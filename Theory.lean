@@ -25,6 +25,7 @@ import Theory.ReactiveCellTransition  -- declaration-derived reactive control pl
 import Theory.CanonicalTransition  -- one canonical materialized post and proof-relevant typed delta unify ordinary and reactive prepared turns without a parallel store or caller-supplied roots
 import Theory.ResourceCost  -- Lean-owned multi-lane bounds/exact debits, checked word overflow, canonical-turn metering, atomic refusal, and additive composition
 import Theory.CanonicalResourceKernel  -- typed sparse asset/account nucleus: transfer, issuer-backed mint/burn, fees, and prepaid leases share one patch-derived conservation law
+import Theory.CanonicalResourceBookEntries  -- the account book as store entries: one entry per account, balance, lease and floor; an operation writes at most 3 (statement)
 import Theory.AuthMap  -- sparse Merkle map over hashed canonical key bytes: root a function of the logical map, O(depth) incremental root, openings; soundness under a pair-scoped collision carrier refuted at a length hash
 import Theory.LogAccumulator  -- Merkle mountain range over log heights: incremental frontier, completeness, collision-exhibiting soundness
 import Theory.AuthTrie  -- compressed authenticated binary trie: O(log n) openings, soundness up to a node collision

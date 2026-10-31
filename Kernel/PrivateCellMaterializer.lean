@@ -3,7 +3,7 @@
 
 The private cell kinds' instance of `Theory.CellStateAux.AuxCache` (root's KeptCell ruling,
 option (b)). The specification is a function of the store alone: `privateRoot wire ctx`, with
-`ctx` the kind-level context (protocol, layout, size bound) and the per-cell, per-version
+`ctx` the kind-level context (`kindCtx`: the protocol version and the wire's frame) and the per-cell, per-version
 separation carried by the blinding value, which the receiver writes as one custody operation
 of each accepted patch (an injective encoding of cell id, version and mask; the encoding and
 the composite-patch restatement of `accept` are the next statement).
@@ -157,9 +157,34 @@ theorem set_index (ctx : List UInt8)
   unfold keptSet
   by_cases blind : some a = wire.blinding <;> simp [blind]
 
+/-- **The seam**: the receiver's kept root is this structure's read at the kind-level context,
+so the hiding results (stated over `KeptCell.root`, `Serve` over `(ctx, mask, index)`) describe
+the root the materializer computes. -/
+theorem keptCell_root (cell : KeptCell wire) :
+    cell.root = keptRoot wire (kindCtx wire) ⟨cell.index, cell.mask⟩ :=
+  rfl
+
+/-- **Context uniformity**: every kept cell of a wire has the root the kind's materializer
+computes from its store bytes at the kind-level context. `kindCtx` is a function of the wire
+alone, so no parameter set can carry another context: this needs no premise about the cell. -/
+theorem keptCell_root_of_kind
+    (codec : Minidregg.Theory.IndexedProgram.LawfulCodec (Store (CanonicalCellRegistry.layout kind)))
+    (rootBytes : List UInt8 → Digest) (agree : ∀ store, rootBytes (codec.encode store) = privateRoot wire (kindCtx wire) store)
+    (cell : KeptCell wire) :
+    cell.root = rootBytes (codec.encode cell.fit.store) := by
+  rw [agree]
+  exact cell.root_eq
+
+/-- And a kept cell's carried structure holds of its store. -/
+theorem keptCell_holds (cell : KeptCell wire) : KeptHolds wire ⟨cell.index, cell.mask⟩ cell.fit.store :=
+  ⟨cell.holds, cell.mask_eq.symm⟩
+
 #assert_axioms keptSet_holds
 #assert_axioms keptRoot_eq
 #assert_axioms rootAvailable
+#assert_axioms keptCell_root
+#assert_axioms keptCell_root_of_kind
+#assert_axioms keptCell_holds
 #assert_axioms set_index
 
 end Minidregg.Kernel.PrivateCellMaterializer

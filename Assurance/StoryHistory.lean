@@ -7,9 +7,10 @@ model of a cell's write history judged by `LawView.admits`; no theorem identifie
 The per-step `kernel_story_step` IS about the controller (a `CheckedLeg`). This file lifts the per-step
 statement to histories, over the controller's states.
 
-* `Realized t S n`: `n` is the `newState` of the controller's `step` for some `CheckedLeg` that is a
-  write on a cell whose authenticated closure includes the sealed story law (`StoryInstalled`).
-  `realized_step` gets `Step t S n` from `kernel_story_step`.
+* `Realized t S n`: `n` is the full projected `newState` of the controller's step (`fullStep`; the
+  step its law is judged on is it cut to the law's reads, with the same verdict) for some
+  `CheckedLeg` that is a write on a cell whose authenticated closure includes the sealed story law
+  (`StoryInstalled`). `realized_step` gets `Step t S n` from `kernel_story_step_full`.
 * `Chained`: consecutive legs link, scene and turn: the `after` slot of one leg equals the `before`
   slot of the next. This is the durable CAS (each pre is the previous post), a premise on the states.
 * `Coherent n`: for the scene and turn fields, `delta = after - before`. No longer a premise of the
@@ -338,7 +339,8 @@ end Scalar
 
 /-! ## §1. The premises, on the controller's states -/
 
-/-- `n` is the new state of the controller's step for a checked write leg on a cell carrying the
+/-- `n` is the full projected new state of the controller's step (`fullStep`; the step the law
+is judged on is it cut to the law's reads, with the same verdict) for a checked write leg on a cell carrying the
 sealed story law of `t` for player `S`. -/
 def Realized (t : Table) (S : Int) (n : State) : Prop :=
   ∃ (F : Type) (_ : Field F) (_ : DecidableEq F) (deployment : Deployment)
@@ -349,13 +351,13 @@ def Realized (t : Table) (S : Int) (n : State) : Prop :=
     Nonempty (CheckedLeg prepared tuple incidence envelope) ∧
     StoryInstalled t S tuple incidence ∧
     (∃ s, command.targets[incidence.getD (firstIndex prepared)].payload = .scalar s) ∧
-    (step prepared tuple incidence).newState = n ∧
+    (fullStep prepared tuple incidence).newState = n ∧
     n.get "request/verb" = some 2
 
 theorem realized_step {t : Table} {S : Int} {n : State} (h : Realized t S n) : Step t S n := by
   obtain ⟨F, _, _, deployment, profile, ambient, ground, command, prepared, tuple, incidence,
     envelope, ⟨leg⟩, installed, -, rfl, w⟩ := h
-  exact kernel_story_step t S leg installed w
+  exact kernel_story_step_full t S leg installed w
 
 /-- **R1.** A realized leg's `resource/field` keys are read from `scalarSlots` of the cell's
 before and after field stores. -/
@@ -367,6 +369,10 @@ theorem realized_scalar {t : Table} {S : Int} {n : State} (h : Realized t S n) :
     (incidence.getD (firstIndex prepared)) sc
   refine ⟨b, a, fun f v => ?_⟩
   rw [← e f v]
+  have post : tuple.logicalPost = policyPostState prepared :=
+    funext fun i => (policyPostState_exact prepared tuple i).symm
+  change (project prepared incidence tuple.source tuple.logicalPost).get _ = _
+  rw [post]
   exact local_field_exact prepared incidence tuple.source (policyPostState prepared) f v
 
 /-- The scene (field 0) and turn (field 1) slots of a leg's state are an arithmetic row. -/

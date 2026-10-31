@@ -210,12 +210,32 @@ fn string<'a>(value: &'a Value, name: &str, label: &str) -> Result<&'a str, Stri
         .ok_or_else(|| format!("{label}.{name} must be a string"))
 }
 
-/// Exact Chat Completions endpoint. The same rule held when the endpoint was
-/// one configured URL; now it holds for every row.
+/// The most path segments a provider row may put before `chat/completions`
+/// (`api/coding/paas/v4` is four).
+const MAX_CHAT_PREFIX: usize = 4;
+
+/// The path is an OpenAI-compatible Chat Completions endpoint: the row's own
+/// prefix (`v1`, `api/v1`, Z.AI's `api/coding/paas/v4`), then exactly
+/// `chat/completions`. Every prefix segment is plain (lowercase letters,
+/// digits, `-`, `.`; never `.` or `..`), and nothing follows: no query, no
+/// fragment, no escape, no trailing slash. So each row pins exactly the chat
+/// endpoint its provider serves, and nothing else reachable on that host.
+fn is_chat_path(path: &str) -> bool {
+    let segments: Vec<&str> = path.split('/').collect();
+    let Some(prefix) = segments.strip_suffix(&["chat", "completions"]) else { return false };
+    prefix.len() <= MAX_CHAT_PREFIX
+        && prefix.iter().all(|s| {
+            !s.is_empty() && *s != "." && *s != ".."
+                && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
+        })
+}
+
+/// Exact Chat Completions endpoint (`is_chat_path`). The same rule held when
+/// the endpoint was one configured URL; now it holds for every row.
 pub fn validate_endpoint(url: &str) -> Result<(), String> {
     let (scheme, remainder) = url.split_once("://").ok_or("upstream URL lacks scheme")?;
     let (authority, path) = remainder.split_once('/').ok_or("upstream URL lacks path")?;
-    if !matches!(path, "v1/chat/completions" | "api/v1/chat/completions")
+    if !is_chat_path(path)
         || authority.is_empty()
         || authority
             .bytes()

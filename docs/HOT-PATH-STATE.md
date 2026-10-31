@@ -242,52 +242,137 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-Continuation (2026-10-31 06:00 EDT, a86738fc at about 560k tokens of context): lane
-`lane/hot-path-cold` at 01a01e359, with nothing uncommitted. The integrator
-(aeb671706eb3f70d7) has a049aca6d merged and 01a01e359 queued. Private cells is
-a507e11e0d0ca4a6a. hbox: build only in pool trees (`. /home/hbox/pool/pool.env;
-LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`; release when
-done); logs go to `/ci/hpc` (never `/home/hbox/lanes/hpc`, which was cleared); profiles are in
-`/ci/hpc/fby` (run.sh, perf.data, symfs).
+State (2026-10-31): lane `lane/hot-path-cold` (agent ac53c05fe796e4294, the live hot-path per root). The integrator is aeb671706eb3f70d7; private cells is
+a8da2b953507b402b; exorcism (the fsync class) is a9252a07cf889741c. On hbox, build only in pool trees (`. /home/hbox/pool/pool.env;
+LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`, release when done). Logs go
+to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build driver is
+`/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host, LANE_DIR=/ci/hpc/nb).
 
+0. **`story new`: 4 Host decisions (3a0fb5e0c, cb2b8e642; on the lane, not yet sent).**
+   - **What runs.** The room's birth, then ONE birth of every cell born in it (`workspace
+     create-group`, `birth_members`: one namespace record with `target.I`/`ownerCapability.I`/
+     `controlCapability.I` per member, each retained under its own name), ONE invoke of every
+     document's `createDocument`, and ONE proposal of the pointer (`room index` on a room the
+     template founded is the pointer's `create`), the map's line and links, the shared names
+     (`room bind` into the template's index is a document `name` action, lowering to
+     `shared_names`' bind link) and, for a story, the table's rows and the map's link to it. The
+     shell's template runner does the folding (`grouped_births`, `TemplateRooms`, `coalescible`);
+     `story new` adds its table to the template's lines (`shell::run_template_with`).
+     workroom and social fold the same way.
+   - **Measured** (eca98bde7-hp-slots2 Host + the lane's client, fresh world, hbox load ~15): 4
+     submits (was 17); 9.8-15.5 s wall (was 62-70 s), of which the Host's calls are 3.7-6.3 s.
+     Read back: `room resolve`, `doc show` and `doc links` show the names, map, links and table.
+   - **What remains.** The client's own work between decisions: 32 op4 and 28 op5 calls (signed
+     reads) per story, and the client's fsyncs, which the exorcism lane (a9252a07cf889741c) removes
+     as a class (efbec07fb, my read-seal change, is withdrawn by b7d21a587 on its word). Then
+     profile op2 on a quiet box.
+   - **Driver.** `hbox:/ci/hpc/sn/run.sh` (a fresh world from a candidate; `MINI=` selects the shell's
+     client; the home must be 0700). Worlds `/ci/hpc/sn/b1`, `b2` are torn down.
 
-1. **Flatness submit: the demand-driven projection.** The statement is landed:
-   `Pred/Frame.lean` has `Pred.reads`, `State.restrict`, `eval_restrict` (the verdict on
-   the law's slots is the verdict), `eval_restrict_of_sub`, and `restrict_needs_reads`
-   (teeth); `PredCompile.inputsInRange_frame` / `inputsInRange_restrict` state the same of
-   the range check. What follows, at the one seam (`CanonicalPolicyAdmission.PolicyStepContext`):
-   - A projection carries both forms: `full : Store L → State`, plus `demand : List Slot →
-     Store L → State` with `demand keys s = (full s).restrict keys`. Contexts are built with
-     `demand law.predicate.reads`, and theorems about the context recover their
-     `project`-stated forms through `eval_restrict` / `inputsInRange_restrict`. Before
-     changing `ofCandidate`/`ofPreparedTuple`, state the frame for the circuit assignment
-     too, if the compiled verdict reads the state (`ComposedPolicyAdmission`
-     relates the compiled verdict to `Pred.eval` under `rangesExact`).
-   - The builders, compositional. `restrict` distributes over `++` (`List.filter_append`).
-     `bytesSlotsFor keys stem bytes` parses the demanded `stem/<i>` names and reads those
-     bytes, and is proved equal to `(bytesSlots stem 0 bytes).restrict keys` (canonical
-     `toString` round trip; `filter` keeps index order). `jointSlots` strips its
-     `joint/target/{id}/` and `joint/index/{i}/` prefixes the same way. The `content/*`
-     summaries in `ContentResource.project` become demanded entries, so an unread summary is
-     never computed.
-   - In the same pass: `support.card`, `elementCount`, `contentPayloadBytes` and `changedIn`
-     through `FiniteDependentMapCachedOrdering.supportCached` (`supportCached_eq`, sort-based)
-     instead of `Multiset.dedup`, by `@[csimp]` lemmas so that no statement moves. Then the
-     observation path's projection (`ResourceObservationAdmission.projectWith`) gets the same
-     `demand`.
-   - Owed in the same batch as the `participantSlots` change (integrator's audit): the deployed
-     projection is built from `p.reads` and its equality to `(full s).restrict keys` is fed to
-     `eval_restrict_of_sub`, so the fix is verified, not merely licensed. Never restrict ahead
-     of a discharging oracle (`Pred.Leaf.leafWith` with a real oracle); add its read set.
-   - Measure with `scripts/perf/flatness-bench.py` and profile with `perf record --call-graph
-     dwarf` plus `--symfs` (the Host runs from a memfd; see `/ci/hpc/fby/run.sh`).
-2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells,
-   now a30875aaf31364697: they send their FORMAT sha (AuxCache in Materialized, masked-trie
-   roots, new PersistedCodecTags), we rebase row 11 onto it, and the integrator lands the pair with one
-   genesis. Row 11 persists no cell root or Materialized field (answered 10-31); together with their private-cell root; agreed, and theirs is not
-   imminent): the checkpoint carries the session indexes and the certificates that read the
-   state at their height (issues, reserves, releases, grants). A Store with dispatch history
-   then also starts at its checkpoint, and the open stops reading the whole log.
+1. **Flatness submit: the demanded projection. Landed on the lane (545f80874 and f7da550af); measured.**
+   - **Measured** (scripts/perf/flatness-bench.py, 130 ops, eca98bde7 with the lane's Host, hbox
+     `/ci/hpc/fbs`). Late submit CPU went from 874 to 280-311 ms; propose CPU from 231 to 50-90 ms;
+     late submit wall from 953 to 436-463 ms. The CPU ratios are still 5.2-5.8x, which fails the 2x
+     bound.
+   - **What remains** (profile `/ci/hpc/fbs/perf.data`): O(cell) work per append. That is
+     `StoreCodec.encode` of the whole document cell (31%), its decode (13%), `Store.set` (12%), the
+     cell root (`physicalRoot`, 8%) and `contentLawDecidable` over the cached support (11%). The next
+     step is a document cell whose encoding, root and law check cost O(change · log n): chunked
+     content cells, or private cells' kept-index root (`Materialized.rootCache = KeptCell.root`)
+     extended to content. That is a format change, so it pairs with row 11's epoch bump.
+   - **Shared seam.** `PolicyStepContext.restrict` and `PhysicalLawResolution.predicateOf?` /
+     `targetPredicate?`, with `predicateOf?_law`, which reads the law's predicate off the same graph
+     load as the resolution.
+   - **Declared resources (DRC).** `legKeys` and `step`, which is the full step restricted to the law's
+     reads (`step_prepared_exact`). `legKeys_exact` plus `step_eval_exact` (via `Pred.eval_restrict`) is
+     the tie the audit asked for.
+   - **Read path.** `fullStep`, `keys` and `step_eval_exact`; the clock theorems are stated of `fullStep`.
+   - **What runs, via `@[csimp]`.** `projectWithCommonDemand` and `projectWithDemand`. A byte block is
+     encoded only if a demanded name contains its stem (`demandsStem`); content summaries are thunks
+     (`ContentResource.projectLazy`, `targetProjectionDemand`, `resourceSlotsDemand`). Content support
+     uses the cached key sort (`supportFast`, with csimps for `elementCount`, `contentPayloadBytes` and
+     `changedIn`).
+   - **Not done.** `StoreCodec.encode` of the whole cell per append (10.5%) still runs where a law reads
+     `content/bytes/*` or the per-byte block, and in the write itself; that needs chunked document cells
+     (a design item and a format change).
+   - **Before (gate13).** 35737eac4: submit CPU 100 → 847 ms. eca98bde7: 116 → 874 ms, propose CPU
+     28 → 231 ms, over heights 3 → 103.
+   - **How to measure.** `scripts/perf/flatness-bench.py --bin <candidate bin with the new
+     minidregg-host>`, built with `/home/hbox/lanes/integ/hotpatch-candidate.sh eca98bde… <name>
+     minidregg-host=/ci/hpc/nb/artifacts/minidregg-host`.
+   - **Integrator's audit of 79a8c4c2c..08aa1b2f6 (sound). Owed in the next batch:**
+     - (1) `legKeys` and `keys` run `loadTarget` beside the configuration's own resolution, so the graph
+       loads twice per leg and per read. Thread the loaded graph through, or measure and record the cost.
+       The resolution does not show in the late profile.
+     - (2) A lemma that a missing `PreparedLaw` (empty `legKeys`) means the leg is refused, not admitted:
+       `resolve? = none → ∀ r, authorizeLeg … ≠ .ok r`, and the same for `authorizeChecked`.
+     - (3) `projectLazy`'s `lawStore` is eager. It is a `Store.set` (`DFinsupp.update`, O(1) to build),
+       but check it under item (d) below.
+     - Optional: a step-level clock corollary via `State.get_restrict`.
+2. **The one FORMAT batch: row 11, row 4 slice 2, and O(change) cells.** It is one epoch bump and one
+   genesis. Private cells (a30875aaf31364697) send their FORMAT sha first, and we rebase onto it.
+   - **Theirs (KeptCell).** `Theory/CellStateAux.lean` (`AuxCache`), `Materialized.carried` (a Thunk,
+     moved by `Carried.run` with one `set` per writing op), and `Kernel/PrivateCellMaterializer.aux`.
+     The root becomes `outerRoot ctxKind mask (trie digest)`, so a write costs one trie walk and one
+     hash. **Scope (root's ruling, 10-31; private cells a8da2b953507b402b):** FORMAT (a) switches only
+     eventHistory and authority to the trie root with mask `[]`. resourceBook holds the whole Book as
+     one value at one address, so a trie changes nothing for it; its entries become store addresses
+     (item 2b). policySource is written once. Content and the declared kinds keep the salted ratchet root until a ZK
+     selective opening exists. That is a later epoch (b) with a second genesis, because plain trie
+     reveals would expose unsalted subtree digests. The content-cell root and flatness stay a
+     published red until (b). The order is iteration speed's seam 1, then their FORMAT sha, then
+     row 11 rebased onto it.
+   - **Ours, in the batch.** (a) Per-entry persistence: entries go through StoreCodec entries instead of
+     one encoded blob per cell write (whole-cell encode is 31% of late submit CPU). Row 11: the
+     checkpoint carries the session indexes and the walk certificates that read the state at their
+     height (issues, reserves, releases, grants), so the open stops reading the whole log.
+   - **Ours, before the batch (no format change).**
+     - (b) The decode (13%) is attributed (perf script over `/ci/hpc/fbs/perf.data`, 304 decode samples).
+       111 are `TurnOfIntent.deltaOf`, which runs `C.decode w.canonicalPostBytes` (via
+       `DeployedBridge.decodeCell`) on every write's post bytes, which the Host has just encoded from
+       the `Materialized` it holds. That is an encode-then-decode round trip per write. The fix is for
+       the write to carry its decoded post with `decode bytes = some post` (a non-persisted field, as
+       `carried` is for `Materialized`), with `deltaOf` reading it behind a `@[csimp]`. The rest are
+       `LinkIndex.liveLinksFull`, `CredentialAuthorityDomainReceiver.decodeRowsFrom` and
+       `physicalPostLawDecidable`, about 11 samples each.
+     - (c) Validation and apply share one patch run.
+     - (d) `Store.set` reads stop walking DFinsupp update history: a persistent map underneath, behind
+       a `@[csimp]`, with no statement change (12%).
+   - **Measured** (explorer, eca98bde7-resvar2 against be4ef7510, hbox at load 6-10; driver
+     `hbox:~/xp/m1.sh`, `~/xp/m2.sh`):
+     - **A fresh member's first signed read:** before, 20.7 s on the forge and about 2 s on hbox. After,
+       0.79 s at height 202 and 0.46 s at height 803. Flat.
+     - **Restart:** before, wall 9.6 s at height 190 and 26.0 s at 769. After, 5.1 s at 803. The first
+       read after restart went from 8.0-8.6 s at 190 and 23.4 s at 769 to 0.19-0.46 s at 803. Flat.
+     - **Certify at a 256 tail:** before, 16.9, 32.2 and 12.2 s. After, 0.8 s at 266, 6.5 s at about 515,
+       6.6 s at about 778, and 5.3 s after a quiet tail at about 1,100. eca98bde7 lacks consent option A
+       (62beac442, in a049aca6d), which caps a lagging provider at one checkpoint interval. Measure again
+       on the cut that carries it.
+     - **`story new --from tale`:** before, 19.9 s. After, 27.7-46.3 s at low height and 41 s at about
+       1,100, under load. Not improved. The coalescing (18 submits, not 22) is in, but each sequential
+       submit costs about 2 s on a loaded box. The fix is one proposal and one submit for the whole
+       template: a multi-step room-birth plan, which is a design item. `chat new` 4.8 s (was 3.0).
+2b. **The account book as store entries (root, 10-31).** `Theory/CanonicalResourceBookEntries.lean`,
+   proved (5d45f87df, 3da7d8824, ab0f7bd26; lane-check RC 0, `#assert_axioms` pinned; statement audited
+   sound by the integrator):
+   - Layout: four RAM namespaces (account, balance, lease, floor); `Represents`, `represents_unique`
+     (teeth), `represents_empty` (satisfiable).
+   - Writes: `operationPatch`, `patchStatement` (valid; represents `operation.apply book`, source =
+     destination included), `patch_writeFootprint_card_le` (at most 3 addresses).
+   - Reads: `EntryAdmission`, `entryAdmission_iff` (exactly `Admission book operation`),
+     `entryAdmission_frame` over `admissionReads` (at most 5 addresses).
+   - Registration and deregistration: `registerPatch`/`deregisterPatch` with `_represents`, and the
+     entry admissions with `_iff`. Their freshness reads are key ranges `(account, _)`; deregistration's
+     "no lease names it" ranges over every lease (index leases by account if deregistration is ever
+     frequent).
+   - **Next: the migration.** Replace `bookAddress`, `logicalBook`, `bookPatch` and
+     `CanonicalResourceKernel.layout` (about 50 consumer files, 361 uses), the Batch layer through
+     `registerPatch`/`operationPatch`/`deregisterPatch`, and the registry wire (`bookWire`; private
+     cells' trie root needs only a StoreCodec.Wire with `blinding := none`, `wire?`/`privateWire?
+     .resourceBook = some bookWire`, `materializer .resourceBook := PrivateCellRoot.materializer
+     bookWire (untagged _)`). It changes the cell layout: FORMAT (a) if ready before private cells'
+     sha, else the next epoch.
+
 3. Rows 3, 8, 16, 17, 19, 20. Measurements on the batch-2 candidate: a fresh member's first
    read, a fresh provider at two heights, restart, `story new`, and the first walk-family
    request after a restart. flatness-get waits on app-reds' resident `/var` fix.

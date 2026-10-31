@@ -44,6 +44,77 @@ def bytesSlots (stem : String) : Nat → List UInt8 → List (String × Int)
   | _, [] => []
   | index, byte :: rest => (s!"{stem}/{index}", Int.ofNat byte.toNat) :: bytesSlots stem (index + 1) rest
 
+/-! ### Demanded byte blocks
+
+A law reads a projection's per-byte slots only by name; a block no demanded name can reach is
+never encoded (`bytesSlotsDemanded`, `bytesSlotsDemanded_filter`). -/
+
+/-- `p` occurs in a list of characters. -/
+def infixB (p : List Char) : List Char → Bool
+  | [] => p.isEmpty
+  | l@(_ :: rest) => p.isPrefixOf l || infixB p rest
+
+theorem infixB_append (p : List Char) : ∀ (a b : List Char), infixB p (a ++ (p ++ b)) = true
+  | [], b => by
+      cases h : p ++ b with
+      | nil =>
+          have empty : p = [] := (List.append_eq_nil_iff.mp h).1
+          simp [infixB, empty]
+      | cons c rest =>
+          simp only [List.nil_append, h, infixB]
+          rw [← h]
+          simp [(List.isPrefixOf_iff_prefix).mpr (List.prefix_append p b)]
+  | c :: a, b => by
+      simp only [List.cons_append, infixB, infixB_append p a b, Bool.or_true]
+
+/-- Whether some demanded name contains `stem`: every slot name of a `stem` byte block, under any
+key prefix, does. -/
+def demandsStem (keys : List String) (stem : String) : Bool :=
+  keys.any fun key => infixB stem.toList key.toList
+
+theorem bytesSlots_names (stem : String) :
+    ∀ (offset : Nat) (bytes : List UInt8) (slot : String × Int),
+      slot ∈ bytesSlots stem offset bytes → ∃ rest : List Char, slot.1.toList = stem.toList ++ rest
+  | _, [], _, member => by simp [bytesSlots] at member
+  | offset, byte :: bytes, slot, member => by
+      simp only [bytesSlots, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact ⟨(toString "/").toList ++ (toString offset).toList,
+          by simp only [String.toList_append, List.append_assoc]; rfl⟩
+      · exact bytesSlots_names stem (offset + 1) bytes slot member
+
+/-- A byte block no demanded name can reach filters to nothing, under any key prefix. -/
+theorem bytesSlots_filter_undemanded (pfx stem : String) (keys : List String)
+    (offset : Nat) (bytes : List UInt8) (undemanded : demandsStem keys stem = false) :
+    (bytesSlots stem offset bytes).filter (fun slot => keys.contains (pfx ++ slot.1)) = [] := by
+  refine List.filter_eq_nil_iff.mpr fun slot member contains => ?_
+  obtain ⟨rest, named⟩ := bytesSlots_names stem offset bytes slot member
+  have reached : demandsStem keys stem = true := by
+    refine List.any_eq_true.mpr ⟨pfx ++ slot.1, by simpa using contains, ?_⟩
+    rw [String.toList_append, named]
+    exact infixB_append stem.toList pfx.toList rest
+  rw [undemanded] at reached
+  exact Bool.false_ne_true reached
+
+/-- A `stem` byte block, encoded only when a demanded name can be one of its slots. -/
+def bytesSlotsDemanded (keys : List String) (stem : String) (bytes : Unit → List UInt8) :
+    List (String × Int) :=
+  if demandsStem keys stem then bytesSlots stem 0 (bytes ()) else []
+
+theorem bytesSlotsDemanded_filter (keys : List String) (pfx stem : String)
+    (bytes : Unit → List UInt8) :
+    (bytesSlotsDemanded keys stem bytes).filter (fun slot => keys.contains (pfx ++ slot.1)) =
+      (bytesSlots stem 0 (bytes ())).filter (fun slot => keys.contains (pfx ++ slot.1)) := by
+  unfold bytesSlotsDemanded
+  cases gate : demandsStem keys stem with
+  | true => rfl
+  | false => rw [bytesSlots_filter_undemanded pfx stem keys 0 _ gate]; rfl
+
+theorem bytesSlotsDemanded_restrict (keys : List String) (stem : String) (bytes : Unit → List UInt8) :
+    (bytesSlotsDemanded keys stem bytes).filter (fun slot => keys.contains slot.1) =
+      (bytesSlots stem 0 (bytes ())).filter (fun slot => keys.contains slot.1) := by
+  simpa using bytesSlotsDemanded_filter keys "" stem bytes
+
 def selfRevoked (logical : Authority) (identifier : CapabilityId) : Bool :=
   (logical ⟨.revoked, .capability identifier⟩).isSome
 

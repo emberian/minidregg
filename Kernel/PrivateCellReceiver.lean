@@ -47,8 +47,8 @@ outer commitment over the context, the mask and the index digest.
   adaptive strategy (refusals included), on the whole published transcript or
   any view through it, under the reduction's efficiency obligation.
 * `root` / `root_eq`: the outer commitment from the kept digest and the held
-  mask, under the context derived from the cell's state (`ctxOf`: protocol,
-  cell, layout, accepted version, size bound), equals `privateRoot`, the
+  mask, under the kind-level context `kindCtx` (protocol version and the
+  wire's frame, a function of the wire alone), equals `privateRoot`, the
   specification over the whole store, which is
   `BlindedCellHiding.maskedTrieCommitment` itself (one commitment
   definition).
@@ -67,6 +67,7 @@ module
 public import Kernel.PrivateCellView
 public import Kernel.BlindedCellHiding
 public import Mathlib.Algebra.BigOperators.Fin
+public import Mathlib.Logic.Equiv.List
 
 @[expose] public section
 
@@ -103,27 +104,45 @@ def outerRoot (ctx mask : List UInt8) (inner : Digest) : Digest :=
     ((StreamCodec.product (StreamCodec.list StreamCodec.byte)
       (StreamCodec.product (StreamCodec.list StreamCodec.byte) digestStream)).encode (ctx, mask, inner))).digest
 
-/-- The cell's fixed parameters: protocol version, cell identity, layout digest
-bytes, public size bound, the registry's selection of the wire, the wire's
-blinding address, and the custody mask function of this cell: the mask of
-accepted version `v` is `prf v`. The host instantiates `prf` as a PRF under a
-key independent of every disclosed value; the receiver only ever evaluates it
-at strictly increasing versions (`History.custodyInputs_distinct`); its PRF
-security is the named premise `CustodyPrf`. -/
+/-- The private-cell protocol version, bound into every kind's context. -/
+def protocolVersion : Nat := 1
+
+/-- **The kind-level context**: the protocol version and the wire's frame (magic, store version
+and layout digest). A function of the wire alone, so every cell of a kind has it by
+construction: no parameter set can carry another (round 18, context uniformity). The cell's
+identity and accepted version are not here: they are in the blinding value, which the receiver
+writes per accepted version (`CustodyCodec`), so the root is a function of the store
+(`Kernel.PrivateCellMaterializer`), and the separation of outer-hash inputs across versions and
+cells comes from the custody value's kind-level decode (`History.custodyBytes_nodup`,
+`CustodyCodec.cross_cell`), not from a context. -/
+def kindCtx : List UInt8 :=
+  (StreamCodec.product StreamCodec.nat (StreamCodec.list StreamCodec.byte)).encode
+    (protocolVersion, StoreCodec.frame wire)
+
+/-- The cell's fixed parameters: its identity, the registry's selection of the wire, the wire's
+blinding address, and the custody function of this cell: the custody value of accepted version
+`v` is `prf v`. The host instantiates `prf` from a PRF under a key independent of every
+disclosed value; the receiver only ever evaluates it at strictly increasing versions
+(`History.custodyInputs_distinct`); its PRF security is the named premise `CustodyPrf`. -/
 structure Params where
-  protocol : Nat
   cell : List UInt8
-  layout : List UInt8
-  sizeBound : Nat
   selected : CanonicalCellRegistry.wire? kind = some wire
   blinding : StoreCodec.Blinding wire
   prf : Nat → (CanonicalCellRegistry.layout kind).Value blinding.space
 
-/-- The context of one accepted version. -/
-def ctxBytes (params : Params wire) (version : Nat) : List UInt8 :=
-  (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.list StreamCodec.byte)
-    (StreamCodec.product (StreamCodec.list StreamCodec.byte) (StreamCodec.product StreamCodec.nat StreamCodec.nat)))).encode
-    (params.protocol, params.cell, params.layout, version, params.sizeBound)
+/-- **A kind-level custody decode**: fixed by the wire, never by a cell's parameters, so the
+cell identity it returns is read from the bytes (round 18: a per-parameters decode could return
+the constant `params.cell` without the bytes carrying it). -/
+abbrev CustodyDecode := List UInt8 → Option (List UInt8 × Nat × List UInt8)
+
+/-- **The custody encoding** of a cell's parameters under the kind's decode: the blinding value
+of version `v` (`params.prf v`) decodes exactly to the cell's identity, the version and the
+secret mask bytes. Only `secret` bears entropy: the identity and version are public, so the
+hiding argument's `λ` is the entropy of `secret v` alone. -/
+structure CustodyCodec (decode : CustodyDecode) (params : Params wire) where
+  secret : Nat → List UInt8
+  exact : ∀ v, decode ((wire.valueStream params.blinding.space).encode (params.prf v)) =
+    some (params.cell, v, secret v)
 
 /-- The cell's mask: its blinding value's bytes (none: the empty mask). -/
 def maskOf (store : Store (CanonicalCellRegistry.layout kind)) : List UInt8 :=
@@ -150,7 +169,7 @@ namespace KeptCell
 variable {wire}
 
 /-- The context of the cell's current accepted version. -/
-def ctx (cell : KeptCell wire) : List UInt8 := ctxBytes wire cell.params cell.version
+def ctx (_cell : KeptCell wire) : List UInt8 := kindCtx wire
 
 /-- The root from the kept digest and the held mask: no rebuild, no store lookup. -/
 def root (cell : KeptCell wire) : Digest := outerRoot cell.ctx cell.mask cell.index.digest
@@ -439,12 +458,22 @@ theorem accept_spec {cell cell' : KeptCell wire} {patch : List (Write (kind := k
       cell'.mask = (wire.valueStream cell.params.blinding.space).encode (cell.params.prf (cell.version + 1)) ∧
       cell'.fit.store = applyPatch
         (cell.fit.store.set cell.params.blinding.address (some (cell.params.prf (cell.version + 1)))) patch ∧
-      cell'.root = privateRoot wire (ctxBytes wire cell.params (cell.version + 1)) cell'.fit.store := by
+      cell'.root = privateRoot wire (kindCtx wire) cell'.fit.store := by
   unfold accept at accepted
   obtain ⟨hp, hv, hm⟩ := writeAll_params accepted
   refine ⟨hv, hp, hm, writeAll_store accepted, ?_⟩
   rw [root_eq]
   simp only [ctx, hp, hv, setMask]
+
+/-- **Acceptance as one composite patch**: the store an accepted version holds is the old store
+under the custody write of version `version + 1` followed by the caller's patch. The custody
+write is the receiver's (from `prf`), never the caller's: every caller write at the blinding
+address is refused (`accept_isSome_iff`). -/
+theorem accept_composite {cell cell' : KeptCell wire} {patch : List (Write (kind := kind))}
+    (accepted : cell.accept patch = some cell') :
+    cell'.fit.store = applyPatch cell.fit.store
+      (⟨cell.params.blinding.address, some (cell.params.prf (cell.version + 1))⟩ :: patch) :=
+  (accept_spec accepted).2.2.2.1
 
 theorem accept_isSome_iff (cell : KeptCell wire) (patch : List (Write (kind := kind))) :
     (cell.accept patch).isSome ↔ ∀ w ∈ patch, addressFits 256 kind w.1 = true ∧ ¬ some w.1 = wire.blinding :=
@@ -500,6 +529,104 @@ theorem History.custodyInputs_distinct {cells : List (KeptCell wire)} (history :
   obtain ⟨masks, chain⟩ := history.spec
   exact ⟨List.pairwise_map.mpr (chain.imp fun h => Nat.ne_of_gt h.1), masks⟩
 
+
+/-- **Custody bytes never repeat under one codec**: two versions' blinding bytes differ, by the
+exact decode, whatever the secret masks are (a repeated mask does not repeat an outer-hash
+input). -/
+theorem CustodyCodec.bytes_ne {decode : CustodyDecode} {params : Params wire}
+    (codec : CustodyCodec wire decode params) {v w : Nat}
+    (ne : v ≠ w) : (wire.valueStream params.blinding.space).encode (params.prf v) ≠
+      (wire.valueStream params.blinding.space).encode (params.prf w) := fun same => by
+  have := (codec.exact v).symm.trans (same ▸ codec.exact w)
+  exact ne (Prod.mk.inj (Prod.mk.inj (Option.some.inj this)).2).1
+
+/-- Teeth: a constant custody value has no custody codec once two versions exist. -/
+theorem CustodyCodec.constant_refuted {decode : CustodyDecode} {params : Params wire}
+    (constant : ∀ v, params.prf v = params.prf 0) : CustodyCodec wire decode params → False :=
+  fun codec => CustodyCodec.bytes_ne wire codec (v := 0) (w := 1) (by decide) (by rw [constant 1])
+
+/-- **The outer-hash inputs of a history are pairwise distinct** under a custody codec of its
+parameters: every version's blinding bytes (the mask argument of the outer hash) differ. This is
+what replaces a per-version context; no birthday term enters. -/
+theorem History.custodyBytes_nodup {cells : List (KeptCell wire)} (history : History wire cells)
+    {decode : CustodyDecode} {params : Params wire} (codec : CustodyCodec wire decode params)
+    (same : ∀ c ∈ cells, c.params = params) :
+    (cells.map KeptCell.mask).Nodup := by
+  obtain ⟨versions, masks⟩ := history.custodyInputs_distinct
+  rw [List.nodup_map_iff_inj_on (List.Nodup.of_map _ versions)]
+  intro c hc d hd equal
+  by_contra differ
+  have hv : c.version ≠ d.version := fun hv => differ (List.inj_on_of_nodup_map versions hc hd hv)
+  rw [masks c hc, masks d hd] at equal
+  have key : ∀ q₁ q₂ : Params wire, q₁ = params → q₂ = params → ∀ v w,
+      (wire.valueStream q₁.blinding.space).encode (q₁.prf v) =
+        (wire.valueStream q₂.blinding.space).encode (q₂.prf w) → v = w := by
+    rintro q₁ q₂ rfl rfl v w eq; by_contra ne; exact CustodyCodec.bytes_ne wire codec ne eq
+  exact hv (key _ _ (same c hc) (same d hd) _ _ equal)
+
+/-- **Cross-cell separation** (round 18): under one kind-level decode, the custody bytes of two
+cells with different identities never coincide, at any versions, whatever their secrets: the
+decode reads the identity back from the bytes. So two cells of one kind at one version with one
+secret do not share an outer-hash input, and no birthday term over cells enters `rom`. -/
+theorem CustodyCodec.cross_cell {decode : CustodyDecode} {p q : Params wire}
+    (cp : CustodyCodec wire decode p) (cq : CustodyCodec wire decode q) (differ : p.cell ≠ q.cell)
+    (v w : Nat) : (wire.valueStream p.blinding.space).encode (p.prf v) ≠
+      (wire.valueStream q.blinding.space).encode (q.prf w) := fun same => by
+  have := (cp.exact v).symm.trans (same ▸ cq.exact w)
+  exact differ (Prod.mk.inj (Option.some.inj this)).1
+
+/-- Across two cells' histories under one kind-level decode, no mask (outer-hash mask argument)
+of one equals a mask of the other. -/
+theorem History.custodyBytes_disjoint {cs ds : List (KeptCell wire)} (hc : History wire cs) (hd : History wire ds)
+    {decode : CustodyDecode} {p q : Params wire} (cp : CustodyCodec wire decode p)
+    (cq : CustodyCodec wire decode q) (onP : ∀ c ∈ cs, c.params = p) (onQ : ∀ d ∈ ds, d.params = q)
+    (differ : p.cell ≠ q.cell) : ∀ c ∈ cs, ∀ d ∈ ds, c.mask ≠ d.mask := by
+  intro c mc d md equal
+  rw [(hc.custodyInputs_distinct).2 c mc, (hd.custodyInputs_distinct).2 d md] at equal
+  have key : ∀ q₁ q₂ : Params wire, q₁ = p → q₂ = q →
+      (wire.valueStream q₁.blinding.space).encode (q₁.prf c.version) ≠
+        (wire.valueStream q₂.blinding.space).encode (q₂.prf d.version) := by
+    rintro q₁ q₂ rfl rfl; exact CustodyCodec.cross_cell wire cp cq differ _ _
+  exact key _ _ (onP c mc) (onQ d md) equal
+
+/-- Teeth: two cells with different identities whose custody bytes coincide (a custody value
+that omits the cell) have no custody codecs under one kind-level decode. -/
+theorem CustodyCodec.shared_bytes_refuted {decode : CustodyDecode} {p q : Params wire}
+    (differ : p.cell ≠ q.cell)
+    (shared : (wire.valueStream p.blinding.space).encode (p.prf 0) = (wire.valueStream q.blinding.space).encode (q.prf 0)) :
+    CustodyCodec wire decode p → CustodyCodec wire decode q → False :=
+  fun cp cq => CustodyCodec.cross_cell wire cp cq differ 0 0 shared
+
+/-! ### A kind-level custody decode over custody naturals -/
+
+/-- An injective code of a cell identity. -/
+def cellCode (cell : List UInt8) : Nat := Encodable.encode (cell.map UInt8.toNat)
+
+/-- Its inverse on codes. -/
+def cellOfCode (code : Nat) : Option (List UInt8) :=
+  (Encodable.decode (α := List Nat) code).map (List.map UInt8.ofNat)
+
+theorem cellOfCode_cellCode (cell : List UInt8) : cellOfCode (cellCode cell) = some cell := by
+  simp only [cellOfCode, cellCode, Encodable.encodek, Option.map_some, List.map_map]
+  congr 1
+  conv_rhs => rw [← List.map_id cell]
+  exact List.map_congr_left fun b _ => UInt8.ofNat_toNat
+
+/-- **The custody natural** of cell `cell`, version `v` and secret `x`: the cell code, the
+version and the secret, paired. -/
+def custodyNat (cell : List UInt8) (v x : Nat) : Nat := Nat.pair (cellCode cell) (Nat.pair v x)
+
+/-- **The decode of custody naturals**, fixed by the wire's reader `readNat` (the blinding
+space's value bytes back to a natural) and the secret's byte form: the cell identity, version
+and secret are read from the natural the bytes carry. -/
+def natDecode (readNat : List UInt8 → Option Nat) (secretBytes : Nat → List UInt8) : CustodyDecode :=
+  fun bytes => (readNat bytes).bind fun n =>
+    (cellOfCode n.unpair.1).map fun cell => (cell, n.unpair.2.unpair.1, secretBytes n.unpair.2.unpair.2)
+
+theorem natDecode_custodyNat {readNat : List UInt8 → Option Nat} (secretBytes : Nat → List UInt8)
+    {bytes : List UInt8} {cell : List UInt8} {v x : Nat} (read : readNat bytes = some (custodyNat cell v x)) :
+    natDecode readNat secretBytes bytes = some (cell, v, secretBytes x) := by
+  simp [natDecode, read, custodyNat, Nat.unpair_pair, cellOfCode_cellCode]
 
 /-! ## The custody PRF and the receiver's PRF term -/
 
@@ -701,18 +828,13 @@ variable {wire}
 /-- Two cells with the same public parameters, version and kept index: they
 differ at most in the custody function and the mask. -/
 def Twin (c₁ c₂ : KeptCell wire) : Prop :=
-  c₁.params.protocol = c₂.params.protocol ∧ c₁.params.cell = c₂.params.cell ∧
-    c₁.params.layout = c₂.params.layout ∧ c₁.params.sizeBound = c₂.params.sizeBound ∧
-    c₁.version = c₂.version ∧ c₁.index = c₂.index
+  c₁.params.cell = c₂.params.cell ∧ c₁.version = c₂.version ∧ c₁.index = c₂.index
 
-theorem Twin.ctx {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) : c₁.ctx = c₂.ctx := by
-  obtain ⟨hp, hc, hl, hs, hv, _⟩ := twin
-  unfold KeptCell.ctx ctxBytes
-  rw [hp, hc, hl, hs, hv]
+theorem Twin.ctx {c₁ c₂ : KeptCell wire} (_twin : Twin c₁ c₂) : c₁.ctx = c₂.ctx := rfl
 
 theorem Twin.symm {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) : Twin c₂ c₁ := by
-  obtain ⟨tp, tc, tl, ts, tv, ti⟩ := twin
-  exact ⟨tp.symm, tc.symm, tl.symm, ts.symm, tv.symm, ti.symm⟩
+  obtain ⟨tc, tv, ti⟩ := twin
+  exact ⟨tc.symm, tv.symm, ti.symm⟩
 
 theorem twins_symm : ∀ {cs₁ cs₂ : List (KeptCell wire)}, List.Forall₂ Twin cs₁ cs₂ → List.Forall₂ Twin cs₂ cs₁
   | _, _, .nil => .nil
@@ -721,12 +843,12 @@ theorem twins_symm : ∀ {cs₁ cs₂ : List (KeptCell wire)}, List.Forall₂ Tw
 theorem twins_versions : ∀ {cs₁ cs₂ : List (KeptCell wire)}, List.Forall₂ Twin cs₁ cs₂ →
     cs₁.map KeptCell.version = cs₂.map KeptCell.version
   | _, _, .nil => rfl
-  | _, _, .cons twin rest => by simp only [List.map_cons, twin.2.2.2.2.1, twins_versions rest]
+  | _, _, .cons twin rest => by simp only [List.map_cons, twin.2.1, twins_versions rest]
 
 /-- **A twin's root is a function of its mask**: the context and index digest are shared. -/
 theorem Twin.root {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) :
     c₁.root = outerRoot c₂.ctx c₁.mask c₂.index.digest := by
-  rw [KeptCell.root, twin.ctx, twin.2.2.2.2.2]
+  rw [KeptCell.root, twin.ctx, twin.2.2]
 
 /-- The index after one data write: a function of the old index. -/
 def indexStep (index : Index wire) (a : Address (CanonicalCellRegistry.layout kind))
@@ -755,12 +877,9 @@ theorem write_twin {c₁ c₂ d₁ : KeptCell wire} (twin : Twin c₁ c₂) {a :
   obtain ⟨d₂, step⟩ := Option.isSome_iff_exists.mp (write_accepts c₂ fits blind v)
   obtain ⟨_, _, hv₁, hp₁⟩ := write_store accepted
   obtain ⟨_, _, hv₂, hp₂⟩ := write_store step
-  obtain ⟨tp, tc, tl, ts, tv, ti⟩ := twin
-  refine ⟨d₂, step, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · rw [hp₁, hp₂]; exact tp
+  obtain ⟨tc, tv, ti⟩ := twin
+  refine ⟨d₂, step, ?_, ?_, ?_⟩
   · rw [hp₁, hp₂]; exact tc
-  · rw [hp₁, hp₂]; exact tl
-  · rw [hp₁, hp₂]; exact ts
   · rw [hv₁, hv₂]; exact tv
   · rw [write_index accepted, write_index step, ti]
 
@@ -776,24 +895,23 @@ theorem writeAll_twin : ∀ {c₁ c₂ d₁ : KeptCell wire} {patch : List (Writ
 
 theorem setMask_twin {c₁ c₂ : KeptCell wire} (twin : Twin c₁ c₂) (version : Nat) :
     Twin (c₁.setMask version) (c₂.setMask version) := by
-  obtain ⟨tp, tc, tl, ts, _, ti⟩ := twin
-  exact ⟨tp, tc, tl, ts, rfl, ti⟩
+  obtain ⟨tc, _, ti⟩ := twin
+  exact ⟨tc, rfl, ti⟩
 
 theorem accept_twin {c₁ c₂ d₁ : KeptCell wire} {patch : List (Write (kind := kind))} (twin : Twin c₁ c₂)
     (accepted : c₁.accept patch = some d₁) : ∃ d₂, c₂.accept patch = some d₂ ∧ Twin d₁ d₂ := by
   unfold accept at accepted ⊢
-  have tv : c₁.version = c₂.version := twin.2.2.2.2.1
+  have tv : c₁.version = c₂.version := twin.2.1
   rw [tv] at accepted
   exact writeAll_twin (setMask_twin twin _) accepted
 
 end KeptCell
 
 /-- Birth's twin: the same store under another custody function. -/
-theorem birth_twin {p₁ p₂ : Params wire} (same : p₁.protocol = p₂.protocol ∧ p₁.cell = p₂.cell ∧
-      p₁.layout = p₂.layout ∧ p₁.sizeBound = p₂.sizeBound ∧ p₁.blinding = p₂.blinding)
+theorem birth_twin {p₁ p₂ : Params wire} (same : p₁.cell = p₂.cell ∧ p₁.blinding = p₂.blinding)
     {store : Store (CanonicalCellRegistry.layout kind)} {c₁ : KeptCell wire} (born : birth wire p₁ store = some c₁) :
     ∃ c₂, birth wire p₂ store = some c₂ ∧ KeptCell.Twin c₁ c₂ := by
-  obtain ⟨sp, sc, sl, ss, sb⟩ := same
+  obtain ⟨sc, sb⟩ := same
   unfold birth at born ⊢
   split at born
   · rename_i unmasked
@@ -801,7 +919,7 @@ theorem birth_twin {p₁ p₂ : Params wire} (same : p₁.protocol = p₂.protoc
     obtain ⟨fit, admitted, rfl⟩ := Option.map_eq_some_iff.mp born
     exact ⟨KeptCell.setMask ⟨p₂, 0, fit, Theory.AuthTrie.Cache.build (bits_length wire) (indexEntries wire fit.store),
         Theory.AuthTrie.Cache.build_holds (bits_length wire) _, maskOf wire fit.store, rfl⟩ 0,
-      by rw [admitted]; rfl, sp, sc, sl, ss, rfl, rfl⟩
+      by rw [admitted]; rfl, sc, rfl, rfl⟩
   · cases born
 
 theorem birth_version {params : Params wire} {store : Store (CanonicalCellRegistry.layout kind)}
@@ -830,18 +948,24 @@ version's context, its mask and its kept index. Roots are one service
 (`rootServe`); a deterministic opening of the index is another. A randomized
 opening (the zero-knowledge opening, whose witness is the mask) is a `Serve` at
 each fixed assignment of its proving coins, and the hop below holds at every
-such assignment; averaging over an independent coin tape is owed. -/
-abbrev Serve (Item : Type) := List UInt8 → List UInt8 → Index wire → Item
+such assignment; averaging over an independent coin tape is owed. The second
+argument is the version's public metadata (the cell's identity and the accepted
+version, `Meta`), which any real host publishes; it is public by construction and
+adds no leakage. -/
+abbrev PublicMeta := List UInt8 × Nat
+
+abbrev Serve (Item : Type) := List UInt8 → PublicMeta → List UInt8 → Index wire → Item
 
 /-- The roots, as a service. -/
-def rootServe : Serve wire Digest := fun ctx mask index => outerRoot ctx mask index.digest
+def rootServe : Serve wire Digest := fun ctx _ mask index => outerRoot ctx mask index.digest
 
 namespace KeptCell
 
 variable {wire}
 
 /-- The item a cell's version is served as. -/
-def served {Item : Type} (serve : Serve wire Item) (cell : KeptCell wire) : Item := serve cell.ctx cell.mask cell.index
+def served {Item : Type} (serve : Serve wire Item) (cell : KeptCell wire) : Item :=
+  serve cell.ctx (cell.params.cell, cell.version) cell.mask cell.index
 
 theorem served_root (cell : KeptCell wire) : cell.served (rootServe wire) = cell.root := rfl
 
@@ -854,7 +978,7 @@ def ViewThroughServe {Item View : Type} (serve : Serve wire Item) (view : List (
   ∃ g : List Item → View, ∀ cells, view cells = g (cells.map (KeptCell.served serve))
 
 /-- **A deterministic service within the leakage**: its items are a function of
-the context, the outer root and the authorized leakage `leak` of the index (the
+the context, the public metadata, the outer root and the authorized leakage `leak` of the index (the
 design's `L`: for a reader, its `narrowPacked` view, `PrivateCellView`). The
 mask reaches a view only inside the root, and the index only through `leak`.
 This is the pointwise, deterministic case of the hybrids after the PRF hop
@@ -862,12 +986,12 @@ This is the pointwise, deterministic case of the hybrids after the PRF hop
 under a uniform mask); a zero-knowledge opening meets it only after simulation,
 distributionally. -/
 def ServesWithin {Item Leak : Type} (leak : Index wire → Leak) (serve : Serve wire Item) : Prop :=
-  ∃ S : List UInt8 → Digest → Leak → Item,
-    ∀ ctx mask index, serve ctx mask index = S ctx (outerRoot ctx mask index.digest) (leak index)
+  ∃ S : List UInt8 → PublicMeta → Digest → Leak → Item,
+    ∀ ctx pub mask index, serve ctx pub mask index = S ctx pub (outerRoot ctx mask index.digest) (leak index)
 
 /-- Satisfiable: the roots, under any leakage. -/
 theorem rootServe_servesWithin {Leak : Type} (leak : Index wire → Leak) : ServesWithin wire leak (rootServe wire) :=
-  ⟨fun _ r _ => r, fun _ _ _ => rfl⟩
+  ⟨fun _ _ r _ => r, fun _ _ _ _ => rfl⟩
 
 /-- Satisfiable: a view of the roots alone. -/
 theorem roots_viewThroughServe : ViewThroughServe wire (rootServe wire) (fun cells => cells.map KeptCell.root) :=
@@ -881,7 +1005,7 @@ from that root and the index's leakage. (Exposure of the index is excluded only
 distributionally: two indexes with one root are a cSHAKE256 collision, so no
 pointwise refutation is claimed for it.) -/
 theorem recoverable_refuted {Item Leak : Type} (leak : Index wire → Leak) (serve : Serve wire Item)
-    (recover : Item → List UInt8) (recovers : ∀ ctx mask index, recover (serve ctx mask index) = mask) :
+    (recover : Item → List UInt8) (recovers : ∀ ctx pub mask index, recover (serve ctx pub mask index) = mask) :
     ¬ ServesWithin wire leak serve := by
   rintro ⟨S, factors⟩
   let index : Index wire := Theory.AuthTrie.Cache.build (bits_length wire) []
@@ -898,7 +1022,7 @@ theorem recoverable_refuted {Item Leak : Type} (leak : Index wire → Leak) (ser
     generalize outerRoot [] (maskOfFn y) index.digest = r₂
     rintro hv; cases r₁; cases r₂; simp_all
   have masks : maskOfFn x = maskOfFn y := by
-    rw [← recovers [] (maskOfFn x) index, ← recovers [] (maskOfFn y) index, factors, factors, roots]
+    rw [← recovers [] ([], 0) (maskOfFn x) index, ← recovers [] ([], 0) (maskOfFn y) index, factors, factors, roots]
   funext i
   have := congrArg (fun l => (l[i.val]?).map UInt8.toNat) masks
   simp only [maskOfFn, List.getElem?_ofFn, i.isLt, Option.map_some, UInt8.toNat_ofNat] at this
@@ -907,8 +1031,8 @@ theorem recoverable_refuted {Item Leak : Type} (leak : Index wire → Leak) (ser
 
 /-- The mask itself, as a service, is refused. -/
 theorem maskServe_refuted {Leak : Type} (leak : Index wire → Leak) :
-    ¬ ServesWithin wire leak (fun _ mask _ => mask) :=
-  recoverable_refuted wire leak _ id fun _ _ _ => rfl
+    ¬ ServesWithin wire leak (fun _ _ mask _ => mask) :=
+  recoverable_refuted wire leak _ id fun _ _ _ _ => rfl
 
 /-! ## The adaptive run -/
 
@@ -927,7 +1051,7 @@ def arun {Item : Type} (serve : Serve wire Item) (params : Params wire) (store :
 
 /-- The item of a version served with the substituted mask `masks.getD version []`. -/
 def substServed {Item : Type} (serve : Serve wire Item) (masks : List (List UInt8)) (cell : KeptCell wire) : Item :=
-  serve cell.ctx (masks.getD cell.version []) cell.index
+  serve cell.ctx (cell.params.cell, cell.version) (masks.getD cell.version []) cell.index
 
 /-- **The run with masks substituted**: the same adaptive run, each version's
 item served with `masks.getD version []` in place of the cell's own mask. -/
@@ -955,8 +1079,7 @@ one side is a refusal on the other: it depends on the patch alone). The masks
 influence the patches only through the items, and the items only through
 `masks`. -/
 theorem arun_srun {Item : Type} (serve : Serve wire Item) {p base : Params wire}
-    (same : p.protocol = base.protocol ∧ p.cell = base.cell ∧ p.layout = base.layout ∧
-      p.sizeBound = base.sizeBound ∧ p.blinding = base.blinding)
+    (same : p.cell = base.cell ∧ p.blinding = base.blinding)
     {store : Store (CanonicalCellRegistry.layout kind)} {next : List Item → List (KeptCell.Write (kind := kind))}
     (masks : List (List UInt8)) (born : (birth wire p store).isSome) :
     ∀ rounds, (∀ v ≤ rounds, masks.getD v [] = (wire.valueStream p.blinding.space).encode (p.prf v)) →
@@ -974,7 +1097,7 @@ theorem arun_srun {Item : Type} (serve : Serve wire Item) {p base : Params wire}
       refine ⟨[c], [c₀], by simp [arun, hc], by simp [srun, hc₀], .cons twin .nil, ?_, by simp, by simp [v0], hist,
         by simp [pc]⟩
       simp only [List.map_cons, List.map_nil, KeptCell.served, substServed, List.cons.injEq, and_true]
-      rw [twin.ctx, twin.2.2.2.2.2, ← twin.2.2.2.2.1, mask, v0, hm 0 le_rfl]
+      rw [twin.ctx, twin.1, twin.2.2, ← twin.2.1, mask, v0, hm 0 le_rfl]
   | rounds + 1, hm => by
       obtain ⟨cells, cells₀, ha, hs, twins, items, nonempty, versions, hist, hp⟩ :=
         arun_srun serve same (next := next) masks born rounds (fun v hv => hm v (by omega))
@@ -1015,7 +1138,7 @@ theorem arun_srun {Item : Type} (serve : Serve wire Item) {p base : Params wire}
             congr 1
             have mask := History.masks_of_params wire hist' params' n (List.mem_cons_self ..)
             simp only [KeptCell.served, substServed]
-            rw [twinN.ctx, twinN.2.2.2.2.2, ← twinN.2.2.2.2.1, mask, nv, hm (c.version + 1) (by omega)]
+            rw [twinN.ctx, twinN.1, twinN.2.2, ← twinN.2.1, mask, nv, hm (c.version + 1) (by omega)]
           · intro x member
             rcases List.mem_cons.mp member with same | member
             · rw [same, nv]; omega
@@ -1035,20 +1158,34 @@ theorem PublishesRun.atMostOneSuccessor {accepted : KeptCell wire → Prop} {cel
 
 /-- The cell parameters under key `k`: the base with `prf := sample ∘ keyed k`. -/
 def keyedParams {m keys : Nat} (base : Params wire)
-    (sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
+    (sample : Nat → Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
     (keyed : Fin keys → Nat → Fin (m + 1)) (k : Fin keys) : Params wire :=
-  { base with prf := fun v => sample (keyed k v) }
+  { base with prf := fun v => sample v (keyed k v) }
+
+/-- **The keyed parameters admit a custody codec** under a kind-level decode whenever the custody
+encoding is exact for it: the custody value of version `v` and secret `x` decodes to the cell,
+`v` and `secretOf x`. Then under every key the blinding value of version `v` decodes to
+`(cell, v, secretOf (keyed k v))`, whether or not the keyed function repeats a value, and the
+hiding argument's `λ` is the entropy of `secretOf` alone. -/
+def keyedCodec {m keys : Nat} (base : Params wire)
+    (sample : Nat → Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
+    (keyed : Fin keys → Nat → Fin (m + 1)) (k : Fin keys)
+    (decode : CustodyDecode) (secretOf : Fin (m + 1) → List UInt8)
+    (exact : ∀ v x, decode ((wire.valueStream base.blinding.space).encode (sample v x)) = some (base.cell, v, secretOf x)) :
+    CustodyCodec wire decode (keyedParams wire base sample keyed k) where
+  secret v := secretOf (keyed k v)
+  exact v := exact v (keyed k v)
 
 /-- The masks of versions `0 … rounds` under a mask function. -/
-def maskList {m : Nat} (encodeMask : Fin (m + 1) → List UInt8) (rounds : Nat) (f : Nat → Fin (m + 1)) :
+def maskList {m : Nat} (encodeMask : Nat → Fin (m + 1) → List UInt8) (rounds : Nat) (f : Nat → Fin (m + 1)) :
     List (List UInt8) :=
-  (List.range (rounds + 1)).map fun v => encodeMask (f v)
+  (List.range (rounds + 1)).map fun v => encodeMask v (f v)
 
 /-- **A key's real transcript is the substituted transcript of its masks.** -/
 theorem arun_transcript {m keys : Nat} {Item : Type} (keyed : Fin keys → Nat → Fin (m + 1)) (base : Params wire)
-    (sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
-    (encodeMask : Fin (m + 1) → List UInt8)
-    (encodes : ∀ x, (wire.valueStream base.blinding.space).encode (sample x) = encodeMask x)
+    (sample : Nat → Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
+    (encodeMask : Nat → Fin (m + 1) → List UInt8)
+    (encodes : ∀ v x, (wire.valueStream base.blinding.space).encode (sample v x) = encodeMask v x)
     (serve : Serve wire Item) (rounds : Nat) (store : Store (CanonicalCellRegistry.layout kind))
     (next : List Item → List (KeptCell.Write (kind := kind))) (born : (birth wire base store).isSome) (k : Fin keys) :
     (arun wire serve (keyedParams wire base sample keyed k) store next rounds).map (·.map (KeptCell.served serve)) =
@@ -1056,14 +1193,14 @@ theorem arun_transcript {m keys : Nat} {Item : Type} (keyed : Fin keys → Nat �
   have bornK : (birth wire (keyedParams wire base sample keyed k) store).isSome := by
     obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp born
     obtain ⟨c₂, hc₂, _⟩ := birth_twin wire (p₁ := base) (p₂ := keyedParams wire base sample keyed k)
-      ⟨rfl, rfl, rfl, rfl, rfl⟩ hc
+      ⟨rfl, rfl⟩ hc
     simp [hc₂]
   obtain ⟨cells, cells₀, ha, hs, _, items, _⟩ :=
     arun_srun wire serve (p := keyedParams wire base sample keyed k) (base := base) (next := next)
-      ⟨rfl, rfl, rfl, rfl, rfl⟩ (maskList encodeMask rounds (keyed k)) bornK rounds (fun v hv => by
+      ⟨rfl, rfl⟩ (maskList encodeMask rounds (keyed k)) bornK rounds (fun v hv => by
         simp only [maskList, List.getD_eq_getElem?_getD, List.getElem?_map,
           List.getElem?_range (by omega : v < rounds + 1), Option.map_some, Option.getD_some]
-        exact (encodes _).symm)
+        exact (encodes _ _).symm)
   rw [ha, transcript, hs]
   simp only [Option.map_some, items]
 
@@ -1082,9 +1219,9 @@ most `num/den` apart. (iii) The ideal's masks on the window are the tape's own
 independent tuple. -/
 theorem receiver_prf_hop {m keys num den : Nat} {Strategy Item : Type}
     (keyed : Fin keys → Nat → Fin (m + 1)) (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop)
-    (base : Params wire) (sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
-    (encodeMask : Fin (m + 1) → List UInt8)
-    (encodes : ∀ x, (wire.valueStream base.blinding.space).encode (sample x) = encodeMask x)
+    (base : Params wire) (sample : Nat → Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
+    (encodeMask : Nat → Fin (m + 1) → List UInt8)
+    (encodes : ∀ v x, (wire.valueStream base.blinding.space).encode (sample v x) = encodeMask v x)
     (serve : Serve wire Item) (rounds : Nat)
     (store : Strategy → Bool → Store (CanonicalCellRegistry.layout kind))
     (next : Strategy → Bool → List Item → List (KeptCell.Write (kind := kind)))
@@ -1122,9 +1259,9 @@ required for that `g` only (asking it for every `g` would put inefficient
 compositions in the budget). -/
 theorem receiver_prf_hop_view {m keys num den : Nat} {Strategy Item View : Type}
     (keyed : Fin keys → Nat → Fin (m + 1)) (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop)
-    (base : Params wire) (sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
-    (encodeMask : Fin (m + 1) → List UInt8)
-    (encodes : ∀ x, (wire.valueStream base.blinding.space).encode (sample x) = encodeMask x)
+    (base : Params wire) (sample : Nat → Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
+    (encodeMask : Nat → Fin (m + 1) → List UInt8)
+    (encodes : ∀ v x, (wire.valueStream base.blinding.space).encode (sample v x) = encodeMask v x)
     (serve : Serve wire Item) (view : List (KeptCell wire) → View) (g : List Item → View)
     (factors : ∀ cells, view cells = g (cells.map (KeptCell.served serve)))
     (rounds : Nat)
@@ -1171,9 +1308,9 @@ defined. The attacks are `Attack base Item View`. -/
 structure HidingSetting (m keys : Nat) (Item View : Type) where
   keyed : Fin keys → Nat → Fin (m + 1)
   base : Params wire
-  sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space
-  encodeMask : Fin (m + 1) → List UInt8
-  encodes : ∀ x, (wire.valueStream base.blinding.space).encode (sample x) = encodeMask x
+  sample : Nat → Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space
+  encodeMask : Nat → Fin (m + 1) → List UInt8
+  encodes : ∀ v x, (wire.valueStream base.blinding.space).encode (sample v x) = encodeMask v x
   serve : Serve wire Item
   view : List (KeptCell wire) → View
   g : List Item → View
@@ -1385,7 +1522,7 @@ theorem pairAttack_legal [DecidableEq View] (S : Store (CanonicalCellRegistry.la
   have born : (birth wire (keyedParams wire setting.base setting.sample setting.keyed k) S).isSome := by
     obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp bornS
     obtain ⟨c₂, hc₂, _⟩ := birth_twin wire (p₁ := setting.base)
-      (p₂ := keyedParams wire setting.base setting.sample setting.keyed k) ⟨rfl, rfl, rfl, rfl, rfl⟩ hc
+      (p₂ := keyedParams wire setting.base setting.sample setting.keyed k) ⟨rfl, rfl⟩ hc
     simp [hc₂]
   have flat : ∀ {patch : List (KeptCell.Write (kind := kind))}, HiddenPatch wire setting.fields patch →
       (arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed k) S (fun _ => patch) r).map
@@ -1433,13 +1570,13 @@ theorem real_eq (a : setting.Strategy) (b : Bool) (t : Fin setting.tapes) :
     (a.next b) setting.rounds <;> simp [setting.factors]
 
 /-- A service that does not read the mask gives a transcript that does not either. -/
-theorem transcript_maskFree (maskFree : ∀ ctx mask mask' index, setting.serve ctx mask index = setting.serve ctx mask' index)
+theorem transcript_maskFree (maskFree : ∀ ctx pub mask mask' index, setting.serve ctx pub mask index = setting.serve ctx pub mask' index)
     (S : Store (CanonicalCellRegistry.layout kind)) (next : List Item → List (KeptCell.Write (kind := kind)))
     (masks masks' : List (List UInt8)) :
     transcript wire setting.serve setting.base S next masks setting.rounds =
       transcript wire setting.serve setting.base S next masks' setting.rounds := by
   have same : substServed wire setting.serve masks = substServed wire setting.serve masks' := by
-    funext c; exact maskFree _ _ _ _
+    funext c; exact maskFree _ _ _ _ _
   have runs : ∀ r, srun wire setting.serve setting.base S next masks r = srun wire setting.serve setting.base S next masks' r := by
     intro r
     induction r with
@@ -1453,7 +1590,7 @@ distinguisher whose two worlds' views separate. The decoy is world `true`'s
 view under `masks₀`; with the mask unread, that is world `true`'s view under
 every key, and world `false`'s view is never it. -/
 theorem unmasked_refuted [DecidableEq View] {num den : Nat} (small : num < den)
-    (maskFree : ∀ ctx mask mask' index, setting.serve ctx mask index = setting.serve ctx mask' index)
+    (maskFree : ∀ ctx pub mask mask' index, setting.serve ctx pub mask index = setting.serve ctx pub mask' index)
     (legal budgeted : setting.Strategy → Prop) (a : setting.Strategy) (la : legal a) (ba : budgeted a)
     (masks₀ : List (List UInt8)) (decides : a.decide = decoyTest [setting.worldView a true masks₀])
     (separated : setting.worldView a false masks₀ ≠ setting.worldView a true masks₀) :
@@ -1584,10 +1721,7 @@ abbrev W := Witness.wire
 
 /-- The base parameters: the declared cell's own blinding, masks `prf v = v`. -/
 def base : Params W where
-  protocol := 1
   cell := []
-  layout := []
-  sizeBound := 0
   selected := Witness.selected
   blinding := DeclaredEffectCell.blinding
   prf := fun v => Int.ofNat v
@@ -1623,9 +1757,9 @@ theorem differ : ∀ c : KeptCell W, birth W base S = some c →
 def setting {Item : Type} (serve : Serve W Item) : HidingSetting W 0 1 Item (List Item) where
   keyed := fun _ _ => 0
   base := base
-  sample := fun _ => (0 : Int)
-  encodeMask := fun x => (W.valueStream base.blinding.space).encode (0 : Int)
-  encodes := fun _ => rfl
+  sample := fun _ _ => (0 : Int)
+  encodeMask := fun _ _ => (W.valueStream base.blinding.space).encode (0 : Int)
+  encodes := fun _ _ => rfl
   serve := serve
   view := fun cells => cells.map (KeptCell.served serve)
   g := id
@@ -1651,11 +1785,11 @@ theorem goalPremises_inhabited :
 /-- **The plaintext service**: the value bytes the kept index holds at slot 2,
 read off the trie's entries; it does not read the mask (the archive of a
 blinded cell's plaintext). -/
-def plainServe : Serve W (Option (List UInt8)) := fun _ _ index => lookup index.trie.entries Witness.a2
+def plainServe : Serve W (Option (List UInt8)) := fun _ _ _ index => lookup index.trie.entries Witness.a2
 
 theorem plain_of_holds {index : Index W} {store : Store (CanonicalCellRegistry.layout .declaredObject)}
     (holds : index.Holds (indexEntries W store)) :
-    plainServe [] [] index = (store Witness.a2).map (valueBytes W Witness.a2) := by
+    plainServe [] ([], 0) [] index = (store Witness.a2).map (valueBytes W Witness.a2) := by
   show lookup index.trie.entries Witness.a2 = _
   rw [lookup_perm holds index.nodup, Theory.AuthTrie.Cache.lookup_canon, indexExact W store Witness.a2,
     if_neg witness_hidden_write.2.2.1]
@@ -1674,7 +1808,7 @@ theorem plain_view (v : Int) (masks : List (List UInt8)) :
   simp only [HidingSetting.worldView, transcript, setting, srun, hc, Option.map_some, Option.bind_some, hn,
     Option.elim, id, List.map_cons, List.map_nil]
   congr 2
-  show plainServe [] [] n.index = _
+  show plainServe [] ([], 0) [] n.index = _
   rw [plain_of_holds n.holds, hs]
   simp [KeptCell.applyPatch]
 
@@ -1688,7 +1822,7 @@ theorem plain_refuted {num den : Nat} (small : num < den) (budgeted : (setting p
     ¬ BlindedCellHiding.TranscriptHiding (setting plainServe).tapes num den (setting plainServe).real
       (setting plainServe).Legal budgeted := by
   let a := (setting plainServe).pairAttack S bornS p₀ p₁ masks₀
-  refine (setting plainServe).unmasked_refuted small (fun _ _ _ _ => rfl) _ budgeted a
+  refine (setting plainServe).unmasked_refuted small (fun _ _ _ _ _ => rfl) _ budgeted a
     ((setting plainServe).pairAttack_legal S bornS hidden₀ hidden₁ masks₀)
     (meaningful a ((setting plainServe).pairAttack_distinguisher S bornS p₀ p₁ masks₀)) masks₀ rfl ?_
   obtain ⟨r₀, h₀⟩ := plain_view 5 masks₀
@@ -1707,15 +1841,51 @@ every other non-cryptographic one. -/
 def idealSetting {Item : Type} (serve : Serve W Item) : HidingSetting W 1 (funs 1 (List.range 2)) Item (List Item) where
   keyed := idealFn 1 (List.range 2)
   base := base
-  sample := fun x => (x.val : Int)
-  encodeMask := fun x => (W.valueStream base.blinding.space).encode (x.val : Int)
-  encodes := fun _ => rfl
+  sample := fun v x => (custodyNat base.cell v x.val : Int)
+  encodeMask := fun v x => (W.valueStream base.blinding.space).encode (custodyNat base.cell v x.val : Int)
+  encodes := fun _ _ => rfl
   serve := serve
   view := fun cells => cells.map (KeptCell.served serve)
   g := id
   factors := fun _ => rfl
   rounds := 1
   fields := Witness.slot1
+
+/-- The declared wire's natural reader: the blinding space's value bytes back to an integer, then
+its natural part. Fixed by the wire. -/
+def readNat (bytes : List UInt8) : Option Nat :=
+  ((W.valueStream DeclaredEffectCell.blinding.space).toLawful.decode bytes).map Int.toNat
+
+theorem readNat_custody (c : List UInt8) (u z : Nat) :
+    readNat ((W.valueStream DeclaredEffectCell.blinding.space).encode (custodyNat c u z : Int)) =
+      some (custodyNat c u z) :=
+  congrArg (Option.map Int.toNat) ((W.valueStream DeclaredEffectCell.blinding.space).toLawful.decode_encode _)
+
+/-- The ideal setting's secret bytes. -/
+def secretBytes (x : Nat) : List UInt8 := [UInt8.ofNat x]
+
+/-- The declared wire's kind-level custody decode. -/
+def declaredDecode : CustodyDecode := natDecode readNat secretBytes
+
+/-- **The ideal setting's custody is exact under the kind-level decode**: its custody value of
+version `v` is the custody natural of the cell, `v` and the secret `x`, so under every key the
+parameters admit a custody codec whose decode reads the cell from the bytes. -/
+def idealSetting_codec {Item : Type} (serve : Serve W Item) (k : Fin (funs 1 (List.range 2))) :
+    CustodyCodec W declaredDecode
+      (keyedParams W (idealSetting serve).base (idealSetting serve).sample (idealSetting serve).keyed k) :=
+  keyedCodec W _ _ _ k declaredDecode (fun x => secretBytes x.val) fun v x =>
+    natDecode_custodyNat secretBytes (readNat_custody base.cell v x.val)
+
+/-- **The declared custody bytes carry the cell**: two different cell identities never give the
+same custody bytes, at any versions and secrets. -/
+theorem declared_cross_cell {cell cell' : List UInt8} (differ : cell ≠ cell') (v w x y : Nat) :
+    (W.valueStream DeclaredEffectCell.blinding.space).encode (custodyNat cell v x : Int) ≠
+      (W.valueStream DeclaredEffectCell.blinding.space).encode (custodyNat cell' w y : Int) := fun same => by
+  have read : ∀ c u z, declaredDecode ((W.valueStream DeclaredEffectCell.blinding.space).encode
+      (custodyNat c u z : Int)) = some (c, u, secretBytes z) := fun c u z =>
+    natDecode_custodyNat secretBytes (readNat_custody c u z)
+  have := (read cell v x).symm.trans (same ▸ read cell' w y)
+  exact differ (Prod.mk.inj (Option.some.inj this)).1
 
 /-- **Joint premise inhabitation** at one setting, the random-function pole
 (not the deployed custody PRF): the custody function is the ideal one, so
@@ -1809,5 +1979,15 @@ end Concrete
 #assert_axioms PublishesRun.atMostOneSuccessor
 #assert_axioms History.atMostOneSuccessor
 #assert_axioms KeptCell.fork_shares_mask
+#assert_axioms CustodyCodec.bytes_ne
+#assert_axioms CustodyCodec.constant_refuted
+#assert_axioms History.custodyBytes_nodup
+#assert_axioms CustodyCodec.cross_cell
+#assert_axioms CustodyCodec.shared_bytes_refuted
+#assert_axioms History.custodyBytes_disjoint
+#assert_axioms cellOfCode_cellCode
+#assert_axioms natDecode_custodyNat
+#assert_axioms Concrete.declared_cross_cell
+#assert_axioms KeptCell.accept_composite
 
 end Minidregg.Kernel.PrivateCellReceiver

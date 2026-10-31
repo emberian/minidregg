@@ -784,8 +784,14 @@ private theorem allPresentEqualMultiset_iff {α : Type} [DecidableEq α]
 
 instance contentLawDecidable (store : Store Hyperdocument.layout) :
     Decidable (ContentLaw store) := by
+  -- The support by the cached canonical-key sort (`supportCached_eq`), not `Multiset.toFinset`'s
+  -- quadratic dedup: this check runs on every content read and write.
   apply decidable_of_iff
-    (allPresentEqualMultiset (store.support.val.map (documentAt store)) = true)
+    (allPresentEqualMultiset ((FiniteDependentMapCachedOrdering.supportCached
+      (StoreCodec.addressKey HyperdocumentCell.contentWire)
+      (StoreCodec.addressKey_injective HyperdocumentCell.contentWire) store).val.map
+        (documentAt store)) = true)
+  rw [FiniteDependentMapCachedOrdering.supportCached_eq]
   symm
   unfold ContentLaw
   rw [allPresentEqualMultiset_iff]
@@ -835,10 +841,18 @@ def EventHistoryLaw (deployment : Deployment)
 instance eventHistoryLawDecidable (deployment : Deployment)
     (store : Store Kernel.HyperdocumentEventLog.Sparse.layout) :
     Decidable (EventHistoryLaw deployment store) := by
+  -- The support by the cached canonical-key sort, as in `contentLawDecidable`: the event log
+  -- grows by one record per document version, and this check runs on every append.
   apply decidable_of_iff
-    ((∀ address ∈ store.support, EventValid deployment address.2 (store address)) ∧
-      allPresentEqualMultiset (store.support.val.map fun address =>
+    ((∀ address ∈ FiniteDependentMapCachedOrdering.supportCached
+        (StoreCodec.addressKey HyperdocumentCell.eventWire)
+        (StoreCodec.addressKey_injective HyperdocumentCell.eventWire) store,
+        EventValid deployment address.2 (store address)) ∧
+      allPresentEqualMultiset ((FiniteDependentMapCachedOrdering.supportCached
+        (StoreCodec.addressKey HyperdocumentCell.eventWire)
+        (StoreCodec.addressKey_injective HyperdocumentCell.eventWire) store).val.map fun address =>
         (store address).map VersionEventRecord.document) = true)
+  rw [FiniteDependentMapCachedOrdering.supportCached_eq]
   symm
   unfold EventHistoryLaw
   constructor

@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 9, 2026-10-31.
+explored as test members only. Batch 11, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -126,6 +126,30 @@ Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one surv
 |---|---|
 | spk-host from 5f5e99324 | built on hbox in 1 min 8 s (`/ci/x4log/tgt/release/spk-host`), but two overlay attempts did not install it (read-only hard-linked copy; a failed script edit), so no live verdict; the integrator then superseded the commit (c730fd3ea) and asked to wait for the next cut. Worlds torn down by PID file. Harness lesson: overlaying one binary into a copy of `$C/bin` needs `rm -f` first, because the files are hard links with mode 555. |
 | load: 4 members x 25 `say` + 10 doc append/submit at once | 100 of 100 says and 10 of 10 doc appends admitted, wall 33.5 s (3.3 writes/s), `say` mean 1.27 s and max 3.0 s, doc submit mean 0.91 s, no refusals; the room tail and `doc show` are complete and in order. |
+
+
+### CONSENT-STORE "after" numbers (eca98bde7-resvar2) and batch 3 candidate a4cb65af
+
+| measure | before (be4ef7510) | after (eca98bde7-resvar2; hbox load 6-10) |
+|---|---|---|
+| fresh member's first signed read | 20.7 s forge, ~2 s hbox | 0.79 s at height 202, 0.46 s at 803 |
+| restart wall / first read after | 9.6 s, 8.0-8.6 s at h190; 26.0 s, 23.4 s at h769 | 5.1 s, 0.19-0.46 s at h803 (flat in height) |
+| certify a 256 tail | 16.9 / 32.2 / 12.2 s | 0.8 s at 266, then 5.3-6.6 s to height 1100 |
+| `story new --from tale` | 19.9 s | 27.7 and 46.3 s at low height, 41 s at about 1100 (not improved; per-submit cost, hot-path row 12 still open) |
+
+Batch 3 (a4cb65af): `bend settle` works. After run, answer and deliver (spent 152,223), `bend settle` delivered the past-deadline tally (phase none, `total=7`) and refunded 60,885, net 91,338 per tally; a second `settle` and another member's `settle` say `0 delivered`. Apps (apps-e2e, world-up and harness from the candidate's own source.tar): the signed-identity fix works, so the install gets past ingest and create; NEW RED at START: `spk-host: grain refused: application has no route; grain route must bind at least one entrance` (evidence `/ci/xe2e10/install-0dp7...json`). Second install in the same run: birth refused `resourceBatch` because the harness funding of 20,000 covers one (`MEMBER_FUNDING=40000` is the knob). Hacker Slides' real download is refused upstream (`http-526`), so only Simple Todos could be seeded.
+
+
+### Batch 3 multi-member pass and the route-before-START fix (hbox)
+
+| item | result |
+|---|---|
+| web flows (a4cb65af) | `doc new`, append, re-POST (replay then 409 for other text), `/bend`, `/room` (rooms only), `/receipts`: all fine. H4 wording not checkable (scratch world has no market index). |
+| restart mid-activity then `bend settle` | works: 2 tallies, one answered, restart between answer and deliver, settle delivered both past deadline (r1 total=7, r2 total=0), net 152,232 for the pair. |
+| `reports` from two members | each filer sees their own report with the build sha; a non-filer sees nothing. |
+| H3 hermes wording | untestable without a resident (scratch says `there is no Hermes in hroom`); needs the forge world. |
+| apps with `mini` built from app-reds 6043dccd0 (route bound before START), `MEMBER_FUNDING=40000` | NEXT RED: install state `routing`: `the owner's route is not bound yet: .../mini query: refused: no-grant: this key holds no grant covering this target and operation (phase observation)`. The worker's route-binding step issues an observation query the member's key has no grant for. Evidence `/ci/xe2e11/install-0dp7...json`, `/ci/x4log/e2e11.out`. Owner: app-reds. |
+| leaked processes | after `world-down.sh /ci/xw9` returned `removal_assertions=0`, five processes of the world were still running with parent 1 and no PID file (`mini codec-resident`, `minidregg-host ... codec`, `mini consent-resident`, `minidregg-client-consent`, `minidregg-link-sqlite-store serve`). world-down does not stop client-side residents spawned by the harness's workspaces. Not killed (no PID file); reported. The settings files these residents name still exist (`/ci/xw9/w/store/base/workroom/deployment/pinned-config.json`, `/ci/xe2e11/ws-controller/provisions/member9/observe/g0001/config.json`; `/ci/xw9` itself is still on disk), so demo-reds' self-exit (settings file or socket gone) does not apply and this is not a red for it. The red is that world-down leaves the world directory and its client residents behind. Still running at the time of writing; stopping them is waiting on ember's word, because the standing rule is PID file or nothing. |
 
 ## Exercised and held
 
