@@ -31,19 +31,18 @@ doc new $ROOM/notes draft --in $ROOM
 # A list that only grows.
 doc new $ROOM/tasks note --in $ROOM
 
-# The map's first line, and its links.
+# The map's first line, its links, and back (notes points at the map): consecutive edits,
+# each submitted at once, run as ONE proposal and one submission.
 doc append $ROOM-map $ROOM/index 'workroom $ROOM: wall is what we say, notes is our draft, tasks only grows'
 submit $ROOM-map
 doc link $ROOM-map-wall $ROOM/index $ROOM/wall
 submit $ROOM-map-wall
-room bind $ROOM-name-wall $ROOM wall $ROOM/wall
 doc link $ROOM-map-notes $ROOM/index $ROOM/notes
 submit $ROOM-map-notes
-room bind $ROOM-name-notes $ROOM notes $ROOM/notes
 doc link $ROOM-map-tasks $ROOM/index $ROOM/tasks
 submit $ROOM-map-tasks
-room bind $ROOM-name-tasks $ROOM tasks $ROOM/tasks
-
-# And back: notes points at the map.
 doc link $ROOM-notes-map $ROOM/notes $ROOM/index
 submit $ROOM-notes-map
+room bind $ROOM-name-wall $ROOM wall $ROOM/wall
+room bind $ROOM-name-notes $ROOM notes $ROOM/notes
+room bind $ROOM-name-tasks $ROOM tasks $ROOM/tasks

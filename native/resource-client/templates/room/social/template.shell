@@ -21,7 +21,7 @@ doc append $ROOM-map $ROOM/index 'social room $ROOM: wall is the room talking, i
 submit $ROOM-map
 doc link $ROOM-map-wall $ROOM/index $ROOM/wall
 submit $ROOM-map-wall
-room bind $ROOM-name-wall $ROOM wall $ROOM/wall
 doc link $ROOM-map-intro $ROOM/index $ROOM/intro
 submit $ROOM-map-intro
+room bind $ROOM-name-wall $ROOM wall $ROOM/wall
 room bind $ROOM-name-intro $ROOM intro $ROOM/intro

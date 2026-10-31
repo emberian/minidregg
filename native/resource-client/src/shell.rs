@@ -241,13 +241,90 @@ fn template_plan(
     Ok(Plan::Template { label, lines })
 }
 
+/// The document request a planned line writes (`doc append|link|… ID NAME …`, a
+/// `propose` of one `document` invoke), with its proposal id.
+fn document_request(session: &Session, text: &str) -> Option<(String, Value)> {
+    let Ok(Plan::Client { command, flags, writes }) = plan(session, text) else { return None };
+    let flag_value = |name: &str| flags.iter().find(|(key, _)| key == name).map(|(_, value)| value.to_string_lossy().into_owned());
+    if command != "workspace" || flag_value("action").as_deref() != Some("propose") || writes.len() != 1 {
+        return None;
+    }
+    let request: Value = serde_json::from_slice(&writes[0].1).ok()?;
+    let targets = request.get("targets")?.as_array()?;
+    let plain = request.get("action").and_then(Value::as_str) == Some("invoke")
+        && targets.iter().all(|t| t.pointer("/payload/type").and_then(Value::as_str) == Some("document"));
+    plain.then(|| (flag_value("proposal-id"), request)).and_then(|(id, request)| Some((id?, request)))
+}
+
+/// A run of template lines that are document proposals each followed at once by its own
+/// `submit`: one proposal of all their actions (per target, in line order; at most 16 per
+/// target, `document_actions`' bound), proposed under the first id and submitted once.
+/// The run is one Host decision instead of one per pair; `None` when fewer than two pairs
+/// line up or a target would exceed the bound.
+fn coalesced_documents(session: &Session, lines: &[(usize, String)]) -> Option<(usize, String, Value)> {
+    let mut at = 0;
+    let mut first: Option<String> = None;
+    let mut targets: Vec<(String, Vec<Value>)> = Vec::new();
+    while at + 1 < lines.len() {
+        let Some((id, request)) = document_request(session, &lines[at].1) else { break };
+        if lines[at + 1].1.split_whitespace().collect::<Vec<_>>() != ["submit", id.as_str()] {
+            break;
+        }
+        for target in request["targets"].as_array().into_iter().flatten() {
+            let name = target["name"].as_str()?.to_owned();
+            let actions = target.pointer("/payload/actions")?.as_array()?.clone();
+            match targets.iter_mut().find(|(held, _)| *held == name) {
+                Some((_, held)) => held.extend(actions),
+                None => targets.push((name, actions)),
+            }
+        }
+        first.get_or_insert(id);
+        at += 2;
+    }
+    if at < 4 || targets.iter().any(|(_, actions)| actions.len() > 16) {
+        return None;
+    }
+    let targets: Vec<Value> = targets.into_iter()
+        .map(|(name, actions)| json!({"name": name, "payload": {"type": "document", "actions": actions}}))
+        .collect();
+    Some((at, first?, json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":targets})))
+}
+
 /// Run a template's lines as the session's own typed lines, in order. The
 /// first line that does not end `Done` stops the rest; the lines before it
 /// stand (each was its own Host decision), and stderr names the line.
+/// Consecutive document proposals each submitted at once (`doc append`/`doc link` +
+/// `submit`) run as one proposal and one submission (`coalesced_documents`): a template
+/// that builds a room's index costs one Host decision for its edits, not one per line.
 fn run_template(session: &Session, label: &str, lines: &[(usize, String)]) -> (i32, bool) {
     let total = lines.len();
-    for (index, (number, text)) in lines.iter().enumerate() {
+    let mut index = 0;
+    while index < lines.len() {
+        if let Some((count, id, request)) = coalesced_documents(session, &lines[index..]) {
+            let numbers: Vec<String> = lines[index..index + count].iter().map(|(n, _)| n.to_string()).collect();
+            eprintln!("{label} {}-{}/{total} (lines {}): one proposal of {} document edits, submitted once",
+                index + 1, index + count, numbers.join(","), count / 2);
+            let proposed = match execute(session, proposal(session, &id, &request)) {
+                Ending::Done => line(session, &format!("submit {id}")),
+                ending => {
+                    let (code, text) = render(&ending);
+                    if !text.is_empty() {
+                        eprint!("{text}");
+                    }
+                    (code, true)
+                }
+            };
+            if proposed.0 != EXIT_OK {
+                eprintln!("template {label} stopped at lines {}: the coalesced document edits\n  lines after them were not run; the {index} line(s) before them stand",
+                    numbers.join(","));
+                return (proposed.0, true);
+            }
+            index += count;
+            continue;
+        }
+        let (number, text) = &lines[index];
         eprintln!("{label} {}/{total} (line {number}): {text}", index + 1);
+        index += 1;
         let (code, more) = line(session, text);
         if code != EXIT_OK {
             eprintln!(
