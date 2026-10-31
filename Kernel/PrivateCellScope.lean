@@ -26,9 +26,13 @@ its 3-bit family prefix, every other field opens its whole tag.
   `2^W` (satisfiable). Teeth (`Witness`): a scope naming `atomsOf 3` does not
   select `atomsOf 4` or `body`'s plain addresses; naming `body` selects both.
 
-Owed: the fitting premise for declared kinds (a slot is `.slot field.value` with
-an unbounded `Digest` value; admission must bound it below `2^W`, the digest
-width) and the address-path half of the keys.
+* `scopeSelectsVisible_checked`: at `bitCode 256`, with the fitting premises
+  replaced by the private index's admission check (`addressFits`: a declared key's
+  digests below `2^256`; content and streams always fit) and the reader's scope cut
+  to its fitting fields (`fitScope`, which changes no fitting address's
+  visibility). Teeth: `Witness.slot_overflow_shares_tag`.
+
+Owed: the address-path half of the keys.
 -/
 module
 
@@ -241,6 +245,123 @@ def bitCode (w : Nat) : ClassCode where
       have := prefixed.eq_of_length (by rw [bitTag_length, bitTag_length])
       cases outer <;> simp [bitTag, family, detail] at this
 
+/-! ## Fitting at the digest width
+
+`bitCode W` is exact only on fields whose parameters are below `2^W`; above it
+two fields share a tag (`Witness.slot_overflow_shares_tag`). Content atoms always
+fit at `W ≥ 64` (`atomLow` is the low 64 bits). A declared key's digests are
+unbounded on the wire (`digestCodec`'s escape form), so the private index admits
+a declared key only when `keyFits` holds: the gate the blinded-cell receiver
+applies before a write enters the index. A reader's scope is cut to its fitting
+fields (`fitScope`), which changes nothing it sees at a fitting address. -/
+
+open Minidregg.Theory.EffectDeclaration (StateKey)
+
+/-- A declared key's digests are below `2^w`. -/
+def keyFits (w : Nat) : StateKey → Bool
+  | .objectField _ field => decide (field.value < 2 ^ w)
+  | .accountBalance _ asset => decide (asset.value < 2 ^ w)
+  | .fieldDeclared _ field => decide (field.value < 2 ^ w)
+  | _ => true
+
+theorem declaredField_fits {w : Nat} {key : StateKey} (fits : keyFits w key = true) :
+    bitFits w (declaredField key) := by
+  cases key <;> simp_all [keyFits, declaredField, bitFits]
+
+theorem contentField_fits (w : Nat) (space : Minidregg.Theory.Hyperdocument.Namespace) :
+    bitFits w (contentField space) := by
+  cases space <;> trivial
+
+instance bitFitsDecidable (w : Nat) : DecidablePred (bitFits w) := fun f => by
+  cases f <;> unfold bitFits <;> infer_instance
+
+instance (w : Nat) : DecidablePred (bitCode w).Fits := bitFitsDecidable w
+
+/-- The private index's admission check on one address of a registry cell. -/
+def addressFits (w : Nat) : (kind : CanonicalCellRegistry.Kind) →
+    Address (CanonicalCellRegistry.layout kind) → Bool
+  | .declaredObject, address | .accountMetadata, address | .declaredProgram, address =>
+      keyFits w address.2
+  | _, _ => true
+
+/-- **A checked address fits** `bitCode w` for every `w ≥ 64`. -/
+theorem fits_of_addressFits {w : Nat} (wide : 64 ≤ w) (kind : CanonicalCellRegistry.Kind)
+    (address : Address (CanonicalCellRegistry.layout kind)) (checked : addressFits w kind address = true) :
+    ∀ f, fieldOf kind address = some f → (bitCode w).Fits f := by
+  intro f found
+  show bitFits w f
+  cases kind with
+  | content =>
+      simp only [fieldOf] at found
+      split at found
+      · cases found
+      · cases found
+        unfold contentFieldAt
+        split
+        · show ContentResource.atomLow _ < 2 ^ w
+          exact lt_of_lt_of_le (Nat.mod_lt _ (by positivity)) (Nat.pow_le_pow_right (by decide) wide)
+        · exact contentField_fits w _
+  | declaredObject | accountMetadata | declaredProgram =>
+      simp only [fieldOf] at found
+      split at found
+      · cases found
+      · cases found
+        exact declaredField_fits checked
+  | stream | worldKind =>
+      simp only [fieldOf] at found
+      cases found
+      trivial
+  | _ => simp [fieldOf] at found
+
+/-- A scope cut to its fields that fit `bitCode w`. -/
+noncomputable def fitScope (w : Nat) : Option (Finset CellField) → Option (Finset CellField)
+  | none => none
+  | some named => some (named.filter (bitFits w))
+
+theorem fitScope_fits (w : Nat) (fields : Option (Finset CellField)) :
+    ScopeFits (bitCode w) (fitScope w fields) := by
+  cases fields with
+  | none => trivial
+  | some named =>
+      intro f member
+      exact (Finset.mem_filter.mp member).2
+
+/-- Cutting a scope to its fitting fields keeps every fitting address's visibility. -/
+theorem visible_fitScope (w : Nat) (fields : Option (Finset CellField)) (kind : CanonicalCellRegistry.Kind)
+    (address : Address (CanonicalCellRegistry.layout kind))
+    (addressFits : ∀ f, fieldOf kind address = some f → bitFits w f) :
+    Visible (fitScope w fields) kind address ↔ Visible fields kind address := by
+  unfold Visible Kept
+  cases fields with
+  | none => rfl
+  | some named =>
+      simp only [fitScope]
+      split
+      · rename_i f found
+        simp only [CellField.NamedBy, Finset.mem_filter]
+        constructor
+        · rintro ⟨⟨outer, ⟨member, _⟩, covers⟩, nb⟩
+          exact ⟨⟨outer, member, covers⟩, nb⟩
+        · rintro ⟨⟨outer, member, covers⟩, nb⟩
+          refine ⟨⟨outer, ⟨member, ?_⟩, covers⟩, nb⟩
+          by_cases isBody : outer = .body
+          · subst isBody; trivial
+          · rw [CellField.covers_eq_of_ne_body isBody covers]
+            exact addressFits f found
+      · simp
+
+/-- **Scope selection under the admission check**, at the digest width: for every
+reader scope, an address the private index admitted (`addressFits 256`, not the
+blinding) is visible exactly when one of the cut scope's prefixes starts its tag. -/
+theorem scopeSelectsVisible_checked (kind : CanonicalCellRegistry.Kind) (fields : Option (Finset CellField))
+    (address : Address (CanonicalCellRegistry.layout kind)) (checked : addressFits 256 kind address = true)
+    (notBlinding : CanonicalCellRegistry.isBlinding kind address = false) :
+    Visible fields kind address ↔
+      ∃ p ∈ scopePrefixes (bitCode 256) (fitScope 256 fields), p <+: (bitCode 256).tag (fieldOf kind address) := by
+  have fits := fits_of_addressFits (by decide) kind address checked
+  rw [← visible_fitScope 256 fields kind address fits]
+  exact scopeSelectsVisible (bitCode 256) kind (fitScope 256 fields) address (fitScope_fits 256 fields) fits notBlinding
+
 /-! ## Witnesses -/
 
 namespace Witness
@@ -259,6 +380,26 @@ theorem body_selects_atoms :
       ¬ (bitCode 64).opens .body <+: (bitCode 64).tag (some .annotations) := by
   decide
 
+/-- The width bound has teeth: past it, two slots share a tag, so a reader of
+slot `0` would be shown slot `2^256`. -/
+theorem slot_overflow_shares_tag :
+    (bitCode 256).tag (some (.slot (2 ^ 256))) = (bitCode 256).tag (some (.slot 0)) ∧
+      CellField.slot (2 ^ 256) ≠ .slot 0 := by
+  refine ⟨?_, by simp⟩
+  have low : ∀ i ∈ List.range 256, (2 ^ 256).testBit i = Nat.testBit 0 i := by
+    intro i member
+    have := List.mem_range.mp member
+    rw [Nat.testBit_two_pow, Nat.zero_testBit]
+    simp only [decide_eq_false_iff_not]
+    omega
+  show bitTag 256 _ = bitTag 256 _
+  simp only [bitTag, detail, bitsW, family, List.map_congr_left low]
+
+/-- The check refuses such a key. -/
+theorem overflow_refused : ∀ object, keyFits 256 (.objectField object ⟨2 ^ 256⟩) = false := by
+  intro object
+  simp [keyFits]
+
 end Witness
 
 #assert_axioms scopeSelectsVisible
@@ -266,5 +407,10 @@ end Witness
 #assert_axioms bitTag_injective
 #assert_axioms Witness.atoms_grant_selects_own
 #assert_axioms Witness.body_selects_atoms
+#assert_axioms fits_of_addressFits
+#assert_axioms visible_fitScope
+#assert_axioms scopeSelectsVisible_checked
+#assert_axioms Witness.slot_overflow_shares_tag
+#assert_axioms Witness.overflow_refused
 
 end Minidregg.Kernel.PrivateCellScope
