@@ -40,7 +40,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   doc page in one codec frame, client and codec from one candidate; 253d0bc26 read-scratch pruning; its own copy of the
   admitOwn fix, identical to dc61016cb).
   + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
-  representsCheck_eq_fast; first read after idle 20.8 s -> 3.9 s at height ~920; audit requested).
+  representsCheck_eq_fast; first read after idle 20.8 s -> 3.9 s at height ~920; audit SOUND: unconditional funext csimp, hash sets over Nat).
 - Awaited: hot-path
   92828ff96 (birth plan directory decode) after lane-check; infra's forge composed of batch 7 (after its batch 4 rebuild).
 - **CLOSED: GET read-path contract** (ember ruled (c)+(d); hot-path owns it statement-first). Never re-run or re-report.
