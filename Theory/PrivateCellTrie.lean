@@ -125,10 +125,10 @@ structure ClassKeys (K Class : Type) where
 def ClassKeys.bitsOf {Class : Type} (keys : ClassKeys K Class) (k : K) : List Bool :=
   keys.tag (keys.classOf k) ++ keys.address k
 
-/-- The finite comparison scope of one class reveal: the canonical tree of the
-store, the reveal's climb from the revealed subtree to the root, and the
-canonical tree of the revealed members below the stop depth
-(`AuthTrie.revealNodes` over the store's canonical entries). -/
+/-- The finite comparison scope of one class reveal: the walk's path nodes and
+the selected subtree of the store's canonical tree, the reveal's climb from the
+revealed subtree to the root, and the canonical tree of the revealed members
+below the stop depth (`AuthTrie.revealNodes` over the store's canonical entries). -/
 def revealNodes (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
     (es : List (K × V)) (p : List Bool) (reveal : Reveal K V D) : NodeIn K V D → Prop :=
   AuthTrie.revealNodes dig bitsOf L (entries bitsOf (canon es)) p reveal
@@ -136,10 +136,9 @@ def revealNodes (dig : NodeIn K V D → D) (bitsOf : K → List Bool) (L : Nat)
 /-- **Complete class opening target.** Over the canonical root of a store with
 injective live paths of public length `L`, a verifying reveal at class `c`'s tag
 answers exactly the live entries of class `c` (last value per key), or two
-distinct nodes of the scope `revealNodes` share a digest: the store's whole
-canonical tree, the reveal's climb and the revealed members' tree. The scope
-includes the whole store tree, so an unrelated collision in the store discharges
-every reveal; locality to the path and the selected subtree is owed. -/
+distinct nodes of the scope `revealNodes` share a digest: the walk's path and
+the selected subtree of the store, the reveal's climb and the revealed members'
+tree. A collision elsewhere in the store does not discharge it. -/
 def ClassRevealComplete {Class : Type} (dig : NodeIn K V D → D) (keys : ClassKeys K Class)
     (L : Nat) : Prop :=
   (∀ k, (keys.bitsOf k).length = L) →

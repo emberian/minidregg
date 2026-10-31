@@ -82,7 +82,7 @@ end Trie
 
 section Oracle
 
-variable {K V D : Type} [DecidableEq K] {M : Type → Type} [Monad M] {N : Type}
+variable {K V D : Type} {M : Type → Type} [Monad M] {N : Type}
 variable (ops : Ops M K V D N)
 
 /-- A layer's digest: cached for a leaf or branch, the empty node's otherwise. -/
@@ -114,6 +114,8 @@ def clashM : List (K × V) → M N
       ops.store (.leaf d [] kv.1 kv.2)
   | kvs@(_ :: _ :: _) => ops.store (.clash kvs)
 
+variable [DecidableEq K]
+
 /-- Where the walk stops: the loaded layer of handle `x`. -/
 def finishM (k : K) (x : N) : Layer K V D N → M N
   | .empty => pure x
@@ -144,23 +146,39 @@ namespace Trie
 
 variable {K V D : Type} (dig : NodeIn K V D → D)
 
-/-- Re-join two children after one of them lost an entry. -/
-def join (l r : Trie K V D) : Trie K V D :=
-  match l, r with
-  | .empty, .empty => .empty
-  | .empty, .leaf d rest k v => .leaf d (true :: rest) k v
-  | .leaf d rest k v, .empty => .leaf d (false :: rest) k v
-  | l, r => mkBranch dig l r
+/-- The identity handler: a handle is the node itself, a digest is `dig`. -/
+def trieOps : Ops Id K V D (Trie K V D) := ⟨fun x => pure (dig x), fun t => pure t.layer, fun l => pure (ofLayer l)⟩
 
-/-- A height-0 bucket after a removal. -/
-def clashOf : List (K × V) → Trie K V D
-  | [] => .empty
-  | [kv] => mkLeaf dig [] kv.1 kv.2
-  | kvs@(_ :: _ :: _) => .clash kvs
+/-- Re-join two children after one of them lost an entry: `joinM` at the
+identity handler. -/
+def join (l r : Trie K V D) : Trie K V D := Id.run (joinM (trieOps dig) l r)
+
+/-- A height-0 bucket after a removal: `clashM` at the identity handler. -/
+def clashOf (kvs : List (K × V)) : Trie K V D := Id.run (clashM (trieOps dig) kvs)
+
+/-- `join`'s cases. -/
+theorem join_eq (l r : Trie K V D) : join dig l r =
+    match l, r with
+    | .empty, .empty => .empty
+    | .empty, .leaf d rest k v => .leaf d (true :: rest) k v
+    | .leaf d rest k v, .empty => .leaf d (false :: rest) k v
+    | l, r => mkBranch dig l r := by
+  cases l <;> cases r <;> rfl
+
+/-- `clashOf`'s cases. -/
+theorem clashOf_eq (kvs : List (K × V)) : clashOf dig kvs =
+    match kvs with
+    | [] => .empty
+    | [kv] => mkLeaf dig [] kv.1 kv.2
+    | kvs@(_ :: _ :: _) => .clash kvs := by
+  match kvs with
+  | [] => rfl
+  | [_] => rfl
+  | _ :: _ :: _ => rfl
 
 theorem join_entries (l r : Trie K V D) :
     (join dig l r).entries = l.entries.map (consBit false) ++ r.entries.map (consBit true) := by
-  cases l <;> cases r <;> simp [join, mkBranch, entries, consBit]
+  cases l <;> cases r <;> simp [join_eq, mkBranch, entries, consBit]
 
 theorem clashOf_entries (kvs : List (K × V)) :
     (clashOf dig kvs).entries = kvs.map fun kv => (kv.1, [], kv.2) := by
@@ -173,7 +191,7 @@ theorem clashOf_inv (kvs : List (K × V)) : Inv dig 0 (clashOf dig kvs) := by
   match kvs with
   | [] => trivial
   | [_] => exact ⟨rfl, rfl⟩
-  | _ :: _ :: _ => simp [clashOf, Inv]
+  | _ :: _ :: _ => simp [clashOf_eq, Inv]
 
 theorem two_le_of_inv_branch {n : Nat} {d : D} {l r : Trie K V D} (inv : Inv dig n (.branch d l r)) :
     2 ≤ (Trie.branch d l r).entries.length := by
@@ -227,30 +245,24 @@ theorem join_inv (n : Nat) (l r : Trie K V D) (il : Inv dig n l) (ir : Inv dig n
           exact branchInv (by simp only [length_entries_leaf, length_entries_clash] at this ⊢; omega)
   | branch d' l' r' =>
       have := two_le_of_inv_branch dig il
-      exact branchInv (by simp only [length_entries_branch] at this ⊢; omega)
+      have two : 2 ≤ (Trie.branch d' l' r').entries.length + r.entries.length := by omega
+      cases r <;> exact branchInv two
   | clash kvs =>
       have := two_le_of_inv_clash dig il
-      exact branchInv (by simp only [length_entries_clash] at this ⊢; omega)
+      have two : 2 ≤ (Trie.clash kvs : Trie K V D).entries.length + r.entries.length := by omega
+      cases r <;> exact branchInv two
 
 variable [DecidableEq K]
-
-/-- The identity handler: a handle is the node itself, a digest is `dig`. -/
-def trieOps : Ops Id K V D (Trie K V D) := ⟨fun x => pure (dig x), fun t => pure t.layer, fun l => pure (ofLayer l)⟩
 
 /-- Remove `k` along the walk `bits`: `eraseM` at the identity handler. -/
 def erase (k : K) (n : Nat) (bits : List Bool) (t : Trie K V D) : Trie K V D :=
   Id.run (eraseM (trieOps dig) k n bits t)
 
 omit [DecidableEq K] in
-theorem joinM_trieOps (l r : Trie K V D) : Id.run (joinM (trieOps dig) l r) = join dig l r := by
-  cases l <;> cases r <;> rfl
+theorem joinM_trieOps (l r : Trie K V D) : Id.run (joinM (trieOps dig) l r) = join dig l r := rfl
 
 omit [DecidableEq K] in
-theorem clashM_trieOps (kvs : List (K × V)) : Id.run (clashM (trieOps dig) kvs) = clashOf dig kvs := by
-  match kvs with
-  | [] => rfl
-  | [_] => rfl
-  | _ :: _ :: _ => rfl
+theorem clashM_trieOps (kvs : List (K × V)) : Id.run (clashM (trieOps dig) kvs) = clashOf dig kvs := rfl
 
 theorem erase_branch (k : K) (n : Nat) (b : Bool) (bs : List Bool) (d : D) (l r : Trie K V D) :
     erase dig k (n + 1) (b :: bs) (.branch d l r) =
@@ -658,9 +670,9 @@ theorem joinM_sim {heap : Heap K V D} {hl hr : Nat} {l r : Trie K V D} (rl : Rep
 theorem clashM_sim (heap : Heap K V D) (kvs : List (K × V)) :
     Sim heap (run dig heap (clashM Prog.ops kvs)) (clashOf dig kvs) True := by
   match kvs with
-  | [] => exact ⟨⟨_, rfl⟩, by simp [clashM, clashOf, Repr], trivial⟩
-  | [_] => exact ⟨⟨_, rfl⟩, by simp [clashM, clashOf, mkLeaf, Repr, run_bind], trivial⟩
-  | _ :: _ :: _ => exact ⟨⟨_, rfl⟩, by simp [clashM, clashOf, Repr], trivial⟩
+  | [] => exact ⟨⟨_, rfl⟩, by simp [clashM, clashOf_eq, Repr], trivial⟩
+  | [_] => exact ⟨⟨_, rfl⟩, by simp [clashM, clashOf_eq, mkLeaf, Repr, run_bind], trivial⟩
+  | _ :: _ :: _ => exact ⟨⟨_, rfl⟩, by simp [clashM, clashOf_eq, Repr], trivial⟩
 
 /-- Where the walk stops: load the handle and finish on its layer. -/
 theorem finish_sim (k : K) (n : Nat) (bits : List Bool) {heap : Heap K V D} {x : Nat} {t : Trie K V D}
