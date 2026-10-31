@@ -9,49 +9,39 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 07:40 EDT)
+## Now (2026-10-31 08:10 EDT)
 
 - **main = 83e926874** = gated batch 4 b9450147f merged with main 7978ddfdd.
-- **Batch 4 b9450147f: GATE GREEN, the rehearsal-3 candidate.** hbox tour 73/73, enrol, composed; forge composed c-b945-d1 all
-  phases; j14-apps PASS with the deploy-script hotpatch HARNESS=9fdef19bd (bwrap ACL 11a4f4ac6: controller uid gets its own
-  execute entry on /usr/local/libexec/mini-grain-bwrap, app-range entries claimed per world; grant_acl stops at the world
-  root c76dbe0c7; gate15 = gate14 + j14 socket parent 711; /ci is 711). Umbrellas all green; fixtures 5c00cc4f3 merged.
-  Flatness: submit_cpu 106 -> 380 (3.6x), propose_cpu 4.05x; walls and get PASS.
-- **Batch 5 1c151fce4 BUILDING** (07:29, integ-build6): exorcism, module-cost, hot-path authority, app-reds route/teardown/ACL.
-- Known leak: residents started by j14-oracle application hooks' query step outlive the run (settings under
-  step/oracle/application/hooks/*/002-query); app-reds owns the fix; the integrator stops them by exact PID after each j14.
-- **Batch 3 a4cb65af3: GATE GREEN.** Forge distinct composed c-a4cb-d2 PASSES every phase (rooms, churn, documents,
-  apps, connector, residents, restart, store-restart); hbox gate13 tour 73/73, enrol, j14-apps PASS (5 rows); umbrellas
-  green except TokenCensus (ConsentAnchor L1 witness, fixed in batch 4). Fixtures re-recorded d546395a9 (merged). It is
-  the fallback ship: it lacks the Z.AI endpoint fix 5f32da72d, the fenced-controller fix cb3bc4f85 and the Etherpad
-  birth naming 0aa00c3e0 (all in batch 4).
-- **Batch 4 b9450147f BUILDING** (launched 05:35 with integ-build6; host stage started after batch 3's umbrella-tree
-  released its lock, ~05:39). First build with iter-speed's lake-threads fix e9d1c6fc8: report its host stage time beside
-  batch 3's 2,476 s. Waiter: READY line is `READY /home/hbox/lanes/integ/candidates/<sha>`. If green on gate13 AND
-  forge composed: it is the rehearsal-3 candidate (rehearse only green). Contents: hot-path demanded projection + content
-  law over cached support + TokenCensus fix + StoryHistory fix + `story new` fold (17 -> 4 submits) + Book entries
-  statement and proofs; private-cells Thunk, CustodyCodec, kindCtx, round-18 fixes; app-reds route before START,
-  qualification args, gogs fixture, custodian installer dd80d1e2a + floor fd8de031a, Etherpad birth naming 0aa00c3e0,
-  named-conjunct error d2377d3c5; demo-reds Z.AI endpoint 5f32da72d, fenced controller cb3bc4f85; iter-speed hot-swap
-  overlay + overlay ids; explorer batches 10-11.
-- **Batch 5 (staging a52de3604+)**: exorcism 4f7972a62 (no fsync anywhere, ember; rebased onto the no-loop volume design),
-  hot-path 4fb1a0e17 (authority snapshot projection over cached support), plus whatever lands. Cut it after batch 4's
-  READY and its umbrella-tree/rerecord (integ-build6 waits for the umbrella lock itself, so launching after READY is safe).
+- **Batch 4 b9450147f: GATE GREEN, the rehearsal-3 candidate.** hbox tour 73/73, enrol, composed; forge composed c-b945-d1
+  all phases; j14-apps PASS with the deploy-script hotpatch HARNESS=9fdef19bd (bwrap ACL 11a4f4ac6: the controller uid gets
+  its own execute entry on /usr/local/libexec/mini-grain-bwrap, app-range entries claimed per world; grant_acl stops at the
+  world root c76dbe0c7; gate15 = gate14 + j14 socket parent 711; /ci is 711). Umbrellas all green; fixtures 5c00cc4f3
+  merged. Flatness: submit_cpu 106 -> 380 (3.6x), propose_cpu 4.05x; walls and get PASS.
+- **Batch 5 1c151fce4: READY 07:52** (host stage 1,005 s, the lake-threads fix's first measured cut; consent 150 s, rust
+  191 s). Contents: exorcism 4f7972a62 (no fsync anywhere), module-cost, hot-path authority snapshot 4fb1a0e17, app-reds
+  route/teardown/ACL, batch 4 fixtures. **gate15 running** (PID in gate-1c15.pid; started 07:53 under the home lock path,
+  so its remaining world-ups are not serialised against lanes): enrol PASS, tour 73/73 PASS; hbox composed residents
+  UNKNOWN (forge composed decides); j14-apps FAIL: "Hermes sent no reply to the ask: refused" (/ci/j-1c151f/journey.log).
+  Waiter armed on `GATE 1c151fce verdict`.
+  Known for it: perf-apps saw a START crash loop ("attestation resource outside supported profile", 20-digit member-
+  namespace resource ids): fixed 40efdcff9 (staging 4ab22bf78). If j14/apps go red on that, overlay the spk-host crate
+  from 4ab22bf78 onto 1c151fce4 (lane-build.sh overlay) and rerun j14 + composed with gate15.
+- **Batch 6 (staging 1e339d769+)**: the resource-id fix, exorcism 16f2d046f (reverts the commitment-seen cache) and whatever lands. Cut it when batch 5's gate and umbrella are
+  in and enough has accumulated (minimal-checks ruling: cuts spaced out to accumulate perf work).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
   Store epoch) + Book entries migration (~50 consumers) + private-cells FORMAT (a): eventHistory and authority to the trie
   root with mask [] (root ruling: blinded content and declared kinds keep the salted ratchet until the compiler-emitted ZK
   selective opening exists; that is epoch (b), a second genesis) + KeptCell Aux cache + fixture re-record. Label FORMAT.
-- **Forge demo** (infra): grain world GREEN through the host custodian; EtherCalc + reveal.js accepted; ships
-  eca98bde7-resvar2-zai or a4cb65af3 with OpenRouter (Z.AI needs batch 4). Keys: ember approved OpenRouter pool key and Z.AI
-  GLM (glm-5.3-flash default), relayed by root. Infra keeps a wait-for-Store drop-in until cb3bc4f85 ships. Infra
-  unblocked quotactl/quotactl_fd in forge's composed nspawn seccomp (not yet in any repo script: infra records it).
-- Flatness (reported, never gating): batch 3 submit_cpu 202 -> 1180 ms, get 2.19x. Hot-path's profile (/ci/hpc/fbz):
-  28% content-law dedup (fixed f7da550af), 18% signed-read challenge path, 13.6% DTreeMap getD in payloadStream; private-
-  cells' eager carried index only 3.8%. Batch 4 measures the fixes. CONSENT-STORE (batch 2+) measured by the explorer:
-  first signed read 20.7 s -> 0.5-0.8 s flat in height; restart+read 26 s -> 5.6 s; certify ~6 s per 256 tail.
-- hbox: / 43 GB free (05:59). Host state app-reds added: /var/lib/mini-vars-backing (loop prjquota ext4 from
-  /tank/lanes/vars-backing.img, NOT in fstab: after reboot `sudo mount -o loop,prjquota /tank/lanes/vars-backing.img
-  /var/lib/mini-vars-backing`), /etc/mini-spk-volumes/{vars-backing,ingest-scratch}, /tank/mini-ingest.
+- **Batch 3 a4cb65af3: GATE GREEN** (forge composed c-a4cb-d2 every phase; hbox tour, enrol, j14). Fallback ship.
+- **Forge demo** (infra): grain world GREEN through the host custodian; EtherCalc + reveal.js accepted. Keys: ember
+  approved the OpenRouter pool key and Z.AI GLM (glm-5.3-flash default), relayed by root. Infra keeps a wait-for-Store
+  drop-in until cb3bc4f85 ships. Infra unblocked quotactl/quotactl_fd in forge's composed nspawn seccomp (not yet in any
+  repo script: infra records it).
+- Flatness (reported, never gating): batch 3 submit_cpu 202 -> 1180 ms; batch 4 106 -> 380. CONSENT-STORE (batch 2+)
+  measured by the explorer: first signed read 20.7 s -> 0.5-0.8 s flat in height; restart+read 26 s -> 5.6 s; certify
+  ~6 s per 256 tail.
+- hbox: / 47 GB free (08:30). Host state app-reds added: /var/lib/mini-vars-backing (loop of /tank/lanes/vars-backing.img,
+  prjquota ext4, NOT in fstab), /etc/mini-spk-volumes/{vars-backing,ingest-scratch} (ingest scratch /tank/mini-ingest).
 
 ## Lanes (route only to the newest id; distilled lanes' old ids are retired)
 
@@ -73,6 +63,11 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 
 ## Rulings in force
 
+- **/tank** (root, 10-31 08:30, correcting the earlier reading): ember's "don't use /tank" means don't MOVE data there to
+  free disk. Existing small /tank files stay: /tank/lanes/world-up.lock (the ONE world-up lock every lane, gate and
+  scripts/spk-platform flocks; never a second path), /tank/lanes/vars-backing.img, /tank/mini-ingest. Gates lock
+  /tank/lanes/world-up.lock again (reverted 08:30); playwright runs from $I/pw (local copy, fine). Free disk only by
+  removing old trash (retired trees after their checkpoint, finished /ci scratch, superseded candidates and gate roots).
 - **Minimal checks** (ember, 10-31, after the gates went green): per iteration only the narrowest check that shows the
   change worked (lane-check of changed files plus one targeted measurement or row); full gates (gate13/15, forge composed,
   umbrellas) once per batch cut; cuts spaced out to accumulate perf work; hotpatched measurement worlds are the inner loop;
@@ -117,7 +112,8 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 | a4cb65af3 | GATE GREEN (batch 3); main's base; fallback ship |
 | eca98bde7-resvar2(-zai) | overlays of batch 2 with the resident /var fix (and Z.AI); forge demo build |
 | b9450147f | GATE GREEN (batch 4, with deploy hotpatch 9fdef19bd): rehearsal-3 candidate; main's base |
-| 1c151fce4 | BUILDING (batch 5) |
+| 1c151fce4 | READY (batch 5); gate13 running |
+| 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64), for perf-apps' START loop |
 
 ## Open reds and owners
 
