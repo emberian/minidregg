@@ -2277,6 +2277,15 @@ fn project_request<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_qualification_an_install_writes_is_accepted_by_this_strict_reader() {
+        let digests = vec!["33".to_owned(), "44".to_owned()];
+        let written = crate::launch_descriptor_native::qualification_json(&"a".repeat(64), "11", "22", &"b".repeat(64), &digests, "55");
+        // deny_unknown_fields: a field the install adds to qualification.json breaks resident START.
+        let read: QualifiedLaunch = serde_json::from_value(written).expect("the written qualification parses");
+        assert_eq!(read.create_count, "2");
+    }
     use crate::dispatch_inspection::app_route_path;
     use crate::http_entrance::read_request;
     use serde_json::json;

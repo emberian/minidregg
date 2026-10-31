@@ -245,24 +245,41 @@ pub fn qualify_launch(config_path: &Path) -> io::Result<Value> {
         return Err(invalid("offline launch qualification input changed"));
     }
     source_host.check_pin()?;
-    let result = json!({
-        "protocol":"mini-spk-launch-qualified-v2",
-        "rawSha256":package.raw_sha256,
-        "signedAppId":package.manifest.app_id.0,
-        "signedAppVersion":package.manifest.app_version.to_string(),
-        "packageRoot":launch.package.root,
-        "launchRoot":launch.root,
-        "launchCanonicalSha256":hex(&Sha256::digest(&launch.canonical)),
-        "createCount":launch.create_digests.len().to_string(),
-        "createDigests":launch.create_digests,
-        "continueDigest":launch.continue_digest,
-    });
+    let result = qualification_json(&package.raw_sha256, &launch.package.root, &launch.root,
+        &hex(&Sha256::digest(&launch.canonical)), &launch.create_digests, &launch.continue_digest);
+    // Beside the qualification, never in it: the consumers of qualification.json read it with
+    // deny_unknown_fields. `grain install` reports these two values to the apps worker.
+    write_new(
+        &config.attempt_dir,
+        "signed-identity.json",
+        &serde_json::to_vec_pretty(&json!({
+            "signedAppId":package.manifest.app_id.0,
+            "signedAppVersion":package.manifest.app_version.to_string(),
+        }))?,
+    )?;
     write_new(
         &config.attempt_dir,
         "qualification.json",
         &serde_json::to_vec_pretty(&result)?,
     )?;
     Ok(result)
+}
+
+/// The one qualification document (`qualification.json`). Its readers (install_v3, resident_service,
+/// the stop service) parse it with deny_unknown_fields, so a field added here breaks resident START:
+/// anything else the install wants to report goes in a separate file beside it.
+pub(crate) fn qualification_json(raw_sha256: &str, package_root: &str, launch_root: &str, canonical_sha256: &str,
+    create_digests: &[String], continue_digest: &str) -> serde_json::Value {
+    json!({
+        "protocol":"mini-spk-launch-qualified-v2",
+        "rawSha256":raw_sha256,
+        "packageRoot":package_root,
+        "launchRoot":launch_root,
+        "launchCanonicalSha256":canonical_sha256,
+        "createCount":create_digests.len().to_string(),
+        "createDigests":create_digests,
+        "continueDigest":continue_digest,
+    })
 }
 
 impl SourceTool for OfflineSourceHost {
