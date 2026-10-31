@@ -12,6 +12,7 @@ green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | gate:flatness-get | flatness-get FAIL | not rerun | yes | rc=1; /ci/f-d2d0ec/get.log |
 | gate:flatness-run | flatness-run FAIL | not rerun | yes | exit=1; /home/hbox/lanes/integ/gate-d2d0ec88/flatness.log |
 | gate:j14-apps | j14-apps FAIL | not rerun | yes | rc=1; /ci/j-d2d0ec/journey.log |
+| gate:j14-apps (bb2) | bootstrap: minidregg-client-consent exits "durable log is not a turn log: a verification walk carries no World" (candidate 76511e768; ed875b899, 042f2a0c1) | no | yes | fixed on main by 86c9dbddb (member-side, confirmed on two worlds); clears on the next round past it. Blocks apps-hermes Scrumblr/Hummingbird/WBO qualifies |
 | gate:composed | composed FAIL | not rerun | yes | scratch world: jworld: port 22640 in use |
 
 Suspect commits since green (`git log 83e926874e38..d2d0ec8819b3`), newest first; owners are the seats whose
