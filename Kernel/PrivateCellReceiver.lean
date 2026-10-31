@@ -529,32 +529,40 @@ theorem idealFn_window {window : List Nat} (distinct : window.Nodup) (t : Fin (f
 /-- The test "the masks of versions `v` and `w` agree". -/
 def equalityTest (v w : Nat) (f : Nat → Fin (m + 1)) : Bool := f v == f w
 
-/-- The named distinguishers a meaningful budget admits: equality of two
-distinct window versions' masks (a custody function repeating a mask on the
-window fails against them). The budget is the efficiency class of the PRF
-assumption: admitting every evaluation test would admit exhaustive key search
-and make the premise statistical, which no short-key PRF meets. -/
-def BudgetAdmitsEquality (window : List Nat) (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
-  ∀ v ∈ window, ∀ w ∈ window, v ≠ w → budgeted (equalityTest m v w)
+/-- The test "the mask of version `v` is `c`": one query, efficient. -/
+def pointTest (v : Nat) (c : Fin (m + 1)) (f : Nat → Fin (m + 1)) : Bool := f v == c
 
-/-- The budget of exactly those tests. -/
-def equalityBudget (window : List Nat) (test : (Nat → Fin (m + 1)) → Bool) : Prop :=
-  ∃ v ∈ window, ∃ w ∈ window, v ≠ w ∧ test = equalityTest m v w
+/-- **The named distinguishers a meaningful budget admits**: equality of two
+distinct window versions' masks (a function repeating a mask fails against
+them) and the one-query point tests on the window (a function predictable at
+one version, such as a public counter, fails against them). The budget is
+meant as the efficiency class of the PRF assumption, and Lean does not tie it
+to efficiency: at a use it is the composed reduction tests plus these named
+distinguishers, nothing more. Admitting every evaluation test would admit
+exhaustive key search and make the premise statistical, which no short-key
+PRF meets. -/
+def BudgetAdmitsNamed (window : List Nat) (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
+  (∀ v ∈ window, ∀ w ∈ window, v ≠ w → budgeted (equalityTest m v w)) ∧
+    ∀ v ∈ window, ∀ c, budgeted (pointTest m v c)
 
-theorem equalityBudget_admits (window : List Nat) : BudgetAdmitsEquality m window (equalityBudget m window) :=
-  fun v hv w hw ne => ⟨v, hv, w, hw, ne, rfl⟩
+/-- The budget of exactly the named distinguishers. -/
+def namedBudget (window : List Nat) (test : (Nat → Fin (m + 1)) → Bool) : Prop :=
+  (∃ v ∈ window, ∃ w ∈ window, v ≠ w ∧ test = equalityTest m v w) ∨ ∃ v ∈ window, ∃ c, test = pointTest m v c
+
+theorem namedBudget_admits (window : List Nat) : BudgetAdmitsNamed m window (namedBudget m window) :=
+  ⟨fun v hv w hw ne => Or.inl ⟨v, hv, w, hw, ne, rfl⟩, fun v hv c => Or.inr ⟨v, hv, c, rfl⟩⟩
 
 /-- The two halves of a joint tape: the key draw and the ideal function draw. -/
 abbrev split {keys window : Nat} (t : Fin (keys * window)) : Fin keys × Fin window := finProdFinEquiv.symm t
 
 /-- **The custody PRF game.** With the ideal fixed as the uniform function on the
-version window and a budget (the efficiency class) admitting the equality
-tests, no budgeted test separates the keyed custody function (key drawn
+version window and a budget admitting the named distinguishers
+(`BudgetAdmitsNamed`), no budgeted test separates the keyed custody function (key drawn
 uniformly from `keys`, outside every view) from the ideal by more than
 `num/den`. -/
 def CustodyPrf (keys num den : Nat) (window : List Nat) (keyed : Fin keys → Nat → Fin (m + 1))
     (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
-  BudgetAdmitsEquality m window budgeted ∧
+  BudgetAdmitsNamed m window budgeted ∧
     ∀ test, budgeted test →
       GapAtMost (keys * funs m window) num den
         (fun t => test (keyed (split t).1)) (fun t => test (idealFn m window (split t).2))
@@ -563,7 +571,7 @@ def CustodyPrf (keys num den : Nat) (window : List Nat) (keyed : Fin keys → Na
 all functions on the window (its key is the function) meets the game at gap 0,
 against every budget. -/
 theorem enumeration_satisfies {den : Nat} (window : List Nat) (denominator : 0 < den)
-    (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) (admits : BudgetAdmitsEquality m window budgeted) :
+    (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) (admits : BudgetAdmitsNamed m window budgeted) :
     CustodyPrf m (funs m window) 0 den window (idealFn m window) budgeted := by
   refine ⟨admits, fun test _ => ?_⟩
   have positive : 0 < funs m window * funs m window := Nat.mul_pos (Nat.pow_pos (Nat.succ_pos _))
@@ -583,11 +591,24 @@ theorem enumeration_satisfies {den : Nat} (window : List Nat) (denominator : 0 <
 abbrev window12 : List Nat := [1, 2]
 
 /-- **Teeth**: a constant custody function fails the game at gap `1/4`, against
-the budget of exactly the equality tests. -/
+the budget of exactly the named distinguishers (by an equality test: gap 1/2). -/
 theorem constant_refuted :
-    ¬ CustodyPrf 1 2 1 4 window12 (fun _ _ => 0) (equalityBudget 1 window12) := by
+    ¬ CustodyPrf 1 2 1 4 window12 (fun _ _ => 0) (namedBudget 1 window12) := by
   rintro ⟨_, game⟩
-  obtain ⟨_, _, bound, _⟩ := game (equalityTest 1 1 2) ⟨1, by simp, 2, by simp, by decide, rfl⟩
+  obtain ⟨_, _, bound, _⟩ := game (equalityTest 1 1 2) (Or.inl ⟨1, by simp, 2, by simp, by decide, rfl⟩)
+  revert bound
+  decide
+
+/-- A public counter: the mask of version `v` is `v mod (m + 1)`, whatever the key. -/
+def counter (keys : Nat) (_k : Fin keys) (v : Nat) : Fin (m + 1) := ⟨v % (m + 1), Nat.mod_lt _ (Nat.succ_pos _)⟩
+
+/-- **Teeth**: a public counter repeats no mask on `{1, 2}`, so it passes every
+equality test, and fails at gap `1/4` by the point test "version 1's mask is
+1" (gap `m/(m+1) = 1/2`). -/
+theorem counter_refuted :
+    ¬ CustodyPrf 1 2 1 4 window12 (counter 1 2) (namedBudget 1 window12) := by
+  rintro ⟨_, game⟩
+  obtain ⟨_, _, bound, _⟩ := game (pointTest 1 1 1) (Or.inr ⟨1, by simp, 1, rfl⟩)
   revert bound
   decide
 
@@ -1038,33 +1059,36 @@ theorem receiver_prf_hop {m keys num den : Nat} {Strategy Item : Type}
   simp only [real]
   exact gap
 
-/-- **The hop through the host's view**: under `ViewThroughServe`, a game on
-whatever readers see of the run is a game on its transcript. -/
+/-- **The hop through the host's view**: given the view's factorization `g`
+through the served items (the witness of `ViewThroughServe`), a game on
+whatever readers see of the run is a game on its transcript; `reduction` is
+required for that `g` only (asking it for every `g` would put inefficient
+compositions in the budget). -/
 theorem receiver_prf_hop_view {m keys num den : Nat} {Strategy Item View : Type}
     (keyed : Fin keys → Nat → Fin (m + 1)) (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop)
     (base : Params wire) (sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
     (encodeMask : Fin (m + 1) → List UInt8)
     (encodes : ∀ x, (wire.valueStream base.blinding.space).encode (sample x) = encodeMask x)
-    (serve : Serve wire Item) (view : List (KeptCell wire) → View) (through : ViewThroughServe wire serve view)
+    (serve : Serve wire Item) (view : List (KeptCell wire) → View) (g : List Item → View)
+    (factors : ∀ cells, view cells = g (cells.map (KeptCell.served serve)))
     (rounds : Nat)
     (store : Strategy → Bool → Store (CanonicalCellRegistry.layout kind))
     (next : Strategy → Bool → List Item → List (KeptCell.Write (kind := kind)))
     (born : ∀ a b, (birth wire base (store a b)).isSome)
     (prf : CustodyPrf m keys num den (List.range (rounds + 1)) keyed budgetedPrf)
     (game : Strategy → Bool → Option View → Bool) (legal budgeted : Strategy → Prop)
-    (reduction : ∀ (g : List Item → View) a, legal a → budgeted a → ∀ b,
+    (reduction : ∀ a, legal a → budgeted a → ∀ b,
       budgetedPrf fun f => game a b ((transcript wire serve base (store a b) (next a b)
         (maskList encodeMask rounds f) rounds).map g)) :
-    ∃ g : List Item → View, ∀ a, legal a → budgeted a → ∀ b,
+    ∀ a, legal a → budgeted a → ∀ b,
       GapAtMost (keys * funs m (List.range (rounds + 1))) num den
         (fun t => game a b ((arun wire serve (keyedParams wire base sample keyed (split t).1) (store a b) (next a b)
           rounds).map view))
         (fun t => game a b ((transcript wire serve base (store a b) (next a b)
           (maskList encodeMask rounds (idealFn m (List.range (rounds + 1)) (split t).2)) rounds).map g)) := by
-  obtain ⟨g, factors⟩ := through
-  refine ⟨g, fun a la ba b => ?_⟩
+  intro a la ba b
   have hop := (receiver_prf_hop wire keyed budgetedPrf base sample encodeMask encodes serve rounds store next born
-    prf (fun a b o => game a b (o.map g)) legal budgeted (reduction g)).2.1 a la ba b
+    prf (fun a b o => game a b (o.map g)) legal budgeted reduction).2.1 a la ba b
   have viewed : ∀ o : Option (List (KeptCell wire)), o.map view = (o.map (·.map (KeptCell.served serve))).map g := by
     intro o; cases o <;> simp [factors]
   simp only [viewed]
@@ -1093,7 +1117,8 @@ theorem receiver_prf_hop_view {m keys num den : Nat} {Strategy Item View : Type}
 #assert_axioms recoverable_refuted
 #assert_axioms maskServe_refuted
 #assert_axioms rootServe_servesWithin
-#assert_axioms Custody.equalityBudget_admits
+#assert_axioms Custody.namedBudget_admits
+#assert_axioms Custody.counter_refuted
 #assert_axioms roots_viewThroughServe
 #assert_axioms PublishesRun.atMostOneSuccessor
 #assert_axioms History.atMostOneSuccessor
