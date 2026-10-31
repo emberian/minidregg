@@ -5107,25 +5107,6 @@ def verifyBytes (config : Config)
 
 #assert_axioms validateLoaded_headTag
 
-end Minidregg.Kernel.NativeHostReplay
-
-/-- info: 'Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append
-/-- info: 'Minidregg.Kernel.NativeHostReplay.Verified.accepted_history' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.Verified.accepted_history
-/-- info: 'Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable
-/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact
-/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact_receipts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_receipts
-/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact_physicalRecord' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalRecord
-/-- info: 'Minidregg.Kernel.NativeHostReplay.createdV3After_retry_completion' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.createdV3After_retry_completion
-/-- info: 'Minidregg.Kernel.NativeHostReplay.runningV3After_retry_completion' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.runningV3After_retry_completion
-
 /-! ## The walk from the Store's checkpoint (sweep rows 4, 9, 13)
 
 Ember 2026-10-31: the storage device is trusted. A walk starts where the Store's open
@@ -5257,11 +5238,11 @@ def verifyFrom (config : Config) {store : DurableHistory.StoreIdentity}
   | .ok origin =>
   have originDurable : origin.durable = base := validateLoaded_durable validated
   let below := target.image.accepted.take start
-  match storedReceipts origin.durable with
+  match storedExact : storedReceipts origin.durable with
   | none => return none
   | some prefixReceipts =>
-  have storedExact : storedReceipts origin.durable = some prefixReceipts := by assumption
-  if sized : prefixReceipts.length ≠ start then return none
+  let some sizedLift := (if h : prefixReceipts.length = start then some (PLift.up h) else none)
+    | return none
   let some context := storedContext config 0 below prefixReceipts {} | return none
   match ← walk config origin reader context.issues context.reserves context.begins
       context.beginsV2 context.claimsV2 context.beginsV3 context.claimsV3 context.createdV3
@@ -5269,7 +5250,7 @@ def verifyFrom (config : Config) {store : DurableHistory.StoreIdentity}
       (target.image.accepted.drop start) with
   | .error failure => return some (.error failure)
   | .ok walked =>
-    have sized : prefixReceipts.length = start := Decidable.of_not_not sized
+    have sized : prefixReceipts.length = start := sizedLift.down
     have within : start ≤ target.image.accepted.length := target.withinLog
     have originAccepted : origin.durable.image.accepted = target.image.accepted.take start := by
       rw [originDurable, image, DurableReceiver.Image.accepted_ofAccepted]
@@ -5314,3 +5295,22 @@ def verifyStart (config : Config) {store : DurableHistory.StoreIdentity}
     | none => verifyLoaded config reader target timing
     | some (.error failure) => return .error failure
     | some (.ok verified) => extendVerified config reader verified target
+
+end Minidregg.Kernel.NativeHostReplay
+
+/-- info: 'Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append
+/-- info: 'Minidregg.Kernel.NativeHostReplay.Verified.accepted_history' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.Verified.accepted_history
+/-- info: 'Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact_receipts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_receipts
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact_physicalRecord' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalRecord
+/-- info: 'Minidregg.Kernel.NativeHostReplay.createdV3After_retry_completion' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.createdV3After_retry_completion
+/-- info: 'Minidregg.Kernel.NativeHostReplay.runningV3After_retry_completion' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.runningV3After_retry_completion
