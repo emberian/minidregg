@@ -1483,9 +1483,20 @@ impl World for ProcessWorld {
         let schema = read_json(&pkgdir.join("schema-inspection.json"))?;
         let launch = read_json(&state_app.join("install").join("launch-descriptor").join("launch-inspection.json"))?;
         let birth_source = read_json(&work.join("birth-source.json"))?;
-        let appcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/appOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks appOwnerCapability")?.to_owned();
+        // The management subject observes the app and its package through the owner's lifecycle delegation;
+        // the owner capabilities in the birth source are the member's own (they are the manager's only when it is the owner).
+        let delegated = read_json(&work.join("delegation.json")).ok()
+            .filter(|d| d.get("appOwner").and_then(Value::as_str).is_some_and(|o| o != self.management_subject));
+        let observed = |field: &str| delegated.as_ref().and_then(|d| d.pointer(&format!("/selector/{field}"))).and_then(Value::as_str).map(str::to_owned);
+        let appcap = match observed("appObserveCapability") {
+            Some(cap) => cap,
+            None => birth_source.pointer("/applicationGrainBirth/applicationBirth/application/appOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks appOwnerCapability")?.to_owned(),
+        };
         let app_delegate = share_delegate_capability(&read_json(&work.join("share-delegation.json")).map_err(|e| format!("shareDelegationRequired: the install retained no share delegation ({e}); reinstall"))?, app, &self.management_subject)?;
-        let pkgcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned();
+        let pkgcap = match observed("packageObserveCapability") {
+            Some(cap) => cap,
+            None => birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned(),
+        };
         let (app_state, _) = self.query(work, &format!("{label}-app-state"), app, &appcap, base + 300, "resource")?;
         let pversion = app_state["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "2")).and_then(|x| x["value"].as_str()).unwrap_or("0").to_owned();
         let t = work.join(format!("{label}-ticket"));
