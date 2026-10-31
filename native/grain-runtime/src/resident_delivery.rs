@@ -1524,8 +1524,10 @@ mod tests {
         let mut host=performed(&record,id);
         host["result"]=json!({"resolution":"refused","basis":"exact-operation-record","notResent":true});
         rt.journal.room_resolutions[0]=host.clone();
-        let receipt=rt.finish_delivery_with_cause(&record,&record.arguments(7),host,Some("client exited 2")).unwrap();
-        assert_eq!(receipt["writeError"],"client exited 2");
+        let receipt=rt.finish_delivery_with_cause(&record,&record.arguments(7),host,Some("error: Connection reset by peer (os error 104)")).unwrap();
+        // A Host refusal found by exact lookup stays terminal even when the write also met a reset.
+        assert_eq!(receipt["type"],"mini-resident-final-refused-v1");
+        assert_eq!(receipt["writeError"],"error: Connection reset by peer (os error 104)");
         assert_eq!(rt.delivery_receipt(&record).unwrap().unwrap(),receipt);
         fs::remove_dir_all(root).unwrap();
     }

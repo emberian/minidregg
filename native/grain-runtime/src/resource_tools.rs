@@ -1209,12 +1209,16 @@ impl RoomTools<'_> {
             .arg("--socket").arg(&self.config.socket);
         let output = self.client(&mut command).map_err(|e| crate::deadline::describe("operation lookup", e))?;
         let recovered = last_json(&String::from_utf8_lossy(&output.stdout));
-        let resolution = match recovered.as_ref().filter(|v| v["type"] == "minidregg-operation-recovery-v1").and_then(|v| v["status"].as_str()) {
+        let status = recovered.as_ref().filter(|v| v["type"] == "minidregg-operation-recovery-v1").and_then(|v| v["status"].as_str());
+        let resolution = match status {
             Some("confirmed") => "performed",
             Some("refused" | "not-submitted") => "refused",
             _ => "uncertain",
         };
-        Ok(json!({"resolution":resolution,"basis":"exact-operation-record","effect":effect,
+        // "The Host never got the write" is not "the Host refused the write": only the latter is a verdict.
+        // The basis keeps them apart, so a caller that retries on basis not-submitted never meets a false refusal.
+        let basis = if status == Some("not-submitted") { "not-submitted" } else { "exact-operation-record" };
+        Ok(json!({"resolution":resolution,"basis":basis,"effect":effect,
             "lookup":recovered,"exitCode":output.status.code()}))
     }
 
@@ -1472,6 +1476,28 @@ mod tests {
     }
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn a_lookup_keeps_a_never_submitted_write_apart_from_a_host_refusal() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("mini-lookup-basis-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let fake = root.join("mini");
+        fs::write(&fake, "#!/bin/sh\ncase \"$*\" in\n*lookup-operation*) echo \"{\\\"type\\\":\\\"minidregg-operation-recovery-v1\\\",\\\"status\\\":\\\"$STATUS\\\"}\" ;;\n*) exit 9 ;;\nesac\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let config: RoomToolsConfig = serde_json::from_value(json!({"mini":fake,"host":"/h","hostConfig":"/c",
+            "socket":"/s","workspace":root,"home":root,"room":"lab"})).unwrap();
+        let tools = RoomTools { config: &config };
+        fs::write(tools.operation_record("g1", "write").unwrap(), b"{}").unwrap();
+        for (status, resolution, basis) in [("not-submitted", "refused", "not-submitted"),
+            ("refused", "refused", "exact-operation-record"), ("confirmed", "performed", "exact-operation-record")] {
+            std::env::set_var("STATUS", status);
+            let found = tools.lookup_operation("g1", "write").unwrap();
+            assert_eq!((found["resolution"].as_str(), found["basis"].as_str()), (Some(resolution), Some(basis)), "{status}");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn restrict_tools_is_on_unless_a_config_turns_it_off() {
