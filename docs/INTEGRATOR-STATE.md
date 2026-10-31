@@ -81,6 +81,11 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   refused before dispatch: controller service is unavailable" (4 repros). App-reds: that text collapses a failing
   `systemctl show` of the controller unit (manager/D-Bus call, prove_controller_unit); 4bee4b608 (staging) keeps exit status
   and stderr. Infra probes the call on demo-dry as mini-h-lobby (and the unit sandbox's view of the system bus).
+  Infra 1c044f3 (dregg-infra controller-entry.py): the controller registration's writable set now includes each command's
+  --workspace (canonicalised, allowed roots), replacing a demo-only ReadWritePaths line; takes effect on a rebuilt world.
+  Infra holds the rebuild until ember rules on the grain-volume blocker (a rebuild would still stop at app installs);
+  then it rebuilds, checks ask/reply, and sends app-reds the controller journal if no reply. dregg-infra CHECKLIST
+  bc6e89c predates d676d44, 938fa33, 1c044f3.
   op66-plan narrowed: not the import profile (EtherCalc 3/3 on hbox under market-large-v1); differences vs Davros: date-style
   app version, a single `modify` permission with no roles, the interface schema; infra sends schema-inspection.json pairs.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
