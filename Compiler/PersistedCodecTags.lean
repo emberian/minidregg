@@ -705,5 +705,10 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev prefix_dregg_world_methods : String := "DREGG/WORLD/METHODS"
 @[persisted_codec_tag] abbrev dregg_store_byte_v3 : List UInt8 := [68, 82, 69, 71, 71, 47, 83, 84, 79, 82, 69, 3]
 
+@[persisted_codec_tag] abbrev private_cell_address_v1 : String := "DREGG/PRIVATE-CELL/ADDRESS/v1"
+@[persisted_codec_tag] abbrev private_cell_node_v1 : String := "DREGG/PRIVATE-CELL/NODE/v1"
+@[persisted_codec_tag] abbrev private_cell_outer_v1 : String := "DREGG/PRIVATE-CELL/OUTER/v1"
+@[persisted_codec_tag] abbrev private_cell_content_v1 : String := "DREGG/PRIVATE-CELL/CONTENT/v1"
+
 make_persisted_codec_manifest
 end Minidregg.Compiler.PersistedCodecTags

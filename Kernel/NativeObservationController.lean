@@ -1431,10 +1431,13 @@ def sinceViewCodec : IndexedProgram.LawfulCodec (List SinceEntry) :=
 def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v3".toUTF8.toList
 
 set_option backward.isDefEq.respectTransparency false in
-/-- The opening of a packed cell's root under `fields`. -/
+/-- The opening of a packed cell's root under `fields`: the salted items of a kind rooted by its
+salted wire. A privately rooted kind (an event log, an authority cell) has no opening: its
+addresses carry no field, so only a full-scope reader sees it, and that reader recomputes the
+root from the whole packed cell it receives (`private_root_recomputes`). -/
 def openingView (fields : Option (Finset CellField))
     (packed : PackedCell CanonicalCellRegistry.registry) : OpeningView :=
-  match CanonicalCellRegistry.wire? packed.kind with
+  match CanonicalCellRegistry.saltedWire? packed.kind with
   | some wire => (StoreCodec.frame wire,
       StoreHiding.items wire (ResourceObservationAdmission.Visible fields packed.kind)
         packed.payload.logical)
@@ -1446,7 +1449,7 @@ the view's root is recomputed from the opening's frame and items alone. -/
 theorem root_opens (fields : Option (Finset CellField))
     (packed : PackedCell CanonicalCellRegistry.registry)
     {wire : StoreCodec.Wire (CanonicalCellRegistry.layout packed.kind)}
-    (selected : CanonicalCellRegistry.wire? packed.kind = some wire) :
+    (selected : CanonicalCellRegistry.saltedWire? packed.kind = some wire) :
     packed.payload.root = StoreHiding.rootOfItems wire (openingView fields packed).2 ∧
       (openingView fields packed).1 = StoreCodec.frame wire := by
   have root : packed.payload.root =
@@ -1457,6 +1460,36 @@ theorem root_opens (fields : Option (Finset CellField))
   refine ⟨?_, rfl⟩
   rw [root]
   exact StoreHiding.view_root_recomputes wire _ packed.payload.logical
+
+set_option backward.isDefEq.respectTransparency false in
+/-- **A privately rooted kind's reader recomputes its root.** An event log or an authority cell
+carries no field and no blinding, so the full-scope reader's narrowed packed cell is the whole
+cell, and the root it receives is the private root of that store; a narrowed reader receives
+an empty store. -/
+theorem private_root_recomputes (packed : PackedCell CanonicalCellRegistry.registry)
+    {wire : StoreCodec.Wire (CanonicalCellRegistry.layout packed.kind)}
+    (selected : CanonicalCellRegistry.privateWire? packed.kind = some wire) :
+    (ResourceObservationAdmission.narrowPacked none packed).payload.logical = packed.payload.logical ∧
+      packed.payload.root = PrivateCellRoot.privateRoot wire (PrivateCellRoot.untagged _)
+        (PrivateCellRoot.kindCtx wire) packed.payload.logical ∧
+      openingView none packed = ([], []) := by
+  obtain ⟨kind, payload⟩ := packed
+  have whole : ∀ (k : CanonicalCellRegistry.Kind) (store : Minidregg.Theory.Store.Store (CanonicalCellRegistry.layout k)),
+      (∀ a, ResourceObservationAdmission.Visible none k a) →
+        Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible none k) store = store :=
+    fun _ store all => Minidregg.Theory.SparseMap.ext fun a =>
+      Minidregg.Theory.SparseMap.filterKeys_apply_pos store (all a)
+  cases kind <;> simp [CanonicalCellRegistry.privateWire?] at selected <;> subst selected
+  · refine ⟨whole .eventHistory payload.logical fun a =>
+        ⟨by simp [ResourceObservationAdmission.Kept, ResourceObservationAdmission.fieldOf],
+          by simp [CanonicalCellRegistry.isBlinding, CanonicalCellRegistry.wire?, HyperdocumentCell.eventWire]⟩,
+      CanonicalCellRegistry.privateWire_rootOf (kind := .eventHistory) (wire := HyperdocumentCell.eventWire) rfl
+        payload.logical, rfl⟩
+  · refine ⟨whole .authority payload.logical fun a =>
+        ⟨by simp [ResourceObservationAdmission.Kept, ResourceObservationAdmission.fieldOf],
+          by simp [CanonicalCellRegistry.isBlinding, CanonicalCellRegistry.wire?, CredentialAuthorityCell.wire]⟩,
+      CanonicalCellRegistry.privateWire_rootOf (kind := .authority) (wire := CredentialAuthorityCell.wire) rfl
+        payload.logical, rfl⟩
 
 /-- `(height, root, lifecycle bytes, opening)`: the cell's root at that height
 (none when it was not live), its lifecycle bytes, a live cell narrowed to the

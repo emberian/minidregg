@@ -29,6 +29,7 @@ module
 
 public import Compiler.HyperdocumentCodec
 public import Compiler.StoreCodec
+public import Compiler.PrivateCellRoot
 public import Kernel.HyperdocumentEventLog
 public import Kernel.HyperdocumentIndexSync
 
@@ -583,8 +584,11 @@ def eventWire : Wire Sparse.layout where
   keyCodecId := fun _ => "version-event-id/digest"
   valueCodecId := fun _ => "version-event-record/v1"
 
-/-- The event-log cell materializer. -/
-def eventMaterializer : Sparse.Materializer Digest := StoreCodec.materializer eventWire
+/-- The event log's materializer: the private root of the event wire (FORMAT (a)): the log is
+unblinded and grows with history, so its root is read from a kept trie in one walk per write,
+never from the whole log's bytes. -/
+def eventMaterializer : Sparse.Materializer Digest :=
+  PrivateCellRoot.materializer eventWire (PrivateCellRoot.untagged _)
 
 /-- The deployed event-id derivation: cSHAKE256 under the version-event
 customization over the typed, domain-separated event preimage.  A recorded

@@ -27,6 +27,7 @@ so cells written with either frame refuse to decode here
 module
 
 public import Compiler.StoreCodec
+public import Compiler.PrivateCellRoot
 public import Compiler.CredentialAuthorityEntryCodec
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -230,8 +231,10 @@ def wire : Wire layout where
   keyCodecId := keyCodecId
   valueCodecId := valueCodecId
 
-/-- The authority cell materializer. -/
-def materializer : CredentialAuthorityState.Materializer := StoreCodec.materializer wire
+/-- The authority cell's materializer: the private root of its wire (FORMAT (a)): the cell is
+unblinded and grows with history, so its root is read from a kept trie in one walk per write. -/
+def materializer : CredentialAuthorityState.Materializer :=
+  PrivateCellRoot.materializer wire (PrivateCellRoot.untagged _)
 
 abbrev Cell := Materialized materializer
 
