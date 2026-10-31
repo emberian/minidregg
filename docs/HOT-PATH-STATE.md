@@ -227,33 +227,32 @@ with height** on be4ef7510.
 
 ## Landed / on the lane
 
-Batch sent to the integrator 2026-10-31: `lane/hot-path-cold` at 54bd71d53 on staging
-6c2156f45; lane-check of all 31 changed Lean files on the hbox pool tree (`/home/hbox/pool/t1`,
-lease `hot-path`), 127 importers rebuilt, RC 0.
+Batch 54bd71d53 (CONSENT-STORE, JDV clean end, sweep rows 1 2 5 6 7 10 12 18) is on staging.
+The next batch, on staging f7eb65272:
 
-| sha | what | checked / measured |
+| sha | what | checked |
 |---|---|---|
-| f352c9c10 (staging) | `bytesBEq`: whole-cell comparisons by object identity first | genesis audit at 769: 38.3 → 32.6 s; post-validation flat 4.4-4.9 ms/record (was 5 → 17.5) |
-| 2fa4c507a | the Host's clean end seals the held session (JDV row 140) | lane-check |
-| d75a60845 | CONSENT-STORE; anchors bound to consent epoch v2 + canonical settings (`anchor_binding`); own-base machinery deleted (supersedes 470fb79c9, bd1c8fc40) | lane-check; mini-sdk consent tests 11/11 |
-| aabd2fe5e | sweep rows 1 2 5 6 7 10 | lane-check |
-| 0dcedac16 | sweep row 18 | lane-check |
-| 6ddc9ce3b | sweep row 12 (template edits coalesced: story new 22 → 18 submissions) | cargo check, 11 template tests |
-| 54bd71d53 | proofs under 4.35 (incl. JointSourcePrefixValidation, red under 4.35 outside the host closure) | lane-check |
+| aa6370007, e72f385b5 | rows 4/9/13: `Provenance` for the lifecycle certificates; `Verified.start` (genesis or the Store's base; `start_trusted`); `verifyFrom`/`verifyStart`; current-Store walks switched (Host session, STOP claim, selected-release/empty-page ACKs, consent fallbacks and upgrade, grant/dispatch lookups, current member key); audits stay genesis | lane-check of 15 files, 134 importers rebuilt, RC 0 |
+| 62beac442 | consent option A: a resident lagging a checkpoint interval rebases at the Store's checkpoint | same lane-check |
+| docs | rows 4/9/13 statement, the many-members question, the flatness submit profile | |
 
-Owed: measurements on a 4.35-epoch world once the batch candidate exists (a fresh member's
-first read, explorer H1: 20.7 s on be4ef7510; a fresh provider at two heights; restart; story
-new). The x1 world (be4ef7510) is down.
+Measurements owed (next candidate, which carries 54bd71d53 and this batch): a fresh
+member's first read (explorer H1: 20.7 s on be4ef7510), a fresh provider at two heights,
+restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-1. Row 4 (above): `Provenance` for the walk certificates, statement first, then `verifyFrom`
-   the checkpoint; then rows 9 and 13.
-2. Row 11: the session indexes in the checkpoint (a checkpoint format change: tell private
-   cells (a30027269707d4613) and the integrator first); the open then reads checkpoint +
-   suffix only.
-3. Row 3 (tail), row 8 (Fn), rows 16/17/19/20.
-4. Consent catch-up per record (~30 ms) and the many-members cost (design question).
+1. **Flatness submit**: project only the slots the law reads (above). Needs a `Pred` read-set
+   frame theorem (eval, `inputsInRange`, the circuit witness); then `bytesSlots` of the whole
+   cell disappears from every projection that does not name `resource/bytes/*`.
+2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells'
+   private-cell root, agreed; theirs is not imminent): the checkpoint carries the session
+   indexes and the certificates that read state at their height (issues, reserves, releases,
+   grants), so a Store with dispatch history also starts at its checkpoint, and the open stops
+   reading the whole log.
+3. Rows 3, 8, 16, 17, 19, 20; flatness-get on 35737eac4 failed before measuring (empty
+   get.log; its world logs were removed with the gate root), so rerun
+   `scripts/perf/flatness-route.sh` on the next candidate in a kept root.
 
 ## Remaining accumulated-size costs (source inventory)
 
