@@ -135,8 +135,10 @@ The bump's hbox build waits for the disk to be cleared; build it alone, first.
 FINAL bump sha cdb399b477ea76e8f8f50e956623f58b5b3412ec (one commit on main 929eac696; Kimi: no statement changes beyond
 two meaning-preserving ones, no sorry/axiom, only native_decide added is the self-test). When writes resume: run
 `bash -c './integ-build4.sh cdb399b47; ./umbrella-minidregg.sh cdb399b47'` alone (toolchain change: whole-tree rebuild,
-raise MEM if hbox is quiet), move main to it on a green host stage, then merge main into staging (hot-path 1-3 recompile
-under 4.35; iteration speed is checking those seven files together on the Mac), lift HOLD LEAN.
+raise MEM if hbox is quiet), move main to it on a green host stage, then merge main into staging (hot-path 1-3: the seven
+files build together on cdb399b47 on the Mac with no 4.35 change; dependents covered by the merge build), lift HOLD LEAN.
+Next from iteration speed: `umbrella-tree.sh SHA` (second warm tree on hbox seeded by hard links/reflinks from
+integ/src/.lake, its own PID file, no lock on integ/src) for integ-build5.sh; not created until disk is cleared.
 
 The bump comes as one sha off main. On its "HOLD LEAN" message, hold every other Lean landing (proofs batches) until
 the bump's candidate is READY; then they rebase. Rust-only and harness landings keep flowing. Build the bump alone.
