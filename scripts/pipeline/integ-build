@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/pipeline/integ-build SHA -- the builder's build of SHA in the warm integration tree $BUILDER_ROOT/src
 # (was hbox's box-local integ-build6.sh; now in the repo so any build box runs the same stages).
-#   rust-check -> host -> consent -> rust -> pack -> candidates/<sha>/READY, then umbrella-tree (a second warm
+#   prime-cargo (the --offline stages' crates) -> rust-check -> host -> consent -> rust -> pack -> candidates/<sha>/READY, then umbrella-tree (a second warm
 #   tree, no lock on src) and the fixture rerecord.
 # Every stage under swarm-build; stage lines `stage NAME rc=N Ns` go to $BUILDER_ROOT/COMMANDS.log (the builder
 # reads them). One build per tree: build.lock. Stops below 25 GB free.
@@ -27,6 +27,8 @@ for d in native-out consent-out artifacts fixtures; do [ ! -e "$I/$d" ] || mv "$
 ls -1dt "$I"/old/* 2>/dev/null | tail -n +5 | xargs -r rm -rf
 stage() { local n=$1 t; shift; t=$(date +%s); swarm-build deploy/candidate/lane-build.sh "$@" > "$I/logs/$n.log" 2>&1; local rc=$?
   say "stage $n rc=$rc $(( $(date +%s) - t ))s"; return $rc; }
+t=$(date +%s); scripts/pipeline/prime-cargo "$src" > "$I/logs/prime-cargo.log" 2>&1; rc=$?; say "stage prime-cargo rc=$rc $(( $(date +%s) - t ))s"
+[ $rc = 0 ] || exit 9
 stage rust-check rust-check || exit 10
 stage host host || exit 11
 stage consent consent || exit 12
