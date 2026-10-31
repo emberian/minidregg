@@ -74,6 +74,14 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   H1a (false `refused`) FIXED by faeb1ff0b. Path: resident -> public proxy participant.sock -> private/operator-v2.sock;
   no server-side log line. Owed by app-reds ad85d40779880420c: (a) the reset's cause (proxy, ServeBounds 10 s read
   deadline, operator drop); (b) who performs the exact retry of a never-submitted final.
+  (b) FIXED 4692d6dfb, cherry-picked alone as 5ae0de223 (lane/app-reds-h1b carries the dropped 40cb4aa59: never merge
+  that branch): after a failed mini_say the exact lookup runs; not-submitted -> `mini retry --mode submit` once. Live
+  check: hp-h1b.sh ($I/hp-h1b.pid) overlays grain-runtime onto dc61016cb as dc61016cb-h1b, then gate15 j14 -hp1
+  KEEP_WORLD=1 after batch 8's gate ($I/gate-dc61-h1b.pid). (a) NOT found: run-26 strace of the proxy and operator-v2
+  saw every exchange complete, no ECONNRESET/EPIPE. Prime suspect (same fault as D1): grain-runtime's codec_frame
+  ignores MINI_CODEC_RESIDENT=0 and forks `mini codec-resident` inside short-lived controller-* commands; the resident
+  dies with that tree, leaving a stale pid+socket. Asked app-reds to fix at the cause (honour the switch, or a detached
+  owned resident with dead-resident detection) and prove it.
 - **D1, forge demo rebuild (batch 4) `members` step**: `sage` provision failed `local native codec: local process
   request failed: Broken pipe`; downstream apps-bootstrap/reenroll/grain world/seed/door red as consequences. Reruns:
   pending (infra repair after the batch 7 forge composed). Same class as H1b (a local transport drop): app-reds told.
@@ -96,6 +104,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 12:10: app-reds: 4692d6dfb cherry-picked (5ae0de223), -hp1 queued, codec-resident lifetime fix asked; run-26
+  mini-keys stopped by PID 2408944, /ci/hb-dav-26 removed.
 - 10-31 12:00: batch 8 READY named to infra (mini-line ships), explorer, perf-apps.
 - 10-31 12:05: hot-path d7c55dfa0 merged (6640356b5); audit requested.
 - 10-31 11:55: perf-client 6a088183f merged (45f0ed263), audit requested from a4d9a6f4cba4855ca.
