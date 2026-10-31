@@ -56,6 +56,7 @@ pub mod identity_custody;
 pub mod www_publish;
 #[cfg(target_os = "linux")]
 pub mod http_entrance;
+pub mod route_socket;
 #[cfg(target_os = "linux")]
 mod http_response;
 #[cfg(target_os = "linux")]

@@ -489,7 +489,7 @@ mod linux {
             return Err(invalid("TLS loopback port differs from custodian origin"));
         }
         let config = tls_config(directory)?;
-        let socket = directory.join("http.sock");
+        let socket = minidregg_spk_host::route_socket::route_socket(directory)?;
         let meta = fs::symlink_metadata(&socket)?;
         if !meta.file_type().is_socket()
             || meta.uid() != unsafe { libc::geteuid() }

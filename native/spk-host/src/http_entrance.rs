@@ -1383,7 +1383,7 @@ impl PrivateHttpEntrance {
                 "custodian HTTP entrance active",
             ));
         }
-        let socket = directory.join("http.sock");
+        let socket = crate::route_socket::ensure_route_socket(directory)?;
         match fs::symlink_metadata(&socket) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),

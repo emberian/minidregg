@@ -1295,7 +1295,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
             route
                 .get("directory")
                 .and_then(Value::as_str)
-                .is_some_and(|dir| Path::new(dir).join("http.sock").exists())
+                .is_some_and(|dir| crate::route_socket::route_socket(Path::new(dir)).is_ok_and(|socket| socket.exists()))
         });
         let agents_ready = agents.iter().all(|agent| agent.get("socket").and_then(Value::as_str)
             .is_some_and(|socket| Path::new(socket).exists()));

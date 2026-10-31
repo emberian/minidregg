@@ -2,7 +2,7 @@
 //! Mini owns the Request, Plan, signature, and Ingress codecs. This client
 //! retains exact bytes and never repeats an uncertain native submit.
 use super::agent_reserve::{
-    approve_slot, bounded, digest, field, private_bytes, private_socket, retain_generated,
+    approve_slot, bounded, digest, field, outcome_clause, private_bytes, private_socket, retain_generated,
     retain_json, source, source_inspect,
 };
 use super::*;
@@ -408,7 +408,7 @@ fn receipt(value: &Value) -> Result<Value> {
     if field(value, "type")? != "confirmed"
         || !matches!(field(value, "confirmation")?, "installed" | "replayed" | "recoveredAfterUncertainResponse")
     {
-        return Err("enrollment outcome did not confirm native acceptance".into());
+        return Err(format!("enrollment outcome did not confirm native acceptance: {}", outcome_clause(value)));
     }
     let mut fields = serde_json::Map::new();
     for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
@@ -494,6 +494,9 @@ pub(super) fn lookup(directory: &Path) -> Result<()> {
     same_seal(&directory, &pinned, &ingress)?;
     let result = outcome(&directory, &stem, &frame, LOOKUP_OP, &pinned)?;
     same_seal(&directory, &pinned, &ingress)?;
+    if field(&result, "type")? != "confirmed" {
+        return Err(format!("enrollment lookup found no accepted original: {}", outcome_clause(&result)));
+    }
     if field(&result, "confirmation")? != "replayed" {
         return Err("enrollment lookup did not select accepted historical original".into());
     }
@@ -593,6 +596,14 @@ mod tests {
         .is_err());
         assert_eq!(sends.get(), 1);
         fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn a_lookup_with_no_accepted_original_names_the_outcome_it_got() {
+        let absent = json!({"type":"refused","reason":"unknownOperation","effect":"no-record"});
+        let error = receipt(&absent).unwrap_err();
+        assert!(error.contains("outcome refused (unknownOperation), effect no-record"), "{error}");
+        assert!(outcome_clause(&json!({})).contains("without a type"));
     }
 
     #[test]

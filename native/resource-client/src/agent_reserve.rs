@@ -93,6 +93,20 @@ pub(super) fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("agent reserve custody lacks {name}"))
 }
 
+/// What a non-confirmed Host outcome says about itself: its `type`, the refusal `reason` and the
+/// effect class a client classifies by, so a caller names the clause instead of a missing field.
+pub(super) fn outcome_clause(value: &Value) -> String {
+    let part = |name: &str| value.get(name).and_then(Value::as_str);
+    let mut text = format!("outcome {}", part("type").unwrap_or("without a type"));
+    if let Some(reason) = part("reason") {
+        text.push_str(&format!(" ({reason})"));
+    }
+    if let Some(effect) = part("effect") {
+        text.push_str(&format!(", effect {effect}"));
+    }
+    text
+}
+
 pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     if !mini_sdk::hex::is_canonical(value) {
         return Err("noncanonical reserve hex".into());
@@ -114,7 +128,7 @@ fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
 
 fn exact_receipt(value: &Value) -> Result<Value> {
     if field(value, "type")? != "confirmed" {
-        return Err("agent reserve outcome did not confirm".into());
+        return Err(format!("agent reserve outcome did not confirm: {}", outcome_clause(value)));
     }
     if !matches!(field(value, "confirmation")?, "installed" | "replayed") {
         return Err("agent reserve confirmation is not accepted history".into());

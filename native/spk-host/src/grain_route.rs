@@ -351,7 +351,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
         "app":app,
         "name":request.name,
         "directory":directory,
-        "socket":directory.join("http.sock"),
+        "socket":crate::route_socket::route_socket(&directory)?,
         "kind":derived.kind,
         "subject":derived.subject,
         "session":derived.session,
