@@ -980,6 +980,17 @@ fn read_journal(root: &Path, height: &str, outcome: &str, now: &str, name: &str)
         .map_err(|error| format!("cannot append {}: {error}", path.display()))
 }
 
+/// The journal line of a read whose working files live in the read scratch: its height and
+/// clock from the challenge when it was answered.
+fn journal_read(root: &Path, attempt: &Path, answered: bool, reference: &Value) {
+    let challenge = bounded_json(&attempt.join("challenge.json")).ok();
+    let field = |pointer: &str| challenge.as_ref().and_then(|c| c.pointer(pointer)).and_then(Value::as_str)
+        .unwrap_or("-").to_owned();
+    let name = reference.get("target").and_then(Value::as_str).unwrap_or("-");
+    let _ = read_journal(root, &field("/height"), if answered { "answered" } else { "refused" },
+        &field("/clock/now"), name);
+}
+
 /// The coordinates a read was judged at, from its retained challenge: the world root,
 /// the height, and the deployment clock the resource's law saw
 /// (`NativeObservationController.read_judged_at_named_clock`).
@@ -1360,7 +1371,7 @@ fn signed_views_purposes(
         return Err("signed read batch shape differs".into());
     }
     let ticket = receipt_continuity::begin(root, workspace)?;
-    let (attempt, nonce) = new_attempt(root)?;
+    let (attempt, nonce) = crate::read_scratch::attempt(root)?;
     if let Some(custody) = custody.as_deref_mut() {
         custody.attempt = Some(attempt.clone());
     }
@@ -1371,13 +1382,14 @@ fn signed_views_purposes(
             "nonce":nonce, "purpose":purpose,
             "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
                 "capability":member(reference,"observeCapability")?}]});
-        let source = root.join("sources").join(format!("qb-{nonce}-{n}.json"));
+        let source = crate::read_scratch::source(&attempt, &format!("qb-{nonce}-{n}.json"));
         create_private(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
         if let Some(custody) = custody.as_deref_mut() { custody.sources.push(source.clone()); }
         intents.push((source, inspection.clone()));
     }
     let result = crate::query_batch_retained(&workspace_host(workspace)?,
-        &member_path(workspace,"config")?, &intents, &member_path(workspace,"key")?, &attempt)?;
+        &member_path(workspace,"config")?, &intents, &member_path(workspace,"key")?, &attempt)
+        .inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
     let challenge = &result.first().ok_or("signed read batch returned no observations")?.1;
     receipt_continuity::finish(root, workspace, ticket, challenge, ContinuityMode::Ordinary)?;
     Ok(result)
@@ -1440,13 +1452,13 @@ fn signed_view_unchecked(
         } else { format!("view-{view}") };
         return signed_opened_view(root, workspace, reference, purpose, &inspection);
     }
-    let (attempt, nonce) = new_attempt(root)?;
+    let (attempt, nonce) = crate::read_scratch::attempt(root)?;
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
         "purpose":{"type":"query","kind":member(reference,"kind")?,
             "target":member(reference,"target")?,"view":view},
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
-    let source = root.join("sources").join(format!("q-{nonce}.json"));
+    let source = crate::read_scratch::source(&attempt, &format!("q-{nonce}.json"));
     create_private(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
@@ -1464,7 +1476,9 @@ fn signed_view_unchecked(
         &member_path(workspace, "key")?,
         &inspection,
         &attempt,
-    )?;
+    );
+    journal_read(root, &attempt, result.is_ok(), reference);
+    let result = result.inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
     shared_names::check_opened(reference, &challenge)?;
     Ok((result, challenge, attempt.join("signed-observation.bin")))
@@ -1489,7 +1503,7 @@ fn doc_query(
         return Ok((value,signed.parent().ok_or("signed query lacks attempt")?.to_owned()));
     }
     let ticket = receipt_continuity::begin(root, workspace)?;
-    let (attempt, nonce) = new_attempt(root)?;
+    let (attempt, nonce) = crate::read_scratch::attempt(root)?;
     let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
         "target":member(reference,"target")?,"view":view});
     if let Some(height) = height {
@@ -1499,12 +1513,11 @@ fn doc_query(
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,"purpose":purpose,
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
-    let source = root.join("sources").join(format!("q-{nonce}.json"));
+    let source = crate::read_scratch::source(&attempt, &format!("q-{nonce}.json"));
     create_private(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
     )?;
-    eprintln!("workspace read attempt: {}", attempt.display());
     let value = query_retained(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
@@ -1513,7 +1526,9 @@ fn doc_query(
         &member_path(workspace, "key")?,
         inspection,
         &attempt,
-    )?;
+    );
+    journal_read(root, &attempt, value.is_ok(), reference);
+    let value = value.inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
     if reference.get("sharedName").is_some() {
         shared_names::check_opened(reference, &challenge)?;
@@ -1916,7 +1931,7 @@ pub(crate) fn rendered_document(
         readable.insert(source, read);
     }
     let render = |host: &[u8], sources: &Vec<Value>| -> Result<Value> {
-        let (attempt, _) = new_attempt(root)?;
+        let (attempt, _) = crate::read_scratch::attempt(root)?;
         make_private_dir(&attempt)?;
         let input = attempt.join("transclusions-in.json");
         create_private(
@@ -2048,7 +2063,7 @@ fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&
 fn host_document(root: &Path, workspace: &Value, host_ref: &Value) -> Result<Value> {
     let (_, _, signed) = signed_view(root, workspace, host_ref, "resource")?;
     let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
-    let (attempt, _) = new_attempt(root)?;
+    let (attempt, _) = crate::read_scratch::attempt(root)?;
     make_private_dir(&attempt)?;
     let input = attempt.join("document-in.json");
     create_private(

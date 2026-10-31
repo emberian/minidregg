@@ -22,6 +22,7 @@ mod agent_lifetime_grant;
 mod trace;
 #[cfg(unix)]
 mod capture;
+mod read_scratch;
 #[cfg(unix)]
 mod line_resident;
 #[cfg(unix)]
@@ -3932,6 +3933,7 @@ fn main() -> ExitCode {
     #[cfg(not(unix))]
     let parsed = Args::parse().and_then(run);
     let ending = main_ending(parsed, EXIT_STATUS.load(Ordering::Relaxed));
+    read_scratch::clear();
     print!("{}", ending.stdout);
     eprint!("{}", ending.stderr);
     ExitCode::from(ending.code)
