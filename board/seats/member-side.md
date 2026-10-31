@@ -57,6 +57,10 @@ resident footprint (a few MB per member), web pages.
   `mini apps bootstrap` refused on 76511e768. `replay` now refuses only a held -> lost track. Confirmed end to end
   on overlay 93b31c1c33d6 (main 27f85e89 on 76511e768bbc): read-path's persvati up.sh UP-RC=0 and a 5-member bb2
   world enrol and bootstrap, consent logs clean; told read-path, build-loop, host-execution, apps-hermes, root.
+- One Host reply check for the client's custody flows (22cac1ee0): `agent_reserve::host_reply(frame, op, what)` names
+  every outcome (no record, never forwarded, undecided), replacing four copies; apps-hermes' 7acbdd878 read. The grain
+  share recovery test ported to the codec session (stale since 3983f0787). `activity.rs`/`checkpoint.rs` keep their
+  own checks (they print the outcome body's text).
 
 ## Numbers
 - hbox, noisy; batch 8 against batch 7, interleaved: `doc new` 476 vs 614 ms wall (Host 254 vs 346 ms, consent
