@@ -194,10 +194,12 @@ applied):
   passes it). Freshness is the named premise `Custody.CustodyPrf` (round 6): the ideal fixed as the
   uniform function on the version window (`idealFn`, tapes enumerate all functions by
   `finFunctionFinEquiv`), the budget admitting every two-query evaluation test
-  (round 10: `BudgetAdmitsEquality`, the budget is the PRF's efficiency class and need only admit the
-  named equality tests on the window; admitting every evaluation test made the premise statistical,
-  exhaustive key search included, which no short-key PRF meets); honest pole
-  `enumeration_satisfies`, teeth `constant_refuted` (against `equalityBudget`).
+  (`BudgetAdmitsNamed`: the budget admits the named distinguishers, equality of two window
+  versions' masks and the one-query point tests; at a use it is the composed reduction tests plus
+  these, nothing more, and Lean does not tie it to efficiency; admitting every evaluation test made
+  the premise statistical, exhaustive key search included); honest pole `enumeration_satisfies`,
+  teeth `constant_refuted` (equality) and `counter_refuted` (a public counter passes every equality
+  test and fails a point test), both against `namedBudget`.
   Round 8 (answered with astra round 10): what is published is a `Serve` (a function of a version's
   context, mask and kept index: roots, deterministic openings; a randomized opening at each fixed
   coin assignment). `ViewThroughServe`: a reader's view is a function of the served items.
@@ -213,8 +215,8 @@ applied):
   (it does not depend on the world bit). `receiver_prf_hop`: (i) every key's real transcript is
   `transcript` of its masks, (ii) the keyed/ideal gap is `num/den` under `reduction` (the composed
   distinguisher is in the PRF's efficiency class whenever the strategy is budgeted), (iii) the
-  ideal's masks on the window are the tape's own tuple; `receiver_prf_hop_view` carries it to any
-  view under `ViewThroughServe`. `PublishesRun` (the host's accepted set is exactly the run) gives
+  ideal's masks on the window are the tape's own tuple; `receiver_prf_hop_view` carries it to a
+  view given its factorization `g` through the served items, with `reduction` for that `g` only. `PublishesRun` (the host's accepted set is exactly the run) gives
   `AtMostOneSuccessor`; the host corollary must also connect the observable event trace. Forks: `AtMostOneSuccessor` is the host's
   obligation (a persisted version counter, a retry returning the stored successor); a history meets
   it, and `fork_shares_mask` shows two accepts from one cell share a mask.
