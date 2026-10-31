@@ -16,7 +16,6 @@ use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::descriptor_native::{author_signed_package, SourceDescriptor, SourceStep, SourceTool};
@@ -43,9 +42,10 @@ const SOURCE_CHILD_DEADLINE: Duration = Duration::from_secs(600);
 ///
 /// The steps of one qualification go to ONE storeless codec child (`HOST CONFIG codec`,
 /// `Host.Main.serveCodec`: frames 7 and 8 are the detached `author` and `inspect` verbs, it never
-/// opens a Store), started at the first step and ended with this value. A child that cannot be
-/// started or ends without answering leaves the step to the detached verb, as before; a step whose
-/// frame exceeds the codec bound is a detached verb too.
+/// opens a Store), started at the first step and ended with this value. It is the only path: a
+/// child that cannot be started, ends without answering, or answers out of turn refuses that step
+/// by name, and a step's frame is bounded by the Host frame (`HOST_MAX_FRAME`), as every Host
+/// session frame is.
 pub(crate) struct OfflineSourceHost {
     pub host: PathBuf,
     pub host_sha256: String,
@@ -54,15 +54,9 @@ pub(crate) struct OfflineSourceHost {
     pub codec: std::sync::Mutex<CodecSlot>,
 }
 
-/// The qualification's codec child: not yet started, running, or unavailable (the detached verb
-/// answers every later step).
-#[derive(Default)]
-pub(crate) enum CodecSlot {
-    #[default]
-    Unstarted,
-    Running(CodecChild),
-    Unavailable,
-}
+/// The qualification's codec child, once started; a child that failed a frame is dropped, so the
+/// qualification refuses rather than trusting it with another.
+pub(crate) type CodecSlot = Option<CodecChild>;
 
 /// The codec frame bound (`HOST_MAX_FRAME`): a length prefix counts the operation byte.
 const CODEC_FRAME_BOUND: usize = 12_102_760;
@@ -73,8 +67,7 @@ pub(crate) struct CodecChild {
     output: std::process::ChildStdout,
 }
 
-/// Why a codec exchange did not answer: the child is gone or misbehaved (the step falls back to
-/// the detached verb), or the deadline passed (the step fails, as a detached verb past it does).
+/// Why a codec exchange did not answer: the child is gone or misbehaved, or the deadline passed.
 enum CodecFailure {
     Lost,
     Deadline,
@@ -240,11 +233,8 @@ impl OfflineSourceHost {
     ) -> io::Result<Vec<u8>> {
         self.check_pin()?;
         let (command, kind) = step.command_kind();
-        let limit = if command == "author" {
-            22 * 1024 * 1024
-        } else {
-            MAX_SOURCE_CANONICAL
-        };
+        // One Host frame carries the operation byte, the kind's length and name, and the input.
+        let limit = (CODEC_FRAME_BOUND - 3 - kind.len()) as u64;
         let input_bytes = read_private(input, limit)?;
         if output.parent() != input.parent() {
             return Err(invalid("offline source output parent differs"));
@@ -254,16 +244,13 @@ impl OfflineSourceHost {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
-        let deadline = Instant::now() + timeout;
-        if !self.codec_step(command, kind, &input_bytes, output, deadline)? {
-            self.detached_step(command, kind, input, output, deadline)?;
-        }
+        self.codec_step(command, kind, &input_bytes, output, Instant::now() + timeout)?;
         self.checked_output(command, input, limit, &input_bytes, output)
     }
 
-    /// The step on this qualification's codec child. `false`: no child can answer it (none could
-    /// be started, the child ended without answering, or the frame exceeds the codec bound), and
-    /// the detached verb runs it. A refusal is the step's refusal; the deadline is the step's.
+    /// The step on this qualification's codec child, its answer written to `output`. A refusal
+    /// is the step's refusal, the deadline is the step's, and a child that cannot start, ends
+    /// without answering or answers out of turn refuses the step by name.
     fn codec_step(
         &self,
         command: &str,
@@ -271,105 +258,50 @@ impl OfflineSourceHost {
         input_bytes: &[u8],
         output: &Path,
         deadline: Instant,
-    ) -> io::Result<bool> {
+    ) -> io::Result<()> {
         use crate::host_operations::{AUTHOR, INSPECT, RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
         let operation = match command {
             "author" => AUTHOR,
             "inspect" => INSPECT,
-            _ => return Ok(false),
+            _ => return Err(invalid("offline source step is not a codec verb")),
         };
         if kind.is_empty() || kind.len() > u16::MAX as usize
             || 1 + 2 + kind.len() + input_bytes.len() > CODEC_FRAME_BOUND
         {
-            return Ok(false);
+            return Err(invalid("offline source step exceeds the Host frame bound"));
         }
         let mut payload = Vec::with_capacity(2 + kind.len() + input_bytes.len());
         payload.extend_from_slice(&(kind.len() as u16).to_le_bytes());
         payload.extend_from_slice(kind.as_bytes());
         payload.extend_from_slice(input_bytes);
         let mut slot = self.codec.lock().map_err(|_| invalid("offline codec lock poisoned"))?;
-        if matches!(*slot, CodecSlot::Unstarted) {
-            *slot = match CodecChild::spawn(&self.host, &self.config) {
-                Ok(child) => CodecSlot::Running(child),
-                Err(_) => CodecSlot::Unavailable,
-            };
+        if slot.is_none() {
+            *slot = Some(CodecChild::spawn(&self.host, &self.config).map_err(|error| {
+                io::Error::new(error.kind(), format!("pinned offline Mini Host codec cannot start: {error}"))
+            })?);
         }
-        let CodecSlot::Running(child) = &mut *slot else {
-            return Ok(false);
-        };
+        let child = slot.as_mut().expect("started above");
         match child.exchange(operation, &payload, deadline) {
-            Ok((answer, body)) if answer == operation => {
-                if body.is_empty() {
-                    *slot = CodecSlot::Unavailable;
-                    return Err(invalid("pinned offline Mini Host author/inspect refused"));
-                }
-                write_new_output(output, &body)?;
-                Ok(true)
-            }
+            Ok((answer, body)) if answer == operation && !body.is_empty() => write_new_output(output, &body),
             Ok((answer, _)) if answer == RESPONSE_NO_RECORD || answer == RESPONSE_HOST_OUTCOME => {
                 Err(invalid("pinned offline Mini Host author/inspect refused"))
             }
             Ok(_) => {
-                // Answered out of turn: this child is not trusted with another frame.
-                *slot = CodecSlot::Unavailable;
+                *slot = None;
                 Err(invalid("pinned offline Mini Host codec answered out of turn"))
             }
             Err(CodecFailure::Lost) => {
-                *slot = CodecSlot::Unavailable;
-                Ok(false)
+                *slot = None;
+                Err(invalid("pinned offline Mini Host codec ended without answering"))
             }
             Err(CodecFailure::Deadline) => {
-                *slot = CodecSlot::Unavailable;
+                *slot = None;
                 Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "pinned offline Mini Host source deadline",
                 ))
             }
         }
-    }
-
-    /// The step as the detached `HOST CONFIG VERB KIND INPUT OUTPUT`, one process.
-    fn detached_step(
-        &self,
-        command: &str,
-        kind: &str,
-        input: &Path,
-        output: &Path,
-        deadline: Instant,
-    ) -> io::Result<()> {
-        let mut child = Command::new(&self.host)
-            .arg(&self.config)
-            .arg(command)
-            .arg(kind)
-            .arg(input)
-            .arg(output)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-                Ok(None) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "pinned offline Mini Host source deadline",
-                    ));
-                }
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(error);
-                }
-            }
-        };
-        if !status.success() {
-            return Err(invalid("pinned offline Mini Host author/inspect refused"));
-        }
-        Ok(())
     }
 
     /// The step's output as the next step reads it: one private regular file of this uid within
@@ -711,94 +643,16 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
-    #[test]
-    fn offline_source_runs_without_socket_and_rejects_pin_drift() {
-        let (root, source, input, output) = offline_fixture("#!/bin/sh\ncat \"$4\" > \"$5\"\n");
-        assert_eq!(
-            source
-                .run_step(
-                    SourceStep::AuthorSchema,
-                    &input,
-                    &output,
-                    Duration::from_secs(2)
-                )
-                .unwrap(),
-            b"original"
-        );
-        let second = root.join("second.bin");
-        // The image is verified once per inode; a rewrite of it is hashed again and refused.
-        let image = fs::read(&source.host).unwrap();
-        let mode = fs::metadata(&source.host).unwrap().permissions();
-        fs::write(&source.host, [image.as_slice(), b"# drift\n"].concat()).unwrap();
-        fs::set_permissions(&source.host, mode).unwrap();
-        assert!(source.check_pin().is_err());
-        fs::write(&source.host, &image).unwrap();
-        fs::set_permissions(&source.host, fs::metadata(&source.host).unwrap().permissions()).unwrap();
-        assert!(source.check_pin().is_ok());
-        fs::write(&source.config, b"{\"changed\":true}").unwrap();
-        assert!(source
-            .run_step(
-                SourceStep::AuthorSchema,
-                &input,
-                &second,
-                Duration::from_secs(2)
-            )
-            .is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn offline_source_rechecks_input_after_child_and_reaps_timeout() {
-        let (root, source, input, output) =
-            offline_fixture("#!/bin/sh\nprintf tampered > \"$4\"\ncat \"$4\" > \"$5\"\n");
-        assert!(source
-            .run_step(
-                SourceStep::AuthorSchema,
-                &input,
-                &output,
-                Duration::from_secs(2)
-            )
-            .is_err());
-        fs::remove_dir_all(root).unwrap();
-
-        let (root, source, input, output) =
-            offline_fixture("#!/bin/sh\ncat \"$4\" > \"$5\"\nprintf changed > \"$1\"\n");
-        assert!(source
-            .run_step(
-                SourceStep::AuthorSchema,
-                &input,
-                &output,
-                Duration::from_secs(2)
-            )
-            .is_err());
-        fs::remove_dir_all(root).unwrap();
-
-        let (root, source, input, output) = offline_fixture("#!/bin/sh\nwhile :; do :; done\n");
-        let started = Instant::now();
-        let error = source
-            .run_step(
-                SourceStep::AuthorSchema,
-                &input,
-                &output,
-                Duration::from_millis(100),
-            )
-            .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-        assert!(started.elapsed() < Duration::from_secs(2));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    /// A mock Host that speaks the codec loop: each frame `7|8, u16 kind length, kind, input`
-    /// is answered with the same operation and `kind:input`, except the kind `refuse`, answered
-    /// with the outcome marker 255. Every start appends its mode to `starts`.
-    fn codec_mock(root: &Path) -> String {
+    /// A mock Host that speaks only the codec loop (`HOST CONFIG codec`): each frame `7|8, u16
+    /// kind length, kind, input` is answered with the same operation and `kind:input`, except the
+    /// kind `refuse` (the outcome marker 255) and `vanish` (the child exits). Every start appends
+    /// its mode to `starts`; `BEFORE` runs (as Python) before each answer is sent.
+    fn codec_mock(root: &Path, before: &str) -> String {
         const MOCK: &str = r#"#!/usr/bin/env python3
 import sys, struct
 open(STARTS, 'a').write(sys.argv[2] + '\n')
 if sys.argv[2] != 'codec':
-    d = open(sys.argv[4], 'rb').read()
-    open(sys.argv[5], 'wb').write(sys.argv[3].encode() + b':' + d)
-    sys.exit(0)
+    sys.exit(1)
 i, o = sys.stdin.buffer, sys.stdout.buffer
 while True:
     h = i.read(4)
@@ -808,22 +662,85 @@ while True:
     op = f[0]
     n = struct.unpack('<H', f[1:3])[0]
     k, d = f[3:3 + n], f[3 + n:]
+    if k == b'vanish':
+        sys.exit(0)
     a = bytes([255]) + b'refused' if k == b'refuse' else bytes([op]) + k + b':' + d
+    BEFORE
     o.write(struct.pack('<I', len(a)) + a)
     o.flush()
 "#;
         MOCK.replace("STARTS", &format!("{:?}", root.join("starts").display().to_string()))
+            .replace("BEFORE", if before.is_empty() { "pass" } else { before })
     }
 
-    #[test]
-    fn offline_steps_share_one_codec_child_and_answer_as_the_detached_verb() {
+    /// `before` gets the fixture's input path and returns the mock's `BEFORE` line.
+    fn codec_fixture(before: &dyn Fn(&Path) -> String) -> (PathBuf, OfflineSourceHost, PathBuf) {
         let (root, source, input, _output) = offline_fixture("#!/bin/sh\nexit 1\n");
-        fs::write(&source.host, codec_mock(&root)).unwrap();
+        fs::write(&source.host, codec_mock(&root, &before(&input))).unwrap();
         let source = OfflineSourceHost {
             host_sha256: hex(&Sha256::digest(fs::read(&source.host).unwrap())),
             ..source
         };
-        let mut answers = Vec::new();
+        (root, source, input)
+    }
+
+    fn starts(root: &Path) -> String {
+        fs::read_to_string(root.join("starts")).unwrap_or_default()
+    }
+
+    #[test]
+    fn offline_source_runs_without_socket_and_rejects_pin_drift() {
+        let (root, source, input) = codec_fixture(&|_| String::new());
+        assert_eq!(
+            source.run_step(SourceStep::AuthorSchema, &input, &root.join("first.bin"), Duration::from_secs(5)).unwrap(),
+            b"application-permission-schema:original"
+        );
+        // The image is verified once per inode; a rewrite of it is hashed again and refused.
+        let image = fs::read(&source.host).unwrap();
+        let mode = fs::metadata(&source.host).unwrap().permissions();
+        fs::write(&source.host, [image.as_slice(), b"# drift\n"].concat()).unwrap();
+        fs::set_permissions(&source.host, mode).unwrap();
+        assert!(source.check_pin().is_err());
+        fs::write(&source.host, &image).unwrap();
+        assert!(source.check_pin().is_ok());
+        fs::write(&source.config, b"{\"changed\":true}").unwrap();
+        assert!(source
+            .run_step(SourceStep::AuthorSchema, &input, &root.join("second.bin"), Duration::from_secs(5))
+            .is_err());
+        drop(source);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn offline_source_rechecks_input_and_config_after_the_step_and_bounds_it() {
+        // The input rewritten while the step ran.
+        let (root, source, input) =
+            codec_fixture(&|input| format!("open({:?},'wb').write(b'tampered')", input.display().to_string()));
+        let error = source.run_step(SourceStep::AuthorSchema, &input, &root.join("out.bin"), Duration::from_secs(5)).unwrap_err();
+        assert!(error.to_string().contains("changed during authoring"), "{error}");
+        drop(source);
+        fs::remove_dir_all(root).unwrap();
+
+        // The config rewritten while the step ran (the child sees it as argv[1]).
+        let (root, source, input) = codec_fixture(&|_| "open(sys.argv[1],'wb').write(b'{\"changed\":true}')".to_owned());
+        assert!(source.run_step(SourceStep::AuthorSchema, &input, &root.join("out.bin"), Duration::from_secs(5)).is_err());
+        drop(source);
+        fs::remove_dir_all(root).unwrap();
+
+        // A child that never answers is ended at the step's deadline.
+        let (root, source, input, output) = offline_fixture("#!/bin/sh\nwhile :; do :; done\n");
+        let started = Instant::now();
+        let error = source.run_step(SourceStep::AuthorSchema, &input, &output, Duration::from_millis(100)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(source.codec.lock().unwrap().is_none());
+        drop(source);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn offline_steps_share_one_codec_child() {
+        let (root, source, input) = codec_fixture(&|_| String::new());
         for (index, step) in [SourceStep::AuthorSchema, SourceStep::InspectSchema, SourceStep::AuthorLaunch]
             .into_iter()
             .enumerate()
@@ -834,48 +751,40 @@ while True:
             assert_eq!(bytes, [kind.as_bytes(), b":original"].concat());
             assert_eq!(fs::read(&output).unwrap(), bytes);
             assert_eq!(fs::metadata(&output).unwrap().permissions().mode() & 0o777, 0o600);
-            answers.push(bytes);
         }
-        // One codec child answered all three; no detached verb ran.
-        assert_eq!(fs::read_to_string(root.join("starts")).unwrap(), "codec\n");
-        // The detached verb's answer for the same step is the same bytes.
-        *source.codec.lock().unwrap() = CodecSlot::Unavailable;
-        let detached = source
-            .run_step(SourceStep::AuthorSchema, &input, &root.join("detached.bin"), Duration::from_secs(5))
-            .unwrap();
-        assert_eq!(detached, answers[0]);
-        assert_eq!(fs::read_to_string(root.join("starts")).unwrap(), "codec\nauthor\n");
+        assert_eq!(starts(&root), "codec\n");
         drop(source);
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn offline_codec_refusal_is_the_steps_refusal_and_a_lost_child_falls_back() {
-        let (root, source, input, _output) = offline_fixture("#!/bin/sh\nexit 1\n");
-        fs::write(&source.host, codec_mock(&root)).unwrap();
-        let source = OfflineSourceHost {
-            host_sha256: hex(&Sha256::digest(fs::read(&source.host).unwrap())),
-            ..source
-        };
+    fn offline_codec_refusal_loss_and_bound_refuse_the_step_by_name() {
+        let (root, source, input) = codec_fixture(&|_| String::new());
+        let deadline = || Instant::now() + Duration::from_secs(5);
         let refused = root.join("refused.bin");
-        let error = source.codec_step("author", "refuse", b"x", &refused, Instant::now() + Duration::from_secs(5))
-            .unwrap_err();
-        assert!(error.to_string().contains("refused"), "{error}");
+        let error = source.codec_step("author", "refuse", b"x", &refused, deadline()).unwrap_err();
+        assert!(error.to_string().contains("author/inspect refused"), "{error}");
         assert!(fs::symlink_metadata(&refused).is_err());
         // The child that refused still serves the next step.
-        let output = root.join("after.bin");
-        source.run_step(SourceStep::InspectPackage, &input, &output, Duration::from_secs(5)).unwrap();
-        assert_eq!(fs::read_to_string(root.join("starts")).unwrap(), "codec\n");
-        // A child that ends without answering leaves the step to the detached verb.
-        if let CodecSlot::Running(child) = &mut *source.codec.lock().unwrap() {
-            let _ = child.child.kill();
-            let _ = child.child.wait();
-        }
-        let output = root.join("fallback.bin");
-        let bytes = source.run_step(SourceStep::AuthorPackage, &input, &output, Duration::from_secs(5)).unwrap();
-        assert_eq!(bytes, b"application-spk-package-identity:original");
-        assert_eq!(fs::read_to_string(root.join("starts")).unwrap(), "codec\nauthor\n");
-        assert!(matches!(*source.codec.lock().unwrap(), CodecSlot::Unavailable));
+        source.run_step(SourceStep::InspectPackage, &input, &root.join("after.bin"), Duration::from_secs(5)).unwrap();
+        // A child that ends without answering refuses the step, and no other process runs it.
+        let lost = root.join("lost.bin");
+        let error = source.codec_step("author", "vanish", b"x", &lost, deadline()).unwrap_err();
+        assert!(error.to_string().contains("ended without answering"), "{error}");
+        assert!(fs::symlink_metadata(&lost).is_err());
+        assert!(source.codec.lock().unwrap().is_none());
+        assert_eq!(starts(&root), "codec\n");
+        // A frame over the Host frame bound is refused before any child sees it.
+        let large = vec![b'x'; CODEC_FRAME_BOUND];
+        let error = source.codec_step("author", "application-permission-schema", &large, &root.join("large.bin"), deadline())
+            .unwrap_err();
+        assert!(error.to_string().contains("Host frame bound"), "{error}");
+        assert_eq!(starts(&root), "codec\n");
+        // An image that cannot start refuses the step by name.
+        fs::remove_file(&source.host).unwrap();
+        let error = source.codec_step("author", "application-permission-schema", b"x", &root.join("gone.bin"), deadline())
+            .unwrap_err();
+        assert!(error.to_string().contains("codec cannot start"), "{error}");
         drop(source);
         fs::remove_dir_all(root).unwrap();
     }
