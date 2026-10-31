@@ -279,6 +279,19 @@ def issuerCheck (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
     decide (∃ address ∈ snapshot.logical.support,
       issuedAt snapshot issuer epoch commitment address = true)
 
+/-- `issuerCheck` with the address scan over the cached key sort (`supportFast`), not
+`DFinsupp.support`'s quadratic dedup over the whole authority store. -/
+def issuerCheckFast (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
+    (commitment : Digest) : Bool :=
+  decide (issuerEpochAt snapshot.cell issuer = epoch) &&
+    decide (∃ address ∈ CredentialAuthorityDomain.supportFast snapshot.logical,
+      issuedAt snapshot issuer epoch commitment address = true)
+
+@[csimp] theorem issuerCheck_eq_fast : @issuerCheck = @issuerCheckFast := by
+  funext snapshot issuer epoch commitment
+  unfold issuerCheck issuerCheckFast
+  rw [CredentialAuthorityDomain.supportFast_eq]
+
 /-- Issuer acceptance names a stored capability of that issuer and epoch. -/
 theorem issuerCheck_sound (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
     (commitment : Digest) (accepted : issuerCheck snapshot issuer epoch commitment = true) :
