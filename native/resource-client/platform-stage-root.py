@@ -110,7 +110,7 @@ def inspect(manifest, expected, frame, infra, pins):
         if not origin.is_relative_to(family):
             need(role=="bwrap","role outside sealed family: "+role);custody(origin)
         roles[role]=origin
-    need(set(("mini","host","store","verifier","spkHost","browserProxy","spkBroker"))<=set(roles),"required service role absent")
+    need(set(("mini","miniLine","host","store","verifier","spkHost","browserProxy","spkBroker"))<=set(roles),"required service role absent")
     for name,pin in pins.items():
         p=Path(name)
         need(not p.is_absolute() and ".." not in p.parts,"infra pin escapes")
@@ -189,7 +189,8 @@ def stage(manifest,expected,frame,infra,pins,operator):
     with allocator.open("x") as out:
         out.write(credential_wrapper(frame,account.pw_name));out.flush()
     allocator.chmod(0o755)
-    put(dest/"source/deploy/shell/mini-shell-ssh",library/"mini-shell-ssh",0o755)
+    # The ssh forced command is the candidate's own mini-line, under the name every key line names.
+    put(dest/roles["miniLine"].relative_to(family),library/"mini-shell-ssh",0o755)
     put(dest/"source/deploy/shell/mini-shell-ssh-credentials",library/"mini-shell-ssh-credentials",0o755)
     for helper in ("spk-ingest",):
         put(dest/"source/deploy/spk-host"/helper,library/helper,0o755)

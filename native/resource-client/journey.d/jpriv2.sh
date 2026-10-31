@@ -55,7 +55,7 @@ check() { # who what command...
 
 # ------------------------------------------------------------------ the box
 install -m 0500 "$MINI" "$BOX/bin/mini"
-install -m 0500 "$DEPLOY/mini-shell-ssh" "$BOX/bin/mini-shell-ssh"
+install -m 0500 "${MINI%/*}/mini-line" "$BOX/bin/mini-shell-ssh"  # the ssh forced command
 install -m 0500 "$DEPLOY/mini-socket-proxy" "$BOX/bin/mini-socket-proxy"
 ssh-keygen -q -t ed25519 -N '' -C jpriv2-sponsor -f "$SPONSOR_TERM/id_ed25519" || die keygen
 ssh-keygen -q -t ed25519 -N '' -C jpriv2-friend -f "$LAPTOP/.ssh/id_ed25519" || die keygen

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bake-off journey J0-J8 with every participant step typed into `mini shell`
 # over ssh. Each participant has its own ssh key, bound by a forced command
-# (deploy/shell/mini-shell-ssh) to its own workspace and session home.
+# (mini-line, installed as mini-shell-ssh) to its own workspace and session home.
 #
 # Rows marked OPERATOR are things the service operator does outside any
 # participant's shell: bootstrap, sshd, service restart, the one key-custody
@@ -33,9 +33,12 @@ done
 command -v jq >/dev/null || { echo 'jq is required' >&2; exit 66; }
 SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-WRAPPER_SRC=$HERE/../../deploy/shell/mini-shell-ssh
+# The ssh forced command is the candidate's mini-line, built beside mini (installed on a box as
+# /usr/local/lib/mini/mini-shell-ssh).
+WRAPPER_SRC=${SHELL_MINI_SRC%/*}/mini-line
 RENDER=$HERE/../../deploy/shell/render-shell-key
-[[ -x $WRAPPER_SRC && -x $RENDER ]] || { echo 'deploy/shell scripts missing' >&2; exit 66; }
+[[ -x $WRAPPER_SRC ]] || { echo "no mini-line beside $SHELL_MINI_SRC" >&2; exit 66; }
+[[ -x $RENDER ]] || { echo 'deploy/shell/render-shell-key missing' >&2; exit 66; }
 if ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":$PORT\$"; then
   echo "port $PORT is in use" >&2
   exit 69

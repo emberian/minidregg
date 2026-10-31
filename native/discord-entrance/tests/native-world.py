@@ -86,7 +86,7 @@ try:
  secret=ROOT/'fake-discord.key';public=run('fake-key',[FAKE,'keygen',secret]).strip()
  roster=ROOT/'roster.json';roster.write_text(json.dumps({'version':1,'users':{'111':'sponsor'}}))
  endpoint_port=port();addr=f'127.0.0.1:{endpoint_port}';spool=ROOT/'spool';spool.mkdir(exist_ok=resume)
- env=dict(os.environ,MINI_DISCORD_APPLICATION_ID='4242',MINI_DISCORD_PUBLIC_KEY=public,MINI_DISCORD_LISTEN=addr,MINI_DISCORD_API_BASE='http://'+api+'/api/v10',MINI_DISCORD_ROSTER=str(roster),MINI_DISCORD_ROSTER_OWNER_UID=str(os.getuid()),MINI_DISCORD_SPOOL=str(spool),MINI_SHELL_WRAPPER=str(SOURCE/'deploy/shell/mini-shell-ssh'),MINI_CLIENT=MINI,MINI_HOST=HOST,MINI_CONFIG=str(CONFIG),MINI_SOCKET=SOCKET,MINI_SESSIONS=str(HOME),MINI_SPONSOR='sponsor',MINI_SPONSOR_WORKSPACE=str(WORLD/'sponsor'))
+ env=dict(os.environ,MINI_DISCORD_APPLICATION_ID='4242',MINI_DISCORD_PUBLIC_KEY=public,MINI_DISCORD_LISTEN=addr,MINI_DISCORD_API_BASE='http://'+api+'/api/v10',MINI_DISCORD_ROSTER=str(roster),MINI_DISCORD_ROSTER_OWNER_UID=str(os.getuid()),MINI_DISCORD_SPOOL=str(spool),MINI_SHELL_WRAPPER=str(pathlib.Path(MINI).with_name('mini-line')),MINI_CLIENT=MINI,MINI_HOST=HOST,MINI_CONFIG=str(CONFIG),MINI_SOCKET=SOCKET,MINI_SESSIONS=str(HOME),MINI_SPONSOR='sponsor',MINI_SPONSOR_WORKSPACE=str(WORLD/'sponsor'))
  endpoint=start('entrance',[TARGET/'mini-discord'],env);wait_port(endpoint_port)
  def interact(label,id,command,opts=(),user='111'):
   out=run(label,[FAKE,'interact',addr,secret,'4242',user,str(id),'tok-'+str(id),command,*opts])

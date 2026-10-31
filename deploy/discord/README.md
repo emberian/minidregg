@@ -5,7 +5,7 @@
 - A Discord user maps to one Mini session through the root-owned roster, and the session's key is held on
   the box, as it is for the ssh entrance.
 - `/mini <line>` hands the line to `mini shell --line`, through the same forced command
-  (`deploy/shell/mini-shell-ssh`) that ssh uses.
+  (`mini-shell-ssh`, the candidate's `bin/mini-line`) that ssh uses.
 - `/mini-help` runs the shell's own `help`.
 - `/mini-world [target:NAME] [page:N]` presents the native `home --json` member projection. A displayed action
   is not a grant; actions are ordinary `/mini` lines judged by Mini.

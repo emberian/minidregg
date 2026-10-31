@@ -161,8 +161,8 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
   BIN=$(dirname "$MINI")
   GATEWAY=${MINI_WEB_BIN:-$BIN/mini-web}; HELPER=${MINI_WEB_SPAWN_BIN:-$BIN/mini-web-spawn}
   [ -x "$GATEWAY" ] && [ -x "$HELPER" ] || unconfigured "no mini-web / mini-web-spawn beside $MINI (cargo build -p minidregg-mini-web -p minidregg-mini-web-spawn), or set MINI_WEB_BIN / MINI_WEB_SPAWN_BIN"
-  WRAPPER=$REPO/deploy/shell/mini-shell-ssh
-  [ -x "$WRAPPER" ] || unconfigured "no $WRAPPER"
+  WRAPPER=$BIN/mini-line   # the ssh forced command, installed on a box as /usr/local/lib/mini/mini-shell-ssh
+  [ -x "$WRAPPER" ] || unconfigured "no mini-line beside $MINI (cargo build -p minidregg-resource-client)"
   # A workspace that pins its Host's socket must be addressed by that exact path.
   pinned=$(jq -r '.socket // empty' "$WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
   R=$D/jwf; mkdir -p "$R/state" "$R/home" "$R/pubhome"
