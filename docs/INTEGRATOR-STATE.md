@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 08:45 EDT)
+## Now (2026-10-31 08:45 EDT; batch 6 list current at 08:50)
 
 - **main = 83e926874** = gated batch 4 b9450147f merged with main 7978ddfdd.
 - **Batch 4 b9450147f: GATE GREEN, the rehearsal-3 candidate.** hbox tour 73/73, enrol, composed; forge composed c-b945-d1
@@ -22,8 +22,8 @@ gated candidates and names candidates to infra and the explorer.
   flatness-submit FAIL. **j14-apps FAIL: "Hermes sent no reply to the ask: refused"**, reproduced on overlay
   1c151fce4-resid (spk-host crate from 40efdcff9) at -hp1 (/ci/j-1c151f-hp1/journey.log), so the resource-id crash is not
   its cause. app-reds owns it (Davros run 18 reads the final mini_say outcome). Batch 5's umbrella-tree and rerecord are
-  still running in umbrella-src (PID 2698823; Mac waiter b4l30lqym).
-- **Batch 6 (staging cfe5c24d5+)**: perf-apps b1 23738a4ce, app-reds' refusal clauses 5c4f73459, the resource-id fix, apps-e2e request-file fix f1255b4b3 (78a20cb56), exorcism 16f2d046f, 8b49bf1e2/fe77ab521 (Store calls carry files in the frame, v2; Host and helper from one build) and 019f2e56f and whatever lands. Cut it when batch 5's gate and umbrella are
+  still running in umbrella-src (PID 2698823); the -hp1 gate PID 3240123 is finishing; Mac waiter b4013oi9a covers both.
+- **Batch 6 (staging cfe5c24d5+)**: perf-apps b1 23738a4ce, app-reds' refusal clauses 5c4f73459, the resource-id fix, apps-e2e request-file fix f1255b4b3 (78a20cb56), exorcism 16f2d046f, 8b49bf1e2/fe77ab521 (Store calls carry files in the frame, v2; Host and helper from one build) 019f2e56f, perf-client f883af161 (readGuards once per call, chargeWith, Host-image digest cache, residents end with world/child/binding instead of idling out, single tenancy; audit round on chargeWith), and whatever lands. Staging d24b3e761. Cut it when batch 5's gate and umbrella are
   in and enough has accumulated (minimal-checks ruling: cuts spaced out to accumulate perf work).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
   Store epoch) + Book entries migration (~50 consumers) + private-cells FORMAT (a): eventHistory and authority to the trie
