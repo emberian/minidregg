@@ -2414,6 +2414,14 @@ fn verify_query_presentation(presented: Value, inspection_kind: &str) -> Result<
             object.insert("hiding".to_owned(), summary);
         }
         presented
+    } else if inspection_kind == "view-resource-document" {
+        let resource = presented.get("resource").ok_or("resource document lacks its resource view")?;
+        let summary = hiding::verify_view(resource)?;
+        let mut presented = presented;
+        presented.get_mut("resource").and_then(Value::as_object_mut)
+            .ok_or("resource document's resource is not an object")?
+            .insert("hiding".to_owned(), summary);
+        presented
     } else if inspection_kind == "view-resource-scope" {
         let resource = presented.get("resource").ok_or("resource scope lacks its narrowed resource")?;
         let summary = hiding::verify_view(resource)?;
