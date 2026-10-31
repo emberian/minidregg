@@ -420,22 +420,28 @@ theorem mem_parentKeys_iff (logical : Store layout) (cell : Nat) :
 
 /-- The parent projection of one authority store: its `parent` plane, with
 the plane's own finite support. -/
+theorem card_parentKeys_le (logical : Store layout) :
+    (parentKeys logical).card ≤ logical.size := by
+  rw [← SparseMap.card_support]
+  refine Finset.card_le_card_of_injOn (fun cell => (⟨.parent, cell⟩ : Address layout)) ?_ ?_
+  · intro cell member
+    exact SparseMap.mem_support_iff.mpr
+      (Option.isSome_iff_ne_none.mp ((mem_parentKeys_iff logical cell).mp member))
+  · intro left _ right _ same
+    cases same; rfl
+
+/-- The parent projection of one authority store: its `parent` plane, bounded by
+the store's size (the plane's own support is a subset of the store's). -/
 def parentageOf (logical : Store layout) : Parentage where
   parentOf cell := logical ⟨.parent, cell⟩
-  support := parentKeys logical
-  supported cell recorded :=
-    (mem_parentKeys_iff logical cell).mpr (Option.isSome_iff_ne_none.mpr recorded)
+  bound := Trunc.mk ⟨logical.size, parentKeys logical, card_parentKeys_le logical, fun cell recorded =>
+    (mem_parentKeys_iff logical cell).mpr (Option.isSome_iff_ne_none.mpr recorded)⟩
 
 /-- The parent projection reads the `parent` plane and nothing else. -/
 theorem parentageOf_congr {left right : Store layout}
     (same : ∀ cell, left ⟨.parent, cell⟩ = right ⟨.parent, cell⟩) :
-    parentageOf left = parentageOf right := by
-  unfold parentageOf
-  congr 1
-  · funext cell
-    exact same cell
-  · ext cell
-    rw [mem_parentKeys_iff, mem_parentKeys_iff, same]
+    parentageOf left = parentageOf right :=
+  Parentage.ext (funext same)
 
 /-- The key an address contributes to the revoked set: its own key on the
 `revoked` plane, nothing on any other plane. -/
@@ -443,24 +449,14 @@ def revokedKeyAt : Address layout → Finset RevocationKey
   | ⟨.revoked, key⟩ => {key}
   | _ => ∅
 
-/-- The revoked keys of one authority store: exactly the `revoked` plane's
-finite support. -/
-def revokedKeys (logical : Store layout) : Finset RevocationKey :=
-  logical.support.biUnion revokedKeyAt
+/-- The revoked keys of one authority store: exactly the keys the `revoked` plane
+holds, each asked by one lookup. -/
+def revokedKeys (logical : Store layout) : RevokedSet :=
+  ⟨fun key => (logical ⟨.revoked, key⟩).isSome⟩
 
 theorem mem_revokedKeys_iff (logical : Store layout) (key : RevocationKey) :
-    key ∈ revokedKeys logical ↔ (logical ⟨.revoked, key⟩).isSome = true := by
-  constructor
-  · intro member
-    obtain ⟨⟨plane, stored⟩, supported, contributes⟩ := Finset.mem_biUnion.mp member
-    cases plane <;> simp [revokedKeyAt] at contributes
-    have same : key = stored := contributes
-    subst same
-    exact Option.isSome_iff_ne_none.mpr (SparseMap.mem_support_iff.mp supported)
-  · intro present
-    exact Finset.mem_biUnion.mpr ⟨⟨.revoked, key⟩,
-      SparseMap.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
-      Finset.mem_singleton_self key⟩
+    key ∈ revokedKeys logical ↔ (logical ⟨.revoked, key⟩).isSome = true :=
+  Iff.rfl
 
 /-- The sole `AuthState` projection.  Capability and revocation witnesses use
 the SAME canonical cell root; revoked membership and every epoch are read from

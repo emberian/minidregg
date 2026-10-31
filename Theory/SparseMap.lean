@@ -352,6 +352,13 @@ theorem nodup_keys (m : SparseMap K V) : m.keys.Nodup := by
 /-- The support: the present keys, as a finset (no dedup: the keys are distinct). -/
 def support (m : SparseMap K V) : Finset K := ⟨m.keys, m.nodup_keys⟩
 
+/-- The number of present keys: the tree's own size, read without a walk. -/
+def size (m : SparseMap K V) : Nat := m.tree.size
+
+theorem card_support (m : SparseMap K V) : m.support.card = m.size := by
+  show m.keys.length = m.tree.size
+  simp [keys, Std.ExtDTreeMap.length_keys]
+
 @[simp] theorem mem_support_iff {m : SparseMap K V} {a : K} : a ∈ m.support ↔ m a ≠ none := by
   show a ∈ m.keys ↔ _
   rw [mem_keys, Option.isSome_iff_ne_none]

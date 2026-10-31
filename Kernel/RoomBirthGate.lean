@@ -430,7 +430,7 @@ def memberB : SubjectId := ⟨5⟩
 def guest : SubjectId := ⟨6⟩
 def stranger : SubjectId := ⟨9⟩
 
-def roomState (revoked : Finset RevocationKey) : AuthState :=
+def roomState (revoked : RevokedSet) : AuthState :=
   { demoState with revoked := revoked, parent := Parentage.ofList [(50, 7)] }
 
 def grant (id : Nat) (holder : SubjectId) (verbs : Finset (Verb .object)) : Capability .object :=

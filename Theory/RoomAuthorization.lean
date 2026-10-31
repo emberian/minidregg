@@ -46,13 +46,14 @@ set_option autoImplicit false
 
 /-- `under room` covers exactly the cells whose parent chain reaches `room`
 (the room itself at length zero), and every such chain has a witness no longer
-than the parent projection's support. -/
+than any finite set holding the cells with a recorded parent. -/
 theorem covers_under_chain {kind : ResourceKind} (parentage : Parentage) (room : Nat)
-    (target : ResourceId kind) :
+    (target : ResourceId kind) (support : Finset Nat)
+    (supported : ∀ c, parentage.parentOf c ≠ none → c ∈ support) :
     (TargetSet.under room : TargetSet kind).Covers parentage target ↔
-      ∃ n, n ≤ parentage.support.card ∧ parentage.ancestor n target.value = some room := by
+      ∃ n, n ≤ support.card ∧ parentage.ancestor n target.value = some room := by
   show parentage.Descends target.value room ↔ _
-  rw [Parentage.descends_iff_bounded]
+  rw [Parentage.descends_iff_bounded parentage support supported]
   exact ⟨fun ⟨n, lt, hn⟩ => ⟨n, by omega, hn⟩, fun ⟨n, le, hn⟩ => ⟨n, by omega, hn⟩⟩
 
 /-- A cell is covered only by an `under X` whose `X` is on its parent chain, or

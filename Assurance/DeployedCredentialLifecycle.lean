@@ -348,13 +348,17 @@ noncomputable def storedCapabilityCodec :
   letI : Nonempty (StoredCapability .object) := ⟨parentStored⟩
   exact codecOfCountable _
 
+/-- The issued cell records no parents: its parentage is `noParents`. -/
+theorem issued_parents : (authState issuedCell).parent = CredentialAuthorityState.noParents :=
+  Parentage.ext rfl
+
 def attenuateEvidence :
     AttenuateEvidence issuedCell attenuateDeclaration parentStored where
   parentExact := by exact issued_root_exact
   parentIdExact := rfl
   parentLineageValid := .root rootCapability rfl rfl
   parentLineageAnchored := True.intro
-  strict := strict_edge
+  strict := issued_parents ▸ strict_edge
   childSlotFresh := by intro kind; cases kind <;> decide
   issuerCurrent := by decide
   policyCurrent := by decide
@@ -388,7 +392,7 @@ noncomputable abbrev attenuatedCell : Cell AuthorityMaterializer :=
 theorem attenuated_child_lineage :
     LineageValid CredentialAuthorityState.noParents
       (descendedCapability childCapability parentStored) :=
-  attenuateEvidence.childLineageValid
+  issued_parents ▸ attenuateEvidence.childLineageValid
 
 /-! ## Capability transport and one exact token use -/
 
@@ -498,6 +502,10 @@ def tokenAuthorization :
 def requestDigestScheme : RequestDigestScheme where
   digestWire := fun wire => ⟨wire.nonce + wire.effectsDigest⟩
 
+/-- Attenuation writes no parent: the attenuated cell's parentage is `noParents`. -/
+theorem attenuated_parents : (authState attenuatedCell).parent = CredentialAuthorityState.noParents :=
+  Parentage.ext rfl
+
 def childLineage : childCapability.Lineage CredentialAuthorityState.noParents :=
   .attenuate childCapability rootCapability (.root rootCapability rfl rfl)
     strict_edge
@@ -513,7 +521,8 @@ noncomputable def acceptedToken :
     change CarrierKind.token = .capability ∨ CarrierKind.token = .token
     exact Or.inr rfl
   requestBinding := .canonical requestDigestScheme useRequest
-  lineage := childLineage
+  lineage := show childCapability.Lineage (authState attenuatedCell).parent from
+    attenuated_parents.symm ▸ childLineage
 
 theorem token_selects_exact_policy_address :
     lifecyclePortal.policyAddress acceptedToken.authorization.policyWitness =

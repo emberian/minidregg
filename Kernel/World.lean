@@ -349,9 +349,15 @@ theorem mem_parentKeys (s : Store (sysLayout TxId D)) (c : CellId) :
 decided at: the `parent` rows with their finite support. -/
 def parentage (w : World R TxId D) : Theory.TypedAuthorization.Parentage where
   parentOf c := w.parent c
-  support := w.system.support.biUnion parentKeyAt
-  supported c recorded :=
-    (mem_parentKeys w.system c).mpr (Option.isSome_iff_ne_none.mpr recorded)
+  bound := Trunc.mk ⟨w.system.size, w.system.support.biUnion parentKeyAt, by
+      rw [← Minidregg.Theory.SparseMap.card_support]
+      refine Finset.card_le_card_of_injOn (fun c => (⟨SysSpace.parent, c⟩ : Address (sysLayout TxId D))) ?_ ?_
+      · intro c member
+        exact Minidregg.Theory.SparseMap.mem_support_iff.mpr
+          (Option.isSome_iff_ne_none.mp ((mem_parentKeys w.system c).mp member))
+      · intro left _ right _ same
+        cases same; rfl,
+    fun c recorded => (mem_parentKeys w.system c).mpr (Option.isSome_iff_ne_none.mpr recorded)⟩
 
 /-- Present cells are never retired (the `Directory` invariant, over the
 system cell's `retired` namespace). -/

@@ -346,14 +346,20 @@ theorem owner_registered_not_revoked :
   decide
 
 theorem owner_revoked_empty : (authState ownerCell).revoked = ∅ := by
-  decide
+  have planes : ∀ address ∈ ownerCell.logical.support, address.1 ≠ .revoked := by decide
+  ext key
+  simp only [RevokedSet.not_mem_empty, iff_false]
+  intro member
+  have present : (ownerCell.logical ⟨.revoked, key⟩).isSome = true :=
+    (mem_authState_revoked_iff ownerCell key).mp member
+  exact planes ⟨.revoked, key⟩ (SparseMap.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present)) rfl
 
 /-- Satisfiable pole: the committed owner capability is admissible. -/
 theorem owner_admissible :
     demoCapability.Admissible (authState ownerCell) demoRequest := by
   refine
     { holder := demoCapability_admissible.holder
-      scope := demoCapability_admissible.scope
+      scope := by decide
       validFrom := demoCapability_admissible.validFrom
       validUntil := demoCapability_admissible.validUntil
       requestLaw := demoCapability_admissible.requestLaw

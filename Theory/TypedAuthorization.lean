@@ -262,33 +262,42 @@ def Holder.Covers (holder : Holder) (subject : SubjectId) : Prop :=
 /-- The system cell's parent projection. `parentage c = some room` records that
 cell `c` was created under the room cell `room`. Resource and room identifiers
 are compared by their raw cell values. The projection is append-only in the
-world: a recorded parent is never rewritten or removed. `support` is a finite
-set holding every cell with a recorded parent; it bounds every parent chain
-that matters, which is what makes chain coverage decidable. -/
+world: a recorded parent is never rewritten or removed. `bound` is a number at
+least the size of some finite set holding every cell with a recorded parent; it
+bounds every parent chain that matters (`ancestor_bounded`), which is what makes
+chain coverage decidable by one walk up the chain (`walk_iff`). It is truncated:
+two parentages with the same parents are equal whatever bounds they carry
+(`ext`), and only a subsingleton (a decision) reads it. -/
+def Parentage.Bounds (parentOf : Nat → Option Nat) (bound : Nat) : Prop :=
+  ∃ support : Finset Nat, support.card ≤ bound ∧ ∀ c, parentOf c ≠ none → c ∈ support
+
 structure Parentage where
   parentOf : Nat → Option Nat
-  support : Finset Nat
-  supported : ∀ c, parentOf c ≠ none → c ∈ support
+  bound : Trunc {bound : Nat // Parentage.Bounds parentOf bound}
 
 namespace Parentage
 
 instance : CoeFun Parentage (fun _ => Nat → Option Nat) := ⟨Parentage.parentOf⟩
 
 /-- No recorded parents. -/
-def empty : Parentage := ⟨fun _ => none, ∅, fun _ h => absurd rfl h⟩
+def empty : Parentage := ⟨fun _ => none, Trunc.mk ⟨0, ∅, le_rfl, fun _ h => absurd rfl h⟩⟩
+
+/-- A parentage is its parent function. -/
+@[ext] theorem ext {p q : Parentage} (same : p.parentOf = q.parentOf) : p = q := by
+  cases p; cases q; subst same; congr 1; exact Subsingleton.elim _ _
 
 /-- The parentage that records exactly the listed `(cell, parent)` rows; a
 later row for the same cell is shadowed by the first. -/
 def ofList (rows : List (Nat × Nat)) : Parentage where
   parentOf c := (rows.find? (fun row => row.1 = c)).map Prod.snd
-  support := (rows.map Prod.fst).toFinset
-  supported c h := by
+  bound := Trunc.mk ⟨rows.length, (rows.map Prod.fst).toFinset,
+    (List.toFinset_card_le _).trans (List.length_map _).le, fun c h => by
     cases found : rows.find? (fun row => row.1 = c) with
     | none => simp [found] at h
     | some row =>
         have member := List.mem_of_find?_eq_some found
         have same : row.1 = c := by simpa using List.find?_some found
-        exact List.mem_toFinset.mpr (List.mem_map.mpr ⟨row, member, same⟩)
+        exact List.mem_toFinset.mpr (List.mem_map.mpr ⟨row, member, same⟩)⟩
 
 /-- Appending rows never changes a recorded parent. -/
 theorem ofList_append_extends (rows extra : List (Nat × Nat)) :
@@ -356,26 +365,28 @@ theorem ancestor_isSome_of_le (p : Parentage) {i n c r : Nat} (le : i ≤ n)
   | none => simp [found] at reach
   | some a => exact ⟨a, rfl⟩
 
-/-- A chain that reaches `r` reaches it within `support.card` steps: a longer
-chain repeats a cell (pigeonhole over the support), and cutting the loop gives
-a shorter chain to the same `r`. -/
-theorem ancestor_bounded (p : Parentage) {n c r : Nat}
+/-- A chain that reaches `r` reaches it within `support.card` steps, for any finite
+`support` holding every cell with a recorded parent: a longer chain repeats a cell
+(pigeonhole over the support), and cutting the loop gives a shorter chain to the
+same `r`. -/
+theorem ancestor_bounded (p : Parentage) (support : Finset Nat)
+    (supported : ∀ c, p.parentOf c ≠ none → c ∈ support) {n c r : Nat}
     (reach : p.ancestor n c = some r) :
-    ∃ m, m ≤ p.support.card ∧ p.ancestor m c = some r := by
+    ∃ m, m ≤ support.card ∧ p.ancestor m c = some r := by
   induction n using Nat.strong_induction_on with
   | _ n ih =>
-    by_cases small : n ≤ p.support.card
+    by_cases small : n ≤ support.card
     · exact ⟨n, small, reach⟩
-    · have mapsTo : ∀ i ∈ Finset.range n, (p.ancestor i c).getD 0 ∈ p.support := by
+    · have mapsTo : ∀ i ∈ Finset.range n, (p.ancestor i c).getD 0 ∈ support := by
         intro i member
         have lt := Finset.mem_range.mp member
         obtain ⟨a, ha⟩ := p.ancestor_isSome_of_le (Nat.le_of_lt lt) reach
         obtain ⟨b, hb⟩ := p.ancestor_isSome_of_le (show i + 1 ≤ n by omega) reach
         rw [ancestor_add, ha, Option.bind_some, ancestor_one] at hb
         rw [ha]
-        exact p.supported a (by simp [hb])
+        exact supported a (by simp [hb])
       obtain ⟨i, hi, j, hj, ne, same⟩ := Finset.exists_ne_map_eq_of_card_lt_of_maps_to
-        (by simpa using (show p.support.card < n by omega)) mapsTo
+        (by simpa using (show support.card < n by omega)) mapsTo
       have hi' := Finset.mem_range.mp hi
       have hj' := Finset.mem_range.mp hj
       obtain ⟨a, ha⟩ := p.ancestor_isSome_of_le (Nat.le_of_lt hi') reach
@@ -396,18 +407,79 @@ theorem ancestor_bounded (p : Parentage) {n c r : Nat}
           rw [ancestor_add, hb, ← ha, ← split, reach]
         exact ih _ (by omega) short
 
-theorem descends_iff_bounded (p : Parentage) (c r : Nat) :
-    p.Descends c r ↔ ∃ n, n < p.support.card + 1 ∧ p.ancestor n c = some r := by
+theorem descends_iff_bounded (p : Parentage) (support : Finset Nat)
+    (supported : ∀ c, p.parentOf c ≠ none → c ∈ support) (c r : Nat) :
+    p.Descends c r ↔ ∃ n, n < support.card + 1 ∧ p.ancestor n c = some r := by
   rw [descends_iff_ancestor]
   constructor
   · rintro ⟨n, hn⟩
-    obtain ⟨m, le, hm⟩ := p.ancestor_bounded hn
+    obtain ⟨m, le, hm⟩ := p.ancestor_bounded support supported hn
     exact ⟨m, by omega, hm⟩
   · rintro ⟨n, _, hn⟩
     exact ⟨n, hn⟩
 
+/-- Walk `c`'s parent chain looking for `r`, at most `fuel` steps up. -/
+def walk (p : Parentage) (r : Nat) : (fuel : Nat) → (c : Nat) → Bool
+  | fuel, c =>
+      if c = r then true
+      else match fuel, p.parentOf c with
+        | fuel + 1, some q => p.walk r fuel q
+        | _, _ => false
+
+theorem walk_iff (p : Parentage) (r : Nat) :
+    ∀ (fuel c : Nat), p.walk r fuel c = true ↔ ∃ n, n ≤ fuel ∧ p.ancestor n c = some r := by
+  intro fuel
+  induction fuel with
+  | zero =>
+      intro c
+      unfold walk
+      by_cases same : c = r
+      · subst same; simp [ancestor]
+      · simp only [same, ite_false]
+        constructor
+        · intro h; simp at h
+        · rintro ⟨n, le, hn⟩
+          obtain rfl : n = 0 := by omega
+          simp [ancestor] at hn; exact absurd hn same
+  | succ fuel ih =>
+      intro c
+      unfold walk
+      by_cases same : c = r
+      · subst same; simp only [if_true, true_iff]; exact ⟨0, by omega, rfl⟩
+      · simp only [same, ite_false]
+        cases link : p.parentOf c with
+        | none =>
+            simp only [reduceCtorEq, false_iff, not_exists, not_and]
+            intro n _ hn
+            cases n with
+            | zero => simp [ancestor] at hn; exact same hn
+            | succ n => simp [ancestor, CoeFun.coe, link] at hn
+        | some q =>
+            simp only
+            rw [ih q]
+            constructor
+            · rintro ⟨n, le, hn⟩
+              exact ⟨n + 1, by omega, by simp [ancestor, CoeFun.coe, link, hn]⟩
+            · rintro ⟨n, le, hn⟩
+              cases n with
+              | zero => simp [ancestor] at hn; exact absurd hn same
+              | succ n =>
+                  simp only [ancestor, CoeFun.coe, link, Option.bind_some] at hn
+                  exact ⟨n, by omega, hn⟩
+
+/-- Coverage decided by walking the chain at most `bound` steps (`walk_iff`,
+`descends_iff_bounded`); an acyclic chain ends at its root, so a walk costs the
+chain's length, not the number of recorded cells. -/
 instance descendsDecidable (p : Parentage) (c r : Nat) : Decidable (p.Descends c r) :=
-  decidable_of_iff _ (p.descends_iff_bounded c r).symm
+  p.bound.recOnSubsingleton fun bound =>
+    decidable_of_iff (p.walk r bound.val c = true) (by
+      obtain ⟨support, card, supported⟩ := bound.property
+      rw [walk_iff, descends_iff_bounded p support supported]
+      constructor
+      · rintro ⟨n, le, hn⟩
+        obtain ⟨m, le', hm⟩ := p.ancestor_bounded support supported hn
+        exact ⟨m, by omega, hm⟩
+      · rintro ⟨n, lt, hn⟩; exact ⟨n, by omega, hn⟩)
 
 theorem Descends.trans {p : Parentage} {a b c : Nat}
     (first : p.Descends a b) (second : p.Descends b c) : p.Descends a c := by
@@ -917,6 +989,37 @@ inductive RevocationKey where
   | signingKey (subject : SubjectId) (epoch : Epoch)
   deriving DecidableEq, Repr, StoreKey
 
+/-- A set of revocation keys given by its membership test: the authority cell's
+`revoked` plane is read key by key (one lookup), never enumerated. -/
+structure RevokedSet where
+  isRevoked : RevocationKey → Bool
+
+namespace RevokedSet
+
+instance : Membership RevocationKey RevokedSet := ⟨fun s key => s.isRevoked key = true⟩
+
+theorem mem_def {s : RevokedSet} {key : RevocationKey} : key ∈ s ↔ s.isRevoked key = true := Iff.rfl
+
+instance (key : RevocationKey) (s : RevokedSet) : Decidable (key ∈ s) :=
+  inferInstanceAs (Decidable (s.isRevoked key = true))
+
+@[ext] theorem ext {s t : RevokedSet} (same : ∀ key, key ∈ s ↔ key ∈ t) : s = t := by
+  cases s; cases t; congr; funext key; exact Bool.eq_iff_iff.mpr (same key)
+
+instance : EmptyCollection RevokedSet := ⟨⟨fun _ => false⟩⟩
+instance : Singleton RevocationKey RevokedSet := ⟨fun key => ⟨fun other => decide (other = key)⟩⟩
+instance : Insert RevocationKey RevokedSet := ⟨fun key s => ⟨fun other => decide (other = key) || s.isRevoked other⟩⟩
+
+@[simp] theorem not_mem_empty (key : RevocationKey) : key ∉ (∅ : RevokedSet) := by
+  simp [mem_def, EmptyCollection.emptyCollection]
+@[simp] theorem mem_singleton {key other : RevocationKey} : other ∈ ({key} : RevokedSet) ↔ other = key := by
+  simp [mem_def, Singleton.singleton]
+@[simp] theorem mem_insert {key other : RevocationKey} {s : RevokedSet} :
+    other ∈ (insert key s : RevokedSet) ↔ other = key ∨ other ∈ s := by
+  simp [mem_def, Insert.insert]
+
+end RevokedSet
+
 /-- The authorization-relevant projection of current state.  Epoch comparisons
 are exact equalities, never lower bounds and never optional. -/
 structure AuthState where
@@ -927,7 +1030,7 @@ structure AuthState where
   policyRoot : Digest
   /-- The committed content address selected by an exact `(id,revision)` pair. -/
   policyAddress : PolicyId → PolicyRevision → Digest
-  revoked : Finset RevocationKey
+  revoked : RevokedSet
   issuerEpoch : IssuerId → Epoch
   policyEpoch : PolicyId → Epoch
   policyRevision : PolicyId → PolicyRevision
@@ -1536,6 +1639,8 @@ theorem demo_explicit_generation_rotation_revokes :
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Parentage.descends_iff_bounded
 /-- info: 'Minidregg.Theory.TypedAuthorization.Parentage.ancestor_bounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Parentage.ancestor_bounded
+/-- info: 'Minidregg.Theory.TypedAuthorization.Parentage.walk_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Parentage.walk_iff
 /-- info: 'Minidregg.Theory.TypedAuthorization.Parentage.ofList_append_extends' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Parentage.ofList_append_extends
 /-- info: 'Minidregg.Theory.TypedAuthorization.TargetSet.covers_of_narrows' depends on axioms: [propext, Classical.choice, Quot.sound] -/

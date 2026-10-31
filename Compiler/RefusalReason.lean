@@ -350,7 +350,7 @@ def owner : SubjectId := ⟨7⟩
 def thief : SubjectId := ⟨9⟩
 def target : ResourceId .object := ⟨42⟩
 
-def state (revoked : Finset RevocationKey) (policyEpoch : Epoch) : AuthState where
+def state (revoked : RevokedSet) (policyEpoch : Epoch) : AuthState where
   capabilityRoot := ⟨0⟩
   revocationRoot := ⟨0⟩
   policyRoot := ⟨0⟩

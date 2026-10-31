@@ -1320,7 +1320,8 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   discard <| timed "authState x10" do
     let mut n := 0
     for i in [0:10] do
-      n := n + authority.snapshot.authState.policyEpoch ⟨i⟩ + authority.snapshot.authState.revoked.card
+      n := n + authority.snapshot.authState.policyEpoch ⟨i⟩ +
+        (if .capability ⟨i⟩ ∈ authority.snapshot.authState.revoked then 1 else 0)
     pure n
   discard <| timed "authority rootBytes x10" do
     let mut n := 0

@@ -71,74 +71,11 @@ set_option autoImplicit false
 
 abbrev Cell := CredentialAuthorityCell.Cell
 
-/-- The authorization projection of an authority cell: its revoked set is the
-`revoked` plane's own support. -/
+/-- The authorization projection of an authority cell: closures over the cell (its
+revoked set and parents are asked key by key, `revokedKeys`, `parentageOf`) and its
+root, so building it walks nothing. -/
 def authStateOf (cell : Cell) : AuthState :=
   CredentialAuthorityState.authState cell
-
-/-- The authority store's support: the tree's keys, no dedup (L0). -/
-def supportFast (logical : Store CredentialAuthorityState.layout) :
-    Finset (Address CredentialAuthorityState.layout) :=
-  logical.support
-
-theorem supportFast_eq (logical : Store CredentialAuthorityState.layout) :
-    supportFast logical = logical.support :=
-  rfl
-
-/-- One plane's keys, each address contributing at most one, distinct addresses distinct keys:
-their union is the multiset bind, with no dedup. -/
-private def planeKeys {X : Type} [DecidableEq X] (at_ : Address CredentialAuthorityState.layout → Finset X)
-    (disjoint : ∀ a b, a ≠ b → Disjoint (at_ a) (at_ b))
-    (support : Finset (Address CredentialAuthorityState.layout)) : Finset X :=
-  ⟨support.val.bind fun a => (at_ a).val, Multiset.nodup_bind.mpr
-    ⟨fun a _ => (at_ a).nodup, Multiset.Nodup.pairwise
-      (fun a _ b _ ne => Finset.disjoint_val.mpr (disjoint _ _ ne)) support.nodup⟩⟩
-
-private theorem planeKeys_eq {X : Type} [DecidableEq X] (at_ : Address CredentialAuthorityState.layout → Finset X)
-    (disjoint : ∀ a b, a ≠ b → Disjoint (at_ a) (at_ b))
-    (support : Finset (Address CredentialAuthorityState.layout)) :
-    planeKeys at_ disjoint support = support.biUnion at_ := by
-  ext x
-  rw [Finset.mem_biUnion]
-  show x ∈ Multiset.bind support.val (fun a => (at_ a).val) ↔ _
-  simp only [Multiset.mem_bind, Finset.mem_val]
-
-private theorem revokedKeyAt_disjoint (a b : Address CredentialAuthorityState.layout) (ne : a ≠ b) :
-    Disjoint (revokedKeyAt a) (revokedKeyAt b) := by
-  rcases a with ⟨pa, ka⟩
-  rcases b with ⟨pb, kb⟩
-  cases pa <;> cases pb <;> simp_all [revokedKeyAt]
-
-private theorem parentKeyAt_disjoint (a b : Address CredentialAuthorityState.layout) (ne : a ≠ b) :
-    Disjoint (parentKeyAt a) (parentKeyAt b) := by
-  rcases a with ⟨pa, ka⟩
-  rcases b with ⟨pb, kb⟩
-  cases pa <;> cases pb <;> simp_all [parentKeyAt]
-
-/-- `authStateOf` with the revoked set and the parent support read off `supportFast`. -/
-def authStateOfFast (cell : Cell) : AuthState :=
-  -- Every field spelled out: `{ authState cell with … }` would build `authState cell` whole
-  -- (its slow `revoked` and `parent` included) before replacing them.
-  { capabilityRoot := cell.root
-    revocationRoot := cell.root
-    policyRoot := cell.root
-    policyAddress := policyAddressAt cell
-    issuerEpoch := issuerEpochAt cell
-    policyEpoch := policyEpochAt cell
-    policyRevision := policyRevisionAt cell
-    subjectKeyEpoch := subjectKeyEpochAt cell
-    revoked := planeKeys revokedKeyAt revokedKeyAt_disjoint (supportFast cell.logical)
-    parent :=
-      { parentOf := fun c => cell.logical ⟨.parent, c⟩
-        support := planeKeys parentKeyAt parentKeyAt_disjoint (supportFast cell.logical)
-        supported := fun c recorded => by
-          rw [planeKeys_eq, supportFast_eq]
-          exact (mem_parentKeys_iff cell.logical c).mpr (Option.isSome_iff_ne_none.mpr recorded) } }
-
-@[csimp] theorem authStateOf_eq_fast : @authStateOf = @authStateOfFast := by
-  funext cell
-  unfold authStateOf authStateOfFast CredentialAuthorityState.authState revokedKeys parentageOf parentKeys
-  simp only [planeKeys_eq, supportFast_eq]
 
 /-- The deployment's authority domain: its domain digest, its one cell, and the
 cell's authorization projection, computed once when the snapshot is built
