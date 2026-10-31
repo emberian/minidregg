@@ -10,21 +10,22 @@ Quest: the unattended builder on `main`; persvati as the quiet measurement box; 
 
 ## State (2026-10-31 13:20, present tense)
 
-### The builder: NOT written yet (next step 1)
-- Ingredients on hbox `/home/hbox/lanes/integ`: `integ-build6.sh SHA` (host stage via lane-build, then
-  `src/scripts/pipeline/umbrella-tree`, then `rerecord.sh` in umbrella-src), `gate15.sh`/`gate14.sh NAME`
-  (PHASES subsets of tour composed enrol j14; HARNESS=sha overlays scripts/ and deploy/spk-host), `sweep.sh`
-  (leaves any candidate whose provenance has `.overlay`), `COMMANDS.log` (event log), `candidates/<sha>/READY`.
-- Batch 9 (997905c0b, the integrator's last): READY 13:00; gate verdict FAIL 13:15 on the flatness rows
-  (flatness-submit/get/run rc=1, logs /ci/f-997905/*.log); integ-build6.sh (pid 3311469, build-b9.pid) still
-  running its umbrella-tree (pid 3686555, umbrella-src.pid). Let it finish; its reds go in REDS.md.
-- Plan: one script `scripts/pipeline/builder` (in repo), run detached on hbox with a PID file: loop on
-  `origin/main` tip; if new, integ-build6 equivalent (host stage, umbrella-tree, rerecord) then gate15 rows (tour,
-  enrol, j14-apps, composed; forge composed via infra); write `board/REDS.md` (per red: stage, error text, first
-  divergence, reruns?, same place?, suspect commits = `git log green..tip -- <files of the red>`, owner from
-  board/seats/*.md "Owns:"); `git push origin SHA:refs/heads/green` when all green. Commit REDS.md by plumbing.
-- After it runs: delete docs/INTEGRATOR-STATE.md, branch integration/staging, fixture-regen/acc7cfa03fac (land its
-  rerecord on main first if still wanted: diff it against main's Fixtures/).
+### The builder: running
+- `scripts/pipeline/builder` (main 7132a51e0). Runs on hbox from a static copy
+  `/home/hbox/lanes/integ/builder/builder.sh` (recopy after changing the repo script), started by
+  `builder/run.sh` (PID `builder/builder.pid`, log `builder/builder.out`), which first waits for the dead
+  integrator's batch-9 build (build-b9.pid) to exit. Per new main tip (board/-only tips skipped): `integ-build6.sh`
+  (host, consent, rust, pack, umbrella-tree, rerecord), `gate15.sh` beside the umbrellas once READY, each red gate
+  row rerun once (SUF=-r1), `board/REDS.md` rewritten and committed straight to main, `green` pushed when clean.
+  Its own state: `$I/builder/` (last-built, signatures, REDS-*.md, build/gate outs). `--reds SHA` rewrites REDS.md
+  from logs; BUILDER_DRY=1 prints only.
+- First REDS.md (main 6ca201aa): batch 9 997905c0 (the integrator's last staging batch), 6 reds: umbrella-tree rc=1,
+  flatness submit/get/run, j14-apps, composed (residents refused prepoll-filler-070 status 3; store-restart
+  unhealthy headroom). green is c849687da.
+- Done: docs/INTEGRATOR-STATE.md deleted (main adf73b9e2); branches integration/staging and
+  fixture-regen/acc7cfa03fac deleted (that rerecord was two batches stale; the builder rerecords each tip).
+- Next: watch the first round on main's tip; move the box-local integ-build6.sh/gate15.sh/sweep.sh into the repo
+  beside the builder (they hold box paths: dregg-infra checkouts, j14 inputs under $I).
 
 ### Build speed: done and on main
 | change | effect (measured) |
@@ -77,9 +78,11 @@ Quest: the unattended builder on `main`; persvati as the quiet measurement box; 
 - Scratch worlds: Store-only worlds via a candidate's run.sh need no root. SPK/grain worlds need root setup
   (deploy/spk-host/install-user-world: /usr/local/libexec helper, /etc/mini-spk-volumes, ACLs on
   /usr/local/libexec/mini-grain-bwrap, subuid ranges, /var/lib/mini-spk-worlds): ask ember before doing any of it.
+- setup2.sh (pid setup2.pid): mini-kernels built (8 s); `lake build Host.Main` in the seed running.
 - Still to do: lane-tree init there (2-3 trees, pool.env), native-loop there, announce to seats, then candidates.
 
-### akapug PRs #18, #16, #14, #7: not looked at yet.
+### akapug PRs #18, #16, #14, #7
+- A sub-agent (a1e0cd9ed9ccacde9) is landing or answering each, against current main.
 
 ## Seams needed
 - infra (board/seats/infra.md): the kept-world rebind tool; ship.sh accepting `.overlay.id` as a candidate id.
