@@ -53,23 +53,112 @@ Consent (CONSENT-STORE, sweep rows 13 partly): a provider start is the Store's
 checkpoint + the suffix (no genesis fold); catch-up is O(records since the client last
 looked), each natively admitted (~30 ms at head ~1,000).
 
-## Row 4 (walks from the checkpoint): the statement to settle first
+## Design question for ember: every member's provider re-admits every record
 
-The walk families (lifecycle, dispatch, grants, Fn frontier) carry certificate lists
-(`PriorIssue`, `PriorBegin*`, `PriorClaim*`, `PriorCreatedV3`, `PriorRunningV3`,
-`PriorLifetimeGrant`, `PriorDispatchReserve`, `RetryHistory`, the Fn frontier audit,
-`PriorSelectedRelease`) whose `admitted`/`sourceExact` fields are existentials minted
-only by native admission inside the genesis walk. To start a walk at the Store's
-checkpoint (trusted storage), each certificate gains a second provenance: **the record
-is the trusted Store's verified record at an index below the walk's start** (the
-records below the start are decoded and classified by family, never executed), and
-every theorem that destructures `admitted` states the disjunction. Consumers that
-derive an exact root from original admission (`PriorLifetimeGrant.finalRoot`) read the
-verified tag's root instead. This weakens those certificate statements exactly to the
-threat model (ember 10-31: no validity proofs; the storage device is trusted), touches
-`Kernel/NativeHostReplay.lean` and its ~40 consumers, and goes statement-first: the
-`Provenance` inductive and the restated `sourceExact` family, then the walk start
-(`verifyFrom` over `Chained.cutAbove`), then rows 9 and 13 follow.
+**What happens.** Each client runs its own consent provider (`minidregg-client-consent`,
+a resident per client with a 10-minute idle timeout). Before it signs anything it
+`refresh`es (Host/ClientConsentCore.lean): it natively admits every record the Store
+appended since it last looked (re-execution, full-record comparison, tail law,
+post-image validation). With M members and R records written per period:
+
+| | cost |
+|---|---|
+| one record, one provider (head ~1,000, hbox, after batches 1-3) | ~30 ms CPU |
+| one member's next command after R foreign records | R × 30 ms of latency (60 records: 1.8 s; 500: 15 s) |
+| the fleet | M × R × 30 ms of CPU: every record is re-executed once per member |
+| a resident that idled out | the Store's checkpoint (at most 64 below the head) + the suffix (CONSENT-STORE) |
+
+The latency is not O(history), but it is O(activity since this member last looked), and
+a quiet member coming back to a busy room pays all of it. This is the explorer's 23.4 s
+read and the sponsor's 12-32 s certify. On the demo every member's provider runs on the
+same box (the workhorse), so the M × R term is all one machine's CPU.
+
+**Options.**
+- **A. Re-base on a lag (recommended).** A resident whose unseen suffix crosses the
+  Store's newest checkpoint rebases there, as a fresh start already does, and admits only
+  the records above it. Worst case: one checkpoint interval (64) × 30 ms ≈ 1.9 s; average
+  about half that. This is the 10-31 ruling ("providers resume from a sealed snapshot")
+  applied to a resident as well as a start, so no new trust premise. The interval can be
+  lowered (sealing costs ~90 ms at 769 cells) to trade Store writes for latency. The
+  records between the old and new base are decoded, not executed. It needs one
+  ClientConsentCore change: `refresh` compares the Store's base with the held height.
+- **B. One provider per box.** Members whose providers share a box (all of them on the
+  demo) share one admitted state. Their custody differs only in signing keys, so the
+  provider keeps one session and signs per member. That divides the fleet term by M. It
+  needs a multi-member frame protocol and a key-per-member custody layout in mini-sdk.
+- **C. No admission.** The provider signs over the Host's opened state (checkpoint + suffix)
+  without re-executing anything. Per-command cost O(1), but the client no longer checks
+  that each record is a lawful transition of the one before. That retires the provider's
+  independent check, a larger change of meaning than A.
+- **D. Status quo.** Correct, but law 17 red for quiet members.
+
+**Recommendation:** A now (it is within the existing ruling; I will land it unless you
+object), then B when the fleet has more than a handful of members on one box.
+
+## Rows 4, 9, 13 (walks from the checkpoint): the statement (root: go, 10-31)
+
+The walk (`NativeHostReplay.verifyLoaded`) re-admits every record from genesis because
+the walk families' certificate lists (`PriorBegin*`, `PriorClaim*`, `PriorCreatedV3`,
+`PriorRunningV3`, `RetryHistory`, `PriorIssue`, `PriorDispatchReserve`,
+`PriorLifetimeGrant`, `PriorSelectedRelease`, the Fn frontier audit) are minted only by
+native admission. Under the threat model ("we trust the storage device"), the honest
+statement is: **a certificate's record was admitted by this walk, or it is a record of
+the trusted Store below the walk's start.** It is restated once, at the seam, so that the
+consumers follow one definition:
+
+```lean
+/-- A walk certificate's provenance. `admitted`: this walk natively admitted the
+record at its prefix. `stored`: the record lies below the walk's start (the trusted
+Store's sealed checkpoint) and its event carries exactly this certificate's ingress;
+it was decoded and classified, never executed. Consumers bind either one to the
+current image by their own presence check (`…_record_at`). -/
+inductive Provenance (admitted carried : Prop) : Prop
+  | admitted (h : admitted)
+  | stored (h : carried)
+```
+
+Each certificate's `admitted : ∃ original accepted, record = ofIntent …` becomes
+`admitted : Provenance (∃ original accepted, …) (codec.decode (historicalSourceEvent
+record.event).canonicalBytes = some ingress)`. The one theorem that destructures it,
+`PriorLifetimeGrant.finalRoot_in_record`, keeps its statement: the stored grant's carried
+fact includes the write whose `exactPost` is `finalRoot`.
+
+`Verified` gains its start:
+
+```lean
+  start : Nat
+  startTrusted : start = 0 ∨ start = target.baseHeight     -- genesis, or the Store's sealed base
+  originExact : origin.durable.image.accepted = target.image.accepted.take start
+  admitted : AdmittedReplay config origin (target.image.accepted.drop start) opened
+    (receiptHistory.toList.drop start)
+  storedReceipts : ∀ i < start, receipts[i]? = the tag-carried receipt at height i + 1
+```
+
+and `Verified.accepted_history` is restated over `drop start`
+(`FnSelectedHistoricalStep` selects only at or above the start; a selection below it
+walks from the nearest checkpoint at or below the index).
+
+- **Satisfiable:** every genesis walk (`start = 0`, no stored certificate); every walk
+  from a Store checkpoint whose prefix classifies.
+- **Teeth:** a `Verified` cannot start anywhere but genesis or the Store's own sealed base
+  (`startTrusted`); every record at or above the start is natively admitted; a stored
+  certificate cannot name an ingress its record does not carry.
+
+**Families, by what classifying them needs:**
+- *decode-only* (stored provenance): lifecycle begin v1/v2/v3, claim v2/v3, completion
+  v2/v4 (created/running), failed-start recovery, retry begin/claim v4, and the Fn frontier
+  (`frontierAfter` already reads only the record and receipt).
+- *state-dependent*: `PriorIssue` (the descriptor reads the authority snapshot at that
+  height), `PriorDispatchReserve` (the purse cell's state before the record),
+  `PriorSelectedRelease` (the post state), `PriorLifetimeGrant` (its ticket and final
+  root). Slice 1: if the prefix holds a record of these families, the walk starts at
+  genesis, as today. Slice 2: these certificates resolve lazily, by one native admission at
+  the trusted `Reader.stateAt index`, when a consumer selects them. That costs O(checkpoint
+  interval) per use, never per walk.
+
+Rows 9 and 13 then take the same start: `inspect-stop-claim`, `selected-release-fn-ack` and
+`fn-empty-page-ack`, and consent's genesis fallbacks (`verifyInitial`/`refresh` suffix
+failure, `upgrade`).
 
 ## Diagnosis that started this (2026-10-30, be4ef7510, x1 world on hbox)
 
