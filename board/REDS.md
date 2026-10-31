@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `920a4a31412c` (Merge remote-tracking branch 'origin/main' into seat/host-execution). Round finished 2026-10-31T23:49Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-920a4a31`.
+Tip: `ebed79cf874a` (board: privacy row, relativeTo reviewed (a014ff501)). Round finished 2026-10-31T23:55Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ebed79cf`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -11,9 +11,14 @@ green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 83e926874e38..920a4a31412c`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..ebed79cf874a`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `ebed79cf` board: privacy row, relativeTo reviewed (a014ff501)
+- `a014ff50` authority load on a walk: a decoded cell takes the held cell's trie by their difference
+- `cc5cbd90` Merge remote-tracking branch 'origin/main' into seat/host-execution
+- `77f8480f` board: host-execution row: complete continuation for the next seat (owner: host-execution)
+- `be581573` builder: REDS.md for 920a4a31412c (5 red)
 - `920a4a31` Merge remote-tracking branch 'origin/main' into seat/host-execution
 - `d0d40855` host-execution: a first walk opens the Store in full once
 - `29a754fe` board: privacy row, FORMAT (a) timing measured: per-write cost still grows; cause and routing
@@ -49,8 +54,3 @@ Suspect commits since green (`git log 83e926874e38..920a4a31412c`), newest first
 - `3ef7de9a` builder: the umbrella tree never holds build.lock; a held lock defers the round; reds carry an owner (owner: build-loop)
 - `3e9f365a` builder: REDS.md for 60f43c435020 (6 red)
 - `24b05cd6` board/seats/read-path.md: a128a7497, 143caf2fc, 8cbe36d62 measured
-- `60f43c43` board: apps-hermes row: Scrumblr qualifies; WBO tail-bound and Hummingbird referer header named (owner: apps-hermes)
-- `eac80ad0` application attachment: a package that declares no roles attaches with roleId none or allAccess (owner: build-loop)
-- `7de8305d` builder: REDS.md for 960da1d8d9a8 (6 red)
-- `960da1d8` builder: REDS.md for 9dc9c138cb32 (4 red)
-- `4c6c3676` board: privacy row, the held authority cell landed (store-retained)
