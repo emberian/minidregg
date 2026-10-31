@@ -90,17 +90,21 @@ mod real {
         )
     }
 
-    /// The persistent `/var` at `path` (held open as `var_fd`, its parent as
-    /// `parent_fd`): whether it is bounded by a project quota (a project id with the
-    /// inherit flag, so everything below it is charged to the project), and the
-    /// size `statfs` reports for it, which for such a directory is the project limit.
+    /// The persistent `/var` at `path` (held open as `var_fd`, its parent as `parent_fd`, both
+    /// O_PATH descriptors): whether it is bounded by a project quota, and the size `statfs` reports
+    /// for it. A directory with the inherit flag under a project limit reports that limit as its
+    /// filesystem size, so it is bounded exactly when it reports less than its parent's filesystem.
+    /// (The project id itself is not read here: the resident runs as the operator, who cannot open
+    /// the app-private directory for the ioctl. The witness pins the directory's inode and the
+    /// helper, as root, set and verified its project.)
     pub(crate) fn var_filesystem(
         _path: &Path,
-        _parent_fd: RawFd,
+        parent_fd: RawFd,
         var_fd: RawFd,
     ) -> io::Result<(bool, u128)> {
-        let (project, inherit) = crate::volume_quota::project_of(var_fd)?;
-        Ok((project != 0 && inherit, crate::volume_quota::reported_bytes(var_fd)?))
+        let var = crate::volume_quota::reported_bytes(var_fd)?;
+        let parent = crate::volume_quota::reported_bytes(parent_fd)?;
+        Ok((var < parent, var))
     }
 
     /// The project id and inherit flag of the open `/var`.

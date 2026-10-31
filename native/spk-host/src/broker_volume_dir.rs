@@ -732,8 +732,13 @@ mod tests {
         w.compare_open_mount(dir.as_raw_fd()).unwrap();
         w.compare_open_project(dir.as_raw_fd()).unwrap();
         assert_eq!(w.project_id, o.project_id);
-        let (separate, total) = crate::os::var_filesystem(&v.path(), dir.as_raw_fd(), dir.as_raw_fd()).unwrap();
+        // The resident's view: the volume against its parent (`vars`) on the same filesystem.
+        let parent = File::open(root.join("vars")).unwrap();
+        let (separate, total) = crate::os::var_filesystem(&v.path(), parent.as_raw_fd(), dir.as_raw_fd()).unwrap();
         assert!(separate && total == 64 * 1048576);
+        // A directory that is not under a project limit reports its parent's size: not bounded.
+        let (bounded, _) = crate::os::var_filesystem(&root.join("vars"), parent.as_raw_fd(), parent.as_raw_fd()).unwrap();
+        assert!(!bounded);
         // A repeated create is refused; the registration is exact.
         assert!(v.create(None).is_err());
         let mut other = volume(&root, "9101", 165536, 128);

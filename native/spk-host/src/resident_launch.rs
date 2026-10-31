@@ -429,7 +429,6 @@ impl PreparedResident {
     /// compare the witness bytes and volume ID to the source-owned v3 claim.
     pub(crate) fn compare_attested_volume(&self, witness: &VolumeWitness) -> io::Result<()> {
         witness.compare_open_mount(self._persistent_var.as_raw_fd())?;
-        witness.compare_open_project(self._persistent_var.as_raw_fd())?;
         witness.recheck_handoff()
     }
 
