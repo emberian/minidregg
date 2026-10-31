@@ -1,7 +1,7 @@
 //! Physical operator packer: exact staged members, canonical Sandstorm SPK signing.
 //! No Mini authority, admission or runtime policy is implemented here.
 use ed25519_dalek::{Signer, SigningKey};
-use minidregg_spk_package_stream::archive_capnp;
+use minidregg_spk_package_stream::{archive_capnp, Limits};
 use sandstorm_package::{spk::base32, File, FileContent};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256, Sha512};
@@ -14,8 +14,49 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const RAW_LIMIT: usize = 256 * 1024 * 1024;
-const DECODED_LIMIT: usize = 768 * 1024 * 1024;
+#[derive(Clone, Copy)]
+enum Profile {
+    Standard,
+    Operator,
+}
+impl Profile {
+    fn parse(name: &str) -> Result<Self> {
+        match name {
+            "standard-v1" => Ok(Self::Standard),
+            "operator-appliance-v1" => Ok(Self::Operator),
+            _ => Err("unknown operator-selected package profile".into()),
+        }
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::Standard => "standard-v1",
+            Self::Operator => "operator-appliance-v1",
+        }
+    }
+    fn limits(self) -> Limits {
+        match self {
+            Self::Standard => Limits::DEFAULT,
+            Self::Operator => Limits::OPERATOR_APPLIANCE,
+        }
+    }
+    fn check_payload(self, bytes: usize) -> Result<()> {
+        let cap = match self {
+            Self::Standard => 700 * 1024 * 1024,
+            Self::Operator => self.limits().decoded_bytes,
+        };
+        if bytes as u64 > cap {
+            return Err("runtime exceeds selected profile payload budget".into());
+        }
+        Ok(())
+    }
+    fn check_archive(self, raw: usize, decoded: usize) -> Result<()> {
+        let limits = self.limits();
+        if raw as u64 > limits.raw_bytes || decoded as u64 > limits.decoded_bytes {
+            return Err("runtime exceeds selected profile archive budget".into());
+        }
+        Ok(())
+    }
+}
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -138,7 +179,7 @@ fn fill_files(
     }
 }
 
-fn sign_archive(files: &[File], signing: &SigningKey) -> Result<(Vec<u8>, usize)> {
+fn sign_archive(files: &[File], signing: &SigningKey, profile: Profile) -> Result<(Vec<u8>, usize)> {
     // Reuse the canonical generated schema already used by the production
     // verifier. In particular, empty regular/executable data remains a byte
     // list, not the void list emitted by the pinned legacy Bread writer.
@@ -163,17 +204,16 @@ fn sign_archive(files: &[File], signing: &SigningKey) -> Result<(Vec<u8>, usize)
     }
     let signature = capnp::serialize::write_message_to_words(&signature);
     let decoded = signature.len() + archive.len();
-    if decoded > DECODED_LIMIT {
-        return Err("package exceeds standard decoded limit".into());
-    }
+    profile.check_archive(0, decoded)?;
     let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 6);
     encoder.write_all(&signature)?;
     encoder.write_all(&archive)?;
     let mut bytes = vec![0x8f, 0xc6, 0xcd, 0xef, 0x45, 0x1a, 0xea, 0x96];
     bytes.extend(encoder.finish()?);
+    profile.check_archive(bytes.len(), decoded)?;
     Ok((bytes, decoded))
 }
-fn pack(stage: &Path, stage_sha: &str, private_key: &Path, output: &Path) -> Result<()> {
+fn pack(stage: &Path, stage_sha: &str, private_key: &Path, output: &Path, profile: Profile) -> Result<()> {
     if output.exists() {
         return Err("output already exists".into());
     }
@@ -221,9 +261,7 @@ fn pack(stage: &Path, stage_sha: &str, private_key: &Path, output: &Path) -> Res
                 total = total
                     .checked_add(size as usize)
                     .ok_or("member total overflow")?;
-                if total > 700 * 1024 * 1024 {
-                    return Err("runtime exceeds standard decoded budget; reduce closure".into());
-                }
+                profile.check_payload(total)?;
                 let path_source = source_path(stage, &receipt, path)?;
                 let executable = entry["executable"]
                     .as_bool()
@@ -251,10 +289,7 @@ fn pack(stage: &Path, stage_sha: &str, private_key: &Path, output: &Path) -> Res
     }
     let files = tree("", &entries, &sources)?;
     drop(sources);
-    let (bytes, decoded) = sign_archive(&files, &signing)?;
-    if bytes.len() > RAW_LIMIT {
-        return Err("compressed runtime exceeds Mini's 256 MiB cap".into());
-    }
+    let (bytes, decoded) = sign_archive(&files, &signing, profile)?;
     let mut temporary =
         tempfile::NamedTempFile::new_in(output.parent().ok_or("output needs parent")?)?;
     temporary.write_all(&bytes)?;
@@ -264,7 +299,7 @@ fn pack(stage: &Path, stage_sha: &str, private_key: &Path, output: &Path) -> Res
         "{}",
         json!({"app_id":app_id,"raw_sha256":hex(&Sha256::digest(&bytes)),
         "raw_bytes":bytes.len(),"decoded_bytes":decoded,"members":entries.len(),
-        "stage_sha256":stage_sha,"verification":"Signed package requires independent post-pack inventory verification."})
+        "stage_sha256":stage_sha,"profile":profile.name(),"verification":"Signed package requires independent post-pack inventory verification."})
     );
     Ok(())
 }
@@ -272,14 +307,31 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("keygen") if args.len() == 3 => keygen(Path::new(&args[2])),
-        Some("pack") if args.len() == 6 => pack(Path::new(&args[2]), &args[3], Path::new(&args[4]), Path::new(&args[5])),
-        _ => Err("usage: minidregg-oracle-pack keygen PRIVATE_KEY | pack STAGE STAGE_SHA256 PRIVATE_KEY NEW_OUTPUT.spk".into()),
+        Some("pack") if args.len() == 6 || (args.len() == 8 && args[6] == "--profile") => {
+            let profile = if args.len() == 8 { Profile::parse(&args[7])? } else { Profile::Standard };
+            pack(Path::new(&args[2]), &args[3], Path::new(&args[4]), Path::new(&args[5]), profile)
+        },
+        _ => Err("usage: minidregg-oracle-pack keygen PRIVATE_KEY | pack STAGE STAGE_SHA256 PRIVATE_KEY NEW_OUTPUT.spk [--profile standard-v1|operator-appliance-v1]".into()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operator_profile_expands_only_explicit_aggregate_budgets() {
+        let payload = 1024 * 1024 * 1024;
+        assert!(Profile::Standard.check_payload(payload).is_err());
+        assert!(Profile::Operator.check_payload(payload).is_ok());
+        assert!(Profile::Standard.check_archive(300 * 1024 * 1024, payload).is_err());
+        assert!(Profile::Operator.check_archive(300 * 1024 * 1024, payload).is_ok());
+        let limits = Limits::OPERATOR_APPLIANCE;
+        assert!(Profile::Operator.check_archive(0, limits.decoded_bytes as usize + 1).is_err());
+        assert!(Profile::Operator.check_archive(limits.raw_bytes as usize + 1, 0).is_err());
+        assert!(Profile::parse("caller-chosen-unlimited").is_err());
+        assert_eq!(Profile::parse("standard-v1").unwrap().name(), "standard-v1");
+    }
 
     fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf, String) {
         let dir = tempfile::tempdir().unwrap();
@@ -330,7 +382,7 @@ mod tests {
     fn real_signed_split_package_preserves_members() {
         let (dir, stage, key_path, stage_sha) = fixture();
         let output = dir.path().join("runtime.spk");
-        pack(&stage, &stage_sha, &key_path, &output).unwrap();
+        pack(&stage, &stage_sha, &key_path, &output, Profile::Standard).unwrap();
         let parsed = sandstorm_package::Spk::parse(&fs::read(&output).unwrap()).unwrap();
         assert_eq!(
             parsed.archive.find("app"),
@@ -341,7 +393,21 @@ mod tests {
             parsed.public_key,
             SigningKey::from_bytes(&[9; 32]).verifying_key().to_bytes()
         );
-        assert!(pack(&stage, &stage_sha, &key_path, &output).is_err());
+        assert!(pack(&stage, &stage_sha, &key_path, &output, Profile::Standard).is_err());
+    }
+
+    #[test]
+    fn explicit_operator_profile_keeps_signing_and_member_custody() {
+        let (dir, stage, key_path, stage_sha) = fixture();
+        let output = dir.path().join("operator-runtime.spk");
+        pack(&stage, &stage_sha, &key_path, &output, Profile::Operator).unwrap();
+        let parsed = sandstorm_package::Spk::parse(&fs::read(&output).unwrap()).unwrap();
+        assert_eq!(parsed.archive.find("app"), Some(b"fixture payload".as_slice()));
+        assert_eq!(parsed.public_key, SigningKey::from_bytes(&[9; 32]).verifying_key().to_bytes());
+        fs::write(stage.join("image/app"), b"changed payload").unwrap();
+        let refused = dir.path().join("changed-operator-runtime.spk");
+        assert!(pack(&stage, &stage_sha, &key_path, &refused, Profile::Operator).is_err());
+        assert!(!refused.exists());
     }
 
     #[test]
@@ -349,12 +415,12 @@ mod tests {
         let (dir, stage, key_path, stage_sha) = fixture();
         let output = dir.path().join("must-not-exist.spk");
         fs::write(stage.join("image/app"), b"changed payload").unwrap();
-        assert!(pack(&stage, &stage_sha, &key_path, &output)
+        assert!(pack(&stage, &stage_sha, &key_path, &output, Profile::Standard)
             .unwrap_err()
             .to_string()
             .contains("member bytes changed"));
         assert!(!output.exists());
-        assert!(pack(&stage, &"0".repeat(64), &key_path, &output)
+        assert!(pack(&stage, &"0".repeat(64), &key_path, &output, Profile::Standard)
             .unwrap_err()
             .to_string()
             .contains("stage receipt hash mismatch"));
@@ -368,7 +434,7 @@ mod tests {
             File::regular("empty-regular", Vec::new()),
             File::executable("empty-executable", Vec::new()),
         ];
-        let (bytes, _) = sign_archive(&files, &SigningKey::from_bytes(&[11; 32])).unwrap();
+        let (bytes, _) = sign_archive(&files, &SigningKey::from_bytes(&[11; 32]), Profile::Standard).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.spk");
         fs::write(&path, bytes).unwrap();
