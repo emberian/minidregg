@@ -45,6 +45,13 @@ record's turn); the birth receive 405 (admitDecodedNative 183, receiveCandidateW
    cold first read, AND the doubled per-request refresh (one view instead of two), so the planned
    "one derived turn shared by both views" memo is NOT built (2b deletes the second view). Scope: ~135
    `opened.durable` uses in Kernel/NativeHost.lean, ~259 in NativeHostReplay.lean, 25 in Host/Main.lean. Order:
+   Inventory done (10-31): NativeHostReplay reads the full image 89x, 81 of them the provenance premise
+   `present : opened.durable.image.accepted[i]? = some record` (issue, reserve, grant, lifecycle evidence at an
+   index); the rest are height/base/baseHeight/logStart/snapshot/extend/prepare. NativeHost: `durable.snapshot` 11x
+   (cell bytes, roots: `OpenedServed.served` has them), `image.accepted` 4x, links/index 2x each. Host/Main: 6.
+   So 2b's statement change is one premise shape: `accepted[i]? = some record` becomes the Opening's authenticated
+   reader's record at i (`DurableHistoryReader`, MAC-verified tag, trusted storage), as `Light.basisVia` already
+   reads keys; everything else maps onto `OpenedServed` fields.
    (a) inventory what each `Opened` consumer reads (directory, authority, pins, seed/logStart exactness, the image's
    accepted records for historical receipts and walks); (b) give `OpenedServed` the missing fields as maintained
    values; (c) retype receivers family by family (birth first: `Held.of` already isolates it to directory +
