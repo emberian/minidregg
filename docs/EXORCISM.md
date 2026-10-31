@@ -11,17 +11,17 @@ Costs are per operation on hbox unless said otherwise. `H` = history height.
 
 | # | where | what it does | why nobody would do it on purpose | cost and scaling | fix | state |
 |---|---|---|---|---|---|---|
-| 1 | every durable write: `mini_sdk::durable`, `phase`, ~575 call sites in 164 files (native/, deploy/, scripts/) | fsync of every file and its directory, ancestor chains, seal records, syncfs, SQLite `synchronous=FULL` + `fullfsync`, anchor fsync, on reads as well as writes | no durability design was ever asked for; a read has no effect to keep | hot-path measured 207 fsyncs, 4.0 s of a 3.9 s line (`room bind`); `story new` 62-70 s, of which Host work was 4.5 s | all removed (batch 1) | on lane/exorcism, measured below |
+| 1 | every durable write: `mini_sdk::durable`, `phase`, ~575 call sites in 164 files (native/, deploy/, scripts/) | fsync of every file and its directory, ancestor chains, seal records, syncfs, SQLite `synchronous=FULL` + `fullfsync`, anchor fsync, on reads as well as writes | no durability design was ever asked for; a read has no effect to keep | hot-path measured 207 fsyncs, 4.0 s of a 3.9 s line (`room bind`); `story new` 62-70 s, of which Host work was 4.5 s | all removed (batch 1; testing/ and extensionless fixtures in e38913cc5) | merged to staging (6ffabc364), measured below |
 | 2 | `native/resource-client/src/main.rs` `process` / `local_process` | spawns a fresh `minidregg-host` per Host call unless `--socket` | the resident `mini serve` exists | Host start + Store open O(H) per call | resident socket | hot-path |
-| 3 | `native/resource-client/src/web/body.rs` `verb`, `plan_line`, `verb_detached` | every form post and most fragments spawn a whole `mini shell` child; `plan_line` spawns one only to PARSE a line | the shell's parser and planner are in the same binary | one process start, workspace load and two resident connections per page action; 28 call sites | plan in process (batch 2: `shell::plan_ending`); one resident shell per body | plan: on the lane; actions: open |
-| 4 | `web/body.rs` `import_inbox` (public front page) | each GET scans the inbox and spawns `mini workspace --action import` per new file | `workspace::import` is a function in this crate | one child per new inbox file per page load | call `workspace::import` in process | open |
+| 3 | `native/resource-client/src/web/body.rs` `verb`, `plan_line`, `verb_detached` | every form post and most fragments spawn a whole `mini shell` child; `plan_line` spawns one only to PARSE a line | the shell's parser and planner are in the same binary | one process start, workspace load and two resident connections per page action; 28 call sites | plan in process (`shell::plan_ending`); one resident shell per body | plan: done (5f9d41e2b); actions: open |
+| 4 | `web/body.rs` `import_inbox` (public front page) | each GET scans the inbox and spawns `mini workspace --action import` per new file | `workspace::import` is a function in this crate | one child per new inbox file per page load | `workspace::import_delegated` in process | done (5f9d41e2b) |
 | 5 | `native/grain-runtime/src/main.rs` (`workspace_readonly`, `workspace_propose`, `workspace_submit`, recover, import, export; 20 sites) | every Hermes typed-tool call spawns `mini workspace` and parses its stdout JSON | a JSON round trip through a child between our own components | one `mini` start, workspace load and resident handshakes per tool call | resident client over a socket | open |
 | 6 | `grain-runtime` `inspected_pre_submit_refusal`, `dispatch_mark_send_v3`; `spk-host` `PrivateOperator::tool_until` (~20 callers) | spawn the 180 MB Lean Host one-shot to `author`/`inspect`/`signatures` | the resident storeless codec (`mini codec-resident`, `mini_sdk::local::Codec`) answers the same frames | 0.07-0.24 s bare start each, several per grain dispatch | codec frames; the one-shot arms in `Host/Main.lean` fold into `pureCodec` (pretty vs compact JSON and the 22 MiB dispatch bound differ today) | open |
-| 7 | `spk-host` `run_pinned` | polls the child every 10 ms and fsynced its stderr log | a wait is a wait | up to 10 ms per helper call (the fsync went in batch 1) | blocking wait with deadline | open |
+| 7 | `spk-host` `run_pinned` | polls the child every 10 ms and fsynced its stderr log | a wait is a wait | up to 10 ms per helper call (the fsync went in batch 1) | blocking wait with deadline | done on staging (`wait_for_exit`) |
 | 8 | `Compiler/NativeCoprocess.lean` callers: `CredentialSignatureIO.verify`, every `DurableReceiverCore` Store op | each signature check and Store op makes a temp dir, writes inputs to files, the helper reads them back, writes its output to a file, Lean reads it | the coprocess frame already carries bytes | a temp dir and 3-6 file round trips per signature and per Store op | bytes in the frame | open (Lean; needs a Host build) |
-| 9 | `native/hyperdocument-link-sqlite-store/src/main.rs` `run` | every helper request re-opens SQLite: mkdir, canonicalize, open, six PRAGMAs, schema check | the helper is a resident process | about a millisecond per Store op | keep the handle per root, reopen on inode change | open |
-| 10 | `native/resource-client/src/apps.rs` `delegate_lifecycle` | `apps install` spawns `mini workspace --action app-lifecycle` per round, up to 14 rounds plus status | same binary; `chat::client` already runs actions in process | two process starts per round | `capture::command` in process | open |
-| 11 | `web.rs` `Site::doc` | a document page is three separate signed reads (page, `links`, `backlinks`) | `signed_views` batches reads | two extra challenge/query round trips per page | one batch | open |
+| 9 | `native/hyperdocument-link-sqlite-store/src/main.rs` `run` | every helper request re-opens SQLite: mkdir, canonicalize, open, six PRAGMAs, schema check | the helper is a resident process | about a millisecond per Store op | keep the handle per root, reopen on inode change | done (b3b132f19) |
+| 10 | `native/resource-client/src/apps.rs` `delegate_lifecycle` | `apps install` spawns `mini workspace --action app-lifecycle` per round, up to 14 rounds plus status | same binary; `chat::client` already runs actions in process | two process starts per round | `capture::command` in process | done (b3b132f19) |
+| 11 | `web.rs` `Site::doc` | a document page is three separate signed reads (page, `links`, `backlinks`) | `signed_views` batches reads | two extra challenge/query round trips per page | one `signed_views_mixed` batch | done (b3b132f19) |
 | 12 | `web.rs` `Site::targets`, `index` | every page re-reads and parses every `refs/*.json` | the workspace is loaded once per body | O(references) per page | keep the index in the body | open |
 | 13 | consent provider (`Host/ClientConsentCore.lean`) | re-admits every record the Store gained since it last looked | independent verification is the design | ~47 ms per foreign record of catch-up | hot-path's option A (rebase at checkpoint) | hot-path |
 
@@ -75,3 +75,21 @@ One run each, `strace -f` over the client, both residents, the private Host and 
 (`/ci/exo/m2.sh`); the box was shared with other lanes. Before: candidate a4cb65af's `mini` and
 Store helper. After: lane/exorcism 2b206eb7e's `mini` and Store helper, same Host and consent
 provider.
+
+## Batch 2: in process, one batch, a kept handle (5f9d41e2b, b3b132f19)
+
+| path | before | after |
+|---|---|---|
+| `GET /doc/NAME` through `mini web` (member-1, four loads) | 666, 718, 629, 584 ms; 25 Host exchanges | 102, 106, 108, 84 ms; 17 Host exchanges |
+
+Before is candidate a4cb65af's `mini` (it also carries batch 1's fsyncs); after is b3b132f19's
+`mini` and Store helper. The page bytes are identical except the launch's path secret
+(`/ci/exo/m3.sh`, traces `/ci/exo/tr-{before,after}.jsonl`). Store crate tests: 38/38.
+
+## Open, in order
+
+Rows 5 and 6 are the next batch: a resident client for the Hermes controller's typed tools
+instead of one `mini workspace` child per call, and the spk-host/grain-runtime one-shot Lean
+`inspect`/`author` spawns folded into the resident codec (which first needs the one-shot arms
+of `Host/Main.lean` folded into `pureCodec`). Then rows 3 (the web body's action children),
+8 (coprocess temp files, Lean) and 12.
