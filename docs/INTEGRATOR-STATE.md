@@ -58,7 +58,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   ECONNRESET from the operator-v2 socket and was recorded as `refused`. c88b88755 (batch 7) surfaces the write error.
   Run 24 confirmed: "Connection reset by peer (os error 104)", then the exact lookup said not-submitted, which
   `lookup_operation` (resource_tools.rs ~1213) maps to `refused` together with a real Host refusal. app-reds' 40cb4aa59
-  (lane/app-reds-3-tf) is HELD, not merged: it matches error prose by substring and makes a real Host refusal found by
+  (lane/app-reds-3-tf) is DROPPED (superseded by ccdaf98b3 on lane/app-reds-h1, itself sent back 11:45: resolution must
+  carry not-submitted too, since publish_notices skips and resident_compute fails on resolution "refused"). 40cb4aa59 was: it matches error prose by substring and makes a real Host refusal found by
   exact lookup non-terminal after a reset (a retry loop). Asked for the fix at the lookup (not-submitted distinct, Host
   refusal stays terminal, two tests). The reset's own cause (ServeBounds 10 s deadline?) stays open; run 25 times it.
 - Batch 6 74e1cfa10 j14: `FAIL rc=1`; its world /ci/j-74e1cf was swept, so its signature is unrecorded: not counted as H1.
@@ -77,6 +78,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 11:45: app-reds: ccdaf98b3 sent back (not-submitted as its own resolution at every resolution match; tests).
 - 10-31 11:30: retained-mode: 05bffae27/7f42f6445 merged (573303614); auditor a4d9a6f4cba4855ca: round-3 request.
 - 10-31 11:20: app-reds: 40cb4aa59 held with review (fix at lookup_operation; typed transport cause; two tests).
 - 10-31 11:08: app-reds: H1 one fault (2/2 same place), batch 6 unrecorded, batch 7 base is H2, W1 separate; asked for
@@ -97,7 +99,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 | exorcist | a76808829fc8e4836 (a6ad40ce192354deb, a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
 | perf-apps | a25df305cfd551d8b | apps install, grain HTTP path, typed-tool path (perf) |
 | perf-client | a778bbda6509944a5 (a8d456c6e773efbb8 retired) | client, consent provider per-record cost, web page loads, idle cold start (perf) |
-| retained-mode | a13f0c9ab4513b2d7 | incremental-computation architecture: a Lean incremental node with one generic "maintained = recomputed" theorem, the Host's derived structures as maintained nodes persisted in checkpoints, emission from Effects/, a lint for whole-state functions on per-request paths, one hot path migrated end to end |
+| retained-mode | a9b54e85e4a194b91 (a13f0c9ab4513b2d7 retired) | incremental-computation architecture: a Lean incremental node with one generic "maintained = recomputed" theorem, the Host's derived structures as maintained nodes persisted in checkpoints, emission from Effects/, a lint for whole-state functions on per-request paths, one hot path migrated end to end |
 | demo-reds (sub-Opus of the integrator) | a64c387f3e638aa63 | bend/web/door/Hermes product reds as routed |
 | statement auditor (sub-Opus of the integrator) | a4d9a6f4cba4855ca | read-only adversarial audit of each lane's top-level statements, one round per merged sha |
 
