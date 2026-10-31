@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# scripts/pipeline/candidate-transfer -- copy one candidate between boxes so that nothing ever sees half of it.
+#
+#   scripts/pipeline/candidate-transfer SRC_HOST:SRC_CANDIDATES DST_HOST:DST_CANDIDATES NAME
+#
+# e.g.  candidate-transfer hbox:/home/hbox/lanes/integ/candidates bb2:/srv/integ/candidates b9450147f571...
+# Run it anywhere that can ssh to both hosts (the Mac); a host of `-` means local.
+#   1. streams NAME as a tar into DST_CANDIDATES/.incoming-NAME (a dot name: the builder, the gate, ship.sh and
+#      `ls candidates/` never take it for a candidate);
+#   2. on DST, checks the copy against its own SHA256SUMS (and fixtures/SHA256SUMS when present) and requires READY
+#      when the source has one;
+#   3. only then renames it to DST_CANDIDATES/NAME, in one rename(2) on the same filesystem.
+# A failed or interrupted transfer leaves only .incoming-NAME (rerun replaces it). An existing DST NAME is refused.
+# The rule for every candidate transfer: never copy into candidates/NAME directly.
+set -euo pipefail
+[ $# = 3 ] || { sed -n 3,4p "$0" >&2; exit 64; }
+src_host=${1%%:*} src=${1#*:} dst_host=${2%%:*} dst=${2#*:} name=$3
+case $name in */*|.*|'') echo "candidate-transfer: bad name $name" >&2; exit 64 ;; esac
+on() { local h=$1; shift; if [ "$h" = - ]; then bash -c "$*"; else ssh -o ConnectTimeout=20 "$h" "$*"; fi; }
+q() { printf '%q' "$1"; }
+inc="$dst/.incoming-$name"
+on "$dst_host" "set -e; [ ! -e $(q "$dst/$name") ] || { echo 'candidate-transfer: $dst/$name exists' >&2; exit 65; }
+  rm -rf $(q "$inc"); mkdir -p $(q "$inc")"
+t0=$(date +%s)
+on "$src_host" "tar -C $(q "$src/$name") -cf - ." | on "$dst_host" "tar -C $(q "$inc") -xf -"
+ready=$(on "$src_host" "[ -e $(q "$src/$name/READY") ] && echo yes || echo no")
+on "$dst_host" "set -e; cd $(q "$inc")
+  [ -f SHA256SUMS ] || { echo 'candidate-transfer: no SHA256SUMS' >&2; exit 66; }
+  sha256sum --quiet -c SHA256SUMS
+  [ ! -f fixtures/SHA256SUMS ] || (cd fixtures && sha256sum --quiet -c SHA256SUMS)
+  [ $ready = no ] || [ -e READY ] || { echo 'candidate-transfer: READY missing' >&2; exit 66; }
+  cd ..; [ ! -e $(q "$name") ] && mv -T $(q ".incoming-$name") $(q "$name")"
+echo "candidate-transfer: $dst_host:$dst/$name verified and in place ($(( $(date +%s) - t0 )) s)"
