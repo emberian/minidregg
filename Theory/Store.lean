@@ -354,6 +354,89 @@ def firstDisabled? : Store L → Patch L → Option Nat
   | nil => rfl
   | cons op rest ih => exact ih (op.apply store)
 
+/-- The patch that runs `before` to `after`: a write or allocation for every entry of `after`
+whose value differs, a free for every entry of `before` that `after` lacks (`run_diff`).
+A reader that holds a cell and is handed the next cell's bytes moves the held cell's
+carried structure by this patch instead of building it (`Materialized.relativeTo`). -/
+def diff (before after : Store L) : Patch L :=
+  after.toList.filterMap (fun entry =>
+      if before entry.1 = some entry.2 then none
+      else some (match before entry.1 with
+        | some old => Op.write entry.1.1 entry.1.2 old entry.2
+        | none => Op.allocate entry.1.1 entry.1.2 entry.2)) ++
+    before.toList.filterMap (fun entry =>
+      if after entry.1 = none then some (Op.free entry.1.1 entry.1.2 entry.2) else none)
+
+/-- A patch each of whose operations sets its address to `target`'s value runs any store to
+`target` at the addresses it touches and leaves the rest. -/
+theorem run_apply_of_sets (target : Store L) :
+    ∀ (patch : Patch L), (∀ op ∈ patch, ∀ store : Store L,
+        op.apply store = store.set op.address (target op.address)) →
+      ∀ (store : Store L) (address : Address L),
+        run store patch address = if address ∈ patch.map Op.address then target address else store address
+  | [], _, store, address => by simp
+  | op :: rest, sets, store, address => by
+      rw [run_cons, sets op (List.mem_cons_self) store,
+        run_apply_of_sets target rest (fun other member => sets other (List.mem_cons_of_mem _ member))]
+      by_cases inRest : address ∈ rest.map Op.address
+      · simp [inRest]
+      · by_cases here : address = op.address
+        · subst here; simp [inRest]
+        · simp [inRest, here]
+
+theorem diff_sets (before after : Store L) :
+    ∀ op ∈ diff before after, ∀ store : Store L,
+      op.apply store = store.set op.address (after op.address) := by
+  intro op member store
+  rcases List.mem_append.mp member with changed | freed
+  · obtain ⟨entry, present, made⟩ := List.mem_filterMap.mp changed
+    have value : after entry.1 = some entry.2 := (SparseMap.mem_toList after entry.1 entry.2).mp present
+    split at made
+    · cases made
+    · cases made
+      split <;> simp [Op.apply, Op.address, value]
+  · obtain ⟨entry, _, made⟩ := List.mem_filterMap.mp freed
+    split at made
+    · rename_i absent
+      cases made
+      simp [Op.apply, Op.address, absent]
+    · cases made
+
+/-- `diff` runs `before` to `after`. -/
+theorem run_diff (before after : Store L) : run before (diff before after) = after := by
+  apply SparseMap.ext_iff'.mpr
+  intro address
+  rw [run_apply_of_sets after _ (diff_sets before after)]
+  split
+  · rfl
+  · rename_i untouched
+    by_contra differ
+    apply untouched
+    rw [List.mem_map]
+    cases found : after address with
+    | some value =>
+        have present := (SparseMap.mem_toList after address value).mpr found
+        cases prior : before address with
+        | none =>
+            have member : Op.allocate address.1 address.2 value ∈ diff before after :=
+              List.mem_append_left _ (List.mem_filterMap.mpr ⟨⟨address, value⟩, present, by
+                simp [prior]⟩)
+            exact ⟨_, member, rfl⟩
+        | some old =>
+            have changed : old ≠ value := fun same => differ (by rw [prior, found, same])
+            have member : Op.write address.1 address.2 old value ∈ diff before after :=
+              List.mem_append_left _ (List.mem_filterMap.mpr ⟨⟨address, value⟩, present, by
+                simp [prior, changed]⟩)
+            exact ⟨_, member, rfl⟩
+    | none =>
+        cases old : before address with
+        | none => exact absurd (old.trans found.symm) differ
+        | some value =>
+            have member : Op.free address.1 address.2 value ∈ diff before after :=
+              List.mem_append_right _ (List.mem_filterMap.mpr ⟨⟨address, value⟩,
+                (SparseMap.mem_toList before address value).mpr old, by simp [found]⟩)
+            exact ⟨_, member, rfl⟩
+
 theorem validFrom_append (store : Store L) (left right : Patch L) :
     ValidFrom store (left ++ right) ↔
       ValidFrom store left ∧ ValidFrom (run store left) right := by
