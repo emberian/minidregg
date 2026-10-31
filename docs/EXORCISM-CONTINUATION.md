@@ -117,6 +117,23 @@ docs/HOT-PATH-STATE.md). This lane has not built one.
   file into `mini-line`), then the in-process file bus (the query path passes paths between
   `author`/`inspect`/`host_files`; bytes would remove the remaining scratch writes).
 
+## Next: the codec's double view render (root: yes, batch with 47b7cb2e1 + c763e3ead)
+
+Per `doc show` the codec resident renders the same view twice: `inspect view-resource`
+(Host/Json.lean `resourceJson` via `contentCellJson`, used by the client for the K-NARROW-HIDE
+check and the entries) and `inspect view-document` (`documentJson`: the client sends the same
+view bytes back hex-encoded inside JSON, `pageOfView` decodes them again, `pageJson` renders
+again), plus one more `view-document` per transcluded source for its line numbers
+(workspace.rs `render(bin, &[])`). In the batch 6 profile: resourceJson 23%, documentJson 23%,
+PackedCell.decodePayload 15% of the codec's busy time. Two routes, not exclusive:
+1. one inspection kind that answers the resource view and its document rendering together (the
+   client asks once; Json.lean decodes once and renders the content once);
+2. `view-document` taking the view bytes as a binary frame (no hex-in-JSON), and the client's
+   per-source line-number render folded into the host's.
+Both are Lean (Host/Json.lean) plus the client's callers in workspace.rs (`signed_view` users that
+then call `render`). Build through `scripts/pipeline/native-loop` (about 7 min; base
+acc7cfa03fac56b2261ce3bd1ec5ad1693ce281f) together with 47b7cb2e1 and c763e3ead.
+
 ## Other open items
 
 - The client's attempt-file bus: about 60 openat per signed read (it writes each step and reads it
