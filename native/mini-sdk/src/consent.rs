@@ -405,9 +405,25 @@ pub fn connect_resident_kind(kind: ResidentKind, executable: &Path, settings_byt
 
 /// A connection to this binding's resident of `kind`, starting it when none listens.
 fn resident_connection(kind: ResidentKind, executable: &Path, settings_bytes: &[u8], launch: Command) -> Result<std::os::unix::net::UnixStream> {
+    resident_connection_in(&private_anchor_dir()?, kind, executable, settings_bytes, launch)
+}
+
+/// [`connect_resident_kind`] in the resident directory `dir` (owner-private) rather than this
+/// process's own: split tenancy's delegated consent workers all reach the operator's ONE shared
+/// consent resident there. `launch` must serve that same directory (MINI_CONSENT_ANCHOR_DIR=`dir`).
+pub fn connect_resident_in(dir: &Path, kind: ResidentKind, executable: &Path, settings_bytes: Vec<u8>, launch: Command) -> Result<Session> {
+    if !crate::private::dir_ok(&fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?) {
+        return Err(format!("resident directory {} must be an owner-private directory", dir.display()).into());
+    }
+    let stream = resident_connection_in(dir, kind, executable, &settings_bytes, launch)?;
+    let input = stream.try_clone().map_err(|e| e.to_string())?;
+    Ok(Session::over(Box::new(input), Box::new(stream), executable.to_path_buf(), settings_bytes))
+}
+
+fn resident_connection_in(dir: &Path, kind: ResidentKind, executable: &Path, settings_bytes: &[u8], launch: Command) -> Result<std::os::unix::net::UnixStream> {
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
-    let dir = private_anchor_dir()?;
+    let dir = dir.to_path_buf();
     let binding = binding(executable, settings_bytes)?;
     let (socket, _socket_directory) = resident_socket(kind, &dir, &binding)?;
     let stream = match resident_stream(&socket) {

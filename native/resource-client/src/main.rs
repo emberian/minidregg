@@ -973,10 +973,11 @@ usage:
                          the box's shared codec Host for every member account (split tenancy); requires one
                          systemd-activated listener; clients select it with MINI_CODEC_SOCKET/_PEER_UID and
                          refuse unless it greets with their own Host image and settings digests
-  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds N]
+  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds N] [--resident-dir DIR]
                          delegated full consent for one client UID that cannot read the Store (a controller, a
                          split-tenancy member); requires one systemd-activated listener; keeps its warm verifier
-                         (with --idle-seconds N, ends after N seconds with no connection); clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
+                         (with --idle-seconds N, ends after N seconds with no connection); with
+                         --resident-dir it relays to the operator's ONE shared consent resident there; clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
@@ -3031,9 +3032,12 @@ fn run(mut args: Args) -> Result<()> {
                     .ok_or("idle seconds must be a positive decimal")?),
                 None => None,
             };
+            // Split tenancy (ember 2026-10-31): relay to the operator's ONE shared consent resident
+            // in this owner-private directory instead of holding a provider per member.
+            let shared = args.optional("resident-dir").map(path);
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
-            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,idle.map(std::time::Duration::from_secs))
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,idle.map(std::time::Duration::from_secs),shared.as_deref())
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {

@@ -491,6 +491,105 @@ fn serve_connection(socket: UnixStream, pins: &Selection, worker: &Mutex<Worker>
         transport::write_frame(&mut channel, &reply).map_err(|e| e.to_string())?;
     }
 }
+/// Who answers a member's delegated consent: this worker's own provider child, or the operator's
+/// ONE shared consent resident (split tenancy, ember 2026-10-31: the members' workers are thin
+/// relays to one verifier per box).
+#[derive(Clone)]
+enum Backend {
+    Own(Arc<Mutex<Worker>>),
+    Shared(Arc<SharedVerifier>),
+}
+
+/// The operator's shared consent resident in `dir` (owner-private to the operator), reached with a
+/// FRESH resident connection per member connection, so the resident re-checks the Store before
+/// that connection's first frame (`ConsentAnchor.recheckStore`, frame 233) exactly as it does for
+/// every `mini` command, and retains its anchor after every admission. The executable and config
+/// are the member's pins: their digests are checked once here, and the executable's file identity
+/// before every connection, so a replaced provider is refused, never silently resident.
+struct SharedVerifier {
+    dir: PathBuf,
+    executable: PathBuf,
+    config: PathBuf,
+    settings: Vec<u8>,
+    identity: (u64, u64, u64, i64, i64, i64, i64),
+}
+fn file_identity(meta: &fs::Metadata) -> (u64, u64, u64, i64, i64, i64, i64) {
+    use std::os::unix::fs::MetadataExt;
+    (meta.dev(), meta.ino(), meta.size(), meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec())
+}
+impl SharedVerifier {
+    fn start(executable: &Path, config: &Path, pins: &Selection, dir: &Path) -> Result<Self> {
+        fsio::check_private_dir(dir)?;
+        let settings = transport::read_config(config)?;
+        if <[u8; 32]>::from(Sha256::digest(&settings)) != pins.config {
+            return Err("consent service exact config digest mismatch".into());
+        }
+        let mut file = File::open(executable).map_err(|e| format!("consent provider {}: {e}", executable.display()))?;
+        let before = file_identity(&file.metadata().map_err(|e| e.to_string())?);
+        let mut digest = Sha256::new();
+        io::copy(&mut file, &mut digest).map_err(|e| e.to_string())?;
+        if file_identity(&file.metadata().map_err(|e| e.to_string())?) != before
+            || <[u8; 32]>::from(digest.finalize()) != pins.executable
+        {
+            return Err("consent service exact provider digest mismatch".into());
+        }
+        Ok(Self { dir: dir.to_path_buf(), executable: executable.to_path_buf(), config: config.to_path_buf(), settings, identity: before })
+    }
+    fn connect(&self) -> Result<mini_sdk::local::Session> {
+        let now = fs::metadata(&self.executable).map_err(|e| e.to_string())?;
+        if file_identity(&now) != self.identity {
+            return Err("consent provider changed under the delegated worker; restart it".into());
+        }
+        let mini = std::env::current_exe().map_err(|e| e.to_string())?;
+        let mut launch = std::process::Command::new(mini);
+        launch.arg("consent-resident").arg("--consent").arg(&self.executable).arg("--settings").arg(&self.config)
+            .env("MINI_CONSENT_ANCHOR_DIR", &self.dir);
+        Ok(mini_sdk::consent::connect_resident_in(&self.dir, mini_sdk::consent::ResidentKind::Consent,
+            &self.executable, self.settings.clone(), launch)?)
+    }
+}
+
+/// [`serve_connection`] over the shared verifier: the same peer check, handshake, delegated
+/// frames and deadlines; each frame is the resident's to answer, on this member connection's own
+/// resident connection (opened at its first frame).
+fn serve_connection_shared(socket: UnixStream, pins: &Selection, shared: &SharedVerifier) -> Result<()> {
+    if transport::peer_uid(&socket)? != pins.peer {
+        return Err("consent controller peer UID mismatch".into());
+    }
+    socket.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let deadline = Arc::new(Mutex::new(Instant::now() + IO));
+    let mut channel = Channel {
+        socket,
+        deadline: deadline.clone(),
+        failed: Arc::new(AtomicBool::new(false)),
+        writer: false,
+        client: false,
+    };
+    let hello = transport::read_frame_bounded(&mut channel, TAG.len() + 64)
+        .map_err(|e| e.to_string())?
+        .ok_or("missing consent hello")?;
+    if hello != pins.hello() {
+        return Err("consent client binding mismatch".into());
+    }
+    transport::write_frame(&mut channel, &hello).map_err(|e| e.to_string())?;
+    let mut session: Option<mini_sdk::local::Session> = None;
+    loop {
+        let frame = ingress(&mut channel, REPLAY, IO)?;
+        if !allowed(&frame) {
+            return Err("consent operation is not delegated".into());
+        }
+        if session.is_none() {
+            session = Some(shared.connect()?);
+        }
+        let (answer, body) = session.as_mut().expect("resident session").exchange(frame[0], &frame[1..])?;
+        if answer != frame[0] && answer != mini_sdk::consent::CONSENT_REFUSAL {
+            return Err("unexpected consent verifier response".into());
+        }
+        *deadline.lock().map_err(|_| "deadline lock")? = Instant::now() + IO;
+        transport::write_frame(&mut channel, &[&[answer], body.as_slice()].concat()).map_err(|e| e.to_string())?;
+    }
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn serve(
     socket: &Path,
@@ -501,6 +600,7 @@ pub(crate) fn serve(
     controller: u32,
     anchors: &Path,
     idle: Option<Duration>,
+    shared: Option<&Path>,
 ) -> Result<()> {
     if controller == 0 || controller == mini_sdk::private::euid() {
         return Err("consent requires distinct non-root controller UID".into());
@@ -521,9 +621,10 @@ pub(crate) fn serve(
         executable: image,
         config: settings,
     };
-    let worker = Arc::new(Mutex::new(Worker::start(
-        executable, config, &pins, anchors,
-    )?));
+    let backend = match shared {
+        Some(dir) => Backend::Shared(Arc::new(SharedVerifier::start(executable, config, &pins, dir)?)),
+        None => Backend::Own(Arc::new(Mutex::new(Worker::start(executable, config, &pins, anchors)?))),
+    };
     // The worker keeps its warm verifier, as the member-side consent resident does: no idle exit
     // unless `--idle-seconds` asks for one (`idle` Some). Socket activation would start it again on
     // the next connection from the retained frontier, but that start is a provider launch and a
@@ -555,9 +656,13 @@ pub(crate) fn serve(
         if let Ok(mut t) = last.lock() {
             *t = Instant::now();
         }
-        let (worker, active, last, pins) = (worker.clone(), active.clone(), last.clone(), pins.clone());
+        let (backend, active, last, pins) = (backend.clone(), active.clone(), last.clone(), pins.clone());
         std::thread::spawn(move || {
-            if let Err(e) = serve_connection(stream, &pins, &worker) {
+            let served = match &backend {
+                Backend::Own(worker) => serve_connection(stream, &pins, worker),
+                Backend::Shared(shared) => serve_connection_shared(stream, &pins, shared),
+            };
+            if let Err(e) = served {
                 eprintln!("mini consent connection: {e}")
             }
             if let Ok(mut t) = last.lock() {
@@ -571,6 +676,68 @@ pub(crate) fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Split tenancy's thin relay: two member connections are answered by ONE shared consent
+    /// resident (one provider start), each on its own resident connection, so the resident's Store
+    /// re-check (233) precedes each connection's first frame; a client with other pins refuses.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn shared_verifier_relays_each_member_connection_to_one_resident() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = PathBuf::from(format!("/tmp/mcp-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let anchors = dir.join("a");
+        fs::create_dir(&anchors).unwrap();
+        fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
+        // A provider stand-in: logs each start and each operation, answers 233/228 with themselves,
+        // 229 with an anchor, and any other frame with its own byte and "ok".
+        let provider = dir.join("provider");
+        fs::write(&provider, format!("#!/usr/bin/python3 -I\nimport sys,struct\nopen('{d}/starts','a').write('start\\n')\n\
+i,o=sys.stdin.buffer,sys.stdout.buffer\nwhile True:\n  w=i.read(4)\n  if len(w)<4: break\n  f=i.read(struct.unpack('<I',w)[0])\n  op=f[0]\n  open('{d}/ops','a').write(str(op)+'\\n')\n  r=bytes([op])+(b'ANCHOR' if op==229 else b'' if op in (228,233) else b'ok')\n  o.write(struct.pack('<I',len(r))+r); o.flush()\n", d = dir.display())).unwrap();
+        fs::set_permissions(&provider, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = dir.join("config.json");
+        fs::write(&config, b"{\"x\":1}").unwrap();
+        let pins = Selection {
+            socket: dir.join("peer.sock"),
+            peer: mini_sdk::private::euid(),
+            executable: Sha256::digest(fs::read(&provider).unwrap()).into(),
+            config: Sha256::digest(b"{\"x\":1}").into(),
+        };
+        // The operator's resident, already running (as its own unit would be).
+        let (a, p, c) = (anchors.clone(), provider.clone(), config.clone());
+        std::thread::spawn(move || mini_sdk::consent::serve_resident(&a, p, c, None));
+        for _ in 0..2000 {
+            if fs::read_dir(&anchors).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".sock")) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let shared = Arc::new(SharedVerifier::start(&provider, &config, &pins, &anchors).unwrap());
+        for _ in 0..2 {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            let (s, p) = (shared.clone(), pins.clone());
+            let served = std::thread::spawn(move || serve_connection_shared(server, &p, &s));
+            transport::write_frame(&mut client, &pins.hello()).unwrap();
+            assert_eq!(transport::read_frame_bounded(&mut client, 1024).unwrap().unwrap(), pins.hello());
+            transport::write_frame(&mut client, &[220, 1, 2, 3]).unwrap();
+            assert_eq!(transport::read_frame_bounded(&mut client, 1024).unwrap().unwrap(), b"\xdcok".to_vec());
+            drop(client);
+            let _ = served.join();
+        }
+        assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1, "one provider for every member");
+        let ops: Vec<String> = fs::read_to_string(dir.join("ops")).unwrap().lines().map(str::to_owned).collect();
+        assert_eq!(ops.iter().filter(|op| *op == "233").count(), 2, "a Store re-check per member connection: {ops:?}");
+        // A member whose pins name another config is refused at the handshake.
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let (s, p) = (shared.clone(), pins.clone());
+        let served = std::thread::spawn(move || serve_connection_shared(server, &p, &s));
+        let other = Selection { config: [9; 32], ..pins.clone() };
+        transport::write_frame(&mut client, &other.hello()).unwrap();
+        assert!(served.join().unwrap().is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn consent_proxy_explicit_invalid_environment_never_disappears() {
         use std::os::unix::ffi::OsStringExt;
