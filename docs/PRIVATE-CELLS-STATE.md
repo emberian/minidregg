@@ -186,9 +186,17 @@ applied):
   `write` checks the one address (`write_refuses`), so no receiving path exists without it.
 * `write`: refuses the blinding address (`write_refuses_blinding`: the mask moves only by
   `accept`); a value is one `Cache.insert`, a removal one `Cache.erase` (`write_none_index`).
-* `accept`: one accepted version: the supplied mask and the next version, then the patch, for a
-  no-op too (`accept_spec`). Mask freshness and secrecy are the host's custody obligation, an
-  argument here.
+* `accept`: one accepted version: the next version and its mask `Params.prf (version + 1)`, then
+  the patch in order, for a no-op too; no caller supplies a mask (fourth-round audit).
+  `accept_spec` gives the resulting store exactly; `accept_isSome_iff`: accepted exactly when every
+  write fits and avoids the blinding. `History.masks_fresh`: across a cell's history the custody
+  function is evaluated at pairwise distinct versions, the receiver's discharge of the fresh-mask
+  premise under a PRF assumption on `Params.prf` (a host custody key independent of every disclosed
+  value).
+* `birth` refuses a store already holding a mask (`birth_refuses_masked`: imports are never
+  silently re-masked) and accepts any other gated store (`birth_accepts`); `blinding_fits` proves
+  the registry's blinding address passes the gate, so no caller supplies that either.
+* `privateRoot` is `BlindedCellHidingDraft.maskedTrieCommitment` itself: one commitment definition.
 * `root` / `root_eq`: the outer commitment (cSHAKE256 under `DREGG/PRIVATE-CELL/OUTER/v1` over the
   state-derived context, the held mask, the kept digest) equals `privateRoot`, with no rebuild and
   no store lookup.

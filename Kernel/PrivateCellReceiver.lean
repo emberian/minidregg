@@ -12,23 +12,31 @@ outer commitment over the context, the mask and the index digest.
   entries, the mask bytes held directly (`mask_eq`: the store's blinding value's
   bytes), the cell's fixed parameters and its accepted version. Every
   constructor goes through the gate.
-* `birth`: the whole store through `admit`, the first mask set at the
-  blinding address, one bulk build of the index (linear in the store, once).
+* `birth`: the whole store through `admit`, refused if it already holds a mask
+  (`birth_refuses_masked`: an import is never silently re-masked), then the mask
+  of version 0 and one bulk build of the index (`birth_accepts`).
 * `write`: one data address. The blinding address is refused (the mask moves
   only by `accept`); a key failing `addressFits` is refused, never left out of
   the index; a value is one `Cache.insert` walk, a removal one `Cache.erase`
   walk (metered at `7 L + 3` interpreter operations, `L = 516`, on injective
   live paths: a path collision is a cSHAKE256 collision among live addresses,
   `viewOpeningExact_deployed`).
-* `accept`: one accepted version, atomically: the patch's writes, then the
-  supplied mask at the blinding address and the version advanced, for a no-op
-  patch too. The mask's freshness and secrecy are the host's custody obligation
-  (independent randomness, or a PRF under an independent key); this module
-  takes it as an argument.
+* `accept`: one accepted version, atomically: the version advanced and its mask
+  `prf (version + 1)` set at the blinding address, then the patch's writes in
+  order, for a no-op patch too (`accept_spec`: the resulting store exactly;
+  `accept_isSome_iff`: accepted exactly when every write fits and avoids the
+  blinding). No caller supplies a mask. `History.masks_fresh`: across a cell's
+  history the custody function is evaluated at pairwise distinct versions, the
+  receiver's discharge of the fresh-mask premise under a PRF assumption on
+  `Params.prf` (the host's custody obligation: a key independent of every
+  disclosed value).
 * `root` / `root_eq`: the outer commitment from the kept digest and the held
   mask, under the context derived from the cell's state (`ctxOf`: protocol,
   cell, layout, accepted version, size bound), equals `privateRoot`, the
-  specification over the whole store.
+  specification over the whole store, which is
+  `BlindedCellHidingDraft.maskedTrieCommitment` itself (one commitment
+  definition).
+* `blinding_fits`: the registry's blinding address passes the gate.
 
 Owed: the insert walk metered (it backs the world root's hot path, so as a
 proved `@[csimp]` equality to the oracle walk, not a rewrite); a cell
@@ -41,6 +49,7 @@ versions for retries.
 module
 
 public import Kernel.PrivateCellView
+public import Kernel.BlindedCellHiding
 
 @[expose] public section
 
@@ -78,13 +87,19 @@ def outerRoot (ctx mask : List UInt8) (inner : Digest) : Digest :=
       (StreamCodec.product (StreamCodec.list StreamCodec.byte) digestStream)).encode (ctx, mask, inner))).digest
 
 /-- The cell's fixed parameters: protocol version, cell identity, layout digest
-bytes, public size bound, and the wire's blinding address. -/
+bytes, public size bound, the registry's selection of the wire, the wire's
+blinding address, and the custody mask function of this cell: the mask of
+accepted version `v` is `prf v`. The host instantiates `prf` as a PRF under a
+key independent of every disclosed value; the receiver only ever evaluates it
+at strictly increasing versions (`History.masks_fresh`). -/
 structure Params where
   protocol : Nat
   cell : List UInt8
   layout : List UInt8
   sizeBound : Nat
+  selected : CanonicalCellRegistry.wire? kind = some wire
   blinding : StoreCodec.Blinding wire
+  prf : Nat → (CanonicalCellRegistry.layout kind).Value blinding.space
 
 /-- The context of one accepted version. -/
 def ctxBytes (params : Params wire) (version : Nat) : List UInt8 :=
@@ -99,7 +114,8 @@ def maskOf (store : Store (CanonicalCellRegistry.layout kind)) : List UInt8 :=
 /-- **The private root (specification)**: the outer commitment over the mask and
 the canonical root of the store's index, computed from the whole store. -/
 def privateRoot (ctx : List UInt8) (store : Store (CanonicalCellRegistry.layout kind)) : Digest :=
-  outerRoot ctx (maskOf wire store) (root (deployedDig wire) (bits wire) 516 (indexEntries wire store))
+  BlindedCellHidingDraft.maskedTrieCommitment (deployedDig wire) (bits wire) 516 outerRoot ctx (maskOf wire store)
+    (indexEntries wire store)
 
 /-- A gated store with its kept index, mask, parameters and accepted version. -/
 structure KeptCell where
@@ -123,7 +139,8 @@ def root (cell : KeptCell wire) : Digest := outerRoot cell.ctx cell.mask cell.in
 
 /-- **The kept root is the private root** under the cell's own context. -/
 theorem root_eq (cell : KeptCell wire) : cell.root = privateRoot wire cell.ctx cell.fit.store := by
-  rw [root, privateRoot, Theory.AuthTrie.Cache.digest_eq cell.holds, cell.mask_eq]
+  rw [root, privateRoot, BlindedCellHidingDraft.maskedTrieCommitment, Theory.AuthTrie.Cache.digest_eq cell.holds,
+    cell.mask_eq]
 
 end KeptCell
 
@@ -185,22 +202,39 @@ theorem maskOf_set_other {store : Store (CanonicalCellRegistry.layout kind)} {a 
       have ne : b ≠ a := fun same => blind (by rw [h, same])
       simp [Store.set_ne store a v b ne]
 
-/-- The mask address passes the gate (it is never a declared data key). -/
+/-- **The registry's blinding address passes the gate**: for a declared kind it
+is `StateKey.blinding`, which carries no digest; every other kind's addresses
+always pass. -/
+theorem blinding_fits {wire : StoreCodec.Wire (CanonicalCellRegistry.layout kind)}
+    (selected : CanonicalCellRegistry.wire? kind = some wire) (B : StoreCodec.Blinding wire) :
+    addressFits 256 kind B.address = true := by
+  cases kind <;> simp only [CanonicalCellRegistry.wire?, Option.some.injEq, reduceCtorEq] at selected <;>
+    first
+    | (subst selected
+       obtain ⟨space, key, isB, _⟩ := B
+       cases space
+       simp only [DeclaredEffectCell.wire, Minidregg.Theory.EffectDeclaration.StateKey.address, Option.some.injEq,
+         Sigma.mk.injEq, heq_eq_eq, true_and] at isB
+       subst isB
+       rfl)
+    | (simp [addressFits])
+
 theorem storeFits_set_mask {store : Store (CanonicalCellRegistry.layout kind)} (gate : storeFits wire store = true)
-    (B : StoreCodec.Blinding wire) (fitsB : addressFits 256 kind B.address = true)
+    (selected : CanonicalCellRegistry.wire? kind = some wire) (B : StoreCodec.Blinding wire)
     (m : (CanonicalCellRegistry.layout kind).Value B.space) :
     storeFits wire (store.set B.address (some m)) = true :=
-  storeFits_set wire gate fitsB (some m)
+  storeFits_set wire gate (blinding_fits selected B) (some m)
 
 namespace KeptCell
 
 variable {wire}
 
 /-- Set the mask: the index is untouched (it ignores the blinding). -/
-def setMask (cell : KeptCell wire) (fitsB : addressFits 256 kind cell.params.blinding.address = true)
-    (m : (CanonicalCellRegistry.layout kind).Value cell.params.blinding.space) (version : Nat) : KeptCell wire :=
+def setMask (cell : KeptCell wire) (version : Nat) : KeptCell wire :=
+  let m := cell.params.prf version
   { params := cell.params, version := version,
-    fit := ⟨cell.fit.store.set cell.params.blinding.address (some m), storeFits_set_mask wire cell.fit.fits _ fitsB m⟩,
+    fit := ⟨cell.fit.store.set cell.params.blinding.address (some m),
+      storeFits_set_mask wire cell.fit.fits cell.params.selected _ m⟩,
     index := cell.index,
     holds := by
       have same := indexIgnoresBlinding wire cell.fit.store (cell.fit.store.set cell.params.blinding.address (some m))
@@ -215,21 +249,40 @@ def setMask (cell : KeptCell wire) (fitsB : addressFits 256 kind cell.params.bli
 
 end KeptCell
 
-/-- **Birth (and import)**: the whole store through the gate, the first mask at
-the blinding address, one bulk build of the index; version 0. -/
-def birth (params : Params wire) (fitsB : addressFits 256 kind params.blinding.address = true)
-    (store : Store (CanonicalCellRegistry.layout kind)) (m : (CanonicalCellRegistry.layout kind).Value params.blinding.space) :
-    Option (KeptCell wire) :=
-  (admit wire store).map fun fit =>
-    KeptCell.setMask
-      ⟨params, 0, fit, Theory.AuthTrie.Cache.build (bits_length wire) (indexEntries wire fit.store),
-        Theory.AuthTrie.Cache.build_holds (bits_length wire) _, maskOf wire fit.store, rfl⟩ fitsB m 0
+/-- **Birth**: the whole store through the gate, refused when it already holds a
+value at the blinding address (an imported cell is not silently re-masked: an
+import of a masked cell is a re-genesis and states so by clearing the mask
+first), then the mask of version 0 and one bulk build of the index. -/
+def birth (params : Params wire) (store : Store (CanonicalCellRegistry.layout kind)) : Option (KeptCell wire) :=
+  if store params.blinding.address = none then
+    (admit wire store).map fun fit =>
+      KeptCell.setMask
+        ⟨params, 0, fit, Theory.AuthTrie.Cache.build (bits_length wire) (indexEntries wire fit.store),
+          Theory.AuthTrie.Cache.build_holds (bits_length wire) _, maskOf wire fit.store, rfl⟩ 0
+  else none
 
-theorem birth_refuses (params : Params wire) (fitsB : addressFits 256 kind params.blinding.address = true)
+theorem birth_refuses (params : Params wire)
     {store : Store (CanonicalCellRegistry.layout kind)} {a : Address (CanonicalCellRegistry.layout kind)}
-    (live : store a ≠ none) (overflows : addressFits 256 kind a = false)
-    (m : (CanonicalCellRegistry.layout kind).Value params.blinding.space) : birth wire params fitsB store m = none := by
-  simp [birth, admit_refuses live overflows]
+    (live : store a ≠ none) (overflows : addressFits 256 kind a = false) : birth wire params store = none := by
+  unfold birth
+  split
+  · simp [admit_refuses live overflows]
+  · rfl
+
+theorem birth_refuses_masked (params : Params wire) {store : Store (CanonicalCellRegistry.layout kind)}
+    (masked : store params.blinding.address ≠ none) : birth wire params store = none := by
+  simp [birth, masked]
+
+/-- **Birth accepts** a gated store with no mask: version 0, the store with the
+mask of version 0 set, that mask held. -/
+theorem birth_accepts (params : Params wire) {store : Store (CanonicalCellRegistry.layout kind)}
+    (gate : storeFits wire store = true) (unmasked : store params.blinding.address = none) :
+    ∃ cell, birth wire params store = some cell ∧ cell.version = 0 ∧ cell.params = params ∧
+      cell.fit.store = store.set params.blinding.address (some (params.prf 0)) ∧
+      cell.mask = (wire.valueStream params.blinding.space).encode (params.prf 0) := by
+  unfold birth admit
+  rw [if_pos unmasked, dif_pos gate]
+  exact ⟨_, rfl, rfl, rfl, rfl, rfl⟩
 
 namespace KeptCell
 
@@ -267,12 +320,11 @@ def writeAll : KeptCell wire → List (Write (kind := kind)) → Option (KeptCel
   | cell, [] => some cell
   | cell, w :: rest => (cell.write w.1 w.2).bind fun next => writeAll next rest
 
-/-- **One accepted version**, atomically: the supplied mask and the next
-version, then the patch (which never writes the mask), for a no-op patch too. -/
-def accept (cell : KeptCell wire) (fitsB : addressFits 256 kind cell.params.blinding.address = true)
-    (patch : List (Write (kind := kind))) (m : (CanonicalCellRegistry.layout kind).Value cell.params.blinding.space) :
-    Option (KeptCell wire) :=
-  writeAll (cell.setMask fitsB m (cell.version + 1)) patch
+/-- **One accepted version**, atomically: the next version and its custody mask
+`prf (version + 1)`, then the patch (which never writes the mask), for a no-op
+patch too. No caller supplies a mask, so none can be reused. -/
+def accept (cell : KeptCell wire) (patch : List (Write (kind := kind))) : Option (KeptCell wire) :=
+  writeAll (cell.setMask (cell.version + 1)) patch
 
 /-- **A key failing the gate is refused**, never written outside the index. -/
 theorem write_refuses (cell : KeptCell wire) {a : Address (CanonicalCellRegistry.layout kind)}
@@ -331,21 +383,105 @@ theorem writeAll_params : ∀ {cell cell' : KeptCell wire} {patch : List (Write 
       obtain ⟨hp', hv', hm'⟩ := writeAll_params tail
       exact ⟨hp'.trans hp, hv'.trans hv, hm'.trans hm⟩
 
-/-- **An accepted version** carries the supplied mask, the next version, and a
-root equal to the private root of its store under its own context. -/
-theorem accept_spec {cell cell' : KeptCell wire} {fitsB : addressFits 256 kind cell.params.blinding.address = true}
-    {patch : List (Write (kind := kind))} {m : (CanonicalCellRegistry.layout kind).Value cell.params.blinding.space}
-    (accepted : cell.accept fitsB patch m = some cell') :
+/-- A patch applied in order to a store. -/
+def applyPatch (store : Store (CanonicalCellRegistry.layout kind)) (patch : List (Write (kind := kind))) :
+    Store (CanonicalCellRegistry.layout kind) :=
+  patch.foldl (fun s w => s.set w.1 w.2) store
+
+theorem writeAll_store : ∀ {cell cell' : KeptCell wire} {patch : List (Write (kind := kind))},
+    writeAll cell patch = some cell' → cell'.fit.store = applyPatch cell.fit.store patch
+  | _, _, [], accepted => by cases accepted; rfl
+  | cell, cell', w :: rest, accepted => by
+      simp only [writeAll, Option.bind_eq_some_iff] at accepted
+      obtain ⟨next, step, tail⟩ := accepted
+      rw [writeAll_store tail, (write_store step).1]
+      rfl
+
+/-- **When a patch is accepted**: exactly when every write fits the gate and
+avoids the blinding address. -/
+theorem writeAll_isSome_iff : ∀ (cell : KeptCell wire) (patch : List (Write (kind := kind))),
+    (writeAll cell patch).isSome ↔ ∀ w ∈ patch, addressFits 256 kind w.1 = true ∧ ¬ some w.1 = wire.blinding
+  | _, [] => by simp [writeAll]
+  | cell, w :: rest => by
+      simp only [writeAll, List.mem_cons, forall_eq_or_imp]
+      by_cases fits : addressFits 256 kind w.1 = true
+      · by_cases blind : some w.1 = wire.blinding
+        · rw [write_refuses_blinding cell blind]; simp [blind]
+        · obtain ⟨next, step⟩ := Option.isSome_iff_exists.mp (write_accepts cell fits blind w.2)
+          rw [step, Option.bind_some, writeAll_isSome_iff next rest]
+          simp [fits, blind]
+      · rw [write_refuses cell (by simpa using fits)]; simp [fits]
+
+/-- **An accepted version**: the next version, its custody mask, the store the
+old one with that mask set and the patch applied in order, and a root equal to
+the private root of that store under the version's context. -/
+theorem accept_spec {cell cell' : KeptCell wire} {patch : List (Write (kind := kind))}
+    (accepted : cell.accept patch = some cell') :
     cell'.version = cell.version + 1 ∧ cell'.params = cell.params ∧
-      cell'.mask = (wire.valueStream cell.params.blinding.space).encode m ∧
+      cell'.mask = (wire.valueStream cell.params.blinding.space).encode (cell.params.prf (cell.version + 1)) ∧
+      cell'.fit.store = applyPatch
+        (cell.fit.store.set cell.params.blinding.address (some (cell.params.prf (cell.version + 1)))) patch ∧
       cell'.root = privateRoot wire (ctxBytes wire cell.params (cell.version + 1)) cell'.fit.store := by
   unfold accept at accepted
   obtain ⟨hp, hv, hm⟩ := writeAll_params accepted
-  refine ⟨hv, hp, hm, ?_⟩
+  refine ⟨hv, hp, hm, writeAll_store accepted, ?_⟩
   rw [root_eq]
   simp only [ctx, hp, hv, setMask]
 
+theorem accept_isSome_iff (cell : KeptCell wire) (patch : List (Write (kind := kind))) :
+    (cell.accept patch).isSome ↔ ∀ w ∈ patch, addressFits 256 kind w.1 = true ∧ ¬ some w.1 = wire.blinding :=
+  writeAll_isSome_iff _ patch
+
 end KeptCell
+
+/-! ## Mask freshness: one cell's accepted history -/
+
+/-- An accepted history of one cell, newest first: a birth, then accepts. -/
+inductive History : List (KeptCell wire) → Prop
+  | birth {params : Params wire} {store : Store (CanonicalCellRegistry.layout kind)} {cell : KeptCell wire} :
+      birth wire params store = some cell → History [cell]
+  | accept {cell next : KeptCell wire} {older : List (KeptCell wire)} {patch : List (KeptCell.Write (kind := kind))} :
+      History (cell :: older) → cell.accept patch = some next → History (next :: cell :: older)
+
+/-- Every version of a history holds the custody mask of its own version, under
+one set of parameters, and the versions strictly decrease from the newest. -/
+theorem History.spec : ∀ {cells : List (KeptCell wire)}, History wire cells →
+    (∀ c ∈ cells, c.mask = (wire.valueStream c.params.blinding.space).encode (c.params.prf c.version)) ∧
+      cells.Pairwise (fun newer older => older.version < newer.version ∧ newer.params = older.params)
+  | _, .birth (cell := cell) born => by
+      unfold PrivateCellReceiver.birth at born
+      split at born
+      · obtain ⟨fit, _, rfl⟩ := Option.map_eq_some_iff.mp born
+        exact ⟨by simp [KeptCell.setMask], List.pairwise_singleton _ _⟩
+      · cases born
+  | _, .accept (cell := cell) (next := next) (older := older) earlier accepted => by
+      obtain ⟨masks, chain⟩ := History.spec earlier
+      obtain ⟨hv, hp, hm, _, _⟩ := KeptCell.accept_spec accepted
+      refine ⟨?_, List.pairwise_cons.mpr ⟨?_, chain⟩⟩
+      · intro c member
+        rcases List.mem_cons.mp member with same | member
+        · have key : ∀ q : Params wire, q = cell.params →
+              (wire.valueStream q.blinding.space).encode (q.prf (cell.version + 1)) =
+                (wire.valueStream cell.params.blinding.space).encode (cell.params.prf (cell.version + 1)) := by
+            rintro q rfl; rfl
+          rw [same, hm, hv]; exact (key _ hp).symm
+        · exact masks c member
+      · intro c member
+        rcases List.mem_cons.mp member with same | member
+        · rw [same]; exact ⟨by omega, hp⟩
+        · obtain ⟨lt, same⟩ := (List.pairwise_cons.mp chain).1 c member
+          exact ⟨by omega, hp.trans same⟩
+
+/-- **Masks are fresh**: the custody function is evaluated at pairwise distinct
+versions across a history, each version's mask being its own evaluation. This
+is the receiver's discharge of the hiding argument's fresh-mask premise: under a
+PRF at distinct inputs, the masks are jointly indistinguishable from independent
+uniform ones (the PRF term of docs/RATCHET-LOG-DESIGN.md §4). -/
+theorem History.masks_fresh {cells : List (KeptCell wire)} (history : History wire cells) :
+    (cells.map KeptCell.version).Nodup ∧
+      ∀ c ∈ cells, c.mask = (wire.valueStream c.params.blinding.space).encode (c.params.prf c.version) := by
+  obtain ⟨masks, chain⟩ := history.spec
+  exact ⟨List.pairwise_map.mpr (chain.imp fun h => Nat.ne_of_gt h.1), masks⟩
 
 #assert_axioms KeptCell.root_eq
 #assert_axioms birth_refuses
@@ -356,5 +492,10 @@ end KeptCell
 #assert_axioms KeptCell.write_accepts
 #assert_axioms KeptCell.write_none_index
 #assert_axioms KeptCell.accept_spec
+#assert_axioms KeptCell.accept_isSome_iff
+#assert_axioms blinding_fits
+#assert_axioms birth_accepts
+#assert_axioms birth_refuses_masked
+#assert_axioms History.masks_fresh
 
 end Minidregg.Kernel.PrivateCellReceiver
