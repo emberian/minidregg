@@ -25,12 +25,15 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   READY: gate15 full; name to infra, explorer (C1 16-parallel-say + own-order rows), perf-apps, perf-client (consent
   walk after-number when 619022904 lands); batch 8's verdict goes with it. Launch builds via $I/launch-build.sh SHA NOTE
   (writes build.pid; a nested `ssh … &` held the session twice).
-- **Staging d07df39dc (batch 10 so far)**: perf-client d035d8250 (SECURITY-relevant: residents ran one next-key
+- **Staging (batch 10 so far)**: perf-client d035d8250 (SECURITY-relevant: residents ran one next-key
   commitment check per process lifetime, so a rotation/revocation between commands went unseen; now checked afresh per
   resident command). Batches 8 and 9 ship residents without it: NEITHER may become a shipped fallback unless mini (and
   miniLine, same build family) is overlaid from >= d035d8250.
   + perf-client 042f2a0c1 (Loaded.untracked: only the consent provider's anchored suffix walk drops its World; walks that
   stay tracked named in the docstring; before: 7.9% of provider CPU during doc new; after on batch 10).
+  + branch-reconcile a6ae854de00e3e12e batch 1 (43dd641f7: share-issue window statement elaborated in scratch/ + AUDIT
+  31st pass; ROUTE-LATENCY-STATE rewrite; Kernel/FnConsumerFrontier{Proofs,Scenario}.lean rescued and imported in
+  Kernel.lean, so batch 10's whole-tree build covers the umbrella; docs/BRANCH-RECONCILE.md verdict table).
 - **Batch 8 dc61016cb: gate15 FAIL**: enrol PASS, tour 73/73; j14 = H1b; composed (-c2 after my port collision):
   rooms/churn/apps/connector PASS, documents FAIL (D2), residents R1; flatness get FAIL then PASS on -c2 (load). Lesson:
   a KEEP_WORLD composed world holds port 22640; take it down before the next composed gate.
@@ -190,6 +193,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 14:05: branch-reconcile: batch 1 43dd641f7 merged.
 - 10-31 14:00: perf-client 042f2a0c1 merged (batch 10).
 - 10-31 13:55: perf-client d035d8250 merged (batch 10).
 - 10-31 13:45: exorcist 837c3f457 merged (D2).
@@ -240,6 +244,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 | perf-apps | a70a7655df79c4335 (a25df305cfd551d8b retired) | apps install, grain HTTP path, typed-tool path (perf) |
 | perf-client | a778bbda6509944a5 (a8d456c6e773efbb8 retired) | client, consent provider per-record cost, web page loads, idle cold start (perf) |
 | retained-mode | a9b54e85e4a194b91 (a13f0c9ab4513b2d7 retired) | incremental-computation architecture: a Lean incremental node with one generic "maintained = recomputed" theorem, the Host's derived structures as maintained nodes persisted in checkpoints, emission from Effects/, a lint for whole-state functions on per-request paths, one hot path migrated end to end |
+| branch-reconcile | a6ae854de00e3e12e | stale side-branch commits: verdicts in docs/BRANCH-RECONCILE.md, rescues as module files |
 | demo-reds (sub-Opus of the integrator) | a64c387f3e638aa63 | bend/web/door/Hermes product reds as routed |
 | statement auditor (sub-Opus of the integrator) | a4d9a6f4cba4855ca | read-only adversarial audit of each lane's top-level statements, one round per merged sha |
 
