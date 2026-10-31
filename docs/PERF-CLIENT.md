@@ -68,6 +68,19 @@ Two writes (the birth, then the document): 12 Host calls, 26 codec frames, 10 co
 | 250 | 1.07 s | 264, 39 | 414, 299 | 347 ms | 19 ms | 417 ms |
 | 520 | 1.34 s | 344, 43 | 609, 283 | 372 ms | 19 ms | 434 ms |
 
+Batch 7 (acc7cfa03, fresh world hbox:/ci/pc/w7, load ~18):
+
+| height | Host | op1 plan (birth, doc) ms | op2 submit (birth, doc) ms | own birth catch-up | another member's catch-up of both |
+|---|---|---|---|---|---|
+| 0 | 487 ms | 85, 14 | 298, 58 | 147 ms | 166 ms |
+| 250 | 384 ms | 100, 14 | 180, 64 | 132 ms | 171 ms |
+| 520 | 663 ms | 161, 16 | 314, 139 | 142 ms | 239 ms |
+
+Against batch 6 at the same heights: Host 1.07 to 0.38 s at 250 and 1.34 to 0.66 s at 520; a member's own
+birth catch-up 347 to 132 ms; another member's catch-up of the two records 417 to 171 ms; a `say` record in
+catch-up 36 to 17.6 ms (60 in 1,058 ms). What still grows from 250 to 520: the birth's op1 (100 to 161) and op2
+(180 to 314), the document's op2 (64 to 139), and another member's catch-up (171 to 239 ms).
+
 The codec frames cost 19 ms in all, so batching them is not worth a protocol change. Consent per record is
 flat with height. The birth's Host op1/op2 grows (+30%/+47% over 270 heights): sent to hot-path. On batch 4 at
 height ~500 the same own-birth catch-up was 1,289 ms and op2 1.7 s per write. The member's provider still
