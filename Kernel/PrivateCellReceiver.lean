@@ -27,9 +27,12 @@ outer commitment over the context, the mask and the index digest.
   `accept_isSome_iff`: accepted exactly when every write fits and avoids the
   blinding). No caller supplies a mask. `History.custodyInputs_distinct`: across
   a cell's history the custody function is evaluated at pairwise distinct
-  versions. Freshness is the named premise `Custody.CustodyPrf` (teeth:
-  `Custody.constant_refuted`), composed with the distinct inputs in
-  `receiver_prf_term`, the hybrid argument's PRF hop. Forks are the host's
+  versions. Freshness is the named premise `Custody.CustodyPrf`: the ideal fixed as
+  the uniform function on the version window, the budget admitting every
+  two-query evaluation test (satisfiable `enumeration_satisfies`, teeth
+  `constant_refuted`). `receiver_prf_hop` ties it to the receiver: histories as
+  a function of the key tape give `HybridReduction`'s first antecedent, and the
+  distinct versions make the uniform hybrid's masks independent uniform. Forks are the host's
   obligation `AtMostOneSuccessor` (a history meets it; `fork_shares_mask` is why).
 * `root` / `root_eq`: the outer commitment from the kept digest and the held
   mask, under the context derived from the cell's state (`ctxOf`: protocol,
@@ -51,6 +54,7 @@ module
 
 public import Kernel.PrivateCellView
 public import Kernel.BlindedCellHiding
+public import Mathlib.Algebra.BigOperators.Fin
 
 @[expose] public section
 
@@ -477,7 +481,7 @@ theorem History.spec : ∀ {cells : List (KeptCell wire)}, History wire cells �
 /-- **Distinct custody inputs**: across a history the custody function is
 evaluated at pairwise distinct versions, each version's mask being its own
 evaluation. This alone does not make masks fresh (a constant function passes
-it); freshness is `CustodyPrf` of the function, composed in `receiver_prf_term`. -/
+it); freshness is `CustodyPrf` of the function, composed in `receiver_prf_hop`. -/
 theorem History.custodyInputs_distinct {cells : List (KeptCell wire)} (history : History wire cells) :
     (cells.map KeptCell.version).Nodup ∧
       ∀ c ∈ cells, c.mask = (wire.valueStream c.params.blinding.space).encode (c.params.prf c.version) := by
@@ -491,59 +495,90 @@ open Minidregg.Theory.FiniteTapeGap (GapAtMost)
 
 namespace Custody
 
-/-- **The custody PRF game**: over `tapes` equally likely draws of the custody
-key (`keyed`) or of an ideal function (`ideal`), no budgeted test of the
-function separates the two by more than `num/den`. The key is a tape, so it is
-outside every reader's view; the test sees the function only through its
-values. -/
-def CustodyPrf {M : Type} (tapes num den : Nat) (keyed ideal : Fin tapes → Nat → M)
-    (budgeted : ((Nat → M) → Bool) → Prop) : Prop :=
-  ∀ test, budgeted test → GapAtMost tapes num den (fun t => test (keyed t)) (fun t => test (ideal t))
+variable (m : Nat)
 
-/-- Satisfiable: the ideal function against itself, at gap zero. -/
-theorem identity_satisfies {M : Type} {tapes den : Nat} (positive : 0 < tapes) (denominator : 0 < den)
-    (ideal : Fin tapes → Nat → M) (budgeted : ((Nat → M) → Bool) → Prop) :
-    CustodyPrf tapes 0 den ideal ideal budgeted :=
-  fun _ _ => ⟨positive, denominator, by simp, by simp⟩
+/-- The number of functions from a version window into masks `Fin (m + 1)`. -/
+abbrev funs (window : List Nat) : Nat := (m + 1) ^ window.length
 
-/-- All four functions on `{1, 2}` into `Bool` (zero elsewhere). -/
-def idealFour (t : Fin 4) (n : Nat) : Bool :=
-  if n = 1 then t.val % 2 = 1 else if n = 2 then t.val / 2 = 1 else false
+/-- **The ideal function** on a version window: tape `t` is one of all
+`(m + 1) ^ |window|` functions window → `Fin (m + 1)`, each equally likely
+(`finFunctionFinEquiv`); outside the window it is `0`. -/
+def idealFn (window : List Nat) (t : Fin (funs m window)) (v : Nat) : Fin (m + 1) :=
+  if h : v ∈ window then finFunctionFinEquiv.symm t ⟨window.idxOf v, List.idxOf_lt_length_iff.mpr h⟩ else 0
+
+/-- On a window of distinct versions, the ideal function's values at the window
+are exactly the tape's tuple: independent uniform masks. -/
+theorem idealFn_window {window : List Nat} (distinct : window.Nodup) (t : Fin (funs m window)) (i : Fin window.length) :
+    idealFn m window t window[i] = finFunctionFinEquiv.symm t i := by
+  have mem : window[i] ∈ window := List.getElem_mem _
+  simp only [idealFn, mem, dif_pos]
+  exact congrArg _ (Fin.ext (distinct.idxOf_getElem i i.isLt))
+
+/-- A test of a mask function that evaluates it at at most `q` versions. -/
+def QueryTest (q : Nat) (test : (Nat → Fin (m + 1)) → Bool) : Prop :=
+  ∃ vs : List Nat, vs.length ≤ q ∧ ∃ g : List (Fin (m + 1)) → Bool, test = fun f => g (vs.map f)
+
+/-- A meaningful budget admits every `q`-query evaluation test (the receipt
+keystone's `BudgetAdmitsPublicHash`, for masks). -/
+def BudgetAdmitsQueries (q : Nat) (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
+  ∀ test, QueryTest m q test → budgeted test
+
+/-- The two halves of a joint tape: the key draw and the ideal function draw. -/
+abbrev split {keys window : Nat} (t : Fin (keys * window)) : Fin keys × Fin window := finProdFinEquiv.symm t
+
+/-- **The custody PRF game.** With the ideal fixed as the uniform function on the
+version window and the budget admitting every evaluation test of at least two
+versions, no budgeted test separates the keyed custody function (key drawn
+uniformly from `keys`, outside every view) from the ideal by more than
+`num/den`. -/
+def CustodyPrf (q keys num den : Nat) (window : List Nat) (keyed : Fin keys → Nat → Fin (m + 1))
+    (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) : Prop :=
+  2 ≤ q ∧ BudgetAdmitsQueries m q budgeted ∧
+    ∀ test, budgeted test →
+      GapAtMost (keys * funs m window) num den
+        (fun t => test (keyed (split t).1)) (fun t => test (idealFn m window (split t).2))
+
+/-- **Satisfiable, honestly**: the custody function that IS the enumeration of
+all functions on the window (its key is the function) meets the game at gap 0,
+against every budget. -/
+theorem enumeration_satisfies {q den : Nat} (window : List Nat) (two : 2 ≤ q) (denominator : 0 < den)
+    (budgeted : ((Nat → Fin (m + 1)) → Bool) → Prop) (admits : BudgetAdmitsQueries m q budgeted) :
+    CustodyPrf m q (funs m window) 0 den window (idealFn m window) budgeted := by
+  refine ⟨two, admits, fun test _ => ?_⟩
+  have positive : 0 < funs m window * funs m window := Nat.mul_pos (Nat.pow_pos (Nat.succ_pos _))
+    (Nat.pow_pos (Nat.succ_pos _))
+  let swap : Equiv.Perm (Fin (funs m window * funs m window)) :=
+    finProdFinEquiv.symm.trans ((Equiv.prodComm _ _).trans finProdFinEquiv)
+  have := GapAtMost.zero_of_perm positive denominator (fun t => test (idealFn m window (split t).2)) swap
+  refine this.cast rfl rfl |> fun h => ?_
+  have same : ((fun t => test (idealFn m window (split t).2)) ∘ swap) = fun t => test (idealFn m window (split t).1) := by
+    funext t
+    simp only [Function.comp, swap, Equiv.trans_apply, split, Equiv.symm_apply_apply, Equiv.prodComm_apply,
+      Prod.snd_swap]
+  rw [same] at h
+  exact h
+
+/-- All four functions on `{1, 2}` into `Fin 2`, as tape order gives them. -/
+abbrev window12 : List Nat := [1, 2]
 
 /-- The test "the masks of versions 1 and 2 agree". -/
-def equalTest (f : Nat → Bool) : Bool := f 1 == f 2
+def equalTest (f : Nat → Fin 2) : Bool := f 1 == f 2
 
-/-- **Teeth**: a constant custody function fails the game at any gap below
-one half against the test that compares two versions' masks. -/
+theorem equalTest_query : QueryTest 1 2 equalTest :=
+  ⟨[1, 2], le_rfl, fun l => l[0]? == l[1]?, by funext f; simp [equalTest]⟩
+
+/-- **Teeth**: a constant custody function fails the game at gap `1/4`, against
+the meaningful budget of all two-query tests. -/
 theorem constant_refuted :
-    ¬ CustodyPrf 4 1 4 (fun _ _ => false) idealFour (fun test => test = equalTest) := by
-  intro prf
-  obtain ⟨_, _, bound, _⟩ := prf equalTest rfl
+    ¬ CustodyPrf 1 2 1 1 4 window12 (fun _ _ => 0) (QueryTest 1 2) := by
+  rintro ⟨_, _, game⟩
+  obtain ⟨_, _, bound, _⟩ := game equalTest equalTest_query
   revert bound
   decide
 
 end Custody
 
-open Custody (CustodyPrf)
-
-/-- **The receiver's PRF term.** A history's custody inputs are pairwise
-distinct and each version holds its own evaluation; and for a game that reads
-the masks only through the custody function, `CustodyPrf` of that function
-gives the hybrid argument's first hop (`BlindedCellHidingDraft.HybridReduction`,
-real masks against an ideal function, gap `fNum/den := num/den`). At the
-distinct inputs the history supplies, the ideal function's values are what the
-uniform hybrid samples. -/
-theorem receiver_prf_term {M Strategy : Type} {cells : List (KeptCell wire)} (history : History wire cells)
-    (tapes num den : Nat) (keyed ideal : Fin tapes → Nat → M) (budgetedPrf : ((Nat → M) → Bool) → Prop)
-    (prf : CustodyPrf tapes num den keyed ideal budgetedPrf)
-    (game : Strategy → Bool → (Nat → M) → Bool) (legal budgeted : Strategy → Prop)
-    (reduces : ∀ a, legal a → budgeted a → ∀ b, budgetedPrf (game a b)) :
-    (cells.map KeptCell.version).Nodup ∧
-      (∀ c ∈ cells, c.mask = (wire.valueStream c.params.blinding.space).encode (c.params.prf c.version)) ∧
-      ∀ a, legal a → budgeted a → ∀ b,
-        GapAtMost tapes num den (fun t => game a b (keyed t)) (fun t => game a b (ideal t)) := by
-  obtain ⟨distinct, masks⟩ := history.custodyInputs_distinct
-  exact ⟨distinct, masks, fun a isLegal isBudgeted b => prf _ (reduces a isLegal isBudgeted b)⟩
+open Custody (CustodyPrf funs idealFn split QueryTest)
 
 /-! ## Forks: one accepted successor per version -/
 
@@ -577,6 +612,48 @@ theorem fork_shares_mask {cell left right : KeptCell wire} {patchL patchR : List
 
 end KeptCell
 
+/-- **The receiver's PRF hop** (`BlindedCellHidingDraft.HybridReduction`'s first
+antecedent at `fNum/den := num/den`). Histories are a function of the key tape:
+at key `k` the cells' custody function is the keyed one, through the host's mask
+encoding, and every key yields the same versions. The real hybrid runs the game
+on the masks the history at the tape's key publishes; the uniform hybrid runs it
+on the ideal function's masks at those versions, which (by
+`custodyInputs_distinct`: the versions are distinct) are independent uniform
+masks, the tape's own tuple. Forks are excluded by `AtMostOneSuccessor`. -/
+theorem receiver_prf_hop {m q keys num den : Nat} {Strategy : Type}
+    (keyed : Fin keys → Nat → Fin (m + 1)) (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop)
+    (versions : List Nat) (prf : CustodyPrf m q keys num den versions keyed budgetedPrf)
+    (encodeMask : Fin (m + 1) → List UInt8)
+    (cellsOf : Fin keys → List (KeptCell wire)) (histories : ∀ k, History wire (cellsOf k))
+    (single : ∀ k, AtMostOneSuccessor wire (· ∈ cellsOf k))
+    (sameVersions : ∀ k, (cellsOf k).map KeptCell.version = versions)
+    (tie : ∀ k, ∀ c ∈ cellsOf k, ∀ v,
+      (wire.valueStream c.params.blinding.space).encode (c.params.prf v) = encodeMask (keyed k v))
+    (short : versions.length ≤ q)
+    (game : Strategy → Bool → List (List UInt8) → Bool) (legal budgeted : Strategy → Prop) :
+    (∀ a, legal a → budgeted a → ∀ b,
+      GapAtMost (keys * funs m versions) num den
+        (fun t => game a b ((cellsOf (split t).1).map KeptCell.mask))
+        (fun t => game a b (versions.map fun v => encodeMask (idealFn m versions (split t).2 v)))) ∧
+      (∀ _k : Fin keys, versions.Nodup ∧ ∀ (t : Fin (funs m versions)) (i : Fin versions.length),
+        idealFn m versions t versions[i] = finFunctionFinEquiv.symm t i) := by
+  have published : ∀ k, (cellsOf k).map KeptCell.mask = versions.map fun v => encodeMask (keyed k v) := by
+    intro k
+    obtain ⟨_, masks⟩ := (histories k).custodyInputs_distinct
+    rw [← sameVersions k, List.map_map]
+    refine List.map_congr_left fun c member => ?_
+    rw [masks c member, tie k c member]
+    rfl
+  refine ⟨fun a _ _ b => ?_, fun k => ?_⟩
+  · have admitted := prf.2.1 (fun f => game a b (versions.map fun v => encodeMask (f v)))
+      ⟨versions, short, fun l => game a b (l.map encodeMask), by funext f; simp [List.map_map, Function.comp_def]⟩
+    have gap := prf.2.2 _ admitted
+    simpa only [published] using gap
+  · have distinct : versions.Nodup := by
+      rw [← sameVersions k]; exact (histories k).custodyInputs_distinct.1
+    exact ⟨distinct, fun t i => Custody.idealFn_window m distinct t i⟩
+
+
 #assert_axioms KeptCell.root_eq
 #assert_axioms birth_refuses
 #assert_axioms storeFits_set
@@ -592,8 +669,9 @@ end KeptCell
 #assert_axioms birth_refuses_masked
 #assert_axioms History.custodyInputs_distinct
 #assert_axioms Custody.constant_refuted
-#assert_axioms Custody.identity_satisfies
-#assert_axioms receiver_prf_term
+#assert_axioms Custody.enumeration_satisfies
+#assert_axioms Custody.idealFn_window
+#assert_axioms receiver_prf_hop
 #assert_axioms History.atMostOneSuccessor
 #assert_axioms KeptCell.fork_shares_mask
 
