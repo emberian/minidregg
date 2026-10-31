@@ -2725,7 +2725,7 @@
     {
       "code": 233,
       "symbol": "CONSENT_STORE_RECHECK",
-      "purpose": "re-check the Store before a connection's first frame (233, ConsentAnchor.recheckStore)"
+      "purpose": "the Store re-check owed before a connection's first frame (233): answered at once, made by the next frame before it answers (ConsentAnchor.checkHeld); a 233 reply alone is not proof of Store freshness"
     },
     {
       "code": 234,
