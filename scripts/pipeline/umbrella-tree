@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# scripts/pipeline/umbrella-tree -- the umbrella stage in a SECOND warm tree, so it never holds the build tree.
+#
+#   scripts/pipeline/umbrella-tree [--src SRC] [--tree TREE] [--out DIR] SHA
+#
+# Defaults (hbox integration): SRC=$LANE_DIR/src, TREE=$LANE_DIR/umbrella-src, DIR=$LANE_DIR/umbrella-tree-out.
+# Run it right after SRC built SHA (integ-build: after READY). It
+#   1. checks SRC is at SHA with a clean tracked tree (and is still at SHA after the sync below);
+#   2. keeps TREE as a `git worktree` of SRC's repository, detached at SHA (objects shared, no second .git);
+#   3. seeds TREE/.lake/packages from SRC by hard links (`cp -al`) whenever lake-manifest.json or
+#      lean-toolchain moved, unsharing every small file lake may rewrite in place (as clone-warm does);
+#   4. syncs TREE/.lake/build from SRC per module: a module whose SRC trace is newer than TREE's is
+#      hard-linked from SRC (outputs) and copied (its .trace and .hash files); `*.setup.json` is never
+#      linked (lake writes it in place, and it names SRC's absolute paths; lake regenerates it on a
+#      rebuild). Modules only TREE builds (the umbrella-only libraries) keep TREE's own outputs;
+#   5. runs the umbrella: `build-native-host.sh --umbrella --umbrella-only` over the --unshipped targets
+#      of scripts/pipeline/umbrella-targets plus Minidregg, under swarm-build when it is on PATH, with
+#      the caller's MINIDREGG_LEAN_SEAT_ROOT seats (shared with SRC's builds: a bound, not a lock);
+#   6. prints `RED <Module>` per failing module, then one summary line; exits 0 green, 1 on any red or
+#      failed step.
+# It takes NO lock on SRC: it never writes into SRC (apart from `git worktree add` metadata the first time),
+# and SRC may start its next build as soon as step 4 is done. Its own lock is TREE.lock (mkdir), its PID
+# file TREE.pid (this process; removed on exit).
+#
+# Why hard links are safe: Lean 4.35 and leanc write .olean, .olean.private, .olean.server, .ilean, .ir,
+# .ir.sig, .c and .o to a temporary and rename(2) it, so a rebuild in either tree gives that tree a new inode
+# and leaves the other's alone (measured 2026-10-30 on v4.35.0: a rebuilt module's outputs split, every
+# untouched module's stay shared). Lake writes *.trace and *.setup.json IN PLACE, so those are never shared.
+# Tripwire: after the build, any file in TREE/.lake/build that is still multiply linked but was written
+# after the sync means a shared inode was written in place: reported RED, since SRC's copy changed too.
+#
+# Disk cost, measured on the Mac (2026-10-31, at cdb399b47, 1,373 modules): packages 37 MB (82k small files
+# unshared; every build product a link); TREE/.lake/build 1.57 GB of own inodes after a run that rebuilt 327
+# modules (each rebuilt module's outputs and its setup.json are TREE's own); TREE/target 59 MB (mini-kernels);
+# the worktree's sources. Every module SRC built at SHA costs nothing. Steady state on hbox (SRC/.lake/build
+# 3.6 GB, packages 7.8 GB) is about the outputs of the modules only the umbrella builds plus whatever changed
+# since the last sync: 1-2 GB, never a second 12 GB.
+set -euo pipefail
+PIPELINE_PROG=umbrella-tree
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
+SRC=${LANE_DIR:+$LANE_DIR/src}; TREE=${LANE_DIR:+$LANE_DIR/umbrella-src}; OUT=${LANE_DIR:+$LANE_DIR/umbrella-tree-out}
+while [ $# -gt 1 ]; do
+  case $1 in
+    --src) SRC=$2; shift 2 ;;
+    --tree) TREE=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;;
+    *) pipeline_die "unknown option $1" ;;
+  esac
+done
+SHA=${1:?usage: umbrella-tree [--src SRC] [--tree TREE] [--out DIR] SHA}
+[ -n "${SRC:-}" ] && [ -n "${TREE:-}" ] && [ -n "${OUT:-}" ] || pipeline_die "set LANE_DIR or pass --src --tree --out"
+SRC=$(CDPATH='' cd -- "$SRC" && pwd -P)
+[ -d "$SRC/.lake/build" ] && [ -d "$SRC/.lake/packages" ] || pipeline_die "$SRC is not a built tree"
+SHA=$(git -C "$SRC" rev-parse --verify "$SHA^{commit}")
+src_at() { [ "$(git -C "$SRC" rev-parse HEAD)" = "$SHA" ] && [ -z "$(git -C "$SRC" status --porcelain --untracked-files=no)" ]; }
+src_at || pipeline_die "$SRC is not a clean tree at ${SHA:0:12}"
+
+mkdir "$TREE.lock" 2>/dev/null || pipeline_die "another umbrella-tree holds $TREE.lock (pid $(cat "$TREE.pid" 2>/dev/null))"
+echo $$ > "$TREE.pid"
+trap 'rm -f "$TREE.pid"; rmdir "$TREE.lock" 2>/dev/null || true' EXIT
+
+# 2. the worktree
+if [ ! -e "$TREE" ]; then
+  git -C "$SRC" worktree add -q --detach "$TREE" "$SHA"
+else
+  git -C "$TREE" checkout -q --detach "$SHA"
+fi
+[ -z "$(git -C "$TREE" status --porcelain --untracked-files=no)" ] || pipeline_die "$TREE has tracked changes"
+mkdir -p "$TREE/.lake/build"
+touch "$TREE/.minidregg-native-snapshot"   # an independent snapshot (build-native-host requires the marker)
+
+# 3. packages, by hard links, re-seeded when the dependency pins moved
+stamp=$(cat "$SRC/lake-manifest.json" "$SRC/lean-toolchain" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')
+if [ "$(cat "$TREE/.lake/packages.stamp" 2>/dev/null)" != "$stamp" ]; then
+  rm -rf "$TREE/.lake/packages"          # TREE's own links: removing them never touches SRC's files
+  mkdir -p "$TREE/.lake/packages"
+  for p in "$SRC/.lake/packages"/*; do   # a package that is a symlink (the Mac's shared checkouts) is linked by its target
+    real=$(CDPATH='' cd -- "$p" && pwd -P)
+    cp -al "$real" "$TREE/.lake/packages/$(basename -- "$p")" 2>/dev/null || cp -Rl "$real" "$TREE/.lake/packages/$(basename -- "$p")"
+  done
+  unshare() { cp -p -- "$1" "$1.ut.tmp" && mv -f -- "$1.ut.tmp" "$1"; }
+  export -f unshare
+  ( cd "$TREE/.lake" && find packages \( -path '*/.git/objects' -prune \) -o -type f -links +1 \( \
+      -path 'packages/*/.git/*' -o -name '*.trace' -o -name '*.hash' -o -name '*.json' \
+      -o -name 'lakefile.olean*' -o -name 'lake-manifest.json' -o -name 'lean-toolchain' \) -print0 |
+    xargs -0 -r -n 256 bash -c 'for f; do unshare "$f"; done' _ )
+  echo "$stamp" > "$TREE/.lake/packages.stamp"
+fi
+# lake config and the native kernels: TREE's own copies (small; build-native-host rebuilds the kernels)
+for d in config native; do
+  [ -d "$SRC/.lake/$d" ] && { rm -rf "$TREE/.lake/$d"; cp -Rp "$SRC/.lake/$d" "$TREE/.lake/$d"; }
+done
+
+# 4. build outputs, per module, newest wins
+touch "$TREE/.lake/sync.stamp"
+python3 - "$SRC/.lake/build" "$TREE/.lake/build" <<'PY'
+import os, sys
+src, dst = sys.argv[1], sys.argv[2]
+SHARE = ('.olean', '.olean.private', '.olean.server', '.ilean', '.ir', '.ir.sig', '.c', '.o')
+def kind(name):
+    if name.endswith('.setup.json'): return 'skip'
+    if name.endswith('.trace') or name.endswith('.hash'): return 'copy'
+    if name.endswith(SHARE): return 'link'
+    return 'copy'
+linked = copied = modules = 0
+lib = os.path.join(src, 'lib', 'lean')
+for root, _, files in os.walk(lib):
+    for f in files:
+        if not f.endswith('.trace'): continue
+        mod_rel = os.path.relpath(os.path.join(root, f[:-len('.trace')]), lib)   # e.g. Kernel/Seat
+        s_tr, d_tr = os.path.join(lib, mod_rel + '.trace'), os.path.join(dst, 'lib', 'lean', mod_rel + '.trace')
+        if os.path.exists(d_tr) and os.stat(d_tr).st_mtime >= os.stat(s_tr).st_mtime: continue
+        modules += 1
+        base = os.path.basename(mod_rel)
+        for sub in ('lib/lean', 'ir'):
+            sdir = os.path.join(src, sub, os.path.dirname(mod_rel)); ddir = os.path.join(dst, sub, os.path.dirname(mod_rel))
+            if not os.path.isdir(sdir): continue
+            names = [n for n in os.listdir(sdir) if n.startswith(base + '.')]
+            if not names: continue
+            os.makedirs(ddir, exist_ok=True)
+            for n in sorted(names, key=lambda n: n.endswith('.trace')):     # the trace last
+                k = kind(n)
+                if k == 'skip': continue
+                s, d = os.path.join(sdir, n), os.path.join(ddir, n)
+                tmp = d + '.ut.tmp'
+                if os.path.lexists(tmp): os.unlink(tmp)
+                if k == 'link':
+                    if os.path.exists(d) and os.stat(d).st_ino == os.stat(s).st_ino: continue
+                    os.link(s, tmp); linked += 1
+                else:
+                    with open(s, 'rb') as a, open(tmp, 'wb') as b: b.write(a.read())
+                    st = os.stat(s); os.utime(tmp, (st.st_atime, st.st_mtime)); copied += 1
+                os.replace(tmp, d)
+            stale = os.path.join(ddir, base + '.setup.json')
+            if sub == 'ir' and os.path.exists(stale) and os.stat(stale).st_nlink > 1: os.unlink(stale)
+print(f'umbrella-tree: synced {modules} modules from SRC ({linked} links, {copied} copies)')
+PY
+src_at || pipeline_die "$SRC moved off ${SHA:0:12} during the sync; rerun"
+
+# 5. the umbrella
+mkdir -p "$OUT"
+u="$OUT/$(date -u +%Y%m%dT%H%M%SZ)-${SHA:0:12}"
+targets=(); for t in $(bash "$TREE/scripts/pipeline/umbrella-targets" --unshipped) Minidregg; do targets+=(--umbrella-target "$t"); done
+wrap=(); command -v swarm-build >/dev/null && wrap=(swarm-build)
+t0=$(date +%s)
+set +e
+( cd "$TREE" && CARGO_TARGET_DIR="$TREE/target" MINIDREGG_CYCLE_DIR="$TREE/.cycle" \
+    MINIDREGG_NATIVE_JOBS=${MINIDREGG_NATIVE_JOBS:-2} MINIDREGG_LEAN_THREADS=${MINIDREGG_LEAN_THREADS:-2} LEAN_NUM_THREADS=2 \
+    "${wrap[@]}" scripts/build-native-host.sh --umbrella --umbrella-only "${targets[@]}" --output "$u" --binary "$u.no-binary" ) \
+  > "$u.log" 2>&1
+rc=$?
+set -e
+
+# 6. report
+reds=$( { cat "$u.log"; find "$u" -name '*.log' -exec cat {} + 2>/dev/null; } |
+  sed -n 's/^✖ \[[0-9]*\/[0-9]*\] Building \([^ ]*\).*/\1/p' | sort -u || true)
+for m in $reds; do echo "RED $m"; done
+shared=$(find "$TREE/.lake/build" -type f -links +1 -newer "$TREE/.lake/sync.stamp" 2>/dev/null | head -5 || true)
+for f in $shared; do echo "RED shared-inode-written-in-place ${f#"$TREE/"}"; done
+n=$(printf '%s\n' $reds | grep -c . || true)
+echo "umbrella-tree ${SHA:0:12}: rc=$rc reds=$n $(( $(date +%s)-t0 ))s log $u.log"
+[ "$rc" = 0 ] && [ "$n" = 0 ] && [ -z "$shared" ]
