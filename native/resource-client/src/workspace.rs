@@ -414,7 +414,7 @@ fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
     let daily = ed25519_dalek::SigningKey::from_bytes(&*crate::fsio::read_seed(&key)?).verifying_key().to_bytes();
     // A subject whose commitment the Host showed to be this workspace's own next key can change
     // it only by a rotation that next key signs, so once seen for this exact subject, daily key,
-    // next key and deployment it is not asked again. A subject that commits to no next key can
+    // next key and deployment (config bytes included) it is not asked again. A subject that commits to no next key can
     // still adopt one with its current key alone, so it is asked every time.
     let seen = match &commitment {
         crate::key_rotation::Commitment::Mine(next) => Some(json!({
@@ -422,6 +422,10 @@ fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
             "daily": hex(&daily),
             "next": hex(next),
             "config": member(value, "config")?,
+            // The deployment's pinned config names its genesis; a re-genesis behind the same
+            // paths is a different config.
+            "configSha256": format!("{:x}", Sha256::digest(crate::fsio::read_bounded(
+                &member_path(value, "config")?, 1 << 20)?)),
             "socket": socket.to_string_lossy(),
             "hostSha256": value.get("hostSha256").cloned().unwrap_or(Value::Null),
         })),
