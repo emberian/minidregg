@@ -1147,9 +1147,10 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
 /-- The same image carrying no World (its `track` lost). Only the append (which refuses a lost
 track, `prepareAppend`) and the checkpoint seal (`Loaded.system`) read the World. A consent
 provider's anchored suffix walk (`ConsentAnchor.resume`) re-derives and re-executes every record
-but never appends or seals from it: started untracked, each of its `extend`s skips
-`WorldTrack.advance` (the record's turn derived and admitted), which the provider's replay of the
-same records from the Store (`DurableReceiverIO.extendStored`) has already judged. The Host's
+but never appends or seals from it, and neither does its Store-side target
+(`ClientConsentCore.refresh`): started untracked, each of their `extend`s skips
+`WorldTrack.advance` (the record's turn derived and admitted). That advance never refuses a record
+(a refused turn loses the track); the append is what refuses a lost track. The Host's
 walks stay tracked (`NativeHostReplay.verifyFrom`, `verifyLoaded`, `extendVerified`): receivers
 append from a verified walk's image (`receiveLoadedDetailedWithFresh` from `old.opened.durable`)
 and the Host session adopts a readback built from it, and the append refuses a lost track. -/

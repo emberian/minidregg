@@ -343,9 +343,15 @@ def refreshExtended (config : NativeHost.Config) (old : Session config)
               throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
           | .ok verified => pure ⟨target, .full verified⟩
 
-/-- `refreshExtended` over the Store's entries after the held height. -/
+/-- `refreshExtended` over the Store's entries after the held height. The held target is extended
+untracked (`Loaded.untracked`): a provider never appends or seals a checkpoint, so nothing reads
+the target's World, and advancing it (deriving each record's turn and admitting it,
+`WorldTrack.advance`) would cost every record a World admission whose verdict nobody reads. A
+refused turn only loses a track, which the Host's append refuses (`prepareAppend`) when the record
+is written. -/
 def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
-  refreshExtended config old (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
+  refreshExtended config old
+    (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1.untracked)
 
 /-- The held re-check (frame 233, `ConsentAnchor.checkHeld`) made on the read `refresh` needs
 anyway: one Store read from the held height, its first entry judged against the held tag, the
@@ -362,7 +368,7 @@ def refreshHeld (config : NativeHost.Config) (old : Session config) (heldTag : L
           (stored.entries.head?.map (·.tag)) then
         return .error detail
       return .ok (← refreshExtended config old
-        (← DurableReceiverIO.extendStored config.transport ResourceBirthCodec.rootBytes old.1
+        (← DurableReceiverIO.extendStored config.transport ResourceBirthCodec.rootBytes old.1.untracked
           { stored with entries := stored.entries.drop 1 }))
 
 /-- The full re-admission of the held target; an anchored session is
