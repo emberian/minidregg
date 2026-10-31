@@ -2600,12 +2600,13 @@ structure AcceptedBirth [DecidableEq F]
 has no replay bypass or source-state reconstruction from a historical receipt. -/
 def admitDecodedNative [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)
-    (native : CredentialSignatureIO.NativeConfig) (durable : Durable) (height : Height)
+    (native : CredentialSignatureIO.NativeConfig) (durable : Durable)
+    (held : ResourceBirthController.Concrete.Held deployment durable) (height : Height)
     (ingress : DecodedIngress) (sourced : List (Nat × PackedCell Registry) := []) :
     IO (Except Reject (AcceptedBirth profile deployment pins durable height)) := do
   match ResourceBirthController.Concrete.prepareBirth profile.compilerProfile
       profile.disabledEvaluators deployment pins
-      durable ingress.descriptor height sourced with
+      durable held ingress.descriptor height sourced with
   | .error reason => return .error (.preparation reason)
   | .ok prepared =>
       match preparePending prepared height ingress.method with
@@ -2633,7 +2634,8 @@ def admitNative [DecidableEq F]
     (bytes : List UInt8) : IO (Except Reject (AcceptedBirth profile deployment pins durable height)) :=
   match decodeIngress bytes with
   | none => pure (.error .malformedIngress)
-  | some ingress => admitDecodedNative profile deployment pins native durable height ingress
+  | some ingress => admitDecodedNative profile deployment pins native durable
+      (.load deployment durable) height ingress
 
 end Receiving
 

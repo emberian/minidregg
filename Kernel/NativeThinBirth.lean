@@ -884,12 +884,14 @@ theorem publicPins_exact {config : NativeHost.Config} {durable' : ResourceBirthC
 theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
   intro config durable' opened author wanted draftBytes capabilities draft plan validated purpose
     grain decodedDraft canonical authored planned
-  unfold NativeHost.prepareLoaded at planned
+  unfold NativeHost.prepareLoaded NativeHost.prepareOrdinaryBirth NativeHost.ordinaryBirthSlots
+    at planned
   simp only [grain, Option.isSome_none, Bool.false_eq_true, if_false, bind, Except.bind,
     NativeHost.need, decodedDraft] at planned
   generalize NativeHost.logicalHeight config opened.durable = height at planned
   cases prep : ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
-      config.profile.disabledEvaluators config.deployment opened.pins opened.durable draft height with
+      config.profile.disabledEvaluators config.deployment opened.pins opened.durable
+      (.of opened.directory opened.authority) draft height with
   | error reason => simp [prep, Except.mapError] at planned
   | ok prepared =>
   obtain ⟨domain, semantics, federation, factory, policy⟩ :=

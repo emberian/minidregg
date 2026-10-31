@@ -119,7 +119,8 @@ def pendingOf (factory : Minidregg.Pred.Pred) : Option PendingAt :=
       ⟨7⟩ 71 7 [born]
     let height := NativeHost.logicalHeight config o.durable
     match ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
-        config.profile.disabledEvaluators config.deployment o.pins o.durable descriptor height with
+        config.profile.disabledEvaluators config.deployment o.pins o.durable
+        (.of o.directory o.authority) descriptor height with
     | .error _ => none
     | .ok prepared =>
       match ResourceBirthPolicyController.Concrete.preparePending (profile := config.profile)

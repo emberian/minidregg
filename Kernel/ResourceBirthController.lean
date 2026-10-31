@@ -710,15 +710,47 @@ def requireEvaluators (disabled : List Digest) (descriptor : Descriptor Registry
   | .error .unknownEvaluator => .error .unknownEvaluator
   | .error .evaluatorDisabled => .error .evaluatorDisabled
 
+/-- The decoded directory and authority of one durable image, as whoever already holds them
+supplies them. Each is exactly what loading the image returns (`directoryExact`,
+`authorityExact`), so a preparation over held values is the preparation over fresh loads
+(`Held.eq_load`). The Host's `Opened` holds both, maintained as its session advances
+(`loadDirectoryFrom` decodes only moved rows, `loadDeploymentFrom` reuses an unchanged cell), so
+a birth plan or admission on it decodes no directory row and no authority cell (`Held.of`). -/
+structure Held (deployment : Deployment) (durable : Durable) where
+  directory : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+  authority : Option (CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+  directoryExact : directory = CredentialAuthorityDomainReceiver.loadDirectory durable
+  authorityExact : authority =
+    CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot
+
+/-- Load both from the image: one directory decode and one authority decode. -/
+def Held.load (deployment : Deployment) (durable : Durable) : Held deployment durable :=
+  ⟨_, _, rfl, rfl⟩
+
+/-- Both already held: nothing is decoded. -/
+def Held.of {deployment : Deployment} {durable : Durable}
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) :
+    Held deployment durable :=
+  ⟨some directory, some authority, directory.load_eq.symm, authority.load_eq.symm⟩
+
+/-- Every held pair is the loaded one. -/
+theorem Held.eq_load {deployment : Deployment} {durable : Durable} (held : Held deployment durable) :
+    held = Held.load deployment durable := by
+  obtain ⟨directory, authority, directoryExact, authorityExact⟩ := held
+  subst directoryExact authorityExact
+  rfl
+
 def preparePreAuthority [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) (height : Height)
+    (pins : FactoryPins) (durable : Durable) (held : Held deployment durable)
+    (descriptor : Descriptor Registry) (height : Height)
     (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject (PreparedPreAuthority profile deployment pins durable descriptor) := do
   let valid ← requirePreparation (deployment.Valid ∧ PinsBound deployment pins) .deployment
   let profileBound ← requirePreparation (ProfileBound profile pins) .compilerProfile
   let identityBound ← requirePreparation (IdentityBound profile deployment descriptor) .identity
-  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let directory ← fromOption held.directory .directory
   let parents ← requirePreparation (ParentsPresent deployment directory.directory descriptor) .parent
   let kinds ← requirePreparation (KindsPresent deployment directory.directory descriptor) .kindSource
   let evaluators ← requireEvaluators disabled descriptor
@@ -731,8 +763,7 @@ def preparePreAuthority [DecidableEq F] (profile : PolicyCompilerProfile F) (dis
     (observeCell deployment directory.directory deployment.factoryId .declaredObject) .factory
   let book ← fromOption
     (observeCell deployment directory.directory deployment.resourceBookId .resourceBook) .resourceBook
-  let authority ← fromOption
-    (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  let authority ← fromOption held.authority .authorityDomain
   let rooms ← (RoomBirthGate.check pins directory authority height descriptor).mapError
     PreparationReject.room
   let exports ← fromOption
@@ -805,10 +836,10 @@ list and every final payload are checked before policy evaluation. No step
 mutates the source image or installs a prefix of the birth. -/
 def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (descriptor : Descriptor Registry) (height : Height)
+    (durable : Durable) (held : Held deployment durable) (descriptor : Descriptor Registry) (height : Height)
     (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
-  let pre ← preparePreAuthority profile disabled deployment pins durable descriptor height sourced
+  let pre ← preparePreAuthority profile disabled deployment pins durable held descriptor height sourced
   let grants ← fromOption
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment
       pre.authority descriptor)
@@ -843,11 +874,11 @@ structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
 
 def prepareGrainBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry)
+    (pins : FactoryPins) (durable : Durable) (held : Held deployment durable) (descriptor : Descriptor Registry)
     (operationMarker : Nat) (height : Height) (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject
       (PreparedGrainBirth profile deployment pins durable descriptor operationMarker) := do
-  let pre ← preparePreAuthority profile disabled deployment pins durable descriptor height sourced
+  let pre ← preparePreAuthority profile disabled deployment pins durable held descriptor height sourced
   let combined ← fromOption
     (GrainResourceBirthAuthority.prepare profile deployment pre.authority
       descriptor operationMarker) .authorityBatch
@@ -890,23 +921,22 @@ structure PreparedGrainDraft (profile : PolicyCompilerProfile F)
 
 def prepareGrainDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable) (draft : Descriptor Registry)
+    (pins : FactoryPins) (durable : Durable) (held : Held deployment durable) (draft : Descriptor Registry)
     (operationMarker : Nat) (height : Height) (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject
       (PreparedGrainDraft profile deployment pins durable draft operationMarker) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
-  let authority ← fromOption
-    (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  let authority ← fromOption held.authority .authorityDomain
   -- The room gate first: a creator whose placing grant is revoked is refused
   -- `notRoomMember`, by name, before the grant batch would refuse the born
   -- grants' revoked ancestors as `authorityBatch`.
-  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let directory ← fromOption held.directory .directory
   let _ ← (RoomBirthGate.check pins directory authority height draft).mapError PreparationReject.room
   let combined ← fromOption
     (GrainResourceBirthAuthority.prepare profile deployment authority
       draft operationMarker) .authorityBatch
   let descriptor := { draft with auxiliaryCreates := combined.auxiliaryCreates }
-  let prepared ← prepareGrainBirth profile disabled deployment pins durable descriptor operationMarker height
+  let prepared ← prepareGrainBirth profile disabled deployment pins durable held descriptor operationMarker height
     sourced
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
@@ -972,21 +1002,20 @@ structure PreparedDraft (profile : PolicyCompilerProfile F) (deployment : Deploy
 
 def prepareDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (draft : Descriptor Registry) (height : Height)
+    (durable : Durable) (held : Held deployment durable) (draft : Descriptor Registry) (height : Height)
     (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject (PreparedDraft profile deployment pins durable draft) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
-  let authority ← fromOption
-    (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  let authority ← fromOption held.authority .authorityDomain
   -- The room gate first (as `prepareGrainDraft`): a revoked placing grant is
   -- `notRoomMember`, not the grant batch's `authorityBatch`.
-  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let directory ← fromOption held.directory .directory
   let _ ← (RoomBirthGate.check pins directory authority height draft).mapError PreparationReject.room
   let grants ← fromOption
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment authority draft)
     .authorityBatch
   let descriptor := { draft with auxiliaryCreates := grants.auxiliaryCreates }
-  let prepared ← prepareBirth profile disabled deployment pins durable descriptor height sourced
+  let prepared ← prepareBirth profile disabled deployment pins durable held descriptor height sourced
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 theorem PreparedDraft.user_source_preserved {deployment : Deployment} {pins : FactoryPins}
