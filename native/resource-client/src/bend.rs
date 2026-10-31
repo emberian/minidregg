@@ -613,8 +613,9 @@ fn finish_run(bend: &Bend, name: &str, meta: &Value, transaction: &str, lead: &s
     }
     let registry = bend.ws.root.join("bend").join("objects");
     crate::fsio::ensure_private_dir_all(&registry)?;
-    let _ = crate::fsio::retain_json(&registry.join(format!("{}.json", workspace::ref_file(&object_ref))),
-        &json!({"bend": name, "pin": pin, "object": object, "transaction": transaction, "record": record_cell}));
+    // The object's newest birth is the row (a later run on the same object replaces an ended one's).
+    let row = json!({"bend": name, "pin": pin, "object": object, "transaction": transaction, "record": record_cell});
+    let _ = crate::fsio::replace_private(&registry.join(format!("{}.json", workspace::ref_file(&object_ref))), &row_bytes(&row));
     println!("{line}");
     Ok(())
 }
@@ -773,6 +774,12 @@ fn overdue(view: &Value) -> Option<(String, String)> {
     (height > deadline).then(|| Some((record.to_owned(), phase.pointer("/await/id")?.as_str()?.to_owned()))).flatten()
 }
 
+fn row_bytes(row: &Value) -> Vec<u8> {
+    let mut bytes = serde_json::to_vec_pretty(row).expect("JSON values serialise");
+    bytes.push(b'\n');
+    bytes
+}
+
 /// The view's height when the birth's activity is over (its record retired, or ended or faulted), so a
 /// settle never reads it again; `None` while it awaits.
 fn ended(view: &Value) -> Option<String> {
@@ -806,7 +813,7 @@ fn settle_cmd(bend: &Bend, mut args: Args) -> Result<()> {
         };
         if let Some(height) = ended(&view) {
             row["ended"] = json!(height);
-            let _ = crate::fsio::retain_json(&file, &row);
+            let _ = crate::fsio::replace_private(&file, &row_bytes(&row));
             continue;
         }
         let Some(found) = overdue(&view) else { continue };
