@@ -50,15 +50,10 @@ A cold verb (residents not running) was 555-866 ms on batch 5; residents no long
 
 ### Next, written up but not started
 
-- **The law graph loads twice per grant.** `ResourceObservationAdmission.keys` calls
-  `PhysicalLawResolution.predicateOf?` (one `loadTarget`), and `authorizeChecked` then calls
-  `(policyConfig prepared).resolve?` (a second `loadTarget`, plus a `loadPolicy` of the head that
-  `loadTarget` also loads). A `PreparedLaw` mentions only the config's snapshot, store, profile,
-  target, budget and additional restrictions, never its step, so a law resolved on
-  `{policyConfig prepared with step := s}` is a `PreparedLaw` of `policyConfig prepared` by the
-  same fields. Plan: resolve once on a config with a cheap step, build the step from
-  `law.predicate.reads` (= `keys prepared` by `keys_exact`), and prove the result equal to
-  `authorizeChecked` (csimp) through a helper lemma generalised over the config.
+- **Done (not yet built):** the law graph loaded twice per grant (`keys` through `predicateOf?`,
+  then `resolve?`). `authorizeCheckedFast` loads it once (`lawGraph`), derives the keys and the
+  step from it, and resolves on it (`resolveWith`); `@[csimp] authorizeChecked_eq_fast`. The head
+  policy is still loaded once beside the graph's own load of it (about 1%).
 - `headerAt` runs twice per grant (in `challengeAt` and again in `checkGrant`), about 3%.
 
 Next candidates, in order of share: a verdict cache for `checkGrants` keyed by everything it reads
