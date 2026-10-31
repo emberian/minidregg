@@ -36,6 +36,34 @@ private def atom (id schema : Digest) (bytes : List UInt8) : Json := Json.mkObj 
   ("kind",Json.mkObj [("type",toJson "inlineObject"),("schema",decimal schema)]),
   ("payload",toJson (hex bytes))]
 
+/-- A checked type in the Objective Bend surface's own words (`Nat`, `Bool`, `String`, records,
+`Activity<Plan, Response, Result>`), for a message that must say what a reply has to look like. -/
+private partial def renderTy : Minidregg.Theory.ObjectiveBendTypes.Ty → String
+  | .natural => "Nat"
+  | .boolean => "Bool"
+  | .label => "String"
+  | .variable index => s!"t{index}"
+  | .arrow _ _ domain codomain => s!"{renderTy domain} -> {renderTy codomain}"
+  | .emptyRow => "{}"
+  | .field name member tail =>
+    let rec rest : Minidregg.Theory.ObjectiveBendTypes.Ty → List String × Bool
+      | .field n m t => let (more, open_) := rest t; (s!"{n}: {renderTy m}" :: more, open_)
+      | .emptyRow => ([], false)
+      | _ => ([], true)
+    let (more, open_) := rest tail
+    "{" ++ ", ".intercalate (s!"{name}: {renderTy member}" :: more) ++ (if open_ then ", .." else "") ++ "}"
+  | .variant row => "one of " ++ renderTy row
+  | .computation plan response result => s!"Activity<{renderTy plan}, {renderTy response}, {renderTy result}>"
+  | .specification .. | .prototype .. => "an object"
+  | .custody _ => "a custody"
+
+/-- The response type of the activity a checked callable returns (the type a reply to any of its
+asks must have), if the callable's type ends in one. -/
+private partial def responseOf : Minidregg.Theory.ObjectiveBendTypes.Ty → Option Minidregg.Theory.ObjectiveBendTypes.Ty
+  | .arrow _ _ _ codomain => responseOf codomain
+  | .computation _ response _ => some response
+  | _ => none
+
 /-- The receiver's package schema, never a local copy of its derivation. -/
 abbrev packageSchema : Digest := Minidregg.Kernel.ObjectiveBendPublishedPackage.schema
 
@@ -63,7 +91,9 @@ def author (packageBytes replayedPackage offeredCore expectedCore outputCodecByt
   pure <| Json.mkObj [
     ("schema",toJson "dregg.objective-bend.publication-author.v1"),
     ("packageId",decimal artifact.package),("artifactId",decimal (identity artifact)),
-    ("sourceEntry",toJson declaration),("inputCodec",decimal artifact.inputCodec),("outputCodec",decimal artifact.outputCodec),
+    ("sourceEntry",toJson declaration),
+    -- What a decider's reply to this program's asks must look like (empty: the entry is no activity).
+    ("responseType",toJson ((responseOf checked.typed.type).map renderTy |>.getD "")),("inputCodec",decimal artifact.inputCodec),("outputCodec",decimal artifact.outputCodec),
     -- The front-end work an invoking claim declares for this pair (GPT-6 row E): what the native
     -- route compares with `replayBytes`/`coreBytes` before it replays (`ObjectiveWorkAccount.uncovered`).
     ("frontEnd",Json.mkObj [("replayBytes",toJson (toString (Minidregg.Kernel.ObjectiveWorkAccount.sourceBytes package))),
