@@ -91,7 +91,13 @@ clone_dir() {   # SRC DST: a real copy, by reflink/clonefile where the filesyste
   cp -a --reflink=auto "$1" "$2" 2>/dev/null || cp -Rpc "$1" "$2" 2>/dev/null || cp -Rp "$1" "$2"; }
 warm() {        # TREE SRC_TREE: link SRC's newer build outputs into TREE (never while a build runs in TREE)
   [ -n "$2" ] && [ -d "$2/.lake/build" ] || return 0
-  python3 "$here/warm-link" "$2/.lake/build" "$1/.lake/build" >&2; touch "$1/.lake/warm.stamp"; }
+  python3 "$here/warm-link" "$2/.lake/build" "$1/.lake/build" >&2
+  # .lake/native (libmini_kernels_lean.so, which every Lean module loads) is not a Lake output: copy SRC's when newer,
+  # as the tree's own files (a native build relinks it in place)
+  if [ -f "$2/.lake/native/libmini_kernels_lean.so" ] && [ "$2/.lake/native/libmini_kernels_lean.so" -nt "$1/.lake/native/libmini_kernels_lean.so" ]; then
+    rm -rf "$1/.lake/native.wl"; cp -a "$2/.lake/native" "$1/.lake/native.wl"; rm -rf "$1/.lake/native"; mv "$1/.lake/native.wl" "$1/.lake/native"
+  fi
+  touch "$1/.lake/warm.stamp"; }
 tripwire() {    # TREE: a file still shared with the warm source but written after the warm (an in-place write)
   [ -f "$1/.lake/warm.stamp" ] || return 0
   find "$1/.lake/build" -type f -links +1 -newer "$1/.lake/warm.stamp" 2>/dev/null |

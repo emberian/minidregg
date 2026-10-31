@@ -39,7 +39,9 @@ round() {
   local sha=$1 s8=${1:0:8} t0; t0=$(date +%s)
   say "round ${sha:0:12} start"
   # 1. the build (detached: it holds build.lock and continues into the umbrellas after READY)
-  local build=$REPO/scripts/pipeline/integ-build; [ ! -x "$I/integ-build6.sh" ] || build=$I/integ-build6.sh
+  # integ-build at the tip being built (src is still at the previous round's commit until integ-build checks out SHA)
+  local build=$ST/integ-build; git -C "$REPO" show "$sha:scripts/pipeline/integ-build" > "$build" && chmod +x "$build"
+  [ ! -x "$I/integ-build6.sh" ] || build=$I/integ-build6.sh
   ( cd "$I" && BUILDER_ROOT=$I "$build" "$sha" > "$ST/build-$s8.out" 2>&1 ) & local bpid=$!; echo $bpid > "$ST/build.pid"
   while kill -0 $bpid 2>/dev/null && [ ! -f "$I/candidates/$sha/READY" ]; do sleep 30; done
   # 2. the gate, beside the umbrellas
