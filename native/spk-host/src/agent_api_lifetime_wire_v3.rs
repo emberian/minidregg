@@ -26,9 +26,9 @@ fn control_free(value: &str) -> bool {
         .any(|byte| byte == 0 || byte == b'\r' || byte == b'\n' || byte < 0x20 || byte == 0x7f)
 }
 
-/// Lean's `ordinaryHeaderName`, generated (protocol/host-operations.json `ordinary_headers`).
-fn allowed_header(name: &str) -> bool {
-    crate::host_operations::ordinary_header_name(name)
+/// Lean's `ordinaryHeaderOk`, generated (protocol/host-operations.json `ordinary_headers`).
+fn allowed_header(name: &str, value: &str) -> bool {
+    crate::host_operations::ordinary_header_ok(name, value)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -139,7 +139,7 @@ impl Request {
                     crate::hosted_conversation::descriptor(&body).map_err(refused)?;
                 }
                 for header in headers {
-                    if !(allowed_header(&header.name)
+                    if !(allowed_header(&header.name, &header.value)
                         || crate::host_operations::dav_header_allowed(method, &header.name, &header.value))
                         || header.name.len() > 128
                         || header.value.len() > 8192

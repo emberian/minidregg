@@ -402,9 +402,12 @@ fn project_http(
                 }
                 context.etag_precondition = etags(value, name == "if-match")?;
             }
-            // The rest of Lean's ordinaryHeaderName (generated): carried as additional headers. The
+            "referer" if !crate::host_operations::referer_value_ok(value) => {
+                return Err(invalid("signed referer is not a same-origin path (refererValueOk)"));
+            }
+            // The rest of Lean's ordinaryHeaderOk (generated): carried as additional headers. The
             // names with their own projection are matched above this arm.
-            other if crate::host_operations::ordinary_header_name(other) => {
+            other if crate::host_operations::ordinary_header_ok(other, value) => {
                 context.additional_headers.push(Header {
                     name: name.clone(),
                     value: value.clone(),

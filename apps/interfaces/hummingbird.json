@@ -19,9 +19,11 @@
         "type": "object",
         "properties": {
           "url": {
+            "description": "The tracked page: a path on this grain's own origin (it is sent as the referer, which Mini signs only as a same-origin path).",
             "type": "string",
             "minLength": 1,
-            "maxLength": 4096
+            "maxLength": 4096,
+            "pattern": "^/([^/\\\\][^\\\\]*)?$"
           },
           "event": {
             "type": "string",
@@ -169,7 +171,7 @@
       "args": {
         "url": {
           "concat": [
-            "https://grain.test/analytics/",
+            "/analytics/",
             {
               "context": "runId"
             }
@@ -182,7 +184,7 @@
           "contains": {
             "url": {
               "concat": [
-                "https://grain.test/analytics/",
+                "/analytics/",
                 {
                   "context": "runId"
                 }

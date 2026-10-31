@@ -33,27 +33,6 @@ const MAX_MODEL_TEXT_BODY: usize = 32 * 1024;
 const PROTOCOL: &str = "mini-spk-agent-api-v1";
 const LIFETIME_PROTOCOL: &str = "mini-spk-agent-api-v3";
 
-const ORDINARY_HEADERS: &[&str] = &[
-    "cookie",
-    "accept",
-    "accept-encoding",
-    "content-type",
-    "user-agent",
-    "if-match",
-    "if-none-match",
-    "x-requested-with",
-    "x-csrftoken",
-    "x-csrf-token",
-    "oc-total-length",
-    "oc-chunk-size",
-    "x-oc-mtime",
-    "oc-fileid",
-    "oc-chunked",
-    "oc-checksum",
-    "oc-chunk-offset",
-    "oc-lazyops",
-];
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HttpInput {
     pub application: String,
@@ -2091,7 +2070,21 @@ pub(crate) fn parse_input(
             .get("value")
             .and_then(Value::as_str)
             .ok_or("application API header value must be a string")?;
-        if !(ORDINARY_HEADERS.contains(&name) || mini_sdk::host_operations::dav_header_allowed(method, name, value))
+        // A referer is reduced before signing (a path passes, any other value is dropped, never refused).
+        let reduced;
+        let value = if name == "referer" {
+            match mini_sdk::host_operations::same_origin_referer(value, None) {
+                Some(path) => {
+                    reduced = path;
+                    reduced.as_str()
+                }
+                None => continue,
+            }
+        } else {
+            value
+        };
+        if !(mini_sdk::host_operations::ordinary_header_ok(name, value)
+            || mini_sdk::host_operations::dav_header_allowed(method, name, value))
             || name.len() > 128
             || value.len() > 8192
             || !clean_text(value)

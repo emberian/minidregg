@@ -61,9 +61,9 @@ pub(crate) enum Request {
     },
 }
 
-/// Lean's `ordinaryHeaderName`, generated (protocol/host-operations.json `ordinary_headers`).
-fn allowed_header(name: &str) -> bool {
-    crate::host_operations::ordinary_header_name(name)
+/// Lean's `ordinaryHeaderOk`, generated (protocol/host-operations.json `ordinary_headers`).
+fn allowed_header(name: &str, value: &str) -> bool {
+    crate::host_operations::ordinary_header_ok(name, value)
 }
 
 impl Request {
@@ -124,7 +124,7 @@ impl Request {
                     return Err(refuse("agent API request bounds or syntax refused"));
                 }
                 for header in headers {
-                    if !(allowed_header(&header.name)
+                    if !(allowed_header(&header.name, &header.value)
                         || crate::host_operations::dav_header_allowed(method, &header.name, &header.value))
                         || header.name.len() > 128
                         || header.value.len() > 8192
