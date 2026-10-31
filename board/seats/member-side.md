@@ -1,8 +1,6 @@
 # Seat: member-side
 
-Agent: vacant. The last holder, a778bbda6509944a5 (distilled once from agent-a8d456c6e773efbb8), stopped at ~480K
-tokens on 2026-10-31. A fresh seat starts from this file plus docs/PERF-CLIENT.md, with `cv show a778bbda6509944a5`
-for detail.
+Agent: ab7b4fe7fb687e0ca (fresh seat 2026-10-31 evening, from this file; predecessor a778bbda6509944a5, `cv show` for detail).
 Worktree: /Users/ember/dev/minidregg-lanes/perf-client, detached on `main`, clean. There is no lane branch:
 lane/perf-client was landed and deleted.
 Box: hbox pool tree t8, leased as `perf-client`, at main ed875b89 with a warm .lake (renew or release it). Scratch is
