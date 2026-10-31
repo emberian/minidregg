@@ -20,9 +20,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **ember (10-31): no rehearsal cut until she says.** Make the system excellent: Hermes repaired, efficiency everywhere,
   every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
-- **Batch 8 dc61016cb: gate15 FAIL (12:14)**: enrol PASS, tour 73/73; j14 = H1b; composed `jworld: port 22640 in use`
-  (my harness collision: the KEEP_WORLD world /ci/c-acc7cf-hp2 held the port until 12:09) -> rerun -c2 running
-  ($I/gate-dc61-c2.pid, waiter armed); flatness submit+get FAIL (get passed on batches 4-7; hot-path to read). Lesson:
+- **Batch 8 dc61016cb: gate15 FAIL**: enrol PASS, tour 73/73; j14 = H1b; composed (-c2 after my port collision):
+  rooms/churn/apps/connector PASS, documents FAIL (D2), residents R1; flatness get FAIL then PASS on -c2 (load). Lesson:
   a KEEP_WORLD composed world holds port 22640; take it down before the next composed gate.
   READY 11:57 (host 1,496 s; ships bin/mini-line). umbrella-tree follows in umbrella-src.
   Measured (perf-apps, EtherCalc, back to back vs batch 7): Host CPU samples 7,919 -> 3,210 (-60%); first page
@@ -56,6 +55,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   + hot-path 46ba70e43 (C1 follow-ups: `fresh` dropped; Reject.streamRef + append_ref_ahead_refused; PLACE.md client
   contract; positive pipeline statement owed in batch 10) + 75d97b351 (@[csimp] ofCells_eq_fast: each written post
   decoded once, not six times); audit requested.
+  + app-reds 58f0bad2b (cherry-picked 9a570e5a9: grain-runtime honours MINI_CODEC_RESIDENT=0) + perf-client caa988a88
+  (native/mini-session-env: one reading of delegated consent and shared codec; mini-line and web-spawn twins deleted).
   + perf-apps 4315513a7 (66ccd307a: launch qualification's six steps share one storeless codec child; Host processes
   6 -> 1, steps 1.63 -> 0.69 s; fallback twin DELETED by b59364ba5/a66d51f15: a lost child, out-of-turn answer or oversize input refuses the step
   by name; -91 lines).
@@ -144,6 +145,18 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   variable; syntax-checked only). Move gate15's EDGE_REV default to e29997d (contains fbb7648, and installs the
   candidate's mini-line wrapper; extracted at $I/dregg-infra-e29997d) after batch 8's gate and dc61016cb-codec -hp1 exit
   (never mid-gate), before batch 9 gates.
+- **H1b codec theory REFUTED** (dc61016cb-codec -hp1, 12:19, 6/6 runs reset): with 58f0bad2b + 5ae0de223 the final say
+  still met `Connection reset by peer (os error 104)`, and the exact resubmit failed: `exact resubmit exited 1: mini:
+  attempt has no retained …/resource-workspace/attempts/a-28305585112542523315230084449262223697`. Two faults: the reset
+  (cause unknown; the controller world was torn down, KEEP_WORLD keeps only composed worlds) and a write attempt not
+  retained until decided (routed to exorcist with D2, suspect read-scratch 7dd2f7eda). 58f0bad2b merged anyway as a real
+  lifetime defect (9a570e5a9; Linux cgroup codec tests 3/3 on hbox). app-reds RETIRING (context limit): continuation
+  docs/APP-REDS-STATE.md (acd9d5f52, merged); START fixes were never committed (lost); refusal sweep half 2 uncommitted
+  and broken in worktree app-reds-2. Successor owed by root.
+- **D2, protected doc phase outside workspace** (batch 8 composed -c2, documents:protected row 3 `owner: doc protect
+  pd-paper`): `error: phase must remain inside participant workspace` after `workspace attempt: …/attempts/0000…-0`;
+  adapter out/err empty. 1 occurrence; world /ci/c-dc6101-c2/w kept up (gate default? check). Batches 4-7 passed.
+  Routed to exorcist a97dba51f72535cb9 (read scratch 7dd2f7eda suspect), with the resubmit attempt signature.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
@@ -158,13 +171,13 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports owed
 
-- To root (next return): batch 8 verdict so far (FAIL: j14 H1b, composed rerun pending, flatness get regressed), the
-  install trust-boundary ruling (root may overrule).
-- When the -c2 composed and the dc61016cb-codec j14 land: batch 8 verdict to infra, explorer, perf-apps; codec journal to
-  app-reds; flatness-get red to hot-path if it repeats.
+- To root (next return): batch 8 verdict FAIL (j14 H1b; composed D2 documents:protected; R1), H1b codec theory refuted
+  + resubmit attempt not retained, app-reds retiring (successor decision), install trust-boundary ruling.
+- Batch 8 verdict to infra, explorer, perf-apps (send with batch 9 READY).
 
 ## Reports sent (do not resend)
 
+- 10-31 13:35: D2 + resubmit attempt signature to exorcist; perf-client caa988a88 merged, f25b6446 refused.
 - 10-31 13:20: hot-path 46ba70e43/75d97b351 merged (9540a646b); auditor round requested; private-cells ack.
 - 10-31 13:15: perf-client 096c881e5 merged; perf-apps b59364ba5 merged into batch 9.
 - 10-31 13:05: perf-apps a70a7655df79c4335: 4315513a7 merged; fallback twin note.
