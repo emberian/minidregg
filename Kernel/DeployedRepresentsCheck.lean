@@ -17,6 +17,7 @@ module
 public import Kernel.SnapRepresents
 public import Kernel.DeployedBridge
 public import Theory.AssertAxioms
+public import Std.Data.HashSet.Lemmas
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -221,5 +222,113 @@ theorem representsCheck_sound {rootBytes : List UInt8 → Theory.TypedAuthorizat
         simp [rowOk] at this
 
 #assert_axioms representsCheck_sound
+
+
+/-! ## The decision as the Host evaluates it (`representsCheck_eq_fast`)
+
+`representsCheck` judged each system row by `List` membership in the image's transaction ids,
+nullifier keys and cell ids, and iterated `DFinsupp.support` (a deduplication over the whole
+map): with one journal row per transaction, quadratic in the log on every Store open. The
+evaluation below reads each list once into a hash set and iterates the map's own support
+multiset with its absent entries skipped. -/
+
+/-- `∀ key ∈ fields.support, p key`, over an `Option`-valued map's own support multiset with its
+absent entries skipped: no `Multiset.toFinset`. -/
+def allSupport {K : Type} [DecidableEq K] {V : K → Type} (fields : Π₀ key : K, Option (V key))
+    (p : K → Bool) : Bool :=
+  fields.support'.lift (fun support => @decide (∀ key ∈ support.1, (fields key).isSome = true → p key = true)
+      Multiset.decidableForallMultiset)
+    (by
+      intro left right
+      apply decide_eq_decide.mpr
+      constructor
+      · intro holds key _ present
+        exact holds key ((left.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present
+      · intro holds key _ present
+        exact holds key ((right.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present)
+
+theorem allSupport_eq {K : Type} [DecidableEq K] {V : K → Type} (fields : Π₀ key : K, Option (V key))
+    (p : K → Bool) :
+    allSupport fields p = decide (∀ key ∈ fields.support, p key = true) := by
+  unfold allSupport
+  refine Trunc.induction_on fields.support' ?_
+  intro support
+  simp only [Trunc.lift_mk]
+  apply decide_eq_decide.mpr
+  constructor
+  · intro holds key member
+    have present : (fields key).isSome = true := by
+      have := DFinsupp.mem_support_iff.mp member
+      cases h : fields key with
+      | none => exact absurd h this
+      | some _ => rfl
+    exact holds key ((support.2 key).resolve_right (by intro none; have absent : fields key = Option.none := none; rw [absent] at present; cases present)) present
+  · intro holds key _ present
+    exact holds key (DFinsupp.mem_support_iff.mpr (by
+      intro none; rw [none] at present; cases present))
+
+/-- Membership in a list of naturals, read from a hash set built once. -/
+theorem hashSet_contains_ofList (l : List Nat) (n : Nat) :
+    (Std.HashSet.ofList l).contains n = decide (n ∈ l) := by
+  rw [Std.HashSet.contains_ofList]
+  exact Bool.eq_iff_iff.mpr (by simp)
+
+theorem digest_mem_values (l : List Theory.TypedAuthorization.Digest) (d : Theory.TypedAuthorization.Digest) :
+    decide (d.value ∈ l.map (·.value)) = decide (d ∈ l) := by
+  apply decide_eq_decide.mpr
+  constructor
+  · intro member
+    obtain ⟨e, inl, same⟩ := List.mem_map.mp member
+    have : e = d := by
+      cases e; cases d
+      simp only at same
+      subst same
+      rfl
+    exact this ▸ inl
+  · intro member
+    exact List.mem_map.mpr ⟨d, member, rfl⟩
+
+/-- `rowOk` over the hash sets of the key, transaction and cell-id values. -/
+def rowOkSet (keys txs ids : Std.HashSet Nat) :
+    Address (sysLayout TransactionId Theory.TypedAuthorization.Digest) → Bool
+  | ⟨.spent, d⟩ => keys.contains d.value
+  | ⟨.journal, x⟩ => txs.contains x.value
+  | ⟨.retired, c⟩ => ids.contains c
+  | ⟨.parent, _⟩ => false
+  | ⟨.head, _⟩ => true
+  | ⟨.allowance, _⟩ => true
+
+theorem rowOkSet_eq (keys txs : List Theory.TypedAuthorization.Digest) (ids : List Nat)
+    (a : Address (sysLayout TransactionId Theory.TypedAuthorization.Digest)) :
+    rowOkSet (Std.HashSet.ofList (keys.map (·.value))) (Std.HashSet.ofList (txs.map (·.value)))
+      (Std.HashSet.ofList ids) a = rowOk keys txs ids a := by
+  rcases a with ⟨space, key⟩
+  cases space <;>
+    simp only [rowOkSet, rowOk, hashSet_contains_ofList, digest_mem_values]
+
+/-- `representsCheck` as the Host evaluates it. -/
+def representsCheckFast {rootBytes : List UInt8 → Theory.TypedAuthorization.Digest}
+    (image : Image) (snap : DataSnapshot rootBytes) (w : DWorld) : Bool :=
+  let ids := image.cellIds.map (·.value)
+  let keys := (image.accepted.flatMap IntentRecord.nullifiers).map digestKey
+  let txs := image.accepted.map IntentRecord.transactionId
+  let idSet := Std.HashSet.ofList ids
+  let keySet := Std.HashSet.ofList (keys.map (·.value))
+  let txSet := Std.HashSet.ofList (txs.map (·.value))
+  (image.seed.absentBytes == encodeCell none) && !retiresCell image.seed.absentBytes &&
+  image.cellIds.all (fun c => cellOk w (snap.canonicalBytes c) c.value) &&
+  allSupport w.cells (fun c => idSet.contains c) &&
+  allSupport w.system (rowOkSet keySet txSet idSet) &&
+  keys.all (fun d => (w.spent d).isSome) &&
+  txs.all (fun x => (w.journal x).isSome) &&
+  (match w.head with | some (h, _) => h == image.accepted.length | none => false) &&
+  allLanes.all (fun l => w.allowanceOf l == some (snap.model.available l))
+
+@[csimp] theorem representsCheck_eq_fast : @representsCheck = @representsCheckFast := by
+  funext rootBytes image snap w
+  unfold representsCheck representsCheckFast
+  simp only [allSupport_eq, hashSet_contains_ofList, rowOkSet_eq, decide_eq_true_eq]
+
+#assert_axioms representsCheck_eq_fast
 
 end Minidregg.Kernel.HostRefinesWorld
