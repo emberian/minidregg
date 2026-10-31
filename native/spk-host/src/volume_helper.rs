@@ -33,6 +33,12 @@ pub(crate) struct Registry {
     #[serde(default)]
     pub custodian_socket: Option<PathBuf>,
 }
+/// The lowest app uid a world may register. On a host the subordinate range (65536 up) keeps apps
+/// clear of every system account. A world behind a custodian lives in a user namespace whose own
+/// uids are 0..65535, so its apps sit above the system accounts there; the custodian refuses a uid
+/// outside the container's range by name (`bad-uid`).
+fn app_uid_floor(custodian: bool) -> u32 { if custodian { 10000 } else { 65536 } }
+
 impl Registry {
     pub(crate) fn load(store: &str) -> io::Result<Self> {
         if !store_key(store) { return Err(refuse("volume-helper: store id refused")); }
@@ -47,7 +53,7 @@ impl Registry {
         if result.protocol!="mini-spk-volume-registry-v1" || result.store!=store
             || !hex(&result.deployment_id) || !hex(&result.host_id)
             || result.operator_uid==0 || result.operator_gid==0 || result.app_uids.is_empty()
-            || result.app_uids.iter().any(|u| *u<65536 || *u==result.operator_uid)
+            || result.app_uids.iter().any(|u| *u<app_uid_floor(result.custodian_socket.is_some()) || *u==result.operator_uid)
             || result.app_uids.iter().collect::<std::collections::BTreeSet<_>>().len()!=result.app_uids.len()
             || result.grains_root!=Path::new("/var/lib/mini-spk-worlds").join(store)
         { return Err(refuse("volume-helper: registry shape refused")); }
@@ -298,6 +304,12 @@ pub(crate) fn volumes_status(helper:&Path,store:&str) -> io::Result<Vec<VolumeSt
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_custodian_world_may_register_app_uids_inside_a_user_namespace() {
+        assert_eq!(app_uid_floor(false), 65536);
+        assert!(app_uid_floor(true) > 1000 && app_uid_floor(true) < 65536);
+    }
+
     use super::*;
     #[test]
     fn tenancy_helper_cross_world_path_refuses() {
