@@ -279,13 +279,40 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
    - **How to measure.** `scripts/perf/flatness-bench.py --bin <candidate bin with the new
      minidregg-host>`, built with `/home/hbox/lanes/integ/hotpatch-candidate.sh eca98bde… <name>
      minidregg-host=/ci/hpc/nb/artifacts/minidregg-host`.
-2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells,
-   now a30875aaf31364697: they send their FORMAT sha (AuxCache in Materialized, masked-trie
-   roots, new PersistedCodecTags), we rebase row 11 onto it, and the integrator lands the pair with one
-   genesis. Row 11 persists no cell root or Materialized field (answered 10-31); together with their private-cell root; agreed, and theirs is not
-   imminent): the checkpoint carries the session indexes and the certificates that read the
-   state at their height (issues, reserves, releases, grants). A Store with dispatch history
-   then also starts at its checkpoint, and the open stops reading the whole log.
+   - **Integrator's audit of 79a8c4c2c..08aa1b2f6 (sound). Owed in the next batch:**
+     - (1) `legKeys` and `keys` run `loadTarget` beside the configuration's own resolution, so the graph
+       loads twice per leg and per read. Thread the loaded graph through, or measure and record the cost.
+       The resolution does not show in the late profile.
+     - (2) A lemma that a missing `PreparedLaw` (empty `legKeys`) means the leg is refused, not admitted:
+       `resolve? = none → ∀ r, authorizeLeg … ≠ .ok r`, and the same for `authorizeChecked`.
+     - (3) `projectLazy`'s `lawStore` is eager. It is a `Store.set` (`DFinsupp.update`, O(1) to build),
+       but check it under item (d) below.
+     - Optional: a step-level clock corollary via `State.get_restrict`.
+2. **The one FORMAT batch: row 11, row 4 slice 2, and O(change) cells.** It is one epoch bump and one
+   genesis. Private cells (a30875aaf31364697) send their FORMAT sha first, and we rebase onto it.
+   - **Theirs (KeptCell).** `Theory/CellStateAux.lean` (`AuxCache`), `Materialized.carried` (a Thunk,
+     moved by `Carried.run` with one `set` per writing op), and `Kernel/PrivateCellMaterializer.aux`.
+     The root becomes `outerRoot ctxKind mask (trie digest)`, so a write costs one trie walk and one
+     hash. Content and the declared kinds switch to it. We asked them (10-31) to switch, with mask `[]`,
+     eventHistory, authority, resourceBook and policySource too, because those grow with history.
+   - **Ours, in the batch.** (a) Per-entry persistence: entries go through StoreCodec entries instead of
+     one encoded blob per cell write (whole-cell encode is 31% of late submit CPU). Row 11: the
+     checkpoint carries the session indexes and the walk certificates that read the state at their
+     height (issues, reserves, releases, grants), so the open stops reading the whole log.
+   - **Ours, before the batch (no format change).**
+     - (b) The decode (13%) is attributed (perf script over `/ci/hpc/fbs/perf.data`, 304 decode samples).
+       111 are `TurnOfIntent.deltaOf`, which runs `C.decode w.canonicalPostBytes` (via
+       `DeployedBridge.decodeCell`) on every write's post bytes, which the Host has just encoded from
+       the `Materialized` it holds. That is an encode-then-decode round trip per write. The fix is for
+       the write to carry its decoded post with `decode bytes = some post` (a non-persisted field, as
+       `carried` is for `Materialized`), with `deltaOf` reading it behind a `@[csimp]`. The rest are
+       `LinkIndex.liveLinksFull`, `CredentialAuthorityDomainReceiver.decodeRowsFrom` and
+       `physicalPostLawDecidable`, about 11 samples each.
+     - (c) Validation and apply share one patch run.
+     - (d) `Store.set` reads stop walking DFinsupp update history: a persistent map underneath, behind
+       a `@[csimp]`, with no statement change (12%).
+   - **Measurements** of a fresh member's first read at two heights, restart, certify and `story new`
+     come from the explorer on eca98bde7-resvar2. The integrator asked them on 10-31.
 3. Rows 3, 8, 16, 17, 19, 20. Measurements on the batch-2 candidate: a fresh member's first
    read, a fresh provider at two heights, restart, `story new`, and the first walk-family
    request after a restart. flatness-get waits on app-reds' resident `/var` fix.
