@@ -723,6 +723,14 @@ def ofLoaded (loaded : Loaded rootBytes) (_sameStart : store.logStart = loaded.l
     (ofLoaded loaded sameStart).roots = loaded.snapshot.model.roots :=
   (loaded_agrees loaded).roots.symm
 
+/-- Every footprint view of the full materialization's served state is, bare of
+its log-derived fields, the loaded snapshot. -/
+theorem bare_viewAt_ofLoaded (loaded : Loaded rootBytes) (sameStart : store.logStart = loaded.logStart)
+    {head : Head store} {keys : Keys} (footprint : VerifiedFootprint head keys) :
+    bare ((ofLoaded loaded sameStart).viewAt footprint) = bare loaded.snapshot := by
+  rw [Held.bare_eq (agrees_viewAt _ footprint), Held.bare_eq (loaded_agrees loaded)]
+  rfl
+
 /-- The full materialization serves exactly what its image enumerates. -/
 theorem ofLoaded_cellIds (loaded : Loaded rootBytes) (sameStart : store.logStart = loaded.logStart) :
     (ofLoaded loaded sameStart).cellIds = loaded.image.cellIds :=
@@ -1542,6 +1550,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
 #assert_axioms Served.advance_agrees
 #assert_axioms Served.advance_roots
 #assert_axioms Served.ofLoaded_roots
+#assert_axioms Served.bare_viewAt_ofLoaded
 #assert_axioms Served.ofStateAt_canonicalBytes
 #assert_axioms held_state_entries
 
