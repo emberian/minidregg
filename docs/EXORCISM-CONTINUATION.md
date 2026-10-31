@@ -78,6 +78,25 @@ A native Host build takes about 48 minutes in a pool tree prepared with `lane-tr
 with `/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=...`, see
 docs/HOT-PATH-STATE.md). This lane has not built one.
 
+## Client and codec, measured on /ci/exo/w6 (batch 6 world, `doc show`)
+
+- Client (wrapper + `mini`), perf stat over 40 runs: about 7-10 ms CPU per command, two thirds
+  kernel. `mini`'s kernel time by syscall handler (kallsyms via sudo, perf dwarf): user 25%,
+  openat 17% (mostly creating attempt files), page faults 14%, exit_group 8%, write 5%,
+  linkat/mkdir/rename/unlink/statx 10%. A signed read writes about 15 files (a new
+  `attempts/a-N` tree, `sources/q-N.json`, `seen/`), each through a temp name, link and unlink,
+  and keeps them: member-1 already holds 520 attempt directories (18 MB). They are receipt
+  evidence (`receipt_continuity`), so dropping them is a product decision, not a perf fix.
+- Binary layout: fat LTO + one codegen unit (19.6 MB against 21.2 MB) and non-PIE each moved CPU
+  by under 10%, within box noise; LTO costs 245 s against 43 s per release build. Not taken.
+- A bare `mini --help` is 1.5 ms and 168 page faults; a one-shot process per command cannot reach
+  1 ms. A per-member resident behind the ssh wrapper (as `mini command-resident` already is for
+  the controller: `workspace list` 0.4 ms framed) is the route.
+- Codec resident per doc show (perf over 40): `resourceJson` 23% and `documentJson` 23% of busy
+  time (the view decoded and rendered twice: `view-resource`, then `view-document` from the same
+  bytes), `challengeJson` 10%, GMP `Nat` churn throughout `StreamCodec`. Lean; batch onto a
+  Host build.
+
 ## Other open items
 
 - The client's attempt-file bus: about 60 openat per signed read (it writes each step and reads it
