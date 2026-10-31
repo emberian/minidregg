@@ -342,19 +342,21 @@ applied):
    between them cost `O(k)` walks at the first read and retain `k` closures until then. Every
    accepted version's root is read at publication today, so the chain stays one long; a host that
    stops reading roots per version must force the carried structure per version.
-   **Round 18, required in FORMAT** (integrator; Serve/PublicMeta and keyedCodec judged sound):
-   1. *Context uniformity as a construction, not a premise.* `keptCell_root_of_kind` takes
-      `ofKind`. Add a smart constructor `Params.ofKind` fixing protocol, layout and size bound
-      from the kind or wire, with `ctxBytes (Params.ofKind …) = kindCtx` by `rfl` (or birth
-      carries the proof), and have the registry build parameters only through it.
-   2. *Cross-cell separation.* `CustodyCodec.exact`'s decode is chosen per parameters, so a decode
-      returning the constant `params.cell` passes without the bytes carrying the cell
-      (`keyedCodec` does; `idealSetting`'s `Nat.pair v x` has no cell id). Two cells of one kind at
-      one version with one secret then share outer-hash inputs: a birthday term. Fix by a
-      kind-level decode (fixed by the wire, not the parameters) over a custody value that carries
-      an injective cell code, with the cross-cell lemma `p.cell ≠ q.cell → enc (p.prf v) ≠
-      enc (q.prf w)`; or state the birthday term in `rom`'s bound. Prefer the first, and rework
-      `idealSetting`'s custody value to `Nat.pair (cellCode) (Nat.pair v x)`.
+   **Round 18, done** (on lane/private-cells, ahead of the FORMAT switch):
+   1. *Context uniformity by construction.* `Params` lost protocol, layout and size bound;
+      `kindCtx wire` (protocol version and the wire's frame) is the context of every cell of the
+      wire (`KeptCell.ctx` by definition, `Twin.ctx` by `rfl`), and `keptCell_root_of_kind` has no
+      premise about the cell.
+   2. *Cross-cell separation.* `CustodyCodec decode params` is indexed by a kind-level
+      `CustodyDecode`, so a decode cannot read the cell off the parameters.
+      `CustodyCodec.cross_cell` (different cells never share custody bytes under one decode),
+      `History.custodyBytes_disjoint` (no mask of one cell's history equals one of another's),
+      teeth `CustodyCodec.shared_bytes_refuted` (a custody value omitting the cell has no codecs
+      for two cells). Concrete: `custodyNat cell v x := Nat.pair (cellCode cell) (Nat.pair v x)`,
+      `natDecode` over a wire's natural reader, the declared wire's `declaredDecode`;
+      `idealSetting`'s custody value is `custodyNat base.cell v x` (`idealSetting_codec`), and
+      `declared_cross_cell`. `keyedCodec_of_injective` (a choice decode reading `base.cell` off the
+      parameters) is deleted.
    **Tags and epoch:** iteration speed's seam 1 (lane/seam1-epoch) lands first: named tags in
    `Compiler/PersistedCodecTags/Core.lean` (imported by the modules naming them), census tags in
    `Compiler/PersistedCodecTags.lean`. The `DREGG/PRIVATE-CELL/*` tags go in Core if named, else
