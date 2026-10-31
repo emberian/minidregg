@@ -58,7 +58,7 @@ gated candidates and names candidates to infra and the explorer.
 | infra | aa72653a8ce442178 | forge demo container, forge composed (judges residents/restart), dregg-infra (ship.sh, world-down finding) |
 | exorcist | a6ad40ce192354deb (a31f4ba5028d24a92 retired) | no fsync anywhere (lane/exorcism); filtered set `nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)'` |
 | perf-apps | a25df305cfd551d8b | apps install, grain HTTP path, typed-tool path (perf) |
-| perf-client | a8d456c6e773efbb8 | client, consent provider per-record cost, web page loads, idle cold start (perf) |
+| perf-client | a778bbda6509944a5 (a8d456c6e773efbb8 retired) | client, consent provider per-record cost, web page loads, idle cold start (perf) |
 | demo-reds (sub-Opus of the integrator) | a64c387f3e638aa63 | bend/web/door/Hermes product reds as routed |
 | statement auditor (sub-Opus of the integrator) | a4d9a6f4cba4855ca | read-only adversarial audit of each lane's top-level statements, one round per merged sha |
 
