@@ -86,12 +86,21 @@ pub(crate) fn command(command: &str, flags: &[(&str, OsString)]) -> std::io::Res
             .map(|(name, value)| (OsString::from(format!("--{name}")), value.clone()))
             .collect(),
     };
+    ended(|| Ok(args))
+}
+
+/// `mini ARGV...` in this process, parsed as `main` parses its own arguments.
+pub(crate) fn argv(raw: Vec<OsString>) -> std::io::Result<(u8, Vec<u8>, Vec<u8>)> {
+    ended(|| crate::Args::parse_from(raw))
+}
+
+fn ended(args: impl FnOnce() -> crate::Result<crate::Args>) -> std::io::Result<(u8, Vec<u8>, Vec<u8>)> {
     let (ending, mut stdout, mut stderr) = streams(|| {
         let _ = crate::take_command_ending();
         let _ = crate::take_host_decision();
         let _ = crate::take_line_refusal();
         let outer = crate::swap_exit_status(0);
-        let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::run(args)))
+        let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| args().and_then(crate::run)))
             .unwrap_or_else(|_| Err("the client panicked; see the message above".into()));
         let status = crate::swap_exit_status(outer);
         let _ = crate::take_line_refusal();
@@ -101,6 +110,102 @@ pub(crate) fn command(command: &str, flags: &[(&str, OsString)]) -> std::io::Res
     stdout.extend_from_slice(ending.stdout.as_bytes());
     stderr.extend_from_slice(ending.stderr.as_bytes());
     Ok((ending.code, stdout, stderr))
+}
+
+/// `mini command-resident`: one client process that runs many commands for one
+/// caller (the Hermes controller), so each is a frame instead of a fresh `mini`
+/// that re-reads its workspace, re-pins its Host and reconnects its residents.
+///
+/// Descriptor 0 carries requests and 1 carries replies; both are moved aside
+/// at start, so what is printed between commands goes to standard error. A
+/// request is a u32 count of arguments, each a u32 length and its bytes, then
+/// the command's standard input as a u32 length and its bytes (big-endian);
+/// the command reads exactly those bytes, then end of file. A reply is the
+/// exit code (one byte), then stdout and stderr, each a u32 length and bytes.
+/// End of input between requests ends the process.
+#[cfg(unix)]
+pub(crate) fn serve() -> crate::Result<()> {
+    use std::os::unix::ffi::OsStringExt;
+    const ARGS_MAX: u32 = 4096;
+    const BYTES_MAX: usize = 4 << 20;
+    let moved = |fd: i32| -> std::io::Result<File> {
+        let copy = unsafe { libc::dup(fd) };
+        if copy < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(unsafe { File::from_raw_fd(copy) })
+    };
+    let (mut requests, mut replies) = (moved(0).map_err(|e| e.to_string())?, moved(1).map_err(|e| e.to_string())?);
+    let null = File::open("/dev/null").map_err(|e| e.to_string())?;
+    if unsafe { libc::dup2(null.as_raw_fd(), 0) } < 0 || unsafe { libc::dup2(2, 1) } < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    let word = |file: &mut File| -> std::io::Result<Option<u32>> {
+        let mut bytes = [0u8; 4];
+        let mut read = 0;
+        while read < 4 {
+            match file.read(&mut bytes[read..])? {
+                0 if read == 0 => return Ok(None),
+                0 => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+                n => read += n,
+            }
+        }
+        Ok(Some(u32::from_be_bytes(bytes)))
+    };
+    loop {
+        let Some(count) = word(&mut requests).map_err(|e| e.to_string())? else { return Ok(()) };
+        if count == 0 || count > ARGS_MAX {
+            return Err("command-resident: argument count out of bounds".into());
+        }
+        let mut raw = Vec::with_capacity(count as usize);
+        let mut total = 0usize;
+        for _ in 0..count {
+            let length = word(&mut requests).map_err(|e| e.to_string())?.ok_or("command-resident: truncated request")? as usize;
+            total += length;
+            if total > BYTES_MAX {
+                return Err("command-resident: request exceeds 4 MiB".into());
+            }
+            let mut bytes = vec![0u8; length];
+            requests.read_exact(&mut bytes).map_err(|e| e.to_string())?;
+            raw.push(OsString::from_vec(bytes));
+        }
+        let length = word(&mut requests).map_err(|e| e.to_string())?.ok_or("command-resident: truncated request")? as usize;
+        if total + length > BYTES_MAX {
+            return Err("command-resident: request exceeds 4 MiB".into());
+        }
+        let mut input = anonymous().map_err(|e| e.to_string())?;
+        std::io::copy(&mut (&mut requests).take(length as u64), &mut input).map_err(|e| e.to_string())?;
+        input.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+        if unsafe { libc::dup2(input.as_raw_fd(), 0) } < 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        crate::VERIFY_HOST.store(false, std::sync::atomic::Ordering::Relaxed);
+        let ran = argv(raw);
+        // Standard input is /dev/null again, and what the process's reader
+        // buffered from this command's input is dropped, never the next one's.
+        if unsafe { libc::dup2(null.as_raw_fd(), 0) } < 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        {
+            use std::io::BufRead;
+            let mut stdin = std::io::stdin().lock();
+            loop {
+                let buffered = stdin.fill_buf().map(<[u8]>::len).unwrap_or(0);
+                if buffered == 0 {
+                    break;
+                }
+                stdin.consume(buffered);
+            }
+        }
+        let (code, stdout, stderr) = ran.map_err(|e| e.to_string())?;
+        let mut reply = Vec::with_capacity(9 + stdout.len() + stderr.len());
+        reply.push(code);
+        for stream in [&stdout, &stderr] {
+            reply.extend_from_slice(&u32::try_from(stream.len()).map_err(|_| "command-resident: reply too large")?.to_be_bytes());
+            reply.extend_from_slice(stream);
+        }
+        replies.write_all(&reply).map_err(|e| e.to_string())?;
+    }
 }
 
 #[cfg(test)]

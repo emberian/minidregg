@@ -2883,7 +2883,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         last
     };
     let _ = io::stdout().flush();
-    std::process::exit(code);
+    // The last line's code is the exit status, exactly (`main_ending` adds
+    // nothing to it), so a process that runs many commands (`capture::serve`)
+    // goes on after the shell.
+    let _ = crate::take_command_ending();
+    crate::swap_exit_status(u8::try_from(code).unwrap_or(1));
+    Ok(())
 }
 
 #[cfg(test)]

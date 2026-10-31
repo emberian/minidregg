@@ -17,6 +17,7 @@ fn design_preview() {
     fs::write(root.join("home/requests/tale-invite.json"), json!({"type":"mini-story-invitation-v1","story":"tale","role":"player","author":"7","grant":{"recipient":"42"}}).to_string()).unwrap();
     fs::write(root.join("home/story/garden.json"), json!({"role":"player","author":"7","gm":"7"}).to_string()).unwrap();
     let mut site = Site {
+        refs: Mutex::new(None),
         mutations: Mutex::new(()), home: Some(root.join("home")), root: root.clone(),
         workspace: Value::Null, subject: "42".into(), token: String::new(),
         front: Front { origins: vec![], read_only: true }, base: String::new(), face: Face::Body,

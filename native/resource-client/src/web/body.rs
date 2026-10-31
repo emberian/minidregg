@@ -63,6 +63,7 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
     args.finish()?;
     let workspace = workspace::load(&root)?;
     let site = Arc::new(Site {
+        refs: Mutex::new(None),
         mutations: Mutex::new(()),
         home: Some(home.clone()),
         subject: workspace::member(&workspace, "subject")?.to_owned(),
@@ -1320,12 +1321,16 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     // Under the gateway's two minutes, so a run that cannot finish still ends as a page the
     // member can read, never as the gateway's 504.
     let deadline = Instant::now() + Duration::from_secs(100);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            _ => break None,
-        }
+    // A thread waits on the child; this one waits on that, until the deadline.
+    let pid = child.id();
+    let (exited, waiter) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = exited.send(child.wait());
+    });
+    let status = match waiter.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(Ok(status)) => Some(status),
+        Ok(Err(_)) => return None,
+        Err(_) => None,
     };
     let cap = super::capture::text;
     if let Some(status) = status {
@@ -1337,7 +1342,6 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         // A line that may move the world is never cut short: the shell keeps running to its
         // decision (a thread reaps it), and the page says undecided, with where the outcome lands.
         std::thread::spawn(move || {
-            let _ = child.wait();
             let _ = out_thread.join();
             let _ = err_thread.join();
         });
@@ -1347,11 +1351,11 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     }
     // Reads and local verbs are stopped at the deadline: nothing they do can be left half-done.
     // The group is the child's own (process_group(0) above), so its id is the child's pid.
-    if let Ok(pgid) = i32::try_from(child.id()) {
+    // The child is unreaped until the waiter's `wait` returns, so its pid is not yet reused.
+    if let Ok(pgid) = i32::try_from(pid) {
         unsafe { libc::kill(-pgid, libc::SIGKILL) };
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    let _ = waiter.recv();
     let _ = out_thread.join();
     let _ = err_thread.join();
     let stdout = cap(snapshot(&out_buf));

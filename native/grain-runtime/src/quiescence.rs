@@ -548,7 +548,11 @@ impl Runtime {
     fn quiescence_physical_stop_proof(&self) -> Result<()> {
         // Fresh, not the cached startup boolean. Effect-capable custody
         // clients still refuse; only the exact pinned stateless codec pair may
-        // remain. A missing journal child alone proves nothing.
+        // remain. A missing journal child alone proves nothing. The idle
+        // resident clients end first: they are effect-capable processes.
+        self.custody_gate.retire().map_err(|e| format!("resident client: {e}"))?;
+        self.native_gate.retire().map_err(|e| format!("resident client: {e}"))?;
+        crate::resource_tools::retire_room_residents()?;
         cgroup_stop::prove_quiescent_controller(&self.config)?;
         if self.current_pgid.load(Ordering::SeqCst) != 0 {
             return Err("controller retains an owned process group".into());
