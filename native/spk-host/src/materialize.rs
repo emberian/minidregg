@@ -692,5 +692,18 @@ mod tests {
         fs::set_permissions(&spk, fs::Permissions::from_mode(0o444)).unwrap();
         let refused = verify_installed_spk(&dir, app_uid).err().unwrap();
         assert!(refused.to_string().contains("differ from their verified identity"), "{refused}");
+        // A whole other published image (its own package, record and tree, each self-consistent)
+        // swapped in under this image's name is refused: its digest is not the name.
+        let other_input = scratch.join("other.spk");
+        fs::write(&other_input, sandstorm_package::SpkBuilder::new()
+            .manifest_json(r#"{"app_id":"ignored","app_title":"other","app_version":4,"continue_command":{"argv":["/app"]}}"#)
+            .file(sandstorm_package::File::executable("app", b"other".to_vec()))
+            .pack(&ed25519_dalek::SigningKey::from_bytes(&[8; 32]))).unwrap();
+        let other = materialize_spk(&other_input, &scratch, app_uid).unwrap();
+        assert!(verify_installed_spk(&other.directory, app_uid).is_ok());
+        fs::rename(&dir, scratch.join("set-aside")).unwrap();
+        fs::rename(&other.directory, &dir).unwrap();
+        let swapped = verify_installed_spk(&dir, app_uid).err().unwrap();
+        assert!(swapped.to_string().contains("image path differs from signed SPK digest"), "{swapped}");
     }
 }
