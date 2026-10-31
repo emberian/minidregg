@@ -14,6 +14,7 @@ import Theory.IndexedProgram  -- indexed free programs with response-dependent t
 import Theory.GuardedAdvice  -- eager hole shape, typed late advice, total verification, and durable replay refusal
 import Theory.ReactiveReceipt  -- authoritative receipt deltas, dependency-local reactive projections, atomic rejection, and witness-cursor snapshots
 import Theory.ReactiveController  -- Lean-owned guarded-hole/reactive control derives Pending/Reject/CommitIntent from data-only host observations; physical CAS remains external
+import Theory.SparseMap  -- the leaf representation: a persistent extensional finite map (ExtDTreeMap over injective List Nat key codes), O(log n) get/set, DFinsupp as a spec view
 import Theory.Store  -- the one typed sparse store and guarded patch: layouts with ROM/RAM/append-only disciplines, `run` as the free-monoid action, prefix validity, syntactic footprints, and the one frame law
 import Theory.StoreNormalize  -- the normal form of a guarded patch: fuse each operation with the next at its address, keep every guard that can fail; under validity the write footprint is exactly the changed addresses
 import Theory.CellState  -- canonical cells over `Theory.Store`: materialization with the root a function of the logical store, and validated patches (quoted pre-root + prefix validity)
