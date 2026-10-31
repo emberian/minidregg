@@ -135,8 +135,8 @@ impl Session {
 
 /// The identity of a local process selection: the executable file (path and inode identity, size
 /// and both times) and the exact settings bytes. A rebuilt, replaced or moved executable, or any
-/// settings change, binds differently. A codec child is reused, and a consent anchor offered,
-/// only under the same binding.
+/// settings change, binds differently. A codec child or a resident is reused only under the same
+/// binding; a retained consent anchor is bound by [`anchor_binding`] instead.
 pub fn binding(executable: &Path, settings_bytes: &[u8]) -> Result<[u8; 32]> {
     use sha2::Digest;
     use std::os::unix::ffi::OsStrExt;
@@ -152,6 +152,62 @@ pub fn binding(executable: &Path, settings_bytes: &[u8]) -> Result<[u8; 32]> {
     }
     digest.update(sha2::Sha256::digest(settings_bytes));
     Ok(digest.finalize().into())
+}
+
+/// The settings fields that name executables (`storageBinary`, `signatureBinary`): a ship moves
+/// them to the new candidate's paths without changing what admission means.
+const EXECUTABLE_SETTINGS: [&str; 2] = ["storageBinary", "signatureBinary"];
+
+/// The binding of a retained consent anchor (CONSENT-STORE, `Kernel.ConsentAnchor`): the settings
+/// as canonical JSON (keys sorted at every level) without the executable paths, never the
+/// provider's own file. An anchor is a height, genesis log, chain and root of one Store; what it
+/// is admitted under is named inside its bytes (`ConsentAnchor.epochTag`), and a provider of
+/// another consent epoch sets it aside, so an anchor survives a ship that moves only binaries.
+pub fn anchor_binding(settings_bytes: &[u8]) -> Result<[u8; 32]> {
+    use sha2::Digest;
+    let mut value: serde_json::Value = serde_json::from_slice(settings_bytes)
+        .map_err(|e| format!("local consent settings are not JSON: {e}"))?;
+    let object = value.as_object_mut().ok_or("local consent settings are not a JSON object")?;
+    for name in EXECUTABLE_SETTINGS {
+        object.remove(name);
+    }
+    let mut canonical = Vec::new();
+    write_canonical(&value, &mut canonical);
+    let mut digest = sha2::Sha256::new();
+    digest.update(b"MINI-CONSENT-ANCHOR-BINDING/v2\0");
+    digest.update(sha2::Sha256::digest(&canonical));
+    Ok(digest.finalize().into())
+}
+
+/// JSON with every object's keys in byte order, whatever map order serde_json was built with.
+fn write_canonical(value: &serde_json::Value, out: &mut Vec<u8>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut entries: Vec<_> = map.iter().collect();
+            entries.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+            out.push(b'{');
+            for (i, (key, item)) in entries.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(b',');
+                }
+                out.extend_from_slice(serde_json::Value::String(key.clone()).to_string().as_bytes());
+                out.push(b':');
+                write_canonical(item, out);
+            }
+            out.push(b'}');
+        }
+        serde_json::Value::Array(items) => {
+            out.push(b'[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(b',');
+                }
+                write_canonical(item, out);
+            }
+            out.push(b']');
+        }
+        other => out.extend_from_slice(other.to_string().as_bytes()),
+    }
 }
 
 /// How a codec frame failed.

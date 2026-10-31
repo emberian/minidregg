@@ -9,12 +9,14 @@
 //! against the held admission.
 //!
 //! **Retained anchors.** The provider admits the Store's history before its first consent frame.
-//! What it admitted is kept as a retained anchor (`Kernel.ConsentAnchor`) in a private file under
-//! the anchor directory, named by and bound to the exact provider file and settings bytes
-//! ([`crate::local::binding`]). The next provider is offered it (228) before admission, so it
-//! admits only the records after it, and refuses a Store that rolled back or rewrote the anchored
-//! prefix. Another provider build, a replaced provider file or changed settings never see the
-//! anchor: they admit from genesis.
+//! The provider starts from the Store's MAC-verified checkpoint (CONSENT-STORE, the storage device
+//! is trusted) and natively admits every record after it. What it admitted is kept as a retained
+//! anchor (`Kernel.ConsentAnchor`) in a private file under the anchor directory, named by and bound
+//! to the settings without their executable paths ([`crate::local::anchor_binding`]): a ship that
+//! moves only binaries keeps it. The next provider is offered it (228) before admission: it starts
+//! there when the anchor is above the Store's checkpoint, and refuses a Store that rolled back or
+//! rewrote the anchored prefix. A provider of another consent epoch sets the anchor aside
+//! (`ConsentAnchor.decode`) and starts from the checkpoint; changed settings never see it.
 //!
 //! **The resident provider.** A process that starts its own provider pays a Store admission
 //! from the retained anchor before its first frame and drops the warm frontier on exit. The
@@ -48,7 +50,7 @@ use crate::host_operations::CONSENT_PLANS;
 /// for every frame it refuses. This is the local consent protocol's framing, not a reply marker
 /// of the Host request registry (whose 255 is the undecided outcome envelope).
 pub const CONSENT_REFUSAL: u8 = 255;
-use crate::local::{binding, pair, settings_bytes, Session, CAP};
+use crate::local::{anchor_binding, binding, pair, settings_bytes, Session, CAP};
 use crate::{Error, Result};
 
 /// Custody framing of a retained anchor: this tag, the 32-byte binding, then the provider's bytes.
@@ -229,7 +231,7 @@ fn retain_anchor_with(session: &mut Session, observe: &mut dyn FnMut(crate::dura
 /// admission. A refusal of the offer (another epoch, noncanonical bytes) is reported, never
 /// silently replaced by a genesis admission.
 pub fn start(anchors: &Path, executable: PathBuf, settings: &Path, settings_bytes: Vec<u8>) -> Result<Session> {
-    let binding = binding(&executable, &settings_bytes)?;
+    let binding = anchor_binding(&settings_bytes)?;
     let path = anchor_path(anchors, &binding);
     let retained = read_anchor(&path, &binding)?;
     let what = format!("local consent provider {}", executable.display());
@@ -916,7 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn retained_anchor_is_offered_only_under_its_exact_binding() {
+    fn retained_anchor_survives_a_ship_but_not_a_settings_change() {
         let dir = stub_dir("anchor-offer");
         let provider = opcode_stub(&dir, b"ANCHOR-AFTER");
         let settings = dir.join("consent.json");
@@ -927,7 +929,7 @@ mod tests {
         retain_anchor(&mut session);
         drop(session);
         assert_eq!(opcodes(&dir), vec![220, 229]);
-        let binding = binding(&provider, b"{}").unwrap();
+        let binding = anchor_binding(b"{}").unwrap();
         assert_eq!(read_anchor(&anchor_path(&dir.join("anchors"), &binding), &binding).unwrap().as_deref(), Some(&b"ANCHOR-AFTER"[..]));
         // The next provider is offered it first.
         fs::remove_file(dir.join("opcodes")).unwrap();
@@ -935,17 +937,25 @@ mod tests {
         round_trip(&mut session, crate::host_operations::CONSENT_INTENT, b"intent").unwrap();
         drop(session);
         assert_eq!(opcodes(&dir), vec![228, 220]);
-        // Changed settings bytes: another binding, so no offer.
+        // A replaced provider file (a ship) and moved executable settings keep the binding: offered.
+        let resident = crate::local::binding(&provider, b"{}").unwrap();
+        let copy = dir.join("provider-copy");
+        fs::copy(&provider, &copy).unwrap();
+        fs::rename(&copy, &provider).unwrap();
+        assert_ne!(crate::local::binding(&provider, b"{}").unwrap(), resident, "a resident is not reused across a ship");
+        assert_eq!(anchor_binding(br#"{"storageBinary":"/c1/store","domain":1}"#).unwrap(),
+            anchor_binding(br#"{ "domain" : 1, "storageBinary" : "/c2/store" }"#).unwrap());
         fs::remove_file(dir.join("opcodes")).unwrap();
         let mut session = start(&dir.join("anchors"), provider.clone(), &settings, b"{ }".to_vec()).unwrap();
         round_trip(&mut session, crate::host_operations::CONSENT_INTENT, b"intent").unwrap();
         drop(session);
+        assert_eq!(opcodes(&dir), vec![228, 220]);
+        // Changed settings: another binding, so no offer.
+        fs::remove_file(dir.join("opcodes")).unwrap();
+        let mut session = start(&dir.join("anchors"), provider.clone(), &settings, br#"{"domain":2}"#.to_vec()).unwrap();
+        round_trip(&mut session, crate::host_operations::CONSENT_INTENT, b"intent").unwrap();
+        drop(session);
         assert_eq!(opcodes(&dir), vec![220]);
-        // A replaced provider file (new inode) binds differently too.
-        let copy = dir.join("provider-copy");
-        fs::copy(&provider, &copy).unwrap();
-        fs::rename(&copy, &provider).unwrap();
-        assert_ne!(crate::local::binding(&provider, b"{}").unwrap(), binding);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1054,7 +1064,8 @@ mod tests {
             assert!(error.contains("reserved to the resident consent provider"), "{error}");
         }
         assert_eq!(opcodes(&dir), vec![233, 220, 229, 221, 229, 233, 222, 229]);
-        assert_eq!(read_anchor(&anchor_path(&anchors, &binding), &binding).unwrap().as_deref(), Some(&b"ANCHOR-R"[..]));
+        let anchored = anchor_binding(b"{}").unwrap();
+        assert_eq!(read_anchor(&anchor_path(&anchors, &anchored), &anchored).unwrap().as_deref(), Some(&b"ANCHOR-R"[..]));
         assert!(resident_file(ResidentKind::Consent, &anchors, &binding, "pid").exists());
         drop(first);
         drop(second);
@@ -1105,7 +1116,8 @@ mod tests {
         assert_eq!(round_trip(&mut second, crate::host_operations::INSPECT, b"outcome").unwrap(), b"ok");
         assert_eq!(round_trip(&mut first, crate::host_operations::CALL_ASSEMBLE, b"assemble").unwrap(), b"ok");
         assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1, "one child for all connections");
-        assert!(read_anchor(&anchor_path(&anchors, &binding), &binding).unwrap().is_none(), "the codec Host retains no anchor");
+        let anchored = anchor_binding(b"{}").unwrap();
+        assert!(read_anchor(&anchor_path(&anchors, &anchored), &anchored).unwrap().is_none(), "the codec Host retains no anchor");
         assert!(resident_file(ResidentKind::Codec, &anchors, &binding, "pid").exists());
         drop(first);
         drop(second);
@@ -1141,7 +1153,7 @@ mod tests {
             let provider = opcode_stub(&dir, b"NEW-ANCHOR");
             let settings = dir.join("consent.json");
             fs::write(&settings, b"{}").unwrap();
-            let binding = binding(&provider, b"{}").unwrap();
+            let binding = anchor_binding(b"{}").unwrap();
             let path = anchor_path(&dir.join("anchors"), &binding);
             fs::create_dir(dir.join("anchors")).unwrap();
             crate::durable::replace(&path, &anchor_file(&binding, b"OLD-ANCHOR"), crate::durable::Perm::Private).unwrap();

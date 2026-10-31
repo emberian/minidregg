@@ -1334,6 +1334,8 @@ structure OpenState (rootBytes : List UInt8 → Digest) (suffix : List Entry) wh
   /-- The suffix replayed from the checkpoint state alone. -/
   engine : DurableEngine.Engine rootBytes
   replayed : (DurableEngine.Engine.ofState rootBytes base.2.1 []).replay rootBytes records = some engine
+  /-- The checkpoint's World (the seed's genesis World at height 0), before the suffix. -/
+  baseWorld : Except String HostRefinesWorld.DWorld
   /-- The checkpoint's World with the suffix folded as turns (or why there is none). -/
   world : Except String HostRefinesWorld.DWorld
 
@@ -1371,7 +1373,7 @@ def openState (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Dig
     | none => throw "durable log suffix does not replay through the canonical executor"
     | some engine => pure (⟨engine, found⟩ : {engine : DurableEngine.Engine rootBytes //
         (DurableEngine.Engine.ofState rootBytes base.2.1 []).replay rootBytes records = some engine})
-  return ⟨base, baseChain, records, decoded, chains, rfl, frontier, engine, replayed,
+  return ⟨base, baseChain, records, decoded, chains, rfl, frontier, engine, replayed, start,
     start.bind fun w => foldRecords rootBytes w base.1 records⟩
 
 /-- A decided fact as a value, or the refusal naming it. -/
@@ -1489,13 +1491,20 @@ def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Di
   | _ => pure ()
   return ⟨loaded, chains, chainsEq⟩
 
-/-- The single open path, keeping the chain value after every stored record (`chainPrefixes`) for
-a caller that cuts the image at a past height (`Loaded.prefixAt`): the executing part
+/-- A full open with what a cut at or above its base needs (`Loaded.cutAbove`): the chain value
+after every stored record (`chainPrefixes`) and the World at the base, the checkpoint's (or the
+seed's genesis World), before any record after it is folded. -/
+structure Chained (rootBytes : List UInt8 → Digest) where
+  loaded : Loaded rootBytes
+  chains : List Digest
+  chainsExact : chains = chainPrefixes loaded.logStart loaded.image.accepted
+  baseWorld : Except String HostRefinesWorld.DWorld
+
+/-- The single open path, keeping what a cut above the base needs (`Chained`): the executing part
 (`openState`) over the checkpoint and the entries after it, then the gate and the session build
 (`openLoaded`) over the entries below it. Every check refuses; nothing reinterprets. -/
 def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
-    IO (Except String ((loaded : Loaded rootBytes) ×'
-      {chains : List Digest // chains = chainPrefixes loaded.logStart loaded.image.accepted})) := do
+    IO (Except String (Chained rootBytes)) := do
   -- Operator measurement control (as `DurableServed.openHead`): MINI_OPEN_TIMING=1 prints each
   -- stage's elapsed time to stderr.
   let timing := (← IO.getEnv "MINI_OPEN_TIMING") == some "1"
@@ -1532,14 +1541,14 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
           lap s!"fast-forward (checkpoint {opened.base.1}, {suffix.length} entries after it)"
           match openLoaded key rootBytes logStart seed (stored.entries.take height) suffix opened with
           | .error message => return .error message
-          | .ok result =>
+          | .ok ⟨loaded, chains, chainsExact⟩ =>
               lap "gate and rebuild"
-              return .ok result
+              return .ok ⟨loaded, chains, chainsExact, opened.baseWorld⟩
 
-/-- The open path (`loadChained` without the chain prefixes). -/
+/-- The open path (`loadChained` without the chain prefixes or the base World). -/
 def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
     IO (Except String (Loaded rootBytes)) := do
-  return (← loadChained transport rootBytes).map (·.1)
+  return (← loadChained transport rootBytes).map (·.loaded)
 
 inductive Confirmation where
   | installed
@@ -1775,15 +1784,18 @@ def Loaded.prefixImage {rootBytes : List UInt8 → Digest} (loaded : Loaded root
     (height : Nat) : Image :=
   Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height)
 
-/-- A loaded image from its parts: the resumed snapshot, a full root cache and
-every index built over the image. The physical checks (chain, tags, seal) are
-the caller's; `chainExact` and `rootLogSize` carry what they established. -/
+/-- A loaded image from its parts: the resumed snapshot, a full root cache, every
+index built over the image, and the World at the head (`world`, decided against the
+resumed snapshot). The physical checks (chain, tags, seal) are the caller's;
+`chainExact` and `rootLogSize` carry what they established. -/
 def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight : Nat)
     (base : State) (withinLog : baseHeight ≤ image.accepted.length) (logStart chain : Digest)
     (chainExact : chain = chainAfter logStart image.accepted)
     (rootLog : Array (Option Digest)) (rootLogSize : rootLog.size = image.accepted.length)
-    (chainLog : Array Digest) (chainLogExact : chainLog.toList = chainPrefixes logStart image.accepted) :
-    Except String {built : Loaded rootBytes // built.image = image ∧ built.logStart = logStart} :=
+    (chainLog : Array Digest) (chainLogExact : chainLog.toList = chainPrefixes logStart image.accepted)
+    (world : Except String HostRefinesWorld.DWorld) :
+    Except String {built : Loaded rootBytes // built.image = image ∧ built.logStart = logStart ∧
+      built.baseHeight = baseHeight ∧ built.base = base} :=
   match found : DurableEngine.resumeEngine rootBytes image baseHeight base with
   | none => .error "durable image journal does not replay through the canonical executor"
   | some engine =>
@@ -1802,50 +1814,49 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
         SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
           image.accepted,
         rootLog, rootLogSize, none, none,
-        trackOf rootBytes image (DurableEngine.resume_of_resumeEngine found),
-        chainLog, chainLogExact⟩, rfl, rfl⟩
+        trackOfWorld rootBytes image (DurableEngine.resume_of_resumeEngine found) world,
+        chainLog, chainLogExact⟩, rfl, rfl, rfl, rfl⟩
 
-/-- **The loaded image cut at log height `height`**, from an open that kept its
-chain prefixes (`loadChained`): the chain after `height` records is read off
-the prefixes, the state is the checkpoint's resume when the checkpoint is at or
-below `height` (otherwise the genesis fold of the cut), and the stored roots are
-the verified tags' roots up to `height`. Nothing is re-read or re-hashed. -/
-def Loaded.prefixAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (height : Nat)
-    (chains : List Digest) (chainsExact : chains = chainPrefixes loaded.logStart loaded.image.accepted) :
+/-- **The opening cut at `height`, at or above its own base** (CONSENT-STORE): the
+base the Store's open used (its MAC-verified checkpoint, or the seed) is kept, the
+records from the base to `height` are replayed through the executor and folded as
+turns from the base's World (`Chained.baseWorld`), the chain is read off the open's
+verified prefixes and the stored roots are the verified tags'. Nothing below the base
+is executed or folded: the cost is the records between the base and `height`, at most
+the checkpoint interval when `height` is the head's checkpoint or an anchor above it. -/
+def Chained.cutAbove {rootBytes : List UInt8 → Digest} (opened : Chained rootBytes) (height : Nat) :
     Except String {cut : Loaded rootBytes //
-      cut.image = Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height) ∧
-        cut.logStart = loaded.logStart} :=
+      cut.image = Image.ofAccepted opened.loaded.image.seed (opened.loaded.image.accepted.take height) ∧
+        cut.logStart = opened.loaded.logStart ∧ cut.baseHeight = opened.loaded.baseHeight ∧
+        cut.base = opened.loaded.base} :=
+  let loaded := opened.loaded
   if within : height ≤ loaded.height then
     have withinAccepted : height ≤ loaded.image.accepted.length := by
       simpa only [Loaded.height_eq] using within
-    match found : chains[height]? with
-    | none => .error "durable chain prefix unavailable at the requested height"
-    | some chain =>
-        have chainExact : chain = chainAfter loaded.logStart (loaded.image.accepted.take height) := by
-          rw [chainsExact, DurableLogTags.chainPrefixes_getElem? _ _ _ withinAccepted] at found
-          exact (Option.some.inj found).symm
-        have sized : (loaded.rootLog.extract 0 height).size =
-            (loaded.image.accepted.take height).length := by
-          simp [Array.size_extract, loaded.rootLogSize, List.length_take, Nat.min_eq_left withinAccepted]
-        have cutLog : (loaded.chainLog.toList.take (height + 1)).toArray.toList =
-            chainPrefixes loaded.logStart (loaded.image.accepted.take height) := by
-          rw [List.toList_toArray, loaded.chainLogExact,
-            DurableLogTags.chainPrefixes_take _ _ _ withinAccepted]
-        if based : loaded.baseHeight ≤ height then
+    if based : loaded.baseHeight ≤ height then
+      match found : opened.chains[height]? with
+      | none => .error "durable chain prefix unavailable at the requested height"
+      | some chain =>
+          have chainExact : chain = chainAfter loaded.logStart (loaded.image.accepted.take height) := by
+            rw [opened.chainsExact, DurableLogTags.chainPrefixes_getElem? _ _ _ withinAccepted] at found
+            exact (Option.some.inj found).symm
+          have sized : (loaded.rootLog.extract 0 height).size =
+              (loaded.image.accepted.take height).length := by
+            simp [Array.size_extract, loaded.rootLogSize, List.length_take, Nat.min_eq_left withinAccepted]
+          have cutLog : (loaded.chainLog.toList.take (height + 1)).toArray.toList =
+              chainPrefixes loaded.logStart (loaded.image.accepted.take height) := by
+            rw [List.toList_toArray, loaded.chainLogExact,
+              DurableLogTags.chainPrefixes_take _ _ _ withinAccepted]
+          let between := (loaded.image.accepted.take height).drop loaded.baseHeight
           Loaded.build (Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height)) loaded.baseHeight
             loaded.base (by simpa only [Image.accepted_ofAccepted, List.length_take,
               Nat.min_eq_left withinAccepted] using based)
             loaded.logStart chain (by simpa only [Image.accepted_ofAccepted] using chainExact)
-              (loaded.rootLog.extract 0 height) (by simpa only [Image.accepted_ofAccepted] using sized)
-              (loaded.chainLog.toList.take (height + 1)).toArray
-              (by simpa only [Image.accepted_ofAccepted] using cutLog)
-        else
-          Loaded.build (Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height)) 0
-            (State.ofSeed loaded.image.seed) (Nat.zero_le _)
-            loaded.logStart chain (by simpa only [Image.accepted_ofAccepted] using chainExact)
-              (loaded.rootLog.extract 0 height) (by simpa only [Image.accepted_ofAccepted] using sized)
-              (loaded.chainLog.toList.take (height + 1)).toArray
-              (by simpa only [Image.accepted_ofAccepted] using cutLog)
+            (loaded.rootLog.extract 0 height) (by simpa only [Image.accepted_ofAccepted] using sized)
+            (loaded.chainLog.toList.take (height + 1)).toArray
+            (by simpa only [Image.accepted_ofAccepted] using cutLog)
+            (opened.baseWorld.bind fun w => foldRecords rootBytes w loaded.baseHeight between)
+    else .error s!"height {height} is below the Store's base at {loaded.baseHeight}"
   else .error "durable log is shorter than the requested height"
 
 /-- **A kept checkpoint below the open's base**, as the past-read path admits
@@ -2112,75 +2123,6 @@ def Loaded.keptAt {rootBytes : List UInt8 → Digest} (transport : Transport) (k
 #assert_axioms Loaded.atPrefixFrom_below
 #assert_axioms Loaded.atPrefixFrom_kept
 #assert_axioms Loaded.atPrefixFrom_from_checkpoint
-
-/-! ## A cut that keeps nothing the Store sealed (CONSENT-OWN)
-
-`prefixAt` keeps the open's checkpoint as the cut's base when it sits at or
-below the cut, and the verified tags' roots as its stored roots: both are the
-Store key holder's (the operator's). A consent provider's opening may base on
-neither: a client base is a state the client computed. `prefixOwn` is the cut
-whose base is the seed and whose root log keeps no root, so its snapshot is the
-genesis fold of the cut (`atPrefixFrom_own`) and every receipt root below its head
-is evaluated, never read. -/
-
-/-- **The image cut at `height`, folded from genesis**: the chain after
-`height` records read off the open's verified prefixes, the seed as the base,
-no stored roots. -/
-def Loaded.prefixOwn {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (height : Nat)
-    (chains : List Digest) (chainsExact : chains = chainPrefixes loaded.logStart loaded.image.accepted) :
-    Except String {cut : Loaded rootBytes //
-      cut.image = Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height) ∧
-        cut.logStart = loaded.logStart ∧ cut.baseHeight = 0 ∧
-        cut.base = State.ofSeed loaded.image.seed ∧
-        cut.rootLog = Array.replicate cut.image.accepted.length none} :=
-  if within : height ≤ loaded.height then
-    match found : chains[height]? with
-    | none => .error "durable chain prefix unavailable at the requested height"
-    | some chain =>
-        have chainExact : chain = chainAfter loaded.logStart (loaded.image.accepted.take height) := by
-          rw [chainsExact, DurableLogTags.chainPrefixes_getElem? _ _ _ within] at found
-          exact (Option.some.inj found).symm
-        let image : Image := Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height)
-        match found : DurableEngine.resumeEngine rootBytes image 0 (State.ofSeed loaded.image.seed) with
-        | none => .error "durable image journal does not replay from genesis through the canonical executor"
-        | some engine =>
-            have resumed := DurableEngine.resume_of_resumeEngine found
-            let built := RootCache.build (entriesOf image (engine.view rootBytes) chain)
-            .ok ⟨⟨image, 0, State.ofSeed loaded.image.seed, engine, engine.view rootBytes, rfl,
-              Nat.zero_le _, resumed,
-              loaded.logStart, chain, (by simpa only [image, Image.accepted_ofAccepted] using chainExact), built.1, built.2,
-              PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
-              SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
-              SessionIndex.TxIndex.ofRecords image.accepted,
-              SessionIndex.TxIndex.ofRecords_exact image.accepted,
-              SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
-              SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
-              SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId)
-                image.accepted,
-              SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
-                image.accepted,
-              Array.replicate image.accepted.length none, Array.size_replicate, none, none,
-              trackOf rootBytes image resumed,
-              (loaded.chainLog.toList.take (height + 1)).toArray,
-              by rw [List.toList_toArray, loaded.chainLogExact]
-                 simp only [image, Image.accepted_ofAccepted]
-                 exact (DurableLogTags.chainPrefixes_take _ _ _
-                   (by simpa only [Loaded.height_eq] using within)).symm⟩,
-              rfl, rfl, rfl, rfl, rfl⟩
-  else .error "durable log is shorter than the requested height"
-
-/-- **A genesis-based image's past read is the genesis fold of the prefix**, at
-every height: `resume_sound`'s premises hold by construction (the base IS the
-seed), so nothing is assumed about who sealed what. -/
-theorem Loaded.atPrefixFrom_own {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (zero : loaded.baseHeight = 0) (seeded : loaded.base = State.ofSeed loaded.image.seed)
-    (kept : Option (loaded.Kept)) (height : Nat) :
-    loaded.atPrefixFrom kept height = (loaded.prefixImage height).restore rootBytes := by
-  unfold atPrefixFrom
-  rw [if_pos (by rw [zero]; exact Nat.zero_le _), zero, seeded]
-  exact resume_genesis rootBytes (loaded.prefixImage height)
-
-#assert_axioms Loaded.atPrefixFrom_own
 
 /-- The checkpoint state's world-root entries are the served entries. -/
 theorem stateEntries_ofSnapshot {rootBytes : List UInt8 → Digest} (image : Image)
