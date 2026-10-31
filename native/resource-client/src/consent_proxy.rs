@@ -630,14 +630,14 @@ pub(crate) fn serve(
     // the next connection from the retained frontier, but that start is a provider launch and a
     // Store admission the member waits for.
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let active = Arc::new(AtomicUsize::new(0));
+    let slots = Arc::new(Slots::new(SERVED, WAITING));
     let last = Arc::new(Mutex::new(Instant::now()));
     loop {
         let stream = match listener.accept() {
             Ok((stream, _)) => stream,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 let quiet = last.lock().map(|t| t.elapsed()).unwrap_or_default();
-                if active.load(Ordering::Acquire) == 0 && idle.is_some_and(|idle| quiet > idle) {
+                if slots.idle() && idle.is_some_and(|idle| quiet > idle) {
                     return Ok(());
                 }
                 // Wait on the listener itself: a connection is served the moment it arrives.
@@ -649,15 +649,20 @@ pub(crate) fn serve(
         if transport::peer_uid(&stream)? != controller {
             continue;
         }
-        if active.fetch_add(1, Ordering::AcqRel) >= 4 {
-            active.fetch_sub(1, Ordering::AcqRel);
+        if !slots.enter() {
+            // The client reads this as a reset before its hello: nothing was sent, so it may retry.
+            eprintln!("mini consent connection refused: {SERVED} served and {WAITING} waiting");
             continue;
         }
         if let Ok(mut t) = last.lock() {
             *t = Instant::now();
         }
-        let (backend, active, last, pins) = (backend.clone(), active.clone(), last.clone(), pins.clone());
+        let (backend, slots, last, pins) = (backend.clone(), slots.clone(), last.clone(), pins.clone());
         std::thread::spawn(move || {
+            if !slots.admit(Instant::now() + ADMISSION) {
+                eprintln!("mini consent connection refused: none of {SERVED} served connections ended within {}s", ADMISSION.as_secs());
+                return;
+            }
             let served = match &backend {
                 Backend::Own(worker) => serve_connection(stream, &pins, worker),
                 Backend::Shared(shared) => serve_connection_shared(stream, &pins, shared),
@@ -668,8 +673,59 @@ pub(crate) fn serve(
             if let Ok(mut t) = last.lock() {
                 *t = Instant::now();
             }
-            active.fetch_sub(1, Ordering::AcqRel);
+            slots.release();
         });
+    }
+}
+
+/// Connections served at once, and further connections that may wait for one. A client holds its
+/// connection for as long as its process keeps a consent session, so a handful of concurrent
+/// `mini` commands plus the standing ones fill a small bound; a connection past it waits (up to
+/// `ADMISSION`) rather than being closed unserved, which a client saw as `Connection reset by peer`
+/// on its hello and a controller's final write as `never submitted` (H1b).
+const SERVED: usize = 16;
+const WAITING: usize = 64;
+const ADMISSION: Duration = Duration::from_secs(30);
+
+struct Slots {
+    served: AtomicUsize,
+    waiting: AtomicUsize,
+    limit: usize,
+    queue: usize,
+}
+
+impl Slots {
+    fn new(limit: usize, queue: usize) -> Self {
+        Self { served: AtomicUsize::new(0), waiting: AtomicUsize::new(0), limit, queue }
+    }
+    /// A place to wait in; false when `queue` connections already wait.
+    fn enter(&self) -> bool {
+        if self.waiting.fetch_add(1, Ordering::AcqRel) >= self.queue {
+            self.waiting.fetch_sub(1, Ordering::AcqRel);
+            return false;
+        }
+        true
+    }
+    /// A served slot for a waiting connection, or false once `until` passes.
+    fn admit(&self, until: Instant) -> bool {
+        let taken = loop {
+            let now = self.served.load(Ordering::Acquire);
+            if now < self.limit && self.served.compare_exchange(now, now + 1, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                break true;
+            }
+            if Instant::now() >= until {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        self.waiting.fetch_sub(1, Ordering::AcqRel);
+        taken
+    }
+    fn release(&self) {
+        self.served.fetch_sub(1, Ordering::AcqRel);
+    }
+    fn idle(&self) -> bool {
+        self.served.load(Ordering::Acquire) == 0 && self.waiting.load(Ordering::Acquire) == 0
     }
 }
 
@@ -736,6 +792,29 @@ i,o=sys.stdin.buffer,sys.stdout.buffer\nwhile True:\n  w=i.read(4)\n  if len(w)<
         transport::write_frame(&mut client, &other.hello()).unwrap();
         assert!(served.join().unwrap().is_err());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_connection_past_the_served_bound_waits_for_a_slot_instead_of_being_dropped() {
+        let slots = Slots::new(2, 3);
+        for _ in 0..2 {
+            assert!(slots.enter() && slots.admit(Instant::now()));
+        }
+        // The third finds both slots held: it waits its turn, then is admitted when one ends.
+        assert!(slots.enter());
+        std::thread::scope(|scope| {
+            let waiter = scope.spawn(|| slots.admit(Instant::now() + Duration::from_secs(5)));
+            std::thread::sleep(Duration::from_millis(50));
+            slots.release();
+            assert!(waiter.join().unwrap(), "the waiting connection is served once a slot frees");
+        });
+        // With every slot held again, a waiter that outlasts its admission window is refused.
+        assert!(slots.enter());
+        assert!(!slots.admit(Instant::now() + Duration::from_millis(30)));
+        // Only `queue` connections wait at once; one more is refused at the door.
+        assert!(slots.enter() && slots.enter() && slots.enter());
+        assert!(!slots.enter());
+        assert!(!slots.idle());
     }
 
     #[test]
