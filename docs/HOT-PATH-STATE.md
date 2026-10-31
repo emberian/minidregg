@@ -278,6 +278,11 @@ Cold consent provider (exorcist, batch 5, height 26): `verifyInitial` decodes th
 (172 KB) and replays, ~0.6 s CPU, even with a retained anchor; that is the O(state) open row 11 shares
 (lazy cell decode at open: a checkpoint whose cells stay bytes until read). Paid once per world start
 or binding change now that residents do not idle out (perf-client 86428a2f1).
+Open, unowned: `Store.set` is `DFinsupp.update`, so every write leaves a closure layer; WorldCompact
+re-trees every 32 heights (perf-client a778bbda6509944a5 narrows it to touched cells) and post-stores
+carry ~40-deep chains into their encode. The real fix is a store whose update is an O(log n) tree
+insert behind a csimp (Theory.Store's representation, statements unchanged); hot-path after row 11
+unless perf-client takes it.
 Other reports: op66 (lifecycle BEGIN plan) 8.6 s in an app install, a pre-checkpoint certificate
 walk, row 4 slice 2 (FORMAT); doc append O(history) (event-log cell, FORMAT (a)); restart wall
 11.7 s at 491 (row 11).
