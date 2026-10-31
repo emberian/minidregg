@@ -1138,7 +1138,7 @@ impl Journal {
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
                 .open(&temporary).ctx("open", &temporary)?;
-            let result = (|| {
+            let result = (|| -> io::Result<()> {
                 writeln!(file, "{following}")?;
                 fs::rename(&temporary, &path).ctx("rename", &temporary)?;
                 Ok(())

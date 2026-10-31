@@ -307,12 +307,11 @@ fn strip(attempt_dir: &Path) -> io::Result<bool> {
 /// dispatch thread, so no attempt is in authoring while it runs.
 #[cfg(test)]
 pub(crate) fn collect(parent: &Path) -> io::Result<()> {
-    collect_scanned(parent, &scan(parent)?)
+    collect_scanned(&scan(parent)?)
 }
 
-/// `collect` over a scan the caller already holds. The parent directory is written only when an
-/// entry of it was removed; a pass that found everything already stripped writes nothing.
-fn collect_scanned(parent: &Path, scanned: &[Attempt]) -> io::Result<()> {
+/// `collect` over a scan the caller already holds.
+fn collect_scanned(scanned: &[Attempt]) -> io::Result<()> {
     let mut settled = Vec::new();
     for attempt in scanned.iter().filter(|attempt| !attempt.undecided) {
         strip(&attempt.path)?;
@@ -640,7 +639,7 @@ pub(crate) fn admit_new_call(operator: &PrivateOperator, parent: &Path) -> io::R
         // Only this attempt can have changed state since the scan.
         oldest.undecided = present(&oldest.path.join(SUBMIT_ACTIVE))?;
     }
-    collect_scanned(parent, &scanned)?;
+    collect_scanned(&scanned)?;
     if scanned.iter().filter(|attempt| attempt.undecided).count() >= MAX_UNDECIDED {
         return Err(DispatchOutcome {
             operation: None,

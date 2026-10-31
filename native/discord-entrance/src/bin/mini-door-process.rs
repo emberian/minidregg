@@ -718,7 +718,7 @@ impl<O: BoxOps> Processor<O> {
     }
 
     /// Strike the code for this request: the file is rewritten whole and atomically (temp,
- rename), BEFORE the request's first world effect, so a code never admits two people. Striking
+    /// rename), BEFORE the request's first world effect, so a code never admits two people. Striking
     /// again for the same request is a no-op.
     fn strike_invite(&self, serial: u32, name: &str, request: &str) -> Result<(), String> {
         let mut lines = self.load_codes()?;

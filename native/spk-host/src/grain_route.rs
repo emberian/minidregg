@@ -19,7 +19,7 @@ use crate::dispatch_native::{private_dir, write_new};
 use crate::grain::HostView;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::fs::{self, DirBuilder, File};
+use std::fs::{self, DirBuilder};
 
 /// Human dispatch signing slots in Mini's plan order: the one session target's
 /// invocation (4:0; a single target needs no role-8 observation), the

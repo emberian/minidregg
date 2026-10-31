@@ -8,10 +8,9 @@ use minidregg_spk_package_stream::{self as stream, EntryKind, VerifiedPackage};
 use sandstorm_package::SpkManifest;
 use sha2::{Digest, Sha256};
 use std::ffi::CString;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 

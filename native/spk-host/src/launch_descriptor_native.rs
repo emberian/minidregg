@@ -11,7 +11,7 @@ use sandstorm_package::manifest::Command as SpkCommand;
 use sandstorm_package::SpkManifest;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, DirBuilder, File, OpenOptions};
+use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};

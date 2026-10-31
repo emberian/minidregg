@@ -3,7 +3,6 @@
 
 use crate::io_context::IoContext;
 use crate::dispatch_native::private_dir;
-use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;

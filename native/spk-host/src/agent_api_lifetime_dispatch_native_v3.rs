@@ -10,7 +10,7 @@ use crate::agent_api_lifetime_v3::{
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};

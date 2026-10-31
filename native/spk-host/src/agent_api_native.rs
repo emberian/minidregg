@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{DirBuilder, File};
+use std::fs::DirBuilder;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
