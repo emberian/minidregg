@@ -33,6 +33,8 @@ mod volume_custody;
 
 #[path = "broker_volume_dir.rs"]
 mod volume_dir;
+#[path = "broker_volume_custodian.rs"]
+pub mod volume_custodian;
 pub(crate) use volume_dir::{export_image_bytes, Registration, Volume};
 
 const MAX_REQUEST: u64 = 16 * 1024;

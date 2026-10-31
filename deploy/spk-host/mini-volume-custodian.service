@@ -1,0 +1,36 @@
+# The host-side volume custodian (VOLUMES.md, "The custodian"): the one root process that sets a
+# project id and a quota, for grain directories under ROOT, on behalf of a user-namespaced container.
+# /etc/mini-volume-custodian.env sets ROOT, SOCKET, UID_BASE, UID_LIMIT, SOCKET_GID, for example
+#   ROOT=/var/lib/demo-grains  SOCKET=/run/demo-volumes/volume.sock
+#   UID_BASE=<the container's uid 0 on the host>  UID_LIMIT=65536  SOCKET_GID=<group of the container's leader>
+[Unit]
+Description=Mini volume custodian (project quota for grain directories)
+After=local-fs.target
+RequiresMountsFor=${ROOT}
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/mini-volume-custodian.env
+ExecStart=/usr/local/lib/demo/spk-host volume-custodian ${ROOT} ${SOCKET} ${UID_BASE} ${UID_LIMIT} ${SOCKET_GID}
+Restart=on-failure
+RuntimeDirectory=demo-volumes
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+AmbientCapabilities=
+ProtectSystem=strict
+ReadWritePaths=${ROOT}
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

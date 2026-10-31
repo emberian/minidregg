@@ -4,7 +4,7 @@
 //! container lacks), and the bound a directory reports through `statfs`.
 //! Every call takes an open descriptor; nothing here resolves a path.
 use std::io;
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 
 const FS_IOC_FSGETXATTR: libc::c_ulong = 0x801c_581f;
 const FS_IOC_FSSETXATTR: libc::c_ulong = 0x401c_5820;
@@ -52,8 +52,15 @@ pub(crate) struct DqBlk {
 
 /// Project id and inherit flag of the object `fd` names.
 pub(crate) fn project_of(fd: RawFd) -> io::Result<(u32, bool)> {
+    // The resident holds its `/var` as an O_PATH descriptor (opened component by component without
+    // following links), and ioctl refuses those with EBADF. Re-open the very same inode through
+    // /proc/self/fd for the read; fstatfs/fstatvfs elsewhere accept O_PATH as it is.
+    let path = std::ffi::CString::new(format!("/proc/self/fd/{fd}")).expect("no NUL");
+    let real = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC) };
+    if real < 0 { return Err(io::Error::last_os_error()); }
+    let real = unsafe { std::os::fd::OwnedFd::from_raw_fd(real) };
     let mut x = FsXattr::default();
-    if unsafe { libc::ioctl(fd, FS_IOC_FSGETXATTR as _, &mut x as *mut FsXattr) } != 0 {
+    if unsafe { libc::ioctl(real.as_raw_fd(), FS_IOC_FSGETXATTR as _, &mut x as *mut FsXattr) } != 0 {
         return Err(io::Error::last_os_error());
     }
     Ok((x.projid, x.xflags & FS_XFLAG_PROJINHERIT != 0))
@@ -136,8 +143,23 @@ pub(crate) fn reported_bytes(fd: RawFd) -> io::Result<u128> {
     Ok((s.f_blocks as u128) * (s.f_frsize as u128))
 }
 
+/// Is this process in the initial user namespace? The kernel changes a project id (`chattr -p`,
+/// FS_IOC_FSSETXATTR with fsx_projid) only there, so a container run with a user namespace
+/// (`systemd-nspawn -U`, rootless runtimes) cannot create a bounded volume whatever it is bound to.
+pub(crate) fn in_init_user_namespace(map: &str) -> bool {
+    let mut lines = map.lines().filter(|l| !l.trim().is_empty());
+    matches!((lines.next().map(|l| l.split_whitespace().collect::<Vec<_>>()), lines.next()),
+        (Some(f), None) if f == ["0", "0", "4294967295"])
+}
+
 /// Refuse, by name, a filesystem that cannot hold a bounded volume.
 pub(crate) fn require_project_quota(fd: RawFd) -> io::Result<&'static str> {
+    if let Ok(map) = std::fs::read_to_string("/proc/self/uid_map") {
+        if !in_init_user_namespace(&map) {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied,
+                "volume-helper: running in a user namespace (/proc/self/uid_map is not the identity map): the kernel lets only the initial user namespace set a project id, so no quota-bounded volume can be made here; run this container without a user namespace (not nspawn -U) with the project-quota directory bound in"));
+        }
+    }
     let magic = fs_magic(fd)?;
     let Some(name) = fs_name(magic) else {
         return Err(io::Error::new(io::ErrorKind::Unsupported, format!(
@@ -173,6 +195,14 @@ mod tests {
         assert!(!in_use(&DqBlk::default()));
         assert!(in_use(&DqBlk { curspace: 1, ..DqBlk::default() }));
         assert!(in_use(&DqBlk { ihardlimit: 1, ..DqBlk::default() }));
+    }
+
+    #[test]
+    fn only_the_identity_uid_map_is_the_init_user_namespace() {
+        assert!(in_init_user_namespace("         0          0 4294967295\n"));
+        assert!(!in_init_user_namespace("         0      65536      65536\n"));
+        assert!(!in_init_user_namespace("0 0 1\n"));
+        assert!(!in_init_user_namespace("0 0 4294967295\n1000 1000 1\n"));
     }
 
     #[test]

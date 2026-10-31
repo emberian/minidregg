@@ -500,7 +500,7 @@ mod tests {
     fn volume_custody_physical_process_death_thaws_exact_cgroup(){
         let root=physical_receiving_root();
         let (dep,host,vid)=("a".repeat(64),"b".repeat(64),"d".repeat(64));
-        let volume=super::volume_dir::Volume{root:&root,store:PHYS_STORE,grain:PHYS_APP,app_uid:PHYS_UID,size_mib:64,volume_id:&vid,deployment_id:&dep,host_id:&host};
+        let volume=super::volume_dir::Volume{root:&root,store:PHYS_STORE,grain:PHYS_APP,app_uid:PHYS_UID,size_mib:64,volume_id:&vid,custodian:None,deployment_id:&dep,host_id:&host};
         volume.create(None).unwrap();
         fs::create_dir_all(root.join("volume-custody")).unwrap();
         let group=Path::new(CGROUP_ROOT).join(format!("mini-spk-s{PHYS_STORE}-a{PHYS_APP}-g1.service"));
