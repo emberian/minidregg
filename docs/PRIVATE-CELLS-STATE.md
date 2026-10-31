@@ -322,6 +322,18 @@ applied):
    aux, to note at the flatness bench: `Store.set` is `DFinsupp.update` (lookups can traverse
    update history); validation runs the patch and application runs it again; whole-cell
    `canonicalPostBytes` per durable write.
+   **FORMAT scope** (hot-path a8e4317c9e1574ca5, law 17): switch content and the declared kinds
+   (masked), and with mask `[]` every kind whose cell grows with history: eventHistory,
+   authority, resourceBook, policySource (stream entries and nockProgram are written once and
+   stay flat). resourceBook and policySource have no `StoreCodec` wire (`CanonicalCellRegistry.wire?`
+   is `none`), so the instance must be generalized off `Wire` for them. Hot-path does per-entry
+   persistence in the same FORMAT batch, and lands separately before it: held `Materialized`
+   across ops (no decode), one shared patch run for validation and apply, `Store.set` over a
+   persistent map behind a csimp.
+   **Tags and epoch:** iteration speed's seam 1 (lane/seam1-epoch) lands first: named tags in
+   `Compiler/PersistedCodecTags/Core.lean` (imported by the modules naming them), census tags in
+   `Compiler/PersistedCodecTags.lean`. The `DREGG/PRIVATE-CELL/*` tags go in Core if named, else
+   in the census file; the FORMAT sha rebases onto seam 1.
    **FORMAT pairing** agreed with hot-path aa2905fee8ef847d1 (recorded in its
    `docs/HOT-PATH-STATE.md`, "Next" item 2): one epoch bump; I send the FORMAT sha to the hot-path
    address, row 11 rebases onto it, the integrator lands the pair with one genesis and one fixture
