@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
 Tip: `997905c0bc9c` (docs: INTEGRATOR-STATE.md: D2 fixed on staging, resubmit finding). Round finished 2026-10-31T17:23Z.
-green: `c849687da03b`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-997905c0`.
+green: `83e926874e38` (batch 4; this round's builder had no origin/green and printed the tip~20, fixed). Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-997905c0`.
 
 | stage | signature | reruns? | same place as last round? | detail |
 |---|---|---|---|---|
@@ -12,7 +12,7 @@ green: `c849687da03b`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | gate:j14-apps | j14-apps FAIL | not rerun | yes | rc=1; /ci/j-997905/journey.log |
 | gate:composed | composed FAIL | not rerun | yes | rooms=pass; churn=pass; documents=pass; apps=pass; connector=pass; residents=fail: residents: REFUSED prepoll-filler-070 refused with status 3; retained 00194-prepoll-; restart=blocked: prerequisite residents has not passed; store-restart=fail: store-restart:world: mini-health: unhealthy — remaini |
 
-Suspect commits since green (`git log c849687da03b..997905c0bc9c`), newest first; owners are the seats whose
+Suspect commits since `c849687da03b`, the tip~20 (`git log c849687da03b..997905c0bc9c`; the next round counts from green), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
 - `997905c0` docs: INTEGRATOR-STATE.md: D2 fixed on staging, resubmit finding

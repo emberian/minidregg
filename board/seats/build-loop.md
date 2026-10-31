@@ -21,7 +21,9 @@ Quest: the unattended builder on `main`; persvati as the quiet measurement box; 
   from logs; BUILDER_DRY=1 prints only.
 - First REDS.md (main 6ca201aa): batch 9 997905c0 (the integrator's last staging batch), 6 reds: umbrella-tree rc=1,
   flatness submit/get/run, j14-apps, composed (residents refused prepoll-filler-070 status 3; store-restart
-  unhealthy headroom). green is c849687da.
+  unhealthy headroom). green is 83e926874 (batch 4). That REDS.md printed c849687da, the tip~20: the builder's
+  `fetch origin main green` left origin/green unset in integ/src, and it fell back silently. Fixed: explicit
+  refspecs, and a missing green is printed as "none yet".
 - Done: docs/INTEGRATOR-STATE.md deleted (main adf73b9e2); branches integration/staging and
   fixture-regen/acc7cfa03fac deleted (that rerecord was two batches stale; the builder rerecords each tip).
 - Next: watch the first round on main's tip; move the box-local integ-build6.sh/gate15.sh/sweep.sh into the repo

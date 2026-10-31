@@ -63,8 +63,12 @@ round() {
 
 reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
   local sha=$1 G=$2 R=$3 s8=${1:0:8} out=$ST/REDS-${1:0:8}.md prev=$ST/last-signatures.tsv sig=$ST/signatures-${1:0:8}.tsv
-  git -C "$REPO" fetch -q origin main green 2>/dev/null || git -C "$REPO" fetch -q origin main
-  local green; green=$(git -C "$REPO" rev-parse -q --verify origin/green || git -C "$REPO" rev-parse "$sha~20")
+  # explicit refspecs: `fetch origin main green` fills FETCH_HEAD only and left origin/green unset on hbox
+  local mref=+refs/heads/main:refs/remotes/origin/main gref=+refs/heads/green:refs/remotes/origin/green
+  git -C "$REPO" fetch -q origin "$mref" "$gref" 2>/dev/null || git -C "$REPO" fetch -q origin "$mref"
+  local green glabel
+  if green=$(git -C "$REPO" rev-parse -q --verify origin/green); then glabel="\`${green:0:12}\`"
+  else green=$(git -C "$REPO" rev-parse "$sha~20"); glabel="none yet (suspects counted from \`${green:0:12}\`, the tip~20)"; fi
   : > "$sig"
   add() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$sig"; }   # STAGE SIGNATURE DETAIL
   for st in rust-check host consent rust pack umbrella-tree rerecord; do
@@ -87,7 +91,7 @@ reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
     echo "# Reds (owned by the builder, rewritten whole each round)"
     echo
     echo "Tip: \`${sha:0:12}\` ($(git -C "$REPO" log -1 --format='%s' "$sha" | cut -c1-90)). Round finished $(date -u +%Y-%m-%dT%H:%MZ)."
-    echo "green: \`${green:0:12}\`. Builder: hbox \`$I\`, logs \`$ST\`, gate \`$G\`."
+    echo "green: $glabel. Builder: hbox \`$I\`, logs \`$ST\`, gate \`$G\`."
     echo
     if [ "$n" = 0 ]; then echo "No reds: \`green\` moves to \`${sha:0:12}\`."; else
       echo "| stage | signature | reruns? | same place as last round? | detail |"
