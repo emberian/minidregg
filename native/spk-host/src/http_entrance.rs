@@ -328,7 +328,7 @@ fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
         .custom_flags(libc::O_NOFOLLOW)
         .open(directory.join(name)).ctx("open", &(directory.join(name)))?;
     file.write_all(bytes)?;
-    file.sync_all()
+    Ok(())
 }
 
 /// Create a new, never-overwritten custodian. Tokens are written only to
@@ -402,7 +402,6 @@ fn initialize_custodian_policy(
     write_private(directory, "bootstrap.token", bootstrap.as_bytes())?;
     write_private(directory, "api.token", api.as_bytes())?;
     write_private(directory, "custodian.json", &serde_json::to_vec(&config)?)?;
-    File::open(&directory).ctx("open", &directory)?.sync_all()?;
     let _ = CustodianPolicy::load(directory)?;
     Ok(())
 }
@@ -1613,7 +1612,6 @@ fn bootstrap(
             // The marker is durable before the cookie is emitted. A lost reply
             // needs operator review; the bootstrap token is never replayed.
             write_private(directory, "bootstrap.used", b"used\n")?;
-            File::open(&directory).ctx("open", &directory)?.sync_all()?;
             let response = format!(
                 "HTTP/1.1 303 See Other\r\nLocation: /\r\nSet-Cookie: {SESSION_COOKIE}={browser}; Secure; HttpOnly; SameSite=Strict; Path=/\r\nContent-Length: 0\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n"
             );

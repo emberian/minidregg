@@ -167,7 +167,7 @@ fn lookup_profile(
     let ingress = crate::fsio::read_bounded(ingress_path, MAX_INGRESS)?;
     let config_bytes = crate::fsio::read_bounded(config, MAX_CONFIG)?;
     let host_sha = host_image_sha256(host)?;
-    crate::fsio::ensure_private_dir_durable(directory)?;
+    crate::fsio::ensure_private_dir(directory)?;
     create_private(&directory.join("ingress.bin"), &ingress)?;
     let marker = json!({"type":profile.marker(),
         "host":utf8_path(host)?,"hostSha256":host_sha,
@@ -181,7 +181,6 @@ fn lookup_profile(
         &directory.join("lookup-marker.json"),
         &serde_json::to_vec_pretty(&marker).map_err(|error| error.to_string())?,
     )?;
-    sync_directory_ancestors(directory)?;
 
     // A lost reply leaves the marker and exact ingress. The caller may issue
     // another *read-only* lookup in a fresh directory; no submission exists.
@@ -192,7 +191,6 @@ fn lookup_profile(
         }
     };
     create_private(&directory.join("reply.frame"), &frame)?;
-    sync_directory_ancestors(directory)?;
     if host_image_sha256(host)? != host_sha
         || crate::fsio::read_bounded(config, MAX_CONFIG)? != config_bytes
         || crate::fsio::read_bounded(&directory.join("ingress.bin"), MAX_INGRESS)? != ingress
@@ -219,7 +217,6 @@ fn lookup_profile(
     }
     let binary = directory.join("outcome.bin");
     create_private(&binary, body)?;
-    sync_directory_ancestors(directory)?;
     let json_path = directory.join("outcome.json");
     let outcome = inspect_direct(host, config, &binary, &json_path)?;
     let retained: Value = serde_json::from_slice(&crate::fsio::read_bounded(&json_path, MAX_OUTCOME)?)

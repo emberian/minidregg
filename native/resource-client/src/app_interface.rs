@@ -106,7 +106,6 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 &serde_json::to_vec(&input).map_err(|e| e.to_string())?,
             )?;
             crate::create_private(&attempt.join("request.json"),&serde_json::to_vec(&json!({"requestId":id,"controllerSocket":socket,"runtime":runtime,"tool":tool,"operation":op,"packageId":d.package_id,"interfaceSha256":d.sha256,"toolSchema":spec})).map_err(|e|e.to_string())?)?;
-            mini_sdk::durable::flush_directory_syncs().map_err(|e| e.to_string())?;
             let output = Command::new(&runtime)
                 .arg("tool")
                 .arg(&socket)

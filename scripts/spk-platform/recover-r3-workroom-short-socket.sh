@@ -65,9 +65,6 @@ jq -n --arg original "$ORIGINAL" --arg originalSha256 "$(sha "$ORIGINAL")" \
    originalSha256:$originalSha256,oldServiceErrorSha256:$oldServiceErrorSha256,
    acceptedStoreSha256:$acceptedStoreSha256,oldUnit:"mini-spk-platform-r3-base-resume-r2-client-session.service",
    reason:"old socket exceeded SUN_LEN before query; no verified directory or Store change"}' >"$P/provenance.json"
-sync -f "$P/provenance.json"
-sync -f "$P"
-sync -f "$A"
 awk '
   $0 == "EVIDENCE=$1 HOST=$2 MINI=$3 STORE_BINARY=$4 SIGNATURE_BINARY=$5" {
     print; print "RECOVERY=$8"; a++; next
@@ -78,8 +75,6 @@ awk '
     print "  [ \"$(stat -c '\''%u:%a'\'' \"$RUNTIME_BASE\")\" = \"$(id -u):700\" ] || exit 2"
     print "SOCKET_DIR=$(mktemp -d \"$RUNTIME_BASE/mini-r3w.XXXXXX\")"
     print "printf '\''%s\\n'\'' \"$SOCKET_DIR\" >\"$RECOVERY/socket-dir.txt\""
-    print "sync -f \"$RECOVERY/socket-dir.txt\""
-    print "sync -f \"$RECOVERY\""
     b++; next
   }
   $0 == "SOCKET=\"$EVIDENCE/continuation-session/host.sock\"" {
@@ -97,21 +92,14 @@ old_body=$(awk '/^# The one signed birth receipt covers all eight added grains/{
 new_body=$(awk '/^# The one signed birth receipt covers all eight added grains/{emit=1} emit{print}' "$P/workroom-short-socket.sh" | sha256sum | cut -d ' ' -f 1)
 [ "$old_body" = "$new_body" ] || fail 'workroom body changed'
 sha256sum "$ORIGINAL" "$P/workroom-short-socket.sh" >"$P/script-sha256.txt"
-sync -f "$P/workroom-short-socket.sh"
-sync -f "$P/script-sha256.txt"
-sync -f "$P"
 [ "$(sha "$STORE")" = e5515e158fdfb03afdafc3951a3a73c2b779bac37eb8428a146c8244611e30e5 ] || fail 'Store changed before recovery run'
 /bin/sh "$P/workroom-short-socket.sh" "$W" "$HOST" "$MINI" \
   "$STORE_BINARY" "$SIGNATURE_BINARY" "$R/source-stage/agent-allocation.json" \
   "$A/adopted-birth-receipt.json" "$P" >"$P/workroom.stdout" 2>"$P/workroom.stderr"
 [ -s "$W/agents/verified/birth-evidence.json" ] || fail 'workroom signed evidence absent'
 sha256sum "$W/agents/verified/birth-evidence.json" "$P/workroom-short-socket.sh" >"$P/success-sha256.txt"
-sync -f "$P/success-sha256.txt"
 jq -n --arg recovery "$P" --arg signedEvidenceSha256 "$(sha "$W/agents/verified/birth-evidence.json")" '
   {protocol:"mini-spk-r3-workroom-recovery-link-v1",recovery:$recovery,
    signedEvidenceSha256:$signedEvidenceSha256}' >"$A/workroom-recovery-link.json"
-sync -f "$A/workroom-recovery-link.json"
 printf '%s\n' 'complete via workroom-recovery-0001' >"$A/workroom.completed"
-sync -f "$A/workroom.completed"
-sync -f "$A"
 printf '%s\n' "$A/workroom.completed"

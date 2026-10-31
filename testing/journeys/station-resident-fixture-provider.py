@@ -87,13 +87,7 @@ def run(state, port):
             json.dump(value, stream, indent=2)
             stream.write("\n")
             stream.flush()
-            os.fsync(stream.fileno())
         os.replace(temporary, destination)
-        fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
 
     class Endpoint(http.server.BaseHTTPRequestHandler):
         def do_POST(self):

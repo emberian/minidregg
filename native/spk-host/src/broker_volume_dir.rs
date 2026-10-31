@@ -273,6 +273,7 @@ pub(crate) struct Observed {
     pub project_id: u32,
     pub fs_type: &'static str,
     pub inode: u64,
+    pub dev: u64,
     pub path: PathBuf,
 }
 
@@ -377,7 +378,7 @@ impl Volume<'_> {
         }
         let reported = quota::reported_bytes(dir.as_raw_fd())?;
         if reported == 0 || reported > bytes as u128 { return Err(refuse("volume-helper: volume reports a size beyond its quota")); }
-        Ok(Observed { project_id: project, fs_type, inode: m.ino(), path: self.path() })
+        Ok(Observed { project_id: project, fs_type, inode: m.ino(), dev: m.dev(), path: self.path() })
     }
 
     /// The kernel's project-quota requirement for the filesystem under `fd`. With a custodian the
@@ -403,9 +404,9 @@ impl Volume<'_> {
     }
 
     fn witness_text(&self, o: &Observed) -> String {
-        format!("{TAG}\ndeployment_id={}\nhost_id={}\nresource={}\nvolume_id={}\napp_uid={}\nquota_bytes={}\nproject_id={}\nfs_type={}\ndirectory_inode={}\ndirectory={}\n",
+        format!("{TAG}\ndeployment_id={}\nhost_id={}\nresource={}\nvolume_id={}\napp_uid={}\nquota_bytes={}\nproject_id={}\nfs_type={}\ndirectory_inode={}\ndirectory_dev={}\ndirectory={}\n",
             self.deployment_id, self.host_id, self.grain, self.volume_id, self.app_uid, self.quota_bytes(),
-            o.project_id, o.fs_type, o.inode, o.path.display())
+            o.project_id, o.fs_type, o.inode, o.dev, o.path.display())
     }
 
     /// Publish the root-written witness the resident checks. Re-observed before and after the
@@ -424,10 +425,8 @@ impl Volume<'_> {
         let result = (|| -> io::Result<()> {
             unsafe { libc::fchmod(f.as_raw_fd(), 0o644) };
             f.write_all(text.as_bytes())?;
-            f.sync_all()?;
             if self.witness_text(&self.verify()?) != text { return Err(refuse("volume-helper: volume custody drift before publication")); }
             if unsafe { libc::renameat(attest.0.as_raw_fd(), ct.as_ptr(), attest.0.as_raw_fd(), cl.as_ptr()) } != 0 { return Err(io::Error::last_os_error()); }
-            attest.0.sync_all()?;
             Ok(())
         })();
         if result.is_err() { unsafe { libc::unlinkat(attest.0.as_raw_fd(), ct.as_ptr(), 0) }; }
@@ -509,14 +508,13 @@ impl Volume<'_> {
         let result = (|| -> io::Result<()> {
             unsafe { libc::fchmod(f.as_raw_fd(), 0o600) };
             f.write_all(reg.text().as_bytes())?;
-            f.sync_all()?;
             // No-replace: a registration that appeared meanwhile is never overwritten.
             if unsafe { libc::linkat(volumes.0.as_raw_fd(), ct.as_ptr(), volumes.0.as_raw_fd(), cl.as_ptr(), 0) } != 0 { return Err(io::Error::last_os_error()); }
             Ok(())
         })();
         unsafe { libc::unlinkat(volumes.0.as_raw_fd(), ct.as_ptr(), 0) };
         result?;
-        volumes.0.sync_all()
+        Ok(())
     }
 
     /// Operator-supplied image bytes: never mounted. e2fsprogs parses them in userspace as the
@@ -594,7 +592,7 @@ impl Volume<'_> {
             Err(_) => return Err(refuse("volume-helper: volume directory is not a plain directory")),
         } }
         ignore(unsafe { libc::unlinkat(volumes.0.as_raw_fd(), cstr(&format!("{name}.conf"))?.as_ptr(), 0) })?;
-        volumes.0.sync_all()
+        Ok(())
     }
 }
 
@@ -732,8 +730,13 @@ mod tests {
         w.compare_open_mount(dir.as_raw_fd()).unwrap();
         w.compare_open_project(dir.as_raw_fd()).unwrap();
         assert_eq!(w.project_id, o.project_id);
-        let (separate, total) = crate::os::var_filesystem(&v.path(), dir.as_raw_fd(), dir.as_raw_fd()).unwrap();
+        // The resident's view: the volume against its parent (`vars`) on the same filesystem.
+        let parent = File::open(root.join("vars")).unwrap();
+        let (separate, total) = crate::os::var_filesystem(&v.path(), parent.as_raw_fd(), dir.as_raw_fd()).unwrap();
         assert!(separate && total == 64 * 1048576);
+        // A directory that is not under a project limit reports its parent's size: not bounded.
+        let (bounded, _) = crate::os::var_filesystem(&root.join("vars"), parent.as_raw_fd(), parent.as_raw_fd()).unwrap();
+        assert!(!bounded);
         // A repeated create is refused; the registration is exact.
         assert!(v.create(None).is_err());
         let mut other = volume(&root, "9101", 165536, 128);
@@ -883,7 +886,6 @@ mod tests {
         let mut blob = File::create(big.join("blob")).unwrap();
         let chunk = vec![7u8; 1048576];
         for _ in 0..66 { blob.write_all(&chunk).unwrap(); }
-        blob.sync_all().unwrap();
         let big_image = root.join("volumes").join(".import-big");
         mke2fs_tree(&big, &big_image, 80);
         fs::set_permissions(&big_image, fs::Permissions::from_mode(0o600)).unwrap();

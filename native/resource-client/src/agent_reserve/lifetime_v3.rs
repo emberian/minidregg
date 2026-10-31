@@ -32,7 +32,7 @@ struct Pin {
 }
 
 fn pin(directory: &Path) -> Result<Pin> {
-    crate::fsio::ensure_private_dir_durable(directory)?;
+    crate::fsio::ensure_private_dir(directory)?;
     let value: Value = serde_json::from_slice(&private_bytes(&directory.join("pin.json"), 4096)?)
         .map_err(|error| format!("invalid lifetime reserve pin: {error}"))?;
     if field(&value, "format")? != FORMAT {
@@ -111,7 +111,6 @@ pub(crate) fn lifetime_plan(
     let config_bytes = bounded(&config, 65_536)?;
     let host_sha = host_image_sha256(&host)?;
     crate::fsio::create_private_dir(&directory)?;
-    sync_directory_ancestors(&directory)?;
     create_private(&directory.join("source.json"), &source_bytes)?;
     create_private(&directory.join("config.json"), &config_bytes)?;
     let request_path = directory.join("request.bin");
@@ -141,7 +140,6 @@ pub(crate) fn lifetime_plan(
     }
     let frame = session_invoke(&host, &operator_socket, &config, PLAN_OPERATION, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     let plan_bytes = expect_reply(&frame, PLAN_OPERATION)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
@@ -264,11 +262,9 @@ pub(crate) fn lifetime_seal(directory: &Path, approval_json: &Path) -> Result<()
         &pair,
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pinned)?;
     let call = expect_reply(&frame, ASSEMBLE_OPERATION)?;
     create_private(&directory.join("call.bin"), call)?;
-    sync_retained_call(&directory, &directory.join("call.bin"))?;
     retain_json(
         &directory.join("seal.json"),
         &json!({
@@ -310,7 +306,6 @@ fn outcome(
     let bytes = expect_reply(frame, operation)?;
     let binary = directory.join(format!("{stem}.outcome.bin"));
     create_private(&binary, bytes)?;
-    sync_directory_ancestors(directory)?;
     source_inspect(
         &pinned.host,
         &pinned.config,
@@ -351,7 +346,6 @@ pub(crate) fn lifetime_submit(directory: &Path) -> Result<()> {
         .map_err(|error| format!("lifetime reserve op2 uncertain; use exact lookup: {error}"))
     })?;
     create_private(&directory.join("submit.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pinned)?;
     let result = outcome(&directory, "submit", &frame, mini_sdk::host_operations::SUBMIT, &pinned)?;
     same_pin(&directory, &pinned)?;
@@ -412,7 +406,6 @@ pub(crate) fn lifetime_lookup(directory: &Path) -> Result<()> {
         )
     })?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pinned)?;
     let result = outcome(&directory, &stem, &frame, mini_sdk::host_operations::LOOKUP, &pinned)?;
     same_pin(&directory, &pinned)?;

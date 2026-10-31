@@ -72,7 +72,6 @@ def write(path, value):
     with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
         out.write(data)
         out.flush()
-        os.fsync(out.fileno())
 
 
 def sha(path):
@@ -863,10 +862,6 @@ def repair_prepared_bootstrap(contract_path, request_path):
         return (json.dumps(value, indent=2) + "\n").encode()
     def digest(raw):
         return hashlib.sha256(raw).hexdigest()
-    def sync(path):
-        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
-        try: os.fsync(fd)
-        finally: os.close(fd)
     private_directory(root)
     archive = root / "repair-prepared-bootstrap"
     archive.mkdir(mode=0o700, exist_ok=True)
@@ -979,8 +974,6 @@ def repair_prepared_bootstrap(contract_path, request_path):
                     if regular(destination) != raw: raise ValueError("partial repair archive differs")
                 else: write(destination, raw)
             write(intent_path, intent)
-            sync(archive)
-            sync(root)
         for name, expected in intent["archiveSha256"].items():
             if digest(regular(archive / name)) != expected:
                 raise ValueError("repair archived evidence changed")
@@ -1026,7 +1019,6 @@ def repair_prepared_bootstrap(contract_path, request_path):
                 if regular(temporary) != after[name]: raise ValueError("repair publication differs")
             else: write(temporary, after[name])
             os.replace(temporary, paths[name])
-            sync(paths[name].parent)
         result = {"protocol": "mini-application-attachment-bootstrap-repair-v1", "stage": str(paths["stage"]),
                   "configSha256": intent["after"]["controller"], "oldName": intent["oldName"], "newName": intent["newName"],
                   "archive": str(archive), "initializedForegroundTool": intent["initializedForegroundTool"], "next": "Publish this stage through the stopped installer and refresh controllerConfig export; then create the first session once."}
@@ -1034,7 +1026,6 @@ def repair_prepared_bootstrap(contract_path, request_path):
         if completion.exists():
             if read(completion) != result: raise ValueError("repair completion differs")
         else: write(completion, result)
-        sync(archive)
         return result
 
 

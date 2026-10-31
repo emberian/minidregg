@@ -84,9 +84,6 @@ claim() {
   mkdir -m 700 "$JOURNEY/$name" || fail "action $name already claimed"
   STEP="$JOURNEY/$name"
   printf '%s\n' "$name" >"$STEP/action.txt"
-  sync -f "$STEP/action.txt"
-  sync -f "$STEP"
-  sync -f "$JOURNEY"
 }
 claim_readonly() {
   prefix=$1
@@ -120,8 +117,6 @@ selected_action() {
 }
 finish() {
   printf '%s\n' complete >"$STEP/complete.txt"
-  sync -f "$STEP/complete.txt"
-  sync -f "$STEP"
 }
 
 case "$ACTION" in

@@ -62,7 +62,6 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     let _ = fs::remove_file(&temp);
     let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp).map_err(|e| format!("{}: {e}", temp.display()))?;
     file.write_all(&bytes).map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
     fs::rename(&temp, path).map_err(|e| e.to_string())
 }
 
@@ -743,18 +742,9 @@ impl Worker {
         // The grain's record is the grain lock's: phases 3 and 4 wait for a member verb on it to end.
         let grain_lock = self.grain_lock(&grain);
         let _grain = grain_lock.lock().unwrap_or_else(|p| p.into_inner());
-        // Phase 3: START.
-        if retained["phases"]["start"].get("state") != Some(&json!("running")) {
-            match self.world.start(&installed.app) {
-                Ok(Lifecycle::Done) => retained["phases"]["start"] = json!({"state":"running","at":now()}),
-                Ok(Lifecycle::Undecided(detail)) => {
-                    retained["phases"]["start"] = json!({"state":"starting","at":now()});
-                    return undecided("starting", detail, &retry);
-                }
-                Err(error) => return undecided("starting", format!("START did not complete: {error}; nothing is repeated"), &retry),
-            }
-        }
-        // Phase 4: the owner's route on the grain's own origin.
+        // Phase 3: the owner's route on the grain's own origin. `spk-host grain start` refuses an
+        // application that has no entrance bound (grain.rs), so the route comes before START; its
+        // enrollment against the serving generation is after it.
         let mut record = self.grain_record(&grain).ok().flatten().unwrap_or_else(|| json!({
             "protocol":"mini-apps-grain-v1","grain":grain,"app":installed.app,"owner":member,"appId":retained["appId"],
             "packageId":package_id,"rawSha256":installed.raw_sha256,"appVersion":installed.app_version,
@@ -766,11 +756,25 @@ impl Worker {
             match self.bind_route(&work, &installed.app, &member, &host) {
                 Ok(bound) => {
                     record["routes"][member.as_str()] = route_json(&bound, &member);
+                    if let Err(e) = write_json(&grain_file(&self.state, &grain), &record) {
+                        return undecided("stateUnavailable", e, &retry);
+                    }
                 }
                 Err(error) => {
                     let _ = write_json(&grain_file(&self.state, &grain), &record);
                     return undecided("routing", format!("the owner's route is not bound yet: {error}"), &retry);
                 }
+            }
+        }
+        // Phase 4: START.
+        if retained["phases"]["start"].get("state") != Some(&json!("running")) {
+            match self.world.start(&installed.app) {
+                Ok(Lifecycle::Done) => retained["phases"]["start"] = json!({"state":"running","at":now()}),
+                Ok(Lifecycle::Undecided(detail)) => {
+                    retained["phases"]["start"] = json!({"state":"starting","at":now()});
+                    return undecided("starting", detail, &retry);
+                }
+                Err(error) => return undecided("starting", format!("START did not complete: {error}; nothing is repeated"), &retry),
             }
         }
         record["state"] = json!("running");
@@ -1159,6 +1163,23 @@ pub(crate) struct ProcessWorld {
     pub domain: String,
     pub nonce_file: PathBuf,
     pub role_basis: Value,
+    /// Quarantined packages already hashed, by file identity: an install's retry, a second grain of
+    /// the same package and a re-fetch that left the file in place are not re-hashed whole.
+    pub hashed: Mutex<HashMap<PathBuf, (FileIdentity, String)>>,
+    /// The client commands of route binds, enrollments and share issues run in two resident
+    /// `mini client-resident` processes, not a `mini` process each: one pinned to the public
+    /// socket (`query`, `submit`, `current-session-intent`), one for the commands that name the
+    /// operator socket themselves. A resident pins one Host socket, so they are two.
+    pub residents: [Mutex<crate::client_resident::Resident>; 2],
+}
+
+/// A file's identity for a retained digest: device, inode, length and both times. A rewrite in
+/// place changes the ctime (which no writer can set back), a replacement the inode.
+pub(crate) type FileIdentity = (u64, u64, u64, i64, i64, i64, i64);
+
+fn file_identity(meta: &fs::Metadata) -> FileIdentity {
+    use std::os::unix::fs::MetadataExt;
+    (meta.dev(), meta.ino(), meta.len(), meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec())
 }
 
 impl ProcessWorld {
@@ -1202,6 +1223,8 @@ impl ProcessWorld {
             domain: s("domain")?,
             nonce_file: p("nonceFile")?,
             role_basis: w.get("roleBasis").cloned().unwrap_or(json!({"type":"allAccess"})),
+            hashed: Mutex::new(HashMap::new()),
+            residents: [Mutex::new(crate::client_resident::Resident::new(&p("mini")?)), Mutex::new(crate::client_resident::Resident::new(&p("mini")?))],
             profile,
         })
     }
@@ -1244,10 +1267,19 @@ impl ProcessWorld {
         Ok(serde_json::from_slice(&output.stdout).unwrap_or(Value::Null))
     }
 
+    /// `mini ARGS...` in the resident for its socket; its stdout and stderr are kept beside the
+    /// work as a child's were, and a nonzero exit refuses with the command's stderr.
     fn mini(&self, work: &Path, label: &str, args: &[&str]) -> Result<Value> {
-        let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
-        self.run(&self.mini, &refs, &work.join(format!("{label}.stdout")))
+        let public = args.windows(2).any(|pair| pair[0] == "--socket" && Path::new(pair[1]) == self.public_socket);
+        let resident = &self.residents[usize::from(!public)];
+        let (code, stdout, stderr) = resident.lock().map_err(|_| "client resident lock poisoned")?.run(args)?;
+        let kept = work.join(format!("{label}.stdout"));
+        let _ = fs::write(&kept, &stdout);
+        let _ = fs::write(kept.with_extension("stderr"), &stderr);
+        if code != 0 {
+            return Err(format!("{} {}: {}", self.mini.display(), args.first().unwrap_or(&""), String::from_utf8_lossy(&stderr).trim()));
+        }
+        Ok(serde_json::from_slice(&stdout).unwrap_or(Value::Null))
     }
 
     fn confirmed(path: &Path) -> Result<Value> {
@@ -1436,8 +1468,23 @@ impl World for ProcessWorld {
         if !path.is_file() {
             return Ok(None);
         }
-        let meta = fs::metadata(&path).map_err(|e| e.to_string())?;
-        Ok(Some((path.clone(), Self::sha_file(&path)?, meta.len())))
+        // The digest is taken over the opened descriptor and kept for that file identity only.
+        let mut file = fs::File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let opened = file_identity(&file.metadata().map_err(|e| e.to_string())?);
+        if let Some((identity, sha)) = self.hashed.lock().map_err(|_| "package digest cache poisoned")?.get(&path) {
+            if *identity == opened {
+                return Ok(Some((path.clone(), sha.clone(), opened.2)));
+            }
+        }
+        use sha2::Digest;
+        let mut digest = sha2::Sha256::new();
+        std::io::copy(&mut file, &mut digest).map_err(|e| format!("{}: {e}", path.display()))?;
+        if file_identity(&file.metadata().map_err(|e| e.to_string())?) != opened {
+            return Err(format!("{} changed while it was hashed", path.display()));
+        }
+        let sha = hex(&digest.finalize());
+        self.hashed.lock().map_err(|_| "package digest cache poisoned")?.insert(path.clone(), (opened, sha.clone()));
+        Ok(Some((path.clone(), sha, opened.2)))
     }
     fn want(&self, package_id: &str) -> Result<()> {
         fs::write(self.wanted.join(package_id), b"").map_err(|e| format!("cannot flag {package_id} as wanted: {e}"))
@@ -1483,9 +1530,20 @@ impl World for ProcessWorld {
         let schema = read_json(&pkgdir.join("schema-inspection.json"))?;
         let launch = read_json(&state_app.join("install").join("launch-descriptor").join("launch-inspection.json"))?;
         let birth_source = read_json(&work.join("birth-source.json"))?;
-        let appcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/appOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks appOwnerCapability")?.to_owned();
+        // The management subject observes the app and its package through the owner's lifecycle delegation;
+        // the owner capabilities in the birth source are the member's own (they are the manager's only when it is the owner).
+        let delegated = read_json(&work.join("delegation.json")).ok()
+            .filter(|d| d.get("appOwner").and_then(Value::as_str).is_some_and(|o| o != self.management_subject));
+        let observed = |field: &str| delegated.as_ref().and_then(|d| d.pointer(&format!("/selector/{field}"))).and_then(Value::as_str).map(str::to_owned);
+        let appcap = match observed("appObserveCapability") {
+            Some(cap) => cap,
+            None => birth_source.pointer("/applicationGrainBirth/applicationBirth/application/appOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks appOwnerCapability")?.to_owned(),
+        };
         let app_delegate = share_delegate_capability(&read_json(&work.join("share-delegation.json")).map_err(|e| format!("shareDelegationRequired: the install retained no share delegation ({e}); reinstall"))?, app, &self.management_subject)?;
-        let pkgcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned();
+        let pkgcap = match observed("packageObserveCapability") {
+            Some(cap) => cap,
+            None => birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned(),
+        };
         let (app_state, _) = self.query(work, &format!("{label}-app-state"), app, &appcap, base + 300, "resource")?;
         let pversion = app_state["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "2")).and_then(|x| x["value"].as_str()).unwrap_or("0").to_owned();
         let t = work.join(format!("{label}-ticket"));

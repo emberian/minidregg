@@ -132,7 +132,7 @@ impl Runtime {
         let evidence = match provider_continuity_rejection::inspect(&self.config, &pending, reaped)? {
             Some(evidence) => serde_json::to_value(evidence).map_err(|e| e.to_string())?,
             // Killed at the deadline before it assembled a call: the pinned
-            // client seals `call.bin` (fsynced with its directory) before it
+            // client seals `call.bin` before it
             // transmits anything, and its whole process group is dead, so the
             // settle was never sent. Re-preparing is safe twice over: the next
             // attempt re-reads the signed hold and refuses if it moved.

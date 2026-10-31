@@ -50,7 +50,7 @@ Properties the code keeps, with the place to read them:
   execution or packet sealing runs on it. Lifetime inventory is bounded at 64 MiB (`send` and `receive`). A slot past its
   scheduling allowance is a declared fault with no catch-up burst (`wait`), and a future-only resume cannot retransmit a
   released epoch (`prepare_live_wire`; `--resume-epoch` in `run`).
-- Durable record adoption publishes an availability token only after the record is fsynced; a crash-lost token stays
+- Durable record adoption publishes an availability token only after the record is written; a crash-lost token stays
   fail-closed until exact re-adoption.
 - The mailbox offers cores to the source-owned `AsyncDispatch` (`src/async_dispatch.rs`, journal in
   `src/scheduled_transport.rs`): the gateway durably reserves class, access and exact request, fixed workers perform the

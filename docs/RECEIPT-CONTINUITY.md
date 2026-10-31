@@ -83,8 +83,8 @@ captures a baseline before transmission. If concurrent reads finish out of order
 an older completion may be proved a prefix of the newer retained head; a new
 ordinary read below its own starting baseline is still refused.
 
-Custody updates hold a process-shared lock, write a private temporary file, fsync
-it, rename it and fsync the containing directory before acknowledging the answer.
+Custody updates hold a process-shared lock, write a private temporary file
+and rename it before acknowledging the answer.
 Workspace enablement is retained separately from the anchor. This detects missing
 anchor custody rather than falling back to first trust.
 

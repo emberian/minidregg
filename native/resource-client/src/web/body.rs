@@ -14,10 +14,9 @@
 //! `--anonymous` is the public reader: no write affordance, every POST refused before any read.
 
 use super::*;
-use std::io::Read;
 use std::os::fd::FromRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 /// The cost ceiling of a publication's `observe` grant. Every signed read is judged with a cost
 /// (the encoded intent's length, `Kernel/NativeObservationController.lean` `requestAt`) and a
@@ -36,6 +35,8 @@ pub(super) struct Shell {
     /// The published document the public reader's front page shows (`--front-doc`, from the
     /// operator's `/etc/mini/front-doc` through `mini-web-spawn`); `None`: the front page is the index.
     pub front_doc: Option<String>,
+    /// The member's shell clients (`shell_pool`): one per concurrent form action, at most four.
+    pub pool: std::sync::Arc<shell_pool::Pool>,
 }
 
 pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
@@ -63,6 +64,7 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
     args.finish()?;
     let workspace = workspace::load(&root)?;
     let site = Arc::new(Site {
+        refs: Mutex::new(None),
         mutations: Mutex::new(()),
         home: Some(home.clone()),
         subject: workspace::member(&workspace, "subject")?.to_owned(),
@@ -72,7 +74,7 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         front: Front { origins: Vec::new(), read_only: anonymous },
         base: String::new(),
         face: Face::Body,
-        shell: Some(Shell { host, config, home, public_subject, front_doc }),
+        shell: Some(Shell { host, config, home, public_subject, front_doc, pool: Default::default() }),
     });
     // Neither inherited descriptor reaches what this body starts (the shell it runs each verb in, the
     // residents those start): a resident that held the listener or the lifeline would keep either alive.
@@ -450,12 +452,16 @@ fn room(site: &Site, name: &str) -> Page {
     page
 }
 
+/// Attempts the receipts page lists, newest first; `history all` in the shell lists every one.
+const RECEIPTS_PAGE: usize = 50;
+
 fn receipts(site: &Site) -> Page {
     let mut body = String::from(
-        "<p>Every retained attempt of this workspace with its last Host outcome, as <code>history all</code> prints it. \
+        "<p>The newest retained attempts of this workspace with their last Host outcome, as <code>history all -n 50</code> prints them (<code>history all</code> lists every one). \
          Open an attempt to see the Host's receipt and refusal frame, ask again (<code>lookup</code>) or retry an undecided one (<code>retry</code>: exact, never a second write).</p>\n",
     );
-    match verb(site, &["history all".to_owned()]) {
+    // The newest page only: `history all -n` reads that many attempts, not every one retained.
+    match verb(site, &[format!("history all -n {RECEIPTS_PAGE}")]) {
         Some(ending) if ending.code == 0 => {
             let text = ending.text();
             let mut rows = String::new();
@@ -654,7 +660,6 @@ fn publish_form(name: &str, subject: &str) -> String {
 fn import_inbox(site: &Site) {
     let Some(shell) = site.shell.as_ref() else { return };
     let Ok(entries) = fs::read_dir(shell.home.join("inbox")) else { return };
-    let Ok(exe) = std::env::current_exe() else { return };
     let held: Vec<String> = site
         .names()
         .iter()
@@ -689,16 +694,8 @@ fn import_inbox(site: &Site) {
                 }
             }
         }
-        let status = Command::new(&exe)
-            .arg("workspace").arg("--action").arg("import").arg("--dir").arg(&site.root).arg("--name").arg(&chosen).arg("--from-ref").arg(&file)
-            .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &shell.home)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit())
-            .status();
-        // The import's own refusal is on the inherited stderr above; this line says which hint it was.
-        match status {
-            Ok(status) if status.success() => {}
-            Ok(status) => eprintln!("mini web --body: inbox {} not imported as {chosen}: workspace import {status}", file.display()),
-            Err(error) => eprintln!("mini web --body: inbox {} not imported as {chosen}: {error}", file.display()),
+        if let Err(error) = workspace::import_delegated(&site.root, &site.workspace, &chosen, &file) {
+            eprintln!("mini web --body: inbox {} not imported as {chosen}: {error}", file.display());
         }
     }
 }
@@ -1084,25 +1081,16 @@ impl Ending {
     }
 }
 
-/// Plan one line as this member without running it (`mini shell --line L --plan`): the shell's
-/// parser and plan builder, no Host.
+/// Plan one line as this member without running it: the shell's parser and plan builder, in this
+/// process (`shell::plan_ending`, what `mini shell --line L --plan` prints), no Host.
 pub(super) fn plan_line(site: &Site, line: &str) -> Option<Ending> {
     let shell = site.shell.as_ref()?;
-    let exe = std::env::current_exe().ok()?;
     if line.bytes().any(|b| b.is_ascii_control()) {
         return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
     }
-    let mut command = Command::new(exe);
-    command.arg("shell");
-    if let Some(socket) = super::super::SOCKET.get() {
-        command.arg("--socket").arg(socket);
-    }
-    let output = command
-        .arg("--workspace").arg(&site.root).arg("--home").arg(&shell.home).arg("--host").arg(&shell.host).arg("--config").arg(&shell.config)
-        .arg("--line").arg(line).arg("--plan")
-        .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &shell.home)
-        .stdin(Stdio::null()).output().ok()?;
-    Some(Ending { code: output.status.code().unwrap_or(1), stdout: String::from_utf8_lossy(&output.stdout).into_owned(), stderr: String::from_utf8_lossy(&output.stderr).into_owned() })
+    let session = crate::shell::Session { workspace: site.root.clone(), home: shell.home.clone(), host: shell.host.clone(), config: shell.config.clone() };
+    let (code, stdout, stderr) = crate::shell::plan_ending(&session, line);
+    Some(Ending { code, stdout, stderr })
 }
 
 /// From 10 November 2026 (UTC) the member's front page points at the export.
@@ -1243,44 +1231,40 @@ fn export_download(stream: &mut UnixStream, site: &Site, name: &str) -> Result<(
     Ok(())
 }
 
-/// `mini shell` as this member, in script mode, in its own process group: a read stopped at the
-/// deadline is stopped whole, the client the shell ran for it included (a killed shell alone left
-/// `mini workspace --action can` judging on, ahead of the member's next request).
-fn shell_command(site: &Site, exe: &std::path::Path, shell: &Shell) -> Command {
+/// A shell client for this member: `mini command-resident` with the environment the ssh login's
+/// shell has, in its own process group, so a read stopped at the deadline is stopped whole, the
+/// client the shell ran for it included (a killed shell alone left `mini workspace --action can`
+/// judging on, ahead of the member's next request).
+fn shell_client(exe: &std::path::Path, shell: &Shell) -> std::io::Result<shell_pool::Client> {
     let mut command = Command::new(exe);
-    command.arg("shell");
-    // The deployment's socket, as the ssh wrapper passes it; a workspace that pins one takes it from the pin.
-    if let Some(socket) = super::super::SOCKET.get() {
-        command.arg("--socket").arg(socket);
-    }
-    command
-        .arg("--workspace").arg(&site.root)
-        .arg("--home").arg(&shell.home)
-        .arg("--host").arg(&shell.host)
-        .arg("--config").arg(&shell.config)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("HOME", &shell.home);
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    command
+    command.env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &shell.home);
+    shell_pool::start(command)
 }
 
-/// Run one shell line as this member in the background, to its end (a thread reaps it): the
+/// `mini shell` as this member in script mode: its arguments, the deployment's socket as the ssh
+/// wrapper passes it (a workspace that pins one takes it from the pin).
+fn shell_arguments(site: &Site, shell: &Shell) -> Vec<std::ffi::OsString> {
+    let mut arguments: Vec<std::ffi::OsString> = vec!["shell".into()];
+    if let Some(socket) = super::super::SOCKET.get() {
+        arguments.extend(["--socket".into(), socket.into()]);
+    }
+    arguments.extend([
+        "--workspace".into(), site.root.clone().into(), "--home".into(), shell.home.clone().into(),
+        "--host".into(), shell.host.clone().into(), "--config".into(), shell.config.clone().into(),
+    ]);
+    arguments
+}
+
+/// Run one shell line as this member in the background, to its end on its own client: the
 /// export, which reads every document and may take longer than one request.
 fn verb_detached(site: &Site, line: &str, log: &std::path::Path) -> bool {
     let (Some(shell), Ok(exe)) = (site.shell.as_ref(), std::env::current_exe()) else { return false };
-    let Ok(log) = fs::OpenOptions::new().write(true).create_new(true).open(log) else { return false };
-    let Ok(log2) = log.try_clone() else { return false };
-    let mut command = shell_command(site, &exe, shell);
-    command.stdin(Stdio::piped()).stdout(Stdio::from(log)).stderr(Stdio::from(log2));
-    let Ok(mut child) = command.spawn() else { return false };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(format!("{line}\n").as_bytes());
+    if fs::OpenOptions::new().write(true).create_new(true).open(log).is_err() {
+        return false;
     }
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-    true
+    let arguments = shell_arguments(site, shell);
+    let arguments: Vec<&std::ffi::OsStr> = arguments.iter().map(|a| a.as_os_str()).collect();
+    shell.pool.run_detached(&|| shell_client(&exe, shell), &arguments, format!("{line}\n").as_bytes(), log)
 }
 
 fn captured_ending(code: i32, stdout: Vec<u8>, stderr: Vec<u8>, lines: &[String]) -> Ending {
@@ -1306,73 +1290,37 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     if script.bytes().any(|b| b.is_ascii_control() && b != b'\n') {
         return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
     }
-    let mut command = shell_command(site, &exe, shell);
-    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().ok()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(script.as_bytes());
-    }
-    let out = child.stdout.take()?;
-    let err = child.stderr.take()?;
-    // Both pipes are drained on their own threads into shared buffers: the deadline below can then
-    // fire while the shell runs, and a page can carry what was printed so far.
-    let drain = |mut pipe: Box<dyn Read + Send>| {
-        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let sink = buf.clone();
-        let handle = std::thread::spawn(move || {
-            let mut chunk = [0u8; 8192];
-            while let Ok(n) = pipe.read(&mut chunk) {
-                if n == 0 { break; }
-                if let Ok(mut b) = sink.lock() {
-                    // Retain one overflow byte, then keep draining without growing memory.
-                    let keep = n.min((super::capture::MAX_CAPTURE + 1).saturating_sub(b.len()));
-                    b.extend_from_slice(&chunk[..keep]);
-                }
-            }
-        });
-        (buf, handle)
-    };
-    let (out_buf, out_thread) = drain(Box::new(out));
-    let (err_buf, err_thread) = drain(Box::new(err));
-    let snapshot = |b: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>| b.lock().map(|v| v.clone()).unwrap_or_default();
+    let captures = shell_pool::capture_dir(&shell.home);
+    crate::fsio::ensure_private_dir(&captures).ok()?;
+    let arguments = shell_arguments(site, shell);
+    let arguments: Vec<&std::ffi::OsStr> = arguments.iter().map(|a| a.as_os_str()).collect();
     // Under the gateway's two minutes, so a run that cannot finish still ends as a page the
     // member can read, never as the gateway's 504.
     let deadline = Instant::now() + Duration::from_secs(100);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            _ => break None,
-        }
-    };
+    let run = shell.pool.run(&|| shell_client(&exe, shell), &captures, &arguments, script.as_bytes(), deadline,
+        !only_answers(lines), super::capture::MAX_CAPTURE)?;
     let cap = super::capture::text;
-    if let Some(status) = status {
-        let _ = out_thread.join();
-        let _ = err_thread.join();
-        return Some(captured_ending(status.code().unwrap_or(1), snapshot(&out_buf), snapshot(&err_buf), lines));
+    if run.busy {
+        return Some(Ending { code: 1, stdout: String::new(),
+            stderr: "busy: four actions are already running for this account; nothing was run; retry when one finishes\n".into() });
     }
-    if !only_answers(lines) {
-        // A line that may move the world is never cut short: the shell keeps running to its
-        // decision (a thread reaps it), and the page says undecided, with where the outcome lands.
-        std::thread::spawn(move || {
-            let _ = child.wait();
-            let _ = out_thread.join();
-            let _ = err_thread.join();
-        });
-        let mut stderr = cap(snapshot(&err_buf));
+    if let Some(code) = run.code {
+        return Some(captured_ending(code, run.stdout, run.stderr, lines));
+    }
+    if run.detached {
+        // A line that may move the world is never cut short: it runs to its decision on its own
+        // client, and the page says undecided, with where the outcome lands.
+        let mut stderr = cap(run.stderr);
         stderr.push_str("undecided: still deciding after 100 s; the shell keeps running to its decision, which lands under Receipts (or `lookup ID` / `retry ID` for this attempt)\n");
-        return Some(Ending { code: 255, stdout: cap(snapshot(&out_buf)), stderr });
+        return Some(Ending { code: 255, stdout: cap(run.stdout), stderr });
     }
-    // Reads and local verbs are stopped at the deadline: nothing they do can be left half-done.
-    // The group is the child's own (process_group(0) above), so its id is the child's pid.
-    if let Ok(pgid) = i32::try_from(child.id()) {
-        unsafe { libc::kill(-pgid, libc::SIGKILL) };
+    if Instant::now() < deadline {
+        let mut stderr = cap(run.stderr);
+        stderr.push_str("error: the shell client ended before it answered\n");
+        return Some(Ending { code: 1, stdout: cap(run.stdout), stderr });
     }
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = out_thread.join();
-    let _ = err_thread.join();
-    let stdout = cap(snapshot(&out_buf));
+    // Reads and local verbs were stopped at the deadline: nothing they do can be left half-done.
+    let stdout = cap(run.stdout);
     // A bare `can` judges every reference held, printing each as it is decided: the notice counts them.
     let first = lines.first().map(String::as_str).unwrap_or("");
     let notice = if first == "can" || first == "can --all" {
@@ -1734,6 +1682,8 @@ pub(super) fn quote(word: &str) -> String {
     out
 }
 
+#[path = "body/shell_pool.rs"]
+mod shell_pool;
 #[cfg(test)]
 #[path = "body/redteam.rs"]
 mod redteam;

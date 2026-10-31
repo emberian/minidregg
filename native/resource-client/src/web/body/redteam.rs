@@ -64,6 +64,7 @@ fn site(tag: &str) -> (PathBuf, Site) {
     // filename can.
     fs::write(root.join("refs").join("lab\"><img src=x onerror=alert(1)>.json"), "{}").unwrap();
     let site = Site {
+        refs: Mutex::new(None),
         mutations: Mutex::new(()),
         home: Some(root.join("home")),
         root: root.clone(),
@@ -73,7 +74,7 @@ fn site(tag: &str) -> (PathBuf, Site) {
         front: Front { origins: Vec::new(), read_only: false },
         base: String::new(),
         face: Face::Body,
-        shell: Some(Shell { host: "/unused".into(), config: "/unused".into(), home: root.join("home"), public_subject: Some("99".into()), front_doc: None }),
+        shell: Some(Shell { host: "/unused".into(), config: "/unused".into(), home: root.join("home"), public_subject: Some("99".into()), front_doc: None, pool: Default::default() }),
     };
     (root, site)
 }

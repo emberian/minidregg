@@ -50,8 +50,8 @@ Signed room/grant/program observations qualify setup, and a final relevant room
 check detects replacement/dismissal without requiring unrelated world writes to
 stop. Native admission remains the authority gate for every actual effect.
 
-Files and `ready.json` are staged privately, fsynced, atomically renamed into
-`registered-inbox/room-CELL/assignment-NONCE`, then the parent is fsynced. An
+Files and `ready.json` are staged privately, atomically renamed into
+`registered-inbox/room-CELL/assignment-NONCE`. An
 uncommitted partial stage is repaired from the verified bundle; a published inbox
 must match immutable payload and file bytes. A retry publishes once. The retained
 private gate continues across ordinary founder signing-key rotation; fresh

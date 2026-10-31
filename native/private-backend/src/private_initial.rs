@@ -16,7 +16,7 @@ pub(crate) struct Initial {
     _lock: File,
 }
 /// Create `p` holding exactly `framed`, or leave `p` absent: written to a
-/// sibling temp (0600), fsynced, then linked into place without replacing, so a
+/// sibling temp (0600), then linked into place without replacing, so a
 /// crash never leaves a torn file under the final name (a torn `.initial` bricks
 /// the original private material). An existing `p` is refused unchanged.
 pub(crate) fn write_new_durable(p: &Path, framed: &[u8]) -> Result<()> {
@@ -36,11 +36,9 @@ pub(crate) fn write_new_durable(p: &Path, framed: &[u8]) -> Result<()> {
         .mode(0o600)
         .open(&tmp)?;
     f.write_all(framed)?;
-    f.sync_all()?;
     let linked = fs::hard_link(&tmp, p);
     let _ = fs::remove_file(&tmp);
     linked?;
-    File::open(parent)?.sync_all()?;
     if fs::read(p)? != framed {
         return Err(bad("initial durable readback"));
     }

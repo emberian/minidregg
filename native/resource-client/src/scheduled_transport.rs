@@ -28,7 +28,7 @@ fn id_text(id: &[u8; 16]) -> String {
 }
 pub(crate) use crate::fsio::read_private;
 pub(crate) fn persist(path: &Path, bytes: &[u8]) -> Result<()> {
-    // Published only complete and fsynced, never replacing a prior immutable
+    // Published only complete, never replacing a prior immutable
     // ticket/claim/reply. Crash-left staging files are never receipts.
     crate::create_private(path, bytes)
 }

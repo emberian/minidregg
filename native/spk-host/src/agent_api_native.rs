@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{DirBuilder, File};
+use std::fs::DirBuilder;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
@@ -638,12 +638,7 @@ impl CommittedAgent {
             return Err(invalid("agent native submit marker drift"));
         }
         std::fs::remove_file(&self.active_marker).ctx("remove", &self.active_marker)?;
-        File::open(
-            self.active_marker
-                .parent()
-                .ok_or_else(|| invalid("marker parent absent"))?,
-        )?
-        .sync_all()
+        Ok(())
     }
 }
 
@@ -782,16 +777,13 @@ pub(crate) fn authorize_once(
         .create_new(true)
         .open(&active_marker).ctx("open", &active_marker)?;
     active.write_all(&marker_bytes)?;
-    active.sync_all()?;
     let active_metadata = active.metadata()?;
     let active_identity = (active_metadata.dev(), active_metadata.ino());
-    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     if cancelled.load(Ordering::Acquire) {
         if std::fs::read(&active_marker).ctx("read", &active_marker)? != marker_bytes {
             return Err(invalid("agent marker drift before cancelled op46"));
         }
         std::fs::remove_file(&active_marker).ctx("remove", &active_marker)?;
-        File::open(&parent).ctx("open", &parent)?.sync_all()?;
         return Err(invalid("agent caller cancelled before op46"));
     }
     let frame = operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT, &ingress)?;

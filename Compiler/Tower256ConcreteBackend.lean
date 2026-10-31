@@ -1,10 +1,13 @@
 /-
-# Compiler.Tower256ConcreteBackend -- one shared concrete binary backend
+# Compiler.Tower256ConcreteBackend -- one shared concrete binary backend (codec half)
 
-This module owns the single concrete `Backend (binaryTower 8)` intended for
-Tower256 LogUp and additive PCS constructions.  It combines:
+This module owns the field-independent half of the single concrete
+`Backend (binaryTower 8)` intended for Tower256 LogUp and additive PCS
+constructions.  The `backend` value itself, which adds the exact recursive
+Fan--Paar field profile, lives in `Compiler.Tower256Backend`: naming that carrier
+imports Mathlib's field theory, which the host's wire codecs do not need.  This
+module combines:
 
-* the exact recursive Fan--Paar semantic field profile;
 * the Lean-owned SP 800-185 cSHAKE256 computation;
 * compact, prefix-decodable codecs for Merkle paths and transcript values, built on the
   candidate-independent codec nucleus `Theory.StreamCodec` (re-exported by `public import`;
@@ -12,7 +15,8 @@ Tower256 LogUp and additive PCS constructions.  It combines:
 * fixed readable leaf/node/absorb/draw customization strings;
 * stable first-order algorithm, suite, codec, and value-type pins.
 
-Consumers should depend on `backend`, `towerExact`, and `cshakeExact` instead
+Consumers should depend on `backend`, `towerExact`, and `cshakeExact`
+(`Compiler.Tower256Backend`) or on `cshake`, `merkleDomains` and `transcriptDomains` instead
 of rebuilding local copies.  Per-column IDs and proof-suite binding premises
 remain consumer data.  This file proves functional codec and projection facts,
 not collision resistance, a random-oracle theorem, PCS soundness, or any Rust
@@ -21,12 +25,12 @@ semantics.
 
 module
 
-public import Compiler.BinaryTower256Profile
+public import Compiler.Tower256CshakeMerkleController
 public import Compiler.Sp800185Cshake256
 public import Theory.StreamCodec
 public import Theory.Bignum
 public import Theory.AssertAxioms
-meta import Compiler.BinaryTower256Profile
+meta import Compiler.Tower256CshakeMerkleController
 meta import Compiler.Sp800185Cshake256
 meta import Theory.StreamCodec
 meta import Theory.Bignum
@@ -323,49 +327,6 @@ noncomputable def transcriptDomains : TranscriptDomains cshake where
   drawFrameTag := drawFrameTag
   absorb_squeeze_distinct := absorb_squeeze_distinct
 
-noncomputable def backend : Backend BinaryTower256Profile.Tower256 where
-  tower := BinaryTower256Profile.profile
-  cshake := cshake
-  merkle := merkleDomains
-  transcript := transcriptDomains
-
-theorem towerExact : backend.tower = BinaryTower256Profile.profile := rfl
-
-theorem cshakeExact : backend.cshake =
-    Sp800185Cshake256.controller cshakeAlgorithmId digestCodecPin := rfl
-
-theorem cshakeAlgorithmExact : backend.cshake.algorithmId = cshakeAlgorithmId := rfl
-
-theorem digestCodecPinExact :
-    backend.cshake.digestCodecPin = digestCodecPin := rfl
-
-theorem merkleSuiteExact : backend.merkle.suiteId = merkleSuiteId := rfl
-
-theorem merkleCodecPinExact :
-    backend.merkle.proofCodecPin = merklePathCodecPin := rfl
-
-theorem merkleCodecExact : backend.merkle.proofCodec = merklePathCodec := rfl
-
-theorem merkleDomainsExact :
-    backend.merkle.leafCustomization = leafCustomization ∧
-    backend.merkle.nodeCustomization = nodeCustomization := ⟨rfl, rfl⟩
-
-theorem transcriptCodecsExact :
-    backend.transcript.frameCodec = globalFrameCodec ∧
-    backend.transcript.labelCodec = globalDrawLabelCodec := ⟨rfl, rfl⟩
-
-theorem transcriptDomainsExact :
-    backend.transcript.absorbDomain = absorbDomain ∧
-    backend.transcript.squeezeDomain = squeezeDomain ∧
-    backend.transcript.drawFrameTag = drawFrameTag := ⟨rfl, rfl, rfl⟩
-
-theorem cshakeOutputExact (customization input : List UInt8) :
-    backend.cshake.digestCodec.encode
-        (backend.cshake.xofDigest customization input) =
-      (Sp800185Cshake256.hash customization input).bytes :=
-  Sp800185Cshake256.controller_digest_encode_exact
-    cshakeAlgorithmId digestCodecPin customization input
-
 /-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec.decodeNatPrefix_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms StreamCodec.decodeNatPrefix_encode
 /-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.merklePathCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -374,13 +335,7 @@ theorem cshakeOutputExact (customization input : List UInt8) :
 #guard_msgs (whitespace := lax) in #print axioms globalFrameCodec
 /-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.globalDrawLabelCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms globalDrawLabelCodec
-/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.towerExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms towerExact
-/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.cshakeExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms cshakeExact
 /-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.customizationDomains_nodup' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms customizationDomains_nodup
-/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.cshakeOutputExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms cshakeOutputExact
 
 end Minidregg.Compiler.Tower256ConcreteBackend

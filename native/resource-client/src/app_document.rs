@@ -149,9 +149,6 @@ fn store_key(root: &Path) -> Result<Zeroizing<[u8; 32]>> {
         replace_private_file(&path, &*seed)?;
     }
     let secret = Zeroizing::new(crate::read_secret(&path)?.to_bytes());
-    File::open(&parent)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
     Ok(secret)
 }
 fn aad(workspace: &Value, id: &str) -> Result<Vec<u8>> {
@@ -209,9 +206,6 @@ fn opened(root: &Path, workspace: &Value, id: &str) -> Result<Value> {
             .map_err(|_| "connector custody integrity failed")?,
     );
     let value = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
-    File::open(path.parent().ok_or("capture parent absent")?)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
     Ok(value)
 }
 /// Immutable phase records are atomically published under their custody lock: written once, an
@@ -829,7 +823,7 @@ pub(crate) fn recover_exact(root: &Path, workspace: &Value, id: &str) -> Result<
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => save(
             &dir.join("result.json"),
-            &json!({"status":"failed","message":"Writer stopped before the fsynced call. Nothing submitted; export remains retained."}),
+            &json!({"status":"failed","message":"Writer stopped before the call. Nothing submitted; export remains retained."}),
         )?,
         Err(e) => return Err(e.to_string()),
     }

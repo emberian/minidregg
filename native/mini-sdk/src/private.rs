@@ -98,6 +98,15 @@ pub fn create_dir(path: &Path) -> Result<()> {
 }
 
 /// The uid of a connected Unix socket's peer, from the kernel (never from the peer's words).
+/// Wait until `fd` is readable (a listener has a connection), at most `timeout`: the wait an
+/// accept loop on a non-blocking listener does between accepts, instead of sleeping past the
+/// connection that just arrived.
+pub fn wait_readable(fd: std::os::fd::RawFd, timeout: std::time::Duration) {
+    let mut ready = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    let millis = timeout.as_millis().clamp(1, i32::MAX as u128) as i32;
+    unsafe { libc::poll(&mut ready, 1, millis) };
+}
+
 #[cfg(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))]
 pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Result<u32> {
     use std::os::unix::io::AsRawFd;

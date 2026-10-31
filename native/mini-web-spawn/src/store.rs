@@ -127,7 +127,7 @@ impl Store {
         let tmp = path.with_extension("tmp");
         let bytes = serde_json::to_vec_pretty(&session.to_json()).map_err(|e| e.to_string())?;
         let mut file = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        file.write_all(&bytes).and_then(|_| file.sync_all()).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        file.write_all(&bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
         fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))
     }
 

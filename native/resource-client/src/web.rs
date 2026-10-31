@@ -83,6 +83,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let front = Front::loopback(bound.port(), false);
     let site = Site {
         mutations: Mutex::new(()),
+        refs: Mutex::new(None),
         home,
         subject: workspace::member(&workspace, "subject")?.to_owned(),
         root,
@@ -167,6 +168,9 @@ struct Site {
     // Forms and draft-opening GETs may mutate owner-private custody. Complete
     // ingress first, then serialize those paths without blocking signed views.
     mutations: Mutex<()>,
+    /// The workspace's references, parsed once and kept until `refs/` or
+    /// `sources/` changes (every writer publishes by rename).
+    refs: Mutex<Option<Arc<RefIndex>>>,
     home: Option<PathBuf>,
     root: PathBuf,
     workspace: Value,
@@ -179,6 +183,53 @@ struct Site {
     face: Face,
     /// The shell's paths, when this site runs verbs as the member (`--body`).
     shell: Option<body::Shell>,
+}
+
+/// Every reference this workspace holds, sorted by name: its validated JSON
+/// (None when unreadable) and the room it was born in.
+struct RefIndex {
+    stamp: Option<[i64; 8]>,
+    entries: Vec<RefEntry>,
+}
+
+struct RefEntry {
+    name: String,
+    reference: Option<Value>,
+    born_in: Option<String>,
+}
+
+impl RefIndex {
+    /// The modification and change times of `refs/` and `sources/`: a reference
+    /// or birth source added, replaced or removed moves one of them.
+    fn stamp(root: &std::path::Path) -> Option<[i64; 8]> {
+        use std::os::unix::fs::MetadataExt;
+        let refs = fs::metadata(root.join("refs")).ok()?;
+        let sources = fs::metadata(root.join("sources")).map(|m| [m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec()]).unwrap_or([0; 4]);
+        Some([refs.mtime(), refs.mtime_nsec(), refs.ctime(), refs.ctime_nsec(), sources[0], sources[1], sources[2], sources[3]])
+    }
+
+    fn read(root: &std::path::Path, stamp: Option<[i64; 8]>) -> Self {
+        let mut names: Vec<String> = fs::read_dir(root.join("refs"))
+            .map(|dir| {
+                dir.flatten()
+                    .filter_map(|entry| entry.file_name().to_str().and_then(|file| file.strip_suffix(".json")).map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        let entries = names
+            .into_iter()
+            .map(|name| {
+                let reference = workspace::reference(root, &name).ok();
+                // The birth source `create` retains (sources/create-NAME.json on final).
+                let born_in = workspace::bounded_json(&root.join("sources").join(format!("create-{name}.json")))
+                    .ok()
+                    .and_then(|value| value["birth"]["resources"][0]["room"].as_str().map(str::to_owned));
+                RefEntry { name, reference, born_in }
+            })
+            .collect();
+        Self { stamp, entries }
+    }
 }
 
 #[derive(Debug)]
@@ -712,32 +763,28 @@ impl Site {
         }
     }
 
+    /// The kept reference index: rebuilt only when `refs/` or `sources/` changed.
+    fn refs(&self) -> Arc<RefIndex> {
+        let stamp = RefIndex::stamp(&self.root);
+        let mut kept = self.refs.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(index) = kept.as_ref().filter(|index| stamp.is_some() && index.stamp == stamp) {
+            return index.clone();
+        }
+        let index = Arc::new(RefIndex::read(&self.root, stamp));
+        *kept = Some(index.clone());
+        index
+    }
+
     fn names(&self) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(self.root.join("refs"))
-            .map(|dir| {
-                dir.flatten()
-                    .filter_map(|entry| {
-                        entry
-                            .file_name()
-                            .to_str()
-                            .and_then(|file| file.strip_suffix(".json"))
-                            .map(str::to_owned)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        names.sort();
-        names
+        self.refs().entries.iter().map(|entry| entry.name.clone()).collect()
     }
 
     /// Cell id -> this workspace's reference name for it.
     fn targets(&self) -> Vec<(String, String)> {
-        self.names()
-            .into_iter()
-            .filter_map(|other| {
-                let reference = workspace::reference(&self.root, &other).ok()?;
-                Some((reference["target"].as_str()?.to_owned(), other))
-            })
+        self.refs()
+            .entries
+            .iter()
+            .filter_map(|entry| Some((entry.reference.as_ref()?["target"].as_str()?.to_owned(), entry.name.clone())))
             .collect()
     }
 
@@ -751,26 +798,15 @@ impl Site {
         workspace::signed_view(&self.root, &self.workspace, reference, view)
     }
 
-    /// The room a reference was born in, from this workspace's retained birth source.
-    fn born_in(&self, name: &str) -> Option<String> {
-        // The birth source `create` retains (sources/create-NAME.json on final).
-        let source = self.root.join("sources").join(format!("create-{name}.json"));
-        let value = workspace::bounded_json(&source).ok()?;
-        value["birth"]["resources"][0]["room"].as_str().map(str::to_owned)
-    }
-
     fn index(&self) -> Page {
         let base = self.base();
-        let names = self.names();
+        let refs = self.refs();
+        let names: Vec<&String> = refs.entries.iter().map(|entry| &entry.name).collect();
         let mut rows = String::new();
-        let mut rooms = BTreeSet::new();
-        for name in &names {
-            if let Some(room) = self.born_in(name) {
-                rooms.insert(room);
-            }
-        }
-        for name in &names {
-            let Ok(reference) = workspace::reference(&self.root, name) else {
+        let rooms: BTreeSet<&str> = refs.entries.iter().filter_map(|entry| entry.born_in.as_deref()).collect();
+        for entry in &refs.entries {
+            let name = &entry.name;
+            let Some(reference) = entry.reference.as_ref() else {
                 rows.push_str(&format!("<tr><td>{}</td><td colspan=3>unreadable reference</td></tr>\n", escape(name)));
                 continue;
             };
@@ -843,22 +879,19 @@ impl Site {
             Ok(reference) => reference,
             Err(page) => return page,
         };
-        let index_view = |view: &str| -> std::result::Result<Option<Vec<Value>>, Page> {
-            if at.is_some() {
-                return Ok(None);
+        // The link index's two views of this document: one signed read batch, not two reads.
+        let (links, backlinks) = if at.is_some() {
+            (None, None)
+        } else {
+            let views = ["links".to_owned(), "backlinks".to_owned()];
+            match workspace::signed_views_mixed(&self.root, &self.workspace, &[reference.clone(), reference.clone()], &views) {
+                Ok(reads) if reads.len() == 2 => {
+                    let rows = |read: &(Value, Value, PathBuf)| read.0["rows"].as_array().cloned().unwrap_or_default();
+                    (Some(rows(&reads[0])), Some(rows(&reads[1])))
+                }
+                Ok(_) => return failure_page(&title, "signed read batch returned the wrong number of views"),
+                Err(error) => return failure_page(&title, &error),
             }
-            match self.read(&reference, view) {
-                Ok((value, _, _)) => Ok(Some(value["rows"].as_array().cloned().unwrap_or_default())),
-                Err(error) => Err(failure_page(&title, &error)),
-            }
-        };
-        let links = match index_view("links") {
-            Ok(rows) => rows,
-            Err(page) => return page,
-        };
-        let backlinks = match index_view("backlinks") {
-            Ok(rows) => rows,
-            Err(page) => return page,
         };
         let targets = self.targets();
         let names = |id: &str| {
@@ -976,9 +1009,11 @@ impl Site {
         let base = self.base();
         let entries = view["cell"]["entries"].as_array().cloned().unwrap_or_default();
         let children: Vec<String> = self
-            .names()
-            .into_iter()
-            .filter(|other| self.born_in(other).as_deref() == Some(target.as_str()))
+            .refs()
+            .entries
+            .iter()
+            .filter(|other| other.born_in.as_deref() == Some(target.as_str()))
+            .map(|other| other.name.clone())
             .collect();
         let actions = if self.front.read_only { String::new() } else {
             format!("<p><a href=\"{base}/room/{n}/new-document\">Create a document in this room</a> | <a href=\"{base}/room/{n}/resident\">Resident requests and output</a></p>", n = escape(name))
@@ -1365,6 +1400,7 @@ moved 1002: after the start -> after 1001
         fs::create_dir_all(root.join("refs")).unwrap();
         let site = Arc::new(Site {
             mutations: Mutex::new(()),
+            refs: Mutex::new(None),
             home: None,
             root: root.clone(),
             workspace: Value::Null,

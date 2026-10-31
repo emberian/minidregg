@@ -419,7 +419,7 @@ pub fn new_link_code() -> Result<String, String> {
     Ok(out)
 }
 
-/// Write one spool file: created new (never over another), 0600, fsynced with its directory.
+/// Write one spool file: created new (never over another), 0600 with its directory.
 pub fn spool_write(dir: &Path, name: &str, value: &Value) -> Result<(), String> {
     let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     if bytes.len() as u64 > MAX_FILE {
@@ -436,8 +436,8 @@ pub fn spool_write(dir: &Path, name: &str, value: &Value) -> Result<(), String> 
             std::io::ErrorKind::AlreadyExists => "this step was already submitted".to_string(),
             _ => format!("{}: {e}", path.display()),
         })?;
-    file.write_all(&bytes).and_then(|_| file.sync_all()).map_err(|e| format!("{}: {e}", path.display()))?;
-    std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(|e| format!("{}: {e}", dir.display()))
+    file.write_all(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(())
 }
 
 /// Read one spool file as the processor does: never through a symlink, a regular file owned

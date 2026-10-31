@@ -816,7 +816,6 @@ fn admitted_workspace(common: &Common, record: &Value, entry: &Value, ids: &Valu
             record.get("nextPublicFile").and_then(Value::as_str).map(Path::new),
             if fresh {Some(&first_ref)} else {None})?;
         fs::rename(&staged, &root).map_err(|e| e.to_string())?;
-        fs::File::open(&common.directory).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
     }
     let workspace_pin = workspace::load(&root)?;
     if let Some(identity) = setup.get("sshIdentity") {
@@ -853,7 +852,6 @@ fn admitted_workspace(common: &Common, record: &Value, entry: &Value, ids: &Valu
                 crate::create_private(&staged, &serde_json::to_vec_pretty(&complete).map_err(|e|e.to_string())?)?;
             }
             fs::rename(&staged, root.join("workspace.json")).map_err(|e|e.to_string())?;
-            fs::File::open(&root).and_then(|f| f.sync_all()).map_err(|e|e.to_string())?;
         }
     }
     for (name, kind, target, observe, control) in [

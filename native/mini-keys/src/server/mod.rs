@@ -579,7 +579,7 @@ impl Broker {
         let written = serde_json::to_vec(&Value::Object(line)).map_err(|e| e.to_string()).and_then(|mut bytes| {
             bytes.push(b'\n');
             let mut f = self.audit.lock().map_err(|_| "audit lock poisoned".to_owned())?;
-            f.write_all(&bytes).and_then(|_| f.sync_data()).map_err(|e| e.to_string())
+            f.write_all(&bytes).map_err(|e| e.to_string())
         });
         written.map_err(|e| {
             eprintln!("mini-keys: AUDIT WRITE FAILED ({op}): {e}");

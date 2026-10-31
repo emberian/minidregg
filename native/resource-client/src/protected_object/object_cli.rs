@@ -156,7 +156,7 @@ mod tests {
         let storage=root.join("storage.key");
         let storage_bytes=[3;32];
         let mut key_file=fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&storage).unwrap();
-        key_file.write_all(&storage_bytes).unwrap();key_file.sync_all().unwrap();drop(key_file);
+        key_file.write_all(&storage_bytes).unwrap();drop(key_file);
 
         let (secret,public)=object_keys_hybrid::generate().unwrap();
         let generation=object_keys_hybrid::key_commitment(&public);

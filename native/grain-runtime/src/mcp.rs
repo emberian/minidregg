@@ -119,7 +119,7 @@ pub fn start_broker(
                     });
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(20))
+                    mini_sdk::private::wait_readable(std::os::fd::AsRawFd::as_raw_fd(&listener), std::time::Duration::from_millis(20))
                 }
                 Err(_) => break,
             }

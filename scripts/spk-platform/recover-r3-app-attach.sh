@@ -82,10 +82,6 @@ mkdir -m 700 "$P/refused-attempt"
 cp -p "$T"/* "$P/refused-attempt/"
 sha256sum "$T"/* >"$P/refused-original-sha256.txt"
 sha256sum "$P/refused-attempt"/* >"$P/refused-archive-sha256.txt"
-for file in "$P/refused-attempt"/*; do sync -f "$file"; done
-sync -f "$P/refused-original-sha256.txt"
-sync -f "$P/refused-archive-sha256.txt"
-sync -f "$P/refused-attempt"
 cat >"$P/session-function.txt" <<'EOF'
 start_session() {
   name=$1
@@ -94,7 +90,6 @@ start_session() {
     [ "$(stat -c '%u:%a' "$RUNTIME_BASE")" = "$(id -u):700" ] || exit 2
   SOCKET_DIR=$(mktemp -d "$RUNTIME_BASE/mini-r3a.XXXXXX")
   printf '%s\n' "$SOCKET_DIR" >"$RECOVERY/$name-socket-dir.txt"
-  sync -f "$RECOVERY/$name-socket-dir.txt"
   SOCKET="$SOCKET_DIR/host.sock"
   "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     >"$RECOVERY/$name-service.stdout" 2>"$RECOVERY/$name-service.stderr" &
@@ -182,9 +177,6 @@ jq -e --slurpfile initial "$EVIDENCE/app-tool-attach-recovery-before/view.json" 
   .cell.grain.remaining == ((($initial[0].cell.grain.remaining | tonumber) - 9) | tostring) and
   .cell.grain.reserved == "0"' \
 EOF
-sync -f "$P/session-function.txt"
-sync -f "$P/attach-and-reserve.txt"
-sync -f "$P/remaining-check.txt"
 awk -v session="$P/session-function.txt" -v attach="$P/attach-and-reserve.txt" \
   -v remainingFile="$P/remaining-check.txt" '
   $0 == "SPK_AGENT_ALLOCATION=$6" {print; print "RECOVERY=$7"; arg++; next}
@@ -211,9 +203,6 @@ awk -v session="$P/session-function.txt" -v attach="$P/attach-and-reserve.txt" \
 chmod 700 "$P/application-attach-continuation.sh"
 /bin/sh -n "$P/application-attach-continuation.sh" || fail 'generated script syntax refused'
 sha256sum "$SOURCE" "$P/application-attach-continuation.sh" >"$P/script-sha256.txt"
-sync -f "$P/application-attach-continuation.sh"
-sync -f "$P/script-sha256.txt"
-sync -f "$P"
 [ "$(sha "$STORE")" = 449278317fac429751ee208b39f5d6b97328c3fa84bf4fbcf6f1a962bb4bf5a9 ] || fail 'Store changed before attach'
 /bin/sh "$P/application-attach-continuation.sh" "$HOST" "$BASE" "$MINI" \
   "$STORE_BINARY" "$SIGNATURE_BINARY" "$R/source-stage/agent-allocation.json" "$P" \
@@ -225,13 +214,9 @@ for attempt in app session; do
 done
 sha256sum "$BASE/app-attempt/outcome.json" "$BASE/session-attempt/outcome.json" \
   "$P/application-attach-continuation.sh" >"$P/success-sha256.txt"
-sync -f "$P/success-sha256.txt"
 jq -n --arg recovery "$P" --arg appSha256 "$(sha "$BASE/app-attempt/outcome.json")" \
   --arg sessionSha256 "$(sha "$BASE/session-attempt/outcome.json")" '
   {protocol:"mini-spk-r3-app-attach-recovery-v1",recovery:$recovery,
    appSha256:$appSha256,sessionSha256:$sessionSha256}' >"$A/application-recovery-link.json"
-sync -f "$A/application-recovery-link.json"
 printf '%s\n' 'complete via app-recovery-0001' >"$A/application.completed"
-sync -f "$A/application.completed"
-sync -f "$A"
 printf '%s\n' "$A/application.completed"

@@ -11,9 +11,8 @@ os.umask(0o077);state=pathlib.Path(a.state);lock=threading.Lock()
 def write(name,value):
     destination=state/name;temporary=state/(name+'.tmp')
     with open(temporary,'w') as stream:
-        json.dump(value,stream,indent=2);stream.write('\n');stream.flush();os.fsync(stream.fileno())
+        json.dump(value,stream,indent=2);stream.write('\n');stream.flush()
     os.replace(temporary,destination)
-    fd=os.open(state,os.O_RDONLY|os.O_DIRECTORY);os.fsync(fd);os.close(fd)
 def summary(body):
     reads=[row for row in body.get('messages',[]) if row.get('role')=='tool' and row.get('tool_call_id')=='captured-input-read']
     if len(reads)!=1:raise ValueError('one actual captured input read required')

@@ -163,7 +163,7 @@ pub(crate) fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) 
     if path.exists() {
         let prior=bounded_json(path)?;
         if prior == *value {
-            return File::open(parent).and_then(|f|f.sync_all()).map_err(|e|e.to_string());
+            return Ok(());
         }
         if expected != Some(&prior) {
             return Err(format!("retained JSON differs from exact request: {}",path.display()));
@@ -175,7 +175,7 @@ pub(crate) fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) 
 }
 
 /// Immutable exact retries and expected-prior durable replacements. The
-/// existing per-record CAS lock closes interruption after rename and fsync.
+/// existing per-record CAS lock closes interruption after rename and write.
 pub(crate) fn publish_retained_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
     atomic_json(path, value, expected)
 }
@@ -342,7 +342,36 @@ pub(crate) fn load_for_key_transition(root: &Path) -> Result<Value> {
 /// Retained physical custody for exact receipt recovery, offline audit, and the
 /// explicit key-transition adapter. This projection grants no current signing
 /// authority; ordinary fresh signed operations must use the checked loader.
+/// The workspace this process last loaded and checked, by `workspace.json`'s file identity
+/// (device, inode, size, both times): a verb loads its workspace from many places, and a
+/// workspace whose file keeps its identity is the one already checked and pinned. A rewrite
+/// (every update replaces the file) or a replacement loads and checks it again.
+static LOADED: Mutex<Option<(PathBuf, [u64; 7], Value)>> = Mutex::new(None);
+
+fn workspace_identity(root: &Path) -> Option<[u64; 7]> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = fs::symlink_metadata(root.join("workspace.json")).ok()?;
+    Some([meta.dev(), meta.ino(), meta.size(), meta.mtime() as u64, meta.mtime_nsec() as u64,
+        meta.ctime() as u64, meta.ctime_nsec() as u64])
+}
+
 pub(crate) fn load_retained(root: &Path) -> Result<RetainedWorkspace> {
+    let identity = workspace_identity(root);
+    if let (Some(identity), Ok(loaded)) = (identity, LOADED.lock()) {
+        if let Some((path, seen, value)) = loaded.as_ref() {
+            if path == root && *seen == identity {
+                return Ok(RetainedWorkspace { value: value.clone() });
+            }
+        }
+    }
+    let retained = load_retained_checked(root)?;
+    if let (Some(identity), Ok(mut loaded)) = (identity, LOADED.lock()) {
+        *loaded = Some((root.to_path_buf(), identity, retained.value.clone()));
+    }
+    Ok(retained)
+}
+
+fn load_retained_checked(root: &Path) -> Result<RetainedWorkspace> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;
@@ -936,7 +965,6 @@ fn read_journal(root: &Path, height: &str, outcome: &str, now: &str, name: &str)
     if fs::metadata(&path).map(|meta| meta.len() >= READ_JOURNAL_LIMIT).unwrap_or(false) {
         fs::rename(&path, root.join(format!("{READ_JOURNAL}.1")))
             .map_err(|error| format!("cannot rotate {}: {error}", path.display()))?;
-        crate::fsio::sync_parent(&path)?;
     }
     let unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -950,6 +978,17 @@ fn read_journal(root: &Path, height: &str, outcome: &str, now: &str, name: &str)
         .map_err(|error| format!("cannot open {}: {error}", path.display()))?;
     file.write_all(format!("{unix}\t{height}\tread\t{outcome}\t{now}\t{name}\n").as_bytes())
         .map_err(|error| format!("cannot append {}: {error}", path.display()))
+}
+
+/// The journal line of a read whose working files live in the read scratch: its height and
+/// clock from the challenge when it was answered.
+fn journal_read(root: &Path, attempt: &Path, answered: bool, reference: &Value) {
+    let challenge = bounded_json(&attempt.join("challenge.json")).ok();
+    let field = |pointer: &str| challenge.as_ref().and_then(|c| c.pointer(pointer)).and_then(Value::as_str)
+        .unwrap_or("-").to_owned();
+    let name = reference.get("target").and_then(Value::as_str).unwrap_or("-");
+    let _ = read_journal(root, &field("/height"), if answered { "answered" } else { "refused" },
+        &field("/clock/now"), name);
 }
 
 /// The coordinates a read was judged at, from its retained challenge: the world root,
@@ -1332,7 +1371,7 @@ fn signed_views_purposes(
         return Err("signed read batch shape differs".into());
     }
     let ticket = receipt_continuity::begin(root, workspace)?;
-    let (attempt, nonce) = new_attempt(root)?;
+    let (attempt, nonce) = crate::read_scratch::attempt(root)?;
     if let Some(custody) = custody.as_deref_mut() {
         custody.attempt = Some(attempt.clone());
     }
@@ -1343,13 +1382,14 @@ fn signed_views_purposes(
             "nonce":nonce, "purpose":purpose,
             "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
                 "capability":member(reference,"observeCapability")?}]});
-        let source = root.join("sources").join(format!("qb-{nonce}-{n}.json"));
+        let source = crate::read_scratch::source(&attempt, &format!("qb-{nonce}-{n}.json"));
         create_private(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
         if let Some(custody) = custody.as_deref_mut() { custody.sources.push(source.clone()); }
         intents.push((source, inspection.clone()));
     }
     let result = crate::query_batch_retained(&workspace_host(workspace)?,
-        &member_path(workspace,"config")?, &intents, &member_path(workspace,"key")?, &attempt)?;
+        &member_path(workspace,"config")?, &intents, &member_path(workspace,"key")?, &attempt)
+        .inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
     let challenge = &result.first().ok_or("signed read batch returned no observations")?.1;
     receipt_continuity::finish(root, workspace, ticket, challenge, ContinuityMode::Ordinary)?;
     Ok(result)
@@ -1412,13 +1452,13 @@ fn signed_view_unchecked(
         } else { format!("view-{view}") };
         return signed_opened_view(root, workspace, reference, purpose, &inspection);
     }
-    let (attempt, nonce) = new_attempt(root)?;
+    let (attempt, nonce) = crate::read_scratch::attempt(root)?;
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
         "purpose":{"type":"query","kind":member(reference,"kind")?,
             "target":member(reference,"target")?,"view":view},
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
-    let source = root.join("sources").join(format!("q-{nonce}.json"));
+    let source = crate::read_scratch::source(&attempt, &format!("q-{nonce}.json"));
     create_private(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
@@ -1436,7 +1476,9 @@ fn signed_view_unchecked(
         &member_path(workspace, "key")?,
         &inspection,
         &attempt,
-    )?;
+    );
+    journal_read(root, &attempt, result.is_ok(), reference);
+    let result = result.inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
     shared_names::check_opened(reference, &challenge)?;
     Ok((result, challenge, attempt.join("signed-observation.bin")))
@@ -1461,7 +1503,7 @@ fn doc_query(
         return Ok((value,signed.parent().ok_or("signed query lacks attempt")?.to_owned()));
     }
     let ticket = receipt_continuity::begin(root, workspace)?;
-    let (attempt, nonce) = new_attempt(root)?;
+    let (attempt, nonce) = crate::read_scratch::attempt(root)?;
     let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
         "target":member(reference,"target")?,"view":view});
     if let Some(height) = height {
@@ -1471,12 +1513,11 @@ fn doc_query(
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,"purpose":purpose,
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
-    let source = root.join("sources").join(format!("q-{nonce}.json"));
+    let source = crate::read_scratch::source(&attempt, &format!("q-{nonce}.json"));
     create_private(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
     )?;
-    eprintln!("workspace read attempt: {}", attempt.display());
     let value = query_retained(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
@@ -1485,7 +1526,9 @@ fn doc_query(
         &member_path(workspace, "key")?,
         inspection,
         &attempt,
-    )?;
+    );
+    journal_read(root, &attempt, value.is_ok(), reference);
+    let value = value.inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
     if reference.get("sharedName").is_some() {
         shared_names::check_opened(reference, &challenge)?;
@@ -1888,7 +1931,7 @@ pub(crate) fn rendered_document(
         readable.insert(source, read);
     }
     let render = |host: &[u8], sources: &Vec<Value>| -> Result<Value> {
-        let (attempt, _) = new_attempt(root)?;
+        let (attempt, _) = crate::read_scratch::attempt(root)?;
         make_private_dir(&attempt)?;
         let input = attempt.join("transclusions-in.json");
         create_private(
@@ -2020,7 +2063,7 @@ fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&
 fn host_document(root: &Path, workspace: &Value, host_ref: &Value) -> Result<Value> {
     let (_, _, signed) = signed_view(root, workspace, host_ref, "resource")?;
     let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
-    let (attempt, _) = new_attempt(root)?;
+    let (attempt, _) = crate::read_scratch::attempt(root)?;
     make_private_dir(&attempt)?;
     let input = attempt.join("document-in.json");
     create_private(
@@ -3724,17 +3767,123 @@ fn record_replan_reason(attempt: &Path, class: &str, decision: Option<&crate::Ho
     }
 }
 
+/// The retained intent copy of an attempt, by kind: its bytes identify the intent.
+const RETAINED_INTENTS: [&str; 2] = ["intent.json", "intent-source.bin"];
+
+/// The attempt index (`WORKSPACE/attempt-index/by-intent/SHA256/ATTEMPT`, empty files): which
+/// attempts retain an intent with these bytes, so a submission finds an earlier attempt of the
+/// same intent without reading every attempt the workspace retains (law 17). Every attempt that
+/// retains an intent copy is indexed when the copy is retained, before a call can be sealed in it
+/// (`index_retained_intent`, from the one retention in `main.rs`). `complete` records that the
+/// attempts retained before the index existed were indexed (once per workspace).
+fn attempt_index(root: &Path) -> PathBuf {
+    root.join("attempt-index").join("by-intent")
+}
+
+fn intent_key(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn index_entry(index: &Path, bytes: &[u8], attempt: &OsStr) -> Result<()> {
+    let bucket = index.join(intent_key(bytes));
+    crate::fsio::ensure_private_dir_all(&bucket)?;
+    match OpenOptions::new().write(true).create_new(true).mode(0o600).open(bucket.join(attempt)) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(format!("attempt index {}: {error}", bucket.display())),
+    }
+}
+
+/// Index an attempt directory under its present name (after a rename moved it aside).
+fn index_attempt_dir(attempt: &Path) -> Result<()> {
+    for retained in RETAINED_INTENTS {
+        if let Ok(bytes) = fs::read(attempt.join(retained)) {
+            index_retained_intent(attempt, &bytes)?;
+        }
+    }
+    Ok(())
+}
+
+/// Index the attempts retained before the index existed, then record that it was done.
+fn index_existing_attempts(root: &Path, index: &Path) -> Result<()> {
+    if let Ok(entries) = fs::read_dir(root.join("attempts")) {
+        for entry in entries.flatten() {
+            for retained in RETAINED_INTENTS {
+                if let Ok(bytes) = fs::read(entry.path().join(retained)) {
+                    index_entry(index, &bytes, &entry.file_name())?;
+                }
+            }
+        }
+    }
+    // The index directory exists even when no attempt retained an intent yet.
+    crate::fsio::ensure_private_dir_all(index)?;
+    create_private(&index.join("complete"), b"").or_else(|error| {
+        if index.join("complete").is_file() { Ok(()) } else { Err(error) }
+    })
+}
+
+/// The rerun candidates for these intent bytes: the index's bucket, or (when the index cannot be
+/// built or read) every retained attempt, as before the index existed. The index is derived, so a
+/// failure to maintain it costs a scan, never a refusal.
+fn rerun_candidates(root: &Path, bytes: &[u8]) -> Vec<PathBuf> {
+    let index = attempt_index(root);
+    let indexed = index.join("complete").is_file() || index_existing_attempts(root, &index).is_ok();
+    let names: Vec<OsString> = if indexed {
+        match fs::read_dir(index.join(intent_key(bytes))) {
+            Ok(entries) => entries.flatten().map(|entry| entry.file_name()).collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(_) => all_attempt_names(root),
+        }
+    } else {
+        all_attempt_names(root)
+    };
+    names.into_iter().map(|name| root.join("attempts").join(name)).collect()
+}
+
+fn all_attempt_names(root: &Path) -> Vec<OsString> {
+    fs::read_dir(root.join("attempts"))
+        .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+        .unwrap_or_default()
+}
+
+/// Record that `attempt` (a directory under `WORKSPACE/attempts`) retains an intent with these
+/// bytes. Attempts kept elsewhere (an app worker's own directories) are not submissions this
+/// workspace's rerun check reads.
+///
+/// A failure to write the entry does not stop the submission: the index is derived. It withdraws
+/// the index's `complete` record instead, so the next rerun check rebuilds the index from every
+/// attempt (this one included). Only when neither the entry nor that withdrawal can be written
+/// is the submission refused, before any call exists.
+pub(crate) fn index_retained_intent(attempt: &Path, bytes: &[u8]) -> Result<()> {
+    let (Some(parent), Some(name)) = (attempt.parent(), attempt.file_name()) else { return Ok(()) };
+    if parent.file_name() != Some(OsStr::new("attempts")) {
+        return Ok(());
+    }
+    let Some(root) = parent.parent() else { return Ok(()) };
+    let index = attempt_index(root);
+    match index_entry(&index, bytes, name) {
+        Ok(()) => Ok(()),
+        Err(error) => match fs::remove_file(index.join("complete")) {
+            Ok(()) => Ok(()),
+            Err(gone) if gone.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(error),
+        },
+    }
+}
+
 /// A second submission of an intent that an earlier attempt of this workspace already holds is
 /// refused unless that attempt is decided as refused or never sealed a call: the attempt is the
 /// intent's record, and a rerun after a lost reply must look up its exact call, not author a second
 /// one (review §5.2 P4). The retained copy (`intent.json`, or `intent-source.bin` for binary
-/// intents) identifies it, byte for byte.
+/// intents) identifies it, byte for byte. The candidates come from the attempt index (the
+/// attempts retaining these bytes), each still compared byte for byte.
 fn refuse_rerun(root: &Path, source: &Path, kind: &str) -> Result<()> {
     let retained = if kind == "binary" { "intent-source.bin" } else { "intent.json" };
     let bytes = fs::read(source).map_err(|e| format!("cannot read {}: {e}", source.display()))?;
-    let Ok(entries) = fs::read_dir(root.join("attempts")) else { return Ok(()) };
-    for entry in entries.flatten() {
-        let attempt = entry.path();
+    if !root.join("attempts").is_dir() {
+        return Ok(());
+    }
+    for attempt in rerun_candidates(root, &bytes) {
         let copy = attempt.join(retained);
         if !fs::metadata(&copy).is_ok_and(|m| m.len() == bytes.len() as u64) || fs::read(&copy).ok().as_deref() != Some(bytes.as_slice()) {
             continue;
@@ -4501,9 +4650,9 @@ fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
         }
     };
     fs::rename(attempt, &retired).map_err(|error| error.to_string())?;
-    File::open(attempt.parent().ok_or("birth attempt lacks parent")?)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| error.to_string())?;
+    // The retired attempt keeps its evidence, its intent copy included: the rerun check finds it
+    // under its new name.
+    index_attempt_dir(&retired)?;
     Ok(retired)
 }
 
@@ -6178,7 +6327,6 @@ fn doc_push(root: &Path, workspace: &Value, name: &str, file: &Path, proposal_id
     } else {
         let retired = root.join("seen").join(format!(".{}.pushed.{}", ref_file(name), random_nonce()?));
         fs::rename(seen_path(root, name)?, &retired).map_err(|error| format!("cannot retire the seen record: {error}"))?;
-        crate::fsio::sync_parent(&retired)?;
         println!("doc push {name}: admitted; at height {height} {name} also holds others' changes: doc pull {name} before your next push");
     }
     Ok(())
@@ -7337,6 +7485,59 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// The rerun check reads the attempt index: an attempt retained before the index existed is
+    /// found through the one-time index of existing attempts, one retained after through its own
+    /// entry, and a retired (renamed) one under its new name; another intent is not refused.
+    #[test]
+    fn rerun_check_finds_sealed_attempts_through_the_index() {
+        let root = std::env::temp_dir().join(format!("mini-rerun-index-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let attempts = root.join("attempts");
+        fs::create_dir_all(&attempts).unwrap();
+        let seal = |name: &str, intent: &[u8]| {
+            let dir = attempts.join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("intent.json"), intent).unwrap();
+            fs::write(dir.join("call.bin"), b"exact call").unwrap();
+            dir
+        };
+        let source = |intent: &[u8]| {
+            let path = root.join("source.json");
+            fs::write(&path, intent).unwrap();
+            path
+        };
+        seal("a-old", b"{\"old\":1}");
+        let refused = refuse_rerun(&root, &source(b"{\"old\":1}"), "intent").unwrap_err();
+        assert!(refused.contains("a-old"), "{refused}");
+        assert!(attempt_index(&root).join("complete").is_file());
+        let fresh = seal("a-new", b"{\"new\":1}");
+        index_retained_intent(&fresh, b"{\"new\":1}").unwrap();
+        assert!(refuse_rerun(&root, &source(b"{\"new\":1}"), "intent").unwrap_err().contains("a-new"));
+        let retired = attempts.join("a-new.released-0001");
+        fs::rename(&fresh, &retired).unwrap();
+        index_attempt_dir(&retired).unwrap();
+        assert!(refuse_rerun(&root, &source(b"{\"new\":1}"), "intent").unwrap_err().contains("released"));
+        refuse_rerun(&root, &source(b"{\"other\":1}"), "intent").unwrap();
+        // A workspace whose attempts never retained an intent (a fresh controller owner-workspace with
+        // a named attempt): the rerun check builds an empty index and refuses nothing; the named
+        // attempt's retention then indexes it.
+        let fresh_root = root.join("fresh");
+        fs::create_dir_all(fresh_root.join("attempts").join("witness")).unwrap();
+        let fresh_source = fresh_root.join("source.json");
+        fs::write(&fresh_source, b"{\"w\":1}").unwrap();
+        refuse_rerun(&fresh_root, &fresh_source, "intent").unwrap();
+        assert!(attempt_index(&fresh_root).join("complete").is_file());
+        let witness = fresh_root.join("attempts").join("witness");
+        fs::write(witness.join("intent.json"), b"{\"w\":1}").unwrap();
+        index_retained_intent(&witness, b"{\"w\":1}").unwrap();
+        fs::write(witness.join("call.bin"), b"exact call").unwrap();
+        assert!(refuse_rerun(&fresh_root, &fresh_source, "intent").unwrap_err().contains("witness"));
+        // Not indexed and retained after the one-time index: not seen (every retention indexes).
+        seal("a-unindexed", b"{\"u\":1}");
+        refuse_rerun(&root, &source(b"{\"u\":1}"), "intent").unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// A summoned program document (and every cell a verb appends lines to)
     /// must be born with its document: Bob's `doc show` and the resident's
     /// context read of the J14 room found none (the Host's "context source has

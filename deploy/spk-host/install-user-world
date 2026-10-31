@@ -2,7 +2,7 @@
 # The same explicit ROOT SETUP/ROOT CLEANUP entrypoint is used by deployment
 # and scratch acceptance. Runtime privilege is confined to the compiled helper.
 set -euo pipefail
-usage() { echo "usage: $0 install SOURCE_HELPER HELPER_PATH STORE DEPLOYMENT_HEX HOST_HEX OPERATOR_UID SUBUID_START COUNT | remove STORE HELPER_PATH" >&2; exit 2; }
+usage() { echo "usage: $0 install SOURCE_HELPER HELPER_PATH STORE DEPLOYMENT_HEX HOST_HEX OPERATOR_UID SUBUID_START COUNT [CUSTODIAN_SOCKET] | remove STORE HELPER_PATH" >&2; exit 2; }
 [[ $EUID == 0 ]] || { echo 'world install requires explicit root setup' >&2; exit 1; }
 [[ $# -ge 3 ]] || usage
 if [[ $1 == controller-* ]]; then
@@ -21,7 +21,7 @@ try:
                 m.st_mode & 0o7022 == 0 and 0 < m.st_size <= 262144):
             raise ValueError('controller setup companion custody refused')
         code = source.read(262145)
-    if hashlib.sha256(code).hexdigest() != '3d3409431e0d4152a623ac057fcbdd13c77b5639b8fef09b5cb741c0aa23953d':
+    if hashlib.sha256(code).hexdigest() != 'fa485c0539ab67aa6969468fb26c56f385fa3ce150fcad049462827bebb50e95':
         raise ValueError('controller setup companion code pin differs')
 except (OSError, ValueError) as error:
     sys.exit(str(error))
@@ -35,8 +35,8 @@ for mapper in /usr/bin/newuidmap /usr/bin/newgidmap; do
 done
 action=$1
 if [[ $action == install ]]; then
-  [[ $# == 9 ]] || usage
-  source_helper=$2 helper=$3 store=$4 deployment=$5 host=$6 op_uid=$7 start=$8 count=$9
+  [[ $# == 9 || $# == 10 ]] || usage
+  source_helper=$2 helper=$3 store=$4 deployment=$5 host=$6 op_uid=$7 start=$8 count=$9 custodian_socket=${10:-}
 elif [[ $action == remove ]]; then
   [[ $# == 3 ]] || usage
   store=$2 helper=$3
@@ -52,6 +52,29 @@ registry=$registry_dir/$store.json
 profiled_bwrap=/usr/local/libexec/mini-grain-bwrap
 operator_grants=$registry_dir/bwrap-operator-acl
 has_acl_entry() { getfacl -n --omit-header -p -- "$profiled_bwrap" | grep -qx "user:$1:[r-][w-][x-]"; }
+# BEGIN bwrap-claims
+# Every world CLAIMS its whole app range in $root/bwrap-acl-claims, whether or not it had to add the
+# entry; $root/bwrap-acl-grants lists only entries this world added. A world whose uid already had an
+# entry (another world's) therefore never relies on it unrecorded: when the adding world is removed it
+# hands the entry to a surviving claimant instead of revoking it.
+worlds_root=${MINI_SPK_WORLDS_ROOT:-/var/lib/mini-spk-worlds}
+bwrap_other_claimant() { # UID EXCLUDED_ROOT: print the root of another world claiming UID
+  local f
+  for f in "$worlds_root"/*/bwrap-acl-claims; do
+    [[ -f $f && $(dirname -- "$f") != "$2" ]] || continue
+    if grep -qx -- "$1" "$f"; then dirname -- "$f"; return 0; fi
+  done
+  return 1
+}
+bwrap_release() { # UID ROOT: revoke an entry this world added unless another world still claims it
+  local heir
+  if heir=$(bwrap_other_claimant "$1" "$2"); then
+    printf '%s\n' "$1" >>"$heir/bwrap-acl-grants"
+  else
+    setfacl -x "u:$1" -- "$profiled_bwrap"; revoked+="$1,"
+  fi
+}
+# END bwrap-claims
 rule=/etc/sudoers.d/mini-spk-$store
 root=/var/lib/mini-spk-worlds/$store
 # Serialize registry/subuid allocation and helper install/removal across worlds.
@@ -116,7 +139,7 @@ if [[ $action == remove ]]; then
   if [[ -f $root/bwrap-acl-grants ]]; then
     while read -r uid; do
       [[ $uid =~ ^[0-9]+$ ]] || continue
-      setfacl -x "u:$uid" -- "$profiled_bwrap"; revoked+="$uid,"
+      bwrap_release "$uid" "$root"
     done <"$root/bwrap-acl-grants"
   fi
   rm -f "$rule" "$registry"
@@ -144,7 +167,14 @@ if [[ $action == remove ]]; then
   exit 0
 fi
 [[ $deployment =~ ^[0-9a-f]{64}$ && $host =~ ^[0-9a-f]{64}$ && $op_uid =~ ^[1-9][0-9]*$ && $start =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ ]] || usage
-(( start >= 65536 && count >= 2 && count <= 64 )) || usage
+# A world behind a volume custodian (a user-namespaced container, uids 0..65535) registers app uids
+# from inside that namespace and names the custodian's socket; any other world keeps the subordinate floor.
+if [[ -n $custodian_socket ]]; then
+  [[ $custodian_socket =~ ^/[A-Za-z0-9._/-]+$ && $custodian_socket != *..* && $custodian_socket != *//* ]] || usage
+  (( start >= 1 && count >= 2 && count <= 64 )) || usage
+else
+  (( start >= 65536 && count >= 2 && count <= 64 )) || usage
+fi
 [[ ! -e $registry && ! -L $registry && ! -e $rule && ! -e $root && ! -L $root ]] || { echo 'root setup refuses existing world' >&2; exit 1; }
 entry=$(getent passwd "$op_uid")
 op_user=${entry%%:*}
@@ -154,7 +184,7 @@ op_gid=$(printf '%s\n' "$entry" | cut -d: -f4)
 # reservation while inheriting this exact held global lock (fd8).
 # A START already taken by another world or a controller account moves to the next free
 # range of the delegation; the registry and the ROOT SETUP line carry the allocated one.
-allocation=$("$0" controller-check-app-allocation "$store" "$helper" "$op_uid" "$start" "$count")
+allocation=$("$0" controller-check-app-allocation "$store" "$helper" "$op_uid" "$start" "$count" ${custodian_socket:+custodian})
 printf '%s\n' "$allocation"
 [[ $allocation =~ \"appRangeChecked\":\ \[([0-9]+),\ ([0-9]+)\] ]] || { echo 'app allocation reply malformed' >&2; exit 1; }
 (( BASH_REMATCH[2] - BASH_REMATCH[1] == count )) || { echo 'app allocation count differs' >&2; exit 1; }
@@ -206,11 +236,13 @@ install -d -o "$op_uid" -g "$op_gid" -m 700 "$root/spk/inbox"
 if [[ -e $profiled_bwrap ]]; then
   [[ -f $profiled_bwrap && ! -L $profiled_bwrap && $(stat -c '%u' "$profiled_bwrap") == 0 ]] || { echo "root setup refuses $profiled_bwrap custody" >&2; exit 1; }
   install -o root -g root -m 600 /dev/null "$root/bwrap-acl-grants"
+  install -o root -g root -m 600 /dev/null "$root/bwrap-acl-claims"
   if ! has_acl_entry "$op_uid"; then
     setfacl -m "u:$op_uid:r-x" -- "$profiled_bwrap"; granted_operator=1
     printf '%s\n' "$op_uid" >>"$operator_grants"; chmod 600 "$operator_grants"
   fi
   for ((uid=start; uid<start+count; uid++)); do
+    printf '%s\n' "$uid" >>"$root/bwrap-acl-claims"
     has_acl_entry "$uid" && continue
     setfacl -m "u:$uid:r-x" -- "$profiled_bwrap"; granted+=("$uid")
     printf '%s\n' "$uid" >>"$root/bwrap-acl-grants"
@@ -219,8 +251,8 @@ fi
 printf 'deployment_id=%s\nhost_id=%s\n' "$deployment" "$host" >"$root/host-identity"
 chmod 600 "$root/host-identity"
 jq -n --arg store "$store" --arg deployment "$deployment" --arg host "$host" --arg root "$root" --arg helper "$helper" --arg sha "$sha" \
-  --argjson uid "$op_uid" --argjson gid "$op_gid" --argjson start "$start" --argjson count "$count" \
-  '{protocol:"mini-spk-volume-registry-v1",store:$store,deploymentId:$deployment,hostId:$host,grainsRoot:$root,operatorUid:$uid,operatorGid:$gid,appUids:[range($start;$start+$count)],helper:$helper,helperSha256:$sha}' >"$registry"
+  --argjson uid "$op_uid" --argjson gid "$op_gid" --argjson start "$start" --argjson count "$count" --arg custodian "$custodian_socket" \
+  '{protocol:"mini-spk-volume-registry-v1",store:$store,deploymentId:$deployment,hostId:$host,grainsRoot:$root,operatorUid:$uid,operatorGid:$gid,appUids:[range($start;$start+$count)],helper:$helper,helperSha256:$sha} + (if $custodian == "" then {} else {custodianSocket:$custodian} end)' >"$registry"
 chmod 644 "$registry"
 # Numeric uid, precisely one binary. JSON decode and the registry enforce args.
 rule_tmp=$(mktemp /etc/sudoers.d/.mini-spk.XXXXXXXX)

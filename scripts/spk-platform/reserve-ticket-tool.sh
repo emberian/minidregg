@@ -156,7 +156,6 @@ if [ "$#" -eq 11 ] && [ "$1" = prepare ]; then
   (set -C; cat "$ATTEMPT/active-candidate.json" >"$ROOT/active.json") ||
     fail "another reserve became active"
   chmod 600 "$ROOT/active.json"
-  sync -f "$ROOT/active.json" "$ROOT" "$ATTEMPT/native/call.bin"
   echo "exact reserve prepared at $ATTEMPT; send once only after review"
   exit 0
 fi
@@ -172,7 +171,6 @@ if [ "$#" -eq 2 ] && [ "$1" = send ]; then
   (set -C; cat "$ATTEMPT/send-candidate.json" >"$ATTEMPT/send-requested.json") ||
     fail "reserve submit raced"
   chmod 600 "$ATTEMPT/send-requested.json"
-  sync -f "$ATTEMPT/send-requested.json" "$ATTEMPT" "$ROOT"
   "$MINI" retry --attempt "$ATTEMPT/native" --mode submit --socket "$SOCKET" ||
     fail "submit outcome uncertain; use lookup, never send again"
   echo "reserve submit returned; use lookup to confirm exact accepted receipt"
@@ -206,7 +204,6 @@ if [ "$#" -eq 2 ] && [ "$1" = lookup ]; then
        receipt:($outcome[0] | {transactionId,eventId,acceptedCount,worldRoot})}
       ' >"$ATTEMPT/confirmed.json"
     chmod 600 "$ATTEMPT/confirmed.json"
-    sync -f "$ATTEMPT/confirmed.json" "$ATTEMPT"
   else
     private "$ATTEMPT/confirmed.json" 4096
     jq -e --arg call "$(sha "$ATTEMPT/native/call.bin")" \
@@ -255,7 +252,6 @@ if [ "$#" -eq 2 ] && [ "$1" = lookup ]; then
     (set -C; cat "$after_dir/view.json" >"$ATTEMPT/after-view.json") ||
       fail "reserved readback raced"
     chmod 600 "$ATTEMPT/after-view.json"
-    sync -f "$ATTEMPT/after-view.json" "$ATTEMPT"
   else
     private "$ATTEMPT/after-view.json" 1048576
   fi
@@ -348,10 +344,8 @@ if [ "$#" -eq 3 ] && [ "$1" = advance-ticket ]; then
     (set -C; cat "$ATTEMPT/closure-candidate.json" >"$ATTEMPT/closure.json") ||
       fail "closure write raced"
     chmod 600 "$ATTEMPT/closure.json"
-    sync -f "$ATTEMPT/closure.json" "$ATTEMPT"
   fi
   mv "$ROOT/active.json" "$ARCHIVE"
-  sync -f "$ARCHIVE" "$ROOT"
   echo "accepted event22 consumed exact reserve; archived at $ARCHIVE"
   exit 0
 fi

@@ -252,7 +252,6 @@ fn write_state(root: &Path, unit: &str, state: &UnitState) -> io::Result<()> {
             .mode(0o600)
             .open(&temp).ctx("open", &temp)?;
         file.write_all(&serde_json::to_vec(state)?)?;
-        file.sync_all()?;
     }
     fs::rename(&temp, state_path(root, unit))
 }

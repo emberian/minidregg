@@ -3,7 +3,7 @@
 //! This is an internal physical primitive, never a socket command. Only the
 //! native-admitted lifecycle adapter may choose its SPK image, app UID/GID,
 //! exact bubblewrap image and fd3/4/5 bindings. The caller must hold the
-//! operation journal's flock throughout `spawn_bounded` and its Running fsync.
+//! operation journal's flock throughout `spawn_bounded` and its Running write.
 
 use crate::sandbox::{
     open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,

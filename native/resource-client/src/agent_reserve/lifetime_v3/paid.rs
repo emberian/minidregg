@@ -94,7 +94,7 @@ fn initial_bindings(reserve: &Value, grant: &Value, reserve_receipt: &Value) -> 
 }
 
 fn paid_pin(directory: &Path) -> Result<PaidPin> {
-    crate::fsio::ensure_private_dir_durable(directory)?;
+    crate::fsio::ensure_private_dir(directory)?;
     let value: Value = serde_json::from_slice(&private_bytes(&directory.join("pin.json"), 4096)?)
         .map_err(|error| format!("invalid lifetime paid pin: {error}"))?;
     if field(&value, "format")? != FORMAT {
@@ -169,7 +169,6 @@ pub(crate) fn lifetime_paid_plan(reserve: &Path, grant: &Path, directory: &Path)
         .checked_sub(1)
         .ok_or("lifetime reserve accepted count is zero")?;
     crate::fsio::create_private_dir(&directory)?;
-    sync_directory_ancestors(&directory)?;
     retain_json(
         &directory.join("selector.json"),
         &json!({
@@ -211,7 +210,6 @@ pub(crate) fn lifetime_paid_plan(reserve: &Path, grant: &Path, directory: &Path)
         &request,
     )?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     let plan = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)?;
     create_private(&directory.join("plan.bin"), plan)?;
     let inspection = source_inspect(
@@ -348,7 +346,6 @@ pub(crate) fn lifetime_paid_payer_sign(directory: &Path, approval_json: &Path) -
         &pinned.request,
     )?;
     create_private(&directory.join("payer-current-plan.frame"), &current)?;
-    sync_directory_ancestors(&directory)?;
     if expect_reply(&current, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)? != pinned.plan {
         return Err("lifetime payer plan changed at current verified image".into());
     }
@@ -470,7 +467,6 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
         &pinned.request,
     )?;
     create_private(&directory.join("seal-current-plan.frame"), &current)?;
-    sync_directory_ancestors(&directory)?;
     if expect_reply(&current, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)? != pinned.plan {
         return Err("lifetime paid plan changed at current verified image".into());
     }
@@ -518,11 +514,9 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
         &payload,
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
     let ingress = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE)?;
     create_private(&directory.join("ingress.bin"), ingress)?;
-    sync_retained_call(&directory, &directory.join("ingress.bin"))?;
     create_private(&directory.join("approval.json"), &approval_bytes)?;
     retain_json(
         &directory.join("seal.json"),
@@ -632,7 +626,6 @@ pub(crate) fn lifetime_paid_submit(directory: &Path) -> Result<()> {
         .map_err(|error| format!("lifetime paid op76 uncertain; use exact lookup: {error}"))
     })?;
     create_private(&directory.join("submit.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
     let committed = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT)?;
     create_private(&directory.join("committed.bin"), committed)?;
@@ -692,7 +685,6 @@ pub(crate) fn lifetime_paid_lookup(directory: &Path) -> Result<()> {
         &ingress,
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
     let outcome_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP)?;
     create_private(

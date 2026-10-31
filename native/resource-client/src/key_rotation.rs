@@ -239,6 +239,9 @@ pub(crate) fn check_commitment(
         return Ok(None);
     };
     let flag = |name: &str| view.get(name).and_then(Value::as_bool);
+    if flag("currentRevoked") == Some(true) {
+        return Err(format!("refused: subject {subject}'s current key is revoked; nothing can be built on this subject"));
+    }
     let prerotated = flag("prerotated").ok_or("key status lacks prerotated")?;
     let redo = "ask your sponsor to enroll you again, as a NEW name (this subject cannot be repaired): `enroll plan NAME KEYFILE NEXT-PUB COSIGN` with the two hex lines your `keygen` printed (`mini enroll --action cosign --key KEY` prints them again); never use this subject";
     match (commitment, prerotated) {
@@ -611,7 +614,6 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
     }
     if state["phase"] == "preparing" && named.is_none() {
         workspace::private::keyring_remember(&ws.key, &epoch.to_string())?;
-        custody::sync_parent(&workspace::private::enc_ring_path(&ws.key))?;
     }
     if !ingress_path.exists() {
         if state["phase"] != "preparing" {

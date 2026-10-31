@@ -29,7 +29,6 @@ pub(super) fn sign_source(
     let config = absolute(config)?;
     let directory = absolute(directory)?;
     crate::fsio::create_private_dir(&directory)?;
-    sync_directory_ancestors(&directory)?;
     let packet_file = directory.join("packet.bin");
     create_private(&packet_file, &packet)?;
     let spec = directory.join("spec.bin");
@@ -50,7 +49,6 @@ pub(super) fn sign_source(
     let header_bytes = crate::fsio::read_bounded(&header, 65_536)?;
     let signature = directory.join("signature.bin");
     create_private(&signature, &signing.sign(&header_bytes).to_bytes())?;
-    sync_directory_ancestors(&directory)?;
     let ingress = directory.join("ingress.bin");
     process(
         &host,
@@ -88,10 +86,7 @@ fn durable_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
     create_private(path, &bytes)?;
-    sync_directory_ancestors(
-        path.parent()
-            .ok_or("selected publisher state has no parent")?,
-    )
+    Ok(())
 }
 
 fn confirmed(value: &Value) -> Result<()> {
@@ -126,7 +121,7 @@ fn host_route(
     if !output.is_file() {
         return Err(format!("{command} did not retain an outcome"));
     }
-    sync_directory_ancestors(output.parent().ok_or("source outcome has no parent")?)
+    Ok(())
 }
 
 fn inspect_outcome(host: &Path, config: &Path, binary: &Path, json_path: &Path) -> Result<Value> {
@@ -376,7 +371,7 @@ pub(super) fn publish(
     if SOCKET.get().is_some() {
         return Err("selected publisher requires pinned direct source Host commands".into());
     }
-    crate::fsio::ensure_private_dir_durable(state)?;
+    crate::fsio::ensure_private_dir(state)?;
     let _owner = transport::service_lock(&state.join("selected-publisher.lock"))?;
     let host = absolute(host)?;
     let config = absolute(config)?;
@@ -408,7 +403,6 @@ pub(super) fn publish(
             }
         } else {
             create_private(&path, bytes)?;
-            sync_directory_ancestors(state)?;
         }
     }
     // This source-owned check binds the fn bytes to the exact signed packet

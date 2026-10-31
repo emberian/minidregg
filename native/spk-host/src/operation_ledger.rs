@@ -3,7 +3,6 @@
 
 use crate::io_context::IoContext;
 use crate::dispatch_native::private_dir;
-use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
@@ -57,8 +56,6 @@ pub(crate) fn allocate_operation_id(ledger: &Path) -> io::Result<String> {
             // The first allocation is ID 1. Persist the next ID before
             // returning it; an interrupted empty creation stays refused.
             file.write_all(b"2\n")?;
-            file.sync_all()?;
-            File::open(&parent).ctx("open", &parent)?.sync_all()?;
             return Ok("1".to_owned());
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => OpenOptions::new()
@@ -98,8 +95,6 @@ pub(crate) fn allocate_operation_id(ledger: &Path) -> io::Result<String> {
     }
     let current = expected - 1;
     writeln!(file, "{expected}")?;
-    file.sync_all()?;
-    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     Ok(current.to_string())
 }
 

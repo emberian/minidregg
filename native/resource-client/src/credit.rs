@@ -223,7 +223,6 @@ fn propose_and_submit(root: &Path, ws: &Value, id: &str, request: &Value) -> Res
             // A previous run stopped before it signed: nothing was sent.
             fs::rename(&attempt, root.join("attempts").join(format!("{id}-unsent-{}", workspace::random_nonce()?)))
                 .map_err(|error| error.to_string())?;
-            crate::fsio::sync_parent(&attempt)?;
         }
         workspace::submit_intent(root, ws, &proposal.join("intent.json"), "intent", false, Some(&attempt))?;
     }

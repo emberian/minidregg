@@ -25,7 +25,7 @@ proof of Outfox, Echomix or NymHS. The header of that file says the same.
   receiver check their manifest MAC, the complete admitted input set and the complete peeled output set before any
   claim, forwarding or native effect. Any dropped, duplicated, injected or changed packet refuses the whole epoch.
   The registrar is an additional trust assumption (it sees the private route commitments).
-- **Custody.** The complete batch input hash is journaled and a claim is fsynced before processing; the complete output
+- **Custody.** The complete batch input hash is journaled and a claim is written before processing; the complete output
   is cached; a changed replay refuses; a claim without output after a crash is uncertain and never reprocessed. The
   receiver dispatches only through `scheduled_transport::dispatch_once` (`process_mailbox` in `pq_mailbox.rs`), the durable dispatch
   marker written before the native exchange (the module header of `src/scheduled_transport.rs`), so an unknown outcome is never

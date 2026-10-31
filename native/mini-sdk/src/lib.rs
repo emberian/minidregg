@@ -53,6 +53,8 @@ pub mod sign;
 pub mod signer;
 
 #[cfg(feature = "native")]
+pub mod command_resident;
+#[cfg(feature = "native")]
 pub mod consent;
 #[cfg(feature = "native")]
 pub mod durable;
@@ -75,7 +77,6 @@ pub mod lean_codec;
 #[cfg(feature = "native")]
 pub mod operator;
 #[cfg(feature = "native")]
-pub mod phase;
 #[cfg(feature = "native")]
 pub mod store;
 

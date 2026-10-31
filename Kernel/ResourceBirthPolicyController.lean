@@ -1110,9 +1110,12 @@ def rawLeg (prepared : PreparedBirth profile.compilerProfile deployment pins dur
   | .authority =>
       { pre := prepared.authority.snapshot.cell
         patch := ResourceBirthAuthority.patch prepared.authority.snapshot.cell source.val
-        request := ⟨.object, ResourceBirthAuthority.request pins
-          CanonicalCellRegistry.sourceEncoding
-          prepared.authority.snapshot.cell height source.val⟩
+        -- `ResourceBirthAuthority.request` at the snapshot's held projection (`authStateExact`):
+        -- the generic `authState` would rebuild it (its revoked and parent sets deduplicated
+        -- over the whole authority store) for every leg built.
+        request := ⟨.object, factoryRequest pins
+          CanonicalCellRegistry.sourceEncoding (oldAuthority prepared)
+          prepared.authority.snapshot.cell.root height source.val⟩
         Postcondition := ResourceBirthAuthority.Postcondition source.val }
   | .allocation index =>
       { pre := ResourceBirthController.allocationPre prepared.directory.directory (creation descriptor index)
@@ -1145,7 +1148,10 @@ def bindFamily (prepared : PreparedBirth profile.compilerProfile deployment pins
         family := ResourceBirthAuthority.family pins CanonicalCellRegistry.sourceEncoding
           prepared.authority.snapshot.cell height
         declaration := source.val, outcome := ()
-        preExact := rfl, requestExact := rfl, effectsExact := rfl, patchExact := rfl
+        preExact := rfl
+        requestExact := by
+          simp only [rawLeg, oldAuthority, prepared.authority.snapshot.authStateExact]; rfl
+        effectsExact := rfl, patchExact := rfl
         postconditionExact := fun _ => Iff.rfl }
   | .allocation index =>
       { Nullifier := Nat

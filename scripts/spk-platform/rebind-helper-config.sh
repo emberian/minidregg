@@ -71,9 +71,5 @@ jq -cS --arg store "$STORE" --arg signature "$SIGNATURE" \
 jq -cS --arg store "$STORE" --arg signature "$SIGNATURE" \
   '.storageBinary=$store | .signatureBinary=$signature' "$CANDIDATE" >"$OUTPUT/cb55-rebound.json"
 chmod 600 "$OUTPUT/base-rebound.json" "$OUTPUT/cb55-rebound.json"
-sync -f "$OUTPUT/base-rebound.json"
-sync -f "$OUTPUT/cb55-rebound.json"
-sync -f "$OUTPUT"
-sync -f "$PARENT"
 printf 'base_rebound_sha256=%s\n' "$(sha256sum "$OUTPUT/base-rebound.json" | cut -d ' ' -f 1)"
 printf 'candidate_rebound_sha256=%s\n' "$(sha256sum "$OUTPUT/cb55-rebound.json" | cut -d ' ' -f 1)"

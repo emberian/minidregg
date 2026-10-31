@@ -24,7 +24,7 @@ fn run()->Result<(),String>{
  let output=Path::new(&a[4]);let parent=output.parent().ok_or("output needs parent")?;let m=fs::metadata(parent).map_err(|e|e.to_string())?;
  if m.uid()!=owner()?||!m.is_dir()||m.mode()&0o077!=0{return Err("output directory must be private".into())}
  let bytes=packet(&bounded(Path::new(&a[1]),MAX_CONFIG)?,a[2].to_str().ok_or("pin not UTF8")?,&bounded(Path::new(&a[3]),MAX-1)?)?;
- let mut out=OpenOptions::new().write(true).create_new(true).mode(0o600).open(output).map_err(|e|e.to_string())?;out.write_all(&bytes).map_err(|e|e.to_string())?;out.sync_all().map_err(|e|e.to_string())?;File::open(parent).and_then(|d|d.sync_all()).map_err(|e|e.to_string())?;Ok(())
+ let mut out=OpenOptions::new().write(true).create_new(true).mode(0o600).open(output).map_err(|e|e.to_string())?;out.write_all(&bytes).map_err(|e|e.to_string())?;Ok(())
 }
 fn main(){if let Err(e)=run(){eprintln!("agreement-carrier-packet: {e}");std::process::exit(1)}}
 #[cfg(test)]mod tests{use super::*;#[test]fn exact_v2(){let b=packet(b"{}",&"ab".repeat(32),b"original").unwrap();assert_eq!(&b[..7],b"\x02\x02\0\0\0{}");assert_eq!(&b[7..39],&[0xab;32]);assert_eq!(&b[39..],b"\x02original");}#[test]fn refuses_bad_pin_and_empty(){assert!(packet(b"{}",&"xy".repeat(32),b"original").is_err());assert!(packet(b"{}",&"00".repeat(32),b"").is_err());}}

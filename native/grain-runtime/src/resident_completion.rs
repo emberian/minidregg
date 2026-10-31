@@ -82,9 +82,7 @@ fn hash(value: &impl Serialize) -> Result<String> {
 fn retain(path: &Path, value: &impl Serialize) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     retain_exact_private(path, &bytes, LIMIT)?;
-    File::open(path.parent().ok_or("completion artifact parent absent")?)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())
+    Ok(())
 }
 
 fn read<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {

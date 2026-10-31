@@ -118,14 +118,14 @@ pub(crate) fn save_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     create_private(path, &bytes)?;
-    sync_directory_ancestors(path.parent().ok_or("enrollment file lacks parent")?)
+    Ok(())
 }
 
 pub(crate) fn retain_exact(path: &Path, bytes: &[u8]) -> Result<()> {
     crate::fsio::retain_exact(path, bytes, || {
         format!("retained enrollment source changed: {}", path.display())
     })?;
-    sync_directory_ancestors(path.parent().ok_or("enrollment file lacks parent")?)
+    Ok(())
 }
 
 pub(crate) fn save_json_staged(path: &Path, value: &Value) -> Result<()> {
@@ -488,7 +488,7 @@ fn plan_file(pinned_at: Option<&str>) -> &'static str {
 }
 
 fn load_pin(directory: &Path) -> Result<Pin> {
-    crate::fsio::ensure_private_dir_durable(directory)?;
+    crate::fsio::ensure_private_dir(directory)?;
     let pin = json_private(&directory.join("pin.json"))?;
     pinned(&pin, "format", FORMAT)?;
     let host = member_path(&pin, "host")?;
@@ -637,7 +637,7 @@ pub(crate) fn signed_factory_observation(
     match fs::DirBuilder::new().mode(0o700).create(&observation) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            crate::fsio::ensure_private_dir_durable(&observation)?;
+            crate::fsio::ensure_private_dir(&observation)?;
         }
         Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
     }
@@ -896,11 +896,10 @@ fn plan(mut args: Args) -> Result<()> {
     match fs::DirBuilder::new().mode(0o700).create(&directory) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            crate::fsio::ensure_private_dir_durable(&directory)?;
+            crate::fsio::ensure_private_dir(&directory)?;
         }
         Err(error) => return Err(format!("cannot create enrollment attempt: {error}")),
     }
-    sync_directory_ancestors(&directory)?;
     let _lock = transport::service_lock(&directory.join("enrollment.lock"))?;
     if directory.join(SUBMIT_REFUSED).exists() {
         // The sealed plan was refused with no record (`submit`): definitely unadmitted, its binding
@@ -1247,7 +1246,6 @@ fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -
         &serde_json::to_vec_pretty(&acceptance).map_err(|error|error.to_string())?)?;
     let signature = signing.sign(&header).to_bytes();
     create_private(output, &signature)?;
-    sync_directory_ancestors(output.parent().ok_or("possession output lacks parent")?)?;
     Ok(json!({"type":"minidregg-participant-possession-signature-v1",
         "subject":subject,"publicKey":public_key,
         "commandSha256":digest(&mini_sdk::hex::decode(field(&command_view, "canonical")?).map_err(|e| e.0)?),
@@ -1305,8 +1303,8 @@ fn welcome(directory: &Path, birth_context: Option<&Path>) -> Result<()> {
 
 fn join_dir(path: &Path) -> Result<()> {
     match fs::DirBuilder::new().mode(0o700).create(path) {
-        Ok(()) => sync_directory_ancestors(path),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => crate::fsio::ensure_private_dir_durable(path),
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => crate::fsio::ensure_private_dir(path),
         Err(error) => Err(format!("cannot create {}: {error}", path.display())),
     }
 }
@@ -1559,7 +1557,7 @@ fn retain_join_workspace_marker(state: &Path, root: &Path, evidence: &Value, man
 fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Path) -> Result<()> {
     let socket = join_remote()?;
     let state = root.join("join");
-    crate::fsio::ensure_private_dir_durable(&state)?;
+    crate::fsio::ensure_private_dir(&state)?;
     let _lock = transport::service_lock(&state.join("welcome.lock"))?;
     let offer_bytes = bounded(&state.join("offer.json"), 8 * transport::HOST_MAX_FRAME)?;
     let offer: Value = serde_json::from_slice(&offer_bytes).map_err(|error| error.to_string())?;

@@ -170,7 +170,6 @@ fn retire_success_markers(config: &InstallConfig) -> io::Result<()> {
             fs::remove_file(config.artifact(active)).ctx("remove", &(config.artifact(active)))?;
         }
     }
-    fs::File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()?;
     Ok(())
 }
 
@@ -190,7 +189,6 @@ fn archive_pure_attempt(
     fs::File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let archive = config.artifact(&format!("{name}-aborted-pre-op38-{}", super::hex(&bytes)));
     fs::rename(&path, &archive).ctx("rename", &path)?;
-    fs::File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()?;
     Ok(Some(archive))
 }
 
@@ -220,8 +218,6 @@ fn archive_incomplete_completion_attempt(config: &InstallConfig) -> io::Result<(
     if active.is_some() {
         // This ordering makes a crash at either rename boundary recoverable.
         fs::rename(&active_path, &embedded_path).ctx("rename", &active_path)?;
-        fs::File::open(config.artifact("completion-v2-author")).ctx("open", &(config.artifact("completion-v2-author")))?.sync_all()?;
-        fs::File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()?;
     }
     archive_pure_attempt(config, "completion-v2-author")?
         .ok_or_else(|| invalid("v3 INSTALL incomplete completion attempt absent"))?;

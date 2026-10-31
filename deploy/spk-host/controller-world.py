@@ -121,22 +121,10 @@ def write_new(path, data, uid=0, gid=0, mode=0o600):
         with os.fdopen(os.dup(fd), 'wb') as out:
             out.write(data)
             out.flush()
-        os.fsync(fd)
     finally:
         os.close(fd)
-    d = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        os.fsync(d)
-    finally:
-        os.close(d)
 
 
-def sync_directory(path):
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
@@ -150,12 +138,6 @@ def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
     if path.exists() or path.is_symlink():
         require(read_file(path, uid, maximum, allow_empty=not data, required_mode=mode) == data,
                 'exact publication final bytes differ')
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        sync_directory(path.parent)
         return
     temporary = path.with_name('.' + path.name + '-publishing')
     if not temporary.exists() and not temporary.is_symlink():
@@ -175,7 +157,6 @@ def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
                 written = os.write(fd, data[offset:offset + 65536])
                 require(written > 0, 'exact publication made no progress')
                 offset += written
-            os.fsync(fd)
         finally:
             os.close(fd)
     require(read_file(temporary, uid, maximum, allow_empty=not data, required_mode=mode) == data,
@@ -184,7 +165,6 @@ def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
     # a single writer under the lifecycle lock. Preserve any unexpected final.
     require(not path.exists() and not path.is_symlink(), 'exact publication final appeared during write')
     os.replace(temporary, path)
-    sync_directory(path.parent)
 
 
 def mkdir(path, uid=0, gid=0, mode=0o700):
@@ -218,33 +198,48 @@ def strict_json(data):
     return json.loads(data, object_pairs_hook=pairs)
 
 
+# Subordinate (user-namespace) identities start above the host's ordinary ids. A world behind a
+# volume custodian lives inside a user-namespaced container whose own ids are 0..65535, so its
+# delegation starts wherever the container's /etc/subuid puts it and has no such floor.
+SUBORDINATE_FLOOR = 65536
+
+
+def id_floor(registry):
+    return 1 if 'custodianSocket' in registry else SUBORDINATE_FLOOR
+
+
 def ident(value, subordinate=False):
-    return type(value) is int and (65536 if subordinate else 1) <= value < MAX_ID
+    return type(value) is int and (SUBORDINATE_FLOOR if subordinate else 1) <= value < MAX_ID
 
 
 def registry_record(path):
     r = strict_json(read_file(path, 0, 65536, required_mode=0o644))
     keys = {'protocol', 'store', 'deploymentId', 'hostId', 'grainsRoot', 'operatorUid', 'operatorGid', 'appUids', 'helper', 'helperSha256'}
-    require(isinstance(r, dict) and set(r) == keys and r['protocol'] == 'mini-spk-volume-registry-v1', 'root world registry schema refused')
+    # `custodianSocket` marks a world behind a volume custodian (a user-namespaced container).
+    require(isinstance(r, dict) and set(r) - {'custodianSocket'} == keys and set(r) >= keys
+            and r['protocol'] == 'mini-spk-volume-registry-v1', 'root world registry schema refused')
+    require('custodianSocket' not in r or (isinstance(r['custodianSocket'], str)
+            and re.fullmatch(r'/[A-Za-z0-9._/-]+', r['custodianSocket']) and '..' not in r['custodianSocket']),
+            'world custodian socket malformed')
     require(isinstance(r['store'], str) and re.fullmatch('[0-9a-f]{16}', r['store'])
             and path.name == r['store'] + '.json' and r['grainsRoot'] == str(WORLDS / r['store']), 'world registry path differs')
     require(all(isinstance(r[k], str) and re.fullmatch('[0-9a-f]{64}', r[k]) for k in ('deploymentId', 'hostId', 'helperSha256'))
             and ident(r['operatorUid']) and ident(r['operatorGid']), 'world registry identity malformed')
     require(isinstance(r['helper'], str) and re.fullmatch(r'/usr/local/libexec/mini-spk-volume-helper(?:-[0-9a-f]{16})?', r['helper']), 'world helper path malformed')
     app = r['appUids']
-    require(isinstance(app, list) and 1 <= len(app) <= 64 and all(ident(i, True) for i in app)
+    require(isinstance(app, list) and 1 <= len(app) <= 64 and all(ident(i, 'custodianSocket' not in r) for i in app)
             and len(set(app)) == len(app) and not set(app) & {r['operatorUid'], r['operatorGid']}, 'world app identity set malformed')
     return r
 
 
-def namespace_record(r):
+def namespace_record(r, custodian=False):
     fields = {'protocol', 'store', 'deploymentId', 'hostId', 'operatorUid', 'operatorGid', 'controllerUid', 'controllerGid', 'account'}
     require(isinstance(r, dict) and set(r) == fields and r['protocol'] == 'mini-spk-controller-namespace-v1', 'controller reservation schema refused')
     require(isinstance(r['store'], str) and re.fullmatch('[0-9a-f]{16}', r['store'])
             and r['account'] == 'mini-c-' + r['store'], 'controller reservation name malformed')
     require(all(isinstance(r[k], str) and re.fullmatch('[0-9a-f]{64}', r[k]) for k in ('deploymentId', 'hostId'))
             and all(ident(r[k]) for k in ('operatorUid', 'operatorGid'))
-            and all(ident(r[k], True) for k in ('controllerUid', 'controllerGid'))
+            and all(ident(r[k], not custodian) for k in ('controllerUid', 'controllerGid'))
             and not {r['operatorUid'], r['operatorGid']} & {r['controllerUid'], r['controllerGid']}, 'controller reservation identity malformed')
     return r
 
@@ -266,14 +261,15 @@ def bounded_json_paths(directory):
 
 
 def occupied_ids():
-    occupied, reservations = set(), {}
+    occupied, reservations, custodial = set(), {}, set()
     for path in bounded_json_paths(REGISTRY):
         r = registry_record(path)
+        if 'custodianSocket' in r: custodial.add(r['store'])
         require(not occupied.intersection(r['appUids']), 'root app registries overlap')
         occupied.update(r['appUids'])
         occupied.update((r['operatorUid'], r['operatorGid']))
     for path in bounded_json_paths(RESERVATIONS):
-        r = namespace_record(strict_json(read_file(path, 0, 4096, required_mode=0o644)))
+        r = namespace_record(strict_json(read_file(path, 0, 4096, required_mode=0o644)), path.name[:-5] in custodial)
         require(path.name == r['store'] + '.json', 'controller reservation filename differs')
         ids = {r['controllerUid'], r['controllerGid']}
         require(not occupied.intersection(ids), 'controller reservation overlaps a world or another reservation')
@@ -329,20 +325,20 @@ def subordinate_ranges(path, operator_uid):
     return merged(own), merged(other)
 
 
-def intersection(left, right):
+def intersection(left, right, floor=SUBORDINATE_FLOOR):
     out = []; i = j = 0
     while i < len(left) and j < len(right):
-        first, end = max(left[i][0], right[j][0], 65536), min(left[i][1], right[j][1])
+        first, end = max(left[i][0], right[j][0], floor), min(left[i][1], right[j][1])
         if first < end: out.append((first, end))
         if left[i][1] < right[j][1]: i += 1
         else: j += 1
     return out
 
 
-def delegated(operator_uid):
+def delegated(operator_uid, floor=SUBORDINATE_FLOOR):
     uids, foreign_uids = subordinate_ranges(Path('/etc/subuid'), operator_uid)
     gids, foreign_gids = subordinate_ranges(Path('/etc/subgid'), operator_uid)
-    return intersection(uids, gids), merged(foreign_uids + foreign_gids)
+    return intersection(uids, gids, floor), merged(foreign_uids + foreign_gids)
 
 
 def in_ranges(identity, ranges):
@@ -379,8 +375,8 @@ def delegation_owners():
     return names, ids
 
 
-def allocate_identity(operator_uid, account):
-    occupied = occupied_ids(); own, foreign = delegated(operator_uid); accounts = nss_ids()
+def allocate_identity(operator_uid, account, floor=SUBORDINATE_FLOOR):
+    occupied = occupied_ids(); own, foreign = delegated(operator_uid, floor); accounts = nss_ids()
     delegated_names, delegated_ids = delegation_owners()
     require(account not in delegated_names, 'new controller name already has subordinate grants')
     examined = 0
@@ -393,13 +389,13 @@ def allocate_identity(operator_uid, account):
     raise ValueError('no unused controller identity in exclusive delegated UID/GID intersection')
 
 
-def check_app_allocation(store, helper, op_text, first_text, count_text):
+def check_app_allocation(store, helper, op_text, first_text, count_text, custodian=False):
     require(re.fullmatch('[0-9a-f]{16}', store) and re.fullmatch(r'/usr/local/libexec/mini-spk-volume-helper(?:-[0-9a-f]{16})?', helper), 'app allocation coordinates malformed')
     require(all(re.fullmatch('[1-9][0-9]*', s) for s in (op_text, first_text, count_text)), 'app allocation decimal malformed')
     operator, first, count = map(int, (op_text, first_text, count_text))
-    require(ident(operator) and ident(first, True) and 2 <= count <= 64 and first + count <= MAX_ID
+    require(ident(operator) and ident(first, not custodian) and 2 <= count <= 64 and first + count <= MAX_ID
             and str(operator) == os.environ.get('SUDO_UID', str(operator)), 'app allocation identity/bound refused')
-    occupied = occupied_ids(); own, foreign = delegated(operator); accounts = nss_ids()
+    occupied = occupied_ids(); own, foreign = delegated(operator, 1 if custodian else SUBORDINATE_FLOOR); accounts = nss_ids()
     def free(start):
         return all(in_ranges(i, own) and not in_ranges(i, foreign) and i not in occupied and nss_free(i, accounts)
                    for i in range(start, start + count))
@@ -538,8 +534,9 @@ def load(store, helper):
     require(group.gr_name == receipt['name'] and not group.gr_mem, 'controller private group changed')
     require(sum(p.pw_uid == receipt['uid'] for p in pwd.getpwall()) == 1, 'controller UID aliases refused')
     require(receipt['uid'] not in [0, registry['operatorUid'], *registry['appUids']], 'controller UID collision')
-    reserved = namespace_record(strict_json(read_file(RESERVATIONS / (store + '.json'), 0, 4096, required_mode=0o644)))
-    actual = namespace_record(strict_json(read_file(base / 'namespace.json', 0, 4096, required_mode=0o644)))
+    custodian = 'custodianSocket' in registry
+    reserved = namespace_record(strict_json(read_file(RESERVATIONS / (store + '.json'), 0, 4096, required_mode=0o644)), custodian)
+    actual = namespace_record(strict_json(read_file(base / 'namespace.json', 0, 4096, required_mode=0o644)), custodian)
     require(reserved == actual and (actual['controllerUid'], actual['controllerGid']) == (receipt['uid'], receipt['gid'])
             and actual['operatorUid'] == registry['operatorUid'] and actual['operatorGid'] == registry['operatorGid']
             and actual['deploymentId'] == registry['deploymentId'] and actual['hostId'] == registry['hostId'], 'controller allocation reservation differs')
@@ -581,12 +578,12 @@ def create(store, helper):
     require(not any(p.pw_name == name for p in pwd.getpwall()) and not any(g.gr_name == name for g in grp.getgrall()),
             'controller account/group name already exists')
     account_defaults()
-    identity = allocate_identity(registry['operatorUid'], name)
+    identity = allocate_identity(registry['operatorUid'], name, id_floor(registry))
     namespace = {'protocol': 'mini-spk-controller-namespace-v1', 'store': store,
                  'deploymentId': registry['deploymentId'], 'hostId': registry['hostId'],
                  'operatorUid': registry['operatorUid'], 'operatorGid': registry['operatorGid'],
                  'controllerUid': identity, 'controllerGid': identity, 'account': name}
-    namespace_record(namespace)
+    namespace_record(namespace, 'custodianSocket' in registry)
     if not RESERVATIONS.exists(): mkdir(RESERVATIONS, mode=0o755)
     ancestry(RESERVATIONS, {0})
     # Written before either group/account creation. Never deleted on failure or
@@ -600,11 +597,30 @@ def create(store, helper):
     return finish_create(registry, base, namespace)
 
 
+PROFILED_BWRAP = Path('/usr/local/libexec/mini-grain-bwrap')
+
+
+def bwrap_acl(identity, grant):
+    # The controller's user manager runs the worker's launch-gate, which execs the profiled bwrap
+    # (root:group 0750 + per-uid entries). The controller identity is outside every app range, so it
+    # needs its own execute entry, added here and revoked with the controller. A controller uid is
+    # never reused or shared (permanent reservation, excluded from app ranges), so no refcount.
+    if not (PROFILED_BWRAP.exists() or PROFILED_BWRAP.is_symlink()):
+        return
+    m = PROFILED_BWRAP.lstat()
+    require(stat.S_ISREG(m.st_mode) and m.st_uid == 0, 'profiled bwrap custody refused')
+    if grant:
+        run(['/usr/bin/setfacl', '-m', f'u:{identity}:r-x', '--', str(PROFILED_BWRAP)])
+    else:
+        run(['/usr/bin/setfacl', '-x', f'u:{identity}', '--', str(PROFILED_BWRAP)])
+
+
 def finish_create(registry, base, namespace):
     store, name, identity = namespace['store'], namespace['account'], namespace['controllerUid']
     a = pwd.getpwnam(name)
     require((a.pw_uid, a.pw_gid) == (identity, identity) and a.pw_uid not in [0, registry['operatorUid'], *registry['appUids']], 'allocated controller UID/GID collision')
     require(not any(g.gr_mem and name in g.gr_mem for g in grp.getgrall()), 'controller supplemental groups refused')
+    bwrap_acl(a.pw_uid, True)
     mkdir(base / 'home', a.pw_uid, a.pw_gid)
     mkdir(base / 'listener', registry['operatorUid'], registry['operatorGid'])
     mkdir(base / 'reverse', a.pw_uid, a.pw_gid, 0o711)
@@ -632,7 +648,7 @@ def pending_create_identity(registry, base):
     pending = strict_json(read_file(base / 'pending.json', 0, 4096, required_mode=0o600))
     require(pending == {'store': store, 'name': name, 'operatorUid': registry['operatorUid']},
             'pending controller intent differs')
-    namespace = namespace_record(strict_json(read_file(RESERVATIONS / (store + '.json'), 0, 4096, required_mode=0o644)))
+    namespace = namespace_record(strict_json(read_file(RESERVATIONS / (store + '.json'), 0, 4096, required_mode=0o644)), 'custodianSocket' in registry)
     require(namespace['store'] == store and namespace['account'] == name
             and all(namespace[key] == registry[key] for key in ('deploymentId', 'hostId', 'operatorUid', 'operatorGid')),
             'pending controller reservation differs from world')
@@ -640,7 +656,7 @@ def pending_create_identity(registry, base):
     require(identity == namespace['controllerGid'], 'pending controller UID/GID differ')
     require(not (HISTORY / (store + '.json')).exists(), 'removed controller cannot resume creation')
     occupied_ids()  # Validate all app/reservation records, including collisions.
-    own, foreign = delegated(registry['operatorUid'])
+    own, foreign = delegated(registry['operatorUid'], id_floor(registry))
     delegated_names, delegated_ids = delegation_owners()
     require(in_ranges(identity, own) and not in_ranges(identity, foreign)
             and name not in delegated_names and identity not in delegated_ids,
@@ -766,6 +782,44 @@ def grant_acl(path, uid, permission, operator, receipt_path=None):
     if receipt_path is not None:
         write_new(receipt_path.with_suffix('.after.json'), encoded(entry))
     return entry
+
+
+def world_root(public, store_root):
+    """The owner-controlled boundary: the Store's own tree when the public endpoint lies in it,
+    otherwise the directory that holds the endpoint. Nothing above it is this world's to change."""
+    return store_root if store_root in public.parents else public.parent
+
+
+def traversable(path, uid):
+    """Search permission for UID on a directory without any change: the other bit, or an existing
+    user entry for UID that grants x under the mask."""
+    m = metadata(path)
+    if m.st_mode & 0o001:
+        return True
+    mask = 'rwx'
+    text = acl_text(path).splitlines()
+    for line in text:
+        if line.startswith('mask::'):
+            mask = line.split('::', 1)[1]
+    return any(line.startswith(f'user:{uid}:') and 'x' in line.split(':')[2] and 'x' in mask for line in text)
+
+
+def acl_grants(public, uid, store_root):
+    """(path, permission) pairs the controller needs: traversal of private ancestors and access to the
+    public socket. Above the world root an ancestor must already be traversable (refused by name
+    otherwise): worlds share those directories, and a grant there makes the next world refuse the
+    first one's entry and lets teardown order matter. At and below the root the grant is made."""
+    root = world_root(public, store_root)
+    grants = []
+    for p in reversed((public.parent, *public.parent.parents)):
+        inside = p == root or root in p.parents
+        if inside:
+            if not metadata(p).st_mode & 0o001:
+                grants.append((p, '--x'))
+        else:
+            require(traversable(p, uid), f'public socket ancestry {p} above the world root {root} is not '
+                    f'traversable (--x) for controller uid {uid}; operator preparation required')
+    return grants + [(public, '-w-')]
 
 
 def worker_layout(r):
@@ -1074,7 +1128,6 @@ def transfer_birth_tree(root, before_uid, uid, gid):
             require(fingerprint(m) == expected and fingerprint(path.lstat()) == expected, 'birth transfer path changed')
             os.fchown(fd, uid, gid)
             os.fchmod(fd, 0o700 if stat.S_ISDIR(m.st_mode) else 0o600)
-            os.fsync(fd)
         finally:
             os.close(fd)
 
@@ -1286,8 +1339,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     put(base / 'proxy/config.json', data['host-config.json'], op, registry['operatorGid'])
     # Only traversal of private ancestors and access to the PUBLIC socket. The
     # operator's private listener and Store files receive no controller ACL.
-    paths = [p for p in reversed((public.parent, *public.parent.parents)) if not metadata(p).st_mode & 0o001]
-    for p, perm in [(p, '--x') for p in paths] + [(public, '-w-')]:
+    for p, perm in acl_grants(public, r['uid'], WORLDS / store):
         pending['acl'].append(grant_acl(p, r['uid'], perm, op, base / f'acl-{len(pending["acl"]) + 1:03}.json'))
     if has_consent(r):
         # The authorized public-listener traversal ACL may change mode-mask
@@ -1411,7 +1463,6 @@ def replace_root_record(path, data, mode):
     temporary = path.with_name('.' + path.name + '-storage-next')
     publish_exact(temporary, data, mode=mode)
     os.replace(temporary, path)
-    sync_directory(path.parent)
 
 
 def consent_storage_upgrade(store, helper):
@@ -1543,7 +1594,6 @@ def controller_binary_upgrade(store, helper, source_arg, binary_name):
         temporary = path.with_name('.' + binary_name + '-' + source_sha + '-next')
         publish_exact(temporary, source, owner, group, mode, 256 * 1024 * 1024)
         os.replace(temporary, path)
-        sync_directory(path.parent)
     replace_root_record(stage_path, archives['newStage'], 0o600)
     checked_units(base, r)
     return {'store': store, label + 'Upgrade': str(intent_path), label + 'Sha256': source_sha,
@@ -2039,7 +2089,6 @@ def config_update(store, helper, source_arg):
     pending = root / '.controller-next.json'
     publish_exact(pending, data, r['uid'], r['gid'], bound=524288)
     os.replace(pending, worker_config(r))
-    sync_directory(root)
     return {'store': store, 'configurationSha256': sha(data), 'previousSha256': intent['previousSha256'],
             'publication': str(intent_path), 'replayed': old == data}
 
@@ -2489,7 +2538,7 @@ def upgrade_public_listener(store, helper, binary_arg, old_sha, new_sha):
                 'listener is outside exact upgrade states')
         temporary = directory / ('.mini-' + new_sha + '-next')
         publish_exact(temporary,data,mode=0o555,bound=256*1024*1024)
-        os.replace(temporary,binary); sync_directory(directory)
+        os.replace(temporary,binary)
         replace_root_record(record_path,retained['newRecord'],0o600)
         public_listener_record(base,stage,r,public)
     return {**controller_status(store,helper),'publicListenerUpgrade':str(intent_path)}
@@ -2509,7 +2558,6 @@ def public_listener_teardown(base, stage, r):
         require(read_file(pin, r['operatorUid'], 128, required_mode=0o600) == listener_pin(r),
                 'public listener pin changed during teardown')
         pin.unlink()
-        sync_directory(pin.parent)
 
 
 def remove(store, helper):
@@ -2550,6 +2598,7 @@ def remove(store, helper):
     if r.get('workerTask'):
         run(['/usr/bin/loginctl', 'disable-linger', r['name']])
     run(['/usr/sbin/userdel', r['name']])
+    bwrap_acl(r['uid'], False)
     try:
         group = grp.getgrnam(r['name'])
     except KeyError:
@@ -2571,13 +2620,16 @@ def main(args):
     action, store, helper, *extra = args
     # Same global allocator lock as ordinary world setup; no nested installer call.
     if action == 'controller-check-app-allocation':
-        require(len(extra) == 3, 'app allocation check requires operator/start/count')
+        # A fourth word `custodian` is a world behind a volume custodian: its apps live in a user
+        # namespace whose uids start at 1, so the subordinate (65536) floor does not apply.
+        require(len(extra) in (3, 4) and (len(extra) == 3 or extra[3] == 'custodian'),
+                'app allocation check requires operator/start/count[/custodian]')
         held = os.fstat(8); named = os.stat('/run/mini-spk-world-install.lock', follow_symlinks=False)
         require(stat.S_ISREG(held.st_mode) and held.st_uid == 0 and held.st_nlink == 1
                 and not held.st_mode & 0o022 and (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino),
                 'inherited global allocator lock differs')
         fcntl.flock(8, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        print(json.dumps(check_app_allocation(store, helper, *extra), sort_keys=True))
+        print(json.dumps(check_app_allocation(store, helper, *extra[:3], custodian=len(extra) == 4), sort_keys=True))
         return 0
     with open('/run/mini-spk-world-install.lock', 'a') as lock, contextlib.ExitStack() as held_locks:
         fcntl.flock(lock, fcntl.LOCK_EX)

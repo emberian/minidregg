@@ -51,7 +51,7 @@ pub(crate) fn direct(
 ) -> Result<(Value, Value, Rendered, usize)> {
     let (view, challenge, signed) = signed_view(root, workspace, reference, "resource")?;
     let bin = fs::read(signed.with_file_name("view.bin")).map_err(|e| e.to_string())?;
-    let (attempt, _) = new_attempt(root)?;
+    let (attempt, _) = crate::read_scratch::attempt(root)?;
     make_private_dir(&attempt)?;
     let input = attempt.join("search-document-in.json");
     create_private(

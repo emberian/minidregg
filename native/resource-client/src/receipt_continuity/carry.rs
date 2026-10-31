@@ -75,7 +75,7 @@ fn recover_with(root: &Path, mut checkpoint: impl FnMut(&str) -> Result<()>) -> 
     let id = text(&wal, "id")?;
     decimal(id)?;
     let lineage = custody.join("lineages").join(id);
-    // The immutable lineage evidence was synced before the WAL became visible.
+    // The immutable lineage evidence was written before the WAL became visible.
     if read_json(&lineage.join("transition.json"))? != wal["transition"] {
         return Err(fail(
             "carry recovery evidence differs from recorded transition",
@@ -199,7 +199,7 @@ fn copy_config(source: &Path, destination: &Path) -> Result<()> {
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(NOFOLLOW)
-        .open({ crate::fsio::repair_cache(source).map_err(fail)?; source })
+        .open(source)
         .map_err(fail)?;
     let metadata = file.metadata().map_err(fail)?;
     if !metadata.is_file() || metadata.len() > MAX_JSON {
@@ -253,13 +253,11 @@ pub(crate) fn migrate(
     let lineages = custody.join("lineages");
     if !lineages.exists() {
         workspace::make_private_dir(&lineages)?;
-        directory(&custody)?.sync_all().map_err(fail)?;
     }
     directory(&lineages)?;
     let id = workspace::random_nonce()?;
     let lineage = lineages.join(&id);
     workspace::make_private_dir(&lineage)?;
-    directory(&lineages)?.sync_all().map_err(fail)?;
     copy_config(&old_config, &lineage.join("old-config.json"))?;
     copy_config(&config, &lineage.join("new-config.json"))?;
     copy_config(edge, &lineage.join("edge-manifest.json"))?;
@@ -392,12 +390,10 @@ fn register_capsule(root: &Path, settings: &Settings, config: &Path) -> Result<(
     let registry = root.join("capsules");
     if !registry.exists() {
         workspace::make_private_dir(&registry)?;
-        directory(root)?.sync_all().map_err(fail)?;
     }
     directory(&registry)?;
     let capsule = registry.join(workspace::random_nonce()?);
     workspace::make_private_dir(&capsule)?;
-    directory(&registry)?.sync_all().map_err(fail)?;
     copy_config(config, &capsule.join("original-config.json"))?;
     let original = fs::read(capsule.join("original-config.json")).map_err(fail)?;
     let value: Value = serde_json::from_slice(&original).map_err(fail)?;
@@ -430,7 +426,6 @@ fn register_capsule(root: &Path, settings: &Settings, config: &Path) -> Result<(
     {
         return Err(fail("source capsule changed during registration"));
     }
-    directory(&capsule)?.sync_all().map_err(fail)?;
     Ok((capsule, pins))
 }
 fn registered_capsule(custody: &Path, pin: &Value, supplied: &Path) -> Result<(PathBuf, Value)> {
@@ -1527,7 +1522,6 @@ pub(crate) fn retry_lookup(attempt: &Path, mode: &str, direct: bool) -> Result<O
     let response: Value = serde_json::from_slice(&frame[1..]).map_err(fail)?;
     let outcome = lookup_outcome(&response, &origin, &digest, &lower, &cut)?;
     create_file(&json_path, &serde_json::to_vec(&outcome).map_err(fail)?)?;
-    directory(&attempt)?.sync_all().map_err(fail)?;
     finish_attempt(
         Some(AttemptTicket {
             root: root.to_path_buf(),

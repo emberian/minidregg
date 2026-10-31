@@ -3,7 +3,7 @@
 //! Lean's exactly-once unit is the signed call: its transaction identity is
 //! derived from the call's own operation ID (`Kernel/ApplicationDispatchReceiver
 //! .lean`, `receiveAdmitted`, the `findIdx?` on `transactionId`), and every new
-//! human request is authored under a fresh fsynced operation ID
+//! human request is authored under a fresh operation ID
 //! (`hostd::Journal::allocate_dispatch_operation`). One call's unknown outcome
 //! therefore never makes another call unsafe, and nothing here pauses the
 //! grain for every member when one call is undecided.
@@ -245,7 +245,7 @@ pub(crate) fn undecided(parent: &Path) -> io::Result<Vec<PathBuf>> {
         .collect())
 }
 
-/// Write the per-call markers before op34/164. Both are create-new, fsynced
+/// Write the per-call markers before op34/164. Both are create-new
 /// with their directory; a second submit of the same attempt refuses.
 pub(crate) fn arm(attempt_dir: &Path, marker: &[u8]) -> io::Result<PathBuf> {
     write_new(attempt_dir, SUBMIT_REQUESTED, marker)?;
@@ -254,7 +254,7 @@ pub(crate) fn arm(attempt_dir: &Path, marker: &[u8]) -> io::Result<PathBuf> {
 
 /// Settle one call: record the resolution, remove `submit-active.json` only
 /// if it still holds the armed bytes, then drop the call's body-bearing
-/// artifacts. The removal is fsynced before the artifacts go.
+/// artifacts. The removal is written before the artifacts go.
 pub(crate) fn settle(active: &Path, expected: &[u8], resolution: &Value) -> io::Result<()> {
     if retained(active, MAX_MARKER)? != expected {
         return Err(invalid("dispatch submit marker drift before settlement"));
@@ -265,7 +265,6 @@ pub(crate) fn settle(active: &Path, expected: &[u8], resolution: &Value) -> io::
     let _ = fs::remove_file(attempt_dir.join(RESOLUTION)).ctx("remove", &(attempt_dir.join(RESOLUTION)));
     write_new(attempt_dir, RESOLUTION, &serde_json::to_vec(resolution)?)?;
     fs::remove_file(&active).ctx("remove", &active)?;
-    File::open(&attempt_dir).ctx("open", &attempt_dir)?.sync_all()?;
     strip(attempt_dir).map(|_| ())
 }
 
@@ -308,12 +307,11 @@ fn strip(attempt_dir: &Path) -> io::Result<bool> {
 /// dispatch thread, so no attempt is in authoring while it runs.
 #[cfg(test)]
 pub(crate) fn collect(parent: &Path) -> io::Result<()> {
-    collect_scanned(parent, &scan(parent)?)
+    collect_scanned(&scan(parent)?)
 }
 
-/// `collect` over a scan the caller already holds. The parent directory is synced only when an
-/// entry of it was removed; a pass that found everything already stripped writes nothing.
-fn collect_scanned(parent: &Path, scanned: &[Attempt]) -> io::Result<()> {
+/// `collect` over a scan the caller already holds.
+fn collect_scanned(scanned: &[Attempt]) -> io::Result<()> {
     let mut settled = Vec::new();
     for attempt in scanned.iter().filter(|attempt| !attempt.undecided) {
         strip(&attempt.path)?;
@@ -322,9 +320,6 @@ fn collect_scanned(parent: &Path, scanned: &[Attempt]) -> io::Result<()> {
     let excess = settled.len().saturating_sub(MAX_SETTLED);
     for path in settled.into_iter().take(excess) {
         fs::remove_dir_all(path).ctx("remove", path)?;
-    }
-    if excess > 0 {
-        File::open(&parent).ctx("open", &parent)?.sync_all()?;
     }
     Ok(())
 }
@@ -448,7 +443,7 @@ fn note(directory: &Path, text: &str) -> io::Result<()> {
         .custom_flags(libc::O_NOFOLLOW)
         .open(directory.join("note.txt")).ctx("open", &(directory.join("note.txt")))?;
     file.write_all(text.as_bytes())?;
-    file.sync_all()
+    Ok(())
 }
 
 /// The reply op34/164 gave, as far as the transport saw it.
@@ -644,7 +639,7 @@ pub(crate) fn admit_new_call(operator: &PrivateOperator, parent: &Path) -> io::R
         // Only this attempt can have changed state since the scan.
         oldest.undecided = present(&oldest.path.join(SUBMIT_ACTIVE))?;
     }
-    collect_scanned(parent, &scanned)?;
+    collect_scanned(&scanned)?;
     if scanned.iter().filter(|attempt| attempt.undecided).count() >= MAX_UNDECIDED {
         return Err(DispatchOutcome {
             operation: None,

@@ -33,7 +33,7 @@ default build uses for receipt continuity. `Host/PortableContinuationProbe.lean`
   match the entire canonical image and endpoint.
 - `native/portable-archive`: private 64KiB chunks, exact position/length/hash,
   untrusted-provider repair and bounded ranges; new-output-only reconstruction;
-  streaming stable-lock CAS with file+directory fsync and uncertain-reply replay.
+  streaming stable-lock CAS and uncertain-reply replay.
 
 ## Source-owned inventory and current-authority joins still required
 
@@ -146,7 +146,7 @@ signature-verified, continuity-checked ACK and persists its public endpoint in
 an independently provisioned participant-owned directory through the shared
 native exact CAS transport. It returns a Held token only after durable reply
 and exact readback. Stale/forked or newer local pins refuse; a lost-reply retry
-uses same-bytes CAS/fsync rather than treating equality alone as durability.
+uses same-bytes CAS rather than treating equality alone as durability.
 Bootstrap identity/key/first endpoint are independently authenticated and never
 learned from a restored manifest. This is a public client anchor, not a second
 source journal or authority plane. No operator-capsule or native participant

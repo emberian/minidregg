@@ -1922,7 +1922,6 @@ impl RetainedReleaseDraft {
             let mut draft_ring = Keyring::default();
             draft_ring.insert(&spec.room, key);
             private::save_cache(&directory.join("draft-key.cache"), passphrase, &draft_ring)?;
-            fs::File::open(&directory).and_then(|file| file.sync_all()).map_err(|error| error.to_string())?;
             let encrypted = fs::read(directory.join("draft-key.cache")).map_err(|error| error.to_string())?;
             manifest["encryptedKeyCommitmentHex"] = json!(hex(&lineage_digest(&[b"DREGG/PRIVATE-ROOM-DRAFT-CACHE/v1", &encrypted])));
         }
@@ -2822,13 +2821,13 @@ pub(crate) fn open_local(root: &Path, room_name: &str, stream: &str, sequence: &
 
 /// A signed window of a stream (`QueryView.tail`), retained like `signed_view`.
 fn signed_window(root: &Path, workspace: &Value, reference: &Value, start: &str, count: &str) -> Result<Value> {
-    let (attempt, nonce) = super::new_attempt(root)?;
+    let (attempt, nonce) = crate::read_scratch::attempt(root)?;
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
         "purpose":{"type":"query","kind":member(reference,"kind")?,
             "target":member(reference,"target")?,"view":"tail","start":start,"count":count},
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
-    let source = root.join("sources").join(format!("q-{nonce}.json"));
+    let source = crate::read_scratch::source(&attempt, &format!("q-{nonce}.json"));
     crate::create_private(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
     query_retained(
         &member_path(workspace, "host")?,
@@ -2838,7 +2837,7 @@ fn signed_window(root: &Path, workspace: &Value, reference: &Value, start: &str,
         &member_path(workspace, "key")?,
         "view-tail",
         &attempt,
-    )
+    ).inspect_err(|_| crate::read_scratch::keep(root, &attempt))
 }
 
 /// `workspace tail --private ROOM`: the signed window, every entry annotated

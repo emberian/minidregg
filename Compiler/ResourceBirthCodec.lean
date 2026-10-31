@@ -801,10 +801,10 @@ end DirectoryImage
 /-- info: 'Minidregg.Compiler.ResourceBirthCodec.descriptor_encode_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.descriptor_encode_injective
 
-/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_encode' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_encode
 
-/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_canonical' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_canonical
 
 /-- info: 'Minidregg.Compiler.ResourceBirthCodec.DirectoryImage.decode_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/

@@ -636,9 +636,7 @@ fn write_operator_text(path: &Path, text: &str, mode: u32, replace: bool) -> io:
     // The broker's umask is 077; unit files are meant to be world-readable.
     file.set_permissions(fs::Permissions::from_mode(mode))?;
     file.write_all(text.as_bytes())?;
-    file.sync_all()?;
     fs::rename(&temp, path).ctx("rename", &temp)?;
-    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     Ok(true)
 }
 
@@ -754,7 +752,6 @@ impl Broker {
         let mut bytes = line.to_string().into_bytes();
         bytes.push(b'\n');
         let _ = self.log.write_all(&bytes);
-        let _ = self.log.sync_data();
         eprintln!("{line}");
     }
 
@@ -1034,7 +1031,6 @@ impl Broker {
                         let _ = fs::remove_file(&temp).ctx("remove", &temp);
                         return Err(invalid("staged package changed or exceeds import profile bound"));
                     }
-                    out.sync_all()?;
                     if file_sha256(&mut File::open(&temp).ctx("open", &temp)?)? != sha256 {
                         let _ = fs::remove_file(&temp).ctx("remove", &temp);
                         return Err(invalid("staged package differs from its SHA-256"));

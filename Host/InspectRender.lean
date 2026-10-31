@@ -9,6 +9,7 @@ rendering. Nothing here opens a Store or reads anything but its input.
 module
 
 public import Host.InspectViews
+public import Host.RefusalText
 public import Kernel.NativeHost
 public import Lean.Data.Json
 
@@ -332,6 +333,16 @@ private def relationText (clause : Pred) (before : Option Int) : String :=
 private def shown : Option Int → String
   | some v => toString v | none => "absent"
 
+/-- A refusal's phase or detail as the text the Host wrote: valid UTF-8 without control
+characters (line breaks and tabs become spaces), else its hex. -/
+private def frameText (bytes : List UInt8) : String :=
+  match String.fromUTF8? ⟨bytes.toArray⟩ with
+  | some text =>
+      if text.any (fun c => (c.toNat < 32 && c != '\n' && c != '\t') || c.toNat == 127) then
+        "hex " ++ hexText bytes
+      else text.map fun c => if c == '\n' || c == '\t' then ' ' else c
+  | none => "hex " ++ hexText bytes
+
 /-- The explanation of one refusal: only what the Host's refusal frame carries. -/
 def explain (outcome : Outcome) : List String × List (String × Json) :=
   match outcome with
@@ -363,12 +374,20 @@ def explain (outcome : Outcome) : List String × List (String × Json) :=
   | .refused .lawDenied _ _ none =>
       (["refused: law-denied: the law refused, and the refusal names no clause (the cell has no committed law, or every failing clause reads fields outside your grant)"],
        [("reason", "law-denied")])
+  | .refused .operationRejected phase detail none =>
+      -- The controller's own words: its phase and the `Reject` it returned, which the frame
+      -- carries to this requester already (`explain_reads_only_the_refusal` is for the others).
+      ([s!"refused: operation-rejected: {RefusalReason.operationRejected.describe}",
+        s!"  phase: {frameText phase}", s!"  clause: {Minidregg.Host.RefusalText.render (frameText detail)}",
+        s!"  detail: {frameText detail}"],
+       [("reason", "operation-rejected"), ("phase", frameText phase),
+        ("clause", Minidregg.Host.RefusalText.render (frameText detail)), ("detail", frameText detail)])
   | .refused reason _ _ none =>
       ([s!"refused: {reason.name}: {reason.describe}"], [("reason", reason.name)])
   | .confirmed _ receipt => ([s!"not refused: confirmed at height {receipt.acceptedCount}"], [("reason", .null)])
   | .charged _ receipt causeBytes =>
       let cause := match ObjectiveActivityReceiver.rejectCodec.decode causeBytes with
-        | some typed => reprStr typed
+        | some typed => Minidregg.Host.RefusalText.render (reprStr typed)
         | none => s!"invalid canonical cause {hexText causeBytes}"
       ([s!"charged failure at height {receipt.acceptedCount}: {cause}"],
        [("reason", "charged"), ("cause", cause)])
@@ -379,12 +398,13 @@ def explain (outcome : Outcome) : List String × List (String × Json) :=
 
 /-- `why`'s output is a function of the refusal frame's reason and leaf alone:
 two frames that agree on them render identically, whatever their phase or
-detail bytes. It reads no other input, so it discloses nothing the Host's
+detail bytes, except for a controller's own refusal with no law clause (`operationRejected`),
+which prints its phase and detail. It reads no other input, so it discloses nothing the Host's
 refusal did not already carry to this requester. -/
 theorem explain_reads_only_the_refusal (reason : RefusalReason) (leaf : Option LawLeaf)
-    (phase phase' detail detail' : List UInt8) :
+    (phase phase' detail detail' : List UInt8) (notController : reason ≠ .operationRejected ∨ leaf.isSome) :
     explain (.refused reason phase detail leaf) = explain (.refused reason phase' detail' leaf) := by
-  cases leaf <;> cases reason <;> rfl
+  cases leaf <;> cases reason <;> first | rfl | (simp at notController)
 
 #assert_axioms explain_reads_only_the_refusal
 

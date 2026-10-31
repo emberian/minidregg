@@ -76,7 +76,6 @@ fn write_record(path: &Path, value: &Value, replace: bool) -> io::Result<()> {
         .custom_flags(libc::O_NOFOLLOW)
         .open(&temp).ctx("open", &temp)?;
     file.write_all(&bytes)?;
-    file.sync_all()?;
     drop(file);
     if replace {
         fs::rename(&temp, path).ctx("rename", &temp)?;
@@ -86,9 +85,6 @@ fn write_record(path: &Path, value: &Value, replace: bool) -> io::Result<()> {
             let _ = fs::remove_file(&temp).ctx("remove", &temp);
         })?;
         fs::remove_file(&temp).ctx("remove", &temp)?;
-    }
-    if let Ok(dir) = fs::File::open(path.parent().ok_or_else(|| invalid("record parent"))?) {
-        let _ = dir.sync_all();
     }
     Ok(())
 }

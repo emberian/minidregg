@@ -109,7 +109,6 @@ impl Context {
         if let Some(origin) = &self.payment {
             create_private(&record.join("origin-payment.json"), &origin.payment)?;
             create_private(&record.join("origin-locator.json"), &origin.locator)?;
-            sync_directory_ancestors(record)?;
         }
         Ok(())
     }

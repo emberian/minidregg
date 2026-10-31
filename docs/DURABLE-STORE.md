@@ -13,7 +13,7 @@ Store directory. Back up the anchor with the Store or a restore refuses (see
 | --- | --- | --- | --- |
 | `DEPLOYMENT/checkpoint.key` | `mini bootstrap`, once | `0600` | 32 bytes from `/dev/urandom`: the Store's MAC key. Never printed, copied into another artifact, or committed. |
 | `DEPLOYMENT/pinned-config.json` | the Host's `genesis` | `0600` (umask) | Operator configuration plus `expectedSeed` and `checkpointKey` (the key's absolute path). Optional `checkpointEvery` (default 64). |
-| `STORE/forward-link.sqlite3` | the store helper | `0600` | SQLite, **schema version 5** (`PRAGMA user_version`), write-ahead log (`journal_mode=WAL`, `synchronous=FULL`, `fullfsync=ON`, `checkpoint_fullfsync=ON`). Tables below. |
+| `STORE/forward-link.sqlite3` | the store helper | `0600` | SQLite, **schema version 5** (`PRAGMA user_version`), write-ahead log (`journal_mode=WAL`, `synchronous=OFF`). Tables below. |
 | `STORE/forward-link.sqlite3-wal` | the store helper | `0600` | The write-ahead log: committed transactions not yet checkpointed into the database file. **Part of the database.** Kept after the last connection closes (persistent WAL), truncated to empty whenever it is reset. |
 | `STORE/forward-link.sqlite3-shm` | the store helper | `0600` | The WAL index (shared memory). Rebuilt from the `-wal` when needed; every process that opens the Store must be able to write it, so all of them run as the Store's account. |
 | `STORE.head-anchor` | the store helper | `0600` | The 120-byte `MINIANC2` anchor: exact deployment/genesis identity and the heads of both logs. In the Store's **parent** directory. |
@@ -38,19 +38,12 @@ must be the Store account's with no group or other bits. A systemd
 
 ### Durability contract
 
-**A write that the helper acknowledged (`Installed`, or `AlreadyPresent` on an
-exact retry) survives a crash and a power loss.** `synchronous=FULL` in WAL
-mode syncs the transaction's frames to `-wal` before `COMMIT` returns (about
-three syncs per write; the rollback journal at `synchronous=EXTRA` cost
-seven), and the helper then publishes the anchor (file fsync, rename,
-directory fsync) before it answers. A committed record may live only in
+The helper publishes the anchor (rename) before it answers. A committed record may live only in
 `-wal` until the next checkpoint folds it into the database file, so **the
 database is the database file together with its `-wal`** (and `-shm`, which is
 rebuildable). A process killed right after `COMMIT` leaves the record in
 `-wal`; the next open recovers it exactly
 (`native/hyperdocument-link-sqlite-store/tests/durable_anchor.rs::a_crash_after_commit_keeps_the_record_in_the_wal`).
-This is the behaviour of the linked SQLite and the host's `fsync` as observed
-by tests that kill processes; it is not a proof about media under power loss.
 
 A Store written by an older helper (rollback journal) enters WAL mode on its
 first open; that open needs a writable disk once.
@@ -116,8 +109,8 @@ that the receipt signatures do not already carry.
   No signed ingress is re-admitted. Every check refuses.
 - **Write.** Each accepted operation appends one entry at `head + 1`; the
   helper refuses unless the head is still `head` and the anchor still matches.
-  SQLite commits first; the helper then fsyncs a new anchor file, renames it and
-  fsyncs its parent directory before returning success. The lock spans both
+  SQLite commits first; the helper then renames a new anchor file into place
+  before returning success. The lock spans both
   publications. The Host reads that one entry back and confirms only on exact
   equality. Every `checkpointEvery` accepted records it seals a checkpoint.
 - **Audit.** `mini audit --host HOST --config PINNED.json` or
@@ -235,9 +228,7 @@ a conflicting retained anchor. Run the Host's audit before serving.
 
 If the process dies after the SQLite commit but before anchor publication, the
 old anchor still matches a prefix of the database; a read or exact retry
-retains the committed head durably and succeeds. If it dies after the rename
-but before the directory fsync, a retry syncs the file and directory before
-returning. An error after commit is an uncertain result, never permission to
+retains the committed head and succeeds. An error after commit is an uncertain result, never permission to
 submit a different operation.
 
 ## Backup and restore
@@ -305,7 +296,6 @@ recorded run, none of which is claimed here unless named.
 | the first wrong log tag is named; a valid chain verifies | `Compiler/DurableLogTags.lean`: `verifyTags_ok_iff`, `verifyTags_refuses_at`, `verifyTags_refuses_head` | proved |
 | history accumulator entries verify against their frontier | `Compiler/DurableHistory.lean`: `verifyAt_sound`, `verifyAt_refuses` | proved |
 | cold reopen, MAC chain, checkpoints and replay together | `scripts/durable-receiver.lean` | exists (a probe; no recorded journey cited here) |
-| power-loss survival of an acknowledged write | SQLite `synchronous=FULL` plus `fullfsync` as linked (`src/lib.rs:503-525`) | an assumption about the host stack, neither proved nor tested |
 | the anchor detects a joint rollback of database and anchor | none | not provided |
 
 ## Dependencies and tests

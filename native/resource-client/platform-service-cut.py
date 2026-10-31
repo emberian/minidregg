@@ -27,11 +27,8 @@ read, digest, require = provision.load, provision.digest, provision.require
 def write(path, value):
     data = value if isinstance(value, str) else json.dumps(value, indent=2) + "\n"
     with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as file:
-        file.write(data); file.flush(); os.fsync(file.fileno())
+        file.write(data); file.flush()
     os.replace(file.name, path)
-    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try: os.fsync(fd)
-    finally: os.close(fd)
 
 
 def canonical(value):

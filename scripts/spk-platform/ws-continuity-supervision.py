@@ -35,17 +35,12 @@ def checked(path, owner=None, private=False):
 def read(path): return json.loads(path.read_text())
 
 
-def sync_parent(path):
-    fd=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-    try: os.fsync(fd)
-    finally: os.close(fd)
 
 
 def exclusive(path,data):
     fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
     with os.fdopen(fd,'wb') as out:
-        out.write(data); out.flush(); os.fsync(out.fileno())
-    sync_parent(path)
+        out.write(data); out.flush()
 
 
 def restore_owned(record,override,reload_and_observe):
@@ -63,7 +58,6 @@ def restore_owned(record,override,reload_and_observe):
         require(not override.is_symlink() and override.read_bytes()==BODY and sha(override)==expected,
                 'override changed; refusing removal')
         override.unlink()
-        sync_parent(override)
     # Missing override is valid after interrupted install before create_new, or
     # interrupted restore after unlink. Rerun reload; do not recreate anything.
     properties=reload_and_observe()
@@ -129,14 +123,14 @@ def main():
     override=directory/name
     records=grains/'broker/fixture-supervision'
     if not records.exists():
-        records.mkdir(mode=0o700); sync_parent(records)
+        records.mkdir(mode=0o700)
     require(records.is_dir() and not records.is_symlink() and records.stat().st_uid==0 and not records.stat().st_mode & 0o077, 'unsafe root evidence directory')
     record=records/(args.expected_unit+'-'+name+'.json')
     if args.action=='install':
         before=systemctl('show',args.expected_unit,'--property=OnFailure,Restart,ActiveState,ExecStart')
         require('ActiveState=active\n' in before, 'fixture unit is not active')
         if not directory.exists():
-            directory.mkdir(mode=0o755); sync_parent(directory)
+            directory.mkdir(mode=0o755)
         require(directory.is_dir() and not directory.is_symlink() and directory.stat().st_uid==0 and not directory.stat().st_mode & 0o022,'unsafe drop-in directory')
         record_data={'protocol':'mini-spk-fixture-supervision-v1','fixture':str(fp),'app':f['app'],'unit':args.expected_unit,
                      'residentSha256':args.expected_resident_sha256,'brokerConfig':str(broker_path),'brokerConfigSha256':args.broker_config_sha256,

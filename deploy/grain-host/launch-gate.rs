@@ -90,7 +90,6 @@ fn write_state(file: &mut File, state: &str) -> Result<(), String> {
     file.set_len(0).map_err(|e| e.to_string())?;
     file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     file.write_all(state.as_bytes())
-        .and_then(|_| file.sync_all())
         .map_err(|e| e.to_string())
 }
 
@@ -314,7 +313,7 @@ fn supervise(controller: Option<File>, mut command: Command, mut gate: File) -> 
             Ok(false) => {}
             result => {
                 // `started` already forbids replay. Kill before any potentially
-                // blocking gate lock/fsync: storage contention must not extend
+                // blocking gate lock/write: storage contention must not extend
                 // the sandbox lifetime after its controller has exited.
                 let _ = child.kill();
                 let _ = child.wait();
@@ -360,13 +359,10 @@ fn record_cpu(dir: &Path, unit: &str, usec: u64) -> Result<(), String> {
         .open(&temporary)
         .map_err(|e| format!("cpu record: {e}"))?;
     file.write_all(format!("mini-grain-cpu-v1 {usec}\n").as_bytes())
-        .and_then(|_| file.sync_all())
         .map_err(|e| format!("cpu record write: {e}"))?;
     fs::hard_link(&temporary, &path).map_err(|e| format!("cpu record publish: {e}"))?;
     fs::remove_file(&temporary).map_err(|e| format!("cpu record publish: {e}"))?;
-    File::open(dir)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| format!("cpu record directory sync: {e}"))
+    Ok(())
 }
 
 fn run() -> Result<(), String> {
@@ -406,9 +402,6 @@ fn run() -> Result<(), String> {
                 .map(|c| format!("armed\n{}\n", c.encode()))
                 .unwrap_or_else(|| "armed\n".into());
             write_state(&mut file, &state)?;
-            File::open(dir)
-                .and_then(|f| f.sync_all())
-                .map_err(|e| format!("gate directory sync: {e}"))?;
             lock(&file, LOCK_UN)?;
             println!("armed {unit}");
         }
@@ -431,9 +424,6 @@ fn run() -> Result<(), String> {
             let mut file = open_gate(&path, true)?;
             lock(&file, LOCK_EX)?;
             write_state(&mut file, "fenced\n")?;
-            File::open(dir)
-                .and_then(|f| f.sync_all())
-                .map_err(|e| e.to_string())?;
             lock(&file, LOCK_UN)?;
             println!("fenced {unit}");
         }

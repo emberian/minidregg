@@ -322,14 +322,12 @@ install_or_match() {
     rm -- "$source_file"
   else
     chmod 600 "$source_file"
-    sync -f "$source_file"
     mv -nT -- "$source_file" "$destination"
     [ ! -e "$source_file" ] && [ -f "$destination" ] &&
       [ "$(stat -c '%u:%a:%h' "$destination")" = "$(id -u):600:1" ] &&
       [ "$(sha256sum "$destination" | cut -d ' ' -f 1)" = "$source_sha" ] || {
       echo "pure custody publication refused: $destination" >&2; exit 2;
     }
-    sync -f "${destination%/*}"
   fi
 }
 [ "$(sha256sum "$HOST_IDENTITY" | cut -d ' ' -f 1)" = "$HOST_IDENTITY_SHA" ] &&

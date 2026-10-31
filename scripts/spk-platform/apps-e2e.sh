@@ -40,6 +40,14 @@ FIXTURE=${APPS_E2E_INDEX:-$repo/native/resource-client/tests/fixtures/sandstorm-
 CLASS=${APPS_E2E_CLASS:-S} ATTEMPTS=${APPS_E2E_ATTEMPTS:-20} GET_PATH=${APPS_E2E_GET_PATH:-/}
 [[ ! -e $out ]] || { echo "fresh OUT_DIR required" >&2; exit 2; }
 mkdir -m 700 "$out"
+# The consent and codec residents this run's `mini` calls start keep their anchors and PID files in
+# OUT/a, and stop_residents ends them at exit: their settings live under OUT, which world-down never
+# touches, so nothing would otherwise stop them.
+export MINI_CONSENT_ANCHOR_DIR="$out/a"; mkdir -m 700 "$MINI_CONSENT_ANCHOR_DIR"
+stop_worker() { [ -f "$out/worker.pid" ] && kill "$(cat "$out/worker.pid")" 2>/dev/null; rm -f "$out/worker.pid"; }
+stop_residents() { bash "$here/stop-residents.sh" "$out" >&2; rm -f "$out"/ws-*/attempts/*/config.json; }
+cleanup() { stop_worker; stop_residents; }
+trap cleanup EXIT
 rows=0 fails=0
 row() { rows=$((rows + 1)); if [ "$2" = 1 ]; then printf 'PASS\t%s\t%s\n' "$1" "$3"; else fails=$((fails + 1)); printf 'FAIL\t%s\t%s\n' "$1" "$3"; fi; }
 verdict() { local v="J-APPS-E2E PASS $rows/$rows"; [ "$fails" = 0 ] || v="J-APPS-E2E FAIL $fails/$rows"; echo "$v"; echo "$v" >&2; [ "$fails" = 0 ]; }
@@ -189,8 +197,6 @@ nohup "$MINI" apps-worker --state "$out/state" --world "$out/apps-world.json" --
 echo $! >"$out/worker.pid"
 for _ in $(seq 1 50); do [ -S "$out/worker.sock" ] && break; sleep 0.1; done
 row "the worker serves its member socket" "$([ -S "$out/worker.sock" ] && echo 1 || echo 0)" "pid $(cat "$out/worker.pid")"
-stop_worker() { [ -f "$out/worker.pid" ] && kill "$(cat "$out/worker.pid")" 2>/dev/null; rm -f "$out/worker.pid"; }
-trap stop_worker EXIT
 
 # ---- restart then write (APPS_E2E_RESTART=1, Hacker Slides) ---------------------------------------
 # The worker enrols the owner's route after every START (apps_worker.rs World::enroll), so a member
@@ -246,10 +252,12 @@ restart_rows() {
 # ---- the install, as the member -------------------------------------------------------------------
 export MINI_MARKET_INDEX=$FIXTURE MINI_MARKET_META=$out/meta MINI_APPS_VERDICTS=$out/verdicts MINI_APPS_WORKER_SOCKET=$out/worker.sock MINI_APPS_CONFIG=$out/apps.json
 install_app() { # APP-ID
-  local app=$1 attempt=1 outcome rid
+  local app=$1 attempt=1 outcome rid before
+  before=$(ls "$WS9/apps/requests/" 2>/dev/null | sort)
   outcome=$(mini apps install --dir "$WS9" --home "$HOME9" --app "$app" --class "$CLASS" --json 2>"$out/install-$app.err")
   rid=$(grep -oE 'request [0-9a-f]{32}' <<<"$outcome" | head -1 | cut -d' ' -f2)
-  [ -n "$rid" ] || rid=$(ls "$WS9/apps/requests/" 2>/dev/null | grep -E '^[0-9a-f]{32}\.json$' | tail -1 | cut -d. -f1)
+  # Only a request file this install created: an earlier app's request must never be taken for this one's.
+  [ -n "$rid" ] || rid=$(comm -13 <(printf '%s\n' "$before") <(ls "$WS9/apps/requests/" 2>/dev/null | sort) | grep -E '^[0-9a-f]{32}\.json$' | tail -1 | cut -d. -f1)
   # The worker answers a long install `pending` at once and runs it on its own thread: a read meanwhile is not held.
   if grep -q '"state": "pending"' <<<"$outcome"; then
     local t0 t1 during; t0=$(date +%s%N); during=$(mini apps list --dir "$WS9" --json 2>&1); t1=$(date +%s%N)

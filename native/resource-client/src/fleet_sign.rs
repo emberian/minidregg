@@ -546,7 +546,6 @@ fn resubmitted(last: &Path, outcome: Value) -> Result<Option<(PathBuf, Value)>> 
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let temporary = path.with_extension("tmp");
     fs::write(&temporary, bytes)
-        .and_then(|_| fs::File::open(&temporary)?.sync_all())
         .and_then(|_| fs::rename(&temporary, path))
         .map_err(|error| format!("{}: {error}", path.display()))
 }

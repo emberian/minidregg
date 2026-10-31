@@ -131,7 +131,7 @@ requires actual backend/transport evidence before capacity can be released.
 The gateway does not retry on another endpoint or route. Losing a response can
 leave Mini accounting unresolved even when physical completion freed the slot.
 
-The broker uses atomic file replacement plus file/directory fsync and an
+The broker uses atomic file replacement and an
 exclusive state lock. A persistence failure poisons the running service; it
 must restart and reconcile rather than granting more capacity from uncertain
 memory. Configuration changes against retained state are refused until an
@@ -229,7 +229,7 @@ forwarding remain work.
 lifetime completions. The service writes immutable exact terminal receipts into
 its private `receipts/` archive before removing full jobs from the hot snapshot.
 The complete terminal transition, including fairness refund/elapsed counters,
-is first fsynced in the hot snapshot. Receipt file and directory fsync then
+is first written in the hot snapshot. The receipt file then
 precede a second snapshot that retires it. Restart finishes an interrupted
 archive/retirement cut with those same counters; it never redispatches completed
 work. A newer receipt paired with an unresolved older snapshot is an incomplete

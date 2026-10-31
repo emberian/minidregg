@@ -649,8 +649,8 @@ inductive PersistResult where
   deriving DecidableEq, BEq, Repr
 
 /-- The replica's journal as seen by its single writer process. `current` is
-the authoritative in-memory image; `append` is the helper's length-checked,
-fsynced append. A read-only storage has no writer and refuses appends. -/
+the authoritative in-memory image; `append` is the helper's length-checked
+append. A read-only storage has no writer and refuses appends. -/
 structure Storage where
   current : IO (Option (Sigma Restored))
   install : Option (Sigma Restored) → IO Unit

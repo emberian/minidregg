@@ -78,7 +78,7 @@ pub(crate) fn retain(
     marker_bytes.push(b'\n');
     super::create_private(&attempt.join("pre-submit-refusal.frame"), frame)?;
     super::create_private(&attempt.join("pre-submit-refusal.json"), &marker_bytes)?;
-    super::sync_directory_ancestors(attempt)
+    Ok(())
 }
 
 #[cfg(test)]

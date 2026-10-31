@@ -24,7 +24,7 @@ def retain(path, value):
         require(not path.is_symlink() and path.read_bytes() == data, "retained input differs: " + str(path))
     else:
         with path.open("xb") as out:
-            os.chmod(path, 0o600); out.write(data); out.flush(); os.fsync(out.fileno())
+            os.chmod(path, 0o600); out.write(data); out.flush()
 
 def pending_action(attempt):
     if not attempt.exists():

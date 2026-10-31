@@ -762,19 +762,17 @@ theorem committed_lawful {laws : ReceivingLaw.Laws Durable}
 it was decided against (`PayCellDomain.Loaded.observed`), so the Receiver judges
 it by the pay cell's committed law, not by an export law. -/
 theorem payWrite_not_birth (planned : Planned deployment profile ambient durable command) :
-    ReceivingLaw.physicalBirth durable (payWrite planned) = false := by
-  unfold ReceivingLaw.physicalBirth
-  show (match (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).decode
-      (durable.snapshot.canonicalBytes (PayCellDomain.cellIdOf deployment)) with
-    | some (.live _) => false
-    | _ => true) = false
-  rw [planned.pay.observed]
-  unfold PayCellDomain.cellBytes
-  rw [show ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
-      (.live (PayCellDomain.packedCell planned.pay.cell)) =
-      (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).encode
-        (.live (PayCellDomain.packedCell planned.pay.cell)) from rfl,
-    ResourceBirthCodec.LifecycleImage.decode_encode]
+    ReceivingLaw.physicalBirth durable (payWrite planned) = false :=
+  -- Through the general lemma: unfolding `physicalBirth` at this concrete write has the kernel
+  -- decode the pay cell's bytes, which evaluates the Store layout digest (over two minutes).
+  ReceivingLaw.physicalBirth_false_of_live (cell := PayCellDomain.packedCell planned.pay.cell) (by
+    show (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).decode
+      (durable.snapshot.canonicalBytes (PayCellDomain.cellIdOf deployment)) = _
+    rw [planned.pay.observed]
+    exact (show (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).decode
+        ((ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).encode
+          (.live (PayCellDomain.packedCell planned.pay.cell))) = _ from
+      ResourceBirthCodec.LifecycleImage.decode_encode _ _))
 
 /-- **One judge, nothing weakened.**  Under the deployed laws, every committed
 report satisfies the full compiled admission the family's `prepare` no longer

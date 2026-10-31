@@ -38,7 +38,6 @@ def write(path, value):
     with Path(path).open("x") as stream:
         stream.write(json.dumps(value, sort_keys=True, indent=2) + "\n")
         stream.flush()
-        os.fsync(stream.fileno())
     os.chmod(path, 0o600)
 
 def candidate(manifest_path, expected, source):

@@ -734,6 +734,37 @@ pub(crate) struct RoomToolsConfig {
 
 fn restrict_tools_default() -> bool { true }
 
+/// One resident client per room tool identity: its pinned `mini`, Host,
+/// settings, socket, workspace and home (one client process pins each once).
+type RoomResidentKey = [PathBuf; 6];
+static ROOM_RESIDENTS: std::sync::Mutex<Vec<(RoomResidentKey, std::sync::Arc<crate::custody_gate::CustodyGate>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn room_resident(config: &RoomToolsConfig) -> Option<std::sync::Arc<crate::custody_gate::CustodyGate>> {
+    // Test room tools run one-shot `mini` scripts.
+    if cfg!(test) {
+        return None;
+    }
+    let key: RoomResidentKey = [config.mini.clone(), config.host.clone(), config.host_config.clone(),
+        config.socket.clone(), config.workspace.clone(), config.home.clone()];
+    let mut residents = ROOM_RESIDENTS.lock().ok()?;
+    if let Some((_, gate)) = residents.iter().find(|(k, _)| k == &key) {
+        return Some(gate.clone());
+    }
+    let gate = std::sync::Arc::new(crate::custody_gate::CustodyGate::with_resident(&config.mini, None));
+    residents.push((key, gate.clone()));
+    Some(gate)
+}
+
+/// End every idle room resident client (before a physical quiescence proof).
+pub(crate) fn retire_room_residents() -> Result<()> {
+    let residents = ROOM_RESIDENTS.lock().map_err(|_| "room resident registry poisoned")?;
+    for (_, gate) in residents.iter() {
+        gate.retire().map_err(|e| format!("room resident client: {e}"))?;
+    }
+    Ok(())
+}
+
 /// The room tools' MCP schemas (also the provider's function list).
 pub(crate) fn room_tool_specs() -> Vec<Value> {
     let name = json!({"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$",
@@ -963,11 +994,36 @@ impl RoomTools<'_> {
     /// pid before it is waited on (the controller journals it: a submitter it
     /// can later prove stopped).
     pub fn line_with(&self, line: &str, spawned: &mut dyn FnMut(u32)) -> Result<LineRun> {
-        self.line_with_input(line, None, spawned)
+        self.line_with_input(line, None, Some(spawned))
     }
 
-    fn line_with_input(&self, line: &str, input: Option<&[u8]>, spawned: &mut dyn FnMut(u32)) -> Result<LineRun> {
+    /// A line no journal names a submitter for runs as a frame to this room
+    /// identity's resident client (`room_resident`); a journaled write keeps
+    /// its own child, whose /proc cmdline is the proof it stopped.
+    fn line_with_input(&self, line: &str, input: Option<&[u8]>, spawned: Option<&mut dyn FnMut(u32)>) -> Result<LineRun> {
         let config = self.config;
+        let Some(spawned) = spawned else {
+            if let Some(gate) = room_resident(config) {
+                let arguments: Vec<&std::ffi::OsStr> = vec![
+                    "shell".as_ref(), "--socket".as_ref(), config.socket.as_os_str(), "--host".as_ref(),
+                    config.host.as_os_str(), "--config".as_ref(), config.host_config.as_os_str(),
+                    "--workspace".as_ref(), config.workspace.as_os_str(), "--home".as_ref(),
+                    config.home.as_os_str(), "--line".as_ref(), line.as_ref(),
+                ];
+                let out = gate
+                    .run_frame(&std::sync::atomic::AtomicBool::new(false), &arguments, input.unwrap_or(&[]), crate::deadline::NATIVE_CALL)
+                    .map_err(|e| match e {
+                        crate::custody_gate::CustodyError::Uncertain(e) => crate::deadline::describe("mini shell", e),
+                        other => format!("mini shell: {other}"),
+                    })?;
+                return Ok(LineRun {
+                    code: out.status.code().unwrap_or(-1),
+                    stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                    stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+                });
+            }
+            return self.line_with_input(line, input, Some(&mut |_| {}));
+        };
         let mut child = crate::deadline::spawn(Command::new(&config.mini)
             .arg("shell")
             .arg("--socket")
@@ -1005,8 +1061,24 @@ impl RoomTools<'_> {
         })
     }
 
+    /// A `mini` command no journal names a submitter for: a frame to the room
+    /// resident client, or (test room tools) its own child, under the same deadline.
+    fn client(&self, command: &mut Command) -> std::io::Result<std::process::Output> {
+        match room_resident(self.config) {
+            Some(gate) => {
+                let arguments: Vec<&std::ffi::OsStr> = command.get_args().collect();
+                gate.run_frame(&std::sync::atomic::AtomicBool::new(false), &arguments, &[], crate::deadline::NATIVE_CALL)
+                    .map_err(|e| match e {
+                        crate::custody_gate::CustodyError::Uncertain(e) => e,
+                        other => std::io::Error::other(other.to_string()),
+                    })
+            }
+            None => crate::deadline::output(command, crate::deadline::NATIVE_CALL),
+        }
+    }
+
     pub fn line(&self, line: &str) -> Result<LineRun> {
-        self.line_with(line, &mut |_| {})
+        self.line_with_input(line, None, None)
     }
 
     fn ok_or_ending(run: LineRun) -> Result<LineRun> {
@@ -1053,7 +1125,7 @@ impl RoomTools<'_> {
                 let bytes = serde_json::to_vec(cursor).map_err(|e| e.to_string())?;
                 if bytes.len() > 262144 { return Err("discovery cursor exceeds bound".into()); }
                 let n=bounded_decimal(arguments,"n",3)?.ok_or("discovery page size absent")?;
-                let run=Self::ok_or_ending(self.line_with_input(&format!("tail --in {room} --json --discover-json - -n {n}"), Some(&bytes), &mut |_| {})?)?;
+                let run=Self::ok_or_ending(self.line_with_input(&format!("tail --in {room} --json --discover-json - -n {n}"), Some(&bytes), None)?)?;
                 let mut docs=run.stdout.lines().filter_map(|l|serde_json::from_str::<Value>(l).ok());
                 let state=docs.next().ok_or("discovery printed no room state")?;
                 Ok(json!({"room":state,"entries":docs.collect::<Vec<_>>()}))
@@ -1131,18 +1203,23 @@ impl RoomTools<'_> {
             Err(error) => return Err(format!("operation record metadata: {error}")),
             Ok(_) => {}
         }
-        let output = crate::deadline::output(Command::new(&self.config.mini)
-            .args(["credit", "--action", "lookup-operation", "--dir"])
+        let mut command = Command::new(&self.config.mini);
+        command.args(["credit", "--action", "lookup-operation", "--dir"])
             .arg(&self.config.workspace).arg("--operation-record").arg(&record)
-            .arg("--socket").arg(&self.config.socket), crate::deadline::NATIVE_CALL)
-            .map_err(|e| crate::deadline::describe("operation lookup", e))?;
+            .arg("--socket").arg(&self.config.socket);
+        let output = self.client(&mut command).map_err(|e| crate::deadline::describe("operation lookup", e))?;
         let recovered = last_json(&String::from_utf8_lossy(&output.stdout));
-        let resolution = match recovered.as_ref().filter(|v| v["type"] == "minidregg-operation-recovery-v1").and_then(|v| v["status"].as_str()) {
+        let status = recovered.as_ref().filter(|v| v["type"] == "minidregg-operation-recovery-v1").and_then(|v| v["status"].as_str());
+        let resolution = match status {
             Some("confirmed") => "performed",
-            Some("refused" | "not-submitted") => "refused",
+            Some("refused") => "refused",
+            // "The Host never got the write" is not "the Host refused the write": only the latter is a
+            // verdict. It is its own resolution, so no caller can read it as a refusal by matching one value.
+            Some("not-submitted") => "not-submitted",
             _ => "uncertain",
         };
-        Ok(json!({"resolution":resolution,"basis":"exact-operation-record","effect":effect,
+        let basis = if status == Some("not-submitted") { "not-submitted" } else { "exact-operation-record" };
+        Ok(json!({"resolution":resolution,"basis":basis,"effect":effect,
             "lookup":recovered,"exitCode":output.status.code()}))
     }
 
@@ -1153,7 +1230,7 @@ impl RoomTools<'_> {
         let Some(account) = &self.config.account else {
             return Ok(json!({"paid":false,"note":"unmetered"}));
         };
-        let output = crate::deadline::output(Command::new(&self.config.mini)
+        let output = self.client(Command::new(&self.config.mini)
             .arg("credit")
             .arg("--action")
             .arg("turn")
@@ -1168,7 +1245,7 @@ impl RoomTools<'_> {
             .arg("--operation-record")
             .arg(self.operation_record(op, "payment")?)
             .arg("--socket")
-            .arg(&self.config.socket), crate::deadline::NATIVE_CALL)
+            .arg(&self.config.socket))
             // A timed-out payment may have been sent: the caller recovers it by
             // its exact operation record, never by this error's text.
             .map_err(|e| crate::deadline::describe("the turn's payment", e))?;
@@ -1400,6 +1477,28 @@ mod tests {
     }
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn a_lookup_keeps_a_never_submitted_write_apart_from_a_host_refusal() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("mini-lookup-basis-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let fake = root.join("mini");
+        fs::write(&fake, "#!/bin/sh\ncase \"$*\" in\n*lookup-operation*) echo \"{\\\"type\\\":\\\"minidregg-operation-recovery-v1\\\",\\\"status\\\":\\\"$STATUS\\\"}\" ;;\n*) exit 9 ;;\nesac\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let config: RoomToolsConfig = serde_json::from_value(json!({"mini":fake,"host":"/h","hostConfig":"/c",
+            "socket":"/s","workspace":root,"home":root,"room":"lab"})).unwrap();
+        let tools = RoomTools { config: &config };
+        fs::write(tools.operation_record("g1", "write").unwrap(), b"{}").unwrap();
+        for (status, resolution, basis) in [("not-submitted", "not-submitted", "not-submitted"),
+            ("refused", "refused", "exact-operation-record"), ("confirmed", "performed", "exact-operation-record")] {
+            std::env::set_var("STATUS", status);
+            let found = tools.lookup_operation("g1", "write").unwrap();
+            assert_eq!((found["resolution"].as_str(), found["basis"].as_str()), (Some(resolution), Some(basis)), "{status}");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn restrict_tools_is_on_unless_a_config_turns_it_off() {
@@ -1717,13 +1816,45 @@ mod tests {
         assert!(select_read(&reads, &json!({"name":90})).is_err());
     }
 
+    /// The room tools ARE the spec table (no list kept beside it), and metering is structural: every
+    /// spec is exactly one of a write tool (ROOM_WRITE_TOOLS, the only names the resident pays a room
+    /// turn for, which the unmetered read path refuses) or a read tool (the read path handles it, and
+    /// it has no write arm). A tool added to the table without a side fails here.
     #[test]
-    fn room_tools_are_seven_and_writes_are_metered() {
+    fn room_tools_are_the_spec_table_and_every_write_is_metered() {
+        use std::os::unix::fs::PermissionsExt;
         let names: Vec<String> = super::room_tool_specs().iter().map(|s| s["name"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(names, ["mini_room_ls", "mini_room_status", "mini_stream_tail", "mini_say", "mini_doc_context", "mini_doc_show", "mini_doc_link", "mini_doc_review", "mini_doc_append"]);
+        let mut unique = names.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len(), "each tool is named once: {names:?}");
         for write in super::ROOM_WRITE_TOOLS {
-            assert!(names.iter().any(|n| n == write));
+            assert!(names.iter().any(|n| n == write), "{write} is metered but not offered");
         }
+        let root = std::env::temp_dir().join(format!("mini-room-sides-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&root).unwrap();
+        let mini = root.join("mini");
+        let ran = root.join("ran.txt");
+        fs::write(&mini, format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexit 7\n", ran.display())).unwrap();
+        fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = RoomToolsConfig { restrict_tools:true, mini, host:"/unused".into(), host_config:"/unused".into(), socket:"/unused".into(), workspace:root.join("workspace"), home:root.join("home"), room:"lab".into(), account:Some("lab-hermes".into()) };
+        let tools = RoomTools { config:&config };
+        for name in &names {
+            let read = tools.read(name, &json!({}));
+            let not_read = matches!(&read, Err(e) if e == &format!("{name} is not a room read tool"));
+            if super::ROOM_WRITE_TOOLS.contains(&name.as_str()) {
+                assert!(not_read, "{name} writes, so the unmetered read path must refuse it: {read:?}");
+            } else {
+                assert!(!not_read, "{name} is offered and not metered, so it must be a read tool");
+                let write = tools.write("op1", name, &json!({}), &mut |_| {});
+                assert!(matches!(&write, Err(e) if e == &format!("{name} is not a room write tool")),
+                    "{name} is not metered, so it must have no write arm: {write:?}");
+            }
+        }
+        // No read ever spends: nothing a read tool ran names an operation record (the write's payment proof).
+        let lines = fs::read_to_string(&ran).unwrap_or_default();
+        assert!(!lines.contains("--operation-record") && !lines.contains("pay"), "{lines}");
+        let _ = fs::remove_dir_all(&root);
         // The seams are not offered.
         assert!(!super::is_room_tool("mini_doc_quote") && !super::is_room_tool("mini_doc_history"));
         // No tool takes a room, a capability or a proposal id from the model.

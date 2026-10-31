@@ -880,7 +880,7 @@ pub(crate) enum Plan {
     Template { label: String, lines: Vec<(usize, String)> },
     /// Local text for stdout.
     Text(String),
-    History { all: bool },
+    History { all: bool, newest: Option<usize> },
     Help(Option<String>),
     /// A chat verb (`crate::chat`): it composes several client operations.
     Chat(crate::chat::Line),
@@ -1431,7 +1431,11 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         }
         "history" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::HISTORY, &w)?;
-            Plan::History { all: p.opt(0).is_some() }
+            let newest = match p.flag("-n") {
+                Some(Some(n)) => Some(n.parse::<usize>().map_err(|_| format!("history: -n takes a count, not {n}"))?),
+                _ => None,
+            };
+            Plan::History { all: p.opt(0).is_some(), newest }
         }
         "keygen" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::KEYGEN, &w)?;
@@ -2286,15 +2290,42 @@ fn attempt_status(dir: &Path) -> (bool, String) {
     (false, "incomplete (no call, no outcome)".into())
 }
 
-fn history(session: &Session, all: bool) {
+/// Retained evidence, oldest first. `newest`: only the newest N rows. An attempt's status reads
+/// its directory and outcome; the listing orders attempts by their directory's mtime first (one
+/// stat each), so a page of the newest N reads N attempts, not every one the workspace retains.
+fn history(session: &Session, all: bool, newest: Option<usize>) {
     let mut rows: Vec<(std::time::SystemTime, String)> = Vec::new();
     if let Ok(entries) = fs::read_dir(session.workspace.join("attempts")) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
-            let (interesting, status) = attempt_status(&entry.path());
+        let mut attempts: Vec<(std::time::SystemTime, String, PathBuf)> = entries
+            .flatten()
+            .map(|entry| {
+                let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                (modified, entry.file_name().to_string_lossy().into_owned(), entry.path())
+            })
+            .collect();
+        attempts.sort_by(|a, b| b.cmp(a));
+        let mut kept = 0usize;
+        for (modified, name, path) in attempts {
+            if newest.is_some_and(|n| kept >= n) {
+                break;
+            }
+            let (interesting, status) = attempt_status(&path);
             if all || interesting {
                 rows.push((modified, format!("attempt\t{name}\t{status}")));
+                kept += 1;
+            }
+        }
+    }
+    // Signed reads keep one journal line each (`read-journal.tsv`, rotated at 1 MiB), not an attempt.
+    if all {
+        for journal in ["read-journal.tsv.1", "read-journal.tsv"] {
+            let Ok(text) = fs::read_to_string(session.workspace.join(journal)) else { continue };
+            for line in text.lines() {
+                let cells: Vec<&str> = line.split('\t').collect();
+                if let [unix, height, "read", outcome, _, name] = cells[..] {
+                    let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix.parse().unwrap_or(0));
+                    rows.push((at, format!("read\t{name}\tsigned read, {outcome} at height {height}")));
+                }
             }
         }
     }
@@ -2318,6 +2349,9 @@ fn history(session: &Session, all: bool) {
         }
     }
     rows.sort();
+    if let Some(n) = newest {
+        rows.drain(..rows.len().saturating_sub(n));
+    }
     println!("# local retained evidence, oldest first; authority: discovery-only");
     for (_, row) in rows {
         println!("{row}");
@@ -2486,6 +2520,18 @@ fn describe_plan(planned: &Plan) -> String {
     }
 }
 
+/// `--plan` for one line, run nothing: (exit code, stdout, stderr). The grammar accepted the words
+/// but the plan builder refused on a fact of this workspace (an open room given a private room's
+/// declaration, a template file that does not parse): exit 1, named as such. The grammar's own
+/// refusal: usage.
+pub(crate) fn plan_ending(session: &Session, text: &str) -> (i32, String, String) {
+    match plan(session, text) {
+        Ok(planned) => (EXIT_OK, format!("plan: {}\n", describe_plan(&planned)), String::new()),
+        Err(message) if grammar_accepts(text) => (EXIT_CLIENT, String::new(), format!("error: parsed, not plannable here: {message}\n")),
+        Err(message) => (EXIT_USAGE, String::new(), render(&Ending::Usage(message)).1),
+    }
+}
+
 /// Run one line; returns (exit code, keep going).
 pub(crate) fn line(session: &Session, text: &str) -> (i32, bool) {
     let started = std::time::Instant::now();
@@ -2507,8 +2553,8 @@ fn line_untraced(session: &Session, text: &str) -> (i32, bool) {
             print!("{}", help_text(topic.as_deref()));
             Ending::Done
         }
-        Ok(Plan::History { all }) => {
-            history(session, all);
+        Ok(Plan::History { all, newest }) => {
+            history(session, all, newest);
             Ending::Done
         }
         Ok(Plan::Inbox) => {
@@ -2806,7 +2852,23 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     // `--plan`: parse and plan the one line, print the plan, run nothing (the per-leaf dry run of
     // the web front end's parity row; a usage error is the shell's usage ending, exit 2).
     let plan_only = args.optional("plan").is_some();
+    let slots = args.optional("call-slots").map(|d| absolute(d, "call-slots")).transpose()?;
     args.finish()?;
+    // `--call-slots DIR` (the ssh forced command): at most two calls per member at once. The
+    // Store serves every member from one queue, so one member's flood of reads would queue
+    // everyone's. Each call holds one of two locks in DIR for its life and the third is refused by
+    // name; the descriptor is close-on-exec, so nothing this call starts keeps a slot.
+    let _slot = match slots {
+        Some(dir) => match take_call_slot(&dir)? {
+            Some(slot) => Some(slot),
+            None => {
+                eprintln!("mini-shell-ssh: two calls already running for this member; wait for one to finish");
+                crate::swap_exit_status(75);
+                return Ok(());
+            }
+        },
+        None => None,
+    };
     let _ = crate::keys::STDIN_FREE.set(one.is_some());
     // A session over a workspace that already pins its Host takes host,
     // config and socket from that pin (a remote workspace from `mini join`
@@ -2832,23 +2894,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let code = if let Some(one) = one {
         let text = one.into_string().map_err(|_| "--line must be UTF-8")?;
         if plan_only {
-            match plan(&session, &text) {
-                Ok(planned) => {
-                    println!("plan: {}", describe_plan(&planned));
-                    EXIT_OK
-                }
-                // The grammar accepted the words but the plan builder refused on a fact of this
-                // workspace (an open room given a private room's declaration, a template file
-                // that does not parse): exit 1, named as such. The grammar's own refusal: usage.
-                Err(message) if grammar_accepts(&text) => {
-                    eprintln!("error: parsed, not plannable here: {message}");
-                    EXIT_CLIENT
-                }
-                Err(message) => {
-                    eprint!("{}", render(&Ending::Usage(message)).1);
-                    EXIT_USAGE
-                }
-            }
+            let (code, out, err) = plan_ending(&session, &text);
+            print!("{out}");
+            eprint!("{err}");
+            code
         } else {
             line(&session, &text).0
         }
@@ -2884,11 +2933,50 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         last
     };
     let _ = io::stdout().flush();
-    std::process::exit(code);
+    // The last line's code is the exit status, exactly (`main_ending` adds
+    // nothing to it), so a process that runs many commands (`capture::serve`)
+    // goes on after the shell.
+    let _ = crate::take_command_ending();
+    crate::swap_exit_status(u8::try_from(code).unwrap_or(1));
+    Ok(())
+}
+
+/// One of the two call slots in `dir`, held (an exclusive `flock`) while the returned file lives;
+/// `None` when both are held.
+fn take_call_slot(dir: &Path) -> Result<Option<fs::File>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+    crate::fsio::ensure_private_dir_all(dir)?;
+    for name in ["1", "2"] {
+        let path = dir.join(name);
+        let file = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("call slot {}: {e}", path.display()))?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(Some(file));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_third_call_finds_no_slot() {
+        let dir = std::env::temp_dir().join(format!("slots-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let one = super::take_call_slot(&dir).unwrap().expect("first slot");
+        let two = super::take_call_slot(&dir).unwrap().expect("second slot");
+        assert!(super::take_call_slot(&dir).unwrap().is_none());
+        drop(one);
+        assert!(super::take_call_slot(&dir).unwrap().is_some());
+        drop(two);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn refusals_keep_only_the_newest() {
         let dir = std::env::temp_dir().join(format!("refusals-{}", std::process::id()));

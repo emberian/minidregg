@@ -22,7 +22,7 @@ def frame (pin : ParticipantPin) : Bytes :=
   acknowledgementFrame ⟨pin.participant,pin.publicKey,pin.identity,pin.acknowledged⟩
 
 /-- Exact current/next pin files are compared by the SAME streaming native CAS
-transport as agreement storage, with stable lock and fsync/rename/dir-fsync.
+transport as agreement storage, with stable lock and rename.
 Only public pin bytes enter this participant directory. -/
 private def cas (config : Config) (expected next : Bytes) : IO Unit := do
   IO.FS.withTempDir fun directory => do

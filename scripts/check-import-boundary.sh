@@ -6,7 +6,7 @@
 # (each row names only libraries whose own rows lie inside it), so for those three the
 # transitive closure is checked too.
 #
-#   Theory    Mathlib Lean Theory                                           the metatheory never knows the candidate
+#   Theory    Mathlib Lean Std Theory                                       the metatheory never knows the candidate
 #   Selvage   Mathlib Theory Selvage                                        the proof system knows only the metatheory
 #   Effects   Mathlib Lean Theory Effects                                   the derivation engine: a generator over Theory
 #   Pred      Mathlib Theory Pred
@@ -51,7 +51,7 @@ import subprocess, sys
 sys.path.insert(0, "scripts")
 from lean_imports import header_imports, header_layout
 ALLOWED = {
-    "Theory":    {"Mathlib", "Lean", "Theory"},
+    "Theory":    {"Mathlib", "Lean", "Std", "Theory"},
     "Selvage":   {"Mathlib", "Theory", "Selvage"},
     "Effects":   {"Mathlib", "Lean", "Theory", "Effects"},
     "Pred":      {"Mathlib", "Theory", "Pred"},

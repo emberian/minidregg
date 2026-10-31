@@ -10,11 +10,8 @@ def read(path): return json.loads(Path(path).read_text())
 def save(path, value):
     path=Path(path); temporary=path.with_suffix(path.suffix+'.pending')
     with open(temporary,'x') as stream:
-        json.dump(value,stream,indent=2);stream.write('\n');stream.flush();os.fsync(stream.fileno())
+        json.dump(value,stream,indent=2);stream.write('\n');stream.flush()
     os.chmod(temporary,0o600);os.replace(temporary,path)
-    fd=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
-    try: os.fsync(fd)
-    finally: os.close(fd)
 def classify(role, grain):
     names=('generation','status','remaining','reserved')
     require(all(type(grain.get(k)) is str and grain[k].isdecimal() and str(int(grain[k]))==grain[k] for k in names),'noncanonical native task state')

@@ -145,7 +145,7 @@ pub mod store {
         let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
             .open(dir.join(format!("{name}.json")))
             .map_err(|e| format!("profile {name}: {e}"))?;
-        f.write_all(record.to_string().as_bytes()).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
+        f.write_all(record.to_string().as_bytes()).map_err(|e| e.to_string())?;
         Ok(profile)
     }
 }

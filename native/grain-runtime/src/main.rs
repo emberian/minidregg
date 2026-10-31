@@ -2608,7 +2608,6 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
         .open(path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
     file.write_all(bytes)
-        .and_then(|_| file.sync_all())
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -2878,6 +2877,29 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
     Ok(Some(value))
 }
 
+/// One storeless codec frame (`Host.Main.pureCodec`, ops 7-11) to this user's
+/// resident codec Host for the controller's pinned Host and settings, started
+/// as the exact supervisor the quiescence proof admits (`cgroup_stop`). The
+/// answer is the body; a refusal is reported with the Host's own decoding.
+fn codec_frame(config: &Config, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
+    static CODEC: Mutex<mini_sdk::local::Codec> = Mutex::new(mini_sdk::local::Codec::new());
+    let environment = std::env::var_os("MINI_LOCAL_HOST");
+    let host = mini_sdk::host_selection::select_semantic_host(None, environment.as_deref(), &config.host)
+        .map_err(|e| e.to_string())?;
+    let mut codec = CODEC.lock().map_err(|_| "codec lock poisoned")?;
+    codec
+        .frame_with(&host, &config.host_config, operation, payload, &|executable, settings, settings_bytes| {
+            let mut launch = Command::new(&config.mini);
+            launch.arg("codec-resident").arg("--host").arg(&executable).arg("--settings").arg(settings);
+            mini_sdk::consent::connect_resident_kind(mini_sdk::consent::ResidentKind::Codec, &executable, settings_bytes, launch)
+        })
+        .map_err(|error| match error {
+            mini_sdk::local::CodecError::Failed(reason) => reason,
+            mini_sdk::local::CodecError::Refused { decoded, .. } => format!("the codec refused: {}",
+                decoded.map(|v| v.to_string()).unwrap_or_else(|| "undecoded".into())),
+        })
+}
+
 fn valid_workspace_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
@@ -2918,6 +2940,19 @@ fn newest_new_retry(
     let value = serde_json::from_slice(&bounded_regular_file(&attempt.join(name), 131_072)?)
         .map_err(|e| format!("retained lookup record JSON: {e}"))?;
     Ok(Some(value))
+}
+
+/// A retained lookup's outcome file says the Host holds no record of the exact call (`absent`).
+fn outcome_was_absent(outcome: &Path) -> bool {
+    fs::read(outcome).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|v| v.get("type").and_then(Value::as_str) == Some("absent"))
+}
+
+/// The operator's audited reconciliation of a pending operation's slot (`admin ... 'reconcile ...'`).
+fn admin_slot_word(operation: &str) -> &'static str {
+    if operation.starts_with("tool") { "tool audited" }
+    else if operation.starts_with("dispatch") { "dispatch audited fixed|zero" }
+    else { "parent audited" }
 }
 
 fn next_retry_json(attempt: &Path) -> Result<PathBuf> {
@@ -3719,6 +3754,9 @@ struct Runtime {
     signal_lock: Arc<Mutex<()>>,
     cancelled: Arc<AtomicBool>,
     custody_gate: Arc<custody_gate::CustodyGate>,
+    /// `command_capture`'s Mini commands: one resident client, never cancelled
+    /// by hard EOF (those children ran to their end or their deadline).
+    native_gate: custody_gate::CustodyGate,
     /// Set when the last `command_output` child exited with a status and
     /// every holder of its output pipes closed them: the sender is reaped.
     custody_exit_reaped: AtomicBool,
@@ -6338,28 +6376,16 @@ impl Runtime {
         {
             return Err("lifetime ingress differs from exact source paid plan".into());
         }
-        let committed_arg = committed_path.to_str().ok_or("lifetime frame path UTF-8")?;
-        let committed_view_arg = committed_view_path
-            .to_str()
-            .ok_or("lifetime committed inspection path UTF-8")?;
-        let mut inspect_committed = Command::new(host);
-        inspect_committed.args([
-            config,
-            "inspect",
-            "application-agent-lifetime-dispatch-committed",
-            committed_arg,
-            committed_view_arg,
-        ]);
-        let inspected = self
-            .custody_gate
-            .run_capture(&self.cancelled, &mut inspect_committed)
+        // The pure inspection is one frame to the resident codec Host (the
+        // controller's one stateless codec pair), not a fresh Host process.
+        let inspected = codec_frame(&self.config, mini_sdk::host_operations::INSPECT,
+            &mini_sdk::local::kind("application-agent-lifetime-dispatch-committed", &committed)
+                .map_err(|e| e.to_string())?)
             .map_err(|error| format!("lifetime committed source inspection: {error}"))?;
-        if !inspected.status.success() {
-            return Err(format!(
-                "lifetime committed source inspection refused: {}",
-                inspected.status
-            ));
+        if inspected.len() > 2_097_152 {
+            return Err("lifetime committed inspection exceeds its bound".into());
         }
+        write_new(&committed_view_path, &inspected)?;
         let committed_view: Value =
             serde_json::from_slice(&bounded_regular_file(&committed_view_path, 2_097_152)?)
                 .map_err(|error| format!("lifetime committed inspection JSON: {error}"))?;
@@ -6842,6 +6868,15 @@ impl Runtime {
             j
         };
         let process_first_operation_id = journal.next_operation_id;
+        // The test runtimes' `mini` are one-shot scripts; the resident gate has its own tests.
+        // Every Mini command through the custody gate set umask 0o077; command_capture's inherited it.
+        #[cfg(not(test))]
+        let (custody_gate, native_gate) = (
+            Arc::new(custody_gate::CustodyGate::with_resident(&config.mini, Some(0o077))),
+            custody_gate::CustodyGate::with_resident(&config.mini, None),
+        );
+        #[cfg(test)]
+        let (custody_gate, native_gate) = (Arc::new(custody_gate::CustodyGate::new()), custody_gate::CustodyGate::new());
         let mut rt = Self {
             config,
             config_path,
@@ -6853,7 +6888,8 @@ impl Runtime {
             hard_connection: Arc::new(AtomicBool::new(false)),
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
-            custody_gate: Arc::new(custody_gate::CustodyGate::new()),
+            custody_gate,
+            native_gate,
             custody_exit_reaped: AtomicBool::new(false),
             application_api_send_gate: Arc::new(application_api_tools::ForwardSendGate::new()),
             completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),
@@ -7531,19 +7567,69 @@ impl Runtime {
         }
         Ok(deadline::NATIVE_CALL)
     }
+    /// The exact lookup of a pending call found no record of it (`absent`: the Host never admitted
+    /// these bytes, e.g. the Store was not answering when the controller first sent them at boot).
+    /// Absence is not a refusal, so nothing is dropped: the retained signed call is submitted once
+    /// more, byte for byte (`retry --mode submit`). The Host admits an exact retry at most once and
+    /// answers a call it already holds with its original receipt, so this decides the call instead
+    /// of leaving the task fenced. A confirmation proceeds exactly as a confirmed lookup does; a
+    /// refusal or a second undecided answer is returned by name, with the operator verb that
+    /// resolves it. Returns the confirmed outcome's path.
+    fn resubmit_absent_call(&mut self, p: &Pending, lookup: &str) -> Result<PathBuf> {
+        let submitted = next_retry_json(&p.attempt)?;
+        let id = self.next_id()?;
+        let attempt = p.attempt.to_str().ok_or("attempt path UTF-8")?;
+        let socket = self.config.host_socket.clone();
+        let mut args = vec!["retry", "--attempt", attempt, "--mode", "submit"];
+        if let Some(socket) = &socket {
+            args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
+        }
+        let decided = self.command_output(&self.config.mini, &args);
+        self.journal.reconciliation_log.push(json!({
+            "decisionId":id.to_string(),"action":"resubmit-absent-exact-call",
+            "operationId":p.operation_id.to_string(),"operation":p.operation,"attempt":p.attempt,
+            "lookup":lookup,"outcome":submitted,
+            "result":match &decided { Ok(()) => "confirmed".to_owned(), Err(e) => e.clone() }
+        }));
+        self.save()?;
+        decided.map_err(|error| format!(
+            "{} {} was absent at the Host and its exact retained call, submitted once more, did not confirm: {error}; \
+             the attempt is {}; resolve it with `grain-runtime admin {} 'reconcile {}'`",
+            p.operation, p.operation_id, p.attempt.display(),
+            self.config.state_dir.join("admin.sock").display(), admin_slot_word(&p.operation)))?;
+        Ok(submitted)
+    }
+
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
         self.command_capture(program, args).map(|_| ())
     }
     fn command_capture(&self, program: &Path, args: &[&str]) -> Result<std::process::Output> {
         self.custody_exit_reaped.store(false, Ordering::SeqCst);
-        let output = deadline::output(Command::new(program).args(args), self.native_work_limit()?).map_err(|e| {
+        let mut command = Command::new(program);
+        command.args(args);
+        let output = if self.native_gate.has_resident() && program == self.config.mini {
+            // A frame to the resident client; at the deadline it is killed with its group and reaped.
+            self.native_gate
+                .run_capture_until(&AtomicBool::new(false), &mut command, self.native_work_limit()?)
+                .map_err(|error| match error {
+                    custody_gate::CustodyError::Uncertain(e) => {
+                        if e.kind() == std::io::ErrorKind::TimedOut {
+                            self.custody_exit_reaped.store(true, Ordering::SeqCst);
+                        }
+                        deadline::describe(&program.display().to_string(), e)
+                    }
+                    custody_gate::CustodyError::BeforeSpawn => format!("{}: not started", program.display()),
+                })?
+        } else {
+        deadline::output(&mut command, self.native_work_limit()?).map_err(|e| {
             // At the deadline deadline::wait killed the child's whole process
             // group and reaped the leader: the sender is stopped too.
             if e.kind() == std::io::ErrorKind::TimedOut {
                 self.custody_exit_reaped.store(true, Ordering::SeqCst);
             }
             deadline::describe(&program.display().to_string(), e)
-        })?;
+        })?
+        };
         if !output.status.success() {
             // deadline::output returned a status and both pipes at EOF: the
             // child is reaped and no descendant still holds its output.
@@ -13423,7 +13509,7 @@ impl Runtime {
             self.save()?;
             let result = if request.name == "mini_application_api" || oracle_tools::is_tool(&request.name) {
                 let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
-                self.foreground_application_api(&arguments, input)?
+                self.foreground_application_api(&arguments, input, false)?
             } else if typed_applications::is_foreground_name(&request.name) {
                 self.foreground_typed_application(&request.name, &request.arguments, input)?
             } else {
@@ -13824,7 +13910,7 @@ impl Runtime {
         let payload = typed_applications::foreground_arguments(entry, arguments, qualify)?;
         let mut forward = |request: Value| -> Value {
             let reply = typed_applications::raw_arguments(&attachments, &request)
-                .and_then(|mapped| self.foreground_application_api(&mapped, input));
+                .and_then(|mapped| self.foreground_application_api(&mapped, input, true));
             match reply {
                 Ok(value) => value,
                 Err(error) => json!({"isError":true,"text":error}),
@@ -13837,16 +13923,19 @@ impl Runtime {
         })
     }
 
+    /// `raw` asks for the verified Host frame itself (what a typed executor parses), not the
+    /// model presentation `mini_application_api` shows; it needs a lifetime route.
     fn foreground_application_api(
         &mut self,
         arguments: &Value,
         input: &Receiver<Input>,
+        raw: bool,
     ) -> Result<Value> {
         let operation_id = self.foreground_operation.ok_or("foreground API invocation absent")?;
         self.foreground_api_budget = Some(ForegroundApiBudget::new(operation_id));
         let result = (|| {
             let (reply, received) = mpsc::channel();
-            let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
+            let mut active = Some(self.begin_application_api(arguments, reply, None, raw)?);
             loop {
                 self.poll_application_api(&mut active)?;
                 if let Ok(value) = received.try_recv() {
@@ -16960,6 +17049,12 @@ impl Runtime {
         if tool && self.journal.birth_operation.is_some() {
             return Err("resource birth has a durable no-dispatch or refused marker; settle it at zero through recover".into());
         }
+        if audited {
+            self.resolve_pending_attempts()?;
+        }
+        if self.journal.provider_hold.is_some() || self.journal.provider_attempt.is_some() {
+            return Err("the provider's held allowance is not settled yet: run `reconcile provider audited` first, then this".into());
+        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -17137,7 +17232,30 @@ impl Runtime {
     fn reconcile_provider_audited(&mut self) -> Result<()> {
         self.reconcile_provider_evidence(false)
     }
+    /// An operator's reconciliation first resolves every pending native attempt itself, as startup
+    /// recovery does (`retry_pending_slot`: the exact lookup, the exact retained call once more when the
+    /// lookup is absent, or retiring a settle the continuity gate refused before it was signed, under
+    /// the controller's stop proof). A pending attempt is therefore never a reason the operator's verb
+    /// refuses with no way forward: it is resolved, or the reason it cannot be is returned by name.
+    /// A live worker still refuses: nothing is resolved under it.
+    fn resolve_pending_attempts(&mut self) -> Result<()> {
+        if self.child.is_some() || self.journal.child.is_some() {
+            return Err("reconciliation needs the worker stopped first (a live worker holds the attempts)".into());
+        }
+        for (slot, label) in [(AuthoritySlot::Provider, "provider"), (AuthoritySlot::Parent, "parent"),
+            (AuthoritySlot::Tool, "tool"), (AuthoritySlot::Dispatch, "dispatch")] {
+            if let Some(pending) = self.journal.pending_for(slot).clone() {
+                self.retry_pending_slot(slot).map_err(|e| format!(
+                    "the pending {label} attempt {} ({}) could not be resolved: {e}", pending.operation_id, pending.operation))?;
+            }
+        }
+        Ok(())
+    }
+
     fn reconcile_provider_evidence(&mut self, automatic: bool) -> Result<()> {
+        if !automatic {
+            self.resolve_pending_attempts()?;
+        }
         if automatic {
             self.require_delivered_provider_response()?;
             if self.startup_recovery_active {
@@ -17785,8 +17903,13 @@ impl Runtime {
                     // Generic lookup refusal is not evidence that an old call
                     // could never commit. Only the guarded resolver above has
                     // the additional exact-prefix and expired-call witness.
-                    self.command_output(&self.config.mini, &args)?;
-                    retry_result
+                    match self.command_output(&self.config.mini, &args) {
+                        Ok(()) => retry_result,
+                        Err(lookup) if outcome_was_absent(&retry_result) => {
+                            self.resubmit_absent_call(&p, &lookup)?
+                        }
+                        Err(lookup) => return Err(lookup),
+                    }
                 }
             };
             let provider_settlement = if slot == AuthoritySlot::Provider
@@ -17995,7 +18118,7 @@ fn record_unit_cpu(state_dir: &Path, unit: &str) -> Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)
         .map_err(|e| format!("cpu record: {e}"))?;
     file.write_all(format!("mini-grain-cpu-v1 {}\n", nsec.div_ceil(1000)).as_bytes())
-        .and_then(|_| file.sync_all()).map_err(|e| format!("cpu record: {e}"))?;
+        .map_err(|e| format!("cpu record: {e}"))?;
     fs::rename(&temporary, &path).map_err(|e| format!("cpu record: {e}"))
 }
 
@@ -19829,6 +19952,98 @@ mod tests {
         fs::write(attempt.join("call.bin"), b"a call may have been dispatched").unwrap();
         assert!(inspected_pre_submit_refusal(&config, &attempt).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A controller started before the Store answered left a pending call whose exact lookup is
+    /// `absent`. Startup recovery submits the exact retained call once more (the Host admits an exact
+    /// retry once) and proceeds on its confirmation; a refusal of it is named with the operator verb,
+    /// never a silent fence.
+    fn absent_lookup_world(tag: &str, submit_answer: &str) -> (PathBuf, Runtime, PathBuf) {
+        let root = std::env::temp_dir().join(format!("grain-absent-{tag}-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let state = root.join("state");
+        fs::create_dir(&state).unwrap();
+        let attempt = state.join("attempt-0000000000000019");
+        fs::create_dir(&attempt).unwrap();
+        fs::write(attempt.join("call.bin"), b"retained signed call").unwrap();
+        let mini = root.join("controlled-mini");
+        let script = r#"#!/bin/sh
+set -eu
+[ "$1" = retry ] || exit 40
+attempt=$3
+mode=$5
+echo "$mode" >> "$attempt/modes.log"
+n=$(ls "$attempt" | grep -c '^retry-.*\.json$' || true)
+out=$(printf '%s/retry-%04d.json' "$attempt" $((n + 1)))
+if [ "$mode" = lookup ]; then
+  printf '%s\n' '{"type":"absent"}' > "$out"
+  echo "undecided: Host outcome absent; the effect is unknown, so do not repeat the operation: look up the exact retained call" >&2
+  exit 4
+fi
+printf '%s\n' '__SUBMIT__' > "$out"
+case '__SUBMIT__' in *confirmed*) exit 0 ;; *) echo "refused: stale: the authority root moved" >&2; exit 3 ;; esac
+"#.replace("__SUBMIT__", submit_answer);
+        fs::write(&mini, script).unwrap();
+        fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = Config {
+            mini, host: root.join("host"), host_config: root.join("host-config.json"), host_socket: None,
+            startup_timeout_seconds: None, consent_full_readiness: None, control_socket: state.join("control.sock"),
+            custody_key: root.join("parent.key"), state_dir: state.clone(), cwd: root.clone(), task: "9872001".into(),
+            subject: "7".into(), capability: "71".into(), query_capability: "74".into(), policy_control_capability: None,
+            sandbox: None, foreground_tool: None, dispatch_task: None, tool_task: None, provider_task: None, commands: vec![],
+        };
+        let mut runtime = Runtime::open(config, root.join("config.json")).unwrap();
+        runtime.journal.connection = Connection::Hard;
+        runtime.journal.pending = Some(Pending { operation_id: 19, operation: "disconnect".into(), attempt: attempt.clone(), uncertain: true, publication: None });
+        runtime.save().unwrap();
+        (root, runtime, attempt)
+    }
+
+    #[test]
+    fn an_absent_pending_call_is_decided_by_its_exact_retained_bytes_not_fenced() {
+        let (root, mut runtime, attempt) = absent_lookup_world("ok",
+            r#"{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}"#);
+        runtime.retry_pending_slot(AuthoritySlot::Parent).unwrap();
+        assert_eq!(fs::read_to_string(attempt.join("modes.log")).unwrap(), "lookup\nsubmit\n", "a lookup, then one exact resubmit");
+        assert!(runtime.journal.pending.is_none(), "the call is decided");
+        assert!(matches!(runtime.journal.connection, Connection::Detached), "the confirmed disconnect proceeds");
+        let entry = runtime.journal.reconciliation_log.iter().find(|e| e["action"] == "resubmit-absent-exact-call").unwrap();
+        assert_eq!((entry["operationId"].as_str(), entry["result"].as_str()), (Some("19"), Some("confirmed")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The operator's audited reconciliation resolves a pending native attempt itself before it
+    /// settles anything: an absent attempt no longer makes the verb refuse with no way forward.
+    #[test]
+    fn an_operator_reconciliation_resolves_the_pending_attempt_it_used_to_refuse_on() {
+        let (root, mut runtime, attempt) = absent_lookup_world("admin",
+            r#"{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}"#);
+        let error = runtime.reconcile_hold(false, true).unwrap_err();
+        assert_ne!(error, "reconciliation requires no live worker or unresolved custody attempt");
+        assert_eq!(error, "no durable held allowance for this authority", "it got past the pending attempt: {error}");
+        assert!(runtime.journal.pending.is_none());
+        assert_eq!(fs::read_to_string(attempt.join("modes.log")).unwrap(), "lookup\nsubmit\n");
+        // A provider allowance still held is named with the verb that settles it.
+        runtime.journal.provider_attempt = None;
+        runtime.journal.provider_hold = Some(serde_json::from_value(serde_json::json!({"reserve":"1","charge":"0","beforeGeneration":"1",
+            "beforeTargetRoot":"1","reserveConfirmed":true,"reserveRefused":false})).unwrap());
+        let error = runtime.reconcile_hold(false, true).unwrap_err();
+        assert!(error.contains("run `reconcile provider audited` first"), "{error}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_refused_resubmit_of_an_absent_call_is_named_with_the_operator_verb() {
+        let (root, mut runtime, attempt) = absent_lookup_world("refused",
+            r#"{"type":"refused","reason":"stale","phase":"","detail":""}"#);
+        let error = runtime.retry_pending_slot(AuthoritySlot::Parent).unwrap_err();
+        assert!(error.contains("disconnect 19 was absent at the Host") && error.contains("refused: stale")
+            && error.contains("'reconcile parent audited'") && error.contains("attempt-0000000000000019"), "{error}");
+        assert!(runtime.journal.pending.is_some(), "a refusal drops nothing: the operator decides");
+        assert_eq!(fs::read_to_string(attempt.join("modes.log")).unwrap(), "lookup\nsubmit\n", "resubmitted once, never looped");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

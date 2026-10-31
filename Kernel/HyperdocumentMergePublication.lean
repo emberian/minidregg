@@ -16,6 +16,7 @@ Physical compare-and-swap, persistence, consensus, finality and cryptographic
 binding remain obligations of `HandlerBoundary`.  No ancestry/common-base fact
 is introduced here.
 -/
+import Mathlib.Tactic.DeriveFintype
 import Kernel.HyperdocumentMerge
 import Kernel.MultiCellHyperedge
 

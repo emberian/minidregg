@@ -59,7 +59,6 @@ fn author_reply<'a>(host: &Path, config: &Path, directory: &Path,
     author_reply_with_outcome(frame, operation, |body| {
         let input = directory.join(format!("op{operation}-outcome.bin"));
         create_private(&input, body)?;
-        sync_directory_ancestors(directory)?;
         source_inspect(host, config, "outcome", &input,
             &directory.join(format!("op{operation}-outcome.json")))
     })
@@ -95,7 +94,7 @@ struct Pin {
 }
 
 fn pin(directory: &Path) -> Result<Pin> {
-    crate::fsio::ensure_private_dir_durable(directory)?;
+    crate::fsio::ensure_private_dir(directory)?;
     let value = inspected(directory, "pin.json")?;
     if field(&value, "format")? != FORMAT {
         return Err("unsupported enrollment custody pin".into());
@@ -158,7 +157,6 @@ pub(super) fn plan(
     let config_bytes = bounded(&config, 65_536)?;
     let host_sha = host_image_sha256(&host)?;
     crate::fsio::create_private_dir(&directory)?;
-    sync_directory_ancestors(&directory)?;
     create_private(&directory.join("source.json"), &source_bytes)?;
     create_private(&directory.join("config.json"), &config_bytes)?;
     let request_path = directory.join("request.bin");
@@ -188,7 +186,6 @@ pub(super) fn plan(
     }
     let frame = session_invoke(&host, &socket, &config, PLAN_OP, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     let plan_bytes = author_reply(&host, &config, &directory, &frame, PLAN_OP)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
@@ -321,11 +318,9 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
         &pair,
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pinned)?;
     let ingress = author_reply(&pinned.host, &pinned.config, &directory, &frame, ASSEMBLE_OP)?;
     create_private(&directory.join("ingress.bin"), ingress)?;
-    sync_retained_call(&directory, &directory.join("ingress.bin"))?;
     let inspection = source_inspect(
         &pinned.host,
         &pinned.config,
@@ -400,7 +395,6 @@ fn outcome(directory: &Path, stem: &str, frame: &[u8], operation: u8, pin: &Pin)
     let bytes = reply(frame, operation)?;
     let output = directory.join(format!("{stem}.outcome.bin"));
     create_private(&output, bytes)?;
-    sync_directory_ancestors(directory)?;
     source_inspect(
         &pin.host,
         &pin.config,
@@ -457,7 +451,6 @@ pub(super) fn submit(directory: &Path) -> Result<()> {
         .map_err(|error| format!("enrollment op84 uncertain; use exact lookup: {error}"))
     })?;
     create_private(&directory.join("submit.frame"), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_seal(&directory, &pinned, &ingress)?;
     let result = outcome(&directory, "submit", &frame, SUBMIT_OP, &pinned)?;
     same_seal(&directory, &pinned, &ingress)?;
@@ -498,7 +491,6 @@ pub(super) fn lookup(directory: &Path) -> Result<()> {
         &ingress,
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
-    sync_directory_ancestors(&directory)?;
     same_seal(&directory, &pinned, &ingress)?;
     let result = outcome(&directory, &stem, &frame, LOOKUP_OP, &pinned)?;
     same_seal(&directory, &pinned, &ingress)?;

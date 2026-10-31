@@ -136,24 +136,6 @@ fn receipt(outcome: &Value) -> Result<Value> {
     Ok(Value::Object(result))
 }
 
-/// A new operation-owned evidence directory never changes the original attempt.
-/// Preserve both successful and interrupted/failed proofs for later inspection.
-fn sync_evidence(directory: &Path) -> Result<()> {
-    for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        if !fs::symlink_metadata(&path)
-            .map_err(|e| e.to_string())?
-            .file_type()
-            .is_file()
-        {
-            return Err("append proof evidence contains a non-regular file".into());
-        }
-        fs::File::open(&path)
-            .and_then(|file| file.sync_all())
-            .map_err(|e| e.to_string())?;
-    }
-    crate::sync_directory_ancestors(directory)
-}
 
 pub(crate) fn prove(root: &Path, record_path: &Path) -> Result<Value> {
     if !record_path.is_absolute() {
@@ -362,7 +344,6 @@ pub(crate) fn prove(root: &Path, record_path: &Path) -> Result<Value> {
             &serde_json::to_vec_pretty(&failure).map_err(|e| e.to_string())?,
         )?;
     }
-    sync_evidence(&evidence)?;
     result.map_err(|error| format!("{error}; retained proof evidence: {}", evidence.display()))
 }
 

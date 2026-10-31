@@ -1,7 +1,7 @@
 //! One source-authorized STOP of a previously completed resident incarnation.
 //!
 //! The only physical fence entry consumes a sealed fresh op26 callback. After
-//! a crash, retained artifacts may resume an already-fsynced Fenced journal
+//! a crash, retained artifacts may resume an Fenced journal
 //! or audit Stopped, but can never mint another fresh callback or fence Running.
 
 use crate::io_context::IoContext;
@@ -1097,11 +1097,8 @@ fn set_aside_pure_begin(config: &StopConfig, journal_dir: &Path) -> io::Result<(
     File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     let aside = journal_dir.join(format!("stop-begin-plan-only-{}", hex(&random)));
     fs::rename(attempt, &aside).ctx("rename", &attempt)?;
-    File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     if !absent(&active)? {
         fs::rename(&active, aside.join("active-marker.json")).ctx("rename", &active)?;
-        File::open(&aside).ctx("open", &aside)?.sync_all()?;
-        File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     }
     Ok(())
 }

@@ -197,9 +197,7 @@ fn private_directory(path: &Path) -> Result<()> {
             builder
                 .create(path)
                 .map_err(|e| format!("reconciliation archive: {e}"))?;
-            File::open(path.parent().ok_or("archive parent absent")?)
-                .and_then(|f| f.sync_all())
-                .map_err(|e| e.to_string())
+            Ok(())
         }
         Err(e) => Err(format!("reconciliation archive: {e}")),
     }
@@ -246,12 +244,6 @@ fn commit(
         &archive.join("decision.json"),
         &serde_json::to_vec_pretty(&decision).map_err(|e| e.to_string())?,
     )?;
-    File::open(&archive)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
-    File::open(&archive_root)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
     guard.assert_unchanged()?;
     // Only this typed field changes. Completion, failed prompt, controller
     // session and exact previous bytes already have durable retained copies.
@@ -264,9 +256,6 @@ fn commit(
         &archive.join("committed.json"),
         &serde_json::to_vec_pretty(&committed).map_err(|e| e.to_string())?,
     )?;
-    File::open(&archive)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
     Ok(committed)
 }
 

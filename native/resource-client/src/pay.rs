@@ -195,7 +195,6 @@ fn publish_decision_json(path: &Path, value: &Value) -> Result<()> {
         return if workspace::bounded_json(path)? == *value { Ok(()) }
             else { Err("retained payment decision differs; refusing to replace it".into()) };
     }
-    let parent = path.parent().ok_or("payment decision has no parent")?;
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     match mini_sdk::durable::create_new(path, &bytes, mini_sdk::durable::Perm::Private) {
@@ -207,7 +206,7 @@ fn publish_decision_json(path: &Path, value: &Value) -> Result<()> {
         },
         Err(error) => return Err(format!("cannot publish payment decision: {error}")),
     }
-    sync_directory_ancestors(parent)
+    Ok(())
 }
 
 fn frame_body(frame: &[u8], operation: u8) -> Result<&[u8]> {
@@ -475,7 +474,6 @@ fn prepare(
     let frame = session.call(ops.assemble, &pair)?;
     let ingress = frame_body(&frame, ops.assemble)?.to_vec();
     create_private(&directory.join("ingress.bin"), &ingress)?;
-    sync_directory_ancestors(directory)?;
     Ok(ingress)
 }
 
@@ -488,7 +486,6 @@ fn submit_once(session: &Session, directory: &Path, ops: Ops) -> Result<Answer> 
         &json!({"type":"minidregg-pay-submit-v1","operation":ops.submit,
             "ingressSha256":hex(&sha2::Sha256::digest(&ingress))}),
     )?;
-    sync_directory_ancestors(directory)?;
     let frame = match session.call(ops.submit, &ingress) {
         Ok(frame) => frame,
         Err(error) => return Ok(Answer::Undecided(format!("transport: {error}"))),
@@ -506,7 +503,6 @@ fn retained_outcome(
     let body = frame_body(frame, operation)?;
     let bin = directory.join(format!("{stem}.bin"));
     create_private(&bin, body)?;
-    sync_directory_ancestors(directory)?;
     let value = session.inspect("outcome", &bin, &directory.join(format!("{stem}.json")))?;
     Ok(answer(value))
 }
@@ -1044,9 +1040,7 @@ fn receipt(session: &Session, record: &Record, attempt: &Path) -> Result<()> {
     }
     symlink(attempt, &path)
         .map_err(|error| format!("cannot write receipt {}: {error}", path.display()))?;
-    File::open(session.receipts_dir())
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| format!("cannot sync receipts: {error}"))
+    Ok(())
 }
 
 fn quarantine(session: &Session, record: &Record, attempt: &Path, reason: &str) -> Result<()> {

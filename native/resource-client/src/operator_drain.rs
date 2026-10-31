@@ -157,7 +157,7 @@ impl Control {
                             let _ = transport::write_frame(&mut transport::DeadlinePipeWrite { writer: &mut stream, deadline: Instant::now() + Duration::from_millis(200) }, &bytes);
                         }
                     }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => mini_sdk::private::wait_readable(std::os::fd::AsRawFd::as_raw_fd(&listener), std::time::Duration::from_millis(10)),
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => {},
                     Err(e) => {
                         cloned.close.store(true, Ordering::Release);
@@ -316,7 +316,7 @@ pub(crate) fn serve_status_proxy(listener: UnixListener, upstream: &Path, reside
                     let _ = status_exchange(client, upstream, resident_uid);
                 }
             }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(20)),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => mini_sdk::private::wait_readable(std::os::fd::AsRawFd::as_raw_fd(&listener), std::time::Duration::from_millis(20)),
             Err(_) => std::thread::sleep(Duration::from_millis(20)),
         }
     }

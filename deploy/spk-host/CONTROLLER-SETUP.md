@@ -262,7 +262,7 @@ automatic retry. Native output and exit status pass through. A helper cleanup
 failure is an additional transport failure, not evidence that native enrollment
 was undone. The retained request/native record supports an explicit identical
 request recovery when the native command permits it. A nonzero native exit can
-occur after a journal rename/fsync failure and therefore does not prove the
+occur after a journal rename failure and therefore does not prove the
 binding stayed unchanged. Failed or successful binding transitions are never
 rolled back by the installer.
 

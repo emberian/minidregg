@@ -11,6 +11,7 @@ public import Kernel.PayStarterAllowance
 public import Host.BirthRuntimeProfile
 public import Host.CapabilityInspection
 public import Host.InspectRender
+public import Host.RefusalText
 public import Kernel.NativeHostGenesis
 public import Kernel.AgentGrain
 public import Kernel.ProviderRoute
@@ -375,6 +376,14 @@ def encodeHex (bytes : List UInt8) : String :=
 private def decimal (value : Nat) : Lean.Json := .str (toString value)
 private def signedDecimal (value : Int) : Lean.Json := .str (toString value)
 private def hexJson (value : List UInt8) : Lean.Json := .str (encodeHex value)
+
+/-- A controller's refusal carries its typed `Reject` as the detail; `clause` is that detail
+reduced to the constructor path it names (`Host.RefusalText.render`). The hex detail stays the
+committed bytes. -/
+private def controllerClause (reason : RefusalReason) (detail : List UInt8) : List (String × Lean.Json) :=
+  match reason, String.fromUTF8? (ByteArray.mk detail.toArray) with
+  | .operationRejected, some text => [("clause", .str (Minidregg.Host.RefusalText.render text))]
+  | _, _ => []
 
 private def tagged (path : String) (json : Lean.Json) : Result
     (String × Std.TreeMap.Raw String Lean.Json compare) := do
@@ -4426,7 +4435,7 @@ where
         | .replayed => "replayed"
       let cause : Lean.Json :=
         match ObjectiveActivityReceiver.rejectCodec.decode causeBytes with
-        | some typed => .str (reprStr typed)
+        | some typed => .str (Minidregg.Host.RefusalText.render (reprStr typed))
         | none => .null
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
         ("disposition", "charged"), ("cause", cause), ("causeCanonical", hexJson causeBytes),
@@ -4435,8 +4444,10 @@ where
   | .refused .tailBound phase detail none => .mkObj [("type", "refused"),
       ("reason", RefusalReason.tailBound.name), ("phase", hexJson phase), ("detail", hexJson detail),
       ("explain", .str s!"head/height <= certified/height + L fails: {(String.fromUTF8? (ByteArray.mk detail.toArray)).getD "?"}; certify (mini checkpoint) to resume")]
-  | .refused reason phase detail none => .mkObj [("type", "refused"), ("reason", reason.name),
-      ("phase", hexJson phase), ("detail", hexJson detail)]
+  | .refused reason phase detail none =>
+      let head : List (String × Lean.Json) := [("type", Lean.Json.str "refused"), ("reason", Lean.Json.str reason.name)]
+      let tail : List (String × Lean.Json) := [("phase", hexJson phase), ("detail", hexJson detail)]
+      .mkObj (head ++ tail ++ controllerClause reason detail)
   | .refused reason phase detail (some leaf) => .mkObj [("type", "refused"), ("reason", reason.name),
       ("phase", hexJson phase), ("detail", hexJson detail), ("leaf", lawLeafJson leaf),
       ("explain", .str (leaf.explain reason))]

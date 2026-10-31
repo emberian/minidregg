@@ -139,8 +139,7 @@ pub(crate) fn retain_review_file(path:&Path,text:&str)->Result<()> {
         Err(error)=>return Err(error.to_string())
     };
     file.write_all(text.as_bytes()).map_err(|e|e.to_string())?;
-    file.sync_all().map_err(|e|e.to_string())?;
-    std::fs::File::open(path.parent().ok_or("review input parent absent")?).and_then(|dir|dir.sync_all()).map_err(|e|e.to_string())
+    Ok(())
 }
 #[cfg(test)]
 mod tests {

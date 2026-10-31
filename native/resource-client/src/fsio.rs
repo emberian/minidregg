@@ -1,6 +1,6 @@
-//! The crate's one door to durable file publication: String-error adapters over
-//! `mini_sdk::durable`, which stages every file in a unique sibling, fsyncs it, commits the final
-//! name atomically and fsyncs the directory. No custody file in this crate is ever written to its
+//! The crate's one door to file publication: String-error adapters over
+//! `mini_sdk::durable`, which stages every file in a unique sibling and commits the final
+//! name atomically. No custody file in this crate is ever written to its
 //! final name directly; a crash leaves the name absent or complete (create) or old or new
 //! (replace).
 use std::path::Path;
@@ -17,13 +17,12 @@ pub(crate) fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
     durable::create_new(path, bytes, Perm::Private).map_err(|e| format!("cannot create {}: {e}", path.display()))
 }
 
-/// A new owner-private JSON file (pretty, newline-terminated), then every ancestor directory
-/// synced: retained evidence a recovery may rely on.
+/// A new owner-private JSON file (pretty, newline-terminated).
 pub(crate) fn retain_json(path: &Path, value: &serde_json::Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
     create_private(path, &bytes)?;
-    sync_directory_ancestors(path.parent().ok_or_else(|| format!("{} has no parent directory", path.display()))?)
+    Ok(())
 }
 
 /// A new file whose permissions the umask decides (public keys, public outputs).
@@ -50,7 +49,7 @@ pub(crate) fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 /// Retain `bytes` at `path` exactly once: created durably if absent; if present they must be
-/// identical (and are re-synced), else the refusal is `differs`.
+/// identical (and are compared), else the refusal is `differs`.
 pub(crate) fn retain_exact(path: &Path, bytes: &[u8], differs: impl FnOnce() -> String) -> Result<Retained> {
     durable::retain_exact(path, bytes, Perm::Private).map_err(|e| match e {
         RetainError::Differs => differs(),
@@ -58,15 +57,7 @@ pub(crate) fn retain_exact(path: &Path, bytes: &[u8], differs: impl FnOnce() -> 
     })
 }
 
-/// fsync the directory holding `path`.
-pub(crate) fn sync_parent(path: &Path) -> Result<()> {
-    durable::sync_parent(path).map_err(|e| format!("cannot sync the directory of {}: {e}", path.display()))
-}
 
-/// fsync `directory` and every ancestor.
-pub(crate) fn sync_directory_ancestors(directory: &Path) -> Result<()> {
-    durable::sync_ancestors(directory).map_err(|e| format!("cannot sync directory {}: {e}", directory.display()))
-}
 
 /// `N` bytes of operating-system randomness (`mini_sdk::random`, the one reader of `/dev/urandom`).
 pub(crate) fn random<const N: usize>() -> Result<[u8; N]> {
@@ -86,12 +77,6 @@ pub(crate) fn random_nonce() -> Result<String> {
 /// A regular file (never through a symlink) of `1..=limit` bytes.
 pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     mini_sdk::fsread::read_regular(path, 1, limit).map_err(String::from)
-}
-
-/// Repair `path` from the `seal.record` beside it if it is a cache the record names
-/// (`mini_sdk::phase`, invariant 3), for a reader that does not go through [`read_bounded`].
-pub(crate) fn repair_cache(path: &Path) -> Result<()> {
-    mini_sdk::phase::repair_file(path, std::fs::read(path).ok().as_deref()).map(|_| ()).map_err(String::from)
 }
 
 /// [`read_bounded`], an empty file also acceptable.
@@ -114,11 +99,6 @@ pub(crate) fn ensure_private_dir(path: &Path) -> Result<()> {
     mini_sdk::private::ensure_dir(path).map_err(String::from)
 }
 
-/// [`ensure_private_dir`], then the directory and every ancestor synced: the creation is durable.
-pub(crate) fn ensure_private_dir_durable(path: &Path) -> Result<()> {
-    ensure_private_dir(path)?;
-    sync_directory_ancestors(path)
-}
 
 /// [`ensure_private_dir`], missing ancestors created (0700) too.
 pub(crate) fn ensure_private_dir_all(path: &Path) -> Result<()> {

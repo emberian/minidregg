@@ -42,7 +42,7 @@ There is no total room-history admission ceiling.
 
 A request whose escaped prompt plus program exceeds the framed control byte bound receives a retained refusal before provider dispatch, allowing the next author to advance.
 
-Selection is fsynced before the unique resident prompt enters the existing framed
+Selection is written before the unique resident prompt enters the existing framed
 controller. Exactly one addressed entry enters its prompt and final routing.
 Current membership is revalidated before generation; revoked queued work receives
 a retained cancellation. Replaced assignments cannot reuse started requests.
@@ -83,10 +83,10 @@ clear an older started request or substitute a zero local provider count for
 source completion evidence.
 
 Before a driver marks work started, `resident prepare SHA256` runs the source
-preflight and issues a fresh source-chosen prompt ID. It fsyncs the exact text
+preflight and issues a fresh source-chosen prompt ID. It writes the exact text
 hash/task/config/binding in `resident-prepared-ID.json`; callers cannot re-present
 an old unknown ID as a new preparation. Native invocation requires that exact
-preparation and repeats preflight, then fsyncs `resident-entered-ID.json` BEFORE
+preparation and repeats preflight, then writes `resident-entered-ID.json` BEFORE
 entering Hermes preparation or its first possible reserve. A previously entered
 ID cannot run again or acquire zero-effects refusal evidence.
 

@@ -22,9 +22,6 @@ fn create(p: &Path) -> Result<File> {
         .mode(0o600)
         .open(p)
 }
-fn parent_sync(p: &Path) -> Result<()> {
-    File::open(p.parent().ok_or_else(|| bad("parent"))?)?.sync_all()
-}
 fn nonce() -> Result<u64> {
     let mut b = [0; 8];
     crate::entropy::os_fill(&mut b)?;
@@ -34,9 +31,8 @@ pub(crate) fn snapshot(p: &Path, b: &[u8]) -> Result<()> {
     let tmp = p.with_extension(format!("pending-{}-{}", std::process::id(), nonce()?));
     let mut f = create(&tmp)?;
     f.write_all(b)?;
-    f.sync_all()?;
     fs::rename(&tmp, p)?;
-    parent_sync(p)
+    Ok(())
 }
 pub(crate) fn read_packet(s: &mut UnixStream) -> Result<Vec<u8>> {
     let mut l = [0; 4];
@@ -106,7 +102,7 @@ impl Anchor {
         &self.wal.state().journal
     }
     /// The final record recovery dropped as a crash tear, if any. It was never
-    /// answered: a reply follows the completed fsync.
+    /// answered: a reply follows the completed write.
     pub fn torn_tail(&self) -> Option<&wal::TornTail> {
         self.wal.torn_tail()
     }

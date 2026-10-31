@@ -2,7 +2,7 @@
 //! ingress; this module retains bytes and transports only the two Host opcodes.
 use super::{
     absolute, create_private, hex, host_image_sha256, inspect, print_json,
-    sync_directory_ancestors, utf8_path, Result,
+    utf8_path, Result,
 };
 use crate::transport::{self, HOST_MAX_FRAME};
 use serde_json::{json, Value};
@@ -89,7 +89,6 @@ fn invoke(directory: &Path, attempt: &Attempt, operation: u8, stem: &str) -> Res
     let mut marker_bytes = serde_json::to_vec(&marker).map_err(|e| e.to_string())?;
     marker_bytes.push(b'\n');
     create_private(&marker_path, &marker_bytes)?;
-    sync_directory_ancestors(directory)?;
     let reply = transport::invoke_pinned(
         &attempt.socket,
         &attempt.config,
@@ -101,7 +100,6 @@ fn invoke(directory: &Path, attempt: &Attempt, operation: u8, stem: &str) -> Res
         format!("selected-release response uncertain; exact ingress retained: {error}")
     })?;
     create_private(&frame_path, &reply)?;
-    sync_directory_ancestors(directory)?;
     if reply.first().is_some_and(|b| crate::is_outcome_frame(*b)) {
         return Err(format!(
             "Host refused selected release; exact refusal retained in {}",
@@ -161,7 +159,6 @@ pub(super) fn submit(
     let mut manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
     manifest_bytes.push(b'\n');
     create_private(&directory.join("attempt.json"), &manifest_bytes)?;
-    sync_directory_ancestors(&directory)?;
     let attempt = retained(&directory)?;
     invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_SUBMIT, "submit").map(|_| ())
 }

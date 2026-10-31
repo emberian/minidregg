@@ -82,6 +82,11 @@ Environment:
   MINIDREGG_NATIVE_ALLOW_SHARED=1  permit a tree without the snapshot marker
   MINIDREGG_NATIVE_JOBS=N          concurrent C compiler processes (positive integer; default: 2)
   MINIDREGG_LEAN_THREADS=N         threads in each Lean process (positive integer; default: 2)
+  MINIDREGG_LEAN_UNRECORDED_WEIGHT=N  seats a module with no recorded peak RSS takes (default: a third of the
+                                   seats); deploy/candidate/lane-build.sh passes its lane's accumulated table
+                                   in MINIDREGG_LEAN_RSS_FROM
+  MINIDREGG_LAKE_THREADS=N         Lake's worker threads, i.e. how many modules it runs at once before the
+                                   seats bound them (default: 2 x MINIDREGG_LEAN_SEATS, at least 4)
   MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
   MINIDREGG_CYCLE_DIR=DIR          evidence parent (default below /tmp)
   MINIDREGG_LEAN_SEAT_ROOT=DIR     host-wide compiler seats (default /tmp/minidregg-lean-seats)
@@ -363,6 +368,9 @@ cycle_dir=${MINIDREGG_CYCLE_DIR:-/tmp/minidregg-cycle-20260919}
 # Every candidate and scoped build on this host must use this same root.
 seat_root=${MINIDREGG_LEAN_SEAT_ROOT:-/tmp/minidregg-lean-seats}
 lean_seats=${MINIDREGG_LEAN_SEATS:-2}
+# Lake's worker threads = its compiler concurrency (the wrapper comment below); the seats bound it.
+lake_threads=${MINIDREGG_LAKE_THREADS:-$(( 2 * lean_seats > 4 ? 2 * lean_seats : 4 ))}
+case "$lake_threads" in [1-9]|[1-9][0-9]|[1-2][0-9][0-9]) ;; *) printf 'MINIDREGG_LAKE_THREADS must be a positive integer (<= 299)\n' >&2; exit 64 ;; esac
 case "$lean_seats" in [1-9]|[1-9][0-9]) ;; *) printf 'MINIDREGG_LEAN_SEATS must be a positive integer\n' >&2; exit 64 ;; esac
 mkdir -p "$seat_root" "$cycle_dir/build"
 seat_root=$(cd "$seat_root" && pwd -P)
@@ -398,8 +406,8 @@ seat_owners() {
 }
 
 start_epoch=$(date +%s)
-printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nnative_jobs=%s\nseat_root=%s\nlean_seats=%s\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" "$lean_threads" "$native_jobs" "$seat_root" "$lean_seats" \
+printf 'start_utc=%s\nroot=%s\nlean_threads=%s\nlake_threads=%s\nnative_jobs=%s\nseat_root=%s\nlean_seats=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" "$lean_threads" "$lake_threads" "$native_jobs" "$seat_root" "$lean_seats" \
   > "$output_dir/build.log"
 
 # `transImports` is a nonbuildable Lake facet: it parses source headers and
@@ -1300,11 +1308,15 @@ if [[ -n "$companion_output" ]]; then
 fi
 
 # --- the seated Lean wrapper: every Lake build below runs through it --------------------------
-# Lake (Lean 4.30) has no jobs flag: it starts one `lean` per ready module, so LEAN_NUM_THREADS alone
-# does not bound a build. Every Lake build of this script therefore runs with a fake sysroot whose
+# Lake has no jobs flag: each module job is a default-priority task on Lake's OWN Lean thread pool
+# (Lake/Build/Job/Monad.lean, BaseIO.asTask), and the task blocks its worker while its `lean` runs. So
+# Lake's LEAN_NUM_THREADS is the build's real compiler concurrency: it ran at the per-compiler 2 until
+# 2026-10-31 (batch 3: exactly 2 compilers for 86% of a 2,356 s Lean wall on 12 seats). Lake now gets
+# MINIDREGG_LAKE_THREADS workers (default 2 x seats, so seat waiters never starve ready modules) and
+# each compiler gets MINIDREGG_LEAN_THREADS through MINIDREGG_LEAN_COMPILER_THREADS. Every Lake build of this script therefore runs with a fake sysroot whose
 # bin/lean is a wrapper: it takes one of the host's MINIDREGG_LEAN_SEATS seats (an atomic mkdir under
 # MINIDREGG_LEAN_SEAT_ROOT, shared by every build on the host), runs the real compiler with
-# -j $LEAN_NUM_THREADS, logs START/END and releases the seat only after the compiler has exited.
+# -j $MINIDREGG_LEAN_COMPILER_THREADS, logs START/END and releases the seat only after the compiler has exited.
 # Lake runs the closure in parallel; the seats are the only bound on concurrent compilers. The fake
 # sysroot points every library back at the real immutable toolchain (so the outputs and Lake's traces
 # are the real compiler's: publish-artifacts' --umbrella step replays a tree plain Lake built).
@@ -1360,7 +1372,10 @@ source_file=-
 for arg in "$@"; do case "$arg" in *.lean) source_file=$arg ;; esac; done
 # Memory-weighted seats: this compiler takes WEIGHT of the host's MINIDREGG_LEAN_SEATS seats, read from
 # MINIDREGG_LEAN_SEAT_WEIGHTS (module<TAB>weight, written by build-native-host from recorded peak RSS).
-# A module with no row is heavy (all seats) until a build has measured it; a non-module invocation takes 1.
+# A module with no row takes MINIDREGG_LEAN_UNRECORDED_WEIGHT seats (a third of the build's seats, enough for
+# the heaviest recorded module) until a build has measured it; a non-module invocation takes 1. It took ALL
+# seats until 2026-10-31: in ticket order every later compiler waits behind it, and with another build holding
+# seats in the same host-wide root (an umbrella stage) batch 6's host stage compiled nothing for 1,471 s.
 module=-
 if [[ "$source_file" == *.lean ]]; then
   module=${source_file#"$MINIDREGG_LEAN_BUILD_ROOT"/}; module=${module#./}; module=${module%.lean}; module=${module//\//.}
@@ -1368,7 +1383,7 @@ fi
 weight=1
 if [[ "$module" != - ]]; then
   weight=$(awk -F '\t' -v m="$module" '$1 == m { print $2; exit }' "${MINIDREGG_LEAN_SEAT_WEIGHTS:-/dev/null}")
-  [[ -n "$weight" ]] || weight=$MINIDREGG_LEAN_SEATS
+  [[ -n "$weight" ]] || weight=${MINIDREGG_LEAN_UNRECORDED_WEIGHT:-$MINIDREGG_LEAN_SEATS}
 fi
 if (( weight > MINIDREGG_LEAN_SEATS )); then
   printf 'build-native-host: %s alone needs %s of %s Lean seats (its recorded peak RSS exceeds the memory cap): refusing\n' \
@@ -1439,7 +1454,8 @@ trap 'forward_signal TERM' TERM
 line=$(printf 'START\t%s\t%s\t' "$(date +%s)" "$$"; printf '%q ' "$@")
 printf '%s\n' "$line" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
 usage_file=$(mktemp "${TMPDIR:-/tmp}/lean-rusage.XXXXXX")
-python3 "$MINIDREGG_LEAN_RUSAGE" "$usage_file" "$MINIDREGG_REAL_LEAN" -j "$LEAN_NUM_THREADS" "$@" &
+LEAN_NUM_THREADS=$MINIDREGG_LEAN_COMPILER_THREADS \
+  python3 "$MINIDREGG_LEAN_RUSAGE" "$usage_file" "$MINIDREGG_REAL_LEAN" -j "$MINIDREGG_LEAN_COMPILER_THREADS" "$@" &
 child=$!
 # A trapped signal returns `wait` early while the compiler still runs: keep the seat until it exits.
 wait "$child"
@@ -1483,6 +1499,10 @@ rss_sources=()
 if [[ -f "$root/scripts/pipeline/lean-module-rss.tsv" ]]; then rss_sources+=("$root/scripts/pipeline/lean-module-rss.tsv"); fi
 IFS=: read -r -a extra_rss <<< "${MINIDREGG_LEAN_RSS_FROM:-}"
 for f in ${extra_rss[@]+"${extra_rss[@]}"}; do [[ -z "$f" ]] && continue; [[ -f "$f" ]] || { printf 'MINIDREGG_LEAN_RSS_FROM: no table %s\n' "$f" >&2; exit 64; }; rss_sources+=("$f"); done
+# Unrecorded modules: a third of the seats by default (12 seats: 4 x seat_kib, above the 17 GB Pay modules).
+unrecorded_weight=${MINIDREGG_LEAN_UNRECORDED_WEIGHT:-$(( (lean_seats + 2) / 3 ))}
+case "$unrecorded_weight" in [1-9]|[1-9][0-9]) ;; *) printf 'MINIDREGG_LEAN_UNRECORDED_WEIGHT must be a positive integer\n' >&2; exit 64 ;; esac
+(( unrecorded_weight <= lean_seats )) || unrecorded_weight=$lean_seats
 # module<TAB>weight<TAB>maxrss_kib: per module the max recorded peak over every table; weight = ceil(rss / seat)
 awk -F '\t' -v seat="$seat_kib" '$0 !~ /^#/ && $3 ~ /^[0-9]+$/ { if ($3 > r[$1]) r[$1] = $3 }
   END { for (m in r) { w = int((r[m] + seat - 1) / seat); if (w < 1) w = 1; print m "\t" w "\t" r[m] } }' \
@@ -1496,8 +1516,8 @@ if [[ -n "$over" ]]; then
   printf 'build-native-host: over-cap modules (recorded peak RSS exceeds the %s KiB Lean memory cap, %s): each refuses by name if it must compile here:\n%s\n' \
     "$mem_cap_kib" "$mem_cap_from" "$over" | tee -a "$output_dir/build.log" >&2
 fi
-printf 'lean-seats memory-weighted: cap=%sKiB (%s) seats=%s seat=%sKiB; %s modules weighted from %s table(s), unrecorded modules take all %s seats\n' \
-  "$mem_cap_kib" "$mem_cap_from" "$lean_seats" "$seat_kib" "$(wc -l < "$seat_weights" | tr -d ' ')" "${#rss_sources[@]}" "$lean_seats" | tee -a "$output_dir/build.log"
+printf 'lean-seats memory-weighted: cap=%sKiB (%s) seats=%s seat=%sKiB; %s modules weighted from %s table(s), unrecorded modules take %s seats\n' \
+  "$mem_cap_kib" "$mem_cap_from" "$lean_seats" "$seat_kib" "$(wc -l < "$seat_weights" | tr -d ' ')" "${#rss_sources[@]}" "$unrecorded_weight" | tee -a "$output_dir/build.log"
 wrapper_log="$output_dir/lake-lean-wrapper.tsv"
 : > "$wrapper_log"
 lake_cc=${MINIDREGG_NATIVE_LAKE_CC:-$toolchain/bin/clang}
@@ -1510,7 +1530,8 @@ seated_lake() {
     LEAN_SYSROOT="$wrapper_root" \
     LEAN_CC="$lake_cc" \
     LEAN_AR="$toolchain/bin/llvm-ar" \
-    LEAN_NUM_THREADS="$lean_threads" \
+    LEAN_NUM_THREADS="$lake_threads" \
+    MINIDREGG_LEAN_COMPILER_THREADS="$lean_threads" \
     MINIDREGG_REAL_LEAN="$toolchain/bin/lean" \
     MINIDREGG_LEAN_SEAT_ROOT="$seat_root" \
     MINIDREGG_LEAN_SEATS="$lean_seats" \
@@ -1519,6 +1540,7 @@ seated_lake() {
     MINIDREGG_LEAN_BUILD_ROOT="$root" \
     MINIDREGG_LEAN_RUSAGE="$wrapper_root/lean-rusage.py" \
     MINIDREGG_LEAN_SEAT_WEIGHTS="$seat_weights" \
+    MINIDREGG_LEAN_UNRECORDED_WEIGHT="$unrecorded_weight" \
     lake build "$@" > "$log" 2>&1
 }
 
@@ -1632,7 +1654,7 @@ fi
 if [[ "$build_umbrella" == 1 ]]; then
   lake_gate_log="$output_dir/lake-build-$umbrella_tag.log"
   cat > "$output_dir/lake-build-$umbrella_tag.command.txt" <<EOF
-LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build $umbrella_target
+LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lake_threads MINIDREGG_LEAN_COMPILER_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build $umbrella_target
 EOF
   gate_start=$(date +%s)
   printf 'lake-gate %s start\n' "$umbrella_target" | tee -a "$output_dir/build.log"
@@ -1656,7 +1678,7 @@ EOF
   # resulting C files feed the native link below without a duplicate source pass.
   host_gate_log="$output_dir/lake-build-Host.Main-leanArts.log"
   cat > "$output_dir/lake-build-Host.Main-leanArts.command.txt" <<EOF
-LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build +Host.Main:leanArts
+LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lake_threads MINIDREGG_LEAN_COMPILER_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build +Host.Main:leanArts
 EOF
   gate_start=$(date +%s)
   printf 'lake-gate Host.Main:leanArts start\n' | tee -a "$output_dir/build.log"

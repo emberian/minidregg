@@ -10,7 +10,7 @@ call must confirm its native receipt before stable reply cell/sequence, recipien
 and text are exposed. Feed entry numbers are not proof of a stable thread.
 
 Public artifacts and the fresh native lookup are retained in a private sibling
-proof directory and fsynced before success. The statement carries their hashes;
+proof directory and written before success. The statement carries their hashes;
 original attempt files are unchanged. Failed proof attempts preserve their evidence.
 Opaque private-room payloads and non-say or multiple-target operations currently
 refuse. A proof is evidence of a past accepted effect, not a live authority grant.

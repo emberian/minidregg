@@ -345,7 +345,7 @@ fn durable_restart_exact_binding_unknown_and_roster_revocation(){
 }
 #[test]
 fn nothing_is_retained_before_the_deferral_is_written_and_status_is_actor_bound(){
-    // No fsync stands between Discord's request and the deferral: `handle` only takes the
+    // No write stands between Discord's request and the deferral: `handle` only takes the
     // custody lease; the acceptance is retained after the deferral is on the wire. A request
     // whose deferral was never written leaves nothing and ran nothing.
     let w=world("accepted");let app=App::new(w.cfg.clone()).unwrap();let cmd=command("80",FRIEND,"mini",Some("read shared"));

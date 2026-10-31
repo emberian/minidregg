@@ -19,7 +19,7 @@ use crate::dispatch_native::{private_dir, write_new};
 use crate::grain::HostView;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::fs::{self, DirBuilder, File};
+use std::fs::{self, DirBuilder};
 
 /// Human dispatch signing slots in Mini's plan order: the one session target's
 /// invocation (4:0; a single target needs no role-8 observation), the
@@ -272,7 +272,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     .map_err(io::Error::other)?;
     let routes = app_dir.join("routes");
     match DirBuilder::new().mode(0o700).create(&routes) {
-        Ok(()) => File::open(&app_dir).ctx("open", &app_dir)?.sync_all()?,
+        Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error),
     }
@@ -340,9 +340,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
                 "preferredHandle":request.preferred_handle,
             }))?,
         )?;
-        File::open(&staging).ctx("open", &staging)?.sync_all()?;
         fs::rename(&staging, &directory).ctx("rename", &staging)?;
-        File::open(&routes).ctx("open", &routes)?.sync_all()?;
     }
     let custody = read_json(&directory.join("dispatch-custody.json"))?;
     check_retained_custody(&custody, &derived, &request.name)?;

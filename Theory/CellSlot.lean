@@ -628,11 +628,11 @@ structure PersistenceRefinement
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Theory.CellRegistry.PackedCell.decode_bytes' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Theory.CellRegistry.PackedCell.decode_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PackedCell.decode_bytes
-/-- info: 'Minidregg.Theory.CellRegistry.PackedCell.bytes_of_decode' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Theory.CellRegistry.PackedCell.bytes_of_decode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PackedCell.bytes_of_decode
-/-- info: 'Minidregg.Theory.CellRegistry.CellSlot.decode_bytes' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Theory.CellRegistry.CellSlot.decode_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms CellSlot.decode_bytes
 /-- info: 'Minidregg.Theory.CellRegistry.duplicate_create_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms duplicate_create_rejected

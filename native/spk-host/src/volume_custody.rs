@@ -75,6 +75,9 @@ pub(crate) struct VolumeWitness {
     pub(crate) mount: PathBuf,
     pub(crate) project_id: u32,
     pub(crate) directory_inode: u64,
+    /// The filesystem the directory was attested on: a directory of another filesystem (a small bind
+    /// mount, a tmpfs) can collide on the inode number, never on both.
+    pub(crate) directory_dev: u64,
     site: VolumeSite,
     file_dev: u64,
     file_ino: u64,
@@ -91,7 +94,7 @@ impl VolumeWitness {
             return Err(invalid("volume witness control byte refused"));
         }
         let lines: Vec<_> = text.trim_end_matches('\n').split('\n').collect();
-        if lines.len() != 11 || lines[0] != TAG || text.ends_with("\n\n") {
+        if lines.len() != 12 || lines[0] != TAG || text.ends_with("\n\n") {
             return Err(invalid("volume witness field count or tag refused"));
         }
         let deployment_id = value(lines[1], "deployment_id=")?.to_owned();
@@ -123,7 +126,9 @@ impl VolumeWitness {
         let directory_inode = decimal(value(lines[9], "directory_inode=")?)
             .filter(|n| *n > 0)
             .ok_or_else(|| invalid("volume witness directory inode refused"))?;
-        let mount = value(lines[10], "directory=")?.to_owned();
+        let directory_dev = decimal(value(lines[10], "directory_dev=")?)
+            .ok_or_else(|| invalid("volume witness directory device refused"))?;
+        let mount = value(lines[11], "directory=")?.to_owned();
         if Path::new(&mount) != site.mount(resource) {
             return Err(invalid("volume witness directory refused"));
         }
@@ -137,7 +142,8 @@ impl VolumeWitness {
             quota_bytes,
             mount: PathBuf::from(mount),
             project_id,
-            directory_inode: directory_inode,
+            directory_inode,
+            directory_dev,
             site: site.clone(),
             file_dev: 0,
             file_ino: 0,
@@ -162,10 +168,15 @@ impl VolumeWitness {
         if fd_stat.st_ino != self.directory_inode {
             return Err(invalid("preopened /var is not the attested directory inode"));
         }
+        if fd_stat.st_dev as u64 != self.directory_dev {
+            return Err(invalid("preopened /var is not on the attested filesystem"));
+        }
         Ok(())
     }
 
-    /// The open `/var` carries the attested project, with inheritance: the kernel's own record
+    /// For a descriptor opened for reading (the helper's own attestation check; the resident's O_PATH
+    /// descriptor onto the app-private directory cannot be asked for its project). The open `/var`
+    /// carries the attested project, with inheritance: the kernel's own record
     /// that this directory's blocks and inodes are charged to the bounded project.
     pub(crate) fn compare_open_project(&self, persistent_var_fd: RawFd) -> io::Result<()> {
         let (project, inherit) = crate::os::var_project(persistent_var_fd)?;
@@ -210,7 +221,8 @@ fn read_root_witness(
     resource: u64,
     require_recent: bool,
 ) -> io::Result<VolumeWitness> {
-    if resource == 0 || resource > 999_999_999_999_999_999 {
+    // A resource id is any non-zero u64: a member-namespace app birth reserves 20-digit ids.
+    if resource == 0 {
         return Err(invalid("attestation resource outside supported profile"));
     }
     let path = site.witness(resource);
@@ -298,7 +310,14 @@ mod tests {
     use super::*;
 
     fn example() -> Vec<u8> {
-        format!("{TAG}\ndeployment_id={}\nhost_id={}\nresource=8401\nvolume_id={}\napp_uid=2401\nquota_bytes=67108864\nproject_id=1000123456\nfs_type=ext4\ndirectory_inode=7654\ndirectory=/var/lib/mini/grains/vars/0123456789abcdef-8401\n", "a".repeat(64), "b".repeat(64), "c".repeat(64)).into_bytes()
+        format!("{TAG}\ndeployment_id={}\nhost_id={}\nresource=8401\nvolume_id={}\napp_uid=2401\nquota_bytes=67108864\nproject_id=1000123456\nfs_type=ext4\ndirectory_inode=7654\ndirectory_dev=2049\ndirectory=/var/lib/mini/grains/vars/0123456789abcdef-8401\n", "a".repeat(64), "b".repeat(64), "c".repeat(64)).into_bytes()
+    }
+
+    #[test]
+    fn a_witness_without_the_device_pin_is_refused() {
+        let old = String::from_utf8(example()).unwrap().replace("directory_dev=2049\n", "");
+        assert!(VolumeWitness::parse(old.into_bytes(), &site()).is_err());
+        assert!(VolumeWitness::parse(example(), &site()).is_ok());
     }
 
     fn site() -> VolumeSite {
@@ -324,8 +343,14 @@ mod tests {
         witness.app_uid = unsafe { libc::geteuid() };
         witness.mount = mount.clone();
         witness.directory_inode = fs::metadata(&mount).unwrap().ino();
+        witness.directory_dev = fs::metadata(&mount).unwrap().dev();
         let held = fs::File::open(&mount).unwrap();
         witness.compare_open_mount(held.as_raw_fd()).unwrap();
+        // Another filesystem whose inode number happens to collide: the device pin refuses it.
+        witness.directory_dev += 1;
+        let other_fs = witness.compare_open_mount(held.as_raw_fd()).unwrap_err();
+        assert_eq!(other_fs.to_string(), "preopened /var is not on the attested filesystem");
+        witness.directory_dev -= 1;
         // Loosened: the mount is no longer the app's private directory.
         fs::set_permissions(&mount, fs::Permissions::from_mode(0o755)).unwrap();
         let loosened = witness.compare_open_mount(held.as_raw_fd()).unwrap_err();
@@ -347,6 +372,18 @@ mod tests {
         assert_eq!(parsed.resource, 8401);
         assert_eq!(parsed.volume_id, "c".repeat(64));
         assert_eq!(parsed.bytes, example());
+    }
+
+    /// A member-namespace app birth reserves 20-digit resource ids (above 10^18): the witness
+    /// for one parses, with its directory named by the same id.
+    #[test]
+    fn a_twenty_digit_resource_witness_parses() {
+        let big = "17828936604552340943";
+        let text = String::from_utf8(example()).unwrap()
+            .replace("resource=8401", &format!("resource={big}"))
+            .replace("abcdef-8401", &format!("abcdef-{big}"));
+        let parsed = VolumeWitness::parse(text.into_bytes(), &site()).unwrap();
+        assert_eq!(parsed.resource, 17_828_936_604_552_340_943);
     }
 
     #[test]

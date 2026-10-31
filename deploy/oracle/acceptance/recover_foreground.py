@@ -165,11 +165,6 @@ def prepare(plan_path, exported_path, status_path, sources_path, output):
         target=prior/(hashlib.sha256(str(path).encode()).hexdigest()[:16]+'-'+path.name)
         shutil.copyfile(path,target);target.chmod(0o400)
         require(sha(path)==sha(target),'snapshot changed during copy')
-        with target.open('rb') as stream: os.fsync(stream.fileno())
-    for directory in (prior,output,output.parent):
-        fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY)
-        try:os.fsync(fd)
-        finally:os.close(fd)
     require(before=={str(p):sha(p) for p in logical},'Store changed during recovery snapshot')
     (output/'phases').mkdir(mode=0o700)
     durable_json(output/'prepared.json',{'protocol':'mini-oracle-foreground-recovery-prepared-v1','plan':plan,

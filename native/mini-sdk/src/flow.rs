@@ -14,8 +14,7 @@
 //! 4. [`Flow::seal`]: consent names the plan headers the intent permits (222, or thin 232); the
 //!    caller's release sees exactly what would be signed; the headers are signed
 //!    (`transaction-signatures.{json,bin}`), assembled (op 11) into `call.bin`, and the attempt's
-//!    ONE record (`seal.record`, [`crate::phase`]: every file so far, `call.bin` included) and
-//!    every ancestor directory are synced BEFORE anything can transmit it.
+//!    nothing else is written before it can be transmitted.
 //! 5. [`Flow::transmit`]: the exact retained call is submitted (op 2) or looked up (op 3), and the
 //!    local codec presents the answer. A lost reply is answered by looking up the SAME call
 //!    ([`crate::custody`]), never by a new one.
@@ -151,14 +150,6 @@ pub fn signature_list(signer: &dyn Signer, headers: &[Vec<u8>]) -> Result<Value>
     headers.iter().map(|h| Ok(Value::String(crate::hex::encode(&signer.sign(h)?)))).collect::<Result<Vec<_>>>().map(Value::Array)
 }
 
-/// Sync a retained file and every ancestor directory of `directory`: a transmission must never
-/// precede the durable exact bytes and their pathname.
-pub fn sync_retained(directory: &Path, file: &Path) -> Result<()> {
-    std::fs::File::open(file)
-        .and_then(|f| durable::sync_file(&f))
-        .map_err(|e| Error(format!("cannot sync exact call {}: {e}", file.display())))?;
-    durable::sync_ancestors(directory).map_err(|e| Error(format!("cannot sync directory {}: {e}", directory.display())))
-}
 
 impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
     fn path(&self, name: &str) -> PathBuf {
@@ -215,21 +206,11 @@ impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
     }
 
     /// Step 4: sign the consented headers of `plan_bin` after `release` accepts them, assemble the
-    /// exact call into `call.bin`, and sync it; returns its path.
+    /// exact call into `call.bin`; returns its path.
     pub fn seal(&mut self, plan_bin: &Path, release: &mut dyn FnMut(&Sealing<'_>) -> Result<()>) -> Result<PathBuf> {
         let signatures_bin = self.sign(plan_bin, release)?;
         let call = self.path("call.bin");
         self.host.assemble(plan_bin, &signatures_bin, &call)?;
-        // The attempt's ONE durable record: every file written so far, `call.bin` included, is
-        // now a cache of it (`crate::phase`). Synced, with its directory and ancestors, before
-        // anything can transmit the call.
-        crate::phase::seal(self.dir)?;
-        // The record is fsynced and its name committed in `self.dir` by `seal`; what remains is
-        // every ancestor, so the attempt directory itself is durable before transmission.
-        let absolute = std::path::absolute(self.dir).map_err(|e| Error(e.to_string()))?;
-        if let Some(parent) = absolute.parent() {
-            durable::sync_ancestors(parent).map_err(|e| Error(format!("cannot sync directory {}: {e}", parent.display())))?;
-        }
         Ok(call)
     }
 

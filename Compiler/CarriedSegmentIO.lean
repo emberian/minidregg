@@ -237,8 +237,7 @@ def PreservedPrefix.rebindChecked {config : NativeHost.Config} {current : Native
   else throw "carried prefix differs from retained authorization"
 
 /-- Stage/resume only the exact authorized full image. An interrupted partial
-stage can continue; a differing seed, prefix or extra record refuses. The normal
-Store helper fsyncs its independent anchor before each acknowledgement. This
+stage can continue; a differing seed, prefix or extra record refuses. This
 function never switches a live service or initializes a replacement genesis. -/
 def stageAuthorized (config : NativeHost.Config) (authorized : Authorized config) :
     IO (Except String (NativeHost.Opened config)) := do

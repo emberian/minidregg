@@ -94,7 +94,7 @@ pub(super) fn lookup_verified(
     let call = crate::fsio::read_bounded(call_path, MAX_CALL)?;
     let config_bytes = crate::fsio::read_bounded(config, MAX_CONFIG)?;
     let host_sha = host_image_sha256(host)?;
-    crate::fsio::ensure_private_dir_durable(directory)?;
+    crate::fsio::ensure_private_dir(directory)?;
     create_private(&directory.join("call.bin"), &call)?;
     let marker = json!({"type":"minidregg-recipient-historical-call-lookup-v1",
         "host":utf8_path(host)?,"hostSha256":host_sha,
@@ -106,11 +106,9 @@ pub(super) fn lookup_verified(
         &directory.join("lookup-marker.json"),
         &serde_json::to_vec_pretty(&marker).map_err(|error| error.to_string())?,
     )?;
-    sync_directory_ancestors(directory)?;
 
     let frame = invoke_lookup(host, socket, config, &call)?;
     create_private(&directory.join("reply.frame"), &frame)?;
-    sync_directory_ancestors(directory)?;
     if host_image_sha256(host)? != host_sha
         || crate::fsio::read_bounded(config, MAX_CONFIG)? != config_bytes
         || crate::fsio::read_bounded(&directory.join("call.bin"), MAX_CALL)? != call
@@ -125,7 +123,6 @@ pub(super) fn lookup_verified(
     }
     let binary = directory.join("outcome.bin");
     create_private(&binary, body)?;
-    sync_directory_ancestors(directory)?;
     let json_path = directory.join("outcome.json");
     let outcome = inspect_direct(host, config, &binary, &json_path)?;
     let retained: Value = serde_json::from_slice(&crate::fsio::read_bounded(&json_path, MAX_OUTCOME)?)

@@ -340,7 +340,6 @@ fn generations(directory: &Path) -> Result<Vec<PathBuf>> {
 fn new_generation(directory: &Path, count: usize) -> Result<PathBuf> {
     let next = directory.join(format!("g{:04}", count + 1));
     crate::fsio::create_private_dir(&next)?;
-    sync_directory_ancestors(directory)?;
     Ok(next)
 }
 
@@ -407,7 +406,6 @@ fn retire_marker(grant: &ObserveGrant<'_>, why: &str) -> Result<PathBuf> {
     let retired = dir.join(format!("{prefix}{n:04}.json"));
     fs::rename(dir.join("submit-marker.json"), &retired)
         .map_err(|error| format!("cannot retire the submit marker: {error}"))?;
-    sync_directory_ancestors(dir)?;
     new_generation(dir, generations(dir)?.len())?;
     Ok(retired)
 }
@@ -417,11 +415,10 @@ fn observe_once(grant: &ObserveGrant<'_>) -> Result<Attempt> {
     match fs::DirBuilder::new().mode(0o700).create(grant.directory) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            crate::fsio::ensure_private_dir_durable(grant.directory)?;
+            crate::fsio::ensure_private_dir(grant.directory)?;
         }
         Err(error) => return Err(format!("cannot create provisioning attempt: {error}")),
     }
-    sync_directory_ancestors(grant.directory)?;
     let _lock = transport::service_lock(&grant.directory.join("provision.lock"))?;
     if grant.directory.join("result.json").exists() {
         return Ok(Attempt::Done(json_private(&grant.directory.join("result.json"))?));
@@ -461,7 +458,7 @@ fn observe_once(grant: &ObserveGrant<'_>) -> Result<Attempt> {
         "provision plan",
         || {
             let current = latest()?;
-            crate::fsio::ensure_private_dir_durable(&current)?;
+            crate::fsio::ensure_private_dir(&current)?;
             if !current.join("seal.json").exists() {
                 plan(grant, &request, &capability, &current)?;
             }

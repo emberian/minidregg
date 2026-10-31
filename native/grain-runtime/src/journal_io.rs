@@ -39,7 +39,7 @@ fn write_before_publish(path:&Path,bytes:&[u8],before:impl FnOnce()->io::Result<
         if fd>=0{break(stage,unsafe{File::from_raw_fd(fd)})}
         let e=io::Error::last_os_error();if e.kind()!=io::ErrorKind::AlreadyExists{return Err(e)}
     };
-    file.write_all(bytes)?;file.sync_all()?;
+    file.write_all(bytes)?;
     before()?;
     let identity=file.metadata()?;
     let st=stat_leaf(&dir,&stage)?.ok_or_else(||refused("journal stage disappeared"))?;
@@ -47,7 +47,7 @@ fn write_before_publish(path:&Path,bytes:&[u8],before:impl FnOnce()->io::Result<
         return Err(refused("journal stage switched; retained bytes not published"))
     }
     if unsafe{libc::renameat(dir.as_raw_fd(),stage.as_ptr(),dir.as_raw_fd(),name.as_ptr())}!=0{return Err(io::Error::last_os_error())}
-    dir.sync_all()
+    Ok(())
 }
 #[cfg(test)]
 mod tests {

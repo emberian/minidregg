@@ -286,7 +286,7 @@ pub static PUBLISH: Grammar = Grammar { verb: "publish", leaves: &[
     Leaf { path: &["publish"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID (writes the recipient's reference)" },
 ] };
 pub static HISTORY: Grammar = Grammar { verb: "history", leaves: &[
-    Leaf { path: &["history"], args: &[opt("all", Kind::Choice(&["all"]))], flags: &[], effect: Effect::Local, about: "local: retained attempts and their last Host outcome" },
+    Leaf { path: &["history"], args: &[opt("all", Kind::Choice(&["all"]))], flags: &[valued("-n", "N", Kind::Number)], effect: Effect::Local, about: "local: retained attempts and their last Host outcome (-n N: the newest N)" },
 ] };
 pub static CAN: Grammar = Grammar { verb: "can", leaves: &[
     Leaf { path: &["can"], args: &[opt("REF", Kind::Ref)], flags: &[switch("--all"), switch("--any")], effect: Effect::Read, about: "mini workspace --action can [--name REF] [--all true]: each verb my grants cover, prepared and dry-run (Host op 130), never submitted; --any REF: one write REF's law admits from its current values, as a line to paste, or the clauses that rule every write out (Host op 150)" },

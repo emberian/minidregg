@@ -1,16 +1,16 @@
 //! Reusable deterministic transition WAL. Storage premise: honest crash domain;
 //! an unkeyed checksum detects tears, not malicious rollback/authentication.
-//! Each event and exact replay-checked outbox are fsynced before publication.
-//! A partial FINAL frame is truncated and fsynced on recovery, and so is a
+//! Each event and exact replay-checked outbox are written before publication.
+//! A partial FINAL frame is truncated on recovery, and so is a
 //! full-length FINAL frame whose checksum fails: a crash between the length
 //! extension and the data reaching disk leaves exactly that shape, and the
-//! frame was never published (publication requires the completed fsync).
+//! frame was never published (publication requires the completed write).
 //! Dropping it is never silent: `Journal::torn_tail` reports the offset and
 //! the dropped bytes, so a machine that must not re-issue a step can refuse.
 //! A bad checksum on any EARLIER frame, a length word that points past EOF
 //! while a complete checksum-valid record sits at that position (interior
 //! damage, not a tear), or a wrong identity, refuses.
-//! Published records require completed fsync.
+//! Published records require completed write.
 //! This assumes crash-prefix storage; arbitrary disk corruption is not repaired.
 //! This is not an independent anti-rollback anchor and cannot mint source authority.
 use crate::{
@@ -88,8 +88,6 @@ impl<M: Machine> Journal<M> {
         header.extend(hash(&header));
         if file.metadata()?.len() == 0 {
             file.write_all(&header)?;
-            file.sync_all()?;
-            File::open(path.parent().ok_or_else(|| bad("WAL parent"))?)?.sync_all()?;
         }
         file.seek(SeekFrom::Start(0))?;
         let mut all = vec![];
@@ -99,7 +97,6 @@ impl<M: Machine> Journal<M> {
             file.set_len(0)?;
             file.seek(SeekFrom::Start(0))?;
             file.write_all(&header)?;
-            file.sync_all()?;
             all = header.clone();
         }
         if !all.starts_with(&header) {
@@ -115,7 +112,7 @@ impl<M: Machine> Journal<M> {
                 dropped: all[at..].to_vec(),
             });
             file.set_len(at as u64)?;
-            file.sync_all()
+            Ok(())
         };
         while i < all.len() {
             let record_start = i;
@@ -143,7 +140,7 @@ impl<M: Machine> Journal<M> {
             let b = &all[i..i + n];
             if hash(b) != all[i + n..end] {
                 if end == all.len() {
-                    // Torn final frame: never fsynced, never published.
+                    // Torn final frame: never written, never published.
                     drop_tail(&mut file, record_start)?;
                     break;
                 }
@@ -199,7 +196,7 @@ impl<M: Machine> Journal<M> {
             self.file.write_all(&(b.len() as u64).to_le_bytes())?;
             self.file.write_all(&b)?;
             self.file.write_all(&hash(&b))?;
-            self.file.sync_all()
+            Ok(())
         })();
         if let Err(e) = persisted {
             self.poisoned = true;

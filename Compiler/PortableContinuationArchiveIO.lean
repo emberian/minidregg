@@ -132,8 +132,7 @@ def reopen (config : NativeConfig) (manifest : Manifest) (inventory : System.Fil
   catch _ => return .error "portable archive reopen uncertain or refused"
 
 /-- A newly created private quarantine file is reconstructed only after fresh
-readback. Existing files refuse; the native helper fsyncs file and parent and
-rechecks exact bytes. This exports no execution or worker activation permit. -/
+readback. Existing files refuse; the native helper rechecks exact bytes. This exports no execution or worker activation permit. -/
 def exportQuarantined (config : NativeConfig) (manifest : Manifest)
     (readback : Readback config manifest) (destination : System.FilePath) :
     IO (Except String Unit) := do

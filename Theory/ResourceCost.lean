@@ -15,6 +15,8 @@ pure logical transition.
 -/
 module
 
+public import Mathlib.Algebra.Group.Nat.Defs
+public import Mathlib.Algebra.Group.Pi.Basic
 public import Theory.CanonicalTransition
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).

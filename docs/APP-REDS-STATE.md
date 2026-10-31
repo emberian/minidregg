@@ -98,32 +98,52 @@ unquoted `for w in $alt`, so `[--json]` was a glob that matched a one-letter fil
 and turned `apps list [--json]` into `apps list j`. Globbing is now off around the split (ad58a4b9e). Reproduced
 the glob in bash; not re-run through the whole JWF step.
 
-## Since the four reds (2026-10-30 evening): what is landed, what is owed
+## Since the four reds (present state, 2026-10-31; one document, both instances folded)
 
-Landed on `lane/app-reds` (shas in order): 111985198 volumes are project-quota directories, not loop images
-(deploy/spk-host/VOLUMES.md); d786b5d2c the host-side volume custodian (`spk-host volume-custodian`, versioned
-`MINI-VOLUME/1` line grammar, statement C1 to C6) and 28be1c40c app uid floor 10000 for a custodian world;
-6be1c1ea7 + b1c30a598 the root-side controller-tool accepts `mini_app_<name>` typed tools (controller-world.py
-pin moved in install-user-world) and the vars-backing bind in install-user-world; f72223652 apps-e2e grant bound
-50000 (E7: the birth was refused no-grant at 1000); 35f008d3d bend refusals name the package already published and
-the response-type rule (G1, G2 partly); 45091c14e the intake spool directory is an operator input.
+Landed on `lane/app-reds` (and in staging e1a32a07d unless noted):
+- Volumes are project-quota directories, not loop images (111985198, deploy/spk-host/VOLUMES.md), with a
+  host-side custodian for user-namespaced containers (d786b5d2c; `spk-host volume-custodian`, `MINI-VOLUME/1`
+  line grammar, statements C1 to C6; app uid floor 10000 for a custodian world, 28be1c40c; unit template with
+  the literal ROOT written by `install-volume-custodian`).
+- Resident /var check (486f0196f, identical in content to 3eceeb77d): the resident runs as the operator and
+  holds the app-private 0700 directory only as an O_PATH descriptor, so the project ioctl failed (EBADF) and a
+  read reopen failed (EACCES): "resident bootstrap refused: Permission denied". `os::var_filesystem` compares
+  `fstatvfs` of the volume with its parent (a project-limited directory reports its limit); the witness pins the
+  inode. Evidence: EtherCalc through the full launch 3/3 on hbox (/ci/ar-ec/qualification-8).
+- Root-side `controller-tool` accepts `mini_app_<name>` typed tools; controller-world.py is pinned by sha in
+  install-user-world (move both together): 6be1c1ea7, b1c30a598. The `vars-backing` bind and the `ingest-scratch`
+  directory are in install-user-world (b1c30a598, 45091c14e).
+- Intake spool is an operator input (45091c14e): broker config `ingestScratch`, `spk-ingest --scratch`,
+  `spk-host materialize --scratch`. Free-space need on the SPK store drops by one decoded bound.
+- `grain install` reports signedAppId/signedAppVersion (c730fd3ea): the values go in `signed-identity.json`
+  beside `qualification.json`, never in it (resident_service and install_v3 read it with deny_unknown_fields;
+  tests in both). Before this every real market install was refused appIdMismatch.
+- apps-e2e grant bound 50000 and funding 20000 (f72223652, E7); bend refusal hints (35f008d3d); `responseType`
+  in the publication JSON and printed by `bend publish` (32a7f0fc0, Lean: needs the next host build).
 
-hbox state I set up (not in git): `/tank/lanes/vars-backing.img` (24 GB sparse ext4, project quota) loop-mounted at
-`/var/lib/mini-vars-backing`, named by `/etc/mini-spk-volumes/vars-backing`; the mount is not in fstab, so a reboot
-loses it and `install-user-world` then refuses by name. `/tank/mini-ingest` (root:root 0755) named by
-`/etc/mini-spk-volumes/ingest-scratch`: each world's intake spools to `/tank/mini-ingest/<store>`; /tank is the HDD
-mirror, so ingest through it is slower; candidates built before 45091c14e ignore the file.
+hbox state outside git (root host changes, not reboot-persistent):
+- ONE prjquota backing: `/tank/lanes/vars-backing.img` (24 GB sparse ext4 -O quota,project) loop-mounted
+  `prjquota` at `/var/lib/mini-vars-backing`, named by `/etc/mini-spk-volumes/vars-backing`. After a reboot,
+  `sudo mount -o loop,prjquota /tank/lanes/vars-backing.img /var/lib/mini-vars-backing`, or world installs
+  refuse by name. (The sibling's duplicate `/var/lib/mini-spk-vars-backing` from `/tank/mini-spk-vars-backing.img`
+  was empty; unmounted, detached and removed.)
+- `/tank/mini-ingest` (root:root 0755) named by `/etc/mini-spk-volumes/ingest-scratch`: each world's intake
+  spools to `/tank/mini-ingest/<store>`. /tank is the HDD mirror, so ingest through it is slower; candidates
+  built before 45091c14e ignore the file.
 
-Diagnosed: the Davros control run's `controller-worker-prepare` refusal was my `grain-runtime` copy at mode 0775
-under hbox's umask 0002 (custody wants it unwritable by group); `/ci/hb-data/run.sh` installs it 0555. The next
-failure was the root-side tool whitelist (fixed above). gate14's j14 `insufficient scratch workspace` was hbox's
-root disk (36 GB free against the operator-appliance profile's 20 GiB decoded bound), not a layout or version
-mismatch.
+Diagnosed: the Davros control run's `controller-worker-prepare` refusal was my `grain-runtime` copy at mode
+0775 under hbox's umask 0002 (custody wants it unwritable by group); the next failures were the root-side tool
+whitelist (fixed above) and then the resident /var check (fixed above). gate14's j14 `insufficient scratch
+workspace` was hbox's root disk (36 GB free against the operator-appliance profile's 20 GiB decoded bound).
+A hard-linked copy of integ/src/.lake is never a build tree: lake writes traces and setup.json in place (I
+poisoned two files that way, ObjectivePackageAuthor.setup.json and .trace; the integrator removes them); use
+the lane pool (/home/hbox/pool, `lane-tree`, LANE_POOL_NO_WARM=1 while integ builds). Two instances must not
+rsync into one hbox src directory; use /tank/lanes/<own>/src.
 
-Owed: the live Hummingbird run (the foreground typed/_qualify tools are built and unit-tested; the rerun needs a
-current candidate, the old one was swept), then WBO and Scrumblr; `op66-plan` for EtherCalc and Etherpad on the demo
-world (waits for infra's rebuilt forge world, with the retained plan kept); E3 and E4 (why-clause and guard-rejection
-rendering, Lean/Host side, no owner); the G2 slot response type query; E7's live rerun on the explorer's side.
-
-Hazard: another process edited this worktree (resident `/var` check: os.rs, resident_launch.rs, volume_custody.rs,
-the fixture rename, the custodian unit template) and left it uncommitted; I did not take it.
+Owed: Davros j14 through app-start on a live world with the resident fix (hbox /ci/hb-dav-7, running) and then
+the live Hummingbird run, WBO and Scrumblr qualification (the foreground typed/_qualify tools are built and
+unit-tested; the old candidate was swept, so use a current one); `op66-plan` for EtherCalc and Etherpad on the
+demo world (waits for infra's rebuilt forge world, with the retained plan kept); E3 and E4 (why-clause and
+guard-rejection rendering, Lean/Host, no owner); the decider-side half of G2 (a pending await's record view has
+no program type, so only the publisher sees the response type); the Hermes worker root's interpreter (built for
+3.12, the box has 3.13); the controller boot ordering and recovery.

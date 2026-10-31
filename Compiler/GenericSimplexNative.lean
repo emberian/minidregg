@@ -137,7 +137,7 @@ def storage (n : Native) : Storage := n.storage
 def crypto (n : Native) : Crypto := n.helper.crypto
 
 /-- Journal storage over an in-memory authoritative image and the helper's
-exclusive, length-checked, fsynced append. -/
+exclusive, length-checked append. -/
 def journalStorage (helper : Helper) (writable : Bool) (initial : Sigma Restored) : IO Storage := do
   let image ← IO.mkRef (some initial)
   return {
@@ -156,7 +156,7 @@ def journalStorage (helper : Helper) (writable : Bool) (initial : Sigma Restored
         return if status == 0 then .durable else .conflict
       catch _ => return .uncertain }
 
-/-- Create a fresh journal (exclusive, fsynced) holding only its base frame. -/
+/-- Create a fresh journal (exclusive) holding only its base frame. -/
 def createJournal (binary journal : System.FilePath) (base : Journal) : IO Unit := do
   let helper ← spawnHelper {binary := binary,journal := some journal}
   try

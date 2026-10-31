@@ -24,7 +24,7 @@ There is no Rust proposition or Rust field semantics in this module.
 -/
 
 import Compiler.AdditiveFriReceiptClause
-import Compiler.Tower256ConcreteBackend
+import Compiler.Tower256Backend
 import Compiler.Tower256CshakeMerkleBinding
 import Compiler.AuthenticatedColumnSelvage
 import Selvage.AdditiveBasisBinding

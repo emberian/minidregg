@@ -359,7 +359,7 @@ impl Mirror {
                 let path=dir.join(&file);
                 use std::io::Write;use std::os::unix::fs::OpenOptionsExt;
                 let mut f=std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path);
-                match &mut f {Ok(f)=>{f.write_all(text.as_bytes()).and_then(|_|f.sync_all()).map_err(|e|e.to_string())?},Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>{},Err(e)=>return Err(e.to_string())}
+                match &mut f {Ok(f)=>{f.write_all(text.as_bytes()).map_err(|e|e.to_string())?},Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>{},Err(e)=>return Err(e.to_string())}
                 let operation=dir.join(format!("discord-{}-{id}.operation.json",self.room));
                 let line=format!("say --in {} --via discord --via-id {author} --via-name {name} --operation-record {} --file {file}",self.room,operation.display());
                 let outcome=self.deployment.run(&self.session,&line);

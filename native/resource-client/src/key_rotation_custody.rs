@@ -9,7 +9,7 @@ pub(super) fn directory(path: &Path) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => workspace::make_private_dir(path)?,
         Err(e) => return Err(e.to_string()),
     }
-    sync_parent(path)
+    Ok(())
 }
 pub(super) fn publish(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
     workspace::publish_retained_json(path, value, expected)
@@ -20,7 +20,6 @@ pub(super) fn read(path: &Path) -> Result<Value> {
 pub(super) fn bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
     agent_reserve::private_bytes(path, limit)
 }
-pub(super) use crate::fsio::sync_parent;
 pub(super) fn immutable(path: &Path, value: &[u8]) -> Result<()> {
     crate::fsio::retain_exact(path, value, || "retained rotation bytes changed".to_owned()).map(|_| ())
 }
@@ -36,7 +35,7 @@ pub(super) fn stable_id(id: &str) -> Result<()> {
     Ok(())
 }
 /// The caller holds the workspace transition lock. Accept only the retained
-/// prior value or the exact installed value. Rename plus directory fsync makes
+/// prior value or the exact installed value. Rename plus directory write makes
 /// a crash after rename recoverable by exact readback, with no fresh keygen.
 fn install_bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let meta = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
@@ -54,7 +53,7 @@ pub(super) fn install(path: &Path, prior: Option<&[u8]>, next: &[u8]) -> Result<
             let existing =
                 install_bytes(path, next.len().max(prior.map_or(0, |p| p.len())).max(1))?;
             if existing == next {
-                return sync_parent(path);
+                return Ok(());
             }
             if prior != Some(existing.as_slice()) {
                 return Err(

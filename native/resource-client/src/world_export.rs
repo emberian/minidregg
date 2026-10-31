@@ -41,7 +41,6 @@ impl ExportClaim {
         let _ = self.file.set_len(0);
         let _ = self.file.seek(std::io::SeekFrom::Start(0));
         let _ = self.file.write_all(&self.previous);
-        let _ = self.file.sync_all();
     }
 }
 
@@ -67,7 +66,6 @@ pub(crate) fn claim_export(home: &Path, now: u64) -> Result<ExportClaim> {
     file.set_len(0).map_err(|e| e.to_string())?;
     file.seek(std::io::SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     file.write_all(format!("{now}\n").as_bytes()).map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
     Ok(ExportClaim { file, previous })
 }
 
@@ -177,7 +175,7 @@ impl Tar {
 
     fn finish(mut self) -> Result<()> {
         self.out.write_all(&[0u8; 1024]).map_err(|e| e.to_string())?;
-        self.out.sync_all().map_err(|e| e.to_string())
+        Ok(())
     }
 }
 

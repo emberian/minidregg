@@ -16,12 +16,17 @@ mod app_interface;
 mod attempt_state;
 mod bounds;
 mod fsio;
-pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json, sync_directory_ancestors};
+pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json};
 #[cfg(unix)]
 mod agent_lifetime_grant;
 mod trace;
 #[cfg(unix)]
 mod capture;
+mod read_scratch;
+#[cfg(unix)]
+mod line_resident;
+#[cfg(unix)]
+mod client_resident;
 #[cfg(unix)]
 mod key_rotation;
 #[cfg(unix)]
@@ -475,6 +480,14 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
             ));
         }
     }
+    // The Host reduces a controller's typed `Reject` to the clause path it names
+    // (`Host.RefusalText.render`: `guard-rejected 0`); the committed detail stays in the
+    // outcome JSON. A Host that sends no `clause` is answered with the detail as before.
+    let detail = outcome
+        .get("clause")
+        .and_then(Value::as_str)
+        .filter(|clause| !clause.is_empty() && !clause.chars().any(char::is_control))
+        .map_or(detail, str::to_owned);
     let hint = refusal_hint(&detail);
     Some(format!(
         "refused: {reason}: {detail} (phase {}){hint}",
@@ -488,7 +501,9 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
 /// epochs, a fresh child id, an unspent nullifier); most often the authority
 /// has moved since, and the cure is a new proposal.
 fn refusal_hint(detail: &str) -> &'static str {
-    if detail.contains("CapabilityDelegationController.Reject.descent") {
+    if detail.contains("CapabilityDelegationController.Reject.descent")
+        || detail.contains("capability-delegation-controller: descent")
+    {
         "\n  hint: this delegation was authored against the authority as it stood then; it has moved since \
          (or the proposal was already used). Propose it again under a new ID and submit that."
     } else {
@@ -585,10 +600,13 @@ fn host_image_identity(metadata: &fs::Metadata) -> HostImageIdentity {
     )
 }
 
-/// The digest of the selected Host image, hashed once per file identity per
-/// process. The identity is read from the open handle, before and after the
-/// hash; a file that changed while it was hashed is refused, and a later call
-/// that sees a different identity hashes again.
+/// The digest of the selected Host image, hashed once per file identity. The
+/// identity is read from the open handle, before and after the hash; a file that
+/// changed while it was hashed is refused, and a later call that sees a different
+/// identity hashes again. A digest outlives the process that hashed it in the
+/// owner-private resident directory (`host_digest_record`), under the same
+/// identity, so a `mini` process per verb does not re-read ~180 MB (a chat `tail`
+/// spent 170 of its 186 ms of CPU here); `--verify-host` still hashes.
 ///
 /// A remote client has no Host image: its Host is named by an empty path and known only by the digest
 /// it pinned, which every v2 envelope carries and the box's socket checks.
@@ -635,6 +653,16 @@ fn host_image_sha256(host: &Path) -> Result<String> {
     {
         return Ok(sha.clone());
     }
+    let record = host_digest_record(host, &identity);
+    if !verify_host() {
+        if let Some(sha) = record.as_deref().and_then(read_host_digest) {
+            if pinned.is_none_or(|pin| pin == &sha) {
+                cache.retain(|(path, _, _)| path != host);
+                cache.push((host.to_path_buf(), identity, sha.clone()));
+                return Ok(sha);
+            }
+        }
+    }
     let mut digest = sha2::Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -664,7 +692,43 @@ fn host_image_sha256(host: &Path) -> Result<String> {
     }
     cache.retain(|(path, _, _)| path != host);
     cache.push((host.to_path_buf(), identity, sha.clone()));
+    if let Some(record) = record {
+        // Best effort: a digest that cannot be kept is hashed again by the next process.
+        let _ = mini_sdk::durable::replace(&record, format!("{sha}\n").as_bytes(), mini_sdk::durable::Perm::Private);
+    }
     Ok(sha)
+}
+
+/// Where the digest of the Host image at `host` with `identity` is kept between processes:
+/// `h-<first 16 bytes of SHA-256(path, identity)>.sha256` in the owner-private resident
+/// directory (`mini_sdk::consent::private_anchor_dir`, where the consent and codec residents
+/// keyed by the same file identity live). None without one (no $HOME and no
+/// MINI_CONSENT_ANCHOR_DIR): that process hashes.
+#[cfg(unix)]
+fn host_digest_record(host: &Path, identity: &HostImageIdentity) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = mini_sdk::consent::private_anchor_dir().ok()?;
+    let (dev, ino, size, mtime, mtime_nsec, ctime, ctime_nsec) = *identity;
+    let mut key = sha2::Sha256::new();
+    key.update(b"MINI-HOST-IMAGE-DIGEST/v1\0");
+    key.update((host.as_os_str().len() as u64).to_le_bytes());
+    key.update(host.as_os_str().as_bytes());
+    for value in [dev, ino, size] {
+        key.update(value.to_le_bytes());
+    }
+    for value in [mtime, mtime_nsec, ctime, ctime_nsec] {
+        key.update(value.to_le_bytes());
+    }
+    Some(dir.join(format!("h-{}.sha256", hex(&key.finalize()[..16]))))
+}
+
+/// A kept digest: an owner-private regular file holding exactly 64 lowercase hex digits and a newline.
+#[cfg(unix)]
+fn read_host_digest(record: &Path) -> Option<String> {
+    mini_sdk::private::check_file(record).ok()?;
+    let bytes = fs::read(record).ok()?;
+    let text = std::str::from_utf8(bytes.strip_suffix(b"\n")?).ok()?;
+    (text.len() == 64 && mini_sdk::hex::is_lower(text)).then(|| text.to_owned())
 }
 
 /// Whether this process hashes a pinned Host image anyway (`mini --verify-host ...`, MINI_VERIFY_HOST=1).
@@ -851,6 +915,7 @@ usage:
   mini mix-live --action cover|registrar|relay|mailbox|scan|send|receive --state DIR --generation HEX --origin-ms MS --records DIR [action options]
   mini consent-resident --consent PATH --settings PATH     the resident consent component for this user's `mini` processes
   mini codec-resident --host HOST --settings PATH          the storeless resident codec Host for this user's `mini` processes
+  mini client-resident                                     run the parent's client commands in this one process (the apps worker's channel on stdin)
   mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -910,10 +975,15 @@ usage:
                          operations and the status action only; resident clients pin MINI_OPERATOR_PEER_UID
   mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
                          requires one systemd-activated listener; controller clients pin --operator-peer-uid
-  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds 600]
+  mini serve-codec --socket SHARED-SOCKET --host HOST --config CONFIG.json
+                         the box's shared codec Host for every member account (split tenancy); requires one
+                         systemd-activated listener; clients select it with MINI_CODEC_SOCKET/_PEER_UID and
+                         refuse unless it greets with their own Host image and settings digests
+  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds N] [--resident-dir DIR]
                          delegated full consent for one client UID that cannot read the Store (a controller, a
-                         split-tenancy member); requires one systemd-activated listener; ends after --idle-seconds
-                         with no connection; clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
+                         split-tenancy member); requires one systemd-activated listener; keeps its warm verifier
+                         (with --idle-seconds N, ends after N seconds with no connection); with
+                         --resident-dir it relays to the operator's ONE shared consent resident there; clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
@@ -1567,14 +1637,6 @@ fn create_dir(path: &Path) -> Result<()> {
     fs::create_dir(path).map_err(|error| format!("cannot create {}: {error}", path.display()))
 }
 
-/// The native host may write call.bin without syncing it. A successful
-/// external submit must never precede a durable exact call and its pathname.
-fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
-    File::open(call)
-        .and_then(|file| mini_sdk::durable::sync_file(&file))
-        .map_err(|error| format!("cannot sync exact call {}: {error}", call.display()))?;
-    sync_directory_ancestors(directory)
-}
 
 fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     create_public(path, bytes)
@@ -2067,15 +2129,13 @@ fn submit_once(
 ) -> Result<()> {
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
-    // Until the seal every file of this attempt is a cache of its seal record: staged and linked
-    // without its own fsync (`mini_sdk::phase`). The seal ends the scope; so does any early return.
-    let _caches = mini_sdk::phase::CacheScope::enter(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {
         "intent.json"
     });
     copy_new(intent, &retained_intent)?;
+    workspace::index_retained_intent(directory, &fs::read(&retained_intent).map_err(|e| e.to_string())?)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "submit")?;
@@ -2105,10 +2165,6 @@ fn submit_once(
         (plan_bin.clone(), plan_json.clone())
     };
     let presentation = flow.present(&prepared_bin, &prepared_json)?;
-    if provider_continuity.is_some() {
-        sync_retained_call(directory, &prepared_bin)?;
-        sync_retained_call(directory, &prepared_json)?;
-    }
     #[cfg(unix)]
     if let Some(descriptor) = provider_continuity {
         if let Err(error) = provider_continuity::guard(
@@ -2199,6 +2255,7 @@ pub(crate) fn dry_run(
         "intent.json"
     });
     copy_new(intent, &retained_intent)?;
+    workspace::index_retained_intent(directory, &fs::read(&retained_intent).map_err(|e| e.to_string())?)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "dry-run")?;
@@ -2315,6 +2372,7 @@ fn query_once(
         "intent.json"
     });
     copy_new(intent, &retained_intent)?;
+    workspace::index_retained_intent(directory, &fs::read(&retained_intent).map_err(|e| e.to_string())?)?;
     let retained_config = directory.join("config.json");
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, "query")?;
@@ -2560,14 +2618,10 @@ fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
     if !matches!(mode, "submit" | "lookup") {
         return Err("--mode must be submit or lookup".to_owned());
     }
-    // A retained attempt's caches are checked against its seal record before anything (this
-    // process, a one-shot Host, the transport) reads them (`mini_sdk::phase`, invariant 3).
-    mini_sdk::phase::repair_dir(directory)?;
     let call = directory.join("call.bin");
     if !call.is_file() {
         return Err(format!("attempt has no retained {}", call.display()));
     }
-    sync_retained_call(directory, &call)?;
     #[cfg(unix)]
     if let Some(outcome) = receipt_continuity::carry::retry_lookup(directory, mode, direct)? {
         return print_confirmed_outcome(&outcome);
@@ -2668,7 +2722,6 @@ fn continuity(
     let retained_config = private_consumer_attempt(host, config, directory, "continuity")?;
     create_private(&directory.join("call.bin"), &call_bytes)?;
     create_private(&directory.join("outcome.bin"), &outcome_bytes)?;
-    sync_directory_ancestors(directory)?;
     let payload = provider_continuity::request_payload(&call_bytes, &outcome_bytes, None, false)?;
     let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
@@ -2750,7 +2803,15 @@ fn run(mut args: Args) -> Result<()> {
         pin_remote_host(sha.to_str().ok_or("--host-sha256 must be UTF-8")?)?;
     }
     if let Some(socket) = &socket_argument {
-        let _ = SOCKET.set(path(socket.clone()));
+        // A process serving several commands (`capture`) pins one Host socket; another is refused.
+        let socket = path(socket.clone());
+        match SOCKET.get() {
+            Some(pinned) if pinned != &socket => return Err("Host socket differs from the one this process pinned".into()),
+            Some(_) => {}
+            None => {
+                let _ = SOCKET.set(socket);
+            }
+        }
     }
     #[cfg(unix)]
     if socket_argument.as_deref().is_some_and(|s| transport::is_remote(Path::new(s)))
@@ -2777,13 +2838,7 @@ fn run(mut args: Args) -> Result<()> {
         }
         #[cfg(unix)]
         "workspace" => {
-            // One `mini workspace` action publishes 30-40 custody files; their directory fsyncs
-            // are coalesced to the barriers (every Host request, and here before exit), each file
-            // still complete or absent (`mini_sdk::durable`).
-            mini_sdk::durable::defer_directory_syncs();
-            let result = workspace::run(args);
-            let barrier = transport::durability_barrier();
-            result.and(barrier)
+            workspace::run(args)
         }
         #[cfg(unix)]
         "app-interface" => app_interface::run(args),
@@ -2902,6 +2957,11 @@ fn run(mut args: Args) -> Result<()> {
             client_consent::resident(consent, settings)
         }
         #[cfg(unix)]
+        "client-resident" => {
+            args.finish()?;
+            client_resident::serve()
+        }
+        #[cfg(unix)]
         "codec-resident" => {
             // HOT-PATH 2a: one storeless codec Host per image+settings binding for every `mini`
             // process of this user, started by the first `local_frame` that finds none listening.
@@ -2959,6 +3019,19 @@ fn run(mut args: Args) -> Result<()> {
             public_proxy::serve_agent_activated(socket, &upstream, &config, uid)
         }
         #[cfg(target_os = "linux")]
+        "serve-codec" => {
+            // The box's shared codec Host (split tenancy): one storeless codec child for every
+            // member account, on the systemd-activated listener at fd 3 (`--socket` names it).
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-codec requires --socket")?;
+            let listener = unsafe { <std::os::unix::net::UnixListener as std::os::fd::FromRawFd>::from_raw_fd(3) };
+            public_proxy::validate_activated_listener(&listener, socket)?;
+            let image: [u8; 32] = mini_sdk::hex::decode_fixed(&host_image_sha256(&host)?).map_err(|_| "Host image digest is not 32 bytes")?;
+            Ok(mini_sdk::consent::serve_codec_service(listener, host, config, image)?)
+        }
+        #[cfg(target_os = "linux")]
         "serve-controller-consent" => {
             let consent = path(args.required("consent")?);
             let config = path(args.required("config")?);
@@ -2966,15 +3039,19 @@ fn run(mut args: Args) -> Result<()> {
             let image = consent_proxy::digest(args.required("consent-sha256")?.to_str().ok_or("consent digest must be UTF-8")?)?;
             let settings = consent_proxy::digest(args.required("config-sha256")?.to_str().ok_or("config digest must be UTF-8")?)?;
             let uid = args.required("controller-uid")?.to_str().and_then(|n|n.parse::<u32>().ok()).ok_or("controller UID must be a decimal u32")?;
-            // Seconds with no connection before the service ends (socket activation restarts it).
+            // Seconds with no connection before the service ends (socket activation restarts it);
+            // without the flag it keeps its warm verifier.
             let idle = match args.optional("idle-seconds") {
-                Some(v) => v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
-                    .ok_or("idle seconds must be a positive decimal")?,
-                None => mini_sdk::consent::RESIDENT_IDLE_S,
+                Some(v) => Some(v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
+                    .ok_or("idle seconds must be a positive decimal")?),
+                None => None,
             };
+            // Split tenancy (ember 2026-10-31): relay to the operator's ONE shared consent resident
+            // in this owner-private directory instead of holding a provider per member.
+            let shared = args.optional("resident-dir").map(path);
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
-            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,std::time::Duration::from_secs(idle))
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,idle.map(std::time::Duration::from_secs),shared.as_deref())
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {
@@ -3845,11 +3922,18 @@ fn main() -> ExitCode {
         Some(command) if command == OsStr::new("fleet-sign") => {
             fleet_sign::run(env::args_os().skip(2).collect())
         }
+        Some(command) if command == OsStr::new("command-resident") && env::args_os().len() == 2 => {
+            capture::serve()
+        }
+        Some(command) if command == OsStr::new("line-resident") => {
+            line_resident::main_args().and_then(|(listen, config)| line_resident::serve(listen, config))
+        }
         _ => Args::parse().and_then(run),
     };
     #[cfg(not(unix))]
     let parsed = Args::parse().and_then(run);
     let ending = main_ending(parsed, EXIT_STATUS.load(Ordering::Relaxed));
+    read_scratch::clear();
     print!("{}", ending.stdout);
     eprint!("{}", ending.stderr);
     ExitCode::from(ending.code)
@@ -4171,6 +4255,13 @@ mod tests {
         assert_eq!(
             refusal_line(&nested).unwrap(),
             "refused: operation-rejected: invocation preparation: A.Reject.scalar (B.Reject.pageMutation (C.RejectReason.overflow)) (phase prepare)"
+        );
+        // A Host that names the clause: the line carries it, the committed detail stays in the JSON.
+        let clause = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
+            "clause":"declared-resource-scalar: guard-rejected 0","detail":hex(b"DeclaredResourceScalar.Reject.guardRejected 0")});
+        assert_eq!(
+            refusal_line(&clause).unwrap(),
+            "refused: operation-rejected: declared-resource-scalar: guard-rejected 0 (phase prepare)"
         );
         let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
         assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));

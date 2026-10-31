@@ -176,6 +176,14 @@ def runNative (config : NativeConfig) (arguments : Array String) : IO IO.Process
     (if config.anchorIdentity.isEmpty then arguments
       else #["--anchor-identity", config.anchorIdentity] ++ arguments)
 
+/-- `runNative` with the call's files as blobs (`mem:NAME` arguments,
+`NativeCoprocess.outputMemory`): no temporary directory, no file round trip. -/
+def runNativeMemory (config : NativeConfig) (arguments : Array String)
+    (inputs : List (String × ByteArray)) : IO (IO.Process.Output × List (String × ByteArray)) :=
+  NativeCoprocess.outputMemory config.binary.toString
+    (if config.anchorIdentity.isEmpty then arguments
+      else #["--anchor-identity", config.anchorIdentity] ++ arguments) inputs
+
 def parseCasOutput (output : IO.Process.Output) : CasObservation :=
   if output.exitCode == 0 && output.stderr == "" then
     match output.stdout with
@@ -240,18 +248,16 @@ def parseStored (fromHeight : Nat) (withBase : Bool) (bytes : ByteArray) : Optio
 def NativeConfig.read (config : NativeConfig) (fromHeight : Nat) (withBase : Bool) :
     IO (Except String (Option Stored)) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "read.bin"
-      let output ← runNative config #["durable-read", config.root.toString,
-        toString fromHeight, if withBase then "1" else "0", path.toString]
-      if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        match parseStored fromHeight withBase (← IO.FS.readBinFile path) with
-        | some stored => return .ok (some stored)
-        | none => return .error "native durable read malformed"
-      else if output.exitCode == 3 && output.stdout == "" then
-        return .ok none
-      else
-        return .error s!"native durable read failed (exit {output.exitCode}): {output.stderr}"
+    let (output, written) ← runNativeMemory config #["durable-read", config.root.toString,
+      toString fromHeight, if withBase then "1" else "0", "mem:read"] []
+    if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
+      match (written.lookup "read").bind (parseStored fromHeight withBase) with
+      | some stored => return .ok (some stored)
+      | none => return .error "native durable read malformed"
+    else if output.exitCode == 3 && output.stdout == "" then
+      return .ok none
+    else
+      return .error s!"native durable read failed (exit {output.exitCode}): {output.stderr}"
   catch error => pure (.error s!"native durable read unavailable: {error}")
 
 /-- `crashAt` is a lifecycle-test hook implemented by process exit inside the
@@ -269,49 +275,47 @@ def encodeNodes (nodes : List NodeWrite) : List UInt8 :=
 def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
     (nodes : List NodeWrite) (crashAt : Option String := none) : IO CasObservation :=
   try
-    IO.FS.withTempDir fun directory => do
-      let recordPath := directory / "record.bin"
-      let tagPath := directory / "tag.bin"
-      let nodesPath := directory / "nodes.bin"
-      IO.FS.writeBinFile recordPath entry.record.toByteArray
-      IO.FS.writeBinFile tagPath entry.tag.toByteArray
-      IO.FS.writeBinFile nodesPath (encodeNodes nodes).toByteArray
-      let arguments := match crashAt with
-        | none => #["durable-append", config.root.toString, toString height,
-            recordPath.toString, tagPath.toString, nodesPath.toString]
-        | some phase => #["durable-append-crash", config.root.toString, toString height,
-            recordPath.toString, tagPath.toString, nodesPath.toString, phase]
-      return parseCasOutput (← runNative config arguments)
+    let arguments := match crashAt with
+      | none => #["durable-append", config.root.toString, toString height,
+          "mem:record", "mem:tag", "mem:nodes"]
+      | some phase => #["durable-append-crash", config.root.toString, toString height,
+          "mem:record", "mem:tag", "mem:nodes", phase]
+    let (output, _) ← runNativeMemory config arguments
+      [("record", entry.record.toByteArray), ("tag", entry.tag.toByteArray),
+        ("nodes", (encodeNodes nodes).toByteArray)]
+    return parseCasOutput output
   catch error => pure (.uncertain s!"native append unavailable: {error}")
 
 def NativeConfig.putCheckpoint (config : NativeConfig) (height : Nat) (bytes : List UInt8) :
     IO (Except String Unit) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "checkpoint.bin"
-      IO.FS.writeBinFile path bytes.toByteArray
-      let output ← runNative config #["durable-checkpoint", config.root.toString,
-        toString height, path.toString]
-      if output.exitCode == 0 && output.stderr == "" then return .ok ()
-      else return .error s!"native checkpoint write failed (exit {output.exitCode}): {output.stderr}"
+    let (output, _) ← runNativeMemory config #["durable-checkpoint", config.root.toString,
+      toString height, "mem:checkpoint"] [("checkpoint", bytes.toByteArray)]
+    if output.exitCode == 0 && output.stderr == "" then return .ok ()
+    else return .error s!"native checkpoint write failed (exit {output.exitCode}): {output.stderr}"
   catch error => pure (.error s!"native checkpoint unavailable: {error}")
 
 def NativeConfig.initialize (config : NativeConfig) (seedBytes : List UInt8) : IO CasObservation :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "seed.bin"
-      IO.FS.writeBinFile path seedBytes.toByteArray
-      return parseCasOutput (← runNative config #["durable-init", config.root.toString,
-        path.toString])
+    let (output, _) ← runNativeMemory config #["durable-init", config.root.toString, "mem:seed"]
+      [("seed", seedBytes.toByteArray)]
+    return parseCasOutput output
   catch error => pure (.uncertain s!"native initialize unavailable: {error}")
+
+/-- The MAC keys this process has read, by file: a Store's key is written once at bootstrap,
+so it is read once per process, not on every Store call. -/
+initialize macKeys : IO.Ref (List (System.FilePath × MacKey)) ← IO.mkRef []
 
 /-- The key file must hold exactly 32 bytes. Its 0600 mode is checked by the
 bootstrap that created it and by the operator; Lean reads, never writes it. -/
 def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
   try
+    if let some key := (← macKeys.get).lookup config.key then return .ok key
     let bytes := (← IO.FS.readBinFile config.key).toList
     match MacKey.ofBytes? bytes with
-    | some key => return .ok key
+    | some key =>
+        macKeys.modify ((config.key, key) :: ·)
+        return .ok key
     | none => return .error "checkpoint MAC key must be exactly 32 bytes"
   catch error => pure (.error s!"checkpoint MAC key unavailable: {error}")
 
@@ -319,11 +323,13 @@ def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
 installs a seed once and never replaces it). -/
 def NativeConfig.peekSeed (config : NativeConfig) : IO (Except String (Option (List UInt8))) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "seed.bin"
-      let output ← runNative config #["durable-seed", config.root.toString, path.toString]
+    do
+      let (output, written) ← runNativeMemory config #["durable-seed", config.root.toString,
+        "mem:seed"] []
       if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        return .ok (some (← IO.FS.readBinFile path).toList)
+        match written.lookup "seed" with
+        | some bytes => return .ok (some bytes.toList)
+        | none => return .error "native durable seed read malformed"
       else if output.exitCode == 3 && output.stdout == "" then
         return .ok none
       else
@@ -371,14 +377,11 @@ def encodeHistoryRequest (request : HistoryRequest) : List UInt8 :=
 def NativeConfig.history (config : NativeConfig) (request : HistoryRequest) :
     IO (Except String HistoryRead) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let requestPath := directory / "request.bin"
-      let path := directory / "history.bin"
-      IO.FS.writeBinFile requestPath (encodeHistoryRequest request).toByteArray
-      let output ← runNative config #["durable-history", config.root.toString,
-        requestPath.toString, path.toString]
+    do
+      let (output, written) ← runNativeMemory config #["durable-history", config.root.toString,
+        "mem:request", "mem:history"] [("request", (encodeHistoryRequest request).toByteArray)]
       if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        match parseHistory (← IO.FS.readBinFile path) with
+        match (written.lookup "history").bind parseHistory with
         | some read => return .ok read
         | none => return .error "native durable history read malformed"
       else return .error s!"native durable history read failed (exit {output.exitCode}): {output.stderr}"
@@ -396,11 +399,11 @@ def checkpointHeightOf (bytes : ByteArray) : Option (Option Nat) := do
 
 def NativeConfig.readFromCheckpoint (config : NativeConfig) : IO (Except String (Option Stored)) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "read.bin"
-      let output ← runNative config #["durable-read", config.root.toString, "1", "2", path.toString]
+    do
+      let (output, written) ← runNativeMemory config #["durable-read", config.root.toString, "1", "2",
+        "mem:read"] []
       if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        let bytes ← IO.FS.readBinFile path
+        let bytes := (written.lookup "read").getD ByteArray.empty
         match checkpointHeightOf bytes with
         | none => return .error "native durable read malformed"
         | some checkpoint =>
@@ -416,12 +419,11 @@ def NativeConfig.readFromCheckpoint (config : NativeConfig) : IO (Except String 
 def NativeConfig.checkpointAt (config : NativeConfig) (height : Nat) :
     IO (Except String (Option StoredCheckpoint)) :=
   try
-    IO.FS.withTempDir fun directory => do
-      let path := directory / "checkpoint.bin"
-      let output ← runNative config #["durable-checkpoint-at", config.root.toString,
-        toString height, path.toString]
+    do
+      let (output, written) ← runNativeMemory config #["durable-checkpoint-at", config.root.toString,
+        toString height, "mem:checkpoint"] []
       if output.exitCode == 0 && output.stdout == "" && output.stderr == "" then
-        let bytes ← IO.FS.readBinFile path
+        let bytes := (written.lookup "checkpoint").getD ByteArray.empty
         match u64At bytes 0 with
         | some 0 => if bytes.size = 8 then return .ok none else return .error "native checkpoint read malformed"
         | some 1 =>
@@ -865,6 +867,46 @@ def WorldTrack.world? {rootBytes : List UInt8 → Digest} {snapshot : DataSnapsh
   | .held w _ => some w
   | .lost _ => none
 
+/-- The deployed judge of a pin, read from the snapshot a held World represents: the
+cell retired, or its canonical bytes (which the executor already holds) not hashing
+to the asserted digest. It agrees with `World.pinFails` at a represented World
+(`snapPinFails_eq`), which re-encodes the World's own copy of the cell instead. -/
+def snapPinFails {rootBytes : List UInt8 → Digest} (snapshot : DataSnapshot rootBytes)
+    (w : HostRefinesWorld.DWorld) (p : Minidregg.Kernel.World.CellId × Digest) : Bool :=
+  (w.retired p.1).isSome || decide (ResourceBirthCodec.rootBytes (snapshot.canonicalBytes ⟨p.1⟩) ≠ p.2)
+
+/-- At a World the snapshot represents, the snapshot's judge is the World's. -/
+theorem snapPinFails_eq {rootBytes : List UInt8 → Digest} {snapshot : DataSnapshot rootBytes}
+    {height : Nat} {w : HostRefinesWorld.DWorld}
+    (rep : HostRefinesWorld.SnapRepresents DeployedBridge.bridge snapshot height w)
+    (p : Minidregg.Kernel.World.CellId × Digest) :
+    snapPinFails snapshot w p = Minidregg.Kernel.World.pinFails DeployedHistory.history w p := by
+  cases hr : w.retired p.1 with
+  | some _ =>
+      have fails : Minidregg.Kernel.World.pinFails DeployedHistory.history w p = true := by
+        cases hp : Minidregg.Kernel.World.pinFails DeployedHistory.history w p
+        · have := ((Minidregg.Kernel.World.pinFails_eq_false_iff DeployedHistory.history).1 hp).1
+          rw [hr] at this; cases this
+        · rfl
+      rw [fails]
+      simp [snapPinFails, hr]
+  | none =>
+      have live : DeployedBridge.bridge.codec.retires (snapshot.canonicalBytes ⟨p.1⟩) = false := by
+        have retired := rep.retired p.1
+        rw [hr] at retired
+        exact retired.symm
+      have root := DeployedHistory.deployed_pinCoherent _ _ (rep.cells p.1) live
+      rw [DeployedBridge.bridge_pin] at root
+      have holds : Minidregg.Kernel.World.pinFails DeployedHistory.history w p = false ↔
+          ResourceBirthCodec.rootBytes (snapshot.canonicalBytes ⟨p.1⟩) = p.2 := by
+        rw [Minidregg.Kernel.World.pinFails_eq_false_iff DeployedHistory.history, root]
+        simp [hr]
+      cases hp : Minidregg.Kernel.World.pinFails DeployedHistory.history w p
+      · simp [snapPinFails, hr, holds.1 hp]
+      · have differs : ResourceBirthCodec.rootBytes (snapshot.canonicalBytes ⟨p.1⟩) ≠ p.2 :=
+          fun same => by have := holds.2 same; rw [hp] at this; cases this
+        simp [snapPinFails, hr, differs]
+
 /-- **One accepted execution, one admitted turn.**  From a held World, derive the
 intent's turn against it, refuse it unless its charge is the intent's on every
 lane (the Host debits what the World debits), and admit it; the result
@@ -881,13 +923,18 @@ def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : Data
           match charged : DeployedCharge.mismatch t.charge intent.exactCharge with
           | some lane => .lost s!"height {height'}: the intent's charge is not its turn's: {repr lane}"
           | none =>
-          match admitted : Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
+          -- The pins are judged from the snapshot's own bytes (`snapPinFails_eq`): the World's
+          -- copy of each pinned cell is never re-encoded for its digest.
+          match admitted : Minidregg.Kernel.World.World.admitPinned DeployedHistory.history
+              (Minidregg.Kernel.World.pinCheckFromBy (snapPinFails snapshot w) 0 t.pins) w t with
           | .error reason => .lost s!"height {height'}: the World refuses the turn: {repr reason}"
           | .ok w' => .held (WorldCompact.compactEvery height' w') (by
+              have admit := (Minidregg.Kernel.World.admitPinned_by_eq DeployedHistory.history w t
+                (fun p _ => snapPinFails_eq rep p)).symm.trans admitted
               rw [WorldCompact.compactEvery_eq, up]
               exact HostRefinesWorld.represents_of_admitted DeployedBridge.bridge
                 DeployedHistory.history rep derived (DeployedCharge.mismatch_none charged) executed
-                admitted)
+                admit)
 
 /-- **The append path refuses an intent charged other than its turn.**  From a
 held World, an intent whose derived turn's charge differs from its exact charge

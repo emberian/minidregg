@@ -45,16 +45,10 @@ def durable_json(path, value):
     with os.fdopen(fd, 'wb') as sink:
         sink.write(raw)
         sink.flush()
-        os.fsync(sink.fileno())
     # Hard-link publication is atomic and refuses an existing destination. A
     # crashed temporary remains evidence; it never counts as a phase outcome.
     os.link(temporary, path, follow_symlinks=False)
     temporary.unlink()
-    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def locked_exec(run, command):
@@ -316,12 +310,7 @@ def resume_prepared_archive(output, current, source_manifest, check_only):
         return {**receipt, 'checked': True}
     fd = os.open(output / 'source-resume-1.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'wb') as sink:
-        sink.write((json.dumps(receipt, indent=2) + '\n').encode()); sink.flush(); os.fsync(sink.fileno())
-    fd = os.open(output, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+        sink.write((json.dumps(receipt, indent=2) + '\n').encode()); sink.flush()
     return output
 
 
@@ -450,30 +439,10 @@ def prepare_session(run, spk, inventory, benchmark, repo, exported_path, resume_
     for path in prior.rglob('*'):
         path.chmod(0o500 if path.is_dir() else 0o400)
     prior.chmod(0o500)
-    # Finish the durable backup before any subsequent source or physical repair.
-    # File data and chmod metadata precede bottom-up directory publication.
-    for path in prior.rglob('*'):
-        if path.is_file():
-            with path.open('rb') as source:
-                os.fsync(source.fileno())
-    for directory in sorted([prior, *(p for p in prior.rglob('*') if p.is_dir())],
-                            key=lambda p: len(p.parts), reverse=True):
-        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
     fd = os.open(output / 'prepared.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
     with os.fdopen(fd, 'wb') as sink:
         sink.write((json.dumps(value, indent=2) + '\n').encode())
         sink.flush()
-        os.fsync(sink.fileno())
-    for directory in (output, output.parent):
-        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
     return output
 
 
@@ -534,11 +503,6 @@ def repair_checkpoint(run, spk, inventory, benchmark, repo, exported, status_pat
     require(output.parent == run / 'checkpoints', 'checkpoint output must be inside fixed run checkpoints')
     output.parent.mkdir(mode=0o700, exist_ok=True)
     durable_json(output, checkpoint)
-    fd = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
     return output
 
 
@@ -581,29 +545,17 @@ def begin_checkpoint(checkpoint_path, spk, inventory, benchmark, repo, exported,
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         shutil.copyfile(run / name, target)
         target.chmod(0o400)
-        with target.open('rb') as source:
-            os.fsync(source.fileno())
         archived[str(run / name)] = {'path': str(target), 'sha256': sha(target)}
         require(sha(run / name) == sha(target), 'checkpoint input changed during archive')
     for directory in sorted([prior, *(p for p in prior.rglob('*') if p.is_dir())],
                             key=lambda p: len(p.parts), reverse=True):
         directory.chmod(0o500)
-        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
     phases = output / 'phases'
     phases.mkdir(mode=0o700)
     durable_json(output / 'checkpoint.json', {'schema': 'mini-oracle-checkpoint-execution-v1',
         'checkpoint': str(checkpoint_path), 'checkpoint_sha256': sha(checkpoint_path), 'source': str(repo),
         'sources': sources, 'archived_original_paths': archived, 'repeated_phases': [],
         'next_phase': checkpoint['next_phase'], 'original_request_id': checkpoint['original_request_id']})
-    fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
     return output
 
 

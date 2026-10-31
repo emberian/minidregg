@@ -125,8 +125,6 @@ pub(crate) fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Resul
         .custom_flags(libc::O_NOFOLLOW)
         .open(&path).ctx("open", &path)?;
     file.write_all(bytes)?;
-    file.sync_all()?;
-    File::open(&directory).ctx("open", &directory)?.sync_all()?;
     Ok(path)
 }
 
@@ -863,7 +861,6 @@ fn run_pinned(mut process: Command, output: &Path, deadline: Instant) -> io::Res
     if stderr_file.metadata()?.len() > MAX_HELPER_STDERR {
         stderr_file.set_len(MAX_HELPER_STDERR)?;
     }
-    stderr_file.sync_all()?;
     let mut reason = String::new();
     File::open(&stderr_path).ctx("open", &stderr_path)?
         .take(MAX_HELPER_STDERR)
@@ -1129,7 +1126,7 @@ impl RecordedDispatch {
 }
 
 impl CommittedDispatch {
-    /// The call's submit marker is only settled after hostd has fsynced its
+    /// The call's submit marker is only settled after hostd has written its
     /// separate DeliveryRequested tombstone. A crash in either interval
     /// leaves this one call undecided (it counts toward the journal's bound
     /// and is never looked up as absent: its permit was committed).
@@ -1169,7 +1166,7 @@ impl CommittedDispatch {
 }
 
 /// The attempt directory is new and durable before any mutation. A marker is
-/// fsynced before op34/164; once present, submission refuses to run again for
+/// written before op34/164; once present, submission refuses to run again for
 /// the same attempt even if the Host response was lost. Historical op35 may
 /// inform an audit, but it can never mint a fresh physical delivery permit.
 fn author_signed_ingress(
@@ -1903,7 +1900,7 @@ pub(crate) mod qualification {
             "operationId":trigger.operation_id,"attemptDirectory":attempt,"opcode":opcode,
             "ingressSha256":hex(&Sha256::digest(read_bounded(&attempt.join("ingress.bin"),HOST_MAX_FRAME)?)),
             "submissionSha256":hash});
-        // submit_once has fsynced its normal per-attempt and global markers.
+        // submit_once has written its normal per-attempt and global markers.
         write_new(
             parent,
             "dispatch-race-ready.json",

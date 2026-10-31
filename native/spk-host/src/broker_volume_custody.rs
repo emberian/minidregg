@@ -84,7 +84,7 @@ impl Dir {
     fn unlink(&self,name:&str)->io::Result<()>{
         let c=component(name)?;
         if unsafe{libc::unlinkat(self.0.as_raw_fd(),c.as_ptr(),0)}!=0{return Err(io::Error::last_os_error())}
-        self.0.sync_all()
+        Ok(())
     }
     fn lock(&self)->io::Result<File>{
         let name=component(".freeze.lock")?;
@@ -191,7 +191,7 @@ impl Frozen {
             groups:groups.iter().map(|g|g.to_string_lossy().into_owned()).collect()};
         let leaf=format!("{name}.json");
         let mut file=dir.create(&leaf)?;
-        file.write_all(&serde_json::to_vec(&pending)?)?;file.sync_all()?;dir.0.sync_all()?;
+        file.write_all(&serde_json::to_vec(&pending)?)?;
         let this=Self{dir,groups,name:leaf,_lock:lock,finished:false};
         let held=(||->io::Result<()>{
             for g in &this.groups{write_freeze(g,"1")?}
@@ -367,7 +367,7 @@ pub(super) fn export(root:&Path,store:&str,app:&str,uid:u32,gid:u32)->io::Result
         let result=(||->io::Result<String>{
             let after=super::volume_dir::fingerprint(registered.dir.as_raw_fd())?;
             if before!=after{return Err(invalid("volume tree changed during capture"))}
-            sparse_copy(&mut image,&mut out)?;out.sync_all()?;
+            sparse_copy(&mut image,&mut out)?;
             out.seek(SeekFrom::Start(0))?;file_sha256(&mut out)
         })();
         let vars=Dir::absolute(root,&[0])?.directory("vars",&[0])?;
@@ -381,7 +381,6 @@ pub(super) fn export(root:&Path,store:&str,app:&str,uid:u32,gid:u32)->io::Result
     let fsck=inspect_copy("/usr/sbin/e2fsck",&["-fn"],&out)?;
     let listing=inspect_copy("/usr/sbin/debugfs",&["-R","ls -l /"],&out)?;
     change_owner(&out,uid,gid)?;
-    out.sync_all()?;exports.0.sync_all()?;
     exports.same_leaf(&leaf,&out)?;
     Ok(json!({"image":root.join(store).join("exports").join(leaf),"sha256":hash,
         "bytes":out.metadata()?.len().to_string(),"frozenMs":frozen_ms.to_string(),"e2fsck":if fsck.status.success(){"clean"}else{"errors"},
@@ -464,7 +463,6 @@ mod tests {
     fn volume_custody_failed_thaw_preserves_durable_repair_obligation(){
         let scratch=Scratch::new();let dir=scratch.dir();
         let mut pending=dir.create("frozen.json").unwrap();pending.write_all(b"exact retained filesystem").unwrap();
-        pending.sync_all().unwrap();dir.0.sync_all().unwrap();
         assert!(clear_pending(&dir,"frozen.json",||Err(io::Error::from_raw_os_error(libc::EIO))).is_err());
         assert_eq!(fs::read(scratch.0.join("frozen.json")).unwrap(),b"exact retained filesystem");
         clear_pending(&dir,"frozen.json",||Ok(())).unwrap();
@@ -492,7 +490,7 @@ mod tests {
         let root=physical_receiving_root();assert_eq!(std::env::var("MINI_VOLUME_CUSTODY_WORKER").unwrap(),"yes");
         let _guard=Frozen::begin(&root,PHYS_STORE,PHYS_APP,0,Path::new(CGROUP_ROOT)).unwrap();
         let mut ready=OpenOptions::new().write(true).create_new(true).mode(0o600).open(root.join("worker-ready")).unwrap();
-        ready.write_all(b"frozen and intent durable").unwrap();ready.sync_all().unwrap();
+        ready.write_all(b"frozen and intent durable").unwrap();
         loop{std::thread::sleep(Duration::from_millis(100));}
     }
     #[test]

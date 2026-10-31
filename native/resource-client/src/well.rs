@@ -289,7 +289,6 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
         "well assembly",
     )?;
     retain(&attempt.join("ingress.bin"), &ingress)?;
-    crate::sync_directory_ancestors(&attempt)?;
     submit_ingress(&host, &socket, &config, &attempt,
         json!({"type":"minidregg-well-outcome-v1","op":op,"well":well,"account":account,"amount":amount}))
 }

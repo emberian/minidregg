@@ -26,6 +26,7 @@ word "sparse" here is representation, not merely vocabulary.
 -/
 module
 
+public import Mathlib.Data.Finset.Union
 public import Theory.AcceptedCellEffect
 public import Theory.CredentialAuthorityFamily
 public import Theory.CredentialSigningKey

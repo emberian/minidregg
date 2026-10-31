@@ -63,5 +63,4 @@ jq -n --arg allocation "$allocation" --arg allocationSha256 "$allocation_sha" '
      grant("hermes-a";"manifest";"8402";"143";"275";"10"),
      grant("hermes-b";"manifest";"8402";"143";"375";"20")]} ' >"$output"
 chmod 600 "$output"
-sync -f "$output" "${output%/*}"
 echo "event28 observe allocation retained at $output"

@@ -8,10 +8,9 @@ use minidregg_spk_package_stream::{self as stream, EntryKind, VerifiedPackage};
 use sandstorm_package::SpkManifest;
 use sha2::{Digest, Sha256};
 use std::ffi::CString;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -94,16 +93,10 @@ fn write_tree(
                 } else {
                     IMAGE_FILE_MODE
                 }))?;
-                // The private stage is flushed at one filesystem durability barrier
-                // before publication, rather than one HDD barrier per member.
             }
         }
     }
     Ok(())
-}
-
-fn sync_directory(path: &Path) -> io::Result<()> {
-    File::open(&path).ctx("open", &path)?.sync_all()
 }
 
 fn cleanup_staging(path: &Path) {
@@ -255,26 +248,15 @@ pub fn materialize_spk_with_scratch(
     profile: ImportProfile,
     scratch: Option<&Path>,
 ) -> io::Result<InstalledPackage> {
-    materialize_with_barrier(package, store, app_uid, profile, scratch, sync_staging_filesystem)
+    materialize_staged(package, store, app_uid, profile, scratch)
 }
 
-/// Supported Linux hosts are 5.8+: syncfs both waits for the filesystem's I/O
-/// and reports writeback errors since this descriptor was opened. An unrelated
-/// filesystem error also refuses publication; it is never silently ignored.
-fn sync_staging_filesystem(stage: &File) -> io::Result<()> {
-    if unsafe { libc::syncfs(stage.as_raw_fd()) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-fn materialize_with_barrier(
+fn materialize_staged(
     package: &Path,
     store: &Path,
     app_uid: u32,
     profile: ImportProfile,
     scratch: Option<&Path>,
-    barrier: impl FnOnce(&File) -> io::Result<()>,
 ) -> io::Result<InstalledPackage> {
     let _protected_store = open_protected_directory(store, app_uid, false)?;
     let _protected_scratch = scratch.map(|dir| open_protected_directory(dir, app_uid, false)).transpose()?;
@@ -308,11 +290,6 @@ fn materialize_with_barrier(
     let stage = store.join(format!(".spk-stage-{}-{nonce}", std::process::id()));
     fs::DirBuilder::new().mode(0o700).create(&stage)?;
     let installed: io::Result<()> = (|| {
-        // Retain before the first staged write: opening after writeback could
-        // miss an earlier error in syncfs's per-open-file error cursor.
-        let stage_file = OpenOptions::new().read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(&stage).ctx("open durability anchor", &stage)?;
         let root = stage.join("root");
         fs::DirBuilder::new().mode(0o700).create(&root)?;
         let mut directories = vec![root.clone()];
@@ -351,21 +328,18 @@ fn materialize_with_barrier(
             .open(stage.join("import-policy.json")).ctx("open", &(stage.join("import-policy.json")))?;
         policy_file.write_all(&serde_json::to_vec(&json!({"profile":profile.as_str()}))?)?;
         policy_file.set_permissions(fs::Permissions::from_mode(0o444))?;
+        let mut identity_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(stage.join(VERIFIED_IDENTITY)).ctx("open", &(stage.join(VERIFIED_IDENTITY)))?;
+        identity_file.write_all(&serde_json::to_vec(&verified_identity_record(&verified))?)?;
+        identity_file.set_permissions(fs::Permissions::from_mode(0o444))?;
         for directory in directories.into_iter().rev() {
             fs::set_permissions(&directory, fs::Permissions::from_mode(IMAGE_DIRECTORY_MODE)).ctx("set permissions", &directory)?;
         }
         fs::set_permissions(&stage, fs::Permissions::from_mode(0o555)).ctx("set permissions", &stage)?;
-        // Every content write, symlink and permission change is complete while
-        // this stage is still private. Linux syncfs has fsync-every-file
-        // durability without serializing thousands of separate disk flushes.
-        // The descriptor predates all staged writes, retaining their error
-        // cursor. A failure here prevents rename; cleanup touches only stage.
-        barrier(&stage_file)?;
         publish_no_replace(&stage, &final_dir)?;
-        // The stage data is durable before its name becomes visible. Persist
-        // that namespace transition separately. As before, a post-rename sync
-        // error leaves the immutable image present and is returned to custody.
-        sync_directory(store)?;
         Ok(())
     })();
     if installed.is_err() {
@@ -376,9 +350,116 @@ fn materialize_with_barrier(
     Ok(verified)
 }
 
+/// The identity the publishing parse derived, retained beside `package.spk` under the image's
+/// own custody (0444 in the 0555 image). Signature verification is a function of the raw bytes,
+/// so a wake that re-hashes `package.spk` to the SHA-256 this record and the image name carry
+/// holds those same bytes, and the record is that parse's result for them.
+const VERIFIED_IDENTITY: &str = "verified-identity.json";
+const VERIFIED_IDENTITY_PROTOCOL: &str = "mini-spk-verified-identity-v1";
+const MAX_VERIFIED_IDENTITY: u64 = 4 * 1024 * 1024;
+
+fn verified_identity_record(verified: &InstalledPackage) -> Value {
+    use crate::canonical::hex;
+    json!({
+        "protocol":VERIFIED_IDENTITY_PROTOCOL,
+        "rawSha256":verified.raw_sha256,
+        "rawLength":verified.raw_length,
+        "signedManifestSha256":hex(&verified.signed_manifest_sha256),
+        "signedBridgeConfig":verified.signed_bridge_config.as_deref().map(hex),
+        "signedDataConfig":verified.signed_data_config.as_deref().map(hex),
+    })
+}
+
+/// The retained identity of a published image, when it has one: `None` for an image published
+/// before the record existed (the caller re-verifies the SPK). The record's custody is the
+/// manifest's; `package.spk` (the descriptor `package_meta` described) is re-hashed whole and must
+/// equal the recorded length and digest and the image's own name.
+fn retained_verified_identity(
+    image_dir: &Path,
+    package_path: &Path,
+    package_meta: &fs::Metadata,
+) -> io::Result<Option<InstalledPackage>> {
+    use crate::canonical::{hex, unhex, unhex_array};
+    use std::io::Read;
+    let path = image_dir.join(VERIFIED_IDENTITY);
+    let meta = match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        other => other.ctx("inspect", &path)?,
+    };
+    if !meta.is_file()
+        || meta.nlink() != 1
+        || (!crate::namespace_identity::root_owned(&path, &meta) && meta.uid() != unsafe { libc::geteuid() })
+        || meta.permissions().mode() & 0o777 != 0o444
+        || meta.len() > MAX_VERIFIED_IDENTITY
+    {
+        return Err(invalid("installed verified identity custody changed"));
+    }
+    let record: Value = serde_json::from_slice(&fs::read(&path).ctx("read", &path)?)?;
+    let text = |key: &str| record.get(key).and_then(Value::as_str);
+    let bytes = |key: &str| -> io::Result<Option<Vec<u8>>> {
+        match record.get(key) {
+            Some(Value::Null) => Ok(None),
+            Some(Value::String(value)) => unhex(value).map(Some).ok_or_else(|| invalid(format!("verified identity {key} malformed"))),
+            _ => Err(invalid(format!("verified identity {key} absent"))),
+        }
+    };
+    if text("protocol") != Some(VERIFIED_IDENTITY_PROTOCOL) || record.as_object().map(|o| o.len()) != Some(6) {
+        return Err(invalid("installed verified identity protocol refused"));
+    }
+    let raw_sha256 = text("rawSha256").filter(|v| crate::canonical::hex64(v)).ok_or_else(|| invalid("verified identity rawSha256 malformed"))?;
+    let raw_length = record.get("rawLength").and_then(Value::as_u64).ok_or_else(|| invalid("verified identity rawLength malformed"))?;
+    let signed_manifest_sha256: [u8; 32] = text("signedManifestSha256").and_then(unhex_array).ok_or_else(|| invalid("verified identity signedManifestSha256 malformed"))?;
+    let signed_bridge_config = bytes("signedBridgeConfig")?.ok_or_else(|| invalid("verified identity lacks the signed bridge config"))?;
+    let signed_data_config = bytes("signedDataConfig")?;
+    if image_dir.file_name().and_then(|name| name.to_str()) != Some(format!("sha256-{raw_sha256}").as_str()) {
+        return Err(invalid("installed image path differs from signed SPK digest"));
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(package_path)
+        .ctx("open", &package_path)?;
+    let opened = file.metadata()?;
+    if (opened.dev(), opened.ino()) != (package_meta.dev(), package_meta.ino()) || opened.len() != raw_length {
+        return Err(invalid("installed SPK custody changed"));
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    let mut length = 0u64;
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        length += count as u64;
+        digest.update(&buffer[..count]);
+    }
+    let raw_sha256_bytes: [u8; 32] = digest.finalize().into();
+    if length != raw_length || hex(&raw_sha256_bytes) != raw_sha256 {
+        return Err(invalid("installed SPK bytes differ from their verified identity"));
+    }
+    if let Some(bytes) = &signed_data_config {
+        crate::shared_data::parse_signed_attachment(bytes)?;
+    }
+    let manifest_path = image_dir.join("manifest.json");
+    let manifest: SpkManifest = serde_json::from_slice(&fs::read(&manifest_path).ctx("read", &manifest_path)?)?;
+    Ok(Some(InstalledPackage {
+        directory: image_dir.to_owned(),
+        raw_sha256: raw_sha256.to_owned(),
+        raw_sha256_bytes,
+        raw_length,
+        signed_manifest_sha256,
+        signed_bridge_config_sha256: Some(Sha256::digest(&signed_bridge_config).into()),
+        signed_bridge_config: Some(signed_bridge_config),
+        signed_data_config,
+        manifest,
+    }))
+}
+
 /// Reopen an operator-owned, content-addressed image for a resident wake.
-/// The streaming reader verifies retained `package.spk` again in this new process;
-/// its signed bridge bytes, manifest and raw digest come from that same parse.
+/// An image published with its verified identity (`retained_verified_identity`) is re-hashed
+/// and takes that identity; an older image is re-verified by the streaming reader in this
+/// process, its signed bridge bytes, manifest and raw digest coming from that same parse.
 /// Protected immutable image custody is separate from signature verification.
 pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<InstalledPackage> {
     let _protected = open_protected_directory(image_dir, app_uid, false)?;
@@ -393,16 +474,21 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
         return Err(invalid("installed SPK custody changed"));
     }
     let profile = retained_import_profile(image_dir)?;
-    let store = image_dir
-        .parent()
-        .ok_or_else(|| invalid("image store parent absent"))?;
-    // The image store's custody is `open_protected_directory`'s above (the resident's own
-    // rule, walked by descriptor). The stream reader's ancestor walk is not used here: a
-    // resident wakes inside its user namespace, where root-owned ancestors of the store
-    // (`/var/lib/mini-spk-worlds`, the world) carry the unmapped overflow uid and that walk
-    // refused every START on Debian 13 ("scratch parent custody refused", 2026-10-27).
-    let spk = stream::verify(&package_path, store, profile.limits())?;
-    let verified = verified_identity(&spk, image_dir.to_owned())?;
+    let verified = match retained_verified_identity(image_dir, &package_path, &package_meta)? {
+        Some(verified) => verified,
+        None => {
+            let store = image_dir
+                .parent()
+                .ok_or_else(|| invalid("image store parent absent"))?;
+            // The image store's custody is `open_protected_directory`'s above (the resident's own
+            // rule, walked by descriptor). The stream reader's ancestor walk is not used here: a
+            // resident wakes inside its user namespace, where root-owned ancestors of the store
+            // (`/var/lib/mini-spk-worlds`, the world) carry the unmapped overflow uid and that walk
+            // refused every START on Debian 13 ("scratch parent custody refused", 2026-10-27).
+            let spk = stream::verify(&package_path, store, profile.limits())?;
+            verified_identity(&spk, image_dir.to_owned())?
+        }
+    };
     if image_dir.file_name().and_then(|name| name.to_str())
         != Some(format!("sha256-{}", verified.raw_sha256).as_str())
     {
@@ -467,50 +553,6 @@ fn retained_import_profile(image_dir: &Path) -> io::Result<ImportProfile> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn materialization_barrier_error_prevents_publication_after_sealing() {
-        let home = std::env::var_os("HOME").expect("protected home required");
-        let scratch = PathBuf::from(home).join(format!(".spk-barrier-test-{}-{}",
-            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
-        fs::DirBuilder::new().mode(0o700).create(&scratch).unwrap();
-        struct Cleanup(PathBuf);
-        impl Drop for Cleanup {
-            fn drop(&mut self) { cleanup_staging(&self.0); }
-        }
-        let _cleanup = Cleanup(scratch.clone());
-        let package = scratch.join("input.spk");
-        let bytes = sandstorm_package::SpkBuilder::new()
-            .manifest_json(r#"{"app_id":"ignored","app_title":"barrier","app_version":1,"continue_command":{"argv":["/app"]}}"#)
-            .file(sandstorm_package::File::executable("app", b"durable fixture".to_vec()))
-            .pack(&ed25519_dalek::SigningKey::from_bytes(&[7;32]));
-        fs::write(&package, &bytes).unwrap();
-        let called = std::cell::Cell::new(false);
-        let outcome = materialize_with_barrier(&package, &scratch,
-            unsafe { libc::geteuid() }.wrapping_add(1), ImportProfile::Standard, None, |fd| {
-                called.set(true);
-                assert_eq!(fd.metadata()?.permissions().mode() & 0o777, 0o555);
-                let stages = fs::read_dir(&scratch)?.filter_map(Result::ok)
-                    .filter(|e| e.file_name().to_string_lossy().starts_with(".spk-stage-"))
-                    .map(|e| e.path()).collect::<Vec<_>>();
-                assert_eq!(stages.len(), 1);
-                let stage = &stages[0];
-                assert_eq!(fs::metadata(stage)?.ino(), fd.metadata()?.ino());
-                assert_eq!(fs::read(stage.join("root/app"))?, b"durable fixture");
-                assert_eq!(fs::read(stage.join("package.spk"))?, bytes);
-                assert!(stage.join("manifest.json").is_file());
-                assert!(stage.join("import-policy.json").is_file());
-                assert!(!fs::read_dir(&scratch)?.filter_map(Result::ok)
-                    .any(|e| e.file_name().to_string_lossy().starts_with("sha256-")));
-                Err(io::Error::from_raw_os_error(libc::EIO))
-            });
-        assert!(called.get(), "publication must consult the sealed-stage barrier");
-        assert_eq!(outcome.err().expect("barrier EIO must refuse publication").raw_os_error(), Some(libc::EIO));
-        assert!(!fs::read_dir(&scratch).unwrap().filter_map(Result::ok)
-            .any(|e| e.file_name().to_string_lossy().starts_with("sha256-")
-                || e.file_name().to_string_lossy().starts_with(".spk-stage-")),
-            "failed barrier must leave neither published image nor private staging");
-    }
 
     #[test]
     fn materialized_profile_survives_wake_and_archive_cannot_choose_it() {
@@ -592,5 +634,76 @@ mod tests {
         assert!(verify_installed_spk(&installed.directory, app_uid).is_ok());
         std::os::unix::fs::symlink("root/import-policy.json", &policy).unwrap();
         assert!(verify_installed_spk(&installed.directory, app_uid).is_err());
+    }
+
+    /// A wake takes the publishing parse's identity only for the very bytes that parse saw: the
+    /// retained identity equals a fresh re-verification field for field, a same-length rewrite of
+    /// `package.spk` is refused, and so is a record under weaker custody. An image without the
+    /// record (published before it existed) is re-verified and yields the same identity.
+    #[test]
+    fn retained_verified_identity_equals_reverification_and_binds_the_bytes() {
+        let home = std::env::var_os("HOME").expect("test requires protected home directory");
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let scratch = PathBuf::from(home).join(format!(".spk-identity-test-{}-{nonce}", std::process::id()));
+        fs::DirBuilder::new().mode(0o700).create(&scratch).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                cleanup_staging(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(scratch.clone());
+        let package = scratch.join("input.spk");
+        let bytes = sandstorm_package::SpkBuilder::new()
+            .manifest_json(r#"{"app_id":"ignored","app_title":"test","app_version":3,"continue_command":{"argv":["/app"]}}"#)
+            .file(sandstorm_package::File::executable("app", b"fixture".to_vec()))
+            .file(sandstorm_package::File::regular("minidregg-data.json", br#"{"schema":"minidregg-public-data-v1","inventory_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#.to_vec()))
+            .pack(&ed25519_dalek::SigningKey::from_bytes(&[7; 32]));
+        fs::write(&package, &bytes).unwrap();
+        let app_uid = unsafe { libc::geteuid() }.wrapping_add(1);
+        let installed = materialize_spk(&package, &scratch, app_uid).unwrap();
+        let dir = installed.directory.clone();
+        let record = dir.join(VERIFIED_IDENTITY);
+        assert!(record.is_file());
+        let fields = |p: &InstalledPackage| {
+            (p.directory.clone(), p.raw_sha256.clone(), p.raw_sha256_bytes, p.raw_length, p.signed_manifest_sha256,
+                p.signed_bridge_config_sha256, p.signed_bridge_config.clone(), p.signed_data_config.clone(), p.manifest.clone())
+        };
+        let retained = verify_installed_spk(&dir, app_uid).unwrap();
+        // The legacy path: the same image without its record is re-verified by the stream reader.
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let kept = fs::read(&record).unwrap();
+        fs::remove_file(&record).unwrap();
+        let reverified = verify_installed_spk(&dir, app_uid).unwrap();
+        assert!(fields(&retained) == fields(&reverified));
+        // Back under its custody, the record is taken; under 0644 it is refused.
+        fs::write(&record, &kept).unwrap();
+        fs::set_permissions(&record, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(verify_installed_spk(&dir, app_uid).is_err());
+        fs::set_permissions(&record, fs::Permissions::from_mode(0o444)).unwrap();
+        assert!(fields(&verify_installed_spk(&dir, app_uid).unwrap()) == fields(&reverified));
+        // One flipped byte of package.spk, same length and same custody: refused by digest.
+        let spk = dir.join("package.spk");
+        let mut tampered = bytes.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        fs::remove_file(&spk).unwrap();
+        fs::write(&spk, &tampered).unwrap();
+        fs::set_permissions(&spk, fs::Permissions::from_mode(0o444)).unwrap();
+        let refused = verify_installed_spk(&dir, app_uid).err().unwrap();
+        assert!(refused.to_string().contains("differ from their verified identity"), "{refused}");
+        // A whole other published image (its own package, record and tree, each self-consistent)
+        // swapped in under this image's name is refused: its digest is not the name.
+        let other_input = scratch.join("other.spk");
+        fs::write(&other_input, sandstorm_package::SpkBuilder::new()
+            .manifest_json(r#"{"app_id":"ignored","app_title":"other","app_version":4,"continue_command":{"argv":["/app"]}}"#)
+            .file(sandstorm_package::File::executable("app", b"other".to_vec()))
+            .pack(&ed25519_dalek::SigningKey::from_bytes(&[8; 32]))).unwrap();
+        let other = materialize_spk(&other_input, &scratch, app_uid).unwrap();
+        assert!(verify_installed_spk(&other.directory, app_uid).is_ok());
+        fs::rename(&dir, scratch.join("set-aside")).unwrap();
+        fs::rename(&other.directory, &dir).unwrap();
+        let swapped = verify_installed_spk(&dir, app_uid).err().unwrap();
+        assert!(swapped.to_string().contains("image path differs from signed SPK digest"), "{swapped}");
     }
 }

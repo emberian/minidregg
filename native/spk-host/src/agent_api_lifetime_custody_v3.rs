@@ -518,7 +518,6 @@ mod tests {
             .open(&seed)
             .unwrap();
         file.write_all(&[9u8; 32]).unwrap();
-        file.sync_all().unwrap();
         let key = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
         let mut custody = custody();
         custody.grant_signer.seed_path = seed.clone();

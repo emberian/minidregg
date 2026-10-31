@@ -74,10 +74,21 @@ class Journey:
         self.root.mkdir(mode=0o700)
         self.lock_root()
         self.logs=self.root/'commands';self.logs.mkdir()
+        self.own_anchors()
+        # The consent and codec residents a `mini` call starts leave no pid file and outlive this run; let
+        # them end by their own idle bound a minute after the last frame (default 600 s) instead of
+        # lingering, because they can only be stopped by PID.
+        for name in ('MINI_CONSENT_IDLE_S','MINI_CODEC_IDLE_S'):os.environ.setdefault(name,'60')
         self.processes=[];self.daemons=[];self.counter=0;self.controller=False
         # A separate fresh private root avoids sharing controller traversal ACLs
         # with another preserved world (including /run/user/UID).
         socket_parent=Path(os.environ.get('J14_ORACLE_SOCKET_PARENT','/build/lanes'))
+        # The socket directory is the controller world's root; the ACL grant stops there, so its parent
+        # lies above the root and only needs to be traversable (--x) for the controller uid. Add that
+        # traverse bit (never read or write) to a parent this user owns, so no caller needs operator prep.
+        parent_stat=socket_parent.stat()
+        if parent_stat.st_uid==os.getuid() and stat.S_IMODE(parent_stat.st_mode)&0o011!=0o011:
+            socket_parent.chmod(stat.S_IMODE(parent_stat.st_mode)|0o011)
         self.sockets=socket_parent/('j14-o7-s-'+secrets.token_hex(4));self.sockets.mkdir(mode=0o700)
         self.bins=Path(need('J14_ORACLE_BIN'))
         self.mini=need('MINI');self.host=need('HOST');self.runtime=need('GRAIN_RUNTIME')
@@ -106,7 +117,7 @@ class Journey:
         repeated. Other failure phases need their exact native recovery path.
         """
         os.umask(0o077)
-        j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands';j.lock_root()
+        j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands';j.lock_root();j.own_anchors()
         if checkpoint is None:
             failure=read(j.root/'failure.json')
             if failure['phase']!='world' or (j.root/'context-after-world.json').exists() or (j.root/'broker').exists():
@@ -348,7 +359,7 @@ class Journey:
             if Journey.private_metadata_bytes(path)!=data:raise ValueError('retained transport evidence changed')
             return
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-        with os.fdopen(fd,'wb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+        with os.fdopen(fd,'wb') as out:out.write(data);out.flush()
 
     def prepare_operator_relocation(self):
         selected=os.environ.get('J14_ORACLE_OPERATOR_RELOCATION')
@@ -431,9 +442,6 @@ class Journey:
             plan={'protocol':'mini-j14-operator-transport-transition-v1','request':request,'files':rows}
             self.retain_transport_bytes(plan_path,(json.dumps(plan,indent=2)+'\n').encode())
         # Persist the whole transition before replacing the first metadata file.
-        directory=os.open(archive,os.O_RDONLY)
-        try:os.fsync(directory)
-        finally:os.close(directory)
         for row in plan['files']:
             path=Path(row['path']);before=self.private_metadata_bytes(Path(row['before']));after=self.private_metadata_bytes(Path(row['after']))
             if hashlib.sha256(before).hexdigest()!=row['beforeSha256'] or hashlib.sha256(after).hexdigest()!=row['afterSha256']:
@@ -443,9 +451,6 @@ class Journey:
             if current!=before:raise ValueError('transport metadata changed outside retained transition')
             temporary=path.with_name(path.name+'.operator-transport-next')
             self.retain_transport_bytes(temporary,after);os.replace(temporary,path)
-            directory=os.open(path.parent,os.O_RDONLY)
-            try:os.fsync(directory)
-            finally:os.close(directory)
         self.c['operatorSocket']=new
         self.c['operatorTransportTransition']=str(plan_path)
         self.operator_relocation=request
@@ -624,7 +629,7 @@ class Journey:
                 value['socket']=new;after=(json.dumps(value,indent=2)+'\n').encode()
                 previous=archive/f'{index:02d}-before.json';successor=archive/f'{index:02d}-after.json'
                 for target,data in [(previous,before),(successor,after)]:
-                    with target.open('xb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+                    with target.open('xb') as out:out.write(data);out.flush()
                 write(record,{'workspace':str(path),'before':str(previous),'after':str(successor),
                     'beforeSha256':sha(previous),'afterSha256':sha(successor),'oldSocket':str(old),'newSocket':new,
                     'oldConfig':str(old_config),'oldConfigSha256':sha(old_config),'newConfigSha256':sha(self.c['hostConfig'])})
@@ -632,11 +637,8 @@ class Journey:
             if current==after:continue
             if current!=before:raise ValueError('workspace changed outside retained routing transition')
             temporary=path.with_name('workspace.transport-next.json')
-            with temporary.open('xb') as out:out.write(after);out.flush();os.fsync(out.fileno())
+            with temporary.open('xb') as out:out.write(after);out.flush()
             os.replace(temporary,path)
-            directory=os.open(path.parent,os.O_RDONLY)
-            try:os.fsync(directory)
-            finally:os.close(directory)
 
     def prepare_platform(self):
         # The resident broker checks a concrete inventory for any home paths.
@@ -679,6 +681,18 @@ class Journey:
     def publish_data(self):
         self.run('publish-data',[self.bins/'spk-data-publish','publish','--store',Path(self.broker['grainsRoot'])/'spk/public-data','--source',self.data,'--inventory',self.inventory],timeout=3600)
 
+    def own_anchors(self):
+        # Consent and codec residents that any step starts (application hooks included) keep their
+        # PID files in this run's own anchor directory, never in $HOME/.mini, so cleanup can stop them.
+        anchors=self.root/'a'
+        anchors.mkdir(mode=0o700,exist_ok=True)
+        os.environ['MINI_CONSENT_ANCHOR_DIR']=str(anchors)
+
+    def stop_residents(self):
+        script=REPO/'scripts/spk-platform/stop-residents.sh'
+        try:subprocess.run(['bash',str(script),str(self.root)],timeout=120,check=False)
+        except Exception:pass
+
     def cleanup(self):
         if self.controller:
             try:self.fixed('controller-stop',timeout=120)
@@ -691,6 +705,7 @@ class Journey:
         if getattr(self,'world_pid',None):
             try:os.kill(self.world_pid,signal.SIGTERM)
             except ProcessLookupError:pass
+        self.stop_residents()
 
     def await_worker_release(self):
         selected=os.environ.get('J14_ORACLE_WORKER_RELEASE')

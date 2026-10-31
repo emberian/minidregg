@@ -244,9 +244,12 @@ theorem prepareFactors : PrepareFactors contentSpec := by
                         · rename_i reason other
                           rw [fresh] at other
                           cases other
-                        · exact congrArg (fun s => (Except.ok ⟨.content,
+                        · refine Eq.trans ?_ (congrArg (fun s => (Except.ok ⟨.content,
                             CellState.materialize HyperdocumentCell.contentMaterializer s⟩ :
-                              Except DispatchRefusal HostCell)) postRun
+                              Except DispatchRefusal HostCell)) postRun)
+                          show (Except.ok ⟨.content, validated'.apply⟩ : Except DispatchRefusal HostCell) = _
+                          rw [validated'.apply_eq_materialize]
+                          rfl
                   · rename_i noLaw
                     have noLaw' : ¬ CanonicalCellRegistry.FinalPostLaw deployment ctx.target
                         (⟨.content, pre⟩ : HostCell)

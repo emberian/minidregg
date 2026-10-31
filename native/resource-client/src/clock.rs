@@ -160,7 +160,6 @@ fn journal(ws: &Workspace, outcome: &Value, now: &str, slot: &str) -> Result<()>
     if fs::metadata(&path).map(|meta| meta.len() >= JOURNAL_LIMIT).unwrap_or(false) {
         fs::rename(&path, ws.dir.join(format!("{JOURNAL}.1")))
             .map_err(|error| format!("cannot rotate {}: {error}", path.display()))?;
-        crate::fsio::sync_parent(&path)?;
     }
     let height = outcome.get("acceptedCount").and_then(Value::as_str).unwrap_or("-");
     let verdict = match outcome.get("type").and_then(Value::as_str) {
@@ -180,7 +179,6 @@ fn journal(ws: &Workspace, outcome: &Value, now: &str, slot: &str) -> Result<()>
         .open(&path)
         .map_err(|error| format!("cannot open {}: {error}", path.display()))?;
     file.write_all(line.as_bytes())
-        .and_then(|()| file.sync_data())
         .map_err(|error| format!("cannot append {}: {error}", path.display()))
 }
 

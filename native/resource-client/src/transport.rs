@@ -107,20 +107,50 @@ pub(crate) fn operation_body_refusal(request: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// A file's identity for a kept digest: device, inode, length, mtime and ctime (no writer can
+/// set a ctime back, and a replacement is another inode).
+type ImageIdentity = (u64, u64, u64, i64, i64, i64, i64);
+
+fn image_identity(meta: &fs::Metadata) -> ImageIdentity {
+    use std::os::unix::fs::MetadataExt;
+    (meta.dev(), meta.ino(), meta.len(), meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec())
+}
+
+/// The SHA-256 of a Host image (or any pinned file): hashed through the opened descriptor once
+/// per file identity in this process, and taken again only when the file the path names, or
+/// the one opened, has another identity. A 180 MB Host image hashed per pin check cost about
+/// 0.1 s each, several times per custody operation.
 pub(crate) fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
+    static HASHED: std::sync::Mutex<Vec<(std::path::PathBuf, ImageIdentity, [u8; 32])>> = std::sync::Mutex::new(Vec::new());
     let mut file = fs::File::open(path)
         .map_err(|e| format!("cannot open host image {}: {e}", path.display()))?;
+    let opened = image_identity(&file.metadata().map_err(|e| format!("cannot inspect host image {}: {e}", path.display()))?);
+    let named = fs::metadata(path).map(|meta| image_identity(&meta)).ok();
+    if named == Some(opened) {
+        if let Some((_, _, digest)) = HASHED.lock().map_err(|_| "host image digest cache poisoned")?
+            .iter().find(|(kept, identity, _)| kept == path && *identity == opened) {
+            return Ok(*digest);
+        }
+    }
     let mut hash = Sha256::new();
-    let mut chunk = [0u8; 64 * 1024];
+    let mut chunk = vec![0u8; 1024 * 1024];
     loop {
         let count = file
             .read(&mut chunk)
             .map_err(|e| format!("cannot hash host image {}: {e}", path.display()))?;
         if count == 0 {
-            return Ok(hash.finalize().into());
+            break;
         }
         hash.update(&chunk[..count]);
     }
+    let digest: [u8; 32] = hash.finalize().into();
+    let after = image_identity(&file.metadata().map_err(|e| format!("cannot inspect host image {}: {e}", path.display()))?);
+    if after == opened && named == Some(opened) {
+        let mut kept = HASHED.lock().map_err(|_| "host image digest cache poisoned")?;
+        kept.retain(|(kept, _, _)| kept != path);
+        kept.push((path.to_path_buf(), opened, digest));
+    }
+    Ok(digest)
 }
 
 fn parse_host_sha256(value: &str) -> Result<[u8; 32], String> {
@@ -920,13 +950,6 @@ impl<W: Write + AsRawFd> Write for DeadlinePipeWrite<'_, W> {
     }
 }
 
-/// Before any byte reaches a Host: every custody name this process committed is durable
-/// (`mini_sdk::durable::flush_directory_syncs`; a no-op unless the process defers directory syncs).
-/// A request whose preceding custody cannot be made durable is never sent.
-pub(crate) fn durability_barrier() -> Result<(), String> {
-    mini_sdk::durable::flush_directory_syncs().map_err(|e| format!("cannot make custody durable before the Host request: {e}"))
-}
-
 /// An upgraded worker requires the executable image actually serving the
 /// socket to match its durable host pin. Version 2 is mandatory on this path:
 /// an older service rejects the envelope before it can forward the request.
@@ -990,7 +1013,6 @@ pub(crate) fn invoke_pinned_deadline(
     frame.extend_from_slice(&expected);
     frame.push(operation);
     frame.extend_from_slice(payload);
-    durability_barrier()?;
     let started = Instant::now();
     let mut stream = connect_unix_deadline(socket, deadline)
         .map_err(|e| format!("cannot connect within deadline: {e}"))?;
@@ -1182,7 +1204,6 @@ fn invoke_inner(
     frame.extend_from_slice(expected_host_sha256);
     frame.push(operation);
     frame.extend_from_slice(payload);
-    durability_barrier()?;
     let started = std::time::Instant::now();
     if mini_sdk::operator::lose_reply_armed(operation) {
         // The lost-reply switch (`submit ID --lose-reply-once`, DEMO-EXPERIENCE A11): write the
@@ -1190,7 +1211,6 @@ fn invoke_inner(
         // attempt stays retained as uncertain; `lookup`/`retry` ask for the same decided outcome.
         std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
         if let Endpoint::Unix(path) = endpoint(socket)? {
-            durability_barrier()?;
             let mut stream = UnixStream::connect(path).map_err(|e| format!("cannot connect to {}: {e}", path.display()))?;
             write_frame(&mut stream, &frame).map_err(|e| format!("uncertain host request write: {e}"))?;
             await_unread_reply(&stream, Instant::now() + Duration::from_secs(120));
@@ -1242,7 +1262,6 @@ fn await_unread_reply(stream: &UnixStream, deadline: Instant) {
 const LOST_REPLY: &str = "uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look up or retry the exact retained call";
 
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
-    durability_barrier()?;
     let expected_peer = crate::operator_peer::before_connect(socket)?;
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;

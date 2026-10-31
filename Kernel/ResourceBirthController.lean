@@ -904,9 +904,10 @@ def PreparedGrainBirth.readGuards {profile : PolicyCompilerProfile F}
     {descriptor : Descriptor Registry} {operationMarker : Nat}
     (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
     List ReadGuard :=
+  let written := prepared.writes.map DataWrite.cellId
   (prepared.pre.authority.readGuards ++ (parentGuards durable descriptor ++
     (kindGuards durable descriptor ++ (prepared.pre.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
-    guard.cellId ∉ prepared.writes.map DataWrite.cellId
+    guard.cellId ∉ written
 
 /-- The user draft has no auxiliary creates; only the initial policy sources are
 filled in. The complete descriptor returned here is the one that must be signed. -/
@@ -949,9 +950,10 @@ def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
 def PreparedBirth.readGuards {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) : List ReadGuard :=
+  let written := prepared.writes.map DataWrite.cellId
   (prepared.authority.readGuards ++ (parentGuards durable descriptor ++
     (kindGuards durable descriptor ++ (prepared.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
-    guard.cellId ∉ prepared.writes.map DataWrite.cellId
+    guard.cellId ∉ written
 
 def PreparedBirth.oldAuthority {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}

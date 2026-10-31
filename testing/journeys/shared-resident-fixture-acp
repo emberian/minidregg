@@ -120,7 +120,6 @@ for line in sys.stdin:
             db.execute('CREATE TABLE IF NOT EXISTS messages(session TEXT, role TEXT, content TEXT)')
             db.executemany('INSERT INTO messages VALUES (?,?,?)',[(SID,'user',prompt),(SID,'tool',json.dumps(read)),(SID,'assistant',text)])
         db.close()
-        with open(HOME/'state.db','rb') as stream: os.fsync(stream.fileno())
         send({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':SID,'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':text}}}})
         evidence={'ordinal':ordinal,'pid':os.getpid(),'text':text,'author':selected['author'],'cell':selected['cell'],'sequence':selected['sequence'],
             'ordinarySay':ordinal>1,'promptSha256':hashlib.sha256(prompt.encode()).hexdigest(),'sqliteSha256':hashlib.sha256((HOME/'state.db').read_bytes()).hexdigest()}

@@ -161,7 +161,12 @@ fn native_reply(reply: &Value) -> std::result::Result<NativeReply, Refusal> {
                 uncertain: false,
             },
             Ok(v) if v["type"] == "uncertain-v3" => uncertain(&format!("native-uncertain-{}", v["phase"].as_str().unwrap_or("unnamed"))),
-            _ => uncertain("native-outcome-unknown"),
+            _ => {
+                // The name stays the one fixed spelling; the controller's journal keeps what the call returned.
+                let shown: String = text.chars().filter(|c| !c.is_control()).take(240).collect();
+                eprintln!("typed application call returned an unclassified error: {shown}");
+                uncertain("native-outcome-unknown")
+            }
         });
     }
     let frame: Value = serde_json::from_str(text).map_err(|_| uncertain("native-reply-malformed"))?;
@@ -412,7 +417,41 @@ mod tests {
         }
     }
 
+    /// Arguments named `path` are arguments, not path templates: the Davros steps are `{"path": ...}` alone.
+    #[test]
+    fn qualification_resolves_single_path_arguments_and_runs_davros_end_to_end() {
+        let dav = entry("dav", DAVROS);
+        let pins = pins(&[&dav]);
+        let mut log = Vec::new();
+        let listing = br#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/qa1/moved.bin</d:href><d:propstat><d:prop><d:resourcetype/><d:getcontentlength>8</d:getcontentlength><d:getetag>"e"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#;
+        let mut replies = vec![http(201, b"", "9"), http(201, b"", "10"), http(201, b"", "11"),
+            http(200, &[0, 255, b'a', b'g', b'e', b'n', b't', b'\n'], "12"), http(207, listing, "13")];
+        let mut forward = controller(&pins, &mut log, &mut replies);
+        let result = qualify_tool(&dav, &json!({"runId":"qa1"}), &mut forward);
+        drop(forward);
+        assert_eq!(result["isError"], false, "{result}");
+        let paths: Vec<_> = log.iter().map(|m| (m["method"].as_str().unwrap(), m["path"].as_str().unwrap())).collect();
+        assert_eq!(paths, [("MKCOL", "dav/qa1"), ("PUT", "dav/qa1/sample.bin"), ("MOVE", "dav/qa1/sample.bin"),
+            ("GET", "dav/qa1/moved.bin"), ("PROPFIND", "dav/qa1")]);
+    }
+
     const WBO: &str = include_str!("../../../apps/interfaces/wbo.json");
+
+    /// Davros qualification args are objects keyed `path`; the executor must resolve them as
+    /// arguments (not as path-part bindings) and prepare the first request.
+    #[test]
+    fn qualification_resolves_arguments_that_are_named_path() {
+        let dav = entry("dav", DAVROS);
+        let mut first: Option<Value> = None;
+        let mut forward = |request: Value| -> Value {
+            first.get_or_insert(request);
+            http(500, b"{}", "1")
+        };
+        let result = qualify_tool(&dav, &json!({"runId":"qb44d7585667c47f0"}), &mut forward);
+        assert!(!result["text"].as_str().unwrap().contains("declaration-invalid"), "{result}");
+        let request = first.expect("the first qualification step reaches the controller");
+        assert_eq!(request["operation"], "directory.create", "{request}");
+    }
 
     #[test]
     fn foreground_names_digest_and_qualification_context_are_checked() {
@@ -519,6 +558,17 @@ mod tests {
         assert_eq!((result["isError"].clone(), text["refusal"].clone(), text["uncertain"].clone()), (json!(true), json!("typed-apps-not-granted"), json!(false)));
         assert_eq!((log.len(), replies.len()), (1, 1), "exactly one attempt, no retry");
         assert_eq!(text["nativeReceipts"], json!([]));
+    }
+
+    #[test]
+    fn a_verified_http_frame_parses_and_the_model_presentation_is_native_reply_malformed() {
+        let frame = json!({"type":"http-v3","status":200,"headers":[{"name":"content-type","value":"text/plain"}],"bodyHex":"6869"});
+        let ok = native_reply(&json!({"isError":false,"text":frame.to_string()})).unwrap_or_else(|e| panic!("{}", e.name));
+        assert_eq!(ok.status, 200);
+        // present_lifetime_http's text for a model is not a frame: the failure mode of a non-raw call.
+        let presented = native_reply(&json!({"isError":false,"text":"HTTP 200 text/plain\n\nhi"}));
+        let refusal = presented.err().expect("presentation is not a frame");
+        assert_eq!((refusal.name.as_str(), refusal.uncertain), ("native-reply-malformed", true));
     }
 
     #[test]

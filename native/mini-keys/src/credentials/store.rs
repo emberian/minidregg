@@ -99,8 +99,8 @@ fn ensure_private_dir(path: &Path, label: &str) -> Result<(), String> {
     }
 }
 
-/// Replace `path` with `bytes` atomically: a fresh 0600 sibling, fsync,
-/// rename, fsync the directory.
+/// Replace `path` with `bytes` atomically: a fresh 0600 sibling,
+/// rename.
 fn replace_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path.parent().ok_or("record path has no parent")?;
     let name = path
@@ -116,12 +116,9 @@ fn replace_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .open(&temporary)
         .map_err(|e| format!("credential record write: {e}"))?;
     file.write_all(bytes)
-        .and_then(|_| file.sync_all())
         .map_err(|e| format!("credential record write: {e}"))?;
     fs::rename(&temporary, path).map_err(|e| format!("credential record rename: {e}"))?;
-    File::open(parent)
-        .and_then(|d| d.sync_all())
-        .map_err(|e| format!("credential directory sync: {e}"))
+    Ok(())
 }
 
 // One provider-wide lock orders key replacement, grant changes, revocation
@@ -463,9 +460,6 @@ impl CredentialStore {
                         Err(e) => return Err(format!("credential revoke: {e}")),
                     }
                 }
-                File::open(&dir)
-                    .and_then(|d| d.sync_all())
-                    .map_err(|e| format!("credential directory sync: {e}"))?;
                 Ok(removed)
             }
         }
@@ -1616,6 +1610,33 @@ mod credential_tests {
         assert!(validate_endpoint("https://openrouter.ai/other").is_err());
         assert!(validate_endpoint("http://127.0.0.1:9/v1/chat/completions").is_ok());
         assert!(validate_endpoint("https://user@host/v1/chat/completions").is_err());
+    }
+
+    #[test]
+    fn a_row_names_its_own_chat_path_and_nothing_else_on_the_host() {
+        // Z.AI's coding plan (deploy/hermes/README.md, the subscriber tier).
+        assert!(validate_endpoint("https://api.z.ai/api/coding/paas/v4/chat/completions").is_ok());
+        assert!(validate_endpoint("https://api.example/chat/completions").is_ok(), "no prefix");
+        for bad in [
+            "https://api.z.ai/api/coding/paas/v4/chat/completions/",
+            "https://api.z.ai/api/coding/paas/v4/chat/completions#x",
+            "https://api.z.ai/api/../v1/chat/completions",
+            "https://api.z.ai/api/./v1/chat/completions",
+            "https://api.z.ai/api//v1/chat/completions",
+            "https://api.z.ai/api/%2e%2e/chat/completions",
+            "https://api.z.ai/API/v1/chat/completions",
+            "https://api.z.ai/a/b/c/d/e/chat/completions",
+            "https://api.z.ai/api/coding/paas/v4/completions",
+            "https://api.z.ai/api/coding/paas/v4/chat/completionsx",
+            "https://api.z.ai/api/coding/paas/v4/embeddings",
+            "http://api.z.ai/api/coding/paas/v4/chat/completions",
+        ] {
+            assert!(validate_endpoint(bad).is_err(), "{bad}");
+        }
+        // The demo's shipped rows parse as a table (what `grain-runtime provider-table check` runs).
+        let rows: Value = serde_json::from_str(include_str!("../../../../deploy/hermes/demo/providers-zai-rows.json")).unwrap();
+        let table = serde_json::json!({"type": "mini-provider-table-v2", "providers": rows});
+        ProviderTable::parse(table.to_string().as_bytes()).expect("the zai rows are a valid provider table");
     }
 
     #[test]

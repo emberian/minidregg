@@ -57,14 +57,9 @@ def publish(path, data, mode, gid=0):
     with os.fdopen(fd, 'wb') as out:
         os.fchown(out.fileno(), 0, gid)
         os.fchmod(out.fileno(), mode)
-        out.write(data); out.flush(); os.fsync(out.fileno())
+        out.write(data); out.flush()
     os.link(temporary, path)
     temporary.unlink()
-    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 def run(frame, manifest_path, uid):
     require(os.geteuid() == 0, 'root staging required')

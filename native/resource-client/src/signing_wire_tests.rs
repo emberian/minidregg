@@ -85,20 +85,7 @@ fn custody_listing(attempt: &Path) -> String {
     let mut out = String::new();
     for name in names {
         let bytes = fs::read(attempt.join(&name)).unwrap();
-        if name == mini_sdk::phase::RECORD {
-            // The record's index: which files it holds, and each one's length and digest (the
-            // path-bearing manifest by name only); its payload is those files' bytes.
-            let text = String::from_utf8_lossy(&bytes);
-            let index: Value = serde_json::from_str(text.lines().nth(1).unwrap()).unwrap();
-            for row in index["files"].as_array().unwrap() {
-                if row["name"] == "attempt.json" {
-                    out.push_str("custody seal.record holds attempt.json\n");
-                } else {
-                    out.push_str(&format!("custody seal.record holds {} {} {}\n", row["name"].as_str().unwrap(),
-                        row["length"], row["sha256"].as_str().unwrap()));
-                }
-            }
-        } else if name == "attempt.json" {
+        if name == "attempt.json" {
             let value: Value = serde_json::from_slice(&bytes).unwrap();
             let mut keys: Vec<_> = value.as_object().unwrap().keys().cloned().collect();
             keys.sort();
@@ -122,7 +109,6 @@ fn signing_wire_worker() {
         submit(&host, &dir.join("config.json"), &dir.join("intent.json"), OsStr::new("intent"),
             &dir.join("mini.key"), &dir.join("attempt"), false)
     };
-    fs::write(dir.join("fsyncs"), mini_sdk::durable::fsyncs().to_string()).unwrap();
     let mut log = fs::OpenOptions::new().append(true).open(dir.join("wire")).unwrap();
     writeln!(log, "result {result:?}").unwrap();
     log.write_all(custody_listing(&dir.join("attempt")).as_bytes()).unwrap();
@@ -165,13 +151,6 @@ fn pinned(golden: &str, dry_run: bool) {
         .output().unwrap();
     assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     let wire = fs::read_to_string(dir.join("wire")).unwrap();
-    let fsyncs: u64 = fs::read_to_string(dir.join("fsyncs")).unwrap().parse().unwrap();
-    eprintln!("{golden}: {fsyncs} fsyncs");
-    if !dry_run {
-        // One signed write: the seal record, its directory and ancestors, and the two answer files
-        // (`mini_sdk::phase`); every other file of the attempt is a cache of the record.
-        assert!(fsyncs <= 16, "a signed write issued {fsyncs} fsyncs");
-    }
     let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join(golden);
     if std::env::var_os("MINI_WIRE_REGEN").is_some() {
         fs::write(&golden, &wire).unwrap();

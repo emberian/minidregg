@@ -337,8 +337,6 @@ fn open_store(path: &Path, create: bool, app_uid: Option<u32>) -> io::Result<Fil
                 // passed directory FD through its backing pathname as the app.
                 // Never widen an existing directory or any ancestor here.
                 created.set_permissions(fs::Permissions::from_mode(0o755))?;
-                created.sync_all()?;
-                parent.sync_all()?;
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e),
@@ -438,7 +436,7 @@ fn write_fixed(parent: &File, name: &str, bytes: &[u8]) -> io::Result<()> {
     )?;
     file.write_all(bytes)?;
     file.set_permissions(fs::Permissions::from_mode(0o444))?;
-    file.sync_all()
+    Ok(())
 }
 fn stream_hash(
     file: &mut File,
@@ -615,13 +613,11 @@ pub fn publish(
                 )));
             }
             output.set_permissions(fs::Permissions::from_mode(0o444))?;
-            output.sync_all()?;
         }
         for (path, kind) in checked.expected.iter().rev() {
             if *kind == NodeKind::Directory {
                 let dir = open_relative(&data, path, true)?;
                 dir.set_permissions(fs::Permissions::from_mode(0o555))?;
-                dir.sync_all()?;
             }
         }
         let receipt = Receipt {
@@ -636,7 +632,6 @@ pub fn publish(
         write_fixed(&stage, "inventory.json", inventory_bytes)?;
         write_fixed(&stage, "receipt.json", &receipt_bytes)?;
         stage.set_permissions(fs::Permissions::from_mode(0o555))?;
-        stage.sync_all()?;
         let from = cstring(&stage_name)?;
         let to = cstring(&final_name)?;
         if unsafe {
@@ -652,7 +647,6 @@ pub fn publish(
         {
             return Err(io::Error::last_os_error());
         }
-        store_fd.sync_all()?;
         Ok(())
     })();
     attempt.map_err(|error| {

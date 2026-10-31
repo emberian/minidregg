@@ -45,7 +45,7 @@ ID distinguish this path from legacy workspaces. Its states are:
   initial evidence. Missing enabled custody fails, including on repeated onboarding.
 
 A root-level flock serializes enrollment completion; existing custody locking and
-fsync/temp/rename/directory-fsync operations are reused. A crash between verified
+temp/rename operations are reused. A crash between verified
 candidate and enablement can resume. Tests exercise actual helper calls and child
 process termination at persistence phases; these are process-crash checks, not
 power-loss simulation.

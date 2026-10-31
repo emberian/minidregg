@@ -22,7 +22,7 @@ if data.count(needle)!=1:
 result=data.replace(needle,b'  '+os.fsencode(a.physical_bwrap)+b' --die-with-parent --unshare-user --unshare-pid')
 output=pathlib.Path(a.output)
 with output.open('xb') as f:
-    f.write(result); f.flush(); os.fsync(f.fileno())
+    f.write(result); f.flush()
 output.chmod(0o555)
 print(json.dumps({'sourcePath':str(source),'sourceSha256':hashlib.sha256(data).hexdigest(),'path':str(output),'sha256':hashlib.sha256(result).hexdigest(),'physicalBwrap':{'path':str(physical),'sha256':a.physical_sha256}}))
 

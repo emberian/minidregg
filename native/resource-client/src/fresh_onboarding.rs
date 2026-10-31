@@ -50,7 +50,7 @@ pub(crate) fn verifier_pin(config: &Path, verifier: &Path) -> Result<Value> {
     .json())
 }
 /// Creation evidence lives outside the workspace it protects. Reuse custody's
-/// nofollow/private atomic save and directory fsync, under the caller's join lock.
+/// nofollow/private atomic save and directory write, under the caller's join lock.
 pub(crate) fn retain_workspace_creation(root: &Path, value: &Value) -> Result<()> {
     let path = root.join("workspace-created.json");
     match fs::symlink_metadata(&path) {
@@ -58,7 +58,7 @@ pub(crate) fn retain_workspace_creation(root: &Path, value: &Value) -> Result<()
             if read_json(&path)? != *value {
                 return Err(fail("join workspace creation evidence changed"));
             }
-            directory(root)?.sync_all().map_err(fail)
+            Ok(())
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             save(root, "workspace-created.json", value)
@@ -301,7 +301,6 @@ fn complete_with(
                 return Err(fail("enabled candidate custody disappeared"));
             }
             crate::fsio::create_private_dir(&custody)?;
-            directory(root)?.sync_all().map_err(fail)?;
         }
         Err(e) => return Err(fail(e)),
         Ok(_) => (),

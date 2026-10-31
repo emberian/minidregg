@@ -429,7 +429,7 @@ end AcceptedLaws
 #guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains
 /-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.Accepted.duplicate_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.duplicate_rejected
-/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.validAppend_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.validAppend_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms validAppend_iff
 /-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.no_accepted_of_foreign_domain' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_accepted_of_foreign_domain

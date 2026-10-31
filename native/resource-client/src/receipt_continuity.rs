@@ -132,7 +132,6 @@ fn read_json(path: &Path) -> Result<Value> {
     read_json_mode(path, true)
 }
 fn read_json_mode(path: &Path, custody: bool) -> Result<Value> {
-    crate::fsio::repair_cache(path).map_err(fail)?;
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(NOFOLLOW)
@@ -314,9 +313,6 @@ fn anchor(root: &Path, settings: &Settings) -> Result<Point> {
         return Err(fail("anchor deployment identity differs"));
     }
     let point = Point::parse(&value["point"])?.with_witness(&value)?;
-    // A previous writer may have died after rename but before directory fsync.
-    // Reconfirm the recovered pathname before it becomes any request's baseline.
-    directory(root)?.sync_all().map_err(fail)?;
     Ok(point)
 }
 fn persist(root: &Path, settings: &Settings, point: &Point) -> Result<()> {
@@ -425,7 +421,6 @@ pub(crate) fn begin(root: &Path, workspace: &Value) -> Result<Option<Ticket>> {
     // A long-lived shell can hold an older manifest while another process enables
     // continuity. Consult the durable manifest rather than downgrading that shell.
     let mut manifest = read_json(&root.join("workspace.json"))?;
-    directory(root)?.sync_all().map_err(fail)?;
     if workspace.get("receiptContinuity").is_some() && manifest.get("receiptContinuity").is_none() {
         return Err(fail("workspace continuity enablement disappeared"));
     }
@@ -753,7 +748,7 @@ pub(crate) struct AttemptTicket {
 /// Attempts whose confirmed outcome this process already carried through
 /// `finish_attempt`, with that exact outcome. Recording the same confirmed
 /// point again in the same process would repeat the lock, verifier checks
-/// and fsyncs for an anchor that is already durable.
+/// and writes for an anchor that is already durable.
 static FINISHED_ATTEMPTS: std::sync::Mutex<Vec<(PathBuf, Value)>> =
     std::sync::Mutex::new(Vec::new());
 
@@ -919,7 +914,6 @@ pub(crate) fn initialize(
         return Err(fail("bootstrap did not verify exact signed read point"));
     }
     crate::fsio::create_private_dir(&custody)?;
-    directory(root)?.sync_all().map_err(fail)?;
     let _lock = lock(&custody)?;
     persist(&custody, &settings, &verified)?;
     save(&custody, "enabled.json", &settings.json())?;
@@ -1333,12 +1327,7 @@ mod tests {
 
     #[test]
     fn process_crashes_preserve_old_or_complete_new_anchor() {
-        for stage in [
-            Stage::BeforeFileSync,
-            Stage::BeforeCommit,
-            Stage::AfterCommit,
-            Stage::AfterDirectorySync,
-        ] {
+        for stage in [Stage::BeforeCommit, Stage::AfterCommit] {
             let (root, ticket) = setup(1);
             let status = Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "receipt_continuity::tests::crash_child"])
@@ -1348,7 +1337,7 @@ mod tests {
                 .unwrap()
                 .status;
             assert_eq!(status.code(), Some(73));
-            let expected = if matches!(stage, Stage::BeforeFileSync | Stage::BeforeCommit) {
+            let expected = if stage == Stage::BeforeCommit {
                 1
             } else {
                 2

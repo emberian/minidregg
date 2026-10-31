@@ -106,7 +106,7 @@ dzk_store::Store uses the existing deterministic transition Journal:
 - Dealer event retains exact polynomial coefficients and random seed.
 - Source/environment delivery request, authenticated receive, and proof transfer
   events retain their exact canonical bytes.
-- The event and exact resulting outbox are fsynced before publication.
+- The event and exact resulting outbox are written before publication.
 - Reopen re-executes every event and compares the exact recorded outbox.
 - Exact dealer retry returns retained packets; changed coefficients refuse.
 - Identity binds party, full Generation and protocol context.

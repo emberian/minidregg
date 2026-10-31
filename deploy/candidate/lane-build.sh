@@ -7,8 +7,15 @@
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh consent                      (after host: a companion of that build)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh umbrellas                    (after host: the libraries no shipped root imports)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust-check                   (no Lean needed: `cargo check` of every rust role)
-#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust
+#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust [--crate CRATE]...    (--crate: only those crates' roles)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh pack OUT_DIR
+#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh overlay BASE_CANDIDATE PARENT_DIR LABEL ROLE...
+#
+# overlay (hot-swap, ember 10-30: hotpatch worlds between batch candidates): PARENT_DIR/<12-hex id>
+# (printed; LABEL is kept in provenance.json .overlay.name) is BASE_CANDIDATE with ROLE's binaries replaced by this lane's builds (package.py --overlay: whole build families only,
+# every pin re-emitted, provenance.json .overlay records base, commit and roles). Build them first:
+# `rust --crate CRATE` for Rust roles (seconds to minutes, warm), `host` and `consent` for the Lean pair.
+# The same clean-tree and compiled-inputs checks as pack. A gate then stands worlds up from it.
 #
 # LANE_DIR holds the clone at LANE_DIR/src (a snapshot: `touch src/.minidregg-native-snapshot`); evidence
 # goes to LANE_DIR/{logs,cycle,native-out,consent-out}, binaries to LANE_DIR/artifacts. Run each step as
@@ -25,16 +32,31 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 . "$here/lib.sh"
 LANE_DIR=${LANE_DIR:?LANE_DIR=/abs/path/of/the/lane}
 [[ $LANE_DIR = /* ]] || { echo "lane-build: LANE_DIR must be absolute" >&2; exit 64; }
-step=${1:?host|consent|umbrellas|rust-check|rust|pack}; shift
+step=${1:?host|consent|umbrellas|rust-check|rust|pack|overlay}; shift
 src=$LANE_DIR/src
-[ -d "$src/.git" ] || { echo "lane-build: $src is not a clone" >&2; exit 64; }
+[ -e "$src/.git" ] || { echo "lane-build: $src is not a clone" >&2; exit 64; }   # a worktree (lane-tree) has a .git file
 mkdir -p "$LANE_DIR/artifacts" "$LANE_DIR/cycle" "$LANE_DIR/logs"
 cd "$src"
 native() {  # OUTPUT_DIR BINARY [builder args...]
-  local out=$1 bin=$2; shift 2
+  local out=$1 bin=$2 rss=$LANE_DIR/logs/lean-module-rss.tsv rc=0; shift 2
+  # A rebuild in the same lane (the incremental loop): the builder refuses an existing output or binary, so
+  # the last ones move aside to *.prev (one generation kept: a companion or a comparison may read it).
+  if [ -e "$out" ] || [ -e "$bin" ]; then
+    rm -rf "$out.prev" "$bin.prev"
+    [ ! -e "$out" ] || mv "$out" "$out.prev"
+    [ ! -e "$bin" ] || mv "$bin" "$bin.prev"
+  fi
+  # Every module this lane has measured weighs its seats: logs/lean-module-rss.tsv accumulates (per module,
+  # the max peak RSS) over the lane's builds, so a module is unrecorded for one build at most.
+  [ ! -s "$rss" ] || export MINIDREGG_LEAN_RSS_FROM="${MINIDREGG_LEAN_RSS_FROM:+$MINIDREGG_LEAN_RSS_FROM:}$rss"
   MINIDREGG_NATIVE_JOBS=${MINIDREGG_NATIVE_JOBS:-2} MINIDREGG_LEAN_THREADS=${MINIDREGG_LEAN_THREADS:-2} \
     MINIDREGG_CYCLE_DIR="$LANE_DIR/cycle" LEAN_NUM_THREADS=2 \
-    scripts/build-native-host.sh "$@" --output "$out" --binary "$bin"
+    scripts/build-native-host.sh "$@" --output "$out" --binary "$bin" || rc=$?
+  if [ -s "$out/lean-module-rss.tsv" ]; then
+    awk -F '\t' 'BEGIN { OFS = "\t" } $0 !~ /^#/ && $3 ~ /^[0-9]+$/ { if (!($1 in r) || $3 > r[$1]) { r[$1] = $3; l[$1] = $0 } }
+      END { for (m in l) print l[m] }' ${rss:+$( [ -s "$rss" ] && echo "$rss")} "$out/lean-module-rss.tsv" | LC_ALL=C sort > "$rss.tmp" && mv "$rss.tmp" "$rss"
+  fi
+  return $rc
 }
 # The inputs a binary is compiled from. A commit that changes none of them (a script, a doc) does not
 # move what a build at an earlier commit produced; one that changes any of them does.
@@ -49,6 +71,21 @@ unchanged_since() {  # BUILD (host|rust): refuse unless HEAD's compiled inputs e
   changed=$(git diff --name-only "$at" HEAD -- "${compiled[@]}")
   [ -z "$changed" ] || { echo "lane-build: compiled inputs changed since the $b build at $at:" >&2; echo "$changed" >&2; exit 1; }
   echo "lane-build: $b roles built at ${at:0:12}; compiled inputs identical at $(git rev-parse --short=12 HEAD)"
+}
+toolchains_json() {  # HEAD: the builder evidence package.py requires, as logs/toolchains-HEAD.json
+  local head=$1 rust
+  rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+  jq -n --arg lean "$(lean --version)" --arg lake "$(lake --version)" --arg leanPin "$(cat lean-toolchain)" \
+    --arg rustPin "$rust" --arg rustc "$(rustc "+$rust" -vV)" --arg cargo "$(cargo "+$rust" -V)" \
+    --arg cc "$(cc --version | head -1)" --arg host "$(hostname)" \
+    --arg rustflags "$(cat "$LANE_DIR/logs/rust-build.flags")" \
+    '{recorded: "lane-build", builtOn: $host, leanToolchain: $leanPin, lean: $lean, lake: $lake,
+      rustToolchain: $rustPin, rustc: $rustc, cargo: $cargo, cc: $cc,
+      rustflags: $rustflags,
+      buildFlags: {rust: {RUSTFLAGS: $rustflags, CARGO_INCREMENTAL: "0", profile: "release", locked: true},
+        native: {builder: "scripts/build-native-host.sh", hostRoot: "Host.Main", consentRoot: "Host.ClientConsentSession"}},
+      nativeHost: "scripts/build-native-host.sh via lane-build.sh (incremental or full), consent as its companion"}' \
+    >"$LANE_DIR/logs/toolchains-$head.json"
 }
 case $step in
   host)
@@ -101,6 +138,20 @@ case $step in
     printf '%s\n' "$src" >"$LANE_DIR/logs/rust-build.root"
     git rev-parse HEAD >"$LANE_DIR/logs/rust-build.commit"
     python3 deploy/candidate/package.py --rust-roles >"$LANE_DIR/logs/rust-roles.txt"
+    # --crate CRATE...: only those crates (a hot-swap); pack then refuses until a full rust run.
+    crates=()
+    while [ $# -gt 0 ]; do
+      case $1 in --crate) crates+=("${2:?--crate CRATE}"); shift 2 ;; *) echo "lane-build: rust takes --crate CRATE" >&2; exit 64 ;; esac
+    done
+    if [ ${#crates[@]} -gt 0 ]; then
+      for c in "${crates[@]}"; do awk -v c="$c" '$2 == c {f=1} END {exit !f}' "$LANE_DIR/logs/rust-roles.txt" \
+        || { echo "lane-build: no Rust role is built from crate $c" >&2; exit 64; }; done
+      awk -v cs=" ${crates[*]} " 'index(cs, " " $2 " ")' "$LANE_DIR/logs/rust-roles.txt" >"$LANE_DIR/logs/rust-roles.partial"
+      mv "$LANE_DIR/logs/rust-roles.partial" "$LANE_DIR/logs/rust-roles.txt"
+      printf '%s\n' "${crates[@]}" >"$LANE_DIR/logs/rust-build.partial"
+    else
+      rm -f "$LANE_DIR/logs/rust-build.partial"
+    fi
     while read -r _ crate bin features; do
       echo "== $crate/$bin $(date -u +%H:%M:%S)"
       (cd "$src" && cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
@@ -112,7 +163,7 @@ case $step in
     # (This builder also packs older tips, whose package.py still ships them as roles: an empty list.)
     rm -rf "$LANE_DIR/fixtures"; mkdir -p "$LANE_DIR/fixtures"
     : >"$LANE_DIR/logs/fixture-roles.txt"
-    if grep -q -- '--fixture-roles' deploy/candidate/package.py; then
+    if [ ! -f "$LANE_DIR/logs/rust-build.partial" ] && grep -q -- '--fixture-roles' deploy/candidate/package.py; then
       python3 deploy/candidate/package.py --fixture-roles >"$LANE_DIR/logs/fixture-roles.txt"
     fi
     while read -r _ crate bin; do
@@ -128,6 +179,7 @@ case $step in
     head=$(git rev-parse HEAD)
     [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "lane-build: tracked changes uncommitted" >&2; exit 1; }
     for b in host rust; do unchanged_since $b; done
+    [ ! -f "$LANE_DIR/logs/rust-build.partial" ] || { echo "lane-build: the last rust run built only $(paste -sd' ' "$LANE_DIR/logs/rust-build.partial"); run rust in full to pack" >&2; exit 1; }
     git archive --format=tar "$head" >"$LANE_DIR/logs/source-$head.tar"
     A=$LANE_DIR/artifacts
     roles=$(jq -n --arg c "$head" --arg hb "$(cat "$LANE_DIR/logs/host-build.commit")" --arg rb "$(cat "$LANE_DIR/logs/rust-build.commit")" \
@@ -139,18 +191,7 @@ case $step in
       roles=$(jq --arg r "$r" --arg p "$f" --arg h "$(sha256sum "$f" | cut -d' ' -f1)" '.[$r] = $p | .sha256[$r] = $h' <<<"$roles")
     done
     printf '%s\n' "$roles" >"$LANE_DIR/logs/roles-$head.json"
-    rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
-    jq -n --arg lean "$(lean --version)" --arg lake "$(lake --version)" --arg leanPin "$(cat lean-toolchain)" \
-      --arg rustPin "$rust" --arg rustc "$(rustc "+$rust" -vV)" --arg cargo "$(cargo "+$rust" -V)" \
-      --arg cc "$(cc --version | head -1)" --arg host "$(hostname)" \
-      --arg rustflags "$(cat "$LANE_DIR/logs/rust-build.flags")" \
-      '{recorded: "lane-build", builtOn: $host, leanToolchain: $leanPin, lean: $lean, lake: $lake,
-        rustToolchain: $rustPin, rustc: $rustc, cargo: $cargo, cc: $cc,
-        rustflags: $rustflags,
-        buildFlags: {rust: {RUSTFLAGS: $rustflags, CARGO_INCREMENTAL: "0", profile: "release", locked: true},
-          native: {builder: "scripts/build-native-host.sh", hostRoot: "Host.Main", consentRoot: "Host.ClientConsentSession"}},
-        nativeHost: "scripts/build-native-host.sh via lane-build.sh (incremental or full), consent as its companion"}' \
-      >"$LANE_DIR/logs/toolchains-$head.json"
+    toolchains_json "$head"
     python3 deploy/candidate/package.py --roles "$LANE_DIR/logs/roles-$head.json" --source-archive "$LANE_DIR/logs/source-$head.tar" \
       --out "$OUT" --toolchains "$LANE_DIR/logs/toolchains-$head.json" --host-build-manifest "$LANE_DIR/native-out/manifest.txt"
     # Journey fixtures ride beside the candidate, outside bin/, the manifest and SHA256SUMS.
@@ -162,5 +203,38 @@ case $step in
       done < <(python3 deploy/candidate/package.py --fixture-roles)
       (cd "$OUT/fixtures" && sha256sum -- * >SHA256SUMS)
     fi ;;
+  overlay)
+    base=${1:?overlay BASE_CANDIDATE PARENT_DIR LABEL ROLE...}; parent=${2:?overlay BASE_CANDIDATE PARENT_DIR LABEL ROLE...}
+    label=${3:?overlay BASE_CANDIDATE PARENT_DIR LABEL ROLE...}; shift 3
+    [ $# -gt 0 ] || { echo "lane-build: overlay names the roles it swaps" >&2; exit 64; }
+    head=$(git rev-parse HEAD)
+    [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "lane-build: tracked changes uncommitted" >&2; exit 1; }
+    A=$LANE_DIR/artifacts swaps=() lean=0 rustroles=0 hbm=()
+    for r in "$@"; do
+      case $r in
+        host) f=$A/minidregg-host; lean=1 ;;
+        consent) f=$A/minidregg-client-consent; lean=1 ;;
+        *) f=$(python3 deploy/candidate/package.py --rust-roles | awk -v r="$r" '$1 == r {print $3}')
+           [ -n "$f" ] || { echo "lane-build: $r is not a role" >&2; exit 64; }
+           f=$A/$f; rustroles=1
+           if [ -f "$LANE_DIR/logs/rust-build.partial" ]; then
+             crate=$(python3 deploy/candidate/package.py --rust-roles | awk -v r="$r" '$1 == r {print $2}')
+             grep -qx "$crate" "$LANE_DIR/logs/rust-build.partial" \
+               || { echo "lane-build: the last rust run did not build $crate (role $r); rust --crate $crate" >&2; exit 1; }
+           fi ;;
+      esac
+      [ -f "$f" ] || { echo "lane-build: missing $f (role $r)" >&2; exit 1; }
+      swaps+=("--role=$r=$f")
+    done
+    [ $lean = 0 ] || { unchanged_since host; hbm=(--host-build-manifest "$LANE_DIR/native-out/manifest.txt"); }
+    [ $rustroles = 0 ] || unchanged_since rust
+    git archive --format=tar "$head" >"$LANE_DIR/logs/source-$head.tar"
+    toolchains_json "$head"
+    python3 deploy/candidate/package.py --overlay "$base" "${swaps[@]}" --source-archive "$LANE_DIR/logs/source-$head.tar" \
+      --toolchains "$LANE_DIR/logs/toolchains-$head.json" --into "$parent" --name "$label" "${hbm[@]}" \
+      | tee "$LANE_DIR/logs/overlay-$label.json"
+    OUT=$(jq -r .candidate "$LANE_DIR/logs/overlay-$label.json")
+    # the base's journey fixtures, unchanged (they ride beside the candidate, never in its pins)
+    if [ -d "$base/fixtures" ] && [ ! -e "$OUT/fixtures" ]; then cp -al "$base/fixtures" "$OUT/fixtures"; fi ;;
   *) echo "lane-build: unknown step $step" >&2; exit 64 ;;
 esac

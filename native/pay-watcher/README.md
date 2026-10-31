@@ -71,7 +71,7 @@ copy of each vector, because the binary writes its cursor beside the config.
 ## Durable service ticks
 
 The deployed wrapper uses `--durable-ticks`. Before it advances any enrollment
-cursor, the watcher fsyncs `OUT/pending.json`, containing the complete observations,
+cursor, the watcher writes `OUT/pending.json`, containing the complete observations,
 audit events, previous/next cursor and observer/asset identity. Directory entries
 are synced as well as file contents. A restart republishes that exact pending
 report without RPC access. A cursor outside its recorded before/after states or a

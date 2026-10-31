@@ -94,10 +94,10 @@ read/admitted, so their clients must retain exact uncertainty rather than infer
 absence. Route mutation is refused while paused.
 
 The complete pause receipt binds the exact request and physical `record.json`
-hash. A completed resume receipt is fsynced before removing the matching pause
+hash. A completed resume receipt is written before removing the matching pause
 marker. Repeated exact resume is idempotent; an old resume cannot clear another
 pause. An interrupted pause fences startup of every generation of that app.
-Atomic publication reuses the hostd temp/fsync/rename/parent-fsync helper under the
+Atomic publication reuses the hostd temp/rename helper under the
 checkpoint lock. Broker copy and pause/resume use the same lock.
 
 Static root-owned callback config `mini-spk-checkpoint-app-config-v1` contains

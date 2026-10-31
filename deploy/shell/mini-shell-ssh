@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # SSH forced command: one authorized key = one participant session.
 # The connecting key is bound to exactly one workspace and one session home by
 # the authorized_keys line that names this wrapper; the friend cannot choose
@@ -8,6 +8,10 @@
 #   ssh -t friend@host              interactive (prompt, Tab completion)
 #   ssh friend@host 'read shared'   one verb; exit code is the verb's
 #   ssh -T friend@host < script     script mode; stops at the first failure
+#
+# This is the deployed wrapper (the box installs it from the candidate, so it and `mini` come
+# from one tree). A one-verb session runs two processes, this shell and `mini-line` (or `mini`):
+# everything below reads files with the shell's own `read`, never a helper process.
 set -euo pipefail
 if [[ $# -ne 6 ]]; then
   echo 'usage: mini-shell-ssh ABS_MINI ABS_HOST ABS_CONFIG ABS_SOCKET ABS_WORKSPACE ABS_HOME' >&2
@@ -19,24 +23,86 @@ done
 mini=$1 host=$2 config=$3 socket=$4 workspace=$5 home=$6
 [[ -x $mini ]] || { echo 'mini client is not executable' >&2; exit 66; }
 umask 077
-# At most two calls per member at once. The Store serves every member from one queue, so one
-# member's flood of reads or `can` dry runs would queue everyone's (infra's abuse-limits review;
-# the per-subject request rate belongs in the Host). Each call holds one of two flock slots in the
-# member's home for its life, and the third is refused by name. The slot is held by this wrapper's
-# descriptor 9, which `mini` does not inherit (`9>&-`), so nothing mini starts (a resident codec
-# that outlives the call) keeps a slot.
-command -v flock >/dev/null || { echo 'mini-shell-ssh: flock (util-linux) is required' >&2; exit 69; }
-slots=$home/.call-slots
-mkdir -p -m 700 -- "$slots"
-exec 9>>"$slots/1"
-if ! flock -n 9; then
-  exec 9>>"$slots/2"
-  flock -n 9 || { echo 'mini-shell-ssh: two calls already running for this member; wait for one to finish' >&2; exit 75; }
+# The box's consent mode for hosted sessions: /etc/mini/session-consent (root 0644, one word).
+# `thin` sets MINI_THIN_CONSENT=1, the client's thin consent path (no Store replay); used where
+# the operator runs both the Host and the hosted shell. Absent or `full`: full-peer consent.
+# Remote and bring-your-own clients never read this file.
+consent_mode=
+if [[ -r /etc/mini/session-consent ]]; then read -r consent_mode </etc/mini/session-consent || true; fi
+case ${consent_mode-} in
+  thin) export MINI_THIN_CONSENT=1 ;;
+  ''|full) unset MINI_THIN_CONSENT ;;
+  *) echo "mini-shell-ssh: /etc/mini/session-consent must be thin or full" >&2; exit 78 ;;
+esac
+# Single tenancy (every hosted session runs as one account against the box's one pinned config):
+# /etc/mini/session-residents (root 0644, one absolute path to a directory that account owns, 0700)
+# gives every session the same resident directory, so the box runs ONE consent provider and ONE
+# codec Host for all of them instead of one each (`mini_sdk::consent::serve_resident_kind`). Absent:
+# each session's residents live under its own HOME. Never set it under split tenancy: there each
+# member is its own account and its residents are its own.
+if [[ -r /etc/mini/session-residents ]]; then
+  read -r residents </etc/mini/session-residents || true
+  [[ ${residents-} == /* ]] || { echo 'mini-shell-ssh: /etc/mini/session-residents must name an absolute directory' >&2; exit 78; }
+  export MINI_CONSENT_ANCHOR_DIR=$residents
 fi
+# The client retains consent anchors under $HOME/.mini or MINI_CONSENT_ANCHOR_DIR. sshd sets HOME;
+# a root-side caller that starts this through `env -i` (the door processor's sponsor credit read,
+# runuser -u mini-core) sets neither, and the client then refuses. Without either, the anchors live
+# in the session home this script was given, which its caller already owns.
+if [[ -z ${HOME-} && -z ${MINI_CONSENT_ANCHOR_DIR-} ]]; then
+  export MINI_CONSENT_ANCHOR_DIR="$home/.mini/consent-anchors"
+fi
+# Delegated full consent (split tenancy; mini-consent@NAME.socket, rendered per hosted member): a
+# member's client cannot read the operator's Store to replay it, so it asks the operator's worker
+# over HOME/consent/peer.sock. The client pins the listener (systemd's, uid 0), the consent
+# executable and the pinned config by sha256; the worker computes the same pins from the same
+# files. The ship renders both digests once into HOME/consent/peer.pins (root 0644, one line:
+# `CONSENT_SHA256 CONFIG_SHA256`, 64 lowercase hex each), so no command hashes the 190 MB
+# provider. A box without that file (shipped before it existed) hashes here, as it always did.
+if [[ -S $home/consent/peer.sock ]]; then
+  export MINI_CONSENT_SOCKET="$home/consent/peer.sock" MINI_CONSENT_PEER_UID=0
+  # The client takes a durable consent selection only with all three of these beside the socket.
+  MINI_CONSENT_HOST="${mini%/*}/minidregg-client-consent"
+  export MINI_LOCAL_HOST="$host" MINI_CONSENT_HOST MINI_CONSENT_CONFIG="$config"
+  pins=$home/consent/peer.pins
+  if [[ -r $pins ]]; then
+    read -r MINI_CONSENT_SHA256 MINI_CONSENT_CONFIG_SHA256 _ <"$pins" || true
+    hex='^[0-9a-f]{64}$'
+    [[ ${MINI_CONSENT_SHA256-} =~ $hex && ${MINI_CONSENT_CONFIG_SHA256-} =~ $hex ]] \
+      || { echo "mini-shell-ssh: $pins must hold two sha256 digests" >&2; exit 78; }
+  else
+    read -r MINI_CONSENT_SHA256 _ < <(sha256sum "$MINI_CONSENT_HOST")
+    read -r MINI_CONSENT_CONFIG_SHA256 _ < <(sha256sum "$config")
+  fi
+  export MINI_CONSENT_SHA256 MINI_CONSENT_CONFIG_SHA256
+fi
+# The box's shared codec Host (split tenancy): /etc/mini/session-codec (root 0644, one absolute
+# socket path, `mini serve-codec`'s systemd listener in a directory of the sessions' group). Every
+# member's codec frames go there instead of to a codec Host of its own; the client refuses unless it
+# greets with this session's own Host image and settings digests.
+if [[ -r /etc/mini/session-codec ]]; then
+  read -r codec_socket </etc/mini/session-codec || true
+  [[ ${codec_socket-} == /* ]] || { echo 'mini-shell-ssh: /etc/mini/session-codec must name an absolute socket' >&2; exit 78; }
+  export MINI_CODEC_SOCKET=$codec_socket MINI_CODEC_PEER_UID=0
+fi
+# At most two calls per member at once; `mini shell --call-slots` holds one of two locks in the
+# member's home for the call's life and refuses the third by name (exit 75). The client reads the
+# candidate it runs from off its own path (`chat.rs` `running_candidate`).
+args=(shell --socket "$socket" --host "$host" --config "$config"
+  --workspace "$workspace" --home "$home" --call-slots "$home/.call-slots")
+# One line runs in the member's resident shell (`mini-line`, beside `mini`): it holds the call slot
+# and hands the line and this session's streams to the resident serving that slot, so no `mini`
+# starts per verb. Without `mini-line`, or when no resident can be used, the line runs in a
+# fresh `mini` as before.
 if [[ -n ${SSH_ORIGINAL_COMMAND-} ]]; then
-  "$mini" shell --socket "$socket" --host "$host" --config "$config" \
-    --workspace "$workspace" --home "$home" --line "$SSH_ORIGINAL_COMMAND" 9>&-
-else
-  "$mini" shell --socket "$socket" --host "$host" --config "$config" \
-    --workspace "$workspace" --home "$home" 9>&-
+  line=${mini%/*}/mini-line
+  [[ -x $line ]] && exec "$line" "$mini" "${args[@]}" --line "$SSH_ORIGINAL_COMMAND"
+  exec "$mini" "${args[@]}" --line "$SSH_ORIGINAL_COMMAND"
 fi
+# Interactive login only: the motd, then the re-genesis notice ship.sh --regenesis writes (and
+# ember deletes when it is old news), go to stderr before the prompt. Both live beside this script.
+lib=${BASH_SOURCE[0]%/*}
+for note in "$lib/motd.txt" "$lib/notice.txt"; do
+  [[ -r $note ]] && printf '%s\n' "$(<"$note")" >&2
+done
+exec "$mini" "${args[@]}"

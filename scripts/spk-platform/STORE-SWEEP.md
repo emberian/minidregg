@@ -41,7 +41,7 @@ app's verdict. The real Mini ingest verifies signatures and enforces the actual 
 Decoded sizes beyond the large profile are reported as `FAIL package-size`; downloads beyond
 its raw ceiling fail at `fetch`. Neither is silently omitted.
 
-Every complete world, including teardown, holds `flock -o /tank/lanes/world-up.lock`.
+Every complete world, including teardown, holds `flock -o $WORLD_UP_LOCK` (default `/tank/lanes/world-up.lock`).
 No lock descriptor reaches resident children. Every app is stopped after its probe;
 `world-down.sh` and then `stop-residents.sh` run before deleting this invocation's staging.
 Partial world-up records enough identity for world-down. Cleanup failure retains staging

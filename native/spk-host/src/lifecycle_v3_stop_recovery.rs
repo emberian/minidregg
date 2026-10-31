@@ -96,7 +96,7 @@ fn receipt_json(receipt: &ExactReceipt) -> Value {
 }
 
 /// Move `paths` (those present) into a fresh `<label>-<nonce>` directory
-/// under the journal, fsynced. Nothing is deleted.
+/// under the journal. Nothing is deleted.
 fn set_aside(journal_dir: &Path, label: &str, paths: &[&Path]) -> io::Result<PathBuf> {
     let mut random = [0u8; 16];
     File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
@@ -110,8 +110,6 @@ fn set_aside(journal_dir: &Path, label: &str, paths: &[&Path]) -> io::Result<Pat
             fs::rename(path, aside.join(name)).ctx("rename", &path)?;
         }
     }
-    File::open(&aside).ctx("open", &aside)?.sync_all()?;
-    File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     Ok(aside)
 }
 

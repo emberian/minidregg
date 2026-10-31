@@ -40,12 +40,12 @@ def put(origin,destination,mode):
     need(not destination.exists() and not destination.is_symlink(),"staging destination exists")
     destination.parent.mkdir(mode=0o755,parents=True,exist_ok=True)
     with Path(origin).open("rb") as source,destination.open("xb") as out:
-        shutil.copyfileobj(source,out);out.flush();os.fsync(out.fileno())
+        shutil.copyfileobj(source,out);out.flush()
     os.chmod(destination,mode)
     need(sha(origin)==sha(destination),"staging copy changed")
 def publish(path,value):
     with path.open("x") as out:
-        json.dump(value,out,sort_keys=True,indent=2);out.write("\n");out.flush();os.fsync(out.fileno())
+        json.dump(value,out,sort_keys=True,indent=2);out.write("\n");out.flush()
     os.chmod(path,0o444)
 def metadata_variant(value,old,new,staged,rewritten):
     result=rewrite(value,str(old),str(new))
@@ -187,7 +187,7 @@ def stage(manifest,expected,frame,infra,pins,operator):
             put(origin,library/name,0o755 if os.access(origin,os.X_OK) else 0o444)
     allocator=library/"mini-credential-namespace"
     with allocator.open("x") as out:
-        out.write(credential_wrapper(frame,account.pw_name));out.flush();os.fsync(out.fileno())
+        out.write(credential_wrapper(frame,account.pw_name));out.flush()
     allocator.chmod(0o755)
     put(dest/"source/deploy/shell/mini-shell-ssh",library/"mini-shell-ssh",0o755)
     put(dest/"source/deploy/shell/mini-shell-ssh-credentials",library/"mini-shell-ssh-credentials",0o755)
@@ -211,14 +211,14 @@ def stage(manifest,expected,frame,infra,pins,operator):
         "generatedHooks":{"credentialNamespace":{"path":str(frame/"usr/local/lib/mini/mini-credential-namespace"),"sha256":sha(allocator),"operator":account.pw_name}},
         "effects":"immutable candidate/hooks and empty private Store; no units, accounts, SPK writes, or service starts"})
     for directory in sorted((p for p in temporary.rglob("*") if p.is_dir() and not p.is_symlink()),key=lambda p:len(p.parts),reverse=True):
-        fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY);os.fsync(fd);os.close(fd)
+        fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY);os.close(fd)
     need(not frame.exists(),"frame collision before publication")
     # renameat2 RENAME_NOREPLACE prevents a concurrent frame from being replaced.
     import ctypes
     libc=ctypes.CDLL(None,use_errno=True)
     result=libc.renameat2(-100,os.fsencode(temporary),-100,os.fsencode(frame),1)
     need(result==0,"frame publication refused, errno "+str(ctypes.get_errno()))
-    fd=os.open(frame.parent,os.O_RDONLY|os.O_DIRECTORY);os.fsync(fd);os.close(fd)
+    fd=os.open(frame.parent,os.O_RDONLY|os.O_DIRECTORY);os.close(fd)
     return read(frame/"staging.json")
 def main():
     p=argparse.ArgumentParser(description=__doc__)

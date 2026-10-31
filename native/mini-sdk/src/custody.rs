@@ -142,7 +142,7 @@ pub enum Transmission {
 pub enum Phase {
     Drafted,
     Prepared,
-    /// The exact call is retained (fsynced) before any transmission.
+    /// The exact call is retained before any transmission.
     Sealed { call_sha256: [u8; 32] },
     Uncertain { call_sha256: [u8; 32], detail: String },
     Confirmed { call_sha256: [u8; 32], receipt: Receipt },

@@ -225,9 +225,7 @@ fn publish_phase(root: &Path, phase: &Value) -> Result<()> {
                 return Err("retained lifecycle recipient reference differs".into());
             }
         }
-        return File::open(path.parent().ok_or("recipient reference lacks parent")?)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| e.to_string());
+        return Ok(());
     }
     publish_delegation(root, proposal, &member_path(phase, "attempt")?)
 }
@@ -242,7 +240,7 @@ fn retain_discovery(path: &Path, workspace: &Value, refs: &[Value; 3], manager: 
             return Err("initial lifecycle discovery authority changed before consent publication".into());
         }
         // Preserve the first discovery bytes, including historical metadata.
-        // Exact replay fsyncs the parent if an earlier publication lost its ack.
+        // Exact replay writes the parent if an earlier publication lost its ack.
         retain(path, &sample)
     } else {
         retain(path, &json!({"references":refs}))

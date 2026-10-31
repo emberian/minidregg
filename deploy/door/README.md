@@ -107,7 +107,7 @@ socket.
   non-regular file, any group/other access, or a non-root owner). One code per line, `SERIAL CODE`: SERIAL
   a unique decimal of 1 or more, CODE a unique 8 to 64 of `A-Z a-z 0-9 -` (make them with
   `openssl rand -hex 16`); `#` comments and blank lines are kept. The processor strikes a code by rewriting
-  the whole file atomically (temp, fsync, rename) to `SERIAL CODE used NAME REQUEST-ID AT`, BEFORE the
+  the whole file atomically (temp, rename) to `SERIAL CODE used NAME REQUEST-ID AT`, BEFORE the
   request's first world effect; a crash then finds the request's own strike and carries on, never a second
   person. A request refused after its strike (the sponsor floor, at the funding step) returns the code.
   Add codes by appending lines (not while a tick runs: the processor holds its lock, so edit with
