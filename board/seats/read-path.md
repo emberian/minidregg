@@ -51,6 +51,20 @@ rounds, and move measurement to persvati's standing world when it exists.
   47b7cb2e1, c763e3ead, 975491262 (`fetchPolicySourceFast`, `loadPolicy` hashing fetched bytes,
   `authorizeCheckedFast` loading the law graph once).
 
+## In flight (2026-10-31 evening; hbox down since about 16:30)
+
+- 143caf2fc's measurement: native-loop overlay of 143caf2fc cherry-picked onto batch 9 (997905c0b) in pool tree t3
+  (/ci/exo/lean/nl1.sh, PID file nl1.pid, log nl1.log); base candidate
+  /home/hbox/lanes/integ/candidates/997905c0bc9c85086324d02c46abeeab3273f6e2. Then two scratch worlds, before
+  (batch 9) and after (the overlay), Host CPU per `doc show` alternated. Moves to persvati once build-loop
+  announces it.
+- Written, not yet checked (uncommitted in the worktree): `registryDigest` seven bytes per big multiplication
+  (`registryFoldFast`, `@[csimp] registryDigest_eq_fast`, value-identical), Kernel/CredentialSignedEnvelopeController.lean.
+  Check with `lake build Kernel.CredentialSignedEnvelopeController` on a pool tree before it lands.
+- hbox trash to clear when hbox returns (root's word): stop w6 and w7 by their PID files and remove them (0.6 G
+  each; keep w8), and /home/hbox/lanes/exorcism's Rust target (9.1 G total clone; the pool tree replaces it once
+  nothing uncommitted is left there).
+
 ## Next, widest first
 
 1. Cold first read and restart (traced 2026-10-31): both are the FULL Store open
