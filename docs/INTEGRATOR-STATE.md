@@ -33,10 +33,10 @@ The session was pruned 10-30 evening; the root re-adopted the veteran lanes with
 
 | lane | agent | owns |
 |---|---|---|
-| hot-path | aa2905fee8ef847d1 (successor of a86738fc1dfae6429) | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
+| hot-path | aa2905fee8ef847d1 (distilled; owns flatness reds; rows 4/9/13 at the shared seam; row 11 FORMAT with private cells: one batch, one genesis) | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
 | infra (fresh) | aa72653a8ce442178 | Firecracker (or similar) lite VM inside the forge demo host, then the fresh ship; forge composed container |
 | app-reds | ad85d40779880420c (volume/custodian/apps; a17f4172949caca14 on resident /var checks, Hermes items) | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
-| private cells | a30027269707d4613 (distilled resume of a0f378bac619f4864 <- a74ad8d84ada5627a) | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
+| private cells | a507e11e0d0ca4a6a (distilled; item 00 of docs/PRIVATE-CELLS-STATE.md first) | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
 | iteration speed | ab2786fe1172f5683 | the bump cdb399b47, umbrella-tree.sh (second warm tree for integ-build5) |
 | explorer | a3e5d6dbcd68e616c | perf and behaviour probes on candidates; docs/EXPLORER-FINDINGS.md |
 | demo-reds (sub-Opus of this integrator, done) | a64c387f3e638aa63 | G3-G6 (lane/demo-reds 8982fa265); left: no bend top-up verb, `bend show` prints "phase ?" after an activity ends |
