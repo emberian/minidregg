@@ -2046,7 +2046,10 @@ pub(crate) fn parse_input(
     let method = string("method")?;
     // CONVERSATION is the hosted-conversation descriptor method (protocol/hosted-conversation.json); the
     // Host validates its body against that vocabulary before anything reaches the app.
-    if !matches!(method, "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "CONVERSATION") {
+    // The WebDAV methods are the Host's own (host_operations::DAV_METHODS, Kernel/ApplicationDispatchAdmission.lean).
+    if !(matches!(method, "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "CONVERSATION")
+        || mini_sdk::host_operations::dav_method(method))
+    {
         return Err("application API method is unavailable".into());
     }
     let path = string("path")?;
@@ -2083,7 +2086,7 @@ pub(crate) fn parse_input(
             .get("value")
             .and_then(Value::as_str)
             .ok_or("application API header value must be a string")?;
-        if !ORDINARY_HEADERS.contains(&name)
+        if !(ORDINARY_HEADERS.contains(&name) || mini_sdk::host_operations::dav_header_allowed(method, name, value))
             || name.len() > 128
             || value.len() > 8192
             || !clean_text(value)
@@ -2093,7 +2096,7 @@ pub(crate) fn parse_input(
         ordered_headers.push((name.to_owned(), value.to_owned()));
     }
     let body = decode_hex(string("bodyHex")?)?;
-    if matches!(method, "GET" | "HEAD" | "DELETE") && !body.is_empty() {
+    if matches!(method, "GET" | "HEAD" | "DELETE" | "COPY" | "MOVE" | "UNLOCK" | "OPTIONS") && !body.is_empty() {
         return Err("application API body is unavailable for this method".into());
     }
     Ok(HttpInput {
