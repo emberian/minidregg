@@ -2339,7 +2339,13 @@ fn describe_plan(planned: &Plan) -> String {
 /// Run one line; returns (exit code, keep going).
 pub(crate) fn line(session: &Session, text: &str) -> (i32, bool) {
     let started = std::time::Instant::now();
-    let result = line_untraced(session, text);
+    let mut result = line_untraced(session, text);
+    // The shell defers directory syncs (`run`); a line's end is a barrier, so every custody name
+    // it committed is durable before its result reaches the user or the next line.
+    if let Err(error) = mini_sdk::durable::flush_directory_syncs() {
+        eprintln!("mini: cannot make this line's custody durable: {error}");
+        result.0 = result.0.max(1);
+    }
     crate::trace::record("line", text, 0, result.0 as usize, started);
     result
 }
@@ -2641,6 +2647,11 @@ fn read_line(session: &Session, prompt: &str, past: &[String]) -> Option<String>
 // ---------------------------------------------------------------- entry
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
+    // One line publishes dozens of custody files; their directory fsyncs are coalesced to the
+    // barriers (every Host request, and each line's end: `line`), each file still complete or
+    // absent (`mini_sdk::durable`), as `mini workspace` does.
+    #[cfg(unix)]
+    mini_sdk::durable::defer_directory_syncs();
     let absolute = |value: OsString, label: &str| -> Result<PathBuf> {
         let path = PathBuf::from(value);
         if !path.is_absolute() {
