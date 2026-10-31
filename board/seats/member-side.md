@@ -75,7 +75,11 @@ resident footprint (a few MB per member), web pages.
    With the projection O(1) these matter only for what the profile still shows. Theirs: the birth chain over
    `ServedBasis.Ground`, including `preparePreAuthority`. Diffs go to them before landing.
 3. The authority root: done by privacy's FORMAT (a), f28cd8457 (authority materializer on the kept private index;
-   a patched cell's root O(delta x 516)). Confirm on the profile that `rootCached` no longer hashes whole cells.
+   a patched cell's root O(delta x 516)). Confirm on the profile that `rootCached` no longer hashes whole cells,
+   and send privacy (a7bf41b0d8bb24813) the numbers or a red. Its claim to refute: a root read on the provider's walk
+   is flat in history. Its pre-(a) baseline (explorer, b9450147f hotpatch): authority delegate ~2.5 s at 13 prior
+   entries, ~4.1 s at 303; doc-log write ~2.0 s at 13, ~6.1 s at 303. A residual linear term in the durable path
+   (`ResourceBirthCodec.rootBytes`, `GuardedDurableCommit`) is per-entry persistence, not the root.
 4. Footprint: the shared consent provider ~66 MB anon and flat; per-member increment at 1 and 5 members once infra's
    split units are rendered; then cut the shared base (codec ~12 MB, provider).
 5. Web and per-verb constants: `/keys` 60 to 75 ms is the Host's key-status op; read-path owns the read file bus
@@ -91,7 +95,7 @@ resident footprint (a few MB per member), web pages.
 - read-path (a97dba51f72535cb9): takes the consent provider's start (`verifyInitial`, `resume`) off the full Store
   open onto `DurableServed.openHead`. I told it nothing of mine is in flight in ClientConsentCore/ConsentAnchor;
   keep one Store read per command (5517f6f57) and no World on the walk.
-- privacy / private cells (a3f7fce75cd3e4e49; FORMAT (a) owns the authority root): the `DeployedBridge.cellRoot` = materialized root theorem, for row 9's
+- privacy / private cells (a7bf41b0d8bb24813; FORMAT (a) owns the authority root): the `DeployedBridge.cellRoot` = materialized root theorem, for row 9's
   O(log n) judge.
 - store-retained (a9b54e85e4a194b91): L0 makes the World's cells SparseMap trees (supersedes WorldCompact, row 9b); it
   ports `allSupport` itself; the map codec's sortedness check. Told: the provider needs no sealed World (only the
