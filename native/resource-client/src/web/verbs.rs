@@ -791,6 +791,7 @@ mod tests {
     fn bare_site() -> Site {
         Site {
             mutations: Mutex::new(()),
+            refs: Mutex::new(None),
             home: None,
             root: std::env::temp_dir(),
             workspace: Value::Null,

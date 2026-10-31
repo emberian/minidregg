@@ -64,6 +64,7 @@ fn site(tag: &str) -> (PathBuf, Site) {
     // filename can.
     fs::write(root.join("refs").join("lab\"><img src=x onerror=alert(1)>.json"), "{}").unwrap();
     let site = Site {
+        refs: Mutex::new(None),
         mutations: Mutex::new(()),
         home: Some(root.join("home")),
         root: root.clone(),
