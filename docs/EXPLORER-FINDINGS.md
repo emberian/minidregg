@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 3, 2026-10-30.
+explored as test members only. Batch 4, 2026-10-30.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -60,6 +60,17 @@ Test members dw-10302104 and dw-10302056 only, driven by `/root/explorer/dm USER
 | F6 | `ask lobby hello` is admitted (`#10 unacknowledged`) but no reply arrives: `mini-grain-resident@9872001` is `failed`. Infra knows (resident exits while installs ingest; restart pending). | infra |
 
 Held: tale story with two players on the forge (key gate refuses `take key`/`go 3` out of order, GM narration shown on `look`); `chat new/invite/join/say/tail` between two members (writes 2.0-2.4 s warm, `chat new` 13 s, `doc new` 6.2 s under load); public pages from outside (/ 2.0 s steady, /doc/welcome 1.6 s, /tour /verb /story 0.5-0.7 s, /apps 1.3 s, 404s 0.5 s). Probe artefact: curl to the public URL from inside demo-dry hangs, use an outside probe.
+
+
+## hbox world x3 (be4ef7510, demo params + objectiveInvocation, funding 1,225,000)
+
+Worlds x1, x2, xw1, xweb and the e2e workers are down (x1's down listed one survivor that had already exited). x3 is up: `/ci/xp-log/m3 MEMBER 'verb'`, down with `jworld-scratch.sh down /ci/x3/w`.
+
+| id | repro | owner |
+|---|---|---|
+| G0 | E1 confirmed closed in a scratch world: with the policy pinned and funding 1,225,000, `bend publish` then `bend run tally` are admitted in under 1 s; one run costs 121,779 (10 runs fit the grant). A repeated identical `bend run` is refused with the exact-retry guard (`--again true`). | n/a |
+| G1 | A second member publishing the identical `Tally.obend` (`bend publish tally @Tally.obend --entry tally`) is refused `conflict: transaction identity conflict (phase replay)`; the package is already on the chain, yet the member then runs it fine. The refusal should say the package is already published. | kernel/shell refusal rendering |
+| G2 | `bend answer SLOT @file` by the decider with a wrong reply shape is refused `Refusal.responseType "reply"`; a non-decider is refused `notDecider` (good, by name). The decider message does not say what shape the slot wants. Await deadlines are heights (62 against a current 61): on a busy world the window can pass between `await` and `answer`. | shell/bend docs |
 
 ## Exercised and held
 
