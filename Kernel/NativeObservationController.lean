@@ -570,35 +570,172 @@ def challenge (context : Context deployment) (profile : CanonicalRuntimeProfile.
   let clock ← need .operationRejected (ClockCellDomain.load deployment context.cells)
   challengeAt context profile federation genesisHeight intent clock.clock intentSignature
 
-def checkGrant {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+/-- One grant of a signed read, worked out once: its selection, its request and marker, and the
+header the challenge carries for it. Op 5 computes its challenge from these (`challengePlanned`)
+and checks each grant against the same values (`checkGrantPlanned`), recomputing none of them. -/
+structure GrantPlan (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) where
+  private mk ::
+  selected : Selected context grant
+  wanted : Request grant.kind
+  wantedExact : wanted = request context profile.semantics federation genesisHeight intent grant
+    selected.packed.payload.root
+  signatureMarker : Nat
+  markerExact : signatureMarker = marker context profile.semantics intent grant
+  signedHeader : CredentialSignedEnvelopeController.SignedHeader
+  headerExact : headerAt context profile context.worldRoot federation genesisHeight intent grant =
+    .ok signedHeader
+
+private def planOne (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
+    Except Refusal (GrantPlan context profile federation genesisHeight intent grant) :=
+  match chosen : select context grant with
+  | none => .error (.of .noGrant)
+  | some selected =>
+      match signed : (CredentialSignatureAdmission.signingHeader context.authority
+          (marker context profile.semantics intent grant)
+          ⟨grant.kind, request context profile.semantics federation genesisHeight intent grant
+            selected.packed.payload.root⟩).mapError
+          (fun reason => Refusal.of (RefusalReason.ofSignature reason)) with
+      | .error reason => .error reason
+      | .ok value => .ok ⟨selected, _, rfl, _, rfl, value, by
+          unfold headerAt
+          simp only [chosen, need, bind, Except.bind]
+          exact signed⟩
+
+/-- A grant's plan carries exactly the header `headerAt` computes, and refuses as it refuses. -/
+private theorem planOne_header (context : Context deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId) (genesisHeight : Nat)
+    (intent : Intent) (grant : GrantRef) :
+    (planOne context profile federation genesisHeight intent grant).map (·.signedHeader) =
+      headerAt context profile context.worldRoot federation genesisHeight intent grant := by
+  unfold planOne
+  split
+  · next chosen =>
+      unfold headerAt
+      simp only [chosen, need, bind, Except.bind, Except.map]
+  · next selected chosen =>
+      split
+      · next reason signed =>
+          unfold headerAt
+          simp only [chosen, need, bind, Except.bind, Except.map]
+          exact signed.symm
+      · next value signed =>
+          unfold headerAt
+          simp only [chosen, need, bind, Except.bind, Except.map]
+          exact signed.symm
+
+/-- The plans of a read's grants, in the order the intent names them. -/
+inductive Planned (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : List GrantRef → Type where
+  | nil : Planned context profile federation genesisHeight intent []
+  | cons {grant : GrantRef} {rest : List GrantRef} :
+      GrantPlan context profile federation genesisHeight intent grant →
+      Planned context profile federation genesisHeight intent rest →
+      Planned context profile federation genesisHeight intent (grant :: rest)
+
+/-- The encoded headers of a read's plans, as its challenge carries them. -/
+def Planned.headers {context : Context deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} {intent : Intent} :
+    {grants : List GrantRef} → Planned context profile federation genesisHeight intent grants →
+      List (List UInt8)
+  | _, .nil => []
+  | _, .cons plan rest => CredentialSignedEnvelopeController.headerCodec.encode plan.signedHeader :: rest.headers
+
+private def planAll (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) :
+    (grants : List GrantRef) → Except Refusal (Planned context profile federation genesisHeight intent grants)
+  | [] => .ok .nil
+  | grant :: rest =>
+      match planOne context profile federation genesisHeight intent grant with
+      | .error reason => .error reason
+      | .ok plan =>
+          match planAll context profile federation genesisHeight intent rest with
+          | .error reason => .error reason
+          | .ok planned => .ok (.cons plan planned)
+
+/-- The plans' headers are the headers `challengeAt` encodes, in order, and the plans refuse
+exactly where it refuses. -/
+private theorem planAll_headers (context : Context deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId) (genesisHeight : Nat)
+    (intent : Intent) (grants : List GrantRef) :
+    (planAll context profile federation genesisHeight intent grants).map Planned.headers =
+      grants.mapM (fun grant => do
+        let value ← headerAt context profile context.worldRoot federation genesisHeight intent grant
+        pure (CredentialSignedEnvelopeController.headerCodec.encode value)) := by
+  induction grants with
+  | nil => rfl
+  | cons grant rest ih =>
+      have one := planOne_header context profile federation genesisHeight intent grant
+      simp only [planAll, List.mapM_cons]
+      cases planned : planOne context profile federation genesisHeight intent grant with
+      | error reason =>
+          rw [planned] at one
+          simp only [Except.map] at one
+          rw [← one]
+          rfl
+      | ok plan =>
+          rw [planned] at one
+          simp only [Except.map] at one
+          rw [← one, ← ih]
+          cases planAll context profile federation genesisHeight intent rest <;> rfl
+
+/-- Op 5's challenge, with the plans it was computed from (`challengePlanned_exact`). -/
+def challengePlanned (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (intentSignature : List UInt8) :
+    Except Refusal (Challenge × Planned context profile federation genesisHeight intent intent.grants) := do
+  let clock ← need .operationRejected (ClockCellDomain.load deployment context.cells)
+  footprintExact context intent
+  let planned ← planAll context profile federation genesisHeight intent intent.grants
+  pure (⟨intent, deployment.domain, profile.semantics, federation,
+    context.worldRoot, context.authority.cell.root,
+    genesisHeight + context.height, clock.clock.now, clock.clock.slot, planned.headers, intentSignature⟩,
+    planned)
+
+/-- **The planned challenge is the challenge**, refusal for refusal. -/
+theorem challengePlanned_exact (context : Context deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId) (genesisHeight : Nat)
+    (intent : Intent) (intentSignature : List UInt8) :
+    (challengePlanned context profile federation genesisHeight intent intentSignature).map Prod.fst =
+      challenge context profile federation genesisHeight intent intentSignature := by
+  unfold challengePlanned challenge challengeAt
+  have headers := planAll_headers context profile federation genesisHeight intent intent.grants
+  cases ClockCellDomain.load deployment context.cells with
+  | none => rfl
+  | some clock =>
+      simp only [need, bind, Except.bind]
+      cases footprintExact context intent with
+      | error reason => rfl
+      | ok unit =>
+          simp only [bind, Except.bind] at headers ⊢
+          rw [← headers]
+          cases planAll context profile federation genesisHeight intent intent.grants <;> rfl
+
+/-- One grant of an authenticated read, checked against its plan: the requester's header
+signature, then its capability and the resource's current law. -/
+def checkGrantPlanned {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grant : GrantRef) (signature : List UInt8) :
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) {grant : GrantRef}
+    (plan : GrantPlan context profile federation genesisHeight intent grant) (signature : List UInt8) :
     m (Except Refusal (CheckedGrant context profile federation genesisHeight intent grant)) := do
-  let some selected := select context grant | return .error (preAuthentication (.of .noGrant))
-  let worldRoot := context.worldRoot
-  let wanted := requestAt context worldRoot profile.semantics federation genesisHeight
-    intent grant selected.packed.payload.root
-  match ResourceObservationAdmission.prepare context profile wanted
-      (markerAt deployment worldRoot profile.semantics intent grant) grant.capability
-      (intentCodec.encode intent) with
+  match ResourceObservationAdmission.prepare context profile plan.wanted plan.signatureMarker
+      grant.capability (intentCodec.encode intent) with
   | .error reason => return .error (preAuthentication reason)
   | .ok prepared =>
-  match headerAt context profile worldRoot federation genesisHeight intent grant with
-  | .error reason => return .error (preAuthentication reason)
-  | .ok actualHeader =>
-  let envelope := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode ⟨actualHeader, signature⟩
+  let prepared : ReadPreparation context profile federation genesisHeight intent grant plan.selected :=
+    cast (by unfold ReadPreparation; rw [plan.wantedExact, plan.markerExact]) prepared
+  let envelope := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode ⟨plan.signedHeader, signature⟩
   -- From here the refusal is the signed requester's own: its signature is
   -- checked first, then its capability and the resource's current law.
   match ← ResourceObservationAdmission.check native prepared envelope with
   | .error reason => return .error reason
   | .ok checked =>
-      have selectedExact : prepared.observed.before = selected.packed := by
-        have same := prepared.observed.present.symm.trans selected.present
+      have selectedExact : prepared.observed.before = plan.selected.packed := by
+        have same := prepared.observed.present.symm.trans plan.selected.present
         injection same
-      have balancesExact : prepared.accountBalances = selected.accountBalances := by
-        exact Option.some.inj (prepared.balancesExact.symm.trans selected.balancesExact)
-      return .ok ⟨selected, prepared, selectedExact, balancesExact, envelope, checked⟩
+      have balancesExact : prepared.accountBalances = plan.selected.accountBalances := by
+        exact Option.some.inj (prepared.balancesExact.symm.trans plan.selected.balancesExact)
+      return .ok ⟨plan.selected, prepared, selectedExact, balancesExact, envelope, checked⟩
 
 structure AuthorizedIntent (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) where
@@ -622,22 +759,23 @@ theorem AuthorizedIntent.query_footprint
   footprint_success_exact context intent [(query.kind, query.target)]
     (by simp only [requiredTargets, purpose]; rfl) accepted.footprint
 
-private def checkGrants {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
+private def checkGrantsPlanned {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
-    (grants : List GrantRef) (signatures : List (List UInt8)) :
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) :
+    (grants : List GrantRef) → Planned context profile federation genesisHeight intent grants →
+    (signatures : List (List UInt8)) →
     m (Except Refusal ((index : Fin grants.length) →
-      CheckedGrant context profile federation genesisHeight intent (grants.get index))) :=
-  match grants, signatures with
-  | [], [] => return .ok (fun index => Fin.elim0 index)
-  | grant :: rest, signature :: remaining => do
-      match ← checkGrant native context profile federation genesisHeight intent grant signature with
+      CheckedGrant context profile federation genesisHeight intent (grants.get index)))
+  | [], .nil, [] => return .ok (fun index => Fin.elim0 index)
+  | _ :: rest, .cons plan planned, signature :: remaining => do
+      match ← checkGrantPlanned native context profile federation genesisHeight intent plan signature with
       | .error reason => return .error reason
       | .ok first =>
-          match ← checkGrants native context profile federation genesisHeight intent rest remaining with
+          match ← checkGrantsPlanned native context profile federation genesisHeight intent rest planned
+              remaining with
           | .error reason => return .error reason
           | .ok tail => return .ok (Fin.cases first tail)
-  | _, _ => return .error (preAuthentication (.of .malformed))
+  | _, _, _ => return .error (preAuthentication (.of .malformed))
 
 /-- A supplied challenge that differs from the current one is stale exactly
 when it names another world root, authority root or height (all public
@@ -671,13 +809,17 @@ def authorizeAuthenticated {m : Type → Type} [Monad m] (native : CredentialSig
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
     m (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
   let intent := signed.challenge.intent
-  match derived : challenge context profile federation genesisHeight intent
+  match planned : challengePlanned context profile federation genesisHeight intent
       signed.challenge.intentSignature with
   | .error reason => return .error (preAuthentication reason)
-  | .ok expected =>
+  | .ok (expected, plans) =>
+      have derived : challenge context profile federation genesisHeight intent
+          signed.challenge.intentSignature = .ok expected := by
+        rw [← challengePlanned_exact, planned]; rfl
       if same : expected = signed.challenge then
         if footprint : footprintExact context intent = .ok () then
-          match ← checkGrants native context profile federation genesisHeight intent intent.grants signed.signatures with
+          match ← checkGrantsPlanned native context profile federation genesisHeight intent intent.grants plans
+              signed.signatures with
           | .error reason => return .error reason
           | .ok grants => return .ok ⟨signed.challenge,
                 derived.trans (congrArg Except.ok same), footprint, grants⟩
