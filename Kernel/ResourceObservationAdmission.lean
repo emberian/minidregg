@@ -383,9 +383,8 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
       match config.resolve? with
       | none => .error (Refusal.lawDenied none)
       | some committed =>
-          let witness := committed.witness
-          match committed.admit wanted
-              evidence witness (.policy wanted.policyId wanted.policyRevision)
+          match committed.admitOwn wanted
+              evidence (.policy wanted.policyId wanted.policyRevision)
               prepared.epochExact prepared.revisionExact with
           | none => .error (ComposedLawDiagnostics.publicRefusal
               (readerFields context kind capability) committed)

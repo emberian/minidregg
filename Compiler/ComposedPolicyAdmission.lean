@@ -337,6 +337,58 @@ theorem PreparedLaw.admit_eq {F : Type} [Field F] [DecidableEq F]
       ComposedPolicyAdmission.admit config request evidence witness membership epochExact revisionExact := by
   simp only [PreparedLaw.admit, ComposedPolicyAdmission.admit, PreparedLaw.verifies_eq]
 
+/-- `admit` on the law's own generated witness (`law.witness`): the caller's ordinary form. -/
+def PreparedLaw.admitOwn {F : Type} [Field F] [DecidableEq F]
+    {config : Config F} (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind)
+    (evidence : Evidence config.portal config.snapshot.authState request)
+    (membership : config.portal.MembershipWitness)
+    (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId) :
+    Option (Authorized config.portal config.snapshot.authState request) :=
+  law.admit request evidence law.witness membership epochExact revisionExact
+
+/-- The verdict of `law.verifies` on the law's own witness, decided by the predicate
+itself: the circuit is not evaluated (`compiledLawAccepts_generated`). -/
+def PreparedLaw.verifiesOwnFast {F : Type} [Field F] [DecidableEq F]
+    {config : Config F} (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind) : Bool :=
+  law.binding request &&
+    (supported config.profile.compiler law.predicate &&
+      inputsInRange config.profile.compiler law.predicate config.step.oldState config.step.newState &&
+      decide (castInjOn F (intsOf law.predicate config.step.oldState config.step.newState)) &&
+      Minidregg.Pred.eval law.predicate config.step.oldState config.step.newState)
+
+theorem PreparedLaw.verifiesOwnFast_eq {F : Type} [Field F] [DecidableEq F]
+    {config : Config F} (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind) :
+    law.verifiesOwnFast request = law.verifies request law.witness := by
+  have same : config.verifies request law.witness =
+      (law.binding request && compiledLawAccepts config.profile law.predicate law.witness.compiled) := by
+    simp [Config.verifies, law.headExact, law.graphExact, PreparedLaw.binding,
+      ResolvedLawCompilation.checks, PreparedLaw.witness, ResolvedLawCompilation.witness,
+      PreparedLaw.predicate, Bool.and_assoc]
+  rw [law.verifies_eq, same, PreparedLaw.verifiesOwnFast]
+  congr 1
+  simp only [PreparedLaw.witness, ResolvedLawCompilation.witness, PreparedLaw.predicate]
+  exact (compiledLawAccepts_generated _ _ _ _ _).symm
+
+def PreparedLaw.admitOwnFast {F : Type} [Field F] [DecidableEq F]
+    {config : Config F} (law : PreparedLaw config) {kind : ResourceKind} (request : Request kind)
+    (evidence : Evidence config.portal config.snapshot.authState request)
+    (membership : config.portal.MembershipWitness)
+    (epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId)
+    (revisionExact : request.policyRevision = config.snapshot.authState.policyRevision request.policyId) :
+    Option (Authorized config.portal config.snapshot.authState request) :=
+  admitWithCheck config request evidence law.witness membership epochExact revisionExact
+    (fun _ => law.verifiesOwnFast request)
+    ((law.verifiesOwnFast_eq request).trans (law.verifies_eq request law.witness))
+
+@[csimp] theorem PreparedLaw.admitOwn_eq_fast :
+    @PreparedLaw.admitOwn = @PreparedLaw.admitOwnFast := by
+  funext F _ _ config law kind request evidence membership epochExact revisionExact
+  unfold PreparedLaw.admitOwn PreparedLaw.admitOwnFast PreparedLaw.admit
+  congr 1
+  funext _
+  exact (law.verifiesOwnFast_eq request).symm
+
 /-! ## Authorization with the law's verdict left to the Receiver -/
 
 /-- **Authorization, the law's verdict not included.**  Every fact `admit`
