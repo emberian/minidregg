@@ -5,31 +5,27 @@ Present-state record of the integration lane, rewritten whole when its shape cha
 line each). History (the 10-30 rehearsal-3 smoke, the hbox disk pause, the Hermes and apps diagnoses) is in this file's
 git history (e5dfc3ddb and earlier).
 
-## Now (2026-10-30 22:10 EDT; ember's 10-31 word)
+## Now (2026-10-31 01:00 EDT)
 
-- hbox has disk again (ember cleared approved trees: 57 GB, 69 GB after the first sweep). Writes resumed.
-- **Bump LANDED: main = cdb399b47** (host stage rc=0 1,922 s after reseeding packages from private-cells' 4.35 tree; READY 23:54; HOLD LEAN lifted). Was: building ALONE on hbox (launched 22:03: `integ-build4.sh cdb399b47;
-  umbrella-minidregg.sh cdb399b47`, SEATS=12 MEM=64G, PID in build.pid; whole-tree rebuild, 797-module closure).
-  HOLD LEAN is in force until its host stage is green: then main moves to cdb399b47 and HOLD LEAN lifts.
-- **BATCH 35737eac4 BUILDING** (integ-build5, launched 23:58). It is staging (integ/batch-435 in the landing worktree), built with integ-build5.sh (umbrellas
-  in the second warm tree umbrella-src after READY; rerecord from there). Contents on cdb399b47: staging's hot-path
-  batch 1 + app-reds 5f22e6324/659301aa4/4bee4b608 + seed/hermes scripts; import-boundary b7bf3a8b2 (tier table green,
-  no cycle; Compiler.Signature/NatDigits255Fast/StreamCodec nucleus -> Theory, Effects Revival keystones ->
-  Kernel/EffectsRevival, moveEffect -> Kernel/MoveEffect); no-loop volume helper 111985198, custodian d786b5d2c, custodian
-  uid range 28be1c40c, bend publish/answer hints 35f008d3d; demo-reds 8982fa265 (G3 purse 4 prices: a completed one-answer
-  tally costs 91,331, grant 1,225,000 = 12 sequential; G4 one height clock; G5 named repeats; G6 web forms exact retries);
-  private-cells increment 1 dd0e6efbd (audited: nothing vacuous; follow-ups sent); iter-speed umbrella-tree 2535ea2e1 +
-  warm-link/lane-tree 7143777f0; rerecord staleness by elaboration + doc-write re-record fb8a638f8; explorer findings 1-5.
-  Pending to fold if they arrive before launch: iter-speed's v4.35 fixes for Effects/Revival/Hosted* (ResearchWip),
-  hot-path's consent snapshot batch (supersedes staging 29f81ea1d/24a14656f; includes JDV 1a4f3a623), private-cells'
-  premises_inhabited rename. Launch waits for iter-speed's "clear" (its hbox lane-pool init reads integ/src once after
-  the bump's Minidregg umbrella).
-- hbox grains root: app-reds made /var/lib/mini-vars-backing a loop-mounted prjquota ext4 (/tank/lanes/vars-backing.img,
-  24 GB sparse) named by /etc/mini-spk-volumes/vars-backing; new world-ups bind <backing>/<store> as vars. NOT in fstab:
-  after an hbox reboot run `sudo mount -o loop,prjquota /tank/lanes/vars-backing.img /var/lib/mini-vars-backing`.
-- Rehearsal 3 runs be4ef7510 (only fully gated candidate: tour 73/73, j14-apps, composed all green). 7d90da717 is READY on
-  host stages only (Fixtures umbrella red: Native fixtures stale against the new event ids; no tour/composed gate). Infra
-  told (22:05): ship be4ef7510 + SEED_OVERLAY of 460ad0fd7 and 929eac696 for now; the batch candidate replaces it once gated.
+- main = cdb399b47 (Lean v4.35.0 bump, landed 23:52; HOLD LEAN lifted).
+- **Batch candidate 35737eac4 READY 00:43** (integ-build5; host 2,498 s). gate13: tour 73/73 PASS, enrol PASS, hbox composed
+  rooms/churn/documents/store-restart pass; RED j14-apps + composed apps:sheet = "grains root is on ext4 without project
+  quota": 111985198 left the vars-backing bind out of deploy/spk-host/install-user-world (app-reds fix b1c30a598 + the
+  controller-world pin 6be1c1ea7); connector/residents/restart blocked behind apps; flatness-submit FAIL (submit_cpu
+  100 -> 847 ms over history 3..103), flatness-get failed to run (reported to hot-path; never a gate). Hotpatch rerun
+  running: gate14 (HARNESS overlays scripts + deploy/spk-host) HARNESS=8431fd33f SUF=-hp1 PHASES="composed j14".
+  umbrella-tree (umbrella-src, first run, long) then rerecord run after READY. Infra runs forge distinct composed
+  c-3573-d1 and wired the custodian (demo-volume-custodian.service) for the demo VM from this candidate.
+- **Staging (next batch) e46f16dcd+**: hot-path consent snapshot batch 54bd71d53/7d96bba7e (CONSENT-STORE, JDV fix, sweep
+  rows 1/2/5/6/7/10/12/18; supersedes 470fb79c9/bd1c8fc40), private-cells receiver + custody PRF rounds (b076a4806 ..
+  c130fd188, audited each round), app-reds b1c30a598/6be1c1ea7/f72223652 (apps-e2e grant bound 50000), demo-reds
+  8ff7c7da3 (door hands house publications to members; member `reports`), explorer batches 6-7. FORMAT change coming:
+  hot-path row 11 (checkpoint carries session indexes; Store epoch bump) shares ONE epoch bump with private-cells' root
+  switch: one batch, one genesis, fixture re-record.
+- Rehearsal 3 stays on be4ef7510 on forge (fresh world up; Hermes ask refused no-credential: the OpenRouter pool key is
+  ember's decision, raised to root).
+- hbox disk: 42 GB free at 00:50 (pool 12 GB, umbrella-src ~10 GB). sweep.sh now also removes candidates beyond the
+  newest 3 READY (+ keep list).
 
 ## Lanes (send shas; name every new candidate to infra and the explorer)
 
@@ -37,9 +33,9 @@ The session was pruned 10-30 evening; the root re-adopted the veteran lanes with
 
 | lane | agent | owns |
 |---|---|---|
-| hot-path | a86738fc1dfae6429 | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
+| hot-path | aa2905fee8ef847d1 (successor of a86738fc1dfae6429) | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
 | infra (fresh) | aa72653a8ce442178 | Firecracker (or similar) lite VM inside the forge demo host, then the fresh ship; forge composed container |
-| app-reds | a17f4172949caca14 and ad85d40779880420c | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
+| app-reds | ad85d40779880420c (volume/custodian/apps; a17f4172949caca14 on resident /var checks, Hermes items) | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
 | private cells | a30027269707d4613 (distilled resume of a0f378bac619f4864 <- a74ad8d84ada5627a) | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
 | iteration speed | ab2786fe1172f5683 | the bump cdb399b47, umbrella-tree.sh (second warm tree for integ-build5) |
 | explorer | a3e5d6dbcd68e616c | perf and behaviour probes on candidates; docs/EXPLORER-FINDINGS.md |
