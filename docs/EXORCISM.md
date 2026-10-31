@@ -13,16 +13,16 @@ Costs are per operation on hbox unless said otherwise. `H` = history height.
 |---|---|---|---|---|---|---|
 | 1 | every durable write: `mini_sdk::durable`, `phase`, ~575 call sites in 164 files (native/, deploy/, scripts/) | fsync of every file and its directory, ancestor chains, seal records, syncfs, SQLite `synchronous=FULL` + `fullfsync`, anchor fsync, on reads as well as writes | no durability design was ever asked for; a read has no effect to keep | hot-path measured 207 fsyncs, 4.0 s of a 3.9 s line (`room bind`); `story new` 62-70 s, of which Host work was 4.5 s | all removed (batch 1; testing/ and extensionless fixtures in e38913cc5) | merged to staging (6ffabc364), measured below |
 | 2 | `native/resource-client/src/main.rs` `process` / `local_process` | spawns a fresh `minidregg-host` per Host call unless `--socket` | the resident `mini serve` exists | Host start + Store open O(H) per call | resident socket | hot-path |
-| 3 | `native/resource-client/src/web/body.rs` `verb`, `plan_line`, `verb_detached` | every form post and most fragments spawn a whole `mini shell` child; `plan_line` spawns one only to PARSE a line | the shell's parser and planner are in the same binary | one process start, workspace load and two resident connections per page action; 28 call sites | plan in process (`shell::plan_ending`); one resident shell per body | plan: done (5f9d41e2b); actions: open |
+| 3 | `native/resource-client/src/web/body.rs` `verb`, `plan_line`, `verb_detached` | every form post and most fragments spawn a whole `mini shell` child, polled every 25 ms; `plan_line` spawned one only to PARSE a line | the shell's parser and planner are in the same binary | a shell child is about 20 ms of start, workspace load and resident connections per action, plus up to 25 ms of poll | plan in process (5f9d41e2b); the child is waited on, not polled (60cd0fbca); the child itself stays: the body serves concurrent requests and a mutating line outlives its page at 100 s, which a single resident cannot | poll done; child open |
 | 4 | `web/body.rs` `import_inbox` (public front page) | each GET scans the inbox and spawns `mini workspace --action import` per new file | `workspace::import` is a function in this crate | one child per new inbox file per page load | `workspace::import_delegated` in process | done (5f9d41e2b) |
-| 5 | `native/grain-runtime/src/main.rs` (`workspace_readonly`, `workspace_propose`, `workspace_submit`, recover, import, export; 20 sites) | every Hermes typed-tool call spawns `mini workspace` and parses its stdout JSON | a JSON round trip through a child between our own components | one `mini` start, workspace load and resident handshakes per tool call | resident client over a socket | open |
-| 6 | `grain-runtime` `inspected_pre_submit_refusal`, `dispatch_mark_send_v3`; `spk-host` `PrivateOperator::tool_until` (~20 callers) | spawn the 180 MB Lean Host one-shot to `author`/`inspect`/`signatures` | the resident storeless codec (`mini codec-resident`, `mini_sdk::local::Codec`) answers the same frames | 0.07-0.24 s bare start each, several per grain dispatch | codec frames; the one-shot arms in `Host/Main.lean` fold into `pureCodec` (pretty vs compact JSON and the 22 MiB dispatch bound differ today) | open |
+| 5 | `native/grain-runtime`: the custody gate (`workspace_*`, reserve and lifetime authoring, historical lookups, resource reads), `command_capture` (about 20 Host submissions and lookups), `RoomTools` (room Hermes reads, payments, lookups) | every Hermes typed-tool or room tool call spawned a fresh `mini` and the gate polled it every 10 ms | a JSON round trip through a child between our own components | `workspace list` 20 ms as a child, 0.4 ms as a frame; `workspace read` 72 to 51 ms; a room read (`mini shell --line doc show`) 82 to 52 ms | `mini command-resident` (resource-client `capture::serve`), frames with argv and stdin; one resident per gate and per room identity; cancel and deadlines kill its group as they killed the child; residents retire before the quiescence proof; journaled room writes keep their own child (its /proc cmdline is the stopped-submitter proof) | done (8221ced44, 10f52ebde, a6512c115) |
+| 6 | `grain-runtime` `inspected_pre_submit_refusal`, `refusal_codec`, reserve codec, lifetime paid ingress and committed inspection; `spk-host` `PrivateOperator::tool_until` | spawn the 180 MB Lean Host one-shot to `author`/`inspect`/`signatures` | the persistent Host answers the same verbs in session (operations 195-197, `runToolSession`, byte-identical) | 0.07-0.24 s bare start each | spk-host: done on staging (`tool_in_session`); grain-runtime: the same call on `dispatchTask.operatorSocket` (one helper in mini-sdk for both), except `inspect-agent-lifetime-paid-ingress` and multi-input refusal codecs, which have no session operation yet (Lean) | spk-host done; grain-runtime open |
 | 7 | `spk-host` `run_pinned` | polls the child every 10 ms and fsynced its stderr log | a wait is a wait | up to 10 ms per helper call (the fsync went in batch 1) | blocking wait with deadline | done on staging (`wait_for_exit`) |
-| 8 | `Compiler/NativeCoprocess.lean` callers: `CredentialSignatureIO.verify`, every `DurableReceiverCore` Store op | each signature check and Store op makes a temp dir, writes inputs to files, the helper reads them back, writes its output to a file, Lean reads it | the coprocess frame already carries bytes | a temp dir and 3-6 file round trips per signature and per Store op | bytes in the frame | open (Lean; needs a Host build) |
+| 8 | `Compiler/NativeCoprocess.lean` callers: `CredentialSignatureIO.verify`, every `DurableReceiverCore` Store op | each signature check and Store op makes a temp dir, writes inputs to files, the helper reads them back, writes its output to a file, Lean reads it | the coprocess frame could carry bytes (its stdout field is UTF-8 text today) | measured on hbox's tmpfs: at most 130 us per op with no fsync left, under 1% of a Store op | bytes in the frame (Lean + both helpers' `serve`) | open, low |
 | 9 | `native/hyperdocument-link-sqlite-store/src/main.rs` `run` | every helper request re-opens SQLite: mkdir, canonicalize, open, six PRAGMAs, schema check | the helper is a resident process | about a millisecond per Store op | keep the handle per root, reopen on inode change | done (b3b132f19) |
 | 10 | `native/resource-client/src/apps.rs` `delegate_lifecycle` | `apps install` spawns `mini workspace --action app-lifecycle` per round, up to 14 rounds plus status | same binary; `chat::client` already runs actions in process | two process starts per round | `capture::command` in process | done (b3b132f19) |
 | 11 | `web.rs` `Site::doc` | a document page is three separate signed reads (page, `links`, `backlinks`) | `signed_views` batches reads | two extra challenge/query round trips per page | one `signed_views_mixed` batch | done (b3b132f19) |
-| 12 | `web.rs` `Site::targets`, `index` | every page re-reads and parses every `refs/*.json` | the workspace is loaded once per body | O(references) per page | keep the index in the body | open |
+| 12 | `web.rs` `Site::targets`, `index`, room children, inspect and resident pages | every page re-listed `refs/` and parsed every reference and birth source | the body is one long-lived process | O(references) per page (not visible at 200 references against box noise) | a kept `RefIndex`, rebuilt when `refs/` or `sources/` changes | done (60cd0fbca) |
 | 13 | consent provider (`Host/ClientConsentCore.lean`) | re-admits every record the Store gained since it last looked | independent verification is the design | ~47 ms per foreign record of catch-up | hot-path's option A (rebase at checkpoint) | hot-path |
 
 ## Batch 1: no fsync anywhere (2b206eb7e)
@@ -86,10 +86,19 @@ Before is candidate a4cb65af's `mini` (it also carries batch 1's fsyncs); after 
 `mini` and Store helper. The page bytes are identical except the launch's path secret
 (`/ci/exo/m3.sh`, traces `/ci/exo/tr-{before,after}.jsonl`). Store crate tests: 38/38.
 
+## Batch 3: resident clients (8221ced44, 60cd0fbca, 10f52ebde, a6512c115)
+
+| path (hbox, /ci/exo/w, member-1, median of 9-15) | child per call | frame to a resident |
+|---|---|---|
+| `mini workspace --action list` | 20.3 ms | 0.4 ms |
+| `mini workspace --action read --name X` | 71.7 ms | 50.8 ms |
+| room read `mini shell --line "doc show X"` | 82.2 ms | 51.6 ms |
+| `mini shell --line whoami` | 2.6 ms | 0.2 ms |
+
+Same exit code and stdout in every pair (`/ci/exo/m4.py`, `/ci/exo/m5.py`). The custody gate's
+10 ms poll is gone from every framed call.
+
 ## Open, in order
 
-Rows 5 and 6 are the next batch: a resident client for the Hermes controller's typed tools
-instead of one `mini workspace` child per call, and the spk-host/grain-runtime one-shot Lean
-`inspect`/`author` spawns folded into the resident codec (which first needs the one-shot arms
-of `Host/Main.lean` folded into `pureCodec`). Then rows 3 (the web body's action children),
-8 (coprocess temp files, Lean) and 12.
+Row 6's grain-runtime half (session operations on the operator socket), then row 3's shell child
+(a resident per body needs concurrent requests and a line that outlives its page), then row 8.
