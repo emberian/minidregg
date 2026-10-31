@@ -1,5 +1,5 @@
 /-
-# Theory.Retained -- a derived value is maintained, never recomputed (statement)
+# Theory.Retained -- maintained views answer as recomputation does (statement)
 
 The retained-mode abstraction (`docs/RETAINED-MODE.md`). A system state advances by admitted
 deltas; a *view* is a family of queries whose meaning is a function of the state (`spec`, the
@@ -17,8 +17,11 @@ derived structure owes only its local lemmas (`Node.fetch_sound`, `Node.update_h
 * `Node D In Out` (open over an input view): a read declares the input queries it needs given
   its representation (`readProbes`: none on a hit) and sees only their answers (`Reads`); an
   update declares probes from the delta alone (pre or post the delta) and sees only theirs.
-  `ReadBounded`/`ProbeBounded` are the per-instance budgets (`c + k · size`). The
-  representation is free; what is bounded is what a step may read. CPU is measured, not typed.
+  `ReadFootprintBounded`/`ProbeFootprintBounded` bound the declared input footprint
+  (`c + k · size`), NOT cost: the representation and the delta are free, so a shadow-state node
+  (`Rep := Store`, `update := Patch.run`, `fetch := spec`) meets a zero footprint while recomputing
+  on every read. Cost is gated by the flatness bench (law 17); a cost statement over an
+  instrumented interpreter (as `PrivateCellTrie.EraseCost` over `AuthTrie.Prog`) is owed per node.
 * `Node.stack N M`: a node over a maintained input is maintained; the input's answers are
   fetched once, materialized, and its fills kept (the chain rule; nested `View.sum` layers give
   any finite DAG in topological order, `Node.weakenLeft` reads a wider input).
@@ -296,7 +299,7 @@ end Maintained
 its representation (`readProbes`: none on a memo hit, the dependencies on a miss) and sees
 only their answers; an update declares its probes from the delta alone and sees only their
 answers. The representation is free (it may hold anything); what is bounded is what a step
-may read, against budgets stated per instance (`ReadBounded`, `ProbeBounded`). -/
+may read, against budgets stated per instance (`ReadFootprintBounded`, `ProbeFootprintBounded`). -/
 structure Node (D : DeltaSystem.{u, v}) (In Out : View D.State) where
   Rep : Type
   Holds : Rep → D.State → Prop
@@ -317,11 +320,11 @@ namespace Node
 variable {D : DeltaSystem.{u, v}} {In Out : View D.State}
 
 /-- The per-delta read budget: a constant plus `k` probes per unit of delta size. -/
-def ProbeBounded (N : Node D In Out) (size : D.Delta → Nat) (c k : Nat) : Prop :=
+def ProbeFootprintBounded (N : Node D In Out) (size : D.Delta → Nat) (c k : Nat) : Prop :=
   ∀ δ, (N.probes δ).length ≤ c + k * size δ
 
 /-- The per-read budget: a constant plus `k` input queries per unit of query size. -/
-def ReadBounded (N : Node D In Out) (size : Out.Q → Nat) (c k : Nat) : Prop :=
+def ReadFootprintBounded (N : Node D In Out) (size : Out.Q → Nat) (c k : Nat) : Prop :=
   ∀ r q, (N.readProbes r q).length ≤ c + k * size q
 
 /-- A node reads its input through a wider view's left half. -/
@@ -612,8 +615,8 @@ def node : Node D In Out where
       exact R.frame q s s' (fun i hi => (R.touched_frame δ step i (untouched i hi)).symm)
 
 /-- A hit reads nothing; a miss reads exactly the declared dependencies. -/
-theorem node_readBounded (c : Nat) (bound : ∀ q, (R.deps q).length ≤ c) :
-    (node R Stamps Memo).ReadBounded (fun _ => 0) c 0 := by
+theorem node_readFootprintBounded (c : Nat) (bound : ∀ q, (R.deps q).length ≤ c) :
+    (node R Stamps Memo).ReadFootprintBounded (fun _ => 0) c 0 := by
   intro r q
   show (readProbes R Stamps Memo r q).length ≤ c + 0 * 0
   unfold readProbes
@@ -813,10 +816,10 @@ def flagNode : Node sys (View.sum (storeView layout Example.empty) totalView) fl
 
 abbrev graph := flagNode.stack layer1
 
-theorem flagNode_probeBounded : flagNode.ProbeBounded (fun _ => 0) 1 0 := fun _ => by
+theorem flagNode_probeFootprintBounded : flagNode.ProbeFootprintBounded (fun _ => 0) 1 0 := fun _ => by
   simp [flagNode]
 
-theorem totalNode_probeBounded : totalNode.ProbeBounded (fun _ => 0) 0 0 := fun _ => by
+theorem totalNode_probeFootprintBounded : totalNode.ProbeFootprintBounded (fun _ => 0) 0 0 := fun _ => by
   simp [totalNode]
 
 /-- Premise inhabitation: the graph's representation relation holds at genesis. -/
@@ -909,9 +912,27 @@ end Example
 #assert_axioms Example.memo_hit_reads_nothing
 #assert_axioms Maintained.checkpoint_restore_from
 #assert_axioms Node.weakenLeft
-#assert_axioms RedGreen.node_readBounded
+#assert_axioms RedGreen.node_readFootprintBounded
 #assert_axioms Derivation.frame
 #assert_axioms Example.holds_inhabited
-#assert_axioms Example.flagNode_probeBounded
+#assert_axioms Example.flagNode_probeFootprintBounded
+
+#assert_axioms DeltaSystem.run_cons
+#assert_axioms lookup_sound
+#assert_axioms Maintained.ask_sound
+#assert_axioms Maintained.fetchAll_sound
+#assert_axioms Maintained.fetch_then_recompute
+#assert_axioms Maintained.restore_exists
+#assert_axioms RedGreen.green_iff
+#assert_axioms RedGreen.touchAll_get
+#assert_axioms RedGreen.hit_sound
+#assert_axioms RedGreen.readProbes_miss
+#assert_axioms store_touched_frame
+#assert_axioms Example.g_set_same
+#assert_axioms Example.g_set_other
+#assert_axioms Example.g_set_ns
+#assert_axioms Example.op_total
+#assert_axioms Example.patch_total
+#assert_axioms Example.totalNode_probeFootprintBounded
 
 end Minidregg.Theory.Retained
