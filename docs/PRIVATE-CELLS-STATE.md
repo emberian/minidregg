@@ -260,7 +260,14 @@ applied):
    service (`rootServe` without the mask) is a cSHAKE256 non-collision of two index digests; the
    kernel cannot evaluate Keccak and the deployed digest reaches the Rust kernel, so no
    `native_decide` instance is claimed. `Legal`'s docstring: what an opening reveals beyond
-   `Visible` is pushed into `zk`. Rounds 11 and
+   `Visible` is pushed into `zk`. Round 14: that setting is cryptographically degenerate (one key);
+   `idealSetting` is the same deployment with the custody function the ideal one on the window
+   (`keyed := idealFn`, keys = all functions `{0,1} → Fin 2`); `jointPremises_inhabited`: `CustodyPrf`
+   at gap 0 against every test (`enumeration_satisfies`), a key, the bound's side conditions, a
+   budget admitting the distinguishers, and the pair's birth, hidden patches, legality and hidden
+   difference, all at one setting. `idealGoal_of_open`: there `RatchetHidingGoal` of `real` follows
+   from `zk`, `rom` and `identical` alone (the reduction obligation is trivial against the all-tests
+   budget). Rounds 11 and
    12 found the earlier forms vacuous (a caller-chosen game reading the world bit; caller-labelled
    distinguishers; caller-chosen `legal`; decoys no run produces; syntactic hidden difference).
    Owed in the hiding argument: the ZK hybrid over an independent coin tape, the ROM
