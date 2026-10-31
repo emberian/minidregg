@@ -138,7 +138,8 @@ injective live paths of public length `L`, a verifying reveal at class `c`'s tag
 answers exactly the live entries of class `c` (last value per key), or two
 distinct nodes of the scope `revealNodes` share a digest: the walk's path and
 the selected subtree of the store, the reveal's climb and the revealed members'
-tree. A collision elsewhere in the store does not discharge it. -/
+tree. A collision outside the walked path and the selected subtree does not
+discharge it; at stop depth 0 the selected subtree is the whole store. -/
 def ClassRevealComplete {Class : Type} (dig : NodeIn K V D → D) (keys : ClassKeys K Class)
     (L : Nat) : Prop :=
   (∀ k, (keys.bitsOf k).length = L) →

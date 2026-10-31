@@ -19,7 +19,9 @@ reveal can.
   (`revealNodes`) share a digest. The scope is local: the walk's path and the
   selected subtree on the store side (`revealNodes_store_treeNode`: both inside
   the canonical tree), the reveal's climb and members on the other. A collision
-  elsewhere in the store does not discharge it. No premise about the reveal or
+  outside the walked path and the selected subtree does not discharge it. The
+  locality is bounded by the stop depth the reveal chooses: at depth 0 the
+  selected subtree is the whole store. No premise about the reveal or
   the Store's rows.
 * `reveal_complete` — the honest reveal verifies.
 * Decided poles: an honest reveal is accepted; one that omits a member, forges a
@@ -338,7 +340,9 @@ def Reveal.answer (bitsOf : K → List Bool) (p : List Bool) (reveal : Reveal K 
 path nodes down to the stop depth and the canonical subtree selected there; on
 the reveal side, its climb from the revealed subtree to the root and the
 canonical tree of its revealed members below the stop depth. Fixed by `es` and
-the reveal, and local: a collision elsewhere in the store is outside it. It
+the reveal: a collision outside the walked path and the selected subtree is
+outside it. The bound is the stop depth the reveal chooses; at depth 0 the
+selected subtree is the whole store. It
 over-approximates the nodes actually hashed (`TreeNode.child` also descends
 beneath singleton leaves). -/
 def revealNodes (bitsOf : K → List Bool) (L : Nat) (es : List (Entry K V)) (p : List Bool)
