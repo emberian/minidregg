@@ -33,11 +33,12 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   + c763e3ead + **b37f26cf6** (A: ssh lines run in a per-member `mini line-resident` via new bin `mini-line`, role
   miniLine, which every mini overlay must also carry; B: signed reads keep one journal line, no attempt tree; doc show
   wall min 17.4 -> 13.7 ms), perf-client 783b460cb + b6 + b940b3f50 (+ fb6f024a8 via exorcism), retained-mode 62aa5fcf8
-  over 675a80745 + 1d4ff4efb, boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
+  over 675a80745 + 1d4ff4efb, + 05bffae27/7f42f6445 (round-2 answers: SparseMap transport lemmas, Zero, 37 pins;
+  round-3 audit requested from a4d9a6f4cba4855ca), boundary 48cea3caf (Theory may import Std), batch 6 fixtures. Batch 8 cut owes the
   whole-tree build of these.
 - **Next shared-interface change: retained-mode L0** (Store as a persistent extensional tree map, ~66 files,
-  WorldCompact deleted): its own cut with one whole-tree build; FORMAT rebases onto it. Round-2 audit owed items before
-  L0: transport lemmas, one optionZero, pin all SparseMap theorems.
+  WorldCompact deleted): its own cut with one whole-tree build; FORMAT rebases onto it. lane/retained-l0 is WIP
+  (94cd7ceca, Theory wave 8/42): NEVER merge until retained-mode sends a sha labelled SHARED-INTERFACE.
 - **CLOSED: GET read-path contract** (ember ruled (c) prepaid per-payer reservations, (d) per-route declared eligibility;
   hot-path owns it statement-first). Never re-run or re-report.
 - hbox: / 57 GB free (11:00).
@@ -74,6 +75,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 11:30: retained-mode: 05bffae27/7f42f6445 merged (573303614); auditor a4d9a6f4cba4855ca: round-3 request.
 - 10-31 11:20: app-reds: 40cb4aa59 held with review (fix at lookup_operation; typed transport cause; two tests).
 - 10-31 11:08: app-reds: H1 one fault (2/2 same place), batch 6 unrecorded, batch 7 base is H2, W1 separate; asked for
   KEEP_WORLD/receipt copy on a probe red. Exorcist: b37f26cf6 merged (c9cfa459e), rides batch 8.
