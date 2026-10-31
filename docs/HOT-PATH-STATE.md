@@ -103,13 +103,33 @@ with height** on be4ef7510.
 
 ## Landed / on the lane
 
-| sha (on cdb399b47) | what | measured / checked |
+Batch sent to the integrator 2026-10-31: `lane/hot-path-cold` at 54bd71d53 on staging
+6c2156f45; lane-check of all 31 changed Lean files on the hbox pool tree (`/home/hbox/pool/t1`,
+lease `hot-path`), 127 importers rebuilt, RC 0.
+
+| sha | what | checked / measured |
 |---|---|---|
-| f352c9c10 | `bytesBEq`: whole-cell byte comparisons by object identity first | genesis audit at 769: 38.3 → 32.6 s; post-validation flat 4.4-4.9 ms/record (was 5 → 17.5); on staging |
-| 470fb79c9, bd1c8fc40 | own-base cost fixes (cached cells; `Thunk` state) | write 2.6 → 1.65 s; **superseded** by 9925241bd (own bases deleted) |
-| 1a4f3a623 | the Host's clean end seals the held session (no second cold open; JDV row 140) | check on the 4.35 tree owed |
-| 9925241bd | CONSENT-STORE: providers start from the Store's checkpoint; anchors survive ships (`anchor_binding`) | mini-sdk consent tests 11/11 on the Mac; Lean check on the 4.35 tree owed |
-| (next) | sweep rows 1, 2, 5, 6, 7, 10 | Lean check owed |
+| f352c9c10 (staging) | `bytesBEq`: whole-cell comparisons by object identity first | genesis audit at 769: 38.3 → 32.6 s; post-validation flat 4.4-4.9 ms/record (was 5 → 17.5) |
+| 2fa4c507a | the Host's clean end seals the held session (JDV row 140) | lane-check |
+| d75a60845 | CONSENT-STORE; anchors bound to consent epoch v2 + canonical settings (`anchor_binding`); own-base machinery deleted (supersedes 470fb79c9, bd1c8fc40) | lane-check; mini-sdk consent tests 11/11 |
+| aabd2fe5e | sweep rows 1 2 5 6 7 10 | lane-check |
+| 0dcedac16 | sweep row 18 | lane-check |
+| 6ddc9ce3b | sweep row 12 (template edits coalesced: story new 22 → 18 submissions) | cargo check, 11 template tests |
+| 54bd71d53 | proofs under 4.35 (incl. JointSourcePrefixValidation, red under 4.35 outside the host closure) | lane-check |
+
+Owed: measurements on a 4.35-epoch world once the batch candidate exists (a fresh member's
+first read, explorer H1: 20.7 s on be4ef7510; a fresh provider at two heights; restart; story
+new). The x1 world (be4ef7510) is down.
+
+## Next (successor: start here)
+
+1. Row 4 (above): `Provenance` for the walk certificates, statement first, then `verifyFrom`
+   the checkpoint; then rows 9 and 13.
+2. Row 11: the session indexes in the checkpoint (a checkpoint format change: tell private
+   cells (a30027269707d4613) and the integrator first); the open then reads checkpoint +
+   suffix only.
+3. Row 3 (tail), row 8 (Fn), rows 16/17/19/20.
+4. Consent catch-up per record (~30 ms) and the many-members cost (design question).
 
 ## Remaining accumulated-size costs (source inventory)
 
