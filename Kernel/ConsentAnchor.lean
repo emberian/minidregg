@@ -463,24 +463,26 @@ def resume (config : Config) {store : DurableHistory.StoreIdentity}
     match opened.cutAbove height with
     | .error detail => return .error (.contradicted s!"consent start at {height}: {detail}")
     | .ok ⟨cut, imaged, logStarted, based, baseExact⟩ =>
-      match validated : validateLoaded config cut with
+      -- The suffix walk carries no World (`Loaded.untracked`): the Store's replay of the same
+      -- records (`DurableReceiverIO.extendStored`) judges them as turns; nothing reads a walk's.
+      match validated : validateLoaded config cut.untracked with
       | .error detail =>
           return .error (.contradicted s!"the Store's image at the consent start {height} is invalid: {detail}")
       | .ok start =>
         if exact : AnchorExact (opened.loaded.baseHeight, opened.loaded.base).1 retained start then
           have wraps := validateLoaded_durable validated
           have startLength : start.durable.image.accepted.length = height := by
-            rw [wraps, imaged, DurableReceiver.Image.accepted_ofAccepted, List.length_take]
+            rw [wraps, DurableReceiverIO.Loaded.untracked_image, imaged, DurableReceiver.Image.accepted_ofAccepted, List.length_take]
             exact Nat.min_eq_left bounds.2.1
           have seedExact : opened.loaded.image.seed = start.durable.image.seed := by
-            rw [wraps, imaged, DurableReceiver.Image.ofAccepted_seed]
+            rw [wraps, DurableReceiverIO.Loaded.untracked_image, imaged, DurableReceiver.Image.ofAccepted_seed]
           have anchorWithin : start.durable.image.accepted.length ≤ opened.loaded.image.accepted.length := by
             rw [startLength]; exact bounds.2.1
           have prefixExact : opened.loaded.image.accepted.take start.durable.image.accepted.length =
               start.durable.image.accepted := by
-            rw [wraps, imaged, DurableReceiver.Image.accepted_ofAccepted]
+            rw [wraps, DurableReceiverIO.Loaded.untracked_image, imaged, DurableReceiver.Image.accepted_ofAccepted]
             exact take_length_take _ _
-          have logStartExact : opened.loaded.logStart = start.durable.logStart := by rw [wraps, logStarted]
+          have logStartExact : opened.loaded.logStart = start.durable.logStart := by rw [wraps, DurableReceiverIO.Loaded.untracked_logStart, logStarted]
           have startBase : start.durable.baseHeight = (opened.loaded.baseHeight, opened.loaded.base).1 ∧
               start.durable.base = (opened.loaded.baseHeight, opened.loaded.base).2 := by
             rw [wraps]; exact ⟨based, baseExact⟩

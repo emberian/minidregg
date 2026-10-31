@@ -1144,6 +1144,25 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   chainLog : Array Digest
   chainLogExact : chainLog.toList = chainPrefixes logStart image.accepted
 
+/-- The same image carrying no World (its `track` lost). Only the append (which refuses a lost
+track, `prepareAppend`) and the checkpoint seal (`Loaded.system`) read the World. A consent
+provider's anchored suffix walk (`ConsentAnchor.resume`) re-derives and re-executes every record
+but never appends or seals from it: started untracked, each of its `extend`s skips
+`WorldTrack.advance` (the record's turn derived and admitted), which the provider's replay of the
+same records from the Store (`DurableReceiverIO.extendStored`) has already judged. The Host's
+walks stay tracked (`NativeHostReplay.verifyFrom`, `verifyLoaded`, `extendVerified`): receivers
+append from a verified walk's image (`receiveLoadedDetailedWithFresh` from `old.opened.durable`)
+and the Host session adopts a readback built from it, and the append refuses a lost track. -/
+def Loaded.untracked {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    Loaded rootBytes :=
+  { loaded with track := .lost "a verification walk carries no World" }
+
+@[simp] theorem Loaded.untracked_image {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.untracked.image = loaded.image := rfl
+
+@[simp] theorem Loaded.untracked_logStart {rootBytes : List UInt8 → Digest}
+    (loaded : Loaded rootBytes) : loaded.untracked.logStart = loaded.logStart := rfl
+
 /-- The head height is the chronological journal's length. -/
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
