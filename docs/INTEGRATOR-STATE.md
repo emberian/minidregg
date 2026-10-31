@@ -4,7 +4,7 @@ Present-state record of the integration lane, rewritten whole when its shape cha
 `hbox:/home/hbox/lanes/integ/COMMANDS.log` (every build stage, gate verdict, sweep, world teardown and process stop, one
 line each). History is in this file's git history.
 
-The integrator is agent **aec6914709d96f496** (fresh 10-31 10:55, replacing aba0beaa578594e92, retired by `cv retire`;
+The integrator is agent **a59646e9d93f1ad6e** (fresh 10-31 13:00, replacing aec6914709d96f496, stopped by accident;
 the hook names the live integrator to anyone who messages an old id). Lanes send shas, READY, reds and handoffs to the
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them once per batch,
 moves main to gated candidates and names candidates to infra and the explorer.
@@ -20,11 +20,11 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **ember (10-31): no rehearsal cut until she says.** Make the system excellent: Hermes repaired, efficiency everywhere,
   every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
-- **Batch 9 997905c0b: BUILD running** (launched 12:35, PID 3311469 in $I/build.pid and build-b9.pid; integrator
-  waiter armed on READY). gate15 default EDGE_REV is now **e29997d** (12:35; needed for the mini-line ssh wrapper). At
-  READY: gate15 full; name to infra, explorer (C1 16-parallel-say + own-order rows), perf-apps, perf-client (consent
-  walk after-number when 619022904 lands); batch 8's verdict goes with it. Launch builds via $I/launch-build.sh SHA NOTE
-  (writes build.pid; a nested `ssh … &` held the session twice).
+- **Batch 9 997905c0b: READY 13:00** (host 1,203 s); umbrella-tree + rerecord running in umbrella-src
+  ($I/umbrella-src.pid). **gate15 full launched 13:02** ($I/gate-b9.pid, out old/gate-9979.out; EDGE_REV e29997d). At
+  the verdict: name to infra (forge composed), explorer (C1 16-parallel-say + own-order rows), perf-apps, perf-client
+  (consent walk after-number when 619022904 lands); batch 8's verdict goes with it. Launch builds via
+  $I/launch-build.sh SHA NOTE (writes build.pid; a nested `ssh … &` held the session twice).
 - **Staging (batch 10 so far)**: perf-client d035d8250 (SECURITY-relevant: residents ran one next-key
   commitment check per process lifetime, so a rotation/revocation between commands went unseen; now checked afresh per
   resident command). Batches 8 and 9 ship residents without it: NEITHER may become a shipped fallback unless mini (and
@@ -36,7 +36,11 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   Kernel.lean, so batch 10's whole-tree build covers the umbrella; docs/BRANCH-RECONCILE.md verdict table).
   + exorcist 5dcd02eef (56d65ae3c: mini_sdk::attempt::Attempt, signed reads keep files in memory; cross-crate refactor of
   flow/CliHost/query_retained/signed_view/client_consent; warm doc show openat 53 -> 16, writes 30 -> 4, CPU -10..25%).
-  If a batch 10 row reds: first look for a refusal record or attempt file missing from a read's directory.
+  + exorcist dde0f4463/697d8dd4f/2551dfc94 (staging eeab46d2c: a fresh memory attempt probes the disk only once its
+  dir may hold foreign files; `doc show` leaves an identical seen/ snapshot unrewritten; resident statx 57 -> 44, task-clock
+  per warm doc show 2.0-2.3 -> 1.0-2.1 ms).
+  If a batch 10 row reds: first look for a refusal record or attempt file missing from a read's directory, then for a
+  read of an attempt name the process never made (`was not made`).
 - **Batch 8 dc61016cb: gate15 FAIL**: enrol PASS, tour 73/73; j14 = H1b; composed (-c2 after my port collision):
   rooms/churn/apps/connector PASS, documents FAIL (D2), residents R1; flatness get FAIL then PASS on -c2 (load). Lesson:
   a KEEP_WORLD composed world holds port 22640; take it down before the next composed gate.
@@ -239,7 +243,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 | lane | agent | owns now |
 |---|---|---|
 | hot-path | a0fee5643746e520c (a6c4a1532687a4fdb, ac53c05fe796e4294 retired) | law-17 perf queue: flatness, `story new`, row 11, Book entries migration (FORMAT) |
-| app-reds | ad85d40779880420c | apps installs on forge/hbox, op66-plan, Hummingbird/WBO/Scrumblr live qualification, Davros control run, E3/E4, G2 decider-side type, controller boot ordering, Hermes worker root interpreter |
+| app-reds | a33e42314aa08ab3a (ad85d40779880420c retired) | apps installs on forge/hbox, op66-plan, Hummingbird/WBO/Scrumblr live qualification, Davros control run, E3/E4, G2 decider-side type, controller boot ordering, Hermes worker root interpreter |
 | private cells | a8da2b953507b402b | FORMAT (a); then the compiler-emitted ZK selective opening; decode pin to CanonicalCellRegistry.custodyDecode with (b) |
 | iteration speed | a6c58cb72b0764dbb | seam 1 (codec tags / Store epoch, lands before or with FORMAT), lane pool /home/hbox/pool, lane-tree, hot-swap overlay tool |
 | explorer | a3e5d6dbcd68e616c | multi-member exploration of each READY candidate; docs/EXPLORER-FINDINGS.md on lane/explorer |
