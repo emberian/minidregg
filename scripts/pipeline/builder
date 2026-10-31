@@ -2,16 +2,18 @@
 # scripts/pipeline/builder -- the unattended builder (board/README.md): loops on the `main` tip, builds and gates it,
 # writes board/REDS.md, and moves `green` when everything passes. Owned by the build-loop seat.
 #
-#   nohup scripts/pipeline/builder > $I/builder.out 2>&1 & echo $! > $I/builder.pid      (hbox, user hbox)
+#   nohup scripts/pipeline/builder > $I/builder.out 2>&1 & echo $! > $I/builder.pid      (the build box, user build)
 #   scripts/pipeline/builder --once [SHA]     one round (default: the origin/main tip), then exit
 #   scripts/pipeline/builder --reds SHA       only rewrite REDS.md from SHA's existing build and gate logs
 #   BUILDER_DRY=1: print REDS.md instead of committing it, and never move green
 #
 # One round for tip SHA:
-#   1. build: $I/integ-build6.sh SHA (rust-check, host, consent, rust, pack -> candidates/SHA/READY; then the
-#      umbrella stage in umbrella-src and the fixture rerecord), detached, stage lines in $I/COMMANDS.log;
+#   1. build: scripts/pipeline/integ-build SHA (rust-check, host, consent, rust, pack -> candidates/SHA/READY; then
+#      the umbrella stage in umbrella-src and the fixture rerecord), detached, stage lines in $I/COMMANDS.log
+#      ($I/integ-build6.sh instead when the box still has that local copy);
 #   2. gate: once READY, $I/gate15.sh SHA (tour J0-J8 + JWF, composed, enrol-resume, j14-apps, then flatness)
-#      beside the umbrellas; every red gate row is rerun once (PHASES=<row> SUF=-r1) to answer "reruns?";
+#      beside the umbrellas; every red gate row is rerun once (PHASES=<row> SUF=-r1) to answer "reruns?".
+#      A box without gate15.sh reports the gate as "not run here" (a red row: green never moves ungated);
 #   3. reds: board/REDS.md rewritten whole (stage, signature, reruns?, same place as last round?, suspect commits
 #      since `green`, owner), committed straight to main by path (temporary index, never a worktree);
 #   4. green: all stages and rows pass -> `git push origin SHA:refs/heads/green`.
@@ -19,7 +21,7 @@
 # touches another process: integ-build6 and gate15 keep their own PID files and locks. Disk: integ-build6
 # stops below 25 GB free; the builder logs it as a red and waits.
 set -uo pipefail
-I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; LOG=$I/COMMANDS.log; ST=$I/builder; mkdir -p "$ST"
+I=${BUILDER_ROOT:-/srv/integ}; LOG=$I/COMMANDS.log; ST=$I/builder; mkdir -p "$ST"
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)} DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}
 export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH
 REPO=$I/src   # its .git holds the objects; the builder only fetches and writes by plumbing
@@ -37,11 +39,12 @@ round() {
   local sha=$1 s8=${1:0:8} t0; t0=$(date +%s)
   say "round ${sha:0:12} start"
   # 1. the build (detached: it holds build.lock and continues into the umbrellas after READY)
-  ( cd "$I" && ./integ-build6.sh "$sha" > "$ST/build-$s8.out" 2>&1 ) & local bpid=$!; echo $bpid > "$ST/build.pid"
+  local build=$REPO/scripts/pipeline/integ-build; [ ! -x "$I/integ-build6.sh" ] || build=$I/integ-build6.sh
+  ( cd "$I" && BUILDER_ROOT=$I "$build" "$sha" > "$ST/build-$s8.out" 2>&1 ) & local bpid=$!; echo $bpid > "$ST/build.pid"
   while kill -0 $bpid 2>/dev/null && [ ! -f "$I/candidates/$sha/READY" ]; do sleep 30; done
   # 2. the gate, beside the umbrellas
   local gpid=""
-  if [ -f "$I/candidates/$sha/READY" ]; then
+  if [ -f "$I/candidates/$sha/READY" ] && [ -x "$I/gate15.sh" ]; then
     ( cd "$I" && ./gate15.sh "$sha" > "$ST/gate-$s8.out" 2>&1 ) & gpid=$!; echo $gpid > "$ST/gate.pid"
   fi
   wait $bpid; [ -z "$gpid" ] || wait $gpid
@@ -84,6 +87,7 @@ reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
     awk -F'\t' '$2 == "FAIL" { print $1 "\t" $3 }' "$G/TOUR.tsv" "$G/flatness.tsv" "$G/j14.tsv" 2>/dev/null |
       while IFS=$'\t' read -r row detail; do add "gate:$row" "$row FAIL" "${detail:0:240}"; done
     [ "$(jq -r .composed.verdict "$G/gate.json")" = PASS ] || add gate:composed "composed $(jq -r .composed.verdict "$G/gate.json")" "$(jq -r .composed.detail "$G/gate.json" | cut -c1-300)"
+  elif [ -f "$I/candidates/$sha/READY" ] && [ ! -x "$I/gate15.sh" ]; then add gate "not run here" "$(hostname) has no gate15.sh yet: green does not move"
   elif [ -f "$I/candidates/$sha/READY" ]; then add gate "no verdict" "$G/gate.json missing"
   fi
   local n; n=$(grep -c . "$sig" || true)
@@ -91,7 +95,7 @@ reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
     echo "# Reds (owned by the builder, rewritten whole each round)"
     echo
     echo "Tip: \`${sha:0:12}\` ($(git -C "$REPO" log -1 --format='%s' "$sha" | cut -c1-90)). Round finished $(date -u +%Y-%m-%dT%H:%MZ)."
-    echo "green: $glabel. Builder: hbox \`$I\`, logs \`$ST\`, gate \`$G\`."
+    echo "green: $glabel. Builder: $(hostname) \`$I\`, logs \`$ST\`, gate \`$G\`."
     echo
     if [ "$n" = 0 ]; then echo "No reds: \`green\` moves to \`${sha:0:12}\`."; else
       echo "| stage | signature | reruns? | same place as last round? | detail |"

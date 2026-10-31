@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# scripts/pipeline/integ-build SHA -- the builder's build of SHA in the warm integration tree $BUILDER_ROOT/src
+# (was hbox's box-local integ-build6.sh; now in the repo so any build box runs the same stages).
+#   rust-check -> host -> consent -> rust -> pack -> candidates/<sha>/READY, then umbrella-tree (a second warm
+#   tree, no lock on src) and the fixture rerecord.
+# Every stage under swarm-build; stage lines `stage NAME rc=N Ns` go to $BUILDER_ROOT/COMMANDS.log (the builder
+# reads them). One build per tree: build.lock. Stops below 25 GB free.
+# Box knobs (env): BUILDER_ROOT (default /srv/integ), SEATS (MINIDREGG_LEAN_SEATS, default 16), JOBS (native jobs, 8),
+# MEM (SWARM_MEM_MAX of the host stage, 64G), UMBRELLA_SEATS (4), UMBRELLA_MEM (32G).
+set -u
+I=${BUILDER_ROOT:-/srv/integ}; SHA=${1:?usage: integ-build SHA}; src=$I/src; LOG=$I/COMMANDS.log
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)} DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}
+export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH
+export LANE_DIR=$I MINIDREGG_LEAN_SEAT_ROOT=${MINIDREGG_LEAN_SEAT_ROOT:-$I/seats} MINIDREGG_LEAN_SEATS=${SEATS:-16} \
+  MINIDREGG_NATIVE_JOBS=${JOBS:-8} SWARM_MEM_MAX=${MEM:-64G}
+say() { echo "$(date -Is) $*" >> "$LOG"; }
+exec 9>"$I/build.lock"; flock -n 9 || { say "STOP: another build holds $I/build.lock"; exit 75; }
+free=$(df -BG --output=avail "$I" | tail -1 | tr -dc 0-9); [ "$free" -ge 25 ] || { say "STOP disk $free G free under $I"; exit 70; }
+cd "$src" || exit 2
+git fetch -q origin || { say "fetch failed"; exit 3; }
+git checkout -q --detach "$SHA" || { say "checkout $SHA failed"; exit 3; }
+SHA=$(git rev-parse HEAD); touch .minidregg-native-snapshot
+say "BUILD ${SHA:0:12} start (seats $MINIDREGG_LEAN_SEATS mem $SWARM_MEM_MAX, $(hostname))"
+mkdir -p "$I/old" "$I/logs" "$I/candidates"
+for d in native-out consent-out artifacts fixtures; do [ ! -e "$I/$d" ] || mv "$I/$d" "$I/old/$d.$(date +%s)"; done
+# keep one generation of old outputs: the rest is disk (hbox filled this way)
+ls -1dt "$I"/old/* 2>/dev/null | tail -n +5 | xargs -r rm -rf
+stage() { local n=$1 t; shift; t=$(date +%s); swarm-build deploy/candidate/lane-build.sh "$@" > "$I/logs/$n.log" 2>&1; local rc=$?
+  say "stage $n rc=$rc $(( $(date +%s) - t ))s"; return $rc; }
+stage rust-check rust-check || exit 10
+stage host host || exit 11
+stage consent consent || exit 12
+stage rust rust || exit 13
+C=$I/candidates/$SHA; [ -e "$C/READY" ] && { say "candidate $C already READY"; exit 0; }; rm -rf "$C"
+stage pack pack "$C" || exit 14
+date -Is > "$C/READY" && say "READY $C"
+# candidates: keep the newest 6 (and green's, if present)
+green=$(git rev-parse -q --verify origin/green 2>/dev/null || true)
+ls -1dt "$I"/candidates/*/ 2>/dev/null | tail -n +7 | while read -r d; do [ "$(basename "$d")" = "$green" ] || rm -rf "$d"; done
+exec 9>&-   # src is free for the next build once the umbrella tree has synced; umbrella-tree takes no lock on src
+t=$(date +%s)
+MINIDREGG_LEAN_SEATS=${UMBRELLA_SEATS:-4} SWARM_MEM_MAX=${UMBRELLA_MEM:-32G} \
+  scripts/pipeline/umbrella-tree --src "$src" --tree "$I/umbrella-src" --out "$I/umbrella-tree-out" "$SHA" > "$I/logs/umbrella-tree.log" 2>&1
+say "stage umbrella-tree rc=$? $(( $(date +%s) - t ))s"
+# The fixtures follow the Objective front end and the codec (scripts/native-accepted-fixture/rerecord.sh), run in
+# the umbrella tree where the Fixtures oleans are: "unchanged" (0), "recorded fixture-regen/<sha12> <commit>"
+# (0; pushed for review), "authority-differs <diff>" (4: a person's reviewed commit), 1 = a step failed.
+if [ -x "$I/umbrella-src/scripts/native-accepted-fixture/rerecord.sh" ]; then
+  R=$I/rerecord/${SHA:0:12}-$(date +%s); mkdir -p "$I/rerecord"; t=$(date +%s)
+  ( cd "$I/umbrella-src" && MINIDREGG_LEAN_SEATS=${UMBRELLA_SEATS:-4} SWARM_MEM_MAX=${UMBRELLA_MEM:-32G} \
+    swarm-build scripts/native-accepted-fixture/rerecord.sh "$C" "$R" ) > "$I/logs/rerecord.log" 2>&1; rc=$?
+  last=$(tail -n1 "$I/logs/rerecord.log")
+  say "stage rerecord rc=$rc $(( $(date +%s) - t ))s: $last"
+  case "$last" in recorded\ fixture-regen/*) b=$(echo "$last" | cut -d' ' -f2)
+    git -C "$I/umbrella-src" push -q origin "$b" && say "rerecord pushed $b" ;; esac
+fi
