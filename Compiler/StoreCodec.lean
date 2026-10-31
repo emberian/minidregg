@@ -1431,6 +1431,8 @@ end Capacity
 #guard_msgs (whitespace := lax) in #print axioms decode_other_layout
 /-- info: 'Minidregg.Compiler.StoreCodec.decode_other_version' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms decode_other_version
+/-- info: 'Minidregg.Compiler.StoreCodec.chainAfter_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms chainAfter_iff
 /-- info: 'Minidregg.Compiler.StoreCodec.root_binds_salted_entries' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms root_binds_salted_entries
 /-- info: 'Minidregg.Compiler.StoreCodec.openings_determine_store' depends on axioms: [propext, Classical.choice, Quot.sound] -/
