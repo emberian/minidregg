@@ -191,9 +191,14 @@ applied):
   `accept_spec` gives the resulting store exactly; `accept_isSome_iff`: accepted exactly when every
   write fits and avoids the blinding. `History.custodyInputs_distinct`: across a cell's history the
   custody function is evaluated at pairwise distinct versions (inputs only: a constant function
-  passes it). Freshness is the named premise `Custody.CustodyPrf` (the PRF game over the custody key
-  as a tape; satisfiable `identity_satisfies`, teeth `constant_refuted`), composed in
-  `receiver_prf_term` into the hybrid argument's PRF hop. Forks: `AtMostOneSuccessor` is the host's
+  passes it). Freshness is the named premise `Custody.CustodyPrf` (round 6): the ideal fixed as the
+  uniform function on the version window (`idealFn`, tapes enumerate all functions by
+  `finFunctionFinEquiv`), the budget admitting every two-query evaluation test
+  (`BudgetAdmitsQueries`); honest pole `enumeration_satisfies`, teeth `constant_refuted`.
+  `receiver_prf_hop`: histories as a function of the key tape (`tie`: each cell's custody function
+  is the keyed one) give `HybridReduction`'s first antecedent at `num/den`, real = the game on the
+  published masks, uniform = on the ideal function's masks at the history's versions, which
+  `custodyInputs_distinct` makes the tape's own independent tuple (`idealFn_window`). Forks: `AtMostOneSuccessor` is the host's
   obligation (a persisted version counter, a retry returning the stored successor); a history meets
   it, and `fork_shares_mask` shows two accepts from one cell share a mask.
 * `birth` refuses a store already holding a mask (`birth_refuses_masked`: imports are never
