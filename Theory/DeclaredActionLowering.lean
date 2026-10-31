@@ -21,6 +21,11 @@ future language can be encoded by these three constructors.
 -/
 module
 
+public import Mathlib.Algebra.BigOperators.Group.List.Basic
+public import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+public import Mathlib.Algebra.BigOperators.Group.Finset.Piecewise
+public import Mathlib.Data.Nat.Pairing
+public import Mathlib.Data.Finset.Union
 public import Theory.AcceptedCellEffect
 public import Theory.DeclaredTurn
 public import Theory.ResourceCost

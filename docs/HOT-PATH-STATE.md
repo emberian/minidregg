@@ -242,22 +242,45 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-State (2026-10-31, continuation written at ~490k tokens by ac53c05fe796e4294, the live hot-path per
-root): lane `lane/hot-path-cold`. Sent and merged: through c6ff16f55 (in batch 4). On the lane, not
-yet sent: e7489b9aa (4fb1a0e17 is merged for batch 5). The integrator is aba0beaa578594e92; private
-cells is a8da2b953507b402b; exorcism (the fsync class) is a9252a07cf889741c. On hbox build only in
-pool trees (`. /home/hbox/pool/pool.env; LANE_POOL_NO_WARM=1 lane-tree acquire hot-path
-origin/lane/hot-path-cold`; `lane-tree native hot-path` before a native build; release when done).
-Logs `/ci/hpc`. Native Host: `/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host,
-LANE_DIR=/ci/hpc/nb, src = the pool tree); `/ci/hpc/nb/both2.sh` = native convert + closure
-lane-check (`/ci/hpc/lcs20.log`) + build (`/ci/hpc/nb/host.log`). Hotpatch:
-`/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=/ci/hpc/nb/artifacts/minidregg-host`.
-Profiles: perf `--call-graph dwarf` on the `mini serve` child; symbolize with a symfs whose
-`memfd:mini-pinned-image (deleted)` links to the candidate's minidregg-host (`/ci/hpc/sn/symfs3`).
+State (2026-10-31, ac53c05fe796e4294, the live hot-path): lane `lane/hot-path-cold`. Sent: through
+a55855f18 (batch 6; 8b4ed6a40 is in batch 5). Integrator aba0beaa578594e92; private cells
+a8da2b953507b402b; exorcism a31f4ba5028d24a92 (owns the Host's READ ops 144/5/4 and
+ContentResource.project's encode, fromEntriesCached re-keying, loadPolicy, storedCapabilityDigest);
+perf-client a8d456c6e773efbb8 (owns the consent provider, `Loaded.write`'s post encode, the per-guard
+`writes` pattern in every receiver except the DRC, and World.admit's pin root / WorldCompact).
+Ember 10-31: per sha, lane-check of the changed files plus one targeted measurement on a hotpatched
+world; no gates; pool trees at swarm-build 28G or less.
 
-Root's order (10-31): (1) row 11 + the Book layout implementation, as hot-path's part of FORMAT (a)
-with private cells; (2) cut the per-submit cost; (3) the remaining sweep rows (3, 8, 16, 17, 19, 20,
-14).
+Tools on hbox: pool trees (`. /home/hbox/pool/pool.env; LANE_POOL_NO_WARM=1 lane-tree acquire
+hot-path origin/lane/hot-path-cold`, release when done). Native Host: `/ci/hpc/nb/build7.sh` (resets
+t7 to the pushed head, `lane-tree native`, builds into `/ci/hpc/nb/artifacts`). Hotpatch:
+`/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=...`, then copy the Host
+into `bin/clients/x86_64-unknown-linux-gnu/` too and check SHA256SUMS. Growth measurement:
+`/ci/hpc/sn/grow2.sh` (one world, 8 sequential `story new`, perf of stories 2 and 8 into
+`g2.s{2,8}.perf.data`); symbolize with a symfs holding a COPY (never a symlink: cp -f follows it)
+of the candidate's minidregg-host named `memfd:mini-pinned-image (deleted)` (`/ci/hpc/sn/symfs5`);
+compare with `/ci/hpc/sn/cmp.py g2 <ms2> <ms8>`; attribute with `/ci/hpc/sn/who.py <perf script> <regex>`.
+The Host runs on P-cores: read the `cpu_core` section of perf report, not the first (`cpu_atom`).
+
+**Per-story growth (root's item, 10-31).** 8 stories on one world, Host CPU: eca98bde-hp-auth2 1.04 →
+2.83 s (2.72x); eca98bde-hp-auth3 (a55855f18's Host) 1.50 → 2.51 s (1.67x, load 14-16 against 8-9).
+Fixed: `Ground.authority` rebuilt `Snapshot.ofCell`/`authStateOf` about 15 times per invocation
+(now once per served state on `ServedAuthority`); `issuerCheck`'s quadratic support; DRC guard filters
+re-running `writes` per guard. What still grows (story 2 → 8 on auth3):
+1. A ~40-deep `Store.set` chain on post-stores (`Patch.run`/`setAll` of a birth's authority entries),
+   walked by every lookup of the post's encode (`Materialized.bytesCached` → `StoreCodec.encode`,
+   `sortedSupport`): +460 ms. Build the post without a chain (pre's entries merged with the patch into
+   `fromEntriesCached`), or better, per-entry persistence (FORMAT).
+2. The session's per-request refresh (`sessionConfirmed` → `NativeHostSession.refresh` →
+   `Loaded.extend`/`WorldTrack.advance`/`WorldCompact`): +190 ms.
+3. Whole-cell encodes of growing cells (authority post root, directory decode): FORMAT (a) + row 11.
+Cold consent provider (exorcist, batch 5, height 26): `verifyInitial` decodes the whole checkpoint
+(172 KB) and replays, ~0.6 s CPU, even with a retained anchor; that is the O(state) open row 11 shares
+(lazy cell decode at open: a checkpoint whose cells stay bytes until read). Paid once per world start
+or binding change now that residents do not idle out (perf-client 86428a2f1).
+Other reports: op66 (lifecycle BEGIN plan) 8.6 s in an app install, a pre-checkpoint certificate
+walk, row 4 slice 2 (FORMAT); doc append O(history) (event-log cell, FORMAT (a)); restart wall
+11.7 s at 491 (row 11).
 
 - **Ember's bar (10-31):** "on a modern nvme machine there's not really an excuse for anything to take
   substantially over 1ms." Aim for about 1 ms of Host work per action. A warm submit, read or open in

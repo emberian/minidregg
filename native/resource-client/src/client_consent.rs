@@ -42,9 +42,24 @@ fn resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CONSENT_RESIDEN
 /// `pure_host` binding for every `mini` process of this user instead of one 159 MB Lean image per
 /// process. `MINI_CODEC_RESIDENT=0` keeps the per-process child.
 fn codec_resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CODEC_RESIDENT").as_deref()!=Ok("0") }
-/// A resident with no frame for `$variable` seconds (default `RESIDENT_IDLE_S`, 600) ends.
-fn resident_idle(variable:&str)->std::time::Duration {
-    std::time::Duration::from_secs(std::env::var(variable).ok().and_then(|v|v.parse().ok()).unwrap_or(mini_sdk::consent::RESIDENT_IDLE_S))
+/// A resident keeps its warm state and does not idle out (`mini_sdk::consent::serve_resident_kind`:
+/// it ends with its world, its child, or a superseded binding). `$variable` seconds, when set, add
+/// an idle exit for a box that wants one.
+/// The box's shared codec Host, when the session selects one: `MINI_CODEC_SOCKET` (absolute) and
+/// `MINI_CODEC_PEER_UID` (its listener's owner, 0 for a systemd-activated one), both or neither.
+fn codec_service()->Result<Option<(PathBuf,u32)>> {
+    match (std::env::var_os("MINI_CODEC_SOCKET"),std::env::var("MINI_CODEC_PEER_UID")) {
+        (None,Err(_))=>Ok(None),
+        (Some(socket),Ok(peer))=>{
+            let socket=PathBuf::from(socket);
+            if !socket.is_absolute(){return Err("MINI_CODEC_SOCKET must be absolute".into());}
+            Ok(Some((socket,peer.parse().map_err(|_|"MINI_CODEC_PEER_UID must be a decimal uid")?)))
+        }
+        _=>Err("the shared codec Host needs both MINI_CODEC_SOCKET and MINI_CODEC_PEER_UID".into()),
+    }
+}
+fn resident_idle(variable:&str)->Option<std::time::Duration> {
+    std::env::var(variable).ok().and_then(|v|v.parse().ok()).filter(|n:&u64|*n>0).map(std::time::Duration::from_secs)
 }
 
 /// The selected consent provider of this process, started (or reached as this binding's resident
@@ -112,8 +127,8 @@ pub(crate) fn drop_dead_session(slot:&mut Option<Consent>,lifeline:&mut Option<c
 }
 
 /// `mini consent-resident --consent EXECUTABLE --settings SETTINGS`: hold one provider for this
-/// binding and serve its frames until the provider ends or no frame arrives for
-/// `MINI_CONSENT_IDLE_S` (600) seconds.
+/// binding and serve its frames until the provider ends, its world is torn down or its binding is
+/// superseded (with `MINI_CONSENT_IDLE_S` set, also after that many idle seconds).
 pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
     let idle=resident_idle("MINI_CONSENT_IDLE_S");
     if !mini_sdk::consent::daemonize()? { return Ok(()); }
@@ -122,7 +137,8 @@ pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
 /// `mini codec-resident --host EXECUTABLE --settings SETTINGS` (HOT-PATH 2a): hold ONE storeless
 /// codec Host (`HOST SETTINGS codec`, `Host.Main.serveCodec`) for this binding and serve every
 /// `mini` process's codec frames (7-11) on the binding's socket, one frame at a time, until the
-/// Host ends or no frame arrives for `MINI_CODEC_IDLE_S` (600) seconds. The codec is pure and
+/// Host ends, its world is torn down or its binding is superseded (with `MINI_CODEC_IDLE_S` set,
+/// also after that many idle seconds). The codec is pure and
 /// holds no state between frames, so sharing one across processes changes no reply; it removes
 /// one 159 MB Lean image start per `mini` process. The image is the client's own selected
 /// semantic Host (`pure_host`), never the serving Store's.
@@ -295,6 +311,23 @@ pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Outp
     #[cfg(not(unix))] {Err("local native consent codecs currently require Unix".into())}
 }
 
+/// A source custody wrapper's detached Host verb (`HOST CONFIG VERB ...`), answered by this
+/// process's codec session when the verb is a pure one (`author`, `inspect`, `signatures`): the
+/// same frame the detached verb computes, without a Host process per call. The destination is
+/// replaced, as the detached verb's write replaced it. `false`: not a pure verb; the caller runs
+/// the image.
+pub(crate) fn pure_source(host:&Path,config:&Path,args:&[&OsStr])->Result<bool> {
+    let pure=args.first().and_then(|word|word.to_str()).is_some_and(|verb|matches!(verb,"author"|"inspect"|"signatures"));
+    if !pure {return Ok(false);}
+    if let Some(destination)=args.last().map(Path::new) {
+        match fs::symlink_metadata(destination) {
+            Ok(meta) if meta.file_type().is_file() => fs::remove_file(destination).map_err(|e|format!("cannot replace {}: {e}",destination.display()))?,
+            _ => {}
+        }
+    }
+    codec_process(host,config,args).map(|_|true)
+}
+
 /// Local producer for wrappers retaining native session frames themselves.
 /// Existing retained frames must be compared with this local derivation before
 /// reuse; the frame's original remote origin is not consent authority.
@@ -315,7 +348,15 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
     let mut codec=CODEC.lock().map_err(|_|"local codec lock poisoned")?;
-    let answer=if codec_resident_enabled() {
+    let answer=if let Some((socket,peer))=codec_service()? {
+        // The box's shared codec Host (split tenancy): it must greet with this client's own pins,
+        // the image digest (the workspace's, `host_image_sha256`) and the settings bytes' digest.
+        let image:[u8;32]=mini_sdk::hex::decode_fixed(&crate::host_image_sha256(&executable)?).map_err(|_|"Host image digest is not 32 bytes")?;
+        codec.frame_with(&executable,&settings,operation,payload,&|executable,_settings,settings_bytes|{
+            let expected=mini_sdk::consent::codec_service_hello(&image,&settings_bytes);
+            mini_sdk::consent::connect_codec_service(&socket,peer,&expected,executable,settings_bytes)
+        })
+    } else if codec_resident_enabled() {
         codec.frame_with(&executable,&settings,operation,payload,&|executable,settings,settings_bytes|{
             let mini=std::env::current_exe().map_err(|e|format!("{}: {e}",ResidentKind::Codec.name()))?;
             let mut launch=Command::new(mini);

@@ -1622,15 +1622,26 @@ fn append_operation(session: &Session, path: &Path, stream: &str, request: &Valu
 }
 
 /// The client's version and the candidate it was built from, as a report records them. The sha
-/// is the build's (`MINI_BUILD_SHA` at compile time), or the box's (`MINI_CANDIDATE_SHA` in the
-/// environment); a client built with neither says so rather than guess.
+/// is the box's (`MINI_CANDIDATE_SHA` in the environment, or the candidate directory this client
+/// runs from, `.../candidate/<ID>/bin/mini`, read here so no wrapper spends three processes on
+/// it per command), or the build's (`MINI_BUILD_SHA` at compile time); a client with none says
+/// so rather than guess.
 fn client_identity() -> (String, String) {
     let sha = std::env::var("MINI_CANDIDATE_SHA").ok().filter(|v| !v.is_empty())
+        .or_else(running_candidate)
         .or_else(|| option_env!("MINI_BUILD_SHA").map(str::to_owned))
         .map(|v| v.chars().filter(char::is_ascii_alphanumeric).take(40).collect::<String>())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "sha-unrecorded".to_owned());
     (format!("mini {}", env!("CARGO_PKG_VERSION")), sha)
+}
+
+/// The candidate directory this executable runs from (`.../candidate/<ID>/bin/mini`, symlinks
+/// resolved), when its name is 12 to 40 hex digits.
+fn running_candidate() -> Option<String> {
+    let exe = std::fs::canonicalize(std::env::current_exe().ok()?).ok()?;
+    let id = exe.parent()?.parent()?.file_name()?.to_str()?.to_owned();
+    ((12..=40).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit())).then_some(id)
 }
 
 /// What this client retained of attempt `id`, in a word, for a report made from it.

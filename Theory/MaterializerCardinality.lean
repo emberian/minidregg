@@ -14,6 +14,7 @@ regression tooth, and characterizes the materializer honestly: it is inhabited
 exactly when the store type is countable, which it is whenever namespaces, keys
 and values are.
 -/
+import Mathlib.Data.Countable.Basic
 import Mathlib.Data.DFinsupp.Encodable
 import Theory.CellState
 import Theory.EffectDeclaration

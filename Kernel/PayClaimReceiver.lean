@@ -325,9 +325,10 @@ def writes (prepared : Prepared deployment profile ambient durable ingress check
   prepared.pay.write prepared.payPost :: prepared.legs.writes prepared.factory
 
 def readGuards (prepared : Prepared deployment profile ambient durable ingress checked) : List ReadGuard :=
+  let written := (writes prepared).map DataWrite.cellId
   (prepared.clock.readGuard :: prepared.authority.readGuards ++
     (prepared.lawGuards ++ prepared.dependencies.readGuards).map (fun (cellIdentifier, expectedRoot) => (⟨⟨cellIdentifier⟩, expectedRoot⟩ : ReadGuard))).filter
-    fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
+    fun guard => guard.cellId ∉ written
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable ingress checked) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧

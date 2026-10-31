@@ -22,6 +22,7 @@ treated as evidence of physical atomicity.
 -/
 module
 
+public import Mathlib.Algebra.BigOperators.Pi
 public import Kernel.MultiCellHyperedge
 public import Theory.ResourceCost
 public import Theory.AxiomPin

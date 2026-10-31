@@ -9,6 +9,7 @@ a receipt codec or runtime callback surface.
 -/
 module
 
+public import Mathlib.Data.Finset.Basic
 public import Theory.DisclosureDeclaration
 
 @[expose] public section

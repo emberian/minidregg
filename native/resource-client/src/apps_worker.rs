@@ -1163,6 +1163,23 @@ pub(crate) struct ProcessWorld {
     pub domain: String,
     pub nonce_file: PathBuf,
     pub role_basis: Value,
+    /// Quarantined packages already hashed, by file identity: an install's retry, a second grain of
+    /// the same package and a re-fetch that left the file in place are not re-hashed whole.
+    pub hashed: Mutex<HashMap<PathBuf, (FileIdentity, String)>>,
+    /// The client commands of route binds, enrollments and share issues run in two resident
+    /// `mini client-resident` processes, not a `mini` process each: one pinned to the public
+    /// socket (`query`, `submit`, `current-session-intent`), one for the commands that name the
+    /// operator socket themselves. A resident pins one Host socket, so they are two.
+    pub residents: [Mutex<crate::client_resident::Resident>; 2],
+}
+
+/// A file's identity for a retained digest: device, inode, length and both times. A rewrite in
+/// place changes the ctime (which no writer can set back), a replacement the inode.
+pub(crate) type FileIdentity = (u64, u64, u64, i64, i64, i64, i64);
+
+fn file_identity(meta: &fs::Metadata) -> FileIdentity {
+    use std::os::unix::fs::MetadataExt;
+    (meta.dev(), meta.ino(), meta.len(), meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec())
 }
 
 impl ProcessWorld {
@@ -1206,6 +1223,8 @@ impl ProcessWorld {
             domain: s("domain")?,
             nonce_file: p("nonceFile")?,
             role_basis: w.get("roleBasis").cloned().unwrap_or(json!({"type":"allAccess"})),
+            hashed: Mutex::new(HashMap::new()),
+            residents: [Mutex::new(crate::client_resident::Resident::new(&p("mini")?)), Mutex::new(crate::client_resident::Resident::new(&p("mini")?))],
             profile,
         })
     }
@@ -1248,10 +1267,19 @@ impl ProcessWorld {
         Ok(serde_json::from_slice(&output.stdout).unwrap_or(Value::Null))
     }
 
+    /// `mini ARGS...` in the resident for its socket; its stdout and stderr are kept beside the
+    /// work as a child's were, and a nonzero exit refuses with the command's stderr.
     fn mini(&self, work: &Path, label: &str, args: &[&str]) -> Result<Value> {
-        let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
-        self.run(&self.mini, &refs, &work.join(format!("{label}.stdout")))
+        let public = args.windows(2).any(|pair| pair[0] == "--socket" && Path::new(pair[1]) == self.public_socket);
+        let resident = &self.residents[usize::from(!public)];
+        let (code, stdout, stderr) = resident.lock().map_err(|_| "client resident lock poisoned")?.run(args)?;
+        let kept = work.join(format!("{label}.stdout"));
+        let _ = fs::write(&kept, &stdout);
+        let _ = fs::write(kept.with_extension("stderr"), &stderr);
+        if code != 0 {
+            return Err(format!("{} {}: {}", self.mini.display(), args.first().unwrap_or(&""), String::from_utf8_lossy(&stderr).trim()));
+        }
+        Ok(serde_json::from_slice(&stdout).unwrap_or(Value::Null))
     }
 
     fn confirmed(path: &Path) -> Result<Value> {
@@ -1440,8 +1468,23 @@ impl World for ProcessWorld {
         if !path.is_file() {
             return Ok(None);
         }
-        let meta = fs::metadata(&path).map_err(|e| e.to_string())?;
-        Ok(Some((path.clone(), Self::sha_file(&path)?, meta.len())))
+        // The digest is taken over the opened descriptor and kept for that file identity only.
+        let mut file = fs::File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let opened = file_identity(&file.metadata().map_err(|e| e.to_string())?);
+        if let Some((identity, sha)) = self.hashed.lock().map_err(|_| "package digest cache poisoned")?.get(&path) {
+            if *identity == opened {
+                return Ok(Some((path.clone(), sha.clone(), opened.2)));
+            }
+        }
+        use sha2::Digest;
+        let mut digest = sha2::Sha256::new();
+        std::io::copy(&mut file, &mut digest).map_err(|e| format!("{}: {e}", path.display()))?;
+        if file_identity(&file.metadata().map_err(|e| e.to_string())?) != opened {
+            return Err(format!("{} changed while it was hashed", path.display()));
+        }
+        let sha = hex(&digest.finalize());
+        self.hashed.lock().map_err(|_| "package digest cache poisoned")?.insert(path.clone(), (opened, sha.clone()));
+        Ok(Some((path.clone(), sha, opened.2)))
     }
     fn want(&self, package_id: &str) -> Result<()> {
         fs::write(self.wanted.join(package_id), b"").map_err(|e| format!("cannot flag {package_id} as wanted: {e}"))

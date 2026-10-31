@@ -23,6 +23,8 @@ mod trace;
 #[cfg(unix)]
 mod capture;
 #[cfg(unix)]
+mod client_resident;
+#[cfg(unix)]
 mod key_rotation;
 #[cfg(unix)]
 mod key_adoption;
@@ -475,6 +477,14 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
             ));
         }
     }
+    // The Host reduces a controller's typed `Reject` to the clause path it names
+    // (`Host.RefusalText.render`: `guard-rejected 0`); the committed detail stays in the
+    // outcome JSON. A Host that sends no `clause` is answered with the detail as before.
+    let detail = outcome
+        .get("clause")
+        .and_then(Value::as_str)
+        .filter(|clause| !clause.is_empty() && !clause.chars().any(char::is_control))
+        .map_or(detail, str::to_owned);
     let hint = refusal_hint(&detail);
     Some(format!(
         "refused: {reason}: {detail} (phase {}){hint}",
@@ -488,7 +498,9 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
 /// epochs, a fresh child id, an unspent nullifier); most often the authority
 /// has moved since, and the cure is a new proposal.
 fn refusal_hint(detail: &str) -> &'static str {
-    if detail.contains("CapabilityDelegationController.Reject.descent") {
+    if detail.contains("CapabilityDelegationController.Reject.descent")
+        || detail.contains("capability-delegation-controller: descent")
+    {
         "\n  hint: this delegation was authored against the authority as it stood then; it has moved since \
          (or the proposal was already used). Propose it again under a new ID and submit that."
     } else {
@@ -585,10 +597,13 @@ fn host_image_identity(metadata: &fs::Metadata) -> HostImageIdentity {
     )
 }
 
-/// The digest of the selected Host image, hashed once per file identity per
-/// process. The identity is read from the open handle, before and after the
-/// hash; a file that changed while it was hashed is refused, and a later call
-/// that sees a different identity hashes again.
+/// The digest of the selected Host image, hashed once per file identity. The
+/// identity is read from the open handle, before and after the hash; a file that
+/// changed while it was hashed is refused, and a later call that sees a different
+/// identity hashes again. A digest outlives the process that hashed it in the
+/// owner-private resident directory (`host_digest_record`), under the same
+/// identity, so a `mini` process per verb does not re-read ~180 MB (a chat `tail`
+/// spent 170 of its 186 ms of CPU here); `--verify-host` still hashes.
 ///
 /// A remote client has no Host image: its Host is named by an empty path and known only by the digest
 /// it pinned, which every v2 envelope carries and the box's socket checks.
@@ -635,6 +650,16 @@ fn host_image_sha256(host: &Path) -> Result<String> {
     {
         return Ok(sha.clone());
     }
+    let record = host_digest_record(host, &identity);
+    if !verify_host() {
+        if let Some(sha) = record.as_deref().and_then(read_host_digest) {
+            if pinned.is_none_or(|pin| pin == &sha) {
+                cache.retain(|(path, _, _)| path != host);
+                cache.push((host.to_path_buf(), identity, sha.clone()));
+                return Ok(sha);
+            }
+        }
+    }
     let mut digest = sha2::Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -664,7 +689,43 @@ fn host_image_sha256(host: &Path) -> Result<String> {
     }
     cache.retain(|(path, _, _)| path != host);
     cache.push((host.to_path_buf(), identity, sha.clone()));
+    if let Some(record) = record {
+        // Best effort: a digest that cannot be kept is hashed again by the next process.
+        let _ = mini_sdk::durable::replace(&record, format!("{sha}\n").as_bytes(), mini_sdk::durable::Perm::Private);
+    }
     Ok(sha)
+}
+
+/// Where the digest of the Host image at `host` with `identity` is kept between processes:
+/// `h-<first 16 bytes of SHA-256(path, identity)>.sha256` in the owner-private resident
+/// directory (`mini_sdk::consent::private_anchor_dir`, where the consent and codec residents
+/// keyed by the same file identity live). None without one (no $HOME and no
+/// MINI_CONSENT_ANCHOR_DIR): that process hashes.
+#[cfg(unix)]
+fn host_digest_record(host: &Path, identity: &HostImageIdentity) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = mini_sdk::consent::private_anchor_dir().ok()?;
+    let (dev, ino, size, mtime, mtime_nsec, ctime, ctime_nsec) = *identity;
+    let mut key = sha2::Sha256::new();
+    key.update(b"MINI-HOST-IMAGE-DIGEST/v1\0");
+    key.update((host.as_os_str().len() as u64).to_le_bytes());
+    key.update(host.as_os_str().as_bytes());
+    for value in [dev, ino, size] {
+        key.update(value.to_le_bytes());
+    }
+    for value in [mtime, mtime_nsec, ctime, ctime_nsec] {
+        key.update(value.to_le_bytes());
+    }
+    Some(dir.join(format!("h-{}.sha256", hex(&key.finalize()[..16]))))
+}
+
+/// A kept digest: an owner-private regular file holding exactly 64 lowercase hex digits and a newline.
+#[cfg(unix)]
+fn read_host_digest(record: &Path) -> Option<String> {
+    mini_sdk::private::check_file(record).ok()?;
+    let bytes = fs::read(record).ok()?;
+    let text = std::str::from_utf8(bytes.strip_suffix(b"\n")?).ok()?;
+    (text.len() == 64 && mini_sdk::hex::is_lower(text)).then(|| text.to_owned())
 }
 
 /// Whether this process hashes a pinned Host image anyway (`mini --verify-host ...`, MINI_VERIFY_HOST=1).
@@ -851,6 +912,7 @@ usage:
   mini mix-live --action cover|registrar|relay|mailbox|scan|send|receive --state DIR --generation HEX --origin-ms MS --records DIR [action options]
   mini consent-resident --consent PATH --settings PATH     the resident consent component for this user's `mini` processes
   mini codec-resident --host HOST --settings PATH          the storeless resident codec Host for this user's `mini` processes
+  mini client-resident                                     run the parent's client commands in this one process (the apps worker's channel on stdin)
   mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -910,10 +972,15 @@ usage:
                          operations and the status action only; resident clients pin MINI_OPERATOR_PEER_UID
   mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
                          requires one systemd-activated listener; controller clients pin --operator-peer-uid
-  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds 600]
+  mini serve-codec --socket SHARED-SOCKET --host HOST --config CONFIG.json
+                         the box's shared codec Host for every member account (split tenancy); requires one
+                         systemd-activated listener; clients select it with MINI_CODEC_SOCKET/_PEER_UID and
+                         refuse unless it greets with their own Host image and settings digests
+  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds N] [--resident-dir DIR]
                          delegated full consent for one client UID that cannot read the Store (a controller, a
-                         split-tenancy member); requires one systemd-activated listener; ends after --idle-seconds
-                         with no connection; clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
+                         split-tenancy member); requires one systemd-activated listener; keeps its warm verifier
+                         (with --idle-seconds N, ends after N seconds with no connection); with
+                         --resident-dir it relays to the operator's ONE shared consent resident there; clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
@@ -2884,6 +2951,11 @@ fn run(mut args: Args) -> Result<()> {
             client_consent::resident(consent, settings)
         }
         #[cfg(unix)]
+        "client-resident" => {
+            args.finish()?;
+            client_resident::serve()
+        }
+        #[cfg(unix)]
         "codec-resident" => {
             // HOT-PATH 2a: one storeless codec Host per image+settings binding for every `mini`
             // process of this user, started by the first `local_frame` that finds none listening.
@@ -2941,6 +3013,19 @@ fn run(mut args: Args) -> Result<()> {
             public_proxy::serve_agent_activated(socket, &upstream, &config, uid)
         }
         #[cfg(target_os = "linux")]
+        "serve-codec" => {
+            // The box's shared codec Host (split tenancy): one storeless codec child for every
+            // member account, on the systemd-activated listener at fd 3 (`--socket` names it).
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-codec requires --socket")?;
+            let listener = unsafe { <std::os::unix::net::UnixListener as std::os::fd::FromRawFd>::from_raw_fd(3) };
+            public_proxy::validate_activated_listener(&listener, socket)?;
+            let image: [u8; 32] = mini_sdk::hex::decode_fixed(&host_image_sha256(&host)?).map_err(|_| "Host image digest is not 32 bytes")?;
+            Ok(mini_sdk::consent::serve_codec_service(listener, host, config, image)?)
+        }
+        #[cfg(target_os = "linux")]
         "serve-controller-consent" => {
             let consent = path(args.required("consent")?);
             let config = path(args.required("config")?);
@@ -2948,15 +3033,19 @@ fn run(mut args: Args) -> Result<()> {
             let image = consent_proxy::digest(args.required("consent-sha256")?.to_str().ok_or("consent digest must be UTF-8")?)?;
             let settings = consent_proxy::digest(args.required("config-sha256")?.to_str().ok_or("config digest must be UTF-8")?)?;
             let uid = args.required("controller-uid")?.to_str().and_then(|n|n.parse::<u32>().ok()).ok_or("controller UID must be a decimal u32")?;
-            // Seconds with no connection before the service ends (socket activation restarts it).
+            // Seconds with no connection before the service ends (socket activation restarts it);
+            // without the flag it keeps its warm verifier.
             let idle = match args.optional("idle-seconds") {
-                Some(v) => v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
-                    .ok_or("idle seconds must be a positive decimal")?,
-                None => mini_sdk::consent::RESIDENT_IDLE_S,
+                Some(v) => Some(v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
+                    .ok_or("idle seconds must be a positive decimal")?),
+                None => None,
             };
+            // Split tenancy (ember 2026-10-31): relay to the operator's ONE shared consent resident
+            // in this owner-private directory instead of holding a provider per member.
+            let shared = args.optional("resident-dir").map(path);
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
-            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,std::time::Duration::from_secs(idle))
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,idle.map(std::time::Duration::from_secs),shared.as_deref())
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {
@@ -4156,6 +4245,13 @@ mod tests {
         assert_eq!(
             refusal_line(&nested).unwrap(),
             "refused: operation-rejected: invocation preparation: A.Reject.scalar (B.Reject.pageMutation (C.RejectReason.overflow)) (phase prepare)"
+        );
+        // A Host that names the clause: the line carries it, the committed detail stays in the JSON.
+        let clause = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
+            "clause":"declared-resource-scalar: guard-rejected 0","detail":hex(b"DeclaredResourceScalar.Reject.guardRejected 0")});
+        assert_eq!(
+            refusal_line(&clause).unwrap(),
+            "refused: operation-rejected: declared-resource-scalar: guard-rejected 0 (phase prepare)"
         );
         let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
         assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));

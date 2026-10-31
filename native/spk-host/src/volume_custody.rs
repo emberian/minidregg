@@ -221,7 +221,8 @@ fn read_root_witness(
     resource: u64,
     require_recent: bool,
 ) -> io::Result<VolumeWitness> {
-    if resource == 0 || resource > 999_999_999_999_999_999 {
+    // A resource id is any non-zero u64: a member-namespace app birth reserves 20-digit ids.
+    if resource == 0 {
         return Err(invalid("attestation resource outside supported profile"));
     }
     let path = site.witness(resource);
@@ -371,6 +372,18 @@ mod tests {
         assert_eq!(parsed.resource, 8401);
         assert_eq!(parsed.volume_id, "c".repeat(64));
         assert_eq!(parsed.bytes, example());
+    }
+
+    /// A member-namespace app birth reserves 20-digit resource ids (above 10^18): the witness
+    /// for one parses, with its directory named by the same id.
+    #[test]
+    fn a_twenty_digit_resource_witness_parses() {
+        let big = "17828936604552340943";
+        let text = String::from_utf8(example()).unwrap()
+            .replace("resource=8401", &format!("resource={big}"))
+            .replace("abcdef-8401", &format!("abcdef-{big}"));
+        let parsed = VolumeWitness::parse(text.into_bytes(), &site()).unwrap();
+        assert_eq!(parsed.resource, 17_828_936_604_552_340_943);
     }
 
     #[test]

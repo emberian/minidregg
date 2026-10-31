@@ -74,6 +74,11 @@ class Journey:
         self.root.mkdir(mode=0o700)
         self.lock_root()
         self.logs=self.root/'commands';self.logs.mkdir()
+        self.own_anchors()
+        # The consent and codec residents a `mini` call starts leave no pid file and outlive this run; let
+        # them end by their own idle bound a minute after the last frame (default 600 s) instead of
+        # lingering, because they can only be stopped by PID.
+        for name in ('MINI_CONSENT_IDLE_S','MINI_CODEC_IDLE_S'):os.environ.setdefault(name,'60')
         self.processes=[];self.daemons=[];self.counter=0;self.controller=False
         # A separate fresh private root avoids sharing controller traversal ACLs
         # with another preserved world (including /run/user/UID).
@@ -112,7 +117,7 @@ class Journey:
         repeated. Other failure phases need their exact native recovery path.
         """
         os.umask(0o077)
-        j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands';j.lock_root()
+        j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands';j.lock_root();j.own_anchors()
         if checkpoint is None:
             failure=read(j.root/'failure.json')
             if failure['phase']!='world' or (j.root/'context-after-world.json').exists() or (j.root/'broker').exists():
@@ -676,6 +681,18 @@ class Journey:
     def publish_data(self):
         self.run('publish-data',[self.bins/'spk-data-publish','publish','--store',Path(self.broker['grainsRoot'])/'spk/public-data','--source',self.data,'--inventory',self.inventory],timeout=3600)
 
+    def own_anchors(self):
+        # Consent and codec residents that any step starts (application hooks included) keep their
+        # PID files in this run's own anchor directory, never in $HOME/.mini, so cleanup can stop them.
+        anchors=self.root/'a'
+        anchors.mkdir(mode=0o700,exist_ok=True)
+        os.environ['MINI_CONSENT_ANCHOR_DIR']=str(anchors)
+
+    def stop_residents(self):
+        script=REPO/'scripts/spk-platform/stop-residents.sh'
+        try:subprocess.run(['bash',str(script),str(self.root)],timeout=120,check=False)
+        except Exception:pass
+
     def cleanup(self):
         if self.controller:
             try:self.fixed('controller-stop',timeout=120)
@@ -688,6 +705,7 @@ class Journey:
         if getattr(self,'world_pid',None):
             try:os.kill(self.world_pid,signal.SIGTERM)
             except ProcessLookupError:pass
+        self.stop_residents()
 
     def await_worker_release(self):
         selected=os.environ.get('J14_ORACLE_WORKER_RELEASE')

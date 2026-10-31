@@ -221,8 +221,9 @@ def writes (prepared : Prepared deployment semantics durable command) : List Dat
   prepared.authority.writes prepared.authorityPost
 
 def readGuards (prepared : Prepared deployment semantics durable command) : List ReadGuard :=
+  let written := (writes prepared).map DataWrite.cellId
   prepared.authority.readGuards.filter fun guard =>
-    guard.cellId ∉ (writes prepared).map DataWrite.cellId
+    guard.cellId ∉ written
 
 def PhysicalShape (prepared : Prepared deployment semantics durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧

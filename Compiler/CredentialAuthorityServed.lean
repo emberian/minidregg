@@ -170,13 +170,18 @@ structure ServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store
   cell : CredentialAuthorityDomain.Cell
   valid : deployment.Valid
   observed : served.canonicalBytes (cellIdOf deployment) = cellBytes cell
+  /-- The cell's authorization projection, computed once per served state: every request's
+  snapshot (`snapshotOn`) carries this one, not a projection rebuilt per reference. -/
+  authState : AuthState
+  authStateExact : authState = CredentialAuthorityDomain.authStateOf cell
 
 def loadServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store : StoreIdentity}
     (served : State store) : Option (ServedAuthority deployment served) :=
   if valid : deployment.Valid then
     match decoded : decodeCell (served.canonicalBytes (cellIdOf deployment)) with
     | none => none
-    | some cell => some ⟨cell, valid, (decodeCell_canonical decoded).symm⟩
+    | some cell => some ⟨cell, valid, (decodeCell_canonical decoded).symm,
+        CredentialAuthorityDomain.authStateOf cell, rfl⟩
   else none
 
 /-- The authority snapshot for a request: the clock is the served height and
@@ -186,8 +191,19 @@ must declare it, `DurableView.Family.covers`). -/
 def ServedAuthority.snapshotOn {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
     {served : State store} (authority : ServedAuthority deployment served) {head : Head store} {keys : Keys}
     (footprint : VerifiedFootprint head keys) : CredentialAuthorityDomain.Snapshot :=
-  CredentialAuthorityDomain.Snapshot.ofCell deployment.domain served.height
-    (spentOf deployment.domain (served.viewAt footprint)) authority.cell
+  ⟨deployment.domain, served.height, spentOf deployment.domain (served.viewAt footprint), authority.cell,
+    authority.authState, authority.authStateExact⟩
+
+/-- `snapshotOn` is the snapshot `Snapshot.ofCell` builds; only the projection is the held one. -/
+theorem ServedAuthority.snapshotOn_eq {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+    {served : State store} (authority : ServedAuthority deployment served) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) :
+    authority.snapshotOn footprint =
+      CredentialAuthorityDomain.Snapshot.ofCell deployment.domain served.height
+        (spentOf deployment.domain (served.viewAt footprint)) authority.cell := by
+  obtain ⟨cell, valid, observed, authState, exact⟩ := authority
+  subst exact
+  rfl
 
 /-- The light authority over a view is the full authority load of that view,
 up to the clock: the full shape's clock (`clockOf`, its history length) is its
@@ -337,10 +353,10 @@ theorem ServedAuthority.unique {deployment : CanonicalCellRegistry.Deployment} {
     have decoded := congrArg decodeCell (left.observed.symm.trans right.observed)
     rw [decodeCell_bytes, decodeCell_bytes] at decoded
     exact Option.some.inj decoded
-  cases left
-  cases right
+  obtain ⟨leftCell, _, _, leftState, leftExact⟩ := left
+  obtain ⟨rightCell, _, _, rightState, rightExact⟩ := right
   simp only at same
-  subst same
+  subst same leftExact rightExact
   rfl
 
 /-- Loading a state that has an authority yields that authority. -/
@@ -362,7 +378,8 @@ def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {ear
     Option (ServedAuthority deployment served) :=
   if same : bytesBEq (served.canonicalBytes (cellIdOf deployment))
       (before.canonicalBytes (cellIdOf deployment)) then
-    some ⟨held.cell, held.valid, (bytesBEq_iff.mp same).trans held.observed⟩
+    some ⟨held.cell, held.valid, (bytesBEq_iff.mp same).trans held.observed,
+      held.authState, held.authStateExact⟩
   else loadServedAuthority deployment served
 
 theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deployment}
