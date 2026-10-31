@@ -429,11 +429,32 @@ fn recorded_commitment(value: &Value) -> Result<crate::key_rotation::Commitment>
     }
 }
 
-/// Once per process for each workspace: the subject's commitment is still this
+/// The workspaces whose commitment this command has checked.
+static CHECKED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Forget every commitment check: a command run by a resident (`capture::argv`) checks again.
+/// "Checked" never outlives the command that checked, so a rotation or revocation by another
+/// holder between two of a resident's commands is caught by the next one.
+pub(crate) fn forget_commitment_checks() {
+    if let Ok(mut checked) = CHECKED.lock() {
+        checked.clear();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn note_commitment_checked_for_test(root: &Path) {
+    CHECKED.lock().unwrap().push(root.to_path_buf());
+}
+
+#[cfg(test)]
+pub(crate) fn commitment_checked_for_test(root: &Path) -> bool {
+    CHECKED.lock().unwrap().iter().any(|known| known == root)
+}
+
+/// Once per command for each workspace: the subject's commitment is still this
 /// workspace's own next key (FIX-IDENTITY). Every verb that loads a workspace
 /// passes here; a friend never builds on a subject someone else can rotate.
 fn recheck_commitment(root: &Path, value: &Value) -> Result<()> {
-    static CHECKED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
     if CHECKED.lock().map_err(|_| "commitment check lock poisoned")?.iter().any(|known| known == root) {
         return Ok(());
     }
