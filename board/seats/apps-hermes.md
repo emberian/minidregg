@@ -9,7 +9,7 @@ Quest: Hermes final say (H1b), the START reds, the refusal-clause sweep, live Hu
   sys and fd). The final say's `mini` child, 3 ms after exec, reads ECONNRESET on the hello of the controller's
   consent peer.sock: the consent service served 4 connections and silently closed the 5th (4 live: a standing
   Hermes-side mini plus 3 concurrent controller children). Not the codec resident, proxy or ServeBounds. Fix:
-  16 served, 64 queued up to 30 s, refusal logged. Live j14-apps check with the new `mini` still owed.
+  16 served, 64 queued up to 30 s, refusal logged. LIVE: j14-apps passes (rc 0, final say succeeds) on dc61016cb-codec with this fix applied to the candidate's own source (hbox /ci/j-ar4); a mini built from main does not run on the dc61016cb Host (kind skew), so check on main's builder next.
 - START reds (fda2e4193): route socket past sun_path binds through a bounded alias `<state>/rt/<digest>/http.sock`
   (route_socket.rs); `grain route` publishes it as "socket"; lookup with no accepted original names its outcome.
   The "custody lacks confirmation" was a not-confirmed outcome read as a missing field (a consequence of the
