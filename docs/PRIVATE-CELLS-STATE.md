@@ -159,15 +159,33 @@ items 1 to 4 below done; astra round 8):
 * **Reveal locality** (`Theory/AuthTrieRange.lean`): `climb_digest_sound` concludes with the
   walk's `PathNode`s (one per walked bit plus one), and `revealNodes`' store side is those path
   nodes plus the selected subtree (`revealNodes_store_treeNode`: inside the canonical tree). A
-  collision elsewhere in the store no longer discharges a reveal.
+  collision outside the walked path and the selected subtree no longer discharges a reveal; the
+  bound is the reveal's stop depth (at depth 0 the selected subtree is the whole store).
+
+**Increment 4** (the integrator's third-round audit of e2f6da711..b027ed235):
+* `viewOpeningExact_deployed` (`Kernel/PrivateCellView.lean`): at the receiver's real parameters
+  (`addressHash`, 256 bits of cSHAKE256 under `DREGG/PRIVATE-CELL/ADDRESS/v1`; `deployedDig`,
+  cSHAKE256 under `DREGG/PRIVATE-CELL/NODE/v1` over injective node bytes `nodeBytesWith`) each
+  collision alternative is a real cSHAKE256 collision on distinct inputs among this store's live
+  addresses or one reveal's scope. The address alternative ranges over every live address of the
+  store, not only the reader's classes (conservative, not local).
+* `Witness` there: a declared cell with two data fields, another class and the blinding, a free
+  injective node digest and an injective address path; both collision branches refuted
+  (`Witness.exact`), honest reveals verify, answers and refusals for a slot-1 reader, the full
+  scope, and an overflowing slot whose tag aliases slot 1 (answered nothing; such a store is
+  refused at the gate).
+* The gate: `storeFits`, `FitStore`, `admit` (refuses; `admit_refuses`), and
+  `admitted_of_storeFits` discharging `admitted`.
+* Locality wording: bounded by the reveal's stop depth.
 
 **Owed, in order:**
-1. **Witness for the seam** (astra round 8): a registry wire, an admitted nonempty store with two
-   visible entries, another class and the blinding, distinct live paths, a free node digest:
-   exact answers, refusal of withheld or altered visible values; `body`/`atomsOf`, full and empty
-   scopes, an overflowing named field.
-2. **Admission enforced:** `addressFits` has no caller yet; the receiver's birth, import and write
-   paths must refuse a key failing it, and preserve it across updates.
+1. **The receiver calls `admit`** on its birth, import and write paths (refusing the write). Not on
+   today's declared admission: `Action.admissionCheck` is the source of the derived AIR
+   (`Compiler/DeclaredActionAir.lean`) and of the native binding's acceptance theorems, so a
+   kernel-wide bound needs a native mirror and a regenerated circuit. It lands with the receiver,
+   whose admission is new anyway. Until then the flat receivers serve the full `Visible` view, so
+   no reader sees less.
+2. **A Store write path that calls `Cache.erase`**, with the receiver.
 3. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the compiler
    where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
 4. The receiver: new materializer version beside the old one until a fresh genesis, with its
