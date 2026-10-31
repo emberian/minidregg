@@ -27,12 +27,19 @@
 //!    (`outcome.*`, `retry-*`) are written after transmission and keep their own fsync: a torn
 //!    answer would read as corruption, not as "look it up".
 //!
+//!    In the shell (and `mini workspace`), directory syncs are deferred to barriers: an answer
+//!    file's NAME written after transmission is durable at the next barrier (the line's end), so a
+//!    crash between the answer and that barrier leaves a sealed attempt without its answer, which
+//!    the exact-retry path recovers (the Host deduplicates the sealed call).
 //! 5. A signed READ's attempt (a query, a batch of queries) has no effect to retry exactly, so it
 //!    is sealed after its answer rather than before its call: [`CacheScope::enter_tree`] makes
 //!    every file under the attempt directory (its per-query children included) a cache, and
 //!    [`seal_tree`] then records each child directory and the attempt directory, one record each.
 //!    A crash before that leaves an unsealed read attempt, which is never reused (invariant 4);
-//!    the next command reads again.
+//!    the next command reads again. The premise holds on the Host: a challenge is derived, not
+//!    recorded (`NativeHost.challengeLoaded`), and a query only authorizes and renders over the
+//!    opened image (`NativeHost.queryLoaded`, `NativeObservationOpeningCache.queryLoaded`, whose
+//!    renderer cache is in memory and keyed by content); no nullifier, receipt or charge is taken.
 //!
 //! Format: `MINI-ATTEMPT-SEAL/v1\n`, one JSON index line
 //! `{"files":[{"name","length","sha256"}...]}\n`, then the files' bytes concatenated in index order.
