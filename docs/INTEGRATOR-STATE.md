@@ -32,8 +32,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   546a551fd (docs). Named READY to infra, explorer, perf-apps.
 - **Batch 7 acc7cfa03: FAIL** (H2, H1, W1). Overlay **acc7cfa03-h1** (batch 7 + mini b940b3f50 + grain-runtime from
   a371cf4a5) -hp2 11:23: hbox composed rooms/churn/documents/apps/connector PASS (W1 gone), residents = R1 standing;
-  j14 FAIL on H1b (below). KEPT worlds for app-reds: /ci/c-acc7cf-hp2/w (composed; down: world-down.sh
-  /ci/c-acc7cf-hp2/inputs then jworld-scratch.sh down) and /ci/j-acc7cf-hp2 (j14). Take down when app-reds says.
+  j14 FAIL on H1b (below). /ci/c-acc7cf-hp2 taken down (12:15); /ci/j-acc7cf-hp2 kept until app-reds says.
 - Batch 6 74e1cfa10 umbrella-tree reds=0; batch 7 umbrella-tree running in umbrella-src.
 - **Next shared-interface change: retained-mode L0**: its own cut. lane/retained-l0 is WIP: NEVER merge until
   retained-mode a9b54e85e4a194b91 sends a sha labelled SHARED-INTERFACE. Auditor's items owed before L0: toDFinsupp 0 = 0
@@ -85,6 +84,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   ignores MINI_CODEC_RESIDENT=0 and forks `mini codec-resident` inside short-lived controller-* commands; the resident
   dies with that tree, leaving a stale pid+socket. Asked app-reds to fix at the cause (honour the switch, or a detached
   owned resident with dead-resident detection) and prove it.
+  Batch 8 dc61016cb gate15 j14 (12:03): H1b again, identical stderr (5/5). app-reds' candidate cause fix 58f0bad2b
+  (lane/app-reds-codec: grain-runtime honours MINI_CODEC_RESIDENT=0) is being proven on overlay dc61016cb-codec
+  (separate /ci root) before merge; app-reds notes the failing 0099 did not start its own codec resident.
 - **D1, forge demo rebuild (batch 4) `members` step**: `sage` provision failed `local native codec: local process
   request failed: Broken pipe`; downstream apps-bootstrap/reenroll/grain world/seed/door red as consequences. Reruns:
   pending (infra repair after the batch 7 forge composed). Same class as H1b (a local transport drop): app-reds told.
@@ -118,6 +120,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 12:15: app-reds: codec experiment ack, batch 8 j14 = H1b, c-acc7cf-hp2 down.
 - 10-31 12:35: C1 narrowing to hot-path.
 - 10-31 12:25: C1 to hot-path; P1 to perf-client and infra; ack to explorer (merge e793bd93e with batch 9).
 - 10-31 12:10: app-reds: 4692d6dfb cherry-picked (5ae0de223), -hp1 queued, codec-resident lifetime fix asked; run-26
