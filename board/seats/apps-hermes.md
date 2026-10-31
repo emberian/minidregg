@@ -28,19 +28,24 @@ Quest: Hermes final say (H1b), the START reds, the refusal-clause sweep, live Hu
   /srv/spk-build/hummingbird/out/hummingbird-0.4.1-api.spk, app 434g078h..., package c7287dfb...); declaration repointed.
 - Copies of all three: this session's scratchpad .../scratchpad/spk/{wbo,scrumblr,hummingbird}.spk (ship to the new box).
 
-## Live qualification (bb2 given to obend; resume on hbox: pool tree, overlay, world-up under its lock; hbox / has ~42 GB)
-- Landed: a4b37cd28 (declaration route path loses one trailing slash; two refused by name; per root's ruling) and 9dc9c138c
-  (conversation channel id "mini-"+64 hex = 69 chars exceeded the Host's 64-char identifier shape: 32 hex now). Both are in
-  mini-sdk, so mini/miniLine/grainRuntime/grainProviderBridge must be rebuilt for a world (overlay on a member-side-fix candidate).
-- Scrumblr (run sb7 on bb2 at 9dc9c138c, rc=1): the Host now admits the open; the app side answers "lifetime agent operation 49 failed:
-  Failed: remote exception: expected headersComplete; HTTP response from sandboxed app had incomplete headers." after ~44 s
-  (one 30 s deadline plus setup). I.e. open_web_socket reaches the bridge and the sandboxed app returns no upgrade headers.
-  Not yet read: whether Scrumblr's socket.io mounts at "/socketio" (declaration path "socketio/" became "socketio") or
-  "/socket.io", and what the web-socket open sends. Next: read minidregg_spk_rpc open_web_socket and the app's server path.
-  Evidence kept on bb2: /srv/worlds/j-sb7 (journal in step/oracle/commands/0098).
-- WBO (run wb1): fails earlier, attachment-activate (step 87), not looked at. Hummingbird: not run.
-- bb2 state: pool tree t2 released; no worlds or jobs left; /srv/worlds holds run root j-sb7, ov/ overlays, spk/ (three packages), ar-*.sh.
-  Runner scripts are in /srv/worlds (ar-bb2run.sh, ar-qual.sh); copies to hbox needed.
+## Live qualification (hbox; bb2 is obend's and my files there are removed)
+- Ruling (root): a route path is the app's own URL and is carried byte-exact. a4b37cd28 reverted; the Host admits one trailing "/"
+  on CONVERSATION relative paths (signed_api_path::conversation_route; Host wire v3, custody projection, dispatch_inspection, and the
+  controller's twin HostedRoute in grain-runtime application_api_tools). Channel ids are 37 characters (9dc9c138c).
+  Commits: 1c670cee5, e46759f4e, plus the attachment roleId change below.
+- SCRUMBLR QUALIFY PASSES (hbox run sbB): write a card, read it back through a fresh socket.io client; rows typed-attachment and
+  native-qualification-sb. Declaration status can move from prototype-unqualified once the owner decides how it is recorded.
+- WBO (runs wbA, wbB): attach needed roleId allAccess (the package declares no roles; script change landed). The qualify then
+  fails: "settle refused by Mini: tail-bound: head 257 certified 0 bound 256; certify (mini checkpoint) to resume", after
+  "lifetime agent operation 663 failed: op76 did not return fresh lifetime committed permit". The journey world reaches 256 uncertified
+  records inside WBO's conversation (one op per frame). Not chased: is the first failure the op76 permit, with the tail bound a
+  consequence, or does the qualify simply outrun an uncheckpointed world? Next: run WBO with a `mini checkpoint` before it, and read op76.
+- Hummingbird (run hbA, role 1): attach and the first socket.io steps pass; the beacon GET sends `referer` and the controller refuses
+  "application API header is outside native ordinary-header profile". The header list is closed in Host/HostOperations.lean
+  (ordinaryHeaderNames), Kernel/ApplicationDispatchAdmission.lean:140, native/spk-rpc/src/web.rs and grain-runtime
+  application_api_tools ORDINARY_HEADERS. Adding `referer` is a Lean-closure change (the tracking pixel uses it); decision owed.
+- Runner on hbox: /home/hbox/lanes/app-reds-cont/ar-cycle.sh SUF DECL ALIAS ROLE SPK (pool tree t2 to origin/main, rust roles, overlay on
+  candidate 9dc9c138c, ar-hrun.sh run); overlays under lane/ov2; packages in spk/; evidence /ci/j-{sbB,wbA,wbB,hbA}.
 
 ## op66-plan refusal (read, no world)
 `launch BEGIN authorization, descriptor or action shape refused` is the single throw at
