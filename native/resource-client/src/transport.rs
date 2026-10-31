@@ -107,20 +107,50 @@ pub(crate) fn operation_body_refusal(request: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// A file's identity for a kept digest: device, inode, length, mtime and ctime (no writer can
+/// set a ctime back, and a replacement is another inode).
+type ImageIdentity = (u64, u64, u64, i64, i64, i64, i64);
+
+fn image_identity(meta: &fs::Metadata) -> ImageIdentity {
+    use std::os::unix::fs::MetadataExt;
+    (meta.dev(), meta.ino(), meta.len(), meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec())
+}
+
+/// The SHA-256 of a Host image (or any pinned file): hashed through the opened descriptor once
+/// per file identity in this process, and taken again only when the file the path names, or
+/// the one opened, has another identity. A 180 MB Host image hashed per pin check cost about
+/// 0.1 s each, several times per custody operation.
 pub(crate) fn host_image_sha256(path: &Path) -> Result<[u8; 32], String> {
+    static HASHED: std::sync::Mutex<Vec<(std::path::PathBuf, ImageIdentity, [u8; 32])>> = std::sync::Mutex::new(Vec::new());
     let mut file = fs::File::open(path)
         .map_err(|e| format!("cannot open host image {}: {e}", path.display()))?;
+    let opened = image_identity(&file.metadata().map_err(|e| format!("cannot inspect host image {}: {e}", path.display()))?);
+    let named = fs::metadata(path).map(|meta| image_identity(&meta)).ok();
+    if named == Some(opened) {
+        if let Some((_, _, digest)) = HASHED.lock().map_err(|_| "host image digest cache poisoned")?
+            .iter().find(|(kept, identity, _)| kept == path && *identity == opened) {
+            return Ok(*digest);
+        }
+    }
     let mut hash = Sha256::new();
-    let mut chunk = [0u8; 64 * 1024];
+    let mut chunk = vec![0u8; 1024 * 1024];
     loop {
         let count = file
             .read(&mut chunk)
             .map_err(|e| format!("cannot hash host image {}: {e}", path.display()))?;
         if count == 0 {
-            return Ok(hash.finalize().into());
+            break;
         }
         hash.update(&chunk[..count]);
     }
+    let digest: [u8; 32] = hash.finalize().into();
+    let after = image_identity(&file.metadata().map_err(|e| format!("cannot inspect host image {}: {e}", path.display()))?);
+    if after == opened && named == Some(opened) {
+        let mut kept = HASHED.lock().map_err(|_| "host image digest cache poisoned")?;
+        kept.retain(|(kept, _, _)| kept != path);
+        kept.push((path.to_path_buf(), opened, digest));
+    }
+    Ok(digest)
 }
 
 fn parse_host_sha256(value: &str) -> Result<[u8; 32], String> {
