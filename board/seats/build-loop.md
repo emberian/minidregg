@@ -40,12 +40,14 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
   defaults to /srv/integ.
 - green is 83e926874 (batch 4). The last REDS.md (hbox, main 997905c0) has 6 reds.
 
-### Seam 1 (codec tags)
-- origin/lane/seam1-epoch-main 1d4f01724 (on main 07e2c47ac, merges cleanly): the 12 named tags are in
-  Compiler/PersistedCodecTags/Core.lean. DurableCheckpointCodec imports the 645-tag census privately, and
-  persistedCodecCorpus is @[no_expose]. The manifest is byte-identical and StoreEpoch.current is unchanged.
-- Baseline: a census-tag edit rebuilds 478 Host modules. Being measured on dregg-build2 next, then it lands on main ahead
-  of the FORMAT batch (privacy a3f7fce75cd3e4e49 and host-execution a24974e84d3c540d1 told).
+### Seam 1 (codec tags): on main (f2002e589)
+- The 12 named tags are in Compiler/PersistedCodecTags/Core.lean; the 645-tag census (Compiler/PersistedCodecTags.lean)
+  is imported privately by DurableCheckpointCodec alone, and persistedCodecCorpus is @[no_expose]. The manifest is
+  byte-identical and StoreEpoch.current is unchanged.
+- Measured on dregg-build2 (pool tree, one census-tag edit, `lake build Host.Main`, 16 threads): main 365 modules,
+  447 s; with the seam 4 modules, 95 s. The epoch corpus still moves on a census edit (28,604 -> 28,610 bytes).
+- FORMAT batch (privacy a3f7fce75cd3e4e49, host-execution a24974e84d3c540d1) told to rebase onto it.
+- Seams 2 and 3 (StoreCodec, Theory.Store, WorldRoot) only if a measured edit rate makes them pay.
 
 ### Build speed: done and on main
 | change | effect (measured) |
@@ -59,10 +61,13 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - Next levers: per-compile import tax; path depth (the Application* chain); the consent companion's fixed ~116 s.
 
 ### Hot-swap
-- `lane-build.sh overlay BASE PARENT LABEL ROLE...` / `package.py --overlay`: whole build families only, the dir named
-  by a 12-hex id. Swapping into a running kept world waits on infra's rebind tool. hbox t6 "iter-hotswap" (an
-  uncommitted script) is unreachable while hbox is down, so I'm redoing it on dregg-build2. The overlay stays on the
-  candidates' filesystem, with no data on /tank.
+- `lane-build.sh overlay BASE PARENT LABEL ROLE...` / `package.py --overlay` (on main): an overlay candidate, whole
+  build families only, named by a 12-hex id, every pin re-emitted.
+- `scripts/pipeline/hot-swap --state STATE [--hermes-root ROOT] LABEL ROLE...` (origin/lane/hot-swap, written, not
+  yet run): overlay on BASE's filesystem (the candidate STATE runs), `run.sh stop`, `run.sh upgrade` to the overlay
+  manifest, the Hermes root `--rebind` when grainRuntime/grainProviderBridge move, `run.sh start`, one line in
+  STATE/hot-swaps.jsonl. Tested on the first dregg-build2 candidate's world, then it lands. A unit-supervised Store
+  is stopped and started by its unit (infra's kept-world tooling).
 
 ### persvati (`ssh persvati-remote`, ember's machine): quiet measurement box
 - /home/ember/mdpool: a 4-tree pool at 43995c7f (793 warm modules). Measurement only; no lane builds.
