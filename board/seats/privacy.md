@@ -85,8 +85,10 @@ lowering into Air only where useful, never as a second compiler for the opening.
   census. Told of the epoch (fixtures re-record) and the bb2 Mathlib permission failures.
 - host-execution (a24974e84d3c540d1) measured 14% of `doc new` in rebuilding the authority trie. Cause:
   `CredentialAuthorityDomainReceiver.loadDeploymentAt` decodes the cell from bytes per load, and each fresh
-  `Materialized` builds its index on its first root read; patches already carry it. Routed to store-retained
-  (session holds the forced cell). Nothing to change in PrivateCellRoot or CellState.
+  `Materialized` builds its index on its first root read; patches already carry it. Fixed by store-retained
+  (bdfa9428c, c3a28038a: the session holds the light birth's validated post-cell, and
+  `loadServedAuthorityHeld` takes it when the served bytes are its bytes). Writers other than the ordinary birth
+  still re-decode; host-execution measures the 14% on the next candidate.
 - hot-path (no seat row now): per-entry persistence; the durable path still hashes whole lifecycle bytes
   (`ResourceBirthCodec.rootBytes`, `GuardedDurableCommit`): FORMAT (a) does not remove that linear work.
 - perf-client (a8d456c6e773efbb8): the theorem relating `DeployedBridge.cellRoot` to the cell's `rootCache`.
