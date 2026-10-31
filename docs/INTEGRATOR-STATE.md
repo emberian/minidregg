@@ -9,7 +9,7 @@ retired-agent hook names the live integrator to anyone who messages the old id).
 integrator; the integrator merges onto `integration/staging`, cuts batch candidates on hbox, gates them, moves main to
 gated candidates and names candidates to infra and the explorer.
 
-## Now (2026-10-31 09:20 EDT)
+## Now (2026-10-31 09:35 EDT)
 
 - **ember (10-31 09:10, via root): no rehearsal cut until she says.** Make the system as good as it can be: keep batching,
   gate once per batch, keep the newest green candidate as the fallback. Priorities: repair Hermes (batch 5's j14
@@ -23,13 +23,13 @@ gated candidates and names candidates to infra and the explorer.
   submitted (lookup `not-submitted`), and the write error was dropped; c88b88755 (batch 7) now surfaces it as writeError.
   Forge composed c-1c15-d1 PASSES every phase (residents, restart included). Umbrella-tree on batch 5: rc=0, 0 reds
   (TokenCensus fixed); its fixture re-record eb5cf8f8a is merged (staging 72ad281c5).
-- **Batch 6 74e1cfa10: BUILDING since 08:51** (integ-build6, PID file $I/build-b6.pid; batch 5's umbrella chain still in
-  $I/build.pid). Carries perf-apps b1, refusal clauses, resource-id fix, apps-e2e request file, exorcism (no fsync; Store
-  frame v2 8b49bf1e2/fe77ab521; 019f2e56f), perf-client residents end when storageRoot goes. Mac waiter busrjvxch (host stage running since 08:51).
-  On READY: gate15; name it to the explorer, exorcist (row 8 measurement), perf-apps (first page / per request), infra.
+- **Batch 6 74e1cfa10: READY 09:31** (host 2,165 s; consent, rust, pack rc=0). gate15 running since 09:32 (PID file
+  $I/gate-74e1.pid); its umbrella-tree is running in umbrella-src. Named to the explorer, exorcist (row 8), perf-apps and
+  infra (forge composed). Carries perf-apps b1, refusal clauses, the resource-id fix, the apps-e2e request file, exorcism
+  (no fsync; Store frame v2 8b49bf1e2/fe77ab521; 019f2e56f), and perf-client (residents end when their storageRoot goes).
 - **Batch 7 (staging b1bbe2369)**: resident final writeError c88b88755, demo-reds 58c17b1de, perf-client f95edc7bf +
   b34173dad (candidate ssh wrapper) + 394039fb1 (one shared codec Host per box under split tenancy), apps-e2e 78a20cb56,
-  perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime, audit round).
+  perf-apps b2 05c2b208b, hot-path a55855f18, perf-client 5415aecf7, iter-speed Mathlib import trim ee7a25ca7 (Host.Main 3,930 -> 2,895 modules; Pratt certificate for mersenne127P_prime; audit sound, pins only shrank), app-reds c0a49c8d7 (an argument object keyed `path` is an argument: Davros qualify's declaration-invalid).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 + Book entries migration +
   private-cells FORMAT (a) (eventHistory, authority to the trie root, mask []) + KeptCell Aux cache + fixture re-record.
 - Explorer on batch 5 vs 4: fsyncs 0; 128-ref credit 6.9 s -> 0.35 s; idle catch-up 61 s -> 0.36 s; first read after

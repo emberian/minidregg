@@ -73,6 +73,26 @@ path are measured after its fix.
 </content>
 </invoke>
 
+## A grain HTTP request and the first page (batch 6 `74e1cfa10`, EtherCalc, hbox)
+
+Measured on the featured-qualify path (`run6.sh fqD D fq j`, grain-journey's small app ids, so START is
+green there; `mini apps install` START is still red on app-reds' two items), then `page.sh` over the
+owner's route socket with the route cookie:
+
+| measure | value |
+|---|---|
+| create, install, share, start, enrol, page / (featured-qualify row) | 53 s (256 s on 10-29) |
+| one GET, warm (20 sequential) | min 280 ms, median 340 ms, max 440 ms |
+| the first page: `/` plus its 17 assets, one at a time | 8.5 s |
+| 10 concurrent GET / | all answered after 2.8 s (the resident dispatches one at a time) |
+
+Where one GET goes (the resident's own `dispatch-timing`/`author-timing` lines, median of the last
+requests): about 210 ms of dispatch, of which the SUBMIT Host call (the durable turn every request is)
+is 150 to 180 ms; authoring and the PLAN about 20 ms; inspecting the committed permit 14 to 17 ms; the
+journal fence 8 ms; the app's own answer a few ms. With ten requests in flight, each waits 1.1 to 1.6 s
+in the resident's queue. The first page is therefore about (assets + 1) times the SUBMIT turn: the lever
+is the Host's per-dispatch turn (hot-path) or several dispatches in one turn, not spk-host.
+
 ## Batch 2: before and after (EtherCalc, batch 5 + 40efdcff9 + batch 1, hbox)
 
 | measure | before (batch 1) | after |
