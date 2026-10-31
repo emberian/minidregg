@@ -183,7 +183,15 @@ Do not call mini_say or perform unrelated index, digest, or document maintenance
         args=self.root/'qualify-arguments.json'
         write(args,{'context':{'runId':'q'+secrets.token_hex(8)},'_miniInterfaceDigest':declaration_digest(d)})
         write(self.root/'qualify-request.json',{'requestId':request,'tool':'mini_app_'+self.alias+'_qualify','arguments':str(args)})
-        done=self.fixed('controller-tool',request,'mini_app_'+self.alias+'_qualify',args)
+        try:
+            done=self.fixed('controller-tool',request,'mini_app_'+self.alias+'_qualify',args)
+        except RuntimeError:
+            # The foreground call failed before a definite reply: keep the controller's own account
+            # (the retained tool result and its journal) next to the failure, before teardown.
+            for verb in ('controller-tool-result','controller-journal'):
+                try:self.fixed(verb,*([request] if verb.endswith('result') else []))
+                except RuntimeError:pass
+            raise
         value=read(done)
         result=value.get('result',{})
         text=result.get('text','')
