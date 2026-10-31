@@ -30,9 +30,9 @@ same step. Closed items are never re-reported.
   overlaid as **candidates/acc7cfa03-attidx** (both copies of mini replaced; hotpatch-candidate.sh fixed to replace every
   copy by digest). Queued: gate15 PHASES="j14 composed" SUF=-hp1 on it, launching when both acc7 gates exit
   ($I/hp-attidx.pid waits; then $I/gate-acc7-attidx.pid). Forge composed of batch 7 queued by infra.
-- **Staging dc0b7c935 (batch 8 so far)**: iter-speed 7800d3199 + 697db7664 (native-loop: a lane's Lean change reaches a
+- **Staging 48cea3caf (batch 8 so far; boundary table: Theory may import Std, for SparseMap)**: iter-speed 7800d3199 + 697db7664 (native-loop: a lane's Lean change reaches a
   native candidate in ~8 min), tower split 0eab28db7, exorcist 47b7cb2e1 + c763e3ead, perf-client 783b460cb + b6 +
-  b940b3f50, retained-mode 675a80745 (Theory/Retained.lean; audit sent 10:47: correctness sound, cost budgets do not exclude recompute, no Host-shaped node yet, pins owed) + 1d4ff4efb (docs).
+  b940b3f50, retained-mode 62aa5fcf8 (footprint-bound renames, all 35 pins, Theory/SparseMap.lean = L0's foundation; round-2 audit running) over 675a80745 (Theory/Retained.lean; audit sent 10:47: correctness sound, cost budgets do not exclude recompute, no Host-shaped node yet, pins owed) + 1d4ff4efb (docs).
   Batch 8 is the whole-tree build these owe.
 - **Next shared-interface change: retained-mode L0** (Theory.Store's Store becomes a persistent extensional tree map,
   ~66 files, WorldCompact deleted): its own cut with one whole-tree build; FORMAT (private cells (a), hot-path row 11,
