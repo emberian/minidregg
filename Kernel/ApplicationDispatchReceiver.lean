@@ -337,7 +337,7 @@ theorem mismatched_route_never_submits (config : Config) {target : Durable}
     (mismatch : routeMatches config admitted constraint = false) :
     receiveAdmitted config old ingress admitted (some constraint) refusal =
       pure (.noRecordRefused refusal) := by
-  simp [receiveAdmitted, absent, mismatch]
+  simp [receiveAdmitted, DurableReceiverIO.Loaded.firstIndex_eq, absent, mismatch]
 
 private def receiveVerifiedWith (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)

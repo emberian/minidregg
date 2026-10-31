@@ -334,13 +334,12 @@ theorem startHeight_ok {retained : Option Anchor} {loaded : Durable} {chains : L
       cases accepted
       exact ⟨Nat.le_refl _, loaded.withinLog, fun _ absent => by cases absent⟩
   | some anchor =>
-      unfold startHeight at accepted
       cases checked : checkStore anchor loaded chains with
-      | error detail => rw [checked] at accepted; cases accepted
+      | error detail => simp only [startHeight, checked] at accepted; cases accepted
       | ok done =>
           cases done
-          rw [checked] at accepted
-          cases accepted
+          simp only [startHeight, checked, Except.ok.injEq] at accepted
+          subst accepted
           obtain ⟨started, within, chained⟩ := checkStore_ok chainsExact checked
           refine ⟨Nat.le_max_left _ _, Nat.max_le.mpr ⟨loaded.withinLog, within⟩, ?_⟩
           intro other same
@@ -389,7 +388,7 @@ structure Anchored (config : Config) (target : Durable) where
   private mk ::
   retained : Option Anchor
   /-- The base (height, state) of the Store's open this admission resumed over. -/
-  storeBase : Nat × State
+  storeBase : Nat × DurableCheckpoint.State
   start : Opened config
   /-- The start's base is the Store's. -/
   startBase : start.durable.baseHeight = storeBase.1 ∧ start.durable.base = storeBase.2
