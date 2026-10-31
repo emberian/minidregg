@@ -52,7 +52,7 @@ root is NEUTRAL: admitted only when a judged authorizer of the same patch names 
 -/
 module
 
-public import Compiler.PersistedCodecTags
+public import Compiler.PersistedCodecTags.Core
 public import Compiler.WorldKindCell
 public import Compiler.DeclaredEffectCell
 public import Compiler.CredentialAuthorityCell

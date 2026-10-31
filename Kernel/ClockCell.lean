@@ -30,7 +30,7 @@ The old clock cell shape refuses; re-genesis seeds `now` from explicit params.
 -/
 module
 
-public import Compiler.PersistedCodecTags
+public import Compiler.PersistedCodecTags.Core
 public import Compiler.StoreCodec
 public import Theory.AxiomPin
 

@@ -14,7 +14,7 @@ the receiver re-runs THIS front end on the package's sources and admits only a
 package naming this identity (`ObjectiveBendNativeAdmission.SourceSelection`). -/
 module
 
-public import Compiler.PersistedCodecTags
+public import Compiler.PersistedCodecTags.Core
 public import Compiler.ObjectiveBendParse
 public import Compiler.ObjectiveBendElaborate
 public import Compiler.ObjectiveBendC4
@@ -23,7 +23,7 @@ public import Compiler.ObjectiveBendTermWire
 public import Compiler.ObjectiveBendFrontEnd
 public import Compiler.ObjectiveBendLaw
 public import Compiler.Sha256
-meta import Compiler.PersistedCodecTags
+meta import Compiler.PersistedCodecTags.Core
 meta import Compiler.ObjectiveBendParse
 meta import Compiler.ObjectiveBendElaborate
 meta import Compiler.ObjectiveBendC4
