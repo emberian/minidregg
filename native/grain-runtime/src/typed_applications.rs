@@ -432,6 +432,22 @@ mod tests {
 
     const WBO: &str = include_str!("../../../apps/interfaces/wbo.json");
 
+    /// Davros qualification args are objects keyed `path`; the executor must resolve them as
+    /// arguments (not as path-part bindings) and prepare the first request.
+    #[test]
+    fn qualification_resolves_arguments_that_are_named_path() {
+        let dav = entry("dav", DAVROS);
+        let mut first: Option<Value> = None;
+        let mut forward = |request: Value| -> Value {
+            first.get_or_insert(request);
+            http(500, b"{}", "1")
+        };
+        let result = qualify_tool(&dav, &json!({"runId":"qb44d7585667c47f0"}), &mut forward);
+        assert!(!result["text"].as_str().unwrap().contains("declaration-invalid"), "{result}");
+        let request = first.expect("the first qualification step reaches the controller");
+        assert_eq!(request["operation"], "directory.create", "{request}");
+    }
+
     #[test]
     fn foreground_names_digest_and_qualification_context_are_checked() {
         let wbo = entry("wbo", WBO);
