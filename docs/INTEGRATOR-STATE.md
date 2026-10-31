@@ -17,19 +17,13 @@ gated candidates and names candidates to infra and the explorer.
   its own execute entry on /usr/local/libexec/mini-grain-bwrap, app-range entries claimed per world; grant_acl stops at the
   world root c76dbe0c7; gate15 = gate14 + j14 socket parent 711; /ci is 711). Umbrellas all green; fixtures 5c00cc4f3
   merged. Flatness: submit_cpu 106 -> 380 (3.6x), propose_cpu 4.05x; walls and get PASS.
-- **Batch 5 1c151fce4: READY 07:52** (host stage 1,005 s, the lake-threads fix's first measured cut; consent 150 s, rust
-  191 s). Contents: exorcism 4f7972a62 (no fsync anywhere), module-cost, hot-path authority snapshot 4fb1a0e17, app-reds
-  route/teardown/ACL, batch 4 fixtures. **gate15 running** (PID 2738976 in gate-1c15.pid; started 07:53 under the home
-  lock path, so its remaining world-ups are not serialised against lanes): enrol PASS, tour 73/73 PASS; hbox composed
-  residents UNKNOWN (forge composed decides); j14-apps FAIL: the room-refusal ask got no Hermes reply ("Hermes sent no
-  reply to the ask: refused", /ci/j-1c151f/journey.log). Suspected cause: perf-apps' START crash loop ("attestation
-  resource outside supported profile", 20-digit member-namespace resource ids), fixed 40efdcff9.
-  **Running**: gate15 on overlay **1c151fce4-resid** (batch 5 + spk-host crate from 40efdcff9), PHASES="j14 composed",
-  SUF=-hp1, PID in gate-1c15-resid-hp1.pid (Mac waiter bmk5rq363). Known red it will likely show: app-reds' Davros run 17
-  traced the j14 "refused" probe to Hermes's final `mini_say` resolving `refused` / lookup `not-submitted` with exit 0
-  (reply text correct, never delivered); app-reds owns it (run 18 captures the room-operations record). Forge composed
-  decides residents.
-- **Batch 6 (staging cc55a3e56+)**: the resource-id fix, exorcism 16f2d046f, 8b49bf1e2/fe77ab521 (Store calls carry files in the frame, v2; Host and helper from one build) and 019f2e56f and whatever lands. Cut it when batch 5's gate and umbrella are
+- **Batch 5 1c151fce4: READY 07:52, gate15 FAIL** (host 1,005 s, consent 150 s, rust 191 s). enrol PASS, tour 73/73,
+  hbox composed rooms/churn/documents/apps/connector PASS, residents UNKNOWN (forge decides); flatness-get PASS,
+  flatness-submit FAIL. **j14-apps FAIL: "Hermes sent no reply to the ask: refused"**, reproduced on overlay
+  1c151fce4-resid (spk-host crate from 40efdcff9) at -hp1 (/ci/j-1c151f-hp1/journey.log), so the resource-id crash is not
+  its cause. app-reds owns it (Davros run 18 reads the final mini_say outcome). Batch 5's umbrella-tree and rerecord are
+  still running in umbrella-src (Mac waiter bsakk28rk).
+- **Batch 6 (staging cfe5c24d5+)**: perf-apps b1 23738a4ce, app-reds' refusal clauses 5c4f73459, the resource-id fix, exorcism 16f2d046f, 8b49bf1e2/fe77ab521 (Store calls carry files in the frame, v2; Host and helper from one build) and 019f2e56f and whatever lands. Cut it when batch 5's gate and umbrella are
   in and enough has accumulated (minimal-checks ruling: cuts spaced out to accumulate perf work).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
   Store epoch) + Book entries migration (~50 consumers) + private-cells FORMAT (a): eventHistory and authority to the trie
@@ -115,8 +109,8 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 | a4cb65af3 | GATE GREEN (batch 3); main's base; fallback ship |
 | eca98bde7-resvar2(-zai) | overlays of batch 2 with the resident /var fix (and Z.AI); forge demo build |
 | b9450147f | GATE GREEN (batch 4, with deploy hotpatch 9fdef19bd): rehearsal-3 candidate; main's base |
-| 1c151fce4 | READY (batch 5); gate15 running, j14 red |
-| 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64); gate15 -hp1 queued after batch 5's gate |
+| 1c151fce4 | READY (batch 5); gate15 FAIL: j14 `refused` ask, residents for forge |
+| 1c151fce4-resid | overlay: batch 5 + spk-host crate from 40efdcff9 (resource id any non-zero u64); gate15 -hp1: j14 same `refused` red |
 
 ## Open reds and owners
 
