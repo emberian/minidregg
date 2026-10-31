@@ -11,11 +11,22 @@ git history (e5dfc3ddb and earlier).
 - **The Lean v4.35.0 bump cdb399b47 is building ALONE on hbox** (launched 22:03: `integ-build4.sh cdb399b47;
   umbrella-minidregg.sh cdb399b47`, SEATS=12 MEM=64G, PID in build.pid; whole-tree rebuild, 797-module closure).
   HOLD LEAN is in force until its host stage is green: then main moves to cdb399b47 and HOLD LEAN lifts.
-- **Next: ONE batch candidate** = cdb399b47 + staging (merged cleanly on the Mac as 108d6f5ef on integ/batch-435:
-  hot-path batches 1-3, app-reds 5f22e6324 namespace + 659301aa4 NO_RECORD, 4bee4b608 controller-unit naming, scout
-  docs, the reveal.js seed and install-hermes fixes) + the import-boundary refactor (below) + whatever the live lanes
-  send before the bump is READY. No single-fix candidates (ember: never wait 40 minutes for a few tiny fixes): between
-  candidates, test on hotpatched kept worlds.
+- **Next: ONE batch candidate** = staging (integ/batch-435 in the landing worktree), built with integ-build5.sh (umbrellas
+  in the second warm tree umbrella-src after READY; rerecord from there). Contents on cdb399b47: staging's hot-path
+  batch 1 + app-reds 5f22e6324/659301aa4/4bee4b608 + seed/hermes scripts; import-boundary b7bf3a8b2 (tier table green,
+  no cycle; Compiler.Signature/NatDigits255Fast/StreamCodec nucleus -> Theory, Effects Revival keystones ->
+  Kernel/EffectsRevival, moveEffect -> Kernel/MoveEffect); no-loop volume helper 111985198, custodian d786b5d2c, custodian
+  uid range 28be1c40c, bend publish/answer hints 35f008d3d; demo-reds 8982fa265 (G3 purse 4 prices: a completed one-answer
+  tally costs 91,331, grant 1,225,000 = 12 sequential; G4 one height clock; G5 named repeats; G6 web forms exact retries);
+  private-cells increment 1 dd0e6efbd (audited: nothing vacuous; follow-ups sent); iter-speed umbrella-tree 2535ea2e1 +
+  warm-link/lane-tree 7143777f0; rerecord staleness by elaboration + doc-write re-record fb8a638f8; explorer findings 1-5.
+  Pending to fold if they arrive before launch: iter-speed's v4.35 fixes for Effects/Revival/Hosted* (ResearchWip),
+  hot-path's consent snapshot batch (supersedes staging 29f81ea1d/24a14656f; includes JDV 1a4f3a623), private-cells'
+  premises_inhabited rename. Launch waits for iter-speed's "clear" (its hbox lane-pool init reads integ/src once after
+  the bump's Minidregg umbrella).
+- hbox grains root: app-reds made /var/lib/mini-vars-backing a loop-mounted prjquota ext4 (/tank/lanes/vars-backing.img,
+  24 GB sparse) named by /etc/mini-spk-volumes/vars-backing; new world-ups bind <backing>/<store> as vars. NOT in fstab:
+  after an hbox reboot run `sudo mount -o loop,prjquota /tank/lanes/vars-backing.img /var/lib/mini-vars-backing`.
 - Rehearsal 3 runs be4ef7510 (only fully gated candidate: tour 73/73, j14-apps, composed all green). 7d90da717 is READY on
   host stages only (Fixtures umbrella red: Native fixtures stale against the new event ids; no tour/composed gate). Infra
   told (22:05): ship be4ef7510 + SEED_OVERLAY of 460ad0fd7 and 929eac696 for now; the batch candidate replaces it once gated.
@@ -28,11 +39,11 @@ The session was pruned 10-30 evening; the root re-adopted the veteran lanes with
 |---|---|---|
 | hot-path | a86738fc1dfae6429 | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
 | infra (fresh) | aa72653a8ce442178 | Firecracker (or similar) lite VM inside the forge demo host, then the fresh ship; forge composed container |
-| app-reds | a17f4172949caca14 | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
+| app-reds | a17f4172949caca14 and ad85d40779880420c | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
 | private cells | a74ad8d84ada5627a | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
 | iteration speed | ab2786fe1172f5683 | the bump cdb399b47, umbrella-tree.sh (second warm tree for integ-build5) |
 | explorer | a3e5d6dbcd68e616c | perf and behaviour probes on candidates; docs/EXPLORER-FINDINGS.md |
-| import boundary (sub-Opus of this integrator) | a96542041e5be6db1 | the tier-table ruling, lane/import-boundary off cdb399b47, in /Users/ember/dev/minidregg-lanes/iter-speed-land (lent from iteration speed; release it when done) |
+| demo-reds (sub-Opus of this integrator, done) | a64c387f3e638aa63 | G3-G6 (lane/demo-reds 8982fa265); left: no bend top-up verb, `bend show` prints "phase ?" after an activity ends |
 
 No proofs or scout lane: the integrator owns umbrella reds and the fixture re-record.
 
