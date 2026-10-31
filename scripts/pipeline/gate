@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# scripts/pipeline/gate SHA -- the gate for candidate $BUILDER_ROOT/candidates/SHA (was hbox's box-local gate15.sh).
+# harness = the candidate's own source.tar (HARNESS=<ref> overlays scripts/, deploy/spk-host and the journey harness
+# from that ref). tour (J0-J8 world + JWF dry) || composed (keep-going, edge dregg-infra) || enrol-resume || j14-apps,
+# in parallel; then flatness alone (law 17, never another run's verdict); then gate-from-runs.py; then the sweep.
+# World-ups under the world-up flock. PHASES="tour composed enrol j14" selects phases; SUF names a rerun.
+# Box knobs (env; defaults are hbox's): BUILDER_ROOT (/home/hbox/lanes/integ), GATE_RUNS (the world roots, /ci),
+# WORLD_UP_LOCK (/tank/lanes/world-up.lock), EDGE (BUILDER_ROOT/dregg-infra-EDGE_REV/edge/mini), PLAYWRIGHT_DIR.
+# Inputs staged once under BUILDER_ROOT: j14-hroot (Hermes runtime root), j14-data (davros.spk, inventory.json),
+# j14-secrets/openrouter.key (never printed), spk-cache.
+set -u
+umask 022   # install-user-world refuses a group-writable controller-world.py (mode & 0o7022)
+I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; SHA=${1:?}; C=$I/candidates/$SHA; S8=${SHA:0:8}; G=$I/gate-$S8${SUF:-}; LOG=$I/COMMANDS.log
+EDGE=${EDGE:-$I/dregg-infra-${EDGE_REV:-e29997d}/edge/mini}; R=${GATE_RUNS:-/ci}; LOCK=${WORLD_UP_LOCK:-/tank/lanes/world-up.lock}
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)} DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}
+export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH
+export PLAYWRIGHT_DIR=${PLAYWRIGHT_DIR:-$I/pw/node_modules}
+say(){ echo "$(date -Is) $*" >> $LOG; }
+[ -f $C/READY ] || { say "gate: no READY $C"; exit 2; }
+mkdir -p $G && SRC=$G/src && mkdir -p $SRC && tar -xf $C/source.tar -C $SRC
+if [ -n "${HARNESS:-}" ]; then   # the harness (scripts/, native/resource-client scripts, journey.d) from HARNESS over the candidate source
+  git -C $I/src fetch -q origin && git -C $I/src archive "$HARNESS" scripts deploy/spk-host native/resource-client/journey.d $(git -C $I/src ls-tree --name-only "$HARNESS" native/resource-client/ | grep -E '\.(py|sh)$') | tar -x -C $SRC || { say "gate: harness overlay $HARNESS failed"; exit 3; }
+fi
+say "GATE $S8 start (harness = candidate source)"
+tour() {
+  local RUN=$R/t-${S8:0:6}${SUF:-} M=$G/tour-manifest.json
+  printf '{"host":"%s","mini":"%s","store":"%s","verifier":"%s"}\n' $C/bin/minidregg-host $C/bin/mini $C/bin/minidregg-link-sqlite-store $C/bin/minidregg-credential-signature-verifier > $M
+  (cd $SRC && flock -o $LOCK env JOURNEY_ONLY="J0 J1 J2 J3 J4 J5 J6 J7 J8" native/resource-client/journey.sh $M $RUN > $G/journey.log 2>&1); echo "journey rc=$?" >> $G/tour.log
+  local W=$RUN/world
+  export MINI=$C/bin/mini HOST=$C/bin/minidregg-host CONFIG=$W/deployment/pinned-config.json
+  export SOCKET=$(jq -r .socket $W/newcomer-workspace/workspace.json) SPONSOR_WS=$W/sponsor WS=$W/newcomer-workspace
+  export SUBJECT=$(jq -r .subject $W/newcomer-workspace/workspace.json) STEP_DIR=$RUN/steps/JWF-dry
+  mkdir -p "$STEP_DIR" "$(dirname "$SOCKET")"; chmod 700 "$(dirname "$SOCKET")"; rm -f "$SOCKET"
+  setsid nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" > $G/serve-jwf.log 2>&1 < /dev/null & echo $! > $G/serve-jwf.pid
+  for i in $(seq 1 100); do [ -S "$SOCKET" ] && break; sleep 0.3; done; sleep 2
+  bash $SRC/native/resource-client/journey.d/jweb-frontend.sh --dry > $G/jwf.out 2> $G/jwf.err; echo "jwf rc=$?" >> $G/tour.log
+  kill "$(cat $G/serve-jwf.pid)" 2>/dev/null
+  awk -F'\t' '$1 ~ /^(PASS|FAIL|UNCONFIGURED|UNJUDGED)$/ {print $2"\t"$1"\t"$3}' $G/jwf.out > $G/TOUR.tsv
+  say "GATE $S8 tour: $(awk -F'\t' '{print $2}' $G/TOUR.tsv | sort | uniq -c | tr '\n' ' ')"
+}
+composed() {
+  local RUN=$R/c-${S8:0:6}${SUF:-} N=5 PORT=${PORT:-22640} CV=FAIL CDETAIL="world not built"
+  mkdir -p $RUN/log; local W=$RUN/w RC=$SRC/native/resource-client
+  export JWORLD_ROUTE_FRONT_PORT=${JWORLD_ROUTE_FRONT_PORT:-22643} JWORLD_MANAGEMENT=${JWORLD_MANAGEMENT:-distinct} JWORLD_ROOT_HANDOFFS=${JWORLD_ROOT_HANDOFFS:-1}
+  if flock -o $LOCK "$EDGE/journey/jworld-scratch.sh" up "$EDGE" "$C" "$W" "$N" "$PORT" > $RUN/log/world.out 2> $RUN/log/world.err; then
+    export MINI_TEST_SPK=${MINI_TEST_SPK:-$(TEST_SPK=ethercalc sh $SRC/scripts/spk-platform/fetch-test-spk.sh $I/spk-cache)}   # the box default /srv/lanes/prod-spk need not exist
+    mkdir -m 700 $RUN/composed; local EXTRA=()
+    if bash $SRC/scripts/spk-platform/composed-inputs.sh "$W/WORLD-IDENTITY.json" "$C" "$RUN/inputs" > $RUN/log/inputs.out 2> $RUN/log/inputs.err; then
+      read -r -a EXTRA < "$RUN/inputs/composed-args.txt"; else say "GATE $S8 composed-inputs refused: $(tail -n1 $RUN/log/inputs.err)"; fi
+    if python3 $RC/composed-scenario.py spec "$W/WORLD-IDENTITY.json" "$RUN/composed/state" "$N" jd3 "${EXTRA[@]}" > $RUN/composed/spec.json 2> $RUN/log/spec.err; then
+      python3 $RC/composed-scenario.py gate $RUN/composed/spec.json $RUN/composed/gate.json > $RUN/log/composed.out 2> $RUN/log/composed.err
+      if [ -s $RUN/composed/gate.json ]; then CV=$(jq -r .verdict $RUN/composed/gate.json)
+        CDETAIL=$(jq -r '[.phases | to_entries[] | "\(.key)=\(.value | tostring | .[0:90])"] | join("; ")' $RUN/composed/gate.json)
+      else CDETAIL="composed wrote no result: $(tail -n1 $RUN/log/composed.err)"; fi
+    else CDETAIL="spec refused: $(tail -n1 $RUN/log/spec.err)"; fi
+    if [ -n "${KEEP_WORLD:-}" ]; then say "GATE $S8 composed world KEPT UP at $W (inputs $RUN/inputs); down: world-down.sh $RUN/inputs then jworld-scratch.sh down $W"
+    else
+    [ -f $RUN/inputs/broker-setup/recovery.json ] && bash $SRC/scripts/spk-platform/world-down.sh $RUN/inputs > $RUN/log/world-down.log 2>&1
+    "$EDGE/journey/jworld-scratch.sh" down "$W" > $RUN/log/down.log 2>&1
+    fi
+  else CDETAIL="scratch world: $(grep -v '^jworld ok' $RUN/log/world.err | tail -n1)"; fi
+  jq -n --arg v "$CV" --arg d "$CDETAIL" --arg sums "$(sha256sum $C/SHA256SUMS | cut -d' ' -f1)" '{composed:$v, detail:$d, candidateSha256sums:$sums}' > $G/composed-result.json
+  say "GATE $S8 composed $CV: $CDETAIL"
+}
+enrol() { sh $SRC/native/resource-client/enrol-resume-acceptance.sh $C/bin/minidregg-host $C/bin/mini $C/bin/minidregg-link-sqlite-store $C/bin/minidregg-credential-signature-verifier $R/e-${S8:0:6}${SUF:-} > $G/enrol-resume.log 2>&1; say "GATE $S8 enrol-resume rc=$?"; }
+# j14-apps (rehearsal-3 meat): one Store, Hermes as resident with typed Davros tools (refused without the room grant,
+# then PUT 201 and GET 200 through Mini with admission/settlement receipts), and a separate human GET of the agent's
+# content. Inputs staged once from the apps-agents lane: $I/j14-hroot (Hermes runtime root, rebound to this candidate),
+# $I/j14-data (davros.spk, inventory.json), $I/j14-secrets/openrouter.key (never printed).
+j14apps() {
+  local RUNJ=$R/j-${S8:0:6}${SUF:-}; local J=$RUNJ
+  mkdir -p -m 755 $J/bin $J/cand && mkdir -p -m 711 $RUNJ/s && mkdir -p -m 700 $RUNJ/step && ln -sfn $RUNJ $G/j14
+  cp -p $C/bin/* $J/bin/ 2>/dev/null; cp -p $SRC/deploy/spk-host/spk-ingest $J/bin/spk-ingest
+  python3 - "$C" "$J" <<'PY' || { printf 'j14-apps\tFAIL\tmanifest relocation failed\n' > $G/j14.tsv; return; }
+import hashlib, json, sys
+from pathlib import Path
+c, j = Path(sys.argv[1]), Path(sys.argv[2])
+m = json.loads((c / 'manifest.json').read_text())
+for k, v in list(m.items()):
+    if isinstance(v, str) and '/bin/' in v and (j / 'bin' / Path(v).name).is_file():
+        p = j / 'bin' / Path(v).name
+        assert hashlib.sha256(p.read_bytes()).hexdigest() == m['sha256'][k], k
+        m[k] = str(p)
+(j / 'cand' / 'manifest.json').write_text(json.dumps(m, indent=2) + '\n')
+PY
+  bash $SRC/deploy/hermes/build-runtime-root --rebind $I/j14-hroot $J/cand > $J/rebind.json 2> $J/rebind.err || { printf 'j14-apps\tFAIL\thermes root rebind failed; %s/rebind.err\n' "$J" > $G/j14.tsv; return; }
+  ( cd $SRC && env J14_APPS_UNTIL=probe MINI=$J/bin/mini HOST=$J/bin/minidregg-host STORE=$J/bin/minidregg-link-sqlite-store \
+      VERIFIER=$J/bin/minidregg-credential-signature-verifier GRAIN_RUNTIME=$J/bin/grain-runtime TEST_PROVIDER=$C/fixtures/mini-hermes-test-provider \
+      J14_ORACLE_BIN=$J/bin J14_ORACLE_CANDIDATE_MANIFEST=$J/cand/manifest.json J14_HERMES_ROOT=$I/j14-hroot \
+      J14_ORACLE_SPK=$I/j14-data/davros.spk J14_ORACLE_DATA_SOURCE=$I/j14-data J14_ORACLE_INVENTORY=$I/j14-data/inventory.json \
+      J14_ORACLE_SOCKET_PARENT=$RUNJ/s J14_ORACLE_ORCHESTRATION_COMMIT=${SHA:0:9} \
+      J14_APPS_DECLARATION=$SRC/apps/interfaces/davros.json J14_APPS_POOL_KEY=$I/j14-secrets/openrouter.key JOURNEY_STEP_DIR=$RUNJ/step \
+      python3 native/resource-client/journey.d/j14-apps.py > $J/journey.log 2>&1 ); local rc=$?
+  local res; res=$(ls $RUNJ/step/*/result.json 2>/dev/null | head -1)
+  if [[ $rc == 0 && -n $res ]] && jq -e '.passed == true' "$res" >/dev/null; then
+    printf 'j14-apps\tPASS\t%s\n' "$(jq -r '.rows | join(",")' "$res")" > $G/j14.tsv
+  else
+    printf 'j14-apps\tFAIL\trc=%s; %s/journey.log\n' "$rc" "$J" > $G/j14.tsv
+  fi
+  say "GATE $S8 j14-apps: $(cut -f2,3 $G/j14.tsv | tr '\t' ' ' | cut -c1-200)"
+}
+P=" ${PHASES:-tour composed enrol j14} "
+[[ $P == *" tour "* ]] && { tour > $G/tour.log 2>&1 & echo $! > $G/tour.pid; }
+[[ $P == *" composed "* ]] && { composed > $G/composed.log 2>&1 & echo $! > $G/composed.pid; }
+[[ $P == *" enrol "* ]] && { enrol & echo $! > $G/enrol.pid; }
+[[ $P == *" j14 "* ]] && { j14apps > $G/j14-phase.log 2>&1 & echo $! > $G/j14.pid; }
+wait
+[ -f $G/TOUR.tsv ] || cp ${TOUR_FROM:-/nonexistent} $G/TOUR.tsv 2>/dev/null
+# Law 17 is mandatory, including phase-selective reruns: never reuse another run's
+# flatness verdict. It runs after the other workloads to avoid timing their contention.
+FROOT=$R/f-${S8:0:6}${SUF:-}
+printf 'flatness-submit\tFAIL\tnot completed\nflatness-get\tFAIL\tnot completed\n' > "$G/flatness.tsv"
+if [[ -f $SRC/scripts/perf/flatness-gate.sh ]]; then
+  MINI_MARKET_CACHE=$I/spk-cache bash "$SRC/scripts/perf/flatness-gate.sh" "$C" "$FROOT" \
+    "${FLATNESS_N:-1000}" "${FLATNESS_LO:-10}" > "$G/flatness.log" 2>&1 &
+  echo $! > "$G/flatness.pid"
+  wait "$(cat "$G/flatness.pid")"; flatness_rc=$?
+  [[ ! -s $FROOT/gate.tsv ]] || cp "$FROOT/gate.tsv" "$G/flatness.tsv"
+  # Failure before fresh-root creation must not adopt an older green result.
+  if [[ $flatness_rc != 0 ]]; then
+    printf 'flatness-run\tFAIL\texit=%s; %s/flatness.log\n' "$flatness_rc" "$G" >> "$G/flatness.tsv"
+  fi
+else
+  echo 'candidate harness lacks scripts/perf/flatness-gate.sh' > "$G/flatness.log"
+fi
+say "GATE $S8 flatness: $(tr '\n' ';' < "$G/flatness.tsv")"
+python3 $EDGE/gate-from-runs.py --sums $(sha256sum $C/SHA256SUMS | cut -d' ' -f1) --commit $SHA --ran-on "$(hostname)" --composed $G/composed-result.json --tour $G/TOUR.tsv --tour "$G/flatness.tsv" $([[ -f $G/j14.tsv ]] && echo --tour $G/j14.tsv) > $G/gate.json 2> $G/gate.err
+say "GATE $S8 verdict $(jq -r .verdict $G/gate.json 2>/dev/null)"
+# lane trash (ember 2026-10-31): gate roots and worlds of candidates two or more behind, unless kept ($I/keep) or in use
+BUILDER_ROOT=$I GATE_RUNS=$R "$SRC/scripts/pipeline/sweep" >> $G/sweep.log 2>&1 || "$(dirname "$0")/sweep" >> $G/sweep.log 2>&1

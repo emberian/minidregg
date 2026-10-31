@@ -10,15 +10,14 @@
 # One round for tip SHA:
 #   1. build: scripts/pipeline/integ-build SHA (rust-check, host, consent, rust, pack -> candidates/SHA/READY; then
 #      the umbrella stage in umbrella-src and the fixture rerecord), detached, stage lines in $I/COMMANDS.log
-#      ($I/integ-build6.sh instead when the box still has that local copy);
-#   2. gate: once READY, $I/gate15.sh SHA (tour J0-J8 + JWF, composed, enrol-resume, j14-apps, then flatness)
+#   2. gate: once READY, scripts/pipeline/gate SHA (tour J0-J8 + JWF, composed, enrol-resume, j14-apps, then flatness)
 #      beside the umbrellas; every red gate row is rerun once (PHASES=<row> SUF=-r1) to answer "reruns?".
-#      A box without gate15.sh reports the gate as "not run here" (a red row: green never moves ungated);
+#      A tree without scripts/pipeline/gate reports the gate as "not run here" (a red row: green never moves ungated);
 #   3. reds: board/REDS.md rewritten whole (stage, signature, reruns?, same place as last round?, suspect commits
 #      since `green`, owner), committed straight to main by path (temporary index, never a worktree);
 #   4. green: all stages and rows pass -> `git push origin SHA:refs/heads/green`.
 # Then it waits for a new tip (BUILDER_POLL_S, default 300). It never builds two rounds at once and never
-# touches another process: integ-build6 and gate15 keep their own PID files and locks. Disk: integ-build6
+# touches another process: integ-build and gate keep their own PID files and locks. Disk: integ-build
 # stops below 25 GB free; the builder logs it as a red and waits.
 set -uo pipefail
 I=${BUILDER_ROOT:-/srv/integ}; LOG=$I/COMMANDS.log; ST=$I/builder; mkdir -p "$ST"
@@ -41,13 +40,14 @@ round() {
   # 1. the build (detached: it holds build.lock and continues into the umbrellas after READY)
   # integ-build at the tip being built (src is still at the previous round's commit until integ-build checks out SHA)
   local build=$ST/integ-build; git -C "$REPO" show "$sha:scripts/pipeline/integ-build" > "$build" && chmod +x "$build"
-  [ ! -x "$I/integ-build6.sh" ] || build=$I/integ-build6.sh
   ( cd "$I" && BUILDER_ROOT=$I "$build" "$sha" > "$ST/build-$s8.out" 2>&1 ) & local bpid=$!; echo $bpid > "$ST/build.pid"
   while kill -0 $bpid 2>/dev/null && [ ! -f "$I/candidates/$sha/READY" ]; do sleep 30; done
   # 2. the gate, beside the umbrellas
   local gpid=""
-  if [ -f "$I/candidates/$sha/READY" ] && [ -x "$I/gate15.sh" ]; then
-    ( cd "$I" && ./gate15.sh "$sha" > "$ST/gate-$s8.out" 2>&1 ) & gpid=$!; echo $gpid > "$ST/gate.pid"
+  # the gate and sweep run from a copy taken now: integ-build may check out the next tip in src while they run
+  if [ -f "$I/candidates/$sha/READY" ] && [ -x "$I/src/scripts/pipeline/gate" ]; then
+    cp "$I/src/scripts/pipeline/gate" "$I/src/scripts/pipeline/sweep" "$ST/"
+    ( cd "$I" && "$ST/gate" "$sha" > "$ST/gate-$s8.out" 2>&1 ) & gpid=$!; echo $gpid > "$ST/gate.pid"
   fi
   wait $bpid; [ -z "$gpid" ] || wait $gpid
   local G=$I/gate-$s8 rerun=""
@@ -59,7 +59,7 @@ round() {
     grep -q $'\tFAIL' "$G/j14.tsv" 2>/dev/null && phases="$phases j14"
     grep -q 'enrol-resume rc=[1-9]' <(grep "GATE $s8 " "$LOG") && phases="$phases enrol"
     if [ -n "$phases" ] || grep -q $'\tFAIL' "$G/flatness.tsv" 2>/dev/null; then
-      ( cd "$I" && PHASES="${phases# }" SUF=-r1 ./gate15.sh "$sha" > "$ST/gate-$s8-r1.out" 2>&1 ); rerun=$I/gate-$s8-r1
+      ( cd "$I" && PHASES="${phases# }" SUF=-r1 "$ST/gate" "$sha" > "$ST/gate-$s8-r1.out" 2>&1 ); rerun=$I/gate-$s8-r1
     fi
   fi
   reds "$sha" "$G" "$rerun"
@@ -89,7 +89,7 @@ reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
     awk -F'\t' '$2 == "FAIL" { print $1 "\t" $3 }' "$G/TOUR.tsv" "$G/flatness.tsv" "$G/j14.tsv" 2>/dev/null |
       while IFS=$'\t' read -r row detail; do add "gate:$row" "$row FAIL" "${detail:0:240}"; done
     [ "$(jq -r .composed.verdict "$G/gate.json")" = PASS ] || add gate:composed "composed $(jq -r .composed.verdict "$G/gate.json")" "$(jq -r .composed.detail "$G/gate.json" | cut -c1-300)"
-  elif [ -f "$I/candidates/$sha/READY" ] && [ ! -x "$I/gate15.sh" ]; then add gate "not run here" "$(hostname) has no gate15.sh yet: green does not move"
+  elif [ -f "$I/candidates/$sha/READY" ] && [ ! -x "$I/src/scripts/pipeline/gate" ]; then add gate "not run here" "the tree has no scripts/pipeline/gate: green does not move"
   elif [ -f "$I/candidates/$sha/READY" ]; then add gate "no verdict" "$G/gate.json missing"
   fi
   local n; n=$(grep -c . "$sig" || true)
