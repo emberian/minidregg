@@ -20,20 +20,21 @@ git history (e5dfc3ddb and earlier).
   host stages only (Fixtures umbrella red: Native fixtures stale against the new event ids; no tour/composed gate). Infra
   told (22:05): ship be4ef7510 + SEED_OVERLAY of 460ad0fd7 and 929eac696 for now; the batch candidate replaces it once gated.
 
-## Lanes (send shas; name every new candidate to infra)
+## Lanes (send shas; name every new candidate to infra and the explorer)
 
-The session was pruned and restarted 10-30 evening; earlier lane ids are dead.
+The session was pruned 10-30 evening; the root re-adopted the veteran lanes with `cv adopt` (their old ids work).
 
 | lane | agent | owns |
 |---|---|---|
-| hot-path | a5e7651731f8a570d | consent providers resume from a sealed snapshot (anchors survive ships), the genesis-replay sweep; the law-17 perf queue |
-| infra | aa72653a8ce442178 | Firecracker (or similar) lite VM inside the forge demo host, then the fresh ship; forge composed container |
-| app-reds | a2765cc76c0c0045e | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
-| private cells | a5826957262e821ba | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
-| import boundary (sub-Opus of this integrator) | a96542041e5be6db1 | the tier-table ruling below, on lane/import-boundary off cdb399b47, in /Users/ember/dev/minidregg-lanes/iter-speed-land |
+| hot-path | a86738fc1dfae6429 | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
+| infra (fresh) | aa72653a8ce442178 | Firecracker (or similar) lite VM inside the forge demo host, then the fresh ship; forge composed container |
+| app-reds | a17f4172949caca14 | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
+| private cells | a74ad8d84ada5627a | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
+| iteration speed | ab2786fe1172f5683 | the bump cdb399b47, umbrella-tree.sh (second warm tree for integ-build5) |
+| explorer | a3e5d6dbcd68e616c | perf and behaviour probes on candidates; docs/EXPLORER-FINDINGS.md |
+| import boundary (sub-Opus of this integrator) | a96542041e5be6db1 | the tier-table ruling, lane/import-boundary off cdb399b47, in /Users/ember/dev/minidregg-lanes/iter-speed-land (lent from iteration speed; release it when done) |
 
-No iteration-speed, proofs, scout or explorer lane now (the root restarts the explorer once the VM demo is up). The
-integrator lands the bump itself and owns what proofs owned: umbrella reds, the accepted-fixture re-record.
+No proofs or scout lane: the integrator owns umbrella reds and the fixture re-record.
 
 ## Rulings in force
 
