@@ -1287,6 +1287,40 @@ def fetchPolicySource (domain : Digest) (directory : Directory Nat registry) (ad
     Option (List UInt8) :=
   (loadPolicySource domain directory address).map LoadedPolicySource.canonicalBytes
 
+/-- `fetchPolicySource`, compiled: the record is encoded once, for both its digest and the bytes
+returned (`fetchPolicySource_eq_fast`). -/
+def fetchPolicySourceFast (domain : Digest) (directory : Directory Nat registry) (address : Digest) :
+    Option (List UInt8) :=
+  match directory.slots (PolicySourceCell.physicalId domain address) with
+  | .present ⟨.policySource, payload⟩ =>
+      match PolicySourceCell.recordAt payload.logical with
+      | none => none
+      | some record =>
+          let bytes := PolicyRecordCodec.encode record
+          if record.domain = domain ∧ PolicyRecordCodec.hashBytes bytes = address then some bytes
+          else none
+  | _ => none
+
+@[csimp] theorem fetchPolicySource_eq_fast : @fetchPolicySource = @fetchPolicySourceFast := by
+  funext domain directory address
+  unfold fetchPolicySource fetchPolicySourceFast loadPolicySource
+  split
+  next payload slot =>
+    simp only [slot]
+    split
+    next found => simp [found]
+    next record found =>
+      simp only [found]
+      by_cases valid : record.domain = domain ∧ PolicyRecordCodec.digest record = address
+      · rw [dif_pos valid, if_pos (by simpa [PolicyRecordCodec.digest] using valid)]
+        rfl
+      · rw [dif_neg valid, if_neg (by simpa [PolicyRecordCodec.digest] using valid)]
+        rfl
+  next absent =>
+    split
+    next payload slot => exact absurd slot (absent payload)
+    next => rfl
+
 set_option backward.isDefEq.respectTransparency false in
 theorem fetchPolicySource_exact (domain : Digest) (directory : Directory Nat registry)
     (address : Digest) (record : CanonicalPolicyAdmission.PolicyRecord)

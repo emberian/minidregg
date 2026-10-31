@@ -39,6 +39,28 @@ A cold verb (residents not running) was 555-866 ms on batch 5; residents no long
   builds cells with `materialize`, not `materializeCanonical`, so the Store's own bytes are dropped);
   `signedRequestBytes` re-encoded for each signing header.
 
+### Read-path Lean fixes: written, not yet in a Host build
+
+- `fetchPolicySource` encoded each policy record twice (digest, then bytes); `fetchPolicySourceFast`
+  encodes once (`@[csimp] fetchPolicySource_eq_fast`, Compiler/CanonicalCellRegistry.lean).
+- `loadPolicy` re-encoded the record it had just decoded to check its digest; it hashes the
+  fetched bytes instead (canonical, so the same digest), Compiler/CredentialAuthorityPolicyRegistry.lean.
+- Build them (with whatever else is ready) through iteration speed's `lane-tree host` once it is
+  announced; do not build in t7 before then.
+
+### Next, written up but not started
+
+- **The law graph loads twice per grant.** `ResourceObservationAdmission.keys` calls
+  `PhysicalLawResolution.predicateOf?` (one `loadTarget`), and `authorizeChecked` then calls
+  `(policyConfig prepared).resolve?` (a second `loadTarget`, plus a `loadPolicy` of the head that
+  `loadTarget` also loads). A `PreparedLaw` mentions only the config's snapshot, store, profile,
+  target, budget and additional restrictions, never its step, so a law resolved on
+  `{policyConfig prepared with step := s}` is a `PreparedLaw` of `policyConfig prepared` by the
+  same fields. Plan: resolve once on a config with a cheap step, build the step from
+  `law.predicate.reads` (= `keys prepared` by `keys_exact`), and prove the result equal to
+  `authorizeChecked` (csimp) through a helper lemma generalised over the config.
+- `headerAt` runs twice per grant (in `challengeAt` and again in `checkGrant`), about 3%.
+
 Next candidates, in order of share: a verdict cache for `checkGrants` keyed by everything it reads
 (authority root, policy roots, resource cell root, clock, grant bytes); `PackedCell.decode` keeping
 the decoded bytes (`materializeCanonical`, already proved equal); `loadPolicy` keeping the decoded
