@@ -23,6 +23,8 @@ mod trace;
 #[cfg(unix)]
 mod capture;
 #[cfg(unix)]
+mod client_resident;
+#[cfg(unix)]
 mod key_rotation;
 #[cfg(unix)]
 mod key_adoption;
@@ -910,6 +912,7 @@ usage:
   mini mix-live --action cover|registrar|relay|mailbox|scan|send|receive --state DIR --generation HEX --origin-ms MS --records DIR [action options]
   mini consent-resident --consent PATH --settings PATH     the resident consent component for this user's `mini` processes
   mini codec-resident --host HOST --settings PATH          the storeless resident codec Host for this user's `mini` processes
+  mini client-resident                                     run the parent's client commands in this one process (the apps worker's channel on stdin)
   mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -2941,6 +2944,11 @@ fn run(mut args: Args) -> Result<()> {
             let settings = path(args.required("settings")?);
             args.finish()?;
             client_consent::resident(consent, settings)
+        }
+        #[cfg(unix)]
+        "client-resident" => {
+            args.finish()?;
+            client_resident::serve()
         }
         #[cfg(unix)]
         "codec-resident" => {
