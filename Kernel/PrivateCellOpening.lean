@@ -133,16 +133,23 @@ is the path and content digest of a live address of the view. -/
 def Answers (st : Statement (kind := kind)) (w : Witness) : Prop :=
   ∀ k d, (∃ p ∈ readerPrefixes st.fields, (k, d) ∈ (w.reveals p).answer Subtype.val p) ↔ ImagePair wire st.view k d
 
+/-- **The bounded shape** (astra round 16): a reveal that stops above its prefix carries at most
+one member, the terminal leaf there. With `revealVerify`'s `siblings.length ≤ p.length`, every
+reveal is at most the prefix's sibling digests and either one terminal or exactly the entries
+under the prefix, so the circuit's shape is fixed by the public prefix and answer. -/
+def Shaped (fields : Option (Finset CellField)) (w : Witness) : Prop :=
+  ∀ p ∈ readerPrefixes fields, (w.reveals p).siblings.length < p.length → (w.reveals p).members.length ≤ 1
+
 /-- **The opening relation.** The root is the outer commitment over the kind's context, the
 witness's mask and index digest; the mask's kind-level custody decode names the statement's cell
 and version (a relabelled version is refused unless the custody bytes say it); every reader
-prefix's reveal of the image verifies against the index digest at depth 516; and the reveals
-answer exactly the view's image. -/
+prefix's reveal of the image verifies against the index digest at depth 516; the reveals
+answer exactly the view's image; and every reveal is `Shaped`. -/
 def OpeningRel (decode : CustodyDecode) (st : Statement (kind := kind)) (w : Witness) : Prop :=
   st.root = outerRoot (kindCtx wire) w.mask w.inner ∧
     (∃ secret, decode w.mask = some (st.cell, st.version, secret)) ∧
     (∀ p ∈ readerPrefixes st.fields, revealVerify pathDig Subtype.val 516 w.inner p (w.reveals p) = true) ∧
-    Answers wire st w
+    Answers wire st w ∧ Shaped st.fields w
 
 /-- Two distinct live addresses of the store whose canonical bytes collide under the address
 customization of cSHAKE256 (two entries on one key path). -/
@@ -269,7 +276,7 @@ theorem openingRel_exact (selected : CanonicalCellRegistry.wire? kind = some wir
     (st.view = Minidregg.Theory.SparseMap.filterKeys (Visible st.fields kind) S ∧
         ∃ secret, decode (maskOf wire S) = some (st.cell, st.version, secret)) ∨
       DeployedCollision wire S st w := by
-  obtain ⟨outer, custody, verifies, answers⟩ := holds
+  obtain ⟨outer, custody, verifies, answers, -⟩ := holds
   by_cases same : (w.mask, w.inner) = (maskOf wire S, innerRoot wire S)
   swap
   · exact Or.inr (Or.inr (Or.inr (Or.inr ⟨same, outer.symm.trans root⟩)))
@@ -327,7 +334,7 @@ theorem honest_rel (selected : CanonicalCellRegistry.wire? kind = some wire) (de
   have wf : Theory.AuthTrie.WF 516 (entries Subtype.val (imageEntries wire S)) := by
     rw [entries_image]
     exact wf_image _ _ (wf_canon (fun a => paths_length wire (kindTag kind) a) inj)
-  refine ⟨rfl, ⟨secret, custody⟩, fun p member => ?_, fun k d => ?_⟩
+  refine ⟨rfl, ⟨secret, custody⟩, fun p member => ?_, fun k d => ?_, fun p member early => ?_⟩
   · show revealVerify pathDig Subtype.val 516 (innerRoot wire S) p
       (revealFor pathDig Subtype.val 516 (imageEntries wire S) p) = true
     rw [innerRoot_image]
@@ -335,6 +342,8 @@ theorem honest_rel (selected : CanonicalCellRegistry.wire? kind = some wire) (de
       (by have := readerPrefixes_short fields p member; omega)
   · exact imageUnion_iff wire selected S fields (admitted_of_storeFits gate) _
       (fun p _ k d => revealFor_answer pathDig Subtype.val 516 _ p k d) k d
+  · exact Theory.AuthTrie.revealFor_shaped pathDig Subtype.val 516 _ p
+      (by have := readerPrefixes_short fields p member; omega) early
 
 #assert_axioms innerRoot_image
 #assert_axioms imageUnion_iff
