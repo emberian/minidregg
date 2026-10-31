@@ -322,9 +322,11 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
    - **Theirs (KeptCell).** `Theory/CellStateAux.lean` (`AuxCache`), `Materialized.carried` (a Thunk,
      moved by `Carried.run` with one `set` per writing op), and `Kernel/PrivateCellMaterializer.aux`.
      The root becomes `outerRoot ctxKind mask (trie digest)`, so a write costs one trie walk and one
-     hash. **Scope (root's ruling, 10-31; private cells a8da2b953507b402b):** FORMAT switches only
-     the unblinded kinds that grow (eventHistory, authority, resourceBook, policySource) to the trie
-     root with mask `[]`. Content and the declared kinds keep the salted ratchet root until a ZK
+     hash. **Scope (root's ruling, 10-31; private cells a8da2b953507b402b):** FORMAT (a) switches only
+     eventHistory and authority to the trie root with mask `[]`. resourceBook holds the whole Book as
+     one value at one address, so a trie changes nothing for it. Its per-write cost stays linear in
+     the Book until the Book's entries become store addresses: a CanonicalResourceKernel layout
+     redesign, a hot-path row with no owner yet. policySource is written once. Content and the declared kinds keep the salted ratchet root until a ZK
      selective opening exists. That is a later epoch (b) with a second genesis, because plain trie
      reveals would expose unsalted subtree digests. The content-cell root and flatness stay a
      published red until (b). The order is iteration speed's seam 1, then their FORMAT sha, then
