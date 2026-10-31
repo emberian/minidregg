@@ -59,6 +59,50 @@ path adds to it.
 Memory method: `smaps_rollup` Pss and Private over the resident processes (`consent-resident`,
 `codec-resident`, the provider, the codec Host) of this world (`/ci/pc/mem.sh`).
 
+## A `doc new`, call by call (MINI_TRACE, batch-6 world hbox:/ci/pc/w6, load ~24)
+
+Two writes (the birth, then the document): 12 Host calls, 26 codec frames, 10 consent frames.
+
+| height | Host | op1 plan (birth, doc) ms | op2 submit (birth, doc) ms | own birth catch-up (consent) | codec frames | another member's catch-up of both |
+|---|---|---|---|---|---|---|
+| 250 | 1.07 s | 264, 39 | 414, 299 | 347 ms | 19 ms | 417 ms |
+| 520 | 1.34 s | 344, 43 | 609, 283 | 372 ms | 19 ms | 434 ms |
+
+Batch 7 (acc7cfa03, fresh world hbox:/ci/pc/w7, load ~18):
+
+| height | Host | op1 plan (birth, doc) ms | op2 submit (birth, doc) ms | own birth catch-up | another member's catch-up of both |
+|---|---|---|---|---|---|
+| 0 | 487 ms | 85, 14 | 298, 58 | 147 ms | 166 ms |
+| 250 | 384 ms | 100, 14 | 180, 64 | 132 ms | 171 ms |
+| 520 | 663 ms | 161, 16 | 314, 139 | 142 ms | 239 ms |
+
+Against batch 6 at the same heights: Host 1.07 to 0.38 s at 250 and 1.34 to 0.66 s at 520; a member's own
+birth catch-up 347 to 132 ms; another member's catch-up of the two records 417 to 171 ms; a `say` record in
+catch-up 36 to 17.6 ms (60 in 1,058 ms). What still grows from 250 to 520: the birth's op1 (100 to 161) and op2
+(180 to 314), the document's op2 (64 to 139), and another member's catch-up (171 to 239 ms).
+
+The codec frames cost 19 ms in all, so batching them is not worth a protocol change. Consent per record is
+flat with height. The birth's Host op1/op2 grows (+30%/+47% over 270 heights): sent to hot-path. On batch 4 at
+height ~500 the same own-birth catch-up was 1,289 ms and op2 1.7 s per write. The member's provider still
+re-derives and re-executes its own just-admitted birth (~350 ms); its plan consent ran the planner, not the
+executor, so there is no execution to reuse byte for byte, and sharing would mean carrying the planner's
+prepared kernel values into the deriver. Decided after batch 7 (its authority-leg fix lands in that walk).
+
+## Where a verb's client time goes now (batch-6 world, `doc new`, `strace -c -w`)
+
+Of ~0.9 s of client syscall time, 93% is waiting on the Host and consent sockets (poll 565 ms, recvfrom 280 ms).
+Every filesystem call together is ~20 ms. The attempt's own files (staged temp, link, unlink; ~30 for the two
+writes) are ~3 ms, and each mkdir takes 30 to 80 us. So an attempt is not merged into one file: the saving is
+~3 ms, and merging would rewrite the custody format and its crash ordering, which a dozen readers depend on.
+
+The shell path's floor is the ssh handshake: `help` takes 181 to 216 ms over a fresh connection, 15 to 16 ms over a
+multiplexed one, and 122 ms with classical curve25519 key exchange instead of OpenSSH 9.7's post-quantum default.
+FRIENDS.md shows the ControlMaster lines (bf1c9ccf3). The server's key exchange is ember's decision and infra's sshd.
+
+Consent catch-up of `say` records (batch-6 provider, 60 records in 2.15 s, ~36 ms each): the World pin
+re-encode is 27% (batch 7, row 9), the second Store read 11.7% (batch 8, row 12), the Store helper's reply 12.5%,
+decoding records 9.4%, and the kernel walk ~20% (the DRC authority leg is 9%, hot-path's).
+
 ## Landed
 
 Batch 1 (f883af161, staging merged in; staging d24b3e761, batch 6): rows 1, 2, 4, 8 (single tenancy).
