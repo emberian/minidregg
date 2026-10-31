@@ -44,7 +44,6 @@ def log(kind, **fields):
     with open(LOG, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
         handle.flush()
-        os.fsync(handle.fileno())
 
 
 def transcript(session, role, text):

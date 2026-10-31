@@ -25,12 +25,9 @@ def main():
     def retain():
         temp=out/'receiving.next.json'
         fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
-        try:os.write(fd,json.dumps(state,indent=2).encode());os.fsync(fd)
+        try:os.write(fd,json.dumps(state,indent=2).encode())
         finally:os.close(fd)
         os.replace(temp,state_path)
-        fd=os.open(out,os.O_RDONLY|os.O_DIRECTORY)
-        try:os.fsync(fd)
-        finally:os.close(fd)
     def run_argv(label,argv,effect=False,refusal=False,native_refusal=False):
         prior=state['steps'].get(label)
         if prior and prior['phase']=='done':return prior['stdout']
@@ -77,7 +74,7 @@ def main():
             if target.read_bytes()!=encoded:raise RuntimeError('authored receiving file changed: '+str(target))
         else:
             fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-            try:os.write(fd,encoded);os.fsync(fd)
+            try:os.write(fd,encoded)
             finally:os.close(fd)
         return target.name
     def context(label,name):
@@ -191,7 +188,7 @@ def main():
             if packet_path.read_bytes()!=encoded:raise RuntimeError('prepared native ingress changed')
         else:
             fd=os.open(packet_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-            try:os.write(fd,encoded);os.fsync(fd)
+            try:os.write(fd,encoded)
             finally:os.close(fd)
         state['result']={'status':'PREPARED-NOT-LANDED','ingress':str(packet_path),
             'ingressSha256':hashlib.sha256(encoded).hexdigest(),'callSha256':retained['call']['sha256']}

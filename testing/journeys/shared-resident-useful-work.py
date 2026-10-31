@@ -56,15 +56,9 @@ def publish(path, data, mode=0o600):
     try:
         os.fchmod(fd, mode)
         os.write(fd, data)
-        os.fsync(fd)
     finally:
         os.close(fd)
     os.replace(temporary, path)
-    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def member_names(value):
@@ -972,7 +966,6 @@ def main(argv=None):
     if not pool_secret.exists():
         fd = os.open(pool_secret, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.write(fd, b'completion-cut-local-fixture-key\n')
-        os.fsync(fd)
         os.close(fd)
     table = {'type': 'mini-provider-table-v2', 'providers': [{'name': 'resident-fixture-pool', 'endpoint': endpoint, 'kind': 'openai-compatible',
                                                              'models': ['mini-hermes-completion-cut'], 'credential': 'pool', 'caps': {'perCall': '2048', 'perDay': '40'}}]}

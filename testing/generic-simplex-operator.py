@@ -71,12 +71,6 @@ def save_call(path, payload):
     with os.fdopen(descriptor, "wb") as stream:
         stream.write(payload)
         stream.flush()
-        os.fsync(stream.fileno())
-    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
 
 
 def read_outcome(path):
@@ -96,11 +90,6 @@ def read_outcome(path):
 def retained_attempt(attempts, payload):
     ticket = attempts / uuid.uuid4().hex
     ticket.mkdir(mode=0o700)
-    parent = os.open(attempts, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(parent)
-    finally:
-        os.close(parent)
     original = ticket / "call.bin"
     outcome = ticket / "outcome.bin"
     save_call(original, payload)
@@ -135,7 +124,6 @@ def run_submission(prefix, attempts, seconds, payload, grace=CLIENT_GRACE_SECOND
             child.wait()
             raise RuntimeError("agreement completion uncertain; use exact original-call lookup")
         log.flush()
-        os.fsync(log.fileno())
     if result:
         raise RuntimeError("agreement client failed; original call retained for lookup")
     # Only the actual Lean codec producer writes this result; the bridge never
