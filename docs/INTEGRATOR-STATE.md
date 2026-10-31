@@ -149,14 +149,18 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   still met `Connection reset by peer (os error 104)`, and the exact resubmit failed: `exact resubmit exited 1: mini:
   attempt has no retained …/resource-workspace/attempts/a-28305585112542523315230084449262223697`. Two faults: the reset
   (cause unknown; the controller world was torn down, KEEP_WORLD keeps only composed worlds) and a write attempt not
-  retained until decided (routed to exorcist with D2, suspect read-scratch 7dd2f7eda). 58f0bad2b merged anyway as a real
+  retained until decided. Exorcist: not read-scratch; `attempt has no retained` = the attempt dir has no sealed call
+  (the write stopped before seal), so `retry --mode submit` cannot apply: the resubmit logic (5ae0de223) must handle a
+  never-sealed write (re-prepare, or refuse by name). For app-reds' successor. 58f0bad2b merged anyway as a real
   lifetime defect (9a570e5a9; Linux cgroup codec tests 3/3 on hbox). app-reds RETIRING (context limit): continuation
   docs/APP-REDS-STATE.md (acd9d5f52, merged); START fixes were never committed (lost); refusal sweep half 2 uncommitted
   and broken in worktree app-reds-2. Successor owed by root.
 - **D2, protected doc phase outside workspace** (batch 8 composed -c2, documents:protected row 3 `owner: doc protect
   pd-paper`): `error: phase must remain inside participant workspace` after `workspace attempt: …/attempts/0000…-0`;
   adapter out/err empty. 1 occurrence; world torn down by the gate; evidence under /ci/c-dc6101-c2/composed/state. Batches 4-7 passed.
-  Routed to exorcist a97dba51f72535cb9 (read scratch 7dd2f7eda suspect), with the resubmit attempt signature.
+  CAUSE + FIX (exorcist 837c3f457, staging 5fa44a57f, batch 9): 7dd2f7eda put signed reads in the process read
+  scratch; `doc protect` places its enrollment phase beside the read (signed.parent()), so it left the workspace. Now
+  read_scratch::retain moves the enrollment read into WORKSPACE/attempts first. Live check: batch 9 composed.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
@@ -177,6 +181,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 13:45: exorcist 837c3f457 merged (D2).
 - 10-31 13:35: D2 + resubmit attempt signature to exorcist; perf-client caa988a88 merged, f25b6446 refused.
 - 10-31 13:20: hot-path 46ba70e43/75d97b351 merged (9540a646b); auditor round requested; private-cells ack.
 - 10-31 13:15: perf-client 096c881e5 merged; perf-apps b59364ba5 merged into batch 9.
