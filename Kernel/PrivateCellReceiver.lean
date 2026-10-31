@@ -1044,6 +1044,29 @@ def maskList {m : Nat} (encodeMask : Fin (m + 1) → List UInt8) (rounds : Nat) 
     List (List UInt8) :=
   (List.range (rounds + 1)).map fun v => encodeMask (f v)
 
+/-- **A key's real transcript is the substituted transcript of its masks.** -/
+theorem arun_transcript {m keys : Nat} {Item : Type} (keyed : Fin keys → Nat → Fin (m + 1)) (base : Params wire)
+    (sample : Fin (m + 1) → (CanonicalCellRegistry.layout kind).Value base.blinding.space)
+    (encodeMask : Fin (m + 1) → List UInt8)
+    (encodes : ∀ x, (wire.valueStream base.blinding.space).encode (sample x) = encodeMask x)
+    (serve : Serve wire Item) (rounds : Nat) (store : Store (CanonicalCellRegistry.layout kind))
+    (next : List Item → List (KeptCell.Write (kind := kind))) (born : (birth wire base store).isSome) (k : Fin keys) :
+    (arun wire serve (keyedParams wire base sample keyed k) store next rounds).map (·.map (KeptCell.served serve)) =
+      transcript wire serve base store next (maskList encodeMask rounds (keyed k)) rounds := by
+  have bornK : (birth wire (keyedParams wire base sample keyed k) store).isSome := by
+    obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp born
+    obtain ⟨c₂, hc₂, _⟩ := birth_twin wire (p₁ := base) (p₂ := keyedParams wire base sample keyed k)
+      ⟨rfl, rfl, rfl, rfl, rfl⟩ hc
+    simp [hc₂]
+  obtain ⟨cells, cells₀, ha, hs, _, items, _⟩ :=
+    arun_srun wire serve (p := keyedParams wire base sample keyed k) (base := base) (next := next)
+      ⟨rfl, rfl, rfl, rfl, rfl⟩ (maskList encodeMask rounds (keyed k)) bornK rounds (fun v hv => by
+        simp only [maskList, List.getD_eq_getElem?_getD, List.getElem?_map,
+          List.getElem?_range (by omega : v < rounds + 1), Option.map_some, Option.getD_some]
+        exact (encodes _).symm)
+  rw [ha, transcript, hs]
+  simp only [Option.map_some, items]
+
 /-- **The receiver's PRF hop** (`BlindedCellHiding.HybridReduction`'s first
 antecedent at `fNum/den := num/den`), against an adaptive strategy. Each
 strategy and world bit choose the birth store and, round by round, the next
@@ -1084,20 +1107,9 @@ theorem receiver_prf_hop {m keys num den : Nat} {Strategy Item : Type}
       idealFn m (List.range (rounds + 1)) t (List.range (rounds + 1))[i] = finFunctionFinEquiv.symm t i := by
   have real : ∀ a b k, (arun wire serve (keyedParams wire base sample keyed k) (store a b) (next a b) rounds).map
       (·.map (KeptCell.served serve)) =
-      transcript wire serve base (store a b) (next a b) (maskList encodeMask rounds (keyed k)) rounds := by
-    intro a b k
-    have bornK : (birth wire (keyedParams wire base sample keyed k) (store a b)).isSome := by
-      obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp (born a b)
-      obtain ⟨c₂, hc₂, _⟩ := birth_twin wire (p₁ := base) (p₂ := keyedParams wire base sample keyed k) ⟨rfl, rfl, rfl, rfl, rfl⟩ hc
-      simp [hc₂]
-    obtain ⟨cells, cells₀, ha, hs, _, items, _⟩ :=
-      arun_srun wire serve (p := keyedParams wire base sample keyed k) (base := base) ⟨rfl, rfl, rfl, rfl, rfl⟩
-        (maskList encodeMask rounds (keyed k)) bornK rounds (fun v hv => by
-          simp only [maskList, List.getD_eq_getElem?_getD, List.getElem?_map,
-            List.getElem?_range (by omega : v < rounds + 1), Option.map_some, Option.getD_some]
-          exact (encodes _).symm)
-    rw [ha, transcript, hs]
-    simp only [Option.map_some, items]
+      transcript wire serve base (store a b) (next a b) (maskList encodeMask rounds (keyed k)) rounds :=
+    fun a b k => arun_transcript wire keyed base sample encodeMask encodes serve rounds (store a b) (next a b)
+      (born a b) k
   refine ⟨real, fun a la ba b => ?_, fun t i => Custody.idealFn_window m List.nodup_range t i⟩
   have gap := prf.2 _ (reduction a la ba b)
   simp only [real]
@@ -1140,6 +1152,8 @@ theorem receiver_prf_hop_view {m keys num den : Nat} {Strategy Item View : Type}
 
 /-! ## The hiding goal at the receiver -/
 
+open Minidregg.Kernel.ResourceObservationAdmission (Visible)
+
 /-- **An attack**: the two candidate worlds' birth store and adaptive patch
 choices (a world is `false` or `true`), and the attacker's own decision on the
 view. The decision never sees the world bit; it is all the attacker outputs. -/
@@ -1151,8 +1165,9 @@ structure Attack (base : Params wire) (Item View : Type) where
 
 /-- **One deployment of the receiver's hiding game**: the custody function and
 its mask encoding, what is served and the reader's view through it (`g`,
-`factors`: the `ViewThroughServe` witness), and the number of rounds. The
-attacks are `Attack base Item View`. -/
+`factors`: the `ViewThroughServe` witness), the number of rounds, and the
+reader's authorized scope `fields`, from which the same-leakage rule is
+defined. The attacks are `Attack base Item View`. -/
 structure HidingSetting (m keys : Nat) (Item View : Type) where
   keyed : Fin keys → Nat → Fin (m + 1)
   base : Params wire
@@ -1164,6 +1179,113 @@ structure HidingSetting (m keys : Nat) (Item View : Type) where
   g : List Item → View
   factors : ∀ cells, view cells = g (cells.map (KeptCell.served serve))
   rounds : Nat
+  fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField)
+
+/-! ### Stores under writes no reader sees -/
+
+/-- A write at an address the scope does not see leaves the reader's view. -/
+theorem filter_set_invisible {fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField)}
+    (S : Store (CanonicalCellRegistry.layout kind)) (a : Address (CanonicalCellRegistry.layout kind))
+    (v : Option ((CanonicalCellRegistry.layout kind).Value a.1)) (hidden : ¬ Visible fields kind a) :
+    DFinsupp.filter (Visible fields kind) (S.set a v) = DFinsupp.filter (Visible fields kind) S := by
+  refine DFinsupp.ext fun b => ?_
+  simp only [DFinsupp.filter_apply]
+  split
+  · rename_i seen
+    have ne : b ≠ a := fun h => hidden (h ▸ seen)
+    exact Store.set_ne S a v b ne
+  · rfl
+
+theorem applyPatch_invisible {fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField)} :
+    ∀ (S : Store (CanonicalCellRegistry.layout kind)) (patch : List (KeptCell.Write (kind := kind))),
+      (∀ w ∈ patch, ¬ Visible fields kind w.1) →
+        DFinsupp.filter (Visible fields kind) (KeptCell.applyPatch S patch) = DFinsupp.filter (Visible fields kind) S
+  | _, [], _ => rfl
+  | S, w :: rest, hidden => by
+      show DFinsupp.filter _ (KeptCell.applyPatch (S.set w.1 w.2) rest) = _
+      rw [applyPatch_invisible _ rest (fun x hx => hidden x (List.mem_cons_of_mem _ hx)),
+        filter_set_invisible S w.1 w.2 (hidden w (List.mem_cons_self ..))]
+
+/-- No scope sees the blinding address. -/
+theorem blinding_invisible (fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField)) (p : Params wire) :
+    ¬ Visible fields kind p.blinding.address := by
+  rintro ⟨_, visible⟩
+  have : CanonicalCellRegistry.isBlinding kind p.blinding.address = true :=
+    (isBlinding_iff p.selected _).mpr p.blinding.isBlinding.symm
+  rw [this] at visible; cases visible
+
+theorem birth_store {p : Params wire} {S : Store (CanonicalCellRegistry.layout kind)} {c : KeptCell wire}
+    (born : birth wire p S = some c) : c.fit.store = S.set p.blinding.address (some (p.prf 0)) := by
+  unfold birth at born
+  split at born
+  · rename_i unmasked
+    obtain ⟨fit, admitted, rfl⟩ := Option.map_eq_some_iff.mp born
+    unfold admit at admitted
+    split at admitted
+    · cases admitted; rfl
+    · cases admitted
+  · cases born
+
+/-- **A hidden patch**: every write is at an address the reader's scope does not
+see, fits the gate and avoids the blinding address (so it is accepted). -/
+def HiddenPatch (fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField))
+    (patch : List (KeptCell.Write (kind := kind))) : Prop :=
+  ∀ w ∈ patch, ¬ Visible fields kind w.1 ∧ addressFits 256 kind w.1 = true ∧ ¬ some w.1 = wire.blinding
+
+/-- A run repeating one hidden patch: every round is accepted, and every
+version's reader view is the birth store's. -/
+theorem hidden_run {Item : Type} (serve : Serve wire Item) (fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField))
+    {p : Params wire} {S : Store (CanonicalCellRegistry.layout kind)} (born : (birth wire p S).isSome)
+    {patch : List (KeptCell.Write (kind := kind))} (hidden : HiddenPatch wire fields patch) :
+    ∀ r, ∃ cells, arun wire serve p S (fun _ => patch) r = some cells ∧ cells.length = r + 1 ∧
+      ∀ c ∈ cells, DFinsupp.filter (Visible fields kind) c.fit.store = DFinsupp.filter (Visible fields kind) S
+  | 0 => by
+      obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp born
+      refine ⟨[c], by simp [arun, hc], rfl, ?_⟩
+      intro x member
+      rw [List.mem_singleton.mp member, birth_store wire hc]
+      exact filter_set_invisible S _ _ (blinding_invisible wire fields p)
+  | r + 1 => by
+      obtain ⟨cells, ha, len, views⟩ := hidden_run serve fields born hidden r
+      match cells, len with
+      | c :: rest, len =>
+        obtain ⟨n, hn⟩ := Option.isSome_iff_exists.mp
+          ((KeptCell.accept_isSome_iff c patch).mpr fun w hw => ⟨(hidden w hw).2.1, (hidden w hw).2.2⟩)
+        obtain ⟨_, _, _, hs, _⟩ := KeptCell.accept_spec hn
+        refine ⟨n :: c :: rest, by simp only [arun, ha, Option.bind_some, hn, Option.elim], by simp [len], ?_⟩
+        intro x member
+        rcases List.mem_cons.mp member with same | member
+        · rw [same, hs, applyPatch_invisible _ patch (fun w hw => (hidden w hw).1),
+            filter_set_invisible _ _ _ (blinding_invisible wire fields c.params)]
+          exact views c (List.mem_cons_self ..)
+        · exact views x member
+
+/-- Two different values at one address give different stores. -/
+theorem single_differ (S : Store (CanonicalCellRegistry.layout kind)) (a : Address (CanonicalCellRegistry.layout kind))
+    {v₀ v₁ : (CanonicalCellRegistry.layout kind).Value a.1} (ne : v₀ ≠ v₁) :
+    KeptCell.applyPatch S [⟨a, some v₀⟩] ≠ KeptCell.applyPatch S [⟨a, some v₁⟩] := by
+  intro same
+  have := DFunLike.congr_fun same a
+  simp only [KeptCell.applyPatch, List.foldl_cons, List.foldl_nil, Store.set_eq, Option.some.injEq] at this
+  exact ne this
+
+/-- One write at a hidden, fitting, non-blinding address is a hidden patch. -/
+theorem single_hidden (fields : Option (Finset Minidregg.Theory.TypedAuthorization.CellField))
+    {a : Address (CanonicalCellRegistry.layout kind)} (v : (CanonicalCellRegistry.layout kind).Value a.1)
+    (hidden : ¬ Visible fields kind a) (fits : addressFits 256 kind a = true) (off : ¬ some a = wire.blinding) :
+    HiddenPatch wire fields [⟨a, some v⟩] := by
+  intro w member
+  rw [List.mem_singleton.mp member]
+  exact ⟨hidden, fits, off⟩
+
+/-- **Concretely**: in `PrivateCellView.Witness`'s declared cell, the slot-2
+field is hidden from the slot-1 reader, fits the gate and is not the blinding
+address, so `[⟨a2, some 5⟩]` and `[⟨a2, some 7⟩]` are hidden patches with
+different effects. -/
+theorem witness_hidden_write :
+    ¬ Visible Witness.slot1 .declaredObject Witness.a2 ∧ addressFits 256 .declaredObject Witness.a2 = true ∧
+      ¬ some Witness.a2 = Witness.wire.blinding ∧ (5 : Int) ≠ 7 := by
+  refine ⟨by decide, by decide, by decide, by decide⟩
 
 namespace HidingSetting
 
@@ -1194,6 +1316,156 @@ def uniform (a : setting.Strategy) (b : Bool) (t : Fin setting.tapes) : Bool :=
 def composed (a : setting.Strategy) (b : Bool) (f : Nat → Fin (m + 1)) : Bool :=
   a.decide ((transcript wire setting.serve setting.base (a.store b) (a.next b)
     (maskList setting.encodeMask setting.rounds f) setting.rounds).map setting.g)
+
+/-- The view world `b` publishes when the masks are the list `masks`. -/
+def worldView (a : setting.Strategy) (b : Bool) (masks : List (List UInt8)) : Option View :=
+  (transcript wire setting.serve setting.base (a.store b) (a.next b) masks setting.rounds).map setting.g
+
+/-- The reader-authorized view of one version: `narrowPacked`'s store. -/
+def readerView (c : KeptCell wire) : Store (CanonicalCellRegistry.layout kind) :=
+  DFinsupp.filter (Visible setting.fields kind) c.fit.store
+
+/-- **The same-leakage rule** (`BlindedCellHiding.OnlineSameLeakage` at the
+receiver: the prefix is the round, the paired state the two worlds' runs, the
+release the reader's authorized view of every published version): under every
+custody key and at every round, the two worlds publish versions whose
+reader-authorized views agree, version by version. -/
+def Legal (a : setting.Strategy) : Prop :=
+  ∀ (k : Fin keys) r, r ≤ setting.rounds →
+    (arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed k) (a.store false)
+      (a.next false) r).map (·.map setting.readerView) =
+    (arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed k) (a.store true)
+      (a.next true) r).map (·.map setting.readerView)
+
+/-- The store world `b`'s first accepted version holds after the patch chosen
+on `items`. -/
+def effect (a : setting.Strategy) (b : Bool) (items : List Item) : Option (Store (CanonicalCellRegistry.layout kind)) :=
+  (birth wire setting.base (a.store b)).bind fun c => (c.accept (a.next b items)).map (·.fit.store)
+
+/-- **The goal's hidden difference**: on some items both worlds' patches are
+accepted and their effects on the store differ (operation histories, not patch
+syntax). -/
+def HiddenDiff (a : setting.Strategy) : Prop :=
+  ∃ items, (setting.effect a false items).isSome ∧ (setting.effect a true items).isSome ∧
+    setting.effect a false items ≠ setting.effect a true items
+
+/-- **The decoy-membership test**: is the view one of the candidate views? -/
+def decoyTest [DecidableEq View] (decoys : List (Option View)) (v : Option View) : Bool := decoys.contains v
+
+/-- **The goal's distinguishers**: attacks deciding whether the view is world
+`true`'s view under some fixed exposed mask list (the attack a reader mounts
+when the masks are known or absent). -/
+def Distinguisher [DecidableEq View] (a : setting.Strategy) : Prop :=
+  ∃ masks₀ : List (List UInt8), a.decide = decoyTest [setting.worldView a true masks₀]
+
+/-- **The concrete challenge**: one birth store, patch `p₀` in world `false` and
+`p₁` in world `true` at every round, decided by membership in world `true`'s
+view under `masks₀`. -/
+def pairAttack [DecidableEq View] (S : Store (CanonicalCellRegistry.layout kind)) (bornS : (birth wire setting.base S).isSome)
+    (p₀ p₁ : List (KeptCell.Write (kind := kind))) (masks₀ : List (List UInt8)) : setting.Strategy :=
+  ⟨fun _ => S, fun b _ => cond b p₁ p₀,
+    decoyTest [(transcript wire setting.serve setting.base S (fun _ => p₁) masks₀ setting.rounds).map setting.g],
+    fun _ => bornS⟩
+
+theorem pairAttack_distinguisher [DecidableEq View] (S : Store (CanonicalCellRegistry.layout kind))
+    (bornS : (birth wire setting.base S).isSome) (p₀ p₁ : List (KeptCell.Write (kind := kind)))
+    (masks₀ : List (List UInt8)) : setting.Distinguisher (setting.pairAttack S bornS p₀ p₁ masks₀) :=
+  ⟨masks₀, rfl⟩
+
+/-- **The pair is legal** when both patches are hidden: every version of either
+world shows the reader the birth store's view. -/
+theorem pairAttack_legal [DecidableEq View] (S : Store (CanonicalCellRegistry.layout kind))
+    (bornS : (birth wire setting.base S).isSome) {p₀ p₁ : List (KeptCell.Write (kind := kind))}
+    (hidden₀ : HiddenPatch wire setting.fields p₀) (hidden₁ : HiddenPatch wire setting.fields p₁)
+    (masks₀ : List (List UInt8)) : setting.Legal (setting.pairAttack S bornS p₀ p₁ masks₀) := by
+  intro k r _
+  have born : (birth wire (keyedParams wire setting.base setting.sample setting.keyed k) S).isSome := by
+    obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp bornS
+    obtain ⟨c₂, hc₂, _⟩ := birth_twin wire (p₁ := setting.base)
+      (p₂ := keyedParams wire setting.base setting.sample setting.keyed k) ⟨rfl, rfl, rfl, rfl, rfl⟩ hc
+    simp [hc₂]
+  have flat : ∀ {patch : List (KeptCell.Write (kind := kind))}, HiddenPatch wire setting.fields patch →
+      (arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed k) S (fun _ => patch) r).map
+        (·.map setting.readerView) = some (List.replicate (r + 1) (DFinsupp.filter (Visible setting.fields kind) S)) := by
+    intro patch hidden
+    obtain ⟨cells, ha, len, views⟩ := hidden_run wire setting.serve setting.fields born hidden r
+    rw [ha, Option.map_some, Option.some.injEq, List.eq_replicate_iff]
+    refine ⟨by simp [len], fun x member => ?_⟩
+    obtain ⟨c, hc, rfl⟩ := List.mem_map.mp member
+    exact views c hc
+  exact (flat hidden₀).trans (flat hidden₁).symm
+
+/-- **The pair has a hidden difference** when both patches are hidden and their
+effects on the post-birth store differ. -/
+theorem pairAttack_hiddenDiff [DecidableEq View] (S : Store (CanonicalCellRegistry.layout kind))
+    (bornS : (birth wire setting.base S).isSome) {p₀ p₁ : List (KeptCell.Write (kind := kind))}
+    (hidden₀ : HiddenPatch wire setting.fields p₀) (hidden₁ : HiddenPatch wire setting.fields p₁)
+    (differ : ∀ c : KeptCell wire, birth wire setting.base S = some c →
+      KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) p₀ ≠
+        KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) p₁)
+    (masks₀ : List (List UInt8)) : setting.HiddenDiff (setting.pairAttack S bornS p₀ p₁ masks₀) := by
+  obtain ⟨c, hc⟩ := Option.isSome_iff_exists.mp bornS
+  have accepts : ∀ {patch : List (KeptCell.Write (kind := kind))}, HiddenPatch wire setting.fields patch →
+      ∃ n, c.accept patch = some n ∧ n.fit.store =
+        KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) patch := by
+    intro patch hidden
+    obtain ⟨n, hn⟩ := Option.isSome_iff_exists.mp
+      ((KeptCell.accept_isSome_iff c patch).mpr fun w hw => ⟨(hidden w hw).2.1, (hidden w hw).2.2⟩)
+    exact ⟨n, hn, (KeptCell.accept_spec hn).2.2.2.1⟩
+  obtain ⟨n₀, hn₀, hs₀⟩ := accepts hidden₀
+  obtain ⟨n₁, hn₁, hs₁⟩ := accepts hidden₁
+  refine ⟨[], ?_, ?_, ?_⟩ <;> simp only [effect, pairAttack, hc, Option.bind_some, cond, hn₀, hn₁, Option.map_some,
+    Option.isSome_some]
+  rw [Ne, Option.some.injEq, hs₀, hs₁]
+  exact differ c hc
+
+/-- The real experiment's view is the substituted transcript of the tape key's masks. -/
+theorem real_eq (a : setting.Strategy) (b : Bool) (t : Fin setting.tapes) :
+    setting.real a b t = a.decide ((transcript wire setting.serve setting.base (a.store b) (a.next b)
+      (maskList setting.encodeMask setting.rounds (setting.keyed (split t).1)) setting.rounds).map setting.g) := by
+  rw [← arun_transcript wire setting.keyed setting.base setting.sample setting.encodeMask setting.encodes setting.serve
+    setting.rounds (a.store b) (a.next b) (a.born b) (split t).1, real]
+  congr 1
+  cases arun wire setting.serve (keyedParams wire setting.base setting.sample setting.keyed (split t).1) (a.store b)
+    (a.next b) setting.rounds <;> simp [setting.factors]
+
+/-- A service that does not read the mask gives a transcript that does not either. -/
+theorem transcript_maskFree (maskFree : ∀ ctx mask mask' index, setting.serve ctx mask index = setting.serve ctx mask' index)
+    (S : Store (CanonicalCellRegistry.layout kind)) (next : List Item → List (KeptCell.Write (kind := kind)))
+    (masks masks' : List (List UInt8)) :
+    transcript wire setting.serve setting.base S next masks setting.rounds =
+      transcript wire setting.serve setting.base S next masks' setting.rounds := by
+  have same : substServed wire setting.serve masks = substServed wire setting.serve masks' := by
+    funext c; exact maskFree _ _ _ _
+  have runs : ∀ r, srun wire setting.serve setting.base S next masks r = srun wire setting.serve setting.base S next masks' r := by
+    intro r
+    induction r with
+    | zero => rfl
+    | succ r ih => simp only [srun, ih, same]
+  simp only [transcript, runs, same]
+
+/-- **Teeth**: an unmasked service (one that does not read the mask: the legacy
+fingerprint) refutes hiding at every bound below one against a legal budgeted
+distinguisher whose two worlds' views separate. The decoy is world `true`'s
+view under `masks₀`; with the mask unread, that is world `true`'s view under
+every key, and world `false`'s view is never it. -/
+theorem unmasked_refuted [DecidableEq View] {num den : Nat} (small : num < den)
+    (maskFree : ∀ ctx mask mask' index, setting.serve ctx mask index = setting.serve ctx mask' index)
+    (legal budgeted : setting.Strategy → Prop) (a : setting.Strategy) (la : legal a) (ba : budgeted a)
+    (masks₀ : List (List UInt8)) (decides : a.decide = decoyTest [setting.worldView a true masks₀])
+    (separated : setting.worldView a false masks₀ ≠ setting.worldView a true masks₀) :
+    ¬ BlindedCellHiding.TranscriptHiding setting.tapes num den setting.real legal budgeted := by
+  intro hides
+  have view : ∀ b t, setting.real a b t = decoyTest [setting.worldView a true masks₀] (setting.worldView a b masks₀) := by
+    intro b t
+    rw [real_eq, decides]
+    congr 1
+    unfold worldView
+    rw [transcript_maskFree setting maskFree _ _ _ masks₀]
+  apply Minidregg.Theory.FiniteTapeGap.not_gapAtMost_of_separating small (left := setting.real a true) (right := setting.real a false)
+  · intro t; rw [view]; simp [decoyTest]
+  · intro t; rw [view]; simpa [decoyTest] using separated
+  · exact (hides a la ba).symm
 
 /-- **The receiver's hiding from the hybrids** (`BlindedCellHiding.TranscriptHiding`
 of `real` at the hybrid composition's bound). The PRF hop is discharged here
@@ -1229,67 +1501,42 @@ theorem hiding_of_hybrids {num den lambda versions queries zNum : Nat}
     setting.uniform simulated ideal legal budgeted positive denominator below
     (fun a la ba b => ⟨hop a la ba b, zk a la ba b, rom a la ba b⟩) identical
 
-/-! ### The goal's distinguishers and hidden choice, concretely -/
-
-/-- **The decoy-membership test**: is the view one of the candidate views? (A
-reader holding the views the other world would produce with exposed masks
-recognises them.) -/
-def decoyTest [DecidableEq View] (decoys : List (Option View)) (v : Option View) : Bool := decoys.contains v
-
-/-- The goal's distinguishers: attacks deciding by a decoy-membership test with
-at least one decoy. -/
-def Distinguisher [DecidableEq View] (a : setting.Strategy) : Prop :=
-  ∃ decoys : List (Option View), decoys ≠ [] ∧ a.decide = decoyTest decoys
-
-/-- The goal's hidden difference: the two worlds' patches differ. -/
-def HiddenDiff (a : setting.Strategy) : Prop := ∃ items, a.next false items ≠ a.next true items
-
-/-- **A concrete challenge**: one birth store, patch `p₀` in world `false` and
-`p₁` in world `true` at every round, decided by a decoy test. -/
-def pairAttack [DecidableEq View] (s : Store (CanonicalCellRegistry.layout kind)) (bornS : (birth wire setting.base s).isSome)
-    (p₀ p₁ : List (KeptCell.Write (kind := kind))) (decoys : List (Option View)) : setting.Strategy :=
-  ⟨fun _ => s, fun b _ => if b then p₁ else p₀, decoyTest decoys, fun _ => bornS⟩
-
-theorem pairAttack_distinguisher [DecidableEq View] {s : Store (CanonicalCellRegistry.layout kind)}
-    {bornS : (birth wire setting.base s).isSome} {p₀ p₁ : List (KeptCell.Write (kind := kind))}
-    {decoys : List (Option View)} (someDecoy : decoys ≠ []) :
-    setting.Distinguisher (setting.pairAttack s bornS p₀ p₁ decoys) :=
-  ⟨decoys, someDecoy, rfl⟩
-
-theorem pairAttack_hiddenDiff [DecidableEq View] {s : Store (CanonicalCellRegistry.layout kind)}
-    {bornS : (birth wire setting.base s).isSome} {p₀ p₁ : List (KeptCell.Write (kind := kind))}
-    {decoys : List (Option View)} (distinct : p₀ ≠ p₁) :
-    setting.HiddenDiff (setting.pairAttack s bornS p₀ p₁ decoys) :=
-  ⟨[], by simpa [pairAttack] using distinct⟩
-
 /-- **The receiver's hiding goal from the hybrids** (`BlindedCellHiding.RatchetHidingGoal`
-of `real`), its distinguishers the decoy-membership attacks and its hidden
-difference differing patches. The budget must admit every decoy attack, and the
-hidden-choice witness is the concrete `pairAttack` with distinct patches and a
-decoy, whose legality under the same-leakage rule is the one thing assumed of it.
-The hybrids `zk`, `rom`, `identical` stay open, as in `hiding_of_hybrids`. -/
+of `real`), with every non-vacuity witness concrete: `legal` is the setting's
+same-leakage rule `Legal`; the distinguishers are the decoy attacks on the other
+world's view; the hidden difference compares the two worlds' accepted effects;
+the hidden-choice witness is `pairAttack` with two hidden patches whose effects
+differ, and it is proved legal (`pairAttack_legal`), not assumed. The budget
+must admit every distinguisher. The hybrids `zk`, `rom`, `identical` stay open,
+as in `hiding_of_hybrids`. -/
 theorem hidingGoal_of_hybrids [DecidableEq View] {num den lambda versions queries zNum : Nat}
-    (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop) (legal budgeted : setting.Strategy → Prop)
+    (budgetedPrf : ((Nat → Fin (m + 1)) → Bool) → Prop) (budgeted : setting.Strategy → Prop)
     (prf : CustodyPrf m keys num den setting.window setting.keyed budgetedPrf)
-    (reduction : ∀ a, legal a → budgeted a → ∀ b, budgetedPrf (setting.composed a b))
+    (reduction : ∀ a, setting.Legal a → budgeted a → ∀ b, budgetedPrf (setting.composed a b))
     (someKey : 0 < keys) (denominator : 0 < den) (below : queries < 2 ^ lambda)
     (small : 2 * (num + zNum) * (2 ^ lambda - queries) + 2 * versions * queries * den < den * (2 ^ lambda - queries))
     (meaningful : BlindedCellHiding.BudgetMeaningful budgeted setting.Distinguisher)
-    (s : Store (CanonicalCellRegistry.layout kind)) (bornS : (birth wire setting.base s).isSome)
-    (p₀ p₁ : List (KeptCell.Write (kind := kind))) (distinct : p₀ ≠ p₁)
-    (decoys : List (Option View)) (someDecoy : decoys ≠ [])
-    (legalPair : legal (setting.pairAttack s bornS p₀ p₁ decoys))
+    (S : Store (CanonicalCellRegistry.layout kind)) (bornS : (birth wire setting.base S).isSome)
+    (p₀ p₁ : List (KeptCell.Write (kind := kind)))
+    (hidden₀ : HiddenPatch wire setting.fields p₀) (hidden₁ : HiddenPatch wire setting.fields p₁)
+    (differ : ∀ c : KeptCell wire, birth wire setting.base S = some c →
+      KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) p₀ ≠
+        KeptCell.applyPatch (c.fit.store.set c.params.blinding.address (some (c.params.prf (c.version + 1)))) p₁)
+    (masks₀ : List (List UInt8))
     (simulated ideal : setting.Strategy → Bool → Fin setting.tapes → Bool)
-    (zk : ∀ a, legal a → budgeted a → ∀ b, GapAtMost setting.tapes zNum den (setting.uniform a b) (simulated a b))
-    (rom : ∀ a, legal a → budgeted a → ∀ b,
+    (zk : ∀ a, setting.Legal a → budgeted a → ∀ b,
+      GapAtMost setting.tapes zNum den (setting.uniform a b) (simulated a b))
+    (rom : ∀ a, setting.Legal a → budgeted a → ∀ b,
       GapAtMost setting.tapes (versions * queries) (2 ^ lambda - queries) (simulated a b) (ideal a b))
-    (identical : ∀ a, legal a → budgeted a → GapAtMost setting.tapes 0 1 (ideal a false) (ideal a true)) :
-    BlindedCellHiding.RatchetHidingGoal setting.tapes lambda versions queries num zNum den setting.real legal
+    (identical : ∀ a, setting.Legal a → budgeted a → GapAtMost setting.tapes 0 1 (ideal a false) (ideal a true)) :
+    BlindedCellHiding.RatchetHidingGoal setting.tapes lambda versions queries num zNum den setting.real setting.Legal
       budgeted setting.HiddenDiff setting.Distinguisher :=
   ⟨denominator, below, small, meaningful,
-    ⟨_, legalPair, setting.pairAttack_distinguisher someDecoy, setting.pairAttack_hiddenDiff distinct⟩,
-    setting.hiding_of_hybrids budgetedPrf legal budgeted prf reduction someKey denominator below simulated ideal zk
-      rom identical⟩
+    ⟨setting.pairAttack S bornS p₀ p₁ masks₀, setting.pairAttack_legal S bornS hidden₀ hidden₁ masks₀,
+      setting.pairAttack_distinguisher S bornS p₀ p₁ masks₀,
+      setting.pairAttack_hiddenDiff S bornS hidden₀ hidden₁ differ masks₀⟩,
+    setting.hiding_of_hybrids budgetedPrf setting.Legal budgeted prf reduction someKey denominator below simulated
+      ideal zk rom identical⟩
 
 end HidingSetting
 
@@ -1315,6 +1562,13 @@ end HidingSetting
 #assert_axioms HidingSetting.hiding_of_hybrids
 #assert_axioms HidingSetting.hidingGoal_of_hybrids
 #assert_axioms HidingSetting.pairAttack_hiddenDiff
+#assert_axioms HidingSetting.pairAttack_legal
+#assert_axioms HidingSetting.unmasked_refuted
+#assert_axioms HidingSetting.real_eq
+#assert_axioms arun_transcript
+#assert_axioms witness_hidden_write
+#assert_axioms single_differ
+#assert_axioms single_hidden
 #assert_axioms Custody.shift_passes_equality
 #assert_axioms Custody.shift_passes_points
 #assert_axioms arun_srun
