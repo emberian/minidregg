@@ -1,19 +1,22 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `78f347a6af51` (builder: REDS.md for 4b750eb674ff (6 red)). Round finished 2026-10-31T23:23Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-78f347a6`.
+Tip: `ef2a21c94a3c` (builder: REDS.md for 78f347a6af51 (5 red)). Round finished 2026-10-31T23:24Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ef2a21c9`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| host | rc=1 see /home/hbox/lanes/integ/logs/host.log | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
-| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
+| host | rc=1 see /home/hbox/lanes/integ/logs/host.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
+| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 83e926874e38..78f347a6af51`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..ef2a21c94a3c`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `ef2a21c9` builder: REDS.md for 78f347a6af51 (5 red)
+- `a2363bbb` board: member-side row after 22cac1ee0
+- `22cac1ee` client: one Host reply check names every outcome; the grain recovery test drives the codec session (owner: member-side)
 - `78f347a6` builder: REDS.md for 4b750eb674ff (6 red)
 - `142d5b99` board: apps-hermes row: referer sender and twins, image-free plan currency, new seat id (owner: apps-hermes)
 - `7acbdd87` plans stay valid across a moved image: currency is compared modulo each signing plan's root and heig (owner: apps-hermes, member-side)
@@ -51,6 +54,3 @@ Suspect commits since green (`git log 83e926874e38..78f347a6af51`), newest first
 - `bdfa9428` R6(i) authority: a light write hands the session its authority post-cell; adopt takes it without a d (owner: host-execution)
 - `e46759f4` conversation paths: the controller's reserve projection admits the trailing slash too (owner: apps-hermes)
 - `1c670cee` conversation paths: the Host carries the app's own endpoint byte-exact, one trailing slash included  (owner: apps-hermes, read-path)
-- `cc93292e` board: apps-hermes row: trailing-slash and channel-id fixes landed; Scrumblr now fails in the app's  (owner: apps-hermes)
-- `acfab457` board: member-side row: the measurement overlay carries f28cd8457
-- `e2d7800e` board: privacy row, builds back on hbox; bb2 t4 released
