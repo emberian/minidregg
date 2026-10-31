@@ -21,7 +21,8 @@
 #   LANE_POOL_REPO      the pool's own bare repo the trees are worktrees of (init clones it; origin GitHub)
 #   LANE_POOL_PACKAGES  the box's ONE shared .lake/packages (read-only, keyed by lake-manifest.json); every
 #                       tree's .lake/packages is a symlink to it
-#   LAKE_CACHE_DIR      the box's ONE Lake artifact cache; LAKE_ARTIFACT_CACHE=true for every pooled build
+#   LAKE_CACHE_DIR      the box's Lake artifact cache directory; pool.env sets LAKE_ARTIFACT_CACHE=false (the
+#                       cache would also cache the read-only shared packages and fail; warm-link warms trees)
 #   LANE_POOL_WARM      optional: a built tree kept current at main (hbox: the integration tree); acquire
 #                       links its newer outputs into the tree it hands out, so a lane starts warm at main
 #                       (LANE_POOL_NO_WARM=1 in the caller's environment skips that while the source builds)
@@ -57,7 +58,9 @@ if [ -z "$pool_env" ] && [ "${1:-}" = init ]; then
   mkdir -p "$LANE_POOL_ROOT"
   { for v in LANE_POOL_ROOT LANE_POOL_REPO LANE_POOL_PACKAGES LAKE_CACHE_DIR LANE_POOL_WARM; do
       [ -n "${!v:-}" ] && printf 'export %s=%q\n' "$v" "${!v}"; done
-    echo 'export LAKE_ARTIFACT_CACHE=true'; } > "$LANE_POOL_ROOT/pool.env"
+    # No Lake artifact cache in pool trees: with it on, lake also caches the read-only shared packages'
+    # artifacts and fails on every package module (EACCES, hbox 2026-10-31). Warmth comes from warm-link.
+    echo 'export LAKE_ARTIFACT_CACHE=false'; } > "$LANE_POOL_ROOT/pool.env"
   pool_env=$LANE_POOL_ROOT/pool.env
   echo "lane-tree: wrote $pool_env"
 fi
@@ -130,6 +133,8 @@ case ${1:-} in
     t=$(held_by "$lane"); [ -n "$t" ] || die "$lane holds no tree"
     tripwire "$t"
     save_diff "$t" "released by $lane"
+    # a free tree is a clean tree: the work is in saved/ (above), never handed to the next holder
+    git -C "$t" checkout -q -f HEAD && git -C "$t" clean -q -fd -e .lake
     rm -f "$leases/$(basename "$t")"; echo "released $t" ;;
   renew)
     lane=${2:?LANE or TREE}; lock
@@ -150,7 +155,7 @@ case ${1:-} in
     lock
     for t in $(trees); do
       h=$(holder "$t"); a=$(lease_age_h "$t")
-      if [ -n "$h" ] && [ "$a" -ge "$TTL_H" ]; then save_diff "$t" "lease of $h expired (${a}h)"; rm -f "$leases/$(basename "$t")"; echo "freed $(basename "$t") ($h, ${a}h)"; fi
+      if [ -n "$h" ] && [ "$a" -ge "$TTL_H" ]; then save_diff "$t" "lease of $h expired (${a}h)"; git -C "$t" checkout -q -f HEAD; git -C "$t" clean -q -fd -e .lake; rm -f "$leases/$(basename "$t")"; echo "freed $(basename "$t") ($h, ${a}h)"; fi
     done ;;
   init)
     seed=${2:?SEED_TREE}; n=${3:?N}
