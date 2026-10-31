@@ -5,7 +5,7 @@ Agent: a7bf41b0d8bb24813 (distilled from a3f7fce75cd3e4e49, retired; earlier: a8
 Owns: private cells: `Compiler/PrivateCellRoot.lean`, `Compiler/PrivateCellIndex.lean`, `Kernel/PrivateCell*.lean`
 (View, Scope, Receiver, Materializer, Opening), `Kernel/BlindedCellHiding.lean`, `Kernel/ReceiptEventHiding.lean`,
 `Theory/PrivateCellTrie.lean`, `Theory/AuthTrieErase.lean`, `Theory/AuthTrieReveal.lean`, `Theory/CellStateAux.lean`
-(the carried structure in `Theory/CellState.lean`), `Theory/FiniteTapeGap.lean`, `Theory/OracleGame.lean`,
+(the carried structure in `Theory/CellState.lean`), `Theory/FiniteTapeGap.lean`, `Theory/OracleGame.lean`, `Compiler/AirKeccak.lean`,
 `docs/RATCHET-LOG-DESIGN.md`.
 Quest: blinded cells (content, declared kinds) on a private authenticated map with O(log n) writes and bounded reads,
 hidden by a fresh outer mask per version and a zero-knowledge complete selective opening; the unblinded growing kinds
@@ -24,7 +24,7 @@ on the same trie root (FORMAT (a)). Never trade hiding for speed.
   `/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex
   exec -m gpt-6-astra -s read-only -C <worktree> "<prompt>"`, nohup with a PID file in the scratchpad.
 
-## State (main 4038d3693)
+## State (main 81afc7026)
 - f28cd8457 FORMAT (a): `HyperdocumentCell.eventMaterializer` and `CredentialAuthorityCell.materializer` are
   `PrivateCellRoot.materializer _ (untagged _)`; `CanonicalCellRegistry` `saltedWire?`/`privateWire?`/
   `wire_salted_or_private`/`materializer_of_privateWire`/`privateWire_rootOf`; narrowed openings over salted wires
@@ -44,21 +44,33 @@ on the same trie root (FORMAT (a)). Never trade hiding for speed.
   receiver (`KeptCell`, custody PRF hop, `hiding_of_hybrids` with zk, rom, identical open), the private root.
 
 ## Next, in order
-1. The circuit pinned (astra round 15 item 2). Done: the bounded shape (`Shaped` in `OpeningRel`, 4038d3693;
-   `AuthTrieReveal.walkReveal_short_stop`). Owed: the opening's `OracleGame.Codec` (statement bits: root, cell,
-   version, scope, the view's framed entries; witness bits: mask, inner digest, per prefix siblings padded to the
-   prefix length with private selectors, one optional terminal (path, digest), the members under the prefix), and
-   an `EmittedCircuit` per public width: an AirFlatten gate list over ZMod 2 WITH its acceptance output wire
-   (`flatten_constraint_iff`; conjoin checks, never sum residuals over F2), sound (acceptance → `OpeningRel` of the
-   decoded witness), complete (`OpeningRel` → the encoded witness accepts), gate count bounded by the width; strict
-   canonical order of the answered entries.
-2. The Keccak/cSHAKE gadget (statement first: acceptance equals `Sp800185Cshake256.hash` on the deployed framing).
-3. The backend: MPC-in-the-head over the linearized circuit as an OracleGame `System`, straight-line extraction from
-   the logged commitment preimages (round 15 item 6).
-4. The receiver adapter (round 15 items 7, 8), then `zk` of `hiding_of_hybrids` discharged; epoch (b): content and
-   declared kinds onto the private root.
-5. The binding reduction for the private root (equal roots → equal stores ∨ a named collision), owed since round 13.
-6. FORMAT (a)'s timing: member-side (ab7b4fe7fb687e0ca) measures the authority cell. Baseline b9450147f:
+Substrate (astra round 17): the built Air rung over `ZMod 2` (add' = XOR, mul' = AND, each constraint zero-checked
+alone), flattened by `AirFlatten`, emitted by `Emit`, shared by `EmitShare.cse` (`cse_emit_accepts_iff`). The parked
+AND/XOR network in ResearchWip (`ObliviousNetwork`, `BendProofKeccak`) keeps its Bend consumers; rescue by a proved
+lowering into Air only where useful, never as a second compiler for the opening.
+1. Done 81afc7026: `Compiler/AirKeccak.lean` (`roundB_spec`, `round_accepts`, `perm_accepts` per transition,
+   `perm_sound`, `perm_complete` via `traceAsg` on an injective layout, `perm_trace_unique`, 38400 constraints,
+   `round_refuses_flip`). Next in it: absorb and squeeze for a PUBLIC byte length (rows of the sponge, padding as
+   constants, bytes as 8 wires each, never recomposed into one field element): `cshakeSystem cust len` accepts iff
+   the output wires read `cshake256Bytes cust input`. Then the costs published: pre-CSE term nodes, post-CSE XOR/AND
+   gates, witness inputs, zero outputs.
+2. The custody size contract (round 17 item 5): `CustodyDecode` is an arbitrary function, and `maskOf` inherits
+   the kind's value encoding, so the outer input length is not fixed per kind. Choose the concrete decoder, prove an
+   accepted-mask length bound and its circuit refinement; a public length goes in the statement, a private one
+   needs bounded padding with constrained secret length.
+3. The opening system per public shape (capacities per prefix; private stopping depth, occupancy and node tags):
+   node hash inputs are variant-sized (empty 1 byte, branch 65, leaf 98), so private variants need selection or
+   bounded-length hashing; the public view's content digests may be verifier preprocessing if their binding to
+   the encoded view is proved. `Witness.reveals` is a function: serialize the selected prefixes and prove
+   reconstruction preserves `OpeningRel`. Sound and complete against `OpeningRel` through the codec.
+4. The ZKBoo seam (round 17 item 3): an evaluator derived from the emitted SSA whose outputs are the residuals,
+   every zero check preserved; deterministic gate evaluation, uniqueness only for retained outputs after CSE.
+   `OracleGame.System` picks circuits by statement bit length: shape-indexed instances or one padded circuit.
+5. The backend: MPC-in-the-head over that circuit as an OracleGame `System` (straight-line extraction from the
+   logged commitment preimages, one stateful simulator).
+6. The receiver adapter (round 15 items 7, 8), then `zk` of `hiding_of_hybrids`; epoch (b).
+7. The binding reduction for the private root (equal roots → equal stores ∨ a named collision).
+8. FORMAT (a)'s timing: member-side (ab7b4fe7fb687e0ca) measures the authority cell. Baseline b9450147f:
    doc-log write ~2.0 s at 13 prior entries, ~4.0 s at 103, ~6.1 s at 303; delegate ~2.5 s at 13, ~4.1 s at 303.
 
 ## Seams
