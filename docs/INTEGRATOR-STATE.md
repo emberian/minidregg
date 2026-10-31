@@ -78,7 +78,11 @@ door stranger/invite/lobby, public cold/first/warm; https://demo.dregg.online/ =
   and stays with app-reds.
 - Hermes (d) judged on the final world: controller, dispatch, resident GREEN; `ask lobby` admitted (5.7 s, one re-plan)
   and lands, but no reply: mini-grain-resident@9872001 joins the lobby then exits 1 with "resident source preparation
-  refused before dispatch: controller service is unavailable" (4 repros). Routed to app-reds a17f4172949caca14.
+  refused before dispatch: controller service is unavailable" (4 repros). App-reds: that text collapses a failing
+  `systemctl show` of the controller unit (manager/D-Bus call, prove_controller_unit); 4bee4b608 (staging) keeps exit status
+  and stderr. Infra probes the call on demo-dry as mini-h-lobby (and the unit sandbox's view of the system bus).
+  op66-plan narrowed: not the import profile (EtherCalc 3/3 on hbox under market-large-v1); differences vs Davros: date-style
+  app version, a single `modify` permission with no roles, the interface schema; infra sends schema-inspection.json pairs.
 Ruling: deploy-script fixes keep be4ef7510's verdicts (no composed rerun); a Rust fix means a new cut.
 The restart `continuous` red was the resident's own output document moving its maintenance revision; be4ef7510's
 maintenance_fingerprint leaves out documents the resident writes.
