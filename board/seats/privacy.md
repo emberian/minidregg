@@ -23,7 +23,7 @@ on the same trie root (FORMAT (a)). Never trade hiding for speed.
   `/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex
   exec -m gpt-6-astra -s read-only -C <worktree> "<prompt>"`, nohup with a PID file in the scratchpad.
 
-## State (main f28cd8457)
+## State (main 4038d3693)
 - f28cd8457 FORMAT (a): `HyperdocumentCell.eventMaterializer` and `CredentialAuthorityCell.materializer` are
   `PrivateCellRoot.materializer _ (untagged _)`; `CanonicalCellRegistry` `saltedWire?`/`privateWire?`/
   `wire_salted_or_private`/`materializer_of_privateWire`/`privateWire_rootOf`; narrowed openings over salted wires
@@ -43,10 +43,14 @@ on the same trie root (FORMAT (a)). Never trade hiding for speed.
   receiver (`KeptCell`, custody PRF hop, `hiding_of_hybrids` with zk, rom, identical open), the private root.
 
 ## Next, in order
-1. The circuit pinned (astra round 15 item 2): the bounded relation (`depth < |prefix| → members ≤ 1`, siblings
-   padded to the prefix length, one optional private terminal per prefix), per public shape an emitted gate system
-   with its acceptance output (`flatten_constraint_iff`), conjunction over F2 without residual cancellation, public
-   length bounds, checked encodings, strict canonical order of answered entries; the opening's `OracleGame.Codec`.
+1. The circuit pinned (astra round 15 item 2). Done: the bounded shape (`Shaped` in `OpeningRel`, 4038d3693;
+   `AuthTrieReveal.walkReveal_short_stop`). Owed: the opening's `OracleGame.Codec` (statement bits: root, cell,
+   version, scope, the view's framed entries; witness bits: mask, inner digest, per prefix siblings padded to the
+   prefix length with private selectors, one optional terminal (path, digest), the members under the prefix), and
+   an `EmittedCircuit` per public width: an AirFlatten gate list over ZMod 2 WITH its acceptance output wire
+   (`flatten_constraint_iff`; conjoin checks, never sum residuals over F2), sound (acceptance → `OpeningRel` of the
+   decoded witness), complete (`OpeningRel` → the encoded witness accepts), gate count bounded by the width; strict
+   canonical order of the answered entries.
 2. The Keccak/cSHAKE gadget (statement first: acceptance equals `Sp800185Cshake256.hash` on the deployed framing).
 3. The backend: MPC-in-the-head over the linearized circuit as an OracleGame `System`, straight-line extraction from
    the logged commitment preimages (round 15 item 6).
