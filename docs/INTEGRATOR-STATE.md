@@ -22,8 +22,8 @@ gated candidates and names candidates to infra and the explorer.
   flatness-submit FAIL. **j14-apps FAIL: "Hermes sent no reply to the ask: refused"**, reproduced on overlay
   1c151fce4-resid (spk-host crate from 40efdcff9) at -hp1 (/ci/j-1c151f-hp1/journey.log), so the resource-id crash is not
   its cause. app-reds owns it (Davros run 18 reads the final mini_say outcome). Batch 5's umbrella-tree and rerecord are
-  still running in umbrella-src (Mac waiter bsakk28rk).
-- **Batch 6 (staging cfe5c24d5+)**: perf-apps b1 23738a4ce, app-reds' refusal clauses 5c4f73459, the resource-id fix, exorcism 16f2d046f, 8b49bf1e2/fe77ab521 (Store calls carry files in the frame, v2; Host and helper from one build) and 019f2e56f and whatever lands. Cut it when batch 5's gate and umbrella are
+  still running in umbrella-src (PID 2698823; Mac waiter b4l30lqym).
+- **Batch 6 (staging cfe5c24d5+)**: perf-apps b1 23738a4ce, app-reds' refusal clauses 5c4f73459, the resource-id fix, apps-e2e request-file fix f1255b4b3 (78a20cb56), exorcism 16f2d046f, 8b49bf1e2/fe77ab521 (Store calls carry files in the frame, v2; Host and helper from one build) and 019f2e56f and whatever lands. Cut it when batch 5's gate and umbrella are
   in and enough has accumulated (minimal-checks ruling: cuts spaced out to accumulate perf work).
 - **FORMAT batch (later, one genesis, after iter-speed's seam 1)**: hot-path row 11 (checkpoint carries session indexes;
   Store epoch) + Book entries migration (~50 consumers) + private-cells FORMAT (a): eventHistory and authority to the trie
