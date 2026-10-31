@@ -2,7 +2,7 @@
 
 Agent: a24974e84d3c540d1 (distilled from a0fee5643746e520c, 2026-10-31 17:27)
 Worktree: /Users/ember/dev/minidregg-lanes/host-execution (branch seat/host-execution, rebased onto main and pushed to main;
-no side branch). Box tree: dregg-build2 (`ssh bb2`) pool t3 (was hbox pool t7) (`. /home/hbox/pool/pool.env; lane-tree renew hot-path`), native Host builds via
+no side branch). Box tree: hbox pool t3 (`ssh hbox`, `. ~/.minidregg-env`, `lane-tree acquire host-execution origin/main`), native Host builds via
 `scripts/pipeline/native-loop hot-path <base candidate> <label>` from t7 (~3-15 min; candidates land in
 /home/hbox/pool/lanes/hot-path/candidates/<id>).
 
@@ -59,9 +59,12 @@ record's turn); the birth receive 405 (admitDecodedNative 183, receiveCandidateW
    (`birthPlanKeys`, `prepareOrdinaryBirthAuthorizedOn`) and submitted (`submitBirthLight`) on light.
    Still full: ops 4/5 (read-path ad74bb6d4410b48f3 ports them onto a light Ground), the walk families
    (`sessionWalked`), fn/carried ops, op 130 dry run.
-   Measuring: native-loop of main on bb2 t3 against base /srv/integ/candidates/76511e768…, tooling in bb2
-   ~/hx (up.sh, grow.sh, pcm.py). BLOCKED: worlds from 76511e768 don't come up (consent resident dies,
-   "durable log is not a turn log: a verification walk carries no World"; ed875b899), routed to member-side.
+   Round 3 LANDED 1aebf0ac0: refresh never extends a held full image (`materialize` does, on demand); births
+   adopt their readback. Round 4 LANDED (on main by 2e85f5676): ops 144 (key status, every say), 173 (certify
+   view), 91 (doc new's birth intent) on the light served state (`sessionServed`).
+   Measuring on persvati (/home/ember/mdpool/hx: up.sh, grow.sh, pcm.py, restart.sh; candidates copied there and
+   relocated). persvati has perf_event_paranoid=4 (no profiling); hbox has perf. `MINIDREGG_HOST_TRACE=1` in the
+   world's env prints per-op ms into W/log/store.log ("op N"): a say is ops 4,4,5,1,2,144; a doc new adds 91, 173.
    (a) inventory what each `Opened` consumer reads (directory, authority, pins, seed/logStart exactness, the image's
    accepted records for historical receipts and walks); (b) give `OpenedServed` the missing fields as maintained
    values; (c) retype receivers family by family (birth first: `Held.of` already isolates it to directory +
@@ -71,7 +74,7 @@ record's turn); the birth receive 405 (admitDecodedNative 183, receiveCandidateW
 2. (i) a write carries its decoded post beside its bytes (`decode bytes = some post`), so the receive and the light
    adopt never decode the Host's own post (ruled ours by retained-mode).
 3. App-create turns: op66 BEGIN plan (3-6 s), route (4.5 s), enrolment (4.1 s), START (2.3 s): read and trace each
-   (perf-apps' timelines hbox:/home/hbox/lanes/perf-apps/ctpH, ctpI; driver ctp.sh; a70a7655df79c4335 reruns it).
+   (perf-apps' timelines ctpH/ctpI were deleted 10-31; regenerate with a70a7655df79c4335's ctp.sh on a current candidate).
 4. GET read-path contract: draft (not elaborated) at
    /private/tmp/claude-501/-Users-ember-dev-minidregg/01a192eb-6b7b-70ef-8cad-095d745dabe5/scratchpad/ApplicationReadPermit.lean.draft;
    astra's NEEDS-CHANGE review at
