@@ -221,7 +221,7 @@ pub(crate) fn routed_reserve_http_for(
     if query.contains('#') {
         return Err("retained forward path or query differs from API profile".into());
     }
-    let app_path = route.project_path(path)?;
+    let app_path = route.project_path_for(method, path)?;
     let headers = retained_forward
         .get("headers")
         .and_then(Value::as_array)
@@ -292,9 +292,14 @@ impl HostedRoute {
         }
     }
     /// The app-relative path of a model path, exactly as the Host projects it.
-    pub(crate) fn project_path(&self, path: &str) -> Result<String, String> {
+    /// The same projection for a request of `method`: a hosted CONVERSATION path may end in one `/` (the
+    /// app's own websocket URL, carried byte-exact), as the Host's `HostedRoute::project_path_for` admits it.
+    pub(crate) fn project_path_for(&self, method: &str, path: &str) -> Result<String, String> {
         self.validate()?;
         match self {
+            Self::Api { signed_prefix } if method == "CONVERSATION" => {
+                minidregg_signed_api_path::conversation_route(signed_prefix, path).map_err(str::to_owned)
+            }
             Self::Api { signed_prefix } => {
                 minidregg_signed_api_path::route(signed_prefix, path).map_err(str::to_owned)
             }
@@ -2745,6 +2750,20 @@ mod tests {
             .unwrap(),
             "2824c93080445e7846b388355db9bd0fab208b2fa311d4f2125b1650759f00f1"
         );
+    }
+
+    #[test]
+    fn a_conversation_reserve_binds_the_apps_trailing_slash_endpoint_and_other_methods_do_not() {
+        let api = HostedRoute::Api { signed_prefix: "/".into() };
+        for path in ["socketio/", "socket.io/", "api/kernels/"] {
+            let forward = json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL,"operationId":"9","method":"CONVERSATION",
+                "path":path,"query":"EIO=4&transport=websocket","headers":[],"bodyHex":"7b7d"});
+            let expected = routed_reserve_http_for(&forward, &api).unwrap();
+            assert_eq!(expected["pathHex"], hex(path.as_bytes()), "{path}");
+        }
+        let get = json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL,"operationId":"9","method":"GET",
+            "path":"socketio/","query":"","headers":[],"bodyHex":""});
+        assert!(routed_reserve_http_for(&get, &api).is_err());
     }
 
     #[test]
