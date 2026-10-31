@@ -3,6 +3,7 @@
 set -euo pipefail
 umask 077
 here=$(cd "$(dirname "$0")" && pwd)
+world_up_lock=${WORLD_UP_LOCK:-/home/hbox/lanes/world-up.lock}
 repo=$(cd "$here/../.." && pwd)
 data=$here/store-sweep-data.py
 usage() {
@@ -20,7 +21,7 @@ same candidate and package. Interrupted apps have no verdict and are tried fresh
 --retry-stage explicitly archives FAIL records at that stage before replanning.
 Staging defaults to /tank/lanes/cx-store-sweep/staging and is removed after teardown.
 A cleanup failure stops the sweep and retains staging for inspection.
-Each entire world holds flock -o /tank/lanes/world-up.lock through teardown.
+Each entire world holds flock -o $WORLD_UP_LOCK (default /home/hbox/lanes/world-up.lock) through teardown.
 PASS means the lifecycle plus authenticated GET / answered HTTP 2xx or 3xx;
 redirects are recorded, not followed. No app-specific functionality is certified.
 HELP
@@ -79,7 +80,7 @@ echo "$(wc -l <"$plan") worlds; candidate $sha; profile chosen from package byte
 [[ $staging == /tank/lanes/* && $staging != *[!a-zA-Z0-9_./-]* ]] || { echo 'staging must be a simple absolute directory under /tank/lanes' >&2; exit 2; }
 mkdir -p "$staging"
 if compgen -G "$staging/b.*" >/dev/null; then
-  flock -o /tank/lanes/world-up.lock "$here/store-sweep-world.sh" "$candidate" "$out" "$staging" - --recover-all
+  flock -o "$world_up_lock" "$here/store-sweep-world.sh" "$candidate" "$out" "$staging" - --recover-all
 fi
 # Save the scripts and binary pins used, independently of subsequent lane edits.
 mkdir -p "$out/driver"
@@ -89,6 +90,6 @@ while IFS= read -r batch; do
   batchfile=$(mktemp "$out/batch.XXXXXX.json")
   printf '%s\n' "$batch" >"$batchfile"
   # The lock covers preparation, world-up, every app, world-down and resident cleanup.
-  flock -o /tank/lanes/world-up.lock "$here/store-sweep-world.sh" "$candidate" "$out" "$staging" "$batchfile"
+  flock -o "$world_up_lock" "$here/store-sweep-world.sh" "$candidate" "$out" "$staging" "$batchfile"
 done <"$plan"
 jq '.counts' "$out/qualification.json"
