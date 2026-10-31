@@ -24,7 +24,7 @@ gated candidates and names candidates to infra and the explorer.
   residents UNKNOWN (forge composed decides); j14-apps FAIL: the room-refusal ask got no Hermes reply ("Hermes sent no
   reply to the ask: refused", /ci/j-1c151f/journey.log). Suspected cause: perf-apps' START crash loop ("attestation
   resource outside supported profile", 20-digit member-namespace resource ids), fixed 40efdcff9.
-  **Next, armed** (hbox `$I/hp-resid.sh` PID 3123406 waits on gate15's PID; Mac waiter bdsdg7ubd wakes the integrator when the -hp1 run exits): when gate15 exits, gate15 runs on overlay
+  **Next, armed** (hbox `$I/hp-resid.sh` PID 3123406 waits on gate15's PID; Mac waiter bd51o28q4 wakes the integrator when the -hp1 run exits): when gate15 exits, gate15 runs on overlay
   **1c151fce4-resid** (batch 5 + the spk-host crate from 40efdcff9) with PHASES="j14 composed", HARNESS=staging tip,
   SUF=-hp1 (PID in gate-1c15-resid-hp1.pid, log logs/gate-1c15-resid-hp1.log). If j14 is still red there, the
   journey's step dir names the cause; route it to app-reds. Then ask infra for forge composed on the green one.
