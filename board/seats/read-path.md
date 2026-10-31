@@ -105,7 +105,7 @@ rounds, and move measurement to persvati's standing world when it exists.
 - member-side (a778bbda6509944a5): consent cost per read; mini-web-spawn's `delegated_consent_env` twin of
   mini-line's selection (theirs, by a shared `#[path]` source); op 144 head-keyed check later.
 - store-retained (a9b54e85e4a194b91): the reference-name index over WORKSPACE/refs.
-- host-execution (a0fee5643746e520c): `issuerCheck`/`existsSupport`, FORMAT, the restart path, the GET read-path
+- host-execution (a24974e84d3c540d1): `issuerCheck`/`existsSupport`, FORMAT, the restart path, the GET read-path
   contract.
 - infra (aa72653a8ce442178): deletes edge/mini/shell/mini-shell-ssh once no supported candidate lacks
   bin/mini-line.
