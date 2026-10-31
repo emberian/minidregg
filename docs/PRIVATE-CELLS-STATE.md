@@ -120,9 +120,22 @@ coverage equals a bounded prefix union (`body` covers every `atomsOf low`); mult
 overwrite and deletion witnesses; store-side collision locality (authentication path plus
 selected subtree); `Cache.reveal_eq`.
 
-**Next increments** (in order):
-1. The Store adapter and the class-prefix = `Visible` theorem; `maskedTrieCommitment` over the
-   kept cache (the bulk root is the spec only).
+**Increment 2, started** (`Compiler/PrivateCellIndex.lean`, statements, elaborate on hbox,
+not yet reviewed): semantics decided: a `Store` is a finite map with no history, so first- vs
+last-wins is a property of entry LISTS only; the adapter reads canonical entries (distinct
+addresses, `entries_keys`), where both conventions agree, and the trie's last-wins is the
+update convention. `indexEntries` omits the blinding address. `IndexExact` (last value at
+every address = the store's value bytes; none at blinding) and `IndexBindsData` (equal
+indexes agree off the blinding; teeth: stores differing only in blinding share an index).
+
+**Next increments** (in order, batched onto dd0e6efbd as the coordinator asked):
+1. Prove `IndexExact` / `IndexBindsData` (lastVal over a map/filter of a key-distinct list;
+   value codecs injective by `streamEncode_injective`). Then item 2: `ClassKeys` over
+   `indexEntries` whose class prefix selects exactly `Visible`/`narrowPacked`
+   (`Kernel/ResourceObservationAdmission.lean` ~696-870: `body` covers every `atomsOf low`,
+   annotations combine links/marks/annotations); state as a bounded union of prefixes.
+   Item 3: witnesses with an injective digest (`AuthTrie.spelled`-like but multi-class K/V):
+   cross-class refusal, overwrite, deletion. Item 4: the opening relation from the compiler.
 2. The opening relation in the compiler's vocabulary (compiler-emitted AIR; grow the
    compiler where it lacks a trie-path or cSHAKE gadget), not a hand-written circuit.
 3. The receiver: new materializer version beside the old one until a fresh genesis, with its
@@ -134,3 +147,25 @@ selected subtree); `Cache.reveal_eq`.
 `ResourceView`, `NativeThinConsent.checkOpened` recomputing the flat root, whole-cell
 serialization in `canonicalPostBytes` of every durable write, `streamPayload` and `since`
 scanning the accepted log, `historicalReceipt`'s `findIdx?` (cached variant exists).
+
+## Continuation (for a successor)
+
+* **Trees.** Mac worktree `~/dev/minidregg-lanes/private-cells` (branch `lane/private-cells`,
+  pushed to origin; HEAD dd0e6efbd plus increment-2 work). hbox warm tree
+  `/home/hbox/lanes/private-cells/src` on Lean 4.35: sync edited files with rsync, iterate with
+  `swarm-build lake env lean <file>`, batch with `swarm-build lake build Theory Kernel Compiler
+  Minidregg Host` (about 10-40 min warm), logs and PID files under
+  `/home/hbox/lanes/private-cells/logs/`. Before READY, verify each committed `.lean` file equals
+  the hbox copy (`git show HEAD:f | ssh hbox cmp - …`).
+* **Landing.** Integrator is aeb671706eb3f70d7: send a sha whose parent is the integrator's
+  batch or main, with the full build result. dd0e6efbd is merged on staging (e89557587); an
+  adversarial statement audit of it is running there. Codec or event-id batches carry their own
+  fixture re-record. Before the new cell format, agree the codec epoch with hot-path
+  a86738fc1dfae6429.
+* **Review practice.** Statement first; codex astra (`codex exec -m gpt-6-astra -s read-only -C
+  <worktree> "<prompt>"`) as peer on each statement and on proofs' claims; Kimi via the integrator
+  for non-vacuity. Every round so far found real defects: apply them, never weaken.
+* **Lessons.** Scoped collisions (never a global `Collision` disjunct); a counted-cost Prop over
+  a returned `Nat` is only meaningful for an operation whose count is its own execution; quantify
+  constants before the size parameters; budgets need a positive query bound and must not admit
+  unbounded enumeration; a witness at the wire shape is not an admitted invocation.
