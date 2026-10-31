@@ -2818,7 +2818,23 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     // `--plan`: parse and plan the one line, print the plan, run nothing (the per-leaf dry run of
     // the web front end's parity row; a usage error is the shell's usage ending, exit 2).
     let plan_only = args.optional("plan").is_some();
+    let slots = args.optional("call-slots").map(|d| absolute(d, "call-slots")).transpose()?;
     args.finish()?;
+    // `--call-slots DIR` (the ssh forced command): at most two calls per member at once. The
+    // Store serves every member from one queue, so one member's flood of reads would queue
+    // everyone's. Each call holds one of two locks in DIR for its life and the third is refused by
+    // name; the descriptor is close-on-exec, so nothing this call starts keeps a slot.
+    let _slot = match slots {
+        Some(dir) => match take_call_slot(&dir)? {
+            Some(slot) => Some(slot),
+            None => {
+                eprintln!("mini-shell-ssh: two calls already running for this member; wait for one to finish");
+                crate::swap_exit_status(75);
+                return Ok(());
+            }
+        },
+        None => None,
+    };
     let _ = crate::keys::STDIN_FREE.set(one.is_some());
     // A session over a workspace that already pins its Host takes host,
     // config and socket from that pin (a remote workspace from `mini join`
@@ -2891,8 +2907,42 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     Ok(())
 }
 
+/// One of the two call slots in `dir`, held (an exclusive `flock`) while the returned file lives;
+/// `None` when both are held.
+fn take_call_slot(dir: &Path) -> Result<Option<fs::File>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+    crate::fsio::ensure_private_dir_all(dir)?;
+    for name in ["1", "2"] {
+        let path = dir.join(name);
+        let file = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("call slot {}: {e}", path.display()))?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(Some(file));
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_third_call_finds_no_slot() {
+        let dir = std::env::temp_dir().join(format!("slots-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let one = super::take_call_slot(&dir).unwrap().expect("first slot");
+        let two = super::take_call_slot(&dir).unwrap().expect("second slot");
+        assert!(super::take_call_slot(&dir).unwrap().is_none());
+        drop(one);
+        assert!(super::take_call_slot(&dir).unwrap().is_some());
+        drop(two);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn refusals_keep_only_the_newest() {
         let dir = std::env::temp_dir().join(format!("refusals-{}", std::process::id()));

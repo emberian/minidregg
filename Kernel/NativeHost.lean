@@ -524,10 +524,9 @@ def rotationAssemble (plan : SubjectKeyRotation.SigningPlan)
 /-- The current key status of `subject` as seen by the holder of `publicKey`. -/
 def keyStatusLoaded (config : Config) (opened : Opened config) (subject : SubjectId)
     (publicKey : List UInt8) : Except String SubjectKeyRotation.Status := do
-  let authority ← need "authority cell unavailable"
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  -- The opened image's own authority load, not a second encode and decode of the cell.
   need "subject has no current signing key"
-    (SubjectKeyRotation.status authority.snapshot.logical subject publicKey)
+    (SubjectKeyRotation.status opened.authority.snapshot.logical subject publicKey)
 
 /-- Source-authored factory-observation provisioning plan on one verified
 image. The single slot is the sponsor's ordinary current-authority header for
@@ -2256,8 +2255,7 @@ structure WellLedger where
   wells : List WellLedgerRow
 
 def wellLedgerLoaded (config : Config) (opened : Opened config) : Except String WellLedger := do
-  let authority ← need "authority unavailable"
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  let authority := opened.authority
   let book ← need "book unavailable"
     (ResourceBirthController.Concrete.observeCell config.deployment opened.directory.directory
       config.deployment.resourceBookId .resourceBook)
@@ -2762,8 +2760,7 @@ structure SeatView where
   cells : List (Nat × Digest × List UInt8)
 
 def seatViewLoaded (config : Config) (opened : Opened config) (cells : List Nat) : Except String SeatView := do
-  let authority ← need "authority unavailable"
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  let authority := opened.authority
   let snapshot := opened.durable.snapshot
   pure ⟨logicalHeight config opened.durable, authority.snapshot.cell.root,
     ObjectiveActivity.bookOf (snapshot.canonicalBytes ⟨config.deployment.resourceBookId⟩),

@@ -20,8 +20,7 @@ structure PlanRequest where
 
 def planLoaded (config : Config) (opened : Opened config) (request : PlanRequest) :
     Except String SubjectKeyCommitmentAdoption.SigningPlan := do
-  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot
-    | throw "authority cell unavailable"
+  let authority := opened.authority
   let some current := CredentialAuthorityState.currentSigningKey authority.snapshot.logical request.subject
     | throw "subject has no current signing key"
   if current.publicKey != request.currentPublicKey then throw "presented key is not current"
