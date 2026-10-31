@@ -2,52 +2,52 @@
 
 Lane `lane/exorcism`, worktree `/Users/ember/dev/minidregg-lanes/exorcism`. The findings table and
 every landed batch with its numbers are in `docs/EXORCISM.md`. Integrator: aba0beaa578594e92.
-Hot-path (a6c4a1532687a4fdb) owns submit, story growth and FORMAT; this lane owns the Host's own
-per-request time on the read and query path, aiming at ember's bar of about 1 ms warm.
+Hot-path (a6c4a1532687a4fdb) owns submit, story growth, FORMAT, the ServedAuthority projection,
+`Patch.run` and `issuerCheck` (it carries this lane's `existsSupport`). This lane owns the per-request
+cost of a signed read end to end, aiming at ember's bar of about 1 ms warm.
 
-## In flight
+## Where a one-shot `doc show` goes (hbox /ci/exo/w, candidate a4cb65af, light strace)
 
-- `b168332a1` (Lean, not yet built into a Host): key status (op 144), the well ledger, the seat view
-  and the key-commitment plan read `Opened.authority` instead of `loadDeployment` (an encode and
-  decode of the 7 KB authority cell, 3.2 ms of op 144's 4-5 ms). Its `issuerCheck` half moved to
-  hot-path (they adopted `existsSupport` verbatim; this lane removed its copy in `93b5fef03`).
-- `lane-check` of `Kernel/NativeHost.lean` and `Kernel/NativeHostKeyCommitmentAdoption.lean` was
-  running in pool tree `/home/hbox/pool/t6` (`/ci/exo/lc3.sh`, PID file `/ci/exo/lc3.pid`, results
-  `/ci/exo/lc3.log`); it was rebuilding stale imports. t6 still carries an uncommitted diff to
-  `Compiler/CredentialAuthorityPolicyRegistry.lean` from before `93b5fef03`: check that file out at
-  the lane head before reusing the tree. t6 is leased to `exorcism`; `lane-tree release exorcism`.
+About 40 ms of wall time:
+- Host op 5 (signed read) 9-13 ms, op 4 (challenge) 2-4 ms, op 144 (key status, the
+  workspace's commitment recheck) 5-10 ms;
+- codec resident frames 3 ms (author 0.2, challenge JSON 0.6, signatures 0.1, signed observation
+  0.2, view-resource 1.1, view-document 1.0);
+- consent resident 2.8 ms (two frames; each Store read went through a temp dir);
+- client: process start and workspace load about 4 ms, then about 60 openat as an attempt-file bus
+  (it writes intent, challenge, signatures and views, then reads them back; `config.json` is read
+  about eight times).
 
-## Next
+## Riding batch 6 (merged to staging), not yet measured
 
-1. Finish the importer checks; send `cad5a66fb` to the integrator for a Host build; measure op 144
-   and op 5 on `/ci/exo/w` with `MINIDREGG_HOST_TRACE=1 bash /ci/exo/w/restart.sh` (traces land in
-   `/ci/exo/w/log/store.log`) and `/ci/exo/m5b.py MINI N "key-status" "doc show xafter228813"`.
-2. The rest of a signed read (op 5), agreed with hot-path as this lane's (submit runs them too), from the perf profile (`/ci/exo/hd.data`, symbolized with
-   `perf report --symfs /ci/exo/symfs --comm 8`; `/ci/exo/agg.py` aggregates `perf script` chains):
-   - `ContentResource.project` encodes the whole document cell (`StoreCodec.encode`, through
-     `contentBytes`) for both `before` and `after`, which are the same store on a read: about 8%.
-   - `FiniteDependentMapCachedOrdering.fromEntriesCached` re-keys every entry (`addressKey`
-     encodes each address): about 4%.
-   - `loadPolicy` re-encodes the policy record (`PolicyRecordCodec.encode`): about 3%.
-   - `storedCapabilityDigest` hashes each candidate capability of the issuer's epoch: about 3%.
-   - `Theory/CredentialAuthorityState` `parentKeys`/`revokedKeyAt` take `logical.support`
-     (quadratic dedup) on authority loads.
-   Hot-path keeps the ServedAuthority projection, the `Patch.run` Store.set chain (tell it if a
-   read hits `Patch.run`), DRC `writes`/`readGuards` and FORMAT.
-3. The challenge (op 4, 1-2 ms): not profiled yet.
-4. Rows 6 and 8 of `docs/EXORCISM.md` (small).
+- `b168332a1`: op 144 and three other readers use `Opened.authority` (3.2 ms of op 144).
+- `bcccac6cc`: the ssh wrapper execs mini, which holds the call slots (whoami 9.8 to 4.0 ms).
+- `16f2d046f` + `019f2e56f`: the commitment-seen cache is reverted (review); check_commitment
+  refuses an explicit `currentRevoked: true`.
 
-## How to measure (hbox)
+## Sent, not yet merged
 
-- A Host op straight to a socket: `/ci/exo/hop.py SOCKET OP N` (`/ci/exo/host.sha` holds the
-  candidate Host digest).
-- Profile the Host: `perf record -F 499 --call-graph dwarf,16384 -o OUT -- bash -c "bash
-  /ci/exo/w/restart.sh; sleep 900"` with a PID file, drive requests, `kill -INT` that PID. The Host
-  runs from a deleted memfd; `/ci/exo/symfs/memfd:mini-pinned-image (deleted)` is a copy of the
-  candidate's `minidregg-host` so `--symfs /ci/exo/symfs` resolves it.
-- `minidregg-host CONFIG store-bench` times loads (`loadDeployment x10`, `validateServedFrom`, ...).
+- `8b49bf1e2` + `fe77ab521`: Store calls carry their files in the coprocess frame (frame v2,
+  `NativeCoprocess.outputMemory`, Store helper `mem:NAME`); the MAC key is read once per process.
+  The Host and its Store helper must come from the same build.
+
+## Next, in order
+
+1. Measure ops 144, 5 and 4 and the consent resident on the batch 6 candidate (then batch 7 for
+   the memory frames). Overlay on /ci/exo/w: `bash /ci/exo/w/restart.sh` restarts Host and Store;
+   `MINI_TRACE=/abs/file` gives per-op client times.
+2. Profile op 5 on the new Host (perf `--call-graph dwarf` works on the on-disk residents; the
+   operator Host runs from a memfd, so copy its binary under a symfs as before). The read-path
+   costs agreed as this lane's: `ContentResource.project`'s double encode, `fromEntriesCached`
+   re-keying, the `loadPolicy` re-encode, `storedCapabilityDigest`. Hot-path's 545f80874 (demand
+   projection) postdates the old profile, so re-profile before changing them.
+3. The client's attempt-file bus: keep the values in memory and write each retained file once.
+4. The consent provider reads the Store twice per connection (`recheckHeld` from `height`, then
+   `extendFrom` from `height + 1`); one read serves both.
+5. Codec frames: the view is decoded twice (view-resource, then view-document).
 
 ## Rules carried
 
-PID files for every process; stop only by PID file; no `pkill -f`; named-file commits with
-`git commit -F`; filtered tests; swarm-build; one Lean closure at a time (the integrator's).
+PID files and timeouts for every remote job; stop only by PID file; named-file commits with
+`git commit -F`; filtered tests; swarm-build; no Host build on hbox while it is under 50 GB free
+(the integrator builds candidates); `/home/hbox/lanes/exorcism` is the Rust-only clone.
