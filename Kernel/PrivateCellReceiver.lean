@@ -577,6 +577,72 @@ theorem natDecode_custodyNat {readNat : List UInt8 → Option Nat} (secretBytes 
     natDecode readNat secretBytes bytes = some (cell, v, secretBytes x) := by
   simp [natDecode, read, custodyNat, Nat.unpair_pair, cellOfCode_cellCode]
 
+/-! ## The framed custody bytes: a public shape
+
+`natDecode` reads the custody value as one paired natural, so the length of an accepted mask
+grows with the secret's magnitude: the outer commitment's input length, and with it the shape of
+any proof over it, would depend on the secret. The framed custody bytes are the cell identity
+and the version under their stream codecs, then exactly 32 secret octets (`fixedStream 32`).
+An accepted mask is then the public frame of `(cell, version)` followed by the secret: its
+length is a function of the cell and the version (`framed_length`), and in a circuit only the
+32 secret octets are private. -/
+
+/-- The framed custody stream: cell identity, version, 32 secret octets. -/
+def custodyStream : StreamCodec (List UInt8 × Nat × Fin (256 ^ 32)) :=
+  StreamCodec.product (StreamCodec.list StreamCodec.byte)
+    (StreamCodec.product StreamCodec.nat (Tower256ConcreteBackend.fixedStream 32))
+
+/-- The custody bytes of a cell, a version and a secret. -/
+def custodyBytes (cell : List UInt8) (v : Nat) (secret : Fin (256 ^ 32)) : List UInt8 :=
+  custodyStream.encode (cell, v, secret)
+
+/-- **The framed custody decode**, fixed by nothing but the stream: the identity, the version,
+and the secret's 32 octets. -/
+def framedDecode : CustodyDecode := fun bytes =>
+  (custodyStream.toLawful.decode bytes).map fun (cell, v, secret) =>
+    (cell, v, (Tower256ConcreteBackend.fixedStream 32).encode secret)
+
+/-- The public frame an accepted mask starts with. -/
+def custodyFrame (cell : List UInt8) (v : Nat) : List UInt8 :=
+  (StreamCodec.list StreamCodec.byte).encode cell ++ StreamCodec.nat.encode v
+
+theorem custodyBytes_split (cell : List UInt8) (v : Nat) (secret : Fin (256 ^ 32)) :
+    custodyBytes cell v secret = custodyFrame cell v ++ (Tower256ConcreteBackend.fixedStream 32).encode secret := by
+  simp [custodyBytes, custodyStream, custodyFrame, StreamCodec.product, List.append_assoc]
+
+/-- **Exactly the framed bytes decode**, and only those. -/
+theorem framedDecode_iff (bytes : List UInt8) (cell : List UInt8) (v : Nat) (secret : List UInt8) :
+    framedDecode bytes = some (cell, v, secret) ↔
+      ∃ s : Fin (256 ^ 32), secret = (Tower256ConcreteBackend.fixedStream 32).encode s ∧ bytes = custodyBytes cell v s := by
+  simp only [framedDecode, Option.map_eq_some_iff, Prod.exists]
+  constructor
+  · rintro ⟨c, u, s, hdec, heq⟩
+    simp only [Prod.mk.injEq] at heq
+    obtain ⟨rfl, rfl, rfl⟩ := heq
+    exact ⟨s, rfl, ((custodyStream.toLawful_decode_iff _ _).mp hdec).symm⟩
+  · rintro ⟨s, rfl, rfl⟩
+    exact ⟨cell, v, s, (custodyStream.toLawful_decode_iff _ _).mpr rfl, rfl⟩
+
+/-- **The shape is public**: every accepted mask naming `(cell, v)` has the frame's length plus 32. -/
+theorem framed_length {bytes cell : List UInt8} {v : Nat} {secret : List UInt8}
+    (accepted : framedDecode bytes = some (cell, v, secret)) :
+    bytes.length = (custodyFrame cell v).length + 32 ∧ secret.length = 32 := by
+  obtain ⟨s, rfl, rfl⟩ := (framedDecode_iff _ _ _ _).mp accepted
+  rw [custodyBytes_split, List.length_append, Tower256ConcreteBackend.fixedStream_encode_length]
+  exact ⟨rfl, rfl⟩
+
+/-- A kind-level decode has a public shape when two accepted masks naming one cell and version
+always have one length. -/
+def PublicShape (decode : CustodyDecode) : Prop :=
+  ∀ m m' cell v s s', decode m = some (cell, v, s) → decode m' = some (cell, v, s') → m.length = m'.length
+
+theorem framedDecode_publicShape : PublicShape framedDecode := fun _ _ _ _ _ _ h h' =>
+  (framed_length h).1.trans (framed_length h').1.symm
+
+/-- Teeth: a decode that passes its input through as the secret has no public shape. -/
+theorem passThrough_not_publicShape : ¬ PublicShape (fun m => some ([], 0, m)) := fun shaped =>
+  absurd (shaped [] [0] [] 0 [] [0] rfl rfl) (by decide)
+
 /-! ## The custody PRF and the receiver's PRF term -/
 
 open Minidregg.Theory.FiniteTapeGap (GapAtMost)
@@ -1938,6 +2004,10 @@ end Concrete
 #assert_axioms History.custodyBytes_disjoint
 #assert_axioms cellOfCode_cellCode
 #assert_axioms natDecode_custodyNat
+#assert_axioms framedDecode_iff
+#assert_axioms framed_length
+#assert_axioms framedDecode_publicShape
+#assert_axioms passThrough_not_publicShape
 #assert_axioms Concrete.declared_cross_cell
 #assert_axioms Concrete.secretBytes_injective
 #assert_axioms KeptCell.accept_composite

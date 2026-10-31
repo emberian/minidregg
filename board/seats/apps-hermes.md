@@ -28,12 +28,23 @@ Quest: Hermes final say (H1b), the START reds, the refusal-clause sweep, live Hu
   /srv/spk-build/hummingbird/out/hummingbird-0.4.1-api.spk, app 434g078h..., package c7287dfb...); declaration repointed.
 - Copies of all three: this session's scratchpad .../scratchpad/spk/{wbo,scrumblr,hummingbird}.spk (ship to the new box).
 
-## Live qualification (blocked on a grain world; hbox is down, dregg-build2 pending)
-- Runner (hbox only so far): /home/hbox/lanes/app-reds-cont/ar-j14run2.sh CAND SUF DECL ALIAS ROLE SPK, over an overlay
-  candidate (lane-build overlay of main's mini/grain-runtime/spk-host roles on a batch candidate). Aliases/roles:
-  Scrumblr sb/0, Hummingbird hb/1 (manager), WBO per its declaration.
-- Scrumblr qualify ended native-outcome-unknown (app API attempt uncertain, cause unlogged then; 08340bac9 logs it).
-  Rerun first on dregg-build2 once grain worlds work there.
+## Live qualification (dregg-build2; hbox is gone)
+- Runner: /srv/worlds/ar-bb2run.sh SUF DECL ALIAS ROLE SPK, env CAND (candidate dir) and POOLSRC (a /srv/pool/tN tree: the sudoers
+  allow-list only admits install-user-world from there). Needs controller-world.py and install-user-world not group-writable
+  (chmod g-w in the pool tree) and spk-ingest installed 0755 (the broker wants a non-group-writable executable). Packages in
+  /srv/worlds/spk; Hermes root /srv/hermes/root-76511e768bbc. Overlay with 86c9dbddb: /srv/pool/lanes/member-side/candidates/93b31c1c33d6.
+- Scrumblr qualify (run sb5, rc=1): world, bootstrap, attach all pass; the qualify call ends native-outcome-unknown, application API
+  attempt uncertain. Log from 08340bac9 names it: "lifetime API transport result: Uncertain(host reply header: application API
+  socket closed)"; the resident's spk-host logs "agent v3 request refused unparsed: lifetime HTTP request refused" at the same second.
+  Cause, from reading the code (the request itself was not retained, so not a captured fact): the declaration's conversation path is
+  "socketio/" (trailing slash, as socket.io needs); agent_api_lifetime_wire_v3.rs:118 admits a path only if
+  minidregg_signed_api_path::route("/", path) accepts it, and route() refuses a trailing slash ("relative API path is not
+  canonical", deliberate: refuse_ambiguous_prefix_and_path_without_normalizing). The controller's native profile
+  (application_api_tools::parse_input) accepts it, so the refusal comes one hop late, as an uncertain outcome. Every conversation
+  declaration with "socket.io/" (scrumblr, hummingbird, wbo, etherdraw) hits it. Same on hbox sb2 (same signature).
+  Open design choice (touches the admission law, Rust sites: wire_v3:118, custody_v3:339, agent_api_lifetime_v3:186,
+  dispatch_inspection:143 and whatever Lean statement mirrors them): admit one trailing '/' for method CONVERSATION only.
+  Not done; the controller should at least refuse the path before sending, naming the clause.
 
 ## op66-plan refusal (read, no world)
 `launch BEGIN authorization, descriptor or action shape refused` is the single throw at

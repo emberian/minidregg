@@ -575,7 +575,6 @@ header the challenge carries for it. Op 5 computes its challenge from these (`ch
 and checks each grant against the same values (`checkGrantPlanned`), recomputing none of them. -/
 structure GrantPlan (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) where
-  private mk ::
   selected : Selected context grant
   wanted : Request grant.kind
   wantedExact : wanted = request context profile.semantics federation genesisHeight intent grant
