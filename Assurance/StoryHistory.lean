@@ -7,9 +7,10 @@ model of a cell's write history judged by `LawView.admits`; no theorem identifie
 The per-step `kernel_story_step` IS about the controller (a `CheckedLeg`). This file lifts the per-step
 statement to histories, over the controller's states.
 
-* `Realized t S n`: `n` is the `newState` of the controller's `step` for some `CheckedLeg` that is a
-  write on a cell whose authenticated closure includes the sealed story law (`StoryInstalled`).
-  `realized_step` gets `Step t S n` from `kernel_story_step`.
+* `Realized t S n`: `n` is the full projected `newState` of the controller's step (`fullStep`; the
+  step its law is judged on is it cut to the law's reads, with the same verdict) for some
+  `CheckedLeg` that is a write on a cell whose authenticated closure includes the sealed story law
+  (`StoryInstalled`). `realized_step` gets `Step t S n` from `kernel_story_step_full`.
 * `Chained`: consecutive legs link, scene and turn: the `after` slot of one leg equals the `before`
   slot of the next. This is the durable CAS (each pre is the previous post), a premise on the states.
 * `Coherent n`: for the scene and turn fields, `delta = after - before`. No longer a premise of the

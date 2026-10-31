@@ -248,6 +248,35 @@ LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`, relea
 to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build driver is
 `/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host, LANE_DIR=/ci/hpc/nb).
 
+0. **`story new` under 1 s (root, 10-31: ahead of everything except the FORMAT batch).**
+   - **Driver.** `hbox:/ci/hpc/sn/run.sh` brings up a fresh world from a candidate
+     (`newparticipant-acceptance.sh`). Then run `mini shell --socket W/public/mini.sock --host H
+     --config W/deployment/pinned-config.json --workspace W/sponsor --home HOME --line "story new N
+     --from tale"` with `MINI_TRACE`. World `/ci/hpc/sn/b1` is torn down (server and its two residents stopped by PID file). The residents'
+     anchors live in `~/.mini/consent-anchors` because MINI_CONSENT_ANCHOR_DIR was unset.
+   - **Before** (eca98bde7 + the lane's Host, fresh world, hbox load 9-17): 62-70 s. Of that, the
+     Host's own calls were 4.5 s. One line (`room bind`, 3.9 s) used 0.25 s of CPU across client,
+     Host and residents, and issued 207 fsyncs totalling 4.0 s.
+   - **efbec07fb** (signed reads sealed after their answer, `mini_sdk::phase` invariant 5; the shell
+     defers directory syncs): one line 1.0 s (67 fsyncs); `story new` 19-22 s.
+   - **What remains.** There are 17 Host decisions. Submit (op2) averages 460 ms on a loaded box,
+     totalling 7.9 s; propose (op1) totals 1.7 s and op5 1.5 s. The client's remaining ~11 s is about
+     0.6 s per decision.
+   - **Next: fold the template into about 3 decisions.**
+     - (i) One birth descriptor for every cell born in the room after the room's own birth.
+       `ResourceBirth.Descriptor.births` is already a list; the client's `workspace::birth` builds
+       one resource. A `birth_many` reserves each name's ids through `participant_namespace::reserve`
+       and retains each ref after the receipt. The room's own birth stays separate: the Host refuses
+       placement in a room that is not yet a present cell.
+     - (ii) One invoke for every write: the `createDocument` of each document (now a second
+       decision inside each `doc new`), the coalesced edits, and `room bind`/`room index`. These are
+       `workspace --action shared-name`, one decision each; find what they write and fold them into
+       the same multi-target invoke.
+     - (iii) The story's table and map, in the same birth and the same invoke.
+     - (iv) Per-decision client cost: count fsyncs per proposal and per submit again (67 per line
+       now).
+     - (v) Host submit at 460 ms on a tiny history: profile op2 on a quiet moment.
+
 1. **Flatness submit: the demanded projection. Landed on the lane (545f80874 and f7da550af); measured.**
    - **Measured** (scripts/perf/flatness-bench.py, 130 ops, eca98bde7 with the lane's Host, hbox
      `/ci/hpc/fbs`). Late submit CPU went from 874 to 280-311 ms; propose CPU from 231 to 50-90 ms;
@@ -293,8 +322,13 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
    - **Theirs (KeptCell).** `Theory/CellStateAux.lean` (`AuxCache`), `Materialized.carried` (a Thunk,
      moved by `Carried.run` with one `set` per writing op), and `Kernel/PrivateCellMaterializer.aux`.
      The root becomes `outerRoot ctxKind mask (trie digest)`, so a write costs one trie walk and one
-     hash. Content and the declared kinds switch to it. We asked them (10-31) to switch, with mask `[]`,
-     eventHistory, authority, resourceBook and policySource too, because those grow with history.
+     hash. **Scope (root's ruling, 10-31; private cells a8da2b953507b402b):** FORMAT switches only
+     the unblinded kinds that grow (eventHistory, authority, resourceBook, policySource) to the trie
+     root with mask `[]`. Content and the declared kinds keep the salted ratchet root until a ZK
+     selective opening exists. That is a later epoch (b) with a second genesis, because plain trie
+     reveals would expose unsalted subtree digests. The content-cell root and flatness stay a
+     published red until (b). The order is iteration speed's seam 1, then their FORMAT sha, then
+     row 11 rebased onto it.
    - **Ours, in the batch.** (a) Per-entry persistence: entries go through StoreCodec entries instead of
      one encoded blob per cell write (whole-cell encode is 31% of late submit CPU). Row 11: the
      checkpoint carries the session indexes and the walk certificates that read the state at their
