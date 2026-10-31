@@ -169,7 +169,12 @@ case ${1:-} in
       # the pool's own bare repo, owned by the lanes user (a shared clone's object store can hold
       # root-owned directories, and then no fetch succeeds); objects are borrowed from the seed's repo
       ref=$(CDPATH='' cd -- "$seed" && CDPATH='' cd -- "$(git rev-parse --git-common-dir)" && pwd -P)
-      git clone -q --bare --reference "$ref" "${LANE_POOL_ORIGIN:-https://github.com/emberian/minidregg.git}" "$LANE_POOL_REPO"
+      if [ -n "$(git -C "$seed" config --get remote.origin.partialclonefilter)" ]; then
+        # a partial clone cannot lend objects (--reference fails on its missing blobs): a partial clone of its own
+        git clone -q --bare --filter=blob:none "${LANE_POOL_ORIGIN:-https://github.com/emberian/minidregg.git}" "$LANE_POOL_REPO"
+      else
+        git clone -q --bare --reference "$ref" "${LANE_POOL_ORIGIN:-https://github.com/emberian/minidregg.git}" "$LANE_POOL_REPO"
+      fi
       git -C "$LANE_POOL_REPO" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
       git -C "$LANE_POOL_REPO" fetch -q origin
     fi
