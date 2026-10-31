@@ -23,6 +23,7 @@ public import Kernel.DurableDataIntent
 public import Kernel.RoomBirthGate
 public import Kernel.BirthExportAdmission
 public import Kernel.BirthCandidateAdmission
+public import Compiler.ServedBasis
 public import Kernel.ReceivingLaw
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -272,6 +273,7 @@ namespace Concrete
 
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
+open Minidregg.Compiler.ServedBasis (Ground)
 
 variable {F : Type} [Field F] {profile : PolicyCompilerProfile F}
 
@@ -505,39 +507,39 @@ instance parentsPresentDecidable (deployment : Deployment) (directory : Director
 
 /-- The rooms a birth names, read at their exact old roots: the commit refuses
 if a room changed or was retired after preparation. -/
-def parentGuards (durable : Durable) (descriptor : Descriptor Registry) : List ReadGuard :=
+def parentGuards (ground : Ground deployment) (descriptor : Descriptor Registry) : List ReadGuard :=
   (descriptor.parentRows.map Prod.snd).dedup.map fun room =>
-    { cellId := ⟨room⟩, expectedRoot := durable.snapshot.model.roots ⟨room⟩ }
+    { cellId := ⟨room⟩, expectedRoot := ground.view.model.roots ⟨room⟩ }
 
-theorem parentGuards_exact (durable : Durable) (descriptor : Descriptor Registry)
-    (guard : ReadGuard) (member : guard ∈ parentGuards durable descriptor) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+theorem parentGuards_exact (ground : Ground deployment) (descriptor : Descriptor Registry)
+    (guard : ReadGuard) (member : guard ∈ parentGuards ground descriptor) :
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   simp only [parentGuards, List.mem_map] at member
   obtain ⟨room, _, rfl⟩ := member
   rfl
 
-theorem parentGuards_cover (durable : Durable) (descriptor : Descriptor Registry)
+theorem parentGuards_cover (ground : Ground deployment) (descriptor : Descriptor Registry)
     {row : Nat × Nat} (member : row ∈ descriptor.parentRows) :
-    ∃ guard ∈ parentGuards durable descriptor, guard.cellId = ⟨row.2⟩ :=
+    ∃ guard ∈ parentGuards ground descriptor, guard.cellId = ⟨row.2⟩ :=
   ⟨_, List.mem_map.mpr ⟨row.2, List.mem_dedup.mpr (List.mem_map.mpr ⟨row, member, rfl⟩), rfl⟩, rfl⟩
 
 /-- Kind-definition bytes are observed once, at the same durable snapshot as
 birth preparation, and remain a physical CAS dependency through commit. -/
-def kindGuards (durable : Durable) (descriptor : Descriptor Registry) : List ReadGuard :=
+def kindGuards (ground : Ground deployment) (descriptor : Descriptor Registry) : List ReadGuard :=
   (descriptor.births.filterMap fun item =>
     CanonicalCellRegistry.instanceKind item.create.cell).map fun kind =>
-      ⟨⟨kind⟩, durable.snapshot.model.roots ⟨kind⟩⟩
+      ⟨⟨kind⟩, ground.view.model.roots ⟨kind⟩⟩
 
-theorem kindGuards_exact (durable : Durable) (descriptor : Descriptor Registry)
-    (guard : ReadGuard) (member : guard ∈ kindGuards durable descriptor) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+theorem kindGuards_exact (ground : Ground deployment) (descriptor : Descriptor Registry)
+    (guard : ReadGuard) (member : guard ∈ kindGuards ground descriptor) :
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   obtain ⟨kind, _, rfl⟩ := List.mem_map.mp member
   rfl
 
-theorem kindGuards_cover (durable : Durable) (descriptor : Descriptor Registry)
+theorem kindGuards_cover (ground : Ground deployment) (descriptor : Descriptor Registry)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {kind : Nat} (selected : CanonicalCellRegistry.instanceKind item.create.cell = some kind) :
-    ∃ guard ∈ kindGuards durable descriptor, guard.cellId = ⟨kind⟩ :=
+    ∃ guard ∈ kindGuards ground descriptor, guard.cellId = ⟨kind⟩ :=
   ⟨_, List.mem_map.mpr ⟨kind, List.mem_filterMap.mpr ⟨item, member, selected⟩, rfl⟩, rfl⟩
 
 inductive PreparationReject where
@@ -567,6 +569,9 @@ inductive PreparationReject where
   | resourceBatch
   | physicalShape
   | finalCellLaw
+  /-- The ground does not answer a replay marker the birth reads (a light basis
+  that did not declare it): refused by name, never read as unspent. -/
+  | undeclaredMarker
   /-- The room birth gate refused, by name (`Kernel.RoomBirthGate`). -/
   | room (reason : RoomBirthGate.Refusal)
   deriving DecidableEq, Repr
@@ -614,6 +619,43 @@ theorem initialsAdmissible_nil_iff (deployment : Deployment) (descriptor : Descr
     InitialsAdmissible deployment [] descriptor ↔ CanonicalCellRegistry.BirthsAdmissible deployment descriptor := by
   simp [InitialsAdmissible, SourcedInitial, CanonicalCellRegistry.BirthsAdmissible]
 
+/-- The birth's replay nullifier: the descriptor's authority marker, under the same
+domain/marker key as every other operation (`CredentialAuthorityReplay.nullifier`). -/
+def birthMarker (deployment : Deployment) (marker : Nat) : StableNullifier :=
+  CredentialAuthorityReplay.nullifier deployment.domain marker
+
+/-- The ground answers a replay marker's spent bit: always on the full shape; on a
+light basis only a declared one (`Ground.markerSpent`). A preparation reads a
+marker's spent bit only after this holds, so an undeclared marker is never read as
+unspent. -/
+def MarkerDeclared {deployment : Deployment} (ground : Ground deployment) (marker : Nat) : Prop :=
+  ground.declaresNullifier (birthMarker deployment marker) = true
+
+instance {deployment : Deployment} (ground : Ground deployment) (marker : Nat) :
+    Decidable (MarkerDeclared ground marker) := by
+  unfold MarkerDeclared; infer_instance
+
+/-- **A declared marker's answer is the authority's spent bit** (`Ground.markerSpent_some`). -/
+theorem MarkerDeclared.markerSpent {deployment : Deployment} {ground : Ground deployment} {marker : Nat}
+    (declared : MarkerDeclared ground marker) :
+    ground.markerSpent marker = some (ground.authority.spent marker) := by
+  unfold MarkerDeclared birthMarker at declared
+  simp [Ground.markerSpent, declared]
+
+/-- The full shape declares every marker. -/
+theorem MarkerDeclared.full {deployment : Deployment} (durable : Durable)
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) (marker : Nat) :
+    MarkerDeclared (Ground.ofLoaded durable directory authority) marker := rfl
+
+/-- **Refuting pole**: a light basis that did not declare the marker's nullifier
+does not declare the marker. -/
+theorem MarkerDeclared.undeclared {deployment : Deployment} {store : Minidregg.Compiler.DurableHistory.StoreIdentity}
+    (basis : Minidregg.Compiler.ServedBasis.Basis deployment store) (marker : Nat)
+    (undeclared : birthMarker deployment marker ∉ basis.keys.nullifiers) :
+    ¬ MarkerDeclared (Ground.ofBasis basis) marker := by
+  simp [MarkerDeclared, Ground.declaresNullifier, undeclared]
+
 /-- Every component is obtained from this one restored image and the fixed
 production registry. The private constructor prevents a host from supplying
 an arbitrary authority snapshot, Book, allocation result or post-state.
@@ -622,39 +664,39 @@ This is preparation, not acceptance: no policy authorization has been created.
 The upper receiving controller evaluates these exact candidates and retains
 all family modes and authorizations before exposing their physical intent. -/
 structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (descriptor : Descriptor Registry) where
+    (ground : Ground deployment) (descriptor : Descriptor Registry) where
   private mk ::
   deploymentValid : deployment.Valid
   pinsBound : PinsBound deployment pins
   profileBound : ProfileBound profile pins
   identityBound : IdentityBound profile deployment descriptor
-  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
-  parentsPresent : ParentsPresent deployment directory.directory descriptor
-  kindsPresent : KindsPresent deployment directory.directory descriptor
+  /-- The ground answers the birth's replay marker (`BatchReady` reads its spent bit). -/
+  markerDeclared : MarkerDeclared ground descriptor.authorityNullifier
+  parentsPresent : ParentsPresent deployment ground.directory descriptor
+  kindsPresent : KindsPresent deployment ground.directory descriptor
   sourced : List (Nat × PackedCell Registry)
   initials : InitialsAdmissible deployment sourced descriptor
   policiesBound : descriptor.InitialPoliciesBound
-  factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
-  book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
-  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
-  grants : CredentialAuthorityDomainReceiver.PreparedGrantBatch profile deployment authority descriptor
+  factory : ObservedCell deployment ground.directory deployment.factoryId .declaredObject
+  book : ObservedCell deployment ground.directory deployment.resourceBookId .resourceBook
+  grants : CredentialAuthorityDomainReceiver.PreparedGrantBatch profile deployment ground.authority descriptor
   auxiliaryExact : descriptor.auxiliaryCreates = grants.auxiliaryCreates
-  allocated : Allocated Registry directory.directory descriptor
+  allocated : Allocated Registry ground.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload descriptor.resourceBatch
   writesUnique : ((planWrites deployment descriptor factory.payload book.payload
-    resources.post grants.writes).map DataWrite.cellId).Nodup
+    resources.post (ground.authorityWrites grants.post)).map DataWrite.cellId).Nodup
   writePreExact : ∀ write ∈ planWrites deployment descriptor factory.payload book.payload
-      resources.post grants.writes,
-    write.expectedPre = durable.snapshot.model.roots write.cellId
+      resources.post (ground.authorityWrites grants.post),
+    write.expectedPre = ground.view.model.roots write.cellId
   finalCells : ∀ write ∈ planWrites deployment descriptor factory.payload book.payload
-      resources.post grants.writes, PhysicalPostLaw deployment write
+      resources.post (ground.authorityWrites grants.post), PhysicalPostLaw deployment write
   /-- The height the room birth gate was decided at: the admission height. -/
   gateHeight : Height
   /-- Every room birth passed the gate (`RoomBirthGate.Admitted`). -/
-  rooms : RoomBirthGate.Admitted pins directory authority gateHeight descriptor
-  exports : BirthExportAdmission.Checked profile deployment pins durable directory authority
+  rooms : RoomBirthGate.Admitted pins ground gateHeight descriptor
+  exports : BirthExportAdmission.Checked profile deployment pins ground
     factory.payload.root gateHeight descriptor
-  candidates : BirthCandidateAdmission.Checked profile deployment durable directory authority
+  candidates : BirthCandidateAdmission.Checked profile deployment ground
     grants.post grants.initialSources.records
 
 private def requirePreparation (condition : Prop) [Decidable condition]
@@ -671,16 +713,17 @@ before authority edits, so neither route may use newly created grants to
 authorize its own source. The existing bare receiver retains its exact check
 order and rejection meanings. -/
 structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
-    (deployment : Deployment) (pins : FactoryPins) (durable : Durable)
+    (deployment : Deployment) (pins : FactoryPins) (ground : Ground deployment)
     (descriptor : Descriptor Registry) where
   private mk ::
   deploymentValid : deployment.Valid
   pinsBound : PinsBound deployment pins
   profileBound : ProfileBound profile pins
   identityBound : IdentityBound profile deployment descriptor
-  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
-  parentsPresent : ParentsPresent deployment directory.directory descriptor
-  kindsPresent : KindsPresent deployment directory.directory descriptor
+  /-- The ground answers the birth's replay marker (`BatchReady` reads its spent bit). -/
+  markerDeclared : MarkerDeclared ground descriptor.authorityNullifier
+  parentsPresent : ParentsPresent deployment ground.directory descriptor
+  kindsPresent : KindsPresent deployment ground.directory descriptor
   /-- The evaluators this deployment's operator disabled (`Profile.disabledEvaluators`, the list
   the runtime semantics digest commits and a run resolves against), as the birth checked them. -/
   disabled : List Digest
@@ -692,13 +735,12 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   policiesBound : descriptor.InitialPoliciesBound
   /-- Every Nock program born here names only program cells already present. -/
   librariesPresent : CanonicalCellRegistry.birthLibrariesPresent deployment.domain
-    directory.directory descriptor = true
-  factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
-  book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
-  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
+    ground.directory descriptor = true
+  factory : ObservedCell deployment ground.directory deployment.factoryId .declaredObject
+  book : ObservedCell deployment ground.directory deployment.resourceBookId .resourceBook
   gateHeight : Height
-  rooms : RoomBirthGate.Admitted pins directory authority gateHeight descriptor
-  exports : BirthExportAdmission.Checked profile deployment pins durable directory authority
+  rooms : RoomBirthGate.Admitted pins ground gateHeight descriptor
+  exports : BirthExportAdmission.Checked profile deployment pins ground
     factory.payload.root gateHeight descriptor
 
 /-- The evaluator check, by name: a program record naming an unknown or disabled evaluator
@@ -710,85 +752,53 @@ def requireEvaluators (disabled : List Digest) (descriptor : Descriptor Registry
   | .error .unknownEvaluator => .error .unknownEvaluator
   | .error .evaluatorDisabled => .error .evaluatorDisabled
 
-/-- The decoded directory and authority of one durable image, as whoever already holds them
-supplies them. Each is exactly what loading the image returns (`directoryExact`,
-`authorityExact`), so a preparation over held values is the preparation over fresh loads
-(`Held.eq_load`). The Host's `Opened` holds both, maintained as its session advances
-(`loadDirectoryFrom` decodes only moved rows, `loadDeploymentFrom` reuses an unchanged cell), so
-a birth plan or admission on it decodes no directory row and no authority cell (`Held.of`). -/
-structure Held (deployment : Deployment) (durable : Durable) where
-  directory : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-  authority : Option (CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
-  directoryExact : directory = CredentialAuthorityDomainReceiver.loadDirectory durable
-  authorityExact : authority =
-    CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot
-
-/-- Load both from the image: one directory decode and one authority decode. -/
-def Held.load (deployment : Deployment) (durable : Durable) : Held deployment durable :=
-  ⟨_, _, rfl, rfl⟩
-
-/-- Both already held: nothing is decoded. -/
-def Held.of {deployment : Deployment} {durable : Durable}
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) :
-    Held deployment durable :=
-  ⟨some directory, some authority, directory.load_eq.symm, authority.load_eq.symm⟩
-
-/-- Every held pair is the loaded one. -/
-theorem Held.eq_load {deployment : Deployment} {durable : Durable} (held : Held deployment durable) :
-    held = Held.load deployment durable := by
-  obtain ⟨directory, authority, directoryExact, authorityExact⟩ := held
-  subst directoryExact authorityExact
-  rfl
-
 def preparePreAuthority [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable) (held : Held deployment durable)
+    (pins : FactoryPins) (ground : Ground deployment)
     (descriptor : Descriptor Registry) (height : Height)
     (sourced : List (Nat × PackedCell Registry) := []) :
-    Except PreparationReject (PreparedPreAuthority profile deployment pins durable descriptor) := do
+    Except PreparationReject (PreparedPreAuthority profile deployment pins ground descriptor) := do
   let valid ← requirePreparation (deployment.Valid ∧ PinsBound deployment pins) .deployment
   let profileBound ← requirePreparation (ProfileBound profile pins) .compilerProfile
   let identityBound ← requirePreparation (IdentityBound profile deployment descriptor) .identity
-  let directory ← fromOption held.directory .directory
-  let parents ← requirePreparation (ParentsPresent deployment directory.directory descriptor) .parent
-  let kinds ← requirePreparation (KindsPresent deployment directory.directory descriptor) .kindSource
+  let marker ← requirePreparation (MarkerDeclared ground descriptor.authorityNullifier) .undeclaredMarker
+  let parents ← requirePreparation (ParentsPresent deployment ground.directory descriptor) .parent
+  let kinds ← requirePreparation (KindsPresent deployment ground.directory descriptor) .kindSource
   let evaluators ← requireEvaluators disabled descriptor
   let initials ← requirePreparation (InitialsAdmissible deployment sourced descriptor) .initialPayload
   let policiesBound ← requirePreparation descriptor.InitialPoliciesBound .initialPolicy
   let libraries ← requirePreparation
-    (CanonicalCellRegistry.birthLibrariesPresent deployment.domain directory.directory descriptor =
+    (CanonicalCellRegistry.birthLibrariesPresent deployment.domain ground.directory descriptor =
       true) .nockLibrary
   let factory ← fromOption
-    (observeCell deployment directory.directory deployment.factoryId .declaredObject) .factory
+    (observeCell deployment ground.directory deployment.factoryId .declaredObject) .factory
   let book ← fromOption
-    (observeCell deployment directory.directory deployment.resourceBookId .resourceBook) .resourceBook
-  let authority ← fromOption held.authority .authorityDomain
-  let rooms ← (RoomBirthGate.check pins directory authority height descriptor).mapError
+    (observeCell deployment ground.directory deployment.resourceBookId .resourceBook) .resourceBook
+  let rooms ← (RoomBirthGate.check pins ground height descriptor).mapError
     PreparationReject.room
   let exports ← fromOption
-    (BirthExportAdmission.check profile deployment pins durable directory authority
+    (BirthExportAdmission.check profile deployment pins ground
       factory.payload.root height descriptor) .inheritedLaw
-  .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory,
+  .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, marker.down,
     parents.down, kinds.down, disabled, evaluators.down, sourced, initials.down, policiesBound.down, libraries.down,
-    factory, book, authority, height, rooms.down, exports⟩
+    factory, book, height, rooms.down, exports⟩
 
 /-- Common post-authority physical checks. The authority route supplies only
 its already checked physical writes; allocation, conserved Book application,
 old-root equality and final cell law stay identical for both birth modes. -/
 structure PreparedPostAuthority {profile : PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {descriptor : Descriptor Registry}
-    (pre : PreparedPreAuthority profile deployment pins durable descriptor)
+    (pre : PreparedPreAuthority profile deployment pins ground descriptor)
     (authorityWrites : List DataWrite) where
   private mk ::
-  allocated : Allocated Registry pre.directory.directory descriptor
+  allocated : Allocated Registry ground.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch pre.book.payload descriptor.resourceBatch
   writesUnique : ((planWrites deployment descriptor pre.factory.payload pre.book.payload
     resources.post authorityWrites).map DataWrite.cellId).Nodup
   writePreExact : ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
       resources.post authorityWrites,
-    write.expectedPre = durable.snapshot.model.roots write.cellId
+    write.expectedPre = ground.view.model.roots write.cellId
   finalCells : ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
       resources.post authorityWrites, PhysicalPostLaw deployment write
 
@@ -796,26 +806,26 @@ structure PreparedPostAuthority {profile : PolicyCompilerProfile F}
 given `authorityWrites`) touch distinct cells, each expects exactly the durable snapshot's root at
 its cell, and each final cell satisfies its physical cell law. -/
 theorem PreparedPostAuthority.planExact {profile : PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {descriptor : Descriptor Registry}
-    {pre : PreparedPreAuthority profile deployment pins durable descriptor}
+    {pre : PreparedPreAuthority profile deployment pins ground descriptor}
     {authorityWrites : List DataWrite} (post : PreparedPostAuthority pre authorityWrites) :
     ((planWrites deployment descriptor pre.factory.payload pre.book.payload
         post.resources.post authorityWrites).map DataWrite.cellId).Nodup ∧
       (∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
           post.resources.post authorityWrites,
-        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+        write.expectedPre = ground.view.model.roots write.cellId) ∧
       ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
           post.resources.post authorityWrites, PhysicalPostLaw deployment write :=
   ⟨post.writesUnique, post.writePreExact, post.finalCells⟩
 
 def preparePostAuthority {profile : PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {descriptor : Descriptor Registry}
-    (pre : PreparedPreAuthority profile deployment pins durable descriptor)
+    (pre : PreparedPreAuthority profile deployment pins ground descriptor)
     (authorityWrites : List DataWrite) :
     Except PreparationReject (PreparedPostAuthority pre authorityWrites) := do
-  let allocated ← match allocate? Registry pre.directory.directory descriptor with
+  let allocated ← match allocate? Registry ground.directory descriptor with
     | .error _ => .error PreparationReject.allocation
     | .ok allocated => .ok allocated
   let admission ← requirePreparation
@@ -826,7 +836,7 @@ def preparePostAuthority {profile : PolicyCompilerProfile F}
     resources.post authorityWrites
   let shape ← requirePreparation
     ((writes.map DataWrite.cellId).Nodup ∧
-      ∀ write ∈ writes, write.expectedPre = durable.snapshot.model.roots write.cellId)
+      ∀ write ∈ writes, write.expectedPre = ground.view.model.roots write.cellId)
     .physicalShape
   let finalCells ← requirePreparation (∀ write ∈ writes, PhysicalPostLaw deployment write) .finalCellLaw
   .ok ⟨allocated, resources, shape.down.1, shape.down.2, finalCells.down⟩
@@ -836,23 +846,23 @@ list and every final payload are checked before policy evaluation. No step
 mutates the source image or installs a prefix of the birth. -/
 def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (held : Held deployment durable) (descriptor : Descriptor Registry) (height : Height)
+    (ground : Ground deployment) (descriptor : Descriptor Registry) (height : Height)
     (sourced : List (Nat × PackedCell Registry) := []) :
-    Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
-  let pre ← preparePreAuthority profile disabled deployment pins durable held descriptor height sourced
+    Except PreparationReject (PreparedBirth profile deployment pins ground descriptor) := do
+  let pre ← preparePreAuthority profile disabled deployment pins ground descriptor height sourced
   let grants ← fromOption
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment
-      pre.authority descriptor)
+      ground.authority descriptor)
     .authorityBatch
   let aux ← requirePreparation
     (sameCreates descriptor.auxiliaryCreates grants.auxiliaryCreates = true)
     .auxiliaryCreates
   let candidates ← fromOption
-    (BirthCandidateAdmission.check profile deployment durable pre.directory pre.authority
+    (BirthCandidateAdmission.check profile deployment ground
       grants.post grants.initialSources.records) .candidateLaw
-  let post ← preparePostAuthority pre grants.writes
+  let post ← preparePostAuthority pre (ground.authorityWrites grants.post)
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
-    pre.directory, pre.parentsPresent, pre.kindsPresent, pre.sourced, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
+    pre.markerDeclared, pre.parentsPresent, pre.kindsPresent, pre.sourced, pre.initials, pre.policiesBound, pre.factory, pre.book,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
     post.writesUnique, post.writePreExact, post.finalCells, pre.gateHeight, pre.rooms, pre.exports, candidates⟩
 
@@ -861,114 +871,118 @@ post covering initial grants and both replay markers. `operationMarker` here is
 only a preparation coordinate; the receiving source must prove it equals the
 canonical signed grain command's marker before any admission or commit. -/
 structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
-    (deployment : Deployment) (pins : FactoryPins) (durable : Durable)
+    (deployment : Deployment) (pins : FactoryPins) (ground : Ground deployment)
     (descriptor : Descriptor Registry) (operationMarker : Nat) where
   private mk ::
-  pre : PreparedPreAuthority profile deployment pins durable descriptor
+  pre : PreparedPreAuthority profile deployment pins ground descriptor
+  /-- The ground answers the composite operation's own replay marker. -/
+  operationMarkerDeclared : MarkerDeclared ground operationMarker
   authorityCombined : GrainResourceBirthAuthority.Prepared profile deployment
-    pre.authority descriptor operationMarker
+    ground.authority descriptor operationMarker
   auxiliaryExact : descriptor.auxiliaryCreates = authorityCombined.auxiliaryCreates
-  post : PreparedPostAuthority pre authorityCombined.writes
-  candidates : BirthCandidateAdmission.Checked profile deployment durable pre.directory pre.authority
+  post : PreparedPostAuthority pre (ground.authorityWrites authorityCombined.post)
+  candidates : BirthCandidateAdmission.Checked profile deployment ground
     authorityCombined.post authorityCombined.initialSources.records
 
 def prepareGrainBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable) (held : Held deployment durable) (descriptor : Descriptor Registry)
+    (pins : FactoryPins) (ground : Ground deployment) (descriptor : Descriptor Registry)
     (operationMarker : Nat) (height : Height) (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject
-      (PreparedGrainBirth profile deployment pins durable descriptor operationMarker) := do
-  let pre ← preparePreAuthority profile disabled deployment pins durable held descriptor height sourced
+      (PreparedGrainBirth profile deployment pins ground descriptor operationMarker) := do
+  let pre ← preparePreAuthority profile disabled deployment pins ground descriptor height sourced
+  let operation ← requirePreparation (MarkerDeclared ground operationMarker) .undeclaredMarker
   let combined ← fromOption
-    (GrainResourceBirthAuthority.prepare profile deployment pre.authority
+    (GrainResourceBirthAuthority.prepare profile deployment ground.authority
       descriptor operationMarker) .authorityBatch
   let aux ← requirePreparation
     (sameCreates descriptor.auxiliaryCreates combined.auxiliaryCreates = true)
     .auxiliaryCreates
   let candidates ← fromOption
-    (BirthCandidateAdmission.check profile deployment durable pre.directory pre.authority
+    (BirthCandidateAdmission.check profile deployment ground
       combined.post combined.initialSources.records) .candidateLaw
-  let post ← preparePostAuthority pre combined.writes
-  .ok ⟨pre, combined, (sameCreates_iff _ _).mp aux.down, post, candidates⟩
+  let post ← preparePostAuthority pre (ground.authorityWrites combined.post)
+  .ok ⟨pre, operation.down, combined, (sameCreates_iff _ _).mp aux.down, post, candidates⟩
 
 def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {descriptor : Descriptor Registry} {operationMarker : Nat}
-    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
+    (prepared : PreparedGrainBirth profile deployment pins ground descriptor operationMarker) :
     List DataWrite :=
   planWrites deployment descriptor prepared.pre.factory.payload prepared.pre.book.payload
-    prepared.post.resources.post prepared.authorityCombined.writes
+    prepared.post.resources.post (ground.authorityWrites prepared.authorityCombined.post)
 
 def PreparedGrainBirth.readGuards {profile : PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {descriptor : Descriptor Registry} {operationMarker : Nat}
-    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
+    (prepared : PreparedGrainBirth profile deployment pins ground descriptor operationMarker) :
     List ReadGuard :=
   let written := prepared.writes.map DataWrite.cellId
-  (prepared.pre.authority.readGuards ++ (parentGuards durable descriptor ++
-    (kindGuards durable descriptor ++ (prepared.pre.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
+  (ground.authorityReadGuards ++ (parentGuards ground descriptor ++
+    (kindGuards ground descriptor ++ (prepared.pre.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
     guard.cellId ∉ written
 
 /-- The user draft has no auxiliary creates; only the initial policy sources are
 filled in. The complete descriptor returned here is the one that must be signed. -/
 structure PreparedGrainDraft (profile : PolicyCompilerProfile F)
-    (deployment : Deployment) (pins : FactoryPins) (durable : Durable)
+    (deployment : Deployment) (pins : FactoryPins) (ground : Ground deployment)
     (draft : Descriptor Registry) (operationMarker : Nat) where
   private mk ::
   noAuxiliaryInput : draft.auxiliaryCreates = []
   descriptor : Descriptor Registry
   sourceExact : descriptor = { draft with auxiliaryCreates := descriptor.auxiliaryCreates }
-  prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker
+  prepared : PreparedGrainBirth profile deployment pins ground descriptor operationMarker
 
 def prepareGrainDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable) (held : Held deployment durable) (draft : Descriptor Registry)
+    (pins : FactoryPins) (ground : Ground deployment) (draft : Descriptor Registry)
     (operationMarker : Nat) (height : Height) (sourced : List (Nat × PackedCell Registry) := []) :
     Except PreparationReject
-      (PreparedGrainDraft profile deployment pins durable draft operationMarker) := do
+      (PreparedGrainDraft profile deployment pins ground draft operationMarker) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
-  let authority ← fromOption held.authority .authorityDomain
+  -- Both replay markers are answered before either spent bit is read.
+  let _ ← requirePreparation (MarkerDeclared ground draft.authorityNullifier) .undeclaredMarker
+  let _ ← requirePreparation (MarkerDeclared ground operationMarker) .undeclaredMarker
   -- The room gate first: a creator whose placing grant is revoked is refused
   -- `notRoomMember`, by name, before the grant batch would refuse the born
   -- grants' revoked ancestors as `authorityBatch`.
-  let directory ← fromOption held.directory .directory
-  let _ ← (RoomBirthGate.check pins directory authority height draft).mapError PreparationReject.room
+  let _ ← (RoomBirthGate.check pins ground height draft).mapError PreparationReject.room
   let combined ← fromOption
-    (GrainResourceBirthAuthority.prepare profile deployment authority
+    (GrainResourceBirthAuthority.prepare profile deployment ground.authority
       draft operationMarker) .authorityBatch
   let descriptor := { draft with auxiliaryCreates := combined.auxiliaryCreates }
-  let prepared ← prepareGrainBirth profile disabled deployment pins durable held descriptor operationMarker height
+  let prepared ← prepareGrainBirth profile disabled deployment pins ground descriptor operationMarker height
     sourced
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) : List DataWrite :=
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) : List DataWrite :=
   planWrites deployment descriptor prepared.factory.payload prepared.book.payload
-    prepared.resources.post prepared.grants.writes
+    prepared.resources.post (ground.authorityWrites prepared.grants.post)
 
 def PreparedBirth.readGuards {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) : List ReadGuard :=
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) : List ReadGuard :=
   let written := prepared.writes.map DataWrite.cellId
-  (prepared.authority.readGuards ++ (parentGuards durable descriptor ++
-    (kindGuards durable descriptor ++ (prepared.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
+  (ground.authorityReadGuards ++ (parentGuards ground descriptor ++
+    (kindGuards ground descriptor ++ (prepared.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
     guard.cellId ∉ written
 
 def PreparedBirth.oldAuthority {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) : AuthState :=
-  prepared.authority.snapshot.authState
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) : AuthState :=
+  ground.authority.authState
 
 theorem PreparedBirth.transaction_identity {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) :
     descriptor.transactionId = sourceIdentity profile deployment descriptor.creator descriptor.nonce :=
   prepared.identityBound.1
 
 theorem PreparedBirth.authority_marker_identity {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) :
     descriptor.authorityNullifier =
       (sourceIdentity profile deployment descriptor.creator descriptor.nonce).value :=
   prepared.identityBound.2
@@ -976,18 +990,18 @@ theorem PreparedBirth.authority_marker_identity {deployment : Deployment} {pins 
 /-- Chosen global journal identifiers never become prepared receiving effects.
 This requires no assumption that two different hash inputs have different hashes. -/
 theorem no_prepared_of_wrong_transaction {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
     (wrong : descriptor.transactionId ≠
       sourceIdentity profile deployment descriptor.creator descriptor.nonce) :
-    ¬Nonempty (PreparedBirth profile deployment pins durable descriptor) := by
+    ¬Nonempty (PreparedBirth profile deployment pins ground descriptor) := by
   rintro ⟨prepared⟩
   exact wrong prepared.transaction_identity
 
 theorem no_prepared_of_wrong_marker {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
     (wrong : descriptor.authorityNullifier ≠
       (sourceIdentity profile deployment descriptor.creator descriptor.nonce).value) :
-    ¬Nonempty (PreparedBirth profile deployment pins durable descriptor) := by
+    ¬Nonempty (PreparedBirth profile deployment pins ground descriptor) := by
   rintro ⟨prepared⟩
   exact wrong prepared.authority_marker_identity
 
@@ -995,34 +1009,34 @@ theorem no_prepared_of_wrong_marker {deployment : Deployment} {pins : FactoryPin
 fill that field; every other source field remains exactly the draft's value.
 The resulting descriptor is the complete object to review, sign and submit. -/
 structure PreparedDraft (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (draft : Descriptor Registry) where
+    (ground : Ground deployment) (draft : Descriptor Registry) where
   private mk ::
   noAuxiliaryInput : draft.auxiliaryCreates = []
   descriptor : Descriptor Registry
   sourceExact : descriptor = { draft with auxiliaryCreates := descriptor.auxiliaryCreates }
-  prepared : PreparedBirth profile deployment pins durable descriptor
+  prepared : PreparedBirth profile deployment pins ground descriptor
 
 def prepareDraft [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (held : Held deployment durable) (draft : Descriptor Registry) (height : Height)
+    (ground : Ground deployment) (draft : Descriptor Registry) (height : Height)
     (sourced : List (Nat × PackedCell Registry) := []) :
-    Except PreparationReject (PreparedDraft profile deployment pins durable draft) := do
+    Except PreparationReject (PreparedDraft profile deployment pins ground draft) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
-  let authority ← fromOption held.authority .authorityDomain
+  -- The birth's replay marker is answered before its spent bit is read.
+  let _ ← requirePreparation (MarkerDeclared ground draft.authorityNullifier) .undeclaredMarker
   -- The room gate first (as `prepareGrainDraft`): a revoked placing grant is
   -- `notRoomMember`, not the grant batch's `authorityBatch`.
-  let directory ← fromOption held.directory .directory
-  let _ ← (RoomBirthGate.check pins directory authority height draft).mapError PreparationReject.room
+  let _ ← (RoomBirthGate.check pins ground height draft).mapError PreparationReject.room
   let grants ← fromOption
-    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment authority draft)
+    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment ground.authority draft)
     .authorityBatch
   let descriptor := { draft with auxiliaryCreates := grants.auxiliaryCreates }
-  let prepared ← prepareBirth profile disabled deployment pins durable held descriptor height sourced
+  let prepared ← prepareBirth profile disabled deployment pins ground descriptor height sourced
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 theorem PreparedDraft.user_source_preserved {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {draft : Descriptor Registry}
-    (prepared : PreparedDraft profile deployment pins durable draft) :
+    {ground : Ground deployment} {draft : Descriptor Registry}
+    (prepared : PreparedDraft profile deployment pins ground draft) :
     prepared.descriptor.births = draft.births ∧
       prepared.descriptor.grants = draft.grants ∧
       prepared.descriptor.initialPolicies = draft.initialPolicies ∧
@@ -1033,8 +1047,8 @@ theorem PreparedDraft.user_source_preserved {deployment : Deployment} {pins : Fa
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem PreparedBirth.write_roots_bound {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (write : DataWrite) (member : write ∈ prepared.writes) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
   rcases List.mem_append.mp member with front | authority
@@ -1043,29 +1057,28 @@ theorem PreparedBirth.write_roots_bound {deployment : Deployment} {pins : Factor
       exact birthWrite_root_bound request
     · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
       rcases native with rfl | rfl <;> rfl
-  · simp only [CredentialAuthorityDomainReceiver.PreparedGrantBatch.writes,
-      CredentialAuthorityDomainReceiver.Loaded.writes, List.mem_singleton] at authority
+  · simp only [Ground.authorityWrites, List.mem_singleton] at authority
     subst write
-    exact prepared.authority.write_root_bound _
+    exact ground.authorityWrite_root_bound _
 
 theorem PreparedBirth.readGuards_readonly {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
     guard.cellId ∉ prepared.writes.map DataWrite.cellId :=
   by simpa using (List.mem_filter.mp member).2
 
 theorem PreparedBirth.readGuards_exact {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   rcases List.mem_append.mp (List.mem_filter.mp member).1 with authority | room
-  · exact prepared.authority.readGuards_exact guard authority
+  · exact ground.authorityReadGuards_exact guard authority
   · rcases List.mem_append.mp room with parent | kind
-    · exact parentGuards_exact durable descriptor guard parent
+    · exact parentGuards_exact ground descriptor guard parent
     · rcases List.mem_append.mp kind with kind | inherited
-      · exact kindGuards_exact durable descriptor guard kind
+      · exact kindGuards_exact ground descriptor guard kind
       · rcases List.mem_append.mp inherited with inherited | candidate
         · exact prepared.exports.guardsExact guard inherited
         · exact prepared.candidates.guardsExact guard candidate
@@ -1073,8 +1086,8 @@ theorem PreparedBirth.readGuards_exact {deployment : Deployment} {pins : Factory
 /-- Every export dependency is guarded at commit or covered by an exact
 old-root write of the same transaction. -/
 theorem PreparedBirth.export_reads_covered {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.exports.readGuards) :
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
@@ -1084,8 +1097,8 @@ theorem PreparedBirth.export_reads_covered {deployment : Deployment} {pins : Fac
         by simpa using written⟩)
 
 theorem PreparedGrainBirth.export_reads_covered {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry} {operationMarker : Nat}
-    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker)
+    {ground : Ground deployment} {descriptor : Descriptor Registry} {operationMarker : Nat}
+    (prepared : PreparedGrainBirth profile deployment pins ground descriptor operationMarker)
     (guard : ReadGuard) (member : guard ∈ prepared.pre.exports.readGuards) :
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
@@ -1095,8 +1108,8 @@ theorem PreparedGrainBirth.export_reads_covered {deployment : Deployment} {pins 
         by simpa using written⟩)
 
 theorem PreparedBirth.candidate_reads_covered {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.candidates.readGuards) :
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
@@ -1106,8 +1119,8 @@ theorem PreparedBirth.candidate_reads_covered {deployment : Deployment} {pins : 
         by simpa using written⟩)
 
 theorem PreparedGrainBirth.candidate_reads_covered {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry} {operationMarker : Nat}
-    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker)
+    {ground : Ground deployment} {descriptor : Descriptor Registry} {operationMarker : Nat}
+    (prepared : PreparedGrainBirth profile deployment pins ground descriptor operationMarker)
     (guard : ReadGuard) (member : guard ∈ prepared.candidates.readGuards) :
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
@@ -1119,9 +1132,9 @@ theorem PreparedGrainBirth.candidate_reads_covered {deployment : Deployment} {pi
 /-- The authority cell's read is covered: it is written under its old root, or
 it remains a read guard. -/
 theorem PreparedBirth.authority_reads_covered {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
-    (guard : ReadGuard) (member : guard ∈ prepared.authority.readGuards) :
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
+    (guard : ReadGuard) (member : guard ∈ ground.authorityReadGuards) :
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
   · exact Or.inl written
@@ -1132,137 +1145,134 @@ birth's physical writes — names only rooms that are present cells of the image
 it was prepared from, none of them a deployment cell, and each room is a read
 guard at its exact old root unless the birth itself writes it. -/
 theorem birth_parent_must_exist {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) :
-    (∃ cell, prepared.directory.directory.slots room = .present cell) ∧
+    (∃ cell, ground.directory.slots room = .present cell) ∧
       room ∉ [deployment.factoryId, deployment.resourceBookId, deployment.authorityCellId] ∧
       (⟨room⟩ ∈ prepared.writes.map DataWrite.cellId ∨
         ∃ guard ∈ prepared.readGuards, guard.cellId = ⟨room⟩ ∧
-          guard.expectedRoot = durable.snapshot.model.roots ⟨room⟩) := by
+          guard.expectedRoot = ground.view.model.roots ⟨room⟩) := by
   have row := Descriptor.mem_parentRows member inRoom
   obtain ⟨present, notDeployment⟩ := prepared.parentsPresent _ row
   refine ⟨(slotPresent_iff _ _).mp present, notDeployment, ?_⟩
-  obtain ⟨guard, guardMember, guardCell⟩ := parentGuards_cover durable descriptor row
+  obtain ⟨guard, guardMember, guardCell⟩ := parentGuards_cover ground descriptor row
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
   · exact Or.inl (guardCell ▸ written)
   · refine Or.inr ⟨guard, List.mem_filter.mpr ⟨List.mem_append_right _ (List.mem_append_left _ guardMember),
       by simpa using written⟩, guardCell, ?_⟩
     rw [← guardCell]
-    exact parentGuards_exact durable descriptor guard guardMember
+    exact parentGuards_exact ground descriptor guard guardMember
 
 /-- Every prepared world-instance birth checks its chosen definition against
 actual old source and retains that source as a commit dependency. -/
 theorem birth_kind_source_bound {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {kind : Nat} (selected : CanonicalCellRegistry.instanceKind item.create.cell = some kind) :
-    CanonicalCellRegistry.kindBirthValid deployment prepared.directory.directory item.create.cell = true ∧
+    CanonicalCellRegistry.kindBirthValid deployment ground.directory item.create.cell = true ∧
       (⟨kind⟩ ∈ prepared.writes.map DataWrite.cellId ∨
         ∃ guard ∈ prepared.readGuards, guard.cellId = ⟨kind⟩ ∧
-          guard.expectedRoot = durable.snapshot.model.roots ⟨kind⟩) := by
+          guard.expectedRoot = ground.view.model.roots ⟨kind⟩) := by
   refine ⟨prepared.kindsPresent item member, ?_⟩
-  obtain ⟨guard, guardMember, guardCell⟩ := kindGuards_cover durable descriptor member selected
+  obtain ⟨guard, guardMember, guardCell⟩ := kindGuards_cover ground descriptor member selected
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
   · exact Or.inl (guardCell ▸ written)
   · refine Or.inr ⟨guard, List.mem_filter.mpr
         ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_left _ guardMember)),
           by simpa using written⟩, guardCell, ?_⟩
     rw [← guardCell]
-    exact kindGuards_exact durable descriptor guard guardMember
+    exact kindGuards_exact ground descriptor guard guardMember
 
 /-- **`birth_under_room_requires_grant`**, at the one preparation every birth
 route passes: a prepared birth of an item into room `R` names the creator's
 placing capability, admissible for the creator's `placeObject` request on `R` at
 the gate height, and `R`'s committed law accepts that request. -/
 theorem PreparedBirth.birth_under_room_requires_grant {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {pins : FactoryPins} {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) :
     ∃ placement cap, item.placement = some placement ∧
-      RoomBirthGate.storedAt prepared.authority placement = some cap ∧
+      RoomBirthGate.storedAt ground placement = some cap ∧
       cap.holder.Covers descriptor.creator ∧
-      cap.Admissible prepared.authority.snapshot.authState
-        (RoomBirthGate.placeRequest pins prepared.authority.snapshot.authState
-          (RoomBirthGate.roomRoot prepared.directory.directory room) prepared.gateHeight descriptor room) ∧
-      ∃ clock : ClockCellDomain.Loaded deployment durable.snapshot,
-        ClockCellDomain.load deployment durable.snapshot = some clock ∧
-      ∃ observed : ResourceTargetAdmission.Observed deployment prepared.directory.directory
-          .object room (RoomBirthGate.roomRoot prepared.directory.directory room),
-        ∃ law, RoomBirthGate.lawOf prepared.directory prepared.authority room = some law ∧
+      cap.Admissible ground.authority.authState
+        (RoomBirthGate.placeRequest pins ground.authority.authState
+          (RoomBirthGate.roomRoot ground.directory room) prepared.gateHeight descriptor room) ∧
+      ∃ clock : ClockCellDomain.Loaded deployment ground.view,
+        ClockCellDomain.load deployment ground.view = some clock ∧
+      ∃ observed : ResourceTargetAdmission.Observed deployment ground.directory
+          .object room (RoomBirthGate.roomRoot ground.directory room),
+        ∃ law, RoomBirthGate.lawOf ground room = some law ∧
           Minidregg.Pred.eval law
             (RoomBirthGate.viewOf clock.clock (RoomBirthGate.placeRequest pins
-              prepared.authority.snapshot.authState (RoomBirthGate.roomRoot prepared.directory.directory room)
+              ground.authority.authState (RoomBirthGate.roomRoot ground.directory room)
               prepared.gateHeight descriptor room) observed)
             (RoomBirthGate.viewOf clock.clock (RoomBirthGate.placeRequest pins
-              prepared.authority.snapshot.authState (RoomBirthGate.roomRoot prepared.directory.directory room)
+              ground.authority.authState (RoomBirthGate.roomRoot ground.directory room)
               prepared.gateHeight descriptor room) observed) = true :=
   RoomBirthGate.birth_under_room_requires_grant prepared.rooms member inRoom
 
 /-- The same at the shared pre-authority preparation (the grain route's). -/
 theorem PreparedPreAuthority.birth_under_room_requires_grant {deployment : Deployment}
-    {pins : FactoryPins} {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedPreAuthority profile deployment pins durable descriptor)
+    {pins : FactoryPins} {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedPreAuthority profile deployment pins ground descriptor)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) :
     ∃ placement cap, item.placement = some placement ∧
-      RoomBirthGate.storedAt prepared.authority placement = some cap ∧
+      RoomBirthGate.storedAt ground placement = some cap ∧
       cap.holder.Covers descriptor.creator ∧
-      cap.Admissible prepared.authority.snapshot.authState
-        (RoomBirthGate.placeRequest pins prepared.authority.snapshot.authState
-          (RoomBirthGate.roomRoot prepared.directory.directory room) prepared.gateHeight descriptor room) :=
+      cap.Admissible ground.authority.authState
+        (RoomBirthGate.placeRequest pins ground.authority.authState
+          (RoomBirthGate.roomRoot ground.directory room) prepared.gateHeight descriptor room) :=
   let ⟨placement, cap, named, stored, holder, admissible, _⟩ :=
     RoomBirthGate.birth_under_room_requires_grant prepared.rooms member inRoom
   ⟨placement, cap, named, stored, holder, admissible⟩
 
-/-- Refusal pole: when the loaded directory has no cell at the named room,
+/-- Refusal pole: when the ground's directory has no cell at the named room,
 no birth into that room is prepared. -/
 theorem no_prepared_of_absent_parent {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {room : Nat} (inRoom : item.parent = some room)
-    (absent : ∀ directory, DirectoryImage.decode Registry
-        (CredentialAuthorityDomainReceiver.directoryRows durable) = some directory →
-      directory.slots room = .absent) :
-    IsEmpty (PreparedBirth profile deployment pins durable descriptor) :=
+    (absent : ground.directory.slots room = .absent) :
+    IsEmpty (PreparedBirth profile deployment pins ground descriptor) :=
   ⟨fun prepared => by
     obtain ⟨⟨cell, present⟩, _, _⟩ := birth_parent_must_exist prepared member inRoom
-    rw [absent _ prepared.directory.decoded] at present
+    rw [absent] at present
     cases present⟩
 
 theorem PreparedBirth.fresh_before {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (request : CreateRequest (CellId := Nat) Registry)
     (member : request ∈ descriptor.createRequests) :
-    durable.snapshot.canonicalBytes ⟨request.cellId⟩ = [] := by
-  rw [← prepared.directory.bytes_exact, prepared.allocated.fresh_pre request member]
+    ground.view.canonicalBytes ⟨request.cellId⟩ = [] := by
+  rw [← ground.bytes_exact, prepared.allocated.fresh_pre request member]
   rfl
 
 theorem PreparedBirth.authority_post_exact {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) :
     prepared.grants.post =
-      ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor
+      ResourceBirthAuthority.post ground.authority.cell descriptor
         prepared.grants.mode := rfl
 
 /-- The authority cell's one write carries exactly the batch's post, guarded at
 the loaded root of that cell. -/
 theorem PreparedBirth.authority_write_member {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) :
-    prepared.authority.write prepared.grants.post ∈ prepared.writes := by
-  simp [PreparedBirth.writes, planWrites, CredentialAuthorityDomainReceiver.PreparedGrantBatch.writes,
-    CredentialAuthorityDomainReceiver.Loaded.writes]
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) :
+    ground.authorityWrite prepared.grants.post ∈ prepared.writes := by
+  simp [PreparedBirth.writes, planWrites, Ground.authorityWrites]
 
 /-- Checked source records are actual allocator participants, not staging
 receipts or entries in an unrelated in-memory payload store. -/
 theorem PreparedBirth.initial_source_member {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (record : PolicyRecord) (member : record ∈ prepared.grants.initialSources.records) :
     CanonicalCellRegistry.policySourceCreate deployment.domain record ∈ descriptor.createRequests := by
   unfold Descriptor.createRequests
@@ -1271,21 +1281,21 @@ theorem PreparedBirth.initial_source_member {deployment : Deployment} {pins : Fa
   exact List.mem_map.mpr ⟨record, member, rfl⟩
 
 theorem PreparedBirth.initial_source_created {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (record : PolicyRecord) (member : record ∈ prepared.grants.initialSources.records) :
     prepared.allocated.after.slots
         (CanonicalCellRegistry.policySourceCreate deployment.domain record).cellId =
       .present (CanonicalCellRegistry.policySourceCell record) :=
-  ResourceBirth.allocate_success_created Registry prepared.directory.directory
+  ResourceBirth.allocate_success_created Registry ground.directory
     prepared.allocated.after descriptor.createRequests prepared.allocated.accepted _
       (prepared.initial_source_member record member)
 
 /-- The same physical intent that installs the new policy heads contains
 each exact source cell. No later payload upload is needed for first use. -/
 theorem PreparedBirth.initial_source_write {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (record : PolicyRecord) (member : record ∈ prepared.grants.initialSources.records) :
     birthWrite (CanonicalCellRegistry.policySourceCreate deployment.domain record) ∈ prepared.writes := by
   apply List.mem_append_left
@@ -1294,8 +1304,8 @@ theorem PreparedBirth.initial_source_write {deployment : Deployment} {pins : Fac
 
 /-- Every birth item's own birth write is among the writes a prepared birth commits. -/
 theorem PreparedBirth.birth_write_member {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (item : BirthItem Registry) (member : item ∈ descriptor.births) :
     birthWrite item.create ∈ prepared.writes := by
   apply List.mem_append_left
@@ -1306,8 +1316,8 @@ theorem PreparedBirth.birth_write_member {deployment : Deployment} {pins : Facto
 the allocated result. The address equality is decoder evidence, not a free
 hash equality interpreted as equality of different source records. -/
 theorem PreparedBirth.initial_policy_created {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (initial : InitialPolicy) (member : initial ∈ descriptor.initialPolicies) :
     ∃ record,
       PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
@@ -1323,23 +1333,23 @@ theorem PreparedBirth.initial_policy_created {deployment : Deployment} {pins : F
   exact ⟨record, decoded, facts, created⟩
 
 theorem PreparedBirth.initial_law {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (item : BirthItem Registry) (member : item ∈ descriptor.births) :
     CanonicalCellRegistry.UserInitial deployment item.create.cellId item.create.cell ∨
       SourcedInitial deployment prepared.sourced item.create.cellId item.create.cell :=
   prepared.initials item member
 
 theorem PreparedBirth.conserves {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) (asset : Nat) :
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) (asset : Nat) :
     (CanonicalResourceKernel.logicalBook prepared.resources.post.logical).totalAsset asset =
       (CanonicalResourceKernel.logicalBook prepared.book.payload.logical).totalAsset asset :=
   prepared.resources.conserves asset
 
 theorem PreparedBirth.no_user_book {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor)
     (item : BirthItem Registry) (member : item ∈ descriptor.births) :
     item.create.cell.kind ≠ .resourceBook := by
   intro forbidden

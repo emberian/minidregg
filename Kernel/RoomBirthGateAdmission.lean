@@ -16,18 +16,18 @@ open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Kernel.ResourceBirthController.Concrete
+open Minidregg.Compiler.ServedBasis (Ground)
 
 set_option autoImplicit false
 
 variable {F : Type} [Field F] [DecidableEq F]
 
 theorem preparePreAuthority_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
-    {held : Held deployment durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {disabled : List Digest} {descriptor : Descriptor Registry} {height : Height}
-    {pre : PreparedPreAuthority profile deployment pins durable descriptor}
+    {pre : PreparedPreAuthority profile deployment pins ground descriptor}
     {sourced : List (Nat × CellRegistry.PackedCell Registry)}
-    (prepared : preparePreAuthority profile disabled deployment pins durable held descriptor height sourced = .ok pre) :
+    (prepared : preparePreAuthority profile disabled deployment pins ground descriptor height sourced = .ok pre) :
     pre.gateHeight = height := by
   unfold preparePreAuthority at prepared
   simp only [bind, Except.bind] at prepared
@@ -37,12 +37,11 @@ theorem preparePreAuthority_gateHeight {profile : CanonicalPolicyAdmission.Polic
     | (simp_all)
 
 theorem prepareBirth_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
-    {held : Held deployment durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {disabled : List Digest} {descriptor : Descriptor Registry} {height : Height}
-    {birth : PreparedBirth profile deployment pins durable descriptor}
+    {birth : PreparedBirth profile deployment pins ground descriptor}
     {sourced : List (Nat × CellRegistry.PackedCell Registry)}
-    (prepared : prepareBirth profile disabled deployment pins durable held descriptor height sourced = .ok birth) :
+    (prepared : prepareBirth profile disabled deployment pins ground descriptor height sourced = .ok birth) :
     birth.gateHeight = height := by
   unfold prepareBirth at prepared
   simp only [bind, Except.bind] at prepared
@@ -56,12 +55,11 @@ theorem prepareBirth_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompil
       | (simp_all)
 
 theorem prepareGrainBirth_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
-    {held : Held deployment durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {disabled : List Digest} {descriptor : Descriptor Registry} {operationMarker : Nat} {height : Height}
-    {birth : PreparedGrainBirth profile deployment pins durable descriptor operationMarker}
+    {birth : PreparedGrainBirth profile deployment pins ground descriptor operationMarker}
     {sourced : List (Nat × CellRegistry.PackedCell Registry)}
-    (prepared : prepareGrainBirth profile disabled deployment pins durable held descriptor operationMarker height
+    (prepared : prepareGrainBirth profile disabled deployment pins ground descriptor operationMarker height
       sourced = .ok birth) :
     birth.pre.gateHeight = height := by
   unfold prepareGrainBirth at prepared
@@ -81,31 +79,30 @@ prepares at its admission height and its `AcceptedBirth.prepared` is that very
 value — bears an item into room `R` only under a placing capability admissible
 at `h` for the creator's `placeObject` request on `R`, and `R`'s law accepts it. -/
 theorem birth_under_room_requires_grant_at {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
-    {held : Held deployment durable}
+    {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {disabled : List Digest} {descriptor : Descriptor Registry} {height : Height}
-    {birth : PreparedBirth profile deployment pins durable descriptor}
+    {birth : PreparedBirth profile deployment pins ground descriptor}
     {sourced : List (Nat × CellRegistry.PackedCell Registry)}
-    (prepared : prepareBirth profile disabled deployment pins durable held descriptor height sourced = .ok birth)
+    (prepared : prepareBirth profile disabled deployment pins ground descriptor height sourced = .ok birth)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) :
     ∃ placement cap, item.placement = some placement ∧
-      RoomBirthGate.storedAt birth.authority placement = some cap ∧
+      RoomBirthGate.storedAt ground placement = some cap ∧
       cap.holder.Covers descriptor.creator ∧
-      cap.Admissible birth.authority.snapshot.authState
-        (RoomBirthGate.placeRequest pins birth.authority.snapshot.authState
-          (RoomBirthGate.roomRoot birth.directory.directory room) height descriptor room) ∧
-      ∃ clock : ClockCellDomain.Loaded deployment durable.snapshot,
-        ClockCellDomain.load deployment durable.snapshot = some clock ∧
-      ∃ observed : ResourceTargetAdmission.Observed deployment birth.directory.directory
-          .object room (RoomBirthGate.roomRoot birth.directory.directory room),
-        ∃ law, RoomBirthGate.lawOf birth.directory birth.authority room = some law ∧
+      cap.Admissible ground.authority.authState
+        (RoomBirthGate.placeRequest pins ground.authority.authState
+          (RoomBirthGate.roomRoot ground.directory room) height descriptor room) ∧
+      ∃ clock : ClockCellDomain.Loaded deployment ground.view,
+        ClockCellDomain.load deployment ground.view = some clock ∧
+      ∃ observed : ResourceTargetAdmission.Observed deployment ground.directory
+          .object room (RoomBirthGate.roomRoot ground.directory room),
+        ∃ law, RoomBirthGate.lawOf ground room = some law ∧
           Minidregg.Pred.eval law
             (RoomBirthGate.viewOf clock.clock (RoomBirthGate.placeRequest pins
-              birth.authority.snapshot.authState (RoomBirthGate.roomRoot birth.directory.directory room)
+              ground.authority.authState (RoomBirthGate.roomRoot ground.directory room)
               height descriptor room) observed)
             (RoomBirthGate.viewOf clock.clock (RoomBirthGate.placeRequest pins
-              birth.authority.snapshot.authState (RoomBirthGate.roomRoot birth.directory.directory room)
+              ground.authority.authState (RoomBirthGate.roomRoot ground.directory room)
               height descriptor room) observed) = true := by
   have exact := prepareBirth_gateHeight prepared
   have granted := birth.birth_under_room_requires_grant member inRoom

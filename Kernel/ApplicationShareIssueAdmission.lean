@@ -25,11 +25,11 @@ set_option maxHeartbeats 1000000
 variable {F : Type} [Field F] [DecidableEq F]
 variable {profile : CanonicalRuntimeProfile.Profile F}
 variable {config : NativeHost.Config} {pins : FactoryPins}
-variable {durable : ResourceBirthController.Concrete.Durable} {height : Height}
+variable {ground : Minidregg.Compiler.ServedBasis.Ground config.deployment} {height : Height}
 
 /-- **The writes the issue commits**: the admitted birth's own, untransformed.
 The issue's naming check (`Accepted.named`) runs over exactly these. -/
-def finalWrites (birth : AcceptedBirth profile config.deployment pins durable height) :
+def finalWrites (birth : AcceptedBirth profile config.deployment pins ground height) :
     List DurableDataIntent.DataWrite :=
   birth.prepared.writes
 
@@ -39,21 +39,21 @@ caller-chosen ticket-looking bytes. A separate receiver must install a distinct
 event and app read guard before this can authorize any dispatch. -/
 structure Accepted (profile : CanonicalRuntimeProfile.Profile F)
     (config : NativeHost.Config) (pins : FactoryPins)
-    (durable : ResourceBirthController.Concrete.Durable) (height : Height)
+    (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment) (height : Height)
     (ingress : ApplicationShareIssueSource.Ingress) where
   private mk ::
   sourceReady : Ready config.deployment.domain ingress.spec
     (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
       config.deployment ingress.spec.issuer ingress.spec.ticket.issueNonce).value
-  birth : AcceptedBirth profile config.deployment pins durable height
+  birth : AcceptedBirth profile config.deployment pins ground height
   birthBytes : birth.ingress.bytes = ingress.birthIngress
   sourceDescriptor : birth.descriptor =
     { sourceReady.expectedDescriptor profile config birth.pending.record
-        birth.prepared.authority.snapshot.authState height
+        ground.authority.authState height
         birth.descriptor.fee.payer birth.descriptor.funding with
       auxiliaryCreates := birth.prepared.grants.auxiliaryCreates }
   appPrepared : ApplicationShareIssueDelegation.Prepared
-    (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.directory birth.prepared.authority) profile config.federation
+    ground profile config.federation
       height ingress.spec birth.descriptor
   appChecked : ApplicationShareIssueDelegation.Checked appPrepared ingress.appEnvelope
   appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
@@ -74,17 +74,17 @@ private theorem descriptorBytes_injective : Function.Injective
 def admitNative (profile : CanonicalRuntimeProfile.Profile F)
     (config : NativeHost.Config) (pins : FactoryPins)
     (native : CredentialSignatureIO.NativeConfig)
-    (durable : ResourceBirthController.Concrete.Durable) (height : Height)
+    (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment) (height : Height)
     (bytes : List UInt8) : IO (Except String
       (Σ ingress : ApplicationShareIssueSource.Ingress,
-        Accepted profile config pins durable height ingress)) := do
+        Accepted profile config pins ground height ingress)) := do
   let some ingress := ApplicationShareIssueSource.ingressCodec.decode bytes
     | return .error refused
   let .ok ready := prepare profile config ingress.spec | return .error refused
   let some decoded := ResourceBirthPolicyController.Concrete.decodeIngress
       ingress.birthIngress | return .error refused
   let .ok birth ← ResourceBirthPolicyController.Concrete.admitDecodedNative
-      profile config.deployment pins native durable (ResourceBirthController.Concrete.Held.load config.deployment durable) height decoded
+      profile config.deployment pins native ground height decoded
       ready.sourced
       | return .error refused
   if birthBytes : birth.ingress.bytes = ingress.birthIngress then
@@ -92,17 +92,17 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
         CanonicalCellRegistry.sourceEncoding.codec.encode birth.descriptor =
           CanonicalCellRegistry.sourceEncoding.codec.encode
             { ready.expectedDescriptor profile config birth.pending.record
-                birth.prepared.authority.snapshot.authState height
+                ground.authority.authState height
                 birth.descriptor.fee.payer birth.descriptor.funding with
               auxiliaryCreates := birth.prepared.grants.auxiliaryCreates } then
       have sourceDescriptor : birth.descriptor =
           { ready.expectedDescriptor profile config birth.pending.record
-              birth.prepared.authority.snapshot.authState height
+              ground.authority.authState height
               birth.descriptor.fee.payer birth.descriptor.funding with
             auxiliaryCreates := birth.prepared.grants.auxiliaryCreates } :=
         descriptorBytes_injective sourceDescriptorBytes
       let context : ApplicationShareIssueDelegation.Context config.deployment :=
-        (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.directory birth.prepared.authority)
+        ground
       let .ok appPrepared := ApplicationShareIssueDelegation.prepare context
         profile config.federation height ingress.spec birth.descriptor
         | return .error refused
@@ -122,14 +122,14 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
   else return .error refused
 
 theorem Accepted.same_loaded_image {ingress : ApplicationShareIssueSource.Ingress}
-    (accepted : Accepted profile config pins durable height ingress) :
+    (accepted : Accepted profile config pins ground height ingress) :
     accepted.appPrepared.observed.before.payload.root = accepted.appPrepared.root :=
   accepted.appPrepared.observed.rootExact.symm
 
 /-- The ordinary factory checker and Book batch use the same signed fee, quoted
 under the platform record's creation tariff on the whole ticket cell the factory judged. -/
 theorem Accepted.special_fee_bound {ingress}
-    (accepted : Accepted profile config pins durable height ingress) :
+    (accepted : Accepted profile config pins ground height ingress) :
     accepted.birth.descriptor.fee.amount =
       accepted.birth.descriptor.quotedFee accepted.birth.pending.record.creation := by
   have bound := accepted.birth.pending.checked.feeBound.1
@@ -142,18 +142,18 @@ ticket descriptor of `ingress.spec` under `profile`, `config` and the platform r
 `durable` holds, at `height`; `pins` carries that record's creation tariff; every committed write expects `durable`'s exact root; and every birth write
 is named by the admitted factory step. -/
 theorem Accepted.indexed {ingress : ApplicationShareIssueSource.Ingress}
-    (accepted : Accepted profile config pins durable height ingress) :
+    (accepted : Accepted profile config pins ground height ingress) :
     accepted.birth.ingress.bytes = ingress.birthIngress ∧
       accepted.birth.descriptor =
         { accepted.sourceReady.expectedDescriptor profile config accepted.birth.pending.record
-            accepted.birth.prepared.authority.snapshot.authState height
+            ground.authority.authState height
             accepted.birth.descriptor.fee.payer accepted.birth.descriptor.funding with
           auxiliaryCreates := accepted.birth.prepared.grants.auxiliaryCreates } ∧
-      ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment durable =
+      ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment ground.view =
         some accepted.birth.pending.record ∧
       pins.tariff = accepted.birth.pending.record.creation ∧
       (∀ write ∈ finalWrites accepted.birth,
-        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+        write.expectedPre = ground.view.model.roots write.cellId) ∧
       ResourceBirthController.Concrete.Named accepted.birth.factoryStep (finalWrites accepted.birth) :=
   ⟨accepted.birthBytes, accepted.sourceDescriptor, accepted.birth.pending.recordExact,
     accepted.birth.pending.priced,

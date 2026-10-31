@@ -78,7 +78,8 @@ def lookupOriginal (config : Config) (target : Durable) (bytes : List UInt8) :
     ⟨config.federation, NativeHost.logicalHeight config before.durable⟩
   let .ok ⟨admittedIngress, accepted⟩ ←
       ApplicationShareIssueGrainAdmission.admitNative config.profile config
-        before.pins config.signature before.durable ambient bytes
+        before.pins config.signature (.ofLoaded before.durable before.directory before.authority)
+        ambient bytes
     | return .error .transactionConflict
   let intent := ApplicationShareIssueGrainReceiver.intent accepted
   let receipt := selection.selected.receipt

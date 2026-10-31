@@ -694,40 +694,37 @@ factory/policy authorization. New grants are never used to authorize their own
 birth. The post is the batch patch applied to the loaded cell; its one write
 replaces that cell. -/
 structure PreparedGrantBatch {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
-    (deployment : CanonicalCellRegistry.Deployment) (loaded : Loaded deployment durable.snapshot)
+    (deployment : CanonicalCellRegistry.Deployment) (authority : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor registry) where
   private mk ::
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile descriptor.initialPolicies
   mode : ResourceBirthAuthority.BatchEvidence
-    loaded.snapshot.cell descriptor
+    authority.cell descriptor
 /-- The prepared batch is fresh at the loaded authority cell. -/
 theorem PreparedGrantBatch.batchFresh {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
+    {deployment : CanonicalCellRegistry.Deployment} {authority : CredentialAuthorityDomain.Snapshot}
     {descriptor : Descriptor registry}
-    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    (prepared : PreparedGrantBatch profile deployment authority descriptor) :
     ((ResourceBirthAuthority.entries descriptor).map Sigma.fst).Nodup ∧
       descriptor.GrantIdsDistinct ∧
-      (∀ row ∈ descriptor.parentRows, loaded.snapshot.cell.logical ⟨.parent, row.1⟩ = none) :=
+      (∀ row ∈ descriptor.parentRows, authority.cell.logical ⟨.parent, row.1⟩ = none) :=
   ⟨prepared.mode.slotsDistinct, prepared.mode.grantIdsDistinct, prepared.mode.parentsFresh⟩
 
 /-- **What a prepared grant batch guarantees about its indices**: the batch's slots and grant ids
-are distinct, every parent row is absent in `loaded`'s authority cell, and every initial policy of
+are distinct, every parent row is absent in the `authority` cell, and every initial policy of
 `descriptor` decodes to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`
 (the profile has a descriptor, the record names this domain and the profile's semantics, is version 0
 with no predecessor, and its predicate is one the profile's compiler supports). -/
 theorem PreparedGrantBatch.sound {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
+    {deployment : CanonicalCellRegistry.Deployment} {authority : CredentialAuthorityDomain.Snapshot}
     {descriptor : Descriptor registry}
-    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    (prepared : PreparedGrantBatch profile deployment authority descriptor) :
     ((ResourceBirthAuthority.entries descriptor).map Sigma.fst).Nodup ∧
       descriptor.GrantIdsDistinct ∧
-      (∀ row ∈ descriptor.parentRows, loaded.snapshot.cell.logical ⟨.parent, row.1⟩ = none) ∧
+      (∀ row ∈ descriptor.parentRows, authority.cell.logical ⟨.parent, row.1⟩ = none) ∧
       ∀ initial ∈ descriptor.initialPolicies, ∃ record,
         PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
           PolicySourceCell.InitialFacts deployment.domain profile initial record :=
@@ -737,40 +734,34 @@ theorem PreparedGrantBatch.sound {F : Type} [Field F]
       exact ⟨record, decoded, facts⟩⟩
 
 def prepareGrantBatch {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
-    (deployment : CanonicalCellRegistry.Deployment) (loaded : Loaded deployment durable.snapshot)
+    (deployment : CanonicalCellRegistry.Deployment) (authority : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor registry) :
-    Option (PreparedGrantBatch profile deployment loaded descriptor) := do
+    Option (PreparedGrantBatch profile deployment authority descriptor) := do
   let initialSources ← PolicySourceCell.checkInitials deployment.domain profile descriptor.initialPolicies
-  if ready : BatchReady loaded.snapshot descriptor then
-    some ⟨initialSources, batchEvidence loaded.snapshot descriptor ready⟩
+  if ready : BatchReady authority descriptor then
+    some ⟨initialSources, batchEvidence authority descriptor ready⟩
   else none
 
 section GrantBatch
 
 variable {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
+    {deployment : CanonicalCellRegistry.Deployment} {authority : CredentialAuthorityDomain.Snapshot}
     {descriptor : Descriptor registry}
 
-def PreparedGrantBatch.post (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+def PreparedGrantBatch.post (prepared : PreparedGrantBatch profile deployment authority descriptor) :
     CredentialAuthorityDomain.Cell :=
-  ResourceBirthAuthority.post loaded.snapshot.cell descriptor prepared.mode
-
-def PreparedGrantBatch.writes (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
-    List DataWrite :=
-  loaded.writes prepared.post
+  ResourceBirthAuthority.post authority.cell descriptor prepared.mode
 
 def PreparedGrantBatch.auxiliaryCreates
-    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    (prepared : PreparedGrantBatch profile deployment authority descriptor) :
     List (CreateRequest (CellId := Nat) registry) :=
   CanonicalCellRegistry.initialSourceCreates deployment.domain prepared.initialSources.records
 
 theorem PreparedGrantBatch.post_logical
-    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
-    prepared.post.logical = setAll loaded.snapshot.logical (ResourceBirthAuthority.entries descriptor) :=
+    (prepared : PreparedGrantBatch profile deployment authority descriptor) :
+    prepared.post.logical = setAll authority.logical (ResourceBirthAuthority.entries descriptor) :=
   ResourceBirthAuthority.post_logical _ _ _
 
 end GrantBatch

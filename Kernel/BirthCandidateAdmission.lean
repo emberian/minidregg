@@ -3,6 +3,7 @@ The accepted authority batch supplies one post and all exact staged records.
 Sealed or unsatisfiable new local laws remain legal sources. -/
 module
 
+public import Compiler.ServedBasis
 public import Compiler.CandidateLawResolution
 public import Compiler.PhysicalLawResolution
 public import Compiler.CredentialAuthorityDomainReceiver
@@ -16,12 +17,12 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Compiler.ServedBasis (Ground)
 open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 
 set_option autoImplicit false
 
 abbrev Deployment := CanonicalCellRegistry.Deployment
-abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 
 /-- Exclude exactly the sources staged by this same birth. Existing selected
 heads and every predecessor fetched for a pin remain physical dependencies. -/
@@ -34,52 +35,49 @@ def physicalGuards (pairs : List (Nat × Digest)) : List ReadGuard :=
 variable {F : Type} [Field F]
 
 structure Checked (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (durable : Durable) (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (ground : Ground deployment)
     (post : CredentialAuthorityDomain.Cell) (records : List PolicyRecord) where
   private mk ::
   graph : PolicyComponentResolution.LoadedRoots
-    (CredentialAuthorityDomain.Snapshot.ofCell authority.snapshot.domain authority.snapshot.revision
-      authority.snapshot.spent post)
+    (CredentialAuthorityDomain.Snapshot.ofCell ground.authority.domain ground.authority.revision
+      ground.authority.spent post)
     (CandidateLawResolution.overlayRecords
-      (PhysicalLawResolution.payloadStore authority.snapshot directory.directory) records)
+      (PhysicalLawResolution.payloadStore ground.authority ground.directory) records)
     profile.semantics (CandidateLawResolution.changedRecordRoots records)
-  graphExact : CandidateLawResolution.validateRecords authority.snapshot
-    (PhysicalLawResolution.payloadStore authority.snapshot directory.directory) post profile.semantics records
+  graphExact : CandidateLawResolution.validateRecords ground.authority
+    (PhysicalLawResolution.payloadStore ground.authority ground.directory) post profile.semantics records
     PhysicalLawResolution.resolutionBudget = .ok graph
   supported : Minidregg.Compiler.supported profile.compiler
     (ResolvedLawCompilation.predicate graph.resolved) = true
   sourceGuards : List (Nat × Digest)
-  sourcesExact : PhysicalLawResolution.loadGuards authority.snapshot directory.directory
+  sourcesExact : PhysicalLawResolution.loadGuards ground.authority ground.directory
     (existingAddresses records (PhysicalLawResolution.addresses graph)) = some sourceGuards
   guardsExact : ∀ guard ∈ physicalGuards sourceGuards,
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+    guard.expectedRoot = ground.view.model.roots guard.cellId
 
 def Checked.readGuards {profile : PolicyCompilerProfile F} {deployment : Deployment}
-    {durable : Durable} {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {ground : Ground deployment}
     {post : CredentialAuthorityDomain.Cell} {records : List PolicyRecord}
-    (checked : Checked profile deployment durable directory authority post records) : List ReadGuard :=
+    (checked : Checked profile deployment ground post records) : List ReadGuard :=
   physicalGuards checked.sourceGuards
 
 def check (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (durable : Durable) (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (ground : Ground deployment)
     (post : CredentialAuthorityDomain.Cell) (records : List PolicyRecord) :
-    Option (Checked profile deployment durable directory authority post records) := do
-  match graphExact : CandidateLawResolution.validateRecords authority.snapshot
-      (PhysicalLawResolution.payloadStore authority.snapshot directory.directory) post profile.semantics records
+    Option (Checked profile deployment ground post records) := do
+  match graphExact : CandidateLawResolution.validateRecords ground.authority
+      (PhysicalLawResolution.payloadStore ground.authority ground.directory) post profile.semantics records
       PhysicalLawResolution.resolutionBudget with
   | .error _ => none
   | .ok graph =>
       if supported : Minidregg.Compiler.supported profile.compiler
           (ResolvedLawCompilation.predicate graph.resolved) = true then do
-        match sourcesExact : PhysicalLawResolution.loadGuards authority.snapshot directory.directory
+        match sourcesExact : PhysicalLawResolution.loadGuards ground.authority ground.directory
             (existingAddresses records (PhysicalLawResolution.addresses graph)) with
         | none => none
         | some sourceGuards =>
             if guardsExact : ∀ guard ∈ physicalGuards sourceGuards,
-                guard.expectedRoot = durable.snapshot.model.roots guard.cellId then
+                guard.expectedRoot = ground.view.model.roots guard.cellId then
               some ⟨graph, graphExact, supported, sourceGuards, sourcesExact, guardsExact⟩
             else none
       else none

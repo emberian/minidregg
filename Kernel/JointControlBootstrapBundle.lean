@@ -75,7 +75,7 @@ def overhead (source : Source) : Charge
 def birthIntent {config : Config} {opened : Opened config}
     (source : Source)
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment
-      opened.pins opened.durable (logicalHeight config opened.durable)) :
+      opened.pins opened.ground (logicalHeight config opened.durable)) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ordinary := ResourceBirthReceiver.intent accepted
   let event : StableEvent := ⟨61,config.deployment.domain,
@@ -94,7 +94,7 @@ owned application birth remains the independently consented birth method. -/
 def ownerBirthCheck {config : Config} {opened : Opened config}
     (pin : JointControlFrame.Pin)
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment
-      opened.pins opened.durable (logicalHeight config opened.durable)) : Bool :=
+      opened.pins opened.ground (logicalHeight config opened.durable)) : Bool :=
   decide (accepted.descriptor.creator = pin.owner) &&
   match accepted.descriptor.births with
   | [item] =>
@@ -135,7 +135,7 @@ structure Accepted (config : Config) (opened : Opened config) (source : Source) 
   pin : JointControlFrame.Pin
   pinned : config.jointControl = some pin
   birth : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment
-    opened.pins opened.durable (logicalHeight config opened.durable)
+    opened.pins opened.ground (logicalHeight config opened.durable)
   creatorOwner : ownerBirthCheck pin birth = true
   intent : DataIntent ResourceBirthCodec.rootBytes
   intentExact : intent = birthIntent source birth
@@ -155,7 +155,7 @@ def admit (config : Config) (opened : Opened config) (source : Source) :
     let some ingress := ResourceBirthPolicyController.Concrete.decodeIngress source.birthIngressBytes
       | return .error "noncanonical retained bootstrap birth"
     match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment
-        opened.pins config.signature opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority)
+        opened.pins config.signature opened.ground
         (logicalHeight config opened.durable) ingress with
     | .error reason => return .error s!"bootstrap birth current permission refused: {repr reason}"
     | .ok birth =>

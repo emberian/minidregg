@@ -11,7 +11,7 @@ A birth that names a room `R` (`create --in R`) is admitted only when
 2. `R`'s own committed law accepts that request, read through the same
    projection observation admission reads a cell's law through
    (`ResourceObservationAdmission.projectWith`), including the committed clock
-   loaded from the same durable snapshot. Missing clocks fail closed.
+   loaded from the same ground (the snapshot a birth prepares against). Missing clocks fail closed.
 
 So a room's law decides who may birth into it, over its members. The stock
 templates: a workroom or social room's law admits every member; a realm's law
@@ -66,11 +66,11 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CredentialAuthorityState (readCapability)
+open Minidregg.Compiler.ServedBasis (Ground)
 
 set_option autoImplicit false
 
 abbrev Deployment := CanonicalCellRegistry.Deployment
-abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Registry := CanonicalCellRegistry.registry
 
 /-- Why a birth into a room is refused, by name. -/
@@ -216,21 +216,20 @@ def placeRequest (pins : FactoryPins) (state : AuthState) (roomRoot : Digest) (h
     (height : Height) (descriptor : Descriptor Registry) (room : Nat) :
     (placeRequest pins state roomRoot height descriptor room).subject = descriptor.creator := rfl
 
-variable {deployment : Deployment} {durable : Durable}
+variable {deployment : Deployment}
 
 /-- The stored capability at `placement`, as a capability. -/
-def storedAt (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+def storedAt (ground : Ground deployment)
     (placement : CapabilityId) : Option (Capability .object) :=
-  (readCapability authority.snapshot.cell .object placement).map (·.head)
+  (readCapability ground.authority.cell .object placement).map (·.head)
 
 /-- The room's committed law at its current revision, read from the same policy
 registry and source store observation admission resolves laws from. -/
-def lawOf (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+def lawOf (ground : Ground deployment)
     (room : Nat) : Option Minidregg.Pred.Pred :=
-  ((CredentialAuthorityPolicyRegistry.policyRegistry authority.snapshot
-      (ResourceObservationAdmission.sourceStoreOf deployment directory.directory)).resolve ⟨room⟩
-      (authority.snapshot.authState.policyRevision ⟨room⟩)).map (·.record.predicate)
+  ((CredentialAuthorityPolicyRegistry.policyRegistry ground.authority
+      (ResourceObservationAdmission.sourceStoreOf deployment ground.directory)).resolve ⟨room⟩
+      (ground.authority.authState.policyRevision ⟨room⟩)).map (·.record.predicate)
 
 /-- The room cell's current root, as the loaded directory holds it (the zero
 digest when the slot is absent; `checkRoom` then refuses `notARoom`). -/
@@ -242,47 +241,45 @@ def roomRoot (directory : Directory Nat Registry) (room : Nat) : Digest :=
 /-- The law's view of the room for the placement request, with the receiving
 snapshot's committed clock. The caller must load the clock before evaluating a law. -/
 def viewOf (clock : Kernel.ClockCell.Clock) {room : Nat} {root : Digest}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {directory : Directory Nat Registry}
     (request : Request .object)
-    (observed : ResourceTargetAdmission.Observed deployment directory.directory .object room root) :
+    (observed : ResourceTargetAdmission.Observed deployment directory .object room root) :
     Minidregg.Pred.State :=
   ResourceObservationAdmission.projectWith clock request [] observed.before.kind [] observed.before.payload.logical
 
 /-- One room birth: the room is an object cell of the directory, and the
 creator's placing capability and the room's law admit the placement. -/
 def checkRoom (pins : FactoryPins)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (ground : Ground deployment)
     (height : Height) (descriptor : Descriptor Registry) (room : Nat) (placement : CapabilityId) :
     Except Refusal Unit :=
-  match Kernel.ClockCellDomain.load deployment durable.snapshot with
+  match Kernel.ClockCellDomain.load deployment ground.view with
   | none => .error .clockUnavailable
   | some clock =>
-      match ResourceTargetAdmission.observe deployment directory.directory .object room
-          (roomRoot directory.directory room) with
+      match ResourceTargetAdmission.observe deployment ground.directory .object room
+          (roomRoot ground.directory room) with
       | none => .error (.notARoom room)
       | some observed =>
-          let request := placeRequest pins authority.snapshot.authState (roomRoot directory.directory room)
+          let request := placeRequest pins ground.authority.authState (roomRoot ground.directory room)
             height descriptor room
-          decideRoom room (storedAt authority placement) authority.snapshot.authState request
-            (lawOf directory authority room) (viewOf clock.clock request observed)
+          decideRoom room (storedAt ground placement) ground.authority.authState request
+            (lawOf ground room) (viewOf clock.clock request observed)
 
 /-- A missing or invalid committed clock refuses room placement before a room law
 can be evaluated. Root births do not evaluate a room law and remain unaffected. -/
 theorem checkRoom_clock_unavailable (pins : FactoryPins)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (ground : Ground deployment)
     (height : Height) (descriptor : Descriptor Registry) (room : Nat) (placement : CapabilityId)
-    (missing : Kernel.ClockCellDomain.load deployment durable.snapshot = none) :
-    checkRoom pins directory authority height descriptor room placement = .error .clockUnavailable := by
+    (missing : Kernel.ClockCellDomain.load deployment ground.view = none) :
+    checkRoom pins ground height descriptor room placement = .error .clockUnavailable := by
   simp [checkRoom, missing]
 
 /-- Room placement laws read the clock before request/resource slots, exactly as
 observations do. A resource field with a colliding name cannot shadow these slots. -/
 theorem viewOf_clock_exact (clock : Kernel.ClockCell.Clock) {room : Nat} {root : Digest}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {directory : Directory Nat Registry}
     (request : Request .object)
-    (observed : ResourceTargetAdmission.Observed deployment directory.directory .object room root) :
+    (observed : ResourceTargetAdmission.Observed deployment directory .object room root) :
     (viewOf clock request observed).get "clock/now" = some (Int.ofNat clock.now) ∧
       (viewOf clock request observed).get "clock/day" =
         some (Int.ofNat (clock.now / Kernel.ClockCell.secondsPerDay)) ∧
@@ -292,15 +289,14 @@ theorem viewOf_clock_exact (clock : Kernel.ClockCell.Clock) {room : Nat} {root :
 /-- One birth item: a root birth names no placing capability; a room birth
 names one, is owned by its creator, and passes `checkRoom`. -/
 def checkItem (pins : FactoryPins)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (ground : Ground deployment)
     (height : Height) (descriptor : Descriptor Registry) (item : BirthItem Registry) :
     Except Refusal Unit :=
   match item.parent, item.placement with
   | none, none => .ok ()
   | some room, some placement =>
       if item.owner = descriptor.creator then
-        checkRoom pins directory authority height descriptor room placement
+        checkRoom pins ground height descriptor room placement
       else .error (.ownerNotCreator room)
   | _, _ => .error .placementShape
 
@@ -324,18 +320,16 @@ theorem checkAll_ok_iff {α : Type} (check : α → Except Refusal Unit) (items 
 
 /-- Every birth item of the descriptor passes the gate. -/
 def Admitted (pins : FactoryPins)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (ground : Ground deployment)
     (height : Height) (descriptor : Descriptor Registry) : Prop :=
-  ∀ item ∈ descriptor.births, checkItem pins directory authority height descriptor item = .ok ()
+  ∀ item ∈ descriptor.births, checkItem pins ground height descriptor item = .ok ()
 
 /-- The gate: the first refusal, by name, or the admission. -/
 def check (pins : FactoryPins)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
+    (ground : Ground deployment)
     (height : Height) (descriptor : Descriptor Registry) :
-    Except Refusal (PLift (Admitted pins directory authority height descriptor)) :=
-  match decided : checkAll (checkItem pins directory authority height descriptor) descriptor.births with
+    Except Refusal (PLift (Admitted pins ground height descriptor)) :=
+  match decided : checkAll (checkItem pins ground height descriptor) descriptor.births with
   | .error reason => .error reason
   | .ok () => .ok ⟨(checkAll_ok_iff _ _).mp decided⟩
 
@@ -344,35 +338,34 @@ room `R` names a placing capability stored in the authority cell, held by the
 creator, admissible for the creator's `placeObject` request on `R`, and `R`'s
 committed law accepts that request on `R`'s current state. -/
 theorem birth_under_room_requires_grant {pins : FactoryPins}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {ground : Ground deployment}
     {height : Height} {descriptor : Descriptor Registry}
-    (admitted : Admitted pins directory authority height descriptor)
+    (admitted : Admitted pins ground height descriptor)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) :
-    ∃ placement cap, item.placement = some placement ∧ storedAt authority placement = some cap ∧
+    ∃ placement cap, item.placement = some placement ∧ storedAt ground placement = some cap ∧
       cap.holder.Covers descriptor.creator ∧
-      cap.Admissible authority.snapshot.authState
-        (placeRequest pins authority.snapshot.authState (roomRoot directory.directory room) height descriptor room) ∧
-      ∃ clock : Kernel.ClockCellDomain.Loaded deployment durable.snapshot,
-        Kernel.ClockCellDomain.load deployment durable.snapshot = some clock ∧
-        ∃ observed : ResourceTargetAdmission.Observed deployment directory.directory .object room
-          (roomRoot directory.directory room),
-        ∃ law, lawOf directory authority room = some law ∧
+      cap.Admissible ground.authority.authState
+        (placeRequest pins ground.authority.authState (roomRoot ground.directory room) height descriptor room) ∧
+      ∃ clock : Kernel.ClockCellDomain.Loaded deployment ground.view,
+        Kernel.ClockCellDomain.load deployment ground.view = some clock ∧
+        ∃ observed : ResourceTargetAdmission.Observed deployment ground.directory .object room
+          (roomRoot ground.directory room),
+        ∃ law, lawOf ground room = some law ∧
           Minidregg.Pred.eval law
-            (viewOf clock.clock (placeRequest pins authority.snapshot.authState (roomRoot directory.directory room)
+            (viewOf clock.clock (placeRequest pins ground.authority.authState (roomRoot ground.directory room)
               height descriptor room) observed)
-            (viewOf clock.clock (placeRequest pins authority.snapshot.authState (roomRoot directory.directory room)
+            (viewOf clock.clock (placeRequest pins ground.authority.authState (roomRoot ground.directory room)
               height descriptor room) observed) = true := by
   have passed := admitted item member
   cases placed : item.placement with
   | none => simp [checkItem, inRoom, placed] at passed
   | some placement =>
-      have step : checkRoom pins directory authority height descriptor room placement = .ok () := by
+      have step : checkRoom pins ground height descriptor room placement = .ok () := by
         by_cases owner : item.owner = descriptor.creator
         · simpa [checkItem, inRoom, placed, owner] using passed
         · simp [checkItem, inRoom, placed, owner] at passed
-      cases loaded : Kernel.ClockCellDomain.load deployment durable.snapshot with
+      cases loaded : Kernel.ClockCellDomain.load deployment ground.view with
       | none => simp [checkRoom, loaded] at step
       | some clock =>
           simp only [checkRoom, loaded] at step
@@ -388,10 +381,9 @@ theorem birth_under_room_requires_grant {pins : FactoryPins}
 owned by its creator, so its grants are held by the subject whose placing
 capability they descend from. -/
 theorem room_birth_owner_is_creator {pins : FactoryPins}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {ground : Ground deployment}
     {height : Height} {descriptor : Descriptor Registry}
-    (admitted : Admitted pins directory authority height descriptor)
+    (admitted : Admitted pins ground height descriptor)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) : item.owner = descriptor.creator := by
   have passed := admitted item member
@@ -404,10 +396,9 @@ theorem room_birth_owner_is_creator {pins : FactoryPins}
 
 /-- A root birth names no placing capability. -/
 theorem root_birth_names_no_placement {pins : FactoryPins}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {ground : Ground deployment}
     {height : Height} {descriptor : Descriptor Registry}
-    (admitted : Admitted pins directory authority height descriptor)
+    (admitted : Admitted pins ground height descriptor)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     (root : item.parent = none) : item.placement = none := by
   have passed := admitted item member

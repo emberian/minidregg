@@ -58,6 +58,7 @@ open Minidregg.Theory.CanonicalResourceKernel
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
+open Minidregg.Compiler.ServedBasis (Ground)
 
 set_option autoImplicit false
 
@@ -65,22 +66,22 @@ variable {F : Type} [Field F] {profile : PolicyCompilerProfile F}
 
 /-- The actual receiving preparation carries support from its loaded Book. -/
 theorem PreparedBirth.book_accountSupported {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) :
     (logicalBook prepared.book.payload.logical).AccountSupported :=
   CanonicalCellRegistry.book_accountSupported _ _ _ prepared.book.law
 
 /-- The actual source-derived birth patch preserves support, with no premise
 about hidden balances supplied by the caller. -/
 theorem PreparedBirth.post_book_accountSupported {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) :
     (logicalBook prepared.resources.post.logical).AccountSupported :=
   prepared.resources.accountSupported prepared.book_accountSupported
 
 theorem PreparedBirth.registration_accounts_only {deployment : Deployment} {pins : FactoryPins}
-    {durable : Durable} {descriptor : Descriptor Registry}
-    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    {ground : Ground deployment} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins ground descriptor) :
     RegistrationsAdmitted (logicalBook prepared.book.payload.logical)
         descriptor.resourceBatch.registrations ↔
       RegistrationsFresh (logicalBook prepared.book.payload.logical).accounts

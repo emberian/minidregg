@@ -38,6 +38,7 @@ open Minidregg.Theory.AuthorizationDeclaration
 open Minidregg.Kernel
 open Minidregg.Kernel.MultiCellHyperedge
 open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Compiler.ServedBasis (Ground)
 
 set_option autoImplicit false
 set_option maxHeartbeats 1000000
@@ -65,14 +66,14 @@ This is an exact header inequality, independent of any hash injectivity. -/
 theorem composite_header_differs_from_bare {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F}
     {deployment : Deployment} {pins : ResourceBirth.FactoryPins}
-    {durable : Durable} {tariff : Tariff} {source : Source}
+    {ground : Ground deployment} {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (key : Minidregg.Theory.CredentialSigningKey.KeyRecord)
     (request : SomeRequest) (validUntil validUntil' : Nat) :
-    CredentialSignatureAdmission.header birth.prepared.pre.authority.snapshot key
+    CredentialSignatureAdmission.header ground.authority key
       (useMarker profile deployment tariff source) request validUntil ≠
-    CredentialSignatureAdmission.header birth.prepared.pre.authority.snapshot key
+    CredentialSignatureAdmission.header ground.authority key
       source.birth.authorityNullifier request validUntil' := by
   intro same
   have markerEqual := congrArg CredentialSignedEnvelopeController.SignedHeader.nullifier same
@@ -139,12 +140,12 @@ def branchPrimary {tariff : Tariff} {source : Source} :
 
 def branchRequest {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (height : Height) : Branch tariff source → PackedEffectRequest
   | .inl (.source index) => ⟨.account, CanonicalResourceEffect.batchSourceRequest
@@ -161,12 +162,12 @@ def branchRequest {F : Type} [Field F]
 
 def branchIdentity {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (height : Height) (branch : Branch tariff source) :
     AuthorizationDeclaration.RequestWire :=
@@ -178,12 +179,12 @@ observed grain target states and the source-derived command. No newborn
 authority or unrelated Book balance is projected into another law. -/
 def project {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (height : Height) (branch : Branch tariff source)
     (logical : (incidence : GrainResourceBirthTransaction.Incidence tariff source) →
@@ -191,7 +192,7 @@ def project {F : Type} [Field F]
     Minidregg.Pred.State :=
   let wanted := branchRequest birth grain height branch
   let common := WorldKindLawDependencies.targetSelectorSlots
-    birth.prepared.pre.directory.directory wanted.2.target.value ++
+    ground.directory wanted.2.target.value ++
     CanonicalRuntimeProfile.requestSlots wanted.2
   match branch with
   | .inl birthBranch =>
@@ -271,15 +272,16 @@ theorem grainTariffOf_pin {record : PlatformCellLayout.Platform} {tariff : Tarif
 
 /-- The grain-birth tariff the image `durable` prices grain births by: its platform record's.
 Hosts read it here, never from the config's genesis pin. -/
-def grainTariffAt (deployment : Deployment) (durable : Durable) : Option Tariff :=
-  (ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable).bind grainTariffOf
+def grainTariffAt (deployment : Deployment) (snapshot : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) :
+    Option Tariff :=
+  (ResourceBirthPolicyController.Concrete.platformRecordAt deployment snapshot).bind grainTariffOf
 
-theorem grainTariffAt_record {deployment : Deployment} {durable : Durable} {tariff : Tariff}
-    (priced : grainTariffAt deployment durable = some tariff) :
-    ∃ record, ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+theorem grainTariffAt_record {deployment : Deployment} {snapshot : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes}
+    {tariff : Tariff} (priced : grainTariffAt deployment snapshot = some tariff) :
+    ∃ record, ResourceBirthPolicyController.Concrete.platformRecordAt deployment snapshot =
         some record ∧ record.grainBirth = some ⟨tariff.base, tariff.perBirth⟩ := by
   unfold grainTariffAt at priced
-  cases recorded : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  cases recorded : ResourceBirthPolicyController.Concrete.platformRecordAt deployment snapshot with
   | none => rw [recorded] at priced; cases priced
   | some record =>
       rw [recorded] at priced
@@ -289,21 +291,21 @@ theorem grainTariffAt_record {deployment : Deployment} {durable : Durable} {tari
 policy step, native request and final intent must consume this exact value. -/
 structure Pending {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (pins : ResourceBirth.FactoryPins) (durable : Durable)
+    (pins : ResourceBirth.FactoryPins) (ground : Ground deployment)
     (ambient : Ambient) (tariff : Tariff) (source : Source)
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)) where
   private mk ::
   tuple : PreparedTuple (GrainResourceBirthTransaction.plan birth grain ambient.height)
   physical : GrainResourceBirthTransaction.PhysicalShape birth grain
   checked : ResourceBirthPolicyController.Checked pins CanonicalCellRegistry.sourceEncoding
-    birth.prepared.pre.authority.snapshot.authState source.birth
+    ground.authority.authState source.birth
   /-- The platform record of the image the birth is prepared against. -/
   record : PlatformCellLayout.Platform
-  recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+  recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment ground.view =
     some record
   /-- The factory pins carry the record's creation tariff. -/
   priced : pins.tariff = record.creation
@@ -311,9 +313,9 @@ structure Pending {F : Type} [Field F]
   grainPriced : record.grainBirth = some ⟨tariff.base, tariff.perBirth⟩
   templateBound : ResourceBirthPolicyController.Concrete.TemplateBound
     (ResourceBirthPolicyController.Concrete.templateAt profile.template record)
-    birth.prepared.pre.authority.snapshot.authState ambient.height source.birth
+    ground.authority.authState ambient.height source.birth
   bornLineage : ResourceBirthPolicyController.Concrete.BornLineage
-    (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
+    (ResourceBirthPolicyController.Concrete.placementLineage ground.authority.cell)
     source.birth
   requestsDistinct : Function.Injective (branchIdentity birth grain ambient.height)
   /-- The platform cell, read as the birth's price, is not written by the composite patch,
@@ -323,14 +325,14 @@ structure Pending {F : Type} [Field F]
 
 def preparePending {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (pins : ResourceBirth.FactoryPins) (durable : Durable)
+    (pins : ResourceBirth.FactoryPins) (ground : Ground deployment)
     (ambient : Ambient) (tariff : Tariff) (source : Source)
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)) :
-    Except Reject (Pending profile deployment pins durable ambient tariff source birth grain) := do
+    Except Reject (Pending profile deployment pins ground ambient tariff source birth grain) := do
   let tuple ← match GrainResourceBirthTransaction.prepareTuple birth grain with
     | none => .error .tuple
     | some tuple => .ok tuple
@@ -339,9 +341,9 @@ def preparePending {F : Type} [Field F]
       Except.ok (PLift.up shape) else Except.error .physical :
         Except Reject (PLift (GrainResourceBirthTransaction.PhysicalShape birth grain)))
   let checked ← (ResourceBirthPolicyController.check pins
-    CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
+    CanonicalCellRegistry.sourceEncoding ground.authority.authState
     source.birth).mapError Reject.metadata
-  match recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  match recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment ground.view with
   | none => .error (.metadata .platformUnavailable)
   | some record =>
     let priced ← (ResourceBirthPolicyController.require (pins.tariff = record.creation)
@@ -351,11 +353,11 @@ def preparePending {F : Type} [Field F]
         Reject.metadata
     let templateBound ← (ResourceBirthPolicyController.Concrete.checkTemplateAt
         (ResourceBirthPolicyController.Concrete.templateAt profile.template record)
-        birth.prepared.pre.authority.snapshot.authState ambient.height source.birth).mapError
+        ground.authority.authState ambient.height source.birth).mapError
       Reject.metadata
     let bornLineage ← (ResourceBirthPolicyController.require
       (ResourceBirthPolicyController.Concrete.BornLineage
-        (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
+        (ResourceBirthPolicyController.Concrete.placementLineage ground.authority.cell)
         source.birth) .roomLineage).mapError Reject.metadata
     if distinct : Function.Injective (branchIdentity birth grain ambient.height) then
       if platformUnwritten : PlatformCellDomain.cellIdOf deployment ∉
@@ -370,28 +372,28 @@ validated patch, physical guard and joint source exactly the same. The native
 composite tuple retained in `pending.tuple` remains factory-primary. -/
 def Pending.branchTuple {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source) :
     PreparedTuple (GrainResourceBirthTransaction.plan birth grain ambient.height) :=
   { pending.tuple with primary := branchPrimary branch }
 
 def Pending.branchStep {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source) : CanonicalPolicyAdmission.PolicyStepContext :=
   CanonicalPolicyAdmission.PolicyStepContext.ofPreparedTuple
     (fun _ logical => project birth grain ambient.height branch logical)
@@ -399,14 +401,14 @@ def Pending.branchStep {F : Type} [Field F]
 
 theorem Pending.branchStep_states {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source) :
     (pending.branchStep branch).oldState =
       project birth grain ambient.height branch pending.tuple.logicalPre ∧
@@ -416,52 +418,52 @@ theorem Pending.branchStep_states {F : Type} [Field F]
 
 def Pending.branchDependencies {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source) :
     Option WorldKindLawDependencies.Dependencies :=
-  WorldKindLawDependencies.loadTarget deployment birth.prepared.pre.directory.directory
+  WorldKindLawDependencies.loadTarget deployment ground.directory
     (branchRequest birth grain ambient.height branch).2.target.value
 
 def Pending.branchConfig {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source) : ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile birth.prepared.pre.authority.snapshot
-    birth.prepared.pre.directory.directory
-    (CredentialAuthorityPolicyRegistry.sourcePortal birth.prepared.pre.authority.snapshot
+  PhysicalLawResolution.config profile.compilerProfile ground.authority
+    ground.directory
+    (CredentialAuthorityPolicyRegistry.sourcePortal ground.authority
       (useMarker profile deployment tariff source))
     (pending.branchStep branch) (branchRequest birth grain ambient.height branch).2.target.value
     (((pending.branchDependencies branch).map WorldKindLawDependencies.Dependencies.additional).getD [])
 
 def Pending.branchLawGuards {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source) :
     Option (List (Nat × Digest)) := do
   let dependencies ← pending.branchDependencies branch
-  let guards ← PhysicalLawResolution.readGuards birth.prepared.pre.authority.snapshot
-    birth.prepared.pre.directory.directory profile.semantics
+  let guards ← PhysicalLawResolution.readGuards ground.authority
+    ground.directory profile.semantics
     (branchRequest birth grain ambient.height branch).2.target.value dependencies.additional
   pure (guards ++ dependencies.readGuards).eraseDups
 
@@ -470,17 +472,17 @@ compiled witness can be accepted. This includes the composite factory mode,
 the two grain actions and their source-bound nonce. -/
 def Pending.portal {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain) : Portal :=
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain) : Portal :=
   let base := CredentialAuthorityPolicyRegistry.domainPortal
-    birth.prepared.pre.authority.snapshot
-    (CredentialAuthorityPolicyRegistry.sourcePortal birth.prepared.pre.authority.snapshot
+    ground.authority
+    (CredentialAuthorityPolicyRegistry.sourcePortal ground.authority
       (useMarker profile deployment tariff source))
   { base with
     PolicyWitness := Branch tariff source × ComposedPolicyAdmission.Witness F
@@ -493,14 +495,14 @@ def Pending.portal {F : Type} [Field F] [DecidableEq F]
 
 theorem Pending.dispatched_request_exact {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     {kind : ResourceKind} (request : Request kind) (address : Digest)
     (witness : pending.portal.PolicyWitness)
     (accepted : pending.portal.verifyCommittedPolicy address request witness = true) :
@@ -517,19 +519,19 @@ theorem Pending.dispatched_request_exact {F : Type} [Field F] [DecidableEq F]
 
 def Pending.liftEvidence {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source)
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence (pending.branchConfig branch).portal
-      birth.prepared.pre.authority.snapshot.authState request) :
-    Evidence pending.portal birth.prepared.pre.authority.snapshot.authState request := by
+      ground.authority.authState request) :
+    Evidence pending.portal ground.authority.authState request := by
   unfold Pending.portal Pending.branchConfig PhysicalLawResolution.config
     ComposedPolicyAdmission.Config.portal at *
   cases evidence with
@@ -544,19 +546,19 @@ def Pending.liftEvidence {F : Type} [Field F] [DecidableEq F]
 
 def Pending.liftAuthorization {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source)
     (authorized : Authorized (pending.branchConfig branch).portal
-      birth.prepared.pre.authority.snapshot.authState
+      ground.authority.authState
       (branchRequest birth grain ambient.height branch).2) :
-    Authorized pending.portal birth.prepared.pre.authority.snapshot.authState
+    Authorized pending.portal ground.authority.authState
       (branchRequest birth grain ambient.height branch).2 where
   evidence := pending.liftEvidence branch authorized.evidence
   policyWitness := (branch, authorized.policyWitness)
@@ -583,21 +585,21 @@ def requiresCapability {tariff : Tariff} {source : Source} :
 receipt and typed authorization; the final union intent must include it. -/
 structure CheckedBranch {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source)
     (credential : ResourceBirthPolicyController.Concrete.BranchCredential) where
-  receipt : CredentialSignatureAdmission.CheckedSignature birth.prepared.pre.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = credential.envelope
   policySource : CanonicalCellRegistry.LoadedPolicySource deployment.domain
-    birth.prepared.pre.directory.directory
-    (birth.prepared.pre.authority.snapshot.authState.policyAddress
+    ground.directory
+    (ground.authority.authState.policyAddress
       (branchRequest birth grain ambient.height branch).2.policyId
       (branchRequest birth grain ambient.height branch).2.policyRevision)
   dependencies : WorldKindLawDependencies.Dependencies
@@ -605,33 +607,33 @@ structure CheckedBranch {F : Type} [Field F] [DecidableEq F]
   lawGuards : List (Nat × Digest)
   lawGuardsExact : pending.branchLawGuards branch = some lawGuards
   lawGuardsBound : lawGuards.all (fun guard =>
-    decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true
-  authorization : Authorized pending.portal birth.prepared.pre.authority.snapshot.authState
+    decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true
+  authorization : Authorized pending.portal ground.authority.authState
     (branchRequest birth grain ambient.height branch).2
   modeBound : requiresCapability branch = true →
     authorization.evidence.capabilityValue.isSome = true
 
 def Pending.admitBranch {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source)
     (credential : ResourceBirthPolicyController.Concrete.BranchCredential)
-    (receipt : CredentialSignatureAdmission.CheckedSignature birth.prepared.pre.authority.snapshot) :
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority) :
     Except Reject (CheckedBranch pending branch credential) := do
   if exactEnvelope : receipt.envelopeBytes = credential.envelope then
     let wanted := branchRequest birth grain ambient.height branch
     let step := pending.branchStep branch
     let config := pending.branchConfig branch
-    let old := birth.prepared.pre.authority.snapshot.authState
+    let old := ground.authority.authState
     let policySource ← match CanonicalCellRegistry.loadPolicySource deployment.domain
-        birth.prepared.pre.directory.directory
+        ground.directory
         (old.policyAddress wanted.2.policyId wanted.2.policyRevision) with
       | none => .error .policySourceUnavailable
       | some loaded => .ok loaded
@@ -644,7 +646,7 @@ def Pending.admitBranch {F : Type} [Field F] [DecidableEq F]
       | some guards => .ok (show { guards // pending.branchLawGuards branch = some guards }
           from ⟨guards, exact⟩)
     let guardsBound ← (if bound : guardsChecked.val.all (fun guard =>
-        decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true then
+        decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true then
       Except.ok (PLift.up bound) else Except.error .policySourceConflict)
     let evidence : Evidence config.portal old wanted.2 ←
       if requiresCapability branch then
@@ -693,14 +695,14 @@ evaluates true on `pending.branchStep branch` (whose new state, for a birth bran
 names every newborn). -/
 theorem CheckedBranch.law_admits_step {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {pending : Pending profile deployment pins ground ambient tariff source birth grain}
     {branch : Branch tariff source}
     {credential : ResourceBirthPolicyController.Concrete.BranchCredential}
     (checked : CheckedBranch pending branch credential) :
@@ -727,20 +729,20 @@ theorem CheckedBranch.law_admits_step {F : Type} [Field F] [DecidableEq F]
 
 def Pending.admitBranchNative {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    (pending : Pending profile deployment pins durable ambient tariff source birth grain)
+    (pending : Pending profile deployment pins ground ambient tariff source birth grain)
     (branch : Branch tariff source)
     (native : CredentialSignatureIO.NativeConfig)
     (credential : ResourceBirthPolicyController.Concrete.BranchCredential) :
     IO (Except Reject (CheckedBranch pending branch credential)) := do
   match ← CredentialSignatureAdmission.verifyNative native
-      birth.prepared.pre.authority.snapshot
+      ground.authority
       (useMarker profile deployment tariff source)
       (branchRequest birth grain ambient.height branch).2 credential.envelope with
   | .error reason => return .error (.nativeSignature reason)
@@ -748,26 +750,27 @@ def Pending.admitBranchNative {F : Type} [Field F] [DecidableEq F]
 
 def readContext {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source) :
+      deployment pins ground profile.semantics tariff source) :
     ResourceObservationAdmission.Context deployment :=
-  (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
+  let _ := birth
+  ground
 
 def readRequest {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) :
     Request (source.grainCommand tariff).targets[index].kind :=
   let command := source.grainCommand tariff
-  { DeclaredResourceController.requestFor birth.prepared.pre.authority.snapshot
+  { DeclaredResourceController.requestFor ground.authority
       profile.semantics ambient command command.targets[index]
       (grain.targets index).before.payload.root with
     verb := DeclaredResourceController.observeVerb command.targets[index].kind
@@ -775,17 +778,17 @@ def readRequest {F : Type} [Field F]
       "DREGG.RESOURCE.TRANSACTION.OBSERVE/v8".toUTF8.toList
       ((Tower256ConcreteBackend.StreamCodec.product
         Tower256ConcreteBackend.bytesStream Tower256ConcreteBackend.StreamCodec.nat).encode
-        (DeclaredResourceController.commandBytes birth.prepared.pre.authority.snapshot.domain
+        (DeclaredResourceController.commandBytes ground.authority.domain
           profile.semantics command, command.targets[index].target))).digest }
 
 def readPreparation {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) :=
   ResourceObservationAdmission.prepare (readContext birth) profile
@@ -795,12 +798,12 @@ def readPreparation {F : Type} [Field F] [DecidableEq F]
 
 structure ReadLeg {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff))
     (envelope : List UInt8) where
@@ -813,16 +816,16 @@ structure ReadLeg {F : Type} [Field F] [DecidableEq F]
   lawGuards : List (Nat × Digest)
   lawGuardsExact : ResourceObservationAdmission.lawReadGuards selected = some lawGuards
   lawGuardsBound : lawGuards.all (fun guard =>
-    decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true
+    decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true
 
 def verifyRead {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff))
     (native : CredentialSignatureIO.NativeConfig) (envelope : List UInt8) :
@@ -838,7 +841,7 @@ def verifyRead {F : Type} [Field F] [DecidableEq F]
             | none => return .error .policySourceUnavailable
             | some guards =>
                 if bound : guards.all (fun guard =>
-                    decide (guard.2 = durable.snapshot.model.roots ⟨guard.1⟩)) = true then
+                    decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true then
                   return .ok ⟨present, ready, checked, guards, guardsExact, bound⟩
                 else return .error .policySourceConflict
   else return .error .capability
@@ -857,14 +860,14 @@ theorem mem_branches {tariff : Tariff} {source : Source}
 
 def policyDependencyPairs {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {pending : Pending profile deployment pins ground ambient tariff source birth grain}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
     (signed : SignedShape profile deployment tariff source ingress)
     (checked : (branch : Branch tariff source) →
@@ -878,14 +881,14 @@ def policyDependencyPairs {F : Type} [Field F] [DecidableEq F]
 
 def policySourceGuards {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {pending : Pending profile deployment pins ground ambient tariff source birth grain}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
     (signed : SignedShape profile deployment tariff source ingress)
     (checked : (branch : Branch tariff source) →
@@ -899,14 +902,14 @@ def policySourceGuards {F : Type} [Field F] [DecidableEq F]
 
 theorem policyDependency_covered {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {pending : Pending profile deployment pins ground ambient tariff source birth grain}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
     (signed : SignedShape profile deployment tariff source ingress)
     (checked : (branch : Branch tariff source) →
@@ -927,14 +930,14 @@ theorem policyDependency_covered {F : Type} [Field F] [DecidableEq F]
 
 def PolicyGuardShape {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {pending : Pending profile deployment pins ground ambient tariff source birth grain}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
     (signed : SignedShape profile deployment tariff source ingress)
     (checked : (branch : Branch tariff source) →
@@ -944,18 +947,18 @@ def PolicyGuardShape {F : Type} [Field F] [DecidableEq F]
   (∀ guard ∈ policySourceGuards signed checked observations,
     guard.cellId ∉ (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId) ∧
   (∀ guard ∈ policySourceGuards signed checked observations,
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    guard.expectedRoot = ground.view.model.roots guard.cellId)
 
 instance policyGuardShapeDecidable {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
-    {pending : Pending profile deployment pins durable ambient tariff source birth grain}
+    {pending : Pending profile deployment pins ground ambient tariff source birth grain}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
     (signed : SignedShape profile deployment tariff source ingress)
     (checked : (branch : Branch tariff source) →
@@ -970,17 +973,17 @@ instance policyGuardShapeDecidable {F : Type} [Field F] [DecidableEq F]
 before a caller can obtain this private-constructor value. -/
 structure Accepted {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (pins : ResourceBirth.FactoryPins) (durable : Durable)
+    (pins : ResourceBirth.FactoryPins) (ground : Ground deployment)
     (ambient : Ambient) (tariff : Tariff) (source : Source)
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (ingress : GrainResourceBirthPolicyController.DecodedIngress) where
   private mk ::
   signed : SignedShape profile deployment tariff source ingress
-  pending : Pending profile deployment pins durable ambient tariff source birth grain
+  pending : Pending profile deployment pins ground ambient tariff source birth grain
   observations : (index : DeclaredResourceController.TargetIndex (source.grainCommand tariff)) →
     ReadLeg birth grain index (observationEnvelope signed index)
   checked : (branch : Branch tariff source) →
@@ -992,18 +995,18 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
 
 def admitDecodedNative {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
-    (pins : ResourceBirth.FactoryPins) (durable : Durable)
+    (pins : ResourceBirth.FactoryPins) (ground : Ground deployment)
     (ambient : Ambient) (tariff : Tariff) (source : Source)
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
+      deployment pins ground profile.semantics tariff source)
     (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff))
     (native : CredentialSignatureIO.NativeConfig)
     (ingress : GrainResourceBirthPolicyController.DecodedIngress) :
-    IO (Except Reject (Accepted profile deployment pins durable ambient tariff source birth grain ingress)) := do
+    IO (Except Reject (Accepted profile deployment pins ground ambient tariff source birth grain ingress)) := do
   if signed : SignedShape profile deployment tariff source ingress then
-    match preparePending profile deployment pins durable ambient tariff source birth grain with
+    match preparePending profile deployment pins ground ambient tariff source birth grain with
     | .error reason => return .error reason
     | .ok pending =>
         let observationResults ← DeclaredResourceController.collectIO
@@ -1056,29 +1059,29 @@ def admitDecodedNative {F : Type} [Field F] [DecidableEq F]
 
 def Accepted.portals {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :
     GrainResourceBirthTransaction.Incidence tariff source → Portal :=
   fun _ => accepted.pending.portal
 
 def Accepted.admissionEvidence {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :
     accepted.pending.tuple.AdmissionEvidence accepted.portals where
   modes incidence := by
     cases incidence with
@@ -1096,7 +1099,7 @@ def Accepted.admissionEvidence {F : Type} [Field F] [DecidableEq F]
         | authority => exact ()
         | allocation index =>
             exact (ResourceBirthController.allocationCandidate pins
-              CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
+              CanonicalCellRegistry.sourceEncoding ground.authority.authState
               birth.prepared.post.allocated
               (ResourceBirthPolicyController.Concrete.creation source.birth index)
               (List.get_mem _ _) ambient.height).modeEvidence
@@ -1121,15 +1124,15 @@ def Accepted.admissionEvidence {F : Type} [Field F] [DecidableEq F]
 
 def Accepted.apex {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (_accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    (_accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :
     Digest :=
   CanonicalCellRegistry.sourceEncoding.hashBytes
     ("DREGG/GRAIN-RESOURCE-BIRTH/APEX/v1".toUTF8.toList ++
@@ -1137,42 +1140,42 @@ def Accepted.apex {F : Type} [Field F] [DecidableEq F]
 
 def Accepted.declaration {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :=
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :=
   accepted.pending.tuple.toDeclaration accepted.portals accepted.apex
 
 def Accepted.legs {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :
     accepted.declaration.AcceptedLegs :=
   accepted.pending.tuple.accept accepted.portals accepted.apex accepted.admissionEvidence
 
 theorem Accepted.post_exact {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress)
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress)
     (incidence : GrainResourceBirthTransaction.Incidence tariff source) :
     accepted.declaration.post accepted.legs incidence =
       (GrainResourceBirthTransaction.validated birth grain ambient.height incidence).apply :=
@@ -1181,39 +1184,39 @@ theorem Accepted.post_exact {F : Type} [Field F] [DecidableEq F]
 
 /-- The platform cell at the image's root: the price a grain birth read
 (`Pending.recordExact`). A concurrent install changes that root and makes the birth stale. -/
-def platformGuard (deployment : Deployment) (durable : Durable) : ReadGuard :=
+def platformGuard (deployment : Deployment) (ground : Ground deployment) : ReadGuard :=
   { cellId := PlatformCellDomain.cellIdOf deployment
-    expectedRoot := durable.snapshot.model.roots (PlatformCellDomain.cellIdOf deployment) }
+    expectedRoot := ground.view.model.roots (PlatformCellDomain.cellIdOf deployment) }
 
 /-- The CAS observes every physical source, every admitted policy source and the platform
 cell. Read-only source cells may overlap each other, but none may overlap a write. -/
 def Accepted.readGuards {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :
     List ReadGuard :=
   GrainResourceBirthTransaction.readGuards birth grain ++
     policySourceGuards accepted.signed accepted.checked accepted.observations ++
-    [platformGuard deployment durable]
+    [platformGuard deployment ground]
 
 theorem Accepted.readGuards_readonly {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress)
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress)
     (guard : ReadGuard) (member : guard ∈ accepted.readGuards) :
     guard.cellId ∉ (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId := by
   rcases List.mem_append.mp member with sources | platform
@@ -1226,17 +1229,17 @@ theorem Accepted.readGuards_readonly {F : Type} [Field F] [DecidableEq F]
 
 theorem Accepted.readGuards_exact {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress)
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress)
     (guard : ReadGuard) (member : guard ∈ accepted.readGuards) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   rcases List.mem_append.mp member with sources | platform
   · rcases List.mem_append.mp sources with physical | policy
     · exact accepted.pending.physical.2.2.2.2 guard physical
@@ -1250,18 +1253,18 @@ theorem Accepted.readGuards_exact {F : Type} [Field F] [DecidableEq F]
 of the CAS guards, so an install between preparation and commit makes the birth stale. -/
 theorem Accepted.platformGuarded {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
-    ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :
+    ResourceBirthPolicyController.Concrete.platformRecordAt deployment ground.view =
         some accepted.pending.record ∧
-      platformGuard deployment durable ∈ accepted.readGuards :=
+      platformGuard deployment ground ∈ accepted.readGuards :=
   ⟨accepted.pending.recordExact, List.mem_append_right _ (List.mem_singleton_self _)⟩
 
 /-- **Neutral births named, grain-backed.**  Every birth write of the composite patch
@@ -1269,15 +1272,15 @@ the grain birth commits is named by the factory branch's step, and the factory's
 committed law accepts that very step. -/
 theorem Accepted.births_named {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :
     (∀ write ∈ GrainResourceBirthTransaction.writes birth grain,
         ResourceBirthController.Concrete.bornIn write = true →
         ReceivingLaw.namesBirth (accepted.pending.branchStep (.inl .factory)) write = true) ∧
@@ -1307,26 +1310,26 @@ factory template under that record over the loaded authority at `ambient`'s heig
 by the admitted factory step. -/
 theorem Accepted.indexed {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
     {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source}
+      deployment pins ground profile.semantics tariff source}
     {grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      ground.directory ground.authority
       profile.semantics ambient (source.grainCommand tariff)}
     {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress) :
     SignedShape profile deployment tariff source ingress ∧
       GrainResourceBirthTransaction.PhysicalShape birth grain ∧
       (∀ guard ∈ accepted.readGuards,
-        guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
-      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+        guard.expectedRoot = ground.view.model.roots guard.cellId) ∧
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment ground.view =
         some accepted.pending.record ∧
       pins.tariff = accepted.pending.record.creation ∧
       accepted.pending.record.grainBirth = some ⟨tariff.base, tariff.perBirth⟩ ∧
       ResourceBirthPolicyController.Concrete.TemplateBound
         (ResourceBirthPolicyController.Concrete.templateAt profile.template accepted.pending.record)
-        birth.prepared.pre.authority.snapshot.authState ambient.height source.birth ∧
+        ground.authority.authState ambient.height source.birth ∧
       ResourceBirthController.Concrete.Named (accepted.pending.branchStep (.inl .factory))
         (GrainResourceBirthTransaction.writes birth grain) :=
   ⟨accepted.signed, accepted.pending.physical, accepted.readGuards_exact,

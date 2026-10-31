@@ -103,10 +103,10 @@ def bornRoot : Nat := (ResourceBirthController.birthWrite born.item.create).exac
 /-- A pending birth with everything it is indexed by. -/
 abbrev PendingAt :=
   (config : NativeHost.Config) × (pins : FactoryPins) ×
-    (durable : ResourceBirthController.Concrete.Durable) ×
+    (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment) ×
     (descriptor : Descriptor ResourceBirthController.Concrete.Registry) × (height : Height) ×
     (prepared : ResourceBirthController.Concrete.PreparedBirth config.profile.compilerProfile
-      config.deployment pins durable descriptor) ×
+      config.deployment pins ground descriptor) ×
     ResourceBirthPolicyController.Concrete.Pending (profile := config.profile) prepared height
 
 /-- The real plan path for the one-birth descriptor on the genesis whose factory law is
@@ -119,15 +119,14 @@ def pendingOf (factory : Minidregg.Pred.Pred) : Option PendingAt :=
       ⟨7⟩ 71 7 [born]
     let height := NativeHost.logicalHeight config o.durable
     match ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
-        config.profile.disabledEvaluators config.deployment o.pins o.durable
-        (ResourceBirthController.Concrete.Held.of o.directory o.authority) descriptor height with
+        config.profile.disabledEvaluators config.deployment o.pins (.ofLoaded o.durable o.directory o.authority) descriptor height with
     | .error _ => none
     | .ok prepared =>
       match ResourceBirthPolicyController.Concrete.preparePending (profile := config.profile)
           prepared.prepared height with
       | .error _ => none
       | .ok pending =>
-        some ⟨config, o.pins, o.durable, prepared.descriptor, height, prepared.prepared, pending⟩
+        some ⟨config, o.pins, .ofLoaded o.durable o.directory o.authority, prepared.descriptor, height, prepared.prepared, pending⟩
 
 /-- The law that names the newborn's exact post root. -/
 def passLaw : Minidregg.Pred.Pred := .eq (ReceivingLaw.birthSlot 7001) (Int.ofNat bornRoot)
@@ -146,15 +145,15 @@ theorem refuse_verdict : verdictIs false (pendingOf refuseLaw) = true := by nati
 theorem inhabited_of_verdict {expected : Bool} :
     ∀ found : Option PendingAt, verdictIs expected found = true →
       ∃ (config : NativeHost.Config) (pins : FactoryPins)
-        (durable : ResourceBirthController.Concrete.Durable)
+        (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment)
         (descriptor : Descriptor ResourceBirthController.Concrete.Registry) (height : Height)
         (prepared : ResourceBirthController.Concrete.PreparedBirth config.profile.compilerProfile
-          config.deployment pins durable descriptor)
+          config.deployment pins ground descriptor)
         (pending : ResourceBirthPolicyController.Concrete.Pending (profile := config.profile)
           prepared height),
         pending.factoryVerdict = some expected
-  | some ⟨config, pins, durable, descriptor, height, prepared, pending⟩, holds =>
-      ⟨config, pins, durable, descriptor, height, prepared, pending, by
+  | some ⟨config, pins, ground, descriptor, height, prepared, pending⟩, holds =>
+      ⟨config, pins, ground, descriptor, height, prepared, pending, by
         simpa [verdictIs] using holds⟩
   | none, holds => by simp [verdictIs] at holds
 
@@ -162,10 +161,10 @@ theorem inhabited_of_verdict {expected : Bool} :
 whose factory verdict is `some true`: `PlanPassNotLawRefused` is not vacuous. -/
 theorem plan_passes_inhabited :
     ∃ (config : NativeHost.Config) (pins : FactoryPins)
-      (durable : ResourceBirthController.Concrete.Durable)
+      (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment)
       (descriptor : Descriptor ResourceBirthController.Concrete.Registry) (height : Height)
       (prepared : ResourceBirthController.Concrete.PreparedBirth config.profile.compilerProfile
-        config.deployment pins durable descriptor)
+        config.deployment pins ground descriptor)
       (pending : ResourceBirthPolicyController.Concrete.Pending (profile := config.profile)
         prepared height),
       pending.factoryVerdict = some true :=
@@ -175,10 +174,10 @@ theorem plan_passes_inhabited :
 verdict `some false`, so `PlanRefusalSound` and `LawRefusalDisclosed` are not vacuous. -/
 theorem plan_refuses_inhabited :
     ∃ (config : NativeHost.Config) (pins : FactoryPins)
-      (durable : ResourceBirthController.Concrete.Durable)
+      (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment)
       (descriptor : Descriptor ResourceBirthController.Concrete.Registry) (height : Height)
       (prepared : ResourceBirthController.Concrete.PreparedBirth config.profile.compilerProfile
-        config.deployment pins durable descriptor)
+        config.deployment pins ground descriptor)
       (pending : ResourceBirthPolicyController.Concrete.Pending (profile := config.profile)
         prepared height),
       pending.factoryVerdict = some false :=

@@ -123,7 +123,7 @@ record the genesis terms stand in and every pay plan refuses `platformUnavailabl
 (`PayEnrolReceiver.AmbientCurrent`), so the stand-in prices nothing. -/
 def _root_.Minidregg.Kernel.NativeHost.payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
   ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff,
-    match ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment opened.durable with
+    match ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment opened.durable.snapshot with
     | some record => ResourceBirthPolicyController.Concrete.templateAt config.profile.template record
     | none => config.profile.template⟩
 
@@ -171,10 +171,12 @@ structure PriorIssue (config : Config) where
 theorem PriorIssue.sourceExact {config : Config} (prior : PriorIssue config) :
     (∃ (pins : Minidregg.Theory.ResourceBirth.FactoryPins)
        (original : ResourceBirthController.Concrete.Durable)
+       (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
+       (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
        (height : Minidregg.Theory.TypedAuthorization.Height)
        (ingress : ApplicationShareIssueSource.Ingress)
        (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-         pins original height ingress),
+         pins (.ofLoaded original directory authority) height ingress),
        prior.evidence.spec = ingress.spec ∧
          prior.evidence.ingressBytes = ApplicationShareIssueSource.ingressCodec.encode ingress ∧
          prior.evidence.descriptor = accepted.birth.descriptor ∧
@@ -182,10 +184,12 @@ theorem PriorIssue.sourceExact {config : Config} (prior : PriorIssue config) :
            (ApplicationShareIssueReceiver.intent accepted)) ∨
     (∃ (pins : Minidregg.Theory.ResourceBirth.FactoryPins)
        (original : ResourceBirthController.Concrete.Durable)
+       (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
+       (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
        (ambient : DeclaredResourceController.Ambient)
        (ingress : ApplicationShareIssueGrainSource.Ingress)
        (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
-         pins original ambient ingress),
+         pins (.ofLoaded original directory authority) ambient ingress),
        prior.evidence.spec = ingress.spec ∧
          prior.evidence.ingressBytes = ingress.canonicalBytes ∧
          prior.evidence.descriptor = accepted.decoded.source.birth ∧
@@ -1101,7 +1105,7 @@ structure LifetimeGrantIssueAt (config : Config) (opened : Opened config)
   present : opened.durable.image.accepted[prior.index]? = some prior.evidence.record
   scope : ingress.spec.grant.matchesIssued prior.evidence.spec prior.index prior.receipt = true
   current : ApplicationAgentLifetimeGrantAdmission.Accepted config.profile config
-    opened.pins opened.durable (logicalHeight config opened.durable) ingress
+    opened.pins opened.ground (logicalHeight config opened.durable) ingress
 theorem LifetimeGrantIssueAt.ticket_record_at {config : Config} {opened : Opened config}
     {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
     (admitted : LifetimeGrantIssueAt config opened ingress) :
@@ -1240,22 +1244,22 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground) :
       NativeAdmission config opened reserved.intent
   | birth (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
-      config.profile config.deployment opened.pins opened.durable
+      config.profile config.deployment opened.pins opened.ground
       (logicalHeight config opened.durable)) :
       NativeAdmission config opened (ResourceBirthReceiver.intent accepted)
   | grainBirth {tariff : GrainResourceBirthController.Tariff}
       {source : GrainResourceBirthController.Source}
       {birth : GrainResourceBirthController.PreparedSourceBirth config.profile.compilerProfile
-        config.deployment opened.pins opened.durable config.profile.semantics tariff source}
+        config.deployment opened.pins opened.ground config.profile.semantics tariff source}
       {grain : GrainResourceBirthTransaction.PreparedTargets config.deployment
-        birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+        opened.ground.directory opened.ground.authority
         config.profile.semantics ⟨config.federation, logicalHeight config opened.durable⟩
         (source.grainCommand tariff)}
       {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-      (pinned : GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable =
+      (pinned : GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable.snapshot =
         some tariff)
       (accepted : GrainResourceBirthAdmission.Accepted config.profile config.deployment
-        opened.pins opened.durable ⟨config.federation, logicalHeight config opened.durable⟩
+        opened.pins opened.ground ⟨config.federation, logicalHeight config opened.durable⟩
         tariff source birth grain ingress) :
       NativeAdmission config opened (GrainResourceBirthReceiver.intent accepted)
   | invoke {command : DeclaredResourceController.Command}
@@ -1379,11 +1383,11 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (accepted.intent config opened ingress)
   | applicationShareIssue {ingress : ApplicationShareIssueSource.Ingress}
       (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-        opened.pins opened.durable (logicalHeight config opened.durable) ingress) :
+        opened.pins opened.ground (logicalHeight config opened.durable) ingress) :
       NativeAdmission config opened (ApplicationShareIssueReceiver.intent accepted)
   | applicationGrainShareIssue {ingress : ApplicationShareIssueGrainSource.Ingress}
       (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
-        opened.pins opened.durable
+        opened.pins opened.ground
         ⟨config.federation, logicalHeight config opened.durable⟩ ingress) :
       NativeAdmission config opened (ApplicationShareIssueGrainReceiver.intent accepted)
   | applicationSessionEnrollment
@@ -1518,11 +1522,11 @@ inductive IssueAdmission (config : Config) (opened : Opened config)
     (intent : DataIntent rootBytes) : Type where
   | legacy (ingress : ApplicationShareIssueSource.Ingress)
       (accepted : ApplicationShareIssueAdmission.Accepted config.profile config opened.pins
-        opened.durable (logicalHeight config opened.durable) ingress)
+        opened.ground (logicalHeight config opened.durable) ingress)
       (intentExact : intent = ApplicationShareIssueReceiver.intent accepted)
   | grain (ingress : ApplicationShareIssueGrainSource.Ingress)
       (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config opened.pins
-        opened.durable ⟨config.federation, logicalHeight config opened.durable⟩ ingress)
+        opened.ground ⟨config.federation, logicalHeight config opened.durable⟩ ingress)
       (intentExact : intent = ApplicationShareIssueGrainReceiver.intent accepted)
 
 /-- A turn of the object kernel, as admitted: the kernel activity's or the seat
@@ -1684,7 +1688,7 @@ def Derived.ofJointReserve {config : Config} {opened : Opened config}
 The accepted value can only be made by the complete birth admission path. -/
 def Derived.ofBirth {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
-      config.profile config.deployment opened.pins opened.durable
+      config.profile config.deployment opened.pins opened.ground
       (logicalHeight config opened.durable)) : Derived config opened :=
   { intent := ResourceBirthReceiver.intent accepted
     admission := .birth accepted
@@ -1708,13 +1712,13 @@ def Derived.ofBirth {config : Config} {opened : Opened config}
 
 theorem Derived.ofBirth_intent {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
-      config.profile config.deployment opened.pins opened.durable
+      config.profile config.deployment opened.pins opened.ground
       (logicalHeight config opened.durable)) :
     (Derived.ofBirth accepted).intent = ResourceBirthReceiver.intent accepted := rfl
 
 theorem Derived.ofBirth_admission {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
-      config.profile config.deployment opened.pins opened.durable
+      config.profile config.deployment opened.pins opened.ground
       (logicalHeight config opened.durable)) :
     (Derived.ofBirth accepted).admission = NativeAdmission.birth accepted := rfl
 
@@ -2045,13 +2049,13 @@ private def admitLifetimeGrantIssueAt (config : Config) (opened : Opened config)
           if present : opened.durable.image.accepted[prior.index]? =
               some prior.evidence.record then
             match ← ApplicationAgentLifetimeGrantAdmission.admitNative config.profile
-                config opened.pins config.signature opened.durable
+                config opened.pins config.signature opened.ground
                 (logicalHeight config opened.durable) ingress.canonicalBytes with
             | .error _ => return .error "agent lifetime grant native admission refused"
             | .ok ⟨decoded, accepted⟩ =>
               if same : decoded = ingress then
                 have current : ApplicationAgentLifetimeGrantAdmission.Accepted config.profile
-                    config opened.pins opened.durable
+                    config opened.pins opened.ground
                     (logicalHeight config opened.durable) ingress := by
                   cases same
                   exact accepted
@@ -2684,7 +2688,7 @@ private def derive (config : Config) (opened : Opened config)
           .fnEmptyPollV2 accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if (ApplicationShareIssueSource.ingressCodec.decode bytes).isSome then
     match ← ApplicationShareIssueAdmission.admitNative config.profile config opened.pins
-        config.signature opened.durable height bytes with
+        config.signature opened.ground height bytes with
     | .error _ => return .error "historical application share issue admission refused"
     | .ok ⟨issueIngress, accepted⟩ =>
         return .ok ⟨ApplicationShareIssueReceiver.intent accepted,
@@ -2693,7 +2697,7 @@ private def derive (config : Config) (opened : Opened config)
   if (ApplicationShareIssueGrainSource.codec.decode bytes).isSome then
     let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
     match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config opened.pins
-        config.signature opened.durable ambient bytes with
+        config.signature opened.ground ambient bytes with
     | .error _ => return .error "historical grain-backed application share issue refused"
     | .ok ⟨issueIngress, accepted⟩ =>
         return .ok ⟨ApplicationShareIssueGrainReceiver.intent accepted,
@@ -2793,22 +2797,21 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted => return .ok ⟨accepted.intent, .applicationLifecycleBegin accepted,
         none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := GrainResourceBirthPolicyController.decodeIngress bytes then
-    match pinned : GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable with
+    match pinned : GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable.snapshot with
     | none => return .error "historical grain-backed birth tariff: the image's platform record pins none"
     | some tariff =>
         let source := ingress.source
         match GrainResourceBirthController.prepareSourceBirth config.profile.compilerProfile
-            config.profile.disabledEvaluators config.deployment opened.pins opened.durable
-            (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) config.profile.semantics tariff source height with
+            config.profile.disabledEvaluators config.deployment opened.pins opened.ground config.profile.semantics tariff source height with
         | .error reason => return .error s!"historical grain-backed birth preparation: {repr reason}"
         | .ok birth =>
             let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
             match GrainResourceBirthTransaction.prepareTargets config.profile config.deployment
-                opened.pins opened.durable ambient tariff source birth with
+                opened.pins opened.ground ambient tariff source birth with
             | .error reason => return .error s!"historical grain target preparation: {repr reason}"
             | .ok grain =>
                 match ← GrainResourceBirthAdmission.admitDecodedNative config.profile
-                    config.deployment opened.pins opened.durable ambient tariff source birth grain
+                    config.deployment opened.pins opened.ground ambient tariff source birth grain
                     config.signature ingress with
                 | .error _ => return .error "historical grain-backed birth admission refused"
                 | .ok accepted =>
@@ -2817,7 +2820,7 @@ private def derive (config : Config) (opened : Opened config)
   match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
   | some ingress =>
       match ← ResourceBirthPolicyController.Concrete.admitDecodedNative config.profile config.deployment
-          opened.pins config.signature opened.durable (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) height
+          opened.pins config.signature opened.ground height
           ingress with
       | .error reason => return .error s!"birth admission refused: {repr reason}"
       | .ok accepted => return .ok (Derived.ofBirth accepted)
@@ -2885,7 +2888,8 @@ private def issuesAfter (config : Config) (opened : Opened config)
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, receipt,
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromAccepted config opened.pins
-          opened.durable (logicalHeight config opened.durable) ingress accepted record
+          opened.durable opened.directory opened.authority (logicalHeight config opened.durable)
+          ingress accepted record
           recordExact⟩ :: issues
   | some (.grain ingress accepted intentExact) =>
       let recordExact : record = DurableReceiver.IntentRecord.ofIntent
@@ -2894,7 +2898,8 @@ private def issuesAfter (config : Config) (opened : Opened config)
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, receipt,
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromGrainAccepted config opened.pins
-          opened.durable ⟨config.federation, logicalHeight config opened.durable⟩
+          opened.durable opened.directory opened.authority
+          ⟨config.federation, logicalHeight config opened.durable⟩
           ingress accepted record recordExact⟩ :: issues
 
 /-- A compact ordinary invocation enters the reserve-eligible chronological

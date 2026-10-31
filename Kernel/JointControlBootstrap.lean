@@ -58,7 +58,7 @@ set_option backward.isDefEq.respectTransparency false in
 private def birthCheck {config : Config} {opened : Opened config}
     (pin : JointControlFrame.Pin)
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment
-      opened.pins opened.durable (logicalHeight config opened.durable)) : Bool :=
+      opened.pins opened.ground (logicalHeight config opened.durable)) : Bool :=
   match accepted.descriptor.births with
   | [item] =>
       decide (item.owner = pin.owner) && decide (item.create.cellId = pin.cell.value) &&
@@ -91,7 +91,7 @@ private def initializeCheck {config : Config} {opened : Opened config} {command 
 phase-specific source operation. Raw accepted-record bytes cannot mint them. -/
 inductive CurrentPermission (config : Config) (opened : Opened config) where
   | birth (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment
-      opened.pins opened.durable (logicalHeight config opened.durable)) :
+      opened.pins opened.ground (logicalHeight config opened.durable)) :
       CurrentPermission config opened
   | initialize {command : Command} {signed : SignedCommand}
       {prepared : PreparedInvocation config.deployment config.profile
@@ -126,7 +126,7 @@ structure Admission (config : Config) (opened : Opened config)
 retained, funded BootstrapBundle opcode admits the first phase. -/
 def admitBirth {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth config.profile config.deployment
-      opened.pins opened.durable (logicalHeight config opened.durable)) :
+      opened.pins opened.ground (logicalHeight config opened.durable)) :
     Option (Admission config opened (ResourceBirthReceiver.intent accepted)) := none
 
 def admitInitialize {config : Config} {opened : Opened config} {command : Command} {signed : SignedCommand}
