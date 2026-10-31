@@ -242,11 +242,43 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-State (2026-10-31): lane `lane/hot-path-cold` (agent ac53c05fe796e4294, the live hot-path per root). The integrator is aeb671706eb3f70d7; private cells is
-a8da2b953507b402b; exorcism (the fsync class) is a9252a07cf889741c. On hbox, build only in pool trees (`. /home/hbox/pool/pool.env;
-LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`, release when done). Logs go
-to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build driver is
-`/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host, LANE_DIR=/ci/hpc/nb).
+State (2026-10-31, continuation written at ~490k tokens by ac53c05fe796e4294, the live hot-path per
+root): lane `lane/hot-path-cold`. Sent and merged: through c6ff16f55 (in batch 4). On the lane, not
+yet sent: 4fb1a0e17 (authority projection, below). The integrator is aeb671706eb3f70d7; private
+cells is a8da2b953507b402b; exorcism (the fsync class) is a9252a07cf889741c. On hbox build only in
+pool trees (`. /home/hbox/pool/pool.env; LANE_POOL_NO_WARM=1 lane-tree acquire hot-path
+origin/lane/hot-path-cold`; `lane-tree native hot-path` before a native build; release when done).
+Logs `/ci/hpc`. Native Host: `/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host,
+LANE_DIR=/ci/hpc/nb, src = the pool tree); `/ci/hpc/nb/both2.sh` = native convert + closure
+lane-check (`/ci/hpc/lcs20.log`) + build (`/ci/hpc/nb/host.log`). Hotpatch:
+`/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=/ci/hpc/nb/artifacts/minidregg-host`.
+Profiles: perf `--call-graph dwarf` on the `mini serve` child; symbolize with a symfs whose
+`memfd:mini-pinned-image (deleted)` links to the candidate's minidregg-host (`/ci/hpc/sn/symfs3`).
+
+Root's order (10-31): (1) row 11 + the Book layout implementation, as hot-path's part of FORMAT (a)
+with private cells; (2) cut the per-submit cost; (3) the remaining sweep rows (3, 8, 16, 17, 19, 20,
+14).
+
+- **Per-submit (item 2), in progress.** Host profile across 3 `story new` (fresh world,
+  `/ci/hpc/sn/b3.perf.data`): births 33% (encode 34% overall: `encodeViaWriter`, whole-cell
+  `StoreCodec.encode` 9%), `CredentialAuthorityState.authState` 15% (`revokedKeys`/`parentKeys` =
+  `DFinsupp.support` + `biUnion` dedup, O(n²) in the authority store, per invocation). 4fb1a0e17 cuts the
+  latter (`authStateOfFast`, `@[csimp] authStateOf_eq_fast`); its closure check and native build were
+  started by `/ci/hpc/nb/both2.sh` (PID file `/ci/hpc/nb/both2.pid`). Then: hotpatch eca98bde-hp-slots2
+  with the new Host, rerun `/ci/hpc/sn/prof.sh` (adjust R and the candidate), compare. Next targets in
+  the same profile: `DeclaredResourceController.readGuards`/`targetWrite` filter scans (8%), the birth
+  descriptor's encode (`framedDescriptorCodec`, 10%).
+- **Row 11 (item 1), design not started in code.** `DurableReceiverIO.loadChained` reads every entry,
+  MACs every tag, decodes every record and rebuilds six indexes, because `Loaded` holds
+  `image.accepted` (every record, a List) and each index is stated as a function of it
+  (`indexExact : index = PresenceIndex.ofRecords image.accepted`, `linksExact`, `idsExact`, `txsExact`,
+  `spentAtExact`, `writesAtExact`, the receipt-root log). Under trusted storage (ember 10-31), the
+  checkpoint body can carry the six indexes and the receipt-root log at its height, and the open
+  advances them over the suffix only. The statement change: each `*Exact` is "the index the checkpoint
+  carries, advanced over the suffix", with the checkpoint's own seal as the trust premise; the
+  records below the base stop being decoded on open (a lazy prefix, decoded on a historical read).
+  It is a checkpoint body change (DurableCheckpointCodec `Body`), so it rides the FORMAT epoch. Ask
+  private cells for their sha's state first; they will not hold for us.
 
 0. **`story new`: 4 Host decisions (3a0fb5e0c, cb2b8e642; on the lane, not yet sent).**
    - **What runs.** The room's birth, then ONE birth of every cell born in it (`workspace
