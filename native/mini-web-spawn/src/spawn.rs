@@ -362,10 +362,13 @@ impl Spawner {
                 command.arg("--front-doc").arg(doc);
             }
         }
+        // fd 4: the read end of this helper's lifeline; the body exits at its EOF (`--parent-fd`).
+        command.arg("--parent-fd").arg("4");
         let listener_fd = listener.as_raw_fd();
+        let line = lifeline()?;
         unsafe {
             command.pre_exec(move || {
-                if libc::dup2(listener_fd, 3) < 0 {
+                if libc::dup2(listener_fd, 3) < 0 || libc::dup2(line, 4) < 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 Ok(())
@@ -374,6 +377,31 @@ impl Spawner {
         let child = command.spawn().map_err(|e| format!("spawn body: {e}"))?;
         Ok(child.id())
     }
+}
+
+/// The helper's lifeline: one pipe made once, both ends close-on-exec, the write end never written
+/// and never closed while this process lives. Every body is handed the read end as its fd 4 and
+/// exits when it reads EOF there, which is exactly when every write end is gone: this helper ended,
+/// however it ended (a stop, a crash, SIGKILL), so no body outlives the helper that started it.
+/// Returns the read end.
+pub fn lifeline() -> Result<RawFd, String> {
+    static LINE: std::sync::OnceLock<Result<(RawFd, RawFd), String>> = std::sync::OnceLock::new();
+    LINE.get_or_init(|| {
+        let mut fds = [0 as libc::c_int; 2];
+        #[cfg(target_os = "linux")]
+        let made = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
+        #[cfg(not(target_os = "linux"))]
+        let made = unsafe { libc::pipe(fds.as_mut_ptr()) };
+        if made != 0 {
+            return Err(format!("lifeline pipe: {}", std::io::Error::last_os_error()));
+        }
+        for fd in fds {
+            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
+                return Err(format!("lifeline close-on-exec: {}", std::io::Error::last_os_error()));
+            }
+        }
+        Ok((fds[0], fds[1]))
+    }).clone().map(|(read, _write)| read)
 }
 
 /// The delegated full consent selection for a member whose home holds `consent/peer.sock`.

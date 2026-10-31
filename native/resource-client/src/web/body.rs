@@ -46,6 +46,9 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         .filter(|fd| *fd >= 3)
         .ok_or("--listen-fd takes an inherited descriptor number (3 or above)")?;
     let anonymous = args.optional("anonymous").is_some();
+    let parent: Option<i32> = args.optional("parent-fd")
+        .map(|v| v.to_str().and_then(|s| s.parse().ok()).filter(|fd: &i32| *fd > 3).ok_or("--parent-fd takes an inherited descriptor number other than the listener's"))
+        .transpose()?;
     let home = absolute(&path(args.required("home")?))?;
     let host = absolute(&path(args.required("host")?))?;
     let config = absolute(&path(args.required("config")?))?;
@@ -71,6 +74,18 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         face: Face::Body,
         shell: Some(Shell { host, config, home, public_subject, front_doc }),
     });
+    // Neither inherited descriptor reaches what this body starts (the shell it runs each verb in, the
+    // residents those start): a resident that held the listener or the lifeline would keep either alive.
+    for inherited in std::iter::once(fd).chain(parent) {
+        unsafe { libc::fcntl(inherited, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    if let Some(line) = parent {
+        std::thread::spawn(move || {
+            until_closed(line);
+            eprintln!("mini web --body: the helper that started this body is gone (its lifeline closed); exiting");
+            std::process::exit(0);
+        });
+    }
     let listener = unsafe { UnixListener::from_raw_fd(fd) };
     eprintln!("mini web --body: subject {} serving fd {fd}{}", site.subject, if anonymous { " (anonymous)" } else { "" });
     let handler: Arc<dyn Fn(UnixStream, Instant) + Send + Sync> = Arc::new(move |stream, deadline| {
@@ -90,6 +105,18 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Block until the lifeline `fd` reads EOF (every write end closed: the helper is gone) or fails.
+/// The helper never writes it; any bytes are ignored.
+fn until_closed(fd: i32) {
+    let mut byte = [0u8; 64];
+    loop {
+        let n = unsafe { libc::read(fd, byte.as_mut_ptr().cast(), byte.len()) };
+        if n == 0 || (n < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted) {
+            return;
+        }
+    }
 }
 
 const ANONYMOUS: &str = "the public reader shows what members published; writing needs your own session (Join, then open the link the door gives you)";
@@ -1716,6 +1743,21 @@ mod design_preview;
 
 #[cfg(test)]
 mod tests {
+    /// A body outlives nothing: its lifeline's EOF (the helper gone, however it ended) is what it waits on.
+    #[test]
+    fn the_lifeline_returns_when_its_last_writer_closes_and_not_before() {
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let (read, write) = (fds[0], fds[1]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || { super::until_closed(read); tx.send(()).unwrap(); });
+        assert_eq!(unsafe { libc::write(write, b"x".as_ptr().cast(), 1) }, 1);
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err(), "bytes are not a death");
+        unsafe { libc::close(write) };
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "the writer's close is");
+        unsafe { libc::close(read) };
+    }
+
     #[test]
     fn a_second_export_inside_the_window_is_refused_with_the_time_named() {
         let home = std::env::temp_dir().join(format!("mini-export-cooldown-{}", std::process::id()));
