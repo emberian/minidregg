@@ -19,8 +19,10 @@ gated candidates and names candidates to infra and the explorer.
   merged. Flatness: submit_cpu 106 -> 380 (3.6x), propose_cpu 4.05x; walls and get PASS.
 - **Batch 5 1c151fce4: READY 07:52** (host stage 1,005 s, the lake-threads fix's first measured cut; consent 150 s, rust
   191 s). Contents: exorcism 4f7972a62 (no fsync anywhere), module-cost, hot-path authority snapshot 4fb1a0e17, app-reds
-  route/teardown/ACL, batch 4 fixtures. **gate13 running** (started 07:53): enrol PASS, tour 73/73 PASS; hbox composed
-  residents UNKNOWN (hbox can't judge it, as always; forge composed decides). Waiter armed on `GATE 1c151fce verdict`.
+  route/teardown/ACL, batch 4 fixtures. **gate15 running** (PID in gate-1c15.pid; started 07:53 under the home lock path,
+  so its remaining world-ups are not serialised against lanes): enrol PASS, tour 73/73 PASS; hbox composed residents
+  UNKNOWN (forge composed decides); j14-apps FAIL: "Hermes sent no reply to the ask: refused" (/ci/j-1c151f/journey.log).
+  Waiter armed on `GATE 1c151fce verdict`.
   Known for it: perf-apps saw a START crash loop ("attestation resource outside supported profile", 20-digit member-
   namespace resource ids): fixed 40efdcff9 (staging 4ab22bf78). If j14/apps go red on that, overlay the spk-host crate
   from 4ab22bf78 onto 1c151fce4 (lane-build.sh overlay) and rerun j14 + composed with gate15.
@@ -38,8 +40,8 @@ gated candidates and names candidates to infra and the explorer.
 - Flatness (reported, never gating): batch 3 submit_cpu 202 -> 1180 ms; batch 4 106 -> 380. CONSENT-STORE (batch 2+)
   measured by the explorer: first signed read 20.7 s -> 0.5-0.8 s flat in height; restart+read 26 s -> 5.6 s; certify
   ~6 s per 256 tail.
-- hbox: / 48 GB free (08:15). Host state app-reds added: /var/lib/mini-vars-backing (loop prjquota ext4, NOT in fstab;
-  image moving off /tank), /etc/mini-spk-volumes/{vars-backing,ingest-scratch}.
+- hbox: / 47 GB free (08:30). Host state app-reds added: /var/lib/mini-vars-backing (loop of /tank/lanes/vars-backing.img,
+  prjquota ext4, NOT in fstab), /etc/mini-spk-volumes/{vars-backing,ingest-scratch} (ingest scratch /tank/mini-ingest).
 
 ## Lanes (route only to the newest id; distilled lanes' old ids are retired)
 
@@ -61,10 +63,11 @@ Every Lean-statement sha gets an audit round from a4d9a6f4cba4855ca before it ri
 
 ## Rulings in force
 
-- **No /tank** (ember via root, 10-31 08:15): nothing uses /tank on hbox. Free disk only by removing old trash (retired
-  trees after their checkpoint, lanes' finished /ci scratch, superseded candidates and gate roots); the 40 GB early-warning
-  sweep line asks lanes to clear scratch. Gates now lock /home/hbox/lanes/world-up.lock and run playwright from $I/pw.
-  Owed by app-reds: vars-backing image and ingest scratch off /tank, store-sweep.sh's lock path.
+- **/tank** (root, 10-31 08:30, correcting the earlier reading): ember's "don't use /tank" means don't MOVE data there to
+  free disk. Existing small /tank files stay: /tank/lanes/world-up.lock (the ONE world-up lock every lane, gate and
+  scripts/spk-platform flocks; never a second path), /tank/lanes/vars-backing.img, /tank/mini-ingest. Gates lock
+  /tank/lanes/world-up.lock again (reverted 08:30); playwright runs from $I/pw (local copy, fine). Free disk only by
+  removing old trash (retired trees after their checkpoint, finished /ci scratch, superseded candidates and gate roots).
 - **Minimal checks** (ember, 10-31, after the gates went green): per iteration only the narrowest check that shows the
   change worked (lane-check of changed files plus one targeted measurement or row); full gates (gate13/15, forge composed,
   umbrellas) once per batch cut; cuts spaced out to accumulate perf work; hotpatched measurement worlds are the inner loop;
