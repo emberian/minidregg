@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 
 /// At most this many clients at once (and so this many concurrent form actions).
 const CLIENTS_MAX: usize = 4;
+/// A run waits at most this long for a client when all are taken, then is refused as busy.
+const TAKE_WAIT: Duration = Duration::from_secs(2);
 /// A run that outlived its page is waited on this long before its client is stopped.
 const DETACHED_MAX: Duration = Duration::from_secs(24 * 3600);
 
@@ -49,6 +51,8 @@ pub(crate) struct Pool {
 /// One run's outcome: the exit code, or that the deadline passed (`detached`: the run goes on to
 /// its end on its own client), or that the client failed; with what was printed so far.
 pub(crate) struct Run {
+    /// Every client is taken (at most `CLIENTS_MAX` actions at once): nothing ran.
+    pub busy: bool,
     pub code: Option<i32>,
     pub detached: bool,
     pub stdout: Vec<u8>,
@@ -56,28 +60,31 @@ pub(crate) struct Run {
 }
 
 impl Pool {
-    fn take(&self, start: &dyn Fn() -> std::io::Result<Client>, deadline: Instant) -> Option<Client> {
-        let mut state = self.state.lock().ok()?;
+    /// A client: an idle one, a new one under `CLIENTS_MAX`, or one freed within `TAKE_WAIT`.
+    /// `Err(true)`: all are taken (busy); `Err(false)`: a new client did not start.
+    fn take(&self, start: &dyn Fn() -> std::io::Result<Client>) -> Result<Client, bool> {
+        let deadline = Instant::now() + TAKE_WAIT;
+        let mut state = self.state.lock().map_err(|_| false)?;
         loop {
             if let Some(client) = state.idle.pop() {
-                return Some(client);
+                return Ok(client);
             }
             if state.live < CLIENTS_MAX {
                 state.live += 1;
                 drop(state);
                 return match start() {
-                    Ok(client) => Some(client),
+                    Ok(client) => Ok(client),
                     Err(_) => {
                         self.forget();
-                        None
+                        Err(false)
                     }
                 };
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return None;
+                return Err(true);
             }
-            state = self.freed.wait_timeout(state, left).ok()?.0;
+            state = self.freed.wait_timeout(state, left).map_err(|_| false)?.0;
         }
     }
 
@@ -113,7 +120,11 @@ impl Pool {
         may_move: bool,
         bound: usize,
     ) -> Option<Run> {
-        let mut client = self.take(start, deadline)?;
+        let mut client = match self.take(start) {
+            Ok(client) => client,
+            Err(true) => return Some(Run { busy: true, code: None, detached: false, stdout: Vec::new(), stderr: Vec::new() }),
+            Err(false) => return None,
+        };
         let id = self.captures.fetch_add(1, Ordering::Relaxed);
         let out = capture_dir.join(format!("shell-{}-{id}.out", std::process::id()));
         let err = capture_dir.join(format!("shell-{}-{id}.err", std::process::id()));
@@ -136,13 +147,13 @@ impl Pool {
         match reply {
             Ok(output) => {
                 self.give_back(client);
-                let run = Run { code: output.status.code(), detached: false, stdout: printed(&out), stderr: printed(&err) };
+                let run = Run { busy: false, code: output.status.code(), detached: false, stdout: printed(&out), stderr: printed(&err) };
                 let _ = fs::remove_file(&out);
                 let _ = fs::remove_file(&err);
                 Some(run)
             }
             Err(error) if error.kind() == std::io::ErrorKind::TimedOut && may_move => {
-                let run = Run { code: None, detached: true, stdout: printed(&out), stderr: printed(&err) };
+                let run = Run { busy: false, code: None, detached: true, stdout: printed(&out), stderr: printed(&err) };
                 let pool = self.clone();
                 std::thread::spawn(move || {
                     match mini_sdk::command_resident::read_reply(&mut client.replies, Instant::now() + DETACHED_MAX, 0) {
@@ -158,7 +169,7 @@ impl Pool {
                 // A read past its deadline, or a client that ended mid-run: its group is stopped
                 // before what it printed is read, so nothing more lands after this.
                 self.discard(client);
-                let run = Run { code: None, detached: false, stdout: printed(&out), stderr: printed(&err) };
+                let run = Run { busy: false, code: None, detached: false, stdout: printed(&out), stderr: printed(&err) };
                 let _ = fs::remove_file(&out);
                 let _ = fs::remove_file(&err);
                 Some(run)
@@ -168,7 +179,7 @@ impl Pool {
 
     /// Run one line to its end in the background with its output appended to `log`.
     pub(crate) fn run_detached(self: &Arc<Self>, start: &dyn Fn() -> std::io::Result<Client>, arguments: &[&OsStr], stdin: &[u8], log: &Path) -> bool {
-        let Some(mut client) = self.take(start, Instant::now() + Duration::from_secs(100)) else { return false };
+        let Ok(mut client) = self.take(start) else { return false };
         let request = mini_sdk::command_resident::Request { arguments, stdin, stdout: Some(log), stderr: Some(log) };
         let sent = {
             use std::io::Write;
@@ -209,4 +220,21 @@ fn read_bounded(path: &Path, bound: usize) -> Vec<u8> {
 /// A private directory for the runs' output files, under the member's shell home.
 pub(crate) fn capture_dir(home: &Path) -> PathBuf {
     home.join("web-runs")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_full_pool_refuses_as_busy_after_the_short_wait() {
+        let pool = Arc::new(Pool::default());
+        pool.state.lock().unwrap().live = CLIENTS_MAX;
+        let started = Instant::now();
+        let run = pool
+            .run(&|| Err(std::io::Error::other("never started")), Path::new("/nonexistent"), &[OsStr::new("whoami")], b"", Instant::now() + Duration::from_secs(100), true, 16)
+            .expect("a busy pool answers");
+        assert!(run.busy && run.code.is_none());
+        assert!(started.elapsed() >= TAKE_WAIT && started.elapsed() < TAKE_WAIT + Duration::from_secs(1));
+    }
 }

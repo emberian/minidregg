@@ -1296,6 +1296,10 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     let run = shell.pool.run(&|| shell_client(&exe, shell), &captures, &arguments, script.as_bytes(), deadline,
         !only_answers(lines), super::capture::MAX_CAPTURE)?;
     let cap = super::capture::text;
+    if run.busy {
+        return Some(Ending { code: 1, stdout: String::new(),
+            stderr: "busy: four actions are already running for this account; nothing was run; retry when one finishes\n".into() });
+    }
     if let Some(code) = run.code {
         return Some(captured_ending(code, run.stdout, run.stderr, lines));
     }
