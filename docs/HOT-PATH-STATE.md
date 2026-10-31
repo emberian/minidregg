@@ -352,16 +352,26 @@ to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build
        1,100, under load. Not improved. The coalescing (18 submits, not 22) is in, but each sequential
        submit costs about 2 s on a loaded box. The fix is one proposal and one submit for the whole
        template: a multi-step room-birth plan, which is a design item. `chat new` 4.8 s (was 3.0).
-2b. **The account book as store entries (root, 10-31).** `Theory/CanonicalResourceBookEntries.lean`
-   (5d45f87df, statement, lane-check RC 0): four RAM namespaces (account, balance, lease, floor);
-   `Represents`, `represents_unique` (teeth), `represents_empty` (satisfiable); `operationPatch`;
-   `patch_writeFootprint_subset` / `_card_le` (an operation writes at most 3 addresses, whatever the
-   book's size); the keystone `PatchStatement` (valid, and the result represents `operation.apply
-   book`), stated, to be proved after the statement audit. Then the migration: `bookAddress`,
-   `logicalBook`, `bookPatch` and `CanonicalResourceKernel.layout` are replaced (about 50 consumer
-   files, 361 uses), so the cell layout changes: it rides FORMAT (a) if proved and migrated before
-   private cells' sha, the next epoch otherwise. The Batch layer (registrations, deregistrations)
-   needs the same per-entry patch for account entries.
+2b. **The account book as store entries (root, 10-31).** `Theory/CanonicalResourceBookEntries.lean`,
+   proved (5d45f87df, 3da7d8824, ab0f7bd26; lane-check RC 0, `#assert_axioms` pinned; statement audited
+   sound by the integrator):
+   - Layout: four RAM namespaces (account, balance, lease, floor); `Represents`, `represents_unique`
+     (teeth), `represents_empty` (satisfiable).
+   - Writes: `operationPatch`, `patchStatement` (valid; represents `operation.apply book`, source =
+     destination included), `patch_writeFootprint_card_le` (at most 3 addresses).
+   - Reads: `EntryAdmission`, `entryAdmission_iff` (exactly `Admission book operation`),
+     `entryAdmission_frame` over `admissionReads` (at most 5 addresses).
+   - Registration and deregistration: `registerPatch`/`deregisterPatch` with `_represents`, and the
+     entry admissions with `_iff`. Their freshness reads are key ranges `(account, _)`; deregistration's
+     "no lease names it" ranges over every lease (index leases by account if deregistration is ever
+     frequent).
+   - **Next: the migration.** Replace `bookAddress`, `logicalBook`, `bookPatch` and
+     `CanonicalResourceKernel.layout` (about 50 consumer files, 361 uses), the Batch layer through
+     `registerPatch`/`operationPatch`/`deregisterPatch`, and the registry wire (`bookWire`; private
+     cells' trie root needs only a StoreCodec.Wire with `blinding := none`, `wire?`/`privateWire?
+     .resourceBook = some bookWire`, `materializer .resourceBook := PrivateCellRoot.materializer
+     bookWire (untagged _)`). It changes the cell layout: FORMAT (a) if ready before private cells'
+     sha, else the next epoch.
 
 3. Rows 3, 8, 16, 17, 19, 20. Measurements on the batch-2 candidate: a fresh member's first
    read, a fresh provider at two heights, restart, `story new`, and the first walk-family
