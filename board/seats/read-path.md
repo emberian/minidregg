@@ -42,6 +42,8 @@ rounds, and move measurement to persvati's standing world when it exists.
   runs over it; `Local` is bytes; read-path codec inspections are `inspect_bytes`. Per read: openat 53 to 16,
   write 30 to 4, unlink 15 to 0, linkat 13 to 0; resident CPU 3.5-4.4 to 2.6-3.9 ms.
 - dde0f4463: a fresh memory attempt asks the disk nothing (statx 57 to 44 per read).
+- 143caf2fc: op 5 works out each grant's selection, request and header once (`GrantPlan`, `challengePlanned`,
+  `challengePlanned_exact`); measurement pending (native-loop overlay on batch 9, /ci/exo/lean/nl1.log).
 - 697d8dd4f: `doc show` leaves an identical seen/NAME.json in place (its rename was 9% of the resident on ZFS).
   Resident task-clock 2.0-2.3 ms before the bus, 1.0-2.1 ms after these.
 - Earlier, with numbers in docs/EXORCISM.md: the codec's one-decode `view-resource-document` (bc17cef1b,
@@ -64,14 +66,17 @@ rounds, and move measurement to persvati's standing world when it exists.
    `SuffixVerified`) and the session's receivers are typed over the full `Loaded` (KN2 stage 2a). The fix is
    KN2 stage 2b for these two paths: the Host session and the consent admission over the `Opening`. Constant
    factors inside the full open (decode about 1 ms per record) do not change its order and are not taken.
-2. Op 5 (Lean; native Host build through native-loop, about 7 min in a pool tree). Perf shares of
-   dispatchSession over 40 reads on the batch 6 Host: `checkGrants` 60% (`ResourceObservationAdmission.check`
-   49%, `capabilityEvidenceChecked` 19%); the challenge recomputed inside op 5 (`authorizeAuthenticated`) 13%
-   though op 4 computed it; `loadRoots`/`loadPolicy` 12%; `step` 10%; `headerAt` twice per grant about 3%;
-   `PackedCell.decode` building with `materialize` and dropping the Store's bytes (`materializeCanonical` is
-   proved equal); `signedRequestBytes` re-encoded per signing header. Retained form: a `checkGrants` verdict
-   maintained against what it reads (authority root, policy roots, cell root, clock, grant bytes), not a cache
-   recomputed per request.
+2. Op 5 (Lean). Current Host profile (hbox w8, overlay on acc7cfa03 with the read-path Lean fixes; 60 warm
+   `doc show`, perf dwarf on the serving Host, symbols through /ci/exo/symfs; stacks /ci/exo/hp.stacks.txt,
+   tallies /ci/exo/stk.py, ph.py, sub.py): about 6.5 ms Host CPU per read on the box's E-cores; op 5 58%, op 4 12%,
+   session refresh 6%. Inside op 5: `verifyNative` 12% (Ed25519 2.8%, the rest the controller's state and
+   registry encoded and decoded back, `registryDigest` a base-257 bignum fold computed twice 3.4%),
+   `authorizeCheckedFast` 11% (`loadPolicy` 4.6%, capability evidence 3.9%), the challenge recomputed 7.4%, the
+   grant's select/request/header again in the check 5% (143caf2fc removes this), `queryResultUsing` 8%. Across
+   ops: each grant's header is computed in op 4 and again in op 5 (5% more), and the intent signature is verified
+   in both (1.7%); sharing those needs a per-head plan held by the Host session (after host-execution's 2b port).
+   `Config.transport` rebuilt per request in the session refresh (`anchorIdentity`, `Nat.reprFast`) 3.4%: told
+   host-execution. Retained form for `checkGrants`: per-head plans and the loaded policy graph held by the session.
 3. Codec: `challengeJson` 10% and GMP `Nat` churn in `StreamCodec`.
 4. "Reads keep nothing per read" (RULINGS): a read still appends one read-journal line, rewrites seen/NAME.json
    when the world moved, and a refused read moves into attempts/. Decide each against the ruling.
