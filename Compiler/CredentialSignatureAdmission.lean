@@ -295,6 +295,59 @@ def prepare (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest)
         else .error .sourceBinding
       else .error .sourceBinding
 
+open Minidregg.Theory.PlanBinding in
+/-- `checkFootprint` on an envelope already decoded. -/
+def checkFootprintDecoded (snapshot : Snapshot)
+    (envelope : CredentialSignedEnvelopeController.SignedEnvelope) : Except Reject Unit :=
+  match PlanFootprintCodec.decode CredentialAuthorityCell.wire envelope.header.footprint with
+  | none => .error .malformedFootprint
+  | some signed =>
+      match Footprint.admit snapshot.logical signed with
+      | .ok () => .ok ()
+      | .error (.footprintStale address) =>
+          .error (.footprintStale (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire address))
+
+/-- `prepare` with the envelope decoded once and the controller handed its state and registry
+as values (`CredentialSignedEnvelopeController.prepare_encoded`), not encoded for the
+controller to decode them back (`prepare_eq_fast`). -/
+def prepareFast (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest)
+    (envelopeBytes : List UInt8) : Except Reject (Prepared snapshot nullifier request) := do
+  let source ← select snapshot request
+  match CredentialSignedEnvelopeController.envelopeCodec.decode envelopeBytes with
+  | none => .error (.envelope .malformedEnvelope)
+  | some envelope =>
+  checkFootprintDecoded snapshot envelope
+  let registry := keyRegistry snapshot source.key
+  match CredentialSignedEnvelopeController.prepareDecoded (NativeError := CredentialSignatureIO.Error)
+      request.2.subject.value signatureDomain (requestBytes request)
+      (controllerState snapshot source.key nullifier request)
+      registry (CredentialSignedEnvelopeController.registryCodec.encode registry) envelope with
+  | .error .expired => .error (.expired request.2.height envelope.header.validUntil)
+  | .error reason => .error (.envelope reason)
+  | .ok controller =>
+      if keyExact : controller.key = source.key then
+        if headerExact : controller.envelope.header =
+            header snapshot source.key nullifier request controller.envelope.header.validUntil then
+          .ok ⟨source, controller, keyExact, headerExact⟩
+        else .error .sourceBinding
+      else .error .sourceBinding
+
+@[csimp] theorem prepare_eq_fast : @prepare = @prepareFast := by
+  funext snapshot nullifier request envelopeBytes
+  unfold prepare prepareFast
+  cases select snapshot request with
+  | error reason => rfl
+  | ok source =>
+      simp only [bind, Except.bind]
+      rw [CredentialSignedEnvelopeController.prepare_encoded]
+      unfold checkFootprint
+      cases CredentialSignedEnvelopeController.envelopeCodec.decode envelopeBytes with
+      | none => rfl
+      | some envelope =>
+          simp only
+          unfold checkFootprintDecoded
+          split <;> rfl
+
 /-- The constructor is module-private. There is no positive-result decoder,
 test receipt constructor, arbitrary verifier callback or pure mint function. The
 verdict is the configured verifier's, and the receipt keeps that config

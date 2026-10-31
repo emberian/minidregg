@@ -117,6 +117,49 @@ def registryDigest (bytes : List UInt8) : Digest :=
   ⟨bytes.foldl (fun accumulator byte =>
       accumulator * 257 + byte.toNat + 1) 17⟩
 
+/-- One step of `registryDigest`'s fold. -/
+def registryStep (accumulator : Nat) (byte : UInt8) : Nat :=
+  accumulator * 257 + byte.toNat + 1
+
+theorem registryStep_foldl (start : Nat) (bytes : List UInt8) :
+    bytes.foldl registryStep start = start * 257 ^ bytes.length + bytes.foldl registryStep 0 := by
+  induction bytes generalizing start with
+  | nil => simp
+  | cons byte rest ih =>
+      simp only [List.foldl_cons, List.length_cons]
+      rw [ih, ih (registryStep 0 byte)]
+      simp only [registryStep, Nat.pow_succ]
+      grind
+
+/-- 257 ^ 7, below 2 ^ 63: a seven-byte chunk's fold is a scalar. -/
+def registryChunkScale : Nat := 257 ^ 7
+
+/-- `registryDigest`'s fold seven bytes at a time: one multiplication of the growing value per
+chunk instead of one per byte (the value is a base-257 numeral as long as the registry). -/
+def registryFoldFast (start : Nat) : List UInt8 → Nat
+  | b0 :: b1 :: b2 :: b3 :: b4 :: b5 :: b6 :: rest =>
+      registryFoldFast (start * registryChunkScale + [b0, b1, b2, b3, b4, b5, b6].foldl registryStep 0) rest
+  | rest => rest.foldl registryStep start
+
+theorem registryFoldFast_eq (start : Nat) (bytes : List UInt8) :
+    registryFoldFast start bytes = bytes.foldl registryStep start := by
+  fun_induction registryFoldFast start bytes with
+  | case1 start b0 b1 b2 b3 b4 b5 b6 rest ih =>
+      rw [ih, registryChunkScale]
+      have chunk := registryStep_foldl start [b0, b1, b2, b3, b4, b5, b6]
+      simp only [List.length_cons, List.length_nil] at chunk
+      simp only [List.foldl_cons, List.foldl_nil] at chunk ⊢
+      rw [chunk]
+  | case2 start rest _ => rfl
+
+def registryDigestFast (bytes : List UInt8) : Digest :=
+  ⟨registryFoldFast 17 bytes⟩
+
+@[csimp] theorem registryDigest_eq_fast : @registryDigest = @registryDigestFast := by
+  funext bytes
+  simp only [registryDigest, registryDigestFast, registryFoldFast_eq]
+  rfl
+
 /-! ## Exact signed frame -/
 
 structure SignedHeader where
@@ -335,6 +378,87 @@ def prepare {NativeError : Type}
                         { state, registry, envelope, key
                           frame := envelope.frame
                           frameExact := rfl }
+
+/-- What `prepare` decides once its three decodes succeed (`prepare_decoded`): a caller that
+holds the state, the registry and the envelope as values asks this, not an encode and a decode
+of each. `registryBytes` is the registry's encoding, the bytes its commitment is over. -/
+def prepareDecoded {NativeError : Type}
+    (expectedSubject : Nat) (expectedDomain expectedMessage : List UInt8)
+    (state : ControllerState) (registry : KeyRegistryProjection) (registryBytes : List UInt8)
+    (envelope : SignedEnvelope) :
+    Except (Failure NativeError) Prepared :=
+  if ¬(registry.keys.map (fun key => key.keyId)).Nodup then
+    .error .malformedRegistry
+  else if state.codecVersion != stateCodecVersion then
+    .error .wrongStateVersion
+  else if registry.codecVersion != registryCodecVersion then
+    .error .wrongRegistryVersion
+  else if envelope.header.codecVersion != envelopeCodecVersion then
+    .error .wrongEnvelopeVersion
+  else if registry.authorityRoot != state.authorityRoot then
+    .error .staleAuthority
+  else if registryDigest registryBytes != state.registryCommitment then
+    .error .uncommittedRegistry
+  else if registry.registryEpoch != state.registryEpoch then
+    .error .staleRegistry
+  else if envelope.header.footprint != state.footprint then
+    .error .footprintStale
+  else if envelope.header.validUntil < state.height then
+    .error .expired
+  else if envelope.header.domain != expectedDomain then
+    .error .wrongDomain
+  else if envelope.header.message != expectedMessage then
+    .error .wrongMessage
+  else if state.consumedNullifiers.contains
+      envelope.header.nullifier then
+    .error .replayedNullifier
+  else
+    match registry.findKey envelope.header.keyId with
+    | none => .error .unknownKey
+    | some key =>
+        if key.subject != expectedSubject then .error .wrongSubject
+        else if key.keyEpoch != envelope.header.keyEpoch then
+          .error .wrongKeyEpoch
+        else if key.algorithm != envelope.header.algorithm then
+          .error .wrongAlgorithm
+        else if registry.registryEpoch < key.activeFrom ||
+            key.activeUntil < registry.registryEpoch then
+          .error .staleKey
+        else
+          .ok
+            { state, registry, envelope, key
+              frame := envelope.frame
+              frameExact := rfl }
+
+/-- **`prepare` is its decodes, then `prepareDecoded`.** -/
+theorem prepare_decoded {NativeError : Type}
+    (expectedSubject : Nat) (expectedDomain expectedMessage : List UInt8)
+    (stateBytes registryBytes envelopeBytes : List UInt8) :
+    prepare (NativeError := NativeError) expectedSubject expectedDomain expectedMessage
+        stateBytes registryBytes envelopeBytes =
+      match stateCodec.decode stateBytes with
+      | none => .error .malformedState
+      | some state =>
+          match registryCodec.decode registryBytes with
+          | none => .error .malformedRegistry
+          | some registry =>
+              match envelopeCodec.decode envelopeBytes with
+              | none => .error .malformedEnvelope
+              | some envelope => prepareDecoded expectedSubject expectedDomain expectedMessage
+                  state registry registryBytes envelope := by
+  rfl
+
+/-- `prepare` over a state and a registry it is handed as their encodings. -/
+theorem prepare_encoded {NativeError : Type}
+    (expectedSubject : Nat) (expectedDomain expectedMessage : List UInt8)
+    (state : ControllerState) (registry : KeyRegistryProjection) (envelopeBytes : List UInt8) :
+    prepare (NativeError := NativeError) expectedSubject expectedDomain expectedMessage
+        (stateCodec.encode state) (registryCodec.encode registry) envelopeBytes =
+      match envelopeCodec.decode envelopeBytes with
+      | none => .error .malformedEnvelope
+      | some envelope => prepareDecoded expectedSubject expectedDomain expectedMessage
+          state registry (registryCodec.encode registry) envelope := by
+  rw [prepare_decoded, stateCodec.decode_encode, registryCodec.decode_encode]
 
 structure Admission where
   keyId : Nat
