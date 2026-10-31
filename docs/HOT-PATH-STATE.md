@@ -53,6 +53,41 @@ Consent (CONSENT-STORE, sweep rows 13 partly): a provider start is the Store's
 checkpoint + the suffix (no genesis fold); catch-up is O(records since the client last
 looked), each natively admitted (~30 ms at head ~1,000).
 
+## Flatness submit red: where the Host's per-append CPU goes (35737eac4, 2026-10-31)
+
+flatness-submit on 35737eac4 (gate13): submit CPU went from 100 to 847 ms over heights
+3..103 (8.5x), propose from 24 to 229 ms. The workload is appends to one document, so the
+document's size grows with history. I profiled the Host child during ops 85-100 with dwarf
+call graphs (hbox `/ci/hpc/fby`; the Host runs from a memfd, so `perf report
+--symfs=/ci/hpc/fby/symfs` maps it back to the candidate binary). Inclusive shares of the
+Host's CPU:
+- **ContentResource.project, 17.7%**: the policy projection computes all ~30 `content/*`
+  slots eagerly, and each is a pass over the whole content store (bytes, payload bytes,
+  `support.card`, names unique, body/annotation writes), before and after. The law reads
+  two of them. On top of that, the slot table (`PredCompile.slotTable`: String-keyed
+  HashMap inserts of every slot, both sides) is 22.8%, and `inputsInRangeFast` is 14%.
+- **DFinsupp.support → Multiset.dedup, 4% and quadratic** (`List.pwFilter`), via
+  `ContentResource.elementCount` and `support.card`.
+- **StoreCodec.encode, 10.5%** (StreamCodec writer 19%): the whole document cell is
+  re-encoded per append. That is O(cell), not O(change).
+- **The observation authorize, 15%** (`NativeObservationController.checkGrants` →
+  `ResourceObservationAdmission.projectWith`, with `PreparedLaw.witness` at 8.5%): a
+  second full projection and law witness, inside `NativeObservationOpeningCache.queryLoaded`.
+- `prepareAuthorizedLoaded` 31%, `submitInvokeLight` 24%.
+
+**Root cause of the slot volume:** `DeclaredResourceController.participantSlots` puts
+`bytesSlots "resource/bytes" 0 (encode cell)` into the policy state: one String-named slot
+per byte of the target cell's encoding, and three times over (local, `joint/target/…`,
+`joint/index/…`), on both sides, for every projection (the invoke admission and the
+observation check). A 5 KB document is about 30,000 formatted names and HashMap inserts
+per projection. This dominates `slotTable` and the String hashing.
+
+Fix order: (1) project only the slots the law reads" (needs a `Pred` read-set frame lemma;
+`witnessed` and `hashEq` read named slots too); (2) `support.card` and `elementCount` from
+StoreCodec's cached sorted support, not a dedup; (3) the observation path's second
+projection; (4) chunked document cells (O(change) encode, a design item and a format
+change). Blinded-cell re-salting is private cells' and did not show in this profile.
+
 ## Design question for ember: every member's provider re-admits every record
 
 **What happens.** Each client runs its own consent provider (`minidregg-client-consent`,
