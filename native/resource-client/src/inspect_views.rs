@@ -222,7 +222,7 @@ fn turn(root: &Path, workspace: &Value, what: &str, json_out: bool) -> Result<()
     if !intent.is_file() {
         return Err(format!("no intent at {}", intent.display()));
     }
-    let (attempt, _) = new_attempt(root)?;
+    let (attempt, _) = crate::read_scratch::attempt(root)?;
     let verdict = dry_run(
         &member_path(workspace, "host")?,
         &member_path(workspace, "config")?,
@@ -386,7 +386,7 @@ fn why(root: &Path, workspace: &Value, attempt: Option<&str>, extra: Option<&Pat
     };
     if undisclosed {
         if let Some(intent) = intent {
-            let (dry, _) = new_attempt(root)?;
+            let (dry, _) = crate::read_scratch::attempt(root)?;
             let verdict = dry_run(
                 &member_path(workspace, "host")?,
                 &member_path(workspace, "config")?,

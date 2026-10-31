@@ -22,6 +22,9 @@ mod agent_lifetime_grant;
 mod trace;
 #[cfg(unix)]
 mod capture;
+mod read_scratch;
+#[cfg(unix)]
+mod line_resident;
 #[cfg(unix)]
 mod client_resident;
 #[cfg(unix)]
@@ -3922,11 +3925,15 @@ fn main() -> ExitCode {
         Some(command) if command == OsStr::new("command-resident") && env::args_os().len() == 2 => {
             capture::serve()
         }
+        Some(command) if command == OsStr::new("line-resident") => {
+            line_resident::main_args().and_then(|(listen, config)| line_resident::serve(listen, config))
+        }
         _ => Args::parse().and_then(run),
     };
     #[cfg(not(unix))]
     let parsed = Args::parse().and_then(run);
     let ending = main_ending(parsed, EXIT_STATUS.load(Ordering::Relaxed));
+    read_scratch::clear();
     print!("{}", ending.stdout);
     eprint!("{}", ending.stderr);
     ExitCode::from(ending.code)

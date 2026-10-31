@@ -93,6 +93,11 @@ fn pay(room: &resource_tools::RoomToolsConfig, ledger: &Path) -> Result<u64> {
             Ok(_) => {}
             Err(error) => match tools.lookup_operation(&payment, "payment") {
                 Ok(lookup) if lookup["resolution"] == "performed" => {}
+                // The payment never reached the Host: the exact operation is retried (the Host dedups on its
+                // operation record), it is not a refusal.
+                Ok(lookup) if lookup["resolution"] == "not-submitted" => {
+                    tools.pay(&payment, "compute").map_err(|retry| format!("compute turn {payment}: not submitted, exact retry: {retry}"))?;
+                }
                 Ok(lookup) => return Err(format!("compute turn {payment}: {error}; {}", lookup["resolution"])),
                 Err(lookup) => return Err(format!("compute turn {payment}: {error}; lookup {lookup}")),
             },

@@ -10,8 +10,8 @@
 #   ssh -T friend@host < script     script mode; stops at the first failure
 #
 # This is the deployed wrapper (the box installs it from the candidate, so it and `mini` come
-# from one tree). A one-verb session runs two processes, this shell and `mini`: everything below
-# reads files with the shell's own `read`, never a helper process.
+# from one tree). A one-verb session runs two processes, this shell and `mini-line` (or `mini`):
+# everything below reads files with the shell's own `read`, never a helper process.
 set -euo pipefail
 if [[ $# -ne 6 ]]; then
   echo 'usage: mini-shell-ssh ABS_MINI ABS_HOST ABS_CONFIG ABS_SOCKET ABS_WORKSPACE ABS_HOME' >&2
@@ -90,7 +90,13 @@ fi
 # candidate it runs from off its own path (`chat.rs` `running_candidate`).
 args=(shell --socket "$socket" --host "$host" --config "$config"
   --workspace "$workspace" --home "$home" --call-slots "$home/.call-slots")
+# One line runs in the member's resident shell (`mini-line`, beside `mini`): it holds the call slot
+# and hands the line and this session's streams to the resident serving that slot, so no `mini`
+# starts per verb. Without `mini-line`, or when no resident can be used, the line runs in a
+# fresh `mini` as before.
 if [[ -n ${SSH_ORIGINAL_COMMAND-} ]]; then
+  line=${mini%/*}/mini-line
+  [[ -x $line ]] && exec "$line" "$mini" "${args[@]}" --line "$SSH_ORIGINAL_COMMAND"
   exec "$mini" "${args[@]}" --line "$SSH_ORIGINAL_COMMAND"
 fi
 # Interactive login only: the motd, then the re-genesis notice ship.sh --regenesis writes (and

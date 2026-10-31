@@ -14,7 +14,7 @@ pub(crate) fn document(root:&Path, workspace:&Value, name:&str, max_rows:usize, 
     let reference=reference(root,name)?;
     let (view,challenge,signed)=signed_view(root,workspace,&reference,"resource")?;
     let bin=fs::read(signed.with_file_name("view.bin")).map_err(|e|e.to_string())?;
-    let (attempt,_)=new_attempt(root)?;
+    let (attempt,_)=crate::read_scratch::attempt(root)?;
     make_private_dir(&attempt)?;
     let input=attempt.join("context-in.json");
     create_private(&input,&serde_json::to_vec(&json!({
@@ -208,7 +208,7 @@ fn summary_text(root:&Path,workspace:&Value,value:&Value)->Result<(Option<String
             Err(_)=>unavailable=true,
         }
     }
-    let (attempt,_)=new_attempt(root)?;make_private_dir(&attempt)?;
+    let (attempt,_)=crate::read_scratch::attempt(root)?;make_private_dir(&attempt)?;
     let input=attempt.join("context-support-in.json");
     create_private(&input,&serde_json::to_vec(&json!({"dependencies":dependencies,"current":current})).map_err(|e|e.to_string())?)?;
     let verdict=inspect(&workspace_host(workspace)?,&member_path(workspace,"config")?,

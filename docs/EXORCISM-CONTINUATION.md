@@ -78,6 +78,45 @@ A native Host build takes about 48 minutes in a pool tree prepared with `lane-tr
 with `/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=...`, see
 docs/HOT-PATH-STATE.md). This lane has not built one.
 
+## Client and codec, measured on /ci/exo/w6 (batch 6 world, `doc show`)
+
+- Client (wrapper + `mini`), perf stat over 40 runs: about 7-10 ms CPU per command, two thirds
+  kernel. `mini`'s kernel time by syscall handler (kallsyms via sudo, perf dwarf): user 25%,
+  openat 17% (mostly creating attempt files), page faults 14%, exit_group 8%, write 5%,
+  linkat/mkdir/rename/unlink/statx 10%. A signed read writes about 15 files (a new
+  `attempts/a-N` tree, `sources/q-N.json`, `seen/`), each through a temp name, link and unlink,
+  and keeps them: member-1 already holds 520 attempt directories (18 MB). They are receipt
+  evidence (`receipt_continuity`), so dropping them is a product decision, not a perf fix.
+- Binary layout: fat LTO + one codegen unit (19.6 MB against 21.2 MB) and non-PIE each moved CPU
+  by under 10%, within box noise; LTO costs 245 s against 43 s per release build. Not taken.
+- A bare `mini --help` is 1.5 ms and 168 page faults; a one-shot process per command cannot reach
+  1 ms. A per-member resident behind the ssh wrapper (as `mini command-resident` already is for
+  the controller: `workspace list` 0.4 ms framed) is the route.
+- Codec resident per doc show (perf over 40): `resourceJson` 23% and `documentJson` 23% of busy
+  time (the view decoded and rendered twice: `view-resource`, then `view-document` from the same
+  bytes), `challengeJson` 10%, GMP `Nat` churn throughout `StreamCodec`. Lean; batch onto a
+  Host build.
+
+## Landed on the lane after batch 8's shas (decisions A and B, root 2026-10-31)
+
+- 4336fd84d + 50de20db5 + def44636b, A: `mini-line` and `mini line-resident`. The ssh wrapper
+  execs `mini-line`, which holds the call slot and passes the line and its three descriptors
+  (SCM_RIGHTS) to the resident for that slot (two per member, keyed by mini's identity, the
+  arguments, MINI_*/HOME/PATH and the umask). The candidate ships `bin/mini-line` (role miniLine,
+  family with mini). On /ci/exo/w6: client CPU 6.2 to 2.2 ms per `doc show`, `whoami` wall 3.4 to
+  2.5 ms (the bash wrapper's own start is now most of it).
+- 7dd2f7eda, B: `read_scratch`. Reads and codec inspections work in a per-process directory on
+  /dev/shm or XDG_RUNTIME_DIR (newest 64 kept, removed at a one-shot command's end); a refused read
+  moves into attempts/; one read-journal line per read, listed by `history all`. A `doc show` used
+  to add 3 attempt directories and 1.5 source files; now none.
+- End to end on /ci/exo/w6, 40 `doc show` each, alternated: wall median 23.8 / 24.2 ms before,
+  20.6 / 23.1 ms after; minimum 17.4-17.9 ms before, 13.7-16.0 ms after. Of what is left: Host
+  ops about 8 ms, codec 3.5 ms, consent 1.9 ms, the resident's own work 3.5-4 ms, the bash
+  wrapper about 2 ms.
+- Next on the client: the wrapper itself in Rust (its `read`s of /etc/mini files and the pins
+  file into `mini-line`), then the in-process file bus (the query path passes paths between
+  `author`/`inspect`/`host_files`; bytes would remove the remaining scratch writes).
+
 ## Other open items
 
 - The client's attempt-file bus: about 60 openat per signed read (it writes each step and reads it

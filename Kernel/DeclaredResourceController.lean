@@ -941,12 +941,11 @@ def authorizeLeg [DecidableEq F]
   -- `ReceivingLaw.Laws.physical`: resolve, then the range and cast verdicts on this step.
   let judged ← requireSome .policyUnavailable (PhysicalLawResolution.judge config)
   let law := judged.law
-  let witness := law.witness
   if judged.inRange != true then
     throw .policyInputRange
   if !judged.castsInjective then
     throw .policyCastAlias
-  requireSome .policyRejected (law.admit wanted evidence witness
+  requireSome .policyRejected (law.admitOwn wanted evidence
     (.policy wanted.policyId wanted.policyRevision)
     (source_request_epoch_current prepared tuple incidence)
     (source_request_revision_current prepared tuple incidence))
