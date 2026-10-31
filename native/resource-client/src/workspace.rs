@@ -3800,21 +3800,60 @@ fn index_existing_attempts(root: &Path, index: &Path) -> Result<()> {
             }
         }
     }
+    // The index directory exists even when no attempt retained an intent yet.
+    crate::fsio::ensure_private_dir_all(index)?;
     create_private(&index.join("complete"), b"").or_else(|error| {
         if index.join("complete").is_file() { Ok(()) } else { Err(error) }
     })
 }
 
+/// The rerun candidates for these intent bytes: the index's bucket, or (when the index cannot be
+/// built or read) every retained attempt, as before the index existed. The index is derived, so a
+/// failure to maintain it costs a scan, never a refusal.
+fn rerun_candidates(root: &Path, bytes: &[u8]) -> Vec<PathBuf> {
+    let index = attempt_index(root);
+    let indexed = index.join("complete").is_file() || index_existing_attempts(root, &index).is_ok();
+    let names: Vec<OsString> = if indexed {
+        match fs::read_dir(index.join(intent_key(bytes))) {
+            Ok(entries) => entries.flatten().map(|entry| entry.file_name()).collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(_) => all_attempt_names(root),
+        }
+    } else {
+        all_attempt_names(root)
+    };
+    names.into_iter().map(|name| root.join("attempts").join(name)).collect()
+}
+
+fn all_attempt_names(root: &Path) -> Vec<OsString> {
+    fs::read_dir(root.join("attempts"))
+        .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+        .unwrap_or_default()
+}
+
 /// Record that `attempt` (a directory under `WORKSPACE/attempts`) retains an intent with these
 /// bytes. Attempts kept elsewhere (an app worker's own directories) are not submissions this
 /// workspace's rerun check reads.
+///
+/// A failure to write the entry does not stop the submission: the index is derived. It withdraws
+/// the index's `complete` record instead, so the next rerun check rebuilds the index from every
+/// attempt (this one included). Only when neither the entry nor that withdrawal can be written
+/// is the submission refused, before any call exists.
 pub(crate) fn index_retained_intent(attempt: &Path, bytes: &[u8]) -> Result<()> {
     let (Some(parent), Some(name)) = (attempt.parent(), attempt.file_name()) else { return Ok(()) };
     if parent.file_name() != Some(OsStr::new("attempts")) {
         return Ok(());
     }
     let Some(root) = parent.parent() else { return Ok(()) };
-    index_entry(&attempt_index(root), bytes, name)
+    let index = attempt_index(root);
+    match index_entry(&index, bytes, name) {
+        Ok(()) => Ok(()),
+        Err(error) => match fs::remove_file(index.join("complete")) {
+            Ok(()) => Ok(()),
+            Err(gone) if gone.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(error),
+        },
+    }
 }
 
 /// A second submission of an intent that an earlier attempt of this workspace already holds is
@@ -3829,13 +3868,7 @@ fn refuse_rerun(root: &Path, source: &Path, kind: &str) -> Result<()> {
     if !root.join("attempts").is_dir() {
         return Ok(());
     }
-    let index = attempt_index(root);
-    if !index.join("complete").is_file() {
-        index_existing_attempts(root, &index)?;
-    }
-    let Ok(entries) = fs::read_dir(index.join(intent_key(&bytes))) else { return Ok(()) };
-    for entry in entries.flatten() {
-        let attempt = root.join("attempts").join(entry.file_name());
+    for attempt in rerun_candidates(root, &bytes) {
         let copy = attempt.join(retained);
         if !fs::metadata(&copy).is_ok_and(|m| m.len() == bytes.len() as u64) || fs::read(&copy).ok().as_deref() != Some(bytes.as_slice()) {
             continue;
@@ -7470,6 +7503,20 @@ mod tests {
         index_attempt_dir(&retired).unwrap();
         assert!(refuse_rerun(&root, &source(b"{\"new\":1}"), "intent").unwrap_err().contains("released"));
         refuse_rerun(&root, &source(b"{\"other\":1}"), "intent").unwrap();
+        // A workspace whose attempts never retained an intent (a fresh controller owner-workspace with
+        // a named attempt): the rerun check builds an empty index and refuses nothing; the named
+        // attempt's retention then indexes it.
+        let fresh_root = root.join("fresh");
+        fs::create_dir_all(fresh_root.join("attempts").join("witness")).unwrap();
+        let fresh_source = fresh_root.join("source.json");
+        fs::write(&fresh_source, b"{\"w\":1}").unwrap();
+        refuse_rerun(&fresh_root, &fresh_source, "intent").unwrap();
+        assert!(attempt_index(&fresh_root).join("complete").is_file());
+        let witness = fresh_root.join("attempts").join("witness");
+        fs::write(witness.join("intent.json"), b"{\"w\":1}").unwrap();
+        index_retained_intent(&witness, b"{\"w\":1}").unwrap();
+        fs::write(witness.join("call.bin"), b"exact call").unwrap();
+        assert!(refuse_rerun(&fresh_root, &fresh_source, "intent").unwrap_err().contains("witness"));
         // Not indexed and retained after the one-time index: not seen (every retention indexes).
         seal("a-unindexed", b"{\"u\":1}");
         refuse_rerun(&root, &source(b"{\"u\":1}"), "intent").unwrap();
