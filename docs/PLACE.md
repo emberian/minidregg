@@ -71,8 +71,9 @@ roster's streams; `tail` orders entries by (height, author, cell, sequence)
 (`native/resource-client/src/chat.rs`). Topics, pins, unpins and reactions are typed entries in
 the speaker's own stream, never writes to another member's stream. Because each author writes
 only their own stream, appends by different authors never stale each other
-(`append_admits_disjoint_authors`); two appends planned from one read of one stream serialise
-(`append_same_stream_serialises`).
+(`append_admits_disjoint_authors`); and an append is computed at the head it meets, never at
+its planned root (`append_planned_root_irrelevant`), so parallel appends to one stream all land,
+in admission order.
 
 (a) Who may write a stream is a law installed at birth (`StreamResource.authorLaw`): every
 `mutate` or `append` must be signed by the author (`authorLaw_refuses_other_writer`,
