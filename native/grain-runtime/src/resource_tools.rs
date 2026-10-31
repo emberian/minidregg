@@ -1212,11 +1212,12 @@ impl RoomTools<'_> {
         let status = recovered.as_ref().filter(|v| v["type"] == "minidregg-operation-recovery-v1").and_then(|v| v["status"].as_str());
         let resolution = match status {
             Some("confirmed") => "performed",
-            Some("refused" | "not-submitted") => "refused",
+            Some("refused") => "refused",
+            // "The Host never got the write" is not "the Host refused the write": only the latter is a
+            // verdict. It is its own resolution, so no caller can read it as a refusal by matching one value.
+            Some("not-submitted") => "not-submitted",
             _ => "uncertain",
         };
-        // "The Host never got the write" is not "the Host refused the write": only the latter is a verdict.
-        // The basis keeps them apart, so a caller that retries on basis not-submitted never meets a false refusal.
         let basis = if status == Some("not-submitted") { "not-submitted" } else { "exact-operation-record" };
         Ok(json!({"resolution":resolution,"basis":basis,"effect":effect,
             "lookup":recovered,"exitCode":output.status.code()}))
@@ -1490,7 +1491,7 @@ mod tests {
             "socket":"/s","workspace":root,"home":root,"room":"lab"})).unwrap();
         let tools = RoomTools { config: &config };
         fs::write(tools.operation_record("g1", "write").unwrap(), b"{}").unwrap();
-        for (status, resolution, basis) in [("not-submitted", "refused", "not-submitted"),
+        for (status, resolution, basis) in [("not-submitted", "not-submitted", "not-submitted"),
             ("refused", "refused", "exact-operation-record"), ("confirmed", "performed", "exact-operation-record")] {
             std::env::set_var("STATUS", status);
             let found = tools.lookup_operation("g1", "write").unwrap();

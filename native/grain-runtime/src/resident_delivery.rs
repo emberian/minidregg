@@ -343,6 +343,7 @@ fn validate_terminal_resolution(record:&FinalRecord,resolution:&Value)->Result<(
             let mut performed=resolution.clone();performed["result"]["resolution"]=json!("performed");
             validate_final_resolution(record,&performed)
         },
+        Some("not-submitted")=>Err("final write was never submitted: no terminal outcome; retain the exact source operation for an exact retry".into()),
         _=>Err("final effect is uncertain; retain exact source operation without replay".into()),
     }
 }
@@ -1521,6 +1522,11 @@ mod tests {
         assert!(error.contains("not-submitted") && error.contains("no terminal refusal"),"{error}");
         assert!(rt.journal.resident_delivery.is_some());
         assert!(!rt.config.state_dir.join("resident-final-refused-0000000000000001.json").exists());
+        let mut never=performed(&record,id);
+        never["result"]=json!({"resolution":"not-submitted","basis":"not-submitted","effect":"write"});
+        let error=rt.finish_delivery(&record,&record.arguments(7),never).unwrap_err();
+        assert!(error.contains("never submitted") && error.contains("exact retry"),"{error}");
+        assert!(rt.journal.resident_delivery.is_some());
         let mut host=performed(&record,id);
         host["result"]=json!({"resolution":"refused","basis":"exact-operation-record","notResent":true});
         rt.journal.room_resolutions[0]=host.clone();
