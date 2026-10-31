@@ -662,13 +662,13 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let body ← readExactly input length
   let operation := body[0]!
   let payload := body.toList.drop 1
-  let thin := operation ≥ 230 && operation ≤ 232 || operation == 234 || operation == 235 || operation == 226
-  let admits := !(thin || operation == 236 && !payload.isEmpty || operation == 228 || operation == 233 ||
+  let isThin := operation ≥ 230 && operation ≤ 232 || operation == 234 || operation == 235 || operation == 226
+  let admits := !(isThin || operation == 236 && !payload.isEmpty || operation == 228 || operation == 233 ||
     operation == 229)
   if owed && !admits then
     if let some session := held then recheckOrEnd config session output
   let owed := owed && admits
-  if thin then && operation ≤ 232 || operation == 234 || operation == 235 || operation == 226 then
+  if isThin then
     let answer ← try
         let reply ← if operation == 226 then possession config payload
           else do thin (← IO.ofExcept settings.providerRoutes) config operation payload
