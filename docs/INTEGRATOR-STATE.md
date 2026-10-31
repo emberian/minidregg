@@ -41,8 +41,10 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   admitOwn fix, identical to dc61016cb).
   + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
   representsCheck_eq_fast; first read after idle 20.8 s -> 3.9 s at height ~920; audit SOUND: unconditional funext csimp, hash sets over Nat).
-- Awaited: hot-path
-  92828ff96 (birth plan directory decode) after lane-check; infra's forge composed of batch 7 (after its batch 4 rebuild).
+  + hot-path 92828ff96/d7c55dfa0 (birth preparation takes Held directory/authority: callers with an Opened decode no
+  directory row; ordinary birth plan prepared once instead of ~4 decodes; Held.eq_load, Loaded.load_eq; audit
+  requested). Before: `doc new` Host CPU 621 ms -> 1000 ms after 500 says (law 17); after-numbers awaited.
+- Awaited: infra's forge composed of batch 7 (after its batch 4 rebuild).
 - **CLOSED: GET read-path contract** (ember ruled (c)+(d); hot-path owns it statement-first). Never re-run or re-report.
 - hbox: / 57 GB free (11:25).
 
@@ -92,6 +94,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 12:05: hot-path d7c55dfa0 merged (6640356b5); audit requested.
 - 10-31 11:55: perf-client 6a088183f merged (45f0ed263), audit requested from a4d9a6f4cba4855ca.
 - 10-31 11:50: app-reds: D1 (codec Broken pipe on forge batch 4) as a second transport-drop sighting.
 - 10-31 11:35: exorcist: 975491262 merged (507155c77), batch 9; fix already in batch 8. hot-path: a5e757016 in batch 8.
