@@ -39,7 +39,10 @@ same step. Closed items are never re-reported.
   Book entries) rebases onto it.
 - **CLOSED: GET read-path contract.** Astra reviewed, ember ruled; hot-path a6c4a1532687a4fdb owns it statement-first. Never
   re-run or re-report.
-- hbox: / 59 GB free (10:42).
+- **Hermes final-say red (batches 5-7 j14 `refused`)**: app-reds run 24 found the cause class: the controller's final
+  `mini_say` got ECONNRESET from the operator-v2 socket and was recorded as `refused`. Owed (app-reds): a transport
+  failure resolves by exact lookup and exact retry, never `refused`; and prove or rule out ServeBounds' 10 s read deadline.
+- hbox: / 60 GB free (10:55).
 
 ## Reports owed
 
