@@ -111,6 +111,12 @@ another until a real batch has accumulated. Rehearsal 3 ships be4ef7510 with the
 
 ## Lean 4.35 bump protocol (what is held)
 
+**HOLD LEAN declared ~21:00 2026-10-30** by ab2786fe1172f5683: bump green on the Mac for the whole closure (only the two
+Native fixtures red, as on main); 324 pin sets changed within propext/Classical.choice/Quot.sound; 187 scoped
+`backward.isDefEq.respectTransparency false`; final sha off main 929eac696 after Kimi's review. Held: proofs (re-record from
+the bump candidate instead), private cells, hot-path 2dfa8372e. Staging's unbuilt hot-path batches 1-3 merge after the bump.
+The bump's hbox build waits for the disk to be cleared; build it alone, first.
+
 The bump comes as one sha off main. On its "HOLD LEAN" message, hold every other Lean landing (proofs batches) until
 the bump's candidate is READY; then they rebase. Rust-only and harness landings keep flowing. Build the bump alone.
 Required in its commit message: every #assert_axioms pin whose set changed (Classical.choice joining is fine; sorryAx,
