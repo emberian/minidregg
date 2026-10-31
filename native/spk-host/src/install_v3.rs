@@ -42,6 +42,13 @@ const MAX_QUALIFICATION: u64 = 16 * 1024;
 struct QualifiedLaunch {
     protocol: String,
     raw_sha256: String,
+    /// The signed identity the qualification read; the install reports it, nothing here decides on it.
+    #[serde(default)]
+    #[allow(dead_code)]
+    signed_app_id: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    signed_app_version: Option<String>,
     package_root: String,
     launch_root: String,
     launch_canonical_sha256: String,
@@ -862,6 +869,8 @@ mod tests {
         let qualification = QualifiedLaunch {
             protocol: "mini-spk-launch-qualified-v2".into(),
             raw_sha256: "a".repeat(64),
+            signed_app_id: None,
+            signed_app_version: None,
             package_root: "11".into(),
             launch_root: "22".into(),
             launch_canonical_sha256: super::super::hex(&Sha256::digest(&launch.canonical)),

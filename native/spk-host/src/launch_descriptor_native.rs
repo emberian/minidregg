@@ -248,6 +248,8 @@ pub fn qualify_launch(config_path: &Path) -> io::Result<Value> {
     let result = json!({
         "protocol":"mini-spk-launch-qualified-v2",
         "rawSha256":package.raw_sha256,
+        "signedAppId":package.manifest.app_id.0,
+        "signedAppVersion":package.manifest.app_version.to_string(),
         "packageRoot":launch.package.root,
         "launchRoot":launch.root,
         "launchCanonicalSha256":hex(&Sha256::digest(&launch.canonical)),
