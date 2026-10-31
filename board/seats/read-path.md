@@ -43,6 +43,10 @@ rounds, and move measurement to persvati's standing world when it exists.
   runs over it; `Local` is bytes; read-path codec inspections are `inspect_bytes`. Per read: openat 53 to 16,
   write 30 to 4, unlink 15 to 0, linkat 13 to 0; resident CPU 3.5-4.4 to 2.6-3.9 ms.
 - dde0f4463: a fresh memory attempt asks the disk nothing (statx 57 to 44 per read).
+- 8cbe36d62: ops 4 and 5 on the light opening (`challengeWireLight`, `queryWireLight`, `rememberLight`); a current
+  resource read no longer opens the full image; history, `at h` and batch reads still do (`sessionFull`). The op 4
+  chain is ground-generic and its theorems are restated over any ground. lane-check green on bb2; not yet run
+  against a world.
 - a128a7497: signature admission hands the controller its state and registry as values (`prepareDecoded`,
   `@[csimp] prepare_eq_fast`), the envelope decoded once, `registryDigest` seven bytes per big multiplication
   (`@[csimp] registryDigest_eq_fast`); checked on persvati (three modules), not yet measured.
@@ -62,7 +66,7 @@ rounds, and move measurement to persvati's standing world when it exists.
   /home/hbox/lanes/integ/candidates/997905c0bc9c85086324d02c46abeeab3273f6e2. Then two scratch worlds, before
   (batch 9) and after (the overlay), Host CPU per `doc show` alternated. Moves to persvati once build-loop
   announces it.
-- a128a7497 and 143caf2fc await one native Host build (dregg-build2 when build-loop announces it) and a
+- a128a7497, 143caf2fc and 8cbe36d62 await one native Host build (dregg-build2 when build-loop announces it) and a
   measurement of Host CPU per `doc show` against an unchanged base, alternated worlds.
 - hbox trash to clear when hbox returns (root's word): stop w6 and w7 by their PID files and remove them (0.6 G
   each; keep w8), and /home/hbox/lanes/exorcism's Rust target (9.1 G total clone; the pool tree replaces it once
@@ -107,7 +111,8 @@ rounds, and move measurement to persvati's standing world when it exists.
 
 - member-side (a778bbda6509944a5): consent cost per read; mini-web-spawn's `delegated_consent_env` twin of
   mini-line's selection (theirs, by a shared `#[path]` source); op 144 head-keyed check later.
-- store-retained (a9b54e85e4a194b91): the reference-name index over WORKSPACE/refs.
+- store-retained (a9b54e85e4a194b91): the reference-name index over WORKSPACE/refs; op 4's planned challenges
+  retained for op 5 (`Session.challenges`), typed by the light opening's ground (proposed to it 2026-10-31).
 - host-execution (a24974e84d3c540d1): `issuerCheck`/`existsSupport`, FORMAT, the restart path, the GET read-path
   contract.
 - infra (aa72653a8ce442178): deletes edge/mini/shell/mini-shell-ssh once no supported candidate lacks
