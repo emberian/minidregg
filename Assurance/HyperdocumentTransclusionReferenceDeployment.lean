@@ -20,6 +20,7 @@ collision resistance, Fiat--Shamir/ROM, external finality, physical storage,
 search-index coverage, and response availability remain named premises.
 -/
 
+import Mathlib.Data.Rat.Encodable
 import Mathlib.Data.List.Lex
 import Mathlib.Data.Prod.Lex
 import Assurance.HyperdocumentLinkEndpointController

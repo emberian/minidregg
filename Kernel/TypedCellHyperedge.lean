@@ -22,6 +22,7 @@ certificate are deleted; this is the only joint carrier over one cell.
 -/
 module
 
+public import Mathlib.Algebra.BigOperators.Pi
 public import Kernel.Turn
 public import Theory.AcceptedCellEffect
 

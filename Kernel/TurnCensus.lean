@@ -64,6 +64,8 @@ The final `host_submit_is_step` statement for T4 is in
 logRoot0 legBytes imageBytes` (stage F must say what a leg's bytes and a birth
 image's bytes are).
 -/
+import Mathlib.Tactic.Ring
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Kernel.World
 import Theory.AssertAxioms
 

@@ -76,6 +76,7 @@ native store and the host's open/submit path are C2's.
 -/
 module
 
+public import Mathlib.Data.Finset.Union
 public import Theory.Store
 public import Theory.TypedAuthorization
 public import Theory.ResourceCost

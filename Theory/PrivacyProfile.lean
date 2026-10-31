@@ -7,7 +7,7 @@ file neither realizes nor assumes one for any concrete primitive.
 -/
 module
 
-public import Mathlib.Tactic
+public import Mathlib.Tactic.Common
 
 @[expose] public section
 

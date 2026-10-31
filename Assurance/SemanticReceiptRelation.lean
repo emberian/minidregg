@@ -17,6 +17,7 @@ not claim that a Rust `HistoryEnvelope` implements this word: no Rust semantics
 exists in which such a refinement theorem could be stated. Lean emission of
 the codec/API and `[PCH-OUTER-ACCUMULATOR]` remain separate boundaries.
 -/
+import Mathlib.Tactic.DeriveFintype
 import Theory.ReactiveReceipt
 import Selvage.Accumulator
 

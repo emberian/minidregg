@@ -22,7 +22,9 @@ EVERY committed ancestor, and EVERY committed channel.
 module
 
 public import Mathlib.Data.Finset.Basic
-public import Mathlib.Tactic
+public import Mathlib.Tactic.Common
+public import Mathlib.Tactic.NormNum
+public import Mathlib.Data.Finset.Card
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr

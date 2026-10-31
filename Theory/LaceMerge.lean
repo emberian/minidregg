@@ -35,6 +35,7 @@ Residuals: `[LACE-frontier]` tips/frontier view (reuse `CausalVersionDag.frontie
 DERIVED finalizer (DISTRIBUTED-DESIGN §3.3); `[LACE-catchup]` fold-of-merge catch-up
 (trivial once merge is a semilattice, deferred).
 -/
+import Mathlib.Logic.Equiv.List
 import Theory.CausalVersionDag
 
 namespace Minidregg.Theory.LaceMerge

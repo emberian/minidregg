@@ -45,6 +45,13 @@ same operation normalization and conservation law.
 -/
 module
 
+public import Mathlib.Tactic.DeriveCountable
+public import Mathlib.Tactic.Linarith
+public import Mathlib.Tactic.Ring
+public import Mathlib.Data.Countable.Basic
+public import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+public import Mathlib.Algebra.BigOperators.Group.Finset.Piecewise
+public import Mathlib.Algebra.Order.BigOperators.Group.Finset
 public import Mathlib.Data.DFinsupp.Encodable
 public import Theory.CellState
 public import Theory.TypedAuthorization
