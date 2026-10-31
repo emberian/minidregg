@@ -62,6 +62,23 @@ fn resident_idle(variable:&str)->Option<std::time::Duration> {
     std::env::var(variable).ok().and_then(|v|v.parse().ok()).filter(|n:&u64|*n>0).map(std::time::Duration::from_secs)
 }
 
+/// The consent settings bytes, re-read only when the file's identity (device, inode, size, both
+/// times) differs from the last read in this process: every consent frame of a command names the
+/// same settings file, and a rewrite or replacement changes its identity.
+fn settings_bytes_by_identity(settings:&Path)->Result<Vec<u8>> {
+    use std::os::unix::fs::MetadataExt;
+    static SEEN:Mutex<Option<(PathBuf,[u64;7],Vec<u8>)>>=Mutex::new(None);
+    let meta=std::fs::symlink_metadata(settings).map_err(|e|format!("{}: {e}",settings.display()))?;
+    let identity=[meta.dev(),meta.ino(),meta.size(),meta.mtime() as u64,meta.mtime_nsec() as u64,meta.ctime() as u64,meta.ctime_nsec() as u64];
+    let mut seen=SEEN.lock().map_err(|_|"consent settings cache lock poisoned")?;
+    if let Some((path,id,bytes))=seen.as_ref() {
+        if path==settings&&*id==identity {return Ok(bytes.clone());}
+    }
+    let bytes=crate::fsio::read_bounded_or_empty(settings, CAP)?;
+    *seen=Some((settings.to_path_buf(),identity,bytes.clone()));
+    Ok(bytes)
+}
+
 /// The selected consent provider of this process, started (or reached as this binding's resident
 /// provider) on first use and kept: restarting would discard its independently verified frontier.
 /// A dead provider remains failed for this process rather than silently verifying an older source
@@ -73,7 +90,7 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
     let settings=PINS.get().map(|pins|pins.config.clone()).or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
     if !executable.is_absolute()||!settings.is_absolute() {return Err("local consent executable/settings must be absolute".into());}
-    let settings_bytes=crate::fsio::read_bounded_or_empty(&settings, CAP)?;
+    let settings_bytes=settings_bytes_by_identity(&settings)?;
     let delegated=match PINS.get(){Some(p)=>p.delegated.clone(),None=>crate::consent_proxy::Selection::from_env()?};
     if let Some(selected)=DELEGATED_SESSION.get(){
         if selected!=&delegated{return Err("consent transport selection changed within signing session".into());}

@@ -342,7 +342,36 @@ pub(crate) fn load_for_key_transition(root: &Path) -> Result<Value> {
 /// Retained physical custody for exact receipt recovery, offline audit, and the
 /// explicit key-transition adapter. This projection grants no current signing
 /// authority; ordinary fresh signed operations must use the checked loader.
+/// The workspace this process last loaded and checked, by `workspace.json`'s file identity
+/// (device, inode, size, both times): a verb loads its workspace from many places, and a
+/// workspace whose file keeps its identity is the one already checked and pinned. A rewrite
+/// (every update replaces the file) or a replacement loads and checks it again.
+static LOADED: Mutex<Option<(PathBuf, [u64; 7], Value)>> = Mutex::new(None);
+
+fn workspace_identity(root: &Path) -> Option<[u64; 7]> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = fs::symlink_metadata(root.join("workspace.json")).ok()?;
+    Some([meta.dev(), meta.ino(), meta.size(), meta.mtime() as u64, meta.mtime_nsec() as u64,
+        meta.ctime() as u64, meta.ctime_nsec() as u64])
+}
+
 pub(crate) fn load_retained(root: &Path) -> Result<RetainedWorkspace> {
+    let identity = workspace_identity(root);
+    if let (Some(identity), Ok(loaded)) = (identity, LOADED.lock()) {
+        if let Some((path, seen, value)) = loaded.as_ref() {
+            if path == root && *seen == identity {
+                return Ok(RetainedWorkspace { value: value.clone() });
+            }
+        }
+    }
+    let retained = load_retained_checked(root)?;
+    if let (Some(identity), Ok(mut loaded)) = (identity, LOADED.lock()) {
+        *loaded = Some((root.to_path_buf(), identity, retained.value.clone()));
+    }
+    Ok(retained)
+}
+
+fn load_retained_checked(root: &Path) -> Result<RetainedWorkspace> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;

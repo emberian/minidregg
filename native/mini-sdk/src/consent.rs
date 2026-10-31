@@ -5,8 +5,10 @@
 //!
 //! Frames (READ `Host/ClientConsentCore.lean`): 220 intent, 221 observation, 222 plan, 224
 //! operator (specialized) plan, 226 possession, 227 Objective, 228 offer a retained anchor, 229
-//! the anchor of what was admitted, 230–232 thin consent and 234–235 thin birth consent (no Store read), 233 re-check the Store
-//! against the held admission.
+//! the anchor of what was admitted, 230–232 thin consent and 234–235 thin birth consent (no Store read), 233 the Store re-check
+//! against the held admission: answered at once and owed, the provider makes it on the next
+//! frame's own Store read before answering that frame, so a 233 reply alone proves nothing about
+//! the Store; only the frame after it does (`ClientConsentCore.serve`).
 //!
 //! **Retained anchors.** The provider admits the Store's history before its first consent frame.
 //! The provider starts from the Store's MAC-verified checkpoint (CONSENT-STORE, the storage device
@@ -22,8 +24,8 @@
 //! from the retained anchor before its first frame and drops the warm frontier on exit. The
 //! resident provider ([`serve_resident`]) is that same provider, kept: ONE provider child per
 //! binding, started as [`start`] starts one, relaying each client connection's frames to it one at
-//! a time. Each connection's first frame is preceded by 233 (`ConsentAnchor.recheckStore`), so a
-//! rolled-back Store refuses the next command as a new provider would. A refusal there, or a dead
+//! a time. Each connection's first frame is preceded by 233 (`ConsentAnchor.checkHeld`, made on that
+//! frame's own read), so a rolled-back Store refuses the next command as a new provider would. A refusal there, or a dead
 //! provider, ends the resident; the next command starts a new one from the retained anchor. Its
 //! socket lives in the owner-private anchor directory (Linux uses a directory descriptor
 //! when that address is too long), and both ends check the peer is this user.
