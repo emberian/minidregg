@@ -1,6 +1,6 @@
 # Seat: host-execution
 
-Agent: a0fee5643746e520c (about 420K tokens at 2026-10-31 evening; distill at ~500K)
+Agent: a24974e84d3c540d1 (distilled from a0fee5643746e520c, 2026-10-31 17:27)
 Worktree: /Users/ember/dev/minidregg-lanes/host-execution (branch seat/host-execution, rebased onto main and pushed to main;
 no side branch). Box tree: hbox pool t7 (`. /home/hbox/pool/pool.env; lane-tree renew hot-path`), native Host builds via
 `scripts/pipeline/native-loop hot-path <base candidate> <label>` from t7 (~3-15 min; candidates land in
