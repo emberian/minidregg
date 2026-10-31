@@ -169,13 +169,19 @@ fn native_reply(reply: &Value) -> std::result::Result<NativeReply, Refusal> {
             }
         });
     }
-    let frame: Value = serde_json::from_str(text).map_err(|_| uncertain("native-reply-malformed"))?;
+    // The refusal name is fixed; the cause goes to the controller's own log (bounded, no body bytes).
+    let malformed = |why: &str| {
+        let head: String = text.chars().filter(|c| !c.is_control()).take(160).collect();
+        eprintln!("typed foreground: reply malformed ({why}); {} bytes; begins {head:?}", text.len());
+        uncertain("native-reply-malformed")
+    };
+    let frame: Value = serde_json::from_str(text).map_err(|_| malformed("not JSON"))?;
     if frame["type"] != "http-v3" {
         return Err(uncertain("native-reply-not-definite"));
     }
-    let status = frame["status"].as_u64().filter(|s| (100..=599).contains(s)).ok_or_else(|| uncertain("native-reply-malformed"))? as u16;
-    let hex = frame["bodyHex"].as_str().filter(|h| h.len() <= MAX_REPLY_BYTES * 2).ok_or_else(|| uncertain("native-reply-malformed"))?;
-    let body = mini_sdk::hex::decode(hex).map_err(|_| uncertain("native-reply-malformed"))?;
+    let status = frame["status"].as_u64().filter(|s| (100..=599).contains(s)).ok_or_else(|| malformed("status"))? as u16;
+    let hex = frame["bodyHex"].as_str().filter(|h| h.len() <= MAX_REPLY_BYTES * 2).ok_or_else(|| malformed("bodyHex absent or over bound"))?;
+    let body = mini_sdk::hex::decode(hex).map_err(|_| malformed("bodyHex not hex"))?;
     let headers = frame["headers"].as_array().into_iter().flatten().filter_map(|h| {
         Some((h["name"].as_str()?.to_owned(), h["value"].as_str()?.to_owned()))
     }).collect();
