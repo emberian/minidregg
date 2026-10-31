@@ -68,6 +68,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   H1a (false `refused`) FIXED by faeb1ff0b. Path: resident -> public proxy participant.sock -> private/operator-v2.sock;
   no server-side log line. Owed by app-reds ad85d40779880420c: (a) the reset's cause (proxy, ServeBounds 10 s read
   deadline, operator drop); (b) who performs the exact retry of a never-submitted final.
+- **D1, forge demo rebuild (batch 4) `members` step**: `sage` provision failed `local native codec: local process
+  request failed: Broken pipe`; downstream apps-bootstrap/reenroll/grain world/seed/door red as consequences. Reruns:
+  pending (infra repair after the batch 7 forge composed). Same class as H1b (a local transport drop): app-reds told.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
@@ -87,6 +90,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 11:50: app-reds: D1 (codec Broken pipe on forge batch 4) as a second transport-drop sighting.
 - 10-31 11:35: exorcist: 975491262 merged (507155c77), batch 9; fix already in batch 8. hot-path: a5e757016 in batch 8.
 - 10-31 11:28: -hp2 result to app-reds (H1b signature, kept worlds), infra, explorer, perf-apps.
 - 10-31 12:30: staging Lean red routed to hot-path a0fee5643746e520c; ack to perf-client.
