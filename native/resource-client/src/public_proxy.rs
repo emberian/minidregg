@@ -490,7 +490,7 @@ fn run(
                 workers.handles.push(handle);
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(10))
+                mini_sdk::private::wait_readable(std::os::fd::AsRawFd::as_raw_fd(&listener), std::time::Duration::from_millis(10))
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return Err(format!("public accept failed: {e}")),

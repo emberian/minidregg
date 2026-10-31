@@ -21,7 +21,7 @@ fn design_preview() {
         mutations: Mutex::new(()), home: Some(root.join("home")), root: root.clone(),
         workspace: Value::Null, subject: "42".into(), token: String::new(),
         front: Front { origins: vec![], read_only: true }, base: String::new(), face: Face::Body,
-        shell: Some(Shell { host: "/unused".into(), config: "/unused".into(), home: root.join("home"), public_subject: Some("99".into()), front_doc: None }),
+        shell: Some(Shell { host: "/unused".into(), config: "/unused".into(), home: root.join("home"), public_subject: Some("99".into()), front_doc: None, pool: Default::default() }),
     };
     // Use the real market parser, ordering and JSON projection for catalogue screenshots.
     // MINI_WEB_CATALOGUE is a captured upstream index, never a second production list.

@@ -53,6 +53,8 @@ pub mod sign;
 pub mod signer;
 
 #[cfg(feature = "native")]
+pub mod command_resident;
+#[cfg(feature = "native")]
 pub mod consent;
 #[cfg(feature = "native")]
 pub mod durable;

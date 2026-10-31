@@ -11,7 +11,6 @@ use std::ffi::OsStr;
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
-use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -380,16 +379,9 @@ impl CustodyGate {
         before_check: impl FnOnce(),
         after_spawn: impl FnOnce(u32),
     ) -> Result<Output, CustodyError> {
-        use std::os::unix::ffi::OsStrExt;
         let started = Instant::now();
-        let mut frame = Vec::new();
-        frame.extend_from_slice(&(arguments.len() as u32).to_be_bytes());
-        for argument in arguments {
-            frame.extend_from_slice(&(argument.len() as u32).to_be_bytes());
-            frame.extend_from_slice(argument.as_bytes());
-        }
-        frame.extend_from_slice(&(input.len() as u32).to_be_bytes());
-        frame.extend_from_slice(input);
+        let frame = mini_sdk::command_resident::frame(&mini_sdk::command_resident::Request {
+            arguments, stdin: input, stdout: None, stderr: None });
         let (mut replies, pid) = {
             let slot = self
                 .child
@@ -446,7 +438,12 @@ impl CustodyGate {
             after_spawn(pid);
             (replies, pid)
         };
-        let reply = read_reply(&mut replies, started + limit, limit);
+        let reply = mini_sdk::command_resident::read_reply(&mut replies, started + limit, MAX_STREAM_BYTES)
+            .map_err(|error| match error.kind() {
+                io::ErrorKind::TimedOut => io::Error::new(io::ErrorKind::TimedOut, format!(
+                    "Mini resident exceeded its {}s deadline; killed; exact attempt uncertain", limit.as_secs())),
+                _ => error,
+            });
         let mut resident = self
             .resident
             .lock()
@@ -499,64 +496,6 @@ impl CustodyGate {
             thread::sleep(Duration::from_millis(10));
         }
     }
-}
-
-/// The resident's reply: exit code, then stdout and stderr, each a u32 length
-/// and its bytes. Waits on the pipe itself (poll) until `deadline`.
-fn read_reply(pipe: &mut ChildStdout, deadline: Instant, limit: Duration) -> io::Result<Output> {
-    let mut bytes = Vec::new();
-    loop {
-        if let Some(output) = parse_reply(&bytes)? {
-            return Ok(output);
-        }
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, format!(
-                "Mini resident exceeded its {}s deadline; killed; exact attempt uncertain", limit.as_secs())));
-        }
-        let mut poll = libc::pollfd { fd: pipe.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-        let wait = left.as_millis().min(i32::MAX as u128) as i32;
-        match unsafe { libc::poll(&mut poll, 1, wait.max(1)) } {
-            0 => continue,
-            n if n < 0 => {
-                let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(error);
-            }
-            _ => {}
-        }
-        let mut chunk = [0u8; 65536];
-        match pipe.read(&mut chunk) {
-            Ok(0) => return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
-                "Mini resident ended before its reply; exact attempt uncertain")),
-            Ok(count) => bytes.extend_from_slice(&chunk[..count]),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-fn parse_reply(bytes: &[u8]) -> io::Result<Option<Output>> {
-    let Some((&code, mut rest)) = bytes.split_first() else { return Ok(None) };
-    let mut streams = Vec::with_capacity(2);
-    for _ in 0..2 {
-        let Some(length) = rest.get(..4) else { return Ok(None) };
-        let length = u32::from_be_bytes(length.try_into().expect("four bytes")) as usize;
-        if length > MAX_STREAM_BYTES {
-            return Err(io::Error::other("Mini resident reply exceeded custody capture bound"));
-        }
-        let Some(stream) = rest.get(4..4 + length) else { return Ok(None) };
-        streams.push(stream.to_vec());
-        rest = &rest[4 + length..];
-    }
-    if !rest.is_empty() {
-        return Err(io::Error::other("Mini resident wrote past its reply"));
-    }
-    let stderr = streams.pop().expect("two streams");
-    let stdout = streams.pop().expect("two streams");
-    Ok(Some(Output { status: std::process::ExitStatus::from_raw(i32::from(code) << 8), stdout, stderr }))
 }
 
 fn set_nonblocking(pipe: &impl AsRawFd) -> io::Result<()> {
@@ -723,6 +662,7 @@ mod tests {
             "  if not h: break\n",
             "  a=[r.read(struct.unpack('>I',r.read(4))[0]) for _ in range(struct.unpack('>I',h)[0])]\n",
             "  i=r.read(struct.unpack('>I',r.read(4))[0])\n",
+            "  [r.read(struct.unpack('>I',r.read(4))[0]) for _ in range(2)]\n",
             "  if a==[b'hang']: time.sleep(60)\n",
             "  o=b' '.join(a)+i; e=str(os.getpid()).encode()\n",
             "  w.write(bytes([3])+struct.pack('>I',len(o))+o+struct.pack('>I',len(e))+e); w.flush()\n",

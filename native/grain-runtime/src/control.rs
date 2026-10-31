@@ -98,7 +98,7 @@ pub fn start_admin(path: &Path) -> Result<AdminServer, String> {
                     });
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(20));
+                    mini_sdk::private::wait_readable(std::os::fd::AsRawFd::as_raw_fd(&listener), std::time::Duration::from_millis(20));
                 }
                 Err(_) => break,
             }
@@ -385,7 +385,7 @@ pub fn start(path: &Path, hard_interrupt: HardInterrupt) -> Result<Server, Strin
                     });
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(20))
+                    mini_sdk::private::wait_readable(std::os::fd::AsRawFd::as_raw_fd(&listener), std::time::Duration::from_millis(20))
                 }
                 Err(_) => break,
             }
