@@ -903,7 +903,7 @@ try:
     row("settling the pool hold from a forged before.route = user",
         "refused at prepare by the receiver's old-value guard on field 4 (the recorded route); hold unchanged",
         f"{why2[:160]} reserved={h2['reserved']} route={h2.get('route')}",
-        at2 and "guardRejected 4" in why2 and same2)
+        at2 and "guard-rejected 4" in why2 and same2)
     r3, t3, h3, same3 = settle_as("settle-pool-at-the-user-fee", "2", "pool", USER_FEE)
     at3, why3 = prepare_refusal("settle-pool-at-the-user-fee", t3)
     row(f"settling the pool hold for the user fee ({USER_FEE} < pool fee {POOL_FEE})",

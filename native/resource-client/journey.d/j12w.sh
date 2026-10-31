@@ -171,7 +171,7 @@ case "$RC:$FIRST" in
   *) record J12W wb "doc push b1 paper @b.md" 3 FAIL "rc $RC: $FIRST" ;;
 esac
 EVIDENCE=$(sed -n 's/^  evidence: //p' "$ERR" | head -1)
-check J12W "the Host's own refusal line names staleAtom" grep -q '^refused: operation-rejected: .*ContentResource.Reject.staleAtom' "$ERR"
+check J12W "the Host's own refusal line names the clause content-resource: stale-atom" grep -q '^refused: operation-rejected: .*content-resource: stale-atom' "$ERR"
 check J12W "the Host's decoding of the retained frame is operation-rejected" \
   test "$(jq -r '.reason // empty' "${EVIDENCE%.bin}.json" 2>/dev/null)" = operation-rejected
 check J12W "B's seen record is untouched by the refusal" \

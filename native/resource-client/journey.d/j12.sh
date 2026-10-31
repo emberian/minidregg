@@ -183,7 +183,7 @@ ok J12 bob "doc edit b2 paper 1 'Alice: the first paragraph, tightened by Bob.'"
 ok J12 bob "submit b2"
 # alice edits line 1 as she last read it; bob changed it since: the Host refuses
 ok J12 alice "doc edit a2 paper 1 'Alice: my own rewrite.'"
-refused J12 alice "submit a2" operation-rejected "ContentResource.Reject.staleAtom"
+refused J12 alice "submit a2" operation-rejected "content-resource: stale-atom"
 ok J12 alice "doc show paper --json"
 check J12 "alice rereads: line 1 is bob's edit" line_is "$OUT" 1 "$A" 'tightened by Bob\.$'
 ok J12 alice "doc edit a3 paper 1 'Alice: the first paragraph, tightened by Bob, then Alice.'"

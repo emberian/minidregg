@@ -89,7 +89,7 @@ A=$(subj alice); BOB=$(subj bob); CARL=$(subj carl); EVE=$(subj eve)
 # K-FIELD-CLOSURE (2ab6ef007) births a declared cell holding its declaration and NO
 # field: field 1 is created here (= 0) so the guests' `write 1 1 0` (value 1, expected
 # 0) passes its guard and reaches the law. Without it every write, the owner's
-# included, is refused `guardRejected 0` at prepare: the expected-0 guard over an
+# included, is refused `guard-rejected 0` (the Host names it so; the committed repr is guardRejected 0) at prepare: the expected-0 guard over an
 # absent field, which says nothing about the law or the grant.
 q alice "create vault declared open 1,2" || die "create vault"
 q alice "invoke v-c1 vault create 1 0"; q alice "submit v-c1" || die "field 1: $(refused)"

@@ -612,7 +612,7 @@ STALE_RC=$?
 STALE1=$(cat "$W"/public/serve*.log 2>/dev/null | grep -c 'submission refused (operator log).*birthStale')
 # The Host refuses it at prepare (the submitter reads the kernel's reason) or, if a
 # plan was signed, at admission (the operator log names it): birthStale either way.
-STALE_NAMED=$(grep -c 'ResourceBirthPolicyController.Reject.birthStale' "$L/stale-birth.err")
+STALE_NAMED=$(grep -c 'resource-birth-policy-controller: birth-stale' "$L/stale-birth.err")
 record aged OPERATOR "a birth authored at genesis (notBefore $GH) is refused on the aged World" "refused birthStale" \
   "rc $STALE_RC, prepare refusals naming birthStale $STALE_NAMED, operator-log birthStale lines $STALE0 -> $STALE1" \
   "$([ "$STALE_RC" != 0 ] && { [ "$STALE_NAMED" -gt 0 ] || [ "$STALE1" -gt "$STALE0" ]; } && echo ok || echo FAIL)" \
