@@ -220,8 +220,8 @@ am inferring a lane's scope from its name, or **UNOWNED**.
 
 The previous map's `0` rows that a scratch world can reach are now measured. Every number includes the ssh
 connection and wrapper: a pure local verb (`help`) costs **180-200 ms over ssh against 7 ms for the same client
-called directly**, so about 175 ms of every ssh-carried action is the ssh path itself (connect, forced command,
-bash wrapper), before any Host work. That floor is 175x the bar and applies to every row of the shell table.
+called directly**, so about 175 ms of every ssh-carried action is the ssh path itself (see the correction below: it is the
+handshake, ~15 ms with a multiplexed connection), before any Host work.
 
 | path | warm (ms) | grows | owner |
 |---|---|---|---|
@@ -239,6 +239,16 @@ bash wrapper), before any Host work. That floor is 175x the bar and applies to e
 | `export world` | 1,034 first, 176 second, at height 142 (6.9 s at h195 in an early run on another box) | E: yes with world size | retained-mode inventory |
 
 No scratch-reachable row is near 1 ms; all are 180 ms to 2.3 s, 175 ms of which is the ssh path.
+
+**Correction from perf-client on the ssh floor:** the ~175 ms is the ssh handshake, not the wrapper or `mini`.
+Measured on hbox against a scratch sshd (OpenSSH 9.7, `help`, member-1): 181-216 ms plain; **15-16 ms over a
+multiplexed connection (ControlMaster)**, which is wrapper + mini only; 122 ms with classical curve25519 kex
+instead of the default post-quantum hybrid, so about 60-90 ms is the PQ key exchange. The web path does not
+pay it. Every one-verb-per-connection ssh number in this file therefore includes about 165 ms of handshake;
+subtract it, or read the rows as "warm, multiplexed" minus ~165 ms (e.g. a local read is ~15-20 ms, a story
+`go` ~430-460 ms). Server-side kex choice is ember's security decision and the sshd config is infra's; both
+are with the coordinator. Client side: `deploy/shell/FRIENDS.md` now shows the ControlMaster config
+(lane/perf-client).
 
 ## Owners after the coordinator's ruling
 
