@@ -16,7 +16,12 @@
 # Commit first: lane-build refuses a tree with uncommitted tracked changes. Run it detached with a PID file.
 set -euo pipefail
 lane=${1:?LANE}; base=${2:?BASE_CANDIDATE}; label=${3:?LABEL}
-. "${LANE_POOL_ENV:-$HOME/pool/pool.env}"
+pool_env=
+for f in "${LANE_POOL_ENV:-}" "${LANE_POOL_ROOT:+$LANE_POOL_ROOT/pool.env}" /srv/pool/pool.env /build/pool/pool.env "$HOME/pool/pool.env"; do
+  [ -n "$f" ] && [ -f "$f" ] && { pool_env=$f; break; }
+done
+[ -n "$pool_env" ] || { echo "native-loop: no pool.env (set LANE_POOL_ENV)" >&2; exit 1; }
+. "$pool_env"
 pool_tree=$("$LANE_POOL_ROOT/bin/lane-tree" status | awk -v l="$lane" '$2 == l { print $1 }')
 [ -n "$pool_tree" ] || { echo "native-loop: $lane holds no pooled tree (lane-tree acquire $lane REF)" >&2; exit 64; }
 t=$LANE_POOL_ROOT/$pool_tree

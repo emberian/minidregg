@@ -59,7 +59,7 @@ if command -v swarm-build >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&
   die "swarm-build cannot reach the systemd user bus (XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-unset}): a build here would exit 1 and compile nothing; log in as $(id -un) or enable lingering"
 fi
 pool_env=
-for f in "${LANE_POOL_ENV:-}" /build/pool/pool.env /tank/dregg-build/pool/pool.env "$HOME/pool/pool.env"; do
+for f in "${LANE_POOL_ENV:-}" "${LANE_POOL_ROOT:+$LANE_POOL_ROOT/pool.env}" /srv/pool/pool.env /build/pool/pool.env /tank/dregg-build/pool/pool.env "$HOME/pool/pool.env"; do
   [ -n "$f" ] && [ -f "$f" ] && { pool_env=$f; . "$f"; break; }
 done
 if [ -z "$pool_env" ] && [ "${1:-}" = init ]; then
