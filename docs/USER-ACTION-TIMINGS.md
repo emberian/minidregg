@@ -216,20 +216,36 @@ am inferring a lane's scope from its name, or **UNOWNED**.
 | snapshot save / restore, cold start | 0 (designed; snapshots not exercised) | the point of the work | hot-path (cold-start), retained-mode (proposed) |
 | world-down / teardown leaving residents | defect, not latency | n/a | infra (outside the lanes) |
 
-## Unowned rows (to the coordinator)
+## Coverage map, second pass (b6 74e1cfa10, scratch world, hbox load 9 to 12, via ssh, ms, three runs)
 
-History-sensitive or on a user's critical path first:
-1. `export world` / app-export / backup / restore (O(world), 6.9 s at h195).
-2. Door, enrol and the reenroll chain (first minute of every stranger); and the clock tick, roster sync.
-3. Story play verbs (`go`/`take`/`act`/`narrate`): ~1-1.7 s and likely O(cell).
-4. Carry, FN consumer, and consensus/source agreement readers: 0 measurements; the carry prefix check is
-   likely O(history).
-5. Discord bridge and pay-watcher.
-6. The read-only local verbs (`history`, `why`, `inspect`, `describe`, `law show`, `inbox`): scale with the
-   698 retained attempts.
-7. Room administration verbs (`kick`, `seal`, `rotate`, `rewrap`), `law`/`kind`/`program`/`instance`, market,
-   job, board, `key`, `tariff`, `topup`, `pay ROOM`.
-8. `/search`, inference scheduler, agent session overlay.
+The previous map's `0` rows that a scratch world can reach are now measured. Every number includes the ssh
+connection and wrapper: a pure local verb (`help`) costs **180-200 ms over ssh against 7 ms for the same client
+called directly**, so about 175 ms of every ssh-carried action is the ssh path itself (connect, forced command,
+bash wrapper), before any Host work. That floor is 175x the bar and applies to every row of the shell table.
+
+| path | warm (ms) | grows | owner |
+|---|---|---|---|
+| ssh + wrapper floor (`help`) | 179-203 | no | perf-client |
+| local read-only verbs (`history`, `history all`, `why`, `inbox`, `refs`, `room list`) | 180-230, same at 0 and 132 retained attempts | **no** (flat to 132 attempts) | perf-client (floor only) |
+| `inspect caps` / `can REF` | 207-389 / 216-219 (one Host read) | no | perf-client |
+| story `look` / `go` / `take` / `act` / `narrate` | 280-453 look; 593-629 for `go`/`take`/`act`; 435 narrate; `story list`/`law tale` 184-214 | not seen over 5 moves | hot-path |
+| room `new` / `members` / `status` / `invite` + submit / `kick` + submit | 1,001 / 464 / 206 / 245+492 / 396+704 | not measured with history | hot-path |
+| `law check` / `law show` / `inspect law` / `law install` + submit | 194 / 471 / 512 / 211 + 839 | not measured | hot-path |
+| `market open` / `bids` | 2,255 / 455 | not measured | UNOWNED |
+| `board new` | 761 (`board add` needs a numeric TASK: my test row was a usage error) | not measured | UNOWNED |
+| `jobs`, `tariff show`, `tariff set`, `credit` | 183 / 445 / 386 / 560 | no | UNOWNED |
+| `pay audit`; `pay status` | 206; usage error without the account ref | no | UNOWNED |
+| `key ls`, `key providers` | refused: `mini-keys refused client-config` (a scratch world has no keys broker) | n/a | UNOWNED (needs a world with mini-keys: the forge) |
+| `export world` | 1,034 first, 176 second, at height 142 (6.9 s at h195 in an early run on another box) | E: yes with world size | retained-mode inventory |
+
+No scratch-reachable row is near 1 ms; all are 180 ms to 2.3 s, 175 ms of which is the ssh path.
+
+## Owners after the coordinator's ruling
+
+- hot-path (a6c4a1532687a4fdb): story play verbs (280-629 ms), room administration (206 ms-1 s), `law` verbs (194 ms-840 ms).
+- perf-client (a778bbda6509944a5): the local read-only verbs (all flat at 180-230 ms: the 175 ms ssh/wrapper floor, not the verb), the ssh path itself, door/enrol/reenroll once measured.
+- retained-mode inventory (a13f0c9ab4513b2d7): `export world`/app-export/backup/restore, carry, fn consumer, consensus and source-agreement readers, as migration targets (carry/fn/consensus: still 0 measurements).
+- Measure first, owner after: Discord bridge and pay-watcher (forge only), door/enrol (forge), `market`/`board`/`jobs`/`tariff`/`pay`/`key` verbs (above; no owner named yet), `/search`, inference scheduler, agent session overlay.
 
 ## Open items
 
