@@ -273,6 +273,7 @@ pub(crate) struct Observed {
     pub project_id: u32,
     pub fs_type: &'static str,
     pub inode: u64,
+    pub dev: u64,
     pub path: PathBuf,
 }
 
@@ -377,7 +378,7 @@ impl Volume<'_> {
         }
         let reported = quota::reported_bytes(dir.as_raw_fd())?;
         if reported == 0 || reported > bytes as u128 { return Err(refuse("volume-helper: volume reports a size beyond its quota")); }
-        Ok(Observed { project_id: project, fs_type, inode: m.ino(), path: self.path() })
+        Ok(Observed { project_id: project, fs_type, inode: m.ino(), dev: m.dev(), path: self.path() })
     }
 
     /// The kernel's project-quota requirement for the filesystem under `fd`. With a custodian the
@@ -403,9 +404,9 @@ impl Volume<'_> {
     }
 
     fn witness_text(&self, o: &Observed) -> String {
-        format!("{TAG}\ndeployment_id={}\nhost_id={}\nresource={}\nvolume_id={}\napp_uid={}\nquota_bytes={}\nproject_id={}\nfs_type={}\ndirectory_inode={}\ndirectory={}\n",
+        format!("{TAG}\ndeployment_id={}\nhost_id={}\nresource={}\nvolume_id={}\napp_uid={}\nquota_bytes={}\nproject_id={}\nfs_type={}\ndirectory_inode={}\ndirectory_dev={}\ndirectory={}\n",
             self.deployment_id, self.host_id, self.grain, self.volume_id, self.app_uid, self.quota_bytes(),
-            o.project_id, o.fs_type, o.inode, o.path.display())
+            o.project_id, o.fs_type, o.inode, o.dev, o.path.display())
     }
 
     /// Publish the root-written witness the resident checks. Re-observed before and after the

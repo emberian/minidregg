@@ -61,13 +61,18 @@ the helper read, write, chown or delete anything outside the volume.
 
 **G4 Custody keyed to project and directory.** The witness the resident checks
 (`DREGG/SPK-VAR-CUSTODY/v1+projdir`, below) names the deployment, host, resource, volume id,
-uid, quota, **project id**, filesystem type and the **directory inode and path**; at launch the
+uid, quota, **project id**, filesystem type and the **directory inode, device and path**; at launch the
 resident compares its open `/var` descriptor against the path (device and inode) and against the
-witness's inode, and requires `statfs` of it to report a size below its parent filesystem's and within
-the class bound (an inherit-project directory reports its project limit). The resident runs as the
-operator and cannot open the app-private directory to read the project id itself; the helper, as root,
-set and verified it, and the inode pin means a replaced or moved directory does not match. A directory
-re-projected to a looser limit changes the reported size and is refused. The witness is root-written, 0644, root-owned ancestors, fresh within 120 s.
+witness's inode and device (an inode number alone can collide on another filesystem), requires the
+volume to be on its parent's filesystem (`st_dev` equal; a small bind mount or tmpfs at `/var` is
+refused), and requires `statfs` of it to report a size below its parent filesystem's. At the final START
+it requires that size to equal the attested class size exactly, so quota drift between attestation and
+launch is refused. The resident runs as the operator and cannot open the app-private directory to read the
+project id itself; the helper, as root, set and verified the project, with inheritance and the exact hard
+and soft limits, which `statfs` cannot show (xfs reports the soft limit when one is present). That exact
+check is the helper's (`verify`, run again by `mount`/`attest`), not the resident's; a privileged actor who
+changes the quota after the last helper verification and before START is refused only when the
+reported size changes. The witness is root-written, 0644, root-owned ancestors, fresh within 120 s.
 
 **G5 Clean teardown.** `destroy` removes the tree (descriptor-relative, no-follow), then clears
 the project limit, then removes the registration and witness, in an order such that a crash
@@ -147,7 +152,7 @@ resident re-checks the directory's inode and reported size at every launch.
 
 ## Witness `DREGG/SPK-VAR-CUSTODY/v1+projdir`
 
-Eleven newline-terminated lines, in this order:
+Twelve newline-terminated lines, in this order:
 
 ```
 DREGG/SPK-VAR-CUSTODY/v1+projdir
@@ -160,6 +165,7 @@ quota_bytes=<decimal>
 project_id=<decimal>
 fs_type=ext4|xfs
 directory_inode=<decimal>
+directory_dev=<decimal>
 directory=<GRAINS_ROOT/vars/<store>-<resource>>
 ```
 
