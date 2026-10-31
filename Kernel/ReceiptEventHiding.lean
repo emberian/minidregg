@@ -52,10 +52,12 @@ both premises.
   unchanged (`DeclaredResourceController.invocationEvent_eq_iff`), teeth on the
   current code for ingress reconstructible from the view
   (`public_signature_refutes`), the generic ideal-model consistency witness
-  (`pad_unlinkable_with_hidden_choice`), and inhabitation of every keystone
-  premise but `IdealReplacement` by a challenge at the native envelope shape
-  (`DeployedShape.premises_inhabited`: noncryptographic premises jointly
-  inhabited at the wire shape, not an admitted invocation).
+  (`pad_unlinkable_with_hidden_choice`), and wire-shape inhabitation of the
+  challenge at the native envelope shape (`DeployedShape.wire_shape_inhabited`:
+  shape only, by `rfl`, budget everything; not premise inhabitation and not an
+  admitted invocation). Owed: a joint witness including `IdealReplacement` at the
+  deployed shape, and an unconditional `public_signer_refuted` (its `distinct`
+  discharged).
 * Scope: unlinkability against the admitted reader class (see the keystone),
   not yet computational hiding.
 * Open, and named: `IdealReplacement` for `eventIdOfSigned`, the cryptographic
@@ -427,13 +429,17 @@ def challenge : Challenge 1 Unit where
   honestSigner := fun _ _ => rfl
   signatureWidth := fun _ _ => rfl
 
-/-- **The noncryptographic premises are jointly inhabited, at the native wire
-shape**: the challenge above (nonempty targets, one target envelope per target,
+/-- **Wire-shape inhabitation only**, NOT premise inhabitation: every field is
+by `rfl` and the budget admits every reader, and on this one-tape deterministic
+instance `IdealReplacement` is effectively refuted. Owed: a joint witness that
+includes `IdealReplacement` at the deployed shape (at least two tapes, the
+signer's randomness and key on the tape, the budget the query-bounded
+`PublicHashTest` class). What it shows: the challenge above (nonempty targets, one target envelope per target,
 the current envelope codec version, its envelope decoding to a 64-byte
 signature), a gap below one, query bound 1, and a budget admitting every reader
 (so both public-hash classes). Shape only: no registry, ground or signature
 verdict is constructed, so this is not an admitted invocation. -/
-theorem premises_inhabited :
+theorem wire_shape_inhabited :
     (∀ world tape, (challenge.command world).targets ≠ [] ∧
       (challenge.signedOf world tape).targetEnvelopes.length = (challenge.command world).targets.length ∧
       (challenge.sign tape (commandCodec.encode (challenge.command world))).header.codecVersion =
@@ -447,7 +453,7 @@ theorem premises_inhabited :
   ⟨fun world tape => ⟨by simp [challenge, command], rfl, rfl, challenge.envelope_decodes world tape⟩,
     Nat.one_pos, Nat.one_pos, fun _ _ => trivial, fun _ _ => trivial⟩
 
-#assert_axioms premises_inhabited
+#assert_axioms wire_shape_inhabited
 
 /-- Conditional public-signer refutation: if the two worlds' event ids differ, the
 keystone fails for this challenge at every bound. -/
