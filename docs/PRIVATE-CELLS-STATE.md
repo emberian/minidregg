@@ -194,16 +194,28 @@ applied):
   passes it). Freshness is the named premise `Custody.CustodyPrf` (round 6): the ideal fixed as the
   uniform function on the version window (`idealFn`, tapes enumerate all functions by
   `finFunctionFinEquiv`), the budget admitting every two-query evaluation test
-  (`BudgetAdmitsQueries`); honest pole `enumeration_satisfies`, teeth `constant_refuted`.
-  Round 7: queries are restricted to the window (`QueryTest` over `vs ⊆ window`), so a real PRF can
-  meet the game. `receiver_prf_hop`: one birth store and one patch list, the custody function alone
-  varying with the key (`run`, `run_twin`: the runs are twins cell by cell, same public parameters,
-  versions and kept index); the published transcript (the run's roots) factors through the masks
-  over a shared skeleton (`roots_factor`); the gap between the transcript under the keyed function
-  and under the ideal is `num/den`; the versions are distinct and the ideal's masks at them are the
-  tape's own tuple (`idealFn_window`). `AtMostOneSuccessor` is not a premise of the hop: a run is one
-  chain (`History.atMostOneSuccessor`), and that the host publishes exactly its run stays the
-  host's obligation. Forks: `AtMostOneSuccessor` is the host's
+  (round 10: `BudgetAdmitsEquality`, the budget is the PRF's efficiency class and need only admit the
+  named equality tests on the window; admitting every evaluation test made the premise statistical,
+  exhaustive key search included, which no short-key PRF meets); honest pole
+  `enumeration_satisfies`, teeth `constant_refuted` (against `equalityBudget`).
+  Round 8 (answered with astra round 10): what is published is a `Serve` (a function of a version's
+  context, mask and kept index: roots, deterministic openings; a randomized opening at each fixed
+  coin assignment). `ViewThroughServe`: a reader's view is a function of the served items.
+  `ServesWithin leak`: the items are a function of the context, the outer root and the index's
+  authorized leakage (the deterministic case of the hybrids after the PRF hop); teeth
+  `recoverable_refuted` / `maskServe_refuted`: a service from which the mask reads back, an archive
+  of store bytes included, is outside every leakage (pigeonhole on the 256-bit root). Index
+  exposure is excluded only distributionally (no pointwise refutation: equal roots of two indexes
+  are a cSHAKE256 collision). `arun` is the adaptive run (strategy and world bit choose the birth
+  store and each patch from the items served so far; a refused patch leaves the cell unchanged, and
+  refusal is a function of the patch alone); `arun_srun`: it is `srun`, the same run with masks
+  substituted, at the custody masks of versions `0 … rounds`, and every version is in that window
+  (it does not depend on the world bit). `receiver_prf_hop`: (i) every key's real transcript is
+  `transcript` of its masks, (ii) the keyed/ideal gap is `num/den` under `reduction` (the composed
+  distinguisher is in the PRF's efficiency class whenever the strategy is budgeted), (iii) the
+  ideal's masks on the window are the tape's own tuple; `receiver_prf_hop_view` carries it to any
+  view under `ViewThroughServe`. `PublishesRun` (the host's accepted set is exactly the run) gives
+  `AtMostOneSuccessor`; the host corollary must also connect the observable event trace. Forks: `AtMostOneSuccessor` is the host's
   obligation (a persisted version counter, a retry returning the stored successor); a history meets
   it, and `fork_shares_mask` shows two accepts from one cell share a mask.
 * `birth` refuses a store already holding a mask (`birth_refuses_masked`: imports are never
@@ -215,35 +227,22 @@ applied):
   no store lookup.
 
 **Owed, in order:**
-00. **Round-8 audit of `receiver_prf_hop`** (staging e46f16dcd; QueryTest, run, run_twin, Twin,
-   roots_factor judged sound), required before the Draft move:
-   - **Transcript = roots plus openings.** Define the published transcript as the run's roots and
-     the reveals a reader receives (key-independent: twins share the whole kept index, so the reveals
-     of `revealFor` over equal indexes are equal); prove it factors through the masks like
-     `roots_factor`.
-   - **Host obligation beside custody:** store bytes, the blinding value included, never reach a
-     view. Posting or archiving durable record bytes (the `Kernel/FnArchive.lean` caveat in
-     `ReceiptEventHiding`) puts the mask in the view and voids `CustodyPrf`'s premise. Name it as a
-     Prop and carry it.
-   - **Adaptivity.** Today `store` and `patches` are fixed outside `∀ a b`, so both worlds and every
-     strategy see one transcript (non-adaptive). Required, preferably (b): an adaptive run where
-     patch `i` is a function of the strategy, the world bit and the roots before `i`; prove the
-     roots are a function of the mask tuple at the fixed versions, so the same admitted `QueryTest`
-     applies. (a) is the fallback: `storeOf`/`patchesOf : Strategy → Bool → …`, each `(a, b)` with
-     its own skeleton, scope recorded as non-adaptive. Either way the window must not depend on `b`
-     (equal patch counts across worlds: versions are `0 … n`).
-   - When the hop is linked to the deployed host, "the host publishes exactly one run" becomes a
-     premise (`AtMostOneSuccessor` over the host's accepted set).
 0. **The hiding goals out of the Draft namespace** (`Kernel/BlindedCellHiding.lean`), statement
    first, with `CustodyPrf` as the PRF premise of `StandardModelHidingGoal` / `HybridReduction`'s
-   first hop and `AtMostOneSuccessor` as the fork premise.
+   first hop (now `receiver_prf_hop`, adaptive), `PublishesRun` / `AtMostOneSuccessor` as the fork
+   premise, and `ViewThroughServe` / `ServesWithin` as the host's view premises. Hybrid order PRF,
+   then zero-knowledge simulation of openings (an independent coin tape, queries and proof
+   occurrences, then averaging; ZK does not give `ServesWithin` pointwise, only after simulation),
+   then root replacement under uniform masks (needs an encoding premise: `sample`/`encodeMask` give
+   high-entropy masks; the PRF hop holds for any encoding). The host corollary connects the actual
+   accepted set and its observable event trace to `arun` (`PublishesRun` alone is not enough).
 1. **The cell representation carries `KeptCell`**: `Materialized.rootCache := KeptCell.root`,
    `rootExact` by `root_eq` and a materializer whose `rootOf` is `privateRoot` (context made
    explicit in the specification: `rootOf : Store → Root` cannot see the accepted version), patch
    application through `accept` with no rematerialization, export bytes lazy.
 2. **The registry and native-host switch** for content and the declared kinds: a root-format change
    (fresh genesis, fixture re-record in the same sha), codec epoch ordered with the hot-path lane
-   (a86738fc1dfae6429 answered 10-31: no overlap with Materialized, CellState, PersistedCodecTags or snapshots; private cells go first; it reports before touching a format). The receiver's acceptance theorems cite `admit`; **no receiver
+   (a86738fc1dfae6429 answered 10-31: no overlap with Materialized, CellState, PersistedCodecTags or snapshots; private cells go first). Agreed with hot-path aa2905fee8ef847d1 (row 11, session indexes in the checkpoint): ONE epoch bump, one batch, one fresh genesis, one fixture re-record; when the root-switch sha is green, tell it, it rebases row 11 onto it, the pair goes to the integrator labelled FORMAT. If row 11 is ready well before, it does not wait. The receiver's acceptance theorems cite `admit`; **no receiver
    path ships without it** (the agreed ordering: not on today's `Action.admissionCheck`, the source
    of `DeclaredActionAir` and the native binding's acceptance theorems).
 3. **Insert metered**: `Trie.insert` backs the world root's hot path (`Kernel/WorldRootCache`), so
