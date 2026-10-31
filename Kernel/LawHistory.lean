@@ -113,6 +113,41 @@ theorem ActiveComponent.evaluated {config : ComposedPolicyAdmission.Config F} {l
   simpa [Minidregg.Theory.LawComposition.Component.guarded,
     Minidregg.Pred.eval_any, Minidregg.Pred.eval_not, selected, predicateExact] using guarded
 
+/-- A conjunct's reads are the conjunction's. -/
+theorem reads_all_mem {ps : List Pred} {q : Pred} (member : q ∈ ps) :
+    ∀ k ∈ q.reads, k ∈ (Pred.all ps).reads := by
+  intro k hk
+  unfold Pred.all
+  simp only [Minidregg.Pred.Pred.reads]
+  induction ps with
+  | nil => cases member
+  | cons p rest ih =>
+      simp only [Minidregg.Pred.PredList.ofList, Minidregg.Pred.PredList.reads, List.mem_append]
+      rcases List.mem_cons.mp member with rfl | inRest
+      · exact Or.inl hk
+      · exact Or.inr (ih inRest)
+
+/-- A disjunct's reads are the disjunction's. -/
+theorem reads_any_mem {ps : List Pred} {q : Pred} (member : q ∈ ps) :
+    ∀ k ∈ q.reads, k ∈ (Pred.any ps).reads := by
+  intro k hk
+  unfold Pred.any
+  simp only [Minidregg.Pred.Pred.reads]
+  induction ps with
+  | nil => cases member
+  | cons p rest ih =>
+      simp only [Minidregg.Pred.PredList.ofList, Minidregg.Pred.PredList.reads, List.mem_append]
+      rcases List.mem_cons.mp member with rfl | inRest
+      · exact Or.inl hk
+      · exact Or.inr (ih inRest)
+
+/-- States that agree on a superset of a law's reads give it the same verdict. -/
+theorem eval_agree_of_sub (p : Pred) {keys : List String} (sub : ∀ k ∈ p.reads, k ∈ keys)
+    {old new old' new' : Minidregg.Pred.State} (o : Minidregg.Pred.State.AgreeOn keys old old')
+    (n : Minidregg.Pred.State.AgreeOn keys new new') :
+    eval p old new = eval p old' new' :=
+  Minidregg.Pred.evalWith_frame Minidregg.Pred.failClosed (fun _ _ _ _ _ => rfl) p (o.mono sub) (n.mono sub)
+
 /-- Shared assurance bridge for every consumer of the composed portal, including
 policy installation. The supplied authorization checks the complete closure. -/
 theorem authorized_component_eval (config : ComposedPolicyAdmission.Config F)
@@ -154,6 +189,46 @@ theorem checked_leg_component_eval
       (step prepared tuple incidence).newState = true := by
   obtain ⟨graph, resolved, holds⟩ := checked_leg_policy_eval leg
   exact installed.evaluated graph resolved holds
+
+/-- `checked_leg_component_eval` on the full projection (`fullStep`): the cut step and the full
+step get the same verdict (`step_eval_loaded`), so a component holds on every projected slot. -/
+theorem checked_leg_component_eval_full
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
+    (leg : CheckedLeg prepared tuple incidence envelope) (law : Pred)
+    (installed : ActiveComponent (policyConfig prepared tuple incidence) law) :
+    eval law (fullStep prepared tuple incidence).oldState
+      (fullStep prepared tuple incidence).newState = true := by
+  obtain ⟨graph, resolved, holds⟩ := checked_leg_policy_eval leg
+  obtain ⟨node, member, predicateExact, selected⟩ := installed graph resolved
+  -- The selector is a guard of the composed law, so it reads only slots the cut keeps.
+  have sub : ∀ k ∈ node.component.selector.predicate.reads,
+      k ∈ (ResolvedLawCompilation.predicate graph.resolved).reads := by
+    intro k hk
+    have guard : k ∈ node.component.guarded.reads :=
+      reads_any_mem (q := .not node.component.selector.predicate)
+        (by simp) k (by simpa [Minidregg.Pred.Pred.reads] using hk)
+    exact reads_all_mem (List.mem_map_of_mem member) k guard
+  have cut := step_prepared_exact prepared tuple incidence
+  rw [legKeys_loaded prepared tuple incidence graph resolved] at cut
+  have selectedFull : eval node.component.selector.predicate (fullStep prepared tuple incidence).oldState
+      (fullStep prepared tuple incidence).newState = true := by
+    have same := eval_agree_of_sub node.component.selector.predicate sub
+      (Minidregg.Pred.State.agreeOn_restrict _ (fullStep prepared tuple incidence).oldState)
+      (Minidregg.Pred.State.agreeOn_restrict _ (fullStep prepared tuple incidence).newState)
+    rw [← same]
+    have stepped : eval node.component.selector.predicate (step prepared tuple incidence).oldState
+        (step prepared tuple incidence).newState = true := selected
+    rw [cut] at stepped
+    exact stepped
+  rw [step_eval_loaded prepared tuple incidence graph resolved] at holds
+  have guarded := Minidregg.Theory.LawComposition.inherited_never_widens
+    (Minidregg.Theory.LawComposition.canonicalOrder graph.resolved.postorder)
+    _ _ holds node member
+  simpa [Minidregg.Theory.LawComposition.Component.guarded,
+    Minidregg.Pred.eval_any, Minidregg.Pred.eval_not, selectedFull, predicateExact] using guarded
+
+#assert_axioms checked_leg_component_eval_full
 
 /-- info: 'Minidregg.Kernel.LawHistory.Accepted.tail' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.tail

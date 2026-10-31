@@ -440,6 +440,17 @@ theorem kernel_story_step (t : Table) (S : Int)
     (law t S) installed
   exact law_step t S holds w
 
+/-- **Kernel form on the full projection**: the same, for the leg's full projected new state. -/
+theorem kernel_story_step_full (t : Table) (S : Int)
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command} {envelope : List UInt8}
+    (leg : CheckedLeg prepared tuple incidence envelope) (installed : StoryInstalled t S tuple incidence)
+    (w : (fullStep prepared tuple incidence).newState.get "request/verb" = some 2) :
+    Step t S (fullStep prepared tuple incidence).newState := by
+  have holds := Minidregg.Kernel.LawHistory.checked_leg_component_eval_full leg
+    (law t S) installed
+  exact law_step t S holds w
+
 end Kernel
 
 /-! ## Axiom pins: every theorem rests on the standard three or fewer. -/
