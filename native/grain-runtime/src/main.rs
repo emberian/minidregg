@@ -2881,6 +2881,11 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
     Ok(Some(value))
 }
 
+/// Whether this process may leave a resident codec Host: only an unset or non-`0` `MINI_CODEC_RESIDENT`.
+fn codec_resident_allowed(value: Option<&std::ffi::OsStr>) -> bool {
+    value != Some(std::ffi::OsStr::new("0"))
+}
+
 /// One storeless codec frame (`Host.Main.pureCodec`, ops 7-11) to this user's
 /// resident codec Host for the controller's pinned Host and settings, started
 /// as the exact supervisor the quiescence proof admits (`cgroup_stop`). The
@@ -2891,12 +2896,20 @@ fn codec_frame(config: &Config, operation: u8, payload: &[u8]) -> Result<Vec<u8>
     let host = mini_sdk::host_selection::select_semantic_host(None, environment.as_deref(), &config.host)
         .map_err(|e| e.to_string())?;
     let mut codec = CODEC.lock().map_err(|_| "codec lock poisoned")?;
-    codec
-        .frame_with(&host, &config.host_config, operation, payload, &|executable, settings, settings_bytes| {
+    // `MINI_CODEC_RESIDENT=0` is the parent's word that this process must not leave a resident behind
+    // (`controller-world.py controller_child` sets it for every short-lived controller command, as it does
+    // for `mini` itself): the codec Host is then this process's own child, which ends with it. The
+    // controller service sets nothing and keeps the resident pair its quiescence proof admits.
+    let answer = if !codec_resident_allowed(std::env::var_os("MINI_CODEC_RESIDENT").as_deref()) {
+        codec.frame(&host, &config.host_config, operation, payload)
+    } else {
+        codec.frame_with(&host, &config.host_config, operation, payload, &|executable, settings, settings_bytes| {
             let mut launch = Command::new(&config.mini);
             launch.arg("codec-resident").arg("--host").arg(&executable).arg("--settings").arg(settings);
             mini_sdk::consent::connect_resident_kind(mini_sdk::consent::ResidentKind::Codec, &executable, settings_bytes, launch)
         })
+    };
+    answer
         .map_err(|error| match error {
             mini_sdk::local::CodecError::Failed(reason) => reason,
             mini_sdk::local::CodecError::Refused { decoded, .. } => format!("the codec refused: {}",
@@ -19126,6 +19139,15 @@ mod foreground_api_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_zero_codec_resident_switch_keeps_the_codec_host_in_process() {
+        use std::ffi::OsStr;
+        assert!(!codec_resident_allowed(Some(OsStr::new("0"))));
+        assert!(codec_resident_allowed(None));
+        assert!(codec_resident_allowed(Some(OsStr::new("1"))));
+        assert!(codec_resident_allowed(Some(OsStr::new(""))));
+    }
 
     #[test]
     fn lifetime_reserve_wall_requires_selected_live_hermes_worker() {
