@@ -32,6 +32,7 @@ import Compiler.HyperdocumentCell  -- hyperdocument content, event-log and link-
 import Compiler.CredentialAuthorityCell  -- the authority domain is one StoreCodec cell over typed planes; revoked/nullifier/registered are append-only presence planes; the page and LOOM/AUTH/STATE codecs are deleted (docs/DATAMODEL.md §5 B1)
 import Compiler.StreamCell  -- a stream is a head cell (binding, count, tail key) plus one cell per entry; an append = one head write + one fresh entry cell, bytes independent of the stream length (FLEET-TOPIC-ON-STREAM)
 import Compiler.StoreCodec  -- the unbounded canonical store codec: sorted address-byte support, length-prefixed, no capacity or shard; general round-trip/canonicity, layout-digest frame (docs/DATAMODEL.md §5 A2)
+import Compiler.PrivateCellIndex  -- a blinded cell's store as private-trie entries: exact last values, binds the data, carries nothing of the blinding
 import Compiler.PlanFootprintCodec  -- a plan footprint as canonical bytes: (wire address, optional wire value) reads, carried by the signed header (Theory.PlanBinding)
 import Compiler.IntStream  -- the one integer byte codec: zigzag base-255; the Book's Sum codec is deleted
 import Compiler.DeclaredEffectCell  -- declared object/program/account-metadata cells are StoreCodec at the effect wire; the four-slot page is deleted (docs/DATAMODEL.md §5 B1)
