@@ -9,10 +9,9 @@
 #   2. keeps TREE as a `git worktree` of SRC's repository, detached at SHA (objects shared, no second .git);
 #   3. seeds TREE/.lake/packages from SRC by hard links (`cp -al`) whenever lake-manifest.json or
 #      lean-toolchain moved, unsharing every small file lake may rewrite in place (as clone-warm does);
-#   4. syncs TREE/.lake/build from SRC per module: a module whose SRC trace is newer than TREE's is
-#      hard-linked from SRC (outputs) and copied (its .trace and .hash files); `*.setup.json` is never
-#      linked (lake writes it in place, and it names SRC's absolute paths; lake regenerates it on a
-#      rebuild). Modules only TREE builds (the umbrella-only libraries) keep TREE's own outputs;
+#   4. syncs TREE/.lake/build from SRC per module with scripts/pipeline/warm-link (outputs hard-linked,
+#      .trace and .hash copied, .setup.json never shared; newest trace wins, so modules only TREE builds,
+#      the umbrella-only libraries, keep TREE's own outputs);
 #   5. runs the umbrella: `build-native-host.sh --umbrella --umbrella-only` over the --unshipped targets
 #      of scripts/pipeline/umbrella-targets plus Minidregg, under swarm-build when it is on PATH, with
 #      the caller's MINIDREGG_LEAN_SEAT_ROOT seats (shared with SRC's builds: a bound, not a lock);
@@ -93,48 +92,7 @@ done
 
 # 4. build outputs, per module, newest wins
 touch "$TREE/.lake/sync.stamp"
-python3 - "$SRC/.lake/build" "$TREE/.lake/build" <<'PY'
-import os, sys
-src, dst = sys.argv[1], sys.argv[2]
-SHARE = ('.olean', '.olean.private', '.olean.server', '.ilean', '.ir', '.ir.sig', '.c', '.o')
-def kind(name):
-    if name.endswith('.setup.json'): return 'skip'
-    if name.endswith('.trace') or name.endswith('.hash'): return 'copy'
-    if name.endswith(SHARE): return 'link'
-    return 'copy'
-linked = copied = modules = 0
-lib = os.path.join(src, 'lib', 'lean')
-for root, _, files in os.walk(lib):
-    for f in files:
-        if not f.endswith('.trace'): continue
-        mod_rel = os.path.relpath(os.path.join(root, f[:-len('.trace')]), lib)   # e.g. Kernel/Seat
-        s_tr, d_tr = os.path.join(lib, mod_rel + '.trace'), os.path.join(dst, 'lib', 'lean', mod_rel + '.trace')
-        if os.path.exists(d_tr) and os.stat(d_tr).st_mtime >= os.stat(s_tr).st_mtime: continue
-        modules += 1
-        base = os.path.basename(mod_rel)
-        for sub in ('lib/lean', 'ir'):
-            sdir = os.path.join(src, sub, os.path.dirname(mod_rel)); ddir = os.path.join(dst, sub, os.path.dirname(mod_rel))
-            if not os.path.isdir(sdir): continue
-            names = [n for n in os.listdir(sdir) if n.startswith(base + '.')]
-            if not names: continue
-            os.makedirs(ddir, exist_ok=True)
-            for n in sorted(names, key=lambda n: n.endswith('.trace')):     # the trace last
-                k = kind(n)
-                if k == 'skip': continue
-                s, d = os.path.join(sdir, n), os.path.join(ddir, n)
-                tmp = d + '.ut.tmp'
-                if os.path.lexists(tmp): os.unlink(tmp)
-                if k == 'link':
-                    if os.path.exists(d) and os.stat(d).st_ino == os.stat(s).st_ino: continue
-                    os.link(s, tmp); linked += 1
-                else:
-                    with open(s, 'rb') as a, open(tmp, 'wb') as b: b.write(a.read())
-                    st = os.stat(s); os.utime(tmp, (st.st_atime, st.st_mtime)); copied += 1
-                os.replace(tmp, d)
-            stale = os.path.join(ddir, base + '.setup.json')
-            if sub == 'ir' and os.path.exists(stale) and os.stat(stale).st_nlink > 1: os.unlink(stale)
-print(f'umbrella-tree: synced {modules} modules from SRC ({linked} links, {copied} copies)')
-PY
+python3 "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/warm-link" "$SRC/.lake/build" "$TREE/.lake/build"
 src_at || pipeline_die "$SRC moved off ${SHA:0:12} during the sync; rerun"
 
 # 5. the umbrella
