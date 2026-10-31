@@ -25,6 +25,10 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   READY: gate15 full; name to infra, explorer (C1 16-parallel-say + own-order rows), perf-apps, perf-client (consent
   walk after-number when 619022904 lands); batch 8's verdict goes with it. Launch builds via $I/launch-build.sh SHA NOTE
   (writes build.pid; a nested `ssh … &` held the session twice).
+- **Staging 2d9736211 (batch 10 so far)**: perf-client d035d8250 (SECURITY-relevant: residents ran one next-key
+  commitment check per process lifetime, so a rotation/revocation between commands went unseen; now checked afresh per
+  resident command). Batches 8 and 9 ship residents without it: NEITHER may become a shipped fallback unless mini (and
+  miniLine, same build family) is overlaid from >= d035d8250.
 - **Batch 8 dc61016cb: gate15 FAIL**: enrol PASS, tour 73/73; j14 = H1b; composed (-c2 after my port collision):
   rooms/churn/apps/connector PASS, documents FAIL (D2), residents R1; flatness get FAIL then PASS on -c2 (load). Lesson:
   a KEEP_WORLD composed world holds port 22640; take it down before the next composed gate.
@@ -184,6 +188,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 13:55: perf-client d035d8250 merged (batch 10).
 - 10-31 13:45: exorcist 837c3f457 merged (D2).
 - 10-31 13:35: D2 + resubmit attempt signature to exorcist; perf-client caa988a88 merged, f25b6446 refused.
 - 10-31 13:20: hot-path 46ba70e43/75d97b351 merged (9540a646b); auditor round requested; private-cells ack.
