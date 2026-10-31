@@ -6,6 +6,15 @@ selected veri7vn kernels, Workbench and companion providers. The source and
 appliance recipes live in [veri7vn](https://github.com/emberian/veri7vn);
 Mini owns package admission, isolation, agent authority and lifecycle.
 
+The next runtime uses veri7vn's Rust `oracle-host` for both conversational
+queries and direct operations. It shares the native data image, runs extracted
+kernels, and contains the remaining Python Engine in bounded tenant-owned
+workers. The [Rust package adapter](../deploy/oracle/rust-host-package.md) connects
+that distribution to Mini's existing signed inventory, shared data and authority
+bridge. It can admit the native image as an explicit package resource. This
+candidate still needs signed receiving qualification; the measurements and
+deployment descriptions below concern the earlier Python-based packages.
+
 ## What callers can do
 
 Use conversational queries for supported calculations and sourced facts, or
