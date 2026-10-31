@@ -266,8 +266,9 @@ applied):
    at gap 0 against every test (`enumeration_satisfies`), a key, the bound's side conditions, a
    budget admitting the distinguishers, and the pair's birth, hidden patches, legality and hidden
    difference, all at one setting. `idealGoal_of_open`: there `RatchetHidingGoal` of `real` follows
-   from `zk`, `rom` and `identical` alone (the reduction obligation is trivial against the all-tests
-   budget). Rounds 11 and
+   from `zk`, `rom` and `identical` alone. This is the random-function pole, not the deployed custody
+   PRF: the reduction obligation is trivial only against the all-tests budget the ideal function
+   allows; at a real PRF `reduction` is the open concrete-security premise. Rounds 11 and
    12 found the earlier forms vacuous (a caller-chosen game reading the world bit; caller-labelled
    distinguishers; caller-chosen `legal`; decoys no run produces; syntactic hidden difference).
    Owed in the hiding argument: the ZK hybrid over an independent coin tape, the ROM
