@@ -242,29 +242,62 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-State (2026-10-31, ac53c05fe796e4294, the live hot-path): lane `lane/hot-path-cold`. Sent: a55855f18 (staging,
-batch 7) and 6d744e25f (= 05a38ff4e + docs; batch 8: the law check on its own witness decides `Pred.eval`).
-Integrator aec6914709d96f496 (replaced aba0beaa578594e92); private cells a8da2b953507b402b; exorcism
-a6ad40ce192354deb (Host READ ops 144/5/4, loadPolicy, challenge); perf-client a778bbda6509944a5 (consent
-provider, `Loaded.write`, per-guard writes in receivers, World.admit pins, representsCheck's membership);
-retained-mode a13f0c9ab4513b2d7 (L0: `Store` as a tree-backed map, then the authority projection as a
-maintained node); perf-apps a25df305cfd551d8b (EtherCalc dispatch captures). Pool tree t7 is held
-(`lane-tree renew hot-path`); next native build with iter-speed's `scripts/pipeline/native-loop hot-path
-<base candidate> <label>` (~7 min) once on staging, not build7.sh (~48 min).
-Next, in order: (1) the birth plan on the light ground (below, O(cells) directory decodes per birth);
-(2) ember's read-path GET contract (statement first, (a)-(e) below) with group commit judged against the
-dispatch profile; (3) row 11 + Book wiring for FORMAT; (4) the session refresh term.
+State (2026-10-31 evening, hot-path a0fee5643746e520c). Lane `lane/hot-path-cold` at 75d97b351, merged with
+staging 5e5ee95f7. Integrator aec6914709d96f496; retained-mode a9b54e85e4a194b91 (L0 on lane/retained-l0:
+SparseMap Store/World, WorldCompact deleted; its file list is in its 10-31 message: stay out of those files);
+perf-client a778bbda6509944a5 (walk side only; row 11 incl. the sealed World is OURS); perf-apps
+a25df305cfd551d8b/a70a7655df79c4335; auditor a4d9a6f4cba4855ca; explorer a3e5d6dbcd68e616c. Pool tree t7 leased
+(`lane-tree renew hot-path`); native-loop: from t7, `LANE_POOL_ENV=/home/hbox/pool/pool.env
+scripts/pipeline/native-loop hot-path /home/hbox/lanes/integ/candidates/<base> <label>` (~9 min; candidate lands in
+/home/hbox/pool/lanes/hot-path/candidates/<id>). Lane-check from t7 after `git reset --hard` to the pushed head,
+or scp edited files in for an iteration (commit before native-loop).
 
-Tools on hbox: pool trees (`. /home/hbox/pool/pool.env; LANE_POOL_NO_WARM=1 lane-tree acquire
-hot-path origin/lane/hot-path-cold`, release when done). Native Host: `/ci/hpc/nb/build7.sh` (resets
-t7 to the pushed head, `lane-tree native`, builds into `/ci/hpc/nb/artifacts`). Hotpatch:
-`/home/hbox/lanes/integ/hotpatch-candidate.sh <base> <name> minidregg-host=...`, then copy the Host
-into `bin/clients/x86_64-unknown-linux-gnu/` too and check SHA256SUMS. Growth measurement:
-`/ci/hpc/sn/grow2.sh` (one world, 8 sequential `story new`, perf of stories 2 and 8 into
-`g2.s{2,8}.perf.data`); symbolize with a symfs holding a COPY (never a symlink: cp -f follows it)
-of the candidate's minidregg-host named `memfd:mini-pinned-image (deleted)` (`/ci/hpc/sn/symfs5`);
-compare with `/ci/hpc/sn/cmp.py g2 <ms2> <ms8>`; attribute with `/ci/hpc/sn/who.py <perf script> <regex>`.
-The Host runs on P-cores: read the `cpu_core` section of perf report, not the first (`cpu_atom`).
+Landed today (all merged on staging; batch 9 unless noted):
+- a5e757016 (cherry-picked as dc61016cb, batch 8): `authorizeWith` uses `admitOwn` (staging red from the merge
+  with c763e3ead; also kept batch 8's Pred.eval path on signed reads).
+- 92828ff96 + d7c55dfa0: `ResourceBirthController.Concrete.Held` (directory + authority as Options with
+  exactness to `loadDirectory`/`loadDeployment`; `Held.of` from `Opened`, `Held.load` for cold callers,
+  `Held.eq_load`); every birth preparation, plan and admission reads the held pair; an ordinary birth's
+  authorized plan is prepared once (`prepareOrdinaryBirthAuthorized`). Audited sound.
+- a9e738baf + 46ba70e43 (C1, explorer): stream appends are computed at the head they meet
+  (`append_planned_root_irrelevant`; `append_same_stream_serialises` deleted); `Reject.streamRef` refuses a
+  ref at or beyond the own stream's head (`append_ref_ahead_refused`); PLACE.md client contract. OWED (batch
+  10): the positive pipeline statement (two appends from one read both admit, either order).
+- 75d97b351: `@[csimp] TurnOfIntent.ofCells_eq_fast`: each write's post decoded once per derivation (was 6x).
+
+Measured (fresh jworld worlds, hbox, `doc new` median Host CPU, /ci/hpc/bp/grow.sh; pcm.py):
+stock acc7cfa03 621 ms at 0 says -> 1000 ms after 500; overlay 681e4f09f44e (staging 5e5ee95f7 = batch 8 +
+Held) 186 -> 557 ms. Growth (~+370 ms / 500 says) is NOT the birth plan: profile at 500
+(/ci/hpc/bp/held500.perf.data, symfs /ci/hpc/bp/symfs, `under.py held500.script.txt PATTERN` for callee
+breakdowns): 455/1316 samples under `Host_sessionConfirmed` -> `NativeHostSession.refresh`: Light.refresh 241
+(foldRecords -> World.admit + ofCells), full Loaded.extend -> WorldTrack.advance -> ofCells 121,
+validateLoadedFrom 46, encode 116. The world /ci/hpc/bp/w (overlay) is UP (stop: `jworld-scratch.sh down
+/ci/hpc/bp/w` from /home/hbox/lanes/integ/dregg-infra-69c17a3/edge/mini/journey); /ci/hpc/bp/w-stock is a
+stopped stock world (delete when done). Hotpatching a world in place does not work (manifest, provenance,
+state.json hostSha256, workspace and anchor pins all bind the Host image): stand up a fresh world per candidate.
+
+Next, in order:
+1. The refresh term (integrator ranked it first: it is the law-17 growth). Retained-mode ruled (i) and (ii)
+   are ours and are node instances: (i) a write carries its decoded post beside its bytes (a carried value
+   with `decode bytes = some post`, like `Materialized.carried`) so `deltaOf` never decodes on the Host's own
+   path; (ii) one derived turn per record shared by the light and full views (and the receive's own
+   derivation): a red-green memo keyed by record, with the exactness equation. Send the shas to retained-mode
+   for RETAINED-MODE.md. First measure 75d97b351 (native-loop on base acc7cfa03, fresh world, grow.sh).
+   After L0 lands, the encode side is ours: make StoreKey code order agree with the wire `addressKey` order so
+   `sortedSupport` is the tree's order with no sort.
+2. Read-path GET contract: statement drafted, UNCOMMITTED, at Kernel/ApplicationReadPermit.lean (R1-R8; not
+   yet elaborated). Astra reviewing (codex job, output
+   /private/tmp/claude-501/-Users-ember-dev-minidregg/01a18fa5-51c4-7992-906c-97cb89814dae/scratchpad/astra-readpermit.txt).
+   Fold astra's changes, lane-check, then send to the integrator for the statement audit. Open for ember: the
+   liable payer (draft: the ticket's issuer).
+3. op66 (INSTALL BEGIN plan, 3.3-6.3 s, perf-apps' largest single term): measure on batch 9 (carries Held).
+4. Row 11 + FORMAT with private cells (incl. perf-client's sealed World: WorldTrack `.held w rep` from the
+   checkpoint; names in perf-client's 10-31 message: Compiler/DurableReceiverCore WorldTrack :858, advance :914,
+   trackOfWorld :1031, worldOfCheckpoint :1052), rebased onto L0.
+5. Batch 8 numbers (perf-apps, EtherCalc): warm GET 173 -> 82 ms median, 10 concurrent 2.98 -> 0.79 s,
+   first page 2.43 -> 1.79 s; capture kept at hbox:/ci/pa-prof8.
+
+Older context follows (2026-10-31 morning).
 
 **App pages (perf-apps a25df305cfd551d8b, batch 6, EtherCalc on hbox): every grain HTTP request is
 one durable dispatch turn, ~210 ms in the resident of which 150-180 ms is the Host SUBMIT.** A first
