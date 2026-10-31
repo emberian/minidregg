@@ -49,7 +49,7 @@ class Apps(m.Journey):
         self.c['expectedHost']=self.alias+'-j14.localhost'
 
     def run(self,label,args,**kwargs):
-        if label=='world':args=['flock','-o',os.environ.get('WORLD_UP_LOCK','/home/hbox/lanes/world-up.lock'),*args]
+        if label=='world':args=['flock','-o',os.environ.get('WORLD_UP_LOCK','/tank/lanes/world-up.lock'),*args]
         return super().run(label,args,**kwargs)
 
     def fixed(self,verb,*args,**kwargs):
