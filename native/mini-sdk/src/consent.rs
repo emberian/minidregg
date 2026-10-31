@@ -487,8 +487,9 @@ pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: 
 ///
 /// A resident keeps its warm state: with `idle` None (every member's resident) it never idles
 /// out, so a member who comes back after an hour pays no provider start and no Store admission
-/// from the retained anchor. It ends when its child ends, when its socket is unlinked or replaced
-/// (its directory removed with its world), or when its binding is superseded: another file at its
+/// from the retained anchor. It ends when its child ends, when its world is torn down (the Store
+/// directory its settings name, `storageRoot`, removed), when its socket is unlinked or replaced,
+/// or when its binding is superseded: another file at its
 /// executable path (a `candidate/current` repointed by a ship) or other bytes at its settings path,
 /// so no client can select this binding again. `Some(idle)` adds the idle exit.
 ///
@@ -514,6 +515,11 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     let (socket, _socket_directory) = resident_socket(kind, dir, &binding)?;
     crate::private::clear_stale_socket(&socket)?;
     let executable_path = executable.clone();
+    // The Store the settings name (`storageRoot`): when it is gone the world is gone, whatever
+    // else of it (the resident directory, the executables, the settings copy) lives elsewhere.
+    let store_root = serde_json::from_slice::<serde_json::Value>(&settings_bytes).ok()
+        .and_then(|v| v.get("storageRoot").and_then(|r| r.as_str()).map(PathBuf::from))
+        .filter(|root| root.is_absolute() && fs::symlink_metadata(root).is_ok());
     let executable_started = fs::metadata(&executable_path).map_err(|e| format!("{}: {e}", executable_path.display()))?;
     let session = kind.start(dir, executable, &settings, settings_bytes)?;
     let listener = std::os::unix::net::UnixListener::bind(&socket)
@@ -548,12 +554,14 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
                 if active.load(Ordering::Acquire) == 0 && idle.is_some_and(|idle| quiet > idle) {
                     return Ok(());
                 }
-                // Its world torn down (its directory and socket removed), its socket unlinked or replaced, or
+                // Its world torn down (the Store its settings name removed, or its directory and socket), its
+                // socket unlinked or replaced, or
                 // its binding superseded (another executable at its path, other bytes at its settings path):
                 // no client can bind it or reach it again, so it ends now.
                 if looked.elapsed() >= std::time::Duration::from_secs(1) {
                     looked = std::time::Instant::now();
                     if !socket_is(&socket, _files.identity)
+                        || store_root.as_ref().is_some_and(|root| fs::symlink_metadata(root).is_err())
                         || active.load(Ordering::Acquire) == 0 && superseded(&executable_path, &executable_started, &settings, &binding)
                     {
                         return Ok(());
@@ -1252,6 +1260,47 @@ mod tests {
         assert!(daemon.is_finished(), "a superseded binding ends its resident");
         daemon.join().unwrap().unwrap();
         assert!(!socket.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A resident whose world is torn down ends, even when its directory, its executable and its
+    /// settings file live outside that world: the Store its settings name is gone.
+    #[test]
+    fn a_resident_ends_when_the_store_its_settings_name_is_removed() {
+        let dir = PathBuf::from(format!("/tmp/mcw-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let host = crate::local::fake::codec_stub(&dir);
+        fs::write(dir.join("reply"), framed(b"\xff unexpected frame")).unwrap();
+        let world = dir.join("world");
+        fs::create_dir_all(world.join("store")).unwrap();
+        let settings_bytes = format!("{{\"storageRoot\":\"{}\"}}", world.join("store").display()).into_bytes();
+        let settings = dir.join("settings.json");
+        fs::write(&settings, &settings_bytes).unwrap();
+        let anchors = dir.join("anchors");
+        fs::create_dir(&anchors).unwrap();
+        fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
+        let binding = binding(&host, &settings_bytes).unwrap();
+        let (socket, _socket_directory) = resident_socket(ResidentKind::Codec, &anchors, &binding).unwrap();
+        let (a, h, s) = (anchors.clone(), host.clone(), settings.clone());
+        let daemon = std::thread::spawn(move || serve_resident_kind(ResidentKind::Codec, &a, h, s, None));
+        for _ in 0..2000 {
+            if socket.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        assert!(!daemon.is_finished(), "a resident of a live world stays");
+        fs::remove_dir_all(&world).unwrap();
+        for _ in 0..60 {
+            if daemon.is_finished() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(daemon.is_finished(), "a torn-down world ends its resident");
+        daemon.join().unwrap().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
