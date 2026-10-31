@@ -15,12 +15,12 @@ class StageTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base=Path(self.temp.name)
         self.source=self.base/"source"
-        recipes=("native/resource-client/paid-entry-adapter.py","native/resource-client/platform-task-readiness.py","deploy/shell/mini-shell-ssh","deploy/shell/mini-shell-ssh-credentials",
+        recipes=("native/resource-client/paid-entry-adapter.py","native/resource-client/platform-task-readiness.py","deploy/shell/mini-shell-ssh-credentials",
                  "testing/journeys/shared-resident-fixture-acp","testing/journeys/shared-resident-fixture-provider.py")
         for recipe in recipes:
             p=self.source/recipe;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(recipe)
         manifest={"sourceCommit":"e"*40,"sha256":{}}
-        for role in ("mini","host","store","verifier","spkHost","spkBroker","browserProxy","bwrap","grainRuntime"):
+        for role in ("mini","miniLine","host","store","verifier","spkHost","spkBroker","browserProxy","bwrap","grainRuntime"):
             p=self.base/role;p.write_text(role);manifest[role]=str(p);manifest["sha256"][role]=stage.sha(p)
         self.manifest=self.base/"manifest.json";self.manifest.write_text(json.dumps(manifest))
         package=self.base/"sheet.spk";package.write_bytes(b"SPK fixture")

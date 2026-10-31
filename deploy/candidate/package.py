@@ -55,8 +55,9 @@ ROLES = {
     "host": "minidregg-host",
     "consent": "minidregg-client-consent",
     "mini": "mini",
-    # The ssh forced command's line client (deploy/shell/mini-shell-ssh): hands a line to the
-    # member's resident shell (`mini line-resident`); built with mini, from the same crate.
+    # The ssh forced command (a box installs a root-owned copy as /usr/local/lib/mini/mini-shell-ssh):
+    # hands a line to the member's resident shell (`mini line-resident`); built with mini, from the
+    # same crate.
     "miniLine": "mini-line",
     "store": "minidregg-link-sqlite-store",
     "verifier": "minidregg-credential-signature-verifier",

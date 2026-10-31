@@ -2,7 +2,7 @@
 
 Present-state table, rewritten whole at each batch. Lane `lane/explorer`. Subject: candidate
 be4ef7510 (hbox `/home/hbox/lanes/integ/candidates/be4ef751074ca28c7d306c2f2bcf61cda03893c8`),
-explored as test members only. Batch 12, 2026-10-31.
+explored as test members only. Batch 14, 2026-10-31.
 
 ## Worlds (all on hbox, all mine; torn down when the lane ends)
 
@@ -163,6 +163,43 @@ Batch 3 (a4cb65af): `bend settle` works. After run, answer and deliver (spent 15
 | object create | 2.1 s then 1.3 s; `story new` 7.0 s (b5 14 s, b4 28-45 s). |
 | apps-e2e, two installs, 40,000 funding | Simple Todos: past ingest, create, route; START now fails `spk-host: grain refused: UNRESOLVED: .../host/apps/<id>/g2 is uncertain (START attempted without a completion record); reconcile it before another START`. The harness retried START after a first attempt left no completion record; the first START's own failure is not visible in the install detail. Etherpad: birth admitted, download refused upstream (`http-526`), so nothing beyond fetching. Run took 1243 s. Owner: app-reds. |
 | residents after teardown | the batch's resident pid files exist (`/ci/xa6w/w/a/c-*.pid`, `r-*.pid`), but after `world-down.sh /ci/xa6w` a `mini codec-resident` (3981220) and its `minidregg-host codec` (3981221) kept running 20+ minutes; neither pid appears in any pid file (the c-/r- files name dead pids), and their settings file under `/ci/xa6w` still exists, so self-exit does not fire. Left running, reported. |
+
+
+### Batch 8 (dc61016cb): resident shell, concurrency, reads, resets (hbox scratch)
+
+| id | result |
+|---|---|
+| I1 | Flaky world-up: `render-authorized-keys.sh` decides `mode=open` with `"$MINI" --help 2>&1 \| grep -qE '^[[:space:]]*mini shell'` under `set -o pipefail`. On the first attempt it concluded `mode=closed (the shipped client (dc61016cbbac) has no mini shell)`; the published copy's `--help` had exited 101 into the closed pipe (Rust panic on EPIPE), which pipefail turns into failure. It did not reproduce in 40 retries (20 per copy), and the second world-up passed, so it is a rare timing race. Two owners: infra (read the usage into a variable, then grep) and the `mini` CLI (a broken pipe on stdout must end quietly, not panic with 101). |
+| I2 | Concurrent lines from ONE member: 16 parallel `say` over separate ssh connections gave 2 admitted and 14 refused, 9 of them `declared-resource-controller: stale-t...` and 5 `target ... moved since the plan was signed`. 16 parallel says from 4 members at once (4 each): 6 admitted, 10 refused. The resident shell does not serialize or retry a member's concurrent lines; a user with two terminals sees refusals for ordinary says. 16 parallel `credit` reads: all 16 fine in 302 ms total. Owner: perf-client (the mini-line resident) or hot-path (retry on moved target). |
+| I3 | `mini` replaced mid-session (new inode moved over the path): the next three lines succeeded in 91-272 ms. |
+| I4 | Reads no longer leave an attempt tree: `credit` x3 left `attempts/` at 47 entries before and after; `read-journal.tsv` exists. `history` takes 16 ms, `history all` 15 ms (48 lines). Good. |
+| I5 | No resets: a 120-write mixed burst across three members printed no failure lines, no `reset`, no `broken pipe`. (H1b is Hermes-only; not reproducible here.) |
+| I6 | Timings (multiplexed ssh, b8, height 250): plain ssh `help` 165-171 ms vs 11 ms multiplexed; `credit` 20-57 ms; `say` 94-231 ms (first 231); `tail` 133-138; `doc new` 1.0 s; `chat new` 2.6 s; `create` 0.8 s; `story new` 5.6 s; certify 5.9 s at height 250. Not different from b7 for writes. |
+
+
+### Concurrency probe on b8 (dc61016cb): which concurrent writes conflict
+
+Racing separate ssh connections, fresh scratch world, hbox:
+
+| race | admitted | refusals |
+|---|---|---|
+| 1 member, 6 x `doc new` (different names) | 6 of 6 | none |
+| 2 members, 3 x `doc new` each | 6 of 6 | none |
+| 1 member, 6 x `chat new` (different names) | 6 of 6 | none (8.7 s wall) |
+| 2 members, 3 x `chat new` each | 6 of 6 | none (18 s wall) |
+| 1 member, 6 x `create object` | 6 of 6 | none |
+| 2 members, 3 x `create object` each | 6 of 6 | none |
+| 1 member, 6 x `say` (same room) | **1 of 6** | 3 x `target N moved since the plan was signed (stale-target)`, 2 x `declared-resource-controller: stale-target` |
+| 2 members, 3 x `say` each (same room) | **3 of 6** | the same two stale-target reasons |
+| 6 sequential `say` from one member | 6 of 6 | none |
+
+So creates of new cells commute; only `say` into the same room conflicts, and it conflicts with itself within one
+member (the member's own stream cell: one admitted per member would give 2, I saw 3, so two members may also
+collide on a shared room target; the probe cannot tell the two apart). The same member's concurrent `say`s fail
+because every write plans against the stream cell's current state and the second plan is stale when the first
+admits. Appends to a stream should commute (retry on stale-target inside the resident, or admit append against
+the latest state). My `doc append` row only proposed (no submit), so it says nothing about append conflicts on
+one document: untested.
 
 ## Exercised and held
 

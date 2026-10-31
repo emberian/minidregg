@@ -220,8 +220,8 @@ am inferring a lane's scope from its name, or **UNOWNED**.
 
 The previous map's `0` rows that a scratch world can reach are now measured. Every number includes the ssh
 connection and wrapper: a pure local verb (`help`) costs **180-200 ms over ssh against 7 ms for the same client
-called directly**, so about 175 ms of every ssh-carried action is the ssh path itself (connect, forced command,
-bash wrapper), before any Host work. That floor is 175x the bar and applies to every row of the shell table.
+called directly**, so about 175 ms of every ssh-carried action is the ssh path itself (see the correction below: it is the
+handshake, ~15 ms with a multiplexed connection), before any Host work.
 
 | path | warm (ms) | grows | owner |
 |---|---|---|---|
@@ -240,12 +240,62 @@ bash wrapper), before any Host work. That floor is 175x the bar and applies to e
 
 No scratch-reachable row is near 1 ms; all are 180 ms to 2.3 s, 175 ms of which is the ssh path.
 
+**Correction from perf-client on the ssh floor:** the ~175 ms is the ssh handshake, not the wrapper or `mini`.
+Measured on hbox against a scratch sshd (OpenSSH 9.7, `help`, member-1): 181-216 ms plain; **15-16 ms over a
+multiplexed connection (ControlMaster)**, which is wrapper + mini only; 122 ms with classical curve25519 kex
+instead of the default post-quantum hybrid, so about 60-90 ms is the PQ key exchange. The web path does not
+pay it. Every one-verb-per-connection ssh number in this file therefore includes about 165 ms of handshake;
+subtract it, or read the rows as "warm, multiplexed" minus ~165 ms (e.g. a local read is ~15-20 ms, a story
+`go` ~430-460 ms). Server-side kex choice is ember's security decision and the sshd config is infra's; both
+are with the coordinator. Client side: `deploy/shell/FRIENDS.md` now shows the ControlMaster config
+(lane/perf-client).
+
 ## Owners after the coordinator's ruling
 
 - hot-path (a6c4a1532687a4fdb): story play verbs (280-629 ms), room administration (206 ms-1 s), `law` verbs (194 ms-840 ms).
 - perf-client (a778bbda6509944a5): the local read-only verbs (all flat at 180-230 ms: the 175 ms ssh/wrapper floor, not the verb), the ssh path itself, door/enrol/reenroll once measured.
 - retained-mode inventory (a13f0c9ab4513b2d7): `export world`/app-export/backup/restore, carry, fn consumer, consensus and source-agreement readers, as migration targets (carry/fn/consensus: still 0 measurements).
 - Measure first, owner after: Discord bridge and pay-watcher (forge only), door/enrol (forge), `market`/`board`/`jobs`/`tariff`/`pay`/`key` verbs (above; no owner named yet), `/search`, inference scheduler, agent session overlay.
+
+## Batch 7 (acc7cfa03) against batch 4: the full table again, ssh multiplexed
+
+Same driver (`~/xp/tm7.sh`: ControlMaster ssh, so the ~165 ms handshake is excluded; the b4 columns still
+include it, so subtract ~165 ms from every b4 ssh number to compare). Fresh = height 54-158, aged = 531-636,
+hbox load 9-12. ms, cold / warm (median of 3).
+
+| action | b4 fresh warm | b7 fresh cold/warm | b4 aged warm | b7 aged cold/warm | grows (b7) |
+|---|---|---|---|---|---|
+| first signed read, new member | 543 | 38 | 629 | 206 | no |
+| later signed read (`credit`, 128 refs for aged) | 650 | 33 | 6,933 | 551 / 166 | slightly |
+| chat say | 1,103 | 132 / 165 | 1,674 | 138 / 393 | modest |
+| tail -n 5 | 2,065 | 80 / 81 | 2,603 | 352 / 217 | modest |
+| doc new | 2,850 | 820 / 905 | 4,016 | 1,391 / 1,228 | yes |
+| doc append (propose) / submit / show | 1,155 / 1,063 / 515 | 48 / 124 / 55 | 993 / 1,073 / 449 | 44 / 130 / 43 | no |
+| chat new | 7,665 | 2,124 / 2,052 | 11,820 | 3,860 / 3,532 | yes |
+| chat invite + join | 21,039 | 3,708 / 4,986 | 21,337 | 5,947 / 7,499 | yes |
+| create object | 2,779 | 602 / 849 | 2,956 | 1,067 / 1,417 | yes |
+| delegate propose / submit / publish / import | 919 / 1,829 / 272 / 415 | 53 / 389 / 20 / 46 | 1,311 / 2,199 / 450 / 416 | 70 / 610 / 19 / 133 | submit yes |
+| pay status account | 1,178 | 32 | 707 | 88 / 39 | no |
+| bend publish / run | 919 / 1,762 | 374 / 428 | 6,361 / 10,229 | 188* / 823 / 865 | run ~2x |
+| bend await / answer / deliver | broken in b4 | 24 / 61 / 349 | broken | 30 / 90 / 210-673 / 484 | deliver slightly |
+| bend settle | 266 | 22 | 5,846 | 1,658 | **yes** (22 -> 1,658) |
+| story new (tale) | 28,273 | 3,431 | 44,881 | 5,911 | yes |
+| web read pages | 5-7 (invalid run) | 8-15 | 13-16 | 10-35 (`/apps` cold 272) | no |
+| web GET `/doc/NAME` cold | - | 1,641 / 73 | - | **18,999** / 129 | **yes (cold body)** |
+| web POST doc/new / append | 6,500-7,700 | 1,057 / 1,779, 270 / 490 | - | 2,011 / 2,059, 296 / 410 | modest |
+| public GET / anonymous | 26 | 13 / 8 | 26 | 22 / 12 | no |
+| certify (256 tail) | 2,345 | **4,910** | 25,146 | **21,302** | **yes** |
+| restart (wall) / first read | 2,508 / 605 | 2,070 / 213 | 12,548 / 18,956 | 5,948 / 423 | wall yes |
+
+\* aged `bend publish` was a duplicate publish (rc 1 conflict), so its timing is a refusal. bend `answer` rc 3
+and `revoke` rc 1 rows are driver artefacts (answering the same slot repeatedly; revoking an object with no
+grant); their times are refusal times, not successes.
+
+What is still far from the bar after batch 7 (warm, multiplexed, so wall time ~ server work):
+- **Certify: 4.9 s fresh, 21.3 s at height 636.** Unchanged in character from b4 (25 s) and halts writes. Still O(history).
+- **Cold web body: a first `GET /doc/NAME` after height 600 took 19 s** (1.6 s fresh) — the per-member web body spawn plus its first read. Warm it is 73-129 ms.
+- **Writes**: `chat new` 2-4 s, `chat invite + join` 4-7.5 s, `create object` 0.6-1.4 s, `doc new` 0.8-1.4 s, `story new` 3.4-5.9 s, `delegate submit` 0.4-1.0 s, `bend run` 0.4-0.9 s. All still 100x to 1000x the 1 ms bar and growing with history.
+- **Reads** are now 30-80 ms for the cheap ones (credit 33, tail 81, doc show 38-55, pay status 32-39), 30-80x the bar. `bend settle` grows 22 ms to 1.7 s.
 
 ## Open items
 
