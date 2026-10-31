@@ -26,8 +26,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   "the metered workroom is not ready"; flatness submit FAIL / get PASS (published, never gating).
 - **acc7cfa03-attidx -hp1** (batch 7 + mini from b940b3f50, HARNESS=49a717ef2, PHASES "j14 composed"; PID file
   $I/gate-acc7-attidx.pid; integrator waiter armed): composed FAIL again 10:57 with the SAME "metered workroom is not
-  ready" refusal, so that refusal is NOT downstream of the attempt-index ENOENT: it is its own fault (hot-path's diagnosis:
-  management subject 8 lacks the sponsor-born task's grant). j14 still running.
+  ready" refusal, so that refusal is NOT downstream of the attempt-index ENOENT: it is its own fault (W1). j14 FAIL
+  11:02: H1 (op 47; journal: op 98 mini_say paid, write lookup not-submitted mapped to refused). Gate verdict FAIL
+  in substance; flatness phase still finishing (waiter armed).
 - Batch 6 74e1cfa10 umbrella-tree rc=0 reds=0 (10:57); fixture-regen/74e1cfa10719 merged on staging (790eb04a3).
 - **Staging 790eb04a3 (batch 8 material)**: iter-speed 7800d3199 + 697db7664, tower split 0eab28db7, exorcist 47b7cb2e1
   + c763e3ead + **b37f26cf6** (A: ssh lines run in a per-member `mini line-resident` via new bin `mini-line`, role
@@ -51,7 +52,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   probe, first `task_turn('refused', ...)` (the UNGRANTED Davros put; the label is the probe's name, not the outcome).
   Error: `ValueError: Hermes sent no reply to the ask: refused`. First divergence: the resident run completes (op 47,
   provider attempts 49/69/89, model text correctly names `typed-apps-not-granted`, `resident-completed`), then the final
-  delivery outcome is `{"status":"refused","type":"mini-resident-request-outcome-v1"}` with receipt
+  delivery outcome is `{"status":"refused","type":"mini-resident-request-outcome-v1"}` (3/3: batch 5, 5-resid, 7-hp1) with receipt
   `controller/home/grain/state/resident-final-refused-0000000000000047.json`; no say reaches the transcript. Service logs
   carry no error text (the receipt's body was in the torn-down world). Reruns: yes (2/2). Same place: yes, identical
   op id and outcome across a spk-host overlay. One fault. Cause class (app-reds run 24): the final `mini_say` got
@@ -67,17 +68,22 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
 - **W1, metered workroom not ready** (batch 7 base -c2 and -hp1): stage composed-inputs, `composed-inputs: the metered
   workroom is not ready`. Reruns: yes; same place: yes, with and without the ENOENT fix. One fault, independent of H2.
+  Not in batches 4-6 (their composed reached apps/connector): entered with batch 7 material. Owner: hot-path
+  a6c4a1532687a4fdb (holds the diagnosis: management subject 8 lacks the sponsor-born task's grant).
 - **R1, residents room-summon UNKNOWN** on hbox composed (every batch since 2): hbox cannot judge residents; forge
   composed does (batch 5 forge PASS). Standing, not a candidate red.
 
 ## Reports owed
 
-- To root, infra, explorer, perf-apps: batch 7 verdict (FAIL, signatures above) plus the -hp1 j14 result when it lands.
-- To app-reds: the -hp1 j14 signature (whether batch 7 + c88b88755 reaches H1, and its surfaced write error).
-- To the W1 owner (hot-path diagnosed; route decided at the -hp1 verdict): W1 survives the ENOENT fix.
+- To root: batch 7 verdict and signatures (in the integrator's next return).
+- When app-reds sends the H1 resolution rework: review, merge to staging, overlay grain-runtime onto acc7cfa03-attidx,
+  gate15 PHASES=j14 SUF=-hp2 KEEP_WORLD=1.
+- Infra's forge composed verdict on batch 7 (W1 on forge?) is awaited, not owed.
 
 ## Reports sent (do not resend)
 
+- 10-31 11:50: batch 7 verdict FAIL (H2, H1, W1) to infra, explorer, perf-apps; -hp1 j14 = H1 signature to app-reds;
+  W1 routed to hot-path a6c4a1532687a4fdb.
 - 10-31 11:45: app-reds: ccdaf98b3 sent back (not-submitted as its own resolution at every resolution match; tests).
 - 10-31 11:30: retained-mode: 05bffae27/7f42f6445 merged (573303614); auditor a4d9a6f4cba4855ca: round-3 request.
 - 10-31 11:20: app-reds: 40cb4aa59 held with review (fix at lookup_operation; typed transport cause; two tests).
