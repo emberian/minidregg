@@ -17947,7 +17947,12 @@ fn prove_controller_unit(task: &str) -> Result<()> {
         ]), deadline::MANAGER_QUERY)
         .map_err(|e| deadline::describe("controller service proof", e))?;
     if !output.status.success() {
-        return Err("controller service is unavailable".into());
+        // `systemctl show` of a loaded unit succeeds; a failure here is the manager (D-Bus, the
+        // user manager under load, a missing runtime directory), not the unit. Name it.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr: String = stderr.trim().chars().take(240).collect();
+        return Err(format!("controller service is unavailable: `systemctl show {unit}` {}{}",
+            output.status, if stderr.is_empty() { String::new() } else { format!(": {stderr}") }));
     }
     let source = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
     let main_pid = source
