@@ -292,6 +292,66 @@ def participantSlots (prepared : PreparedInvocation deployment profile ambient g
     (targetProjection command.subject command.targets[i] (prepared.targets i).pre.logical (logical (some i)) ++
       moneyPolicySlots prepared i)
 
+/-! ### Demanded projection
+
+A step carries only the slots its committed law reads (`legKeys`, `step`): the projection is
+`State.restrict` of the full one (`projectWithCommonFor`, the statement), computed by
+`projectWithCommonDemand` (`@[csimp]`), which never encodes a participant cell into per-byte
+`resource/bytes/…` slots unless a demanded name can be one of them (`demandsStem`). -/
+
+/-- Whether a demanded name can be participant `i`'s slot `name`: locally, or under either joint key. -/
+def participantWant (keys : List Minidregg.Pred.Slot) (command : Command) (i : TargetIndex command)
+    (name : String) : Bool :=
+  keys.contains name || keys.contains (jointTargetKey command.targets[i].target name) ||
+    keys.contains (jointIndexKey i.val name)
+
+/-- Participant `i`'s slots as a demand needs them: its per-byte cell block only when `gate` holds,
+and its target summaries only as `want` names them (`ResourceTransaction.targetProjectionDemand`). -/
+def participantSlotsGated (gate : Bool) (want : String → Bool)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (i : TargetIndex command) : List (String × Int) :=
+  (if gate then
+      bytesSlots "resource/bytes" 0 (command.targets[i].materializer.codec.encode (logical (some i)))
+    else []) ++
+    (targetProjectionDemand want command.subject command.targets[i] (prepared.targets i).pre.logical
+        (logical (some i)) ++
+      moneyPolicySlots prepared i)
+
+/-- Under the gate and any `want` covering the demanded names under `pfx`, a participant's slots
+filter alike. -/
+theorem participantSlots_filter_gated
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (keys : List Minidregg.Pred.Slot) (pfx : String) (want : String → Bool)
+    (wanted : ∀ name, keys.contains (pfx ++ name) = true → want name = true) (i : TargetIndex command) :
+    (participantSlots prepared logical i).filter (fun slot => keys.contains (pfx ++ slot.1)) =
+      (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes") want
+        prepared logical i).filter (fun slot => keys.contains (pfx ++ slot.1)) := by
+  have keep : ∀ l : List (String × Int),
+      (l.filter fun slot => want slot.1).filter (fun slot => keys.contains (pfx ++ slot.1)) =
+        l.filter (fun slot => keys.contains (pfx ++ slot.1)) := by
+    intro l
+    rw [List.filter_filter]
+    apply List.filter_congr
+    intro slot _
+    cases h : keys.contains (pfx ++ slot.1) with
+    | false => simp
+    | true => simp [wanted _ h]
+  have demanded : targetProjectionDemand want command.subject command.targets[i]
+      (prepared.targets i).pre.logical (logical (some i)) =
+      (targetProjection command.subject command.targets[i] (prepared.targets i).pre.logical
+        (logical (some i))).filter fun slot => want slot.1 :=
+    targetProjectionDemand_eq _ _ _ _ _
+  unfold participantSlots participantSlotsGated
+  rw [demanded, List.filter_append, List.filter_append, List.filter_append,
+    List.filter_append, keep]
+  cases gate : ResourceAuthorityProjection.demandsStem keys "resource/bytes" with
+  | true => rfl
+  | false =>
+      erw [ResourceAuthorityProjection.bytesSlots_filter_undemanded pfx "resource/bytes" keys 0 _ gate]
+      simp
+
 /-- Local names for the primary participant, then every participant under
 `joint/target/{id}/…` and again under `joint/index/{i}/…` (`jointSlots`). -/
 def projectWithCommon (prepared : PreparedInvocation deployment profile ambient ground command)
@@ -335,6 +395,69 @@ def project (prepared : PreparedInvocation deployment profile ambient ground com
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
   projectWithCommon prepared primary (projectCommonSlots prepared primary source) logical
+
+/-- **The demanded projection** (the statement): the full projection cut to `keys`. -/
+def projectWithCommonFor (keys : List Minidregg.Pred.Slot)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (primary : Incidence command) (common : List (String × Int))
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
+    Minidregg.Pred.State :=
+  (projectWithCommon prepared primary common logical).restrict keys
+
+/-- What runs: each participant's slots once, without its per-byte cell block unless a demanded
+name can reach it, then the cut. -/
+def projectWithCommonDemand (keys : List Minidregg.Pred.Slot)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (primary : Incidence command) (common : List (String × Int))
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
+    Minidregg.Pred.State :=
+  let gate := ResourceAuthorityProjection.demandsStem keys "resource/bytes"
+  let localIndex := primary.getD (firstIndex prepared)
+  let projected := Array.ofFn fun i => participantSlotsGated gate (participantWant keys command i) prepared logical i
+  let slots := fun i : TargetIndex command => projected[i.val]'(by
+    simpa only [projected, Array.size_ofFn] using i.isLt)
+  (⟨common ++ slots localIndex ++ jointSlots command.targets slots⟩ : Minidregg.Pred.State).restrict keys
+
+theorem projectWithCommonDemand_exact (keys : List Minidregg.Pred.Slot)
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (primary : Incidence command) (common : List (String × Int))
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
+    projectWithCommonDemand keys prepared primary common logical =
+      projectWithCommonFor keys prepared primary common logical := by
+  have local_ : ∀ i, (participantSlots prepared logical i).filter (fun slot => keys.contains slot.1) =
+      (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes")
+        (participantWant keys command i) prepared logical i).filter (fun slot => keys.contains slot.1) := by
+    intro i
+    simpa using participantSlots_filter_gated prepared logical keys "" (participantWant keys command i)
+      (fun name h => by simp_all [participantWant]) i
+  have target : ∀ i : TargetIndex command,
+      (participantSlots prepared logical i).filter
+          (fun slot => keys.contains (jointTargetKey command.targets[i].target slot.1)) =
+        (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes")
+          (participantWant keys command i) prepared logical i).filter
+          (fun slot => keys.contains (jointTargetKey command.targets[i].target slot.1)) := fun i =>
+    participantSlots_filter_gated prepared logical keys
+      ("joint/target/" ++ toString command.targets[i].target ++ "/") (participantWant keys command i)
+      (fun name h => by simp only [participantWant, jointTargetKey, h, Bool.or_true, Bool.true_or]) i
+  have index : ∀ i : TargetIndex command,
+      (participantSlots prepared logical i).filter
+          (fun slot => keys.contains (jointIndexKey i.val slot.1)) =
+        (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes")
+          (participantWant keys command i) prepared logical i).filter
+          (fun slot => keys.contains (jointIndexKey i.val slot.1)) := fun i =>
+    participantSlots_filter_gated prepared logical keys
+      ("joint/index/" ++ toString i.val ++ "/") (participantWant keys command i)
+      (fun name h => by simp only [participantWant, jointIndexKey, h, Bool.or_true, Bool.true_or]) i
+  simp only [projectWithCommonDemand, projectWithCommonFor, projectWithCommon, Minidregg.Pred.State.restrict,
+    Array.getElem_ofFn, jointSlots, List.filter_append, List.filter_flatMap, List.filter_map,
+    Function.comp_def, local_, target, index]
+
+@[csimp] theorem projectWithCommonFor_eq_demand :
+    @projectWithCommonFor = @projectWithCommonDemand := by
+  funext
+  exact (projectWithCommonDemand_exact _ _ _ _ _).symm
+
+#assert_axioms projectWithCommonDemand_exact
 
 theorem projectWithCommon_exact (prepared : PreparedInvocation deployment profile ambient ground command)
     (primary : Incidence command) (source : Source command)
@@ -646,11 +769,23 @@ theorem policyPostState_exact (prepared : PreparedInvocation deployment profile 
   rw [sourceExact]
   rfl
 
+/-- The slots this incidence's committed law reads (`PhysicalLawResolution.targetPredicate?`, the
+law `policyConfig` resolves: `legKeys_exact`); empty when no law resolves, and then the leg
+refuses `policyUnavailable` before any verdict. -/
+def legKeys (prepared : PreparedInvocation deployment profile ambient ground command)
+    (incidence : Incidence command) : List Minidregg.Pred.Slot :=
+  ((PhysicalLawResolution.targetPredicate? deployment profile.compilerProfile ground.authority
+      ground.directory (incidenceTarget command incidence).target).map Minidregg.Pred.Pred.reads).getD []
+
+/-- The policy step of an incidence: the projected old and new states cut to the slots its
+committed law reads (`step_prepared_exact`), so its verdict is the verdict on the full
+projection (`step_eval_exact`). -/
 def step (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : PolicyStepContext :=
   let common := projectCommonSlots prepared incidence tuple.source
+  let keys := legKeys prepared incidence
   PolicyStepContext.ofPreparedTupleExact
-    (fun _ logical => projectWithCommon prepared incidence common logical) profile.semantics
+    (fun _ logical => projectWithCommonFor keys prepared incidence common logical) profile.semantics
     { tuple with primary := incidence }
     (policyPreCell prepared) (policyPostState prepared)
     (policyPreCell_exact prepared tuple) (policyPostState_exact prepared tuple)
@@ -660,10 +795,13 @@ theorem step_prepared_exact
     (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     step prepared tuple incidence =
-      PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
-        { tuple with primary := incidence } := by
-  unfold step
-  rw [PolicyStepContext.ofPreparedTupleExact_eq]
+      (PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
+        { tuple with primary := incidence }).restrict (legKeys prepared incidence) := by
+  unfold step projectWithCommonFor
+  rw [PolicyStepContext.ofPreparedTupleExact_restrict (legKeys prepared incidence)
+    (fun _ logical => projectWithCommon prepared incidence
+      (projectCommonSlots prepared incidence tuple.source) logical),
+    PolicyStepContext.ofPreparedTupleExact_eq]
   rfl
 
 /-- Build the policy configuration from the step the caller is already
@@ -694,6 +832,35 @@ theorem policyConfigFromStep_exact [DecidableEq F]
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) :
     policyConfigFromStep prepared incidence (step prepared tuple incidence) =
       policyConfig prepared tuple incidence := rfl
+
+/-- The cut is to the reads of exactly the law the leg's configuration resolves. -/
+theorem legKeys_exact [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared tuple incidence)) :
+    legKeys prepared incidence = law.predicate.reads := by
+  unfold legKeys
+  rw [PhysicalLawResolution.targetPredicate?_law deployment profile.compilerProfile ground.authority
+    ground.directory _ _ _ law]
+  rfl
+
+/-- **The leg's verdict is the verdict on the full projection**: its committed law on the cut
+step is the same law on the step `ofPreparedTuple (project …)` builds (`Pred.eval_restrict`). -/
+theorem step_eval_exact [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (law : ComposedPolicyAdmission.PreparedLaw (policyConfig prepared tuple incidence)) :
+    Minidregg.Pred.eval law.predicate (step prepared tuple incidence).oldState
+        (step prepared tuple incidence).newState =
+      Minidregg.Pred.eval law.predicate
+        (PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
+          { tuple with primary := incidence }).oldState
+        (PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
+          { tuple with primary := incidence }).newState := by
+  rw [step_prepared_exact, legKeys_exact prepared tuple incidence law]
+  exact Minidregg.Pred.eval_restrict law.predicate _ _
+
+#assert_axioms step_eval_exact
 
 /-- The portal of an ordinary leg: its target's committed law on the joint step. -/
 def legPortal [DecidableEq F]

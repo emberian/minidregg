@@ -242,45 +242,43 @@ restart, `story new`, the first walk-family request after a restart.
 
 ## Next (successor: start here)
 
-Continuation (2026-10-31 06:00 EDT, a86738fc at about 560k tokens of context): lane
-`lane/hot-path-cold` at 01a01e359, with nothing uncommitted. The integrator
-(aeb671706eb3f70d7) has a049aca6d merged and 01a01e359 queued. Private cells is
-a507e11e0d0ca4a6a. hbox: build only in pool trees (`. /home/hbox/pool/pool.env;
-LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`; release when
-done); logs go to `/ci/hpc` (never `/home/hbox/lanes/hpc`, which was cleared); profiles are in
-`/ci/hpc/fby` (run.sh, perf.data, symfs).
+State (2026-10-31): lane `lane/hot-path-cold` at the slot-fix batch (sent to the integrator). The integrator is aeb671706eb3f70d7 and routes hot-path to this agent; private cells is
+a30875aaf31364697. On hbox, build only in pool trees (`. /home/hbox/pool/pool.env;
+LANE_POOL_NO_WARM=1 lane-tree acquire hot-path origin/lane/hot-path-cold`, release when done). Logs go
+to `/ci/hpc`. Profiles: `/ci/hpc/fby` (run.sh, `--symfs`). The native Host build driver is
+`/ci/hpc/nb/build.sh` (deploy/candidate/lane-build.sh host, LANE_DIR=/ci/hpc/nb).
 
-
-1. **Flatness submit: the demand-driven projection.** The statement is landed:
-   `Pred/Frame.lean` has `Pred.reads`, `State.restrict`, `eval_restrict` (the verdict on
-   the law's slots is the verdict), `eval_restrict_of_sub`, and `restrict_needs_reads`
-   (teeth); `PredCompile.inputsInRange_frame` / `inputsInRange_restrict` state the same of
-   the range check. What follows, at the one seam (`CanonicalPolicyAdmission.PolicyStepContext`):
-   - A projection carries both forms: `full : Store L → State`, plus `demand : List Slot →
-     Store L → State` with `demand keys s = (full s).restrict keys`. Contexts are built with
-     `demand law.predicate.reads`, and theorems about the context recover their
-     `project`-stated forms through `eval_restrict` / `inputsInRange_restrict`. Before
-     changing `ofCandidate`/`ofPreparedTuple`, state the frame for the circuit assignment
-     too, if the compiled verdict reads the state (`ComposedPolicyAdmission`
-     relates the compiled verdict to `Pred.eval` under `rangesExact`).
-   - The builders, compositional. `restrict` distributes over `++` (`List.filter_append`).
-     `bytesSlotsFor keys stem bytes` parses the demanded `stem/<i>` names and reads those
-     bytes, and is proved equal to `(bytesSlots stem 0 bytes).restrict keys` (canonical
-     `toString` round trip; `filter` keeps index order). `jointSlots` strips its
-     `joint/target/{id}/` and `joint/index/{i}/` prefixes the same way. The `content/*`
-     summaries in `ContentResource.project` become demanded entries, so an unread summary is
-     never computed.
-   - In the same pass: `support.card`, `elementCount`, `contentPayloadBytes` and `changedIn`
-     through `FiniteDependentMapCachedOrdering.supportCached` (`supportCached_eq`, sort-based)
-     instead of `Multiset.dedup`, by `@[csimp]` lemmas so that no statement moves. Then the
-     observation path's projection (`ResourceObservationAdmission.projectWith`) gets the same
-     `demand`.
-   - Owed in the same batch as the `participantSlots` change (integrator's audit): the deployed
-     projection is built from `p.reads` and its equality to `(full s).restrict keys` is fed to
-     `eval_restrict_of_sub`, so the fix is verified, not merely licensed. Never restrict ahead
-     of a discharging oracle (`Pred.Leaf.leafWith` with a real oracle); add its read set.
-   - Measure with `scripts/perf/flatness-bench.py` and profile with `perf record --call-graph
-     dwarf` plus `--symfs` (the Host runs from a memfd; see `/ci/hpc/fby/run.sh`).
+1. **Flatness submit: the demanded projection. Landed on the lane (545f80874 and f7da550af); measured.**
+   - **Measured** (scripts/perf/flatness-bench.py, 130 ops, eca98bde7 with the lane's Host, hbox
+     `/ci/hpc/fbs`). Late submit CPU went from 874 to 280-311 ms; propose CPU from 231 to 50-90 ms;
+     late submit wall from 953 to 436-463 ms. The CPU ratios are still 5.2-5.8x, which fails the 2x
+     bound.
+   - **What remains** (profile `/ci/hpc/fbs/perf.data`): O(cell) work per append. That is
+     `StoreCodec.encode` of the whole document cell (31%), its decode (13%), `Store.set` (12%), the
+     cell root (`physicalRoot`, 8%) and `contentLawDecidable` over the cached support (11%). The next
+     step is a document cell whose encoding, root and law check cost O(change · log n): chunked
+     content cells, or private cells' kept-index root (`Materialized.rootCache = KeptCell.root`)
+     extended to content. That is a format change, so it pairs with row 11's epoch bump.
+   - **Shared seam.** `PolicyStepContext.restrict` and `PhysicalLawResolution.predicateOf?` /
+     `targetPredicate?`, with `predicateOf?_law`, which reads the law's predicate off the same graph
+     load as the resolution.
+   - **Declared resources (DRC).** `legKeys` and `step`, which is the full step restricted to the law's
+     reads (`step_prepared_exact`). `legKeys_exact` plus `step_eval_exact` (via `Pred.eval_restrict`) is
+     the tie the audit asked for.
+   - **Read path.** `fullStep`, `keys` and `step_eval_exact`; the clock theorems are stated of `fullStep`.
+   - **What runs, via `@[csimp]`.** `projectWithCommonDemand` and `projectWithDemand`. A byte block is
+     encoded only if a demanded name contains its stem (`demandsStem`); content summaries are thunks
+     (`ContentResource.projectLazy`, `targetProjectionDemand`, `resourceSlotsDemand`). Content support
+     uses the cached key sort (`supportFast`, with csimps for `elementCount`, `contentPayloadBytes` and
+     `changedIn`).
+   - **Not done.** `StoreCodec.encode` of the whole cell per append (10.5%) still runs where a law reads
+     `content/bytes/*` or the per-byte block, and in the write itself; that needs chunked document cells
+     (a design item and a format change).
+   - **Before (gate13).** 35737eac4: submit CPU 100 → 847 ms. eca98bde7: 116 → 874 ms, propose CPU
+     28 → 231 ms, over heights 3 → 103.
+   - **How to measure.** `scripts/perf/flatness-bench.py --bin <candidate bin with the new
+     minidregg-host>`, built with `/home/hbox/lanes/integ/hotpatch-candidate.sh eca98bde… <name>
+     minidregg-host=/ci/hpc/nb/artifacts/minidregg-host`.
 2. **Row 4 slice 2 and row 11, one format change** (one epoch bump with private cells,
    now a30875aaf31364697: they send their FORMAT sha (AuxCache in Materialized, masked-trie
    roots, new PersistedCodecTags), we rebase row 11 onto it, and the integrator lands the pair with one

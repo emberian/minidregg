@@ -1293,6 +1293,36 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
     | kindRead => exact WorldPrototypeConstruction.observeProject before
     | read => exact ContentResource.project before after ⟨[]⟩
 
+/-- `targetProjection` filtered by `want`, a content cell's summaries computed only when named
+(`ContentResource.projectDemand`, `targetProjectionDemand_eq`). -/
+def targetProjectionDemand (want : String → Bool) (subject : SubjectId) (target : Target)
+    (before after : Store target.layout) : List (String × Int) := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload with
+    | scalar _ => exact (DeclaredResourceProjection.project id before after).filter fun slot => want slot.1
+    | computeFunding funding => exact (fundingProject funding).filter fun slot => want slot.1
+    | moneyConsent consent => exact
+        ([("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
+          (consent.funding.map fundingProject).getD []).filter fun slot => want slot.1
+    | content content => exact ContentResource.projectDemand want before after content
+    | append request => exact (streamSlots request before).filter fun slot => want slot.1
+    | world _ => exact (WorldKindProjection.project subject before after).filter fun slot => want slot.1
+    | kindDefinition _ => exact (WorldKindProjection.definitionProject before after).filter fun slot => want slot.1
+    | kindRead => exact (WorldPrototypeConstruction.observeProject before).filter fun slot => want slot.1
+    | read => exact ContentResource.projectDemand want before after ⟨[]⟩
+
+theorem targetProjectionDemand_eq (want : String → Bool) (subject : SubjectId) (target : Target)
+    (before after : Store target.layout) :
+    targetProjectionDemand want subject target before after =
+      (targetProjection subject target before after).filter fun slot => want slot.1 := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload with
+    | content content => exact ContentResource.projectDemand_eq want before after content
+    | read => exact ContentResource.projectDemand_eq want before after ⟨[]⟩
+    | _ => rfl
+
 /-- The participant slot a sample reads: target `i`'s projection of its loaded
 pre-state (before = after = pre), so a program sees only committed values. -/
 def sampleRead (command : Command) (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
