@@ -27,6 +27,7 @@ demo-custodian (host-side volume custodian wiring), demo-grain-world custodian m
 composed prjquota worlds + seccomp quotactl allowance, ship.sh overlay ids and mini-line install, pipefail help-probe fix, DEMO_ALERT off, rebuild-world,
 composed-confine-a (Stage A, written, NOT applied).
 
+## Stage A DONE (2026-10-31): composed container has no loop devices, loop-control, loop DeviceAllow or loop-nodes unit; worlds volume is a host-mounted prjquota ext4 (/var/lib/composed-grains-host) bound at /var/lib/mini-spk-worlds. Regression: composed on b9450147f571 PASS all 8 phases (c-b945-sa). Still PrivateUsers=no and the default nspawn cap set (CAP_MKNOD stays in it); Stage B (userns + custodian) is next.
 ## Next
 1. Fresh demo rebuild from green (quiet-host wait threshold must tolerate fn's load ~5), Hermes ask/reply smoke (GLM via Z.AI row zai-glm only).
 2. Stage A: `workhorse/composed-confine-a apply` then a composed rerun before calling it done; Stage B (userns + custodian for composed) coordinating the
