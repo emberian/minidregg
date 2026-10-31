@@ -13423,7 +13423,7 @@ impl Runtime {
             self.save()?;
             let result = if request.name == "mini_application_api" || oracle_tools::is_tool(&request.name) {
                 let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
-                self.foreground_application_api(&arguments, input)?
+                self.foreground_application_api(&arguments, input, false)?
             } else if typed_applications::is_foreground_name(&request.name) {
                 self.foreground_typed_application(&request.name, &request.arguments, input)?
             } else {
@@ -13824,7 +13824,7 @@ impl Runtime {
         let payload = typed_applications::foreground_arguments(entry, arguments, qualify)?;
         let mut forward = |request: Value| -> Value {
             let reply = typed_applications::raw_arguments(&attachments, &request)
-                .and_then(|mapped| self.foreground_application_api(&mapped, input));
+                .and_then(|mapped| self.foreground_application_api(&mapped, input, true));
             match reply {
                 Ok(value) => value,
                 Err(error) => json!({"isError":true,"text":error}),
@@ -13837,16 +13837,19 @@ impl Runtime {
         })
     }
 
+    /// `raw` asks for the verified Host frame itself (what a typed executor parses), not the
+    /// model presentation `mini_application_api` shows; it needs a lifetime route.
     fn foreground_application_api(
         &mut self,
         arguments: &Value,
         input: &Receiver<Input>,
+        raw: bool,
     ) -> Result<Value> {
         let operation_id = self.foreground_operation.ok_or("foreground API invocation absent")?;
         self.foreground_api_budget = Some(ForegroundApiBudget::new(operation_id));
         let result = (|| {
             let (reply, received) = mpsc::channel();
-            let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
+            let mut active = Some(self.begin_application_api(arguments, reply, None, raw)?);
             loop {
                 self.poll_application_api(&mut active)?;
                 if let Ok(value) = received.try_recv() {
