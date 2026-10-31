@@ -704,14 +704,17 @@ fn deliver_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     decimal_arg(&object, "OBJECT")?;
     decimal_arg(&transaction, "TRANSACTION")?;
     let view = activity::view(&bend.ws, &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]}))?;
-    let (record, await_id) = deliverable(&view)?;
+    // Nothing to deliver (not awaiting; the await not yet decided nor past its deadline) is the Host's
+    // view refusing, by name: a refusal ending, not a client error.
+    let (record, await_id) = match deliverable(&view) { Ok(found) => found, Err(e) => return ending(e) };
     let (payer, payer_cap) = bend.payer(account.as_deref())?;
     let mut turn = json!({"kind": "deliver", "record": record, "await": await_id, "account": payer, "accountCapability": payer_cap});
     // The resumed segment runs over the stored checkpoint: when it needs more heap than the
     // escrowed envelope carries, the deliverer adds the difference (`heapUncovered`; priced,
     // paid by me). The Host's read-only quote is the kernel's own `ResumeTail.needed`.
     let quoted = activity::view(&bend.ws, &json!({"quotes": [{"record": &record, "await": &await_id}]}))?;
-    if let Some(heap) = extra_heap(&quoted, &record, &await_id)? {
+    let extra = match extra_heap(&quoted, &record, &await_id) { Ok(extra) => extra, Err(e) => return ending(e) };
+    if let Some(heap) = extra {
         turn["extra"] = extra_envelope(heap);
     }
     let name = deliver_name(&await_id);
