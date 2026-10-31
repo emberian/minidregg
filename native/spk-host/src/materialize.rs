@@ -27,6 +27,7 @@ const IMAGE_FILE_MODE: u32 = 0o644;
 const IMAGE_EXECUTABLE_MODE: u32 = 0o755;
 const IMAGE_DIRECTORY_MODE: u32 = 0o755;
 
+#[derive(Clone)]
 pub struct InstalledPackage {
     pub directory: PathBuf,
     pub raw_sha256: String,
@@ -164,6 +165,41 @@ fn verified_identity(spk: &VerifiedPackage, directory: PathBuf) -> io::Result<In
     })
 }
 
+/// The verified identity of one file this process already qualified: the path, the profile and
+/// the file's identity (device, inode, length, mode, owner, both times) when it was verified.
+type QualifiedKey = (PathBuf, &'static str, (u64, u64, u64, u32, u32, i64, i64, i64, i64));
+#[allow(clippy::type_complexity)]
+static QUALIFIED: std::sync::Mutex<Vec<(QualifiedKey, InstalledPackage)>> = std::sync::Mutex::new(Vec::new());
+
+fn qualified_key(input: &Path, profile: ImportProfile) -> Option<QualifiedKey> {
+    let meta = fs::symlink_metadata(input).ok().filter(|meta| meta.is_file())?;
+    Some((input.to_path_buf(), profile.as_str(), (meta.dev(), meta.ino(), meta.len(), meta.mode(), meta.uid(),
+        meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec())))
+}
+
+/// One signature verification per file per process: `grain install` qualifies the staged SPK and
+/// then prepares INSTALL from the same file, which re-verified it whole (about 2 s for 37 MB).
+/// The result is kept only when the file's identity was the same before and after the
+/// verification, and taken only while the path still names that identity; a writer cannot set a
+/// ctime back, so any change to the file verifies it again.
+fn qualified_identity(input: &Path, parent: &Path, profile: ImportProfile) -> io::Result<InstalledPackage> {
+    let before = qualified_key(input, profile);
+    if let Some(key) = &before {
+        let kept = QUALIFIED.lock().map_err(|_| invalid("qualification cache poisoned"))?;
+        if let Some((_, package)) = kept.iter().find(|(kept, _)| kept == key) {
+            return Ok(package.clone());
+        }
+    }
+    let spk = stream::verify_in_private_temp_at_with_root_custody(input, parent, profile.limits(), crate::namespace_identity::root_owned)?;
+    let verified = verified_identity(&spk, PathBuf::new())?;
+    if before.is_some() && qualified_key(input, profile) == before {
+        let mut kept = QUALIFIED.lock().map_err(|_| invalid("qualification cache poisoned"))?;
+        kept.retain(|(key, _)| key.0 != input);
+        kept.push((before.expect("checked"), verified.clone()));
+    }
+    Ok(verified)
+}
+
 /// Parse one signed SPK without publishing an image, using the standard profile.
 pub fn qualify_bridge_spk(package: &Path) -> io::Result<(InstalledPackage, BridgeConfig)> {
     qualify_bridge_spk_with_profile(package, ImportProfile::Standard)
@@ -182,8 +218,7 @@ pub fn qualify_bridge_spk_with_profile(
     let parent = input
         .parent()
         .ok_or_else(|| invalid("package parent absent"))?;
-    let spk = stream::verify_in_private_temp_at_with_root_custody(&input, parent, profile.limits(), crate::namespace_identity::root_owned)?;
-    let verified = verified_identity(&spk, PathBuf::new())?;
+    let verified = qualified_identity(&input, parent, profile)?;
     let member = verified
         .signed_bridge_config
         .as_deref()
@@ -634,6 +669,38 @@ mod tests {
         assert!(verify_installed_spk(&installed.directory, app_uid).is_ok());
         std::os::unix::fs::symlink("root/import-policy.json", &policy).unwrap();
         assert!(verify_installed_spk(&installed.directory, app_uid).is_err());
+    }
+
+    /// A second qualification of the same file in one process takes the first's result, and a
+    /// rewrite of the file (same length, same name) is verified again and refused.
+    #[test]
+    fn qualification_is_kept_per_file_identity_and_a_rewrite_is_verified_again() {
+        let home = std::env::var_os("HOME").expect("test requires protected home directory");
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let scratch = PathBuf::from(home).join(format!(".spk-qualify-test-{}-{nonce}", std::process::id()));
+        fs::DirBuilder::new().mode(0o700).create(&scratch).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                cleanup_staging(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(scratch.clone());
+        let package = scratch.join("input.spk");
+        let bytes = sandstorm_package::SpkBuilder::new()
+            .manifest_json(r#"{"app_id":"ignored","app_title":"test","app_version":5,"continue_command":{"argv":["/app"]}}"#)
+            .file(sandstorm_package::File::executable("app", b"fixture".to_vec()))
+            .pack(&ed25519_dalek::SigningKey::from_bytes(&[6; 32]));
+        fs::write(&package, &bytes).unwrap();
+        let (first, _) = qualify_bridge_spk(&package).unwrap();
+        let (second, _) = qualify_bridge_spk(&package).unwrap();
+        assert_eq!(first.raw_sha256, second.raw_sha256);
+        assert_eq!(first.signed_bridge_config, second.signed_bridge_config);
+        let mut tampered = bytes.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        fs::write(&package, &tampered).unwrap();
+        assert!(qualify_bridge_spk(&package).is_err());
     }
 
     /// A wake takes the publishing parse's identity only for the very bytes that parse saw: the
