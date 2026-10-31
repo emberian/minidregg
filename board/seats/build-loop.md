@@ -30,9 +30,19 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - The box holds no GitHub write key: lanes push from the Mac (or `git fetch ssh://bb2/srv/pool/tN HEAD`). The builder
   needs one to publish REDS.md and move `green`; until then it runs with BUILDER_DRY=1.
 - Disk: everything under /srv. integ-build keeps one generation of old outputs and 6 candidates (plus green's).
-- Not yet: the gate (gate15.sh, hbox-local, lost with hbox: tour, composed on forge, enrol-resume, j14, flatness). A
-  round without it reports "gate: not run here", and green does not move. Not yet either: SPK/grain-world root setup
-  (after the pool, per root).
+- The gate runs here: scripts/pipeline/gate (408962f1d) with BUILDER_ROOT=/srv/integ, GATE_RUNS=/srv/integ/ci,
+  WORLD_UP_LOCK=/srv/worlds/world-up.lock (inputs staged in /srv/integ: dregg-infra-e29997d, pw, j14-hroot, j14-data,
+  j14-secrets, spk-cache). First run at 76511e768: all phases ran; every red is the consent-provider exit 86c9dbddb fixes.
+  The builder runs as /srv/integ/builder-run.sh (those knobs, BUILDER_DRY=1, main's builder). Not yet: SPK/grain-world
+  root setup (after the pool, per root).
+- The shared packages are read-only; lake replays write missing .hash files, so the pool once refused six Mathlib
+  replays (EACCES). Fixed 19:57 by one writable `lake build Mathlib ...` over the shared copy, then re-locked
+  (~/mlhash.sh): run it again after any package re-seed.
+- Candidate transfers: only by `scripts/pipeline/candidate-transfer SRC_HOST:DIR DST_HOST:DIR NAME` (a97b13c4a). It copies
+  into DST/.incoming-NAME, verifies SHA256SUMS (and fixtures/, and READY) on the destination, then renames into place, so
+  no reader of candidates/ ever sees a partial candidate. Never copy into candidates/NAME directly.
+- hbox b9450147f candidate: transferring that way (from the Mac, PID file in the build-loop scratchpad cand-copy.pid; hbox
+  uplink ~100 KB/s). It exists in /srv/integ/candidates only once complete and verified.
 
 ### The builder
 - `scripts/pipeline/builder`: per new main tip, `scripts/pipeline/integ-build` (now in the repo: rust-check, host,

@@ -109,7 +109,7 @@ rounds, and move measurement to persvati's standing world when it exists.
 
 ## Seams
 
-- member-side (a778bbda6509944a5): consent cost per read; mini-web-spawn's `delegated_consent_env` twin of
+- member-side (ab7b4fe7fb687e0ca): consent cost per read; mini-web-spawn's `delegated_consent_env` twin of
   mini-line's selection (theirs, by a shared `#[path]` source); op 144 head-keyed check later.
 - store-retained (a9b54e85e4a194b91): the reference-name index over WORKSPACE/refs; op 4's planned challenges
   retained for op 5 (`Session.challenges`), typed by the light opening's ground (proposed to it 2026-10-31).
