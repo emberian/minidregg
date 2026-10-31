@@ -50,6 +50,7 @@ The session was pruned 10-30 evening; the root re-adopted the veteran lanes with
 | app-reds | ad85d40779880420c (volume/custodian/apps; a17f4172949caca14 on resident /var checks, Hermes items) | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
 | private cells | a8da2b953507b402b (FORMAT (a): eventHistory + authority to the trie root with mask [] in one genesis with row 11, after seam 1; then the compiler-emitted ZK selective opening; (b) content + declared kinds in a second epoch) | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
 | iteration speed | ab2786fe1172f5683 | the bump cdb399b47, umbrella-tree.sh (second warm tree for integ-build5) |
+| exorcism | a31f4ba5028d24a92 (distilled; a9252a07cf889741c retired) | no fsync anywhere (ember), lane/exorcism; merged 4f7972a62 for batch 5; filtered set: nextest -E 'test(durable) \| test(anchor) \| test(signing_wire) \| test(attempt_state) \| test(receipt_continuity)' |
 | explorer | a3e5d6dbcd68e616c | perf and behaviour probes on candidates; docs/EXPLORER-FINDINGS.md |
 | demo-reds (sub-Opus of this integrator, done) | a64c387f3e638aa63 | G3-G6 (lane/demo-reds 8982fa265); left: no bend top-up verb, `bend show` prints "phase ?" after an activity ends |
 
