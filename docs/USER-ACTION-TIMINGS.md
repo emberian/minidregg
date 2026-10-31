@@ -1,4 +1,4 @@
-# User action timings (batch 4, b9450147f)
+# User action timings (batch 4, b9450147f; coverage map covers b4 to b6)
 
 Present-state table, rewritten whole. Candidate `b9450147f571b6e3f9dffd6ed649024137ad8a0a` on hbox, a fresh scratch
 world (demo params, Objective policy, funding 1,225,000, five members), driven by `~/xp/tm.sh` (wall table),
@@ -124,6 +124,112 @@ behind. The batch-5 change that limits a lagging consent provider's catch-up sho
 6. **`POST /doc/new` 6.5 to 7.7 s, `doc new` 2.6 to 4 s, `create object` 2 to 3 s, `say` 1 to 1.7 s**: every
    write is 0.5 to 3 s of fsync wait; exorcist.
 7. Web read pages 15 to 70 ms and public GET / 26 ms: acceptable relative to the above, still 15x to 70x the bar.
+
+## Coverage map: every user-, agent- and operator-visible path
+
+One row per path. Bar: about 1 ms of warm server-side work per action. "Cost" says how the number was
+obtained: **M** = measured by me on b9450147f (b4), 1c151fce4 (b5) or 74e1cfa10 (b6), hbox load 9 to 15;
+**E** = estimated from a measured neighbour, stated; **0** = not measured at all. "Grows" = grows with
+history (h = chain height / entries / refs). Owner is one of the live lanes (hot-path a6c4a1532687a4fdb,
+exorcist a76808829fc8e4836, perf-client a778bbda6509944a5, perf-apps a25df305cfd551d8b, private-cells
+a8da2b953507b402b, retained-mode a13f0c9ab4513b2d7, app-reds ad85d40779880420c), a *proposed* one where I
+am inferring a lane's scope from its name, or **UNOWNED**.
+
+### Shell and client
+
+| path | warm cost | grows | owner |
+|---|---|---|---|
+| ssh forced command + wrapper (`mini-shell-ssh`) | M: client floor 7 ms (`help`); b4 13 execs, b5 22 (cold residents), b6 wrapper `#!/bin/bash` and mkdir/flock gone | no | exorcist (done in b6), perf-client |
+| signed read `credit`, `read`, `can`, `refs` | M: b4 650 ms to 13 s (128 refs); b5 211-427 ms; b6 211-256 ms | b4 yes (refs); b5/b6 flat in refs | exorcist (fsync), retained-mode (proposed), hot-path |
+| stream read `tail -n N` | M: b4 2.0-2.6 s; not re-measured since | b4 modest | hot-path, perf-client (proposed) |
+| `history`, `why`, `inspect`, `describe`, `law show`, `inbox` | 0 (local file reads, plus one Host read for `inspect`) | E: yes with attempts (698 retained attempts) | UNOWNED |
+| first signed read of a new session | M: 20.7 s (b3), 0.5-0.8 s (b5) | fixed | hot-path (done) |
+| idle member's first action after hundreds of heights | M: 19-61 s (b4), 0.36 s (b5) | fixed | hot-path (done) |
+| restart: wall and first read | M: 12.5 s at h620 (b4); 11.7 s wall + 0.24 s read at h491 (b5) | wall: yes | hot-path |
+
+### Writes (every one is propose + submit)
+
+| path | warm cost | grows | owner |
+|---|---|---|---|
+| `say`, `topic`, `pin`, `react` | M: b4 1.1 s; b5 0.55 s; b6 0.4-0.5 s; 60% is Host op2 (163 ms) | modest | hot-path (op2), exorcist |
+| `doc new` / `append` / `submit` / `show` | M: 2.6 s / 0.9 s / 0.9 s / 0.5 s (b4); append+submit 1.0, 2.1, 3.4 s at 13/103/303 entries (b6) | **yes** (event-log cell, O(history)) | private-cells (FORMAT a), hot-path |
+| doc `edit`, `insert`, `move`, `remove`, `mark`, `link`, `transclude`, `annotate`, `search`, `diff`, `history` | 0 (E: each is one propose+submit like append, so >= 1 s) | E: yes | private-cells (proposed) |
+| `create` object, `provision` | M: 2-3 s (b4); 1.3-2.1 s (b6); 3.5 s avg for 128 in b5 | no | hot-path, exorcist |
+| `chat new` / `invite` / `join` / `enter` | M: 8-14 s / 21 s (invite+join) (b4); chat new 10 s at load 13 (b4 batch) | chat new yes | hot-path, exorcist |
+| `story new` | M: 28-45 s (b4); 14 s (b5); 7.0 s (b6) | yes (b4) | hot-path (row 12, FORMAT batch) |
+| story `go` / `take` / `act` / `narrate` / `look` | M: ~1.0-1.7 s each on b1 (early run); not re-measured | no | UNOWNED |
+| `delegate` / `revoke` + submit + publish + import | M: 0.9 + 1.8 + 0.3 + 0.4 s (b4); delegate+submit 1.7-3.1 s at 13, 3.9-4.5 s at 303 grants | **yes** (authority cell) | hot-path (authority fix), private-cells (FORMAT a) |
+| `room kick`, `seal`, `rotate`, `rewrap`, `renew`, `welcome`, `concierge`, `leave` | 0 (E: >= 1 s each) | E: yes | UNOWNED |
+| `law` install / check, `kind`, `program`, `instance call/set` | 0 | E: yes | UNOWNED |
+| private rooms (`chat new --private`, key wraps) | 0 (E: >= chat new 8 s plus ML-KEM wraps) | E: yes | private-cells |
+| `market` / `bid` / `reveal` / `settle`, `job` verbs, `board` | M: `market open` 2.4 s (early); `job`, `board`, `bid` 0 | E: yes | UNOWNED |
+| `key set/grant/revoke`, `credit`/`tariff`/`topup`/`pay ROOM` | `credit` M 0.2 s; `tariff` M 1.9 s (b1); `topup`, `pay ROOM`, `key` 0 | no | UNOWNED |
+| `pay status`, `pay address`, `pay audit` | M: 0.7-1.2 s (b4); `audit` 0.2 s | no | UNOWNED (pay-watcher side: 0) |
+
+### Programs
+
+| path | warm cost | grows | owner |
+|---|---|---|---|
+| `bend publish` / `run` / `answer` / `deliver` / `settle` | M (b4, fresh -> aged h600): publish 0.9 -> 6.4 s; run 1.4 -> 7.3 s; deliver 1.1 -> 6.1 s; settle 0.27 -> 5.8 s; answer 0.17 s | **yes, 5-22x** | hot-path (authority fix a55855f18, in batch 7) |
+| `bend await` / `show` / `lookup` | M: 0.2 s | no | hot-path |
+| default purse (cost per completed tally) | M: net 91,338 after settle | n/a | hot-path (done) |
+
+### Web (gateway on loopback, one helper)
+
+| path | warm cost | grows | owner |
+|---|---|---|---|
+| read pages `/ /doc /story /room /bend /verb /tour /export` | M: 14-33 ms | E: mild | perf-client |
+| `/apps`, `/receipts` | M: 41-50 / 45-68 ms | E: yes (698 attempts) | perf-client, perf-apps (`/apps`) |
+| form POSTs (`/doc/new`, append, verb forms, re-POST replay) | M: `/doc/new` 6.5-7.7 s (b4); append 0.6 s; replay 0.09 s | as the verb | hot-path / perf-client |
+| login + terminal (`/login`, `/term` WebSocket) | 0 | E: no | perf-client (proposed) |
+| public reader `GET /` anonymous | M: 26 ms warm, 77 ms first; cold body start `J-COLD-READ` once 133 s then 2 s | no | perf-client (proposed) |
+| `/search` | 0 (answered 400 without a valid query) | E: yes | UNOWNED |
+
+### Apps, Hermes, agents
+
+| path | warm cost | grows | owner |
+|---|---|---|---|
+| `apps search`, `list`, `show`, `status`, `open` | M: `apps list` 4 ms (pending install), `search` fast (file) | E: no | perf-apps |
+| `apps install` end to end | M: 1,243 s run for 2 installs (b6), still red (START UNRESOLVED); perf-apps reports 39.5 -> 17.7 s | n/a | perf-apps, app-reds |
+| app start, route, first page through the grain front | 0 (blocked by the START red) | E: no | app-reds, perf-apps |
+| app request/response through the broker (beneath-HTML write) | 0 | 0 | perf-apps (proposed) |
+| `summon`, `dismiss` | 0 (no Hermes in scratch worlds) | 0 | app-reds |
+| Hermes `ask` to reply: Host side, model call (external), reply turn | 0 (forge: refused `no-credential`) | 0 | app-reds; model time reported separately as external |
+| Hermes typed tool call (Davros etc.) | 0 (gate row passes but is not timed) | 0 | app-reds, perf-apps |
+| `key` / provider routing, inference scheduler | 0 | 0 | UNOWNED |
+| agent session overlay, `agent-session-overlay.sh`, resident start | 0 | 0 | UNOWNED |
+
+### Operator, infrastructure and external
+
+| path | warm cost | grows | owner |
+|---|---|---|---|
+| certify / checkpoint | M: 0.8-6.6 s (b5, 256 tail); 25 s at h620 (b4) | b4 yes | hot-path |
+| mini-health (signed sponsor read) | M: 0.2-8 s (b2-b4 depending on restart) | b4 yes | hot-path |
+| clock tick (`mini-clock-tick`), roster sync, door tick | 0 | 0 | UNOWNED |
+| door `/join`, enrol, `mini-reenroll`, invite, link | 0 (door held closed; scratch worlds enrol directly in ~3 s per member: world-up for 5 members is ~60 s) | E: no | UNOWNED |
+| Discord bridge (`discord-entrance`, mirror, `mini-discord`) | 0 | 0 | UNOWNED |
+| `pay-watcher` (chain tick, credit) | 0 | 0 | UNOWNED |
+| carry (RECEIPT-CARRY, carry verifier, edge seal) | 0 | E: yes (prefix verification) | UNOWNED |
+| fn / FN consumer (FN-E1, E2, selective origin) | 0 | 0 | UNOWNED |
+| evidence capture and export (`export world`, `doc app-export`, backup, `mini-restore-check`) | `export world` M 6.9 s at h195 (early); others 0 | **E: yes** (O(world)) | UNOWNED |
+| consensus and source agreement (SOURCE-AGREEMENT-READER, joint-agreement-crypto, joint `consensus pin`) | 0 | E: yes | UNOWNED |
+| snapshot save / restore, cold start | 0 (designed; snapshots not exercised) | the point of the work | hot-path (cold-start), retained-mode (proposed) |
+| world-down / teardown leaving residents | defect, not latency | n/a | infra (outside the lanes) |
+
+## Unowned rows (to the coordinator)
+
+History-sensitive or on a user's critical path first:
+1. `export world` / app-export / backup / restore (O(world), 6.9 s at h195).
+2. Door, enrol and the reenroll chain (first minute of every stranger); and the clock tick, roster sync.
+3. Story play verbs (`go`/`take`/`act`/`narrate`): ~1-1.7 s and likely O(cell).
+4. Carry, FN consumer, and consensus/source agreement readers: 0 measurements; the carry prefix check is
+   likely O(history).
+5. Discord bridge and pay-watcher.
+6. The read-only local verbs (`history`, `why`, `inspect`, `describe`, `law show`, `inbox`): scale with the
+   698 retained attempts.
+7. Room administration verbs (`kick`, `seal`, `rotate`, `rewrap`), `law`/`kind`/`program`/`instance`, market,
+   job, board, `key`, `tariff`, `topup`, `pay ROOM`.
+8. `/search`, inference scheduler, agent session overlay.
 
 ## Open items
 
