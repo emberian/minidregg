@@ -473,7 +473,8 @@ def tuple (prepared : Prepared deployment profile ambient ground command) : Prep
   source := ()
   primary := ()
   validated _ := prepared.validated
-  postconditions _ := ⟨prepared.validated.resultAt, child_anchored prepared⟩
+  postconditions _ := ⟨prepared.validated.resultAt,
+    prepared.validated.apply_eq_materialize ▸ child_anchored prepared⟩
   cellIdsDistinct := fun _ _ _ => Subsingleton.elim _ _
   requestEffects _ := rfl
 

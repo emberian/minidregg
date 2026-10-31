@@ -720,7 +720,8 @@ def acceptAttenuation
       effectsDigestBound := requestDigestExact
       modeEvidence := modeEvidence
       validated := validated
-      postcondition := ⟨validated.resultAt, modeEvidence.childLineageAnchored validated⟩
+      postcondition := ⟨validated.resultAt,
+        validated.apply_eq_materialize ▸ modeEvidence.childLineageAnchored validated⟩
       disclosure := .sealed
       disclosureAllowed := trivial }
 
@@ -912,7 +913,8 @@ def acceptDelegation {M : Materializer}
       effectsDigestBound := rfl
       modeEvidence := mode
       validated := validated
-      postcondition := ⟨validated.resultAt, mode.childLineageAnchored validated⟩
+      postcondition := ⟨validated.resultAt,
+        validated.apply_eq_materialize ▸ mode.childLineageAnchored validated⟩
       disclosure := .sealed
       disclosureAllowed := trivial }
 
@@ -1042,7 +1044,10 @@ theorem delegation_post_lineage_valid {M : Materializer}
       LineageValid (authState pre).parent stored ∧
         LineageAnchored accepted.prepared.post stored := by
   exact ⟨_, delegation_post_capability_exact accepted,
-    accepted.modeEvidence.childLineageValid, accepted.postcondition.2⟩
+    accepted.modeEvidence.childLineageValid,
+    by show LineageAnchored accepted.validated.apply _
+       rw [accepted.validated.apply_eq_materialize]
+       exact accepted.postcondition.2⟩
 
 /-! ## Revocation -/
 
@@ -1425,8 +1430,10 @@ theorem attenuation_post_lineage_anchored
       (authState := authState pre)
       (attenuateFamily pre codec parentCodec effectDigest context)
       request pre declaration parent) :
-    LineageAnchored accepted.prepared.post (descendedCapability declaration.child parent) :=
-  accepted.postcondition.2
+    LineageAnchored accepted.prepared.post (descendedCapability declaration.child parent) := by
+  show LineageAnchored accepted.validated.apply _
+  rw [accepted.validated.apply_eq_materialize]
+  exact accepted.postcondition.2
 
 @[simp] theorem revocation_post_exact
     {M : Materializer} {pre : Cell M}

@@ -69,7 +69,7 @@ theorem validated_write_world {pre : Materialized M} {expectedPreRoot : Root}
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Theory.AuthMapCellRoot.cellWorld_opening' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Theory.AuthMapCellRoot.cellWorld_opening' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cellWorld_opening
 /-- info: 'Minidregg.Theory.AuthMapCellRoot.cellWorld_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cellWorld_sound
