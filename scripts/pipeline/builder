@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# scripts/pipeline/builder -- the unattended builder (board/README.md): loops on the `main` tip, builds and gates it,
+# writes board/REDS.md, and moves `green` when everything passes. Owned by the build-loop seat.
+#
+#   nohup scripts/pipeline/builder > $I/builder.out 2>&1 & echo $! > $I/builder.pid      (hbox, user hbox)
+#   scripts/pipeline/builder --once [SHA]     one round (default: the origin/main tip), then exit
+#   scripts/pipeline/builder --reds SHA       only rewrite REDS.md from SHA's existing build and gate logs
+#   BUILDER_DRY=1: print REDS.md instead of committing it, and never move green
+#
+# One round for tip SHA:
+#   1. build: $I/integ-build6.sh SHA (rust-check, host, consent, rust, pack -> candidates/SHA/READY; then the
+#      umbrella stage in umbrella-src and the fixture rerecord), detached, stage lines in $I/COMMANDS.log;
+#   2. gate: once READY, $I/gate15.sh SHA (tour J0-J8 + JWF, composed, enrol-resume, j14-apps, then flatness)
+#      beside the umbrellas; every red gate row is rerun once (PHASES=<row> SUF=-r1) to answer "reruns?";
+#   3. reds: board/REDS.md rewritten whole (stage, signature, reruns?, same place as last round?, suspect commits
+#      since `green`, owner), committed straight to main by path (temporary index, never a worktree);
+#   4. green: all stages and rows pass -> `git push origin SHA:refs/heads/green`.
+# Then it waits for a new tip (BUILDER_POLL_S, default 300). It never builds two rounds at once and never
+# touches another process: integ-build6 and gate15 keep their own PID files and locks. Disk: integ-build6
+# stops below 25 GB free; the builder logs it as a red and waits.
+set -uo pipefail
+I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; LOG=$I/COMMANDS.log; ST=$I/builder; mkdir -p "$ST"
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)} DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}
+export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH
+REPO=$I/src   # its .git holds the objects; the builder only fetches and writes by plumbing
+say() { echo "$(date -Is) BUILDER $*" >> "$LOG"; echo "$(date -Is) $*"; }
+once=0; want=""
+reds_only=""
+case ${1:-} in --once) once=1; want=${2:-} ;; --reds) reds_only=${2:?--reds SHA} ;; '') ;; *) echo "usage: builder [--once [SHA] | --reds SHA]" >&2; exit 64 ;; esac
+exec 8>"$ST/builder.lock"; flock -n 8 || { echo "builder: another builder holds $ST/builder.lock" >&2; exit 75; }
+
+stage_rc() {  # SHA STAGE: the rc of the latest `stage STAGE rc=N` line for SHA's build in COMMANDS.log
+  awk -v s="BUILD ${1:0:12} start" -v st="stage $2 rc=" 'index($0, s) { on = 1; rc = "" } on && index($0, st) {
+    x = substr($0, index($0, st) + length(st)); split(x, a, " "); rc = a[1] } END { print rc }' "$LOG"; }
+
+round() {
+  local sha=$1 s8=${1:0:8} t0; t0=$(date +%s)
+  say "round ${sha:0:12} start"
+  # 1. the build (detached: it holds build.lock and continues into the umbrellas after READY)
+  ( cd "$I" && ./integ-build6.sh "$sha" > "$ST/build-$s8.out" 2>&1 ) & local bpid=$!; echo $bpid > "$ST/build.pid"
+  while kill -0 $bpid 2>/dev/null && [ ! -f "$I/candidates/$sha/READY" ]; do sleep 30; done
+  # 2. the gate, beside the umbrellas
+  local gpid=""
+  if [ -f "$I/candidates/$sha/READY" ]; then
+    ( cd "$I" && ./gate15.sh "$sha" > "$ST/gate-$s8.out" 2>&1 ) & gpid=$!; echo $gpid > "$ST/gate.pid"
+  fi
+  wait $bpid; [ -z "$gpid" ] || wait $gpid
+  local G=$I/gate-$s8 rerun=""
+  # reruns: each red gate phase once, alone
+  if [ -s "$G/gate.json" ] && [ "$(jq -r .verdict "$G/gate.json")" != PASS ]; then
+    local phases=""
+    [ "$(jq -r .composed.verdict "$G/gate.json")" = PASS ] || phases="$phases composed"
+    grep -q $'\tFAIL' "$G/TOUR.tsv" 2>/dev/null && phases="$phases tour"
+    grep -q $'\tFAIL' "$G/j14.tsv" 2>/dev/null && phases="$phases j14"
+    grep -q 'enrol-resume rc=[1-9]' <(grep "GATE $s8 " "$LOG") && phases="$phases enrol"
+    if [ -n "$phases" ] || grep -q $'\tFAIL' "$G/flatness.tsv" 2>/dev/null; then
+      ( cd "$I" && PHASES="${phases# }" SUF=-r1 ./gate15.sh "$sha" > "$ST/gate-$s8-r1.out" 2>&1 ); rerun=$I/gate-$s8-r1
+    fi
+  fi
+  reds "$sha" "$G" "$rerun"
+  say "round ${sha:0:12} done $(( $(date +%s) - t0 )) s: $(head -c 200 "$ST/summary-$s8.txt")"
+}
+
+reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
+  local sha=$1 G=$2 R=$3 s8=${1:0:8} out=$ST/REDS-${1:0:8}.md prev=$ST/last-signatures.tsv sig=$ST/signatures-${1:0:8}.tsv
+  git -C "$REPO" fetch -q origin main green 2>/dev/null || git -C "$REPO" fetch -q origin main
+  local green; green=$(git -C "$REPO" rev-parse -q --verify origin/green || git -C "$REPO" rev-parse "$sha~20")
+  : > "$sig"
+  add() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$sig"; }   # STAGE SIGNATURE DETAIL
+  for st in rust-check host consent rust pack umbrella-tree rerecord; do
+    local rc; rc=$(stage_rc "$sha" "$st")
+    case "$rc" in 0) ;; '') [ "$st" = rerecord ] || add "$st" "did not run" "an earlier stage stopped the build" ;;
+      *) local log=$I/logs/$st.log first
+         first=$(grep -m1 -E '^(error|✖|FAIL|lane-build:|build-native-host:)' "$log" 2>/dev/null | cut -c1-240)
+         add "$st" "rc=$rc ${first:-see $log}" "$log" ;;
+    esac
+  done
+  grep -E '^RED ' "$I/logs/umbrella-tree.log" 2>/dev/null | while read -r _ m; do add umbrella "RED $m" "$I/logs/umbrella-tree.log"; done
+  if [ -s "$G/gate.json" ]; then
+    awk -F'\t' '$2 == "FAIL" { print $1 "\t" $3 }' "$G/TOUR.tsv" "$G/flatness.tsv" "$G/j14.tsv" 2>/dev/null |
+      while IFS=$'\t' read -r row detail; do add "gate:$row" "$row FAIL" "${detail:0:240}"; done
+    [ "$(jq -r .composed.verdict "$G/gate.json")" = PASS ] || add gate:composed "composed $(jq -r .composed.verdict "$G/gate.json")" "$(jq -r .composed.detail "$G/gate.json" | cut -c1-300)"
+  elif [ -f "$I/candidates/$sha/READY" ]; then add gate "no verdict" "$G/gate.json missing"
+  fi
+  local n; n=$(grep -c . "$sig" || true)
+  {
+    echo "# Reds (owned by the builder, rewritten whole each round)"
+    echo
+    echo "Tip: \`${sha:0:12}\` ($(git -C "$REPO" log -1 --format='%s' "$sha" | cut -c1-90)). Round finished $(date -u +%Y-%m-%dT%H:%MZ)."
+    echo "green: \`${green:0:12}\`. Builder: hbox \`$I\`, logs \`$ST\`, gate \`$G\`."
+    echo
+    if [ "$n" = 0 ]; then echo "No reds: \`green\` moves to \`${sha:0:12}\`."; else
+      echo "| stage | signature | reruns? | same place as last round? | detail |"
+      echo "|---|---|---|---|---|"
+      while IFS=$'\t' read -r st s d; do
+        local again="-" same=no
+        case "$st" in gate:*) local row=${st#gate:}
+          if [ -n "$R" ] && [ -s "$R/gate.json" ]; then
+            if awk -F'\t' -v r="$row" '$1 == r && $2 == "FAIL"' "$R/TOUR.tsv" "$R/flatness.tsv" "$R/j14.tsv" 2>/dev/null | grep -q . ||
+               { [ "$row" = composed ] && [ "$(jq -r .composed.verdict "$R/gate.json")" != PASS ]; }; then again="yes, red again"
+            else again="no: passed on rerun (flaky)"; fi
+          else again="not rerun"; fi ;;
+        esac
+        grep -qF "$st	$s" "$prev" 2>/dev/null && same=yes
+        printf '| %s | %s | %s | %s | %s |\n' "$st" "${s//|//}" "$again" "$same" "${d//|//}"
+      done < "$sig"
+      echo
+      echo "Suspect commits since green (\`git log ${green:0:12}..${sha:0:12}\`), newest first; owners are the seats whose"
+      echo "\`Owns:\` line (board/seats/*.md) names a path the commit touched:"
+      echo
+      suspects "$green" "$sha"
+    fi
+  } > "$out"
+  cp "$sig" "$prev"
+  publish "$out" "builder: REDS.md for ${sha:0:12} ($n red)"
+  if [ "$n" = 0 ] && [ -z "${BUILDER_DRY:-}" ]; then git -C "$REPO" push -q origin "$sha:refs/heads/green" && say "green -> ${sha:0:12}"; fi
+  printf '%s red(s) at %s\n' "$n" "${sha:0:12}" > "$ST/summary-$s8.txt"
+}
+
+suspects() {  # GREEN SHA: one line per commit since green, with the seats whose Owns: line names a touched path
+  python3 - "$REPO" "$1" "$2" <<'PY'
+import re, subprocess, sys
+repo, green, sha = sys.argv[1:]
+g = lambda *a: subprocess.run(['git', '-C', repo, *a], capture_output=True, text=True).stdout
+owns = {}
+for f in g('ls-tree', '--name-only', 'origin/main', 'board/seats/').split():
+    m = re.search(r'^Owns:(.*)$', g('show', f'origin/main:{f}'), re.M)
+    if m:
+        toks = [t.strip('`,.;()') for t in re.split(r'[\s,]+', m.group(1))]
+        owns[f.split('/')[-1][:-3]] = [t for t in toks if len(t) >= 5 and re.fullmatch(r'[\w./*-]+', t)]
+for line in g('log', '--format=%h %s', f'{green}..{sha}').splitlines()[:40]:
+    h, subj = line.split(' ', 1)
+    files = g('show', '--name-only', '--format=', h).split()
+    seats = sorted({s for s, toks in owns.items() for t in toks for f in files if f.startswith(t.rstrip('*')) or t.lower() in f.lower()})
+    print(f"- `{h}` {subj[:100]}" + (f" (owner: {', '.join(seats)})" if seats else ""))
+PY
+}
+
+publish() {  # FILE MESSAGE: commit FILE as board/REDS.md straight onto origin/main (retry on a race)
+  local f=$1 msg=$2 i idx=$ST/index c tree b
+  if [ -n "${BUILDER_DRY:-}" ]; then cat "$f"; return 0; fi
+  for i in 1 2 3 4 5; do
+    git -C "$REPO" fetch -q origin main || continue
+    GIT_INDEX_FILE=$idx git -C "$REPO" read-tree origin/main
+    b=$(git -C "$REPO" hash-object -w "$f"); GIT_INDEX_FILE=$idx git -C "$REPO" update-index --add --cacheinfo 100644,"$b",board/REDS.md
+    tree=$(GIT_INDEX_FILE=$idx git -C "$REPO" write-tree)
+    [ "$tree" != "$(git -C "$REPO" rev-parse origin/main^{tree})" ] || return 0
+    c=$(printf '%s\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' "$msg" |
+        git -C "$REPO" -c user.name="minidregg builder" -c user.email=builder@dregg.invalid commit-tree "$tree" -p origin/main)
+    git -C "$REPO" push -q origin "$c:refs/heads/main" && return 0
+    sleep 5
+  done
+  say "REDS.md publish failed after 5 tries"
+}
+
+if [ -n "$reds_only" ]; then
+  sha=$(git -C "$REPO" rev-parse "$reds_only"); s8=${sha:0:8}; r=""; [ -d "$I/gate-$s8-r1" ] && r=$I/gate-$s8-r1
+  reds "$sha" "$I/gate-$s8" "$r"; exit 0
+fi
+last=$(cat "$ST/last-built" 2>/dev/null || true)
+while :; do
+  git -C "$REPO" fetch -q origin main || { sleep 60; continue; }
+  tip=${want:-$(git -C "$REPO" rev-parse origin/main)}
+  # REDS.md commits are the builder's own: a tip whose only change since the last round is board/ is not rebuilt
+  if [ -n "$last" ] && [ -z "$want" ] && [ -z "$(git -C "$REPO" diff --name-only "$last" "$tip" -- . ':!board')" ]; then
+    [ $once = 1 ] && exit 0; sleep "${BUILDER_POLL_S:-300}"; continue
+  fi
+  round "$tip"; last=$tip; echo "$tip" > "$ST/last-built"
+  [ $once = 1 ] && exit 0
+done
