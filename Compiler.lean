@@ -107,6 +107,7 @@ import Compiler.CommittedTerminalFactoredProver  -- [CT-factored-prover]: the ho
 import Compiler.Sp800185Kmac256 -- SP 800-185 KMAC256 on the Lean Keccak core (host checkpoint/log MAC); compiled through the kernel seam (HOT-PATH 2d)
 import Compiler.Sp800185Kmac256Conformance -- the KMAC256 known answers, evaluated through the kernel seam (the Rust KMAC256 KAT at every build)
 import Compiler.DurableCheckpointCodec -- docs/DATAMODEL.md §5 C2: seed/log/checkpoint frames, log MAC chain, sealed checkpoints
+import Compiler.DurableIndexProbe -- KN2: the incremental trie set against the canonical root, executed (off the Host path)
 import Compiler.DurableHistoryReader -- KN2: the history read at use, verified against the MAC'd, anchor-bound head (MMR log accumulator + spent trie)
 import Compiler.DurableStoreAudit -- KN2: the Store-backed history Reader and `store audit` (every entry, node, spent row and checkpoint re-derived from genesis)
 import Compiler.CredentialAuthorityServed -- KN2 2b-1: the served state (no history) and its directory and authority cell

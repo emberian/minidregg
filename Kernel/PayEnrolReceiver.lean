@@ -1089,17 +1089,42 @@ def lawStepOf (planned : Planned deployment profile ambient durable command veri
       | _ => some (step planned)
   | none => some (step planned)
 
-theorem lawStepOf_pay (planned : Planned deployment profile ambient durable command verified) :
-    lawStepOf planned (payWrite planned) = some (step planned) := by
+/-- A live write of a law-bearing kind other than the clock carries the enrollment step.
+Stated at any write and cell: unfolding `lawStepOf` at a CONCRETE write has the kernel decode
+its post bytes to reduce the match, which evaluates the Store layout digest (a closed
+cSHAKE256, Keccak round by round): about 100 s for the pay write. -/
+theorem lawStepOf_of_live (planned : Planned deployment profile ambient durable command verified)
+    {write : DataWrite} {cell : PackedCell CanonicalCellRegistry.registry}
+    (live : ReceivingLaw.livePost write = some cell)
+    (notClock : (cell.kind : CanonicalCellRegistry.Kind) ≠ .clock)
+    (bearing : CanonicalCellRegistry.Kind.lawClass cell.kind = .lawBearing) :
+    lawStepOf planned write = some (step planned) := by
+  obtain ⟨kind, payload⟩ := cell
   unfold lawStepOf
-  rw [ReceivingLaw.livePost_live (cell := PayCellDomain.packedCell planned.payPost) rfl]
-  rfl
+  rw [live]
+  cases kind
+  all_goals first | exact absurd rfl notClock | simp_all
+
+/-- A live clock write carries the clock's step. -/
+theorem lawStepOf_of_live_clock (planned : Planned deployment profile ambient durable command verified)
+    {write : DataWrite} {cell : PackedCell CanonicalCellRegistry.registry}
+    (live : ReceivingLaw.livePost write = some cell)
+    (clock : (cell.kind : CanonicalCellRegistry.Kind) = .clock) :
+    lawStepOf planned write = some planned.clockStep := by
+  obtain ⟨kind, payload⟩ := cell
+  cases clock
+  unfold lawStepOf
+  rw [live]
+
+theorem lawStepOf_pay (planned : Planned deployment profile ambient durable command verified) :
+    lawStepOf planned (payWrite planned) = some (step planned) :=
+  lawStepOf_of_live planned (cell := PayCellDomain.packedCell planned.payPost)
+    (ReceivingLaw.livePost_live rfl) (by intro h; cases h) rfl
 
 theorem lawStepOf_clock (planned : Planned deployment profile ambient durable command verified) :
-    lawStepOf planned (clockWrite planned) = some planned.clockStep := by
-  unfold lawStepOf
-  rw [ReceivingLaw.livePost_live (cell := ClockCellDomain.packedCell planned.clockValid.apply) rfl]
-  rfl
+    lawStepOf planned (clockWrite planned) = some planned.clockStep :=
+  lawStepOf_of_live_clock planned (cell := ClockCellDomain.packedCell planned.clockValid.apply)
+    (ReceivingLaw.livePost_live rfl) rfl
 
 /-- Every write of an enrollment's legs is bound: its exact post is its post
 bytes' root (each is a birth write, a packed write or the authority write). -/
@@ -1522,10 +1547,9 @@ theorem factoryWrite_mem {command : Command} {verified : Verified}
 
 theorem lawStepOf_factory {command : Command} {verified : Verified}
     (planned : Planned deployment profile ambient durable command verified) :
-    lawStepOf planned (factoryWrite planned) = some (step planned) := by
-  unfold lawStepOf
-  rw [ReceivingLaw.livePost_live (cell := ⟨.declaredObject, planned.factory.payload⟩) rfl]
-  rfl
+    lawStepOf planned (factoryWrite planned) = some (step planned) :=
+  lawStepOf_of_live planned (cell := ⟨.declaredObject, planned.factory.payload⟩)
+    (ReceivingLaw.livePost_live rfl) (by intro h; cases h) rfl
 
 /-- The factory write is no birth: the loaded directory holds the factory. -/
 theorem factoryWrite_not_birth {command : Command} {verified : Verified}
