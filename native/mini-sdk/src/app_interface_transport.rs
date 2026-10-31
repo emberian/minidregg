@@ -185,7 +185,7 @@ impl Declaration {
             "{:x}",
             Sha256::digest(format!("mini/ddp/op/v1/{root_id}/{serial}/{name}"))
         );
-        let channel = format!("mini-{id}");
+        let channel = channel_name(&format!("mini/ddp/channel/v1/{root_id}/{serial}/{name}"));
         let token = format!(
             "{:x}",
             Sha256::digest(format!("mini/ddp/auth/v1/{seed}/{id}"))
@@ -522,13 +522,10 @@ impl Declaration {
         let root = context["operationId"]
             .as_str()
             .ok_or_else(|| refuse("controller-operation-id-required"))?;
-        let channel = format!(
-            "mini-{:x}",
-            Sha256::digest(format!(
-                "mini/conversation/v1/{root}/{name}/{}",
-                receipts.len()
-            ))
-        );
+        let channel = channel_name(&format!(
+            "mini/conversation/v1/{root}/{name}/{}",
+            receipts.len()
+        ));
         let seconds = number(&self.value["limits"]["seconds"])?.min(300);
         if seconds == 0 {
             return Err(refuse("conversation-deadline-invalid"));
@@ -1061,9 +1058,21 @@ fn validate_refs(v: &Value, ids: &std::collections::BTreeSet<String>) -> Result<
     Ok(())
 }
 
+/// A hosted channel id: the Host's `identifier` shape is at most 64 of [A-Za-z0-9_-]. `mini-` plus a full
+/// SHA-256 in hex is 69, so the first 32 hex digits (128 bits) are kept: 37 characters.
+fn channel_name(seed: &str) -> String {
+    format!("mini-{}", &format!("{:x}", Sha256::digest(seed))[..32])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_channel_id_fits_the_hosts_identifier_shape() {
+        let id = channel_name("mini/conversation/v1/43/cards.read/0");
+        assert!(id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "{id}");
+        assert_ne!(id, channel_name("mini/conversation/v1/43/cards.read/1"));
+    }
     #[test]
     fn source_derived_data_frames_use_native_codec_and_correlation() {
         let fixture: Value =
