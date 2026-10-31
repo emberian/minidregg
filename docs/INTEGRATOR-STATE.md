@@ -39,7 +39,9 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **Staging 507155c77 (batch 9 so far)**: exorcist 975491262 (bc17cef1b + 7e6850892 `inspect view-resource-document`: a
   doc page in one codec frame, client and codec from one candidate; 253d0bc26 read-scratch pruning; its own copy of the
   admitOwn fix, identical to dc61016cb).
-- Awaited: perf-client 36612f028 + 6a088183f (Store-open represents decision) after its overlay measurement; hot-path
+  + perf-client 36612f028/6a088183f (Store open's represents decision linear via hash sets, @[csimp]
+  representsCheck_eq_fast; first read after idle 20.8 s -> 3.9 s at height ~920; audit requested).
+- Awaited: hot-path
   92828ff96 (birth plan directory decode) after lane-check; infra's forge composed of batch 7 (after its batch 4 rebuild).
 - **CLOSED: GET read-path contract** (ember ruled (c)+(d); hot-path owns it statement-first). Never re-run or re-report.
 - hbox: / 57 GB free (11:25).
@@ -90,6 +92,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 11:55: perf-client 6a088183f merged (45f0ed263), audit requested from a4d9a6f4cba4855ca.
 - 10-31 11:50: app-reds: D1 (codec Broken pipe on forge batch 4) as a second transport-drop sighting.
 - 10-31 11:35: exorcist: 975491262 merged (507155c77), batch 9; fix already in batch 8. hot-path: a5e757016 in batch 8.
 - 10-31 11:28: -hp2 result to app-reds (H1b signature, kept worlds), infra, explorer, perf-apps.
