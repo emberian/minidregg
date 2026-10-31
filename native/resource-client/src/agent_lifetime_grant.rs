@@ -29,7 +29,10 @@ const PLAN_ROUTE: &str = "application-agent-lifetime-grant-plan";
 
 fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!("grant Host refused op{operation}; frame retained")),
+        [marker, ..] if super::agent_reserve::outcome_status(*marker).is_some() => Err(format!(
+            "grant Host op{operation} outcome ({}); frame retained",
+            super::agent_reserve::outcome_status(*marker).unwrap_or_default()
+        )),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
         _ => Err(format!("grant op{operation} returned an invalid frame")),
     }
@@ -311,7 +314,15 @@ pub(crate) fn grant_seal(directory: &Path, approval_json: &Path) -> Result<()> {
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     same_pin(&directory, &pinned)?;
-    let call = expect_reply(&frame, ASSEMBLE_OPERATION)?;
+    let call = super::agent_reserve::reply_or_outcome(
+        &pinned.host,
+        &pinned.config,
+        &directory,
+        "assembly",
+        &frame,
+        ASSEMBLE_OPERATION,
+        "grant",
+    )?;
     create_private(&directory.join("call.bin"), call)?;
     retain_json(
         &directory.join("seal.json"),

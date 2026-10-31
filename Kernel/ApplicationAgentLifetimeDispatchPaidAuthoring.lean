@@ -8,6 +8,7 @@ module
 
 public import Kernel.ApplicationDispatchAgentPaidAuthoring
 public import Kernel.ApplicationAgentLifetimeDispatchReceiver
+public import Kernel.SigningPlanImage
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -306,6 +307,54 @@ def paidPlanCodec : LawfulCodec PaidPlan :=
   NativeHostCodec.framed
     "DREGG/APPLICATION/AGENT-LIFETIME-DISPATCH-PAID-AUTHOR-PLAN/v3".toUTF8.toList
     paidPlanStream
+
+/-- A paid plan modulo the images it was read at (the app invocation's and the payer's). An approval
+made on one image stays valid after an append moves it exactly when this projection is unchanged:
+the payer re-check compares it, so approval happens once and nothing is re-signed on a moved image;
+submission still admits at its own image. -/
+def PaidPlan.imageFree (plan : PaidPlan) : PaidPlan :=
+  { plan with
+    app := { plan.app with invocation := SigningPlanImage.imageFree plan.app.invocation }
+    payer := SigningPlanImage.imageFree plan.payer }
+
+/-- Equal image-free projections fix everything but the image coordinates: every signed slot (app,
+observation, payer and grant observation), each draft, domain and semantics, the request and its
+HTTP ingress, the grant, its root, the bindings and the reserve receipt. A rotated key, a spent
+marker or a moved policy changes one of these, so it is still refused. -/
+theorem PaidPlan.imageFree_eq_fixes (p q : PaidPlan) (h : p.imageFree = q.imageFree) :
+    p.payer.slots = q.payer.slots ∧ p.app.invocation.slots = q.app.invocation.slots ∧
+    p.app.observationSlots = q.app.observationSlots ∧
+    p.grantObservationSlot = q.grantObservationSlot ∧
+    p.payer.finalizedDraft = q.payer.finalizedDraft ∧
+    p.app.invocation.finalizedDraft = q.app.invocation.finalizedDraft ∧
+    p.payer.domain = q.payer.domain ∧ p.payer.semantics = q.payer.semantics ∧
+    p.app.invocation.domain = q.app.invocation.domain ∧
+    p.app.invocation.semantics = q.app.invocation.semantics ∧
+    p.request = q.request ∧ p.app.request = q.app.request ∧
+    p.app.unsignedIngress = q.app.unsignedIngress ∧ p.grant = q.grant ∧
+    p.grantRoot = q.grantRoot ∧ p.bindings = q.bindings ∧ p.reserveReceipt = q.reserveReceipt :=
+  ⟨congrArg (fun x => x.payer.slots) h, congrArg (fun x => x.app.invocation.slots) h,
+   congrArg (fun x => x.app.observationSlots) h, congrArg (fun x => x.grantObservationSlot) h,
+   congrArg (fun x => x.payer.finalizedDraft) h,
+   congrArg (fun x => x.app.invocation.finalizedDraft) h,
+   congrArg (fun x => x.payer.domain) h, congrArg (fun x => x.payer.semantics) h,
+   congrArg (fun x => x.app.invocation.domain) h, congrArg (fun x => x.app.invocation.semantics) h,
+   congrArg (fun x => x.request) h, congrArg (fun x => x.app.request) h,
+   congrArg (fun x => x.app.unsignedIngress) h, congrArg (fun x => x.grant) h,
+   congrArg (fun x => x.grantRoot) h, congrArg (fun x => x.bindings) h,
+   congrArg (fun x => x.reserveReceipt) h⟩
+
+/-- Satisfiable: the same plan read at any other image (both roots and heights moved) has the same
+projection, so a certify or another member's append between approval and re-check is not a change. -/
+theorem PaidPlan.imageFree_moved (p : PaidPlan) (appRoot payerRoot : Digest)
+    (appHeight payerHeight : Nat) :
+    PaidPlan.imageFree { p with
+      app := { p.app with invocation := { p.app.invocation with worldRoot := appRoot, height := appHeight } }
+      payer := { p.payer with worldRoot := payerRoot, height := payerHeight } } = p.imageFree := rfl
+
+/-- Teeth: a payer slot set that differs is a different projection, whatever the images. -/
+theorem PaidPlan.imageFree_slot_change (p q : PaidPlan) (h : p.payer.slots ≠ q.payer.slots) :
+    p.imageFree ≠ q.imageFree := fun e => h (p.imageFree_eq_fixes q e).1
 
 private def compactHttp (operationId : Nat) : ApplicationDispatchCodec.Request :=
   { operationId := operationId, method := [], path := [], query := [],

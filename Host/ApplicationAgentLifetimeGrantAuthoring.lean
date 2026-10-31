@@ -7,6 +7,7 @@ signatures; native receiving rechecks both branches and the exact final source.
 module
 
 public import Kernel.ApplicationAgentLifetimeGrantReceiver
+public import Kernel.SigningPlanImage
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -77,6 +78,17 @@ private def planStream : StreamCodec Plan :=
 def planCodec : LawfulCodec Plan :=
   NativeHostCodec.framed "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-PLAN/v2".toUTF8.toList
     planStream
+
+/-- The plan modulo the image its birth was read at (`SigningPlanImage.imageFree`). -/
+def Plan.imageFree (plan : Plan) : Plan :=
+  { plan with birth := SigningPlanImage.imageFree plan.birth }
+
+/-- Equal projections fix the request, the app slot and everything of the birth but its image, so
+an assembly that passes the currency check signs exactly what was approved. -/
+theorem Plan.imageFree_eq_fixes {p q : Plan} (h : p.imageFree = q.imageFree) :
+    p.request = q.request ∧ p.appSlot = q.appSlot ∧
+    SigningPlanImage.imageFree p.birth = SigningPlanImage.imageFree q.birth :=
+  ⟨congrArg (fun x => x.request) h, congrArg (fun x => x.appSlot) h, congrArg (fun x => x.birth) h⟩
 
 /-- Derive the source-bound lifetime-grant birth draft, its source-generated authority shards,
 and the independent app `.delegateObject` signing header from one verified
@@ -202,15 +214,17 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) : Except String (Lis
   pure (ApplicationAgentLifetimeGrantSource.ingressCodec.encode
     ⟨plan.request.spec, birthIngress, appEnvelope⟩)
 
-/-- A retained plan cannot silently authorize after the image or current app
-law changes. The native receiver still checks every signature and the CAS. -/
+/-- A retained plan cannot silently authorize after the current app law changes; a moved image alone
+is not a change. The native receiver still checks every signature and the CAS. -/
 def assembleCurrent {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (plan : Plan)
     (signatures : List (List UInt8)) : Except String (List UInt8) := do
   let fresh ← prepareLoaded verified plan.request.spec plan.request.payer
     plan.request.funding plan.request.sourceCapabilities
-  if planCodec.encode fresh != planCodec.encode plan then
-    throw "agent lifetime grant plan no longer current"
+  -- Current modulo the image: an append since the plan moves only the birth's root and height, and
+  -- `fresh` (read at this image) is what is assembled; any change to a signed byte is still refused.
+  if planCodec.encode fresh.imageFree != planCodec.encode plan.imageFree then
+    throw "agent lifetime grant plan no longer current (a signed slot, request or draft changed)"
   assemble fresh signatures
 
 end Minidregg.Kernel.ApplicationAgentLifetimeGrantAuthoring
