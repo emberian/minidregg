@@ -1598,7 +1598,7 @@ fn backlink_context(
     if !cache.contains_key(&source) {
         let rendered = match reference_for_target(root, &source)? {
             Some(reference) => host_document(root, workspace, &reference).ok().and_then(|document| {
-                let names = reference_names(root);
+                let names = crate::render::WorkspaceNames::of(root);
                 crate::render::render(&crate::render::View {
                     document: &document,
                     entries: &[],
@@ -1790,6 +1790,8 @@ pub(crate) struct DocumentRead {
     pub entries: Vec<Value>,
     pub shown: Vec<Value>,
     pub sources: std::collections::BTreeMap<String, std::collections::BTreeMap<String, usize>>,
+    /// This workspace's names for the targets the page names, read once if at all.
+    pub names: crate::render::WorkspaceNames,
 }
 
 /// Open a separate presentation copy. The signed raw view remains unchanged
@@ -1993,7 +1995,7 @@ pub(crate) fn rendered_document(
             source_lines.insert(source.clone(), crate::render::line_numbers(&view));
         }
     }
-    let names = reference_names(root);
+    let names = crate::render::WorkspaceNames::of(root);
     let mut shown = Vec::new();
     let items = current["transclusions"].as_array().ok_or("Host rendered no transclusions")?.clone();
     let mut resolved = Vec::new();
@@ -2078,6 +2080,7 @@ pub(crate) fn rendered_document(
         entries: display_entries,
         shown,
         sources: source_lines,
+        names,
     })
 }
 
@@ -2449,7 +2452,7 @@ fn doc_unmark(
 /// This workspace's names for reference targets: what a link mark points at is
 /// shown by the name the reader knows it by.  Two names for one target: the
 /// first in byte order, so a rendering does not depend on directory order.
-fn reference_names(root: &Path) -> std::collections::BTreeMap<String, String> {
+pub(crate) fn reference_names(root: &Path) -> std::collections::BTreeMap<String, String> {
     let mut stems: Vec<String> = fs::read_dir(root.join("refs"))
         .into_iter()
         .flatten()
@@ -2497,11 +2500,10 @@ pub(crate) fn read_rendered(
     at: Option<&str>,
 ) -> Result<(DocumentRead, crate::render::Rendered)> {
     let read = rendered_document(root, workspace, name, None, at)?;
-    let names = reference_names(root);
     let rendered = crate::render::render(&crate::render::View {
         document: &read.document,
         entries: &read.entries,
-        names: &names,
+        names: &read.names,
         sources: &read.sources,
         me: member(workspace, "subject")?,
     })?;
