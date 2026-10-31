@@ -51,8 +51,19 @@ rounds, and move measurement to persvati's standing world when it exists.
 
 ## Next, widest first
 
-1. Cold first read (3.9 s) and restart plus first read (~5 s): trace what a first read after a resident or Host
-   start pays (Store open, policy and law graph loads, codec start) before measuring. Snapshot, never replay.
+1. Cold first read and restart (traced 2026-10-31): both are the FULL Store open
+   (`DurableReceiverIO.loadChained`/`load`), O(height) even with the checkpoint at the head. hbox batch 9 world
+   /ci/c-997905/w, head 256 (`minidregg-host CONFIG store-bench`, MINI_OPEN_TIMING=1): full open 1,100 ms (read
+   all entries 257, fast-forward 91, gate and rebuild 752: every tag from 0, every record decoded 264, the chain
+   over every record 111, image, six indexes, rootLog); `validateLoaded` 84 ms. The light open
+   (`DurableServed.openHead`, checkpoint + suffix) is 125 ms (checkpoint decode and tree 96), `validateServed`
+   82 ms. About 4.3 ms per record: PERF-CLIENT row 14's 3.9 s at height ~920 is the same open.
+   Who pays it: `NativeHostSession.start` (`openExisting`, then a light start beside it; `refresh` keeps both),
+   and the consent provider's `verifyInitial` (ClientConsentCore.lean:305) though CONSENT-STORE starts it at the
+   checkpoint. Both stay on the full shape because the native admission (`NativeHostReplay`, `Opened`,
+   `SuffixVerified`) and the session's receivers are typed over the full `Loaded` (KN2 stage 2a). The fix is
+   KN2 stage 2b for these two paths: the Host session and the consent admission over the `Opening`. Constant
+   factors inside the full open (decode about 1 ms per record) do not change its order and are not taken.
 2. Op 5 (Lean; native Host build through native-loop, about 7 min in a pool tree). Perf shares of
    dispatchSession over 40 reads on the batch 6 Host: `checkGrants` 60% (`ResourceObservationAdmission.check`
    49%, `capabilityEvidenceChecked` 19%); the challenge recomputed inside op 5 (`authorizeAuthenticated`) 13%
