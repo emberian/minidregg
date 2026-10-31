@@ -69,7 +69,7 @@ def roundB (B : Fin 25 → Fin 64 → Bool) (c : Lane) (t : Fin 25) (z : Fin 64)
 
 /-! ### `roundB` is the specification's round -/
 
-private theorem getD_ofFn {n : Nat} (f : Fin n → Lane) (i : Nat) (h : i < n) :
+theorem getD_ofFn {n : Nat} (f : Fin n → Lane) (i : Nat) (h : i < n) :
     (Array.ofFn f).getD i zeroLane = f ⟨i, h⟩ := by
   simp [Array.getD, h]
 
@@ -89,7 +89,7 @@ private theorem getLsbD_rotateLeft_rot (v : Lane) (r : Nat) (z : Fin 64) :
   · simp only [show decide ((z : Nat) < 64) = true from by simp [hz], Bool.true_and]
     congr 1; omega
 
-private theorem getLsbD_zeroLane (z : Nat) : zeroLane.getLsbD z = false := by
+theorem getLsbD_zeroLane (z : Nat) : zeroLane.getLsbD z = false := by
   simp [zeroLane]
 
 private theorem xorColumn_bit (st : State) (x : Nat) (z : Fin 64) :
@@ -170,16 +170,16 @@ def rb (asg : Idx → F2) (w : Fin 25 → Fin 64 → Idx) (i : Fin 25) (z : Fin 
 /-- A Boolean as a field element. -/
 def toF (b : Bool) : F2 := if b then 1 else 0
 
-private theorem toF_rb (asg : Idx → F2) (w : Fin 25 → Fin 64 → Idx) (i : Fin 25) (z : Fin 64) :
+theorem toF_rb (asg : Idx → F2) (w : Fin 25 → Fin 64 → Idx) (i : Fin 25) (z : Fin 64) :
     toF (rb asg w i z) = asg (w i z) := by
   have key : ∀ v : F2, (if decide (v = 1) = true then (1 : F2) else 0) = v := by decide
   exact key _
 
-private theorem toF_xor (a b : Bool) : toF (a ^^ b) = toF a + toF b := by
+theorem toF_xor (a b : Bool) : toF (a ^^ b) = toF a + toF b := by
   cases a <;> cases b <;> decide
-private theorem toF_and (a b : Bool) : toF (a && b) = toF a * toF b := by
+theorem toF_and (a b : Bool) : toF (a && b) = toF a * toF b := by
   cases a <;> cases b <;> decide
-private theorem toF_not (a : Bool) : toF (!a) = 1 + toF a := by
+theorem toF_not (a : Bool) : toF (!a) = 1 + toF a := by
   cases a <;> decide
 
 abbrev T := Term (AirSig F2 Idx)
@@ -214,10 +214,10 @@ private theorem eval_roundT (asg : Idx → F2) (w : Fin 25 → Fin 64 → Idx) (
   simp only [roundT, chiT, rhoT, thetaT, colT, bitT, eval_add', eval_mul', eval_cst, eval_vr,
     roundB, chiB, rhoB, thetaB, colB, toF_xor, toF_and, toF_not, toF_rb]
 
-private theorem f2_add_eq_zero (a b : F2) : a + b = 0 ↔ a = b := by
+theorem f2_add_eq_zero (a b : F2) : a + b = 0 ↔ a = b := by
   revert a b; decide
 
-private theorem toF_inj (a b : Bool) : toF a = toF b ↔ a = b := by
+theorem toF_inj (a b : Bool) : toF a = toF b ↔ a = b := by
   cases a <;> cases b <;> decide
 
 /-- **A round accepts iff the output row is the round of the input row.** -/
@@ -271,7 +271,7 @@ def after (st : State) (k : Nat) : State := (roundConstants.take k).foldl round 
 
 private theorem roundConstants_length : roundConstants.length = 24 := rfl
 
-private theorem after_succ (st : State) (r : Fin 24) :
+theorem after_succ (st : State) (r : Fin 24) :
     after st (r.val + 1) = round (after st r.val) (constantOf r) := by
   simp only [after, constantOf]
   rw [List.take_succ, List.foldl_append]
@@ -279,7 +279,7 @@ private theorem after_succ (st : State) (r : Fin 24) :
   rw [List.getElem?_eq_getElem hr]
   simp [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hr]
 
-private theorem after_full (st : State) : after st 24 = keccakF1600 st := by
+theorem after_full (st : State) : after st 24 = keccakF1600 st := by
   simp only [after, keccakF1600]
   rw [show roundConstants.take 24 = roundConstants from List.take_of_length_le (by decide)]
 
@@ -374,7 +374,7 @@ private theorem traceAsg_first (asg : Idx → F2) (trace : Fin 25 → Fin 25 →
     exact Fin.succ_ne_zero _ (inj _ _ _ _ _ _ hmatch).1
   · rfl
 
-private theorem rb_toF (f : Fin 25 → Fin 64 → Bool) (asg : Idx → F2) (w : Fin 25 → Fin 64 → Idx)
+theorem rb_toF (f : Fin 25 → Fin 64 → Bool) (asg : Idx → F2) (w : Fin 25 → Fin 64 → Idx)
     (h : ∀ t z, asg (w t z) = toF (f t z)) : rb asg w = f := by
   funext t z
   simp only [rb, h]

@@ -5,7 +5,7 @@ Agent: a7bf41b0d8bb24813 (distilled from a3f7fce75cd3e4e49, retired; earlier: a8
 Owns: private cells: `Compiler/PrivateCellRoot.lean`, `Compiler/PrivateCellIndex.lean`, `Kernel/PrivateCell*.lean`
 (View, Scope, Receiver, Materializer, Opening), `Kernel/BlindedCellHiding.lean`, `Kernel/ReceiptEventHiding.lean`,
 `Theory/PrivateCellTrie.lean`, `Theory/AuthTrieErase.lean`, `Theory/AuthTrieReveal.lean`, `Theory/CellStateAux.lean`
-(the carried structure in `Theory/CellState.lean`), `Theory/FiniteTapeGap.lean`, `Theory/OracleGame.lean`, `Compiler/AirKeccak.lean`,
+(the carried structure in `Theory/CellState.lean`), `Theory/FiniteTapeGap.lean`, `Theory/OracleGame.lean`, `Compiler/AirKeccak.lean`, `Compiler/AirCshake.lean`,
 `docs/RATCHET-LOG-DESIGN.md`.
 Quest: blinded cells (content, declared kinds) on a private authenticated map with O(log n) writes and bounded reads,
 hidden by a fresh outer mask per version and a zero-knowledge complete selective opening; the unblinded growing kinds
@@ -24,7 +24,7 @@ on the same trie root (FORMAT (a)). Never trade hiding for speed.
   `/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex
   exec -m gpt-6-astra -s read-only -C <worktree> "<prompt>"`, nohup with a PID file in the scratchpad.
 
-## State (main 81afc7026)
+## State (main, AirCshake landing)
 - f28cd8457 FORMAT (a): `HyperdocumentCell.eventMaterializer` and `CredentialAuthorityCell.materializer` are
   `PrivateCellRoot.materializer _ (untagged _)`; `CanonicalCellRegistry` `saltedWire?`/`privateWire?`/
   `wire_salted_or_private`/`materializer_of_privateWire`/`privateWire_rootOf`; narrowed openings over salted wires
@@ -48,12 +48,14 @@ Substrate (astra round 17): the built Air rung over `ZMod 2` (add' = XOR, mul' =
 alone), flattened by `AirFlatten`, emitted by `Emit`, shared by `EmitShare.cse` (`cse_emit_accepts_iff`). The parked
 AND/XOR network in ResearchWip (`ObliviousNetwork`, `BendProofKeccak`) keeps its Bend consumers; rescue by a proved
 lowering into Air only where useful, never as a second compiler for the opening.
-1. Done 81afc7026: `Compiler/AirKeccak.lean` (`roundB_spec`, `round_accepts`, `perm_accepts` per transition,
-   `perm_sound`, `perm_complete` via `traceAsg` on an injective layout, `perm_trace_unique`, 38400 constraints,
-   `round_refuses_flip`). Next in it: absorb and squeeze for a PUBLIC byte length (rows of the sponge, padding as
-   constants, bytes as 8 wires each, never recomposed into one field element): `cshakeSystem cust len` accepts iff
-   the output wires read `cshake256Bytes cust input`. Then the costs published: pre-CSE term nodes, post-CSE XOR/AND
-   gates, witness inputs, zero outputs.
+1. Done: `Compiler/AirKeccak.lean` (81afc7026: `roundB_spec`, `round_accepts`, `perm_accepts` per transition,
+   `perm_sound`, `perm_complete` via `traceAsg`, `perm_trace_unique`, 38400 constraints, `round_refuses_flip`) and
+   `Compiler/AirCshake.lean` (cSHAKE256 at a PUBLIC customization and input length: framing as constants, input bytes
+   as 8 private wires each; per block an XOR row and the permutation, `blocks · 40000` constraints; `sponge_sound`,
+   `cshake_sound` (the last row's first 256 bits are `cshake256Bytes cust input`), `sponge_complete` via the canonical
+   `spongeAsg` on an injective layout disjoint from the input). Owed: the published costs (pre-CSE term nodes,
+   post-CSE XOR/AND gates after `EmitShare.cse`, witness inputs, zero outputs), and a bounded-length variant
+   (secret length, public capacity) only if a private hash input turns out variable.
 2. The custody size contract (round 17 item 5): `CustodyDecode` is an arbitrary function, and `maskOf` inherits
    the kind's value encoding, so the outer input length is not fixed per kind. Choose the concrete decoder, prove an
    accepted-mask length bound and its circuit refinement; a public length goes in the statement, a private one
