@@ -53,6 +53,11 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   carry no error text (the receipt's body was in the torn-down world). Reruns: yes (2/2). Same place: yes, identical
   op id and outcome across a spk-host overlay. One fault. Cause class (app-reds run 24): the final `mini_say` got
   ECONNRESET from the operator-v2 socket and was recorded as `refused`. c88b88755 (batch 7) surfaces the write error.
+  Run 24 confirmed: "Connection reset by peer (os error 104)", then the exact lookup said not-submitted, which
+  `lookup_operation` (resource_tools.rs ~1213) maps to `refused` together with a real Host refusal. app-reds' 40cb4aa59
+  (lane/app-reds-3-tf) is HELD, not merged: it matches error prose by substring and makes a real Host refusal found by
+  exact lookup non-terminal after a reset (a retry loop). Asked for the fix at the lookup (not-submitted distinct, Host
+  refusal stays terminal, two tests). The reset's own cause (ServeBounds 10 s deadline?) stays open; run 25 times it.
 - Batch 6 74e1cfa10 j14: `FAIL rc=1`; its world /ci/j-74e1cf was swept, so its signature is unrecorded: not counted as H1.
 - **H2, attempt-index ENOENT** (batch 7 base): stage j14 worker, `controller-run grain-runtime create` rc=1, ENOENT on
   owner-workspace/attempt-index/by-intent/. Never reached the probe. Distinct from H1. Fix b940b3f50; -hp1 decides.
@@ -69,6 +74,7 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports sent (do not resend)
 
+- 10-31 11:20: app-reds: 40cb4aa59 held with review (fix at lookup_operation; typed transport cause; two tests).
 - 10-31 11:08: app-reds: H1 one fault (2/2 same place), batch 6 unrecorded, batch 7 base is H2, W1 separate; asked for
   KEEP_WORLD/receipt copy on a probe red. Exorcist: b37f26cf6 merged (c9cfa459e), rides batch 8.
 - 10-31: retained-mode audit rounds 1 and 2 (to a13f0c9ab4513b2d7).
