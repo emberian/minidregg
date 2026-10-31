@@ -1939,6 +1939,12 @@ theorem lower_not_witnessed_refuses (profile : CompilerProfile) (vk : Vk) (asg :
     ¬ systemAccepts asg (lower profile (.not (.witnessed vk))) := fun h =>
   one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
 
+/-- The `witnessed` lowering refuses every assignment at positive polarity as well (the
+`lower` arm's comment cites this): no circuit accepts a law that requires a credential. -/
+theorem lower_witnessed_refuses (profile : CompilerProfile) (vk : Vk) (asg : Wire → F) :
+    ¬ systemAccepts asg (lower profile (.witnessed vk)) := fun h =>
+  one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
+
 /-- `sumEq` is not lowered: under every profile its system refuses every assignment, so a law
 using it is never accepted by a circuit (the kernel judges it by `Pred.eval`). -/
 theorem lower_sumEq_refuses (profile : CompilerProfile) (l r : List Slot) (asg : Wire → F) :
