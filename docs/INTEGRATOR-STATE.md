@@ -48,15 +48,15 @@ The session was pruned 10-30 evening; the root re-adopted the veteran lanes with
 
 | lane | agent | owns |
 |---|---|---|
-| hot-path | aa2905fee8ef847d1 / a8e4317c9e1574ca5 (distilled; owns flatness reds; rows 4/9/13 at the shared seam; row 11 FORMAT with private cells: one batch, one genesis) | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
+| hot-path | ac53c05fe796e4294 (distilled; earlier ids retired; owns flatness, story new, row 11, resourceBook redesign: Book entries as store addresses) | consent snapshot resume (provider starts from the Store checkpoint, admits the suffix; anchors survive ships; deletes CONSENT-OWN own-base, superseding staging batches 2-3) + JDV fix 1a4f3a623 (was 2dfa8372e), ONE sha on cdb399b47; the law-17 perf queue |
 | infra (fresh) | aa72653a8ce442178 | Firecracker (or similar) lite VM inside the forge demo host, then the fresh ship; forge composed container |
 | app-reds | ad85d40779880420c (volume/custodian/apps; a17f4172949caca14 on resident /var checks, Hermes items) | the no-loop volume helper (bind-mounted directory + project quotas, the real fix), then op66-plan and the rest |
-| private cells | a30875aaf31364697 (distilled; KeptCell option (b) Aux cache in Materialized, statement first with astra, pool tree, FORMAT batch with hot-path row 11, one genesis) | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
+| private cells | a8da2b953507b402b (FORMAT (a): eventHistory + authority to the trie root with mask [] in one genesis with row 11, after seam 1; then the compiler-emitted ZK selective opening; (b) content + declared kinds in a second epoch) | O(log n) blinded-cell hiding (docs/RATCHET-LOG-DESIGN.md) |
 | iteration speed | ab2786fe1172f5683 | the bump cdb399b47, umbrella-tree.sh (second warm tree for integ-build5) |
 | explorer | a3e5d6dbcd68e616c | perf and behaviour probes on candidates; docs/EXPLORER-FINDINGS.md |
 | demo-reds (sub-Opus of this integrator, done) | a64c387f3e638aa63 | G3-G6 (lane/demo-reds 8982fa265); left: no bend top-up verb, `bend show` prints "phase ?" after an activity ends |
 
-No proofs or scout lane: the integrator owns umbrella reds and the fixture re-record.
+When the root distills a lane, the old id is retired: route only to the newest. No proofs or scout lane: the integrator owns umbrella reds and the fixture re-record.
 
 ## Rulings in force
 
