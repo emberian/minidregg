@@ -3,54 +3,42 @@
 Agent: a6c58cb72b0764dbb (ex iteration-speed lane; inherits the retired integrator's mechanical role)
 Owns: build scripts (`scripts/build-native-host.sh`, `deploy/candidate/{lane-build.sh,package.py,lib.sh}`), the
 pool (`scripts/pipeline/{lane-tree,warm-link,umbrella-tree,native-loop}`), the builder (`scripts/pipeline/{builder,integ-build}`)
-and `board/REDS.md`, the `green` ref, the build box dregg-build2 and its pool, the persvati pool, import seams, outside PRs (akapug).
-Quest: dregg-build2 as the primary build box with the unattended builder on `main`; persvati as the quiet measurement
+and `board/REDS.md`, the `green` ref, the build box hbox and its pool, the persvati pool, import seams, outside PRs (akapug).
+Quest: hbox as the build box with the live unattended builder on `main`; persvati as the quiet measurement
 box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean build and the native inner loop faster.
 
-## State (2026-10-31 19:00, present tense)
+## State (2026-10-31 21:15Z, present tense)
 
-### dregg-build2: the build box (hbox is down, may not come back)
-- Hetzner ccx53, fsn1, 2.31.77.40: 32 dedicated cores, 122 GB RAM, 564 GB NVMe root (27 GB used), Debian 13. About
-  EUR 1/hour, approved by ember. Root: `ssh dregg-build2` (key ~/.ssh/id_portable). Lanes: `ssh bb2` (user `build`,
-  same key, no sudo).
-- Hardening: sshd key-only (PasswordAuthentication/KbdInteractive off, PermitRootLogin prohibit-password, MaxAuthTries 3),
-  fail2ban sshd jail (systemd backend), earlyoom (prefers lean/lake/cargo/rustc/cc/ld, avoids sshd/systemd/fail2ban).
-- Containment: `swarm-build` (scripts/burst/swarm-build, named scopes) under the user swarm.slice, MemoryMax 100G and no
-  swap. The per-build cap is SWARM_MEM_MAX (default 48G). MINIDREGG_LEAN_SEATS=20 at /srv/seats is the box-wide cap on
-  real Lean compilers. CARGO_BUILD_JOBS=12. All of this is in /home/build/.minidregg-env, sourced by .profile and .bashrc.
-- Set up by `scripts/burst/remote/root.sh --role lane --user build --no-data-disk --slice-pct 82`, minus its sudoers
-  line, plus the hardening above. Then elan with v4.35.0, Rust nightly-2026-06-21, a bare blob:none clone
-  /srv/git/minidregg.git, and the seed /srv/lanes/main/src: Mathlib from cache; mini-kernels 13 s; Host.Main from cold in
-  448 s (2,510 jobs).
-- Pool /srv/pool: 8 trees t1..t8 at ffa7a77f, warm (1.6 GB own each), packages-3a3779933df4 read-only (7.3 GB).
-  pool.env: LANE_POOL_WARM=/srv/lanes/main/src, LAKE_ARTIFACT_CACHE=false. Verified: acquire, then `lane-check
-  Kernel/RoomBirthGate.lean`, takes 15 s.
-- Lane recipe: `ssh bb2; t=$(lane-tree acquire SEAT origin/BRANCH); cd $t; scripts/pipeline/lane-check FILE...`; for a
-  native host, `lane-tree native SEAT` then `scripts/pipeline/native-loop SEAT BASE LABEL`; finish with `lane-tree release SEAT`.
-- The box holds no GitHub write key: lanes push from the Mac (or `git fetch ssh://bb2/srv/pool/tN HEAD`). The builder
-  needs one to publish REDS.md and move `green`; until then it runs with BUILDER_DRY=1.
-- Disk: everything under /srv. integ-build keeps one generation of old outputs and 6 candidates (plus green's).
-- The gate runs here: scripts/pipeline/gate (408962f1d) with BUILDER_ROOT=/srv/integ, GATE_RUNS=/srv/integ/ci,
-  WORLD_UP_LOCK=/srv/worlds/world-up.lock (inputs staged in /srv/integ: dregg-infra-e29997d, pw, j14-hroot, j14-data,
-  j14-secrets, spk-cache). First run at 76511e768: all phases ran; every red is the consent-provider exit 86c9dbddb fixes.
-  The builder runs as /srv/integ/builder-run.sh (those knobs, BUILDER_DRY=1, main's builder). Not yet: SPK/grain-world
-  root setup (after the pool, per root).
-- The shared packages are read-only; lake replays write missing .hash files, so the pool once refused six Mathlib
-  replays (EACCES). Fixed 19:57 by one writable `lake build Mathlib ...` over the shared copy, then re-locked
-  (~/mlhash.sh): run it again after any package re-seed.
-- Candidate transfers: only by `scripts/pipeline/candidate-transfer SRC_HOST:DIR DST_HOST:DIR NAME` (a97b13c4a). It copies
-  into DST/.incoming-NAME, verifies SHA256SUMS (and fixtures/, and READY) on the destination, then renames into place, so
-  no reader of candidates/ ever sees a partial candidate. Never copy into candidates/NAME directly.
-- hbox b9450147f candidate: transferring that way (from the Mac, PID file in the build-loop scratchpad cand-copy.pid; hbox
-  uplink ~100 KB/s). It exists in /srv/integ/candidates only once complete and verified.
+### hbox: the build box again (ember 10-31 evening: obend has dregg-build2)
+- The builder runs here live: /home/hbox/lanes/integ/builder-run.sh (PID builder.pid there) fetches main's
+  scripts/pipeline/builder each start and runs it with BUILDER_ROOT=/home/hbox/lanes/integ, GATE_RUNS=/ci,
+  WORLD_UP_LOCK=/tank/lanes/world-up.lock, SEATS 12, MEM 64G. integ/src fetches and pushes over ssh with the
+  10-15 deploy key (`core.sshCommand` -> ~/.ssh/minidregg-deploy; write checked with a throwaway ref). It writes
+  only board/REDS.md (by path onto main, never forced) and `green`. First live round: main 9dc9c138c, 17:12 EDT.
+- Box-wide Lean cap: ~/.minidregg-env (sourced first by .profile and .bashrc) sets MINIDREGG_LEAN_SEAT_ROOT=/home/hbox/seats,
+  MINIDREGG_LEAN_SEATS=12 (24 cores, 123 GB), LEAN_NUM_THREADS 4, SWARM_MEM_MAX 48G default, CARGO_BUILD_JOBS 12,
+  LANE_POOL_ENV=/home/hbox/pool/pool.env. Every build is `swarm-build`.
+- Pool /home/hbox/pool (t1..t9, packages-3a3779933df4 read-only, LAKE_ARTIFACT_CACHE=false). Lane recipe:
+  `t=$(lane-tree acquire SEAT origin/BRANCH); cd $t; scripts/pipeline/lane-check FILE...`; native: `lane-tree native
+  SEAT`, then `scripts/pipeline/native-loop SEAT BASE LABEL`; `lane-tree release SEAT` when done.
+- Disk: / is 455 GB with about 41 GB free (10-31 17:10). The sweep (main's scripts/pipeline/sweep) ran first: 1.5 GB.
+  integ-build stops below 25 GB. The rest is ember's to choose: integ 37 GB (candidates 16 GB, most listed in
+  integ/keep), /ci 40 GB of old gate worlds, lane clones perf-apps 7.8, iter-speed 7.4, infra 6.1, app-reds-cont 5.0 GB.
+  Keep worlds and builds sized to fit; no new data on /tank.
+
+### dregg-build2: obend's now; minidregg does not use it
+- Stopped 10-31 evening: the dry builder's round 997eba977 (pgid from builder.pid, mid-gate), its gate worlds (19, by
+  PID, log /srv/integ/orphans-stop.log), the GitHub relay, the hotswap-test world (`run.sh stop`); build-loop's pool
+  tree released. Setup stays for obend: user build, /srv/pool, /srv/integ, swarm-build, earlyoom, fail2ban, the deploy
+  key ~/.ssh/minidregg_deploy (kept until ember says otherwise). Seats were told to release their bb2 trees.
 
 ### The builder
 - `scripts/pipeline/builder`: per new main tip, `scripts/pipeline/integ-build` (now in the repo: rust-check, host,
-  consent, rust, pack, umbrella-tree, rerecord), then gate15.sh when the box has it, REDS.md, green. BUILDER_ROOT
-  defaults to /srv/integ.
+  consent, rust, pack, umbrella-tree, rerecord), then scripts/pipeline/gate, REDS.md, green. BUILDER_ROOT
+  is set by the box's builder-run.sh (hbox: /home/hbox/lanes/integ).
 - eb4b7e7b2: a round no longer waits for its umbrellas. integ-build frees src once the umbrella tree has synced, the
   next round starts, and REDS.md carries `umbrella-tree running` (a red) until the umbrellas end and it is rewritten.
-- green is 83e926874 (batch 4). The last REDS.md (hbox, main 997905c0) has 6 reds.
+- green is 83e926874 (batch 4) until a live round passes. The first live hbox round rewrites REDS.md whole.
 
 ### Seam 1 (codec tags): on main (f2002e589)
 - The 12 named tags are in Compiler/PersistedCodecTags/Core.lean; the 645-tag census (Compiler/PersistedCodecTags.lean)
@@ -87,9 +75,6 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 ### persvati (`ssh persvati-remote`, ember's machine): quiet measurement box
 - /home/ember/mdpool: a 4-tree pool at 43995c7f (793 warm modules). Measurement only; no lane builds.
 
-### hbox: back (a network outage, not a crash); secondary build box
-- Its builder, integ tree, pool t1..t8 and the box-local gate15.sh are unreachable.
 
 ## Seams needed
 - infra (aa72653a8ce442178): the kept-world rebind tool; ship.sh accepting `.overlay.id`; the gate's forge half from dregg-build2.
-- root or ember: a GitHub write key for build@dregg-build2 (the builder's REDS.md and green pushes).

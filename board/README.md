@@ -35,7 +35,8 @@ passes. Nobody waits on it; `main` may be red for a while; the owner of a red fi
   root in three lines or fewer (landed, red, blocked, handoff); no status summaries.
 
 ## Measuring
-persvati (`ssh persvati-remote`) is the quiet measurement box; hbox is for builds. One standing world per `main` tip
+persvati (`ssh persvati-remote`) is the quiet measurement box; hbox (its pool, /home/hbox/pool) is for builds.
+dregg-build2 is obend's: minidregg does not build or run worlds there. One standing world per `main` tip
 lives there, kept up and hotpatched by anyone; one shared measure script. Before/after goes in the seat's file; the
 explorer folds numbers into COSTS.md.
 
