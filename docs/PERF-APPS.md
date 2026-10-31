@@ -117,7 +117,7 @@ From the process tree (bpftrace) and the install journal's file times, on a quie
 | `spk-host grain install`, of which: | 12.4 to 14.5 | |
 | . stage and copy the package | 0.1 | |
 | . qualification: the first full SPK verify (xz, SHA-512, ed25519) | 2.4 | spk-host (needed once) |
-| . qualification steps: 5 one-shot Host helper processes, the 180 MB Host image hashed before and after each | 2.7 | **batch 3: 1.4** |
+| . qualification steps: six one-shot Host processes (author and inspect of schema, package identity, launch descriptor), the 180 MB Host image hashed before and after each | 2.7 | **batch 3: 1.4 (pin once per inode); batch 4: 0.7 (one codec child for all six)** |
 | . placement | 0.9 | |
 | . INSTALL prepare: a second full verify of the same staged file in the same process | 1.9 | **batch 3: 0.01** |
 | . op66, the BEGIN plan | 3.3 (5.4 to 6.3 under load 27) | hot-path (d7c55dfa0, Held directory, batch 9) |
@@ -155,10 +155,25 @@ prepare verify 2.5 s to 0.013 s.
   Host image was hashed about 0.1 s per pin check, several times per custody operation (agent_payer
   four times per paid dispatch).
 
+## Batch 4: the qualification's six Host processes become one codec child
+
+`qualify_launch` ran author and inspect for the permission schema, the package identity and the launch
+descriptor as six `HOST CONFIG author|inspect` processes, each starting the 180 MB Lean image, polled every
+25 ms. They now go to one storeless `HOST CONFIG codec` child (frames 7 and 8, no Store, no socket), with
+the detached verb as the fallback when no child answers. Back to back on hbox (batch 8 plus batch 3,
+EtherCalc via featured-qualify, load 17 to 34 with an integrator gate running beside it):
+
+| measure | before (I) | after (J) |
+|---|---|---|
+| Host processes for the install's qualification | 6 | 1 |
+| qualification steps, first start to last exit | 1.63 s | 0.69 s (the child's whole life) |
+| qualify.json to qualification.json (includes the 2.4 s SPK verify) | 5.09 s | 3.66 s |
+| create to page | 54.8 s | 53.9 s (load noise; the Host turns dominate) |
+
 ## Continuation (for whoever picks this lane up)
 
 State: batch 1 (`23738a4ce`), batch 2 (`05c2b208b`) and batch 3 (`106b73251`) are merged on staging
-(batches 6, 7 and 9). The create-to-page profile above is current for batch 8.
+(batches 6, 7 and 9); batch 4 (one codec child per qualification) is cut on `lane/perf-apps-b5`. The create-to-page profile above is current for batch 8.
 
 Rulings: the broker's second SPK parse stays (root-side verification of an operator-owned input), and
 `grain install` is not reordered ("refused before any effect" stands; root may overrule). Every grain
@@ -172,8 +187,7 @@ Next, in order:
 2. The root-side parse, if its 1.9 s is wanted: make `minidregg_spk_package_stream::verify` one pass
    (hash the decoded stream as it is decoded instead of re-reading the decoded temp file; no raw temp copy
    when the input is already a private file). The xz decode itself stays; measure the split first.
-3. The worker still starts five one-shot `minidregg-host author`/`inspect` processes of its own during an
-   install (0.06 to 0.21 s each, before the residents start): find the caller and give it the codec session.
+3. (Resolved: the "worker's five one-shot Host processes" were spk-host's qualification steps; batch 4.)
 4. Re-measure the page after hot-path's group commit and read-path work (`prof.sh`).
 
 Tools on hbox (`/home/hbox/lanes/perf-apps`): `upN.sh WORLD OWN_BIN` (N = the candidate's batch; worlds in
