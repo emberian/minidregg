@@ -19,6 +19,9 @@
 - FORMAT (a): trie roots for unblinded growing kinds (eventHistory, authority); blinded kinds wait for the ZK
   selective opening (epoch b). Book entries become their own store addresses.
 - KeptCell: the Materialized Aux cache (option b).
+- Cold first read and restart are the full Store open, O(height) (~4.3 ms per record). They go away only with KN2
+  stage 2b: host-execution retypes the Host session and NativeHostReplay's admission over the light `Opening`;
+  read-path then ports ClientConsentCore/ConsentAnchor. No constant-factor trims inside the full open.
 - Residents never idle out; members share one base, a per-member session of a few MB is the target (up to 100
   members, more someday).
 - Post-quantum ssh key exchange stays. GLM only via ~/.zai-key on the Z.AI coding-plan endpoint; OpenRouter (capped
