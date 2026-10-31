@@ -28,23 +28,19 @@ Quest: Hermes final say (H1b), the START reds, the refusal-clause sweep, live Hu
   /srv/spk-build/hummingbird/out/hummingbird-0.4.1-api.spk, app 434g078h..., package c7287dfb...); declaration repointed.
 - Copies of all three: this session's scratchpad .../scratchpad/spk/{wbo,scrumblr,hummingbird}.spk (ship to the new box).
 
-## Live qualification (dregg-build2; hbox is gone)
-- Runner: /srv/worlds/ar-bb2run.sh SUF DECL ALIAS ROLE SPK, env CAND (candidate dir) and POOLSRC (a /srv/pool/tN tree: the sudoers
-  allow-list only admits install-user-world from there). Needs controller-world.py and install-user-world not group-writable
-  (chmod g-w in the pool tree) and spk-ingest installed 0755 (the broker wants a non-group-writable executable). Packages in
-  /srv/worlds/spk; Hermes root /srv/hermes/root-76511e768bbc. Overlay with 86c9dbddb: /srv/pool/lanes/member-side/candidates/93b31c1c33d6.
-- Scrumblr qualify (run sb5, rc=1): world, bootstrap, attach all pass; the qualify call ends native-outcome-unknown, application API
-  attempt uncertain. Log from 08340bac9 names it: "lifetime API transport result: Uncertain(host reply header: application API
-  socket closed)"; the resident's spk-host logs "agent v3 request refused unparsed: lifetime HTTP request refused" at the same second.
-  Cause, from reading the code (the request itself was not retained, so not a captured fact): the declaration's conversation path is
-  "socketio/" (trailing slash, as socket.io needs); agent_api_lifetime_wire_v3.rs:118 admits a path only if
-  minidregg_signed_api_path::route("/", path) accepts it, and route() refuses a trailing slash ("relative API path is not
-  canonical", deliberate: refuse_ambiguous_prefix_and_path_without_normalizing). The controller's native profile
-  (application_api_tools::parse_input) accepts it, so the refusal comes one hop late, as an uncertain outcome. Every conversation
-  declaration with "socket.io/" (scrumblr, hummingbird, wbo, etherdraw) hits it. Same on hbox sb2 (same signature).
-  Open design choice (touches the admission law, Rust sites: wire_v3:118, custody_v3:339, agent_api_lifetime_v3:186,
-  dispatch_inspection:143 and whatever Lean statement mirrors them): admit one trailing '/' for method CONVERSATION only.
-  Not done; the controller should at least refuse the path before sending, naming the clause.
+## Live qualification (bb2 given to obend; resume on hbox: pool tree, overlay, world-up under its lock; hbox / has ~42 GB)
+- Landed: a4b37cd28 (declaration route path loses one trailing slash; two refused by name; per root's ruling) and 9dc9c138c
+  (conversation channel id "mini-"+64 hex = 69 chars exceeded the Host's 64-char identifier shape: 32 hex now). Both are in
+  mini-sdk, so mini/miniLine/grainRuntime/grainProviderBridge must be rebuilt for a world (overlay on a member-side-fix candidate).
+- Scrumblr (run sb7 on bb2 at 9dc9c138c, rc=1): the Host now admits the open; the app side answers "lifetime agent operation 49 failed:
+  Failed: remote exception: expected headersComplete; HTTP response from sandboxed app had incomplete headers." after ~44 s
+  (one 30 s deadline plus setup). I.e. open_web_socket reaches the bridge and the sandboxed app returns no upgrade headers.
+  Not yet read: whether Scrumblr's socket.io mounts at "/socketio" (declaration path "socketio/" became "socketio") or
+  "/socket.io", and what the web-socket open sends. Next: read minidregg_spk_rpc open_web_socket and the app's server path.
+  Evidence kept on bb2: /srv/worlds/j-sb7 (journal in step/oracle/commands/0098).
+- WBO (run wb1): fails earlier, attachment-activate (step 87), not looked at. Hummingbird: not run.
+- bb2 state: pool tree t2 released; no worlds or jobs left; /srv/worlds holds run root j-sb7, ov/ overlays, spk/ (three packages), ar-*.sh.
+  Runner scripts are in /srv/worlds (ar-bb2run.sh, ar-qual.sh); copies to hbox needed.
 
 ## op66-plan refusal (read, no world)
 `launch BEGIN authorization, descriptor or action shape refused` is the single throw at
