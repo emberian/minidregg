@@ -53,6 +53,24 @@ Consent (CONSENT-STORE, sweep rows 13 partly): a provider start is the Store's
 checkpoint + the suffix (no genesis fold); catch-up is O(records since the client last
 looked), each natively admitted (~30 ms at head ~1,000).
 
+## Row 4 (walks from the checkpoint): the statement to settle first
+
+The walk families (lifecycle, dispatch, grants, Fn frontier) carry certificate lists
+(`PriorIssue`, `PriorBegin*`, `PriorClaim*`, `PriorCreatedV3`, `PriorRunningV3`,
+`PriorLifetimeGrant`, `PriorDispatchReserve`, `RetryHistory`, the Fn frontier audit,
+`PriorSelectedRelease`) whose `admitted`/`sourceExact` fields are existentials minted
+only by native admission inside the genesis walk. To start a walk at the Store's
+checkpoint (trusted storage), each certificate gains a second provenance: **the record
+is the trusted Store's verified record at an index below the walk's start** (the
+records below the start are decoded and classified by family, never executed), and
+every theorem that destructures `admitted` states the disjunction. Consumers that
+derive an exact root from original admission (`PriorLifetimeGrant.finalRoot`) read the
+verified tag's root instead. This weakens those certificate statements exactly to the
+threat model (ember 10-31: no validity proofs; the storage device is trusted), touches
+`Kernel/NativeHostReplay.lean` and its ~40 consumers, and goes statement-first: the
+`Provenance` inductive and the restated `sourceExact` family, then the walk start
+(`verifyFrom` over `Chained.cutAbove`), then rows 9 and 13 follow.
+
 ## Diagnosis that started this (2026-10-30, be4ef7510, x1 world on hbox)
 
 
