@@ -682,10 +682,16 @@ mod tests {
 
     #[test]
     fn the_function_list_is_the_room_tools() {
-        let names: Vec<String> = functions().as_array().unwrap().iter()
-            .map(|f| f["function"]["name"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(names.len(), 7);
-        assert!(names.contains(&"mini_doc_link".to_owned()));
+        // The model is offered exactly the room tool table, each with its own description and schema.
+        let functions = functions();
+        let functions = functions.as_array().unwrap();
+        let specs = crate::resource_tools::room_tool_specs();
+        assert_eq!(functions.len(), specs.len());
+        for (f, spec) in functions.iter().zip(&specs) {
+            assert_eq!(f["type"], "function");
+            assert_eq!((&f["function"]["name"], &f["function"]["description"], &f["function"]["parameters"]),
+                (&spec["name"], &spec["description"], &spec["inputSchema"]));
+        }
     }
 }
 
