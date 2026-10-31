@@ -68,15 +68,14 @@ resident footprint (a few MB per member), web pages.
 1. Confirm 86c9dbddb end to end (apps-hermes' bootstrap rerun). Then measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
    catch-up profile and wall, against the batch-8 numbers above. That is the after-number for rows 16 and 19,
    43995c7f2 (codec order check) and 76511e768 (projection). Expect no `planeKeys`/`supportFast`/`WorldTrack`
-   frames; the roots (`rootCached`, flat aux: decode + whole salted tree per root read) remain until FORMAT (a).
+   frames; the roots come from FORMAT (a)'s kept index (f28cd8457).
 2. Consent per record, retained mode, my side of the split with host-execution (a24974e84d3c540d1): the
    per-record re-projection sites, `CandidateLawResolution.validateRecords` (one post-cell `ofCell`),
    `validateLoadedFrom`, `NativeClientConsent.checkIntentPlan`, the walk's record advance in NativeHostReplay.
    With the projection O(1) these matter only for what the profile still shows. Theirs: the birth chain over
    `ServedBasis.Ground`, including `preparePreAuthority`. Diffs go to them before landing.
-3. The authority root: privacy's FORMAT (a) (a3f7fce75cd3e4e49) moves the authority materializer onto
-   `PrivateCellRoot.materializer` with a kept index, so a patched post cell's root is O(delta x 516), never from
-   bytes. They send the sha; then confirm on the profile.
+3. The authority root: done by privacy's FORMAT (a), f28cd8457 (authority materializer on the kept private index;
+   a patched cell's root O(delta x 516)). Confirm on the profile that `rootCached` no longer hashes whole cells.
 4. Footprint: the shared consent provider ~66 MB anon and flat; per-member increment at 1 and 5 members once infra's
    split units are rendered; then cut the shared base (codec ~12 MB, provider).
 5. Web and per-verb constants: `/keys` 60 to 75 ms is the Host's key-status op; read-path owns the read file bus
