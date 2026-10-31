@@ -186,10 +186,16 @@ theorem enterView_positive (c : Config) (s : State) (view : Nat)
 theorem enterNext_positive (c : Config) (s : State) (old : Positive s) :
     Positive (enterView c s (s.current+1)) := enterView_positive c s _ old (by omega)
 
+theorem enterJump_positive (c : Config) (s : State) (old : Positive s) :
+    Positive (enterView c s (preparedAbove s + 1)) :=
+  enterView_positive c s _ old (by omega)
+
+set_option maxHeartbeats 1000000 in
 theorem progressOuter_positive (c : Config) (s : State) (old : Positive s) :
     Positive (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
   repeat' first
+    | with_reducible apply enterJump_positive
     | with_reducible apply enterNext_positive
     | with_reducible apply propose_positive
     | positive_step

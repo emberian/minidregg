@@ -250,6 +250,12 @@ def enterView (c : Config) (s : State) (number : Nat) : State :=
   let s := { s with current := number, deadline := s.now + viewTimeout c s number }
   let s := putView s (viewAt s number)
   if c.leader number == s.self then propose s else s
+/-- Highest known prepared view above the current view. A view hint alone
+cannot select a jump target. Skipped views keep their existing VA state. -/
+def preparedAbove (s : State) : Nat :=
+  (s.views.map View.number).foldl
+    (fun acc n => if s.current < n && !(viewAt s n).prepared.isEmpty then max acc n else acc) 0
+
 def progressOuter (c : Config) (s : State) : State := Id.run do
   let mut s := s
   -- Late proposal: work (an offer) can arrive after the leader entered its
@@ -267,6 +273,8 @@ def progressOuter (c : Config) (s : State) : State := Id.run do
     if !v.voted && !v.disableRequested then
       if let some block := v.prepared.head? then s := castVote s s.current block
     s := enterView c s (s.current + 1)
+  if s.current < preparedAbove s then
+    s := enterView c s (preparedAbove s + 1)
   return s
 /-- Every known view remains active. Fair poll slices preserve pending work. -/
 def pass (c : Config) (s : State) : State :=

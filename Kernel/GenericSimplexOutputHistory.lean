@@ -233,6 +233,7 @@ theorem enterView_output (c : Config) (s : State) (view : Nat)
     output_actions
   · output_actions
 
+set_option maxHeartbeats 1000000 in
 theorem progressOuter_output (c : Config) (s : State) (old : OutputHistory s) :
     OutputHistory (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]

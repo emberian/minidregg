@@ -37,7 +37,9 @@ GROUPS = {
         "Kernel.GenericSimplexEmissionSupport",
         "Kernel.GenericSimplexEngineSafety",
         "Kernel.GenericSimplexObservationSafety",
+        "Kernel.GenericSimplexJumpSafety",
         "Kernel.GenericSimplexReceiverSafety",
+        "Verify.GenericSimplexJumpControls",
     ],
 }
 

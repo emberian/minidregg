@@ -904,6 +904,7 @@ theorem enterView_causal (c : Config) (s : State) (view : Nat)
     causal_chain
   · causal_chain
 
+set_option maxHeartbeats 1000000 in
 theorem progressOuter_causal (c : Config) (s : State) (old : CausalInvariant s) :
     CausalInvariant (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]

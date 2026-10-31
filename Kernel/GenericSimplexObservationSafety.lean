@@ -53,6 +53,31 @@ theorem actual_audit_refinement {c : Config} {faulty : Finset Nat}
     obtain ⟨view, output⟩ := (reachable_output_history reachable party).delivered block delivered
     exact ⟨view, local_commit_is_committed projected enrolled honest output⟩
 
+/-- A prepared jump target is backed by an earlier honest vote on this
+reachable execution. AuditRefinement alone does not attest prepared entries. -/
+theorem jump_target_has_honest_voter {c : Config} {faulty : Finset Nat}
+    {checked : Network → Nat → Block → Prop} {initialTime : Nat} {net : Network}
+    (reachable : Reachable c faulty checked initialTime net)
+    (size : c.parties = 3*c.faults+1) (faultBound : faulty.card ≤ c.faults)
+    {p j : Nat} {b : Block} (pm : p < c.parties) (ph : p ∉ faulty)
+    (hb : b ∈ (viewAt (net.localState p) j).prepared) :
+    ∃ q t time, q ∉ faulty ∧ t < time ∧ time < net.audit.length ∧
+      auditTrace net time = .prepare p j b ∧
+      Sent (auditTrace net) t q j .vote (some b) := by
+  have projected := reachable_projected (structuralAuditLaws c) reachable
+  have localOutput := (Minidregg.Kernel.GenericSimplexChronology.reachable_history reachable p).prepared j b hb
+  have globalOutput := local_audit_in_global projected pm ph localOutput
+  rw [projected.identity p pm ph] at globalOutput
+  obtain ⟨time, atTime⟩ := List.mem_iff_getElem?.mp globalOutput
+  obtain ⟨within, _⟩ := List.getElem?_eq_some_iff.mp atTime
+  have prepared : auditTrace net time = .prepare p j b := by
+    simp only [auditTrace, atTime, Option.getD_some]
+  obtain ⟨q, honest, t, earlier, vote⟩ := prepared_has_honest_vote
+    (actual_audit_refinement reachable size).faithful faultBound ph prepared
+  exact ⟨q, t, time, honest, earlier, within, prepared, vote⟩
+
+#assert_axioms jump_target_has_honest_voter
+
 theorem actual_state_commits_compatible {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
     (reachable : Reachable c faulty checked time net)

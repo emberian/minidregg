@@ -165,6 +165,7 @@ theorem enterView_origin (c : Config) (s : State) (view : Nat) (old : OriginInva
     origin_chain
   · origin_chain
 
+set_option maxHeartbeats 1000000 in
 theorem progressOuter_origin (c : Config) (s : State) (old : OriginInvariant s) :
     OriginInvariant (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]

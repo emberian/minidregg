@@ -308,6 +308,7 @@ theorem enterView_history (c : Config) (s : State) (view : Nat)
     history_actions
   · history_actions
 
+set_option maxHeartbeats 1000000 in
 theorem progressOuter_history (c : Config) (s : State) (old : HistoryInvariant s) :
     HistoryInvariant (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]

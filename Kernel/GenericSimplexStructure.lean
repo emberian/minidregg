@@ -139,6 +139,7 @@ theorem enterView_preserves (c : Config) (s : State) (number : Nat) :
     audit_chain
   · audit_chain
 
+set_option maxHeartbeats 1000000 in
 theorem progressOuter_preserves (c : Config) (s : State) :
     Preserves s (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
