@@ -3,6 +3,10 @@
 //! Unix socketpair. The public resident command requires a fresh source-bound
 //! lifecycle claim before launching the app.
 
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 #[cfg(target_os = "linux")]
 mod agent_api_custody;
 #[cfg(target_os = "linux")]

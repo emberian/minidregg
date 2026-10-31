@@ -1,0 +1,11 @@
+[package]
+name = "minidregg-mini-streams"
+version = "0.1.0"
+edition = "2021"
+description = "Standard output and error when the reader has gone: a closed stdout ends a command with 141, never a panic. Shared by every client binary."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "mini_streams"
+path = "src/lib.rs"

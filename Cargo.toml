@@ -15,6 +15,7 @@ members = [
   "native/pay-watcher",
   "native/mini-keys",
   "native/mini-sdk",
+  "native/mini-streams",
   "native/compatible-upgrade-custody",
   "native/signed-api-path",
   "native/spk-rpc",

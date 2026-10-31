@@ -11,6 +11,7 @@ name = "mini-web"
 path = "src/main.rs"
 
 [dependencies]
+minidregg-mini-streams = { path = "../mini-streams" }
 libc = "=0.2.189"
 serde_json = "=1.0.151"
 sha2 = "=0.10.9"

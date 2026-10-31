@@ -15,6 +15,7 @@ name = "mini-line"
 path = "src/bin/mini_line.rs"
 
 [dependencies]
+minidregg-mini-streams = { path = "../mini-streams" }
 libc = "=0.2.189"
 # Client-general custody primitives: durable writes, flock, secret-file loading, hex, decimals.
 mini-sdk = { package = "minidregg-mini-sdk", path = "../mini-sdk", features = ["native"] }

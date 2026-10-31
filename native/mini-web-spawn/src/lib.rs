@@ -19,6 +19,10 @@
 //! A token (CODE, SID) is 43 characters of base64url (32 random bytes); the helper stores
 //! tokens only by their SHA-256. CSRF is the same shape. Times are Unix seconds.
 
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 pub mod spawn;
 pub mod store;
 

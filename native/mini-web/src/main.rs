@@ -8,6 +8,10 @@
 //!
 //! A dev gateway (`--origin http://127.0.0.1:PORT`) carries the cookie without `Secure`.
 
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 mod http;
 mod limits;
 mod page;
@@ -46,7 +50,7 @@ struct Gateway {
     defaults: Option<PathBuf>,
 }
 
-fn main() {
+fn run_main() {
     if let Err(error) = run() {
         eprintln!("mini-web: {error}");
         std::process::exit(1);
@@ -494,4 +498,11 @@ mod tests {
             assert!(table.contains(want), "VENDOR.md lists {file}");
         }
     }
+}
+
+fn main() -> std::process::ExitCode {
+    mini_streams::guard(|| {
+        run_main();
+        std::process::ExitCode::SUCCESS
+    })
 }

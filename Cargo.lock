@@ -877,6 +877,7 @@ dependencies = [
  "minidregg-inference-scheduler",
  "minidregg-mini-keys",
  "minidregg-mini-sdk",
+ "minidregg-mini-streams",
  "minidregg-signed-api-path",
  "ring",
  "serde",
@@ -909,6 +910,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "libc",
+ "minidregg-mini-streams",
  "ring",
  "serde",
  "serde_json",
@@ -933,10 +935,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "minidregg-mini-streams"
+version = "0.1.0"
+
+[[package]]
 name = "minidregg-mini-web"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "minidregg-mini-streams",
  "minidregg-mini-web-spawn",
  "ring",
  "serde_json",
@@ -948,6 +955,7 @@ name = "minidregg-mini-web-spawn"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "minidregg-mini-streams",
  "serde_json",
  "sha2",
 ]
@@ -1012,6 +1020,7 @@ dependencies = [
  "libc",
  "minidregg-mini-keys",
  "minidregg-mini-sdk",
+ "minidregg-mini-streams",
  "minidregg-pay-watcher",
  "ring",
  "rustls",
@@ -1038,6 +1047,7 @@ dependencies = [
  "ed25519-dalek",
  "libc",
  "minidregg-compatible-upgrade-custody",
+ "minidregg-mini-streams",
  "minidregg-signed-api-path",
  "minidregg-spk-package-stream",
  "minidregg-spk-rpc",

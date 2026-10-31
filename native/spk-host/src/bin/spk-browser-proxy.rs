@@ -4,6 +4,10 @@
 //! browser trusts an operator-provided certificate for this custodian's own
 //! hostname; this binary never changes certificate trust or listens publicly.
 
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 #[cfg(target_os = "linux")]
 mod linux {
     use minidregg_spk_host::hostd::Journal;
@@ -826,7 +830,7 @@ mod linux {
 }
 
 #[cfg(target_os = "linux")]
-fn main() {
+fn run_main() {
     if let Err(error) = linux::main() {
         eprintln!("spk-browser-proxy: {error}");
         std::process::exit(1);
@@ -834,7 +838,14 @@ fn main() {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn main() {
+fn run_main() {
     eprintln!("spk-browser-proxy requires Linux");
     std::process::exit(2);
+}
+
+fn main() -> std::process::ExitCode {
+    mini_streams::guard(|| {
+        run_main();
+        std::process::ExitCode::SUCCESS
+    })
 }

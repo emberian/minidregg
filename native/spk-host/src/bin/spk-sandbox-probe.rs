@@ -17,14 +17,18 @@
 //!   app needs (threads, fork, a loopback listener, /var and /tmp writes).
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
+// print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
+// panic (`mini_streams`).
+#[macro_use]
+extern crate mini_streams;
 #[cfg(not(target_os = "linux"))]
-fn main() {
+fn run_main() {
     eprintln!("spk-sandbox-probe is Linux-only");
     std::process::exit(2);
 }
 
 #[cfg(target_os = "linux")]
-fn main() {
+fn run_main() {
     let mut report = linux::Report::default();
     linux::run(&mut report);
     std::process::exit(if report.finish() { 0 } else { 1 });
@@ -520,4 +524,11 @@ mod tests {
         assert!(!report.finish());
         assert!(!Report::default().finish(), "no checks is not a pass");
     }
+}
+
+fn main() -> std::process::ExitCode {
+    mini_streams::guard(|| {
+        run_main();
+        std::process::ExitCode::SUCCESS
+    })
 }
