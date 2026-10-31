@@ -4,7 +4,8 @@ use std::process::{Command, Stdio};
 
 #[test]
 fn a_closed_stdout_ends_mini_with_141_and_no_panic() {
-    for round in 0..20 {
+    let mut closed = 0;
+    for round in 0..40 {
         let mut child = Command::new(env!("CARGO_BIN_EXE_mini"))
             .arg("--help")
             .stdin(Stdio::null())
@@ -12,11 +13,17 @@ fn a_closed_stdout_ends_mini_with_141_and_no_panic() {
             .stderr(Stdio::piped())
             .spawn()
             .expect("mini starts");
-        // The read end is closed before `mini` writes a byte: its write always meets EPIPE.
+        // The read end is closed at once. Usually `mini` has not written yet and its write meets
+        // EPIPE (141); a `mini` that wrote first filled the pipe's buffer and ends 0. Never 101.
         drop(child.stdout.take());
         let output = child.wait_with_output().expect("mini ends");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!stderr.contains("panicked"), "round {round}: {stderr}");
-        assert_eq!(output.status.code(), Some(141), "round {round}: {:?} {stderr}", output.status);
+        match output.status.code() {
+            Some(141) => closed += 1,
+            Some(0) => {}
+            other => panic!("round {round}: {other:?} {stderr}"),
+        }
     }
+    assert!(closed > 0, "no round met a closed stdout");
 }
