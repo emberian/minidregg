@@ -330,6 +330,18 @@ applied):
    persistence in the same FORMAT batch, and lands separately before it: held `Materialized`
    across ops (no decode), one shared patch run for validation and apply, `Store.set` over a
    persistent map behind a csimp.
+   **Round 17:** `keptCell_root_of_kind` (a cell whose parameters carry the kind's context has
+   the kind materializer's root; the registry builds each kind's parameters from its constants,
+   and a history keeps one set). The hiding setting's custody value is version-dependent
+   (`sample v x`, `encodeMask v x`; the PRF hop runs over the secret `x`); `keyedCodec` and
+   `keyedCodec_of_injective` give a `CustodyCodec` of the keyed parameters under an exact (or
+   injective) custody encoding, and the ideal setting's custody value is `Nat.pair v x`
+   (`idealSetting_codec`). `Serve` takes the version's public metadata `(cell, version)`
+   (`PublicMeta`) and `ServesWithin`'s `S` may read it; no leakage is added.
+   **Cost note (law 17):** `ValidatedPatch.apply` chains thunks: `k` patches with no root read
+   between them cost `O(k)` walks at the first read and retain `k` closures until then. Every
+   accepted version's root is read at publication today, so the chain stays one long; a host that
+   stops reading roots per version must force the carried structure per version.
    **Tags and epoch:** iteration speed's seam 1 (lane/seam1-epoch) lands first: named tags in
    `Compiler/PersistedCodecTags/Core.lean` (imported by the modules naming them), census tags in
    `Compiler/PersistedCodecTags.lean`. The `DREGG/PRIVATE-CELL/*` tags go in Core if named, else

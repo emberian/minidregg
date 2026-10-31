@@ -164,6 +164,19 @@ theorem keptCell_root (cell : KeptCell wire) :
     cell.root = keptRoot wire (ctxBytes wire cell.params) ⟨cell.index, cell.mask⟩ :=
   rfl
 
+/-- **Context uniformity**: a cell whose parameters carry the kind's context (protocol, layout
+and size bound fixed per kind, `ctxBytes wire params = ctx`) has the root the kind's
+materializer computes from its store bytes. The registry's parameters for a kind are built from
+the kind's constants, so this holds of every cell of the kind; a history keeps one set of
+parameters (`History.spec`), so it is checked once, at birth. -/
+theorem keptCell_root_of_kind (ctx : List UInt8)
+    (codec : Minidregg.Theory.IndexedProgram.LawfulCodec (Store (CanonicalCellRegistry.layout kind)))
+    (rootBytes : List UInt8 → Digest) (agree : ∀ store, rootBytes (codec.encode store) = privateRoot wire ctx store)
+    (cell : KeptCell wire) (ofKind : ctxBytes wire cell.params = ctx) :
+    cell.root = rootBytes (codec.encode cell.fit.store) := by
+  rw [agree, ← ofKind]
+  exact cell.root_eq
+
 /-- And a kept cell's carried structure holds of its store. -/
 theorem keptCell_holds (cell : KeptCell wire) : KeptHolds wire ⟨cell.index, cell.mask⟩ cell.fit.store :=
   ⟨cell.holds, cell.mask_eq.symm⟩
@@ -172,6 +185,7 @@ theorem keptCell_holds (cell : KeptCell wire) : KeptHolds wire ⟨cell.index, ce
 #assert_axioms keptRoot_eq
 #assert_axioms rootAvailable
 #assert_axioms keptCell_root
+#assert_axioms keptCell_root_of_kind
 #assert_axioms keptCell_holds
 #assert_axioms set_index
 
