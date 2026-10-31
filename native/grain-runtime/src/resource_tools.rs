@@ -1235,6 +1235,11 @@ impl RoomTools<'_> {
         let Some(attempt) = found["lookup"]["attempt"].as_str() else {
             return Some(Err("the operation record names no attempt to resubmit".into()));
         };
+        // An attempt that failed before it was sealed holds no signed call (no call.bin): nothing was
+        // ever signed or sent, so there is nothing to submit again and the write must be authored anew.
+        if !Path::new(attempt).join("call.bin").exists() {
+            return Some(Err(format!("the write was never sealed, so it holds no signed call to submit again (attempt {attempt}); author it anew")));
+        }
         let mut command = Command::new(&self.config.mini);
         command.args(["retry", "--attempt"]).arg(attempt).args(["--mode", "submit", "--socket"]).arg(&self.config.socket);
         Some(match self.client(&mut command) {
