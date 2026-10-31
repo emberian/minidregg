@@ -28,6 +28,8 @@ say() { echo "$(date -Is) BUILDER $*" >> "$LOG"; echo "$(date -Is) $*"; }
 once=0; want=""
 reds_only=""
 case ${1:-} in --once) once=1; want=${2:-} ;; --reds) reds_only=${2:?--reds SHA} ;; '') ;; *) echo "usage: builder [--once [SHA] | --reds SHA]" >&2; exit 64 ;; esac
+# fd 8 is the builder's alone: every child is started with 8>&-, or a kept gate world's resident (and the
+# umbrellas) would hold builder.lock past this builder and refuse the next one (hbox 10-31: mini line-resident)
 exec 8>"$ST/builder.lock"; flock -n 8 || { echo "builder: another builder holds $ST/builder.lock" >&2; exit 75; }
 
 stage_rc() {  # SHA STAGE: the rc of the latest `stage STAGE rc=N` line of SHA's build in COMMANDS.log
@@ -45,7 +47,7 @@ round() {
   # 1. the build (detached: it holds build.lock, src, until its umbrella tree has synced, then runs the umbrellas)
   # integ-build at the tip being built (src is still at the previous round's commit until integ-build checks out SHA)
   local build=$ST/integ-build; git -C "$REPO" show "$sha:scripts/pipeline/integ-build" > "$build" && chmod +x "$build"
-  ( cd "$I" && BUILDER_ROOT=$I "$build" "$sha" > "$ST/build-$s8.out" 2>&1 ) & local bpid=$!; echo $bpid > "$ST/build.pid"
+  ( cd "$I" && BUILDER_ROOT=$I "$build" "$sha" > "$ST/build-$s8.out" 2>&1 ) 8>&- & local bpid=$!; echo $bpid > "$ST/build.pid"
   while kill -0 $bpid 2>/dev/null && [ ! -f "$I/candidates/$sha/READY" ]; do sleep 30; done
   # build.lock held (another build in src): not a round; the tip is tried again, nothing is published
   if ! kill -0 $bpid 2>/dev/null; then wait $bpid; [ $? = 75 ] && { say "round ${sha:0:12} deferred: build.lock held"; return 75; }; fi
@@ -54,7 +56,7 @@ round() {
   # the gate and sweep run from a copy taken now: integ-build may check out the next tip in src while they run
   if [ -f "$I/candidates/$sha/READY" ] && [ -x "$I/src/scripts/pipeline/gate" ]; then
     cp "$I/src/scripts/pipeline/gate" "$I/src/scripts/pipeline/sweep" "$ST/"
-    ( cd "$I" && "$ST/gate" "$sha" > "$ST/gate-$s8.out" 2>&1 ) & gpid=$!; echo $gpid > "$ST/gate.pid"
+    ( cd "$I" && "$ST/gate" "$sha" > "$ST/gate-$s8.out" 2>&1 ) 8>&- & gpid=$!; echo $gpid > "$ST/gate.pid"
   fi
   # the next round may start once src is free (the umbrella tree synced); the umbrellas finish beside it
   while kill -0 $bpid 2>/dev/null && [ ! -f "$I/logs/umbrella-synced-${sha:0:12}" ]; do sleep 15; done
@@ -68,7 +70,7 @@ round() {
     grep -q $'\tFAIL' "$G/j14.tsv" 2>/dev/null && phases="$phases j14"
     grep -q 'enrol-resume rc=[1-9]' <(grep "GATE $s8 " "$LOG") && phases="$phases enrol"
     if [ -n "$phases" ] || grep -q $'\tFAIL' "$G/flatness.tsv" 2>/dev/null; then
-      ( cd "$I" && PHASES="${phases# }" SUF=-r1 "$ST/gate" "$sha" > "$ST/gate-$s8-r1.out" 2>&1 ); rerun=$I/gate-$s8-r1
+      ( cd "$I" && PHASES="${phases# }" SUF=-r1 "$ST/gate" "$sha" > "$ST/gate-$s8-r1.out" 2>&1 ) 8>&-; rerun=$I/gate-$s8-r1
     fi
   fi
   reds "$sha" "$G" "$rerun"
