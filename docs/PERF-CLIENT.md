@@ -34,7 +34,7 @@ Staging 7fee25ff's `mini` (it carries the exorcist's batches) unless said otherw
 | 8 | resident footprint | each member's resident consent provider and codec Host do byte-identical work (one binding for every hosted member of a box) | one verifier per box serves them all | per member ~87 MB PSS (provider 56 to 90 MB private, growing with history; codec 12 MB); code pages (~150 MB) are shared once per box | single tenancy: one resident directory per box (`/etc/mini/session-residents`, dev config `residents`); split tenancy (the demo) HELD for ember's ruling on who verifies for a member | ae39dfeb4: 5 members 582 to 311 MB PSS, 5 to 2 providers (the sponsor's config is another binding) |
 | 9 | `Kernel.World` `World.admit` -> `pinCheck` -> `pinFails` -> `DeployedBridge.cellRoot` (in `WorldTrack.advance`) | re-encodes the World's own copy of every pinned cell (a fresh value after each write, its byte cache cold) to compare its root, per record | the executed snapshot already holds those cells' canonical bytes | 16% of a warm catch-up; the Host's append runs the same advance | pins judged from the snapshot's bytes (`snapPinFails`, proved equal at a represented World); `World.admitPinned` with `admit_eq_admitPinned` (rfl) | 5415aecf7: lane-check green; awaits a Host/consent build for the number |
 | 9b | `Compiler/WorldCompact.compactEvery` | rebuilds every cell's store and the cell map every 32 heights | only cells written since the last compaction changed | O(World) per 32 records (2% of hot-path's story profile, growing) | a World map without closure chains (each update O(log n)), or compaction of the cells written since the last one | open |
-| 10 | split tenancy: `mini-shell-ssh` (dregg-infra) and `mini-web-spawn` `delegated_consent_env` | `sha256sum` of the 194 MB consent provider and the config per ssh command / per body start | the worker already holds both digests | 176 ms per ssh command where `consent/peer.sock` exists | infra's wrapper | open |
+| 10 | the member ssh wrapper (`deploy/shell/mini-shell-ssh`, and dregg-infra's deployed copy) | `#!/usr/bin/env bash` probes PATH (8 to 11 failed execve per command), `readlink`/`dirname`/`dirname`/`basename` for MINI_CANDIDATE_SHA, and under split tenancy `sha256sum` of the 194 MB consent provider and the config per command (`mini-web-spawn` per body start) | the digests change once per ship; the client knows its own path | 12 of 15 execve of an ssh `say`; ~176 ms CPU per command where `consent/peer.sock` exists | the candidate's wrapper carries every deployed feature in two processes (bash, mini), files read with builtin `read`; the pins come from a ship-rendered `HOME/consent/peer.pins` (hashing only without it); the client derives its candidate id (f95edc7bf) | b34173dad; infra installs it from batch 7 and renders `peer.pins` in ship.sh |
 | 11 | world bring-up (`jworld-scratch.sh up`, dregg-infra) | 219 s for a five-member scratch world | | every measurement world and journey pays it | for whoever owns world bring-up | noted |
 
 Web pages on this world (staging binaries, member-1, warm, four GETs): `/`, `/doc`, `/story`, `/room`,
@@ -50,6 +50,7 @@ path adds to it.
 | 60b0dbf20 digest kept by file identity | `tail -n 5` client CPU 176 ms (wall 337) | 26 ms (wall 294) |
 | 86428a2f1 no idle exit | member idle 11 min, then `credit`: provider restart from its anchor, 3.2 s (consent 2.4 s CPU) | resident kept; the same `credit` pays only the catch-up of the ~40 records written meanwhile |
 | ae39dfeb4 one resident directory (single tenancy), 1 member | 1 provider, 1 codec, 233 MB PSS (code pages counted once) | same |
+| shared provider, 117 further records (says) | 67.2 MB anon | 66.1 MB anon: no per-record growth |
 | ae39dfeb4, 5 members (4 hosted + sponsor) | 5 providers, 5 codecs, 582 MB PSS; each member's first command after a restart 2.4 to 4.4 s | 2 providers, 2 codecs, 311 MB PSS; members 2 to 4 first command 77 to 109 ms (the provider was already warm) |
 
 Memory method: `smaps_rollup` Pss and Private over the resident processes (`consent-resident`,
@@ -60,4 +61,10 @@ Memory method: `smaps_rollup` Pss and Private over the resident processes (`cons
 Batch 1 (f883af161, staging merged in; staging d24b3e761, batch 6): rows 1, 2, 4, 8 (single tenancy).
 Follow-up 59dd7ded4 (staging db074a736, batch 6): a resident also ends when the Store its settings name
 (`storageRoot`) is removed (the explorer's world-down finding); `chargeWith`'s docstring names its caller's duty.
-Batch 2 (5415aecf7): row 9.
+Batch 2 (5415aecf7, staging 227451d8c, batch 7): row 9.
+Batch 3 (b34173dad, with f95edc7bf): row 10.
+
+Client syscalls per verb, for the record: a warm ssh `say` is 2,365 syscalls for the whole client tree
+(wrapper included). The explorer's 12,031 on batch 5 counted the residents that `strace -f` followed for
+~600 s. Remaining small client items: the attempt's `config.json` re-read once per Host call (36 opens per
+`say`), ~490 `statx` from the private-directory checks per load.

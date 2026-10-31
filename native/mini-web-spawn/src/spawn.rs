@@ -439,11 +439,24 @@ pub fn delegated_consent_env(mini: &Path, host: &Path, config: &Path, home: &Pat
         let bytes = fs::read(path).map_err(|e| format!("delegated consent: {}: {e}", path.display()))?;
         Ok(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
     };
+    // The ship renders both digests once beside the socket (`consent/peer.pins`: one line,
+    // `CONSENT_SHA256 CONFIG_SHA256`), as the ssh wrapper reads them; without it, hash here.
+    let (consent_sha, config_sha) = match fs::read_to_string(home.join("consent/peer.pins")) {
+        Ok(line) => {
+            let hex = |s: &str| s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            let mut words = line.split_whitespace();
+            match (words.next(), words.next()) {
+                (Some(a), Some(b)) if hex(a) && hex(b) => (a.to_owned(), b.to_owned()),
+                _ => return Err("delegated consent: consent/peer.pins must hold two sha256 digests".into()),
+            }
+        }
+        Err(_) => (digest(&consent)?, digest(config)?),
+    };
     Ok(vec![
         ("MINI_CONSENT_SOCKET", socket.display().to_string()),
         ("MINI_CONSENT_PEER_UID", "0".into()),
-        ("MINI_CONSENT_SHA256", digest(&consent)?),
-        ("MINI_CONSENT_CONFIG_SHA256", digest(config)?),
+        ("MINI_CONSENT_SHA256", consent_sha),
+        ("MINI_CONSENT_CONFIG_SHA256", config_sha),
         ("MINI_LOCAL_HOST", host.display().to_string()),
         ("MINI_CONSENT_HOST", consent.display().to_string()),
         ("MINI_CONSENT_CONFIG", config.display().to_string()),
