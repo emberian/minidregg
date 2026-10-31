@@ -73,7 +73,14 @@ path are measured after its fix.
 </content>
 </invoke>
 
-## Batch 2 (in progress on `lane/perf-apps`)
+## Batch 2: before and after (EtherCalc, batch 5 + 40efdcff9 + batch 1, hbox)
+
+| measure | before (batch 1) | after |
+|---|---|---|
+| the worker's owner-route bind (first to last `route-member` work file) | 13 s (17.5 s on batch 5) | 9 s |
+| `mini` processes the worker started in one install | 95 | 2 (`mini client-resident`, kept) |
+
+## What batch 2 changes
 
 - **The apps worker's client commands run in two resident `mini client-resident` processes**
   (`native/resource-client/src/client_resident.rs`), not a `mini` process per command: the channel is a
@@ -89,16 +96,16 @@ path are measured after its fix.
 
 ## Continuation (for whoever picks this lane up)
 
-State: batch 1 (`23738a4ce`) is merged on staging as `cfe5c24d5` and rides batch 6. Batch 2 above is
-committed on `lane/perf-apps`, checked on the Mac (cargo check, filtered tests), not yet measured.
+State: batch 1 (`23738a4ce`) is merged on staging as `cfe5c24d5` and rides batch 6. Batch 2 is measured
+(table above) and goes to batch 7. The worker still runs five one-shot `minidregg-host author`/`inspect`
+processes of its own during an install (0.06 to 0.21 s each, from a path other than the share and agent
+custody); find their caller and give it the codec session.
 
 Next steps, in order:
-1. Measure batch 2 on hbox: build `mini` (and spk-host) from `lane/perf-apps` into
-   `/home/hbox/lanes/perf-apps/target`, copy into `ownB`, run `up.sh B ownB` (worlds live in `/ci/pa-*`,
-   never `/tank` or `/home`), then `run.sh eB B e2e <app id>` against a baseline `run.sh eA A e2e`. Compare
-   with `cmp.sh eB B` (install phase, start phase, resident boots, spk-host durations from the bpftrace
-   process tree) and the worker's `route-*` stdout files. The before number is the route bind at
-   17.5 s in 13 `mini` processes.
+1. How to measure a change: build into `/home/hbox/lanes/perf-apps/target`, copy into an own-bin dir,
+   `up.sh W OWN` (worlds live in `/ci/pa-*`, never `/tank` or `/home`; remove a torn-down world's
+   `/ci/pa-W` before reusing the name), then `run.sh eW W e2e <app id>` against a baseline world, and
+   compare with `cmp.sh eW W` and the worker's `route-*` work files.
 2. When app-reds lands the START fixes (route socket path over SUN_LEN for 20-digit app ids; enrollment
    lookup "agent reserve custody lacks confirmation"), measure the first page and per-request latency:
    time repeated authenticated GETs over the route socket (`curl --unix-socket .../http.sock -w
