@@ -19,7 +19,8 @@ Input protocol: mini-application-attachment-v1. All paths are absolute.
                   template, factory/payer selectors and grain tariff
   names (optional): application, family, route, display, handle, serviceProtocol (null: none),
          applicationFamily
-  roleId (optional): installed permission-schema role index as a decimal string (default "0").
+  roleId (optional): installed permission-schema role index as a decimal string (default "0"), or "none" or
+    "allAccess" for a package that declares no roles.
          Mini checks the selected role against the signed schema and issuer authority.
   route (optional): {"kind":"web","origin":"https://HOST"} binds a v4 web route for an app whose
          package declares no api interface; the session kind is then web, the pins carry the route
@@ -148,8 +149,8 @@ class Attachment:
         self.root = Path(paths["outputDir"])
         self.application, self.issuer = c["application"], c["issuer"]
         self.role_id = c.get("roleId", "0")
-        if not isinstance(self.role_id, str) or not re.fullmatch(r"0|[1-9][0-9]{0,77}", self.role_id):
-            raise ValueError("roleId must be a canonical decimal string")
+        if not isinstance(self.role_id, str) or not re.fullmatch(r"0|[1-9][0-9]{0,77}|none|allAccess", self.role_id):
+            raise ValueError("roleId must be a canonical decimal string, none or allAccess")
         self.signers = c["signers"]
         for field in ("birthSource", "birthAttempt", "bootstrapTicketRequest", "bootstrapTicketAttempt", "packageDirectory"):
             self.absolute(self.application[field])
@@ -539,7 +540,9 @@ class Attachment:
         schema = read(package_dir / "schema-inspection.json")
         interface = next(i for i in read(package_dir / "descriptor-inspection.json")["interfaces"] if i["kind"] == self.session_kind)
         launch_root = read(package_dir.parent / "launch-inspection.json")["root"]
-        ceiling = {"basis": {"type": "role", "id": self.role_id}, "added": [], "removed": [],
+        # A package that declares no roles (WBO) has none to index: its ceiling basis is none or allAccess.
+        basis = {"type": self.role_id} if self.role_id in ("none", "allAccess") else {"type": "role", "id": self.role_id}
+        ceiling = {"basis": basis, "added": [], "removed": [],
                    "roleSchemaRoot": schema["root"], "roleVersion": schema["version"]}
         request = {"spec": {"ticket": {"resource": a["ticket"],
             "scope": {"app": app["app"], "packageVersion": package_version, "packageRoot": launch_root,
