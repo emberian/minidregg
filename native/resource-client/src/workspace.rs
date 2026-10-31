@@ -9,11 +9,12 @@ pub(crate) mod app_document;
 
 use crate::current_birth;
 use crate::create_private;
+use mini_sdk::attempt::Attempt;
 use mini_sdk::lock::{Create, Lease, LockError, Wait};
 use crate::receipt_continuity::{self, Mode as ContinuityMode};
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
-    absolute, author, hex, inspect, path, print_json, query_retained, retry, submit, Args,
+    absolute, author, hex, path, print_json, query_retained, retry, submit, Args,
     Result, SOCKET,
 };
 use serde_json::{json, Value};
@@ -762,7 +763,8 @@ pub(crate) fn paid_owner_transition(root:&Path, key:&Path, next:Option<&Path>,
     selected["receiptContinuity"] = before["receiptContinuity"].clone();
     // Existing candidate/anchor trust now guards this fresh possession read.
     let ticket = receipt_continuity::begin(root,&selected)?;
-    let (_,challenge,signed) = signed_view_unchecked(root,&selected,account,"resource")?;
+    let (_,challenge,mut files) = signed_view_unchecked(root,&selected,account,"resource")?;
+    let signed = files.path("signed-observation.bin")?;
     let continued = receipt_continuity::finish(root,&selected,ticket,&challenge,receipt_continuity::Mode::Ordinary)?;
     Ok((before,selected,json!({"firstTrust":first,"continued":continued,
         "currentAuthority":current,"challenge":challenge,"signedObservation":signed,
@@ -1003,22 +1005,49 @@ fn read_journal(root: &Path, height: &str, outcome: &str, now: &str, name: &str)
 
 /// The journal line of a read whose working files live in the read scratch: its height and
 /// clock from the challenge when it was answered.
-fn journal_read(root: &Path, attempt: &Path, answered: bool, reference: &Value) {
-    let challenge = bounded_json(&attempt.join("challenge.json")).ok();
-    let field = |pointer: &str| challenge.as_ref().and_then(|c| c.pointer(pointer)).and_then(Value::as_str)
+/// `answered` is the answered read's challenge; a refused read's, when it got one, is in its
+/// directory.
+fn journal_read(root: &Path, attempt: &Path, answered: Option<&Value>, reference: &Value) {
+    let refused = answered.is_none().then(|| bounded_json(&attempt.join("challenge.json")).ok()).flatten();
+    let challenge = answered.or(refused.as_ref());
+    let field = |pointer: &str| challenge.and_then(|c| c.pointer(pointer)).and_then(Value::as_str)
         .unwrap_or("-").to_owned();
     let name = reference.get("target").and_then(Value::as_str).unwrap_or("-");
-    let _ = read_journal(root, &field("/height"), if answered { "answered" } else { "refused" },
+    let _ = read_journal(root, &field("/height"), if answered.is_some() { "answered" } else { "refused" },
         &field("/clock/now"), name);
 }
 
-/// The coordinates a read was judged at, from its retained challenge: the world root,
-/// the height, and the deployment clock the resource's law saw
-/// (`NativeObservationController.read_judged_at_named_clock`).
-fn judged_at(attempt: &Path) -> Result<Value> {
-    let challenge = bounded_json(&attempt.join("challenge.json"))?;
-    Ok(json!({"worldRoot": challenge.get("worldRoot"), "height": challenge.get("height"),
-        "clock": challenge.get("clock")}))
+/// The coordinates a read was judged at, from its challenge: the world root, the height, and the
+/// deployment clock the resource's law saw (`NativeObservationController.read_judged_at_named_clock`).
+fn judged_of(challenge: &Value) -> Value {
+    json!({"worldRoot": challenge.get("worldRoot"), "height": challenge.get("height"),
+        "clock": challenge.get("clock")})
+}
+
+/// One file of a read, refused above `limit` bytes.
+pub(crate) fn attempt_bytes(files: &Attempt, name: &str, limit: usize) -> Result<Vec<u8>> {
+    let bytes = files.read(name).map_err(String::from)?;
+    if bytes.len() > limit {
+        return Err(format!("{} exceeds {limit} bytes", files.dir().join(name).display()));
+    }
+    Ok(bytes.into_owned())
+}
+
+/// A read's files on disk, for a caller that hands its signed observation to another Host verb by
+/// path or keeps working files beside it; returns the signed observation's path.
+pub(crate) fn on_disk(files: &mut Attempt) -> Result<PathBuf> {
+    files.materialize()?;
+    Ok(files.dir().join("signed-observation.bin"))
+}
+
+/// A JSON file of a read's attempt (a codec presentation), within the bound every retained JSON
+/// file is read under.
+pub(crate) fn attempt_json(files: &mini_sdk::attempt::Attempt, name: &str) -> Result<Value> {
+    let bytes = files.read(name).map_err(String::from)?;
+    if bytes.len() as u64 > MAX_RECORD {
+        return Err(format!("{} exceeds its bound", files.dir().join(name).display()));
+    }
+    serde_json::from_slice(&bytes).map_err(|error| format!("{}: {error}", files.dir().join(name).display()))
 }
 
 pub(crate) fn read(
@@ -1065,18 +1094,27 @@ pub(crate) fn read_reference(
     }
     let mut bytes = serde_json::to_vec_pretty(&intent).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    let source = root.join("sources").join(format!("q-{nonce}.json"));
-    create_private(&source, &bytes)?;
+    // A kept read keeps its intent source and its attempt; an ephemeral one keeps one journal line.
     if !ephemeral {
+        create_private(&root.join("sources").join(format!("q-{nonce}.json")), &bytes)?;
         eprintln!("workspace read attempt: {}", attempt.display());
     }
     let answered = query_retained(&workspace_host(workspace)?,
-        &member_path(workspace,"config")?, &source, OsStr::new("intent"),
-        &member_path(workspace,"key")?, &format!("view-{view}"), &attempt);
-    let judged = judged_at(&attempt).ok();
-    if answered.is_ok() {
-        let challenge = bounded_json(&attempt.join("challenge.json"))?;
-        receipt_continuity::finish(root,workspace,ticket,&challenge,ContinuityMode::Ordinary)?;
+        &member_path(workspace,"config")?, &bytes, OsStr::new("intent"),
+        &member_path(workspace,"key")?, &format!("view-{view}"), &attempt)
+        .and_then(|(value, mut files)| {
+            if !ephemeral {
+                files.materialize()?;
+            }
+            Ok((value, files))
+        });
+    let challenge = match &answered {
+        Ok((_, files)) => Some(attempt_json(files, "challenge.json")?),
+        Err(_) => bounded_json(&attempt.join("challenge.json")).ok(),
+    };
+    let judged = challenge.as_ref().map(judged_of);
+    if let (Ok(_), Some(challenge)) = (&answered, &challenge) {
+        receipt_continuity::finish(root,workspace,ticket,challenge,ContinuityMode::Ordinary)?;
     }
     if ephemeral {
         // A read commits nothing: once its answer (or refusal) is in hand the attempt
@@ -1101,10 +1139,8 @@ pub(crate) fn read_reference(
             fs::remove_dir_all(&attempt)
                 .map_err(|error| format!("cannot remove {}: {error}", attempt.display()))?;
         }
-        fs::remove_file(&source)
-            .map_err(|error| format!("cannot remove {}: {error}", source.display()))?;
     }
-    let mut answered = answered?;
+    let (mut answered, _) = answered?;
     if let (Some(object), Some(judged)) = (answered.as_object_mut(), judged) {
         object.insert("judgedAt".to_owned(), judged);
     }
@@ -1247,7 +1283,7 @@ fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Resu
 /// native image. Retained singleton envelopes remain usable by source consumers.
 pub(crate) fn signed_views(
     root: &Path, workspace: &Value, references: &[Value], view: &str,
-) -> Result<Vec<(Value, Value, PathBuf)>> {
+) -> Result<Vec<(Value, Value, Attempt)>> {
     signed_views_mixed(root, workspace, references, &vec![view.to_owned(); references.len()])
 }
 
@@ -1322,7 +1358,7 @@ fn signed_read_batches(references: &[Value], views: &[String]) -> Result<Vec<Sig
 /// a write between them triggers the proposal's existing whole-action retry.
 pub(crate) fn signed_views_mixed(
     root: &Path, workspace: &Value, references: &[Value], views: &[String],
-) -> Result<Vec<(Value, Value, PathBuf)>> {
+) -> Result<Vec<(Value, Value, Attempt)>> {
     // Keep the existing seven-exchange singleton path; wrapping one local
     // read in observation-batch would add four pure codec exchanges.
     if references.len() == 1 && views.len() == 1 {
@@ -1330,10 +1366,13 @@ pub(crate) fn signed_views_mixed(
         check_read_coordinates(None, &read.1)?;
         return Ok(vec![read]);
     }
-    signed_views_mixed_with(references, views, |batch| {
+    let reads = signed_views_mixed_with(references, views, |batch| {
         signed_views_purposes(root, workspace, &batch.references,
             &batch.purposes, &batch.inspections, None)
-    })
+    })?;
+    reads.into_iter().map(|(view, challenge, signed)| {
+        Ok((view, challenge, Attempt::disk(signed.parent().ok_or("batch read lacks its attempt")?)))
+    }).collect()
 }
 
 fn signed_views_mixed_with(
@@ -1420,14 +1459,14 @@ fn signed_views_purposes(
 /// A name changing refuses; unrelated writes cannot invalidate the chain.
 fn signed_opened_view(
     root: &Path, workspace: &Value, reference: &Value, purpose: Value, inspection: &str,
-) -> Result<(Value, Value, PathBuf)> {
+) -> Result<(Value, Value, Attempt)> {
     signed_opened_view_custody(root,workspace,reference,purpose,inspection,None)
 }
 
 fn signed_opened_view_custody(
     root: &Path, workspace: &Value, reference: &Value, purpose: Value, inspection: &str,
     custody: Option<&mut BatchReadCustody>,
-) -> Result<(Value, Value, PathBuf)> {
+) -> Result<(Value, Value, Attempt)> {
     let guards = shared_names::guard_references(reference)?;
     let mut references = guards;
     references.push(reference.clone());
@@ -1440,7 +1479,8 @@ fn signed_opened_view_custody(
     let mut results = signed_views_purposes(root, workspace, &references, &purposes, &inspections, custody)?;
     shared_names::check_opened_views(reference, &references[..last],
         &results[..last].iter().map(|(view,_,_)| view.clone()).collect::<Vec<_>>())?;
-    Ok(results.pop().unwrap())
+    let (view, challenge, signed) = results.pop().unwrap();
+    Ok((view, challenge, Attempt::disk(signed.parent().ok_or("signed read lacks its attempt")?)))
 }
 
 pub(crate) fn signed_view(
@@ -1448,7 +1488,7 @@ pub(crate) fn signed_view(
     workspace: &Value,
     reference: &Value,
     view: &str,
-) -> Result<(Value, Value, PathBuf)> {
+) -> Result<(Value, Value, Attempt)> {
     if reference.get("sharedName").is_some() {
         return signed_view_unchecked(root,workspace,reference,view);
     }
@@ -1464,18 +1504,18 @@ fn signed_view_unchecked(
     workspace: &Value,
     reference: &Value,
     view: &str,
-) -> Result<(Value, Value, PathBuf)> {
+) -> Result<(Value, Value, Attempt)> {
     signed_view_inspected(root, workspace, reference, view, None)
 }
 
 /// A content page's current read and its document rendering with no source pages, from one
 /// codec frame (`view-resource-document`): (the resource view, the document, the challenge,
-/// the signed observation). A shared name's opened read renders the document separately.
+/// the read's files). A shared name's opened read renders the document separately.
 pub(crate) fn signed_page(
     root: &Path,
     workspace: &Value,
     reference: &Value,
-) -> Result<(Value, Option<Value>, Value, PathBuf)> {
+) -> Result<(Value, Option<Value>, Value, Attempt)> {
     if reference.get("sharedName").is_some() {
         let (view, challenge, signed) = signed_view(root, workspace, reference, "resource")?;
         return Ok((view, None, challenge, signed));
@@ -1494,7 +1534,7 @@ fn signed_view_inspected(
     reference: &Value,
     view: &str,
     inspection: Option<&str>,
-) -> Result<(Value, Value, PathBuf)> {
+) -> Result<(Value, Value, Attempt)> {
     if reference.get("sharedName").is_some() {
         let purpose = json!({"type":"query","kind":member(reference,"kind")?,
             "target":member(reference,"target")?,"view":view});
@@ -1509,11 +1549,7 @@ fn signed_view_inspected(
             "target":member(reference,"target")?,"view":view},
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
-    let source = crate::read_scratch::source(&attempt, &format!("q-{nonce}.json"));
-    create_private(
-        &source,
-        &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
-    )?;
+    let intent = serde_json::to_vec(&intent).map_err(|error| error.to_string())?;
     let inspection = if let Some(inspection) = inspection {
         inspection.to_owned()
     } else if view == "capability" {
@@ -1524,17 +1560,17 @@ fn signed_view_inspected(
     let result = query_retained(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
-        &source,
+        &intent,
         OsStr::new("intent"),
         &member_path(workspace, "key")?,
         &inspection,
         &attempt,
-    );
-    journal_read(root, &attempt, result.is_ok(), reference);
-    let result = result.inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
-    let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    )
+    .and_then(|(result, files)| Ok((result, attempt_json(&files, "challenge.json")?, files)));
+    journal_read(root, &attempt, result.as_ref().ok().map(|(_, challenge, _)| challenge), reference);
+    let (result, challenge, files) = result.inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
     shared_names::check_opened(reference, &challenge)?;
-    Ok((result, challenge, attempt.join("signed-observation.bin")))
+    Ok((result, challenge, files))
 }
 
 /// A signed query of a referenced resource with `view` (and `height` for
@@ -1547,13 +1583,13 @@ fn doc_query(
     view: &str,
     height: Option<&str>,
     inspection: &str,
-) -> Result<(Value, PathBuf)> {
+) -> Result<(Value, Attempt)> {
     if reference.get("sharedName").is_some() {
         let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
             "target":member(reference,"target")?,"view":view});
         if let Some(height) = height { decimal(height,"height")?; purpose["height"] = json!(height); }
-        let (value, _, signed) = signed_opened_view(root,workspace,reference,purpose,inspection)?;
-        return Ok((value,signed.parent().ok_or("signed query lacks attempt")?.to_owned()));
+        let (value, _, files) = signed_opened_view(root,workspace,reference,purpose,inspection)?;
+        return Ok((value, files));
     }
     let ticket = receipt_continuity::begin(root, workspace)?;
     let (attempt, nonce) = crate::read_scratch::attempt(root)?;
@@ -1566,29 +1602,25 @@ fn doc_query(
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,"purpose":purpose,
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
-    let source = crate::read_scratch::source(&attempt, &format!("q-{nonce}.json"));
-    create_private(
-        &source,
-        &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
-    )?;
+    let intent = serde_json::to_vec(&intent).map_err(|error| error.to_string())?;
     let value = query_retained(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
-        &source,
+        &intent,
         OsStr::new("intent"),
         &member_path(workspace, "key")?,
         inspection,
         &attempt,
-    );
-    journal_read(root, &attempt, value.is_ok(), reference);
-    let value = value.inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
-    let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    )
+    .and_then(|(value, files)| Ok((value, attempt_json(&files, "challenge.json")?, files)));
+    journal_read(root, &attempt, value.as_ref().ok().map(|(_, challenge, _)| challenge), reference);
+    let (value, challenge, files) = value.inspect_err(|_| crate::read_scratch::keep(root, &attempt))?;
     if reference.get("sharedName").is_some() {
         shared_names::check_opened(reference, &challenge)?;
     }
     let mode = if view == "at" { ContinuityMode::Historical } else { ContinuityMode::Ordinary };
     receipt_continuity::finish(root, workspace, ticket, &challenge, mode)?;
-    Ok((value, attempt))
+    Ok((value, files))
 }
 
 /// A signed read of one reference `at` a past height (K-HISTORY-READ), under
@@ -1599,9 +1631,8 @@ fn signed_at(
     workspace: &Value,
     reference: &Value,
     height: &str,
-) -> Result<(Value, PathBuf)> {
-    let (value, attempt) = doc_query(root, workspace, reference, "at", Some(height), "view-at")?;
-    Ok((value, attempt.join("view.bin")))
+) -> Result<(Value, Attempt)> {
+    doc_query(root, workspace, reference, "at", Some(height), "view-at")
 }
 
 /// The referencing line of one backlink, rendered: the line of the source
@@ -1806,7 +1837,8 @@ fn transclude(
 pub(crate) struct DocumentRead {
     pub host: String,
     pub view: Value,
-    pub attempt: PathBuf,
+    /// The host page read's challenge: the height and roots it was judged at.
+    pub challenge: Value,
     pub document: Value,
     pub entries: Vec<Value>,
     pub shown: Vec<Value>,
@@ -1901,21 +1933,17 @@ pub(crate) fn rendered_document(
     let host_ref = reference(root, host_name)?;
     // The host page: current, or `at` a past height under the grant as it stood
     // then (the Host refuses the read otherwise; that refusal is the answer).
-    let (host_view, host_document, host_bin) = match at {
+    let (host_view, host_document, host_attempt) = match at {
         None => {
-            let (view, document, _, signed) = signed_page(root, workspace, &host_ref)?;
-            (view, document, signed.with_file_name("view.bin"))
+            let (view, document, _, files) = signed_page(root, workspace, &host_ref)?;
+            (view, document, files)
         }
         Some(height) => {
-            let (view, bin) = signed_at(root, workspace, &host_ref, height)?;
-            (view["resource"].clone(), None, bin)
+            let (view, files) = signed_at(root, workspace, &host_ref, height)?;
+            (view["resource"].clone(), None, files)
         }
     };
-    let host_attempt = host_bin
-        .parent()
-        .ok_or("host read lacks its attempt directory")?
-        .to_path_buf();
-    let host_bin = fs::read(host_bin).map_err(|error| error.to_string())?;
+    let host_bin = host_attempt.read("view.bin")?.into_owned();
     let host_entries: Vec<Value> = if at.is_some() && host_view.is_null() {
         Vec::new()
     } else {
@@ -1949,16 +1977,16 @@ pub(crate) fn rendered_document(
         let attempt = |reference: &Value| -> Result<(Value, Vec<u8>, Value)> {
             match at {
                 None => {
-                    let (view, _, signed) = signed_view(root, workspace, reference, "resource")?;
-                    let bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
+                    let (view, _, files) = signed_view(root, workspace, reference, "resource")?;
+                    let bin = files.read("view.bin")?.into_owned();
                     Ok((json!({"target":source,"view":hex(&bin)}), bin, view))
                 }
                 Some(height) => {
-                    let (view, bin) = signed_at(root, workspace, reference, height)?;
+                    let (view, files) = signed_at(root, workspace, reference, height)?;
                     if view["state"] != "live" {
                         return Err(format!("source {source} is not live at height {height}"));
                     }
-                    let bin = fs::read(bin).map_err(|error| error.to_string())?;
+                    let bin = files.read("view.bin")?.into_owned();
                     Ok((json!({"target":source,"at":hex(&bin)}), bin, view["resource"].clone()))
                 }
             }
@@ -1986,20 +2014,11 @@ pub(crate) fn rendered_document(
         readable.insert(source, read);
     }
     let render = |host: &[u8], sources: &Vec<Value>| -> Result<Value> {
-        let (attempt, _) = crate::read_scratch::attempt(root)?;
-        make_private_dir(&attempt)?;
-        let input = attempt.join("transclusions-in.json");
-        create_private(
-            &input,
-            &serde_json::to_vec(&json!({"host":hex(host),"sources":sources}))
-                .map_err(|error| error.to_string())?,
-        )?;
-        inspect(
+        crate::inspect_bytes(
             &workspace_host(workspace)?,
             &member_path(workspace, "config")?,
             "view-document",
-            &input,
-            &attempt.join("transclusions.json"),
+            &serde_json::to_vec(&json!({"host":hex(host),"sources":sources})).map_err(|error| error.to_string())?,
         )
     };
     // With no source pages the codec already rendered the page with the read.
@@ -2040,14 +2059,14 @@ pub(crate) fn rendered_document(
                 // reader's grant stood then. A reader granted later keeps the
                 // `moved` placeholder: it is told the lines moved, not shown them.
                 match signed_at(root, workspace, reference, &height) {
-                    Ok((historical, bin)) => {
+                    Ok((historical, files)) => {
                         // Only this independently admitted historical observation
                         // supplies the snapshot wrapper. Current readability gives
                         // no historical authority or fallback.
                         let raw=entries(&historical["resource"] )?.clone();
                         let opened=opened_entries(root, workspace, reference, &historical["resource"]).ok();
                         historical_display=Some((raw, opened));
-                        let at = fs::read(&bin).map_err(|error| error.to_string())?;
+                        let at = files.read("view.bin")?.into_owned();
                         let again = render(&host_bin, &vec![json!({"target":source,"at":hex(&at)})])?;
                         if let Some(found) = again["transclusions"].as_array().and_then(|all| {
                             all.iter().find(|other| other.get("id") == item.get("id"))
@@ -2096,7 +2115,7 @@ pub(crate) fn rendered_document(
     Ok(DocumentRead {
         host: member(&host_ref, "target")?.to_owned(),
         view: host_view,
-        attempt: host_attempt,
+        challenge: attempt_json(&host_attempt, "challenge.json")?,
         document: current,
         entries: display_entries,
         shown,
@@ -2121,22 +2140,13 @@ fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&
 /// transclusion: what placement needs (the order, each element's parent, each
 /// container's revision).
 fn host_document(root: &Path, workspace: &Value, host_ref: &Value) -> Result<Value> {
-    let (_, _, signed) = signed_view(root, workspace, host_ref, "resource")?;
-    let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
-    let (attempt, _) = crate::read_scratch::attempt(root)?;
-    make_private_dir(&attempt)?;
-    let input = attempt.join("document-in.json");
-    create_private(
-        &input,
-        &serde_json::to_vec(&json!({"host":hex(&host_bin),"sources":[]}))
-            .map_err(|error| error.to_string())?,
-    )?;
-    inspect(
+    let (_, _, files) = signed_view(root, workspace, host_ref, "resource")?;
+    let host_bin = files.read("view.bin")?.into_owned();
+    crate::inspect_bytes(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
         "view-document",
-        &input,
-        &attempt.join("document.json"),
+        &serde_json::to_vec(&json!({"host":hex(&host_bin),"sources":[]})).map_err(|error| error.to_string())?,
     )
 }
 
@@ -2540,7 +2550,7 @@ fn doc_show(root: &Path, workspace: &Value, name: &str, at: Option<&str>, format
     if at.is_none() {
         // What `doc edit` and `doc push` name a line against: this read, in the
         // kernel's order.
-        let challenge = bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
+        let challenge = read.challenge.clone();
         retain_seen_value(root, name, &seen_read_value(name, &read, &challenge))?;
     }
     let mut out = mini_streams::out();
@@ -2598,28 +2608,19 @@ fn doc_outline(root: &Path, workspace: &Value, name: &str, json_out: bool) -> Re
     Ok(())
 }
 
-fn view_hex(attempt: &Path) -> Result<String> {
-    let path = attempt.join("view.bin");
-    fs::read(&path)
-        .map(|bytes| hex(&bytes))
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))
+fn view_hex(read: &Attempt) -> Result<String> {
+    Ok(hex(&read.read("view.bin")?))
 }
 
-/// Render `input` with the Host's `kind` inspection, retained beside `attempt`.
-fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> Result<Value> {
-    let input_path = attempt.join(format!("{kind}-input.json"));
-    create_private(
-        &input_path,
-        &serde_json::to_vec(input).map_err(|error| error.to_string())?,
-    )?;
-    let rendered = inspect(
+/// Render `input` with the codec's `kind` inspection (a presentation of reads already made:
+/// nothing is retained).
+fn doc_render(workspace: &Value, kind: &str, input: &Value) -> Result<Value> {
+    crate::inspect_bytes(
         &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
         kind,
-        &input_path,
-        &attempt.join(format!("{kind}.json")),
-    )?;
-    Ok(rendered)
+        &serde_json::to_vec(input).map_err(|error| error.to_string())?,
+    )
 }
 
 /// Whether the `at` read that just failed was refused `no-grant`: the grant did
@@ -2701,7 +2702,7 @@ pub(crate) fn doc_history(root: &Path, workspace: &Value, name: &str) -> Result<
         }
     }
     let input = json!({"target": target, "since": view_hex(&attempt)?, "at": reads});
-    doc_render(workspace, &attempt, "view-history", &input)
+    doc_render(workspace, "view-history", &input)
 }
 
 /// `doc diff NAME H1 H2`: the atom changes between the two `at` reads.
@@ -2710,7 +2711,7 @@ pub(crate) fn doc_diff(root: &Path, workspace: &Value, name: &str, from: &str, t
     let (_, left) = doc_query(root, workspace, &reference, "at", Some(from), "view-at")?;
     let (_, right) = doc_query(root, workspace, &reference, "at", Some(to), "view-at")?;
     let input = json!({"left": view_hex(&left)?, "right": view_hex(&right)?});
-    doc_render(workspace, &right, "view-diff", &input)
+    doc_render(workspace, "view-diff", &input)
 }
 
 /// Historical signed view used by room lineage resolution, sharing the document
@@ -3149,7 +3150,7 @@ fn propose_summary_once(
             let mut grants = Vec::new();
             let command_nonce = random_nonce()?;
             let mut image = None::<String>;
-            for ((entry, reference), (view, challenge, signed)) in
+            for ((entry, reference), (view, challenge, mut signed)) in
                 selected.iter().zip(&references).zip(observations) {
                 let local_name = member(entry, "name")?;
                 if let Some(value)=entry.get("expectedObserveCapability") {
@@ -3160,7 +3161,7 @@ fn propose_summary_once(
                     }
                 }
                 let protected = reference.get("protectedDocument").is_some();
-                let audience = if protected { Some(protected_document::observe(root,workspace,&reference,&signed)?) } else { None };
+                let audience = if protected { Some(protected_document::observe(root,workspace,&reference,&on_disk(&mut signed)?)?) } else { None };
                 let current_image = member(&challenge, "worldRoot")?.to_owned();
                 if let Some(previous) = &image {
                     if previous != &current_image {
@@ -3988,8 +3989,8 @@ fn thin_views(root: &Path, workspace: &Value, source: &Path) -> Result<()> {
             _ => thin_observe_capability(root, &target["target"])?,
         };
         let reference = json!({"kind":target["kind"],"target":target["target"],"observeCapability":capability});
-        let (_, attempt) = doc_query(root, workspace, &reference, "resource", None, "view-resource")?;
-        views.push(attempt.join("view.bin"));
+        let (_, read) = doc_query(root, workspace, &reference, "resource", None, "view-resource")?;
+        views.push(read.read("view.bin")?.into_owned());
     }
     crate::client_consent::set_thin_views(views)
 }
@@ -5124,7 +5125,7 @@ fn birth_members(
         author_generations(
             &authoring,
             &reservation,
-            || Ok(signed_view(root, workspace, &factory_ref, "resource")?.2),
+            || Ok(signed_view(root, workspace, &factory_ref, "resource")?.2.path("signed-observation.bin")?),
             |generation, observation| {
                 current_birth::author(
                     &host,
@@ -6050,7 +6051,7 @@ fn normalized_file(bytes: &[u8]) -> Vec<u8> {
 fn doc_read(root: &Path, workspace: &Value, name: &str) -> Result<Value> {
     let read = rendered_document(root, workspace, name, None, None)?;
     content_page(&read.view, name)?;
-    let challenge = bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
+    let challenge = read.challenge.clone();
     let seen = seen_read_value(name, &read, &challenge);
     retain_seen_value(root, name, &seen)?;
     Ok(seen)

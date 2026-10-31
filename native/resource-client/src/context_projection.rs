@@ -13,16 +13,12 @@ pub(crate) fn document(root:&Path, workspace:&Value, name:&str, max_rows:usize, 
     }
     let reference=reference(root,name)?;
     let (view,challenge,signed)=signed_view(root,workspace,&reference,"resource")?;
-    let bin=fs::read(signed.with_file_name("view.bin")).map_err(|e|e.to_string())?;
-    let (attempt,_)=crate::read_scratch::attempt(root)?;
-    make_private_dir(&attempt)?;
-    let input=attempt.join("context-in.json");
-    create_private(&input,&serde_json::to_vec(&json!({
-        "target":member(&reference,"target")?,"view":hex(&bin),
-        "maxRows":max_rows.to_string(),"maxBytes":max_bytes.to_string()
-    })).map_err(|e|e.to_string())?)?;
-    let mut projection=inspect(&workspace_host(workspace)?,&member_path(workspace,"config")?,
-        "context-document",&input,&attempt.join("context.json"))?;
+    let bin=signed.read("view.bin")?.into_owned();
+    let mut projection=crate::inspect_bytes(&workspace_host(workspace)?,&member_path(workspace,"config")?,
+        "context-document",&serde_json::to_vec(&json!({
+            "target":member(&reference,"target")?,"view":hex(&bin),
+            "maxRows":max_rows.to_string(),"maxBytes":max_bytes.to_string()
+        })).map_err(|e|e.to_string())?)?;
     if projection["type"]!="mini-context-document-v1"
         || projection["source"]!=reference["target"]
         || projection["sourceRoot"]!=view["cell"]["root"] {
@@ -208,11 +204,8 @@ fn summary_text(root:&Path,workspace:&Value,value:&Value)->Result<(Option<String
             Err(_)=>unavailable=true,
         }
     }
-    let (attempt,_)=crate::read_scratch::attempt(root)?;make_private_dir(&attempt)?;
-    let input=attempt.join("context-support-in.json");
-    create_private(&input,&serde_json::to_vec(&json!({"dependencies":dependencies,"current":current})).map_err(|e|e.to_string())?)?;
-    let verdict=inspect(&workspace_host(workspace)?,&member_path(workspace,"config")?,
-        "context-support",&input,&attempt.join("context-support.json"))?;
+    let verdict=crate::inspect_bytes(&workspace_host(workspace)?,&member_path(workspace,"config")?,
+        "context-support",&serde_json::to_vec(&json!({"dependencies":dependencies,"current":current})).map_err(|e|e.to_string())?)?;
     if verdict["type"]!="mini-context-support-v1"{return Err("summary support receiver differs".into());}
     let status=if unavailable{"unavailable"}else{member(&verdict,"status")?};
     Ok((if verdict["current"]==true&&!unavailable{Some(text.to_owned())}else{None},

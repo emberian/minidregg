@@ -41,10 +41,11 @@ pub(crate) fn submit(host: &Path, config: &Path, request: &Path, intent_nonce: &
     write_new(&intent_bin, &field("intent")?)?;
     write_new(&directory.join("command.bin"), &field("command")?)?;
     let signing = read_secret(key)?;
-    let observed = authorize_observation(host, &retained_config, &intent_bin, OsStr::new("binary"),
-        &signing, directory)?;
+    let mut attempt = mini_sdk::attempt::Attempt::disk(directory);
+    let observed = authorize_observation(host, &retained_config, &mut attempt, "prepare-intent.bin", OsStr::new("binary"),
+        &signing)?;
     let plan_bin = directory.join("plan.bin");
-    host_files(host, &retained_config, &[Path::new("prepare"), &observed.signed, &plan_bin])?;
+    host_files(host, &retained_config, &[Path::new("prepare"), &directory.join(observed), &plan_bin])?;
     inspect(host, &retained_config, "plan", &plan_bin, &directory.join("plan.json"))?;
     let request_bytes = fs::read(&request_bin).map_err(|e| e.to_string())?;
     let plan_bytes = fs::read(&plan_bin).map_err(|e| e.to_string())?;

@@ -1458,7 +1458,7 @@ pub(crate) fn bootstrap(root: &Path, ws: &Value, budget: &str, tool_ref: &str, p
                 let factory_ref = json!({"kind":"object","target":factory,"observeCapability":observe_capability});
                 let authoring = root.join("sources").join("apps-bootstrap.authoring");
                 let author_dir = w::author_generations(&authoring, &reservation,
-                    || Ok(w::signed_view(root, ws, &factory_ref, "resource")?.2),
+                    || Ok(w::signed_view(root, ws, &factory_ref, "resource")?.2.path("signed-observation.bin")?),
                     |generation, observation| crate::current_birth::author(&host, &host_config, socket, &source_path, observation, generation, crate::current_birth::Route::Resource),
                     |generation| crate::observation_stale(&host, &host_config, generation))?;
                 let intent_path = crate::current_birth::retained_intent(&author_dir, crate::current_birth::Route::Resource)?;

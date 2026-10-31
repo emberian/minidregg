@@ -197,32 +197,28 @@ pub(crate) fn full_ready(host: &Path, config: &Path) -> Result<()> {
     with_consent(host, config, |consent| consent.full_ready())
 }
 
-/// Consent 220 (thin: 230; a thin birth: 234, with the member's retained source) for the retained intent at `intent` and the signer's public `key`;
-/// the retained bytes the provider confirmed.
-pub(crate) fn intent(host:&Path,config:&Path,intent:&Path,key:&[u8])->Result<Vec<u8>> {
-    let bytes=read(intent)?;
+/// Consent 220 (thin: 230; a thin birth: 234, with the member's retained source) for the
+/// retained intent bytes and the signer's public `key`.
+pub(crate) fn intent(host:&Path,config:&Path,intent:&[u8],key:&[u8])->Result<()> {
     if thin_mode() {
         if let Some(source)=thin_birth_source()? {
-            with_consent(host,config,|c|c.thin_birth_intent(&bytes,key,&source))?;
-            return Ok(bytes);
+            return with_consent(host,config,|c|c.thin_birth_intent(intent,key,&source)).map(|_|());
         }
     }
-    with_consent(host,config,|c|c.intent(&bytes,key,thin_mode()))?;
-    Ok(bytes)
+    with_consent(host,config,|c|c.intent(intent,key,thin_mode())).map(|_|())
 }
 /// Consent 221 (thin: 231): the challenge headers the intent permits `key` to sign.
-pub(crate) fn observation(host:&Path,config:&Path,intent:&Path,signature:&Path,challenge:&Path,key:&[u8])->Result<Vec<Vec<u8>>> {
-    let (intent,signature,challenge)=(read(intent)?,read(signature)?,read(challenge)?);
-    with_consent(host,config,|c|c.observation(&intent,key,&signature,&challenge,thin_mode()))
+pub(crate) fn observation(host:&Path,config:&Path,intent:&[u8],signature:&[u8],challenge:&[u8],key:&[u8])->Result<Vec<Vec<u8>>> {
+    with_consent(host,config,|c|c.observation(intent,key,signature,challenge,thin_mode()))
 }
-/// Consent 222 (thin: 232): the plan headers the intent permits `key` to sign.
-pub(crate) fn plan(host:&Path,config:&Path,intent:&Path,plan:&Path,key:&[u8])->Result<Vec<Vec<u8>>> {
+/// Consent 222 (thin: 232): the plan headers the intent permits `key` to sign. Thin consent keeps
+/// what it showed as `dir/thin-display.json`, beside the plan.
+pub(crate) fn plan(host:&Path,config:&Path,intent:&[u8],plan:&[u8],key:&[u8],dir:&Path)->Result<Vec<Vec<u8>>> {
     if thin_mode() {
-        if let Some(source)=thin_birth_source()? { return thin_birth_plan(host,config,intent,plan,key,&source); }
-        return thin_plan(host,config,intent,plan,key);
+        if let Some(source)=thin_birth_source()? { return thin_birth_plan(host,config,intent,plan,key,&source,dir); }
+        return thin_plan(host,config,intent,plan,key,dir);
     }
-    let (intent,plan)=(read(intent)?,read(plan)?);
-    with_consent(host,config,|c|c.plan(&intent,key,&plan))
+    with_consent(host,config,|c|c.plan(intent,key,plan))
 }
 
 /// Thin consent (`MINI_THIN_CONSENT=1`): frames 230-232, which read no Store.
@@ -232,10 +228,10 @@ pub(crate) fn plan(host:&Path,config:&Path,intent:&Path,plan:&Path,key:&[u8])->R
 /// unsigned input named; nothing falls back to a replay or to signing unchecked.
 pub(crate) fn thin_mode()->bool { std::env::var("MINI_THIN_CONSENT").as_deref()==Ok("1") }
 
-static THIN_VIEWS: std::sync::Mutex<Option<Vec<PathBuf>>> = std::sync::Mutex::new(None);
+static THIN_VIEWS: std::sync::Mutex<Option<Vec<Vec<u8>>>> = std::sync::Mutex::new(None);
 
 /// The served resource views of the next thin plan's targets, in target order.
-pub(crate) fn set_thin_views(views:Vec<PathBuf>)->Result<()> {
+pub(crate) fn set_thin_views(views:Vec<Vec<u8>>)->Result<()> {
     *THIN_VIEWS.lock().map_err(|_|"thin view slot poisoned")?=Some(views);
     Ok(())
 }
@@ -254,26 +250,18 @@ fn thin_birth_source()->Result<Option<Vec<u8>>> {
     path.map(|path|read(&path)).transpose()
 }
 
-fn thin_birth_plan(host:&Path,config:&Path,intent:&Path,plan:&Path,key:&[u8],source:&[u8])->Result<Vec<Vec<u8>>> {
-    let (intent_bytes,plan_bytes)=(read(intent)?,read(plan)?);
-    let (display,headers)=with_consent(host,config,|c|c.thin_birth_plan(&intent_bytes,key,&plan_bytes,source))?;
-    if let Some(directory)=plan.parent() {
-        write_json_new(&directory.join("thin-display.json"),&display)?;
-    }
+fn thin_birth_plan(host:&Path,config:&Path,intent:&[u8],plan:&[u8],key:&[u8],source:&[u8],dir:&Path)->Result<Vec<Vec<u8>>> {
+    let (display,headers)=with_consent(host,config,|c|c.thin_birth_plan(intent,key,plan,source))?;
+    write_json_new(&dir.join("thin-display.json"),&display)?;
     eprintln!("thin consent shows: {}",display);
     Ok(headers)
 }
 
-fn thin_plan(host:&Path,config:&Path,intent:&Path,plan:&Path,key:&[u8])->Result<Vec<Vec<u8>>> {
-    let paths=THIN_VIEWS.lock().map_err(|_|"thin view slot poisoned")?.clone()
+fn thin_plan(host:&Path,config:&Path,intent:&[u8],plan:&[u8],key:&[u8],dir:&Path)->Result<Vec<Vec<u8>>> {
+    let views=THIN_VIEWS.lock().map_err(|_|"thin view slot poisoned")?.clone()
         .ok_or("thin consent has no served target views; nothing signed")?;
-    let mut views=Vec::new();
-    for path in &paths { views.push(read(path)?); }
-    let (intent_bytes,plan_bytes)=(read(intent)?,read(plan)?);
-    let (display,headers)=with_consent(host,config,|c|c.thin_plan(&intent_bytes,key,&plan_bytes,&views))?;
-    if let Some(directory)=plan.parent() {
-        write_json_new(&directory.join("thin-display.json"),&display)?;
-    }
+    let (display,headers)=with_consent(host,config,|c|c.thin_plan(intent,key,plan,&views))?;
+    write_json_new(&dir.join("thin-display.json"),&display)?;
     eprintln!("thin consent shows: {}",display);
     Ok(headers)
 }

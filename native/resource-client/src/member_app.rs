@@ -207,10 +207,7 @@ pub(super) fn status(root: &Path, pin: &Value, name: &str) -> Result<Value> {
         } else {
             challenge = Some(current);
         }
-        reads.push(crate::agent_reserve::private_bytes(
-            &signed,
-            crate::transport::HOST_MAX_FRAME,
-        )?);
+        reads.push(workspace::attempt_bytes(&signed, "signed-observation.bin", crate::transport::HOST_MAX_FRAME)?);
     }
     let challenge: Value = challenge.unwrap();
     let (attempt, nonce) = workspace::new_attempt(root)?;

@@ -10,7 +10,7 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
         Err(e) => return failure_page(&title, &e),
     };
     let challenge =
-        workspace::bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
+        read.challenge.clone();
     let base = site.base();
     let targets = site.targets();
     let source_link = |id: &str| -> String {

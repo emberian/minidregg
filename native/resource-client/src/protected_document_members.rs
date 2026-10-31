@@ -40,7 +40,8 @@ fn current_members(home:&Path)->Result<Vec<Value>> {
 }
 fn source(root:&Path,workspace:&Value,name:&str)->Result<(Value,Value,Value,PathBuf)> {
     let reference=ws::reference(root,name)?;
-    let (view,_,signed)=ws::signed_view(root,workspace,&reference,"resource")?;
+    let (view,_,mut signed_read)=ws::signed_view(root,workspace,&reference,"resource")?;
+    let signed=ws::on_disk(&mut signed_read)?;
     Ok((reference,view,audience_source(workspace,&signed)?,signed))
 }
 fn home_of(root:&Path,reference:&Value)->Result<PathBuf>{Ok(root.join("protected-documents").join(text(reference,"target")?))}

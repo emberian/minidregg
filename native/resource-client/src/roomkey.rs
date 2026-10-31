@@ -2827,17 +2827,17 @@ fn signed_window(root: &Path, workspace: &Value, reference: &Value, start: &str,
             "target":member(reference,"target")?,"view":"tail","start":start,"count":count},
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
-    let source = crate::read_scratch::source(&attempt, &format!("q-{nonce}.json"));
-    crate::create_private(&source, &serde_json::to_vec(&intent).map_err(|e| e.to_string())?)?;
     query_retained(
         &member_path(workspace, "host")?,
         &member_path(workspace, "config")?,
-        &source,
+        &serde_json::to_vec(&intent).map_err(|e| e.to_string())?,
         OsStr::new("intent"),
         &member_path(workspace, "key")?,
         "view-tail",
         &attempt,
-    ).inspect_err(|_| crate::read_scratch::keep(root, &attempt))
+    )
+    .map(|(value, _)| value)
+    .inspect_err(|_| crate::read_scratch::keep(root, &attempt))
 }
 
 /// `workspace tail --private ROOM`: the signed window, every entry annotated

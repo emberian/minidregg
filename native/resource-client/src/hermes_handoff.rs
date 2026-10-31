@@ -459,8 +459,8 @@ fn verify(
                 &v,
                 &capability,
                 &c,
-                &crate::fsio::read_bounded_or_empty(&signed.with_file_name("challenge.bin"), LIMIT)?,
-                &crate::fsio::read_bounded_or_empty(&signed, LIMIT)?,
+                &crate::workspace::attempt_bytes(&signed, "challenge.bin", LIMIT)?,
+                &crate::workspace::attempt_bytes(&signed, "signed-observation.bin", LIMIT)?,
             )?);
         }
     }

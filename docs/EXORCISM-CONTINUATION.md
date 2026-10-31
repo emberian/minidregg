@@ -173,12 +173,33 @@ or a transclusion: a maintained target-to-name index is retained-mode work (told
 At low load (16-20) a warm `whoami` through the binary wrapper is 1.1-1.3 ms wall
 (/ci/exo/wr2.sh with BDIR/ADIR).
 
+## The read file bus: done (56d65ae3c)
+
+`mini_sdk::attempt::Attempt` holds an attempt's named files: on disk as each is made for a write
+(the custody record, unchanged), in memory for a signed read, written to its directory only when
+something needs a path (a one-shot Host, a caller handing the signed observation on by path,
+`on_disk`) or all at once when the read fails (`materialize`, before the refusal is retained and
+`read_scratch::keep` moves it). `Flow` runs over it; `Local` is bytes, `Operator` gets the attempt
+and names. Read-path codec inspections are `inspect_bytes` (no input/output files). Per warm
+`doc show` (resident, strace -c over 20 on /ci/exo/w8): openat 53 to 16, read 75 to 25, close 61
+to 24, write 30 to 4, unlink 15 to 0, linkat 13 to 0. Resident CPU 3.5-4.4 ms before against
+2.6-3.9 ms after, lower in each of 6 alternated rounds (load 32-46; `/ci/exo/rc.sh`,
+`/ci/exo/sc.sh` for the syscall count, `/ci/exo/fx.sh DIR` for the behaviour checks). Install each
+hbox build into a NEW directory: `cp` onto a binary a resident runs fails with ETXTBSY and leaves
+the old one in place.
+
+Twins still on files (not yet folded into `Flow::observe`): `query_batch_once` (main.rs) and the
+enrollment observation in participant_enrollment.rs each hand-roll the observe step; chat keeps
+its newest read per label on disk (`chat::signed_read`, materialized on purpose).
+
 ## Next: what is left of a `doc show`
 
-- The in-process file bus for reads: the query path passes paths between `author`/`inspect`/
-  `host_files`; bytes would remove the remaining scratch writes.
-- Host ops about 8 ms (op 144 1.1, op 4 1.4, op 5 5.7: `checkGrants`, the recomputed challenge,
-  `loadPolicy`; the read-path Lean fixes are written, see above), the resident's own work about 4 ms.
+- statx 57 per read in the resident: `host_selection::select_semantic` stats the Host image on
+  every codec frame, and other per-op metadata checks. Find which are re-validating something
+  that cannot have changed within one command.
+- Host ops about 8 ms (op 144 1.1 once per resident until perf-client's d035d8250 makes it per
+  command again, op 4 2.2, op 5 5.1 at load 27): `checkGrants`, the recomputed challenge,
+  `loadPolicy`; the read-path Lean fixes are written, see above. Consent 2 x 1.2 ms (perf-client).
 
 ## Other open items
 

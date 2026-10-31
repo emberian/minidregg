@@ -237,7 +237,8 @@ pub(crate) fn observe(root:&std::path::Path, workspace:&Value, reference:&Value,
     let source=super::bounded_json(&source_path)?;
     if source["active"] != true { return Err("protected document is frozen; finish its recorded audience transition".into()); }
     let catalog=super::local_reference(root,text(hint,"catalog")?)?;
-    let (_,_,catalog_signed)=super::signed_view(root,workspace,&catalog,"resource")?;
+    let (_,_,mut catalog_signed_read)=super::signed_view(root,workspace,&catalog,"resource")?;
+    let catalog_signed=super::on_disk(&mut catalog_signed_read)?;
     let roster=members::active_home(&root.join("protected-documents").join(target))?.join("roster.bin");
     let state=dir.join("current-audience-state.json");
     crate::create_private(&state,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
@@ -396,7 +397,8 @@ fn protect(root:&std::path::Path,workspace:&Value,name:&str,current:bool) -> Res
     let retained=stage_path(root,&target)?;
     if retained.exists() {return recover(root,workspace,name);}
     if reference.get("protectedDocument").is_some() {return Err("document already has protected custody".into());}
-    let (view,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    let (view,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
+    let signed=super::on_disk(&mut signed_read)?;
     if !current && super::entries(&view)?.iter().any(|entry| entry["type"]=="atom") {
         return Err("existing document text is retained; protect-empty requires an empty document, not implicit historical disclosure".into());
     }
@@ -444,7 +446,8 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
         return Err("retained enrollment device differs from durable custody".into());
     }
     drop(store);
-    let (view,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    let (view,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
+    let signed=super::on_disk(&mut signed_read)?;
     if stage.get("conversion").is_some_and(|value|!value.is_null()) {
         conversion::preflight(root,workspace,name,&home,&view,&signed)?;
     } else if super::entries(&view)?.iter().any(|entry|entry["type"]=="atom") {
@@ -495,7 +498,8 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
         "hybridPublic":public["hybridPublic"]}],
         "grants":[{"kind":"object","target":target,"capability":super::member(&reference,"observeCapability")?}]});
     let request_path=home.join("enrollment-request.json");retain_json(&request_path,&request)?;
-    let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
+    let signed=super::on_disk(&mut signed_read)?;
     // The phase is custody and lives beside its observation (`phaseDirectory`, which recovery
     // resolves inside this workspace), so the read leaves the process's scratch for attempts/.
     let phase_root=crate::read_scratch::retain(root,signed.parent().ok_or("missing phase observation")?)?;
@@ -530,7 +534,8 @@ fn recover_phase(root:&std::path::Path,workspace:&Value,name:&str,home:&std::pat
     let meta=super::bounded_json(&home.join("enrollment.json"))?;
     if meta["object"]!=reference["target"] {return Err("retained enrollment names another document".into());}
     let phase=retained_phase(root,&meta)?;
-    let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
+    let signed=super::on_disk(&mut signed_read)?;
     let source=audience_source(workspace,&signed)?;
     let (state,key)=custody_paths(root);
     if !phase.exists() {
@@ -601,7 +606,8 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
     let phase=retained_phase(root,&meta)?;
     let mut reference=super::local_reference(root,name)?;
     if reference["target"]!=meta["object"] {return Err("retained enrollment names another document".into());}
-    let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
+    let signed=super::on_disk(&mut signed_read)?;
     let source=audience_source(workspace,&signed)?;
     let intent=super::bounded_json(&phase.join("phase-intent.json"))?;
     let expected=&intent["purpose"]["draft"]["declaration"]["source"]["audience"];
@@ -684,7 +690,8 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
 pub(crate) fn export_epoch(root:&std::path::Path,workspace:&Value,name:&str,output:&std::path::Path)->Result<()> {
     let reference=super::local_reference(root,name)?;
     let target=super::member(&reference,"target")?;
-    let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
+    let signed=super::on_disk(&mut signed_read)?;
     let audience=observe(root,workspace,&reference,&signed)?;
     let source=audience_source(workspace,&signed)?;
     let home=root.join("protected-documents").join(target);
@@ -720,10 +727,12 @@ pub(crate) fn import_epoch(root:&std::path::Path,workspace:&Value,name:&str,cata
     if bundle["type"]!="mini-protected-document-epoch-v1" || bundle["object"]!=target {
         return Err("epoch bundle names another document or format".into());
     }
-    let (_,_,signed)=super::signed_view(root,workspace,&reference,"resource")?;
+    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
+    let signed=super::on_disk(&mut signed_read)?;
     let source=audience_source(workspace,&signed)?;
     let catalog_ref=super::local_reference(root,catalog)?;
-    let (_,_,catalog_signed)=super::signed_view(root,workspace,&catalog_ref,"resource")?;
+    let (_,_,mut catalog_signed_read)=super::signed_view(root,workspace,&catalog_ref,"resource")?;
+    let catalog_signed=super::on_disk(&mut catalog_signed_read)?;
     let attempt=signed.parent().ok_or("missing import observation directory")?;
     let roster_bytes=mini_sdk::hex::decode(text(&bundle,"rosterBytes")?).map_err(|e| e.0)?;
     let roster=attempt.join("import-roster.bin");

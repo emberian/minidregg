@@ -794,7 +794,7 @@ impl Site {
         })
     }
 
-    fn read(&self, reference: &Value, view: &str) -> Result<(Value, Value, PathBuf)> {
+    fn read(&self, reference: &Value, view: &str) -> Result<(Value, Value, mini_sdk::attempt::Attempt)> {
         workspace::signed_view(&self.root, &self.workspace, reference, view)
     }
 
@@ -853,7 +853,7 @@ impl Site {
             Ok(both) => both,
             Err(error) => return failure_page(&title, &error),
         };
-        let challenge = workspace::bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
+        let challenge = read.challenge.clone();
         let context = ReadContext {
             height: challenge["height"].as_str().unwrap_or("?").to_owned(),
             authority_root: challenge["authorityRoot"].as_str().unwrap_or("?").to_owned(),
@@ -886,7 +886,7 @@ impl Site {
             let views = ["links".to_owned(), "backlinks".to_owned()];
             match workspace::signed_views_mixed(&self.root, &self.workspace, &[reference.clone(), reference.clone()], &views) {
                 Ok(reads) if reads.len() == 2 => {
-                    let rows = |read: &(Value, Value, PathBuf)| read.0["rows"].as_array().cloned().unwrap_or_default();
+                    let rows = |read: &(Value, Value, mini_sdk::attempt::Attempt)| read.0["rows"].as_array().cloned().unwrap_or_default();
                     (Some(rows(&reads[0])), Some(rows(&reads[1])))
                 }
                 Ok(_) => return failure_page(&title, "signed read batch returned the wrong number of views"),
