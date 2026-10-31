@@ -117,22 +117,39 @@ docs/HOT-PATH-STATE.md). This lane has not built one.
   file into `mini-line`), then the in-process file bus (the query path passes paths between
   `author`/`inspect`/`host_files`; bytes would remove the remaining scratch writes).
 
-## Next: the codec's double view render (root: yes, batch with 47b7cb2e1 + c763e3ead)
+## Codec double render: done (bc17cef1b + 7e6850892), measured with the read-path Lean fixes
 
-Per `doc show` the codec resident renders the same view twice: `inspect view-resource`
-(Host/Json.lean `resourceJson` via `contentCellJson`, used by the client for the K-NARROW-HIDE
-check and the entries) and `inspect view-document` (`documentJson`: the client sends the same
-view bytes back hex-encoded inside JSON, `pageOfView` decodes them again, `pageJson` renders
-again), plus one more `view-document` per transcluded source for its line numbers
-(workspace.rs `render(bin, &[])`). In the batch 6 profile: resourceJson 23%, documentJson 23%,
-PackedCell.decodePayload 15% of the codec's busy time. Two routes, not exclusive:
-1. one inspection kind that answers the resource view and its document rendering together (the
-   client asks once; Json.lean decodes once and renders the content once);
-2. `view-document` taking the view bytes as a binary frame (no hex-in-JSON), and the client's
-   per-source line-number render folded into the host's.
-Both are Lean (Host/Json.lean) plus the client's callers in workspace.rs (`signed_view` users that
-then call `render`). Build through `scripts/pipeline/native-loop` (about 7 min; base
-acc7cfa03fac56b2261ce3bd1ec5ad1693ce281f) together with 47b7cb2e1 and c763e3ead.
+`inspect view-resource-document` (Host/Json.lean `resourceJsonOf`/`documentOf`, one decode) answers
+a current page's resource view and its document together; `workspace::signed_page` asks for it and
+`rendered_document` renders again only against source pages. Built through native-loop on
+acc7cfa03 (overlay `/home/hbox/pool/lanes/exorcism/candidates/acf55bf9d552`, 1275 s) with
+47b7cb2e1 + c763e3ead (+ the admitOwn follow-up 975491262). Scratch worlds /ci/exo/w7 (batch 7)
+and /ci/exo/w8 (the overlay), 100 `doc show` each, alternated, hbox load 22-25:
+
+| per read | w7 batch 7 | w8, batch 7 client | w8, lane client |
+|---|---|---|---|
+| wall | 35.5 / 30.0 ms | 31.0 / 27.5 ms | 28.5 / 24.0 ms |
+| operator CPU (Host + Store) | 14.6 / 13.0 ms | 12.6 / 11.8 ms | 12.6 / 11.4 ms |
+| codec CPU | 4.0 / 3.8 ms | 4.2 / 3.5 ms | 3.2 / 2.9 ms |
+| consent CPU | 1.8 / 1.5 ms | 1.8 / 1.5 ms | 1.7 / 1.5 ms |
+
+## Next: the ssh wrapper in Rust (agreed with perf-client a778bbda6509944a5)
+
+`mini-line` takes the wrapper's six absolute arguments and does all it does; the candidate's
+bin/mini-line is installed AT /usr/local/lib/mini/mini-shell-ssh (a root-owned copy), so no
+authorized_keys line changes; deploy/shell/mini-shell-ssh is deleted (no twin). Measured: bash
+wrapper + mini-line 2.7 ms CPU / 3.3 ms wall for `whoami`, mini-line alone 0.75 ms / 1.2 ms.
+Invariants (perf-client): every /etc/mini file read once (session-consent thin|full,
+session-residents, session-codec); HOME/consent/peer.pins with the sha256 fallback; the HOME-less
+MINI_CONSENT_ANCHOR_DIR fallback ($home/.mini/consent-anchors); umask 077; `--call-slots
+$home/.call-slots`; motd.txt and notice.txt from argv[0]'s directory on interactive login only;
+exit codes 64 (usage, non-absolute), 66 (mini not executable), 78 (bad /etc/mini file or pins);
+SSH_ORIGINAL_COMMAND verbatim to `--line`, never a shell. Callers to move to the binary: about 24
+journeys and scripts under native/resource-client (they `install` deploy/shell/mini-shell-ssh),
+deploy/demo-seed/seed.sh, deploy/door/infra/mini-session-run, native/discord-entrance
+(mini-door-process), native/mini-web-spawn, platform-provision.py / platform-stage-root.py, and
+infra's edge/mini/install.sh:234 plus jworld-scratch.sh:279 (coordinate with infra
+aa72653a8ce442178).
 
 ## Other open items
 
