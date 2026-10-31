@@ -20,8 +20,11 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **ember (10-31): no rehearsal cut until she says.** Make the system excellent: Hermes repaired, efficiency everywhere,
   every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
-- **Batch 8 dc61016cb: READY 11:57** (host 1,496 s; ships bin/mini-line). gate15 full running ($I/gate-dc61.pid,
-  integrator waiter armed); umbrella-tree follows in umbrella-src.
+- **Batch 8 dc61016cb: gate15 FAIL (12:14)**: enrol PASS, tour 73/73; j14 = H1b; composed `jworld: port 22640 in use`
+  (my harness collision: the KEEP_WORLD world /ci/c-acc7cf-hp2 held the port until 12:09) -> rerun -c2 running
+  ($I/gate-dc61-c2.pid, waiter armed); flatness submit+get FAIL (get passed on batches 4-7; hot-path to read). Lesson:
+  a KEEP_WORLD composed world holds port 22640; take it down before the next composed gate.
+  READY 11:57 (host 1,496 s; ships bin/mini-line). umbrella-tree follows in umbrella-src.
   Measured (perf-apps, EtherCalc, back to back vs batch 7): Host CPU samples 7,919 -> 3,210 (-60%); first page
   2.43 -> 1.79 s; warm GET median 173 -> 82 ms; 10 concurrent GETs 2.98 -> 0.79 s; create-to-page 26 s unchanged
   (perf-apps' next target). Carries: exorcist b37f26cf6 (resident shell `mini-line`, role miniLine; read scratch), retained
@@ -108,7 +111,8 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
   say into one room conflicts (6 parallel from 1 member: 1/6; 3+3 from 2: 3/6; sequential 6/6).
 - **P1, mini panics on a closed stdout** (explorer, world-up once `mode=closed … has no mini shell`; 0/40 reruns):
   `mini --help | grep -q` under pipefail; mini exit 101. Owners: perf-client a778bbda6509944a5 (quiet exit on EPIPE,
-  whole client family; owed), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
+  FIXED for resource-client by af0dcfb18 (own print! macros; a closed stdout ends the command 141, residents keep
+  serving; rides batch 9); other client binaries owed via one shared crate), infra (FIXED dregg-infra fbb7648: render-authorized-keys.sh and ship.sh read usage into a
   variable; syntax-checked only). Move gate15's EDGE_REV default to e29997d (contains fbb7648, and installs the
   candidate's mini-line wrapper; extracted at $I/dregg-infra-e29997d) after batch 8's gate and dc61016cb-codec -hp1 exit
   (never mid-gate), before batch 9 gates.
@@ -126,11 +130,14 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports owed
 
-- To root: batch 8 READY and its gate15 verdict (when it lands), in the integrator's next return. Also: the install trust-boundary ruling (root may overrule).
-- Batch 8 gate15 verdict to infra, explorer, perf-apps; any red to its owner with a signature.
+- To root (next return): batch 8 verdict so far (FAIL: j14 H1b, composed rerun pending, flatness get regressed), the
+  install trust-boundary ruling (root may overrule).
+- When the -c2 composed and the dc61016cb-codec j14 land: batch 8 verdict to infra, explorer, perf-apps; codec journal to
+  app-reds; flatness-get red to hot-path if it repeats.
 
 ## Reports sent (do not resend)
 
+- 10-31 12:45: perf-client: af0dcfb18 merged; shared crate for the other binaries.
 - 10-31 12:35: perf-apps: keep the broker parse, no reorder (ruling).
 - 10-31 12:25: app-reds: integrator runs the codec overlay, criterion, /tank note. perf-apps 106b73251 merged; op66 to
   hot-path. Exorcist a97dba51f72535cb9: 2344400ac merged (23cf6bdd3).
