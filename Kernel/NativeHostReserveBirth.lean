@@ -116,7 +116,8 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let some descriptor := CanonicalCellRegistry.sourceEncoding.codec.decode finalized
     | throw "noncanonical reserve birth descriptor"
   let prepared ← (ResourceBirthController.Concrete.prepareBirth config.profile.compilerProfile
-    config.profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor plan.height).mapError
+    config.profile.disabledEvaluators config.deployment opened.pins opened.durable
+    (ResourceBirthController.Concrete.Held.of opened.directory opened.authority) descriptor plan.height).mapError
       (fun reason => s!"reserve birth preparation: {repr reason}")
   let _pending ← (preparePending (profile := config.profile) prepared plan.height .reserve).mapError
     (fun reason => s!"reserve factory method refused: {repr reason}")

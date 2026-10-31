@@ -23,10 +23,11 @@ variable {F : Type} [Field F] [DecidableEq F]
 
 theorem preparePreAuthority_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {held : Held deployment durable}
     {disabled : List Digest} {descriptor : Descriptor Registry} {height : Height}
     {pre : PreparedPreAuthority profile deployment pins durable descriptor}
     {sourced : List (Nat × CellRegistry.PackedCell Registry)}
-    (prepared : preparePreAuthority profile disabled deployment pins durable descriptor height sourced = .ok pre) :
+    (prepared : preparePreAuthority profile disabled deployment pins durable held descriptor height sourced = .ok pre) :
     pre.gateHeight = height := by
   unfold preparePreAuthority at prepared
   simp only [bind, Except.bind] at prepared
@@ -37,10 +38,11 @@ theorem preparePreAuthority_gateHeight {profile : CanonicalPolicyAdmission.Polic
 
 theorem prepareBirth_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {held : Held deployment durable}
     {disabled : List Digest} {descriptor : Descriptor Registry} {height : Height}
     {birth : PreparedBirth profile deployment pins durable descriptor}
     {sourced : List (Nat × CellRegistry.PackedCell Registry)}
-    (prepared : prepareBirth profile disabled deployment pins durable descriptor height sourced = .ok birth) :
+    (prepared : prepareBirth profile disabled deployment pins durable held descriptor height sourced = .ok birth) :
     birth.gateHeight = height := by
   unfold prepareBirth at prepared
   simp only [bind, Except.bind] at prepared
@@ -55,10 +57,11 @@ theorem prepareBirth_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompil
 
 theorem prepareGrainBirth_gateHeight {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {held : Held deployment durable}
     {disabled : List Digest} {descriptor : Descriptor Registry} {operationMarker : Nat} {height : Height}
     {birth : PreparedGrainBirth profile deployment pins durable descriptor operationMarker}
     {sourced : List (Nat × CellRegistry.PackedCell Registry)}
-    (prepared : prepareGrainBirth profile disabled deployment pins durable descriptor operationMarker height
+    (prepared : prepareGrainBirth profile disabled deployment pins durable held descriptor operationMarker height
       sourced = .ok birth) :
     birth.pre.gateHeight = height := by
   unfold prepareGrainBirth at prepared
@@ -79,10 +82,11 @@ value — bears an item into room `R` only under a placing capability admissible
 at `h` for the creator's `placeObject` request on `R`, and `R`'s law accepts it. -/
 theorem birth_under_room_requires_grant_at {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {held : Held deployment durable}
     {disabled : List Digest} {descriptor : Descriptor Registry} {height : Height}
     {birth : PreparedBirth profile deployment pins durable descriptor}
     {sourced : List (Nat × CellRegistry.PackedCell Registry)}
-    (prepared : prepareBirth profile disabled deployment pins durable descriptor height sourced = .ok birth)
+    (prepared : prepareBirth profile disabled deployment pins durable held descriptor height sourced = .ok birth)
     {item : BirthItem Registry} (member : item ∈ descriptor.births)
     {room : Nat} (inRoom : item.parent = some room) :
     ∃ placement cap, item.placement = some placement ∧

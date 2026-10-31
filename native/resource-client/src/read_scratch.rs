@@ -83,30 +83,31 @@ fn dir(root: &Path) -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Remove this process's oldest reads beyond `KEEP - 1`, so one more fits.
+/// The reads this process made, oldest first, per directory: pruning never lists the directory.
+static MADE: Mutex<Vec<(PathBuf, String)>> = Mutex::new(Vec::new());
+
+/// Remove this process's oldest reads in `dir` beyond `KEEP - 1`, so one more fits.
 fn prune(dir: &Path) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
-    let mut reads: Vec<(std::time::SystemTime, String)> = entries.flatten()
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            let nonce = name.strip_prefix("a-")?.to_owned();
-            Some((e.metadata().and_then(|m| m.modified()).ok()?, nonce))
-        })
-        .collect();
-    if reads.len() < KEEP {
+    let Ok(mut made) = MADE.lock() else { return };
+    let mine = made.iter().filter(|(d, _)| d == dir).count();
+    if mine < KEEP {
         return;
     }
-    reads.sort();
-    for (_, nonce) in &reads[..reads.len() + 1 - KEEP] {
+    let mut excess = mine + 1 - KEEP;
+    made.retain(|(d, nonce)| {
+        if excess == 0 || d != dir {
+            return true;
+        }
+        excess -= 1;
         let _ = fs::remove_dir_all(dir.join(format!("a-{nonce}")));
-        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with('q') && name.contains(nonce.as_str()) {
-                let _ = fs::remove_file(entry.path());
+        let _ = fs::remove_file(dir.join(format!("q-{nonce}.json")));
+        for n in 0..16 {
+            if fs::remove_file(dir.join(format!("qb-{nonce}-{n}.json"))).is_err() {
+                break;
             }
         }
-    }
+        false
+    });
 }
 
 /// A fresh working directory name for one read or inspection of `root`, and its nonce.
@@ -117,6 +118,9 @@ pub(crate) fn attempt(root: &Path) -> Result<(PathBuf, String)> {
         let nonce = crate::fsio::random_nonce()?;
         let attempt = dir.join(format!("a-{nonce}"));
         if !attempt.exists() {
+            if let Ok(mut made) = MADE.lock() {
+                made.push((dir.clone(), nonce.clone()));
+            }
             return Ok((attempt, nonce));
         }
     }
@@ -157,6 +161,9 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Remove this process's read directories (a one-shot command's end).
 pub(crate) fn clear() {
+    if let Ok(mut made) = MADE.lock() {
+        made.clear();
+    }
     if let Ok(mut dirs) = DIRS.lock() {
         for (_, dir) in dirs.take().unwrap_or_default() {
             let _ = fs::remove_dir_all(dir);

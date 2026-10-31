@@ -336,13 +336,14 @@ def prepareSourceBirth {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
     (durable : ResourceBirthController.Concrete.Durable)
+    (held : ResourceBirthController.Concrete.Held deployment durable)
     (semantics : Digest) (tariff : Tariff) (source : Source) (height : Height)
     (sourced : List (Nat × PackedCell CanonicalCellRegistry.registry) := []) :
     Except ResourceBirthController.Concrete.PreparationReject
       (PreparedSourceBirth profile deployment pins durable semantics tariff source) := do
   if shape : SourceShape deployment.domain semantics tariff source then
     let prepared ← ResourceBirthController.Concrete.prepareGrainBirth profile disabled deployment
-      pins durable source.birth
+      pins durable held source.birth
       (DeclaredResourceController.operationMarker deployment.domain semantics
         (source.grainCommand tariff)) height sourced
     .ok ⟨shape, prepared⟩
