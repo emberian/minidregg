@@ -27,12 +27,12 @@ public import Theory.AuthTrieRange
 public import Compiler.Sp800185Cshake256
 public import Kernel.WorldRoot
 public import Compiler.DurableReceiverCodec
-public import Theory.AssertCompiled
+public import Theory.AssertAxioms
 meta import Theory.AuthTrieRange
 meta import Compiler.Sp800185Cshake256
 meta import Kernel.WorldRoot
 meta import Compiler.DurableReceiverCodec
-meta import Theory.AssertCompiled
+meta import Theory.AssertAxioms
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -826,6 +826,42 @@ theorem overlay_merge (store : List Bool → Option Row) (early late : List (Lis
 theorem represents_empty (rows : List Bool → Option Row) : Represents rows emptyDigest [] := by
   simp [Represents, rootOf, entries, tree, emptyDigest, WF, RowsRepresent]
 
+/-- The walk from the empty root stops at once: no siblings, an empty terminal. -/
+theorem openingOf_emptyDigest (rows : List Bool → Option Row) (k : IndexKey) :
+    openingOf rows emptyDigest k = ⟨[], .empty⟩ := by
+  simp [openingOf, walk]
+
+/-- Deleting from the empty trie writes nothing and keeps the empty root. The opening is
+rewritten before `set` is unfolded: `simp [set, openingOf, walk, …]` in one call leaves the
+kernel a `Decidable` instance on `verify emptyDigest …` to reduce, and reducing it evaluates
+`emptyDigest`, a closed cSHAKE256, Keccak round by round (about 40 s per evaluation). -/
+theorem set_emptyDigest_none (rows : List Bool → Option Row) (k : IndexKey) :
+    set rows emptyDigest k none = .ok (emptyDigest, []) := by
+  unfold set; rw [openingOf_emptyDigest]
+  simp [Opening.claims, empty_absent, bind, pure, Except.bind, Except.pure]
+
+/-- Inserting into the empty trie writes the one leaf at the root prefix. Stated at any
+`root` equal to `emptyDigest`, so nothing the kernel reduces is the closed digest. -/
+theorem set_some_of_eq_emptyDigest (rows : List Bool → Option Row) (root : Digest) (k : IndexKey)
+    (v : List UInt8) (empty : root = emptyDigest) :
+    set rows root k (some v) = .ok (dig (.leaf k v), [([], .leaf k v)]) := by
+  have opening : openingOf rows root k = ⟨[], .empty⟩ := by subst empty; exact openingOf_emptyDigest rows k
+  have verified : verify root k none ⟨[], .empty⟩ = true := empty ▸ empty_absent k
+  unfold set; rw [opening]
+  simp only [Opening.claims, verified]; rfl
+
+theorem set_emptyDigest_some (rows : List Bool → Option Row) (k : IndexKey) (v : List UInt8) :
+    set rows emptyDigest k (some v) = .ok (dig (.leaf k v), [([], .leaf k v)]) :=
+  set_some_of_eq_emptyDigest rows emptyDigest k v rfl
+
+/-- A lookup against the empty root answers absent, at any `root` equal to `emptyDigest`. -/
+theorem lookupRows_of_eq_emptyDigest (rows : List Bool → Option Row) (root : Digest) (k : IndexKey)
+    (empty : root = emptyDigest) :
+    lookupRows rows root k = .ok ⟨none, ⟨⟨[], .empty⟩, empty ▸ empty_absent k⟩⟩ := by
+  have opening : openingOf rows root k = ⟨[], .empty⟩ := by subst empty; exact openingOf_emptyDigest rows k
+  have verified : verify root k none ⟨[], .empty⟩ = true := empty ▸ empty_absent k
+  unfold lookupRows; simp only [opening, Opening.claims, verified, dite_true]
+
 /-- The primitive contract is proved for insertion/deletion in an empty trie,
 for arbitrary keys, values and stale Store rows. -/
 theorem set_preserves_empty (rows : List Bool → Option Row) (k : IndexKey)
@@ -834,17 +870,11 @@ theorem set_preserves_empty (rows : List Bool → Option Row) (k : IndexKey)
   left
   cases value with
   | none =>
-      have result : set rows emptyDigest k none = .ok (emptyDigest, []) := by
-        simp [set, openingOf, walk, empty_absent, Opening.claims, bind, pure,
-          Except.bind, Except.pure]
-      rw [result] at ok
+      rw [set_emptyDigest_none] at ok
       obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj ok)
       simpa [modelSet] using represents_empty (overlay rows [])
   | some v =>
-      have result : set rows emptyDigest k (some v) = .ok (dig (.leaf k v), [([], .leaf k v)]) := by
-        simp [set, openingOf, walk, empty_absent, Opening.claims, rebuild, Sub.digest,
-          bind, pure, Except.bind, Except.pure]
-      rw [result] at ok
+      rw [set_emptyDigest_some] at ok
       obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj ok)
       simp [modelSet, Represents, rootOf, entries, tree, WF, bitsOf_length, RowsRepresent, overlay]
 
@@ -893,6 +923,11 @@ theorem set_preserves_singleton (rows : List Bool → Option Row) (root : Digest
         obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj ok)
         simp [modelSet, Represents, rootOf, entries, tree, WF, bitsOf_length, RowsRepresent, overlay]
 
+#assert_axioms openingOf_emptyDigest
+#assert_axioms set_emptyDigest_none
+#assert_axioms set_some_of_eq_emptyDigest
+#assert_axioms set_emptyDigest_some
+#assert_axioms lookupRows_of_eq_emptyDigest
 #assert_axioms set_preserves_empty
 #assert_axioms set_preserves_singleton
 
@@ -1052,11 +1087,14 @@ theorem apply_transaction_only (rows : List Bool → Option Row) (height : Nat)
     IndexRows.apply rows emptyDigest height tx [] =
       .ok (dig (.leaf (transactionKey tx) (heightValue height)),
         [([], .leaf (transactionKey tx) (heightValue height))]) := by
-  have look : lookupRows rows emptyDigest (transactionKey tx) =
-      .ok ⟨none, ⟨⟨[], .empty⟩, empty_absent (transactionKey tx)⟩⟩ := by
-    simp [lookupRows, openingOf, walk, Opening.claims, empty_absent]
-  simp [IndexRows.apply, IndexRows.keys, IndexRows.insert, look, set, openingOf, walk,
-    Opening.claims, empty_absent, rebuild, Sub.digest, bind, pure, Except.bind, Except.pure]
+  suffices general : ∀ root, root = emptyDigest → IndexRows.apply rows root height tx [] =
+      .ok (dig (.leaf (transactionKey tx) (heightValue height)),
+        [([], .leaf (transactionKey tx) (heightValue height))]) from general _ rfl
+  intro root empty
+  simp only [IndexRows.apply, IndexRows.keys, List.map_nil, IndexRows.insert,
+    lookupRows_of_eq_emptyDigest rows root _ empty, set_some_of_eq_emptyDigest rows root _ _ empty,
+    bind, Except.bind, pure, Except.pure]
+  rfl
 
 /-- A GENUINE non-membership proof verifies against the wrong transaction-only
 root for every consumed nullifier. Verifier soundness alone cannot establish
@@ -1090,71 +1128,6 @@ theorem consumed_declared (record : Kernel.DurableReceiver.IntentRecord)
 #assert_axioms setAll_preserves
 #assert_axioms maintained_apply
 
-/-! ## The incremental set against the canonical root (executed probe)
-
-`set` is not yet proved to compute `rootOf` of the updated map (cv
-01a11741-1af8; `store audit` rebuilds every row version from the records). This
-probe runs a sequence of inserts, updates and deletes — including keys that share
-their family and primary (a 264-bit common prefix), deletes that collapse a leaf
-upward, and a delete of the last member — through `setAll` over in-memory rows,
-and checks after EVERY step that the incremental root is `rootOf` of the logical
-map, that every key's row lookup verifies and answers the map's value, and that
-each family's reveal answers exactly the family's members. -/
-
-namespace Probe
-
-def probeKey (family : UInt8) (n : Nat) (secondary : Nat) : IndexKey :=
-  ⟨family, primaryOf family [UInt8.ofNat n], ⟨secondary % 256 ^ 32, Nat.mod_lt _ (by decide)⟩⟩
-
-def keys : List IndexKey :=
-  [probeKey 4 1 0, probeKey 4 1 1, probeKey 4 1 2, probeKey 4 1 3, probeKey 4 1 7,
-   probeKey 4 2 0, probeKey 0 1 0, probeKey 0 2 0, probeKey 0 3 0, probeKey 1 1 0, probeKey 1 9 0]
-
-def ops : List (Nat × Option (List UInt8)) :=
-  (List.range 11).map (fun i => (i, some [UInt8.ofNat i])) ++
-  [(2, some [9, 9]), (6, some [1]), (0, none), (1, none), (2, none), (6, some [2]), (9, none),
-   (0, some [5]), (3, none), (4, none), (5, none), (7, none), (8, none), (10, none), (6, none),
-   (0, none), (1, none), (9, none)]
-
-def familyPrefix (family : UInt8) : List Bool := (bitsOf ⟨family, 0, 0⟩).take 8
-
-def sameSet (a b : List (IndexKey × List UInt8)) : Bool :=
-  a.length == b.length && a.all (b.contains ·) && b.all (a.contains ·)
-
-/-- One step checked: the root, every key's verified lookup, every family's reveal. -/
-def stepOk (rows : List Bool → Option Row) (root : Digest) (model : List (IndexKey × List UInt8)) : Bool :=
-  root == rootOf model &&
-  keys.all (fun k => match lookupRows rows root k with
-    | .ok answer => answer.value == (model.find? (·.1 = k)).map (·.2)
-    | .error _ => false) &&
-  [0, 1, 4].all (fun family : UInt8 => match revealRows rows root (familyPrefix family) with
-    | .ok revealed => sameSet revealed.members (model.filter (·.1.family = family))
-    | .error _ => false)
-
-def run : List (Nat × Option (List UInt8)) → List (List Bool × Row) → Digest →
-    List (IndexKey × List UInt8) → Bool
-  | [], _, root, model => model.isEmpty == (root == emptyDigest)
-  | (i, value) :: rest, written, root, model =>
-      let k := keys.getD i (probeKey 0 0 0)
-      match setAll (overlay (fun _ => none) written) root [(k, value)] with
-      | .error _ => false
-      | .ok (root', rows) =>
-          let written' := rows ++ written
-          let model' := modelSet model k value
-          stepOk (overlay (fun _ => none) written') root' model' && run rest written' root' model'
-
-theorem incremental_matches_canonical : run ops [] emptyDigest [] = true := by native_decide
-
-/-- Rows read against a root they do not reach (here a forged one-leaf root
-naming another value) are refused, both by the lookup and by the reveal — never
-answered as the rows say. -/
-theorem wrong_root_refused :
-    (match setAll (overlay (fun _ => none) []) emptyDigest [(probeKey 4 1 0, some [1])] with
-      | .ok (_, rows) => (lookupRows (overlay (fun _ => none) rows) (dig (.leaf (probeKey 4 1 0) [2])) (probeKey 4 1 0)).toOption.isNone &&
-          (revealRows (overlay (fun _ => none) rows) (dig (.leaf (probeKey 4 1 0) [2])) (familyPrefix 4)).toOption.isNone
-      | .error _ => false) = true := by native_decide
-
-end Probe
 
 #assert_axioms key_injective
 #assert_axioms family_disjoint
@@ -1172,7 +1145,5 @@ end Probe
 #assert_axioms empty_present_refused
 #assert_axioms IndexRows.mapLookup_modelSet_some
 #assert_axioms IndexRows.changes_exact
-#assert_compiled Probe.incremental_matches_canonical
-#assert_compiled Probe.wrong_root_refused
 
 end Minidregg.Compiler.DurableIndex

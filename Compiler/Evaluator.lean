@@ -516,30 +516,42 @@ inductive Unresolved where
   | evaluatorDisabled
   deriving DecidableEq, Repr
 
-def resolve (disabled : List Digest) (id : Digest) : Except Unresolved Evaluator :=
-  match registry.find? (fun E => decide (E.id = id)) with
+/-- `resolve` on the entry the registry search found. The search is an argument here, not a
+match discriminant inside `resolve`: a proof that unfolds a match on
+`registry.find? …` has the kernel reduce the search, which evaluates each entry's id (a
+closed cSHAKE256, Keccak round by round, about 25 s per proof). -/
+def resolveFound (found : Option Evaluator) (disabled : List Digest) : Except Unresolved Evaluator :=
+  match found with
   | none => .error .unknownEvaluator
   | some E => if E.id ∈ disabled then .error .evaluatorDisabled else .ok E
+
+def resolve (disabled : List Digest) (id : Digest) : Except Unresolved Evaluator :=
+  resolveFound (registry.find? (fun E => decide (E.id = id))) disabled
+
+theorem resolveFound_ok {found : Option Evaluator} {disabled : List Digest} {E : Evaluator}
+    (h : resolveFound found disabled = .ok E) : found = some E ∧ E.id ∉ disabled := by
+  unfold resolveFound at h
+  split at h
+  · cases h
+  · split at h
+    · cases h
+    · rename_i enabled
+      cases h
+      exact ⟨rfl, enabled⟩
 
 /-- **`resolve_registered`**: what `resolve` admits is a compiled-in entry with
 exactly the named id, not disabled. Never friend-extensible. -/
 theorem resolve_registered {disabled : List Digest} {id : Digest} {E : Evaluator}
     (h : resolve disabled id = .ok E) :
     E ∈ registry ∧ E.id = id ∧ E.id ∉ disabled := by
-  unfold resolve at h
-  split at h
-  · cases h
-  · rename_i found hf
-    split at h
-    · cases h
-    · rename_i enabled
-      cases h
-      exact ⟨List.mem_of_find?_eq_some hf, by simpa using List.find?_some hf, enabled⟩
+  obtain ⟨found, enabled⟩ := resolveFound_ok h
+  exact ⟨List.mem_of_find?_eq_some found, by simpa using List.find?_some found, enabled⟩
 
 theorem resolve_unknown {disabled : List Digest} {id : Digest}
     (absent : ∀ E ∈ registry, E.id ≠ id) : resolve disabled id = .error .unknownEvaluator := by
   unfold resolve
   rw [List.find?_eq_none.mpr (by intro E m; simpa using absent E m)]
+  rfl
 
 /-- Pole: an id that is not Nock's is refused `unknownEvaluator`, whatever is disabled. -/
 theorem pole_unknownEvaluator (disabled : List Digest) (id : Digest) (other : id ≠ nock.id) :
@@ -665,16 +677,22 @@ theorem Machine.admit_fuelZero {M : Machine} {program : Program}
 
 namespace Evaluator
 
-/-- **`admitRecord`**: what a birth of this record meets, store-free: its evaluator resolves
-(`unknownEvaluator`, `evaluatorDisabled`), and the record passes that evaluator's `admit`. -/
-def admitRecord (disabled : List Digest) (program : Program) : Except NockProgramCodec.Refusal Unit :=
-  match resolve disabled program.evaluator with
+/-- `admitRecord` on the record's resolution, taken as an argument for the same reason as
+`resolveFound`'s: the kernel never reduces `resolve` to unfold this match. -/
+def admitResolved (resolved : Except Unresolved Evaluator) (program : Program) :
+    Except NockProgramCodec.Refusal Unit :=
+  match resolved with
   | .error .unknownEvaluator => .error .unknownEvaluator
   | .error .evaluatorDisabled => .error .evaluatorDisabled
   | .ok E =>
     match E.admit program with
     | .error reason => .error reason
     | .ok _ => .ok ()
+
+/-- **`admitRecord`**: what a birth of this record meets, store-free: its evaluator resolves
+(`unknownEvaluator`, `evaluatorDisabled`), and the record passes that evaluator's `admit`. -/
+def admitRecord (disabled : List Digest) (program : Program) : Except NockProgramCodec.Refusal Unit :=
+  admitResolved (resolve disabled program.evaluator) program
 
 /-- The registry's cell law for a program record (profile-free: nothing disabled): it names a
 compiled-in evaluator and passes its `admit`. -/
@@ -688,14 +706,14 @@ evaluator has is refused `unknownEvaluator`, whatever it holds. -/
 theorem admitRecord_unknownEvaluator {disabled : List Digest} {program : Program}
     (absent : ∀ E ∈ registry, E.id ≠ program.evaluator) :
     admitRecord disabled program = .error .unknownEvaluator := by
-  unfold admitRecord; rw [resolve_unknown absent]
+  unfold admitRecord; rw [resolve_unknown absent]; rfl
 
 /-- **`admitRecord_evaluatorDisabled`** (E3, at birth): a record on an evaluator this
 deployment disabled is refused `evaluatorDisabled`, whatever it holds. -/
 theorem admitRecord_evaluatorDisabled {disabled : List Digest} {program : Program}
     (nockRecord : program.evaluator = nock.id) (off : nock.id ∈ disabled) :
     admitRecord disabled program = .error .evaluatorDisabled := by
-  unfold admitRecord; rw [nockRecord, pole_evaluatorDisabled disabled off]
+  unfold admitRecord; rw [nockRecord, pole_evaluatorDisabled disabled off]; rfl
 
 /-- The admitting pole: a record on an enabled evaluator is exactly as admissible as that
 evaluator's `admit` says. -/
@@ -703,8 +721,8 @@ theorem admitRecord_resolved {disabled : List Digest} {program : Program} {E : E
     (resolved : resolve disabled program.evaluator = .ok E) :
     admitRecord disabled program = (E.admit program).map fun _ => () := by
   unfold admitRecord; rw [resolved]
-  simp only
-  cases h : E.admit program <;> simp [Except.map]
+  unfold admitResolved
+  cases h : E.admit program <;> simp [Except.map, h]
 
 -- Concrete admission fixtures and their kernel-decided poles live in
 -- `Assurance.EvaluatorAudit`, required by Deployed and Assurance.

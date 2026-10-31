@@ -1519,7 +1519,7 @@ theorem nonCanonical_birth_refused (deployment : Deployment) (cellId : Nat)
   rintro ⟨_, _, admitted, _⟩
   unfold Evaluator.RecordAdmissible Evaluator.admitRecord at admitted
   cases hr : Evaluator.resolve [] program.evaluator with
-  | error e => rw [hr] at admitted; cases e <;> simp [Except.toBool] at admitted
+  | error e => rw [hr] at admitted; cases e <;> simp [Evaluator.admitResolved, Except.toBool] at admitted
   | ok E =>
     obtain rfl := Evaluator.resolve_nock hr
     have refused : ∃ r, Evaluator.nock.admit program = .error r := by
@@ -1530,6 +1530,7 @@ theorem nonCanonical_birth_refused (deployment : Deployment) (cellId : Nat)
           (show (Noun.cue program.jam).isSome = true by rw [hcue]; rfl) bad⟩
     obtain ⟨r, hr'⟩ := refused
     rw [hr] at admitted
+    unfold Evaluator.admitResolved at admitted
     simp only [hr'] at admitted
     simp [Except.toBool] at admitted
 

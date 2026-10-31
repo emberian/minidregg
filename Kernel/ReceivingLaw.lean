@@ -642,6 +642,14 @@ theorem livePost_live {write : DataWrite} {cell : Minidregg.Theory.CellRegistry.
       (LifecycleImage.codec registry).encode (.live cell) from rfl,
     LifecycleImage.decode_encode]
 
+/-- A write whose cell's current bytes decode to a live cell is no birth. -/
+theorem physicalBirth_false_of_live {durable : Durable} {write : DataWrite}
+    {cell : Minidregg.Theory.CellRegistry.PackedCell registry}
+    (live : (LifecycleImage.codec registry).decode (durable.snapshot.canonicalBytes write.cellId) =
+      some (.live cell)) :
+    physicalBirth durable write = false := by
+  unfold physicalBirth; rw [live]
+
 /-- **A write to a cell the loaded directory holds is no birth.** -/
 theorem physicalBirth_false_of_present {durable : Durable} (directory : LoadedDirectory durable)
     {write : DataWrite} {cell : Minidregg.Theory.CellRegistry.PackedCell registry}
