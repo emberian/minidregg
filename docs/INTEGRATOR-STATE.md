@@ -20,13 +20,13 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 - **ember (10-31): no rehearsal cut until she says.** Make the system excellent: Hermes repaired, efficiency everywhere,
   every red fixed (never worked around). ~1 ms warm per action is the direction, not a gate. Law 17 holds.
 - **main = 83e926874** = gated batch 4 b9450147f + main 7978ddfdd. **Batch 4 is the green fallback.**
-- **Batch 8 dc61016cb: BUILD running** (launched 11:26, PID 2286225 in $I/build.pid and build-b8.pid; integrator waiter
-  armed on READY). Carries: exorcist b37f26cf6 (resident shell `mini-line`, role miniLine; read scratch), retained
+- **Batch 8 dc61016cb: READY 11:57** (host 1,496 s; ships bin/mini-line). gate15 full running ($I/gate-dc61.pid,
+  integrator waiter armed); umbrella-tree follows in umbrella-src. Carries: exorcist b37f26cf6 (resident shell `mini-line`, role miniLine; read scratch), retained
   05bffae27/7f42f6445 (SparseMap, audit sound), hot-path 5cb39c5fe/05a38ff4e + a5e757016 (cherry-picked as dc61016cb:
   fixes the staging Lean red, authorizeWith on admitOwn; Pred.eval law check, audit sound), app-reds H1a
   ccdaf98b3/faeb1ff0b, iter-speed 7800d3199/697db7664, tower split 0eab28db7, exorcist 47b7cb2e1/c763e3ead, perf-client
   783b460cb/b6/b940b3f50, retained 62aa5fcf8/675a80745/1d4ff4efb, boundary 48cea3caf, batch 6 fixtures, perf-apps
-  546a551fd (docs). At READY: gate15 full (EDGE_REV default now 69c17a3); name to infra, explorer, perf-apps.
+  546a551fd (docs). Named READY to infra, explorer, perf-apps.
 - **Batch 7 acc7cfa03: FAIL** (H2, H1, W1). Overlay **acc7cfa03-h1** (batch 7 + mini b940b3f50 + grain-runtime from
   a371cf4a5) -hp2 11:23: hbox composed rooms/churn/documents/apps/connector PASS (W1 gone), residents = R1 standing;
   j14 FAIL on H1b (below). KEPT worlds for app-reds: /ci/c-acc7cf-hp2/w (composed; down: world-down.sh
@@ -91,11 +91,12 @@ step. Closed items are never re-reported. Report to root on events only (READY, 
 
 ## Reports owed
 
-- To root: -hp2 result (H1a fixed, H1b open, W1 gone) and batch 8 launch, in the integrator's next return.
-- Batch 8 READY: name to infra, explorer, perf-apps (perf-apps' EtherCalc capture is the after-measurement); launch gate15.
+- To root: batch 8 READY and its gate15 verdict (when it lands), in the integrator's next return.
+- Batch 8 gate15 verdict to infra, explorer, perf-apps; any red to its owner with a signature.
 
 ## Reports sent (do not resend)
 
+- 10-31 12:00: batch 8 READY named to infra (mini-line ships), explorer, perf-apps.
 - 10-31 12:05: hot-path d7c55dfa0 merged (6640356b5); audit requested.
 - 10-31 11:55: perf-client 6a088183f merged (45f0ed263), audit requested from a4d9a6f4cba4855ca.
 - 10-31 11:50: app-reds: D1 (codec Broken pipe on forge batch 4) as a second transport-drop sighting.
