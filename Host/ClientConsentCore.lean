@@ -309,7 +309,7 @@ def verifyInitial (config : NativeHost.Config) (retained : Option ConsentAnchor.
   | .ok anchored => return ⟨target, .anchored anchored⟩
   | .error (.contradicted detail) => throw (IO.userError s!"consent refused: {detail}")
   | .error (.suffix _) => pure ()
-  match ← NativeHostReplay.verifyLoaded config reader target with
+  match ← NativeHostReplay.verifyStart config reader target with
   | .error failure => throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
   | .ok verified => pure ⟨target, .full verified⟩
 
@@ -327,7 +327,7 @@ def refresh (config : NativeHost.Config) (old : Session config) : IO (Session co
       match old.2 with
       | .full _ => throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
       | .anchored _ =>
-          match ← NativeHostReplay.verifyLoaded config reader target with
+          match ← NativeHostReplay.verifyStart config reader target with
           | .error failure =>
               throw (IO.userError s!"consent extension refused at {failure.index}: {failure.detail}")
           | .ok verified => pure ⟨target, .full verified⟩

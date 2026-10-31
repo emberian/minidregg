@@ -1255,6 +1255,17 @@ theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} 
     · cases built
       rfl
 
+theorem loadImage_baseHeight {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
+    {loaded : Loaded rootBytes} (built : loadImage rootBytes logStart image = .ok loaded) :
+    loaded.baseHeight = 0 := by
+  unfold loadImage at built
+  split at built
+  · simp at built
+  · split at built
+    · simp at built
+    · cases built
+      rfl
+
 /-- The loaded genesis image of a seed. -/
 def loadSeed (rootBytes : List UInt8 → Digest) (logStart : Digest) (seed : Seed) :
     Except String (Loaded rootBytes) :=

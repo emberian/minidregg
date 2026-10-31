@@ -1142,7 +1142,7 @@ def inspectStopClaimCurrent (config : NativeHost.Config)
           ResourceBirthCodec.rootBytes durable with
         | .error detail => return .error s!"STOP claim history reader: {detail}"
         | .ok reader => pure reader
-      match ← NativeHostReplay.verifyLoaded config reader durable with
+      match ← NativeHostReplay.verifyStart config reader durable with
       | .error failure =>
           return .error s!"STOP claim history refused at entry {failure.index}: {failure.detail}"
       | .ok verified =>
@@ -4956,7 +4956,7 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
         ResourceBirthCodec.rootBytes target with
       | .ok reader => pure reader
       | .error detail => throw (IO.userError s!"selected-release Mini history reader: {detail}")
-    let verified ← match ← NativeHostReplay.verifyLoaded config reader target with
+    let verified ← match ← NativeHostReplay.verifyStart config reader target with
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"selected-release Mini history refused at {failure.index}: {failure.detail}")
@@ -5068,7 +5068,7 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
         ResourceBirthCodec.rootBytes target with
       | .ok reader => pure reader
       | .error detail => throw (IO.userError s!"empty fn Mini history reader: {detail}")
-    let verified ← match ← NativeHostReplay.verifyLoaded config reader target with
+    let verified ← match ← NativeHostReplay.verifyStart config reader target with
       | .ok verified => pure verified
       | .error failure =>
           throw (IO.userError s!"empty fn Mini history refused at {failure.index}: {failure.detail}")

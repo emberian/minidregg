@@ -221,7 +221,7 @@ private def walkPhysical (config : Config) (prior : Option (Walked config))
           return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok ⟨physical, verified⟩
   | none =>
-      match ← NativeHostReplay.verifyLoaded config reader physical with
+      match ← NativeHostReplay.verifyStart config reader physical with
       | .error failure =>
           return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok ⟨physical, verified⟩

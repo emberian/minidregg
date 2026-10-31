@@ -530,7 +530,7 @@ def Basis.full? (config : Config) {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) {target : Durable} :
     Basis config target → IO (Except NativeHostReplay.Failure (NativeHostReplay.Verified config target))
   | .full verified => pure (.ok verified)
-  | .anchored _ => NativeHostReplay.verifyLoaded config reader target
+  | .anchored _ => NativeHostReplay.verifyStart config reader target
 
 /-- Extend either basis over a target that is the old one followed by more
 records (`DurableReceiverIO.extendFrom`): only those records are admitted. -/

@@ -81,7 +81,7 @@ def lookupOriginal (config : Config) (target : Durable) (bytes : List UInt8) :
   let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
     | .error _ => return .error .nativeHistoryUnavailable
     | .ok reader => pure reader
-  let .ok verified ← NativeHostReplay.verifyLoaded config reader target
+  let .ok verified ← NativeHostReplay.verifyStart config reader target
     | return .error .nativeHistoryUnavailable
   return lookupVerified verified bytes
 

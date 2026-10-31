@@ -42,7 +42,7 @@ def select (config : Config) (target : Durable) (point : Point)
   let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
     | .error detail => return .error s!"member key history reader: {detail}"
     | .ok sealed => pure sealed
-  match ← NativeHostReplay.verifyLoaded config reader target with
+  match ← NativeHostReplay.verifyStart config reader target with
   | .error failure => return .error s!"source audit failed at {failure.index}: {failure.detail}"
   | .ok source =>
     if heightExact : source.opened.durable.height = point.height then
