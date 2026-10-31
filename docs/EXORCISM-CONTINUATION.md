@@ -56,4 +56,4 @@ PID files and timeouts for every remote job; stop only by PID file; named-file c
 `git commit -F`; filtered tests; swarm-build; no Host build on hbox (the integrator builds
 candidates); `/home/hbox/lanes/exorcism` is the Rust-only clone; scratch worlds via
 `jworld-scratch.sh up/down` with distinct ports; `/ci/exo/cpu.sh` and `/ci/exo/ops.sh` are the
-drivers; pool tree t4 is leased to this lane.
+drivers; no pool tree is leased (`lane-tree acquire exorcism REF` for a Lean check).
