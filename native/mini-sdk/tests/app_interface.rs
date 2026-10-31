@@ -46,7 +46,7 @@ fn native_dav_binary_and_uncertain_writes() {
 
 fn binding() -> mini_sdk::app_interface::SessionBinding {
     mini_sdk::app_interface::SessionBinding {
-        package_id: "aede44cf19129337aae68b6993324574".into(),
+        package_id: "73c84a947fdd0c3ac1a55bce49016e77".into(),
         subject: "7".into(),
         app: "8".into(),
         generation: "0".into(),
@@ -171,7 +171,7 @@ fn declaration_digest_matches_contract_unicode_escaping() {
     let d = Declaration::load(&serde_json::to_vec(&v).unwrap()).unwrap();
     assert_eq!(
         d.sha256,
-        "917da2077e2421276b725d74c73dbc1bc5fd9e0e838cd3f497d9040ee2bfaba4"
+        "7c7eb3df8a2bd49a3bf3b556caa47a2edb0462f7fe6c6a548dfbfab7e5793687"
     );
 }
 
@@ -345,7 +345,7 @@ fn declaration_digest_matches_contract_numeric_normalization() {
         Declaration::load(&serde_json::to_vec(&v).unwrap())
             .unwrap()
             .sha256,
-        "3064a2deefcb7380ef493ad97241ef6284ce167ffa75944167ad4eb4d73b4176"
+        "575b4d3c309a672ef72b3cc4cf86998f06b9a1be5184e5d3502d9e8e742bf040"
     );
     let mut v: serde_json::Value =
         serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
@@ -354,7 +354,7 @@ fn declaration_digest_matches_contract_numeric_normalization() {
         Declaration::load(&serde_json::to_vec(&v).unwrap())
             .unwrap()
             .sha256,
-        "75c8e38ca7cb6d620e7e8acef955fdaf7ee757cd4bcfcc41ea43c536e3ee418e"
+        "9eb9f44b339cda932ece202e6592489423238dd150d3c0ba047d6c0a1309c92a"
     );
     let mut v: serde_json::Value =
         serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
@@ -363,7 +363,7 @@ fn declaration_digest_matches_contract_numeric_normalization() {
         Declaration::load(&serde_json::to_vec(&v).unwrap())
             .unwrap()
             .sha256,
-        "756d7c74fb948808e52500faec393130895a715a980df7f0f379174431499295"
+        "f537fe7df604610fdcc8fd324b333bfc890f9735db9b805a8a3ae2e5bd993a71"
     );
     let mut v: serde_json::Value =
         serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
@@ -372,7 +372,7 @@ fn declaration_digest_matches_contract_numeric_normalization() {
         Declaration::load(&serde_json::to_vec(&v).unwrap())
             .unwrap()
             .sha256,
-        "4563f556447a18181911e9efcd9940c93075900f897cfc6a4fc33b6cc9dca3fa"
+        "22255579da039ef0792f6fefaf55a2994a052ae82971f4cb8d1e4d6535d68585"
     );
     let mut v: serde_json::Value =
         serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
@@ -381,7 +381,7 @@ fn declaration_digest_matches_contract_numeric_normalization() {
         Declaration::load(&serde_json::to_vec(&v).unwrap())
             .unwrap()
             .sha256,
-        "ede046763257196f30e988101622270948ceb0549f066608f83083272b5d52a5"
+        "ba7de76827913681790fa4baff34745032e3b961ba7f490c439a1b07cfe19c42"
     );
 }
 
