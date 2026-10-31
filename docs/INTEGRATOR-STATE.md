@@ -5,25 +5,28 @@ Present-state record of the integration lane, rewritten whole when its shape cha
 line each). History (the 10-30 rehearsal-3 smoke, the hbox disk pause, the Hermes and apps diagnoses) is in this file's
 git history (e5dfc3ddb and earlier).
 
-## Now (2026-10-31 02:45 EDT)
+## Now (2026-10-31 03:40 EDT)
 
-- main = cdb399b47 (Lean v4.35.0 bump). Candidates kept: be4ef7510 (forge ship), cdb399b47, 35737eac4 (batch 1),
-  eca98bde7 (batch 2), 7d90da717.
-- **Batch 1 35737eac4**: tour 73/73, enrol PASS; apps red (vars-backing bind missing, then hbox disk); umbrella-tree
-  (first second-tree run, 5,457 s): every umbrella green except the two stale Native fixtures, which rerecord
-  re-recorded (fixture-regen/35737eac4863 fa6c6dbf7, data only; merged into staging 1ad2c5c7c).
-- **Batch 2 eca98bde7 READY 02:22** (hot-path CONSENT-STORE, private-cells receiver+custody, app-reds vars-backing +
-  controller pin, demo-reds door publications/reports/bend settle/--again). gate13 FAIL: tour 73/73, enrol, composed
-  rooms/churn/documents/store-restart PASS; j14-apps installs now, then app-start "resident unit ... failed before START"
-  (resident can't open the app-private /var to read its project id: a17f4172949caca14's fix on lane/app-reds-b, not
-  landed); composed apps same class; flatness submit_cpu 116 -> 874 ms (participantSlots, hot-path next); flatness-get
-  blocked on residents. Its umbrella-tree is running in umbrella-src (then rerecord). Infra reruns forge composed
-  c-eca9-d1 (worlds image fixed for prjquota) and queues the fresh demo ship on eca98bde7 through the custodian.
-- **Next cut waits for a17f's resident fix.** Staging also holds: ingest scratch input 45091c14e (hbox
-  /etc/mini-spk-volumes/ingest-scratch -> /tank/mini-ingest), signed-identity c730fd3ea (supersedes 5f5e99324, which
-  broke resident start's strict reader), bend responseType 32a7f0fc0 (Lean), web-body lifeline + resident self-exit
-  4928d9a77, bend show ended 2c23a33a5, H3/H4 59677eb57, hot-path rows 4/9/13 + consent option A a049aca6d + Pred.Frame
-  01a01e359/79a8c4c2c, private-cells hiding goals through 99e3309d1 + KeptCell design fc5548bf3, lane-tree fixes.
+- main = cdb399b47 (Lean v4.35.0 bump). Candidates kept ($I/keep): be4ef7510 (forge ship), cdb399b47, 35737eac4,
+  eca98bde7 (batch 2), eca98bde7-resvar1/-resvar2 (hotpatch copies, hotpatch-candidate.sh).
+- **Batch 3 a4cb65af3 BUILDING** (integ-build5, 03:38): eca98bde7 + resident /var fix 486f0196f + astra follow-up
+  19b7ab1de (dev pin, same-device, exact-size recheck at START; quota-change serialisation stated as open in VOLUMES.md
+  G4) + ingest scratch 45091c14e + signed-identity c730fd3ea + bend responseType 32a7f0fc0 + web lifeline 4928d9a77 +
+  bend show + H3/H4 + hot-path rows 4/9/13, consent option A, Pred.Frame + private-cells hiding goals and Materialized
+  Aux (c75e4ac7a) + lane-tree fixes + fixture re-record 2a995c2e6. Waiter armed on READY.
+- **Batch 2 eca98bde7**: gate13 tour 73/73, enrol PASS; apps red was the resident /var check. Hotpatch 2
+  (eca98bde7-resvar2 = all spk-host crate bins from 19b7ab1de, gate14 HARNESS=19b7ab1de): j14-apps PASS 5 rows; composed
+  rooms/churn/documents/apps/connector/store-restart PASS, residents UNKNOWN (hbox can't judge; forge decides);
+  flatness-get PASS, flatness-submit FAIL. Umbrellas: Native fixtures (re-recorded 2a995c2e6) + NEW TokenCensus red
+  (ConsentAnchor.Anchored.mk L1 witness; hot-path fix b70a547c8, not yet on staging).
+- Hotpatching between cuts (ember): Rust fixes are overlaid as a hotpatch candidate copy
+  (`hotpatch-candidate.sh BASE NAME bin=path...`, re-pins SHA256SUMS, manifest, provenance), then gate14 with
+  HARNESS=<staging sha> (overlays scripts/ and deploy/spk-host) and SUF/PHASES. Build the crate's whole bin set (spk-host
+  crate = spk-host, spk-browser-proxy, mini-spk-broker, mini-spk-volume-helper) or the world mixes binaries.
+- Sweep bug fixed 03:40: the 03:36 sweep matched by prefix and removed hot-path's hotpatch copy and batch 2's gate roots;
+  sweep.sh now skips non-sha candidates and shields shared prefixes.
+- hot-path a8e4317c9e1574ca5: slot projection fix measured (submit CPU 116/874 -> 54/280, propose 28/231 -> 14/50) plus
+  contentLawDecidable over cached support (f7da550af) in flight; one sha after re-bench.
 - FORMAT batch (later, one genesis): hot-path row 11 (checkpoint carries session indexes; Store epoch) + private-cells
   KeptCell option (b) (Aux cache in Materialized; Theory/CellStateAux.lean statement 18e049691 audited sound, conditions
   sent) + the fixture re-record.
