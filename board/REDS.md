@@ -1,19 +1,20 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `3c6b99064d42` (builder: REDS.md for 359ace71edac (5 red)). Round finished 2026-11-01T03:35Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3c6b9906`.
+Tip: `b6a6dfcd4a08` (builder: REDS.md for 3c6b99064d42 (5 red)). Round finished 2026-11-01T04:04Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-b6a6dfcd`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| host | rc=1 error: build failed | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
-| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
+| gate:composed:documents | composed documents fail | yes, red again | no | infra, member-side | fail: documents:protected: no stderr; see /ci/c-b6a6df/composed/state/evidence/0117-docume |
+| gate:composed:residents | composed residents fail | yes, red again | no | member-side, infra | fail: residents: REFUSED timeout: controller admin socket; see /ci/c-b6a6df/composed/state |
+| gate:composed:restart | composed restart blocked | yes, red again | no | host-execution | blocked: prerequisite residents has not passed |
+| gate:composed:store-restart | composed store-restart blocked | yes, red again | no | host-execution | blocked: prerequisite documents has not passed |
 
-Suspect commits since green (`git log 83e926874e38..3c6b99064d42`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..b6a6dfcd4a08`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `b6a6dfcd` builder: REDS.md for 3c6b99064d42 (5 red) (owner: build-loop)
+- `695fddbe` invoke: share postBytes in targetWriteFast to match packedWrite (owner: apps-hermes)
 - `3c6b9906` builder: REDS.md for 359ace71edac (5 red) (owner: build-loop)
 - `48b93d3c` write-path: eliminate target cell re-hash in observation prepare and post-bytes decode in birth prep (owner: apps-hermes)
 - `f7031ae1` fixtures: native runs re-recorded from candidate 359ace71edac (accepted stale, doc-write stale)
@@ -52,5 +53,12 @@ Suspect commits since green (`git log 83e926874e38..3c6b99064d42`), newest first
 - `913e66cd` invoke: the read guards take the written ids without building the target writes (owner: apps-hermes)
 - `901d910c` World legs carry only their changed ops; the turn's pin guards the rest (fold v2) (owner: read-path)
 - `40cde03d` wbo: rectangle.write's numbers carry WBO's own bounds; the qualify size is 10
-- `df55c10a` hummingbird: analytics.record correlates on its event in the live locations stream, not on a referer
-- `8f659b53` board: member-side row: held pair cause; bind? on the walk next
+
+## Flatness (published, does not gate `green`)
+
+| row | verdict | metric | early | late | ratio | bound | owner |
+|---|---|---|---|---|---|---|---|
+| flatness-submit | FAIL | broken: propose_cpu_ms: early window below measurement resolution; increase --lo | - | - | - | - | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 52.000 | 49.000 | 0.942 | 1.958 | read-path |
+| flatness-get | PASS | get_wall_ms | 147.824 | 141.057 | 0.954 | 1.958 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-b6a6dfcd/flatness.log | - | - | - | - | host-execution, store-retained |
