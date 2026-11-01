@@ -1,18 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `78797a80cb02` (builder: REDS.md for b6a6dfcd4a08 (4 red)). Round finished 2026-11-01T04:48Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-78797a80`.
+Tip: `19d6c139081f` (builder: REDS.md for 78797a80cb02 (4 red)). Round finished 2026-11-01T05:25Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-19d6c139`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:composed:documents | composed documents fail | yes, red again | yes | infra, member-side | fail: documents:protected: no stderr; see /ci/c-78797a/composed/state/evidence/0117-docume |
-| gate:composed:residents | composed residents fail | yes, red again | yes | member-side, infra | fail: residents: REFUSED timeout: controller admin socket; see /ci/c-78797a/composed/state |
+| gate:composed:residents | composed residents fail | yes, red again | yes | member-side, infra | fail: residents: REFUSED timeout: controller admin socket; see /ci/c-19d6c1/composed/state |
 | gate:composed:restart | composed restart blocked | yes, red again | yes | host-execution | blocked: prerequisite residents has not passed |
-| gate:composed:store-restart | composed store-restart blocked | yes, red again | yes | host-execution | blocked: prerequisite documents has not passed |
 
-Suspect commits since green (`git log 83e926874e38..78797a80cb02`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..19d6c139081f`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `19d6c139` builder: REDS.md for 78797a80cb02 (4 red) (owner: build-loop)
+- `781e067f` fixtures: native runs re-recorded from candidate 78797a80cb02 (accepted stale, doc-write stale)
 - `78797a80` builder: REDS.md for b6a6dfcd4a08 (4 red) (owner: build-loop)
 - `17665e50` fixtures: native runs re-recorded from candidate b6a6dfcd4a08 (accepted stale, doc-write stale)
 - `c4ecabe0` store-retained: hold served cell state in a persistent map and bind replayed suffixes once
@@ -51,17 +51,15 @@ Suspect commits since green (`git log 83e926874e38..78797a80cb02`), newest first
 - `fd1686db` integ-build: the rerecord holds the umbrella tree; land_regen diffs against the regen's own parent (owner: build-loop)
 - `cbe54d87` lane-tree: a lease idle 30 minutes with no process in its tree is taken
 - `90c8cbed` board: host-execution row: restore the worktree line
-- `f45beda2` board: host-execution row: seat id a559316c0cc2b4b14, delegates state
-- `6ccd0cd4` board: host-execution row: e71c9ab59, he-births commits, dispatch ruling
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 30.000 | 59.000 | 1.967 | 2.000 | host-execution, store-retained |
-| flatness-submit | PASS | submit_wall_ms | 58.243 | 75.837 | 1.302 | 2.000 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 10.000 | 19.000 | 1.900 | 2.000 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 29.304 | 116.707 | 3.983 | 2.000 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_cpu_ms | 34.000 | 97.000 | 2.853 | 2.310 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 58.976 | 113.328 | 1.922 | 2.310 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_cpu_ms | 10.000 | 33.000 | 3.300 | 2.310 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 71.649 | 190.396 | 2.657 | 2.310 | host-execution, store-retained |
 | flatness-get | PASS | get_cpu_ms | 54.000 | 55.000 | 1.019 | 1.958 | read-path |
-| flatness-get | PASS | get_wall_ms | 237.894 | 340.643 | 1.432 | 1.958 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-78797a80/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-get | PASS | get_wall_ms | 347.775 | 283.263 | 0.814 | 1.958 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-19d6c139/flatness.log | - | - | - | - | host-execution, store-retained |
