@@ -10,14 +10,14 @@
 # a directory any live process names in its command line, cwd or open files (reported IN-USE, never killed),
 # a candidate whose binaries a live process runs or a gate world's inputs name. Logs SWEEP lines (with sizes) to COMMANDS.log.
 set -u
-I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; R=${GATE_RUNS:-/ci}; LOG=$I/COMMANDS.log; DRY=${1:-}
+I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; R=${GATE_RUNS:-/ci}; CR=${COMPOSED_RUNS:-/ci-composed}; LOG=$I/COMMANDS.log; DRY=${1:-}
 say(){ echo "$(date -Is) $*" >> $LOG; echo "$*"; }
 keep=$(grep -v '^#' $I/keep 2>/dev/null | tr -d ' ' | grep . || true)
 kept(){ local s=$1 k; for k in $keep; do case $s in $k*) return 0;; esac; done; return 1; }
 # every path live processes hold (cmdline words, cwd, fd targets), once
-held=$(for p in /proc/[0-9]*; do tr '\0' '\n' < $p/cmdline 2>/dev/null; readlink $p/cwd 2>/dev/null; ls -l $p/fd 2>/dev/null | awk '{print $NF}'; done | grep -E "^($R|$I)/" | sort -u)
+held=$(for p in /proc/[0-9]*; do tr '\0' '\n' < $p/cmdline 2>/dev/null; readlink $p/cwd 2>/dev/null; ls -l $p/fd 2>/dev/null | awk '{print $NF}'; done | grep -E "^($R|$CR|$I)/" | sort -u)
 # candidate paths the gate worlds' recorded inputs name (a kept world runs from its candidate)
-worldrefs=$(grep -rhoE "$I/candidates/[0-9a-f]{40}" $R/*/inputs $R/*/w/WORLD-IDENTITY.json $R/*/cand 2>/dev/null | sort -u || true)
+worldrefs=$(grep -rhoE "$I/candidates/[0-9a-f]{40}" $R/*/inputs $R/*/w/WORLD-IDENTITY.json $R/*/cand $CR/*/inputs $CR/*/w/WORLD-IDENTITY.json 2>/dev/null | sort -u || true)
 inuse(){ printf '%s\n' "$held" | grep -q "^$1\(/\|\$\)"; }
 # an overlay candidate (lane-build.sh overlay: provenance.json has .overlay; its 12-hex id is not a commit) is never swept here
 overlay(){ python3 -c 'import json,sys; sys.exit(0 if "overlay" in json.load(open(sys.argv[1])) else 1)' "$I/candidates/$1/provenance.json" 2>/dev/null; }
@@ -33,9 +33,10 @@ for ((i=2; i<${#ready[@]}; i++)); do
   s=${ready[$i]}; kept $s && continue
   [[ $s =~ ^[0-9a-f]{40}$ ]] || continue; overlay $s && continue
   shielded $s && { say "SWEEP shielded ${s:0:9}: its prefix is shared with a kept or newer candidate (gate roots left)"; continue; }
-  for d in $I/gate-${s:0:8}* $R/t-${s:0:6}* $R/c-${s:0:6}* $R/e-${s:0:6}* $R/f-${s:0:6}* $R/j-${s:0:6}*; do
-    [ -d "$d" ] || continue
-    if inuse "$d"; then say "SWEEP IN-USE $d (left; read the holders' cmdlines before any stop)"; continue; fi
+  for d in $I/gate-${s:0:8}* $R/t-${s:0:6}* $CR/c-${s:0:6}* $R/c-${s:0:6}* $R/e-${s:0:6}* $R/f-${s:0:6}* $R/j-${s:0:6}*; do
+    [ -d "$d" ] || [ -L "$d" ] || continue
+    if inuse "$d" || inuse "$(realpath -m "$d")"; then say "SWEEP IN-USE $d (left; read the holders' cmdlines before any stop)"; continue; fi
+    if [ -L "$d" ]; then [ "$DRY" = --dry ] || rm -f "$d" 2>/dev/null; continue; fi
     k=$(du -sk "$d" 2>/dev/null | cut -f1)
     if [ "$DRY" = --dry ]; then echo "would remove $d (${k}K)"; continue; fi
     rm -rf "$d" 2>/dev/null; if [ -e "$d" ]; then say "SWEEP LEFT $d (rm refused; owner or mount)"; else n=$((n+1)); freed=$((freed+k)); fi

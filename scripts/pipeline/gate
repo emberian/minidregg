@@ -39,8 +39,12 @@ tour() {
   say "GATE $S8 tour: $(awk -F'\t' '{print $2}' $G/TOUR.tsv | sort | uniq -c | tr '\n' ' ')"
 }
 composed() {
-  local RUN=$R/c-${S8:0:6}${SUF:-} N=5 PORT=${PORT:-22640} CV=FAIL CDETAIL="world not built"
-  mkdir -p $RUN/log; local W=$RUN/w RC=$SRC/native/resource-client
+  local CR=${COMPOSED_RUNS:-/ci-composed}
+  local RUN=$CR/c-${S8:0:6}${SUF:-} N=5 PORT=${PORT:-22640} CV=FAIL CDETAIL="world not built"
+  sudo -n install -d -m 0755 -o root -g root "$CR"
+  sudo -n install -d -m 0755 -o "$(id -u)" -g "$(id -g)" "$RUN" "$RUN/log"
+  ln -sfn "$RUN" "$R/c-${S8:0:6}${SUF:-}"
+  local W=$RUN/w RC=$SRC/native/resource-client
   export JWORLD_ROUTE_FRONT_PORT=${JWORLD_ROUTE_FRONT_PORT:-22643} JWORLD_MANAGEMENT=${JWORLD_MANAGEMENT:-distinct} JWORLD_ROOT_HANDOFFS=${JWORLD_ROOT_HANDOFFS:-1}
   export COMPOSED_ROOT_HANDOFFS=${COMPOSED_ROOT_HANDOFFS:-sudo}
   stop_broker() {
@@ -85,7 +89,7 @@ composed() {
     local base=$W/root v=$W/root/var/lib/mini task d
     task=$(jq -r .task "$RUN/inputs/resident-binding.json" 2>/dev/null) || return 0
     mkdir -p "$v/controllers/$task"
-    for d in "$R" "$RUN" "$W" "$base" "$base/var" "$base/var/lib" "$v" "$v/controllers" "$v/candidate" "$base/etc" "$base/etc/mini" "$base/etc/mini/keys" "$base/usr" "$base/usr/local" "$base/usr/local/lib"; do
+    for d in "$CR" "$RUN" "$W" "$base" "$base/var" "$base/var/lib" "$v" "$v/controllers" "$v/candidate" "$base/etc" "$base/etc/mini" "$base/etc/mini/keys" "$base/usr" "$base/usr/local" "$base/usr/local/lib"; do
       sudo -n chown root:root "$d" && sudo -n chmod 755 "$d"
     done
     sudo -n chown -R root:root "$v/candidate"/*/ 2>/dev/null; sudo -n chown -h root:root "$v"/candidate/* 2>/dev/null; sudo -n chmod -R a+rX "$v/candidate"
@@ -95,7 +99,6 @@ composed() {
   }
   unseal_frame() {
     local u="$(id -u):$(id -g)"
-    sudo -n chown "$u" "$R" 2>/dev/null; sudo -n chmod 755 "$R" 2>/dev/null
     [ -d "$RUN" ] && sudo -n chown -R "$u" "$RUN" 2>/dev/null
   }
   trap 'stop_broker; unseal_frame' EXIT
@@ -184,7 +187,7 @@ if [[ $P == *" flatness "* ]]; then
   printf 'flatness-submit\tFAIL\tnot completed\nflatness-get\tFAIL\tnot completed\n' > "$G/flatness.tsv"
   if [[ -f $SRC/scripts/perf/flatness-gate.sh ]]; then
     MINI_MARKET_CACHE=$I/spk-cache bash "$SRC/scripts/perf/flatness-gate.sh" "$C" "$FROOT" \
-      "${FLATNESS_N:-1000}" "${FLATNESS_LO:-10}" > "$G/flatness.log" 2>&1 &
+      "${FLATNESS_N:-1000}" "${FLATNESS_LO:-20}" > "$G/flatness.log" 2>&1 &
     echo $! > "$G/flatness.pid"
     wait "$(cat "$G/flatness.pid")"; flatness_rc=$?
     [[ ! -s $FROOT/gate.tsv ]] || cp "$FROOT/gate.tsv" "$G/flatness.tsv"
