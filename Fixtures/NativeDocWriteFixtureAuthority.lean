@@ -46,9 +46,10 @@ write.document.payloadBytes = 60
 # the width of the semantics digest. The retained event is exactly the call's signed ingress (the
 # deployment's domain, the semantics and the signed command, DeclaredResourceController.signedBytes).
 write.event = ingress
-# the World's leg on the document cell, by operation (reads carry no bytes): two writes and two
-# allocations, one of them the atom holding the appended paragraph
-write.legs = read, read, read, write, write, allocate, allocate
+# the World's leg on the document cell, by operation (untouched addresses are guarded by the cell's
+# pre-root pin, 901d910c2): two writes and two allocations, one of them the atom holding the
+# appended paragraph
+write.legs = write, write, allocate, allocate
 # an append is not metered compute and pays no fee in this world: only the structural lanes move.
 # The incidences are the authority leg and the one target. The other three lanes are the Host charge
 # rule's measurements of this write (DeployedCharge, 7877e6e7): the call's turn bytes (the length of

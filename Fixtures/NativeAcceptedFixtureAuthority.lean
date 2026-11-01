@@ -63,9 +63,10 @@ first.created.atom = inlineObject=true payload=[7]
 # The retained event is exactly the call's signed ingress: the deployment's domain, the semantics
 # and the signed command (DeclaredResourceController.signedBytes), nothing more.
 first.event = ingress
-# the World's legs, by operation (reads carry no bytes): the notes document writes its result and
-# allocates the created atom and the result atom; the pay cell allocates the subject's compute row
-first.legs = write, allocate, allocate; read, read, allocate
+# the World's legs, by operation (untouched addresses are guarded by the cell's pre-root pin,
+# 901d910c2): the notes document writes its result and allocates the created atom and the result
+# atom; the pay cell allocates the subject's compute row
+first.legs = write, allocate, allocate; allocate
 # the charge is the request's capacity: the driver's ENVELOPE, with proofWork = price(tariff, capacity)
 # above. The exception is storageBytes: the retained bytes (DeployedCharge.storageCharge), exactly the
 # retained event plus the legs' written values -- no born image, no post image, no framing; the
