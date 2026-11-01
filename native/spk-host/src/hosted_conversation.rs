@@ -265,6 +265,22 @@ fn socketio_event(text: &str) -> Option<String> {
     packet.as_array()?.first()?.as_str().map(str::to_owned)
 }
 
+/// True when a socket.io event packet is a bare empty-interval tick `42["name",[]]`
+/// (such as Hummingbird's 200ms/500ms metric intervals when no event was recorded).
+fn socketio_empty_tick(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix("42") else { return false };
+    let rest = match rest.strip_prefix('/') {
+        Some(ns) => match ns.split_once(',') {
+            Some((_, tail)) => tail,
+            None => return false,
+        },
+        None => rest,
+    };
+    let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+    let Ok(Value::Array(packet)) = serde_json::from_str::<Value>(rest) else { return false };
+    packet.len() == 2 && packet[0].is_string() && packet[1].as_array().is_some_and(Vec::is_empty)
+}
+
 fn response(value: Value) -> io::Result<WebResponse> {
     let body = serde_json::to_vec(&value)?;
     if body.len() > 65_536 {
@@ -504,7 +520,8 @@ impl Pool {
                 let socketio = channel.protocol.starts_with("socket.io-");
                 let keep = |text: &str| -> bool {
                     let (Some(events), true) = (events.as_ref(), socketio) else { return true };
-                    socketio_event(text).is_none_or(|name| events.iter().any(|e| *e == name))
+                    !socketio_empty_tick(text)
+                        && socketio_event(text).is_none_or(|name| events.iter().any(|e| *e == name))
                 };
                 let text = match channel.next_text(deadline, limit, count, &keep).await {
                     Ok(text) => Some(text),
@@ -920,6 +937,9 @@ mod tests {
             assert_eq!(channel.max_frames, 0);
         });
         assert_eq!(socketio_event(r#"42["hits",[]]"#).as_deref(), Some("hits"));
+        assert!(socketio_empty_tick(r#"42["hits",[]]"#));
+        assert!(!socketio_empty_tick(r#"42["hits",[{"timestamp":"t"}]]"#));
+        assert!(!socketio_empty_tick(r#"42["view_totals",3]"#));
         assert_eq!(socketio_event(r#"42/admin,["x"]"#).as_deref(), Some("x"));
         assert_eq!(socketio_event(r#"427["ack",1]"#).as_deref(), Some("ack"));
         assert_eq!(socketio_event("40"), None);

@@ -5695,14 +5695,88 @@ impl Runtime {
             || bounded_regular_file(&directory.join("plan.bin"), 10 * 1024 * 1024)?
                 != resident_bytes
         {
-            return Err("resident lifetime paid bytes differ from source-owned op78".into());
+            // An append between the resident's op78 and the controller's op78 moves the image:
+            // verify the resident's plan with the Host and require equal `imageFreePlanHex`
+            // (Kernel/SigningPlanImage.lean `PaidPlan.imageFree_eq_fixes`).
+            let image_free = current
+                .get("imageFreePlanHex")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
+            if image_free.is_none()
+                || image_free
+                    != resident_inspection
+                        .get("imageFreePlanHex")
+                        .and_then(Value::as_str)
+            {
+                return Err("resident lifetime paid bytes differ from source-owned op78".into());
+            }
+            let resident_plan_path = directory.join("resident-plan.bin");
+            let resident_inspected_path = directory.join("resident-plan-inspected.json");
+            write_new(&resident_plan_path, &resident_bytes)?;
+            let strings = [
+                self.config
+                    .host_config
+                    .to_str()
+                    .ok_or("Host config path UTF-8")?,
+                resident_plan_path.to_str().ok_or("resident plan path UTF-8")?,
+                resident_inspected_path
+                    .to_str()
+                    .ok_or("resident inspection path UTF-8")?,
+            ];
+            self.work_output(
+                &self.config.host,
+                &[
+                    strings[0],
+                    "inspect",
+                    "application-agent-lifetime-paid-plan",
+                    strings[1],
+                    strings[2],
+                ],
+            )
+            .map_err(|error| format!("resident lifetime paid plan inspection: {error}"))?;
+            let verified_resident: Value = serde_json::from_slice(&bounded_regular_file(
+                &resident_inspected_path,
+                2_097_152,
+            )?)
+            .map_err(|error| format!("resident lifetime paid inspection JSON: {error}"))?;
+            if &verified_resident != resident_inspection
+                || verified_resident.get("canonicalPlanHex").and_then(Value::as_str)
+                    != Some(paid_plan_hex)
+                || verified_resident.get("imageFreePlanHex") != current.get("imageFreePlanHex")
+            {
+                return Err("resident lifetime paid bytes differ from source-owned op78".into());
+            }
+            let mut pin: Value = serde_json::from_slice(&bounded_regular_file(
+                &directory.join("pin.json"),
+                4096,
+            )?)
+            .map_err(|error| format!("lifetime paid pin JSON: {error}"))?;
+            pin["planSha256"] = Value::String(sha256_bytes(&resident_bytes)?);
+            let mut frame = vec![78u8];
+            frame.extend_from_slice(&resident_bytes);
+            fs::write(directory.join("plan.bin"), &resident_bytes)
+                .map_err(|e| format!("plan.bin: {e}"))?;
+            fs::write(directory.join("plan.frame"), &frame)
+                .map_err(|e| format!("plan.frame: {e}"))?;
+            fs::write(
+                directory.join("plan-inspected.json"),
+                serde_json::to_vec_pretty(&verified_resident)
+                    .map_err(|e| format!("plan-inspected.json: {e}"))?,
+            )
+            .map_err(|e| format!("plan-inspected.json: {e}"))?;
+            fs::write(
+                directory.join("pin.json"),
+                serde_json::to_vec_pretty(&pin).map_err(|e| format!("pin.json: {e}"))?,
+            )
+            .map_err(|e| format!("pin.json: {e}"))?;
         }
         let paid: Value = serde_json::from_slice(&bounded_regular_file(
             &directory.join("plan-inspected.json"),
             2_097_152,
         )?)
         .map_err(|error| format!("lifetime paid inspection JSON: {error}"))?;
-        if current != paid
+        if (current != paid
+            && current.get("imageFreePlanHex") != paid.get("imageFreePlanHex"))
             || &paid != resident_inspection
             || paid.get("canonicalPlanHex").and_then(Value::as_str) != Some(paid_plan_hex)
         {
