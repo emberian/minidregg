@@ -16,6 +16,7 @@ After=network.target
 Type=exec
 User=mini-core
 Group=mini-core
+Environment=MINI_CONSENT_ANCHOR_DIR=/var/lib/mini-apps/consent-anchors
 ExecStart=/var/lib/mini/candidate/current/bin/mini apps-worker --state /var/lib/mini-apps --world /var/lib/mini-spk-worlds/%i/apps-world.json --member-socket /run/mini-apps/worker.sock --edge-socket /var/lib/mini-apps/edge.sock --member-group mini-sessions --edge-group mini-edge
 Restart=on-failure
 RestartSec=5
@@ -50,10 +51,10 @@ SystemCallFilter=@chown
 SystemCallErrorNumber=EPERM
 # Its own state; the world's grain state (spk-host grain writes install/route/lifecycle artifacts
 # under the store's host state root); the market's wanted/ flags; the member and edge sockets.
-ReadWritePaths=/var/lib/mini-apps /var/lib/mini-spk-worlds/%i /var/lib/mini-market/wanted /run/mini-apps
+ReadWritePaths=/var/lib/mini-apps /var/lib/mini-spk-worlds/%i /var/lib/mini-market/wanted /run/mini-apps /var/lib/mini/store/node
 # /run/user stays visible: spk-host grain status/start/stop reach mini-core's user manager (XDG_RUNTIME_DIR from the drop-in).
 InaccessiblePaths=-/run/dbus -/etc/mini/credentials.key -/var/lib/mini-keys -/var/lib/mini/sessions -/var/lib/mini/credentials -/var/lib/mini-backups -/var/lib/mini-door-process -/var/lib/mini-discord
-MemoryMax=512M
+MemoryMax=1G
 TasksMax=256
 
 [Install]

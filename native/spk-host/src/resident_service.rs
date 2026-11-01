@@ -1707,7 +1707,8 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             submit_v4_claim(&operator, assembled, &begin, &launch, fixed, selection)?
         }
         _ => {
-            let assembled = assemble_v3_claim(
+            let _ = (assemble_v3_claim, submit_v3_claim);
+            crate::lifecycle_v3_claim_native::assemble_and_submit_once(
                 &operator,
                 &claim_signers,
                 config.app_uid,
@@ -1715,8 +1716,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 &launch,
                 &config.claim_nonce_ledger,
                 &config.claim_author_attempt_dir,
-            )?;
-            submit_v3_claim(&operator, assembled, &begin, &launch, &claim_signers)?
+            )?
         }
     };
     if claim.physical_begin.unit != config.unit

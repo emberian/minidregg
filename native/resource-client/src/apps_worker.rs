@@ -398,7 +398,10 @@ impl Worker {
     fn lifecycle(&self, grain: &str, mut record: Value, start: bool) -> Value {
         let app = record["app"].as_str().unwrap_or("").to_owned();
         let verb = if start { "start" } else { "stop" };
-        let outcome = if start { self.world.start(&app) } else { self.world.stop(&app) };
+        let outcome = {
+            let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
+            if start { self.world.start(&app) } else { self.world.stop(&app) }
+        };
         match outcome {
             Ok(Lifecycle::Done) => {
                 record["state"] = json!(if start { "running" } else { "stopped" });
@@ -719,7 +722,11 @@ impl Worker {
                 };
                 retained["class"] = json!(class);
                 let _ = write_json(&request_file(&self.state, &id), retained);
-                match self.world.install(&work, &source, &receipt, &spk, &class, &delegation) {
+                let install_res = {
+                    let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
+                    self.world.install(&work, &source, &receipt, &spk, &class, &delegation)
+                };
+                match install_res {
                     Ok(installed) => {
                         if installed.signed_app_id != retained["appId"] {
                             let _ = self.world.verdict(&package_id, &json!({"verdict":"refused","reason":"appIdMismatch","signedAppId":installed.signed_app_id}));
@@ -730,7 +737,20 @@ impl Worker {
                         installed
                     }
                     Err(error) => {
-                        let name = if error.contains("unsupported physical profile") || error.contains("apiPath") { "unsupportedBridge" } else if error.contains("signature") || error.contains("Signature") { "unverifiedSignature" } else if error.contains("UNRESOLVED") || error.contains("uncertain") { return undecided("installing", error, &retry) } else { "installRefused" };
+                        let non_timing: String = error
+                            .lines()
+                            .filter(|l| !l.contains("tool-timing") && !l.contains("op-timing"))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        let name = if non_timing.contains("unsupported physical profile") || non_timing.contains("apiPath") {
+                            "unsupportedBridge"
+                        } else if non_timing.contains("signature") || non_timing.contains("Signature") {
+                            "unverifiedSignature"
+                        } else if non_timing.contains("UNRESOLVED") || non_timing.contains("uncertain") || non_timing.contains("currentWorldRoot") || non_timing.contains("pinned executable refused") {
+                            return undecided("installing", error, &retry);
+                        } else {
+                            "installRefused"
+                        };
                         let _ = self.world.verdict(&package_id, &json!({"verdict":"refused","reason":format!("{name}: {error}")}));
                         return refused(name, error);
                     }
@@ -761,14 +781,17 @@ impl Worker {
                     }
                 }
                 Err(error) => {
-                    let _ = write_json(&grain_file(&self.state, &grain), &record);
                     return undecided("routing", format!("the owner's route is not bound yet: {error}"), &retry);
                 }
             }
         }
         // Phase 4: START.
         if retained["phases"]["start"].get("state") != Some(&json!("running")) {
-            match self.world.start(&installed.app) {
+            let start_res = {
+                let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
+                self.world.start(&installed.app)
+            };
+            match start_res {
                 Ok(Lifecycle::Done) => retained["phases"]["start"] = json!({"state":"running","at":now()}),
                 Ok(Lifecycle::Undecided(detail)) => {
                     retained["phases"]["start"] = json!({"state":"starting","at":now()});
@@ -833,7 +856,7 @@ impl Worker {
 
     /// The edge connector's publishing verb: the grain's `www.sock`, which the
     /// resident binds in the app's state directory, the grandparent of every
-    /// route directory (`apps/<app>/routes/<route>/http.sock`).
+    /// route directory (`apps/<app>/routes/<route>`).
     fn connect_www(&self, grain: &str) -> std::result::Result<UnixStream, Value> {
         if !valid_grain(grain) {
             return Err(refused("routeRefused", "grain malformed"));
@@ -841,12 +864,14 @@ impl Worker {
         let Some(record) = self.grain_record(grain).map_err(|e| refused("stateUnavailable", e))? else {
             return Err(refused("unknownGrain", grain.to_owned()));
         };
-        let socket = record.get("routes").and_then(Value::as_object).and_then(|routes| routes.values().next())
-            .and_then(|route| route["socket"].as_str()).map(PathBuf::from)
+        let route = record.get("routes").and_then(Value::as_object).and_then(|routes| routes.values().next())
             .ok_or_else(|| refused("noRoute", format!("{grain} has no route yet")))?;
-        let routes_dir = socket.parent().and_then(Path::parent)
+        let route_dir = route.get("directory").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map(PathBuf::from)
+            .or_else(|| route.get("socket").and_then(Value::as_str).and_then(|s| Path::new(s).parent().map(Path::to_path_buf)))
+            .ok_or_else(|| refused("noRoute", format!("{grain} has no route yet")))?;
+        let routes_dir = route_dir.parent()
             .filter(|dir| dir.file_name().is_some_and(|name| name == "routes"))
-            .ok_or_else(|| refused("stateUnavailable", format!("{} is not under a routes directory", socket.display())))?;
+            .ok_or_else(|| refused("stateUnavailable", format!("{} is not under a routes directory", route_dir.display())))?;
         let www = routes_dir.parent().ok_or_else(|| refused("stateUnavailable", "routes directory has no app directory"))?.join("www.sock");
         UnixStream::connect(&www).map_err(|e| refused("grainStopped", format!("{}: {e}", www.display())))
     }
@@ -1403,6 +1428,82 @@ impl ProcessWorld {
         use sha2::Digest;
         Ok(hex(&sha2::Sha256::digest(fs::read(path).map_err(|e| e.to_string())?)))
     }
+
+    /// `delegate_observe`: the owner of `target` delegates an observe-only child capability
+    /// (ordinary signed delegation). Event22 (`grain-share-issue`) does not mint the participant's
+    /// ticket observation capability (`tcap + 2`), so it is delegated from `tcap` before enrollment.
+    fn delegate_observe(&self, work: &Path, name: &str, target: &str, parent_cap: &str, child_cap: &str, holder: &str, nonce: u64) -> Result<()> {
+        let d = format!("{name}-delegate-{child_cap}");
+        let attempt = work.join(format!("{d}-attempt"));
+        if attempt.join("outcome.json").exists() {
+            return Self::confirmed(&attempt.join("outcome.json")).map(|_| ());
+        }
+        let _ = fs::remove_dir_all(&attempt);
+        let _ = self.query(work, &format!("{d}-parent"), target, parent_cap, nonce, "capability")?;
+        let parent_dir = work.join(format!("{d}-parent"));
+        let head_path = parent_dir.join("head.json");
+        let [h, c, s, k] = [
+            self.host.to_str().unwrap_or(""),
+            self.config.to_str().unwrap_or(""),
+            self.public_socket.to_str().unwrap_or(""),
+            self.management_seed.to_str().unwrap_or(""),
+        ];
+        let inspect = Command::new(&self.host)
+            .args([c, "inspect", "view-object-capability", parent_dir.join("view.bin").to_str().unwrap_or(""), head_path.to_str().unwrap_or("")])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !inspect.status.success() {
+            return Err(format!("inspect view-object-capability failed: {}", String::from_utf8_lossy(&inspect.stderr).trim()));
+        }
+        let cap_head = read_json(&head_path)?;
+        let (resource_view, current) = self.query(work, &format!("{d}-owner"), target, parent_cap, nonce + 1, "resource")?;
+        let mut child = cap_head.get("head").cloned().ok_or("capability inspection lacks head")?;
+        let parent_id = child.get("id").and_then(Value::as_str).ok_or("capability head lacks id")?.to_owned();
+        let mut ancestors: Vec<Value> = child.get("ancestors").and_then(Value::as_array).cloned().unwrap_or_default();
+        if !ancestors.iter().any(|a| a.as_str() == Some(&parent_id)) {
+            ancestors.push(json!(parent_id));
+        }
+        let child_obj = child.as_object_mut().ok_or("capability head is not an object")?;
+        child_obj.insert("id".to_owned(), json!(child_cap));
+        child_obj.insert("parent".to_owned(), json!(parent_id));
+        child_obj.insert("holder".to_owned(), json!({"type":"subject","subject":holder}));
+        child_obj.insert("targets".to_owned(), json!([target]));
+        child_obj.insert("verbs".to_owned(), json!(["observe"]));
+        child_obj.insert("ancestors".to_owned(), json!(ancestors));
+        let intent = json!({
+            "subject": self.management_subject,
+            "nonce": (nonce + 2).to_string(),
+            "purpose": {
+                "type": "prepare",
+                "draft": {
+                    "type": "delegate-source",
+                    "command": {
+                        "kind": "object",
+                        "domain": current["domain"],
+                        "semantics": current["semantics"],
+                        "subject": self.management_subject,
+                        "nonce": (nonce + 3).to_string(),
+                        "expectedTargetRoot": resource_view["cell"]["root"],
+                        "parentId": parent_id,
+                        "target": target,
+                        "child": child,
+                    }
+                }
+            },
+            "grants": [{"kind": "object", "target": target, "capability": parent_id}]
+        });
+        let intent_path = work.join(format!("{d}-intent.json"));
+        write_json(&intent_path, &intent)?;
+        if let Err(err) = self.mini(work, &d, &["submit", "--host", h, "--config", c, "--socket", s, "--intent", intent_path.to_str().unwrap_or(""), "--key", k, "--dir", attempt.to_str().unwrap_or("")]) {
+            if err.contains("capability-delegation-controller: descent")
+                && self.query(work, &format!("{d}-existing"), target, child_cap, nonce + 4, "capability").is_ok()
+            {
+                return Ok(());
+            }
+            return Err(err);
+        }
+        Self::confirmed(&attempt.join("outcome.json")).map(|_| ())
+    }
 }
 
 /// The capability a share ticket is issued under. The issuer is the management subject (the dispatch
@@ -1618,9 +1719,23 @@ impl World for ProcessWorld {
             return Err(format!("routeUnenrollable: the route for {member} was bound before enrollment facts were retained; it needs a new share"));
         }
         let issue = PathBuf::from(enrollment.get("ticketIssue").and_then(Value::as_str).unwrap_or(""));
-        let (session_n, cap_n): (u64, u64) = (session.parse().map_err(|_| "session is not decimal")?, cap.parse().map_err(|_| "cap is not decimal")?);
+        let (session_n, cap_n, ticket_n): (u64, u64, u64) = (
+            session.parse().map_err(|_| "session is not decimal")?,
+            cap.parse().map_err(|_| "cap is not decimal")?,
+            ticket.parse().map_err(|_| "ticket is not decimal")?,
+        );
         let label = format!("enroll-{member}");
         let base = self.nonce()?;
+        let tcap = cap_n + ticket_n % 100;
+        self.delegate_observe(
+            work,
+            &format!("route-{member}-ticket"),
+            &ticket,
+            &tcap.to_string(),
+            &(tcap + 2).to_string(),
+            &self.management_subject,
+            base + 10,
+        )?;
         // The serving generation: the app cell's field 0.
         let (app_cell, _) = self.query(work, &format!("{label}-app-{base}"), app, &appcap, base, "resource")?;
         let generation = app_cell["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "0")).and_then(|x| x["value"].as_str())

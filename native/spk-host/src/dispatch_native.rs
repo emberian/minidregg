@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -170,6 +170,50 @@ pub(crate) fn pinned_input_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn proc_fd_socket_path(path: &Path) -> io::Result<(std::os::fd::OwnedFd, PathBuf)> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| invalid("Mini operator socket path refused"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| invalid("Mini operator socket path refused"))?;
+    let c_parent = CString::new(parent.as_os_str().as_bytes())
+        .map_err(|_| invalid("Mini operator socket path refused"))?;
+    let raw = unsafe {
+        libc::open(
+            c_parent.as_ptr(),
+            libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if raw < 0 {
+        return Err(io::Error::last_os_error()).ctx("open socket parent", &parent);
+    }
+    let dir_fd = unsafe { OwnedFd::from_raw_fd(raw) };
+    let mut short = PathBuf::from(format!("/proc/self/fd/{}", dir_fd.as_raw_fd()));
+    short.push(name);
+    Ok((dir_fd, short))
+}
+
+/// Bind a Unix domain listener, routing paths that reach or exceed `sun_path`
+/// through an `O_PATH` directory descriptor on Linux (`/proc/self/fd/<fd>/<name>`).
+pub(crate) fn bind_unix(path: &Path) -> io::Result<UnixListener> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let sun_len = unsafe { std::mem::zeroed::<libc::sockaddr_un>() }.sun_path.len();
+        if path.as_os_str().as_bytes().len() >= sun_len {
+            let (_dir_fd, short) = proc_fd_socket_path(path)?;
+            return UnixListener::bind(&short).ctx("bind", &path);
+        }
+    }
+    UnixListener::bind(path).ctx("bind", &path)
+}
+
 /// Establish transport before sending any operation bytes. Linux AF_UNIX can
 /// block indefinitely on a full listener backlog even with later IO timeouts.
 /// EAGAIN is not an in-progress connection: polling that socket reports HUP
@@ -178,9 +222,27 @@ pub(crate) fn connect_deadline(path: &Path, deadline: Instant) -> io::Result<Uni
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::os::unix::ffi::OsStrExt;
     let timeout = || io::Error::new(io::ErrorKind::TimedOut, "Mini operator connect deadline");
-    let bytes = path.as_os_str().as_bytes();
     // Zero initializes the unused sun_path tail and supplies its NUL terminator.
     let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    #[cfg(target_os = "linux")]
+    let _dir_fd: Option<OwnedFd>;
+    #[cfg(target_os = "linux")]
+    let short_path: PathBuf;
+    let bytes = {
+        let raw_bytes = path.as_os_str().as_bytes();
+        #[cfg(target_os = "linux")]
+        if raw_bytes.len() >= address.sun_path.len() && !raw_bytes.contains(&0) {
+            let (fd, short) = proc_fd_socket_path(path)?;
+            _dir_fd = Some(fd);
+            short_path = short;
+            short_path.as_os_str().as_bytes()
+        } else {
+            _dir_fd = None;
+            raw_bytes
+        }
+        #[cfg(not(target_os = "linux"))]
+        raw_bytes
+    };
     if bytes.is_empty() || bytes.len() >= address.sun_path.len() || bytes.contains(&0) {
         return Err(invalid("Mini operator socket path refused"));
     }

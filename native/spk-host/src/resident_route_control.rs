@@ -448,7 +448,7 @@ impl RouteControl {
                 }
             }
         }
-        let listener = UnixListener::bind(&socket).ctx("bind", &socket)?;
+        let listener = crate::dispatch_native::bind_unix(&socket)?;
         fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).ctx("set permissions", &socket)?;
         let meta = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
         check_socket(&meta)?;

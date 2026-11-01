@@ -224,6 +224,79 @@ fn archive_incomplete_completion_attempt(config: &InstallConfig) -> io::Result<(
     Ok(())
 }
 
+pub(crate) fn can_resume_confirmed_begin(journal: &Path) -> io::Result<bool> {
+    if journal.join("install-prepared-v2.json").exists() || journal.join("claim-v3").exists() {
+        return Ok(false);
+    }
+    let outcome_path = journal.join("begin-v3").join("op22-outcome.json");
+    let Ok(bytes) = fs::read(&outcome_path) else {
+        return Ok(false);
+    };
+    let Ok(outcome) = serde_json::from_slice::<Value>(&bytes) else {
+        return Ok(false);
+    };
+    if outcome.get("type").and_then(Value::as_str) != Some("confirmed")
+        || outcome.get("confirmation").and_then(Value::as_str) != Some("installed")
+    {
+        return Ok(false);
+    }
+    let claim_dir = journal.join("claim-v3-author");
+    if claim_dir.exists() {
+        return crate::lifecycle_v3_claim_native::claim_attempt_is_no_record(&claim_dir);
+    }
+    Ok(!journal.join("lifecycle-claim-v3-active.json").exists())
+}
+
+fn load_confirmed_install_begin(attempt_dir: &Path) -> io::Result<AcceptedLaunchBegin> {
+    let ingress = super::private_file(&attempt_dir.join("begin-v3.bin"), super::MAX_CLAIM)?;
+    let requested: Value = serde_json::from_slice(&super::private_file(
+        &attempt_dir.join("op22-requested.json"),
+        MAX_QUALIFICATION,
+    )?)?;
+    let plan: Value = serde_json::from_slice(&super::private_file(
+        &attempt_dir.join("plan.json"),
+        8 * super::MAX_CLAIM,
+    )?)?;
+    let outcome: Value = serde_json::from_slice(&super::private_file(
+        &attempt_dir.join("op22-outcome.json"),
+        MAX_QUALIFICATION,
+    )?)?;
+    let str_field = |obj: &Value, name: &str| -> io::Result<String> {
+        obj.get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("v3 retained BEGIN field absent"))
+            .map(str::to_owned)
+    };
+    let dec_field = |obj: &Value, name: &str| -> io::Result<String> {
+        let v = str_field(obj, name)?;
+        if !crate::lifecycle_v3_native::decimal(&v) {
+            return Err(invalid("v3 retained BEGIN decimal field noncanonical"));
+        }
+        Ok(v)
+    };
+    if str_field(&requested, "ingressSha256")? != super::hex(&Sha256::digest(&ingress))
+        || str_field(&outcome, "type")? != "confirmed"
+        || str_field(&outcome, "confirmation")? != "installed"
+    {
+        return Err(invalid("v3 retained BEGIN confirmation identity refused"));
+    }
+    Ok(AcceptedLaunchBegin {
+        ingress,
+        action: LaunchBeginAction::Install,
+        prior_create: None,
+        client_operation_id: dec_field(&requested, "clientOperationId")?,
+        authorization_operation_id: dec_field(&plan, "authorizationOperationId")?,
+        volume_id_hex: str_field(&plan, "volumeIdHex")?,
+        snapshot_manifest: dec_field(&plan, "snapshotManifest")?,
+        process_generation: dec_field(&plan, "processGeneration")?,
+        process_identity_hex: str_field(&plan, "processIdentityHex")?,
+        transaction_id: dec_field(&outcome, "transactionId")?,
+        event_id: dec_field(&outcome, "eventId")?,
+        accepted_count: dec_field(&outcome, "acceptedCount")?,
+        world_root: dec_field(&outcome, "worldRoot")?,
+    })
+}
+
 fn preflight_prepare_artifacts(config: &InstallConfig) -> io::Result<()> {
     // A journal is one attempt. Reject both namespaces so an old v1 attempt
     // cannot accidentally be presented as a fresh v3 operation, or vice versa.
@@ -240,7 +313,12 @@ fn preflight_prepare_artifacts(config: &InstallConfig) -> io::Result<()> {
 
 pub(super) fn preflight_prepare(config: &InstallConfig) -> io::Result<()> {
     config.preflight_operator_paths()?;
-    preflight_prepare_artifacts(config)?;
+    let resuming_begin = can_resume_confirmed_begin(&config.journal_dir)?;
+    if resuming_begin {
+        config.preflight_artifacts()?;
+    } else {
+        preflight_prepare_artifacts(config)?;
+    }
     let qualification = QualifiedLaunch::read(config)?;
     open_protected_directory(
         config
@@ -274,6 +352,9 @@ pub(super) fn preflight_prepare(config: &InstallConfig) -> io::Result<()> {
     )?)?;
     begin_signers.validate(&operator, config.app_uid)?;
     claim_signers.validate(&operator, config.app_uid)?;
+    if resuming_begin {
+        archive_pure_attempt(config, "launch-descriptor")?;
+    }
     let launch = author_qualified_launch(
         config,
         &operator,
@@ -281,16 +362,21 @@ pub(super) fn preflight_prepare(config: &InstallConfig) -> io::Result<()> {
         &qualification,
         &config.artifact("launch-descriptor"),
     )?;
-    let begin = submit_begin_once(
-        &operator,
-        &begin_signers,
-        config.app_uid,
-        &launch,
-        LaunchBeginAction::Install,
-        &config.artifact("begin-v3-operation-ledger"),
-        &config.artifact("begin-v3"),
-    )?;
-    let assembled = assemble_claim_once(
+    let begin = if resuming_begin {
+        load_confirmed_install_begin(&config.artifact("begin-v3"))?
+    } else {
+        submit_begin_once(
+            &operator,
+            &begin_signers,
+            config.app_uid,
+            &launch,
+            LaunchBeginAction::Install,
+            &config.artifact("begin-v3-operation-ledger"),
+            &config.artifact("begin-v3"),
+        )?
+    };
+    let _ = (assemble_claim_once, submit_claim_once);
+    let claim = crate::lifecycle_v3_claim_native::assemble_and_submit_once(
         &operator,
         &claim_signers,
         config.app_uid,
@@ -299,7 +385,6 @@ pub(super) fn preflight_prepare(config: &InstallConfig) -> io::Result<()> {
         &config.artifact("claim-v3-nonce-ledger"),
         &config.artifact("claim-v3-author"),
     )?;
-    let claim = submit_claim_once(&operator, assembled, &begin, &launch, &claim_signers)?;
     if claim.physical_begin.package_sha256 != config.expected_raw_sha256 {
         return Err(invalid("v3 INSTALL claim differs from signed SPK"));
     }

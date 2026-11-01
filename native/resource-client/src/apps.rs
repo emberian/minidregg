@@ -557,7 +557,7 @@ pub(crate) fn worker_call(socket: &Path, request: &Value) -> Result<Value> {
         format!("appsWorkerUnavailable: {} ({e}); the install is not started, retry when the worker is up", socket.display())
     })?;
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(120)))
+        .set_read_timeout(Some(std::time::Duration::from_secs(600)))
         .map_err(|e| e.to_string())?;
     let mut line = serde_json::to_vec(request).map_err(|e| e.to_string())?;
     line.push(b'\n');
@@ -634,7 +634,7 @@ fn request_id() -> Result<String> {
 /// `install`: the member's choice, retained under the workspace before it is
 /// sent, so a lost reply is answered by the exact retry of the same id.
 fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::OsString>) -> Result<()> {
-    let selector = text_flag(&mut args, "app")?.ok_or("install requires --app APP-ID|PACKAGE-ID")?;
+    let selector = text_flag(&mut args, "app")?;
     let class = text_flag(&mut args, "class")?.unwrap_or_else(|| "auto".into());
     if !matches!(class.as_str(), "S" | "M" | "L" | "auto") {
         return Err("classRefused: --class takes S, M or L".into());
@@ -649,6 +649,19 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
     let birth_receipt = args.optional("birth-receipt").map(|v| absolute(&path(v))).transpose()?;
     let delegation = args.optional("delegation").map(|v| absolute(&path(v))).transpose()?;
     args.finish()?;
+    let requests = root.join("apps").join("requests");
+    crate::fsio::ensure_private_dir_all(&requests)?;
+    let selector = match (selector, &retry) {
+        (Some(s), _) => s,
+        (None, Some(id)) => {
+            if !mini_sdk::hex::is_canonical_len(id, 16) {
+                return Err("--retry takes the 32-hex request id the first attempt printed".into());
+            }
+            let retained = crate::workspace::bounded_json(&requests.join(format!("{id}.json")))?;
+            retained.get("appId").and_then(Value::as_str).ok_or("retained install request has no appId")?.to_owned()
+        }
+        (None, None) => return Err("install requires --app APP-ID|PACKAGE-ID".into()),
+    };
     let entries = load_index(&paths.index)?;
     let entry = resolve(&entries, &selector)?;
     let verdict = verdict(&paths.verdicts, &paths.meta, &entry.package_id);
@@ -660,8 +673,6 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
             entry.package_id
         ));
     }
-    let requests = root.join("apps").join("requests");
-    crate::fsio::ensure_private_dir_all(&requests)?;
     let is_retry = retry.is_some();
     let (id, retained) = match retry {
         Some(id) => {
@@ -679,7 +690,7 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
             let mut delegation = delegation.unwrap_or_else(|| apps_dir.join("delegation.json"));
             // The member turn (§3 steps 1 and 2): the application birth as the member's own op 30
             // and the hosting delegation to the manager, unless retained documents are supplied.
-            if !(source.is_file() && receipt.is_file() && delegation.is_file()) {
+            if !(source.is_file() && receipt.is_file() && delegation.is_file() && delegation.with_file_name("share-delegation.json").is_file()) {
                 let config = apps_config(&paths.config)?;
                 let ws = crate::workspace::load(&root)?;
                 // The birth is named by the catalog application, not by this request: a retry after an
@@ -1288,6 +1299,10 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str
 fn delegate_share(root: &Path, ws: &Value, app_ref: &str, manager: &str, max_cost: &str) -> Result<Value> {
     use crate::workspace as w;
     let id = format!("share-{app_ref}");
+    let recipient_ref = root.join("proposals").join(&id).join("recipient-reference.json");
+    if recipient_ref.is_file() {
+        return w::bounded_json(&recipient_ref);
+    }
     let proposal = root.join("sources").join(format!("{id}.request.json"));
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":app_ref,"recipient":manager,
         "verbs":["observe","mutate","delegate","append","place"],"maxCost":max_cost});

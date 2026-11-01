@@ -115,7 +115,7 @@ impl CheckpointControl {
             .ok_or_else(|| invalid("checkpoint app directory absent"))?
             .join("checkpoint-pause.json");
         let socket = binding.journal_dir.join("checkpoint-control.sock");
-        let listener = UnixListener::bind(&socket).ctx("bind", &socket)?;
+        let listener = crate::dispatch_native::bind_unix(&socket)?;
         fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).ctx("set permissions", &socket)?;
         Ok(Self {
             listener,

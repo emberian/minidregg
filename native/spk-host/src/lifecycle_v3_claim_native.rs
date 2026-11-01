@@ -406,6 +406,114 @@ fn checked_committed(
 pub(crate) const CLAIM_ACTIVE_MARKER: &str = "lifecycle-claim-v3-active.json";
 pub(crate) const CLAIM_INGRESS_FILE: &str = "claim-v3.bin";
 
+pub(crate) fn claim_attempt_is_no_record(attempt_dir: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(attempt_dir) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {}
+        Ok(_) => return Err(invalid("v3 claim attempt directory identity refused")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    }
+    if attempt_dir.join("committed-v3.bin").exists() {
+        return Ok(false);
+    }
+    if attempt_dir
+        .join(crate::lifecycle_v3_native::BEGIN_REFUSED_MARKER)
+        .exists()
+    {
+        return Ok(true);
+    }
+    let outcome_path = attempt_dir.join("op26-claim-submit-outcome.json");
+    if let Ok(bytes) = fs::read(&outcome_path) {
+        if let Ok(outcome) = serde_json::from_slice::<Value>(&bytes) {
+            if outcome.get("type").and_then(Value::as_str) == Some("refused")
+                && outcome.get("effect").and_then(Value::as_str) == Some("no-record")
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub(crate) fn archive_no_record_claim_attempt(attempt_dir: &Path) -> io::Result<()> {
+    if !claim_attempt_is_no_record(attempt_dir)? {
+        return Err(invalid("v3 claim attempt is not a settled no-record refusal"));
+    }
+    let parent = attempt_dir
+        .parent()
+        .ok_or_else(|| invalid("v3 claim attempt parent absent"))?;
+    private_dir(parent)?;
+    private_dir(attempt_dir)?;
+    let active_path = parent.join(CLAIM_ACTIVE_MARKER);
+    let embedded_path = attempt_dir.join("active-marker.json");
+    if active_path.exists() && !embedded_path.exists() {
+        fs::rename(&active_path, &embedded_path).ctx("rename", &active_path)?;
+    } else if active_path.exists() {
+        fs::remove_file(&active_path).ctx("remove", &active_path)?;
+    }
+    let name = attempt_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| invalid("v3 claim attempt name invalid"))?;
+    let mut bytes = [0u8; 16];
+    use std::io::Read as _;
+    fs::File::open("/dev/urandom")
+        .ctx("open", &"/dev/urandom")?
+        .read_exact(&mut bytes)?;
+    let archive = parent.join(format!("{name}-no-record-{}", hex(&bytes)));
+    fs::rename(attempt_dir, &archive).ctx("rename", attempt_dir)?;
+    Ok(())
+}
+
+pub(crate) fn assemble_and_submit_once(
+    operator: &PrivateOperator,
+    fixed: &FixedLaunchClaimSigners,
+    app_uid: u32,
+    begin: &AcceptedLaunchBegin,
+    launch: &SourceBoundLaunch<'_>,
+    nonce_ledger: &Path,
+    attempt_dir: &Path,
+) -> io::Result<CommittedLaunchClaim> {
+    if claim_attempt_is_no_record(attempt_dir)? {
+        archive_no_record_claim_attempt(attempt_dir)?;
+    }
+    let mut last_err = None;
+    for attempt in 0..4 {
+        if attempt > 0 {
+            archive_no_record_claim_attempt(attempt_dir)?;
+        }
+        let assembled = match assemble_once(
+            operator,
+            fixed,
+            app_uid,
+            begin,
+            launch,
+            nonce_ledger,
+            attempt_dir,
+        ) {
+            Ok(assembled) => assembled,
+            Err(err) => {
+                if attempt + 1 < 4 && claim_attempt_is_no_record(attempt_dir)? {
+                    last_err = Some(err);
+                    continue;
+                }
+                return Err(err);
+            }
+        };
+        match submit_fresh_once(operator, assembled, begin, launch, fixed) {
+            Ok(claim) => return Ok(claim),
+            Err(err) => {
+                if attempt + 1 < 4 && claim_attempt_is_no_record(attempt_dir)? {
+                    last_err = Some(err);
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| invalid("v3 claim attempts exhausted")))
+}
+
 /// Op27 after an uncertain op26: the exact retained v3 claim only. The
 /// receipt is historical evidence and can never arm a physical launch.
 pub(crate) fn recover_claim_receipt_only(

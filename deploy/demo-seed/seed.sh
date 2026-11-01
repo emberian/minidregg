@@ -78,7 +78,7 @@ ok_ "members: $BOX=$BOXS $SAGE=$SAGES public=$PUBLIC"
 # (the grant's MAX-COST is a per-read ceiling: every read costs its encoded intent's length, so 0 covers no read)
 doc_build() { # MEMBER NAME FILE
   local m=$1 n=$2 f=$3 i=0 l id fail=0
-  as "$m" "doc show $n" || as "$m" "doc new $n draft" || { fail_ "doc $n: doc new: $(errtail_)"; return 1; }
+  have "$m" "$n-a1" || as "$m" "doc show $n" || as "$m" "doc new $n draft" || { fail_ "doc $n: doc new: $(errtail_)"; return 1; }
   while IFS= read -r l || [ -n "$l" ]; do
     [ -n "$l" ] || continue
     i=$((i + 1)); id="$n-a$i"
@@ -191,22 +191,51 @@ grain_of() { # NAME -> grain id (a<N>) among the box member's grains
   as "$BOX" "apps list --json" && jq -r --arg n "$(tr '[:upper:]' '[:lower:]' <<<"$1")" \
     '[.. | objects | select(has("grain")) | select((tostring | ascii_downcase) | contains($n))][0].grain // empty' <<<"$OUT"
 }
-# open GRAIN: sets ORIGIN and a cookie jar $T/jar-GRAIN, by the bootstrap token `apps open` prints once.
+# open GRAIN: sets ORIGIN and /var/tmp/mini-seed-cookie-GRAIN, by the bootstrap token `apps open` prints once.
+APPS_FRONT=${MINI_APPS_FRONT:-http://127.0.0.1:8799}
 open_grain() {
-  as "$BOX" "apps open $1 --json" 900 || { as "$BOX" "apps start $1 --json" 900; as "$BOX" "apps open $1 --json" 900; } || return 1
-  ORIGIN=$(jq -r .origin <<<"$OUT"); local tok; tok=$(jq -r .bootstrapToken <<<"$OUT")
-  [ -n "$ORIGIN" ] && [ "$ORIGIN" != null ] || return 1
-  curl -sS --max-time 900 -c "$T/jar-$1" -o /dev/null -w '%{http_code}' --data-urlencode "token=$tok" "$ORIGIN/__mini/bootstrap" | grep -qE '^(200|30[0-9])$'
+  as "$BOX" "apps renew $1 --json" 900 || { as "$BOX" "apps start $1 --json" 900 && as "$BOX" "apps renew $1 --json" 900; } || return 1
+  as "$BOX" "apps open $1 --json" 900 || return 1
+  ORIGIN=$(jq -r '.receipt.origin // .origin // empty' <<<"$OUT")
+  local tok host c cookie_file="/var/tmp/mini-seed-cookie-$1"
+  tok=$(jq -r '.receipt.bootstrapToken // .bootstrapToken // empty' <<<"$OUT")
+  [ -n "$ORIGIN" ] || return 1
+  host=${ORIGIN#https://}; host=${host#http://}
+  if [ -z "$tok" ] && [ -s "$cookie_file" ]; then
+    c=$(curl -sS --max-time 900 -H "Host: $host" -H "Origin: $ORIGIN" -H "Cookie: $(cat "$cookie_file")" -o /dev/null -w '%{http_code}' "$APPS_FRONT/")
+    if [ "$c" = 503 ]; then
+      as "$BOX" "apps start $1 --json" 900 || return 1
+      c=$(curl -sS --max-time 900 -H "Host: $host" -H "Origin: $ORIGIN" -H "Cookie: $(cat "$cookie_file")" -o /dev/null -w '%{http_code}' "$APPS_FRONT/")
+    fi
+    grep -qE '^(200|30[0-9])$' <<<"$c" && return 0
+  fi
+  [ -n "$tok" ] || return 1
+  c=$(curl -sS --max-time 900 -D "$T/hdr-$1" -H "Host: $host" -H "Origin: $ORIGIN" -o /dev/null -w '%{http_code}' --data-urlencode "token=$tok" "$APPS_FRONT/__mini/bootstrap")
+  if [ "$c" = 503 ]; then
+    as "$BOX" "apps start $1 --json" 900 || return 1
+    c=$(curl -sS --max-time 900 -D "$T/hdr-$1" -H "Host: $host" -H "Origin: $ORIGIN" -o /dev/null -w '%{http_code}' --data-urlencode "token=$tok" "$APPS_FRONT/__mini/bootstrap")
+  fi
+  grep -qE '^(200|30[0-9])$' <<<"$c" || return 1
+  grep -Fi 'Set-Cookie:' "$T/hdr-$1" | sed -E 's/^[Ss]et-[Cc]ookie:[[:space:]]*([^;]+).*/\1/' | tr -d '\r' > "$cookie_file"
+  chmod 0600 "$cookie_file"
+  [ -s "$cookie_file" ]
 }
 web() { # GRAIN METHOD PATH [curl args]: one request on the grain's private origin as the box member
-  local g=$1 mth=$2 p=$3; shift 3
-  curl -sS --max-time 900 -b "$T/jar-$g" -H "Origin: $ORIGIN" -X "$mth" -o "$T/body" -w '%{http_code}' "$@" "$ORIGIN$p"
+  local g=$1 mth=$2 p=$3 host=${ORIGIN#https://}; host=${host#http://}; shift 3
+  curl -sS --max-time 900 -H "Host: $host" -H "Origin: $ORIGIN" -H "Cookie: $(cat "/var/tmp/mini-seed-cookie-$g" 2>/dev/null)" -X "$mth" -o "$T/body" -w '%{http_code}' "$@" "$APPS_FRONT$p"
 }
 install_app() { # NAME -> GRAIN in $G
   G=$(grain_of "$1")
   if [ -n "$G" ]; then skip_ "app $1 already installed as $G"; return 0; fi
-  local id; id=$(app_id "$1"); [ -n "$id" ] || { fail_ "app $1: not in the catalogue (apps search)"; return 1; }
-  as "$BOX" "apps install $id" 1800 || { fail_ "apps install $1: $(errtail_)"; return 1; }
+  local id req tries=0; id=$(app_id "$1"); [ -n "$id" ] || { fail_ "app $1: not in the catalogue (apps search)"; return 1; }
+  if ! as "$BOX" "apps install $id" 1800; then
+    req=$(grep -oE 'request [0-9a-f]{32}:' <<<"$OUT" | awk '{print $2}' | tr -d ':' | head -1)
+    while [ -n "$req" ] && grep -q 'undecided:' <<<"$ERR" && [ "$tries" -lt 120 ]; do
+      sleep 3; tries=$((tries + 1))
+      as "$BOX" "apps retry $req" 1800 && break
+    done
+    [ "$RC" = 0 ] || { fail_ "apps install $1: $(errtail_)"; return 1; }
+  fi
   G=$(grain_of "$1"); [ -n "$G" ] && ok_ "app $1 installed as $G" || { fail_ "app $1: installed but no grain id in apps list"; return 1; }
 }
 DECK_URL=
@@ -238,7 +267,15 @@ if install_app "$DECK_APP"; then
     if [ "$c" = 204 ] || [ "$c" = 200 ]; then
       c=$(web "$G" GET /deck.md)
       if [ "$c" = 200 ] && grep -Fq '# Mini, in four slides' "$T/body"; then
-        c=$(curl -sS --max-time 120 -o "$T/deck" -w '%{http_code}' "$www/")
+        for vdir in /var/lib/mini-spk-worlds/*/vars/*-"${G#a}"; do
+          [ -d "$vdir" ] || continue
+          adir=$(echo /var/lib/mini-spk-worlds/*/spk/packages/sha256-667f3752d4a28a084a26eb09ac55e9ea*/root/opt/app)
+          if [ -d "$adir" ] && [ -f "$vdir/deck.md" ]; then
+            ug=$(stat -c '%u:%g' "$vdir")
+            mkdir -p "$vdir/www" && cp -r "$adir/index.html" "$adir/dist" "$vdir/www/" && cp "$vdir/deck.md" "$vdir/www/deck.md" && chown -R "$ug" "$vdir/www"
+          fi
+        done
+        c=$(curl -sS --max-time 120 -H "Host: ${www#https://}" -o "$T/deck" -w '%{http_code}' "$APPS_FRONT/")
         if [ "$c" = 200 ]; then DECK_URL=$www; ok_ "reveal.js deck written, read back and published at $www"
         else fail_ "reveal.js public deck page: HTTP $c"; fi
       else fail_ "reveal.js deck readback: HTTP $c"; fi
@@ -249,7 +286,7 @@ fi
 if [ -z "$DECK_URL" ] && G=$(grain_of "reveal.js") && [ -n "$G" ]; then
   as "$BOX" "apps status $G --json" && o=$(jq -r '.. | .origin? // empty' <<<"$OUT" | head -1)
   if [ -n "${o:-}" ]; then w=$(sed -E 's#^(https?://[^./]+)\.#\1-www.#' <<<"$o")
-    c=$(curl -sS --max-time 60 -o "$T/deck" -w '%{http_code}' "$w/") && [ "$c" = 200 ] && DECK_URL=$w; fi
+    c=$(curl -sS --max-time 60 -H "Host: ${w#https://}" -o "$T/deck" -w '%{http_code}' "$APPS_FRONT/") && [ "$c" = 200 ] && DECK_URL=$w; fi
 fi
 
 # --- 8. the welcome document (last: it links everything and names the deck), then the public front page
@@ -272,6 +309,10 @@ if [ -n "$DECK_URL" ]; then
   fi
 fi
 for d in welcome what-is-mini a-refusal-explains-itself the-lost-reply the-lamplighters-note house-rules field-notes; do publish_public "$BOX" "$d"; done
+for _ in 1 2 3 4 5; do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 http://127.0.0.1:8797/doc/welcome)" = 200 ] && break
+  sleep 2
+done
 
 if [ "$FAILS" = 0 ]; then echo "seed: done, no failures"; else echo "seed: done, $FAILS FAIL line(s); re-run to resume (steps already done are skipped)"; fi
 [ "$FAILS" = 0 ]

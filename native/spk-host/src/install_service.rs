@@ -4,7 +4,7 @@
 #![allow(dead_code)] // Enabled only with the matching native descriptor route.
 
 #[path = "install_v3.rs"]
-mod install_v3;
+pub(crate) mod install_v3;
 
 use crate::io_context::IoContext;
 #[cfg(test)]

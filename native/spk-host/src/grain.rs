@@ -792,13 +792,15 @@ fn install(
     derived_file(&config_path, &serde_json::to_vec_pretty(&config)?)?;
     let prepared = journal.join("install-prepared-v2.json");
     if !exists(&prepared)? {
-        for name in INSTALL_ATTEMPT_ARTIFACTS {
-            if exists(&journal.join(name))? {
-                return Err(unresolved(format!(
-                    "INSTALL preparation attempt {name} exists without a prepared record in {}; \
-                     its BEGIN/claim may be accepted, so it is not repeated",
-                    journal.display()
-                )));
+        if !crate::install_service::install_v3::can_resume_confirmed_begin(&journal)? {
+            for name in INSTALL_ATTEMPT_ARTIFACTS {
+                if exists(&journal.join(name))? {
+                    return Err(unresolved(format!(
+                        "INSTALL preparation attempt {name} exists without a prepared record in {}; \
+                         its BEGIN/claim may be accepted, so it is not repeated",
+                        journal.display()
+                    )));
+                }
             }
         }
         crate::install_service::prepare(&config_path)?;
@@ -1138,9 +1140,15 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         match &run.state {
             RunState::Running => {
                 let unit = broker::resident_unit(&host.store, app, &run.generation.to_string())?;
-                return Ok(json!({"protocol":"mini-spk-grain-start-v1","app":app,
-                    "generation":run.generation.to_string(),"unit":unit,
-                    "already":"running","activeState":unit_active(&unit)?}));
+                let active = unit_active(&unit)?;
+                if prepare_only || matches!(active.as_str(), "active" | "activating" | "reloading") {
+                    return Ok(json!({"protocol":"mini-spk-grain-start-v1","app":app,
+                        "generation":run.generation.to_string(),"unit":unit,
+                        "already":"running","activeState":active}));
+                }
+                drop(route_lock);
+                stop(host, app)?;
+                return start_inner(host, app, prepare_only);
             }
             RunState::Uncertain(reason) => {
                 return Err(unresolved(format!(
