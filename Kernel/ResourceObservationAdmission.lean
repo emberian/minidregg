@@ -182,6 +182,20 @@ structure Prepared (context : Context deployment) (profile : CanonicalRuntimePro
   kindDependenciesExact : WorldKindLawDependencies.loadTarget deployment context.directory
     wanted.target.value = some kindDependencies
 
+def loadTargetDependencies (context : Context deployment) (target : Nat) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTarget deployment context.directory target
+
+def loadTargetDependenciesFast (context : Context deployment) (target : Nat) :
+    Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTargetRooted (fun target => context.view.model.roots ⟨target⟩)
+    deployment context.directory target
+
+@[csimp] theorem loadTargetDependencies_eq_fast :
+    @loadTargetDependencies = @loadTargetDependenciesFast := by
+  funext deployment context target
+  exact WorldKindLawDependencies.loadTarget_eq_rooted (context.physicalCurrent target)
+
 /-- Each refusing branch names its reason. The request is host-built from the
 same image, so a component mismatch means the caller asked for something other
 than an observation of this image (`malformed`) or named generations that have
@@ -205,8 +219,7 @@ def prepare (context : Context deployment) (profile : CanonicalRuntimeProfile.Pr
                     match clockLoaded : Kernel.ClockCellDomain.load deployment context.cells with
                     | none => .error (.of .operationRejected)
                     | some clock =>
-                        match dependenciesExact : WorldKindLawDependencies.loadTarget deployment
-                            context.directory wanted.target.value with
+                        match dependenciesExact : loadTargetDependencies context wanted.target.value with
                         | none => .error (.of .operationRejected)
                         | some dependencies => .ok ⟨observed, observeExact, domainExact, semanticsExact,
                             policyExact, epochExact, revisionExact, values, balancesExact, clock,

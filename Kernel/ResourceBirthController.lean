@@ -72,11 +72,12 @@ def allocate? (registry : TypeRegistry Digest) (before : Directory Nat registry)
   | .ok after => .ok ⟨after, checked⟩
 
 def birthWrite {registry : TypeRegistry Digest}
-    (request : CreateRequest (CellId := Nat) registry) : DataWrite where
-  cellId := ⟨request.cellId⟩
-  expectedPre := physicalRoot (LifecycleImage.fresh (registry := registry))
-  exactPost := physicalRoot (.live request.cell)
-  canonicalPostBytes := LifecycleImage.bytes registry (.live request.cell)
+    (request : CreateRequest (CellId := Nat) registry) : DataWrite :=
+  let postBytes := LifecycleImage.bytes registry (.live request.cell)
+  { cellId := ⟨request.cellId⟩
+    expectedPre := physicalRoot (LifecycleImage.fresh (registry := registry))
+    exactPost := rootBytes postBytes
+    canonicalPostBytes := postBytes }
 
 def allocationWrites {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) : List DataWrite :=
@@ -316,11 +317,12 @@ theorem sameCreates_iff (left right : List (CreateRequest (CellId := Nat) Regist
   simp only [sameCreates, beq_iff_eq]
   exact (lawful_encode_injective createsCodec).eq_iff
 
-def packedWrite (identifier : Nat) (before after : PackedCell Registry) : DataWrite where
-  cellId := ⟨identifier⟩
-  expectedPre := physicalRoot (.live before)
-  exactPost := physicalRoot (.live after)
-  canonicalPostBytes := LifecycleImage.bytes Registry (.live after)
+def packedWrite (identifier : Nat) (before after : PackedCell Registry) : DataWrite :=
+  let postBytes := LifecycleImage.bytes Registry (.live after)
+  { cellId := ⟨identifier⟩
+    expectedPre := physicalRoot (.live before)
+    exactPost := rootBytes postBytes
+    canonicalPostBytes := postBytes }
 
 /-- Each source has one physical owner: allocation emits every new envelope;
 the authority update emits its one cell; the pinned Book emits one final
@@ -433,6 +435,26 @@ theorem authorityWrites_postLaw {deployment : Deployment} (valid : deployment.Va
         (.live (Compiler.CredentialAuthorityDomainReceiver.packedCell post)) from rfl,
     LifecycleImage.decode_encode]
   exact ⟨valid, rfl⟩
+
+theorem birthWrite_postLaw (deployment : Deployment)
+    (request : CreateRequest (CellId := Nat) Registry) :
+    PhysicalPostLaw deployment (birthWrite request) ↔
+      CanonicalCellRegistry.CellLaw deployment request.cellId request.cell := by
+  unfold PhysicalPostLaw
+  rw [show (birthWrite request).canonicalPostBytes =
+      (LifecycleImage.codec Registry).encode (.live request.cell) from rfl,
+    LifecycleImage.decode_encode]
+  rfl
+
+theorem packedWrite_postLaw (deployment : Deployment) (identifier : Nat)
+    (before after : PackedCell Registry) :
+    PhysicalPostLaw deployment (packedWrite identifier before after) ↔
+      CanonicalCellRegistry.CellLaw deployment identifier after := by
+  unfold PhysicalPostLaw
+  rw [show (packedWrite identifier before after).canonicalPostBytes =
+      (LifecycleImage.codec Registry).encode (.live after) from rfl,
+    LifecycleImage.decode_encode]
+  rfl
 
 /-- **K-FIELD-CLOSURE at every receiver.** A live declared object cell that a
 receiver's `PhysicalPostLaw` admits holds only the fields it declares.  Every
@@ -856,15 +878,20 @@ def preparePostAuthority {profile : PolicyCompilerProfile F}
     ((writes.map DataWrite.cellId).Nodup ∧
       ∀ write ∈ writes, write.expectedPre = ground.view.model.roots write.cellId)
     .physicalShape
-  -- The authority writes carry their law (`authorityWrites_postLaw`); only the others are decoded.
+  -- The authority and factory writes carry their law (`authorityWrites_postLaw`, `pre.factory.law`);
+  -- newborn cells and the Book post are checked directly on the cells without decoding post bytes.
   let ownCells ← requirePreparation
-    (∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload resources.post [],
-      PhysicalPostLaw deployment write) .finalCellLaw
+    ((∀ request ∈ descriptor.createRequests,
+        CanonicalCellRegistry.CellLaw deployment request.cellId request.cell) ∧
+      CanonicalCellRegistry.CellLaw deployment deployment.resourceBookId
+        ⟨.resourceBook, resources.post⟩) .finalCellLaw
   .ok ⟨allocated, resources, shape.down.1, shape.down.2, fun write member => by
-    simp only [planWrites, List.mem_append] at member
-    rcases member with (own | own) | authority
-    · exact ownCells.down write (by simp [planWrites, own])
-    · exact ownCells.down write (by simp [planWrites, own])
+    simp only [planWrites, allocationWrites, List.mem_append, List.mem_map, List.mem_cons,
+      List.not_mem_nil, or_false] at member
+    rcases member with (⟨request, reqMem, rfl⟩ | (rfl | rfl)) | authority
+    · exact (birthWrite_postLaw deployment request).mpr (ownCells.down.1 request reqMem)
+    · exact (packedWrite_postLaw deployment deployment.factoryId _ _).mpr pre.factory.law
+    · exact (packedWrite_postLaw deployment deployment.resourceBookId _ _).mpr ownCells.down.2
     · exact authorityLaw write authority⟩
 
 /-- The actual fail-closed receiving preparation. Even the auxiliary create
