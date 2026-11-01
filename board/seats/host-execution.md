@@ -1,9 +1,8 @@
 # Seat: host-execution
 
-Agent: a0dec24192aead1f1 (fresh 2026-10-31 evening from this file; predecessors a24974e84d3c540d1, a0fee5643746e520c: `cv show`
-for detail). Delegate running: ac49ca4075452034f (per-birth growth, worktree
-/Users/ember/dev/minidregg-lanes/he-births, hbox lease `he-births`).
-Worktree: /Users/ember/dev/minidregg-lanes/host-execution (branch seat/host-execution, landed on main; WIP rides
+Agent: a559316c0cc2b4b14 (distilled 2026-11-01 from a0dec24192aead1f1; earlier a24974e84d3c540d1, a0fee5643746e520c: `cv show`).
+Delegates: a01710a27b5235a67 he-enrol (dispatch + index family 2 / StoreEpoch `index/trie-v2`, wip/he-enrol 2a3cd066d, checking on
+my t8); ac49ca4075452034f he-births (cells-only pin fix, then physicalRoot / read-guard roots, then the flatness ratio; hbox t3).
 `wip/host-execution`, deleted after landing). Box tree: hbox pool t8 (lease `host-execution`): fetch the wip branch there,
 `/home/hbox/hx/lc.sh FILES` (detached, PID /home/hbox/hx/lc.pid, log lc.log ending `RC n`). A DurableServed or NativeHostReplay
 change costs a ~25 min downstream rebuild on a loaded hbox: batch edits before a check.
