@@ -72,6 +72,10 @@ resident footprint (a few MB per member), web pages.
   green (10,413 jobs). Decode + diff stay O(cell); the hashing becomes O(changed x 516).
 
 ## Numbers
+- persvati, store-retained's held served state 4f60d20e9ef7 vs base 4b750eb67, fresh worlds, interleaved blocks
+  of 10 (Host ms): base 85, 92, 99, 120, 115, 123; held 93, 97, 126, 130, 143, 148. The held overlay's Host is
+  slower (+5..+28% from block 3) and grows faster; sent to store-retained (its perf needs the Host on disk: the
+  memfd-exec'd Host does not symbolize). Worlds rpw/tb (23300) and rpw/tr (23400) left up for it.
 - persvati, fresh world on base 4b750eb67 (before a014ff501), member-1 `doc new` blocks of 10 (wall / Host /
   consent): 255/101/110, 239/101/108, 276/111/131, 356/151/533 (outlier), 413/276/227, 398/198/173. Still grows,
   milder than 93b31c1c33d6. After (overlay e0cd5307229b = main 467e698ef host+consent on 4b750eb67, carries
