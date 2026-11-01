@@ -51,7 +51,11 @@ front=$("$bin/minidregg-host" /dev/null objective-constants |
 # PolicyRecordCodec.stringStream frames each character as 0xFF then its byte.
 framed=$(python3 -c 'import sys; print("".join("ff%02x" % b for b in sys.argv[1].encode()))' "$front")
 doc_data=Fixtures/NativeDocWriteFixtureData.lean
-elaborates() { (cd "$root" && timeout 1800 lake env lean "$1" > /dev/null 2>&1); }
+dynlib=()
+for so in "$root/.lake/native/libmini_kernels_lean.so" "$root/.lake/native/libmini_kernels_lean.dylib"; do
+  [ -f "$so" ] && dynlib+=(--load-dynlib="$so")
+done
+elaborates() { (cd "$root" && timeout 1800 lake env lean "${dynlib[@]}" "$1" > /dev/null 2>&1); }
 accepted=current; doc=current
 grep -q "$framed" "$root/$data" || accepted=stale
 [ "$accepted" = stale ] || elaborates Fixtures/NativeAcceptedFixture.lean || accepted=stale

@@ -263,8 +263,8 @@ while :; do
   fi
   git -C "$REPO" fetch -q origin main || { sleep 60; continue; }
   tip=${want:-$(git -C "$REPO" rev-parse origin/main)}
-  # REDS.md commits are the builder's own: a tip whose only change since the last round is board/ is not rebuilt
-  if [ -n "$last" ] && [ -z "$want" ] && [ -z "$(git -C "$REPO" diff --name-only "$last" "$tip" -- . ':!board')" ]; then
+  # REDS.md and rerecord data commits are the builder's own: a tip whose only change since the last round is board/ or fixture data is not rebuilt
+  if [ -n "$last" ] && [ -z "$want" ] && [ -z "$(git -C "$REPO" diff --name-only "$last" "$tip" -- . ':!board' ':!Fixtures/NativeAcceptedFixtureData.lean' ':!Fixtures/NativeDocWriteFixtureData.lean')" ]; then
     [ $once = 1 ] && exit 0; sleep "${BUILDER_POLL_S:-300}"; continue
   fi
   round "$tip"; [ $? = 75 ] && { sleep 120; continue; }
