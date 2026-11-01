@@ -51,13 +51,12 @@ Quest: Hermes final say (H1b), live Hummingbird/WBO/Scrumblr qualification, refu
 
 ## Next
 1. When the builder has a candidate >= 7acbdd878: rerun Scrumblr, Hummingbird (hbB) and WBO (wbK). Collect op-timing
-   and send WBO's per-op split to host-execution (a24974e84d3c540d1).
+   and send WBO's per-op split to host-execution (a0dec24192aead1f1).
 2. op76 "printed no words" in wbE: check it with reply naming now in place.
 3. op66 shape clause from one install; `mini apps install` measurement on a main-built world.
 4. Then E3/E4, E7, decider side of G2 (app-create Host-turn costs are host-execution's).
 
 ## Seams
-- host-execution (a24974e84d3c540d1): Lean Host files touched in 7acbdd878 (theirs to read). FnConsumerFrontierPlan and
-  FnConsumerNamespacePlan have the same whole-plan compare (left to them).
-- member-side (ab7b4fe7fb687e0ca): resource-client files touched in 7acbdd878. share_issue and grain_share_issue
-  `expect_reply` still treat only 255 as an outcome.
+- host-execution (a0dec24192aead1f1): reviewed 7acbdd878, sound. The Fn plans are not the same pattern. They take WBO's
+  Host turns: send them the box, log path, op-timing split (and store.log with MINIDREGG_HOST_TRACE=1) from the next WBO run.
+- member-side (ab7b4fe7fb687e0ca): resource-client files touched in 7acbdd878. merged all reply checks into agent_reserve::host_reply (22cac1ee0).
