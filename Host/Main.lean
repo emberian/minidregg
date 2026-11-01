@@ -2863,7 +2863,9 @@ def writeSessionFrame (output : IO.FS.Stream) (operation : UInt8)
   let response := (operation :: payload).toByteArray
   if response.size > maxFrame then
     throw (IO.userError "native host response exceeds frame budget")
-  output.write (lengthBytes response.size ++ response)
+  -- Two writes, not a copy of the whole reply behind its length prefix.
+  output.write (lengthBytes response.size)
+  output.write response
   output.flush
 
 /-- Op34 writes a committed permit only inside the receiver's point-in-time

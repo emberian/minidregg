@@ -165,10 +165,13 @@ abbrev Cache := List Entry
 /-- Only byte equality can reuse a retained packed value. The lawful codec
 turns this into exact value equality; collision resistance is not a premise. -/
 def provider (cache : Cache) : OpeningProvider := fun fields packed =>
-  let bytes := PackedCell.bytes CanonicalCellRegistry.registry packed
-  match cache.find? (fun entry => entry.bytes == bytes) with
+  -- The root picks the candidate (another revision of the same cell has another root, so a miss
+  -- costs one digest comparison per entry, not a byte comparison of the whole cell); the bytes
+  -- still decide the reuse.
+  match cache.find? (fun entry => entry.packed.payload.root == packed.payload.root) with
   | none => ordinaryOpening fields packed
   | some entry =>
+      let bytes := PackedCell.bytes CanonicalCellRegistry.registry packed
       if same : entry.bytes = bytes then
         have encoded : PackedCell.bytes CanonicalCellRegistry.registry entry.packed =
             PackedCell.bytes CanonicalCellRegistry.registry packed := by
@@ -186,11 +189,13 @@ def provider (cache : Cache) : OpeningProvider := fun fields packed =>
 /-- A fixed entry ceiling bounds retention. A single currently accepted source
 view can be large, but the cache cannot retain an unbounded history of views. -/
 def retain (cache : Cache) (packed : PackedCell CanonicalCellRegistry.registry) : Cache :=
-  let bytes := PackedCell.bytes CanonicalCellRegistry.registry packed
-  let entry := match cache.find? (fun entry => entry.bytes == bytes) with
-    | some retained => retained
+  let root := packed.payload.root
+  let entry := match cache.find? (fun entry => entry.packed.payload.root == root) with
+    | some retained =>
+        if retained.bytes = PackedCell.bytes CanonicalCellRegistry.registry packed then retained
+        else Entry.prepare packed
     | none => Entry.prepare packed
-  (entry :: cache.filter (fun old => old.bytes != bytes)).take 16
+  (entry :: cache.filter (fun old => old.packed.payload.root != root)).take 16
 
 theorem retain_bounded (cache : Cache) (packed : PackedCell CanonicalCellRegistry.registry) :
     (retain cache packed).length ≤ 16 := by
