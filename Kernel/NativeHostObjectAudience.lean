@@ -83,7 +83,7 @@ def objectAudienceOn (config : Config) (ground : Minidregg.Compiler.ServedBasis.
 def objectAudienceLoaded (config : Config) (target : Durable)
     (verified : NativeHostReplay.Verified config target)
     (signedObservationBytes : List UInt8) : IO (Except Refusal ObjectAudienceView) :=
-  objectAudienceOn config (.full target verified.opened.directory verified.opened.authority)
+  objectAudienceOn config (.full verified.opened.durable verified.opened.directory verified.opened.authority)
     signedObservationBytes
 
 /-- Device catalog material is disclosed only through its own current signed
@@ -127,7 +127,7 @@ def objectAudienceRosterLoaded (config : Config) (target : Durable)
     (planned : Minidregg.Theory.ObjectAudience.State) :
     IO (Except String (Minidregg.Theory.ObjectAudience.State ×
       Minidregg.Theory.ObjectAudienceRoster.Roster)) :=
-  objectAudienceRosterOn config (.full target verified.opened.directory verified.opened.authority)
+  objectAudienceRosterOn config (.full verified.opened.durable verified.opened.directory verified.opened.authority)
     sourceObservation catalogObservation rosterBytes planned
 
 end Minidregg.Kernel.NativeHost
