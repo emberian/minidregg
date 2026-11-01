@@ -1,18 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `35d8d4a27bd8` (Kernel,Host: eliminate whole-cell re-encodings and sessionWalked in protected document pro). Round finished 2026-11-01T06:52Z.
-green: `6c0612f2f3e9`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-35d8d4a2`.
+Tip: `dbb0dc30de44` (perf(host): pass verified.opened.durable in objectAudienceLoaded/RosterLoaded). Round finished 2026-11-01T07:16Z.
+green: `6c0612f2f3e9`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-dbb0dc30`.
 
-| stage | signature | reruns? | same place as last round? | owner | detail |
-|---|---|---|---|---|---|
-| host | rc=1 error: build failed | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
-| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
+No reds: `green` moves to `dbb0dc30de44`.
 
-Suspect commits since green (`git log 6c0612f2f3e9..35d8d4a27bd8`), newest first; owners are the seats whose
-`Owns:` line (board/seats/*.md) names a path the commit touched:
+## Flatness (published, does not gate `green`)
 
-- `35d8d4a2` Kernel,Host: eliminate whole-cell re-encodings and sessionWalked in protected document propose/submi (owner: apps-hermes)
-- `bc8ca1a0` builder: REDS.md for 6c0612f2f3e9 (0 red) (owner: build-loop)
+| row | verdict | metric | early | late | ratio | bound | owner |
+|---|---|---|---|---|---|---|---|
+| flatness-submit | FAIL | submit_cpu_ms | 16.000 | 49.500 | 3.094 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 29.251 | 61.123 | 2.090 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_cpu_ms | 7.000 | 13.500 | 1.929 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 24.569 | 80.130 | 3.261 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 45.000 | 58.500 | 1.300 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 213.715 | 249.877 | 1.169 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-dbb0dc30/flatness.log | - | - | - | - | host-execution, store-retained |
