@@ -92,46 +92,22 @@ older. `Held.Agrees` is its exactness against the specification snapshot:
 `install_agrees` and `replayed_agrees` carry it across `DataSnapshot.install`
 and `replay`, and the producers (`ofState`, `ofSnapshot`) establish it. -/
 
-/-- A charge with every lane evaluated once: `install`'s charge is a closure
-over its predecessor's. -/
-def flatCharge (charge : Charge) : Charge :=
-  let incidences := charge .incidences
-  let turnBytes := charge .turnBytes
-  let memoryTouches := charge .memoryTouches
-  let witnessBytes := charge .witnessBytes
-  let proofWork := charge .proofWork
-  let storageBytes := charge .storageBytes
-  let networkBytes := charge .networkBytes
-  let sideEffectCount := charge .sideEffectCount
-  let feeDebit := charge .feeDebit
-  let leaseByteBlocks := charge .leaseByteBlocks
-  fun
-    | .incidences => incidences
-    | .turnBytes => turnBytes
-    | .memoryTouches => memoryTouches
-    | .witnessBytes => witnessBytes
-    | .proofWork => proofWork
-    | .storageBytes => storageBytes
-    | .networkBytes => networkBytes
-    | .sideEffectCount => sideEffectCount
-    | .feeDebit => feeDebit
-    | .leaseByteBlocks => leaseByteBlocks
-
-theorem flatCharge_eq (charge : Charge) : flatCharge charge = charge := by
-  funext lane
-  cases lane <;> rfl
-
 /-- The held state of a served snapshot. -/
 structure Held (rootBytes : List UInt8 → Digest) where
   private mk ::
   cells : Theory.SparseMap CellId (fun _ => List UInt8 × Digest)
   absentBytes : List UInt8
   absentRoot : Digest
-  available : Charge
+  /-- The allowance as data, every lane a number: a `Charge` closure over its
+  predecessor's would make each read walk the history. -/
+  availableTuple : DurableReceiverCodec.ChargeTuple
   absentExact : rootBytes absentBytes = absentRoot
   bound : ∀ cellId entry, cells.get? cellId = some entry → rootBytes entry.1 = entry.2
 
 namespace Held
+
+/-- The allowance the held state answers. -/
+def available (held : Held rootBytes) : Charge := DurableReceiverCodec.chargeOfTuple held.availableTuple
 
 def bytesOf (held : Held rootBytes) (cellId : CellId) : List UInt8 :=
   ((held.cells.get? cellId).map Prod.fst).getD held.absentBytes
@@ -244,7 +220,8 @@ def install (held : Held rootBytes) (intent : DurableDataIntent.DataIntent rootB
   cells := setWrites intent.writes held.cells
   absentBytes := held.absentBytes
   absentRoot := held.absentRoot
-  available := flatCharge fun lane => held.available lane - intent.exactCharge lane + intent.credit lane
+  availableTuple := DurableReceiverCodec.chargeTuple fun lane =>
+    held.available lane - intent.exactCharge lane + intent.credit lane
   absentExact := held.absentExact
   bound := setWrites_bound intent.writes held.cells intent.postRootsBound held.bound
 
@@ -268,8 +245,9 @@ theorem install_agrees {held : Held rootBytes} {before : DataSnapshot rootBytes}
     cases intent.writes.find? (·.cellId = cellId) <;> rfl
   available := by
     show (fun lane => before.model.available lane - intent.exactCharge lane + intent.credit lane) =
-      flatCharge fun lane => held.available lane - intent.exactCharge lane + intent.credit lane
-    rw [flatCharge_eq, agrees.available]
+      DurableReceiverCodec.chargeOfTuple (DurableReceiverCodec.chargeTuple fun lane =>
+        held.available lane - intent.exactCharge lane + intent.credit lane)
+    rw [DurableReceiverCodec.chargeOfTuple_tuple, agrees.available]
 
 /-- The held state after records the executor replays (a record that does not
 bind leaves it unchanged; `replay` refuses it). -/
@@ -331,7 +309,7 @@ def ofState (rootBytes : List UInt8 → Digest) (base : State) : Held rootBytes 
   cells := cellsOf rootBytes base.cells
   absentBytes := base.absentBytes
   absentRoot := rootBytes base.absentBytes
-  available := flatCharge base.available
+  availableTuple := DurableReceiverCodec.chargeTuple base.available
   absentExact := rfl
   bound := by
     intro cellId entry found
@@ -359,7 +337,7 @@ theorem ofState_agrees (rootBytes : List UInt8 → Digest) (base : State) (prefi
       (((cellsOf rootBytes base.cells).get? cellId).map Prod.snd).getD (rootBytes base.absentBytes)
     rw [DurableCheckpoint.tableLookup_rootTable, cellsOf_get]
     cases Seed.lookup base.cells cellId <;> rfl
-  available := (flatCharge_eq base.available).symm
+  available := (DurableReceiverCodec.chargeOfTuple_tuple base.available).symm
 
 private def cellsOfIds (snapshot : DataSnapshot rootBytes) (ids : List CellId) :
     Theory.SparseMap CellId (fun _ => List UInt8 × Digest) :=
@@ -388,7 +366,7 @@ def ofSnapshot (rootBytes : List UInt8 → Digest) (ids : List CellId) (snapshot
   cells := cellsOfIds snapshot ids
   absentBytes := absentBytes
   absentRoot := rootBytes absentBytes
-  available := flatCharge snapshot.model.available
+  availableTuple := DurableReceiverCodec.chargeTuple snapshot.model.available
   absentExact := rfl
   bound := by
     intro cellId entry found
@@ -421,7 +399,7 @@ theorem ofSnapshot_agrees (rootBytes : List UInt8 → Digest) (ids : List CellId
     · rename_i missing
       rw [← snapshot.coherent cellId, outside cellId missing]
       rfl
-  available := (flatCharge_eq _).symm
+  available := (DurableReceiverCodec.chargeOfTuple_tuple _).symm
 
 end Held
 
@@ -1541,7 +1519,6 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
 #assert_axioms Served.entries_step
 #assert_axioms receive_executes_as_full
 #assert_axioms extendIds_eq_fast
-#assert_axioms flatCharge_eq
 #assert_axioms Held.bare_eq
 #assert_axioms Held.install_agrees
 #assert_axioms Held.replayed_agrees
