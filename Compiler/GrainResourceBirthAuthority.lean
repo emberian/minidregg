@@ -51,6 +51,9 @@ structure Prepared {F : Type} [Field F]
   operationMarkerFresh : authority.spent operationMarker = false
   checked : CredentialAuthorityDomain.Prepared authority
     (patch authority descriptor)
+  /-- The post cell, built once and shared by every reader (`post_eq_postCached`). -/
+  postCell : CredentialAuthorityDomain.Cell
+  postExact : postCell = checked.validated.apply
 
 def prepare {F : Type} [Field F]
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
@@ -65,7 +68,7 @@ def prepare {F : Type} [Field F]
       if fresh : authority.spent operationMarker = false then
         let checked ← CredentialAuthorityDomain.prepare authority
           (patch authority descriptor)
-        some ⟨distinct, initialSources, ready, fresh, checked⟩
+        some ⟨distinct, initialSources, ready, fresh, checked, checked.validated.apply, rfl⟩
       else none
     else none
   else none
@@ -82,6 +85,17 @@ variable {F : Type} [Field F]
 def Prepared.post (prepared : Prepared profile deployment authority descriptor operationMarker) :
     CredentialAuthorityDomain.Cell :=
   prepared.checked.validated.apply
+
+/-- The post cell the preparation built (`postExact`). -/
+def Prepared.postCached (prepared : Prepared profile deployment authority descriptor operationMarker) :
+    CredentialAuthorityDomain.Cell :=
+  prepared.postCell
+
+/-- Compiled code reads the prepared post cell instead of re-applying the patch, so its cached
+bytes and root are shared by every reader. -/
+@[csimp] theorem Prepared.post_eq_postCached : @Prepared.post = @Prepared.postCached := by
+  funext F _ profile deployment authority descriptor operationMarker prepared
+  exact prepared.postExact.symm
 
 /-- Authority allocates no cells; the only auxiliary creates are the birth's
 initial policy sources. -/

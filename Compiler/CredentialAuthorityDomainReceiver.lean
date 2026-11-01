@@ -713,6 +713,11 @@ structure PreparedGrantBatch {F : Type} [Field F]
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile descriptor.initialPolicies
   mode : ResourceBirthAuthority.BatchEvidence
     authority.cell descriptor
+  /-- The post cell, built once: every reader of `post` (each planned write, the candidate
+  check, the session's held cell) shares this one `Materialized`, so its bytes are encoded
+  once per birth (`post_eq_postCached`). -/
+  postCell : CredentialAuthorityDomain.Cell
+  postExact : postCell = ResourceBirthAuthority.post authority.cell descriptor mode
 /-- The prepared batch is fresh at the loaded authority cell. -/
 theorem PreparedGrantBatch.batchFresh {F : Type} [Field F]
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
@@ -752,7 +757,8 @@ def prepareGrantBatch {F : Type} [Field F]
     Option (PreparedGrantBatch profile deployment authority descriptor) := do
   let initialSources ← PolicySourceCell.checkInitials deployment.domain profile descriptor.initialPolicies
   if ready : BatchReady authority descriptor then
-    some ⟨initialSources, batchEvidence authority descriptor ready⟩
+    let mode := batchEvidence authority descriptor ready
+    some ⟨initialSources, mode, ResourceBirthAuthority.post authority.cell descriptor mode, rfl⟩
   else none
 
 section GrantBatch
@@ -765,6 +771,18 @@ variable {F : Type} [Field F]
 def PreparedGrantBatch.post (prepared : PreparedGrantBatch profile deployment authority descriptor) :
     CredentialAuthorityDomain.Cell :=
   ResourceBirthAuthority.post authority.cell descriptor prepared.mode
+
+/-- The post cell the preparation built (`postExact`). -/
+def PreparedGrantBatch.postCached (prepared : PreparedGrantBatch profile deployment authority descriptor) :
+    CredentialAuthorityDomain.Cell :=
+  prepared.postCell
+
+/-- Compiled code reads the prepared post cell instead of re-applying the batch patch, so its
+cached bytes and root are shared by every reader. -/
+@[csimp] theorem PreparedGrantBatch.post_eq_postCached :
+    @PreparedGrantBatch.post = @PreparedGrantBatch.postCached := by
+  funext F _ profile deployment authority descriptor prepared
+  exact prepared.postExact.symm
 
 def PreparedGrantBatch.auxiliaryCreates
     (prepared : PreparedGrantBatch profile deployment authority descriptor) :

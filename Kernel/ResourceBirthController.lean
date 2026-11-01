@@ -417,6 +417,23 @@ instance physicalPostLawDecidable (deployment : Deployment) (write : DataWrite) 
   unfold PhysicalPostLaw
   split <;> infer_instance
 
+/-- The authority write of any post cell satisfies its physical law: its bytes are the
+canonical live image of that cell, and the authority role's law is only its identifier.
+Preparation therefore decides the law on the other writes and never decodes the authority
+cell's bytes back. -/
+theorem authorityWrites_postLaw {deployment : Deployment} (valid : deployment.Valid)
+    (ground : Ground deployment) (post : Compiler.CredentialAuthorityDomain.Cell) :
+    ∀ write ∈ ground.authorityWrites post, PhysicalPostLaw deployment write := by
+  intro write member
+  simp only [Ground.authorityWrites, List.mem_singleton] at member
+  subst write
+  unfold PhysicalPostLaw
+  rw [show (ground.authorityWrite post).canonicalPostBytes =
+      (LifecycleImage.codec Registry).encode
+        (.live (Compiler.CredentialAuthorityDomainReceiver.packedCell post)) from rfl,
+    LifecycleImage.decode_encode]
+  exact ⟨valid, rfl⟩
+
 /-- **K-FIELD-CLOSURE at every receiver.** A live declared object cell that a
 receiver's `PhysicalPostLaw` admits holds only the fields it declares.  Every
 receiver that writes cells checks `PhysicalPostLaw` on each write, births
@@ -823,7 +840,8 @@ def preparePostAuthority {profile : PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
     {descriptor : Descriptor Registry}
     (pre : PreparedPreAuthority profile deployment pins ground descriptor)
-    (authorityWrites : List DataWrite) :
+    (authorityWrites : List DataWrite)
+    (authorityLaw : ∀ write ∈ authorityWrites, PhysicalPostLaw deployment write) :
     Except PreparationReject (PreparedPostAuthority pre authorityWrites) := do
   let allocated ← match allocate? Registry ground.directory descriptor with
     | .error _ => .error PreparationReject.allocation
@@ -838,8 +856,16 @@ def preparePostAuthority {profile : PolicyCompilerProfile F}
     ((writes.map DataWrite.cellId).Nodup ∧
       ∀ write ∈ writes, write.expectedPre = ground.view.model.roots write.cellId)
     .physicalShape
-  let finalCells ← requirePreparation (∀ write ∈ writes, PhysicalPostLaw deployment write) .finalCellLaw
-  .ok ⟨allocated, resources, shape.down.1, shape.down.2, finalCells.down⟩
+  -- The authority writes carry their law (`authorityWrites_postLaw`); only the others are decoded.
+  let ownCells ← requirePreparation
+    (∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload resources.post [],
+      PhysicalPostLaw deployment write) .finalCellLaw
+  .ok ⟨allocated, resources, shape.down.1, shape.down.2, fun write member => by
+    simp only [planWrites, List.mem_append] at member
+    rcases member with (own | own) | authority
+    · exact ownCells.down write (by simp [planWrites, own])
+    · exact ownCells.down write (by simp [planWrites, own])
+    · exact authorityLaw write authority⟩
 
 /-- The actual fail-closed receiving preparation. Even the auxiliary create
 list and every final payload are checked before policy evaluation. No step
@@ -861,6 +887,7 @@ def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled :
     (BirthCandidateAdmission.check profile deployment ground
       grants.post grants.initialSources.records) .candidateLaw
   let post ← preparePostAuthority pre (ground.authorityWrites grants.post)
+    (authorityWrites_postLaw pre.deploymentValid ground grants.post)
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
     pre.markerDeclared, pre.parentsPresent, pre.kindsPresent, pre.sourced, pre.initials, pre.policiesBound, pre.factory, pre.book,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
@@ -902,6 +929,7 @@ def prepareGrainBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disab
     (BirthCandidateAdmission.check profile deployment ground
       combined.post combined.initialSources.records) .candidateLaw
   let post ← preparePostAuthority pre (ground.authorityWrites combined.post)
+    (authorityWrites_postLaw pre.deploymentValid ground combined.post)
   .ok ⟨pre, operation.down, combined, (sameCreates_iff _ _).mp aux.down, post, candidates⟩
 
 def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
