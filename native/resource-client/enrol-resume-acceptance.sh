@@ -146,9 +146,19 @@ step lookup ok "$MINI" enroll --action lookup --dir "$A"
 # 6. Five members back to back under a running ticker (a tick every 15 s, a box's one-minute ticker
 #    compressed, racing the composed world's enrolments): a seal or submit refused because a tick landed
 #    after the plan re-plans the same request (bounded at six); five admissions.
-( while :; do next_second; "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1; date +%s >"$ROOT/last-tick"; sleep 15; done ) &
+( while :; do
+    next_second
+    date +%s >"$ROOT/last-tick"
+    "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1 &
+    printf '%s\n' "$!" >"$ROOT/tick-child.pid"
+    wait "$!" 2>/dev/null || true
+    date +%s >"$ROOT/last-tick"
+    sleep 15 &
+    printf '%s\n' "$!" >"$ROOT/tick-sleep.pid"
+    wait "$!" 2>/dev/null || true
+  done ) &
 printf '%s\n' "$!" >"$ROOT/ticker.pid"
-trap 'kill -TERM "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true; kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
+trap 'kill -TERM "$(cat "$ROOT/ticker.pid" 2>/dev/null)" "$(cat "$ROOT/tick-sleep.pid" 2>/dev/null)" 2>/dev/null || true; kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
 for i in 1 2 3 4 5; do
   "$MINI" keygen --secret "$ROOT/member-$i.key" --public "$ROOT/member-$i.pub" >"$ROOT/member-$i-keygen.json"
   M="$ROOT/attempts/member-$i"
@@ -175,7 +185,12 @@ for i in 1 2 3 4 5; do
   [ "$(jq -er .authority "$M/enrollment.json")" = admitted-key-only ]
   [ "$(jq -er .subject "$M/enrollment.json")" = "$first" ]
 done
-kill -TERM "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true
+kill -TERM "$(cat "$ROOT/ticker.pid" 2>/dev/null)" "$(cat "$ROOT/tick-sleep.pid" 2>/dev/null)" 2>/dev/null || true
+if [ -s "$ROOT/tick-child.pid" ]; then
+  while kill -0 "$(cat "$ROOT/tick-child.pid")" 2>/dev/null; do sleep 0.05; done
+fi
+wait "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true
+date +%s >"$ROOT/last-tick"
 members=$(for i in 1 2 3 4 5; do jq -er .subject "$ROOT/attempts/member-$i/enrollment.json"; done | sort -u | wc -l | tr -d ' ')
 [ "$members" = 5 ] || { echo "five members admitted $members distinct subjects" >&2; exit 1; }
 seals=$(grep -c '^member-.-seal-' "$ROOT/steps.tsv")
