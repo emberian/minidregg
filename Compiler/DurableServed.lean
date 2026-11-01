@@ -215,15 +215,24 @@ theorem setWrites_bound (writes : List DataWrite)
       subst found
       exact written write (List.mem_of_find?_eq_some first)
 
-/-- One accepted record: its writes into the map, its charge and credit into the allowance. -/
-def install (held : Held rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) : Held rootBytes where
-  cells := setWrites intent.writes held.cells
+/-- One accepted record, its post roots bound (`roots`, a proof: the replay or
+receive that accepted it checked each write's root, so the held state never
+hashes a cell again): its writes into the map, its charge and credit into the
+allowance. -/
+def installRecord (held : Held rootBytes) (record : IntentRecord)
+    (roots : ∀ write, write ∈ record.writes → rootBytes write.canonicalPostBytes = write.exactPost) :
+    Held rootBytes where
+  cells := setWrites record.writes held.cells
   absentBytes := held.absentBytes
   absentRoot := held.absentRoot
   availableTuple := DurableReceiverCodec.chargeTuple fun lane =>
-    held.available lane - intent.exactCharge lane + intent.credit lane
+    held.available lane - record.exactCharge lane + record.credit lane
   absentExact := held.absentExact
-  bound := setWrites_bound intent.writes held.cells intent.postRootsBound held.bound
+  bound := setWrites_bound record.writes held.cells roots held.bound
+
+/-- One accepted intent (`installRecord` of its record; its binding carries the roots). -/
+def install (held : Held rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) : Held rootBytes :=
+  held.installRecord (IntentRecord.ofIntent intent) intent.postRootsBound
 
 /-- **The update rule**: a held state that agrees with `before` agrees, after
 `install`, with `DataSnapshot.install before intent`. -/
@@ -249,22 +258,54 @@ theorem install_agrees {held : Held rootBytes} {before : DataSnapshot rootBytes}
         held.available lane - intent.exactCharge lane + intent.credit lane)
     rw [DurableReceiverCodec.chargeOfTuple_tuple, agrees.available]
 
-/-- The held state after records the executor replays (a record that does not
-bind leaves it unchanged; `replay` refuses it). -/
-def replayed (held : Held rootBytes) : List IntentRecord → Held rootBytes
-  | [] => held
-  | record :: records =>
-      match record.bind? rootBytes with
-      | some intent => (held.install intent).replayed records
-      | none => held.replayed records
+/-- Every write of `records` has its root bound to its bytes: `IntentRecord.bind?`'s
+check, as a proposition. -/
+def RootsBound (rootBytes : List UInt8 → Digest) (records : List IntentRecord) : Prop :=
+  ∀ record, record ∈ records → ∀ write, write ∈ record.writes → rootBytes write.canonicalPostBytes = write.exactPost
+
+theorem bind_roots {record : IntentRecord} {intent : DurableDataIntent.DataIntent rootBytes}
+    (bound : record.bind? rootBytes = some intent) :
+    ∀ write, write ∈ record.writes → rootBytes write.canonicalPostBytes = write.exactPost := by
+  rw [← IntentRecord.bind_exact bound]
+  exact intent.postRootsBound
+
+/-- **A replayed suffix's roots are bound**: `replay` binds every record it accepts. -/
+theorem replay_rootsBound : ∀ (before : DataSnapshot rootBytes) (records : List IntentRecord)
+    (after : DataSnapshot rootBytes), replay rootBytes before records = some after → RootsBound rootBytes records
+  | _, [], _, _ => fun _ member => nomatch member
+  | before, record :: records, after, replayedTo => by
+      unfold replay at replayedTo
+      cases bound : record.bind? rootBytes with
+      | none => simp [bound] at replayedTo
+      | some intent =>
+          simp only [bound, bind, Option.bind] at replayedTo
+          cases executed : DurableDataIntent.execute .complete before intent with
+          | accepted next =>
+              rw [executed] at replayedTo
+              intro member found
+              rcases List.mem_cons.mp found with same | later
+              · subst same; exact bind_roots bound
+              · exact replay_rootsBound next records after replayedTo member later
+          | replayed recorded => rw [executed] at replayedTo; cases replayedTo
+          | rejected reason => rw [executed] at replayedTo; cases replayedTo
+          | crashed point next => rw [executed] at replayedTo; cases replayedTo
+
+/-- The held state after records whose roots are bound (`replay_rootsBound`):
+each record's writes set, nothing re-bound or re-hashed. -/
+def replayed (held : Held rootBytes) : (records : List IntentRecord) → RootsBound rootBytes records → Held rootBytes
+  | [], _ => held
+  | record :: records, roots =>
+      (held.installRecord record (roots record (List.mem_cons_self ..))).replayed records
+        fun later member => roots later (List.mem_cons_of_mem _ member)
 
 theorem replayed_agrees : ∀ (records : List IntentRecord) (held : Held rootBytes)
     (before after : DataSnapshot rootBytes), Agrees held before →
-      replay rootBytes before records = some after → Agrees (held.replayed records) after
-  | [], held, before, after, agrees, replayedTo => by
+      replay rootBytes before records = some after → (roots : RootsBound rootBytes records) →
+      Agrees (held.replayed records roots) after
+  | [], held, before, after, agrees, replayedTo, _ => by
       cases Option.some.inj replayedTo
       exact agrees
-  | record :: records, held, before, after, agrees, replayedTo => by
+  | record :: records, held, before, after, agrees, replayedTo, roots => by
       unfold replay at replayedTo
       cases bound : record.bind? rootBytes with
       | none => simp [bound] at replayedTo
@@ -275,9 +316,10 @@ theorem replayed_agrees : ∀ (records : List IntentRecord) (held : Held rootByt
               rw [executed] at replayedTo
               have installed := DurableReceiver.execute_accepted_install before intent next executed
               subst installed
-              simp only [replayed, bound]
+              have same := IntentRecord.bind_exact bound
+              subst same
               exact replayed_agrees records (held.install intent) _ after (install_agrees agrees intent)
-                replayedTo
+                replayedTo _
           | replayed recorded => rw [executed] at replayedTo; cases replayedTo
           | rejected reason => rw [executed] at replayedTo; cases replayedTo
           | crashed point next => rw [executed] at replayedTo; cases replayedTo
@@ -730,9 +772,9 @@ private def ofReplay (seed : Seed) (absentBytes : List UInt8) (ids : List CellId
     (records : List IntentRecord) (snapshot : DataSnapshot rootBytes)
     (replayed : replay rootBytes before records = some snapshot)
     (height : Nat) (chain worldRoot : Digest) : Served rootBytes store :=
-  ⟨held.replayed records, seed, extendIds ids records, absentBytes, height, chain, worldRoot, fun cellId missing => by
+  ⟨held.replayed records (Held.replay_rootsBound before records snapshot replayed), seed, extendIds ids records, absentBytes, height, chain, worldRoot, fun cellId missing => by
       obtain ⟨notBase, notWritten⟩ := not_mem_extendIds missing
-      rw [← (Held.replayed_agrees records held before snapshot agrees replayed).bytes,
+      rw [← (Held.replayed_agrees records held before snapshot agrees replayed _).bytes,
         DurableReceiver.replay_outside_support rootBytes _ _ cellId notWritten snapshot replayed, agrees.bytes]
       exact outside cellId notBase,
     DurableCheckpoint.nodup_eraseDups _⟩
@@ -745,7 +787,7 @@ private theorem ofReplay_roots (seed : Seed) (absentBytes : List UInt8) (ids : L
     (height : Nat) (chain worldRoot : Digest) :
     (ofReplay (store := store) seed absentBytes ids held before agrees outside records snapshot replayed height
       chain worldRoot).roots = snapshot.model.roots :=
-  (Held.replayed_agrees records held before snapshot agrees replayed).roots.symm
+  (Held.replayed_agrees records held before snapshot agrees replayed _).roots.symm
 
 private theorem ofReplay_canonicalBytes (seed : Seed) (absentBytes : List UInt8) (ids : List CellId)
     (held : Held rootBytes) (before : DataSnapshot rootBytes) (agrees : Held.Agrees held before)
@@ -755,7 +797,7 @@ private theorem ofReplay_canonicalBytes (seed : Seed) (absentBytes : List UInt8)
     (height : Nat) (chain worldRoot : Digest) :
     (ofReplay (store := store) seed absentBytes ids held before agrees outside records snapshot replayed height
       chain worldRoot).canonicalBytes = snapshot.canonicalBytes :=
-  (Held.replayed_agrees records held before snapshot agrees replayed).bytes.symm
+  (Held.replayed_agrees records held before snapshot agrees replayed _).bytes.symm
 
 theorem state_snapshot_outside (base : State) (cellId : CellId) (missing : cellId ∉ base.cells.map Prod.fst) :
     (base.snapshot rootBytes []).canonicalBytes cellId = base.absentBytes := by
@@ -1522,6 +1564,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
 #assert_axioms Held.bare_eq
 #assert_axioms Held.install_agrees
 #assert_axioms Held.replayed_agrees
+#assert_axioms Held.replay_rootsBound
 #assert_axioms Held.ofState_agrees
 #assert_axioms Held.ofSnapshot_agrees
 #assert_axioms Served.advance_agrees
