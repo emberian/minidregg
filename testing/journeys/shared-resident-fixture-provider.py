@@ -44,5 +44,7 @@ class Endpoint(http.server.BaseHTTPRequestHandler):
         self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
     def log_message(self,*args):pass
 server=http.server.ThreadingHTTPServer(('127.0.0.1',a.port),Endpoint)
+pid_file=state/'provider.pid';pid_file.write_text(f'{os.getpid()}\n')
 write('provider-ready.json',{'protocol':'mini-resident-fixture-provider-ready-v1','pid':os.getpid(),'endpoint':f'http://127.0.0.1:{server.server_port}/v1/chat/completions','sourceSha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()})
-server.serve_forever()
+try:server.serve_forever()
+finally:pid_file.unlink(missing_ok=True)

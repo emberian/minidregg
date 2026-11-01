@@ -57,6 +57,18 @@ for request in "$GRAINS_ROOT/broker"/volume-*.json; do
     sudo -n -- "$HELPER" "$payload" >>"$run/volume-helper.log" 2>&1 || rc=1
   done
 done
+if [[ -f $run/resident-binding.json ]]; then
+  res_base=$(jq -r '.base // empty' "$run/resident-binding.json" 2>/dev/null)
+  res_task=$(jq -r '.task // empty' "$run/resident-binding.json" 2>/dev/null)
+  if [[ -n $res_base && -n $res_task ]]; then
+    for unit in "mini-resident-fixture-provider@$res_task.service" "mini-grain-controller@$res_task.service" "mini-grain-resident@$res_task.service"; do
+      pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || true)
+      if [[ $pid =~ ^[1-9][0-9]*$ ]] && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -qF "$res_base/"; then
+        systemctl --user stop "$unit" >>"$run/controller-cleanup.log" 2>&1 || rc=1
+      fi
+    done
+  fi
+fi
 if [[ -d $GRAINS_ROOT/controller ]]; then
   sudo -n -- "$installer" controller-remove "$STORE" "$HELPER" >>"$run/controller-cleanup.log" 2>&1 || rc=1
 fi

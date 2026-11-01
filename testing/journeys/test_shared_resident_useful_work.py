@@ -67,7 +67,7 @@ class ExactRoomWriteTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.workspace = self.root / 'member'
         self.attempt = self.workspace / 'attempts' / 'native-1'
         self.attempt.mkdir(parents=True)
@@ -201,6 +201,39 @@ class PaymentAccountingTests(unittest.TestCase):
         plan.write_text(json.dumps({'command': {'transfer': {'amount': '100'}, 'fee': '2'}}))
         with self.assertRaisesRegex(r.Refused, 'plan differs'):
             r.exact_payment_snapshot(self.root, self.outcomes.__getitem__)
+
+
+class ProviderReadyForRootTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        self.root = self.base / 'world-a/receiving'
+        self.other_root = self.base / 'world-b/receiving'
+        self.proc = self.base / 'proc'
+        self.root.mkdir(parents=True)
+        self.other_root.mkdir(parents=True)
+        (self.proc / '4242').mkdir(parents=True)
+        self.endpoint = 'http://127.0.0.1:45725/v1/chat/completions'
+        self.sha = 'a' * 64
+
+    def write_ready(self, target_root, cmdline_root):
+        (target_root / 'provider-ready.json').write_text(json.dumps({
+            'protocol': 'mini-resident-fixture-provider-ready-v1',
+            'pid': 4242,
+            'endpoint': self.endpoint,
+            'sourceSha256': self.sha,
+        }))
+        cmdline = '\0'.join(['/usr/bin/python3', 'shared-resident-fixture-provider.py', '--state', str(cmdline_root), '--port', '45725', ''])
+        (self.proc / '4242/cmdline').write_bytes(cmdline.encode())
+
+    def test_provider_ready_matches_only_when_ready_file_and_process_belong_to_same_root(self):
+        self.assertFalse(r.provider_ready_for_root(self.root, self.endpoint, self.sha, self.proc))
+        self.write_ready(self.other_root, self.other_root)
+        self.assertFalse(r.provider_ready_for_root(self.root, self.endpoint, self.sha, self.proc))
+        self.write_ready(self.root, self.other_root)
+        self.assertFalse(r.provider_ready_for_root(self.root, self.endpoint, self.sha, self.proc))
+        self.write_ready(self.root, self.root)
+        self.assertTrue(r.provider_ready_for_root(self.root, self.endpoint, self.sha, self.proc))
 
 
 if __name__ == "__main__":

@@ -139,6 +139,24 @@ def proc_identity(pid):
     return {'pid': pid, 'startTicks': stat[19], 'uid': process.stat().st_uid, 'state': stat[0]}
 
 
+def provider_ready_for_root(root, endpoint, provider_sha, proc_root=pathlib.Path('/proc')):
+    """True only when root/provider-ready.json names a live provider process serving this root and endpoint."""
+    ready_path = pathlib.Path(root) / 'provider-ready.json'
+    if not ready_path.is_file():
+        return False
+    try:
+        ready = load(ready_path)
+        pid = int(ready.get('pid', 0))
+        if pid <= 0 or ready.get('protocol') != 'mini-resident-fixture-provider-ready-v1':
+            return False
+        if ready.get('sourceSha256') != provider_sha or ready.get('endpoint') != endpoint:
+            return False
+        cmdline = (pathlib.Path(proc_root) / str(pid) / 'cmdline').read_bytes().decode(errors='replace').split('\0')
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+    return str(root) in cmdline
+
+
 class Journal:
     def __init__(self, path):
         self.path = pathlib.Path(path)
@@ -950,6 +968,8 @@ def main(argv=None):
 
     def ensure_provider():
         """The endpoint is a separately managed USER dependency on a fixed port, kept on success."""
+        if unit_active(provider_unit) and not provider_ready_for_root(root, endpoint, provider_sha):
+            run('provider-stop-stale', ['systemctl', '--user', 'stop', provider_unit])
         if not unit_active(provider_unit):
             (root / 'provider-ready.json').unlink(missing_ok=True)
             run('provider-start', ['systemd-run', '--user', '--collect', '--unit=' + provider_unit, '--property=Type=exec', '--property=Nice=10', '--property=KillMode=control-group',
@@ -1080,6 +1100,8 @@ def main(argv=None):
 
     def ensure_controller(label):
         """A controller start/restart is an ordinary service operation; its journal decides recovery."""
+        if controller_active() and not admin_listening():
+            run(label + '-stop-stale', manager_command + ['stop', controller_unit])
         if not controller_active():
             run(label, [*starter, '--collect', '--unit=' + controller_unit, '--property=UMask=0077', '--property=Nice=10', '--property=KillMode=control-group',
                         *['--setenv=' + k + '=' + v for k, v in environment.items()],
