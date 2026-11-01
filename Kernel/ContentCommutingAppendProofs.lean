@@ -43,7 +43,7 @@ theorem commutingAppend : CommutingAppend := by
     epoch roster pre commutes
   -- the two sides differ only in the target's root, which the arm reads only in the stale
   -- check, and a commuting command skips it
-  simp only [computeTarget, contentTarget, commutes, Bool.not_true, Bool.and_false,
+  simp only [computeTarget, contentTarget, commutes, Bool.not_true, Bool.false_and, Bool.and_false,
     Bool.false_eq_true, ↓reduceIte, bind, Except.bind, pure, Except.pure, throw, throwThe,
     MonadExceptOf.throw]
   repeat' split
@@ -52,9 +52,9 @@ theorem commutingAppend : CommutingAppend := by
 theorem keptPin : KeptPin := by
   intro snapshot semantics ambient command id capability root content observe epoch roster pre
     notCommuting moved
-  have stale : (root != pre.root && !content.commutes) = true := by
+  have stale : (!content.commutes && root != pre.root) = true := by
     rw [Bool.and_eq_true]
-    exact ⟨bne_iff_ne.mpr moved, by rw [notCommuting]; rfl⟩
+    exact ⟨by rw [notCommuting]; rfl, bne_iff_ne.mpr moved⟩
   simp only [computeTarget, contentTarget, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte,
     bind, Except.bind, pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
   split

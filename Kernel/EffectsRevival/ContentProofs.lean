@@ -591,7 +591,7 @@ theorem computeTarget_content_header (ctx : LiveCtx) (command : ContentResource.
   split
   · rename_i stale
     rcases fresh with same | commuting
-    · exact absurd same stale.1
+    · exact absurd same stale.2
     · simp [contentSpec] at commuting
       simp [commuting] at stale
   · generalize ContentResource.prepareCell ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
