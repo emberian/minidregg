@@ -196,10 +196,11 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   let indexBefore ← match ← loaded.headIndexRoot transport key with
     | .ok root => pure root
     | .error message => return .error message
-  let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
+  let cells := intent.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId
+  let keys := DurableIndex.IndexRows.appendKeys intent.transactionId intent.nullifiers cells
   let (indexAfter, indexWrites) ← match ← withIndexRows transport loaded.height keys
       (fun rows => DurableIndex.IndexRows.apply rows indexBefore height intent.transactionId
-        intent.nullifiers) with
+        intent.nullifiers cells) with
     | .ok result => pure result
     | .error message => return .error message
   -- The tag keeps this record's receipt root, the root the extended image

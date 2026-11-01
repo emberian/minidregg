@@ -168,7 +168,9 @@ structure StoreEpoch where
   /-- The history accumulator and the index trie (`Compiler.DurableHistory`,
   `Compiler.DurableIndex`, KN2-STORE-OPEN). `index/trie-v1` replaced the separate
   spent map (`spent/trie-v1`): a Store born with it is refused naming this
-  component. A three-component label (an epoch
+  component. `index/trie-v2` adds family 2 (a written cell ↦ the height of the
+  last record that wrote it): a v1 index has no such rows, so a Store born with
+  it is refused naming this component. A three-component label (an epoch
   born before it) reads as `none` and is refused by naming this component. -/
   accumulator : String
   /-- The command codecs of the log records. `commands/v2`: the delegation
@@ -212,7 +214,7 @@ def persistedSchemaRefs : String :=
 /-- The epoch this Host writes and reads, including the cell layout descriptors. -/
 def StoreEpoch.current : StoreEpoch :=
   ⟨DeclaredEffectCell.stateKeyCodecId, persistedSchemaRefs, logTagLabel,
-    "history/mmr-v1;index/trie-v1;checkpoint/v5", "commands/v2"⟩
+    "history/mmr-v1;index/trie-v2;checkpoint/v5", "commands/v2"⟩
 
 /-- The label carried in the seed frame: every component, `;`-separated (the
 accumulator is itself two parts, `history/…;spent/…`). -/

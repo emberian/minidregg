@@ -235,6 +235,9 @@ namespace Family
 def spent : UInt8 := 0
 /-- An accepted transaction id ↦ the height that accepted it. -/
 def transaction : UInt8 := 1
+/-- A written cell ↦ the height of the LAST record that wrote it (the only family an
+append overwrites). -/
+def lastWrite : UInt8 := 2
 end Family
 
 def keyCustomization : List UInt8 := "DREGG/NATIVE-HOST/INDEX-KEY/v1".toUTF8.toList
@@ -251,6 +254,23 @@ def nullifierKey (nullifier : Kernel.DurableDataIntent.StableNullifier) : IndexK
 /-- The key of an accepted transaction id (family 1). -/
 def transactionKey (transactionId : Kernel.DurableDataIntent.TransactionId) : IndexKey :=
   ⟨Family.transaction, primaryOf Family.transaction (digestStream.encode transactionId), noSecondary⟩
+
+/-- The key of a written cell (family 2). -/
+def cellKey (cell : Kernel.DurableDataIntent.CellId) : IndexKey :=
+  ⟨Family.lastWrite, primaryOf Family.lastWrite (digestStream.encode cell), noSecondary⟩
+
+/-- **A cell key is never a spent or a transaction key**: the family byte differs. -/
+theorem cellKey_ne_nullifierKey (cell : Kernel.DurableDataIntent.CellId)
+    (nullifier : Kernel.DurableDataIntent.StableNullifier) : cellKey cell ≠ nullifierKey nullifier := by
+  intro same
+  have families := congrArg IndexKey.family same
+  simp [cellKey, nullifierKey, Family.spent, Family.lastWrite] at families
+
+theorem cellKey_ne_transactionKey (cell : Kernel.DurableDataIntent.CellId)
+    (transactionId : Kernel.DurableDataIntent.TransactionId) : cellKey cell ≠ transactionKey transactionId := by
+  intro same
+  have families := congrArg IndexKey.family same
+  simp [cellKey, transactionKey, Family.transaction, Family.lastWrite] at families
 
 /-- **A spent key is never a transaction key**, whatever the inputs: the family
 byte differs, so the two never share a trie path (`family_disjoint`). -/
@@ -658,6 +678,109 @@ def declared (records : List Kernel.DurableReceiver.IntentRecord) (k : IndexKey)
   ((records.zipIdx 1).find? fun entry => k ∈ keys entry.1.transactionId entry.1.nullifiers).map
     fun entry => heightValue entry.2
 
+/-- The family-2 keys of a record: one per cell it writes. -/
+def cellKeys (record : Kernel.DurableReceiver.IntentRecord) : List IndexKey :=
+  (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId).map cellKey
+
+/-- Every key an append reads or writes: its family-0/1 keys, then one per written cell. -/
+def appendKeys (transactionId : TransactionId) (nullifiers : List StableNullifier)
+    (cells : List Kernel.DurableDataIntent.CellId) : List IndexKey :=
+  keys transactionId nullifiers ++ cells.map cellKey
+
+/-- **The rows a record overwrites**: each cell it writes ↦ its height (family 2). -/
+def cellChanges (height : Nat) (cells : List Kernel.DurableDataIntent.CellId) :
+    List (IndexKey × Option (List UInt8)) :=
+  cells.map fun cell => (cellKey cell, some (heightValue height))
+
+/-- The family-2 map of a history, defined without the trie: a key ↦ the height of the
+LAST record that writes a cell with that key. -/
+def lastWrite (records : List Kernel.DurableReceiver.IntentRecord) (k : IndexKey) : Option (List UInt8) :=
+  (records.zipIdx 1).foldl (fun acc entry => if k ∈ cellKeys entry.1 then some (heightValue entry.2) else acc)
+    none
+
+/-- The whole logical map of a history: family 2 is the last-write map, families 0 and 1
+the first-record map (`declared`). -/
+def logical (records : List Kernel.DurableReceiver.IntentRecord) (k : IndexKey) : Option (List UInt8) :=
+  if k.family = Family.lastWrite then lastWrite records k else declared records k
+
+theorem lastWrite_append (records : List Kernel.DurableReceiver.IntentRecord)
+    (record : Kernel.DurableReceiver.IntentRecord) (k : IndexKey) :
+    lastWrite (records ++ [record]) k =
+      if k ∈ cellKeys record then some (heightValue (records.length + 1)) else lastWrite records k := by
+  unfold lastWrite
+  rw [List.zipIdx_append, List.foldl_append]
+  simp [Nat.add_comm]
+
+theorem lastWrite_nil (k : IndexKey) : lastWrite [] k = none := rfl
+
+/-- A family-0/1 key is never among a record's cell keys. -/
+theorem not_cellKey_of_family {record : Kernel.DurableReceiver.IntentRecord} {k : IndexKey}
+    (family : k.family ≠ Family.lastWrite) : k ∉ cellKeys record := by
+  intro member
+  obtain ⟨cell, _, rfl⟩ := List.mem_map.mp member
+  exact family rfl
+
+/-- A family-2 key is never among a record's transaction and nullifier keys. -/
+theorem not_key_of_family {transactionId : Kernel.DurableDataIntent.TransactionId}
+    {nullifiers : List Kernel.DurableDataIntent.StableNullifier} {k : IndexKey}
+    (family : k.family = Family.lastWrite) : k ∉ keys transactionId nullifiers := by
+  intro member
+  rcases List.mem_cons.mp member with same | rest
+  · subst same; simp [transactionKey, Family.transaction, Family.lastWrite] at family
+  · obtain ⟨nullifier, _, rfl⟩ := List.mem_map.mp rest
+    simp [nullifierKey, Family.spent, Family.lastWrite] at family
+
+/-- A history's first-record map holds no family-2 key. -/
+theorem declared_lastWrite_family (records : List Kernel.DurableReceiver.IntentRecord) {k : IndexKey}
+    (family : k.family = Family.lastWrite) : declared records k = none := by
+  unfold declared
+  rw [Option.map_eq_none_iff, List.find?_eq_none]
+  intro entry _
+  simpa using not_key_of_family (transactionId := entry.1.transactionId)
+    (nullifiers := entry.1.nullifiers) family
+
+/-- **Untouched since a write, from the last-write map** (soundness). If the last record
+writing a cell with `cell`'s key is at height `r + 1`, then no record after the `r`-th
+writes `cell`. -/
+theorem lastWrite_untouched (records : List Kernel.DurableReceiver.IntentRecord) (r : Nat)
+    (cell : Kernel.DurableDataIntent.CellId)
+    (last : lastWrite records (cellKey cell) = some (heightValue (r + 1))) :
+    ∀ record ∈ records.drop (r + 1), cell ∉ record.writes.map Kernel.DurableDataIntent.DataWrite.cellId := by
+  induction records using List.reverseRecOn generalizing r with
+  | nil => simp
+  | append_singleton init final ih =>
+      rw [lastWrite_append] at last
+      by_cases member : cellKey cell ∈ cellKeys final
+      · rw [if_pos member] at last
+        have heights : init.length + 1 = r + 1 := by
+          simpa using congrArg heightOf (Option.some.inj last)
+        have same : init.length = r := by omega
+        subst same
+        intro record member'
+        rw [List.drop_eq_nil_of_le (by simp)] at member'
+        simp at member'
+      · rw [if_neg member] at last
+        intro record inDrop written
+        by_cases inInit : record ∈ init.drop (r + 1)
+        · exact ih r last record inInit written
+        · -- the record is `final` itself: it writes `cell`, so its keys hold `cell`'s
+          have isFinal : record = final := by
+            rw [List.drop_append_eq_append_drop] at inDrop
+            rcases List.mem_append.mp inDrop with early | late
+            · exact absurd early inInit
+            · exact List.mem_singleton.mp (List.mem_of_mem_drop late)
+          subst isFinal
+          exact member (List.mem_map.mpr ⟨cell, written, rfl⟩)
+
+/-- **Teeth**: a write of `cell` by a record after the `r`-th makes the last-write answer
+something other than height `r + 1`, so a check that wants `r + 1` refuses it. -/
+theorem lastWrite_later_write (records : List Kernel.DurableReceiver.IntentRecord) (r : Nat)
+    (cell : Kernel.DurableDataIntent.CellId) (record : Kernel.DurableReceiver.IntentRecord)
+    (later : record ∈ records.drop (r + 1))
+    (written : cell ∈ record.writes.map Kernel.DurableDataIntent.DataWrite.cellId) :
+    lastWrite records (cellKey cell) ≠ some (heightValue (r + 1)) :=
+  fun last => lastWrite_untouched records r cell last record later written
+
 theorem mapLookup_modelSet_some (m : List (IndexKey × List UInt8)) (k k' : IndexKey) (v : List UInt8) :
     mapLookup (modelSet m k' (some v)) k = if k = k' then some v else mapLookup m k := by
   unfold mapLookup modelSet
@@ -691,9 +814,9 @@ and the record's keys are fresh in it (the executor's guarantee, and what
 `apply` refuses otherwise), then the map before updated by the record's rows is
 the map of the history with the record appended. -/
 theorem changes_exact (records : List Kernel.DurableReceiver.IntentRecord)
-    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8))
-    (before : ∀ k, mapLookup m k = declared records k)
-    (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, declared records k = none) (k : IndexKey) :
+    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8)) (k : IndexKey)
+    (before : mapLookup m k = declared records k)
+    (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, declared records k = none) :
     mapLookup (modelApply m (changes (records.length + 1) record.transactionId record.nullifiers)) k =
       declared (records ++ [record]) k := by
   rw [changes, mapLookup_modelApply_same]
@@ -723,25 +846,60 @@ def insert (height : Nat) (store : List Bool → Option Row) (root : Digest) :
       let (finalRoot, later) ← insert height (overlay store rows) root' rest
       return (finalRoot, later ++ rows.filter fun row => !later.any (·.1 = row.1))
 
-/-- Insert the record's keys at `height` on the Store's rows, against `root`:
-the new root and the rows to write. A key already present is refused. -/
+/-- Insert the record's keys at `height` on the Store's rows, against `root`, then
+overwrite the last-write row of each cell it writes (`cellChanges`): the new root and
+the rows to write. A family-0/1 key already present is refused. -/
 def apply (store : List Bool → Option Row) (root : Digest) (height : Nat)
-    (transactionId : TransactionId) (nullifiers : List StableNullifier) :
-    Except String (Digest × List (List Bool × Row)) :=
-  insert height store root (keys transactionId nullifiers)
+    (transactionId : TransactionId) (nullifiers : List StableNullifier)
+    (cells : List Kernel.DurableDataIntent.CellId) :
+    Except String (Digest × List (List Bool × Row)) := do
+  let (inserted, early) ← insert height store root (keys transactionId nullifiers)
+  let (final, late) ← setAll (overlay store early) inserted (cellChanges height cells)
+  return (final, late ++ early.filter fun row => !late.any (·.1 = row.1))
+
+/-- **The model theorem, with the overwrite.** If the map before the append is the
+history's logical map and the record's family-0/1 keys are fresh in it, the map after
+its inserts and then its cell overwrites is the logical map of the history with the
+record appended: each cell it writes now maps to its own height. -/
+theorem logical_changes_exact (records : List Kernel.DurableReceiver.IntentRecord)
+    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8))
+    (before : ∀ k, mapLookup m k = logical records k)
+    (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, logical records k = none) (k : IndexKey) :
+    mapLookup (modelApply (modelApply m (changes (records.length + 1) record.transactionId record.nullifiers))
+        (cellChanges (records.length + 1) (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId))) k =
+      logical (records ++ [record]) k := by
+  have cellsForm : cellChanges (records.length + 1) (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId) =
+      (cellKeys record).map (fun k => (k, some (heightValue (records.length + 1)))) := by
+    simp [cellChanges, cellKeys, List.map_map, Function.comp_def]
+  rw [cellsForm, mapLookup_modelApply_same]
+  by_cases fam : k.family = Family.lastWrite
+  · rw [logical, if_pos fam, lastWrite_append]
+    by_cases mem : k ∈ cellKeys record
+    · rw [if_pos mem, if_pos mem]
+    · rw [if_neg mem, if_neg mem, changes, mapLookup_modelApply_same, if_neg (not_key_of_family fam),
+        before, logical, if_pos fam]
+  · rw [if_neg (not_cellKey_of_family fam), logical, if_neg fam]
+    refine changes_exact records record m k (by rw [before, logical, if_neg fam]) ?_
+    intro k' mem
+    have answer := fresh k' mem
+    unfold logical at answer
+    by_cases fam' : k'.family = Family.lastWrite
+    · exact absurd mem (not_key_of_family fam')
+    · rwa [if_neg fam'] at answer
 
 end IndexRows
 
 /-! ## Maintained-index proof boundary
 
-`LogicalIndex` is the existing first-record map `IndexRows.declared`; a finite
+`LogicalIndex` is the history's logical map `IndexRows.logical` (the first-record map
+`IndexRows.declared` for families 0 and 1, the last-write map for family 2); a finite
 map represents it when its lookups agree. Heights are values, not a third key
 family. `Represents` also requires the Store's reachable rows to encode the
 canonical trie (stale rows under empty or compressed subtrees are unrestricted).
 The single-set preservation contract below is an explicit, still-open premise,
 not a claim that the deployed incremental trie has been proved correct. -/
 
-abbrev LogicalIndex := IndexRows.declared
+abbrev LogicalIndex := IndexRows.logical
 
 /-- Reachable rows of the canonical compressed trie. Empty subtrees need no
 row; a singleton stops at its leaf, exactly as `walk` and `set` do. -/
@@ -1003,14 +1161,30 @@ theorem insert_eq_setAll (height : Nat) (ks : List IndexKey)
                     have recur := ih (overlay store early) mid final late tail
                     simpa [setAll, step, tail, recur, bind, pure, Except.bind, Except.pure] using ok
 
-/-- The omission-sensitive theorem: the public entry point executes exactly
-its declared changes. This theorem has NO `SetPreserves` hypothesis. -/
-theorem apply_eq_setAll (store : List Bool → Option Row) (root : Digest) (height : Nat)
+/-- The omission-sensitive theorem: the public entry point executes exactly its
+declared changes, the inserts then the cell overwrites, each through `setAll`. This
+theorem has NO `SetPreserves` hypothesis. -/
+theorem apply_steps (store : List Bool → Option Row) (root : Digest) (height : Nat)
     (transactionId : Kernel.DurableDataIntent.TransactionId) (nullifiers : List Kernel.DurableDataIntent.StableNullifier)
+    (cells : List Kernel.DurableDataIntent.CellId)
     (next : Digest) (written : List (List Bool × Row))
-    (ok : apply store root height transactionId nullifiers = .ok (next, written)) :
-    setAll store root (changes height transactionId nullifiers) = .ok (next, written) := by
-  exact insert_eq_setAll height (keys transactionId nullifiers) store root next written ok
+    (ok : apply store root height transactionId nullifiers cells = .ok (next, written)) :
+    ∃ inserted early late,
+      setAll store root (changes height transactionId nullifiers) = .ok (inserted, early) ∧
+      setAll (overlay store early) inserted (cellChanges height cells) = .ok (next, late) ∧
+      written = late ++ early.filter fun row => !late.any (·.1 = row.1) := by
+  unfold apply at ok
+  cases first : insert height store root (keys transactionId nullifiers) with
+  | error e => simp [first, bind, Except.bind] at ok
+  | ok result =>
+      obtain ⟨inserted, early⟩ := result
+      cases second : setAll (overlay store early) inserted (cellChanges height cells) with
+      | error e => simp [first, second, bind, Except.bind] at ok
+      | ok result =>
+          obtain ⟨final, late⟩ := result
+          simp only [first, second, bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at ok
+          obtain ⟨rfl, rfl⟩ := ok
+          exact ⟨inserted, early, late, insert_eq_setAll height _ store root inserted early first, second, rfl⟩
 
 end IndexRows
 
@@ -1068,30 +1242,37 @@ theorem maintained_apply
     (root : Digest) (before : Maintained records rows root)
     (fresh : ∀ k ∈ IndexRows.keys record.transactionId record.nullifiers, LogicalIndex records k = none)
     (next : Digest) (written : List (List Bool × Row))
-    (ok : IndexRows.apply rows root (records.length + 1) record.transactionId record.nullifiers =
-      .ok (next, written)) :
+    (ok : IndexRows.apply rows root (records.length + 1) record.transactionId record.nullifiers
+      (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId) = .ok (next, written)) :
     Maintained (records ++ [record]) (overlay rows written) next ∨
       SetAllCollision rows root (IndexRows.changes (records.length + 1)
-        record.transactionId record.nullifiers) := by
+        record.transactionId record.nullifiers) ∨
+      ∃ inserted early, SetAllCollision (overlay rows early) inserted (IndexRows.cellChanges
+        (records.length + 1) (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId)) := by
   obtain ⟨m, rep, logical⟩ := before
-  rcases setAll_preserves step _ rows root m rep next written
-      (IndexRows.apply_eq_setAll rows root _ _ _ next written ok) with after | collision
-  · exact Or.inl ⟨_, after, IndexRows.changes_exact records record m logical fresh⟩
-  · exact Or.inr collision
+  obtain ⟨inserted, early, late, first, second, rfl⟩ :=
+    IndexRows.apply_steps rows root _ _ _ _ next written ok
+  rcases setAll_preserves step _ rows root m rep inserted early first with mid | collision
+  · rcases setAll_preserves step _ (overlay rows early) inserted _ mid next late second with after | later
+    · refine Or.inl ⟨_, ?_, IndexRows.logical_changes_exact records record m logical fresh⟩
+      rw [overlay_merge]
+      exact after
+    · exact Or.inr (Or.inr ⟨inserted, early, later⟩)
+  · exact Or.inr (Or.inl collision)
 
 /-- With no nullifiers the deployed append path produces exactly the one-leaf
 transaction trie. The omission plant uses this result after dropping the
 consumed nullifier list at the public entry point. -/
 theorem apply_transaction_only (rows : List Bool → Option Row) (height : Nat)
     (tx : Kernel.DurableDataIntent.TransactionId) :
-    IndexRows.apply rows emptyDigest height tx [] =
+    IndexRows.apply rows emptyDigest height tx [] [] =
       .ok (dig (.leaf (transactionKey tx) (heightValue height)),
         [([], .leaf (transactionKey tx) (heightValue height))]) := by
-  suffices general : ∀ root, root = emptyDigest → IndexRows.apply rows root height tx [] =
+  suffices general : ∀ root, root = emptyDigest → IndexRows.apply rows root height tx [] [] =
       .ok (dig (.leaf (transactionKey tx) (heightValue height)),
         [([], .leaf (transactionKey tx) (heightValue height))]) from general _ rfl
   intro root empty
-  simp only [IndexRows.apply, IndexRows.keys, List.map_nil, IndexRows.insert,
+  simp only [IndexRows.apply, IndexRows.keys, List.map_nil, IndexRows.insert, IndexRows.cellChanges, setAll,
     lookupRows_of_eq_emptyDigest rows root _ empty, set_some_of_eq_emptyDigest rows root _ _ empty,
     bind, Except.bind, pure, Except.pure]
   rfl
@@ -1113,7 +1294,7 @@ theorem consumed_declared (record : Kernel.DurableReceiver.IntentRecord)
     LogicalIndex [record] (nullifierKey nullifier) = some (heightValue 1) := by
   have mem : nullifierKey nullifier ∈ IndexRows.keys record.transactionId record.nullifiers :=
     List.mem_cons_of_mem _ (List.mem_map.mpr ⟨nullifier, consumed, rfl⟩)
-  simp [LogicalIndex, IndexRows.declared, mem]
+  simp [LogicalIndex, IndexRows.logical, nullifierKey, Family.spent, Family.lastWrite, IndexRows.declared, mem]
 
 #assert_axioms apply_transaction_only
 #assert_axioms omitted_nullifier_absence
@@ -1124,7 +1305,10 @@ theorem consumed_declared (record : Kernel.DurableReceiver.IntentRecord)
 #assert_axioms lookup_entries
 #assert_axioms maintained_init
 #assert_axioms IndexRows.insert_eq_setAll
-#assert_axioms IndexRows.apply_eq_setAll
+#assert_axioms IndexRows.apply_steps
+#assert_axioms IndexRows.logical_changes_exact
+#assert_axioms IndexRows.lastWrite_untouched
+#assert_axioms IndexRows.lastWrite_later_write
 #assert_axioms setAll_preserves
 #assert_axioms maintained_apply
 

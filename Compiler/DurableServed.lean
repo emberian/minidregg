@@ -643,7 +643,8 @@ nothing older. What it establishes, each refused by name:
   (`walkFrontier`), and the index root its tag carries, re-derived by inserting
   the record's transaction id and nullifiers into the index at the
   checkpoint's version (`DurableIndex.IndexRows.apply` refuses a key already present:
-  a transaction or nullifier accepted before the checkpoint);
+  a transaction or nullifier accepted before the checkpoint) and overwriting the
+  last-write row of each cell it writes;
 * the replay of those records from the checkpoint state through the executor;
 * the head: its tag's MAC under the Store's key (`Head.verify`) and the root it
   carries equal to the replayed world root.
@@ -696,7 +697,7 @@ private def checkIndex (rows : List Bool → Option DurableIndex.Row) :
   | written, root, height, (record, carried) :: rest => do
       let current := fun path => (written.get? path).or (rows path)
       let (next, writes) ← match DurableIndex.IndexRows.apply current root height record.transactionId
-          record.nullifiers with
+          record.nullifiers (record.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId) with
         | .ok result => pure result
         | .error message => throw s!"durable log record at height {height}: {message}"
       if next ≠ carried then
@@ -763,7 +764,8 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   let carriedIndex ← match suffix.mapM fun entry => DurableHistory.trailerCarried entry.tag with
     | none => return .error "durable log tag malformed"
     | some carried => pure (carried.map (·.indexRoot))
-  let keys := records.flatMap fun record => DurableIndex.IndexRows.keys record.transactionId record.nullifiers
+  let keys := records.flatMap fun record => DurableIndex.IndexRows.appendKeys record.transactionId
+    record.nullifiers (record.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId)
   -- Rows down to 48 bits first; every prefix when what they open does not verify.
   let shallow ← match ← DurableReceiverIO.indexRows transport start.height keys 48 with
     | .error message => return .error message
@@ -951,6 +953,7 @@ def Opening.reader (transport : DurableReceiverIO.Transport) (rootBytes : List U
     atHeight := DurableHistoryStore.atHeight transport opening.head
     byTx := DurableHistoryStore.byTx transport opening.head
     spent := DurableHistoryStore.spent transport opening.head
+    lastWrite := DurableHistoryStore.lastWrite transport opening.head
     range := DurableHistoryStore.range transport opening.head
     stateAt := DurableHistoryStore.stateAt transport rootBytes opening.served.seed opening.head }
 
@@ -1030,10 +1033,11 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       let recordBytes := DurableCheckpointCodec.recordFrame.encode record
       let chain := DurableCheckpointCodec.chainStep served.chain record
       -- The index after the head (MAC-verified, carried by the head's tag), this record's keys inserted.
-      let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
+      let cells := intent.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId
+      let keys := DurableIndex.IndexRows.appendKeys intent.transactionId intent.nullifiers cells
       let (indexAfter, indexWrites) ← match ← DurableReceiverIO.withIndexRows transport served.height keys
           (fun rows => DurableIndex.IndexRows.apply rows head.indexRoot height intent.transactionId
-            intent.nullifiers) with
+            intent.nullifiers cells) with
         | .ok result => pure result
         | .error message => return .unavailable message
       -- The root cache advanced by the record's slot writes.

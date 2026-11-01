@@ -107,6 +107,12 @@ structure Spent {store : StoreIdentity} (head : Head store) (nullifier : StableN
   opens : DurableIndex.Opens head.indexRoot (DurableIndex.nullifierKey nullifier)
     (value.map DurableIndex.heightValue)
 
+/-- The last-write height of a cell: the height of the last record that wrote it, or its
+verified absence (no record wrote it), opened against the head's index root (family 2). -/
+structure LastWrite {store : StoreIdentity} (head : Head store) (cell : Minidregg.Kernel.DurableDataIntent.CellId) where
+  value : Option Nat
+  opens : DurableIndex.Opens head.indexRoot (DurableIndex.cellKey cell) (value.map DurableIndex.heightValue)
+
 /-- The state after `height` records, with what makes it authentic:
 * the base is the seed (height 0, the pinned genesis) or a checkpoint whose
   MAC verified under the head's key (`openSealed`), sitting on the log: the
@@ -231,6 +237,8 @@ structure Reader (rootBytes : List UInt8 → Digest) (store : StoreIdentity) whe
   byTx : (transactionId : TransactionId) → IO (Except Refusal (TxAnswer head transactionId))
   /-- The height that consumed a nullifier, or its verified absence. -/
   spent : (nullifier : StableNullifier) → IO (Except Refusal (Spent head nullifier))
+  /-- The height of the last record that wrote a cell, or its verified absence. -/
+  lastWrite : (cell : Minidregg.Kernel.DurableDataIntent.CellId) → IO (Except Refusal (LastWrite head cell))
   /-- Records `first..last` (inclusive), each verified. Bounded windows only on request paths. -/
   range : (first last : Nat) →
     IO (Except Refusal (List ((height : Nat) × Record head height)))
