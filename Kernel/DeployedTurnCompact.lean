@@ -3,8 +3,8 @@
 
 ROOT 10-14: the log entry is the Turn, persisted with DIGEST GUARDS and
 old-value elision.  Every leg `Turn.ofIntent` derives is `legPatch k s s'`
-(guards of the unchanged present addresses, then one change op per changed
-address) from the store `s` the cell holds once the turn's creates have run.
+(one change op per changed address; the untouched addresses are guarded by the
+turn's pin) from the store `s` the cell holds once the turn's creates have run.
 Such a leg is persisted as
 
   cell · kind tag · `rootBytes` of the held cell (the guard, 32 bytes) · the

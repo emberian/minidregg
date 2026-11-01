@@ -496,13 +496,12 @@ theorem intent_equality :
 
 end SeedlessWitness
 
-/-- An unchanged live post really normalizes to the single whole-blob read. -/
-theorem unchanged_post_is_read (k : BlobKind) (v : k.Value) :
-    bridge.codec.legPatch k.kind (k.state (some v)) (k.state (some v)) =
-      [.read k.address.1 k.address.2 (some v)] := by
+/-- An unchanged live post is the empty leg: the turn's pin on the cell guards the blob. -/
+theorem unchanged_post_is_empty (k : BlobKind) (v : k.Value) :
+    bridge.codec.legPatch k.kind (k.state (some v)) (k.state (some v)) = [] := by
   unfold Codec.legPatch
   rw [live_cover]
-  simp [diff, guardOp, changeOp, BlobKind.state]
+  simp [diff, changeOp, BlobKind.state]
 
 /-- Direct links to the receiver's activity and seat image constructors. -/
 theorem activity_image_supported (role : ObjectiveActivityCell.Role) (key body : List UInt8) :
@@ -881,7 +880,7 @@ theorem prepared_posts_images
 
 #assert_axioms prepared_posts_images
 
-#assert_axioms unchanged_post_is_read activity_image_supported seat_image_supported
+#assert_axioms unchanged_post_is_empty activity_image_supported seat_image_supported
 #assert_axioms book_image_supported retired_image_supported finalIntent_writes
 
 

@@ -10,9 +10,11 @@ kind and emits the leg as the **difference** against the cell the world holds:
 * an absent cell whose post decodes to a cell is a `create` born with the
   post image's ROM part (`romPart`, T3b) plus a leg of allocations of the rest
   from that image;
-* a present cell whose post decodes at the same kind is a leg that guards every
-  unchanged present address (a read) and modifies every changed one (`write`,
-  `allocate`, `free`), in the codec's address order;
+* a present cell whose post decodes at the same kind is a leg of one modification
+  per changed address (`write`, `allocate`, `free`), in the codec's address order;
+  the untouched addresses are guarded by the cell's pin, its pre-root
+  (`pin_fixes_store`: an equal root fixes every address, or names a collision), never
+  by one read per unchanged address;
 * the pre-state is what the INTENT asserts, never what the world holds: each
   write's `expectedPre` and each read guard's `expectedRoot` is a pin
   (`pinsOf`, `Turn.pins`) that `World.admit` checks against the held slot's
@@ -25,7 +27,7 @@ kind and emits the leg as the **difference** against the cell the world holds:
 The leg is the cut-free normal form of the receiver's local view: it is a fixed
 point of G-NORM's `Patch.normalize` (`legPatch_normalize`), so its write
 footprint is exactly the addresses that differ (`ofIntent_minimal`, via
-`Patch.normalize_writeFootprint_eq_diff`).  A no-op write becomes a read guard.
+`Patch.normalize_writeFootprint_eq_diff`).  A no-op write becomes an empty leg, guarded by its pin.
 
 The derived patch is *stricter* than the durable layer: it is checked against
 every namespace's discipline.  `legPatch_valid_iff` says the leg is valid
@@ -192,11 +194,16 @@ def changeOp (s s' : Store L) (a : Address L) : Option (Op L) :=
   | some x, none => some (.free a.1 a.2 x)
   | some x, some y => if x = y then none else some (.write a.1 a.2 x y)
 
-/-- **The diff patch** over an address list: the guards of every unchanged
-present address first (so they are the leg's `Leg.guards`), then one
-modification per changed address, each group in the list's order. -/
+/-- **The diff patch** over an address list: one modification per changed address, in the
+list's order.  The unchanged addresses carry no op: the turn's pin on the cell (its
+pre-root) guards them (`pin_fixes_store`), so a leg costs the size of its change. -/
 def diff (as : List (Address L)) (s s' : Store L) : Patch L :=
-  as.filterMap (guardOp s s') ++ as.filterMap (changeOp s s')
+  as.filterMap (changeOp s s')
+
+/-- The per-address read guards a leg carried before the pin guarded the cell: a read of
+every unchanged present address.  Kept as the statement `pin_implies_guards` reaches. -/
+def guardPatch (as : List (Address L)) (s s' : Store L) : Patch L :=
+  as.filterMap (guardOp s s')
 
 theorem guardOp_spec {s s' : Store L} {a : Address L} {op : Op L}
     (h : guardOp s s' a = some op) :
@@ -271,83 +278,61 @@ theorem map_address_filterMap (f : Address L → Option (Op L))
       | some op => simp [hf a op h, map_address_filterMap f hf as]
 
 theorem mem_diff {as : List (Address L)} {s s' : Store L} {op : Op L} :
-    op ∈ diff as s s' ↔ ∃ a ∈ as, guardOp s s' a = some op ∨ changeOp s s' a = some op := by
+    op ∈ diff as s s' ↔ ∃ a ∈ as, changeOp s s' a = some op := by
   unfold diff
-  rw [List.mem_append, List.mem_filterMap, List.mem_filterMap]
-  constructor
-  · rintro (⟨a, ha, h⟩ | ⟨a, ha, h⟩)
-    · exact ⟨a, ha, .inl h⟩
-    · exact ⟨a, ha, .inr h⟩
-  · rintro ⟨a, ha, h | h⟩
-    · exact .inl ⟨a, ha, h⟩
-    · exact .inr ⟨a, ha, h⟩
+  rw [List.mem_filterMap]
 
 theorem diff_op_address {as : List (Address L)} {s s' : Store L} {op : Op L}
-    (m : op ∈ diff as s s') : ∃ a ∈ as, op.address = a ∧
-      (guardOp s s' a = some op ∨ changeOp s s' a = some op) := by
-  obtain ⟨a, ha, h | h⟩ := mem_diff.mp m
-  · exact ⟨a, ha, guardOp_address h, .inl h⟩
-  · exact ⟨a, ha, (changeOp_spec h).2.1, .inr h⟩
+    (m : op ∈ diff as s s') : ∃ a ∈ as, op.address = a ∧ changeOp s s' a = some op := by
+  obtain ⟨a, ha, h⟩ := mem_diff.mp m
+  exact ⟨a, ha, (changeOp_spec h).2.1, h⟩
 
 /-- The diff touches each address at most once. -/
 theorem diff_distinct {as : List (Address L)} (nd : as.Nodup) (s s' : Store L) :
     ((diff as s s').map Op.address).Nodup := by
   unfold diff
-  rw [List.map_append, map_address_filterMap _ (fun _ _ h => guardOp_address h),
-    map_address_filterMap _ (fun _ _ h => (changeOp_spec h).2.1), List.nodup_append]
-  refine ⟨nd.filter _, nd.filter _, fun a ha b hb e => ?_⟩
-  subst e
-  rw [List.mem_filter] at ha hb
-  obtain ⟨op, hop⟩ := Option.isSome_iff_exists.mp ha.2
-  obtain ⟨op', hop'⟩ := Option.isSome_iff_exists.mp hb.2
-  exact guard_change_exclusive hop hop'
+  rw [map_address_filterMap _ (fun _ _ h => (changeOp_spec h).2.1)]
+  exact nd.filter _
 
-/-- **The diff runs to the post store**, whatever the guards say (`run` is
-total): every address the list covers ends at its new value. -/
+/-- **The diff runs to the post store** (`run` is total): every address the list covers
+ends at its new value. -/
 theorem diff_run {as : List (Address L)} (nd : as.Nodup) {s s' : Store L}
     (cover : ∀ a, s a ≠ none ∨ s' a ≠ none → a ∈ as) :
     Patch.run s (diff as s s') = s' := by
   refine run_of_distinct (diff_distinct nd s s') (fun op m => ?_) (fun b hb => ?_)
-  · obtain ⟨a, -, ha, h | h⟩ := diff_op_address m
-    · obtain ⟨x, hs, hs', rfl⟩ := guardOp_spec h
-      exact hs.trans hs'.symm
-    · rw [ha]
-      exact (changeOp_spec h).2.2.1
+  · obtain ⟨a, -, ha, h⟩ := diff_op_address m
+    rw [ha]
+    exact (changeOp_spec h).2.2.1
   · by_cases hm : b ∈ as
     · apply ops_none
       cases hc : changeOp s s' b with
       | none => rfl
       | some op =>
-          exact absurd (changeOp_spec hc).2.1 (hb op (mem_diff.mpr ⟨b, hm, .inr hc⟩))
+          exact absurd (changeOp_spec hc).2.1 (hb op (mem_diff.mpr ⟨b, hm, hc⟩))
     · have h1 : s b = none := by
         by_contra h; exact hm (cover b (.inl h))
       have h2 : s' b = none := by
         by_contra h; exact hm (cover b (.inr h))
       rw [h1, h2]
 
-/-- The diff is valid exactly when each modification is enabled at the start
-store (the guards always are). -/
+/-- The diff is valid exactly when each modification is enabled at the start store. -/
 theorem diff_validFrom_iff {as : List (Address L)} (nd : as.Nodup) (s s' : Store L) :
     Patch.ValidFrom s (diff as s s') ↔
       ∀ a ∈ as, ∀ op, changeOp s s' a = some op → op.Enabled s := by
   constructor
   · intro v a ha op h
-    exact enabled_of_distinct (diff_distinct nd s s') v op (mem_diff.mpr ⟨a, ha, .inr h⟩)
+    exact enabled_of_distinct (diff_distinct nd s s') v op (mem_diff.mpr ⟨a, ha, h⟩)
   · intro en
     refine validFrom_of_distinct (diff_distinct nd s s') fun op m => ?_
-    obtain ⟨a, ha, h | h⟩ := mem_diff.mp m
-    · obtain ⟨x, hs, -, rfl⟩ := guardOp_spec h
-      exact hs
-    · exact en a ha op h
+    obtain ⟨a, ha, h⟩ := mem_diff.mp m
+    exact en a ha op h
 
 /-- The diff is in G-NORM's normal form. -/
 theorem diff_normal {as : List (Address L)} (nd : as.Nodup) (s s' : Store L) :
     Patch.Normal (diff as s s') := by
   refine normal_of_distinct (diff_distinct nd s s') fun op m => ?_
-  obtain ⟨a, -, h | h⟩ := mem_diff.mp m
-  · obtain ⟨x, -, -, rfl⟩ := guardOp_spec h
-    rfl
-  · exact (changeOp_spec h).2.2.2.1
+  obtain ⟨a, -, h⟩ := mem_diff.mp m
+  exact (changeOp_spec h).2.2.2.1
 
 /-- **Expressibility, exactly.**  The diff is valid iff *some* guarded patch
 takes `s` to `s'`.  So a diff refused by the discipline is an image no turn's

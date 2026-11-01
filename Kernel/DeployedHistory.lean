@@ -205,4 +205,69 @@ theorem objective_free_below_retired (c : CellId) (old : ObjectiveActivityCell.P
 #assert_axioms objective_allocate_bytes objective_write_bytes objective_free_bytes read_bytes
 #assert_axioms objective_post_bytes objective_allocate_below_post
 
+/-! ## The pin guards a leg's untouched addresses
+
+A derived leg carries one op per changed address (`TurnOfIntent.diff`); every other address
+of the cell is guarded by the turn's pin on it, its pre-root.  An equal root fixes the whole
+store, or names a collision of the root function: the collision is an explicit disjunct,
+never an assumption. -/
+
+/-- Two distinct byte strings with one deployed root. -/
+def RootCollision : Prop :=
+  ∃ a b : List UInt8, a ≠ b ∧ ResourceBirthCodec.rootBytes a = ResourceBirthCodec.rootBytes b
+
+/-- **A pin fixes the store.**  Two stores of one kind with the same deployed root are
+equal, or their encodings collide. -/
+theorem pin_fixes_store {k : deployedR.Kind} {h s : Store (deployedR.layout k)}
+    (pin : cellRoot (some ⟨k, h⟩) = cellRoot (some ⟨k, s⟩)) : h = s ∨ RootCollision := by
+  by_cases same : encodeCell (some ⟨k, h⟩) = encodeCell (some ⟨k, s⟩)
+  · have decoded := bridge_decode_total_on_registry (some ⟨k, h⟩)
+    rw [same, bridge_decode_total_on_registry] at decoded
+    have cell := (Option.some.inj (Option.some.inj decoded)).symm
+    exact .inl (eq_of_heq (Cell.mk.inj cell).2)
+  · exact .inr ⟨_, _, same, pin⟩
+
+/-- **The pin implies the per-address guards** a leg used to carry: at a held store whose
+root is the pin's, every read of an unchanged present address of the diffed pre-store holds,
+or the root function collides. -/
+theorem pin_implies_guards {k : deployedR.Kind} {h s s' : Store (deployedR.layout k)}
+    (pin : cellRoot (some ⟨k, h⟩) = cellRoot (some ⟨k, s⟩)) :
+    Patch.ValidFrom h (guardPatch (bridge.codec.cover k s s') s s') ∨ RootCollision := by
+  rcases pin_fixes_store pin with rfl | collision
+  · refine .inl (validFrom_of_distinct ?_ fun op m => ?_)
+    · unfold guardPatch
+      rw [map_address_filterMap _ (fun _ _ g => guardOp_address g)]
+      exact (bridge.codec.cover_nodup k h s').filter _
+    · obtain ⟨a, -, g⟩ := List.mem_filterMap.mp m
+      obtain ⟨x, hx, -, rfl⟩ := guardOp_spec g
+      exact hx
+  · exact .inr collision
+
+/-- **Teeth: a change at an address the leg does not touch is refused through the root.**
+A held store that differs from the asserted pre-store anywhere fails the pin
+(`World.pinCheck` refuses the turn `guardFailed`), or the root function collides. -/
+theorem untouched_change_refused {w : World deployedR TransactionId Digest} {c : CellId} {k : deployedR.Kind}
+    {h s s' : Store (deployedR.layout k)} {a : Address (deployedR.layout k)}
+    (held : w.cells c = some ⟨k, h⟩) (moved : h a ≠ s a) (_untouched : changeOp s s' a = none) :
+    Minidregg.Kernel.World.pinFails history w (c, cellRoot (some ⟨k, s⟩)) = true ∨ RootCollision := by
+  cases fails : Minidregg.Kernel.World.pinFails history w (c, cellRoot (some ⟨k, s⟩)) with
+  | true => exact .inl rfl
+  | false =>
+      have pin := ((Minidregg.Kernel.World.pinFails_eq_false_iff history).1 fails).2
+      rw [history_cellDigest, held] at pin
+      rcases pin_fixes_store pin with same | collision
+      · subst same; exact absurd rfl moved
+      · exact .inr collision
+
+/-- Premise inhabitation for the teeth: a held store moved at an address the leg leaves
+alone (the leg of `s` to itself touches nothing). -/
+theorem untouched_change_inhabited {k : deployedR.Kind} {h s : Store (deployedR.layout k)}
+    {a : Address (deployedR.layout k)} (moved : h a ≠ s a) :
+    h a ≠ s a ∧ changeOp s s a = none := by
+  refine ⟨moved, ?_⟩
+  unfold changeOp
+  cases s a <;> simp
+
+#assert_axioms pin_fixes_store pin_implies_guards untouched_change_refused untouched_change_inhabited
+
 end Minidregg.Kernel.DeployedHistory

@@ -810,11 +810,11 @@ theorem toy_write_steps :
       some (some 1, some 6) := by
   decide +kernel
 
-/-- The derived write leg is the one-op diff: a read guard on the unchanged
-`log` row, then `write heap 5 6`. -/
+/-- The derived write leg is the one-op diff, `write heap 5 6`: the unchanged `log` row
+carries no read, the turn's pin on cell 0 guards it. -/
 theorem toy_write_leg :
     ((Turn.ofIntent toyB toyH w0 (writeIntent 1 6)).toOption.map fun t =>
-        t.legs.map fun leg => leg.patch.length) = some [2] := by
+        t.legs.map fun leg => leg.patch.length) = some [1] := by
   decide +kernel
 
 /-- The toy refill turn (M2): no writes, one pin on cell 0, credit 5 on the incidences lane. -/

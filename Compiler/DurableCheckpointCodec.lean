@@ -768,8 +768,9 @@ def checkpointMac (key : MacKey) (body : Body) (root : Digest) : List UInt8 :=
 
 /-- The fold's version: bumped whenever `DurableReceiverIO.foldRecords`' World semantics (the
 turn derivation, `admit`, the system rows it writes) change, so a checkpoint's World sealed by
-another fold is refused by name rather than trusted. -/
-def foldVersion : String := "FOLD/turn-of-intent-v1"
+another fold is refused by name rather than trusted.  v2: a derived leg carries only its
+changed addresses' ops; the pin guards the rest (`DeployedHistory.pin_implies_guards`). -/
+def foldVersion : String := "FOLD/turn-of-intent-v2"
 
 /-- The fold's identity a v4 body carries: the epoch (every persisted codec and layout) and the
 fold's version. -/
