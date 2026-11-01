@@ -723,13 +723,15 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mini-outcome-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let missing = Path::new("/nonexistent/host");
-        let reply = |frame: &[u8]| reply_or_outcome(missing, missing, &dir, &format!("t{}", frame[0]), frame, 75, "grant").map(<[u8]>::to_vec);
-        assert_eq!(reply(&[75, 1, 2]).unwrap(), vec![1, 2]);
+        use mini_sdk::host_operations::{AGENT_LIFETIME_DISPATCH_SUBMIT, AGENT_LIFETIME_GRANT_ASSEMBLE};
+        let reply = |frame: &[u8]| reply_or_outcome(missing, missing, &dir, &format!("t{}", frame[0]), frame,
+            AGENT_LIFETIME_GRANT_ASSEMBLE, "grant").map(<[u8]>::to_vec);
+        assert_eq!(reply(&[AGENT_LIFETIME_GRANT_ASSEMBLE, 1, 2]).unwrap(), vec![1, 2]);
         // op75's refusal in run wbH: marker 253 and a framed outcome, read before as an invalid frame.
         let refused = reply(b"\xfdDREGG/NATIVE-HOST/OUTCOME/v8").unwrap_err();
         assert!(refused.starts_with("grant Host op75 (no record): outcome not decoded"), "{refused}");
         assert!(reply(&[255, 0]).unwrap_err().contains("(undecided)"));
-        assert!(reply(&[76, 1]).unwrap_err().ends_with("returned an invalid frame"));
+        assert!(reply(&[AGENT_LIFETIME_DISPATCH_SUBMIT, 1]).unwrap_err().ends_with("returned an invalid frame"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
