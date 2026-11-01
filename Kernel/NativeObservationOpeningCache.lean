@@ -42,8 +42,10 @@ chooses visibility without recomputing either the salt or the leaf hash, and an
 un-narrowed read forces no leaf hash. -/
 def prepare {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) :
     List (Minidregg.Theory.Store.Entry L × StoreCodec.Opening × Thunk (List UInt8)) :=
+  let key := StoreCodec.blindingKey wire store
   (StoreCodec.entries wire store).map fun entry =>
-    let opened := StoreCodec.opening wire store entry
+    let bytes := StoreCodec.entryBytes wire entry
+    let opened : StoreCodec.Opening := ⟨StoreCodec.salt key bytes, bytes⟩
     (entry, opened, Thunk.mk fun _ => opened.leaf)
 
 def render {L : Layout.{0, 0, 0}} (visible : Address L → Prop) [DecidablePred visible]
@@ -57,7 +59,7 @@ theorem render_prepare {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
   simp only [render, prepare, StoreHiding.items, List.map_map, Function.comp_def]
   apply List.map_congr_left
   intro entry _
-  unfold StoreHiding.itemOf
+  unfold StoreHiding.itemOf StoreCodec.opening
   split <;> rfl
 
 /-- This renderer certifies representation equality for every reader scope. -/

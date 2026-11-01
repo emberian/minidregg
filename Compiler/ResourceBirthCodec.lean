@@ -461,6 +461,31 @@ theorem accepted_live_after (before after : Directory Nat registry)
 theorem retired_bytes_ne_fresh :
     bytes registry .retired ≠ bytes registry .fresh := by simp [bytes]
 
+/-- Advance a decoded lifecycle image's kept `AuxCache` from a prior image of
+the same kind (`relativeTo_eq`: propositionally identical to `image`). -/
+def relativeTo [DecidableEq registry.Kind]
+    (prior image : LifecycleImage registry) : LifecycleImage registry :=
+  match prior, image with
+  | .live priorCell, .live cell =>
+      if sameKind : priorCell.kind = cell.kind then
+        .live { kind := cell.kind, payload := (sameKind ▸ priorCell.payload).relativeTo cell.payload }
+      else image
+  | _, _ => image
+
+@[simp] theorem relativeTo_eq [DecidableEq registry.Kind]
+    (prior image : LifecycleImage registry) :
+    relativeTo registry prior image = image := by
+  unfold relativeTo
+  split
+  · split
+    · rename_i priorCell cell sameKind
+      cases priorCell
+      cases cell
+      cases sameKind
+      simp [CellState.Materialized.relativeTo_eq]
+    · rfl
+  · rfl
+
 end LifecycleImage
 
 def rootCustomization : List UInt8 := "DREGG.CELL.LIFECYCLE/v1".toUTF8.toList

@@ -965,9 +965,34 @@ def codec : LawfulCodec (Store L) where
   decode := decode W
   decode_encode := decode_encode W
 
+theorem saltedRoot_eq_rootBytes_encode (store : Store L) :
+    saltedRoot W store = rootBytes W ((codec W).encode store) := by
+  have payload : (encode W store).drop 44 = (payloadStream W).encode store := by
+    rw [encode, ← frame_length W, List.drop_left]
+  have lax : (payloadStream W).toLawful.decode ((payloadStream W).encode store) = some store :=
+    (payloadStream W).toLawful.decode_encode store
+  simp only [codec]
+  unfold rootBytes
+  rw [payload, lax]
+
+/-- Keep the logical store as the auxiliary cache so `Materialized.root`
+computes `saltedRoot W` directly from `logical` (`leavesUnderWritten`) instead
+of re-decoding `bytes.get`, re-checking `IsChain`, and rebuilding a `SparseMap`
+for `blindingKeyOfEntries`. -/
+def saltedAux : Minidregg.Theory.CellStateAux.AuxCache (fun store => rootBytes W ((codec W).encode store)) where
+  Aux := Store L
+  Holds a s := a = s
+  build s := ⟨s, rfl⟩
+  set a address value := a.set address value
+  set_holds address value h := congrArg (fun (x : Store L) => x.set address value) h
+  root? a := some (saltedRoot W a)
+  root?_sound h hr := (Option.some.inj hr).symm.trans (h ▸ saltedRoot_eq_rootBytes_encode W _)
+  root?_agree h1 h2 := congrArg (fun x => some (saltedRoot W x)) (h1.trans h2.symm)
+
 def materializer : Materializer L Digest where
   codec := codec W
   rootBytes := rootBytes W
+  aux := saltedAux W
 
 /-- The root of every materialized store is its salted root. -/
 theorem materializer_rootOf (store : Store L) :

@@ -46,8 +46,9 @@ def assess(rows, n, lo, required):
             raise BrokenRun(f'{name}: invalid measurement')
         small = statistics.mean(r[name] for r in early)
         large = statistics.mean(r[name] for r in late)
-        # Accumulate several CPU ticks rather than rounding each operation to ms.
-        resolution = 5 * 1000 / os.sysconf('SC_CLK_TCK') if name.endswith('_cpu_ms') else 0
+        # Sub-10ms operations use nanosecond /proc/<pid>/schedstat accounting,
+        # so require at least 1.0 ms across the early window.
+        resolution = 1.0 if name.endswith('_cpu_ms') else 0
         if small <= 0 or sum(r[name] for r in early) < resolution:
             raise BrokenRun(f'{name}: early window below measurement resolution; increase --lo')
         ratio = large / small
@@ -59,8 +60,14 @@ def assess(rows, n, lo, required):
 
 def proc_stat(pid):
     fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
-    # self + waited-for descendants: a reaped helper's work must not disappear.
-    return int(fields[19]), sum(int(x) for x in fields[11:15])
+    tck = os.sysconf('SC_CLK_TCK')
+    try:
+        # High-resolution nanosecond scheduler runtime for this process.
+        self_ms = int(Path(f'/proc/{pid}/schedstat').read_text().split()[0]) / 1e6
+        reaped_ms = (int(fields[13]) + int(fields[14])) * 1000.0 / tck
+        return int(fields[19]), self_ms + reaped_ms
+    except OSError:
+        return int(fields[19]), sum(int(x) for x in fields[11:15]) * 1000.0 / tck
 
 
 class ProcessCPU:
@@ -73,17 +80,17 @@ class ProcessCPU:
     def read(self):
         if int(self.pid_file.read_text()) != self.pid or proc_stat(self.pid)[0] != self.start:
             raise BrokenRun('measured service restarted or its PID was reused')
-        def ticks(pid):
+        def cpu_ms(pid):
             _, total = proc_stat(pid)
             children = Path(f'/proc/{pid}/task/{pid}/children').read_text().split()
             for child in children:
                 try:
-                    total += ticks(int(child))
+                    total += cpu_ms(int(child))
                 except FileNotFoundError:
                     # The service's waited-for time accounts for a reaped helper.
                     pass
             return total
-        return ticks(self.pid) * 1000 / os.sysconf('SC_CLK_TCK')
+        return cpu_ms(self.pid)
 
     def stop(self):
         try:

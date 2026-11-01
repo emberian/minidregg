@@ -517,13 +517,17 @@ theorem LoadedDirectory.slots_eq_of_bytes
 
 /-- One directory row of a later image. When the identifier's canonical bytes
 equal the held image's, the held directory's view of it is reused; otherwise the
-bytes are decoded. `decodeRowFrom_eq`: both are what decoding the bytes returns. -/
+bytes are decoded and stepped relative to the held view. `decodeRowFrom_eq`:
+both are what decoding the bytes returns. -/
 def decodeRowFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (held : LoadedDirectory prior) (identifier : Nat) (bytes : List UInt8) :
     Option (LifecycleImage registry) :=
+  let priorView := LifecycleImage.view registry held.directory identifier
   if bytesBEq (prior.snapshot.canonicalBytes ⟨identifier⟩) bytes then
-    some (LifecycleImage.view registry held.directory identifier)
-  else (LifecycleImage.codec registry).decode bytes
+    some priorView
+  else
+    ((LifecycleImage.codec registry).decode bytes).map
+      (LifecycleImage.relativeTo registry priorView)
 
 theorem decodeRowFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (held : LoadedDirectory prior) (identifier : Nat) (bytes : List UInt8) :
@@ -536,7 +540,8 @@ theorem decodeRowFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.ro
       (held.bytes_exact identifier).trans (bytesBEq_iff.mp same)
     rw [← exact]
     exact (LifecycleImage.decode_encode registry _).symm
-  next => rfl
+  next =>
+    cases (LifecycleImage.codec registry).decode bytes <;> simp [LifecycleImage.relativeTo_eq]
 
 def decodeRowsFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (held : LoadedDirectory prior) :

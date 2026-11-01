@@ -265,12 +265,16 @@ theorem ServedDirectory.load_eq {store : StoreIdentity} {served : State store}
   · exact congrArg some (ServedDirectory.unique _ loaded)
 
 /-- One directory row of a later state: the held view when the identifier's
-bytes equal the held state's, otherwise the bytes decoded. -/
+bytes equal the held state's, otherwise the bytes decoded and stepped relative
+to the held view. -/
 def decodeServedRowFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before)
     (identifier : Nat) (bytes : List UInt8) : Option (LifecycleImage registry) :=
+  let priorView := LifecycleImage.view registry held.directory identifier
   if bytesBEq (before.canonicalBytes ⟨identifier⟩) bytes then
-    some (LifecycleImage.view registry held.directory identifier)
-  else (LifecycleImage.codec registry).decode bytes
+    some priorView
+  else
+    ((LifecycleImage.codec registry).decode bytes).map
+      (LifecycleImage.relativeTo registry priorView)
 
 theorem decodeServedRowFrom_eq {earlier : StoreIdentity} {before : State earlier}
     (held : ServedDirectory before) (identifier : Nat) (bytes : List UInt8) :
@@ -283,7 +287,8 @@ theorem decodeServedRowFrom_eq {earlier : StoreIdentity} {before : State earlier
       (held.bytes_exact identifier).trans (bytesBEq_iff.mp same)
     rw [← exact]
     exact (LifecycleImage.decode_encode registry _).symm
-  next => rfl
+  next =>
+    cases (LifecycleImage.codec registry).decode bytes <;> simp [LifecycleImage.relativeTo_eq]
 
 def decodeServedRowsFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before) :
     List (Nat × List UInt8) → Option (DirectoryImage.Rows registry)
@@ -374,7 +379,8 @@ theorem ServedAuthority.load_eq {deployment : CanonicalCellRegistry.Deployment} 
   · exact congrArg some (ServedAuthority.unique _ authority)
 
 /-- `loadServedAuthority` of a later state: the held cell when the authority
-cell's bytes are unchanged, otherwise the bytes decoded (`loadServedAuthorityFrom_eq`). -/
+cell's bytes are unchanged, otherwise the bytes decoded and stepped relative to
+`held.cell` (`loadServedAuthorityFrom_eq`). -/
 def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {earlier store : StoreIdentity}
     {before : State earlier} (held : ServedAuthority deployment before) (served : State store) :
     Option (ServedAuthority deployment served) :=
@@ -382,7 +388,15 @@ def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {ear
       (before.canonicalBytes (cellIdOf deployment)) then
     some ⟨held.cell, held.valid, (bytesBEq_iff.mp same).trans held.observed,
       held.authState, held.authStateExact⟩
-  else loadServedAuthority deployment served
+  else
+    match decoded : decodeCell (served.canonicalBytes (cellIdOf deployment)) with
+    | none => none
+    | some cell =>
+        let stepped := held.cell.relativeTo cell
+        some ⟨stepped, held.valid,
+          (decodeCell_canonical decoded).symm.trans
+            (congrArg cellBytes (CellState.Materialized.relativeTo_eq held.cell cell).symm),
+          CredentialAuthorityDomain.authStateOf stepped, rfl⟩
 
 theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deployment}
     {earlier store : StoreIdentity} {before : State earlier} (held : ServedAuthority deployment before)
@@ -391,7 +405,16 @@ theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deploymen
   unfold loadServedAuthorityFrom
   split
   · exact (ServedAuthority.load_eq _).symm
-  · rfl
+  · split
+    · rename_i missing
+      unfold loadServedAuthority
+      rw [dif_pos held.valid]
+      split
+      · rfl
+      · rename_i _ present
+        rw [missing] at present
+        cases present
+    · exact (ServedAuthority.load_eq _).symm
 
 /-- An authority cell the Host itself wrote, beside the bytes it encoded it to: a write's
 post-cell (`ResourceBirthAuthority.post`, a patch applied to the pre-cell, so its kept trie

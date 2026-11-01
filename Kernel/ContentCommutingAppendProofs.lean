@@ -104,7 +104,7 @@ theorem computeTarget_content_ok (snapshot : AuthoritySnapshot) (semantics : Dig
         (contentTarget .object id capability ContentResource.commandVersion root content observe
           epoch roster) pre =
       .ok (Store.Patch.run progress.1 (HyperdocumentCell.contentBlinding.patch pre.logical ambient.height)) := by
-  have pass : (root != pre.root && !content.commutes) = false := by
+  have pass : (!content.commutes && root != pre.root) = false := by
     rcases fresh with same | commutes
     · subst same; simp
     · simp [commutes]

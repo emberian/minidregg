@@ -815,7 +815,7 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if version != ContentResource.commandVersion then throw .unsupportedVersion
         -- An append-only command is computed at the cell it meets: it pins no root
         -- (`ContentResource.Command.commutes`, `Kernel.ContentCommutingAppend`).
-        if root != pre.root && !content.commutes then throw .staleTarget
+        if !content.commutes && root != pre.root then throw .staleTarget
         match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
             (contentOperation snapshot semantics command) (ContentResource.documentOf id)
             (contentContext snapshot ambient command) pre content with
