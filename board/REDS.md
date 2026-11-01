@@ -1,19 +1,19 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `29f27f657a11` (builder: REDS.md for 340481687d62 (1 red)). Round finished 2026-11-01T05:59Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-29f27f65`.
+Tip: `446f0c1c9d1f` (builder: REDS.md for 29f27f657a11 (5 red)). Round finished 2026-11-01T06:15Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-446f0c1c`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:j14-apps | j14-apps FAIL | yes, red again | yes | apps-hermes | rc=1; /ci/j-29f27f/journey.log |
-| gate:composed:apps | composed apps fail | yes, red again | no | apps-hermes | fail: apps:sheet: same-Store app: command failed; retained /ci/c-29f27f/inputs/evidence/ap |
-| gate:composed:connector | composed connector blocked | yes, red again | no | infra, member-side | blocked: prerequisite apps has not passed |
-| gate:composed:residents | composed residents blocked | yes, red again | no | member-side, infra | blocked: prerequisite connector has not passed |
-| gate:composed:restart | composed restart blocked | yes, red again | no | host-execution | blocked: prerequisite residents has not passed |
+| gate:j14-apps | j14-apps FAIL | no: passed on rerun (flaky) | yes | apps-hermes | rc=1; /ci/j-446f0c/journey.log |
+| gate:composed:residents | composed residents fail | no: passed on rerun (flaky) | no | member-side, infra | fail: residents: REFUSED driver ended before the end_turn gate; see driver-before-cut.stde |
+| gate:composed:restart | composed restart blocked | no: passed on rerun (flaky) | yes | host-execution | blocked: prerequisite residents has not passed |
 
-Suspect commits since green (`git log 83e926874e38..29f27f657a11`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..446f0c1c9d1f`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `446f0c1c` builder: REDS.md for 29f27f657a11 (5 red) (owner: build-loop)
+- `b97d545f` gate,sweep: isolate composed root-sealed frame under /ci-composed and use FLATNESS_LO=20 (owner: build-loop)
 - `29f27f65` builder: REDS.md for 340481687d62 (1 red) (owner: build-loop)
 - `591b72ba` fixtures: native runs re-recorded from candidate 340481687d62 (accepted stale, doc-write stale)
 - `64f874d3` rerecord,builder: pass libmini_kernels_lean to fixture elaboration check and skip rerecord-only tips (owner: build-loop)
@@ -52,14 +52,15 @@ Suspect commits since green (`git log 83e926874e38..29f27f657a11`), newest first
 - `c509ff14` builder: REDS.md for d5e858b2222b (5 red) (owner: build-loop)
 - `f68a50de` board: apps-hermes row: refuseOn, Hummingbird locations, WBO bounds, hosted event filter, live state (owner: apps-hermes)
 - `8834e486` hosted conversations: a socket.io receive names its awaited events; the Host drains the rest uncharg (owner: apps-hermes)
-- `462919a4` invoke: target pre-roots and read guards come from the ground's snapshot, not a re-hash (owner: apps-hermes)
-- `c4a1e4cf` An append reads its document from propose's own signed read (owner: apps-hermes)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | FAIL | broken: propose_cpu_ms: early window below measurement resolution; increase --lo | - | - | - | - | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 60.000 | 58.000 | 0.967 | 1.958 | read-path |
-| flatness-get | PASS | get_wall_ms | 161.684 | 165.375 | 1.023 | 1.958 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-29f27f65/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | FAIL | submit_cpu_ms | 30.000 | 57.000 | 1.900 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 50.321 | 77.098 | 1.532 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_cpu_ms | 5.000 | 17.500 | 3.500 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 31.652 | 89.403 | 2.825 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 58.000 | 53.000 | 0.914 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 172.203 | 158.034 | 0.918 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-446f0c1c/flatness.log | - | - | - | - | host-execution, store-retained |
