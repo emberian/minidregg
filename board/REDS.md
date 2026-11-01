@@ -1,18 +1,15 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `621be51f18e8` (perf(kernel,compiler): eliminate duplicate per-write decodes, leg patches, pin hashes, and). Round finished 2026-11-01T08:43Z.
-green: `dbb0dc30de44`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-621be51f`.
+Tip: `93d8a0a0f144` (perf(submit): complete proof obligations for retiresCellFast, ofCellsFast, and narrowPacke). Round finished 2026-11-01T09:23Z.
+green: `dbb0dc30de44`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-93d8a0a0`.
 
-| stage | signature | reruns? | same place as last round? | owner | detail |
-|---|---|---|---|---|---|
-| host | rc=1 error: Kernel/TurnOfIntent.lean:1844:18: Tactic `rewrite` failed: Did not find an occurrence of the pattern | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
-| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
+No reds: `green` moves to `93d8a0a0f144`.
 
-Suspect commits since green (`git log dbb0dc30de44..621be51f18e8`), newest first; owners are the seats whose
-`Owns:` line (board/seats/*.md) names a path the commit touched:
+## Flatness (published, does not gate `green`)
 
-- `621be51f` perf(kernel,compiler): eliminate duplicate per-write decodes, leg patches, pin hashes, and un-narrow
-- `cb40b2bb` builder: REDS.md for dbb0dc30de44 (0 red) (owner: build-loop)
+| row | verdict | metric | early | late | ratio | bound | owner |
+|---|---|---|---|---|---|---|---|
+| flatness-submit | FAIL | broken: propose_cpu_ms: early window below measurement resolution; increase --lo | - | - | - | - | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 45.000 | 48.500 | 1.078 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 124.701 | 144.542 | 1.159 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-93d8a0a0/flatness.log | - | - | - | - | host-execution, store-retained |
