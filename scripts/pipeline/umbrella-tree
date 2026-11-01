@@ -97,9 +97,26 @@ src_at || pipeline_die "$SRC moved off ${SHA:0:12} during the sync; rerun"
 [ -z "${UMBRELLA_SYNCED:-}" ] || touch "$UMBRELLA_SYNCED"   # the caller may free SRC now
 
 # 5. the umbrella
+# COORDINATION §2/§6 and TokenCensus/SelfTest.lean: full-tree TokenCensus + TokenCensus.SelfTest
+# (70+ min) run when UMBRELLA_FULL_CENSUS=1 or when TokenCensus.Core/SelfTest/CensusChecks changed;
+# per-round umbrella-tree still builds Fixtures, ObjectiveProofs, Minidregg, AxiomCensusResearch,
+# TokenCensus.Fixtures, and TokenCensus.NativePinSelfTest.
 mkdir -p "$OUT"
 u="$OUT/$(date -u +%Y%m%dT%H%M%SZ)-${SHA:0:12}"
-targets=(); for t in $(bash "$TREE/scripts/pipeline/umbrella-targets" --unshipped) Minidregg; do targets+=(--umbrella-target "$t"); done
+full_census=${UMBRELLA_FULL_CENSUS:-0}
+if [ "$full_census" != 1 ]; then
+  if [ -n "$(git -C "$TREE" diff --name-only "$SHA~1..$SHA" -- 'TokenCensus/Core.lean' 'TokenCensus/SelfTest.lean' 'CensusChecks.lean' 'scripts/kn2/plant-token-census-v2.sh' 2>/dev/null || true)" ]; then
+    full_census=1
+  fi
+fi
+targets=()
+for t in $(bash "$TREE/scripts/pipeline/umbrella-targets" --unshipped) Minidregg; do
+  if [ "$t" = CensusChecks ] && [ "$full_census" != 1 ]; then
+    targets+=(--umbrella-target TokenCensus.NativePinSelfTest --umbrella-target TokenCensus.Fixtures --umbrella-target AxiomCensusResearch)
+  else
+    targets+=(--umbrella-target "$t")
+  fi
+done
 wrap=(); command -v swarm-build >/dev/null && wrap=(swarm-build)
 t0=$(date +%s)
 set +e
