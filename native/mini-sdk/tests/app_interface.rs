@@ -801,12 +801,13 @@ fn a_one_member_args_object_named_path_is_not_the_path_binding_form() {
 
 #[test]
 fn a_declared_referer_is_signed_only_as_a_same_origin_path() {
-    // Hummingbird's tracked url is its beacon's referer, so the declaration types it as a path.
+    // Hummingbird reads a page URL only from the referer, which a Sandstorm bridge never forwards, so
+    // its declaration takes no url at all and correlates on the event.
     let hb = Declaration::load(include_bytes!("../../../apps/interfaces/hummingbird.json")).unwrap();
-    let full = hb.prepare("analytics.record", &json!({"url":"https://grain.test/a","event":"view"}), &json!({}));
-    assert_eq!(full.unwrap_err().name, "input-schema");
-    let path = hb.prepare("analytics.record", &json!({"url":"/a","event":"view"}), &json!({}));
-    assert_ne!(path.unwrap_err().name, "input-schema");
+    let with_url = hb.prepare("analytics.record", &json!({"url":"/a","event":"view"}), &json!({}));
+    assert_eq!(with_url.unwrap_err().name, "input-schema");
+    let event_only = hb.prepare("analytics.record", &json!({"event":"view"}), &json!({}));
+    assert_ne!(event_only.unwrap_err().name, "input-schema");
     // Any binding's referer: a path is signed as given (fragment dropped), any other value is dropped.
     let mut v: serde_json::Value =
         serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();

@@ -89,6 +89,33 @@ fn an_unmatched_conversation_names_what_did_arrive() {
     assert!(name.starts_with("conversation-terminal-incomplete (unmatched: user_joined x1"), "{name}");
 }
 #[test]
+fn hummingbird_record_correlates_on_its_event_in_the_locations_stream() {
+    // lib/metrics/locations.js pushes {city, region, country, latitude, longitude, event} per tracked
+    // request every 500 ms; hits carry only the referer url, which the bridge never forwards.
+    let d=Declaration::load(include_bytes!("../../../apps/interfaces/hummingbird.json")).unwrap();
+    let b=binding("c7287dfbae2796cd283a32452d2395c7");
+    let mut beacon=None;
+    let result=d.execute("analytics.record",&json!({"event":"mini-qualify-7"}),&json!({"operationId":"hb"}),&b,|_,p| {
+        if p.method=="GET" {
+            assert!(p.ordered_headers.iter().all(|(k,_)| k!="referer"));
+            beacon=Some(p.query.clone());
+            return Ok(NativeReply{status:200,headers:vec![],body:vec![],receipt:json!({"op":"beacon"})});
+        }
+        let q:Value=serde_json::from_slice(&p.body).unwrap();
+        let mut frames=vec![];
+        if q["op"]=="open" { frames.push(r#"0{"sid":"s","pingInterval":25000}"#.into()); }
+        if q["op"]=="send" && q["text"]=="40" { frames.push("40".into()); }
+        if q["op"]=="receive" && beacon.is_some() {
+            frames.push(r#"42["hits",[{"timestamp":"2026-11-01T00:00:00.000Z"}]]"#.into());
+            frames.push(r#"42["locations",[{"city":"","region":"C","country":"US","latitude":37.7,"longitude":-122.4,"event":"other"},{"city":"","region":"C","country":"US","latitude":37.7,"longitude":-122.4,"event":"mini-qualify-7"}]]"#.into());
+        }
+        Ok(reply(&q,frames))
+    });
+    assert_eq!(beacon.as_deref(), Some("event=mini-qualify-7"));
+    let entries=result.outcome.unwrap();
+    assert!(entries.as_array().unwrap().iter().any(|e| e["event"]=="mini-qualify-7"), "{entries}");
+}
+#[test]
 fn scrumblr_native_room_and_matching_card_snapshot() {
     let d=Declaration::load(include_bytes!("../../../apps/interfaces/scrumblr.json")).unwrap();
     let result=d.execute("cards.read",&json!({"room":"/human"}),&json!({"operationId":"scrum-read"}),&binding("57fa8aab611f5e0ab656e73324d48879"),|_,p| {
