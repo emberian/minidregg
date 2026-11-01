@@ -1,16 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `19d6c139081f` (builder: REDS.md for 78797a80cb02 (4 red)). Round finished 2026-11-01T05:25Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-19d6c139`.
+Tip: `340481687d62` (builder: REDS.md for 19d6c139081f (2 red)). Round finished 2026-11-01T05:43Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-34048168`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:composed:residents | composed residents fail | yes, red again | yes | member-side, infra | fail: residents: REFUSED timeout: controller admin socket; see /ci/c-19d6c1/composed/state |
-| gate:composed:restart | composed restart blocked | yes, red again | yes | host-execution | blocked: prerequisite residents has not passed |
+| gate:j14-apps | j14-apps FAIL | no: passed on rerun (flaky) | no | apps-hermes | rc=1; /ci/j-340481/journey.log |
 
-Suspect commits since green (`git log 83e926874e38..19d6c139081f`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..340481687d62`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `34048168` builder: REDS.md for 19d6c139081f (2 red) (owner: build-loop)
+- `ff1e3338` fixtures: native runs re-recorded from candidate 19d6c139081f (accepted stale, doc-write stale)
+- `f8ba05d7` composed,client: skip propose view-document when run-free, use system controller manager, and replan (owner: apps-hermes)
 - `19d6c139` builder: REDS.md for 78797a80cb02 (4 red) (owner: build-loop)
 - `781e067f` fixtures: native runs re-recorded from candidate 78797a80cb02 (accepted stale, doc-write stale)
 - `78797a80` builder: REDS.md for b6a6dfcd4a08 (4 red) (owner: build-loop)
@@ -48,18 +50,12 @@ Suspect commits since green (`git log 83e926874e38..19d6c139081f`), newest first
 - `fd822f76` board/seats/read-path.md: the whole continuation for the next read-path seat
 - `48dc530f` board: build-loop row: idle leases taken after 30 min, pool grown to 11, rerecord race fixed
 - `14f9cbb2` Op 5's opening cache picks by the cell root; the reply frame is not copied
-- `fd1686db` integ-build: the rerecord holds the umbrella tree; land_regen diffs against the regen's own parent (owner: build-loop)
-- `cbe54d87` lane-tree: a lease idle 30 minutes with no process in its tree is taken
-- `90c8cbed` board: host-execution row: restore the worktree line
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | FAIL | submit_cpu_ms | 34.000 | 97.000 | 2.853 | 2.310 | host-execution, store-retained |
-| flatness-submit | PASS | submit_wall_ms | 58.976 | 113.328 | 1.922 | 2.310 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_cpu_ms | 10.000 | 33.000 | 3.300 | 2.310 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 71.649 | 190.396 | 2.657 | 2.310 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 54.000 | 55.000 | 1.019 | 1.958 | read-path |
-| flatness-get | PASS | get_wall_ms | 347.775 | 283.263 | 0.814 | 1.958 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-19d6c139/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | FAIL | broken: propose_cpu_ms: early window below measurement resolution; increase --lo | - | - | - | - | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 54.000 | 57.000 | 1.056 | 1.958 | read-path |
+| flatness-get | PASS | get_wall_ms | 156.851 | 160.672 | 1.024 | 1.958 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-34048168/flatness.log | - | - | - | - | host-execution, store-retained |
