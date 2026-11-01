@@ -7,7 +7,7 @@ and `board/REDS.md`, the `green` ref, the build box hbox and its pool, the persv
 Quest: hbox as the build box with the live unattended builder on `main`; persvati as the quiet measurement
 box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean build and the native inner loop faster.
 
-## State (2026-11-01 02:20Z, present tense)
+## State (2026-11-01 02:35Z, present tense)
 
 ### hbox: the build box again (ember 10-31 evening: obend has dregg-build2)
 - The builder runs here live: /home/hbox/lanes/integ/builder-run.sh (PID builder.pid there) fetches main's
@@ -63,6 +63,20 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
   Tested on a scratch origin. fd1686db7: the rerecord holds the umbrella tree (umbrella-rerecord.pid) until it ends.
   Before that, round 467e698's rerecord ran while d5e858's umbrella-tree checked out its tip in the same tree, so
   fixture-regen/d5e858b2222b is untrustworthy and stays unlanded. The next round records it again.
+- 9317f32fc (root, 10-31): flatness is published, never a red. REDS.md has a "Flatness (published, does not gate
+  `green`)" table (metric, early, late, ratio, bound, verdict, owner); a flatness-only FAIL is not rerun. Only tour,
+  enrol, j14, composed, the build stages and the umbrellas gate. Builder restarted on it 22:16 EDT (pid 1235827).
+- World reaping (root, 10-31): `scripts/pipeline/world-reap [--dry] ROOT...` stops a finished world's processes by PID
+  file only (world *.pid, jweb `.bodyPid`, ~/.mini/consent-anchors entries whose non-binary args name the root),
+  reports the rest UNNAMED. After each verdict the builder reaps every {t,c,e,f,j}-<hex6> gate world except those
+  behind this round's functional reds and $I/keep. Manual reap 22:20 EDT: 7 finished worlds, 31 processes; one
+  UNNAMED left (c-4b750e's shared-resident-fixture-provider.py, which composed starts without a PID file).
+- Fleet survey 10-31 22:30 EDT: hbox had 43 minidregg-host processes (112 command lines mention it: root's "120") before
+  the reap and 36 after (169 world processes, 3.4 GB). Left: store-retained pool/t4 12; /ci/hpc 6 (hot-path, no
+  seat); demo-path run-1029 jwf worlds 10 (10-29, unowned); read-path /ci/exo/w8 3 (no live seat); 10-03 codex
+  workbox and 09-27 gitweb fixtures 2; bigstep r1/r2 2 (root-owned /var/lib); c-acc7cf-c2 1 (hot-path's
+  residents on its binaries). persvati: 21 hosts, read-path rp/w 9 and member-side rpw/sa, tb, tr 4 each.
+  store-retained and member-side were sent their lists; the unowned ones went to root.
 - green is 83e926874 (batch 4) until a live round passes. The first live hbox round rewrites REDS.md whole.
 
 ### Seam 1 (codec tags): on main (f2002e589)
