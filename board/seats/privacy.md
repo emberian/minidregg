@@ -79,7 +79,10 @@ lowering into Air only where useful, never as a second compiler for the opening.
    write and rebuilt by `keptBuild`; O(delta·516) holds only for cells patched from a held, forced pre-cell.
    Fixes: member-side's a014ff501 (reviewed) adds `Materialized.relativeTo held decoded` to `Theory/CellState.lean`
    (the held cell's index moved by `Carried.run` over `Patch.diff`; `relativeTo_eq`), used by `loadDeploymentFromAt`
-   on a walk, so hashing is O(changed · 516); decode and diff stay O(cell). Still open: the Host's writers
+   on a walk, so hashing is O(changed · 516); decode and diff stay O(cell). Measured by member-side on persvati
+   (fresh worlds, 60 `doc new` in blocks of 10): consent CPU per write 110 → 108 → 131 → (533) → 227 → 173 ms on
+   base 4b750eb67, and 95 → 91 → 111 → 188 → 110 → 104 ms with a014ff501, close to flat. Host CPU still grows,
+   94 → 139 ms with it. Still open: the Host's writers
    adopt the held post-cell as the birth path does (store-retained, bdfa9428c); or the index is persisted beside
    the bytes (hot-path). Re-measure against the baseline once they land: b9450147f doc-log write ~2.0 s at 13
    prior entries, ~6.1 s at 303.
