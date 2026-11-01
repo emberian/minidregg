@@ -1,19 +1,24 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `ebed79cf874a` (board: privacy row, relativeTo reviewed (a014ff501)). Round finished 2026-10-31T23:55Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ebed79cf`.
+Tip: `467e698ef56f` (client test: name the Host operation constants in the outcome-reply test). Round finished 2026-11-01T01:03Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-467e698e`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| host | rc=1 see /home/hbox/lanes/integ/logs/host.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
-| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
+| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:flatness-submit | flatness-submit FAIL | not rerun | no | host-execution, store-retained | rc=1; /ci/f-467e69/submit.log |
+| gate:flatness-run | flatness-run FAIL | not rerun | no | host-execution, store-retained | exit=1; /home/hbox/lanes/integ/gate-467e698e/flatness.log |
+| gate:composed:residents | composed residents fail | not rerun | no | member-side, infra | fail: residents: REFUSED timeout: managed fixture provider; see /ci/c-467e69/composed/stat |
+| gate:composed:restart | composed restart blocked | not rerun | no | host-execution | blocked: prerequisite residents has not passed |
 
-Suspect commits since green (`git log 83e926874e38..ebed79cf874a`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..467e698ef56f`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `467e698e` client test: name the Host operation constants in the outcome-reply test (owner: member-side)
+- `043c2c58` board: member-side row after a014ff501
+- `a18cfe5c` board: host-execution row: new seat a0dec24192aead1f1; 7acbdd878 reviewed (owner: host-execution)
+- `64a7cf8a` board: apps-hermes row: host-execution seat id, seams updated (owner: apps-hermes)
+- `6cde1ddc` builder: REDS.md for ebed79cf874a (5 red)
 - `ebed79cf` board: privacy row, relativeTo reviewed (a014ff501)
 - `a014ff50` authority load on a walk: a decoded cell takes the held cell's trie by their difference
 - `cc5cbd90` Merge remote-tracking branch 'origin/main' into seat/host-execution
@@ -49,8 +54,3 @@ Suspect commits since green (`git log 83e926874e38..ebed79cf874a`), newest first
 - `a1769318` host-execution: key status, the certify view and a birth's authored intent read the light served sta (owner: host-execution)
 - `bbfa5e08` board: build-loop row: builder restart, fd-8 fix (owner: build-loop)
 - `f1d2d3bb` builder: children never inherit builder.lock (fd 8) (owner: build-loop)
-- `147b9825` lifetime agent: a controller's named refusal reaches the caller as a refusal (law 10) (owner: apps-hermes)
-- `8bd59df6` board: build-loop row: hbox disk sweep, the build.lock fix, the gate edge at 3ddd90f (owner: build-loop)
-- `3ef7de9a` builder: the umbrella tree never holds build.lock; a held lock defers the round; reds carry an owner (owner: build-loop)
-- `3e9f365a` builder: REDS.md for 60f43c435020 (6 red)
-- `24b05cd6` board/seats/read-path.md: a128a7497, 143caf2fc, 8cbe36d62 measured
