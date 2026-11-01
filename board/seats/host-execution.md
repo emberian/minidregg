@@ -1,8 +1,7 @@
 # Seat: host-execution
 
 Agent: a0dec24192aead1f1 (fresh 2026-10-31 evening from this file; predecessors a24974e84d3c540d1, a0fee5643746e520c: `cv show`
-for detail). Delegates running: a01710a27b5235a67 (enrollment + lifetime grant port, worktree
-/Users/ember/dev/minidregg-lanes/he-enrol, hbox lease `he-enrol`); ac49ca4075452034f (per-birth growth, worktree
+for detail). Delegate running: ac49ca4075452034f (per-birth growth, worktree
 /Users/ember/dev/minidregg-lanes/he-births, hbox lease `he-births`).
 Worktree: /Users/ember/dev/minidregg-lanes/host-execution (branch seat/host-execution, landed on main; WIP rides
 `wip/host-execution`, deleted after landing). Box tree: hbox pool t8 (lease `host-execution`): fetch the wip branch there,
@@ -19,6 +18,10 @@ Kernel/ApplicationReadPermit.lean (new).
 Quest: the Host turn costs worth seconds, worst first. Now: KN2 2b PORT-C, the walk families off the full-Store walk.
 
 ## Landed (main)
+- f955ed8a2 (delegate a01710a27b5235a67, done) **enrollment, lifetime grant, op55 on the light opening**: op82/83, op72/73/74/75,
+  op55 serve from the light opening; `NativeHostReplay.selectIssue` re-admits the grain issue at its own prefix;
+  `IssuedEvidence`/`PriorIssue.sourceExact` rephrased from `.ofLoaded` grounds to `∃ ground` (audited: same existential shape,
+  a light ground needs a verified basis). Still walking: grant inspection, the carried enrollment, `PriorLifetimeGrant`, dispatch.
 - 2edf8a1ce **lifecycle on the light opening**: op66/68/70 plans and the BEGIN v3, claim v3, completion v2 submits read the light
   opening (keys -> basis, history via the opening's Reader with re-admission at the original prefix, `receiveServed`, adopt).
   `Received.appended` carries `fresh` (the claim's one-shot launch power). Claim v3's walk receiver deleted. Not yet measured.
@@ -42,8 +45,9 @@ of the whole authority cell, O(grants) per birth, where `Materialized` carries a
 1. Measure 2edf8a1ce: apps-hermes runs WBO qualify wbK (before, 467e698ef) and wbL (first builder candidate with 2edf8a1ce), with
    MINIDREGG_HOST_TRACE=1 + op-timing; per-op ms and any refusal text come to me.
 2. Per-birth `doc new` growth (above): delegate ac49ca4075452034f.
-3. Delegate a01710a27b5235a67: session enrollment (op 82/83) + agent lifetime grant (74/75) onto light; needs the issue/grant
-   evidence existentials retyped from full grounds (`.ofLoaded`, `∃ Opened`) to `∃ ground` (rephrase, not weakening).
+3. WBO wbK (before, 467e698ef): per hosted op ~1.0 s of Host turns, dispatch family dominant (op2 submit p50 88 ms x2.75/op, op76,
+   op78); one-offs op72 15.7 s and op55 10.6 s (first walks: now ported), op66 3.4 s, op70 1.3 s (ported). wbL (with 2edf8a1ce)
+   pending from apps-hermes. Dispatch is the next port (item 5).
 4. STOP: needs a key for "the running incarnation of (app, generation)": proposed `runningNullifier(domain, app, processGeneration)`
    spent by every running START completion (then `Reader.spent` -> height -> Candidate), or the running receipt carried in a new
    STOP ingress. Until then STOP (op66 STOP plan, BEGIN STOP, its completion) walks.
