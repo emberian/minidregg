@@ -56,10 +56,10 @@ composed() {
   }
   provider_units_stop() {
     local u
-    for u in $(systemctl --user list-units --all --no-legend --plain 'mini-resident-fixture-provider@*.service' 'mini-grain-controller@*.service' 'mini-grain-resident@*.service' | awk '{print $1}'); do
+    for u in mini-resident-fixture-provider@8802.service mini-grain-controller@8802.service mini-grain-resident@8802.service; do
       systemctl --user stop "$u" 2>/dev/null; systemctl --user reset-failed "$u" 2>/dev/null
     done
-    for u in $(systemctl list-units --all --no-legend --plain 'mini-grain-controller@*.service' 'mini-grain-resident@*.service' 2>/dev/null | awk '{print $1}'); do
+    for u in mini-grain-controller@8802.service mini-grain-resident@8802.service; do
       sudo -n systemctl stop "$u" 2>/dev/null; sudo -n systemctl reset-failed "$u" 2>/dev/null
     done
   }
@@ -103,7 +103,7 @@ composed() {
   }
   trap 'stop_broker; unseal_frame' EXIT
   provider_units_stop
-  sudo -n sh -c "rm -rf $HOME/.config/systemd/user/mini-grain-* /etc/systemd/system/mini-grain-*" 2>/dev/null
+  sudo -n sh -c "rm -rf $HOME/.config/systemd/user/mini-grain-*@8802* /etc/systemd/system/mini-grain-*@8802*" 2>/dev/null
   sudo -n systemctl daemon-reload 2>/dev/null || true
   jq '. + {providerServices: [{providerResourceId: 8805, tariff: {version: "1", model: "mini-hermes-completion-cut",
         routes: {user: {perOp: "1"}, pool: {perOp: "1", inputMicroPerMillion: "0", outputMicroPerMillion: "0"},

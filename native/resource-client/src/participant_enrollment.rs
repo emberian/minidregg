@@ -98,6 +98,7 @@ pub(crate) fn stale_refusal(
     config: &Path,
     decision: Option<&HostDecision>,
 ) -> bool {
+    let local = crate::client_consent::take_stale_observation();
     match decision {
         Some(HostDecision::Frame { decoded: None, encoded, .. }) => {
             let kind = b"outcome";
@@ -109,8 +110,9 @@ pub(crate) fn stale_refusal(
                 .filter(|frame| frame.first() == Some(&8))
                 .and_then(|frame| serde_json::from_slice::<Value>(&frame[1..]).ok())
                 .is_some_and(|outcome| crate::replan::outcome_is_stale_root(&outcome))
+                || local
         }
-        decision => crate::replan::is_stale_root(decision),
+        decision => crate::replan::is_stale_root(decision) || local,
     }
 }
 

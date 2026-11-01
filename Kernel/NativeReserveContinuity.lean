@@ -107,15 +107,22 @@ def ordinaryOther {config : Config} (session : NativeHostSession.Walked config)
       (PolicyInstallReceiver.decodeIngress bytes).isSome ||
       (CapabilityDelegationReceiver.decodeIngress bytes).isSome then false
   else
-    match DeclaredResourceController.decodeSignedBytes bytes with
-    | some (_, _, signed) =>
-        match DeclaredResourceController.commandCodec.decode signed.commandBytes with
-        | some command =>
-            command.targets.all (fun target =>
-              decide (⟨target.target⟩ ∉ authorityCells session)) &&
-            !decide (writesCell record providerCell)
+    let nonAuthorityFamily :=
+      if (CertifyReceiver.decodeIngress bytes).isSome ||
+          (ClockTickReceiver.decodeIngress bytes).isSome ||
+          (SeatReceiver.decodeIngress bytes).isSome ||
+          (ObjectiveActivityReceiver.decodeIngress bytes).isSome then
+        true
+      else
+        match DeclaredResourceController.decodeSignedBytes bytes with
+        | some (_, _, signed) =>
+            match DeclaredResourceController.commandCodec.decode signed.commandBytes with
+            | some command =>
+                command.targets.all (fun target =>
+                  decide (⟨target.target⟩ ∉ authorityCells session))
+            | none => false
         | none => false
-    | none => false
+    nonAuthorityFamily && !decide (writesCell record providerCell)
 
 /-- The public host call is an outer dispatch frame; the durable event retains
 the family's canonical ingress. Decode the outer frame in Lean before comparing
@@ -143,10 +150,10 @@ theorem ordinaryOther_no_provider_write {config : Config}
     (safe : ordinaryOther session providerCell record = true) :
     ¬ writesCell record providerCell := by
   dsimp [ordinaryOther] at safe
-  split at safe <;> try simp at safe
-  split at safe <;> try simp at safe
-  split at safe <;> try simp at safe
-  exact safe.2
+  split at safe
+  · simp at safe
+  · simp only [Bool.and_eq_true, Bool.not_eq_true', decide_eq_false_iff_not] at safe
+    exact safe.2
 
 theorem safeSuffix_no_provider_write {config : Config}
     (session : NativeHostSession.Walked config) (providerCell : CellId)

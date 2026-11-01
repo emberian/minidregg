@@ -1665,22 +1665,31 @@ impl World for ProcessWorld {
         let _ = session_n;
         let request_path = work.join(format!("{label}-g{generation}-request.json"));
         write_json(&request_path, &request)?;
-        let _ = fs::remove_dir_all(&attempt);
-        let plan_args = ["session-enrollment-plan", "--host", h, "--config", c, "--operator-socket", o, "--request", request_path.to_str().unwrap_or(""), "--dir", attempt.to_str().unwrap_or("")];
-        self.mini(work, &format!("{label}-g{generation}-plan"), &plan_args)
-            .map_err(|e| format!("session-enrollment-plan was refused: {e}"))?;
-        for part in ["plan.bin", "plan-inspected.json", "request.bin"] {
-            if !attempt.join(part).is_file() {
-                return Err(format!("session-enrollment-plan wrote no {part}"));
+        for retry in 0..4 {
+            let _ = fs::remove_dir_all(&attempt);
+            let plan_args = ["session-enrollment-plan", "--host", h, "--config", c, "--operator-socket", o, "--request", request_path.to_str().unwrap_or(""), "--dir", attempt.to_str().unwrap_or("")];
+            self.mini(work, &format!("{label}-g{generation}-plan-r{retry}"), &plan_args)
+                .map_err(|e| format!("session-enrollment-plan was refused: {e}"))?;
+            for part in ["plan.bin", "plan-inspected.json", "request.bin"] {
+                if !attempt.join(part).is_file() {
+                    return Err(format!("session-enrollment-plan wrote no {part}"));
+                }
+            }
+            let inspected = read_json(&attempt.join("plan-inspected.json"))?;
+            let approval = self.approve(&inspected, "headerHex", json!({"type":"minidregg-session-enrollment-approval-v1",
+                "requestSha256":Self::sha_file(&attempt.join("request.bin"))?,"planSha256":Self::sha_file(&attempt.join("plan.bin"))?,
+                "planInspectionSha256":Self::sha_file(&attempt.join("plan-inspected.json"))?}))?;
+            let approval_path = work.join(format!("{label}-g{generation}-approval.json"));
+            write_json(&approval_path, &approval)?;
+            match self.mini(work, &format!("{label}-g{generation}-seal-r{retry}"), &["session-enrollment-seal", "--attempt", attempt.to_str().unwrap_or(""), "--approval", approval_path.to_str().unwrap_or("")]) {
+                Ok(out) => {
+                    let _ = out;
+                    break;
+                }
+                Err(err) if retry < 3 && err.contains("no longer current") => continue,
+                Err(err) => return Err(err),
             }
         }
-        let inspected = read_json(&attempt.join("plan-inspected.json"))?;
-        let approval = self.approve(&inspected, "headerHex", json!({"type":"minidregg-session-enrollment-approval-v1",
-            "requestSha256":Self::sha_file(&attempt.join("request.bin"))?,"planSha256":Self::sha_file(&attempt.join("plan.bin"))?,
-            "planInspectionSha256":Self::sha_file(&attempt.join("plan-inspected.json"))?}))?;
-        let approval_path = work.join(format!("{label}-g{generation}-approval.json"));
-        write_json(&approval_path, &approval)?;
-        self.mini(work, &format!("{label}-g{generation}-seal"), &["session-enrollment-seal", "--attempt", attempt.to_str().unwrap_or(""), "--approval", approval_path.to_str().unwrap_or("")])?;
         if !attempt.join("submit-marker.json").exists() {
             // An uncertain submit is never repeated; the exact lookup decides.
             let _ = self.mini(work, &format!("{label}-g{generation}-submit"), &["session-enrollment-submit", "--attempt", attempt.to_str().unwrap_or("")]);

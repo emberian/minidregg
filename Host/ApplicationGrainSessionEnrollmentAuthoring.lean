@@ -129,9 +129,9 @@ private def descriptorPage (cell : PackedCell CanonicalCellRegistry.registry) :
   | _ => none
 
 private def observationSlot (config : Config) (ground : ServedBasis.Ground config.deployment)
-    (command : DeclaredResourceController.Command)
-    (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-      ⟨config.federation, config.genesisHeight + ground.height⟩
+    (height : Nat) (command : DeclaredResourceController.Command)
+    (_prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
+      ⟨config.federation, height⟩
       ground command)
     (index resource : Nat) (capability : CapabilityId) (root : Digest) :
     Except String SigningSlot := do
@@ -142,7 +142,7 @@ private def observationSlot (config : Config) (ground : ServedBasis.Ground confi
   let wanted : Request .object :=
     { DeclaredResourceController.requestFor ground.authority
         config.profile.semantics
-        ⟨config.federation, config.genesisHeight + ground.height⟩
+        ⟨config.federation, height⟩
         command probe root with verb := .observeObject }
   let marker := DeclaredResourceController.operationMarker
     config.deployment.domain config.profile.semantics command
@@ -156,7 +156,8 @@ the enrollment command's keys). Event28 receiving must independently admit the p
 joint mutation and all signed reads at the same image. -/
 def prepareForIssue (config : Config) (ground : ServedBasis.Ground config.deployment)
     (request : Request) (spec : ApplicationShareIssueSource.Spec)
-    (issueReceipt : NativeHostCodec.Receipt) : Except String Plan := do
+    (issueReceipt : NativeHostCodec.Receipt)
+    (height : Nat := config.genesisHeight + ground.height) : Except String Plan := do
   let ticket := spec.ticket
   let app := ticket.scope.app
   let session := ticket.participant.session
@@ -264,22 +265,25 @@ def prepareForIssue (config : Config) (ground : ServedBasis.Ground config.deploy
       constructed.manifestRoot != manifestCell.payload.root ||
       constructed.ticketRoot != ticketCell.payload.root then
     throw "enrollment authoring differs from shared native construction"
+  let currentHeight := config.genesisHeight + ground.height
+  if height > currentHeight || currentHeight > height + CredentialSignatureAdmission.planValidityWindow then
+    throw "session enrollment plan height out of validity window"
   let prepared ← match DeclaredResourceController.prepare
       config.deployment config.profile
-      ⟨config.federation, config.genesisHeight + ground.height⟩
+      ⟨config.federation, height⟩
       ground command with
     | .ok prepared => pure prepared
     | .error reason => throw s!"enrollment joint preparation refused: {repr reason}"
-  let invocation ← NativeHost.prepareInvokeOn config ground (config.genesisHeight + ground.height)
+  let invocation ← NativeHost.prepareInvokeOn config ground height
     (DeclaredResourceController.commandCodec.encode command)
   if invocation.finalizedDraft !=
       .invoke (DeclaredResourceController.commandCodec.encode command) then
     throw "enrollment finalized command differs"
-  let appSlot ← observationSlot config ground command prepared 0
+  let appSlot ← observationSlot config ground height command prepared 0
     app ticket.participant.appObserveCapability appCell.payload.root
-  let manifestSlot ← observationSlot config ground command prepared 1
+  let manifestSlot ← observationSlot config ground height command prepared 1
     request.packageManifest request.manifestObserveCapability manifestCell.payload.root
-  let ticketSlot ← observationSlot config ground command prepared 2
+  let ticketSlot ← observationSlot config ground height command prepared 2
     ticket.resource ticket.participant.ticketObserveCapability ticketCell.payload.root
   pure ⟨request, enrollment, issueReceipt, appCell.payload.root,
     manifestCell.payload.root, ticketCell.payload.root, previous,
@@ -300,12 +304,14 @@ def prepareVerified (config : Config) {target : Durable}
 /-- The carried path changes only historical selection. Current construction,
 headers, role/ticket/interface checks and original receipt remain exact. -/
 def prepareCarried (config : Config) (opened : Opened config)
-    (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (request : Request) :
+    (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (request : Request)
+    (height : Option Nat := none) :
     ExceptT String IO Plan := do
   let issue ← ExceptT.mk (CarriedApplicationProvenance.selectIssue custody request.issueIndex)
   if issue.spec.ticket.resource != request.ticketResource then
     throw "carried enrollment ticket resource differs"
   prepareForIssue config opened.ground request issue.spec issue.receipt
+    (height.getD (config.genesisHeight + opened.ground.height))
 
 def prepareRequestCarried (config : Config) (opened : Opened config)
     (custody : CarriedSegmentIO.PreservedPrefix config opened.durable) (bytes : List UInt8) :
@@ -317,13 +323,14 @@ def prepareRequestCarried (config : Config) (opened : Opened config)
 /-- Both sides of a carried service use their actual provenance: old issues
 come from the retained profile, new issues from the admitted target suffix. -/
 def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
-    (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request) :
+    (verified : NativeHostReplay.SuffixVerified config anchor target) (request : Request)
+    (height : Option Nat := none) :
     ExceptT String IO Plan := do
   if request.issueIndex < anchor.durable.height then
     let some origin := verified.origin
       | throw "old session issue lacks authenticated carried origin"
     let custody ← origin.rebindChecked verified.opened.durable
-    prepareCarried config verified.opened custody request
+    prepareCarried config verified.opened custody request height
   else
     let some prior := verified.issues.find? (fun issue =>
         issue.index == request.issueIndex &&
@@ -332,6 +339,7 @@ def prepareSuffix (config : Config) {anchor : Opened config} {target : Durable}
     if prior.evidence.record.event.codecVersion != 22 then
       throw "enrollment requires target-suffix event22 ticket issue"
     prepareForIssue config verified.opened.ground request prior.evidence.spec prior.receipt
+      (height.getD (config.genesisHeight + verified.opened.ground.height))
 
 def prepareRequestSuffix (config : Config) {anchor : Opened config} {target : Durable}
     (verified : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) :
@@ -353,7 +361,8 @@ enrollment command constructed on the opening's cells, then the plan made on the
 for that command's keys (`DeclaredResourceController.invocationKeys`) by `prepareForIssue`, the
 derivation the full image runs. The receiver re-admits that issue at its own prefix
 (`NativeHostReplay.selectIssue`). -/
-def prepareLight (config : Config) (light : NativeHostLight.Light config) (request : Request) :
+def prepareLight (config : Config) (light : NativeHostLight.Light config) (request : Request)
+    (height : Option Nat := none) :
     IO (Except String Plan) := do
   let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
   let read ← match ← reader.atHeight (request.issueIndex + 1) with
@@ -377,6 +386,7 @@ def prepareLight (config : Config) (light : NativeHostLight.Light config) (reque
       | .error detail => return .error detail
       | .ok basis =>
           return prepareForIssue config (.ofBasis basis) request issue.spec (NativeHost.receiptOfRecord read)
+            (height.getD (config.genesisHeight + basis.height))
 
 def prepareRequestLight (config : Config) (light : NativeHostLight.Light config) (bytes : List UInt8) :
     IO (Except String Plan) := do
@@ -420,7 +430,7 @@ roots, the original issue receipt and every signing header; `fresh`, read at thi
 is assembled. -/
 def assembleCurrentLight (config : Config) (light : NativeHostLight.Light config)
     (plan : Plan) (signatures : List (List UInt8)) : IO (Except String (List UInt8)) := do
-  match ← prepareLight config light plan.request with
+  match ← prepareLight config light plan.request (some plan.invocation.height) with
   | .error detail => return .error detail
   | .ok fresh =>
       if planCodec.encode fresh.imageFree != planCodec.encode plan.imageFree then
@@ -433,7 +443,7 @@ def assembleCurrentCarried (config : Config) (opened : Opened config)
     (custody : CarriedSegmentIO.PreservedPrefix config opened.durable)
     (plan : Plan) (signatures : List (List UInt8)) :
     ExceptT String IO (List UInt8) := do
-  let fresh ← prepareCarried config opened custody plan.request
+  let fresh ← prepareCarried config opened custody plan.request (some plan.invocation.height)
   if planCodec.encode fresh.imageFree != planCodec.encode plan.imageFree then
     throw "carried session enrollment plan no longer current (a signed slot, root or receipt changed)"
   assemble fresh signatures
@@ -443,7 +453,7 @@ def assembleCurrentSuffix (config : Config) {anchor : Opened config} {target : D
     (verified : NativeHostReplay.SuffixVerified config anchor target)
     (plan : Plan) (signatures : List (List UInt8)) :
     ExceptT String IO (List UInt8) := do
-  let fresh ← prepareSuffix config verified plan.request
+  let fresh ← prepareSuffix config verified plan.request (some plan.invocation.height)
   if planCodec.encode fresh.imageFree != planCodec.encode plan.imageFree then
     throw "session enrollment plan no longer current in carried service (a signed slot, root or receipt changed)"
   assemble fresh signatures

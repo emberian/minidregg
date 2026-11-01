@@ -3753,7 +3753,10 @@ pub(crate) fn submit_intent(
                     &selected_source.borrow(), OsStr::new(kind), &member_path(workspace, "key")?, &attempt, false, None, false)
             },
             |_, decision| {
-                if crate::replan::is_stale_root(decision) {
+                if crate::replan::stale_root("", decision) {
+                    if let Ok(true) = append_preimage_moved(root, workspace, &request, &selected_source.borrow()) {
+                        refresh.set(true);
+                    }
                     record_replan_reason(&attempt, "stale-root", decision);
                     return true;
                 }
