@@ -1,6 +1,6 @@
 # Seat: host-execution
 
-Agent: none (a24974e84d3c540d1 handed over 2026-10-31 night; distilled from a0fee5643746e520c; a fresh seat starts here, `cv show a24974e84d3c540d1` for detail)
+Agent: a0dec24192aead1f1 (fresh 2026-10-31 evening from this file; predecessors a24974e84d3c540d1, a0fee5643746e520c: `cv show` for detail)
 Worktree: /Users/ember/dev/minidregg-lanes/host-execution (branch seat/host-execution, rebased onto main and pushed to main;
 no side branch). Box tree: none held (hbox pool: `ssh hbox`, `. ~/.minidregg-env`, `lane-tree acquire host-execution origin/main`, then `swarm-build scripts/pipeline/lane-check FILES`; dregg-build2 is obend's now), native Host builds via
 `scripts/pipeline/native-loop hot-path <base candidate> <label>` from t7 (~3-15 min; candidates land in
@@ -56,10 +56,10 @@ build ~12% (store-retained/privacy), checkpoint seal 5%.
 4. GET read-path contract (draft + astra review paths below).
 5. Owed from audits: `append_ref_ahead_refused` decided witness; ref-0/cross-stream scope docstring; positive
    pipeline statement for two appends planned from one read.
-6. Owed review: apps-hermes (a990f9e07566fd55c) implemented the paid-plan ruling in 7acbdd878 and wrote in this
-   seat's area: new Kernel/SigningPlanImage.lean (`imageFree`), PaidPlan.imageFree, the grant assembleCurrent and
-   the three session-enrollment assembleCurrent*. Read the diff and statements. Same pattern still open:
-   Host/FnConsumerFrontierPlan.lean:155 and Host/FnConsumerNamespacePlan.lean:166 (whole-plan compare with image).
+6. Reviewed 7acbdd878 (apps-hermes: Kernel/SigningPlanImage `imageFree`, PaidPlan.imageFree, grant and enrollment
+   assembleCurrent): sound. The signed header carries no image coordinate, `fresh` is what is assembled, enrollment keeps
+   its observed roots. Owed there only: the theorems are about the projection, not the Host check itself. The Fn plans
+   (FnConsumerFrontierPlan, FnConsumerNamespacePlan) compare cell roots + header, no image: not the pattern.
 7. member-side (ab7b4fe7fb687e0ca) measured `doc new` 174 -> 540 ms over ~80 writes on persvati overlay 93b31c1c33d6
    (pre-slice-2): expected from the full-image birth path plus the closure chain; remeasure on store-retained's
    SparseMap served state and on main.
