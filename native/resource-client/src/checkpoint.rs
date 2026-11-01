@@ -145,13 +145,34 @@ fn raced(outcome: &Value) -> Option<&'static str> {
     RACED.into_iter().find(|raced| *raced == name)
 }
 
+fn raced_error(error: &str) -> Option<&'static str> {
+    if error.starts_with("local consent refused before signing:") {
+        return Some("staleConsent");
+    }
+    for name in RACED {
+        if error.contains(&format!("Minidregg.Kernel.CertifyReceiver.Reject.{name}")) {
+            return Some(name);
+        }
+    }
+    None
+}
+
 fn certify(ws: &Workspace, control: &str, min_tail: Option<String>) -> Result<Value> {
     let mut races = Vec::new();
     let mut last = None;
     let replanned = crate::replan::replan(
         "certify",
         || {
-            let value = certify_once(ws, control, min_tail.as_deref())?;
+            let value = match certify_once(ws, control, min_tail.as_deref()) {
+                Ok(value) => value,
+                Err(error) => match raced_error(&error) {
+                    Some(reason) => {
+                        races.push(json!({"reason": reason, "detail": error}));
+                        return Err(format!("{RACED_PREFIX}{reason}: {error}"));
+                    }
+                    None => return Err(error),
+                },
+            };
             match raced(&value) {
                 Some(reason) => {
                     races.push(json!({"reason": reason, "certified": value.get("certified")}));

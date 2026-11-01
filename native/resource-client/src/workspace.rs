@@ -3167,7 +3167,11 @@ fn propose_summary_once(
                     }
                 }
                 let protected = reference.get("protectedDocument").is_some();
-                let audience = if protected { Some(protected_document::observe(root,workspace,&reference,&on_disk(&mut signed)?)?) } else { None };
+                let audience = if protected {
+                    Some(protected_document::observe(root,workspace,&reference,&on_disk(&mut signed)?).map_err(|error| {
+                        if error.contains("stale-root") { OBSERVATIONS_MOVED.to_owned() } else { error }
+                    })?)
+                } else { None };
                 let current_image = member(&challenge, "worldRoot")?.to_owned();
                 if let Some(previous) = &image {
                     if previous != &current_image {
@@ -5804,12 +5808,20 @@ fn document_actions(
             // new line can be named by a range of a run that already covered its neighbour.
             let atom = random_nonce()?;
             if tail_runs.is_none() {
-                let document = match read {
-                    Some(files) => read_document(workspace, files)?,
-                    None => host_document(root, workspace, &reference(root, name)?)?,
-                };
-                no_document_refusal(name, &document)?;
-                tail_runs = Some(runs_at_tail(&document)?);
+                let entries = page_entries(content_page(view, name)?)?;
+                let has_doc = entries.iter().any(|entry| entry["type"] == "document")
+                    && entries.iter().any(|entry| entry["type"] == "element");
+                let has_runs = entries.iter().any(|entry| entry["type"] == "run");
+                if has_doc && !has_runs {
+                    tail_runs = Some(Vec::new());
+                } else {
+                    let document = match read {
+                        Some(files) => read_document(workspace, files)?,
+                        None => host_document(root, workspace, &reference(root, name)?)?,
+                    };
+                    no_document_refusal(name, &document)?;
+                    tail_runs = Some(runs_at_tail(&document)?);
+                }
             }
             lowered.extend(append_actions(&atom, text_argument(action)?, tail_runs.iter().flatten()));
             continue;

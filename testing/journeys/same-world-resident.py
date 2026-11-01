@@ -155,7 +155,7 @@ def root_handoffs(binding, receiving):
     entry = base / "usr/local/lib/mini/controller-entry.py"
     require(entry.is_file(), "root hand-offs: the frame has no controller-entry.py at " + str(entry))
     env = ["env", "MINI_ROOT=" + str(base), "MINI_GRAIN_FIXTURE_UID=" + str(os.getuid()),
-           "MINI_GRAIN_CONTROLLER_MANAGER=user"]
+           "MINI_GRAIN_CONTROLLER_MANAGER=" + ("user" if os.getuid() == 0 else "system")]
     def root(words):
         # The first provider custody copy re-renders the key broker's config (the credential store appears with the provider
         # table) and, outside a systemd root, cannot restart the broker: the harness's broker supervisor does that within a

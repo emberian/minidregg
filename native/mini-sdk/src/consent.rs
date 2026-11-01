@@ -81,11 +81,16 @@ pub enum ConsentError {
 }
 
 impl ConsentError {
-    /// The provider's refusal of an observation (221) as stale: the source moved between the
-    /// Host's challenge and the local check. Every other refusal stays terminal.
+    /// The provider's refusal of an observation (221) or plan (222/224) as stale: the source moved
+    /// between the Host's challenge/plan and the local check. Every other refusal stays terminal.
     pub fn is_stale_observation(&self) -> bool {
-        matches!(self, ConsentError::Refused { operation: crate::host_operations::CONSENT_OBSERVATION, answer: CONSENT_REFUSAL, detail }
-            if detail.starts_with(STALE_OBSERVATION_TAG.as_bytes()))
+        matches!(self, ConsentError::Refused {
+            operation: crate::host_operations::CONSENT_OBSERVATION
+                | crate::host_operations::CONSENT_PLAN
+                | crate::host_operations::CONSENT_OPERATOR_PLAN,
+            answer: CONSENT_REFUSAL,
+            detail
+        } if detail.starts_with(STALE_OBSERVATION_TAG.as_bytes()))
     }
 }
 

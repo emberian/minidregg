@@ -421,7 +421,16 @@ def consent (services : ProviderRouteConsent.Services) (config : NativeHost.Conf
         NativeClientConsent.ObservationRefusal.message)
       selectedHeaders config session wanted checked.headers
   | 222 =>
-      let headers ← IO.ofExcept (NativeClientConsent.checkIntentPlan config session.2 wanted rest)
+      let headers ← IO.ofExcept ((NativeClientConsent.checkIntentPlan config session.2 wanted rest).mapError
+        (fun detail =>
+          match NativeHostCodec.signingPlanCodec.decode rest with
+          | some remote =>
+              if remote.domain == config.deployment.domain
+                  && remote.semantics == config.profile.semantics
+                  && remote.height != NativeHost.logicalHeight config session.2.opened.durable then
+                s!"{NativeClientConsent.staleObservationTag}: {detail}"
+              else detail
+          | none => detail))
       selectedHeaders config session wanted headers
   | _ => throw (IO.userError "unsupported consent operation")
 

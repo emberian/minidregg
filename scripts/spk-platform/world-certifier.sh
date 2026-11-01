@@ -10,6 +10,6 @@ control=$(jq -er .factoryControllerCapability "$RUN/store/base/workroom/genesis.
 # Leave half the bounded tail for writes racing the next certification.
 minimum=$(jq -er '(.tailBound | tonumber | . / 2 | floor) | if . < 1 then 1 else . end' "$RUN/store/base/workroom/genesis.json")
 while :; do
-  "$BIN/mini" checkpoint --action certify --workspace "$run/certifier" --control "$control" --min-tail "$minimum"
+  "$BIN/mini" checkpoint --action certify --workspace "$run/certifier" --control "$control" --min-tail "$minimum" || true
   sleep 2
 done

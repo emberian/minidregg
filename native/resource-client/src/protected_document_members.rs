@@ -40,9 +40,8 @@ fn current_members(home:&Path)->Result<Vec<Value>> {
 }
 fn source(root:&Path,workspace:&Value,name:&str)->Result<(Value,Value,Value,PathBuf)> {
     let reference=ws::reference(root,name)?;
-    let (view,_,mut signed_read)=ws::signed_view(root,workspace,&reference,"resource")?;
-    let signed=ws::on_disk(&mut signed_read)?;
-    Ok((reference,view,audience_source(workspace,&signed)?,signed))
+    let (view,signed,source)=signed_audience_view(root,workspace,&reference)?;
+    Ok((reference,view,source,signed))
 }
 fn home_of(root:&Path,reference:&Value)->Result<PathBuf>{Ok(root.join("protected-documents").join(text(reference,"target")?))}
 fn check_identity(stage:&Value,workspace:&Value,reference:&Value,name:&str)->Result<()> {
@@ -72,7 +71,7 @@ pub(crate) fn change(root:&Path,workspace:&Value,name:&str,change:&str,subject:&
     device_path:Option<&Path>)->Result<()> {
     ws::validate_name(change)?;nat32(subject)?;
     if workspace["subject"]==subject {return Err("the retaining owner cannot remove or replace itself with this command".into());}
-    let (reference,_,observed,signed)=source(root,workspace,name)?;
+    let (mut reference,_,mut observed,mut signed)=source(root,workspace,name)?;
     let home=home_of(root,&reference)?;
     let _lock=crate::transport::service_lock(&home.join("membership.lock"))?;
     let changes=home.join("membership");if !changes.exists(){ws::make_private_dir(&changes)?;}
@@ -87,7 +86,7 @@ pub(crate) fn change(root:&Path,workspace:&Value,name:&str,change:&str,subject:&
         return recover_locked(root,workspace,name,change);
     }
     text(&reference,"controlCapability")?;
-    let catalog=text(&reference["protectedDocument"],"catalog")?;
+    let catalog=text(&reference["protectedDocument"],"catalog")?.to_owned();
     let publication=active_home(&home)?;
     if publication==home && !home.join("epoch-manifest.bin").exists() {
         return Err("complete protected enrollment before a membership change".into());
@@ -107,7 +106,17 @@ pub(crate) fn change(root:&Path,workspace:&Value,name:&str,change:&str,subject:&
     if device_path.is_some() && previous.len()>=4096 {
         return Err("protected audience already has the maximum 4096 device entries".into());
     }
-    let actual=super::observe(root,workspace,&reference,&signed)?;
+    let mut obs_attempt=0;
+    let actual=loop {
+        match super::observe(root,workspace,&reference,&signed) {
+            Ok(actual)=>break actual,
+            Err(error) if obs_attempt<7 && error.contains("stale-root")=>{
+                obs_attempt+=1;
+                (reference,_,observed,signed)=source(root,workspace,name)?;
+            }
+            Err(error)=>return Err(error),
+        }
+    };
     let retained=roster_entries(&previous)?;
     if json!(retained)!=actual.roster["entries"] {return Err("local member custody is not the current admitted roster; synchronize before freezing".into());}
     let found=previous.iter().any(|row| row["subject"]==subject);
@@ -237,8 +246,14 @@ fn phase(root:&Path,workspace:&Value,name:&str,dir:&Path,stage:&Value,phase:&str
                 if current["audienceState"]!=expected_before{return Err("audience moved before phase material was retained".into());}
                 let request_path=dir.join(format!("{label}-request.json"));
                 let original=read(&wrapper.join("source.json"))?;
-                crate::object_epoch_cli::run(&original,&request_path,&ws::workspace_host(workspace)?,
-                    &ws::member_path(workspace,"config")?,&ws::member_path(workspace,"key")?,&state,&key,&directory)?;
+                if let Err(error)=crate::object_epoch_cli::run(&original,&request_path,&ws::workspace_host(workspace)?,
+                    &ws::member_path(workspace,"config")?,&ws::member_path(workspace,"key")?,&state,&key,&directory) {
+                    if error.contains("stale-root") && !custody(root)?.operation_known(&op)? {
+                        let _=fs::remove_dir_all(&directory);
+                        continue;
+                    }
+                    return Err(error);
+                }
             }
             let intent=read(&directory.join("phase-intent.json"))?;
             let expected=&intent["purpose"]["draft"]["declaration"]["source"]["audience"];
@@ -267,8 +282,14 @@ fn phase(root:&Path,workspace:&Value,name:&str,dir:&Path,stage:&Value,phase:&str
             if !observation.exists(){retain_record(&observation,&fs::read(&signed).map_err(|e|e.to_string())?)?;}
             request["operation"]=json!(operation);request["phase"]=json!(phase);
             let request_path=dir.join(format!("{label}-request.json"));retain_json(&request_path,&request)?;
-            crate::object_epoch_cli::run(&current,&request_path,&ws::workspace_host(workspace)?,
-                &ws::member_path(workspace,"config")?,&ws::member_path(workspace,"key")?,&state,&key,&directory)?;
+            if let Err(error)=crate::object_epoch_cli::run(&current,&request_path,&ws::workspace_host(workspace)?,
+                &ws::member_path(workspace,"config")?,&ws::member_path(workspace,"key")?,&state,&key,&directory) {
+                if error.contains("stale-root") && !custody(root)?.operation_known(&op)? {
+                    let _=fs::remove_dir_all(&directory);
+                    continue;
+                }
+                return Err(error);
+            }
         }
         let expected=read(&directory.join("phase-intent.json"))?["purpose"]["draft"]["declaration"]["source"]["audience"].clone();
         let (_,_,current,_)=source(root,workspace,name)?;

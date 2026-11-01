@@ -66,7 +66,15 @@ if [[ -f $run/resident-binding.json ]]; then
       if [[ $pid =~ ^[1-9][0-9]*$ ]] && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -qF "$res_base/"; then
         systemctl --user stop "$unit" >>"$run/controller-cleanup.log" 2>&1 || rc=1
       fi
+      sys_pid=$(systemctl show "$unit" -p MainPID --value 2>/dev/null || true)
+      if [[ $sys_pid =~ ^[1-9][0-9]*$ ]] && tr '\0' ' ' <"/proc/$sys_pid/cmdline" 2>/dev/null | grep -qF "$res_base/"; then
+        sudo -n systemctl stop "$unit" >>"$run/controller-cleanup.log" 2>&1 || rc=1
+      fi
     done
+    if grep -rqF "$res_base/" "/etc/systemd/system/mini-grain-controller@$res_task.service.d" "/etc/systemd/system/mini-grain-resident@$res_task.service.d" 2>/dev/null; then
+      sudo -n rm -rf "/etc/systemd/system/mini-grain-controller@$res_task.service.d" "/etc/systemd/system/mini-grain-resident@$res_task.service.d" 2>/dev/null || true
+      sudo -n systemctl daemon-reload 2>/dev/null || true
+    fi
   fi
 fi
 if [[ -d $GRAINS_ROOT/controller ]]; then

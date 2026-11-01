@@ -391,22 +391,15 @@ pub(crate) fn protect_current(root:&std::path::Path,workspace:&Value,name:&str) 
     protect(root,workspace,name,true)
 }
 fn protect(root:&std::path::Path,workspace:&Value,name:&str,current:bool) -> Result<()> {
-    use std::path::Path;
     let reference=super::local_reference(root,name)?;
     let target=super::member(&reference,"target")?.to_owned();
     let retained=stage_path(root,&target)?;
     if retained.exists() {return recover(root,workspace,name);}
     if reference.get("protectedDocument").is_some() {return Err("document already has protected custody".into());}
-    let (view,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
-    let signed=super::on_disk(&mut signed_read)?;
+    let (view,signed,initial)=signed_audience_view(root,workspace,&reference)?;
     if !current && super::entries(&view)?.iter().any(|entry| entry["type"]=="atom") {
         return Err("existing document text is retained; protect-empty requires an empty document, not implicit historical disclosure".into());
     }
-    let host=super::workspace_host(workspace)?;
-    let config=super::member_path(workspace,"config")?;
-    let supported=signed.parent().ok_or("missing observation directory")?.join("audience-supported.json");
-    crate::host_files(&host,&config,&[Path::new("object-audience"),&signed,&supported])?;
-    let initial=super::bounded_json(&supported)?;
     if !initial["audienceState"].is_null() {return Err("document audience already enrolled; recover its retained enrollment".into());}
     let conversion=if current {Some(conversion::snapshot(root,workspace,name,&view,&signed)?)}else{None};
     if current {
@@ -498,24 +491,37 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
         "hybridPublic":public["hybridPublic"]}],
         "grants":[{"kind":"object","target":target,"capability":super::member(&reference,"observeCapability")?}]});
     let request_path=home.join("enrollment-request.json");retain_json(&request_path,&request)?;
-    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
-    let signed=super::on_disk(&mut signed_read)?;
-    // The phase is custody and lives beside its observation (`phaseDirectory`, which recovery
-    // resolves inside this workspace), so the read leaves the process's scratch for attempts/.
-    let phase_root=crate::read_scratch::retain(root,signed.parent().ok_or("missing phase observation")?)?;
-    let signed=phase_root.join("signed-observation.bin");
-    let phase_root=phase_root.as_path();
-    let source_path=phase_root.join("protected-audience.json");
-    crate::host_files(&host,&config,&[Path::new("object-audience"),&signed,&source_path])?;
-    let source=super::bounded_json(&source_path)?;
-    if !source["audienceState"].is_null() {return Err("document audience changed before retained enrollment phase".into());}
-    let phase_dir=phase_root.join("epoch");
-    retain_json(&home.join("enrollment.json"),&json!({
-        "type":"mini-protected-document-enrollment-v1","name":name,"object":target,"catalog":catalog_name,
-        "operation":stage["operation"],"phaseDirectory":phase_dir.strip_prefix(root).map_err(|_|"phase must remain inside participant workspace")?,
-        "mode":if stage.get("conversion").is_some_and(|value|!value.is_null()){"current-text-v1"}else{"empty-v1"},
-        "custody":"protected-documents"}))?;
-    crate::object_epoch_cli::run(&source,&request_path,&host,&config,&writer,&state,&storage,&phase_dir)?;
+    for attempt in 0..8 {
+        let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
+        let signed=super::on_disk(&mut signed_read)?;
+        // The phase is custody and lives beside its observation (`phaseDirectory`, which recovery
+        // resolves inside this workspace), so the read leaves the process's scratch for attempts/.
+        let phase_root=crate::read_scratch::retain(root,signed.parent().ok_or("missing phase observation")?)?;
+        let signed=phase_root.join("signed-observation.bin");
+        let phase_root=phase_root.as_path();
+        let source_path=phase_root.join("protected-audience.json");
+        if let Err(error)=crate::host_files(&host,&config,&[Path::new("object-audience"),&signed,&source_path]) {
+            if attempt<7 && error.contains("stale-root") {continue;}
+            return Err(error);
+        }
+        let source=super::bounded_json(&source_path)?;
+        if !source["audienceState"].is_null() {return Err("document audience changed before retained enrollment phase".into());}
+        let phase_dir=phase_root.join("epoch");
+        retain_json(&home.join("enrollment.json"),&json!({
+            "type":"mini-protected-document-enrollment-v1","name":name,"object":target,"catalog":catalog_name,
+            "operation":stage["operation"],"phaseDirectory":phase_dir.strip_prefix(root).map_err(|_|"phase must remain inside participant workspace")?,
+            "mode":if stage.get("conversion").is_some_and(|value|!value.is_null()){"current-text-v1"}else{"empty-v1"},
+            "custody":"protected-documents"}))?;
+        match crate::object_epoch_cli::run(&source,&request_path,&host,&config,&writer,&state,&storage,&phase_dir) {
+            Ok(())=>break,
+            Err(error) if attempt<7 && error.contains("stale-root")
+                && !crate::object_epoch_cli::restore_phase(&phase_dir,&state,&storage,text(stage,"operation")?)? => {
+                let _=std::fs::remove_file(home.join("enrollment.json"));
+                continue;
+            }
+            Err(error)=>return Err(error),
+        }
+    }
     finish_enrollment(root,workspace,name,&home)
 }
 
@@ -534,19 +540,25 @@ fn recover_phase(root:&std::path::Path,workspace:&Value,name:&str,home:&std::pat
     let meta=super::bounded_json(&home.join("enrollment.json"))?;
     if meta["object"]!=reference["target"] {return Err("retained enrollment names another document".into());}
     let phase=retained_phase(root,&meta)?;
-    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
-    let signed=super::on_disk(&mut signed_read)?;
-    let source=audience_source(workspace,&signed)?;
+    let (_,_,source)=signed_audience_view(root,workspace,&reference)?;
     let (state,key)=custody_paths(root);
     if !phase.exists() {
         // Metadata was durable, but epoch construction had not begun. Reuse its
         // immutable request and original signed observation directory.
         if !source["audienceState"].is_null() {return Err("document audience changed before retained phase began".into());}
         let original=super::bounded_json(&phase.parent().ok_or("phase has no parent")?.join("protected-audience.json"))?;
-        crate::object_epoch_cli::run(&original,&home.join("enrollment-request.json"),
+        match crate::object_epoch_cli::run(&original,&home.join("enrollment-request.json"),
             &super::workspace_host(workspace)?,&super::member_path(workspace,"config")?,
-            &super::member_path(workspace,"key")?,&state,&key,&phase)?;
-        return finish_enrollment(root,workspace,name,home);
+            &super::member_path(workspace,"key")?,&state,&key,&phase) {
+            Ok(())=>return finish_enrollment(root,workspace,name,home),
+            Err(error) if error.contains("stale-root")
+                && !crate::object_epoch_cli::restore_phase(&phase,&state,&key,text(&meta,"operation")?)? => {
+                let _=std::fs::remove_file(home.join("enrollment.json"));
+                let stage=super::bounded_json(&stage_path(root,text(&meta,"object")?)?)?;
+                return continue_enrollment(root,workspace,name,&stage);
+            }
+            Err(error)=>return Err(error),
+        }
     }
     if !crate::object_epoch_cli::restore_phase(&phase,&state,&key,text(&meta,"operation")?)? {
         // Preparation stopped before any key/phase was durably chosen. The
@@ -554,10 +566,18 @@ fn recover_phase(root:&std::path::Path,workspace:&Value,name:&str,home:&std::pat
         // artifacts instead of interpreting missing custody as a new operation.
         if !source["audienceState"].is_null() {return Err("source changed before epoch custody was staged".into());}
         let original=super::bounded_json(&phase.parent().ok_or("phase has no parent")?.join("protected-audience.json"))?;
-        crate::object_epoch_cli::run(&original,&home.join("enrollment-request.json"),
+        match crate::object_epoch_cli::run(&original,&home.join("enrollment-request.json"),
             &super::workspace_host(workspace)?,&super::member_path(workspace,"config")?,
-            &super::member_path(workspace,"key")?,&state,&key,&phase)?;
-        return finish_enrollment(root,workspace,name,home);
+            &super::member_path(workspace,"key")?,&state,&key,&phase) {
+            Ok(())=>return finish_enrollment(root,workspace,name,home),
+            Err(error) if error.contains("stale-root")
+                && !crate::object_epoch_cli::restore_phase(&phase,&state,&key,text(&meta,"operation")?)? => {
+                let _=std::fs::remove_file(home.join("enrollment.json"));
+                let stage=super::bounded_json(&stage_path(root,text(&meta,"object")?)?)?;
+                return continue_enrollment(root,workspace,name,&stage);
+            }
+            Err(error)=>return Err(error),
+        }
     }
     let operation: [u8;32]=mini_sdk::hex::decode(text(&meta,"operation")?).map_err(|e| e.0)?.try_into().map_err(|_|"invalid enrollment operation")?;
     let store=custody(root)?;
@@ -601,14 +621,24 @@ fn audience_source(workspace:&Value,signed:&std::path::Path)->Result<Value> {
         &[std::path::Path::new("object-audience"),signed,&output])?;
     super::bounded_json(&output)
 }
+pub(super) fn signed_audience_view(root:&std::path::Path,workspace:&Value,reference:&Value)->Result<(Value,std::path::PathBuf,Value)> {
+    for attempt in 0..8 {
+        let (view,_,mut signed_read)=super::signed_view(root,workspace,reference,"resource")?;
+        let signed=super::on_disk(&mut signed_read)?;
+        match audience_source(workspace,&signed) {
+            Ok(source)=>return Ok((view,signed,source)),
+            Err(error) if attempt<7 && error.contains("stale-root")=>continue,
+            Err(error)=>return Err(error),
+        }
+    }
+    unreachable!()
+}
 fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std::path::Path)->Result<()> {
     let meta=super::bounded_json(&home.join("enrollment.json"))?;
     let phase=retained_phase(root,&meta)?;
     let mut reference=super::local_reference(root,name)?;
     if reference["target"]!=meta["object"] {return Err("retained enrollment names another document".into());}
-    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
-    let signed=super::on_disk(&mut signed_read)?;
-    let source=audience_source(workspace,&signed)?;
+    let (_,_,source)=signed_audience_view(root,workspace,&reference)?;
     let intent=super::bounded_json(&phase.join("phase-intent.json"))?;
     let expected=&intent["purpose"]["draft"]["declaration"]["source"]["audience"];
     let manifest=std::fs::read(phase.join("epoch-manifest.bin")).map_err(|e|e.to_string())?;
@@ -690,10 +720,15 @@ fn finish_enrollment(root:&std::path::Path,workspace:&Value,name:&str,home:&std:
 pub(crate) fn export_epoch(root:&std::path::Path,workspace:&Value,name:&str,output:&std::path::Path)->Result<()> {
     let reference=super::local_reference(root,name)?;
     let target=super::member(&reference,"target")?;
-    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
-    let signed=super::on_disk(&mut signed_read)?;
-    let audience=observe(root,workspace,&reference,&signed)?;
-    let source=audience_source(workspace,&signed)?;
+    let mut attempt=0;
+    let (audience,source)=loop {
+        let (_,signed,source)=signed_audience_view(root,workspace,&reference)?;
+        match observe(root,workspace,&reference,&signed) {
+            Ok(audience)=>break (audience,source),
+            Err(error) if attempt<7 && error.contains("stale-root")=>{attempt+=1;continue;}
+            Err(error)=>return Err(error),
+        }
+    };
     let home=root.join("protected-documents").join(target);
     let publication=members::active_home(&home)?;
     let meta=if publication==home {super::bounded_json(&home.join("enrollment.json"))?}else {
@@ -727,21 +762,26 @@ pub(crate) fn import_epoch(root:&std::path::Path,workspace:&Value,name:&str,cata
     if bundle["type"]!="mini-protected-document-epoch-v1" || bundle["object"]!=target {
         return Err("epoch bundle names another document or format".into());
     }
-    let (_,_,mut signed_read)=super::signed_view(root,workspace,&reference,"resource")?;
-    let signed=super::on_disk(&mut signed_read)?;
-    let source=audience_source(workspace,&signed)?;
     let catalog_ref=super::local_reference(root,catalog)?;
-    let (_,_,mut catalog_signed_read)=super::signed_view(root,workspace,&catalog_ref,"resource")?;
-    let catalog_signed=super::on_disk(&mut catalog_signed_read)?;
-    let attempt=signed.parent().ok_or("missing import observation directory")?;
     let roster_bytes=mini_sdk::hex::decode(text(&bundle,"rosterBytes")?).map_err(|e| e.0)?;
-    let roster=attempt.join("import-roster.bin");
-    crate::create_private(&roster,&roster_bytes)?;
-    let state_path=attempt.join("import-audience.json");
-    crate::create_private(&state_path,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
-    let checked_path=attempt.join("import-roster-checked.json");
-    crate::host_files(&super::workspace_host(workspace)?,&super::member_path(workspace,"config")?,
-        &[std::path::Path::new("object-audience-roster"),&signed,&catalog_signed,&state_path,&roster,&checked_path])?;
+    let mut retry_attempt=0;
+    let (source,checked_path,attempt)=loop {
+        let (_,signed,source)=signed_audience_view(root,workspace,&reference)?;
+        let (_,_,mut catalog_signed_read)=super::signed_view(root,workspace,&catalog_ref,"resource")?;
+        let catalog_signed=super::on_disk(&mut catalog_signed_read)?;
+        let attempt=signed.parent().ok_or("missing import observation directory")?.to_owned();
+        let roster=attempt.join("import-roster.bin");
+        crate::create_private(&roster,&roster_bytes)?;
+        let state_path=attempt.join("import-audience.json");
+        crate::create_private(&state_path,&serde_json::to_vec(&source["audienceState"]).map_err(|e|e.to_string())?)?;
+        let checked_path=attempt.join("import-roster-checked.json");
+        match crate::host_files(&super::workspace_host(workspace)?,&super::member_path(workspace,"config")?,
+            &[std::path::Path::new("object-audience-roster"),&signed,&catalog_signed,&state_path,&roster,&checked_path]) {
+            Ok(())=>break (source,checked_path,attempt),
+            Err(error) if retry_attempt<7 && error.contains("stale-root")=>{retry_attempt+=1;continue;}
+            Err(error)=>return Err(error),
+        }
+    };
     let audience=Audience::from_checked(&source,&super::bounded_json(&checked_path)?,&target)?;
     if bundle["epoch"]!=audience.anchor.epoch.to_string() {return Err("epoch bundle is not current source epoch".into());}
     let (state,storage)=ensure_custody(root)?;
