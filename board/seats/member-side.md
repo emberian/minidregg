@@ -61,8 +61,16 @@ resident footprint (a few MB per member), web pages.
   every outcome (no record, never forwarded, undecided), replacing four copies; apps-hermes' 7acbdd878 read. The grain
   share recovery test ported to the codec session (stale since 3983f0787). `activity.rs`/`checkpoint.rs` keep their
   own checks (they print the outcome body's text).
+- A verification walk's authority load follows the held trie (a014ff501): `Patch.diff`/`run_diff` (Theory/Store),
+  `Materialized.relativeTo` (Theory/CellState), used by `loadDeploymentFromAt` when the bytes moved. store-bench at
+  height 177: `loadDeployment` from bytes 42 ms vs 2.5 ms held. Reviewed by store-retained and privacy. Whole tree
+  green (10,413 jobs). Decode + diff stay O(cell); the hashing becomes O(changed x 516).
 
 ## Numbers
+- persvati, fresh world on base 4b750eb67 (before a014ff501), member-1 `doc new` blocks of 10 (wall / Host /
+  consent): 255/101/110, 239/101/108, 276/111/131, 356/151/533 (outlier), 413/276/227, 398/198/173. Still grows,
+  milder than 93b31c1c33d6. After-number: overlay of a014ff501+ host+consent on 4b750eb67 (building in
+  /home/ember/mdpool/lanes/msl).
 - persvati 2026-10-31 evening, world rpw/rf (overlay 93b31c1c33d6: main 27f85e89 host+consent incl. 43995c7f2,
   76511e768, 86c9dbddb, f28cd8457; certifier running), member-1 `doc new`, blocks of 10 back to back (wall / Host /
   consent ms medians): 326/174/118, 378/215/134, 487/303/465 (outlier), 514/349/221, 580/375/186, 685/477/196,
@@ -81,9 +89,9 @@ resident footprint (a few MB per member), web pages.
   236 of 2,466 samples (9.6%) of a batch-8 provider's `doc new`. There is no end-to-end after-number yet (see Next 1).
 
 ## Next (in order)
-1. LAW 17 (consent's half): find what grows per record on the provider's walk (trie/hash work suggests cells
-   decoded from bytes rebuild their trie; ask privacy whether the walk's post cell is patched or decoded). Then
-   measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
+1. LAW 17 (consent's half): measure a014ff501 (overlay on 4b750eb67 vs that base). The law-17 form (store-retained):
+   the walk carries each record's own write patch as data beside the Prop admission (`Derived`), so it never
+   decodes or diffs a whole cell; `Patch.diff` stays the bytes-only fallback. Then measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
    catch-up profile and wall, against the batch-8 numbers above. That is the after-number for rows 16 and 19,
    43995c7f2 (codec order check) and 76511e768 (projection). Expect no `planeKeys`/`supportFast`/`WorldTrack`
    frames; the roots come from FORMAT (a)'s kept index (f28cd8457).
