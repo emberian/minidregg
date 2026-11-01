@@ -2539,8 +2539,9 @@ def dispatchSession (config : NativeHost.Config)
   | 8 =>
       let (kind, source) ← splitKind payload
       if kind == "object-audience" then
-        let walked ← sessionWalked config state
-        match ← NativeHost.objectAudienceLoaded config walked.target walked.verified source with
+        let light := (← sessionCurrent config state).light
+        let basis ← IO.ofExcept (← light.basis ⟨[], []⟩)
+        match ← NativeHost.objectAudienceOn config (.ofBasis basis) source with
         | .ok view => return (8, (objectAudienceJson view).compress.toUTF8.toList)
         | .error reason => return (255, refusalFrame "object-audience" reason)
       else if kind == "object-audience-roster" then
@@ -2552,9 +2553,10 @@ def dispatchSession (config : NativeHost.Config)
           | throw (RequestRefusal.malformed "object audience state is not UTF-8")
         let plannedJson ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse plannedText)
         let planned ← RequestRefusal.clientBytes (Minidregg.Host.Json.audienceState "$" plannedJson)
-        let walked ← sessionWalked config state
-        let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterLoaded config
-          walked.target walked.verified sourceObservation catalogObservation rosterBytes planned)
+        let light := (← sessionCurrent config state).light
+        let basis ← IO.ofExcept (← light.basis ⟨[], []⟩)
+        let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterOn config
+          (.ofBasis basis) sourceObservation catalogObservation rosterBytes planned)
         return (8, (checkedObjectRosterJson audience roster rosterBytes).compress.toUTF8.toList)
       else pureCodec config providerRoutes 8 payload
   | 130 =>
@@ -8739,10 +8741,9 @@ def runCommandObjectAudienceRoster (_arguments : List String) (_configPath _comm
             let planned ← IO.ofExcept (Minidregg.Host.Json.audienceState "$" (← readJson plannedPath))
             let rosterBytes ← readBoundedBytes rosterPath maxFrame
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
-            let state ← IO.mkRef (some session)
-            let walked ← sessionWalked pinnedConfig state
-            let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterLoaded pinnedConfig
-              walked.target walked.verified (← readBoundedBytes sourceObservation maxFrame)
+            let basis ← IO.ofExcept (← session.light.basis ⟨[], []⟩)
+            let (audience, roster) ← IO.ofExcept (← NativeHost.objectAudienceRosterOn pinnedConfig
+              (.ofBasis basis) (← readBoundedBytes sourceObservation maxFrame)
               (← readBoundedBytes catalogObservation maxFrame) rosterBytes planned)
             writeJson output (checkedObjectRosterJson audience roster rosterBytes)
             pure 0
@@ -8755,10 +8756,9 @@ def runCommandObjectAudience (_arguments : List String) (_configPath _command : 
   | [observationPath, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
-            let state ← IO.mkRef (some session)
-            let walked ← sessionWalked pinnedConfig state
+            let basis ← IO.ofExcept (← session.light.basis ⟨[], []⟩)
             let signed ← readBoundedBytes observationPath maxFrame
-            let result ← NativeHost.objectAudienceLoaded pinnedConfig walked.target walked.verified signed
+            let result ← NativeHost.objectAudienceOn pinnedConfig (.ofBasis basis) signed
             let view ← match result with
               | .ok view => pure view
               | .error reason => throw (IO.userError s!"object audience observation refused: {repr reason}")

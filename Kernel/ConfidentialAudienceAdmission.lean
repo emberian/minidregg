@@ -45,25 +45,25 @@ def rosterDeviceGuards (context : Context deployment) (roster : Roster) : List R
 
 def recipientRequest (context : Context deployment) (semantics : Digest)
     (ambient : DeclaredResourceController.Ambient) (object : Nat) (root : Digest)
-    (roster : Roster) (entry : Entry) (disclosure : List UInt8) : Request .object where
-  domain := deployment.domain
-  semantics := semantics
-  federation := ambient.federation
-  subject := ⟨entry.subject⟩
-  subjectKeyEpoch := context.authority.authState.subjectKeyEpoch ⟨entry.subject⟩
-  target := ⟨object⟩
-  verb := .observeObject
-  argsDigest := (Sp800185Cshake256.hash "LOOM.AUDIENCE.READ.VIEW/v1".toUTF8.toList
+    (roster : Roster) (entry : Entry) (disclosure : List UInt8) : Request .object :=
+  let viewDigest := (Sp800185Cshake256.hash "LOOM.AUDIENCE.READ.VIEW/v1".toUTF8.toList
     (ObjectAudienceRoster.encode roster ++ disclosure)).digest
-  effectsDigest := (Sp800185Cshake256.hash "LOOM.AUDIENCE.READ.VIEW/v1".toUTF8.toList
-    (ObjectAudienceRoster.encode roster ++ disclosure)).digest
-  nonce := roster.transition
-  height := ambient.height
-  preStateRoot := root
-  policyId := ⟨object⟩
-  policyEpoch := context.authority.authState.policyEpoch ⟨object⟩
-  policyRevision := context.authority.authState.policyRevision ⟨object⟩
-  cost := (ObjectAudienceRoster.entryStream.encode entry).length
+  { domain := deployment.domain
+    semantics := semantics
+    federation := ambient.federation
+    subject := ⟨entry.subject⟩
+    subjectKeyEpoch := context.authority.authState.subjectKeyEpoch ⟨entry.subject⟩
+    target := ⟨object⟩
+    verb := .observeObject
+    argsDigest := viewDigest
+    effectsDigest := viewDigest
+    nonce := roster.transition
+    height := ambient.height
+    preStateRoot := root
+    policyId := ⟨object⟩
+    policyEpoch := context.authority.authState.policyEpoch ⟨object⟩
+    policyRevision := context.authority.authState.policyRevision ⟨object⟩
+    cost := (ObjectAudienceRoster.entryStream.encode entry).length }
 
 abbrev One (context : Context deployment) (ambient : DeclaredResourceController.Ambient)
     (object : Nat) (preRoot : Digest) (roster : Roster) (entry : Entry)

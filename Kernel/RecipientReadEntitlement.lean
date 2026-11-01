@@ -90,6 +90,23 @@ def readGuards (prepared : Preparation (context := context) (profile := profile)
     ⟨⟨wanted.target.value⟩, context.view.model.roots ⟨wanted.target.value⟩⟩] ++
     (dependencies.readGuards ++ sources).map (fun guard => ⟨⟨guard.1⟩, guard.2⟩))
 
+def readGuardsFast (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) : Option (List ReadGuard) := do
+  let dependencies := prepared.kindDependencies
+  let sources ← PhysicalLawResolution.readGuards context.authority
+    context.directory profile.semantics wanted.target.value dependencies.additional
+  pure (context.authorityReadGuards ++ [prepared.clock.readGuard,
+    ⟨⟨wanted.target.value⟩, context.view.model.roots ⟨wanted.target.value⟩⟩] ++
+    (dependencies.readGuards ++ sources).map (fun guard => ⟨⟨guard.1⟩, guard.2⟩))
+
+omit [DecidableEq F] in
+@[csimp] theorem readGuards_eq_fast : @readGuards = @readGuardsFast := by
+  funext F _ deployment context profile wanted marker capability contextBytes prepared
+  have exact : WorldKindLawDependencies.loadTarget deployment context.directory wanted.target.value =
+      some prepared.kindDependencies := prepared.kindDependenciesExact
+  simp only [readGuards, readGuardsFast, exact]
+  rfl
+
 /-- The view is an exact materialized resource selected by a source-owned outer
 controller: current observation or actual validated transaction post. This API
 certifies that indexed view, not its provenance or permission to publish. -/
@@ -110,10 +127,57 @@ def viewProject (prepared : Preparation (context := context) (profile := profile
       (CanonicalAccountView.balanceStream.encode []) ++
     ResourceObservationAdmission.resourceSlots wanted.subject wanted.target.value view.1 logical⟩
 
+def viewKeys (prepared : Preparation (context := context) (profile := profile)
+    (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes)) :
+    List Minidregg.Pred.Slot :=
+  ResourceObservationAdmission.keys prepared
+
+def viewProjectFor (keys : List Minidregg.Pred.Slot)
+    (prepared : Preparation (context := context) (profile := profile)
+      (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
+    (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
+    (logical : Minidregg.Theory.Store.Store (CanonicalCellRegistry.layout view.1)) : Minidregg.Pred.State :=
+  (viewProject prepared view logical).restrict keys
+
+def viewProjectForDemand (keys : List Minidregg.Pred.Slot)
+    (prepared : Preparation (context := context) (profile := profile)
+      (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
+    (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
+    (logical : Minidregg.Theory.Store.Store (CanonicalCellRegistry.layout view.1)) : Minidregg.Pred.State :=
+  (⟨[("target/storageKind", Int.ofNat view.1.tag.toNat)] ++
+    Kernel.ClockCell.slots prepared.clock.clock ++
+    CanonicalRuntimeProfile.requestSlots (viewRequest (wanted := wanted) view) ++
+    ResourceAuthorityProjection.bytesSlotsDemanded keys "context/bytes" (fun _ => contextBytes) ++
+    ResourceAuthorityProjection.bytesSlotsDemanded keys "resource/bytes"
+      (fun _ => (CanonicalCellRegistry.materializer view.1).codec.encode logical) ++
+    ResourceAuthorityProjection.bytesSlotsDemanded keys "account/bytes"
+      (fun _ => CanonicalAccountView.balanceStream.encode []) ++
+    ResourceObservationAdmission.resourceSlotsDemand keys.contains wanted.subject wanted.target.value view.1 logical⟩ :
+      Minidregg.Pred.State).restrict keys
+
+set_option backward.isDefEq.respectTransparency false in
+omit [DecidableEq F] in
+theorem viewProjectForDemand_exact (keys : List Minidregg.Pred.Slot)
+    (prepared : Preparation (context := context) (profile := profile)
+      (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
+    (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
+    (logical : Minidregg.Theory.Store.Store (CanonicalCellRegistry.layout view.1)) :
+    viewProjectForDemand keys prepared view logical = viewProjectFor keys prepared view logical := by
+  simp only [viewProjectForDemand, viewProjectFor, viewProject, Minidregg.Pred.State.restrict,
+    List.filter_append, ResourceAuthorityProjection.bytesSlotsDemanded_restrict]
+  rw [ResourceObservationAdmission.resourceSlotsDemand_eq, List.filter_filter]
+  simp
+
+omit [DecidableEq F] in
+@[csimp] theorem viewProjectFor_eq_demand : @viewProjectFor = @viewProjectForDemand := by
+  funext
+  exact (viewProjectForDemand_exact _ _ _ _).symm
+
 def viewStep (prepared : Preparation (context := context) (profile := profile)
     (wanted := wanted) (marker := marker) (capability := capability) (contextBytes := contextBytes))
     (view : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry) : PolicyStepContext :=
-  PolicyStepContext.ofCandidate (viewProject prepared view) profile.semantics
+  let ks := viewKeys prepared
+  PolicyStepContext.ofCandidate (viewProjectFor ks prepared view) profile.semantics
     (ResourceObservationAdmission.readCandidate (viewRequest (wanted := wanted) view)
       view.1 view.payload rfl)
 

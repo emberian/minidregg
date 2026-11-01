@@ -1741,8 +1741,68 @@ theorem audienceView_binding_preserved
 
 def audienceDisclosure (prepared : PreparedInvocation deployment profile ambient ground command)
     (i : TargetIndex command) : List UInt8 :=
-  let view := audienceView prepared i
-  (CanonicalCellRegistry.materializer view.1).codec.encode view.payload.logical
+  (audienceView prepared i).payload.bytes
+
+/-- The written cell ids without building the target writes: a target write's id is its
+target's, so no target cell is encoded or hashed for it (`writes_cellIds`). -/
+def writtenIds (prepared : PreparedInvocation deployment profile ambient ground command) :
+    List CellId :=
+  ((List.finRange command.targets.length).filterMap fun i =>
+    if command.targets[i].isRead then none else some (⟨command.targets[i].target⟩ : CellId)) ++
+    (entryWrites prepared).map DataWrite.cellId ++ (computeWrites prepared).map DataWrite.cellId
+
+theorem writes_cellIds (prepared : PreparedInvocation deployment profile ambient ground command) :
+    (writes prepared).map DataWrite.cellId = writtenIds prepared := by
+  simp only [writes, ordinaryWrites, writtenIds, List.map_append, List.map_filterMap]
+  congr 2
+  apply List.filterMap_congr
+  intro i _
+  split <;> rfl
+
+theorem targetWrite_expectedPre (prepared : PreparedInvocation deployment profile ambient ground command)
+    (i : TargetIndex command) :
+    (targetWrite prepared i).expectedPre = ground.view.model.roots (targetWrite prepared i).cellId := by
+  simp only [targetWrite, ResourceBirthController.Concrete.packedWrite]
+  exact ground.physicalCurrent _ _ (prepared.targets i).present
+
+theorem targetWrite_postLaw (prepared : PreparedInvocation deployment profile ambient ground command)
+    (i : TargetIndex command) :
+    ResourceBirthController.Concrete.PhysicalPostLaw deployment (targetWrite prepared i) :=
+  (ResourceBirthController.Concrete.packedWrite_postLaw deployment command.targets[i].target
+    (prepared.targets i).before (packTarget command.targets[i] (prepared.targets i).candidate.post)).mpr
+    (prepared.targets i).postLaw.2.2.1
+
+theorem writes_expectedPre_iff (prepared : PreparedInvocation deployment profile ambient ground command) :
+    (∀ write ∈ writes prepared, write.expectedPre = ground.view.model.roots write.cellId) ↔
+      (∀ write ∈ entryWrites prepared ++ computeWrites prepared,
+        write.expectedPre = ground.view.model.roots write.cellId) := by
+  simp only [writes, ordinaryWrites, List.append_assoc, List.mem_append, List.mem_filterMap]
+  constructor
+  · intro h write hw
+    exact h write (Or.inr hw)
+  · intro h write hw
+    rcases hw with ⟨i, _, hi⟩ | hw
+    · split at hi
+      · cases hi
+      · cases hi
+        exact targetWrite_expectedPre prepared i
+    · exact h write hw
+
+theorem writes_postLaw_iff (prepared : PreparedInvocation deployment profile ambient ground command) :
+    (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ↔
+      (∀ write ∈ entryWrites prepared ++ computeWrites prepared,
+        ResourceBirthController.Concrete.PhysicalPostLaw deployment write) := by
+  simp only [writes, ordinaryWrites, List.append_assoc, List.mem_append, List.mem_filterMap]
+  constructor
+  · intro h write hw
+    exact h write (Or.inr hw)
+  · intro h write hw
+    rcases hw with ⟨i, _, hi⟩ | hw
+    · split at hi
+      · cases hi
+      · cases hi
+        exact targetWrite_postLaw prepared i
+    · exact h write hw
 
 inductive TargetAudience [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command) (i : TargetIndex command) where
@@ -1812,13 +1872,28 @@ def checkAudiences [DecidableEq F] {m : Type → Type} [Monad m]
   match ← collectIO (fun i : TargetIndex command => pure (checkTargetAudience prepared i)) with
   | .error reason => return .error reason
   | .ok targets =>
+    let ids := writtenIds prepared
+    let nonTargetWrites := entryWrites prepared ++ computeWrites prepared
     if roots : ∀ guard ∈ audienceGuards targets,
         guard.expectedRoot = ground.view.model.roots guard.cellId then
       if separate : ∀ i, ∀ source ∈ (targets i).deviceSources,
-          source ∉ (writes prepared).map DataWrite.cellId then
-        if discharge : ∀ guard ∈ audienceGuards targets, ∀ write ∈ writes prepared,
+          source ∉ ids then
+        if dischargeNonTarget : ∀ guard ∈ audienceGuards targets, ∀ write ∈ nonTargetWrites,
             guard.cellId = write.cellId → guard.expectedRoot = write.expectedPre then
-          return .ok ⟨targets, roots, separate, discharge⟩
+          have separate' : ∀ i, ∀ source ∈ (targets i).deviceSources,
+              source ∉ (writes prepared).map DataWrite.cellId := by
+            simpa only [writes_cellIds] using separate
+          have discharge : ∀ guard ∈ audienceGuards targets, ∀ write ∈ writes prepared,
+              guard.cellId = write.cellId → guard.expectedRoot = write.expectedPre := by
+            intro guard hguard write hwrite hcell
+            simp only [writes, ordinaryWrites, List.append_assoc, List.mem_append, List.mem_filterMap] at hwrite
+            rcases hwrite with ⟨i, _, hi⟩ | hnon
+            · split at hi
+              · cases hi
+              · cases hi
+                rw [roots guard hguard, hcell, targetWrite_expectedPre]
+            · exact dischargeNonTarget guard hguard write (List.mem_append.mpr hnon) hcell
+          return .ok ⟨targets, roots, separate', discharge⟩
         else return .error .physicalPreparation
       else return .error (.audience .transition)
     else return .error .physicalPreparation
@@ -1854,22 +1929,6 @@ def readGuards (prepared : PreparedInvocation deployment profile ambient ground 
   let written := (writes prepared).map DataWrite.cellId
   sourceGuards prepared ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ written
 
-/-- The written cell ids without building the target writes: a target write's id is its
-target's, so no target cell is encoded or hashed for it (`writes_cellIds`). -/
-def writtenIds (prepared : PreparedInvocation deployment profile ambient ground command) :
-    List CellId :=
-  ((List.finRange command.targets.length).filterMap fun i =>
-    if command.targets[i].isRead then none else some (⟨command.targets[i].target⟩ : CellId)) ++
-    (entryWrites prepared).map DataWrite.cellId ++ (computeWrites prepared).map DataWrite.cellId
-
-theorem writes_cellIds (prepared : PreparedInvocation deployment profile ambient ground command) :
-    (writes prepared).map DataWrite.cellId = writtenIds prepared := by
-  simp only [writes, ordinaryWrites, writtenIds, List.map_append, List.map_filterMap]
-  congr 2
-  apply List.filterMap_congr
-  intro i _
-  split <;> rfl
-
 /-- `readGuards` reading the written ids, not the writes. -/
 def readGuardsFast (prepared : PreparedInvocation deployment profile ambient ground command) :
     List ReadGuard :=
@@ -1888,17 +1947,16 @@ def PhysicalShape (prepared : PreparedInvocation deployment profile ambient grou
     (∀ guard ∈ readGuards prepared, guard.expectedRoot = ground.view.model.roots guard.cellId) ∧
     (lawSourceGuards prepared).isSome = true
 
-/- Construct the full target writes once for the five physical-shape clauses.
-The ordinary proposition below remains the receiver's authority condition;
-this Boolean is only an implementation of its decision procedure. -/
+/- Target writes already satisfy `expectedPre` (`targetWrite_expectedPre`) and
+`PhysicalPostLaw` (`targetWrite_postLaw`), so only non-target writes are checked. -/
 def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient ground command) : Bool :=
-  let ws := writes prepared
-  let ids := ws.map DataWrite.cellId
+  let nonTargetWrites := entryWrites prepared ++ computeWrites prepared
+  let ids := writtenIds prepared
   let source := sourceGuards prepared
   let guards := source ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ ids
   decide ids.Nodup &&
-  decide (∀ write ∈ ws, write.expectedPre = ground.view.model.roots write.cellId) &&
-  decide (∀ write ∈ ws, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
+  decide (∀ write ∈ nonTargetWrites, write.expectedPre = ground.view.model.roots write.cellId) &&
+  decide (∀ write ∈ nonTargetWrites, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
   decide (∀ guard ∈ source, guard.cellId ∉ ids) &&
   decide (∀ guard ∈ guards, guard.expectedRoot = ground.view.model.roots guard.cellId) &&
   (lawSourceGuards prepared).isSome
@@ -1906,7 +1964,8 @@ def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient
 theorem physicalShapeCheck_iff
     (prepared : PreparedInvocation deployment profile ambient ground command) :
     physicalShapeCheck prepared = true ↔ PhysicalShape prepared := by
-  simp [physicalShapeCheck, PhysicalShape, readGuards, Bool.and_eq_true]
+  simp only [physicalShapeCheck, PhysicalShape, readGuards, Bool.and_eq_true, decide_eq_true_eq,
+    writes_cellIds, writes_expectedPre_iff, writes_postLaw_iff]
   tauto
 
 instance physicalShapeDecidable (prepared : PreparedInvocation deployment profile ambient ground command) :
