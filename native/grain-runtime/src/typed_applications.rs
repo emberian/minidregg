@@ -498,7 +498,11 @@ mod tests {
             let mapped = raw_arguments(&pins, &request).expect("the controller accepts what the executor prepared");
             crate::application_api_tools::parse_input(&mapped, &routes).expect("CONVERSATION satisfies the native HTTP profile");
             if mapped["method"] == "GET" {
-                assert_eq!(mapped["path"], "download/abc123", "the saved-export read");
+                assert!(
+                    mapped["path"] == "boards/abc123.svg" || mapped["path"] == "download/abc123",
+                    "the baseline-pin or saved-export read: {}",
+                    mapped["path"]
+                );
                 return http(200, br#"<svg><rect id="abc123"/></svg>"#, "12");
             }
             assert_eq!(mapped["method"], "CONVERSATION", "{mapped}");

@@ -190,6 +190,25 @@
         },
         "steps": [
           {
+            "id": "pin",
+            "http": {
+              "protocol": "http",
+              "method": "GET",
+              "path": [
+                "boards/",
+                {
+                  "arg": "board",
+                  "encoding": "segment"
+                },
+                ".svg"
+              ],
+              "decode": "status",
+              "status": [
+                200
+              ]
+            }
+          },
+          {
             "id": "board",
             "receive": {
               "event": "broadcast",

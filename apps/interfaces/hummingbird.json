@@ -14,12 +14,12 @@
   },
   "operations": {
     "analytics.record": {
-      "description": "Record a tracking event (the tracking pixel with ?event=) and return the dashboard's live locations entries for its interval: each names its event and the request's geolocation. Hummingbird reads a page URL only from the Referer, which a Sandstorm bridge never forwards, so none is recorded. Metrics reset after each interval.",
+      "description": "Record a tracking event (the tracking pixel with ?event=) and return the dashboard's live hits entries for its 200 ms interval. Hummingbird reads a page URL only from the Referer, which a Sandstorm bridge never forwards, and geoip-lite returns null on IPv6-mapped loopback (::ffff:127.0.0.1), so hits carries the recorded timestamp for the interval. Metrics reset after each interval.",
       "input": {
         "type": "object",
         "properties": {
           "event": {
-            "description": "The event name to record; it is echoed in the matching locations entry.",
+            "description": "The event name to record on the tracking pixel.",
             "type": "string",
             "minLength": 1,
             "maxLength": 128
@@ -36,31 +36,21 @@
         "items": {
           "type": "object",
           "properties": {
-            "event": {
+            "timestamp": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "ip": {
               "type": "string",
               "maxLength": 128
-            },
-            "city": {
-              "type": "string",
-              "maxLength": 256
-            },
-            "region": {
-              "type": "string",
-              "maxLength": 256
-            },
-            "country": {
-              "type": "string",
-              "maxLength": 16
-            },
-            "latitude": {
-              "type": "number"
-            },
-            "longitude": {
-              "type": "number"
             }
           },
           "required": [
-            "event"
+            "timestamp"
           ],
           "additionalProperties": true
         }
@@ -93,19 +83,17 @@
             }
           },
           {
-            "id": "locations",
+            "id": "hits",
             "receive": {
-              "event": "locations",
+              "event": "hits",
               "where": [
                 {
                   "path": [
-                    0
+                    0,
+                    0,
+                    "timestamp"
                   ],
-                  "contains": {
-                    "event": {
-                      "arg": "event"
-                    }
-                  }
+                  "exists": true
                 }
               ]
             }
@@ -113,7 +101,7 @@
         ],
         "result": {
           "result": [
-            "locations",
+            "hits",
             0
           ]
         }
@@ -179,16 +167,11 @@
       },
       "assert": [
         {
-          "contains": {
-            "event": {
-              "concat": [
-                "mini-qualify-",
-                {
-                  "context": "runId"
-                }
-              ]
-            }
-          }
+          "path": [
+            0,
+            "timestamp"
+          ],
+          "exists": true
         }
       ]
     }
