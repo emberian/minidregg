@@ -1,126 +1,141 @@
 # Seat: build-loop
 
-Agent: a4141abe7297fdc4b (successor of a6c58cb72b0764dbb, retired; `cv show agent-a6c58cb72b0764dbb` for its history)
-Owns: build scripts (`scripts/build-native-host.sh`, `deploy/candidate/{lane-build.sh,package.py,lib.sh}`), the
-pool (`scripts/pipeline/{lane-tree,warm-link,umbrella-tree,native-loop}`), the builder (`scripts/pipeline/{builder,integ-build}`)
-and `board/REDS.md`, the `green` ref, the build box hbox and its pool, the persvati pool, import seams, outside PRs (akapug).
-Quest: hbox as the build box with the live unattended builder on `main`; persvati as the quiet measurement
-box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean build and the native inner loop faster.
+Agent: none live (handoff 2026-11-01 02:40Z). Last: a4141abe7297fdc4b (`cv show agent-a4141abe7297fdc4b`), before it
+a6c58cb72b0764dbb. A new agent needs only the repo, `cv` and ~/swarm (MACHINES.md, RULES.md); this file is the whole
+continuation.
+Owns: the builder (`scripts/pipeline/{builder,integ-build,gate,sweep,world-reap}`) and `board/REDS.md`, the `green`
+ref; build scripts (`scripts/build-native-host.sh`, `deploy/candidate/{lane-build.sh,package.py,lib.sh}`); the pool
+(`scripts/pipeline/{lane-tree,warm-link,lane-check,umbrella-tree,native-loop}`); `scripts/pipeline/{hot-swap,
+candidate-transfer}`; import seams; the boxes hbox (builds) and persvati (measurement pool); outside PRs (akapug).
+Quest: an unattended builder on `main` that nobody waits on; inner loops of seconds to minutes; never slower.
 
-## State (2026-11-01 02:35Z, present tense)
+## The builder (hbox, running, unattended: leave it running)
+- What it does: loops on origin/main. Each new tip is a round:
+  1. `integ-build` (from that tip) runs prime-cargo, rust-check, host, consent, rust and pack into
+     `candidates/<sha>/READY`. It then syncs the umbrella tree and frees `src`, so the next round can start. The
+     umbrellas (Fixtures, ObjectiveProofs, CensusChecks, Minidregg) and the fixture rerecord finish beside it.
+  2. `gate`: the tour (J0-J8 and JWF dry), composed (keep-going, dregg-infra edge 3ddd90f), enrol-resume, j14-apps,
+     and the flatness run last. A red phase is rerun once, alone (`-r1`).
+  3. It rewrites board/REDS.md whole and commits it by path straight onto main. It moves `green` when nothing is
+     red. Flatness is a published table and never gates (9317f32fc).
+  4. `world-reap` tears down the processes of every builder gate world except those behind this round's reds.
+- Where: hbox, BUILDER_ROOT=/home/hbox/lanes/integ (src = warm integration tree, umbrella-src, candidates/,
+  logs/, builder/ = state: last-built, signatures, REDS-*.md, reap-*.log). Every action is a line in
+  /home/hbox/lanes/integ/COMMANDS.log. Gate worlds are /ci/{t,c,e,f,j}-<sha6>[-r1]; gate roots integ/gate-<sha8>.
+- Pushes: only board/REDS.md, `green`, `fixture-regen/<sha>` branches and the fixture rerecord commit (two
+  Fixtures/*Data.lean files, fast-forward, never forced, RULINGS). Never force-pushes main.
+- Deploy key: integ/src and umbrella-src push with hbox:~/.ssh/minidregg-deploy (read-write for emberian/minidregg),
+  set as `core.sshCommand = ssh -i /home/hbox/.ssh/minidregg-deploy -o IdentitiesOnly=yes`. dregg-build2 (obend's
+  box now) keeps its own key ~/.ssh/minidregg_deploy for user build until ember says otherwise. Never copy a key.
+- **Stop it**: `ssh hbox-remote`, then
+  `p=$(cat /home/hbox/lanes/integ/builder.pid); tr '\0' ' ' </proc/$p/cmdline` (it must read
+  `bash /home/hbox/lanes/integ/builder-main.sh`), then `kill $p`. Stop it right after a `BUILDER round ... done` line
+  in COMMANDS.log, or while it sleeps. Its detached children (an integ-build, the umbrellas) finish on their own. A
+  stopped mid-gate round leaves no REDS.md for that tip; the next builder rebuilds the tip.
+- **Start it**: `cd /home/hbox/lanes/integ && setsid nohup bash builder-run.sh >> builder.out 2>&1 < /dev/null &`.
+  builder-run.sh sources ~/.minidregg-env, sets BUILDER_ROOT, GATE_RUNS=/ci, WORLD_UP_LOCK=/tank/lanes/world-up.lock,
+  SEATS=12 and MEM=64G, fetches main's scripts/pipeline/builder into builder-main.sh, writes builder.pid and execs it.
+  A new builder script on main takes effect only on restart. integ-build, gate, sweep and world-reap are taken
+  from the tip each round. A second builder refuses (builder/builder.lock). A build lock held by another build
+  defers the round (`deferred: build.lock held`, retried every 120 s) and publishes nothing.
+- Live now: pid 1235827, started 22:16 EDT 10-31 on main 9317f32fc. It deferred round ea8a115cf while round
+  c509ff14's build (started by the previous builder) held build.lock. That build ends by itself; the next round
+  then builds the tip.
+- Knobs: `scripts/pipeline/builder --once`, `--reds SHA` (rewrite REDS.md from existing logs), BUILDER_DRY=1 (print,
+  never push). $I/keep lists candidate prefixes that sweep and reap never touch. integ-build stops below 25 GB free.
 
-### hbox: the build box again (ember 10-31 evening: obend has dregg-build2)
-- The builder runs here live: /home/hbox/lanes/integ/builder-run.sh (PID builder.pid there) fetches main's
-  scripts/pipeline/builder each start and runs it with BUILDER_ROOT=/home/hbox/lanes/integ, GATE_RUNS=/ci,
-  WORLD_UP_LOCK=/tank/lanes/world-up.lock, SEATS 12, MEM 64G. integ/src fetches and pushes over ssh with the
-  10-15 deploy key (`core.sshCommand` -> ~/.ssh/minidregg-deploy; write checked with a throwaway ref). It writes
-  only board/REDS.md (by path onto main, never forced) and `green`. First live round: main 9dc9c138c, 17:12 EDT.
-- Box-wide Lean cap: ~/.minidregg-env (sourced first by .profile and .bashrc) sets MINIDREGG_LEAN_SEAT_ROOT=/home/hbox/seats,
-  MINIDREGG_LEAN_SEATS=12 (24 cores, 123 GB), LEAN_NUM_THREADS 4, SWARM_MEM_MAX 48G default, CARGO_BUILD_JOBS 12,
-  LANE_POOL_ENV=/home/hbox/pool/pool.env. Every build is `swarm-build`.
-- Pool /home/hbox/pool (t1..t11 since 10-31 evening; t10/t11 cost about 2 GB each beside the warm links, disk unchanged at
-  42 GB free; packages-3a3779933df4 read-only, LAKE_ARTIFACT_CACHE=false). Lane recipe:
-  `t=$(lane-tree acquire SEAT origin/BRANCH); cd $t; scripts/pipeline/lane-check FILE...`; native: `lane-tree native
-  SEAT`, then `scripts/pipeline/native-loop SEAT BASE LABEL`; `lane-tree release SEAT` when done.
-- Idle leases (root, 10-31; cbe54d87f): a lease untouched for LANE_POOL_IDLE_M minutes (default 30; touched = acquire, renew,
-  or an uncommitted file written), with no process whose cwd, open file or command line is in the tree, is taken by the
-  next acquire (a free tree first) and freed by gc. The holder's diff goes to /home/hbox/pool/saved/ with a header saying
-  to apply it in its next tree. `lane-tree status` shows an idle column. The box copy /home/hbox/pool/bin/lane-tree is
-  main's cbe54d87f (the previous one is kept as bin/lane-tree.prev-20261031). Within minutes he-enrol and he-births took t3 and t5 this way.
-- Disk: / is 455 GB with 78 GB free (10-31 17:55). Removed at the root's word (log integ/ci-rm.log): 52 old builder
-  and integrator gate worlds in /ci (22.4 GB; kept the current round 9dc9c1, every dir a running process names, and
-  apps-hermes' qualify worlds j-ar*/sb*/wb*/hbA), and the retired clones perf-apps (8.1 GB) and iter-speed (7.7 GB;
-  its pushed branch kept, the old toolchain diff in integ/saved-iter-speed-src.diff). app-reds-cont stays (apps-hermes
-  runs ar-cycle.sh from it). Still unowned in /ci: dp-*1029 (10-29, demo-path worlds, some still running). integ-build
-  stops below 25 GB; no new data on /tank.
+## Open reds (REDS.md at d5e858b2222b; green is still 83e926874, batch 4, 15+ hours)
+- gate:composed:residents (member-side, infra): `REFUSED timeout: managed fixture provider`. Every round since
+  9dc9c138 has it (once `prepoll-filler-068 refused with status 3`). It blocks composed restart (host-execution).
+  This is the red that holds green now that flatness does not gate.
+- Flatness, published only: submit_cpu ratio 5.25, submit_wall 3.63, propose_cpu 3.33 and propose_wall 5.73
+  (bound 2.0, host-execution and store-retained). get passes (0.6-1.9).
+- Umbrellas: Fixtures.NativeAcceptedFixture and NativeDocWriteFixture go red whenever a Host change moves event ids.
+  The rerecord lands their data itself now (land_regen, fd1686db7). fixture-regen/d5e858b2222b was recorded in a
+  moving tree and stays unlanded; the next round records it again.
+- Known gaps (unfixed): composed starts testing/journeys/shared-resident-fixture-provider.py with no PID file, so
+  world-reap reports it UNNAMED (one left in /ci/c-4b750e, pid 2608947). scripts/spk-platform/stop-residents.sh
+  stops RUN/a anchors only, not sessions' .call-slots line-residents. The umbrella stage runs the umbrella tree's
+  HEAD, which can differ from the round's sha when rounds overlap. Read the rerecord's `recorded fixture-regen/<sha>`
+  line, not the stage's sha.
 
-### dregg-build2: obend's now; minidregg does not use it
-- Stopped 10-31 evening: the dry builder's round 997eba977 (pgid from builder.pid, mid-gate), its gate worlds (19, by
-  PID, log /srv/integ/orphans-stop.log), the GitHub relay, the hotswap-test world (`run.sh stop`); build-loop's pool
-  tree released. Setup stays for obend: user build, /srv/pool, /srv/integ, swarm-build, earlyoom, fail2ban, the deploy
-  key ~/.ssh/minidregg_deploy (kept until ember says otherwise). Seats were told to release their bb2 trees.
+## The pool and the inner loop (hbox /home/hbox/pool; Lean caps in ~/.minidregg-env)
+- ~/.minidregg-env (sourced by .profile and .bashrc) sets PATH with /home/hbox/pool/bin (lane-tree, warm-link),
+  MINIDREGG_LEAN_SEAT_ROOT=/home/hbox/seats, MINIDREGG_LEAN_SEATS=12, LEAN_NUM_THREADS 4, SWARM_MEM_MAX 48G,
+  CARGO_BUILD_JOBS 12 and LANE_POOL_ENV=/home/hbox/pool/pool.env. Every build is `swarm-build <cmd>`.
+- Trees t1..t11, worktrees of /home/hbox/pool/repo.git. All share the read-only packages-3a3779933df4 and are warm by
+  hard links from integ/src (warm-link; a new tree costs about 2 GB). LAKE_ARTIFACT_CACHE=false.
+- Lean: `t=$(lane-tree acquire SEAT origin/BRANCH); cd $t; scripts/pipeline/lane-check FILE...`; then
+  `lane-tree release SEAT`. `lane-tree status` shows the holder, lease age, idle minutes and dirty count.
+- Native host: `lane-tree native SEAT` (own linked packages copy), then `scripts/pipeline/native-loop SEAT BASE LABEL`.
+  That is a Lean change to a native candidate in about 7 minutes (was about 48).
+- Leases: a lease expires after 12 h (LANE_POOL_TTL_H). It is idle when nothing has touched it for 30 min
+  (LANE_POOL_IDLE_M; touched = acquire, renew or an uncommitted file written) and no process has its cwd, an open
+  file or its command line in the tree. The next acquire takes an idle or expired tree (a free one first), and
+  `lane-tree gc` frees both. The holder's diff goes to /home/hbox/pool/saved/<tree>-<lane>-<time>.patch.
+  The box copy bin/lane-tree is main's cbe54d87f; update it by `git show <sha>:scripts/pipeline/lane-tree` into
+  bin/lane-tree.new, then mv.
+- Leases at handoff: t1 private-cells 8 h, t2 apps-hermes, t3 he-enrol, t4 retained (store-retained), t5 he-births,
+  t7 hot-path 8 h (no seat; the idle rule frees it), t8 host-execution. Free: t6, t9, t10, t11. build-loop released
+  t6 (iter-hotswap) and t9 (seam1) at handoff; t6's saved patch lists only two untracked files already on main.
 
-### The builder
-- `scripts/pipeline/builder`: per new main tip, `scripts/pipeline/integ-build` (now in the repo: rust-check, host,
-  consent, rust, pack, umbrella-tree, rerecord), then scripts/pipeline/gate, REDS.md, green. BUILDER_ROOT
-  is set by the box's builder-run.sh (hbox: /home/hbox/lanes/integ).
-- eb4b7e7b2: a round no longer waits for its umbrellas. integ-build frees src once the umbrella tree has synced, the
-  next round starts, and REDS.md carries `umbrella-tree running` (a red) until the umbrellas end and it is rewritten.
-- 3ef7de9ac: umbrella-tree starts with `9>&-`. It had inherited build.lock, so round 960da1d8 stopped and published six
-  "did not run" reds. A held lock (integ-build rc 75) now defers the round, with nothing published. REDS.md has an owner
-  column, and a composed red is one row per failed phase. The gate's edge is dregg-infra 3ddd90f (the per-world
-  certifier for composed residents; integ/dregg-infra-3ddd90f).
-- f1d2d3bbb: the builder starts every child with `8>&-`. Before it, the round subshell, the gate and its rerun
-  inherited builder.lock, so a kept gate world's residents held it after the builder stopped. The relaunch script
-  (integ/relaunch-builder.sh, one-shot, done) stopped c-9dc9c1's anchored residents, but builder.lock was still held
-  by a call-slot `mini line-resident` (1711035, sessions/ember/.call-slots/r1-*.pid): scripts/spk-platform/
-  stop-residents.sh stops only RUN/a anchors, never call-slot residents. Stopped by its own PID file 18:37 EDT; the
-  builder relaunched 18:38 EDT as pid 2375112 (builder.pid), first round 4b750eb67. New residents no longer inherit fd 8.
-- Fixture rerecord (root's ruling 10-31, RULINGS): integ-build's `land_regen` lands the rerecord on main itself, as a
-  fast-forward of origin/main carrying only Fixtures/NativeAcceptedFixtureData.lean and NativeDocWriteFixtureData.lean
-  from `fixture-regen/<sha>` (still pushed), never forced. It diffs against the regen's own parent and refuses any
-  other path, refuses a parent not on main, and stands down when a commit since that parent touched those files.
-  Tested on a scratch origin. fd1686db7: the rerecord holds the umbrella tree (umbrella-rerecord.pid) until it ends.
-  Before that, round 467e698's rerecord ran while d5e858's umbrella-tree checked out its tip in the same tree, so
-  fixture-regen/d5e858b2222b is untrustworthy and stays unlanded. The next round records it again.
-- 9317f32fc (root, 10-31): flatness is published, never a red. REDS.md has a "Flatness (published, does not gate
-  `green`)" table (metric, early, late, ratio, bound, verdict, owner); a flatness-only FAIL is not rerun. Only tour,
-  enrol, j14, composed, the build stages and the umbrellas gate. Builder restarted on it 22:16 EDT (pid 1235827).
-- World reaping (root, 10-31): `scripts/pipeline/world-reap [--dry] ROOT...` stops a finished world's processes by PID
-  file only (world *.pid, jweb `.bodyPid`, ~/.mini/consent-anchors entries whose non-binary args name the root),
-  reports the rest UNNAMED. After each verdict the builder reaps every {t,c,e,f,j}-<hex6> gate world except those
-  behind this round's functional reds and $I/keep. Manual reap 22:20 EDT: 7 finished worlds, 31 processes; one
-  UNNAMED left (c-4b750e's shared-resident-fixture-provider.py, which composed starts without a PID file).
-- Fleet survey 10-31 22:30 EDT: hbox had 43 minidregg-host processes (112 command lines mention it: root's "120") before
-  the reap and 36 after (169 world processes, 3.4 GB). Left: store-retained pool/t4 12; /ci/hpc 6 (hot-path, no
-  seat); demo-path run-1029 jwf worlds 10 (10-29, unowned); read-path /ci/exo/w8 3 (no live seat); 10-03 codex
-  workbox and 09-27 gitweb fixtures 2; bigstep r1/r2 2 (root-owned /var/lib); c-acc7cf-c2 1 (hot-path's
-  residents on its binaries). persvati: 21 hosts, read-path rp/w 9 and member-side rpw/sa, tb, tr 4 each.
-  store-retained and member-side were sent their lists; the unowned ones went to root.
-- green is 83e926874 (batch 4) until a live round passes. The first live hbox round rewrites REDS.md whole.
+## Hot-swap and candidate transfer (on main)
+- `deploy/candidate/lane-build.sh overlay BASE PARENT LABEL ROLE...` (`package.py --overlay`) builds an overlay
+  candidate: whole build families only, a 12-hex id, every pin re-emitted.
+- `LANE_DIR=LANE scripts/pipeline/hot-swap --state STATE [--hermes-root ROOT] LABEL ROLE...` does, in order:
+  1. the overlay on the base the world STATE runs;
+  2. `run.sh stop`, `run.sh upgrade`, and the Hermes root `--rebind` when grainRuntime or grainProviderBridge move;
+  3. `run.sh start`, and one line in STATE/hot-swaps.jsonl.
+  It refuses a unit-supervised Store. Measured 10-31: stop to serving in 8 s; overlay own disk 141 MB.
+- `scripts/pipeline/candidate-transfer SRC_HOST:DIR DST_HOST:DIR NAME` (run from the Mac; `-` = local) streams to
+  DST/.incoming-NAME, verifies SHA256SUMS (and READY), then renames in one step. Never copy into candidates/NAME
+  directly.
 
-### Seam 1 (codec tags): on main (f2002e589)
-- The 12 named tags are in Compiler/PersistedCodecTags/Core.lean; the 645-tag census (Compiler/PersistedCodecTags.lean)
-  is imported privately by DurableCheckpointCodec alone, and persistedCodecCorpus is @[no_expose]. The manifest is
-  byte-identical and StoreEpoch.current is unchanged.
-- Measured on dregg-build2 (pool tree, one census-tag edit, `lake build Host.Main`, 16 threads): main 365 modules,
-  447 s; with the seam 4 modules, 95 s. The epoch corpus still moves on a census edit (28,604 -> 28,610 bytes).
-- FORMAT batch (privacy a3f7fce75cd3e4e49, host-execution a24974e84d3c540d1) told to rebase onto it.
-- Seams 2 and 3 (StoreCodec, Theory.Store, WorldRoot) only if a measured edit rate makes them pay.
+## World hygiene
+- `scripts/pipeline/world-reap [--dry] ROOT...` stops processes by PID file only. Sources: the world's *.pid
+  files, jweb `.bodyPid` in state/sessions/*.json, and ~/.mini/consent-anchors/*.pid. Journeys run with the box
+  HOME put their residents' files there. A process belongs to ROOT when its cwd, or an argument that is not a binary
+  path, names ROOT. Everything else is reported UNNAMED and left. One /proc pass; about 25 s for 15 roots.
+- `scripts/pipeline/sweep` (runs after each gate) removes the gate roots and worlds of candidates two or more behind,
+  and candidates beyond the newest 3. It skips $I/keep and anything a live process names.
+- Fleet at handoff (10-31 22:30 EDT), minidregg-host processes: hbox 43 before the builder's reap, 36 after (7 finished
+  builder worlds, 31 processes stopped). Still up on hbox:
+  - store-retained pool/t4: 12 (told);
+  - /ci/hpc: 6 (hot-path, no seat; it also runs residents on /ci/c-acc7cf-c2's binaries);
+  - the 10-29 demo-path jwf worlds: 10 (unowned);
+  - read-path /ci/exo/w8: 3 (no live seat);
+  - 10-03 codex workbox and 09-27 gitweb fixtures: 2;
+  - /var/lib/mini-bigstep-hbox-r1, r2: 2 (root-owned).
+  The unowned ones are root's to decide. persvati has 21: read-path rp/w 9, and member-side's rpw/tb and rpw/tr,
+  store-retained's live before/after pair (member-side stops them when store-retained is done); rpw/sa is down.
 
-### Build speed: done and on main
-| change | effect (measured) |
-|---|---|
-| e9d1c6fc8 lake-threads: Lake's own LEAN_NUM_THREADS = 2 x seats | batch 3 ran exactly 2 compilers; now up to 12 |
-| b833dd9c9 + cb49daa63 module-cost (closed cSHAKE256 digests not kernel-evaluated) | Evaluator 197->19 s, DurableIndex 237->12, PayEnrolReceiver 178->10 |
-| host stage | batch 3 2,476 s -> batch 5 1,005 s (critical path 1,417 -> 569 s, 61 modules deep) |
-| ee7a25ca7 + 0eab28db7 Mathlib import trim, tower split | Host.Main Mathlib modules 2,847 -> 1,423 |
-| 0f67c94b7 unrecorded module = 1/3 of seats | batch 6 sat idle 1,471 s behind an all-seats waiter |
-| 7800d3199 + 697db7664 native-loop | Lean change -> native host candidate 408 s (was ~48 min) |
-- Next levers: per-compile import tax; path depth (the Application* chain); the consent companion's fixed ~116 s.
+## Boxes and disk
+- hbox: / 455 GB, 40 GB free at handoff (91%; usually 85-93%). The gate and qualify worlds in /ci are the usual
+  writers (about 0.5-0.9 GB each). sweep logs `DISK WARN` below 40 GB, and integ-build refuses below 25. No new data
+  on /tank. `free` lies on ZFS (check arcstats).
+- persvati (`ssh persvati-remote`): measurement only, pool /home/ember/mdpool (4 trees at 43995c7f), budget about 80 GB.
+- dregg-build2: obend's; minidregg does not build or run worlds there (setup left in place, unused).
 
-### Hot-swap
-- `lane-build.sh overlay BASE PARENT LABEL ROLE...` / `package.py --overlay` (on main): an overlay candidate, whole
-  build families only, named by a 12-hex id, every pin re-emitted.
-- `LANE_DIR=LANE scripts/pipeline/hot-swap --state STATE [--hermes-root ROOT] LABEL ROLE...` (on main): overlay on
-  BASE's filesystem (the candidate STATE runs), `run.sh stop`, `run.sh upgrade` to the overlay manifest, the Hermes
-  root `--rebind` when grainRuntime/grainProviderBridge move, `run.sh start`, one line in STATE/hot-swaps.jsonl. A
-  unit-supervised Store is refused (stop and start it by its unit: infra's kept-world tooling).
-- Run on dregg-build2 2026-10-31 19:40: world /srv/worlds/hotswap-test on 76511e768bbc, grain-runtime rebuilt in
-  /srv/lanes/hotswap (`lane-build.sh rust --crate grain-runtime`, 55 s), swapped as overlay 5ae41015cd71
-  (grainRuntime + grainProviderBridge; SHA256SUMS clean; provenance .overlay names base, roles and source tar; Hermes
-  root /srv/hermes/root-76511e768bbc rebound). Stop to serving again: 8 s. Overlay own disk 141 MB, the rest links.
+## Done and on main (for reference)
+- Build speed: lake-threads (e9d1c6fc8), module-cost (b833dd9c9, cb49daa63), Mathlib trim (ee7a25ca7, 0eab28db7),
+  unrecorded-module seating (0f67c94b7) and native-loop (7800d3199, 697db7664). The host stage went from 2,476 s
+  to 1,005 s. Next levers: the per-compile import tax, the Application* path depth, the consent companion's ~116 s.
+- Seam 1, codec tags (f2002e589): a census-tag edit rebuilds 4 modules in 95 s (was 365 modules in 447 s). Seams 2
+  and 3 only if a measured edit rate pays for them.
+- Builder fixes:
+  - umbrellas do not hold the next round (eb4b7e7b2);
+  - lock inheritance closed (3ef7de9ac fd 9, f1d2d3bbb fd 8);
+  - fixture rerecord lands itself (15f9987f5, fd1686db7);
+  - flatness published (9317f32fc), world reaping (9317f32fc);
+  - idle pool leases (cbe54d87f).
 
-### persvati (`ssh persvati-remote`, ember's machine): quiet measurement box
-- /home/ember/mdpool: a 4-tree pool at 43995c7f (793 warm modules). Measurement only; no lane builds.
-
-
-### Outside PRs (akapug)
-- Landed 10-31: #5 (capture test stdout lock, d9f333dbf) and #4 (fleet-sign join binds the selected socket before
-  key/enrollment/funding; ported onto main, ae98da48b); both closed with a comment. #16, #14, #7: superseded and closed.
-- #18 (simplex prepared jump): open, answered 10-31 17:28Z with five items; item 1 (does the catch-up jump enter the
-  deployed agreement step now?) is with ember via root (10-31). Yes: items 2-5 (logMagic 5, drop the Fabric-bound
-  script, drop the ResearchWip hunk, rebase onto Lean 4.35) before merge. No: say so on the PR.
+## Outside PRs (akapug)
+- Landed 10-31 and closed: #5 (d9f333dbf), #4 (ae98da48b, ported). Superseded and closed: #16, #14, #7.
+- #18 (simplex prepared jump): open. Its item 1 (does the catch-up jump enter the deployed agreement step now?) is
+  with ember via root. If yes, it needs items 2-5 (logMagic 5, drop the Fabric-bound script, drop the ResearchWip
+  hunk, rebase onto Lean 4.35) before merge. If no, say so on the PR.
 
 ## Seams needed
-- infra (aa72653a8ce442178): the kept-world rebind tool; ship.sh accepting `.overlay.id`; the gate's forge half from dregg-build2.
+- infra (a5bc08dce78e7405e): the kept-world rebind tool; ship.sh accepting `.overlay.id`.
+- member-side / infra: a PID file for composed's shared-resident-fixture-provider.py; call-slot residents in
+  stop-residents.sh.
