@@ -250,6 +250,26 @@
                     "arg": "id"
                   }
                 }
+              ],
+              "refuseOn": [
+                {
+                  "event": "mutation_rejected",
+                  "where": [
+                    {
+                      "path": [
+                        0,
+                        "clientMutationId"
+                      ],
+                      "equals": {
+                        "arg": "id"
+                      }
+                    }
+                  ],
+                  "reason": [
+                    0,
+                    "reason"
+                  ]
+                }
               ]
             }
           }

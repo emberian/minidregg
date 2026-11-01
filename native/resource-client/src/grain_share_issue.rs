@@ -104,7 +104,7 @@ fn confirmed_outcome(
     operation: u8,
     state: &Retained,
 ) -> Result<Value> {
-    let body = custody::expect_reply(frame, operation)?;
+    let body = super::agent_reserve::host_reply(frame, operation, "grain share issue")?;
     let binary = directory.join(format!("{stem}.outcome.bin"));
     create_private(&binary, body)?;
     inspect_bounded(
@@ -353,7 +353,7 @@ pub(super) fn plan(
     let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN, &request)?;
     check_inputs()?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan = custody::expect_reply(&frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN)?;
+    let plan = super::agent_reserve::host_reply(&frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN, "grain share issue")?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan)?;
     let plan_view = inspect_bounded(
@@ -438,7 +438,7 @@ pub(super) fn prepare(
     let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN, &request)?;
     check_inputs()?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan = custody::expect_reply(&frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN)?;
+    let plan = super::agent_reserve::host_reply(&frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN, "grain share issue")?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan)?;
     let plan_inspected = inspect_bounded(
@@ -495,7 +495,7 @@ pub(super) fn prepare(
     let assembled_frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_ASSEMBLE, &assembly)?;
     check_inputs()?;
     create_private(&directory.join("assembly.frame"), &assembled_frame)?;
-    let ingress = custody::expect_reply(&assembled_frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_ASSEMBLE)?;
+    let ingress = super::agent_reserve::host_reply(&assembled_frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_ASSEMBLE, "grain share issue")?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     let pin = json!({"format":FORMAT,"host":utf8_path(&host)?,
         "hostSha256":initial_host_sha,"config":utf8_path(&config)?,
@@ -662,16 +662,17 @@ mod tests {
             std::process::id()
         ));
         fs::create_dir(&directory).unwrap();
+        // The pure verbs answer on the pinned image's codec session (`client_consent::pure_source`):
+        // the lookup's outcome body is [2] (replayed, another event), the submit's [1] (installed).
+        let _codec = crate::client_consent::codec_test_lock();
         let host = directory.join("host-inspect.sh");
-        fs::write(&host, concat!(
-            "#!/bin/sh\n",
-            "case \"$4\" in\n",
-            "  *lookup-*) printf '%s\\n' '{\"type\":\"confirmed\",\"confirmation\":\"replayed\",",
-            "\"transactionId\":\"1\",\"eventId\":\"99\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}' > \"$5\" ;;\n",
-            "  *) printf '%s\\n' '{\"type\":\"confirmed\",\"confirmation\":\"installed\",",
-            "\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}' > \"$5\" ;;\n",
-            "esac\n"
-        )).unwrap();
+        let inspect = concat!(
+            r#"if [ "$(od -An -tu1 "$body" | tr -d ' \n')" = 2 ]; then "#,
+            r#"printf '%s' '{"type":"confirmed","confirmation":"replayed","transactionId":"1","eventId":"99","acceptedCount":"3","worldRoot":"4"}' > "$out"; "#,
+            r#"else printf '%s' '{"type":"confirmed","confirmation":"installed","transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"}' > "$out"; fi"#
+        );
+        fs::write(&host, format!("#!/bin/sh\nset -eu\ncase \"$2\" in\n{}  *) exit 9 ;;\nesac\n",
+            crate::client_consent::codec_loop_arm(inspect))).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let config = directory.join("config.json");
         fs::write(&config, b"{}").unwrap();

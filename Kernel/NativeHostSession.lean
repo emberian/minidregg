@@ -253,6 +253,19 @@ private def walkPhysical (config : Config) (prior : Option (Walked config))
           return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
       | .ok verified => return .ok ⟨physical, verified⟩
 
+/-- A first walk over the Store's own chained open (`verifyStartChained`): one full open, the
+walk from its checkpoint, no reload and no whole-prefix comparison. -/
+private def walkChained (config : Config) (chained : DurableReceiverIO.Chained ResourceBirthCodec.rootBytes) :
+    IO (Except String (Walked config)) := do
+  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes
+      chained.loaded with
+    | .error detail => return .error s!"semantic history reader: {detail}"
+    | .ok sealed => pure sealed
+  match ← NativeHostReplay.verifyStartChained config reader chained with
+  | .error failure =>
+      return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
+  | .ok verified => return .ok ⟨chained.loaded, verified⟩
+
 /-- The walk for an already physically refreshed session: over its full image, the
 Store opened in full when it holds none. -/
 def walked (config : Config) (session : Session config) :
@@ -260,9 +273,15 @@ def walked (config : Config) (session : Session config) :
   match session.full with
   | some opened => walkPhysical config session.walked opened.durable
   | none =>
-      match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
-      | .error detail => return .error detail
-      | .ok physical => walkPhysical config session.walked physical
+      match session.walked with
+      | some _ =>
+          match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+          | .error detail => return .error detail
+          | .ok physical => walkPhysical config session.walked physical
+      | none =>
+          match ← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes with
+          | .error detail => return .error detail
+          | .ok chained => walkChained config chained
 
 /-- Retain one admitted current opening and chronology together. -/
 def Session.retainWalked {config : Config} (session : Session config)
@@ -318,9 +337,13 @@ def refreshWalked (config : Config) (session : Session config) :
         | .error detail => return .error detail
         | .ok ⟨physical, _⟩ => pure physical
     | none =>
-        match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+        -- No image held and no walk: one chained open, walked from its checkpoint.
+        match ← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes with
         | .error detail => return .error detail
-        | .ok physical => pure physical
+        | .ok chained =>
+            match ← walkChained config chained with
+            | .error detail => return .error detail
+            | .ok current => return .ok (session.retainWalked current, current)
   let retained ← walkPhysical config session.walked physical
   match retained with
   | .error detail => return .error detail
@@ -331,8 +354,8 @@ def refreshWalked (config : Config) (session : Session config) :
 then validates through its semantic walk. It does not construct an ordinary
 session or validate the final tip redundantly before replay. -/
 def startWalked (config : Config) : IO (Except String (Walked config)) := do
-  match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+  match ← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
-  | .ok physical => walkPhysical config none physical
+  | .ok chained => walkChained config chained
 
 end Minidregg.Kernel.NativeHostSession

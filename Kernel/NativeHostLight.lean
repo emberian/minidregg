@@ -112,6 +112,20 @@ def Light.basisVia {config : Config} (transport : DurableReceiverIO.Transport) (
       -- `OpenedServed.basis` declares exactly `keys` (`basis.keys = keys`, by construction).
       return .ok (light.opened.basis light.opening.head below footprint)
 
+/-- The light ground of one request at the opening's head: `basisVia`'s basis, typed as a
+ground of the history the opening's own `Reader` reads (`Grounded … head`), so a historical
+selection through that Reader (`NativeHistorySelection.select`) pairs with it. -/
+def Light.groundedVia {config : Config} (transport : DurableReceiverIO.Transport) (light : Light config)
+    (keys : DurableView.Keys) :
+    IO (Except String (ServedBasis.Grounded config.deployment light.opening.head)) := do
+  let reader := light.opening.reader transport ResourceBirthCodec.rootBytes
+  match ← reader.footprint keys with
+  | .error refusal => return .error refusal.message
+  | .ok footprint =>
+      have below : light.opened.served.height ≤ light.opening.head.height := by
+        rw [light.same, light.opening.heightExact]
+      return .ok (ServedBasis.Grounded.ofBasis (light.opened.basis light.opening.head below footprint))
+
 /-- A request's basis does not depend on the Store paths a config names: under
 `restorage` it is read through the same transport from the same opening. -/
 theorem Light.basisVia_restorage {config : Config} (transport : DurableReceiverIO.Transport)

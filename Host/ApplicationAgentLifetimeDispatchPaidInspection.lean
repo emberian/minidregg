@@ -173,6 +173,7 @@ def inspectPaidPlan (bytes : List UInt8) : Except String Json := do
   pure <| .mkObj
     [("type", "application-agent-lifetime-paid-plan-v3"),
      ("canonicalPlanHex", hex bytes),
+     ("imageFreePlanHex", hex <| paidPlanCodec.encode plan.imageFree),
      ("compactSelectorRequestHex", hex <| paidRequestCodec.encode plan.request),
      ("fixedSelectors", fixedJson plan.request.fixed),
      ("context", contextJson plan.request.context),

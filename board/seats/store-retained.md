@@ -41,17 +41,30 @@ CPU per story from /proc, perf of stories 2 and 8), hbox t4 2026-10-31 16:00-16:
   The first is R1's target.
 
 ## Next
-1. R1 landed (49cf4f2d2): op 5 authorizes from the challenge op 4 planned over the same light opening
-   (`authorizeRetained_eq`). R6(i) landed (bdfa9428c, c3a28038a): a light birth hands the session its authority
-   post-cell (`HeldCell`, `loadServedAuthorityHeld`, `_eq`/`_taken`/`_other`), so `Light.adopt` neither decodes
-   the cell nor rebuilds its private trie (privacy/host-execution measured 14 % of `doc new` there). Numbers for
-   both come from host-execution's and read-path's measurements on the builder's next candidate.
-2. The rest of R6(i): the other writers pass `none` (grain birth's `admitOn` sees only its intent); the directory's
-   moved-row decode and the post encode (the wire-order encode node, item 4).
-3. Session refresh: main reshaped it (light opening per request, full image only on `materialize`), so the L0-era
-   "refresh grows 10.3 → 14.3 %" is stale; re-profile story 2 vs 8 on the next candidate before designing a node.
+1. **In flight: the held served state** (origin/wip/retained-held d6468ecaf, on main 1b0f7cb25; whole tree green
+   on hbox t4). `DurableServed.Served` keeps `Held`, a `SparseMap CellId (bytes × root)` plus the allowance as a
+   `ChargeTuple`, advanced per record (`Held.install_agrees`, `replayed_agrees`, `ofState_agrees`,
+   `ofSnapshot_agrees`, `bare_viewAt_ofLoaded`), instead of a `DataSnapshot` whose `canonicalBytes`/`roots`/
+   `available` were a closure per installed record. Overlay `hbox:/home/hbox/pool/lanes/retained/candidates/
+   4f60d20e9ef7` (base 4b750eb67). The first overlay, d5c4b3cf2a41, was defective and is withdrawn:
+   `flatCharge`'s lets were floated back into its match arms, so each lane read re-walked the history (story 3:
+   852 s of Host CPU). **The verdict is member-side's persvati `doc new` blocks** (ab7b4fe7fb687e0ca has the
+   pair). hbox Host-CPU tracks load here (the base read 700 -> 990 ms at load 8 and 1760 -> 2010 ms at load 14;
+   the overlay 1150 -> 1350 ms at load 14), so no hbox number decides it. Land it only on a persvati result
+   that is not slower.
+2. Next in DurableServed (from he-births ac49ca4075452034f): `Opening.world` as a `WorldTrack` advanced by
+   `WorldTrack.advance` on the light append, so `foldRecords`'s `World.admit` -> `pinFails` -> `cellRoot` stops
+   re-encoding the authority cell per append; `snapPinFails` reads `model.roots` through `coherent`.
+3. Authority nodes: a maintained digest -> capability-address index beside the authority cell (`issuerCheck`
+   scans the support and hashes every capability, twice per evidence via `domainPortal`); the rest of R6(i)
+   (the other writers pass `none`); member-side's `Patch.diff` (a014ff501, reviewed sound) is the bytes-only
+   fallback, and the O(delta) form is the walk carrying the record's own patch.
 4. Tree order = wire order for StoreCodec (drop encode's sort).
-5. R3 planner/deriver prepared write; I4/I5 Fn and carry scans; export/backup; client refs index; the lint (§7).
+5. R3 planner/deriver prepared write; I4/I5 Fn and carry scans; export/backup; client refs index; the lint (section 7).
+
+Landed 10-31 night: f937f2b38, `mini serve` writes its Host's PID beside the socket (`mini.host.pid`), so a Host
+orphaned by a signalled server is stoppable by its PID file (root's ask; one orphan was stopped by root's word and
+logged in hbox:/home/hbox/pool/t4-retained/kills.log). grow2r stops it the same way.
 
 ## Seams
 - host-execution (a24974e84d3c540d1): R6 carried decoded post / one turn per record; R7 sealed World (with read-path

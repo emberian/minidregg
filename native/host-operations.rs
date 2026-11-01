@@ -460,6 +460,37 @@ pub const ORDINARY_HEADER_NAMES: &[&str] = &["cookie", "accept", "accept-encodin
 pub fn ordinary_header_name(name: &str) -> bool {
     ORDINARY_HEADER_NAMES.contains(&name)
 }
+// Kernel/ApplicationDispatchAdmission.lean refererValueOk: a signed referer is a path of the grain's own origin.
+pub fn referer_value_ok(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.first() == Some(&b'/') && bytes.get(1) != Some(&b'/') && !bytes.contains(&b'\\')
+}
+// Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderOk: by name, and a referer also by value.
+pub fn ordinary_header_ok(name: &str, value: &str) -> bool {
+    ordinary_header_name(name) && (name != "referer" || referer_value_ok(value))
+}
+/// The sender's reduction of a referer before signing: a path passes; an absolute http(s) URL whose
+/// authority is `authority` (the grain's own origin) becomes its path and query; anything else is
+/// dropped (None), never refused. Every Some satisfies referer_value_ok.
+pub fn same_origin_referer(value: &str, authority: Option<&str>) -> Option<String> {
+    let value = value.split('#').next().unwrap_or_default();
+    if referer_value_ok(value) {
+        return Some(value.to_owned());
+    }
+    let rest = ["https://", "http://"].iter().find_map(|scheme| {
+        value.get(..scheme.len()).filter(|p| p.eq_ignore_ascii_case(scheme)).map(|_| &value[scheme.len()..])
+    })?;
+    let end = rest.find(['/', '?']).unwrap_or(rest.len());
+    if !authority.is_some_and(|a| !a.is_empty() && rest[..end].eq_ignore_ascii_case(a)) {
+        return None;
+    }
+    let path = match &rest[end..] {
+        "" => "/".to_owned(),
+        tail if tail.starts_with('?') => format!("/{tail}"),
+        tail => tail.to_owned(),
+    };
+    referer_value_ok(&path).then_some(path)
+}
 
 // Kernel/ApplicationDispatchAdmission.lean davMethod: the WebSession DAV calls, each an exchange.
 pub const DAV_METHODS: &[&str] = &["PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "REPORT", "OPTIONS"];

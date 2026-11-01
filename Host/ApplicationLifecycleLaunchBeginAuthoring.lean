@@ -173,9 +173,9 @@ def StopPlan.shape (plan : StopPlan) : Bool :=
     !plan.running.controlGroup.isEmpty &&
     plan.running.custody.validFor plan.base.unsigned.volume
 
-private def cellAt {config : Config} (opened : Opened config) (resource : Nat) :
-    Option (PackedCell CanonicalCellRegistry.registry) :=
-  match opened.directory.directory.slots resource with
+private def cellAtOn {deployment : CanonicalCellRegistry.Deployment} (ground : ServedBasis.Ground deployment)
+    (resource : Nat) : Option (PackedCell CanonicalCellRegistry.registry) :=
+  match ground.directory.slots resource with
   | .present cell => some cell
   | .absent => none
 
@@ -241,14 +241,16 @@ private def shapeClause (unsigned : ApplicationLifecycleBeginV3Ingress.Ingress) 
     "the volume is not the app's derived volume id"
   else "the START binding does not match the app, volume and descriptor"
 
-private def prepareSelectedVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+/-- The unsigned BEGIN of an op66 request on a ground: its source read from the ground's
+app and package cells. Its declared keys (`ApplicationLifecycleBeginV3Admission.keys`)
+name what a light basis must answer for the rest of the plan (`prepareSelectedOn`). -/
+private def unsignedOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
     (request : Request) (descriptor : ApplicationSpkLaunchDescriptor.Descriptor)
-    (start : Option ApplicationLifecycleLaunchBinding.Binding) : Except String Plan := do
-  let opened := verified.opened
-  let some appCell := cellAt opened pin.app
+    (start : Option ApplicationLifecycleLaunchBinding.Binding) :
+    Except String (ApplicationLifecycleBeginV3Ingress.Ingress × PackedCell CanonicalCellRegistry.registry) := do
+  let some appCell := cellAtOn ground pin.app
     | throw "current launch application cell unavailable"
-  let some packageCell := cellAt opened pin.packageManifest
+  let some packageCell := cellAtOn ground pin.packageManifest
     | throw "current launch package manifest unavailable"
   unless packageCell.kind == .content do
     throw "current launch package manifest is not content"
@@ -273,10 +275,6 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
         config.storeIdentity pin.app (if request.kind == .stop then before.generation
                  else before.generation + 1) }
-  if request.kind == .stop then
-    match verified.selectRunning source with
-    | .error detail => throw detail
-    | .ok _ => pure ()
   let base : ApplicationLifecycleBeginIngress.Ingress :=
     { domain := config.deployment.domain
       semantics := config.profile.semantics
@@ -290,9 +288,17 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
        volume := ApplicationLifecycleLaunchBinding.volumeId
          config.deployment.domain pin.app
        start := start } : ApplicationLifecycleBeginV3Ingress.Ingress).withAuthorizationId
+  return (unsigned, packageCell)
+
+/-- The op66 plan on a ground (see `unsignedOn`): the ground must answer the BEGIN's own
+keys (`ApplicationLifecycleBeginV3Admission.keys`). -/
+private def prepareSelectedOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) (descriptor : ApplicationSpkLaunchDescriptor.Descriptor)
+    (start : Option ApplicationLifecycleLaunchBinding.Binding) : Except String Plan := do
+  let (unsigned, packageCell) ← unsignedOn config ground pin request descriptor start
   unless unsigned.shape do
     throw s!"launch BEGIN authorization, descriptor or action shape refused: {shapeClause unsigned}"
-  unless ApplicationLifecycleBeginV3Admission.markersCurrent opened.ground unsigned do
+  unless ApplicationLifecycleBeginV3Admission.markersCurrent ground unsigned do
     throw "launch BEGIN first-attempt or created marker refuses action"
   unless ApplicationLifecycleBeginV3Admission.installedExact
       config.deployment unsigned packageCell do
@@ -301,12 +307,12 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
   let command := ApplicationLifecycleBegin.command config.deployment.domain
     config.profile.semantics source
   let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+    ⟨config.federation, config.genesisHeight + ground.height⟩
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ambient opened.ground command
+      config.profile ambient ground command
     | throw "current launch BEGIN command preparation refused"
   unless ApplicationLifecycleBeginReceiver.linkedCurrentPolicy config.deployment
-      config.profile ambient opened.ground source prepared do
+      config.profile ambient ground source prepared do
     throw "current launch BEGIN app/package law differs"
   unless decide (DeclaredResourceController.PhysicalShape prepared) do
     throw "current launch BEGIN physical shape refused"
@@ -314,7 +320,7 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let wanted := ApplicationLifecycleBeginReceiver.packageRequest config.deployment
-    config.profile ambient opened.ground source prepared
+    config.profile ambient ground source prepared
   let .ok selected := ResourceObservationAdmission.prepare context config.profile
       wanted marker source.packageObserveCapability source.canonicalBytes
     | throw "current launch package observation preparation refused"
@@ -322,18 +328,29 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
       CanonicalCellRegistry.cellCodec.encode packageCell do
     throw "launch package observation differs from current image"
   let commandBytes := DeclaredResourceController.commandCodec.encode command
-  let .ok invocation := NativeHost.prepareLoaded config opened (.invoke commandBytes)
+  let .ok invocation := NativeHost.prepareInvokeOn config ground (config.genesisHeight + ground.height) commandBytes
     | throw "current launch BEGIN invocation plan refused"
   unless invocation.finalizedDraft == .invoke commandBytes do
     throw "launch BEGIN invocation plan differs from bound action"
   let .ok header := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
     | throw "current launch package observation signing key unavailable"
   let packageSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩
   for slot in invocation.slots do fixedHeader pin slot
   fixedHeader pin packageSlot
   return ⟨unsigned, invocation, packageSlot⟩
+
+private def prepareSelectedVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+    (request : Request) (descriptor : ApplicationSpkLaunchDescriptor.Descriptor)
+    (start : Option ApplicationLifecycleLaunchBinding.Binding) : Except String Plan := do
+  let plan ← prepareSelectedOn config verified.opened.ground pin request descriptor start
+  if request.kind == .stop then
+    match verified.selectRunning plan.unsigned.base.source with
+    | .error detail => throw detail
+    | .ok _ => pure ()
+  return plan
 
 def prepareVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
@@ -454,12 +471,79 @@ def prepareContinueRequestVerified (config : Config) {target : Durable}
           createIndex := none }
       return prepareSelectedVerified config verified pin beginRequest descriptor (some binding)
 
-def prepareRequestVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
-    (bytes : List UInt8) : Except String Plan := do
+/-- The op66 plan on the light opening, for every request but a STOP: the unsigned BEGIN is
+read off the opening's cells, then planned on the opening's basis for that BEGIN's keys
+(`prepareSelectedOn`, the same derivation the full image runs). -/
+private def prepareSelectedLight (config : Config) (light : NativeHostLight.Light config)
+    (pin : Pin) (request : Request) (descriptor : ApplicationSpkLaunchDescriptor.Descriptor)
+    (start : Option ApplicationLifecycleLaunchBinding.Binding) : IO (Except String Plan) := do
+  let cells ← match ← light.basis ⟨[], []⟩ with
+    | .error detail => return .error detail
+    | .ok basis => pure basis
+  match unsignedOn config (.ofBasis cells) pin request descriptor start with
+  | .error detail => return .error detail
+  | .ok (unsigned, _) =>
+      match ← light.basis (ApplicationLifecycleBeginV3Admission.keys unsigned) with
+      | .error detail => return .error detail
+      | .ok basis => return prepareSelectedOn config (.ofBasis basis) pin request descriptor start
+
+def prepareRequestLight (config : Config) (light : NativeHostLight.Light config) (pin : Pin)
+    (bytes : List UInt8) : IO (Except String Plan) := do
   let some request := requestCodec.decode bytes
-    | throw "noncanonical launch BEGIN operator request"
-  prepareVerified config verified pin request
+    | return .error "noncanonical launch BEGIN operator request"
+  if request.kind == .stop then
+    return .error "STOP requires the versioned running-witness operator plan"
+  let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical request.descriptorBytes
+    | return .error "noncanonical signed-SPK launch descriptor"
+  unless descriptor.valid do return .error "invalid signed-SPK launch descriptor"
+  match startBinding config.deployment.domain pin.app descriptor request.kind request.createIndex with
+  | .error detail => return .error detail
+  | .ok start => prepareSelectedLight config light pin request descriptor start
+
+/-- The op66 continue plan on the light opening: the completed create the request names is
+read at its height from the Store's history, its receipt is that record's, and the binding
+built from it is selected and re-admitted at the create's own prefix
+(`NativeHostReplay.selectCreated`) before anything is planned. -/
+def prepareContinueRequestLight (config : Config) (light : NativeHostLight.Light config) (pin : Pin)
+    (bytes : List UInt8) : IO (Except String Plan) := do
+  let some request := continueRequestCodec.decode bytes
+    | return .error "noncanonical launch continue operator request"
+  let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical request.descriptorBytes
+    | return .error "noncanonical signed-SPK launch descriptor"
+  unless descriptor.valid do return .error "invalid signed-SPK launch descriptor"
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let read ← match ← reader.atHeight (request.createdIndex + 1) with
+    | .error refusal => return .error refusal.message
+    | .ok read => pure read
+  let receipt := NativeHost.receiptOfRecord read
+  let completion : Option NativeHostReplay.CompletionIngress :=
+    match ApplicationLifecycleRetryCompletionV4Ingress.codec.decode (NativeHostReplay.sourceBytes read.record) with
+    | some ingress => some (.v4 ingress)
+    | none => (ApplicationLifecycleCompletionV2Ingress.codec.decode (NativeHostReplay.sourceBytes read.record)).map .v2
+  let some completion := completion
+    | return .error "selected successful create is not a lifecycle completion"
+  unless completion.createChoice && completion.creationMarker.isSome do
+    return .error "selected completion was not a create action"
+  let some custody := completion.physical.volumeCustody
+    | return .error "selected successful create lacks volume custody"
+  let binding : ApplicationLifecycleLaunchBinding.Binding :=
+    { app := pin.app
+      volume := ApplicationLifecycleLaunchBinding.volumeId config.deployment.domain pin.app
+      packageRoot := descriptor.root
+      choice := .continue
+      priorCreate := some (receipt, custody)
+      commandDigest := descriptor.continueCommand.digest }
+  unless completion.beginSource.app == binding.app && completion.volume == binding.volume do
+    return .error "completed-create application or volume differs"
+  match ← NativeHostReplay.selectCreated config reader light.opening.head.height binding with
+  | .error detail => return .error detail
+  | .ok _ =>
+      let beginRequest : Request :=
+        { kind := .start
+          clientOperationId := request.clientOperationId
+          descriptorBytes := request.descriptorBytes
+          createIndex := none }
+      prepareSelectedLight config light pin beginRequest descriptor (some binding)
 
 /-- Detached assembly binds the same authorization ID, descriptor and action.
 Fresh event23 admission still rechecks current image, signatures and history. -/

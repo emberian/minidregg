@@ -72,6 +72,35 @@ fn json_digest(value: &Value) -> Result<String> {
     ))
 }
 
+/// The re-invoked plan is the pinned one modulo the images it was read at (Lean
+/// `PaidPlan.imageFree`: each signing plan's world root and height). Byte equality is the fast
+/// case; after an append moved the image, the Host's inspection of the current plan must carry the
+/// pinned plan's `imageFreePlanHex`, so every signed slot and binding is unchanged and the approval
+/// stands without re-signing.
+fn same_plan_modulo_image(
+    directory: &Path,
+    pinned: &PaidPin,
+    retained: &Value,
+    current: &[u8],
+    name: &str,
+) -> Result<bool> {
+    if current == pinned.plan.as_slice() {
+        return Ok(true);
+    }
+    let path = directory.join(format!("{name}-current-plan.bin"));
+    create_private(&path, current)?;
+    let inspected = source_inspect(
+        &pinned.original.host,
+        &pinned.original.config,
+        PLAN_ROUTE,
+        &path,
+        &directory.join(format!("{name}-current-plan-inspected.json")),
+    )?;
+    Ok(field(&inspected, "type")? == PLAN_TYPE
+        && field(&inspected, "canonicalPlanHex")? == hex(current)
+        && field(&inspected, "imageFreePlanHex")? == field(retained, "imageFreePlanHex")?)
+}
+
 fn bound_inspection(directory: &Path, name: &str) -> Result<Value> {
     serde_json::from_slice(&private_bytes(&directory.join(name), JSON_LIMIT)?)
         .map_err(|error| format!("invalid retained lifetime inspection: {error}"))
@@ -210,7 +239,7 @@ pub(crate) fn lifetime_paid_plan(reserve: &Path, grant: &Path, directory: &Path)
         &request,
     )?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)?;
+    let plan = host_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN, "agent lifetime dispatch")?;
     create_private(&directory.join("plan.bin"), plan)?;
     let inspection = source_inspect(
         &original.host,
@@ -346,8 +375,17 @@ pub(crate) fn lifetime_paid_payer_sign(directory: &Path, approval_json: &Path) -
         &pinned.request,
     )?;
     create_private(&directory.join("payer-current-plan.frame"), &current)?;
-    if expect_reply(&current, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)? != pinned.plan {
-        return Err("lifetime payer plan changed at current verified image".into());
+    let current = reply_or_outcome(
+        &pinned.original.host,
+        &pinned.original.config,
+        &directory,
+        "payer-current-plan",
+        &current,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
+        "lifetime paid",
+    )?;
+    if !same_plan_modulo_image(&directory, &pinned, &retained, current, "payer")? {
+        return Err("lifetime payer plan changed beyond its image at current verified image".into());
     }
     let slots = retained
         .get("payerSlots")
@@ -467,8 +505,17 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
         &pinned.request,
     )?;
     create_private(&directory.join("seal-current-plan.frame"), &current)?;
-    if expect_reply(&current, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)? != pinned.plan {
-        return Err("lifetime paid plan changed at current verified image".into());
+    let current = reply_or_outcome(
+        &pinned.original.host,
+        &pinned.original.config,
+        &directory,
+        "seal-current-plan",
+        &current,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
+        "lifetime paid",
+    )?;
+    if !same_plan_modulo_image(&directory, &pinned, &retained, current, "seal")? {
+        return Err("lifetime paid plan changed beyond its image at current verified image".into());
     }
     let app_slots = retained
         .get("appSlots")
@@ -515,7 +562,7 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     same_paid_pin(&directory, &pinned)?;
-    let ingress = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE)?;
+    let ingress = host_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE, "agent lifetime dispatch")?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     create_private(&directory.join("approval.json"), &approval_bytes)?;
     retain_json(
@@ -627,7 +674,7 @@ pub(crate) fn lifetime_paid_submit(directory: &Path) -> Result<()> {
     })?;
     create_private(&directory.join("submit.frame"), &frame)?;
     same_paid_pin(&directory, &pinned)?;
-    let committed = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT)?;
+    let committed = host_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT, "agent lifetime dispatch")?;
     create_private(&directory.join("committed.bin"), committed)?;
     let inspection = source_inspect(
         &pinned.original.host,
@@ -686,7 +733,7 @@ pub(crate) fn lifetime_paid_lookup(directory: &Path) -> Result<()> {
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
     same_paid_pin(&directory, &pinned)?;
-    let outcome_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP)?;
+    let outcome_bytes = host_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP, "agent lifetime dispatch")?;
     create_private(
         &directory.join(format!("{stem}.outcome.bin")),
         outcome_bytes,

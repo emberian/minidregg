@@ -7,9 +7,14 @@ ms-build.pid). Builds: hbox pool (`lane-tree acquire member-side origin/main`, s
 it small). dregg-build2 is obend's now: nothing of mine is left there (t1 released, ~/ms removed).
 hbox leftovers from the predecessor: t8 released; the w8 world and its residents stopped by their PID files;
 hbox:/ci/pc (1.9 GB, the predecessor's scratch) is left in place for ember to decide.
-Measurement world: persvati /home/ember/mdpool/lanes/rpw/rf (2 members, port 22800, PID files in it; up by
-/home/ember/mdpool/rp/up.sh) on overlay /home/ember/mdpool/lanes/cand/93b31c1c33d6 (main 27f85e89 host+consent on
-76511e768bbc; carries 43995c7f2, 76511e768, 86c9dbddb and f28cd8457; the clients and codec are 76511e768bbc's).
+Measurement world: persvati /home/ember/mdpool/lanes/rpw/sa (2 members, port 23200, PID files in it; up by
+/home/ember/mdpool/rp/up.sh) on overlay /home/ember/mdpool/lanes/msl/candidates/e0cd5307229b, built in my persvati
+tree by /home/ember/mdpool/lanes/msl-build.sh (host, consent, overlay on BASE; PID msl-build.pid; LANE_DIR
+/home/ember/mdpool/lanes/msl; the tree has its own 7.3 GB package copy). Candidates copied to persvati under
+/home/ember/mdpool/lanes/cand (4b750eb67 base, 93b31c1c33d6, store-retained's withdrawn d5c4b3cf2a41). Worlds rf, sb,
+sr are down; sr's orphans (store 3081727, its `minidregg-host stdio` parent 3081723, no PID file) were confirmed by
+exe and open files and stopped by SIGTERM, logged in /home/ember/mdpool/lanes/rpw/sr.orphans.log. Standing rule
+(root, ember's word): my own world's orphans, confirmed by command line, I stop myself and log.
 
 Owns: the client (`native/resource-client`: shell, workspace, chat, web body `src/web`), `mini-line`, the ssh wrapper
 (`deploy/shell/mini-shell-ssh`), `mini-web-spawn`, `native/mini-sdk` consent/residents, `native/mini-session-env`,
@@ -57,8 +62,33 @@ resident footprint (a few MB per member), web pages.
   `mini apps bootstrap` refused on 76511e768. `replay` now refuses only a held -> lost track. Confirmed end to end
   on overlay 93b31c1c33d6 (main 27f85e89 on 76511e768bbc): read-path's persvati up.sh UP-RC=0 and a 5-member bb2
   world enrol and bootstrap, consent logs clean; told read-path, build-loop, host-execution, apps-hermes, root.
+- One Host reply check for the client's custody flows (22cac1ee0): `agent_reserve::host_reply(frame, op, what)` names
+  every outcome (no record, never forwarded, undecided), replacing four copies; apps-hermes' 7acbdd878 read. The grain
+  share recovery test ported to the codec session (stale since 3983f0787). `activity.rs`/`checkpoint.rs` keep their
+  own checks (they print the outcome body's text).
+- A verification walk's authority load follows the held trie (a014ff501): `Patch.diff`/`run_diff` (Theory/Store),
+  `Materialized.relativeTo` (Theory/CellState), used by `loadDeploymentFromAt` when the bytes moved. store-bench at
+  height 177: `loadDeployment` from bytes 42 ms vs 2.5 ms held. Reviewed by store-retained and privacy. Whole tree
+  green (10,413 jobs). Decode + diff stay O(cell); the hashing becomes O(changed x 516).
 
 ## Numbers
+- persvati, store-retained's held served state 4f60d20e9ef7 vs base 4b750eb67, fresh worlds, interleaved blocks
+  of 10 (Host ms): base 85, 92, 99, 120, 115, 123; held 93, 97, 126, 130, 143, 148. The held overlay's Host is
+  slower (+5..+28% from block 3) and grows faster; sent to store-retained (its perf needs the Host on disk: the
+  memfd-exec'd Host does not symbolize). Worlds rpw/tb (23300) and rpw/tr (23400) left up for it.
+- persvati, fresh world on base 4b750eb67 (before a014ff501), member-1 `doc new` blocks of 10 (wall / Host /
+  consent): 255/101/110, 239/101/108, 276/111/131, 356/151/533 (outlier), 413/276/227, 398/198/173. Still grows,
+  milder than 93b31c1c33d6. After (overlay e0cd5307229b = main 467e698ef host+consent on 4b750eb67, carries
+  a014ff501): 219/94/95, 218/100/91, 255/113/111, 270/189/188, 267/127/110, 276/139/104. Consent per write is
+  close to flat (block 6: 104 vs 173 ms); wall 276 vs 398. Host still grows (store-retained, host-execution).
+- persvati 2026-10-31 evening, world rpw/rf (overlay 93b31c1c33d6: main 27f85e89 host+consent incl. 43995c7f2,
+  76511e768, 86c9dbddb, f28cd8457; certifier running), member-1 `doc new`, blocks of 10 back to back (wall / Host /
+  consent ms medians): 326/174/118, 378/215/134, 487/303/465 (outlier), 514/349/221, 580/375/186, 685/477/196,
+  then 764/480/236, 805/540/239. `credit` 11 ms wall. LAW 17 RED: per-write cost grows with history, Host 3x and
+  consent 2x over ~80 writes; store flat ~10 ms. Sent to host-execution (Host) and privacy (consent).
+  Consent self time (perf, 2,415 samples; Lean frames do not unwind, self time only): dec_ref 10%, alloc 9.3%,
+  mi_free 6%, keccak 5.7%, octetsOnto 5.4%, AuthTrie.strip 4.3%, cSHAKE pushList 1.2%, PrivateCellRoot hashing.
+  No batch-8 baseline on persvati: the dc61016cb-codec world fails at sponsor-ssh under the current world script.
 - hbox, noisy; batch 8 against batch 7, interleaved: `doc new` 476 vs 614 ms wall (Host 254 vs 346 ms, consent
   160 vs 219 ms CPU). Warm `credit` 17 ms, `doc show` 20 ms. Of `credit`'s 10 ms when run directly: ~4 ms process start
   plus workspace load, three Host round trips, one codec frame, one consent frame. Warm ssh `say` makes 2,365
@@ -69,7 +99,9 @@ resident footprint (a few MB per member), web pages.
   236 of 2,466 samples (9.6%) of a batch-8 provider's `doc new`. There is no end-to-end after-number yet (see Next 1).
 
 ## Next (in order)
-1. Measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
+1. LAW 17 (consent's half): a014ff501 measured (consent near flat). Next, the law-17 form (store-retained):
+   the walk carries each record's own write patch as data beside the Prop admission (`Derived`), so it never
+   decodes or diffs a whole cell; `Patch.diff` stays the bytes-only fallback. Then measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
    catch-up profile and wall, against the batch-8 numbers above. That is the after-number for rows 16 and 19,
    43995c7f2 (codec order check) and 76511e768 (projection). Expect no `planeKeys`/`supportFast`/`WorldTrack`
    frames; the roots come from FORMAT (a)'s kept index (f28cd8457).

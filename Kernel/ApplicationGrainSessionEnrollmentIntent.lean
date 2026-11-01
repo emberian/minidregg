@@ -39,49 +39,49 @@ open Minidregg.Kernel.ApplicationGrainSessionEnrollmentAdmission
 
 set_option autoImplicit false
 
-private def appGuard {config : Config} {opened : Opened config}
+private def appGuard {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) : ReadGuard :=
+    (checked : Checked config ground ingress spec receipt) : ReadGuard :=
   ⟨⟨spec.ticket.scope.app⟩,
     ResourceBirthCodec.physicalRoot (.live checked.appRead.selected.observed.before)⟩
 
-private def manifestGuard {config : Config} {opened : Opened config}
+private def manifestGuard {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) : ReadGuard :=
+    (checked : Checked config ground ingress spec receipt) : ReadGuard :=
   ⟨⟨ingress.request.packageManifest⟩,
     ResourceBirthCodec.physicalRoot (.live checked.manifestRead.selected.observed.before)⟩
 
-private def ticketGuard {config : Config} {opened : Opened config}
+private def ticketGuard {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) : ReadGuard :=
+    (checked : Checked config ground ingress spec receipt) : ReadGuard :=
   ⟨⟨spec.ticket.resource⟩,
     ResourceBirthCodec.physicalRoot (.live checked.ticketRead.selected.observed.before)⟩
 
-def readGuards {config : Config} {opened : Opened config}
+def readGuards {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) : List ReadGuard :=
+    (checked : Checked config ground ingress spec receipt) : List ReadGuard :=
   [appGuard checked, manifestGuard checked, ticketGuard checked]
 
-theorem readGuards_current {config : Config} {opened : Opened config}
+theorem readGuards_current {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt)
+    (checked : Checked config ground ingress spec receipt)
     (guard : ReadGuard) (member : guard ∈ readGuards checked) :
-    guard.expectedRoot = opened.durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.cells.model.roots guard.cellId := by
   simp [readGuards] at member
   rcases member with app | manifest | ticket
   · subst guard; exact checked.appRead.current
   · subst guard; exact checked.manifestRead.current
   · subst guard; exact checked.ticketRead.current
 
-theorem readGuards_readonly {config : Config} {opened : Opened config}
+theorem readGuards_readonly {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt)
+    (checked : Checked config ground ingress spec receipt)
     (guard : ReadGuard) (member : guard ∈ readGuards checked) :
     guard.cellId ∉ (DeclaredResourceController.writes checked.prepared).map DataWrite.cellId := by
   simp [readGuards] at member
@@ -92,7 +92,7 @@ theorem readGuards_readonly {config : Config} {opened : Opened config}
 
 /-- The enrollment tariff over an already-derived ordinary intent. Keeping `ordinary` as a
 parameter prevents the lane closure from re-deriving its writes and guards for every lane. -/
-def chargeOf {config : Config} {opened : Opened config} {ingress : Ingress}
+def chargeOf {config : Config} {ground : ServedBasis.Ground config.deployment} {ingress : Ingress}
     (ordinary : DataIntent rootBytes) : Charge :=
   fun dimension => match dimension with
     | .incidences => ordinary.exactCharge .incidences + 3
@@ -100,21 +100,21 @@ def chargeOf {config : Config} {opened : Opened config} {ingress : Ingress}
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => ordinary.exactCharge .proofWork + 3
     | .memoryTouches => ordinary.exactCharge .memoryTouches + 3
-    | .storageBytes => DeployedCharge.storageCharge opened.ground.view ordinary.writes
+    | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes
         (ApplicationGrainSessionEnrollmentSource.event config.deployment.domain ingress)
     | other => ordinary.exactCharge other
 
-def charge {config : Config} {opened : Opened config}
+def charge {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) : Charge :=
-  chargeOf (config := config) (opened := opened) (ingress := ingress)
+    (checked : Checked config ground ingress spec receipt) : Charge :=
+  chargeOf (config := config) (ground := ground) (ingress := ingress)
     (checked.accepted.dataIntent checked.shape)
 
-def intent {config : Config} {opened : Opened config}
+def intent {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) :
+    (checked : Checked config ground ingress spec receipt) :
     DataIntent rootBytes := by
   let ordinary := checked.accepted.dataIntent checked.shape
   have readonly : ∀ guard ∈ ordinary.readGuards ++ readGuards checked,
@@ -129,29 +129,29 @@ def intent {config : Config} {opened : Opened config}
       readGuards := ordinary.readGuards ++ readGuards checked
       nullifiers := ordinary.nullifiers
       exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
-        (chargeOf (config := config) (opened := opened) (ingress := ingress) ordinary)).toCharge
+        (chargeOf (config := config) (ground := ground) (ingress := ingress) ordinary)).toCharge
       event := ApplicationGrainSessionEnrollmentSource.event config.deployment.domain ingress
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := readonly }
 
-theorem intent_exactCharge {config : Config} {opened : Opened config}
+theorem intent_exactCharge {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) :
+    (checked : Checked config ground ingress spec receipt) :
     (intent checked).exactCharge = charge checked := by
   exact Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
-theorem intent_event_version {config : Config} {opened : Opened config}
+theorem intent_event_version {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) :
+    (checked : Checked config ground ingress spec receipt) :
     (intent checked).event.codecVersion = 28 := rfl
 
-theorem intent_retains_full_ingress {config : Config} {opened : Opened config}
+theorem intent_retains_full_ingress {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) :
+    (checked : Checked config ground ingress spec receipt) :
     (intent checked).event.canonicalBytes = ingress.canonicalBytes := rfl
 
 end Minidregg.Kernel.ApplicationGrainSessionEnrollmentIntent

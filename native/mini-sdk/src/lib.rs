@@ -123,3 +123,34 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     use sha2::Digest;
     sha2::Sha256::digest(bytes).into()
 }
+
+#[cfg(test)]
+mod referer_tests {
+    use crate::host_operations::{ordinary_header_ok, referer_value_ok, same_origin_referer};
+
+    #[test]
+    fn referer_twins_match_lean_teeth() {
+        // Kernel/ApplicationDispatchAdmission.lean referer_value_path_only, case for case.
+        assert!(referer_value_ok("/page?x=1"));
+        assert!(!referer_value_ok("https://other.example/page"));
+        assert!(!referer_value_ok("//other.example/page"));
+        assert!(!referer_value_ok("/a\\b"));
+        assert!(!referer_value_ok(""));
+        assert!(!ordinary_header_ok("referer", "https://other.example/"));
+        assert!(ordinary_header_ok("accept", "https://other.example/"));
+    }
+
+    #[test]
+    fn the_sender_reduces_or_drops_never_refuses() {
+        assert_eq!(same_origin_referer("/p#f", None).as_deref(), Some("/p"));
+        assert_eq!(same_origin_referer("https://g.test/p", None), None);
+        assert_eq!(same_origin_referer("https://g.test/p", Some("g.test")).as_deref(), Some("/p"));
+        assert_eq!(same_origin_referer("http://g.test:8080/p", Some("g.test")), None);
+        assert_eq!(same_origin_referer("https://g.test/p", Some("")), None);
+        for value in ["/", "/a?b", "https://g.test", "https://g.test?q", "HTTPS://G.TEST/x\\y", "//g.test/p"] {
+            if let Some(path) = same_origin_referer(value, Some("g.test")) {
+                assert!(referer_value_ok(&path), "{value} -> {path}");
+            }
+        }
+    }
+}

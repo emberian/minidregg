@@ -270,7 +270,9 @@ theorem bytesBEq_iff {left right : List UInt8} : bytesBEq left right = true ↔ 
 
 /-- `loadDeployment` of a later physical snapshot: when the authority cell's
 bytes equal `held`'s snapshot's, the held cell and its projection are reused
-under this snapshot's clock and spent markers; otherwise the bytes are decoded.
+under this snapshot's clock and spent markers; otherwise the bytes are decoded and the
+held cell's carried structure is moved to the decoded cell by their difference
+(`Materialized.relativeTo`), so its root is not built over every entry.
 `loadDeploymentFrom_eq`: it is `loadDeployment`. -/
 def loadDeploymentFromAt {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
     (held : Loaded deployment before) (physical : PhysicalSnapshot)
@@ -280,7 +282,13 @@ def loadDeploymentFromAt {deployment : CanonicalCellRegistry.Deployment} {before
     some ⟨⟨deployment.domain, height, spentOf deployment.domain physical, held.snapshot.cell,
         held.snapshot.authState, held.snapshot.authStateExact⟩, held.valid, rfl, heightExact, rfl,
       (bytesBEq_iff.mp same).trans held.observed⟩
-  else loadDeploymentAt deployment physical height heightExact
+  else
+    match decoded : decodeCell (physical.canonicalBytes (cellIdOf deployment)) with
+    | none => none
+    | some cell =>
+        some ⟨Snapshot.ofCell deployment.domain height (spentOf deployment.domain physical)
+            (held.snapshot.cell.relativeTo cell), held.valid, rfl, heightExact, rfl,
+          by rw [Materialized.relativeTo_eq]; exact (decodeCell_canonical decoded).symm⟩
 
 def loadDeploymentFrom {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
     (held : Loaded deployment before) (physical : PhysicalSnapshot) : Option (Loaded deployment physical) :=
@@ -298,7 +306,11 @@ theorem loadDeploymentFromAt_eq {deployment : CanonicalCellRegistry.Deployment} 
       held.valid held.snapshot.cell ((bytesBEq_iff.mp same).trans held.observed)
     rw [found]
     exact congrArg some (Loaded.unique _ loaded)
-  · rfl
+  · unfold loadDeploymentAt
+    rw [dif_pos held.valid]
+    split <;> first
+      | rfl
+      | exact congrArg some (Loaded.unique _ _)
 
 theorem loadDeploymentFrom_eq {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
     (held : Loaded deployment before) (physical : PhysicalSnapshot) :

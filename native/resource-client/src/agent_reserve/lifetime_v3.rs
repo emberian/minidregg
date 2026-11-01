@@ -140,7 +140,7 @@ pub(crate) fn lifetime_plan(
     }
     let frame = session_invoke(&host, &operator_socket, &config, PLAN_OPERATION, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan_bytes = expect_reply(&frame, PLAN_OPERATION)?;
+    let plan_bytes = host_reply(&frame, PLAN_OPERATION, "agent reserve")?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
     let inspection = source_inspect(
@@ -263,7 +263,7 @@ pub(crate) fn lifetime_seal(directory: &Path, approval_json: &Path) -> Result<()
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     same_pin(&directory, &pinned)?;
-    let call = expect_reply(&frame, ASSEMBLE_OPERATION)?;
+    let call = host_reply(&frame, ASSEMBLE_OPERATION, "agent reserve")?;
     create_private(&directory.join("call.bin"), call)?;
     retain_json(
         &directory.join("seal.json"),
@@ -303,7 +303,7 @@ fn outcome(
     operation: u8,
     pinned: &Pin,
 ) -> Result<Value> {
-    let bytes = expect_reply(frame, operation)?;
+    let bytes = host_reply(frame, operation, "agent reserve")?;
     let binary = directory.join(format!("{stem}.outcome.bin"));
     create_private(&binary, bytes)?;
     source_inspect(

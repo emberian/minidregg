@@ -61,7 +61,7 @@
       "frames": [
         "0{\"sid\":\"source-session\",\"upgrades\":[],\"pingInterval\":25000,\"pingTimeout\":20000}",
         "40{\"sid\":\"namespace-session\"}",
-        "42[\"hits\",[{\"url\":\"https://grain.test/other\",\"timestamp\":\"2026-10-28T12:00:00.000Z\"},{\"url\":\"https://grain.test/analytics/operation-1\",\"timestamp\":\"2026-10-28T12:00:00.001Z\"}]]"
+        "42[\"hits\",[{\"url\":\"/other\",\"timestamp\":\"2026-10-28T12:00:00.000Z\"},{\"url\":\"/analytics/operation-1\",\"timestamp\":\"2026-10-28T12:00:00.001Z\"}]]"
       ],
       "match": {
         "event": "hits",
@@ -71,7 +71,7 @@
               0
             ],
             "contains": {
-              "url": "https://grain.test/analytics/operation-1"
+              "url": "/analytics/operation-1"
             }
           }
         ]

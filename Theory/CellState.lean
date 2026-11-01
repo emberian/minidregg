@@ -190,6 +190,24 @@ theorem materializeCanonical_eq {L : Layout.{u, v, w}} {Root : Type y} (M : Mate
     materializeCanonical M bytes logical canonical = materialize M logical :=
   Materialized.ext rfl
 
+/-- `decoded` with the carried structure of a `held` cell moved to it by their difference
+(`Patch.diff`, `Patch.run_diff`), so its root is read by one `set` per changed entry instead of
+a build over every entry. For a reader that holds the previous cell and is handed the next
+cell's bytes (a verification walk). `relativeTo_eq`: it is `decoded`. -/
+def Materialized.relativeTo {L : Layout.{u, v, w}} {Root : Type y} {M : Materializer L Root}
+    (held decoded : Materialized M) : Materialized M :=
+  let carried : Thunk (CellStateAux.Carried M.aux decoded.logical) := Thunk.mk fun _ =>
+    Patch.run_diff held.logical decoded.logical ▸
+      CellStateAux.Carried.run M.aux (Patch.diff held.logical decoded.logical) held.carried.get
+  ⟨decoded.logical, decoded.bytesCache, decoded.bytesExact, carried,
+    Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried.get
+      (Thunk.mk fun _ => M.rootBytes decoded.bytesCache.get),
+    CellStateAux.rootOr_eq M.aux carried.get _ (congrArg M.rootBytes decoded.bytesExact)⟩
+
+theorem Materialized.relativeTo_eq {L : Layout.{u, v, w}} {Root : Type y} {M : Materializer L Root}
+    (held decoded : Materialized M) : held.relativeTo decoded = decoded :=
+  Materialized.ext rfl
+
 /-! ## Pair-scoped root binding
 
 A root is a digest of the canonical bytes; no global injectivity of the root

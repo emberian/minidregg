@@ -107,6 +107,46 @@ pub(super) fn outcome_clause(value: &Value) -> String {
     text
 }
 
+/// The status a Host outcome marker names (registry `response_markers`), or None for any other byte.
+pub(super) fn outcome_status(marker: u8) -> Option<&'static str> {
+    use mini_sdk::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NEVER_FORWARDED, RESPONSE_NO_RECORD};
+    match marker {
+        RESPONSE_NO_RECORD => Some("no record"),
+        RESPONSE_NEVER_FORWARDED => Some("never forwarded"),
+        RESPONSE_HOST_OUTCOME => Some("undecided"),
+        _ => None,
+    }
+}
+
+/// A Host reply to `operation`: its body, or, when the Host answered with an outcome, an error that
+/// carries the outcome's own words (read through the Host's `outcome` inspection, retained beside
+/// the frame as `<name>-outcome.{bin,json}`), so a refusal names its clause.
+pub(super) fn reply_or_outcome<'a>(
+    host: &Path,
+    config: &Path,
+    directory: &Path,
+    name: &str,
+    frame: &'a [u8],
+    operation: u8,
+    what: &str,
+) -> Result<&'a [u8]> {
+    match frame {
+        [marker, body @ ..] if !body.is_empty() && outcome_status(*marker).is_some() => {
+            let status = outcome_status(*marker).unwrap_or_default();
+            let input = directory.join(format!("{name}-outcome.bin"));
+            let words = create_private(&input, body)
+                .and_then(|()| {
+                    source_inspect(host, config, "outcome", &input, &directory.join(format!("{name}-outcome.json")))
+                })
+                .map(|view| outcome_clause(&view))
+                .unwrap_or_else(|error| format!("outcome not decoded: {error}"));
+            Err(format!("{what} Host op{operation} ({status}): {words}; frame retained"))
+        }
+        [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
+        _ => Err(format!("{what} op{operation} returned an invalid frame")),
+    }
+}
+
 pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     if !mini_sdk::hex::is_canonical(value) {
         return Err("noncanonical reserve hex".into());
@@ -114,15 +154,16 @@ pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     mini_sdk::hex::decode(value).map_err(|e| e.0)
 }
 
-fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
+/// A Host reply to `operation`: its body; a Host outcome (no record, never forwarded, undecided) is
+/// named by its status, anything else is an invalid frame. `what` names the caller's flow.
+pub(super) fn host_reply<'a>(frame: &'a [u8], operation: u8, what: &str) -> Result<&'a [u8]> {
     match frame {
-        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
-            "agent reserve Host refused op{operation}; frame retained"
+        [marker, ..] if outcome_status(*marker).is_some() => Err(format!(
+            "{what} Host op{operation} outcome ({}); frame retained",
+            outcome_status(*marker).unwrap_or_default()
         )),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
-        _ => Err(format!(
-            "agent reserve op{operation} returned an invalid frame"
-        )),
+        _ => Err(format!("{what} op{operation} returned an invalid frame")),
     }
 }
 
@@ -280,7 +321,7 @@ pub(super) fn plan(
     }
     let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::AGENT_RESERVE_PLAN, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
-    let plan_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_PLAN)?;
+    let plan_bytes = host_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_PLAN, "agent reserve")?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
     let inspection = source_inspect(
@@ -554,7 +595,7 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
     let frame = session_invoke(&pin.host, &pin.operator_socket, &pin.config, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE, &pair)?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     same_pin(&directory, &pin)?;
-    let call = expect_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE)?;
+    let call = host_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE, "agent reserve")?;
     create_private(&directory.join("call.bin"), call)?;
     retain_json(
         &directory.join("seal.json"),
@@ -586,7 +627,7 @@ fn sealed(directory: &Path) -> Result<(Pin, Vec<u8>)> {
 }
 
 fn outcome(directory: &Path, stem: &str, frame: &[u8], operation: u8, pin: &Pin) -> Result<Value> {
-    let bytes = expect_reply(frame, operation)?;
+    let bytes = host_reply(frame, operation, "agent reserve")?;
     let binary = directory.join(format!("{stem}.outcome.bin"));
     create_private(&binary, bytes)?;
     source_inspect(
@@ -676,6 +717,23 @@ pub(super) fn lookup(directory: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn a_host_outcome_reply_is_named_never_an_invalid_frame() {
+        let dir = std::env::temp_dir().join(format!("mini-outcome-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = Path::new("/nonexistent/host");
+        use mini_sdk::host_operations::{AGENT_LIFETIME_DISPATCH_SUBMIT, AGENT_LIFETIME_GRANT_ASSEMBLE};
+        let reply = |frame: &[u8]| reply_or_outcome(missing, missing, &dir, &format!("t{}", frame[0]), frame,
+            AGENT_LIFETIME_GRANT_ASSEMBLE, "grant").map(<[u8]>::to_vec);
+        assert_eq!(reply(&[AGENT_LIFETIME_GRANT_ASSEMBLE, 1, 2]).unwrap(), vec![1, 2]);
+        // op75's refusal in run wbH: marker 253 and a framed outcome, read before as an invalid frame.
+        let refused = reply(b"\xfdDREGG/NATIVE-HOST/OUTCOME/v8").unwrap_err();
+        assert!(refused.starts_with("grant Host op75 (no record): outcome not decoded"), "{refused}");
+        assert!(reply(&[255, 0]).unwrap_err().contains("(undecided)"));
+        assert!(reply(&[AGENT_LIFETIME_DISPATCH_SUBMIT, 1]).unwrap_err().ends_with("returned an invalid frame"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn scratch() -> PathBuf {
         let unique = SystemTime::now()

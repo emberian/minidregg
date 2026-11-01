@@ -47,9 +47,11 @@ open Minidregg.Kernel.ApplicationShareIssueSource
 
 set_option autoImplicit false
 
-/-- Source admission and full intent equality, with the large original
-physical image and admitted object retained only in proof-erased Prop. The
-record is not yet certified as belonging to the current history. -/
+/-- Source admission and full intent equality, with the ground the issue was
+admitted on (the walk's full prefix image, or a light basis at the issue's own
+prefix selected from the Store's history) and the admitted object retained only
+in proof-erased Prop. The record is not yet certified as belonging to the
+current history. -/
 structure IssuedEvidence (config : Config) where
   private mk ::
   spec : ApplicationShareIssueSource.Spec
@@ -58,26 +60,22 @@ structure IssuedEvidence (config : Config) where
   record : DurableReceiver.IntentRecord
   sourceExact :
     (∃ (pins : FactoryPins)
-       (original : ResourceBirthController.Concrete.Durable)
-       (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
-       (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
+       (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment)
        (height : Height)
        (ingress : ApplicationShareIssueSource.Ingress)
        (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-         pins (.ofLoaded original directory authority) height ingress),
+         pins ground height ingress),
        spec = ingress.spec ∧
          ingressBytes = ApplicationShareIssueSource.ingressCodec.encode ingress ∧
          descriptor = accepted.birth.descriptor ∧
          record = DurableReceiver.IntentRecord.ofIntent
            (ApplicationShareIssueReceiver.intent accepted)) ∨
     (∃ (pins : FactoryPins)
-       (original : ResourceBirthController.Concrete.Durable)
-       (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
-       (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
+       (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment)
        (ambient : DeclaredResourceController.Ambient)
        (ingress : ApplicationShareIssueGrainSource.Ingress)
        (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
-         pins (.ofLoaded original directory authority) ambient ingress),
+         pins ground ambient ingress),
        spec = ingress.spec ∧
          ingressBytes = ingress.canonicalBytes ∧
          descriptor = accepted.decoded.source.birth ∧
@@ -89,36 +87,32 @@ private native Accepted issue and exact equality of all recorded intent
 fields. The caller must separately prove chronological membership in an
 admitted replay prefix before using this evidence for a dispatch. -/
 def IssuedEvidence.fromAccepted (config : Config) (pins : FactoryPins)
-    (original : ResourceBirthController.Concrete.Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
-    (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
+    (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment)
     (height : Height)
     (ingress : ApplicationShareIssueSource.Ingress)
     (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-      pins (.ofLoaded original directory authority) height ingress)
+      pins ground height ingress)
     (record : DurableReceiver.IntentRecord)
     (exact : record = DurableReceiver.IntentRecord.ofIntent
       (ApplicationShareIssueReceiver.intent accepted)) : IssuedEvidence config :=
   ⟨ingress.spec, ApplicationShareIssueSource.ingressCodec.encode ingress,
     accepted.birth.descriptor, record,
-    Or.inl ⟨pins, original, directory, authority, height, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
+    Or.inl ⟨pins, ground, height, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
 
 /-- The grain-backed issue is a separate admitted source with its own event22
 and full joint birth intent. Its evidence is never constructed through the
 legacy event15 accepted type. -/
 def IssuedEvidence.fromGrainAccepted (config : Config) (pins : FactoryPins)
-    (original : ResourceBirthController.Concrete.Durable)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
-    (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
+    (ground : Minidregg.Compiler.ServedBasis.Ground config.deployment)
     (ambient : DeclaredResourceController.Ambient)
     (ingress : ApplicationShareIssueGrainSource.Ingress)
     (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
-      pins (.ofLoaded original directory authority) ambient ingress)
+      pins ground ambient ingress)
     (record : DurableReceiver.IntentRecord)
     (exact : record = DurableReceiver.IntentRecord.ofIntent
       (ApplicationShareIssueGrainReceiver.intent accepted)) : IssuedEvidence config :=
   ⟨ingress.spec, ingress.canonicalBytes, accepted.decoded.source.birth, record,
-    Or.inr ⟨pins, original, directory, authority, ambient, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
+    Or.inr ⟨pins, ground, ambient, ingress, accepted, rfl, rfl, rfl, exact⟩⟩
 
 def IssuedEvidence.transactionId {config : Config} (issued : IssuedEvidence config) : Digest :=
   issued.descriptor.transactionId
@@ -129,8 +123,8 @@ def IssuedEvidence.eventId {config : Config} (issued : IssuedEvidence config) : 
 theorem IssuedEvidence.record_transaction {config : Config} (issued : IssuedEvidence config) :
     issued.record.transactionId = issued.transactionId := by
   rcases issued.sourceExact with
-    ⟨_, _, _, _, _, _, accepted, _, _, descriptorExact, recordExact⟩ |
-    ⟨_, _, _, _, _, _, accepted, _, _, descriptorExact, recordExact⟩
+    ⟨_, _, _, _, accepted, _, _, descriptorExact, recordExact⟩ |
+    ⟨_, _, _, _, accepted, _, _, descriptorExact, recordExact⟩
   · rw [recordExact]
     change (ApplicationShareIssueReceiver.intent accepted).transactionId =
       issued.descriptor.transactionId
@@ -145,8 +139,8 @@ theorem IssuedEvidence.record_transaction {config : Config} (issued : IssuedEvid
 theorem IssuedEvidence.record_event_bytes {config : Config} (issued : IssuedEvidence config) :
     issued.record.event.canonicalBytes = issued.ingressBytes := by
   rcases issued.sourceExact with
-    ⟨_, _, _, _, _, _, accepted, _, ingressExact, _, recordExact⟩ |
-    ⟨_, _, _, _, _, _, accepted, _, ingressExact, _, recordExact⟩
+    ⟨_, _, _, _, accepted, _, ingressExact, _, recordExact⟩ |
+    ⟨_, _, _, _, accepted, _, ingressExact, _, recordExact⟩
   · rw [recordExact, ingressExact]
     rfl
   · rw [recordExact, ingressExact]

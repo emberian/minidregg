@@ -27,19 +27,19 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
-private def observationRequest (config : Config) (opened : Opened config)
+private def observationRequest (config : Config) (ground : ServedBasis.Ground config.deployment)
     (command : DeclaredResourceController.Command)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.ground command)
+      ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground command)
     (resource : Nat) (capability : CapabilityId) (root : Digest) : Request .object :=
   let target : DeclaredResourceController.Target :=
     { kind := .object, target := resource, capability := capability,
       observeCapability := none, schemaVersion := ContentResource.commandVersion, expectedTargetRoot := root,
       payload := .content ⟨[]⟩ }
-  { DeclaredResourceController.requestFor opened.ground.authority
+  { DeclaredResourceController.requestFor ground.authority
       config.profile.semantics
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+      ⟨config.federation, config.genesisHeight + ground.height⟩
       command target root with verb := .observeObject }
 
 private def observationMarker (config : Config)
@@ -47,35 +47,35 @@ private def observationMarker (config : Config)
   DeclaredResourceController.operationMarker
     config.deployment.domain config.profile.semantics command
 
-structure CheckedRead {config : Config} {opened : Opened config}
+structure CheckedRead {config : Config} {ground : ServedBasis.Ground config.deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.ground command)
+      ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground command)
     (resource : Nat) (capability : CapabilityId) (root : Digest)
     (envelope : List UInt8) where
   private mk ::
   selected : ResourceObservationAdmission.Prepared
     (DeclaredResourceController.readContext prepared) config.profile
-    (observationRequest config opened command prepared resource capability root)
+    (observationRequest config ground command prepared resource capability root)
     (observationMarker config command) capability
     (DeclaredResourceController.commandCodec.encode command)
   checked : ResourceObservationAdmission.Checked selected envelope
   current : ResourceBirthCodec.physicalRoot (.live selected.observed.before) =
-    opened.durable.snapshot.model.roots ⟨resource⟩
+    ground.cells.model.roots ⟨resource⟩
   readonly : (⟨⟨resource⟩,
     ResourceBirthCodec.physicalRoot (.live selected.observed.before)⟩ : ReadGuard).cellId ∉
     (DeclaredResourceController.writes prepared).map DataWrite.cellId
 
-def checkRead {config : Config} {opened : Opened config}
+def checkRead {config : Config} {ground : ServedBasis.Ground config.deployment}
     {command : DeclaredResourceController.Command}
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.ground command)
+      ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground command)
     (resource : Nat) (capability : CapabilityId) (root : Digest)
     (envelope : List UInt8) :
     IO (Except String (CheckedRead prepared resource capability root envelope)) := do
-  let wanted := observationRequest config opened command prepared resource capability root
+  let wanted := observationRequest config ground command prepared resource capability root
   let context := DeclaredResourceController.readContext prepared
   match ResourceObservationAdmission.prepare context config.profile wanted
       (observationMarker config command) capability
@@ -93,7 +93,7 @@ def checkRead {config : Config} {opened : Opened config}
             return .ok ⟨selected, checked, current, readonly⟩
           else return .error "enrollment observation overlaps joint writes"
 
-structure Checked (config : Config) (opened : Opened config)
+structure Checked (config : Config) (ground : ServedBasis.Ground config.deployment)
     (ingress : Ingress) (spec : ApplicationShareIssueSource.Spec)
     (issueReceipt : NativeHostCodec.Receipt) where
   private mk ::
@@ -101,8 +101,8 @@ structure Checked (config : Config) (opened : Opened config)
   signed : DeclaredResourceController.SignedCommand
   command : DeclaredResourceController.Command
   prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-    opened.ground command
+    ⟨config.federation, config.genesisHeight + ground.height⟩
+    ground command
   shape : DeclaredResourceController.PhysicalShape prepared
   accepted : DeclaredResourceController.AcceptedInvocation prepared signed
   appRead : CheckedRead prepared spec.ticket.scope.app
@@ -115,13 +115,13 @@ structure Checked (config : Config) (opened : Opened config)
     spec.ticket.participant.ticketObserveCapability ingress.ticketRoot
     ingress.ticketObservationEnvelope
 
-def admitAt (config : Config) (opened : Opened config)
+def admitAt (config : Config) (ground : ServedBasis.Ground config.deployment)
     (ingress : Ingress) (spec : ApplicationShareIssueSource.Spec)
     (issueReceipt : NativeHostCodec.Receipt) :
-    IO (Except String (Checked config opened ingress spec issueReceipt)) := do
+    IO (Except String (Checked config ground ingress spec issueReceipt)) := do
   if ingress.issueReceipt != issueReceipt then
     return .error "enrollment original issue receipt differs"
-  let .ok current := prepare config opened ingress.request spec
+  let .ok current := prepare config ground ingress.request spec
     | return .error "current enrollment construction refused"
   if ingress.enrollment != current.enrollment ||
       ingress.appRoot != current.appRoot ||
@@ -138,8 +138,8 @@ def admitAt (config : Config) (opened : Opened config)
   if command != current.command then
     return .error "signed enrollment command differs from source"
   match ← DeclaredResourceController.prepareAuthenticated config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ config.signature
-      opened.ground command signed.authorityEnvelope with
+      ⟨config.federation, config.genesisHeight + ground.height⟩ config.signature
+      ground command signed.authorityEnvelope with
   | .error _ => return .error "joint enrollment preparation refused"
   | .ok prepared =>
       if shape : DeclaredResourceController.PhysicalShape prepared then
@@ -161,5 +161,20 @@ def admitAt (config : Config) (opened : Opened config)
             return .ok ⟨current, signed, command, prepared, shape, accepted,
               appRead, manifestRead, ticketRead⟩
       else return .error "joint enrollment physical shape refused"
+
+/-- The keys an enrollment's admission reads beyond the state: its signed joint command's
+transaction id and operation-marker nullifier (`DeclaredResourceController.invocationKeys`;
+the three signed reads are under the same marker). A light basis for an enrollment declares
+these; a signed command that does not decode declares none (its admission refuses it). -/
+def keys (config : Config) (ingress : Ingress) : DurableView.Keys :=
+  match DeclaredResourceController.decodeSignedBytes ingress.signedBytes with
+  | some (domain, semantics, signed) =>
+      match DeclaredResourceController.commandCodec.decode signed.commandBytes with
+      | some command =>
+          if domain == config.deployment.domain && semantics == config.profile.semantics then
+            DeclaredResourceController.invocationKeys domain semantics command
+          else ⟨[], []⟩
+      | none => ⟨[], []⟩
+  | none => ⟨[], []⟩
 
 end Minidregg.Kernel.ApplicationGrainSessionEnrollmentAdmission

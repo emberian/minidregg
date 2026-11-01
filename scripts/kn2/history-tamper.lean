@@ -128,7 +128,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     | .ok opening => pure opening
     | .error detail => throw (IO.userError s!"FAIL light open: {detail}")
   let next ← match ← DurableServed.receiveServed transport rootBytes opening (step 42) with
-    | .appended _ next _ _ _ => pure next
+    | .appended _ next .. => pure next
     | .rejected reason => throw (IO.userError s!"FAIL light receive 42: rejected {repr reason}")
     | .replayed _ => throw (IO.userError "FAIL light receive 42: replayed")
     | .contention => throw (IO.userError "FAIL light receive 42: contention")

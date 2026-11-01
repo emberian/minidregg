@@ -203,6 +203,7 @@ fn allowed_header(name: &str, response: bool) -> bool {
             | "x-requested-with"
             | "x-csrftoken"
             | "x-csrf-token"
+            | "referer"
     ) || name.starts_with("x-hgarg-")
         || name.starts_with("x-phabricator-")
 }
@@ -281,6 +282,9 @@ fn validate(request: &WebRequest, max_response: usize) -> capnp::Result<()> {
         bounded(&h.value, MAX_FIELD)?;
         if h.name != h.name.to_ascii_lowercase() || !allowed_header(&h.name, false) {
             return Err(error("header outside Sandstorm whitelist"));
+        }
+        if h.name == "referer" && !crate::host_operations::referer_value_ok(&h.value) {
+            return Err(error("referer is not a same-origin path"));
         }
     }
     let tags = match &c.etag_precondition {
