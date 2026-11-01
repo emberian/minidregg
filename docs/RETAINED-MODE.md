@@ -241,32 +241,36 @@ generated nodes are D1 (query view) and I1 (linear fold).
 
 ## 8. Continuation (start here)
 
-The seat's live row is `board/seats/store-retained.md` on main; this section is the design-side state.
+The seat's row, `board/seats/store-retained.md` on main, is the handoff: ownership, landed shas, the WIP branch
+and its diagnosis, numbers, seams and box state. This section is the design-side state.
 
-**Landed on main:** `675a80745` `Theory/Retained.lean`; `1d4ff4efb` this document; `62aa5fcf8` +
-`05bffae27` `Theory/SparseMap.lean` with transport lemmas; **`802ba8c69` L0**: `Store L` and the World's
-`Cells R` are `SparseMap` trees (every lookup and `set` O(log n)); `Compiler/WorldCompact.lean` and
-`compactEvery` deleted; `deriving StoreKey` (`Theory/DeriveStoreKey.lean`) gives every layout's key types
-their codes; the cached-support twins collapsed into the tree's support. Whole tree green on hbox (10404
-jobs).
+**Landed on main:** `675a80745` `Theory/Retained.lean`; `62aa5fcf8` + `05bffae27` `Theory/SparseMap.lean`;
+**`802ba8c69` L0** (`Store L` and the World's `Cells R` are `SparseMap` trees; `WorldCompact` and `compactEvery`
+deleted; `deriving StoreKey`; the cached-support twins collapsed; whole tree green); **`49cf4f2d2` R1** (op 5
+authorizes from the challenge op 4 planned over the same light opening; `authorizeRetained_eq`); **`bdfa9428c`,
+`c3a28038a` R6(i)** (the session keeps the post-birth authority cell with its built index).
 
-**L0 lessons, for the next shared-interface change:** `SparseMap.set` is one `alter` with no case split on
-the value at its head, so `set` terms unify argument by argument (an insert/erase match left `?v` stuck and
-broke `_`-argument elaboration downstream). A section's `[DecidableEq D]` that mentions World needs
-`[StoreKey D]`; defs that do not use it omit it (csimp lemmas then need `omit … in`). The repair loop that
-worked: one whole-tree `lake build` on a pool tree, a log-driven fixer for the mechanical classes (ext,
-support lemmas, `.update`, binders, axiom pins only for files with no other error, edited bottom-up), and
-`lake env lean` on the box for the few manual files; 17 builds from first switch to green.
+**L0 measured** (grow2r on hbox): Host CPU per `story new` 590 → 1200 ms over stories 1 → 8 before, 500 → 700 ms
+after (slope +610 → +200 ms); `DFinsupp.update`/`Function.update` (49 % inclusive at story 8) gone.
 
-**L0 measured** (grow2r on hbox t4, base candidate 997905c0b vs its L0 Host overlay; CPU seconds from /proc):
-Host CPU per `story new` 590 → 1200 ms over stories 1 → 8 before, 500 → 700 ms after (slope +610 → +200 ms);
-`DFinsupp.update`/`Function.update` (49 % inclusive at story 8) gone, `SparseMap.set` 1.1 %. Table and caveats
-on the seat row. What still grows: the signed read (`checkGrant`, `capabilityEvidenceChecked`, cSHAKE256;
-read-path's next) and `NativeHostSession.refresh` (10 → 14 %).
+**L0 lessons, for the next shared-interface change:** `SparseMap.set` is one `alter` with no case split on the
+value at its head, so `set` terms unify argument by argument. A section's `[DecidableEq D]` that mentions World
+needs `[StoreKey D]`. The repair loop that worked: one whole-tree `lake build` on a pool tree, a log-driven fixer
+for the mechanical classes, `lake env lean` for the few manual files; 17 builds from first switch to green.
 
-**R1 landed** (49cf4f2d2): op 4's planned challenges are kept beside the light opening (`NativeHost.Observed`,
-typed by the opening, dropped when the head moves) and op 5 authorizes from them (`authorizeRetained_eq`: the
-same answer as `authorize`; a miss recomputes on the current ground). Measured in read-path's overlay.
+**In flight, not landed: the held served state** (D2 in §4: the served state advanced by the suffix's write sets).
+`origin/wip/retained-held` 4ca511c70; measurement build `origin/wip/retained-held-measure` 6fe9124dd (overlay
+7ed32ce04576). Two defects fixed (a floated `flatCharge`; every replayed record bound twice, which re-hashed the
+authority cell's private trie per refresh: now `Held.RootsBound` from the accepting replay). One open: on persvati
+the held build's write (op 2) is 76.5 ms vs 61.5 ms base and grows faster. hbox stacks put the excess in
+`sessionAdopt` → `Snapshot.ofCell` → `AuthTrie.Trie.build`: the held state's adopt path rebuilds the authority
+cell's trie where the base reuses it. The reuse checks (`bytesBEq`, R6(i), `cellsLawfulServedFrom`) depend on an
+unchanged cell's bytes being the prior image's very object. The general lesson for every node here: **a
+maintained structure must preserve object identity of unchanged values, or carry the derived value (here the
+`Materialized` cell) with its entry**, because the reuse fast paths downstream are pointer checks. The seat row
+has the measurement method (persvati `alt2.py`, `MINIDREGG_HOST_TRACE=1`, request ops only) and the next step.
 
-**Next nodes (§3-4 order):** the session refresh (still growing after L0); R3 the planner/deriver prepared write; I4/I5
-Fn and carry scans; export/backup; the client refs index; the lint (§7). R6 and R7 are host-execution's.
+**Next nodes (§3-4 order):** finish the held served state, then the session refresh; the authority
+digest → capability-address index; tree order = wire order for StoreCodec; R3 the planner/deriver prepared write;
+I4/I5 Fn and carry scans; export/backup; the client refs index; the lint (§7). R6 (other writers) and R7 are
+host-execution's.
