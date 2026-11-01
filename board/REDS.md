@@ -1,21 +1,22 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `e00408f660e6` (builder: REDS.md for d5e858b2222b (3 red)). Round finished 2026-11-01T03:13Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-e00408f6`.
+Tip: `359ace71edac` (builder: REDS.md for e00408f660e6 (7 red)). Round finished 2026-11-01T03:31Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-359ace71`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | rc=1 see /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log |
-| rerecord | rc=4 see /home/hbox/lanes/integ/logs/rerecord-e00408f660e6.log | - | no | build-loop | /home/hbox/lanes/integ/logs/rerecord-e00408f660e6.log |
-| umbrella | RED Fixtures.NativeAcceptedFixture | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log |
-| umbrella | RED Fixtures.NativeDocWriteFixture | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log |
-| umbrella | RED Kernel.ApplicationShareIssueHistorical | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log |
-| gate:composed:residents | composed residents fail | not rerun | yes | member-side, infra | fail: residents: WAITING root canonical provider custody publication absent: /ci/c-e00408/ |
+| umbrella-tree | rc=1 see /home/hbox/lanes/integ/logs/umbrella-tree-359ace71edac.log | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-359ace71edac.log |
+| umbrella | RED Fixtures.NativeAcceptedFixture | - | yes | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-359ace71edac.log |
+| umbrella | RED Fixtures.NativeDocWriteFixture | - | yes | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-359ace71edac.log |
+| gate:composed:residents | composed residents fail | not rerun | yes | member-side, infra | fail: residents: WAITING root canonical provider custody publication absent: /ci/c-359ace/ |
 | gate:composed:restart | composed restart blocked | not rerun | yes | host-execution | blocked: prerequisite residents has not passed |
 
-Suspect commits since green (`git log 83e926874e38..e00408f660e6`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..359ace71edac`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `359ace71` builder: REDS.md for e00408f660e6 (7 red) (owner: build-loop)
+- `f81ce864` Kernel.ApplicationShareIssueHistorical: pass Ground.ofLoaded to IssuedEvidence.fromAccepted
+- `e78141bf` fixtures: update leg projections in accepted and doc-write authorities for fold v2
 - `e00408f6` builder: REDS.md for d5e858b2222b (3 red) (owner: build-loop)
 - `2157f5ce` pipeline: scope per-round umbrella-tree to fast census targets unless instrument changed
 - `8159a9e6` residents: restart fixture provider across world roots and reap on world-down
@@ -53,15 +54,12 @@ Suspect commits since green (`git log 83e926874e38..e00408f660e6`), newest first
 - `cb38b561` births: the prepared authority post cell is built once; its write's law needs no decode (owner: apps-hermes)
 - `70f61182` board: host-execution row: f955ed8a2 landed (enrollment, grant, op55), WBO split
 - `f955ed8a` host-execution: session enrollment, agent lifetime grant and the grain share-issue lookup serve from
-- `738b70ec` board: member-side row: held served state pair measured
-- `d5e858b2` builder: REDS.md for 467e698ef56f (5 red) (owner: build-loop)
-- `dc721e35` conversations: a receive names the app's own rejection (refuseOn), and an incomplete one says what a
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
 | flatness-submit | FAIL | broken: propose_cpu_ms: early window below measurement resolution; increase --lo | - | - | - | - | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 54.000 | 53.000 | 0.981 | 1.958 | read-path |
-| flatness-get | PASS | get_wall_ms | 134.680 | 243.220 | 1.806 | 1.958 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-e00408f6/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 52.000 | 45.000 | 0.865 | 1.958 | read-path |
+| flatness-get | PASS | get_wall_ms | 133.766 | 133.841 | 1.001 | 1.958 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-359ace71/flatness.log | - | - | - | - | host-execution, store-retained |
