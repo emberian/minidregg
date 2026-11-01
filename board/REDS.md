@@ -1,66 +1,67 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `d5e858b2222b` (builder: REDS.md for 467e698ef56f (5 red)). Round finished 2026-11-01T02:50Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-d5e858b2`.
+Tip: `e00408f660e6` (builder: REDS.md for d5e858b2222b (3 red)). Round finished 2026-11-01T03:13Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-e00408f6`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:composed:residents | composed residents fail | not rerun | yes | member-side, infra | fail: residents: REFUSED timeout: managed fixture provider; see /ci/c-d5e858/composed/stat |
+| umbrella-tree | rc=1 see /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log |
+| rerecord | rc=4 see /home/hbox/lanes/integ/logs/rerecord-e00408f660e6.log | - | no | build-loop | /home/hbox/lanes/integ/logs/rerecord-e00408f660e6.log |
+| umbrella | RED Fixtures.NativeAcceptedFixture | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log |
+| umbrella | RED Fixtures.NativeDocWriteFixture | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log |
+| umbrella | RED Kernel.ApplicationShareIssueHistorical | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-e00408f660e6.log |
+| gate:composed:residents | composed residents fail | not rerun | yes | member-side, infra | fail: residents: WAITING root canonical provider custody publication absent: /ci/c-e00408/ |
 | gate:composed:restart | composed restart blocked | not rerun | yes | host-execution | blocked: prerequisite residents has not passed |
 
-Suspect commits since green (`git log 83e926874e38..d5e858b2222b`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..e00408f660e6`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `e00408f6` builder: REDS.md for d5e858b2222b (3 red) (owner: build-loop)
+- `2157f5ce` pipeline: scope per-round umbrella-tree to fast census targets unless instrument changed
+- `8159a9e6` residents: restart fixture provider across world roots and reap on world-down
+- `638e164b` board: store-retained handoff (wind-down): landed shas, the held served state's WIP and diagnosis, b (owner: store-retained)
+- `43b1aad6` board: apps-hermes row: handoff (wind-down), runner, per-app status, box state (owner: apps-hermes)
+- `c0ac6488` board: host-execution row: whole handoff at wind-down (landed, wip/he-enrol state, next steps, reds,
+- `d5845544` board: member-side row rewritten whole as the handoff (wind-down)
+- `0b728dc3` board/seats/read-path.md: rewritten whole as the handoff for a new agent
+- `bcbb92e3` board: privacy seat handoff, rewritten whole for a new agent
+- `85a8f4c8` board: build-loop row rewritten whole as the handoff (builder stop/start, pool, reds, boxes)
+- `cd493933` board: infra seat rewritten whole as a handoff for a new agent
+- `60611b9f` board: member-side row: standing worlds
+- `ea8a115c` board: build-loop row: flatness published not gating; world reaping; fleet survey counts
+- `9317f32f` builder: flatness is published, never a red; finished gate worlds are reaped after each verdict (owner: build-loop)
+- `c509ff14` builder: REDS.md for d5e858b2222b (5 red) (owner: build-loop)
+- `f68a50de` board: apps-hermes row: refuseOn, Hummingbird locations, WBO bounds, hosted event filter, live state (owner: apps-hermes)
+- `8834e486` hosted conversations: a socket.io receive names its awaited events; the Host drains the rest uncharg (owner: apps-hermes)
+- `462919a4` invoke: target pre-roots and read guards come from the ground's snapshot, not a re-hash (owner: apps-hermes)
+- `c4a1e4cf` An append reads its document from propose's own signed read (owner: apps-hermes)
+- `fd822f76` board/seats/read-path.md: the whole continuation for the next read-path seat
+- `48dc530f` board: build-loop row: idle leases taken after 30 min, pool grown to 11, rerecord race fixed
+- `14f9cbb2` Op 5's opening cache picks by the cell root; the reply frame is not copied
+- `fd1686db` integ-build: the rerecord holds the umbrella tree; land_regen diffs against the regen's own parent (owner: build-loop)
+- `cbe54d87` lane-tree: a lease idle 30 minutes with no process in its tree is taken
+- `90c8cbed` board: host-execution row: restore the worktree line
+- `f45beda2` board: host-execution row: seat id a559316c0cc2b4b14, delegates state
+- `6ccd0cd4` board: host-execution row: e71c9ab59, he-births commits, dispatch ruling
+- `913e66cd` invoke: the read guards take the written ids without building the target writes (owner: apps-hermes)
+- `901d910c` World legs carry only their changed ops; the turn's pin guards the rest (fold v2) (owner: read-path)
+- `40cde03d` wbo: rectangle.write's numbers carry WBO's own bounds; the qualify size is 10
+- `df55c10a` hummingbird: analytics.record correlates on its event in the live locations stream, not on a referer
+- `8f659b53` board: member-side row: held pair cause; bind? on the walk next
+- `3305b4b0` typed apps: an unclassified controller error and a failed conversation poll name their cause (owner: apps-hermes)
+- `e71c9ab5` host-execution: an issue selection's history read failure is named, never a conflict (law 10)
+- `cb38b561` births: the prepared authority post cell is built once; its write's law needs no decode (owner: apps-hermes)
+- `70f61182` board: host-execution row: f955ed8a2 landed (enrollment, grant, op55), WBO split
+- `f955ed8a` host-execution: session enrollment, agent lifetime grant and the grain share-issue lookup serve from
+- `738b70ec` board: member-side row: held served state pair measured
 - `d5e858b2` builder: REDS.md for 467e698ef56f (5 red) (owner: build-loop)
 - `dc721e35` conversations: a receive names the app's own rejection (refuseOn), and an incomplete one says what a
-- `2ca521af` board: store-retained row: held served state in flight (overlay 4f60d20e9ef7, persvati verdict owed) (owner: store-retained)
-- `f937f2b3` mini serve: the serving Host's PID beside the socket (mini.host.pid) (owner: apps-hermes)
-- `e63abb0e` board: host-execution row: per-birth doc new profile, second delegate
-- `f9a530be` board: host-execution row: lifecycle port landed (2edf8a1ce), next steps, delegate
-- `2edf8a1c` host-execution: the app-lifecycle turns serve from the light opening (KN2 2b PORT-C, lifecycle first
-- `a1f503b0` board: member-side row: orphans stopped and logged; standing rule
-- `007cedb6` board: privacy row, consent walk measured near flat after a014ff501; Host still grows
-- `b15b9075` board: member-side row: a014ff501 after-number
-- `467e698e` client test: name the Host operation constants in the outcome-reply test (owner: apps-hermes)
-- `043c2c58` board: member-side row after a014ff501
-- `a18cfe5c` board: host-execution row: new seat a0dec24192aead1f1; 7acbdd878 reviewed
-- `64a7cf8a` board: apps-hermes row: host-execution seat id, seams updated (owner: apps-hermes)
-- `6cde1ddc` builder: REDS.md for ebed79cf874a (5 red) (owner: build-loop)
-- `ebed79cf` board: privacy row, relativeTo reviewed (a014ff501)
-- `a014ff50` authority load on a walk: a decoded cell takes the held cell's trie by their difference
-- `cc5cbd90` Merge remote-tracking branch 'origin/main' into seat/host-execution
-- `77f8480f` board: host-execution row: complete continuation for the next seat
-- `be581573` builder: REDS.md for 920a4a31412c (5 red) (owner: build-loop)
-- `920a4a31` Merge remote-tracking branch 'origin/main' into seat/host-execution
-- `d0d40855` host-execution: a first walk opens the Store in full once
-- `29a754fe` board: privacy row, FORMAT (a) timing measured: per-write cost still grows; cause and routing
-- `6c584257` board: member-side row: persvati doc new numbers, law 17 red
-- `c50c4f77` builder: REDS.md for ef2a21c94a3c (5 red) (owner: build-loop)
-- `ef2a21c9` builder: REDS.md for 78f347a6af51 (5 red) (owner: build-loop)
-- `a2363bbb` board: member-side row after 22cac1ee0
-- `22cac1ee` client: one Host reply check names every outcome; the grain recovery test drives the codec session (owner: apps-hermes)
-- `78f347a6` builder: REDS.md for 4b750eb674ff (6 red) (owner: build-loop)
-- `142d5b99` board: apps-hermes row: referer sender and twins, image-free plan currency, new seat id (owner: apps-hermes)
-- `7acbdd87` plans stay valid across a moved image: currency is compared modulo each signing plan's root and heig (owner: apps-hermes)
-- `8bfffe59` referer: the senders reduce it to a same-origin path; every twin checks Lean's value rule (owner: apps-hermes)
-- `1b0f7cb2` board: apps-hermes row: certifier was a harness bug; payer-plan ruling and referer status (owner: apps-hermes)
-- `7ac9217f` dispatch admission: `referer` is an ordinary header, admitted only as a same-origin path (statement 
-- `15f9987f` builder: land its own fixture rerecord on main (root's ruling) (owner: build-loop)
-- `842bc749` Merge remote-tracking branch 'origin/main' into seat/host-execution
-- `8facc1e7` board: host-execution row: measured slices, law-17 cause, next order
-- `520e33d2` board: build-loop row: new seat a4141abe7297fdc4b; builder relaunched; akapug #4 and #5 landed
-- `64c34e22` fixtures: native runs re-recorded from candidate 9dc9c138cb32 (accepted stale, doc-write stale)
-- `ae98da48` fleet-sign join: bind the selected socket before any key, enrollment or funding (PR #4) (owner: apps-hermes)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | FAIL | submit_cpu_ms | 36.000 | 189.000 | 5.250 | 2.000 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 62.938 | 228.739 | 3.634 | 2.000 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_cpu_ms | 18.000 | 60.000 | 3.333 | 2.000 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 57.810 | 331.049 | 5.726 | 2.000 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 128.000 | 77.000 | 0.602 | 1.958 | read-path |
-| flatness-get | PASS | get_wall_ms | 238.341 | 176.910 | 0.742 | 1.958 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-d5e858b2/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | FAIL | broken: propose_cpu_ms: early window below measurement resolution; increase --lo | - | - | - | - | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 54.000 | 53.000 | 0.981 | 1.958 | read-path |
+| flatness-get | PASS | get_wall_ms | 134.680 | 243.220 | 1.806 | 1.958 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-e00408f6/flatness.log | - | - | - | - | host-execution, store-retained |
