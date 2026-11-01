@@ -33,13 +33,15 @@ stage() { local n=$1 t; shift; t=$(date +%s); swarm-build deploy/candidate/lane-
 g() { git -C "$I/umbrella-src" "$@"; }
 land_regen() {
   local b=$1 files="Fixtures/NativeAcceptedFixtureData.lean Fixtures/NativeDocWriteFixtureData.lean"
-  local idx=$I/rerecord/land.index i c tree f
-  [ -z "$(g diff --name-only "$SHA" "$b" -- . ':!Fixtures/NativeAcceptedFixtureData.lean' ':!Fixtures/NativeDocWriteFixtureData.lean')" ] ||
+  local idx=$I/rerecord/land.index i c tree f base
+  base=$(g rev-parse "$b^") || return 1   # the tip it was recorded on: the umbrella tree's HEAD, not always $SHA
+  [ -z "$(g diff --name-only "$base" "$b" -- . ':!Fixtures/NativeAcceptedFixtureData.lean' ':!Fixtures/NativeDocWriteFixtureData.lean')" ] ||
     { say "rerecord not landed: $b changes more than the two fixture data files"; return 1; }
   for i in 1 2 3 4 5; do
     g fetch -q origin main || { sleep 5; continue; }
-    [ -z "$(g log --format=%h "$SHA..origin/main" -- $files)" ] ||
-      { say "rerecord not landed: a commit since ${SHA:0:12} touched the fixture data ($b stays for review)"; return 0; }
+    g merge-base --is-ancestor "$base" origin/main || { say "rerecord not landed: ${base:0:12} is not on main"; return 1; }
+    [ -z "$(g log --format=%h "$base..origin/main" -- $files)" ] ||
+      { say "rerecord not landed: a commit since ${base:0:12} touched the fixture data ($b stays for review)"; return 0; }
     GIT_INDEX_FILE=$idx g read-tree origin/main
     for f in $files; do GIT_INDEX_FILE=$idx g update-index --add --cacheinfo "100644,$(g rev-parse "$b:$f"),$f"; done
     tree=$(GIT_INDEX_FILE=$idx g write-tree)
@@ -68,7 +70,13 @@ ls -1dt "$I"/candidates/*/ 2>/dev/null | tail -n +7 | while read -r d; do [ "$(b
 # umbrellas finish first (that wait holds src, the only queueing left). Stage lines here carry the sha
 # (`stage umbrella-tree SHA12 rc=N`): they land after the next build's lines in COMMANDS.log.
 s12=${SHA:0:12}; U=$I/logs/umbrella-tree-$s12.log; synced=$I/logs/umbrella-synced-$s12; rm -f "$synced"
-while [ -d "$I/umbrella-src.lock" ] && kill -0 "$(cat "$I/umbrella-src.pid" 2>/dev/null)" 2>/dev/null; do sleep 20; done
+# The umbrella tree is held from here through the rerecord (umbrella-rerecord.pid names this build): umbrella-tree's
+# own lock ends with the umbrellas, and the rerecord after them runs in the same tree (10-31: round 467e698's
+# rerecord ran while d5e858's umbrella-tree checked its tip out there, and recorded onto d5e858). Only the build
+# holding build.lock reaches this wait, so the check and the claim below cannot race.
+while { [ -d "$I/umbrella-src.lock" ] && kill -0 "$(cat "$I/umbrella-src.pid" 2>/dev/null)" 2>/dev/null; } ||
+      kill -0 "$(cat "$I/umbrella-rerecord.pid" 2>/dev/null)" 2>/dev/null; do sleep 20; done
+echo $$ > "$I/umbrella-rerecord.pid"
 t=$(date +%s)
 MINIDREGG_LEAN_SEATS=${UMBRELLA_SEATS:-4} SWARM_MEM_MAX=${UMBRELLA_MEM:-32G} UMBRELLA_SYNCED=$synced \
   scripts/pipeline/umbrella-tree --src "$src" --tree "$I/umbrella-src" --out "$I/umbrella-tree-out" "$SHA" > "$U" 2>&1 9>&- &
@@ -90,3 +98,4 @@ if [ -x "$I/umbrella-src/scripts/native-accepted-fixture/rerecord.sh" ]; then
     git -C "$I/umbrella-src" push -q origin "$b" && say "rerecord pushed $b"
     [ -n "${BUILDER_DRY:-}" ] || land_regen "$b" ;; esac
 fi
+rm -f "$I/umbrella-rerecord.pid"   # the umbrella tree is the next build's
