@@ -1,62 +1,47 @@
 # Seat: apps-hermes
 
 Agent: a990f9e07566fd55c (fresh from this file 2026-10-31 23:00Z; predecessors afb920b22b17049cd and a33e42314aa08ab3a, `cv show` for detail)
-Owns: grain-runtime, spk-host, the apps worker, Hermes controller and gateway, route and conversation declarations, refusal rendering
+Owns: grain-runtime, spk-host, the apps worker, Hermes controller and gateway, route and conversation declarations
+(apps/interfaces, protocol/hosted-conversation.json), refusal rendering
 Work areas: Mac worktree /Users/ember/dev/minidregg-lanes/apps-hermes; hbox /home/hbox/lanes/app-reds-cont (pool tree t2, target/)
 Quest: Hermes final say (H1b), live Hummingbird/WBO/Scrumblr qualification, refusals name their clause
 
-## Landed on main
-- 8bfffe590 referer, sender and twins. The generator (scripts/host-operations.py) emits `referer_value_ok` and
-  `ordinary_header_ok` (twins of Lean refererValueOk/ordinaryHeaderOk; `check` pins the Lean body) and the one sender
-  reduction `same_origin_referer(value, authority)`: a path passes; an http(s) URL of the grain's own authority becomes
-  its path and query; anything else is dropped, never refused.
-  - Senders: the browser entrance (against the request Host), app-interface bindings (mini-sdk) and the controller
-    (grain-runtime parse_input; its hand-copied ORDINARY_HEADERS is deleted).
-  - Readers: both agent API wire decoders, dispatch_web_input (a non-path referer is refused naming refererValueOk) and
-    spk-rpc's WebSession whitelist.
-  - Hummingbird's `url` is typed as a same-origin path (pattern), and its qualify uses "/analytics/<runId>".
-  - Tests: mini-sdk referer_tests and a_declared_referer..., grain-runtime application_api_tools (25), spk-host (39
-    filtered, on hbox).
-  - Without this, 7ac9217f2's generated name list let the browser entrance sign full-URL referers that Lean refuses.
-- 7acbdd878 plans stay valid across a moved image (host-execution's ruling). Kernel/SigningPlanImage.lean `imageFree`
-  clears a SigningPlan's worldRoot and height (theorems: fixes everything else; moved image is rfl; slot-change teeth).
-  - PaidPlan.imageFree and the inspection field `imageFreePlanHex`. Both paid.rs re-checks (payer and seal) compare it
-    when the bytes differ. No re-signing.
-  - The same fix for op75 grant assembleCurrent (wbH's red) and for all three session-enrollment assembleCurrent* (op83,
-    infra's batch-7 apps:sheet red); each assembles `fresh`.
-  - op75's refusal was marker 253, read as "invalid frame". resource-client `reply_or_outcome` names any Host outcome
-    with its words (op75, op78 re-checks).
-  - spk-host logs `op-timing opN reply=R ms=T` per Host turn and the session-tool ms.
-  - lane-check green on hbox for all five Lean files; resource-client tests (15) and spk-host tests pass.
-- Earlier (predecessors): H1b cause and fix f3d8f3fa5; START reds fda2e4193; refusal sweep; route paths byte-exact with
-  one trailing "/" admitted on conversation paths (1c670cee5, e46759f4e); channel ids 37 chars (9dc9c138c); attach roleId
-  allAccess; controller refusal decode 147b98259; op76 words a1e69615f; op66 shapeClause 90fba62e4; referer statement
-  7ac9217f2.
+## Landed on main (this session)
+- 8bfffe590 referer sender and twins. Generated `referer_value_ok`, `ordinary_header_ok` and `same_origin_referer`; the
+  browser entrance, app bindings and controller reduce, and the readers check.
+- 7acbdd878 plans valid across a moved image: Kernel/SigningPlanImage `imageFree`; PaidPlan, grant op75 and enrollment
+  op83 currency compare modulo the image. resource-client names Host outcomes. spk-host logs `op-timing`.
+  (467e698ef by member-side fixed my test's literal op bytes.)
+- dc721e35c `refuseOn`: a receive names the app's own rejection, as "app-refused: <reason>" (decided). An incomplete
+  conversation names the frames that did arrive.
+- 3305b4b09 unclassified controller errors and failed polls carry their text.
+- df55c10a2 Hummingbird analytics.record correlates on `event` in the `locations` stream. Hummingbird reads URLs only
+  from the referer, which Sandstorm's bridge header whitelist never forwards.
+- 40cde03d5 WBO inputs carry WBO's own bounds (integer size 10-500, opacity 0.1-1, geometry 0-655360); qualify size 10.
+- 8834e4862 hosted contract: a socket.io receive may list `events`; spk-host drains other event packets uncharged. This
+  changes the receiving domain. Also socket.io endings are named, and the retained-outcome error carries why.
 
-## Live qualification state
-- Scrumblr: qualify PASSES (hbox run sbB). Keep it passing.
-- Hummingbird (hbA): blocked on the referer, now landed. Rerun needs a Host built from main >= 7acbdd878. The Lean
-  admission changed, so the 9dc9c138c overlay is not enough.
-- WBO (wbA..wbJ): the certifier works (harness re-copies workspace.json each pass). The payer-plan red and the op75 red
-  are fixed in 7acbdd878. Remaining: conversation-deadline at the declaration's 120 s (61 hosted ops at about 2 s each;
-  one op is about 1 s of reserve plan and submit plus about 1 s of paid plan, signatures, op76 and committed, at
-  journald 1 s resolution). Next run gives the op-timing ms split; send it to host-execution with numbers.
-  limits.seconds 300 is allowed if the per-op cost stays.
-- Packages: forge /var/lib/spk-fresh/apps/wbo-r2/out/wbo.spk; /srv/spk-build/scrumblr/out/scrumblr-0.5-1.spk;
-  /srv/spk-build/hummingbird/out/hummingbird-0.4.1-api.spk; copies in hbox app-reds-cont/spk/.
-- Runner: /home/hbox/lanes/app-reds-cont/ar-cycle.sh SUF DECL ALIAS ROLE SPK overlays rust roles on a candidate (edit
-  its candidate path to the builder's newest candidate under /home/hbox/lanes/integ/candidates once one contains
-  7acbdd878); ar-hrun.sh runs the j14-apps qualify; evidence in /ci/j-<SUF>.
-- hbox test note: run spk-host dispatch_native tests under `umask 022` (fixtures refuse group-writable config).
+## Live qualification state (hbox)
+- Scrumblr: PASSES (sbC on candidate 467e698ef).
+- Hummingbird: attach with role `allAccess`. Tracker and view-data are separate roles; the pixel needs tracker and the
+  dashboard needs view-data. hbF reached the beacon and saw only cart_adds and view_totals before the locations frame
+  could arrive. Fixed by 8834e4862; rerun on a candidate that contains it.
+- WBO: wbK (467e698ef) gives the per-op split, sent to host-execution. wbN after refuseOn: "app-refused: size: invalid
+  size", fixed by 40cde03d5. wbO: "socketio-connection-refused" after 16 calls, now named by 8834e4862; rerun.
+- Runners: ar-cycle2.sh (CAND env) overlays rust roles; ar-hrun.sh runs one qualify; ar-cert.sh SUF must run alongside
+  every run (tail-bound otherwise). The source tree comes from the BASE candidate, so main's declarations go in
+  app-reds-cont/override/apps/interfaces/ (now: wbo.json, hummingbird.json from 40cde03d5; refresh after declaration
+  commits). spk-host dispatch_native tests need `umask 022` on hbox.
+- Since 8834e4862 the SDK sends the new receive condition, which older Hosts refuse. Overlays need a base candidate
+  that contains 8834e4862.
 
 ## Next
-1. When the builder has a candidate >= 7acbdd878: rerun Scrumblr, Hummingbird (hbB) and WBO (wbK). Collect op-timing
-   and send WBO's per-op split to host-execution (a0dec24192aead1f1).
-2. op76 "printed no words" in wbE: check it with reply naming now in place.
-3. op66 shape clause from one install; `mini apps install` measurement on a main-built world.
-4. Then E3/E4, E7, decider side of G2 (app-create Host-turn costs are host-execution's).
+1. When the builder has a candidate >= 8834e4862: run Hummingbird (hbG) and WBO (wbL, MINIDREGG_HOST_TRACE=1). wbL is
+   host-execution's after-measurement for 2edf8a1ce; send it the per-op split as for wbK.
+2. op66 shape clause from one install; `mini apps install` measurement on a main-built world.
+3. E3/E4, E7, decider side of G2.
 
 ## Seams
-- host-execution (a0dec24192aead1f1): reviewed 7acbdd878, sound. The Fn plans are not the same pattern. They take WBO's
-  Host turns: send them the box, log path, op-timing split (and store.log with MINIDREGG_HOST_TRACE=1) from the next WBO run.
-- member-side (ab7b4fe7fb687e0ca): resource-client files touched in 7acbdd878. merged all reply checks into agent_reserve::host_reply (22cac1ee0).
+- host-execution (a559316c0cc2b4b14): wbK split sent (dispatch op2/op76/op78 per op; op72/op55 setup); told of the
+  receiving-domain change in 8834e4862.
+- member-side (ab7b4fe7fb687e0ca): merged reply checks into agent_reserve::host_reply (22cac1ee0).
