@@ -7,7 +7,7 @@ and `board/REDS.md`, the `green` ref, the build box hbox and its pool, the persv
 Quest: hbox as the build box with the live unattended builder on `main`; persvati as the quiet measurement
 box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean build and the native inner loop faster.
 
-## State (2026-10-31 22:50Z, present tense)
+## State (2026-11-01 02:20Z, present tense)
 
 ### hbox: the build box again (ember 10-31 evening: obend has dregg-build2)
 - The builder runs here live: /home/hbox/lanes/integ/builder-run.sh (PID builder.pid there) fetches main's
@@ -18,9 +18,15 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
 - Box-wide Lean cap: ~/.minidregg-env (sourced first by .profile and .bashrc) sets MINIDREGG_LEAN_SEAT_ROOT=/home/hbox/seats,
   MINIDREGG_LEAN_SEATS=12 (24 cores, 123 GB), LEAN_NUM_THREADS 4, SWARM_MEM_MAX 48G default, CARGO_BUILD_JOBS 12,
   LANE_POOL_ENV=/home/hbox/pool/pool.env. Every build is `swarm-build`.
-- Pool /home/hbox/pool (t1..t9, packages-3a3779933df4 read-only, LAKE_ARTIFACT_CACHE=false). Lane recipe:
+- Pool /home/hbox/pool (t1..t11 since 10-31 evening; t10/t11 cost about 2 GB each beside the warm links, disk unchanged at
+  42 GB free; packages-3a3779933df4 read-only, LAKE_ARTIFACT_CACHE=false). Lane recipe:
   `t=$(lane-tree acquire SEAT origin/BRANCH); cd $t; scripts/pipeline/lane-check FILE...`; native: `lane-tree native
   SEAT`, then `scripts/pipeline/native-loop SEAT BASE LABEL`; `lane-tree release SEAT` when done.
+- Idle leases (root, 10-31; cbe54d87f): a lease untouched for LANE_POOL_IDLE_M minutes (default 30; touched = acquire, renew,
+  or an uncommitted file written), with no process whose cwd, open file or command line is in the tree, is taken by the
+  next acquire (a free tree first) and freed by gc. The holder's diff goes to /home/hbox/pool/saved/ with a header saying
+  to apply it in its next tree. `lane-tree status` shows an idle column. The box copy /home/hbox/pool/bin/lane-tree is
+  main's cbe54d87f (the previous one is kept as bin/lane-tree.prev-20261031). Within minutes he-enrol and he-births took t3 and t5 this way.
 - Disk: / is 455 GB with 78 GB free (10-31 17:55). Removed at the root's word (log integ/ci-rm.log): 52 old builder
   and integrator gate worlds in /ci (22.4 GB; kept the current round 9dc9c1, every dir a running process names, and
   apps-hermes' qualify worlds j-ar*/sb*/wb*/hbA), and the retired clones perf-apps (8.1 GB) and iter-speed (7.7 GB;
@@ -52,9 +58,11 @@ box; seam 1 (codec tags) landed; the hot-swap command; keep making the Lean buil
   builder relaunched 18:38 EDT as pid 2375112 (builder.pid), first round 4b750eb67. New residents no longer inherit fd 8.
 - Fixture rerecord (root's ruling 10-31, RULINGS): integ-build's `land_regen` lands the rerecord on main itself, as a
   fast-forward of origin/main carrying only Fixtures/NativeAcceptedFixtureData.lean and NativeDocWriteFixtureData.lean
-  from `fixture-regen/<sha>` (still pushed), never forced. It refuses a regen that changes any other path and stands
-  down when any commit since the recorded tip touched those files. Tested on a scratch origin (land; out-of-scope
-  refused; no double land; human edit wins). Live from the first round built on a tip that carries it.
+  from `fixture-regen/<sha>` (still pushed), never forced. It diffs against the regen's own parent and refuses any
+  other path, refuses a parent not on main, and stands down when a commit since that parent touched those files.
+  Tested on a scratch origin. fd1686db7: the rerecord holds the umbrella tree (umbrella-rerecord.pid) until it ends.
+  Before that, round 467e698's rerecord ran while d5e858's umbrella-tree checked out its tip in the same tree, so
+  fixture-regen/d5e858b2222b is untrustworthy and stays unlanded. The next round records it again.
 - green is 83e926874 (batch 4) until a live round passes. The first live hbox round rewrites REDS.md whole.
 
 ### Seam 1 (codec tags): on main (f2002e589)
