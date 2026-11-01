@@ -191,6 +191,30 @@ def retiresCell (bytes : List UInt8) : Bool :=
   | some .retired => true
   | _ => false
 
+/-- `retiresCell` as compiled: only the 4-byte retired tag decodes to `.retired`,
+so live cells are never decoded just to test retirement. -/
+def retiresCellFast : List UInt8 → Bool
+  | [68, 82, 2, 0] => true
+  | _ => false
+
+@[csimp] theorem retiresCell_eq_fast : @retiresCell = @retiresCellFast := by
+  funext bytes
+  unfold retiresCell LifecycleImage.codec LifecycleImage.rawCodec
+  change (match LifecycleImage.rawDecode CanonicalCellRegistry.registry bytes with
+    | some .retired => true
+    | _ => false) = retiresCellFast bytes
+  unfold LifecycleImage.rawDecode
+  split
+  · rfl
+  · rfl
+  · rename_i payload
+    cases Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry payload <;> rfl
+  · rename_i other h1 h2 h3
+    unfold retiresCellFast
+    split
+    · contradiction
+    · rfl
+
 theorem retiresCell_decode (bytes : List UInt8) (retires : retiresCell bytes = true) :
     decodeCell bytes = some none := by
   unfold retiresCell at retires

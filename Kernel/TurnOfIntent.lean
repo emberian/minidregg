@@ -1701,7 +1701,26 @@ once more through `chargeOf`) and in `retiresOf`: six decodes of the same post b
 on every derivation (the Host derives one per record on submit, light refresh and session
 refresh). `ofCellsFast` computes each write's delta once and reads every field off that list. -/
 
-/-- `writeRefusal` on an already computed delta. -/
+/-- The leg a delta contributes, paired with whether that leg's patch is valid
+from its pre store: `C.legPatch` is computed once for both (`legAndOk_eq`). -/
+def Delta.legAndOk (C : Codec R) (c : CellId) : Delta R → Option (Leg R) × Bool
+  | .absent => (none, true)
+  | .burn k => (some ⟨c, k, C.legPatch k 0 0⟩, true)
+  | .create k s' =>
+      let p := C.legPatch k (romPart s') s'
+      (some ⟨c, k, p⟩, decide (Patch.ValidFrom (romPart s') p))
+  | .change k s s' =>
+      let p := C.legPatch k s s'
+      (some ⟨c, k, p⟩, decide (Patch.ValidFrom s p))
+  | .retire k s =>
+      let p := C.legPatch k s 0
+      (some ⟨c, k, p⟩, decide (Patch.ValidFrom s p))
+
+theorem Delta.legAndOk_eq (C : Codec R) (c : CellId) (δ : Delta R) :
+    δ.legAndOk C c = (δ.leg? C c, δ.patchOk C) := by
+  cases δ <;> rfl
+
+/-- `writeRefusal` on an already computed delta and its `patchOk` bit. -/
 def refusalOfDelta (C : Codec R) (retired : CellId → Bool) (w : DataWrite)
     (δ : Except Refusal (Delta R)) :
     Option Refusal :=
@@ -1710,11 +1729,32 @@ def refusalOfDelta (C : Codec R) (retired : CellId → Bool) (w : DataWrite)
   | .error e => some e
   | .ok δ => if δ.patchOk C then none else some (.notAPatch w.cellId.value)
 
+def refusalOfDeltaOn (retired : CellId → Bool) (w : DataWrite)
+    (δ : Except Refusal (Delta R)) (ok : Bool) : Option Refusal :=
+  if retired w.cellId.value then some (.retiredCell w.cellId.value) else
+  match δ with
+  | .error e => some e
+  | .ok _ => if ok then none else some (.notAPatch w.cellId.value)
+
 /-- The turn record over computed deltas: `turnOf` with each list built once. -/
 def turnOfDeltas (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (ds : List (CellId × Delta R)) (intent : DataIntent rootBytes) : DTurn R D :=
   let creates := ds.filterMap fun d => d.2.create? d.1
   let legs := ds.filterMap fun d => d.2.leg? B.codec d.1
+  { txId := intent.transactionId
+    creates := creates
+    legs := legs
+    retires := ds.filterMap fun d => d.2.retire? d.1
+    event := intent.event
+    nullifiers := intent.nullifiers.map B.key
+    charge := chargeOf H creates legs intent.event intent.exactCharge
+    subject := intent.subject
+    pins := pinsOf B intent
+    credit := intent.credit }
+
+def turnOfDeltasOn (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (ds : List (CellId × Delta R)) (legs : List (Leg R)) (intent : DataIntent rootBytes) : DTurn R D :=
+  let creates := ds.filterMap fun d => d.2.create? d.1
   { txId := intent.transactionId
     creates := creates
     legs := legs
@@ -1733,17 +1773,22 @@ theorem turnOf_eq_deltas (B : Bridge R D) (H : History R TransactionId StableEve
 def ofCellsFast (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (cells : CellId → Option (Cell R)) (retired : CellId → Bool) (intent : DataIntent rootBytes) :
     Except Refusal (DTurn R D) :=
-  let computed := intent.writes.map fun w => (w, deltaOf B.codec cells w)
-  match computed.findSome? (fun p => refusalOfDelta B.codec retired p.1 p.2) with
+  let computed := intent.writes.map fun w =>
+    let δ := deltaOf B.codec cells w
+    let lo : Option (Leg R) × Bool := match δ with
+      | .ok d => d.legAndOk B.codec w.cellId.value
+      | .error _ => (none, false)
+    (w, δ, lo)
+  match computed.findSome? (fun p => refusalOfDeltaOn retired p.1 p.2.1 p.2.2.2) with
   | some e => .error e
   | none =>
       match (guardIds intent.writes intent.readGuards).find? retired with
       | some c => .error (.retiredCell c)
       | none =>
-          let t := turnOfDeltas B H (computed.filterMap fun p =>
-            match p.2 with
+          let t := turnOfDeltasOn B H (computed.filterMap fun p =>
+            match p.2.1 with
             | .ok δ => some (p.1.cellId.value, δ)
-            | .error _ => none) intent
+            | .error _ => none) (computed.filterMap fun p => p.2.2.1) intent
           if ¬ (writeIds intent.writes).Nodup then .error .duplicateWrite
           else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateWrite
           else if ¬ t.retires.Nodup then .error .duplicateWrite
@@ -1757,19 +1802,51 @@ omit [DecidableEq D] [Minidregg.Theory.StoreKey D] in
 theorem ofCells_eq_fast_apply (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (cells : CellId → Option (Cell R)) (retired : CellId → Bool) (intent : DataIntent rootBytes) :
     ofCells B H cells retired intent = ofCellsFast B H cells retired intent := by
-  have refusals : (intent.writes.map fun w => (w, deltaOf B.codec cells w)).findSome?
-      (fun p => refusalOfDelta B.codec retired p.1 p.2) =
+  have refusals : (intent.writes.map fun w =>
+        let δ := deltaOf B.codec cells w
+        let lo : Option (Leg R) × Bool := match δ with
+          | .ok d => d.legAndOk B.codec w.cellId.value
+          | .error _ => (none, false)
+        (w, δ, lo)).findSome?
+      (fun p => refusalOfDeltaOn retired p.1 p.2.1 p.2.2.2) =
       intent.writes.findSome? (writeRefusal B.codec cells retired) := by
     rw [List.findSome?_map]
-    rfl
-  have computed : ((intent.writes.map fun w => (w, deltaOf B.codec cells w)).filterMap fun p =>
-      match p.2 with
+    congr 1
+    funext w
+    unfold Function.comp refusalOfDeltaOn writeRefusal
+    cases deltaOf B.codec cells w with
+    | error e => rfl
+    | ok d => rw [Delta.legAndOk_eq]
+  have computed : ((intent.writes.map fun w =>
+        let δ := deltaOf B.codec cells w
+        let lo : Option (Leg R) × Bool := match δ with
+          | .ok d => d.legAndOk B.codec w.cellId.value
+          | .error _ => (none, false)
+        (w, δ, lo)).filterMap fun p =>
+      match p.2.1 with
       | .ok δ => some (p.1.cellId.value, δ)
       | .error _ => none) = deltas B.codec cells intent.writes := by
     rw [List.filterMap_map]
     rfl
+  have legsEq : ((intent.writes.map fun w =>
+        let δ := deltaOf B.codec cells w
+        let lo : Option (Leg R) × Bool := match δ with
+          | .ok d => d.legAndOk B.codec w.cellId.value
+          | .error _ => (none, false)
+        (w, δ, lo)).filterMap fun p => p.2.2.1) =
+      (deltas B.codec cells intent.writes).filterMap (fun d => d.2.leg? B.codec d.1) := by
+    rw [List.filterMap_map, deltas, List.filterMap_filterMap]
+    congr 1
+    funext w
+    unfold Function.comp
+    cases deltaOf B.codec cells w with
+    | error e => rfl
+    | ok d => rw [Delta.legAndOk_eq]
+  have turnEq : turnOfDeltasOn B H (deltas B.codec cells intent.writes)
+      ((deltas B.codec cells intent.writes).filterMap (fun d => d.2.leg? B.codec d.1)) intent =
+      turnOf B H cells intent := rfl
   unfold ofCells ofCellsFast
-  simp only [refusals, computed, ← turnOf_eq_deltas]
+  simp only [refusals, computed, legsEq, turnEq]
 
 omit [Minidregg.Theory.StoreKey D] in
 @[csimp] theorem ofCells_eq_fast : @ofCells = @ofCellsFast := by

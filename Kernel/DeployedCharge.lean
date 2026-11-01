@@ -62,8 +62,9 @@ variable {rootBytes : List UInt8 → Theory.TypedAuthorization.Digest}
 cells: `storageOf` of its derived creates and legs and its event. -/
 def storageAt (cells : CellId → Option (Cell deployedR)) (writes : List DataWrite)
     (event : StableEvent) : Nat :=
-  storageOf history ((deltas bridge.codec cells writes).filterMap fun d => d.2.create? d.1)
-    ((deltas bridge.codec cells writes).filterMap fun d => d.2.leg? bridge.codec d.1) event
+  let ds := deltas bridge.codec cells writes
+  storageOf history (ds.filterMap fun d => d.2.create? d.1)
+    (ds.filterMap fun d => d.2.leg? bridge.codec d.1) event
 
 /-- The storage lane against the cells a snapshot holds. -/
 def storageCharge (snap : DataSnapshot rootBytes) (writes : List DataWrite)

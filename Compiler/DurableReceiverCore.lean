@@ -999,6 +999,29 @@ theorem WorldTrack.advance_refuses_unretained {rootBytes : List UInt8 → Digest
 #assert_axioms WorldTrack.advance_refuses_mismatch
 #assert_axioms WorldTrack.advance_refuses_unretained
 
+/-- Pin failure judged from an already-bound root table (`view.model.roots`):
+the World's copy of the cell is neither re-encoded nor re-hashed. -/
+def rootPinFails (roots : CellId → Digest) (w : HostRefinesWorld.DWorld)
+    (p : Minidregg.Kernel.World.CellId × Digest) : Bool :=
+  (w.retired p.1).isSome || decide (roots ⟨p.1⟩ ≠ p.2)
+
+/-- Admit one already-bound intent against a World using the snapshot's bound
+roots for pin checks (`receiveServed`). -/
+def advanceWorldIntent (roots : CellId → Digest) (w : HostRefinesWorld.DWorld)
+    (height : Nat) (intent : DataIntent ResourceBirthCodec.rootBytes) :
+    Except String HostRefinesWorld.DWorld :=
+  match TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent with
+  | .error refusal => .error s!"height {height + 1}: the record is not a turn: {repr refusal}"
+  | .ok t =>
+      match DeployedCharge.mismatch t.charge intent.exactCharge with
+      | some lane =>
+          .error s!"height {height + 1}: the record's charge is not its turn's: {repr lane}"
+      | none =>
+          match Minidregg.Kernel.World.World.admitPinned DeployedHistory.history
+              (Minidregg.Kernel.World.pinCheckFromBy (rootPinFails roots w) 0 t.pins) w t with
+          | .error reason => .error s!"height {height + 1}: the World refuses the turn: {repr reason}"
+          | .ok w' => .ok w'
+
 /-- Fold a log's records as turns from a World: bind, derive, compare the
 charge, admit; refuse by height. -/
 def foldRecords (rootBytes : List UInt8 → Digest) :

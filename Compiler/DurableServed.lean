@@ -1534,7 +1534,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                     have fields := Head.verify_fields verified
                     let served' := served.advance footprint intent next executed chain worldRoot
                     let worldAfter := opening.world.bind fun w =>
-                      (DurableReceiverIO.foldRecords rootBytes w served.height [record]).toOption
+                      (DurableReceiverIO.advanceWorldIntent view.model.roots w served.height intent).toOption
                     -- A due checkpoint (a function of the height alone); a failed seal loses nothing.
                     let sealedAt ←
                       if transport.checkpointEvery > 0 && height % transport.checkpointEvery == 0 then do

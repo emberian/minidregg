@@ -37,18 +37,19 @@ open Minidregg.Kernel.NativeObservationController
 
 set_option autoImplicit false
 
-/-- Canonical entry, exact opening, and its already computed leaf. The renderer
-chooses visibility without recomputing either the salt or the leaf hash. -/
+/-- Canonical entry, exact opening, and its deferred leaf. The renderer
+chooses visibility without recomputing either the salt or the leaf hash, and an
+un-narrowed read forces no leaf hash. -/
 def prepare {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) :
-    List (Minidregg.Theory.Store.Entry L × StoreCodec.Opening × List UInt8) :=
+    List (Minidregg.Theory.Store.Entry L × StoreCodec.Opening × Thunk (List UInt8)) :=
   (StoreCodec.entries wire store).map fun entry =>
     let opened := StoreCodec.opening wire store entry
-    (entry, opened, opened.leaf)
+    (entry, opened, Thunk.mk fun _ => opened.leaf)
 
 def render {L : Layout.{0, 0, 0}} (visible : Address L → Prop) [DecidablePred visible]
-    (prepared : List (Minidregg.Theory.Store.Entry L × StoreCodec.Opening × List UInt8)) :
+    (prepared : List (Minidregg.Theory.Store.Entry L × StoreCodec.Opening × Thunk (List UInt8))) :
     List StoreHiding.Item :=
-  prepared.map fun item => if visible item.1.1 then .inl item.2.1 else .inr item.2.2
+  prepared.map fun item => if visible item.1.1 then .inl item.2.1 else .inr item.2.2.get
 
 theorem render_prepare {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
     (store : Store L) (visible : Address L → Prop) [DecidablePred visible] :
