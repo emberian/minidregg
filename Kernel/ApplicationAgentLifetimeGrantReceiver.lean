@@ -107,7 +107,7 @@ theorem LightConfirmed.exact {config : Config} {opening : DurableServed.Opening 
       confirmed.grounded.ground.recorded
           (ApplicationAgentLifetimeGrantIntentTemplate.template confirmed.current).transactionId = some none :=
   ⟨confirmed.entryExact, confirmed.height,
-    ⟨confirmed.issue.candidate.read, confirmed.issue.candidate.recordExact⟩,
+    confirmed.issue.read_evidence,
     confirmed.event22, confirmed.issueReceipt, confirmed.scope, confirmed.fresh⟩
 
 def LightConfirmed.intent {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}

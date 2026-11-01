@@ -52,7 +52,7 @@ def lookupLight (config : Config) {store : DurableHistory.StoreIdentity}
       | .error (.refused _) => return .error .transactionConflict
       | .ok issue =>
           let receipt := issue.receipt
-          if issue.ingress.canonicalBytes == bytes &&
+          if issue.evidence.ingressBytes == bytes &&
               issue.candidate.record.event.codecVersion == 22 &&
               receipt.transactionId == transactionId &&
               receipt.acceptedCount == found.height then

@@ -645,22 +645,58 @@ def selectCreated (config : Config) {store : DurableHistory.StoreIdentity}
       | .error v4Detail =>
           return .error s!"{v2Detail}; as a retry completion: {v4Detail}"
 
-/-! ## An event22 ticket issue read from the Store's history (the light route) -/
+/-! ## A ticket issue read from the Store's history (the light route) -/
 
-/-- **An event22 ticket issue selected from the Store's history** at 0-based `index` under
-`head` and re-admitted at its own prefix: the record verified at height `index + 1` and the
-state after `index` records (`NativeHistorySelection.select`), the grain-backed issue natively
-admitted on that prior state under `pins`, and the record exactly that admission's intent.
-The walk mints a `PriorIssue` by the same admission at the same prefix. -/
+/-- A share issue natively admitted on `ground` under `pins`: the legacy event15 issue or the
+grain-backed event22 issue (the walk's two `issuesAfter` arms), at the ground's logical height. -/
+inductive IssueAdmitted (config : Config) (pins : Minidregg.Theory.ResourceBirth.FactoryPins)
+    (ground : ServedBasis.Ground config.deployment) where
+  | legacy (ingress : ApplicationShareIssueSource.Ingress)
+      (accepted : ApplicationShareIssueAdmission.Accepted config.profile config pins ground
+        (config.genesisHeight + ground.height) ingress)
+  | grain (ingress : ApplicationShareIssueGrainSource.Ingress)
+      (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config pins ground
+        ⟨config.federation, config.genesisHeight + ground.height⟩ ingress)
+
+namespace IssueAdmitted
+
+variable {config : Config} {pins : Minidregg.Theory.ResourceBirth.FactoryPins}
+  {ground : ServedBasis.Ground config.deployment}
+
+def intent : IssueAdmitted config pins ground → DataIntent rootBytes
+  | .legacy _ accepted => ApplicationShareIssueReceiver.intent accepted
+  | .grain _ accepted => ApplicationShareIssueGrainReceiver.intent accepted
+
+/-- The issue's source evidence for a record that is exactly its intent's. -/
+def evidence (admitted : IssueAdmitted config pins ground) (record : DurableReceiver.IntentRecord)
+    (exact : record = DurableReceiver.IntentRecord.ofIntent admitted.intent) :
+    ApplicationDispatchHistoricalCore.IssuedEvidence config :=
+  match admitted, exact with
+  | .legacy ingress accepted, exact =>
+      .fromAccepted config pins ground (config.genesisHeight + ground.height) ingress accepted record exact
+  | .grain ingress accepted, exact =>
+      .fromGrainAccepted config pins ground ⟨config.federation, config.genesisHeight + ground.height⟩
+        ingress accepted record exact
+
+theorem evidence_record (admitted : IssueAdmitted config pins ground) (record : DurableReceiver.IntentRecord)
+    (exact : record = DurableReceiver.IntentRecord.ofIntent admitted.intent) :
+    (admitted.evidence record exact).record = record := by
+  cases admitted <;> rfl
+
+end IssueAdmitted
+
+/-- **A ticket issue selected from the Store's history** at 0-based `index` under `head` and
+re-admitted at its own prefix: the record verified at height `index + 1` and the state after
+`index` records (`NativeHistorySelection.select`), the issue (legacy or grain-backed) natively
+admitted on that prior state under `pins`, and the record exactly that admission's intent. The
+walk mints a `PriorIssue` by the same admission at the same prefix. -/
 structure IssueSelected (config : Config) {store : DurableHistory.StoreIdentity}
     (head : DurableHistory.Head store) (index : Nat) where
   private mk ::
   candidate : NativeHistorySelection.Candidate config head index
   pins : Minidregg.Theory.ResourceBirth.FactoryPins
-  ingress : ApplicationShareIssueGrainSource.Ingress
-  accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config pins
-    candidate.ground ⟨config.federation, config.genesisHeight + candidate.ground.height⟩ ingress
-  matched : NativeHistorySelection.Matched candidate (ApplicationShareIssueGrainReceiver.intent accepted)
+  admitted : IssueAdmitted config pins candidate.ground
+  matched : NativeHistorySelection.Matched candidate admitted.intent
 
 namespace IssueSelected
 
@@ -670,30 +706,34 @@ variable {config : Config} {store : DurableHistory.StoreIdentity} {head : Durabl
 /-- The issue's source evidence, admitted on its prefix ground. -/
 def evidence (selected : IssueSelected config head index) :
     ApplicationDispatchHistoricalCore.IssuedEvidence config :=
-  .fromGrainAccepted config selected.pins selected.candidate.ground
-    ⟨config.federation, config.genesisHeight + selected.candidate.ground.height⟩ selected.ingress
-    selected.accepted selected.candidate.record selected.matched.candidateRecord
+  selected.admitted.evidence selected.candidate.record selected.matched.candidateRecord
+
+theorem evidence_record (selected : IssueSelected config head index) :
+    selected.evidence.record = selected.candidate.record :=
+  IssueAdmitted.evidence_record _ _ _
 
 /-- The issue's receipt: the selected record's, at its height (`NativeHost.receiptOfRecord`). -/
 def receipt (selected : IssueSelected config head index) : NativeHostCodec.Receipt :=
   ⟨selected.candidate.read.record.transactionId, selected.candidate.read.record.event.eventId,
     index + 1, selected.candidate.read.verified.root⟩
 
+/-- The record verified under the head at the issue's height is its evidence's record. -/
+theorem read_evidence (selected : IssueSelected config head index) :
+    ∃ read : DurableHistoryReader.Record head (index + 1), read.record = selected.evidence.record :=
+  ⟨selected.candidate.read, selected.candidate.recordExact.trans selected.evidence_record.symm⟩
+
 /-- **What a selected issue proves**: the record verified under `head` at height `index + 1`
-is exactly the intent of the grain-backed issue admitted on the state after `index` records;
-its evidence carries that record and that issue's spec; its receipt names that record and
-height. -/
+is exactly the intent of the issue admitted on the state after `index` records; its evidence
+carries that record; its receipt names that record and height. -/
 theorem exact (selected : IssueSelected config head index) :
     (∃ read : DurableHistoryReader.Record head (index + 1),
-        read.record = DurableReceiver.IntentRecord.ofIntent
-          (ApplicationShareIssueGrainReceiver.intent selected.accepted)) ∧
+        read.record = DurableReceiver.IntentRecord.ofIntent selected.admitted.intent) ∧
       selected.candidate.prior.height = index ∧
       selected.evidence.record = selected.candidate.record ∧
-      selected.evidence.spec = selected.ingress.spec ∧
       selected.receipt = ⟨selected.candidate.read.record.transactionId,
         selected.candidate.read.record.event.eventId, index + 1, selected.candidate.read.verified.root⟩ :=
   ⟨⟨selected.candidate.read, selected.candidate.recordExact.trans selected.matched.candidateRecord⟩,
-    selected.candidate.priorHeight, rfl, rfl, rfl⟩
+    selected.candidate.priorHeight, selected.evidence_record, rfl⟩
 
 end IssueSelected
 
@@ -709,7 +749,7 @@ def IssueRefusal.message : IssueRefusal → String
   | .history detail => s!"history unavailable at the issue's height: {detail}"
   | .refused detail => detail
 
-/-- Select the event22 issue at 0-based `index` (below `bound`) and re-admit it at its prefix.
+/-- Select the share issue at 0-based `index` (below `bound`) and re-admit it at its prefix.
 Its keys are its own record's (its transaction id and nullifiers), read verified first; an
 admission that reads any other key refuses on the undeclared answer. -/
 def selectIssue (config : Config) {store : DurableHistory.StoreIdentity}
@@ -723,16 +763,56 @@ def selectIssue (config : Config) {store : DurableHistory.StoreIdentity}
       ⟨[probe.transactionId], probe.nullifiers⟩ with
     | .error detail => return .error (.history detail)
     | .ok candidate => pure candidate
-  let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, config.genesisHeight + candidate.ground.height⟩
-  let admitted ← match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config pins
-      config.signature candidate.ground ambient (sourceBytes candidate.record) with
-    | .error detail => return .error (.refused s!"original event22 issue refused at its prefix: {detail}")
-    | .ok admitted => pure admitted
-  match NativeHistorySelection.matchIntent candidate
-      (ApplicationShareIssueGrainReceiver.intent admitted.2) with
+  let bytes := sourceBytes candidate.record
+  let admitted : IssueAdmitted config pins candidate.ground ←
+    if (ApplicationShareIssueSource.ingressCodec.decode bytes).isSome then
+      match ← ApplicationShareIssueAdmission.admitNative config.profile config pins
+          config.signature candidate.ground (config.genesisHeight + candidate.ground.height) bytes with
+      | .error _ => return .error (.refused "original share issue refused at its prefix")
+      | .ok ⟨ingress, accepted⟩ => pure (.legacy ingress accepted)
+    else
+      match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config pins
+          config.signature candidate.ground ⟨config.federation, config.genesisHeight + candidate.ground.height⟩
+          bytes with
+      | .error detail => return .error (.refused s!"original event22 issue refused at its prefix: {detail}")
+      | .ok ⟨ingress, accepted⟩ => pure (.grain ingress accepted)
+  match NativeHistorySelection.matchIntent candidate admitted.intent with
   | .error detail => return .error (.refused detail)
-  | .ok matched => return .ok ⟨candidate, pins, admitted.1, admitted.2, matched⟩
+  | .ok matched => return .ok ⟨candidate, pins, admitted, matched⟩
+
+/-- The transaction id of the share issue whose source bytes are `bytes`: its birth
+descriptor's (the legacy issue's ordinary birth, or the grain-backed issue's source birth). -/
+def issueTransaction (bytes : List UInt8) : Option Digest :=
+  match ApplicationShareIssueSource.ingressCodec.decode bytes with
+  | some ingress =>
+      (ResourceBirthPolicyController.Concrete.decodeIngress ingress.birthIngress).map (·.descriptor.transactionId)
+  | none => do
+      let ingress ← ApplicationShareIssueGrainSource.codec.decode bytes
+      let grain ← ingress.decodeGrain
+      pure grain.source.birth.transactionId
+
+/-- **The share issue whose source bytes are `bytes`, read from the Store's history**: its
+transaction id (`issueTransaction`) read by the Reader, the record at that height selected and
+re-admitted at its own prefix (`selectIssue`), and its admitted source bytes exactly `bytes`.
+A dispatch names its issue by these bytes (the walk's `priorIssueFor`). -/
+def selectIssueByBytes (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store)
+    (pins : Minidregg.Theory.ResourceBirth.FactoryPins) (bound : Nat) (bytes : List UInt8) :
+    IO (Except IssueRefusal ((index : Nat) × { issue : IssueSelected config reader.head index //
+      issue.evidence.ingressBytes = bytes })) := do
+  let some transactionId := issueTransaction bytes
+    | return .error (.refused "noncanonical share issue source bytes")
+  match ← reader.byTx transactionId with
+  | .error refusal => return .error (.history refusal.message)
+  | .ok (.absent _) => return .error (.refused "share issue absent from the Store's history")
+  | .ok (.present found) =>
+      if found.height = 0 then return .error (.history "the index names height 0 for an issue")
+      let index := found.height - 1
+      match ← selectIssue config reader pins bound index with
+      | .error refusal => return .error refusal
+      | .ok issue =>
+          if same : issue.evidence.ingressBytes = bytes then return .ok ⟨index, issue, same⟩
+          else return .error (.refused "the issue at that transaction has other source bytes")
 
 private def selectCreatedAt (config : Config) (opened : Opened config)
     {store : DurableHistory.StoreIdentity}

@@ -2212,14 +2212,15 @@ def agentLifetimeGrantLookupSession (config : NativeHost.Config)
       return .refused .malformed "application-agent-lifetime-grant".toUTF8.toList
         "noncanonical or conflicting lookup ingress".toUTF8.toList
 
-/-- Historical dispatch lookup is receipt-only. It rechecks the original
-special event at its verifier-selected prefix and never mints a delivery
-permit or replays an application effect. -/
+/-- Historical dispatch lookup is receipt-only. It reads the call's record through the Store's
+history (its exact event and nullifier) and never mints a delivery permit or replays an
+application effect. -/
 def applicationDispatchLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  match ApplicationDispatchLookup.lookupVerified session.verified payload with
+  let light := (← sessionCurrent config state).light
+  match ← ApplicationDispatchLookup.lookupLightBytes
+      (light.opening.reader config.transport ResourceBirthCodec.rootBytes) payload with
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
@@ -2873,28 +2874,29 @@ delivery without replaying an HTTP effect. Other outcomes carry no permit. -/
 def dispatchApplicationSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) (output : IO.FS.Stream) (routeBound : Bool := false) : IO Unit := do
-  let session ← sessionWalked config state
+  let light := (← sessionCurrent config state).light
   let result ← if routeBound then
-      ApplicationDispatchReceiver.receiveRouteBoundVerified config session.verified payload
-    else ApplicationDispatchReceiver.receiveVerified config session.verified payload
+      ApplicationDispatchReceiver.receiveRouteBoundServed config config.transport light payload
+        (sessionAdopt config state)
+    else ApplicationDispatchReceiver.receiveServed config config.transport light payload
+      (sessionAdopt config state)
   match result with
   | .permitted permit =>
-      let handed ← permit.withFreshTip fun committedBytes =>
+      let handed ← permit.withFreshTip config.transport fun committedBytes =>
         writeSessionFrame output 34 committedBytes
       match handed with
-      | .ok _ => sessionSetWalked state permit.old permit.readback
+      | .ok _ => pure ()
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
   | .committed committed =>
       -- Exact durable receipt/cache recovery never authorizes another fd3 call.
       writeSessionFrame output 34 <| outcomeCodec.encode <|
-        .confirmed committed.confirmation committed.receipt
-      sessionSetWalked state committed.old committed.readback
+        .confirmed committed.kind committed.receipt
   | .historical receipt =>
       writeSessionFrame output 34 <| outcomeCodec.encode <| .confirmed .replayed receipt
   | .noRecordRefused refusal =>
-      match ← refusal.withFreshTip (fun bytes => writeSessionFrame output 164 bytes) with
+      match ← refusal.withFreshTip config.transport (fun bytes => writeSessionFrame output 164 bytes) with
       | .ok _ => pure ()
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|

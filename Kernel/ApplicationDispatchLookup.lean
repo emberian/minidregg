@@ -5,7 +5,7 @@ HTTP delivery permit, regardless of whether the request bytes repeat.
 -/
 module
 
-public import Kernel.NativeHostReplay
+public import Kernel.NativeHost
 public import Kernel.ApplicationDispatchAdmission
 
 @[expose] public section
@@ -51,5 +51,51 @@ def lookupVerified {config : Config} {target : Durable}
       receipt.acceptedCount == index + 1 then
     .ok (some receipt)
   else .error .transactionConflict
+
+/-- The transaction id of the exact call an ingress names (`ApplicationDispatchCommand.command`
+of its selected command). -/
+def callTransaction (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
+    Option Minidregg.Theory.TypedAuthorization.Digest := do
+  let selection ← ApplicationDispatchAdmission.selectCommand ingress
+  pure (DeclaredResourceController.transactionId ingress.dispatch.domain ingress.dispatch.semantics
+    (ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent))
+
+/-- A light lookup's answer under `head`: the call's verified absence, or its original receipt. -/
+inductive LightAnswer {store : DurableHistory.StoreIdentity} (head : DurableHistory.Head store)
+    (transactionId : Minidregg.Theory.TypedAuthorization.Digest) where
+  | absent (opens : DurableIndex.Opens head.indexRoot (DurableIndex.transactionKey transactionId) none)
+  | historical (receipt : NativeHostCodec.Receipt)
+
+/-- **Status lookup through the Store's history**: the call's transaction id read by the
+Reader; its record answers by its receipt only when it carries exactly this ingress's event and
+nullifier (the walk's check), a conflict otherwise. It never re-admits a past request under current
+law, nor constructs a physical delivery permit. -/
+def lookupLight {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress) (transactionId : Minidregg.Theory.TypedAuthorization.Digest) :
+    IO (Except Error (LightAnswer reader.head transactionId)) := do
+  match ← reader.byTx transactionId with
+  | .error _ => return .error .nativeHistoryUnavailable
+  | .ok (.absent opens) => return .ok (.absent opens)
+  | .ok (.present found) =>
+      let record := found.read.record
+      let expectedEvent := ApplicationDispatchAdmissionIngress.event ingress
+      if record.event == expectedEvent &&
+          record.nullifiers.contains (ApplicationDispatchAdmissionIngress.nullifier ingress) then
+        return .ok (.historical (NativeHost.receiptOfFound transactionId found))
+      else return .error .transactionConflict
+
+/-- `lookupLight` from request bytes: `none` for a call absent from the history. -/
+def lookupLightBytes {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (bytes : List UInt8) :
+    IO (Except Error (Option NativeHostCodec.Receipt)) := do
+  let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
+    | return .error .malformed
+  let some transactionId := callTransaction ingress
+    | return .error .malformed
+  match ← lookupLight reader ingress transactionId with
+  | .error reason => return .error reason
+  | .ok (.absent _) => return .ok none
+  | .ok (.historical receipt) => return .ok (some receipt)
 
 end Minidregg.Kernel.ApplicationDispatchLookup

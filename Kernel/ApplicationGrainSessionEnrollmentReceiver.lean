@@ -92,7 +92,7 @@ theorem LightConfirmed.exact {config : Config} {opening : DurableServed.Opening 
         guard.expectedRoot = confirmed.grounded.ground.cells.model.roots guard.cellId) ∧
       confirmed.grounded.ground.recorded confirmed.intent.transactionId = some none :=
   ⟨confirmed.entryExact, confirmed.height,
-    ⟨confirmed.issue.candidate.read, confirmed.issue.candidate.recordExact⟩,
+    confirmed.issue.read_evidence,
     confirmed.event22, confirmed.issueReceipt,
     ApplicationGrainSessionEnrollmentIntent.readGuards_current confirmed.checked, confirmed.fresh⟩
 

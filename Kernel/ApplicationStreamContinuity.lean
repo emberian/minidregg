@@ -157,13 +157,19 @@ def attestationCodec : LawfulCodec (Challenge × Tip) :=
     ApplicationReceivingDomain.streamContinuityAttestationFrame
     (StreamCodec.product challengeStream tipStream)
 
+/-- The route binding of a checked dispatch candidate for the issue `issued`. -/
+def bindingOf {config : Config} {ground : DeclaredResourceController.Ground config.deployment}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
+    (candidate : ApplicationDispatchHistoricalCore.CheckedCandidate config ground ingress issued) : Binding :=
+  let d := ingress.dispatch.dispatch
+  ⟨d.app.resource, d.app.generation, d.session.resource, d.session.generation,
+    d.session.subject.value, issued.spec.ticket.resource, candidate.checked.sessionFingerprint⟩
+
 def bindingFor {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
     (admitted : NativeHostReplay.DispatchAt config opened ingress) : Binding :=
-  let d := ingress.dispatch.dispatch
-  ⟨d.app.resource, d.app.generation, d.session.resource, d.session.generation,
-    d.session.subject.value, admitted.prior.evidence.spec.ticket.resource,
-    admitted.checked.checked.sessionFingerprint⟩
+  bindingOf admitted.checked
 
 def tipFor {config : Config} {target : Durable}
     (old : NativeHostReplay.Verified config target) : Tip :=

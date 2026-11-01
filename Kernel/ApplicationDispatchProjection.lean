@@ -68,31 +68,39 @@ abbrev requestDigest (request : Request) : Digest :=
 theorem requestDigest_exact (request : Request) :
     requestDigest request = ApplicationDispatchCodec.requestDigest request := rfl
 
+/-- The projection of a checked dispatch candidate on `ground` for the issue `issued`: the
+receiver projects from the same admission whose intent it submits to CAS. -/
+def ofChecked {config : Config} {ground : DeclaredResourceController.Ground config.deployment}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
+    (candidate : ApplicationDispatchHistoricalCore.CheckedCandidate config ground ingress issued) : Candidate :=
+  let dispatch := ingress.dispatch.dispatch
+  let checked := candidate.checked
+  let pending := ApplicationDispatchPending.candidateIntent checked
+  { dispatch := dispatch
+    effectiveBits := checked.bits
+    sessionFingerprint := checked.sessionFingerprint
+    ticketResource := issued.spec.ticket.resource
+    ticketRoot := ingress.ticketRoot
+    enrollmentResource := ingress.dispatch.enrollmentResource
+    enrollmentRoot := ingress.dispatch.enrollmentRoot
+    authorityRoot := ground.authority.cell.root
+    appRoot := ingress.dispatch.appRoot
+    sessionRoot := checked.selection.sessionRoot
+    issueTransaction := issued.transactionId
+    issueEvent := issued.eventId
+    dispatchTransaction := pending.transactionId
+    dispatchEvent := pending.event.eventId
+    currentWorldRoot := ground.worldRoot
+    physicalRequestDigest := requestDigest dispatch.request }
+
 /-- The receiver projects from the same typed replay admission whose intent
 it submits to CAS. The prior issue was retained by the verifier's actual
 chronological walk, so these bytes cannot be supplied by a caller. -/
 def ofDispatchAt {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
     (admitted : NativeHostReplay.DispatchAt config opened ingress) : Candidate :=
-  let dispatch := ingress.dispatch.dispatch
-  let checked := admitted.checked.checked
-  let pending := admitted.intent
-  { dispatch := dispatch
-    effectiveBits := checked.bits
-    sessionFingerprint := checked.sessionFingerprint
-    ticketResource := admitted.prior.evidence.spec.ticket.resource
-    ticketRoot := ingress.ticketRoot
-    enrollmentResource := ingress.dispatch.enrollmentResource
-    enrollmentRoot := ingress.dispatch.enrollmentRoot
-    authorityRoot := opened.ground.authority.cell.root
-    appRoot := ingress.dispatch.appRoot
-    sessionRoot := checked.selection.sessionRoot
-    issueTransaction := admitted.prior.evidence.transactionId
-    issueEvent := admitted.prior.evidence.eventId
-    dispatchTransaction := pending.transactionId
-    dispatchEvent := pending.event.eventId
-    currentWorldRoot := opened.durable.worldRoot
-    physicalRequestDigest := requestDigest dispatch.request }
+  ofChecked admitted.checked
 
 /-- Event21 projects the same base app identity and rights from its distinct
 checked admission. The payer and reserve coordinates are carried by the
