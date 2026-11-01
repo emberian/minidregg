@@ -137,9 +137,12 @@ impl Channel {
         deadline: Instant,
         limit: usize,
         frame_limit: usize,
+        keep: &dyn Fn(&str) -> bool,
     ) -> io::Result<String> {
         let mut frames = 0;
         let mut consumed = 0;
+        // What the message being assembled has cost; charged to the channel only if it is kept.
+        let (mut message_frames, mut message_bytes) = (0usize, 0usize);
         loop {
             if self.buffered.len() >= 2 {
                 let first = self.buffered[0];
@@ -177,17 +180,15 @@ impl Channel {
                         return Err(invalid("hosted frame byte budget exceeded"));
                     }
                     if self.buffered.len() >= offset + size {
-                        if self.max_frames == 0
-                            || frames >= frame_limit
-                            || offset + size > self.max_bytes
-                            || consumed + offset + size > limit
+                        if self.max_frames <= message_frames
+                            || frames + message_frames >= frame_limit
+                            || message_bytes + offset + size > self.max_bytes
+                            || consumed + message_bytes + offset + size > limit
                         {
                             return Err(invalid("hosted wire frame or byte budget exhausted"));
                         }
-                        frames += 1;
-                        self.max_frames -= 1;
-                        self.max_bytes -= offset + size;
-                        consumed += offset + size;
+                        message_frames += 1;
+                        message_bytes += offset + size;
                         let payload = self.buffered[offset..offset + size].to_vec();
                         self.buffered.drain(..offset + size);
                         match first & 0x0f {
@@ -196,7 +197,16 @@ impl Channel {
                                 self.fragmenting = true;
                             }
                             0 if self.fragmenting => self.fragment.extend(payload),
-                            10 if first & 0x80 != 0 && size <= 125 => continue,
+                            10 if first & 0x80 != 0 && size <= 125 => {
+                                // An unsolicited pong is charged like any delivered frame.
+                                frames += 1;
+                                consumed += offset + size;
+                                self.max_frames -= 1;
+                                self.max_bytes -= offset + size;
+                                message_frames -= 1;
+                                message_bytes -= offset + size;
+                                continue;
+                            }
                             // RFC6455 control ping is an explicit closed-codec limit.
                             // DDP/EngineIO pings are text and returned to the SDK;
                             // no automatic unadmitted pong is sent.
@@ -208,8 +218,19 @@ impl Channel {
                         }
                         if first & 0x80 != 0 {
                             self.fragmenting = false;
-                            return String::from_utf8(std::mem::take(&mut self.fragment))
-                                .map_err(|_| invalid("hosted text is not UTF8"));
+                            let text = String::from_utf8(std::mem::take(&mut self.fragment))
+                                .map_err(|_| invalid("hosted text is not UTF8"))?;
+                            let cost = (std::mem::take(&mut message_frames), std::mem::take(&mut message_bytes));
+                            // A message the receive did not ask for is drained and never delivered,
+                            // so it is not charged; the receive's deadline bounds this work.
+                            if !keep(&text) {
+                                continue;
+                            }
+                            frames += cost.0;
+                            consumed += cost.1;
+                            self.max_frames -= cost.0;
+                            self.max_bytes -= cost.1;
+                            return Ok(text);
                         }
                         continue;
                     }
@@ -231,6 +252,19 @@ impl Channel {
         }
     }
 }
+/// The event name of a socket.io event packet ("42[\"name\", ...]", optionally with a namespace
+/// "42/ns,[...]" or an ack id "42 7[...]"), or None for any other packet.
+fn socketio_event(text: &str) -> Option<String> {
+    let rest = text.strip_prefix("42")?;
+    let rest = match rest.strip_prefix('/') {
+        Some(ns) => ns.split_once(',')?.1,
+        None => rest,
+    };
+    let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+    let packet: Value = serde_json::from_str(rest).ok()?;
+    packet.as_array()?.first()?.as_str().map(str::to_owned)
+}
+
 fn response(value: Value) -> io::Result<WebResponse> {
     let body = serde_json::to_vec(&value)?;
     if body.len() > 65_536 {
@@ -461,7 +495,18 @@ impl Pool {
                 if count == 0 || limit == 0 {
                     return Err(invalid("hosted cumulative channel budget exhausted"));
                 }
-                let text = match channel.next_text(deadline, limit, count).await {
+                // A socket.io receive may name the events it awaits: other event packets
+                // ("42[name, ...]") are drained, never delivered; engine.io control and
+                // connect/disconnect packets always pass.
+                let events: Option<Vec<String>> = d["condition"]["events"].as_array().map(|a| {
+                    a.iter().filter_map(Value::as_str).map(str::to_owned).collect()
+                });
+                let socketio = channel.protocol.starts_with("socket.io-");
+                let keep = |text: &str| -> bool {
+                    let (Some(events), true) = (events.as_ref(), socketio) else { return true };
+                    socketio_event(text).is_none_or(|name| events.iter().any(|e| *e == name))
+                };
+                let text = match channel.next_text(deadline, limit, count, &keep).await {
                     Ok(text) => Some(text),
                     Err(error) if error.kind() == io::ErrorKind::TimedOut => None,
                     Err(error) => return Err(error),
@@ -843,12 +888,42 @@ mod tests {
                 .await
                 .unwrap();
             assert!(channel
-                .next_text(Instant::now() + Duration::from_secs(1), 100, 64)
+                .next_text(Instant::now() + Duration::from_secs(1), 100, 64, &|_| true)
                 .await
                 .is_err());
             assert_eq!(channel.max_frames, 0);
             assert_eq!(channel.max_bytes, 65532);
         });
+    }
+    #[test]
+    fn a_filtered_receive_drains_unawaited_events_without_charging_the_budget() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let (mut channel, tx) = channel(binding(), Default::default());
+            channel.max_frames = 1;
+            let text_frame = |t: &str| [vec![0x81, t.len() as u8], t.as_bytes().to_vec()].concat();
+            let mut wire = vec![];
+            for _ in 0..5 {
+                wire.extend(text_frame(r#"42["view_totals",3]"#));
+            }
+            wire.extend(text_frame(r#"42["locations",[{"event":"e"}]]"#));
+            tx.send(wire).await.unwrap();
+            let keep = |t: &str| socketio_event(t).is_none_or(|n| n == "locations");
+            let text = channel
+                .next_text(Instant::now() + Duration::from_secs(1), 1000, 64, &keep)
+                .await
+                .unwrap();
+            assert_eq!(text, r#"42["locations",[{"event":"e"}]]"#);
+            assert_eq!(channel.max_frames, 0);
+        });
+        assert_eq!(socketio_event(r#"42["hits",[]]"#).as_deref(), Some("hits"));
+        assert_eq!(socketio_event(r#"42/admin,["x"]"#).as_deref(), Some("x"));
+        assert_eq!(socketio_event(r#"427["ack",1]"#).as_deref(), Some("ack"));
+        assert_eq!(socketio_event("40"), None);
+        assert_eq!(socketio_event("2"), None);
     }
     #[test]
     fn hosted_uncertain_send_retains_exact_frame_and_never_replays() {

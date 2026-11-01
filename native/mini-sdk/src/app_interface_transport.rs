@@ -376,8 +376,24 @@ impl Wire {
             self.connected = true;
             return Ok((None, vec![]));
         }
-        if text.starts_with("44") || text == "1" || text == "41" {
-            return Err(refuse("socketio-connection-refused"));
+        // The app ended the connection: say which way, with its own message when it gave one.
+        if let Some(error) = text.strip_prefix("44") {
+            let message = serde_json::from_str::<Value>(error)
+                .ok()
+                .and_then(|v| v.get("message").and_then(Value::as_str).map(str::to_owned))
+                .unwrap_or_else(|| error.to_owned());
+            let message: String = message.chars().filter(|c| !c.is_control()).take(200).collect();
+            return Err(refuse(&if message.is_empty() {
+                "socketio-connection-refused".to_owned()
+            } else {
+                format!("socketio-connection-refused: {message}")
+            }));
+        }
+        if text == "41" {
+            return Err(refuse("socketio-disconnected-by-app"));
+        }
+        if text == "1" {
+            return Err(refuse("engineio-closed-by-app"));
         }
         if let Some(text) = text.strip_prefix("42") {
             if !self.connected {
@@ -428,6 +444,19 @@ impl Wire {
     }
 }
 const APP_REFUSED: &str = "app-refused: ";
+
+/// The event names the pending conditions (and their `refuseOn` frames) await, for the Host's
+/// receive filter; None when any condition matches regardless of event.
+fn awaited_events(pending: &[Value]) -> Option<Vec<String>> {
+    let mut events = std::collections::BTreeSet::new();
+    for condition in pending {
+        events.insert(condition.get("event")?.as_str()?.to_owned());
+        for refusal in condition.get("refuseOn").and_then(Value::as_array).into_iter().flatten() {
+            events.insert(refusal.get("event")?.as_str()?.to_owned());
+        }
+    }
+    (events.len() <= 16).then(|| events.into_iter().collect())
+}
 
 /// The frames a step received but did not match, counted by event: "(unmatched: user_joined x1)".
 fn unmatched(queue: &std::collections::VecDeque<Packet>) -> String {
@@ -609,7 +638,7 @@ impl Declaration {
                 }
                 self.generic_receive(
                     name, binding, &path, &query, &channel, end, &mut wire, &mut queue, dispatch,
-                    receipts,
+                    receipts, None,
                 )?;
             }
             if !wire.connected {
@@ -735,7 +764,7 @@ impl Declaration {
                         // A poll that fails (deadline, channel budget) still says what did arrive.
                         if let Err(mut e) = self.generic_receive(
                             name, binding, &path, &query, &channel, end, &mut wire, &mut queue,
-                            dispatch, receipts,
+                            dispatch, receipts, awaited_events(&pending),
                         ) {
                             e.name = format!("{} {}", e.name, unmatched(&queue));
                             return Err(e);
@@ -845,6 +874,7 @@ impl Declaration {
         queue: &mut std::collections::VecDeque<Packet>,
         dispatch: &mut F,
         receipts: &mut Vec<Value>,
+        events: Option<Vec<String>>,
     ) -> Result<()>
     where
         F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
@@ -868,7 +898,13 @@ impl Declaration {
             .checked_duration_since(std::time::Instant::now())
             .ok_or_else(|| refuse("conversation-deadline"))?;
         let ms = remaining.as_millis().min(1000).max(1) as u64;
-        let reply=self.conversation_at(name,binding,path,query,json!({"version":1,"op":"receive","channel":channel,"condition":{"msg":"any"},"maxFrames":64,"maxBytes":65536,"deadlineMs":ms}),false,dispatch,receipts)?;
+        // On socket.io the Host drains event packets no pending step awaits, so a chatty app
+        // cannot spend the channel's frame budget before the awaited frame arrives.
+        let condition = match events {
+            Some(events) if wire.kind.starts_with("socket.io-") => json!({"events": events}),
+            _ => json!({"msg":"any"}),
+        };
+        let reply=self.conversation_at(name,binding,path,query,json!({"version":1,"op":"receive","channel":channel,"condition":condition,"maxFrames":64,"maxBytes":65536,"deadlineMs":ms}),false,dispatch,receipts)?;
         self.generic_frames(
             name, binding, path, query, channel, &reply, wire, queue, dispatch, receipts,
         )
