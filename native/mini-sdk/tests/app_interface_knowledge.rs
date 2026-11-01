@@ -19,7 +19,7 @@ fn wbo_native_write_acknowledged_and_independent_replay() {
     let d=Declaration::load(include_bytes!("../../../apps/interfaces/wbo.json")).unwrap();
     let b=binding("d3b06718d12bc377db7b494679440b91");
     let mut item=Value::Null; let mut sends=0;
-    let result=d.execute("rectangle.write",&json!({"board":"human","id":"owned","color":"#123456","size":4,"opacity":1,"x":10,"y":10,"x2":120,"y2":90}),&json!({"operationId":"wbo-write"}),&b,|session,p| {
+    let result=d.execute("rectangle.write",&json!({"board":"human","id":"owned","color":"#123456","size":10,"opacity":1,"x":10,"y":10,"x2":120,"y2":90}),&json!({"operationId":"wbo-write"}),&b,|session,p| {
         assert_eq!(session.subject,"7"); assert_eq!(p.method,"CONVERSATION");
         assert!(p.query.contains("EIO=4") && p.query.contains("board=human") && p.query.contains("baselineSeq=0"), "{}", p.query);
         let q:Value=serde_json::from_slice(&p.body).unwrap();
@@ -55,7 +55,7 @@ fn wbo_rejected_write_is_named_at_once_and_decided() {
     let d=Declaration::load(include_bytes!("../../../apps/interfaces/wbo.json")).unwrap();
     let b=binding("d3b06718d12bc377db7b494679440b91");
     let mut receives=0;
-    let result=d.execute("rectangle.write",&json!({"board":"human","id":"owned","color":"#123456","size":4,"opacity":1,"x":10,"y":10,"x2":120,"y2":90}),&json!({"operationId":"wbo-write"}),&b,|_,p| {
+    let result=d.execute("rectangle.write",&json!({"board":"human","id":"owned","color":"#123456","size":10,"opacity":1,"x":10,"y":10,"x2":120,"y2":90}),&json!({"operationId":"wbo-write"}),&b,|_,p| {
         let q:Value=serde_json::from_slice(&p.body).unwrap();
         let mut frames=vec![];
         if q["op"]=="open" { frames.push(r#"0{"sid":"s","pingInterval":25000}"#.into()); }
