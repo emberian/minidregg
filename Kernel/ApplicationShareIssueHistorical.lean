@@ -78,8 +78,8 @@ def Issued.toEvidence {config : Config} {target : Durable} {index : Nat}
     ApplicationDispatchHistoricalCore.IssuedEvidence config :=
   ApplicationDispatchHistoricalCore.IssuedEvidence.fromAccepted config
     issued.selection.selected.before.pins
-    issued.selection.selected.before.durable issued.selection.selected.before.directory
-    issued.selection.selected.before.authority
+    (.ofLoaded issued.selection.selected.before.durable issued.selection.selected.before.directory
+      issued.selection.selected.before.authority)
     (logicalHeight config issued.selection.selected.before.durable)
     issued.ingress issued.accepted issued.selection.selected.record
     ((recordMatches_iff _ _).mp issued.matched)
