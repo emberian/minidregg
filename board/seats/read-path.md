@@ -1,134 +1,119 @@
 # Seat: read-path
 
-Agent: ad74bb6d4410b48f3 (the exorcist a97dba51f72535cb9, distilled once)
-Worktree: /Users/ember/dev/minidregg-lanes/exorcism (detached on `main`; commits push to `main`); Lean checks in
-persvati:/home/ember/mdpool/lanes/read-path (packages shared with the seed; `export PATH=$HOME/.elan/bin:$PATH`)
-Owns: The Host's read and query ops (op 4 challenge, op 5 signed read, the read half of op 144), the codec
-resident and its read inspections, the client's read path (`Flow::query`, `query_retained`, `signed_view`,
-`read_scratch`, the read file bus `mini_sdk::attempt`), `doc show` and `doc history` rendering.
-Quest: a warm signed read toward ~1 ms, widest costs first: cold first read (3.9 s), restart plus first read
-(~5 s, shared with host-execution's restart), then the Host's signed read (~5 ms).
+Agent: (the next read-path seat writes its id here). Previous: ad74bb6d4410b48f3 (the exorcist a97dba51f72535cb9,
+distilled once), stopped 2026-10-31 at about 470K tokens; this file is its whole continuation.
+Mac worktree: /Users/ember/dev/minidregg-lanes/exorcism, detached on `main` (commit by path, `git pull --rebase`,
+push `HEAD:main`; keep the tree clean: an uncommitted Lean change blocks the rebase, so park it as a patch file).
+Owns: the Host's read and query ops (op 4 challenge, op 5 signed read, the read half of op 144), the codec resident's
+read inspections, the client's read path (`Flow::query`, `query_retained`, `signed_view`, `read_scratch`, the read
+file bus `mini_sdk::attempt`), `doc show`/`doc history` rendering, and signature admission
+(Compiler/CredentialSignatureAdmission, Kernel/CredentialSignedEnvelopeController) on the read side.
+Quest: a warm signed read toward ~1 ms, widest costs first; no read grows with history or with the document.
 
-## Where a warm `doc show` stands
+## Where a signed read stands (persvati, quiet, 2026-10-31)
 
-hbox /ci/exo/w8 (batch 7 Host overlay with the read-path Lean fixes, the lane's client), member-1, through
-`mini-line` and the line resident. hbox load moves these more than any one change: compare only alternated
-rounds, and move measurement to persvati's standing world when it exists.
+Warm `doc show` of member-1, worlds from one source (main 27f85e89 + member-side's 86c9dbddb on candidate 76511e768),
+2 runs of 6 alternated rounds of 300 (`/home/ember/mdpool/rp/hc.sh N ROUNDS WORLD...`; Host CPU from /proc, 10 ms ticks):
 
-| part | cost | owner |
-|---|---|---|
-| wall end to end, load 9-19 | 5.6-8.4 ms (8.0-9.6 ms single runs) | |
-| op 5 signed read | about 5 ms at load 27 | read-path (Lean) |
-| op 4 challenge | about 2.2 ms at load 27 | read-path (Lean) |
-| op 144 key status | once per command (member-side's d035d8250) | member-side |
-| consent provider | 2 x 1.2 ms | member-side |
-| codec CPU | 2.9-3.2 ms (load 22-25) | read-path |
-| line resident task-clock | 1.0-2.1 ms | read-path |
-| `whoami` wall, low load | 1.1-1.3 ms | member-side |
+| world | Host CPU per read |
+|---|---|
+| `before3` (a128a7497, 143caf2fc, 8cbe36d62 reverted) | 1.71 / 1.55 ms |
+| `nolight` (8cbe36d62 reverted) | 1.33 / 1.35 ms |
+| `after` | 1.54 / 1.30 ms |
+
+a128a7497 + 143caf2fc: about 0.3 ms (18%) of Host CPU per read. 8cbe36d62 (light opening): within noise warm; its gain is
+the first read after a start (no full Store open), not visible at these worlds' height. End to end 11.3 ms wall per
+`doc show` including the driver's process starts; resident + consent + codec about 4.1 ms CPU. On hbox (E-cores, load)
+the same read was about 6.5 ms Host CPU.
 
 ## Landed (all on `main`)
 
-- 3822c09f2, d843f2ef6: `bin/mini-line` is the ssh forced command (six absolute arguments; 64 usage, 66 mini
-  not executable, 78 bad /etc/mini/session-* or peer.pins, 75 a third call); deploy/shell/mini-shell-ssh deleted.
-  Anchors default to $home/.mini/consent-anchors whenever MINI_CONSENT_ANCHOR_DIR is unset. Infra e29997d installs
-  it as /usr/local/lib/mini/mini-shell-ssh on every ship. `whoami` wall 4.86 to 2.46 ms, `doc show` client CPU
-  5.12 to 2.71 ms (8 alternated rounds, load 20-27). Tests: tests/mini_shell_ssh.rs.
-- 478f170ab: reference names read lazily, once per read. 500 references: resident CPU 13.4-15.0 to 2.8-3.2 ms.
-  Still O(references) for a page that names a target; the maintained index is store-retained's node (keyed per
-  file, not on the directory stamp: in-place overwrites and same-tick creates do not move it).
-- 837c3f457: `read_scratch::retain`; `doc protect`'s enrollment phase stays inside the workspace (batch 8
-  documents:protected row 3, "phase must remain inside participant workspace").
-- 56d65ae3c: the read file bus. `mini_sdk::attempt::Attempt`: disk for writes (custody record unchanged), memory
-  for reads, written out only on a path request (`path`/`output`/`on_disk`) or a failure (`materialize`). `Flow`
-  runs over it; `Local` is bytes; read-path codec inspections are `inspect_bytes`. Per read: openat 53 to 16,
-  write 30 to 4, unlink 15 to 0, linkat 13 to 0; resident CPU 3.5-4.4 to 2.6-3.9 ms.
-- dde0f4463: a fresh memory attempt asks the disk nothing (statx 57 to 44 per read).
-- 8cbe36d62: ops 4 and 5 on the light opening (`challengeWireLight`, `queryWireLight`, `rememberLight`); a current
-  resource read no longer opens the full image; history, `at h` and batch reads still do (`sessionFull`). The op 4
-  chain is ground-generic and its theorems are restated over any ground. lane-check green on bb2; not yet run
-  against a world.
+- 14f9cbb29: op 5's opening cache picks its candidate by the cell root and compares bytes only for it (was: the whole
+  cell's bytes against each of 16 entries, after encoding the cell twice); the reply frame is written without a copy.
+  From he-births' flatness profile (propose's read 14 -> 61 ms over 100 appends). Lane-check green; not yet measured.
+- 56344846a: `GrantPlan`'s constructor public (TokenCensus refused the private one).
+- 8cbe36d62: ops 4 and 5 on the light opening (`challengeWireOn` over any ground, `queryWireLight`, `rememberLight`);
+  history, `at h` and batch reads still open the full image (`sessionFull`). Op 4's theorems restated over any ground.
 - a128a7497: signature admission hands the controller its state and registry as values (`prepareDecoded`,
   `@[csimp] prepare_eq_fast`), the envelope decoded once, `registryDigest` seven bytes per big multiplication
-  (`@[csimp] registryDigest_eq_fast`); checked on persvati (three modules), not yet measured.
+  (`@[csimp] registryDigest_eq_fast`).
 - 143caf2fc: op 5 works out each grant's selection, request and header once (`GrantPlan`, `challengePlanned`,
-  `challengePlanned_exact`); measurement pending (native-loop overlay on batch 9, /ci/exo/lean/nl1.log).
-- 697d8dd4f: `doc show` leaves an identical seen/NAME.json in place (its rename was 9% of the resident on ZFS).
-  Resident task-clock 2.0-2.3 ms before the bus, 1.0-2.1 ms after these.
-- Earlier, with numbers in docs/EXORCISM.md: the codec's one-decode `view-resource-document` (bc17cef1b,
-  7e6850892), `mini line-resident` (4336fd84d, 50de20db5, def44636b), `read_scratch` (7dd2f7eda), and Lean
-  47b7cb2e1, c763e3ead, 975491262 (`fetchPolicySourceFast`, `loadPolicy` hashing fetched bytes,
-  `authorizeCheckedFast` loading the law graph once).
-
-## In flight (2026-10-31 evening; hbox down since about 16:30)
-
-- 143caf2fc's measurement: native-loop overlay of 143caf2fc cherry-picked onto batch 9 (997905c0b) in pool tree t3
-  (/ci/exo/lean/nl1.sh, PID file nl1.pid, log nl1.log); base candidate
-  /home/hbox/lanes/integ/candidates/997905c0bc9c85086324d02c46abeeab3273f6e2. Then two scratch worlds, before
-  (batch 9) and after (the overlay), Host CPU per `doc show` alternated. Moves to persvati once build-loop
-  announces it.
-- Measured 2026-10-31 on persvati (quiet), three worlds from one source (main 27f85e89 + 86c9dbddb on candidate
-  76511e768): `before3` (a128a7497, 143caf2fc, 8cbe36d62 reverted), `nolight` (8cbe36d62 reverted), `after`.
-  Warm `doc show` of member-1, 2 runs of 6 alternated rounds of 300 (/home/ember/mdpool/rp/hc.sh; Host CPU from
-  /proc, 10 ms ticks): Host CPU per read before3 1.71 / 1.55 ms, nolight 1.33 / 1.35, after 1.54 / 1.30. So the
-  signature-admission and op 5 plan commits take about 0.3 ms (18%) of Host CPU per read; the light port is
-  within noise on a warm read (its gain is the first read after a start, not measurable at this world's height:
-  restart.sh's own health read already pays it). End to end 11.3 ms wall per `doc show` including the driver's
-  own process starts; the other world processes (resident, consent, codec) about 4.1 ms CPU.
-  Worlds: persvati /home/ember/mdpool/rp/w/{before3,nolight,after} (ports 22703, 22704, 22702).
-- hbox trash to clear when hbox returns (root's word): stop w6 and w7 by their PID files and remove them (0.6 G
-  each; keep w8), and /home/hbox/lanes/exorcism's Rust target (9.1 G total clone; the pool tree replaces it once
-  nothing uncommitted is left there).
+  `challengePlanned_exact`).
+- Earlier (numbers in docs/EXORCISM.md and git): 697d8dd4f seen snapshot not rewritten; dde0f4463 memory attempt asks
+  the disk nothing; 56d65ae3c the read file bus; 837c3f457 `read_scratch::retain`; 478f170ab lazy reference names;
+  3822c09f2 + d843f2ef6 `mini-line` is the ssh forced command; bc17cef1b/7e6850892 one-decode codec view; Lean
+  47b7cb2e1, c763e3ead, 975491262.
+- Others' work on this path: store-retained R1 49cf4f2d2 (op 4's planned challenge kept for op 5 in `Session.observed`,
+  typed by the light opening, dropped on a head move; `authorizeRetained_eq`); host-execution 2b slice 1 4fb012263
+  (session opens light only); member-side 86c9dbddb (consent refresh red from ed875b899).
 
 ## Next, widest first
 
-1. Cold first read and restart (traced 2026-10-31): both are the FULL Store open
-   (`DurableReceiverIO.loadChained`/`load`), O(height) even with the checkpoint at the head. hbox batch 9 world
-   /ci/c-997905/w, head 256 (`minidregg-host CONFIG store-bench`, MINI_OPEN_TIMING=1): full open 1,100 ms (read
-   all entries 257, fast-forward 91, gate and rebuild 752: every tag from 0, every record decoded 264, the chain
-   over every record 111, image, six indexes, rootLog); `validateLoaded` 84 ms. The light open
-   (`DurableServed.openHead`, checkpoint + suffix) is 125 ms (checkpoint decode and tree 96), `validateServed`
-   82 ms. About 4.3 ms per record: PERF-CLIENT row 14's 3.9 s at height ~920 is the same open.
-   Who pays it: `NativeHostSession.start` (`openExisting`, then a light start beside it; `refresh` keeps both),
-   and the consent provider's `verifyInitial` (ClientConsentCore.lean:305) though CONSENT-STORE starts it at the
-   checkpoint. Both stay on the full shape because the native admission (`NativeHostReplay`, `Opened`,
-   `SuffixVerified`) and the session's receivers are typed over the full `Loaded` (KN2 stage 2a). The fix is
-   KN2 stage 2b for these two paths: the Host session and the consent admission over the `Opening`. Constant
-   factors inside the full open (decode about 1 ms per record) do not change its order and are not taken.
-2. Op 5 (Lean). Current Host profile (hbox w8, overlay on acc7cfa03 with the read-path Lean fixes; 60 warm
-   `doc show`, perf dwarf on the serving Host, symbols through /ci/exo/symfs; stacks /ci/exo/hp.stacks.txt,
-   tallies /ci/exo/stk.py, ph.py, sub.py): about 6.5 ms Host CPU per read on the box's E-cores; op 5 58%, op 4 12%,
-   session refresh 6%. Inside op 5: `verifyNative` 12% (Ed25519 2.8%, the rest the controller's state and
-   registry encoded and decoded back, `registryDigest` a base-257 bignum fold computed twice 3.4%),
-   `authorizeCheckedFast` 11% (`loadPolicy` 4.6%, capability evidence 3.9%), the challenge recomputed 7.4%, the
-   grant's select/request/header again in the check 5% (143caf2fc removes this), `queryResultUsing` 8%. Across
-   ops: each grant's header is computed in op 4 and again in op 5 (5% more), and the intent signature is verified
-   in both (1.7%); sharing those needs a per-head plan held by the Host session (after host-execution's 2b port).
-   `Config.transport` rebuilt per request in the session refresh (`anchorIdentity`, `Nat.reprFast`) 3.4%: told
-   host-execution. Retained form for `checkGrants`: per-head plans and the loaded policy graph held by the session.
-3. Codec: `challengeJson` 10% and GMP `Nat` churn in `StreamCodec`.
-4. "Reads keep nothing per read" (RULINGS): a read still appends one read-journal line, rewrites seen/NAME.json
-   when the world moved, and a refused read moves into attempts/. Decide each against the ruling.
-5. Resident statx 44 per read: the pinned config (16) and the Host image (10) re-checked per codec frame and
-   session op within one command.
-6. Twins on files: `query_batch_once` (main.rs) and participant_enrollment's observation hand-roll the observe
-   step beside `Flow::observe`; fold them onto `Flow` over a memory attempt. Chat keeps its newest read per label
-   on disk on purpose (`chat::signed_read`).
+1. **Append reads the whole document, twice (law 17).** he-births' flatness bench: propose CPU 14 -> 61 ms over 100
+   fixed 42-byte appends (/ci/f-467e69/submit.log on hbox; profiles hbox:/home/hbox/hx-births/p-base-{early,late}.txt).
+   The client's `document_actions` (native/resource-client/src/workspace.rs ~5749, member-side's file) fetches the
+   signed resource view once for `content_page`/the signed version fields, then `host_document` (~2142) fetches a second
+   signed view and decodes it whole (`view-document`) for three things only: the root element exists
+   (`no_document_refusal`), the last live line of `order` (`runs_at_tail` ~5716: the last unstruck atom or an embed),
+   and the ids of the runs ending at that atom (each gets an `insertRun`). An append needs a bounded answer: storage
+   kind content, the cell's current root/version, the root element id, the tail line, the runs at the tail.
+   Design (agree with member-side ab7b4fe7fb687e0ca before writing): a query view `.documentTail` in op 5, answered
+   from the authorized cell like `resourceAnswer` but returning only those fields, its statement relating it to
+   `documentJson` of the full view (the tail of `order`, the runs ending there); the client asks it once, under the
+   same signature, instead of two whole views. `push`, `edit`, `annotate` stay O(document) by meaning.
+   Also O(document) per revision on the Host today: `Entry.prepare` builds every entry's opening for each new
+   revision. A carried-forward opening (prepared entries kept by entry key across revisions, only changed entries
+   prepared) is the retained form; check first whether the opening's salt is per entry or per write ratchet (if it
+   changes for every entry on every write, nothing carries).
+2. **Measure R1 (49cf4f2d2) and 14f9cbb29.** Build on hbox's pool (dregg-build2 is obend's now): an overlay of main with
+   49cf4f2d2 reverted against main, on a builder candidate from hbox (`/home/hbox/lanes/integ/candidates/<sha>` or
+   build-loop's announcement); copy to persvati with `candidate-relocate`, worlds with `/home/ember/mdpool/rp/up.sh
+   CANDIDATE RUN_DIR PORT`, compare with `hc.sh`. store-retained wants the number. R1's find is a linear scan of at most
+   32 held challenges (intent + signature comparison).
+3. **Op 5: `capabilityEvidenceChecked`** (19.6% of an L0 Host's read profile, store-retained's; 3.9% + `loadPolicy` 4.6%
+   in mine). Per read it re-derives the stored capability's digest (`storedCapabilityDigest`: encode + cSHAKE256), and
+   the membership, issuer and non-revocation checks for the capability, its ancestors and channels. Retained form: the
+   digest kept with the authority cell's version (likely through privacy's KeptCell / Materialized Aux cache, ask
+   privacy a3f7fce75cd3e4e49), and the policy graph loaded once per authority root. `WorldKindLawDependencies.loadTarget`
+   re-hashing the target per call is he-births' (roots carried by the directory).
+4. **Cold first read and restart (KN2 2b).** Both were the full Store open (`loadChained`, about 4.3 ms per record;
+   1.1 s at height 256). Host side: host-execution leads (slice 1 landed). Mine after it: port
+   `ClientConsentCore.verifyInitial`/`ConsentAnchor.resume` onto the light `Opening` (start at the checkpoint; the
+   anchor's chain from that entry's MAC-verified tag); member-side stays out of those until then.
+5. **Remaining op 5 terms** (hbox profile, before the landed fixes): the intent signature verified in op 4 and op 5
+   (R1 may cover); `queryResultUsing` 8%; codec `challengeJson` 10% and GMP `Nat` churn in `StreamCodec`.
+6. **"Reads keep nothing per read"** (RULINGS): a read still appends a read-journal line, rewrites seen/NAME.json when
+   the world moved, and a refused read moves into attempts/. Decide each against the ruling.
+7. Client twins on files: `query_batch_once` and participant_enrollment's observation hand-roll `Flow::observe`;
+   fold onto `Flow` over a memory attempt. Resident statx 44 per read (pinned config 16, Host image 10).
 
 ## Seams
 
-- member-side (ab7b4fe7fb687e0ca): consent cost per read; mini-web-spawn's `delegated_consent_env` twin of
-  mini-line's selection (theirs, by a shared `#[path]` source); op 144 head-keyed check later.
-- store-retained (a9b54e85e4a194b91): the reference-name index over WORKSPACE/refs; op 4's planned challenges
-  retained for op 5 (`Session.challenges`), typed by the light opening's ground (proposed to it 2026-10-31).
-- host-execution (a24974e84d3c540d1): `issuerCheck`/`existsSupport`, FORMAT, the restart path, the GET read-path
-  contract.
-- infra (aa72653a8ce442178): deletes edge/mini/shell/mini-shell-ssh once no supported candidate lacks
-  bin/mini-line.
+- member-side ab7b4fe7fb687e0ca: the client (workspace.rs: the append tail read), consent cost per read.
+- host-execution a24974e84d3c540d1 and its births delegate he-births ac49ca4075452034f: KN2 2b, the session, the
+  directory carrying roots, `loadTarget`.
+- store-retained a9b54e85e4a194b91: R1, the reference-name index over WORKSPACE/refs (keyed per file, not on the
+  directory stamp).
+- build-loop a6c58cb72b0764dbb: hbox pool and builder, persvati, `native-loop`.
+- privacy a3f7fce75cd3e4e49: KeptCell for item 3.
+- infra aa72653a8ce442178: deletes edge/mini/shell/mini-shell-ssh once no supported candidate lacks bin/mini-line.
 
-## Tools
+## Boxes, worlds, tools
 
-hbox: Rust-only clone /home/hbox/lanes/exorcism (src, target); scratch worlds /ci/exo/w6, w7, w8 (jworld-scratch.sh
-up/down, distinct ports). Drivers in /ci/exo: `tc.sh` (resident task-clock per read, alternated), `rc.sh`
-(resident CPU from /proc), `sc.sh` (strace -c of the resident), `fx.sh DIR` (behaviour: reads, writes, history, a
-kept read, a refused read), `wr.sh`/`wr2.sh` (wrapper wall and client CPU). Install each build into a new
-/ci/exo/<name>-ssh/bin: `cp` onto a binary a resident runs fails with ETXTBSY. No pool tree is leased.
+- **Build:** hbox pool (`ssh hbox; . /home/hbox/pool/pool.env; t=$(/home/hbox/pool/bin/lane-tree acquire read-path
+  origin/main)`; `scripts/pipeline/lane-check FILE...`; native: `LANE_POOL_ENV=/home/hbox/pool/pool.env
+  scripts/pipeline/native-loop SEAT BASE LABEL` from the tree, detached with a PID file; release when done). Every
+  build under swarm-build. hbox / about 41 GB free (40 GB is the warning line).
+- **Measure:** persvati (`ssh persvati-remote`, no perf for users: /proc ticks). My worlds there, each stopped by
+  `jworld-scratch.sh down RUN_DIR` (its PID files) before removal: /home/ember/mdpool/rp/w/{after,before3,nolight}
+  (ports 22702-22704) on candidates /home/ember/mdpool/candidates/rp/{base,before3,nolight} and member-side's
+  /home/ember/mdpool/lanes/cand/93b31c1c33d6 (after). Infra copy /home/ember/mdpool/rp/infra-3ab3a69; drivers
+  /home/ember/mdpool/rp/{up.sh,hc.sh,reenroll-debug}. Lean checks also work in persvati:/home/ember/mdpool/lanes/read-path
+  (packages shared with the seed; `export PATH=$HOME/.elan/bin:$PATH`).
+- **hbox:** world /ci/exo/w8 (acc7cfa03 overlay, kept), drivers /ci/exo/{tc,rc,sc,fx,hp,wr}.sh, Host profiles
+  /ci/exo/hp.stacks.txt with tallies /ci/exo/{stk,ph,sub}.py and symbols via /ci/exo/symfs; the Rust clone
+  /home/hbox/lanes/exorcism (target removed; holds applied patches already on main); overlay
+  /home/hbox/pool/lanes/exorcism/candidates/7f367c3dc267 (143caf2fc on batch 9, unused).
+- **dregg-build2:** obend's now; nothing of this seat runs there (my overlays 6c2fc1a1bc53/f4467a28bd9c stay in its
+  /srv/pool/lanes, copies are on persvati).
+- Install each build into a NEW directory: `cp` onto a binary a resident runs fails with ETXTBSY.
