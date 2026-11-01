@@ -429,6 +429,16 @@ impl Wire {
 }
 const APP_REFUSED: &str = "app-refused: ";
 
+/// The frames a step received but did not match, counted by event: "(unmatched: user_joined x1)".
+fn unmatched(queue: &std::collections::VecDeque<Packet>) -> String {
+    let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    for packet in queue {
+        *seen.entry(packet.event.clone().unwrap_or_else(|| "message".into())).or_default() += 1;
+    }
+    let seen: Vec<_> = seen.iter().map(|(e, n)| format!("{e} x{n}")).collect();
+    format!("(unmatched: {})", if seen.is_empty() { "nothing".into() } else { seen.join(", ") })
+}
+
 /// A queued frame that a pending receive's `refuseOn` names (the app's own rejection of the awaited
 /// result, e.g. WBO's `mutation_rejected` for this clientMutationId) ends the step at once with the
 /// app's reason, instead of polling until the step's bound.
@@ -722,22 +732,18 @@ impl Declaration {
                         if let Some(refusal) = app_refusal(&pending, &queue, args, context, &results)? {
                             return Err(refusal);
                         }
-                        self.generic_receive(
+                        // A poll that fails (deadline, channel budget) still says what did arrive.
+                        if let Err(mut e) = self.generic_receive(
                             name, binding, &path, &query, &channel, end, &mut wire, &mut queue,
                             dispatch, receipts,
-                        )?;
+                        ) {
+                            e.name = format!("{} {}", e.name, unmatched(&queue));
+                            return Err(e);
+                        }
                     }
                     if !pending.is_empty() {
                         // Name what did arrive, so the refusal says why the awaited frame never matched.
-                        let mut seen = std::collections::BTreeMap::<String, usize>::new();
-                        for packet in &queue {
-                            *seen.entry(packet.event.clone().unwrap_or_else(|| "message".into())).or_default() += 1;
-                        }
-                        let seen: Vec<_> = seen.iter().map(|(e, n)| format!("{e} x{n}")).collect();
-                        return Err(refuse(&format!(
-                            "conversation-terminal-incomplete (unmatched: {})",
-                            if seen.is_empty() { "nothing".into() } else { seen.join(", ") }
-                        )));
+                        return Err(refuse(&format!("conversation-terminal-incomplete {}", unmatched(&queue))));
                     }
                 }
             }

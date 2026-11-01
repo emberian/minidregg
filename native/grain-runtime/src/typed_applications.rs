@@ -162,10 +162,15 @@ fn native_reply(reply: &Value) -> std::result::Result<NativeReply, Refusal> {
             },
             Ok(v) if v["type"] == "uncertain-v3" => uncertain(&format!("native-uncertain-{}", v["phase"].as_str().unwrap_or("unnamed"))),
             _ => {
-                // The name stays the one fixed spelling; the controller's journal keeps what the call returned.
-                let shown: String = text.chars().filter(|c| !c.is_control()).take(240).collect();
+                // Unclassified: still uncertain, but the refusal carries what the call said (bounded,
+                // control-free), so it names its cause instead of one fixed sentence.
+                let shown: String = text.chars().filter(|c| !c.is_control()).take(160).collect();
                 eprintln!("typed application call returned an unclassified error: {shown}");
-                uncertain("native-outcome-unknown")
+                uncertain(&if shown.is_empty() {
+                    "native-outcome-unknown".to_owned()
+                } else {
+                    format!("native-outcome-unknown: {shown}")
+                })
             }
         });
     }
@@ -587,7 +592,10 @@ mod tests {
         let result = call_tool(&dav, "mini_app_dav_file_put", &json!({"path":"a.txt","contentBase64":"AA=="}), &mut forward);
         drop(forward);
         let text: Value = serde_json::from_str(result["text"].as_str().unwrap()).unwrap();
-        assert_eq!((text["refusal"].clone(), text["uncertain"].clone()), (json!("native-outcome-unknown"), json!(true)));
+        assert_eq!(
+            (text["refusal"].clone(), text["uncertain"].clone()),
+            (json!("native-outcome-unknown: Mini tool delivery timed out or reply unavailable; outcome unknown"), json!(true))
+        );
         assert_eq!(log.len(), 1);
     }
 
