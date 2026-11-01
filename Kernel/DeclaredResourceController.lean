@@ -813,6 +813,18 @@ def kindDependencies (prepared : PreparedInvocation deployment profile ambient g
   WorldKindLawDependencies.loadTarget deployment ground.directory
     (incidenceTarget command incidence).target
 
+/-- `kindDependencies` with the target's guard root read from the ground's snapshot, never
+hashed from its cell (`Ground.physicalCurrent`). -/
+def kindDependenciesFast (prepared : PreparedInvocation deployment profile ambient ground command)
+    (incidence : Incidence command) : Option WorldKindLawDependencies.Dependencies :=
+  WorldKindLawDependencies.loadTargetRooted (fun target => ground.view.model.roots ⟨target⟩)
+    deployment ground.directory (incidenceTarget command incidence).target
+
+@[csimp] theorem kindDependencies_eq_fast : @kindDependencies = @kindDependenciesFast := by
+  funext F _ deployment profile ambient ground command prepared incidence
+  exact WorldKindLawDependencies.loadTarget_eq_rooted fun cell present =>
+    ground.physicalCurrent _ cell present
+
 def policyConfigFromStep [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command)
     (incidence : Incidence command) (context : PolicyStepContext) : ComposedPolicyAdmission.Config F :=
@@ -1640,6 +1652,21 @@ def targetWrite (prepared : PreparedInvocation deployment profile ambient ground
   ResourceBirthController.Concrete.packedWrite command.targets[i].target (prepared.targets i).before
     (packTarget command.targets[i] (prepared.targets i).candidate.post)
 
+/-- `targetWrite` with its expected pre-root read from the ground's snapshot, the pre cell never
+re-hashed (`Ground.physicalCurrent`). -/
+def targetWriteFast (prepared : PreparedInvocation deployment profile ambient ground command)
+    (i : TargetIndex command) : DataWrite :=
+  let after := packTarget command.targets[i] (prepared.targets i).candidate.post
+  { cellId := ⟨command.targets[i].target⟩
+    expectedPre := ground.view.model.roots ⟨command.targets[i].target⟩
+    exactPost := ResourceBirthCodec.physicalRoot (.live after)
+    canonicalPostBytes := ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry (.live after) }
+
+@[csimp] theorem targetWrite_eq_fast : @targetWrite = @targetWriteFast := by
+  funext F _ deployment profile ambient ground command prepared i
+  simp only [targetWrite, targetWriteFast, ResourceBirthController.Concrete.packedWrite,
+    ground.physicalCurrent _ _ (prepared.targets i).present]
+
 /-- The fresh entry cell of each stream-append target (`StreamWrite.entryWrite`):
 the target write is the stream's head, this is its one new entry. -/
 def entryWrites (prepared : PreparedInvocation deployment profile ambient ground command) :
@@ -1661,6 +1688,17 @@ def targetReadGuard (prepared : PreparedInvocation deployment profile ambient gr
     (i : TargetIndex command) : ReadGuard :=
   ⟨⟨command.targets[i].target⟩,
     ResourceBirthCodec.physicalRoot (ResourceBirthCodec.LifecycleImage.live (prepared.targets i).before)⟩
+
+/-- `targetReadGuard` with the root read from the ground's snapshot (`Ground.physicalCurrent`:
+the target's cell is the directory's, so its physical root is the snapshot's). -/
+def targetReadGuardFast (prepared : PreparedInvocation deployment profile ambient ground command)
+    (i : TargetIndex command) : ReadGuard :=
+  ⟨⟨command.targets[i].target⟩, ground.view.model.roots ⟨command.targets[i].target⟩⟩
+
+@[csimp] theorem targetReadGuard_eq_fast : @targetReadGuard = @targetReadGuardFast := by
+  funext F _ deployment profile ambient ground command prepared i
+  simp only [targetReadGuard, targetReadGuardFast,
+    ground.physicalCurrent _ _ (prepared.targets i).present]
 
 /-- The physical writes are the written targets plus fresh append entries: the authority incidence
 and every observe-only read target are reads, so their cells enter as read

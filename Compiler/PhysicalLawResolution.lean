@@ -104,6 +104,18 @@ def targetConfig {F : Type} [Field F] [DecidableEq F]
   config profile snapshot directory base step target
     ((WorldKindLawDependencies.loadTarget deployment directory target).map (·.additional) |>.getD [])
 
+/-- `targetConfig` reading the restrictions without hashing the target cell (`additionalAt_eq`). -/
+def targetConfigFast {F : Type} [Field F] [DecidableEq F]
+    (deployment : CanonicalCellRegistry.Deployment) (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry) (base : Portal)
+    (step : PolicyStepContext) (target : Nat) : ComposedPolicyAdmission.Config F :=
+  config profile snapshot directory base step target
+    (WorldKindLawDependencies.additionalAt deployment directory target)
+
+@[csimp] theorem targetConfig_eq_fast : @targetConfig = @targetConfigFast := by
+  funext F _ _ deployment profile snapshot directory base step target
+  simp only [targetConfig, targetConfigFast, WorldKindLawDependencies.additionalAt_eq]
+
 /-- The committed law's predicate at `target` under the structural restrictions `additional`,
 read off the same graph load as `config`'s resolution, without a step: a receiving source cuts
 its projection to this law's reads before it builds the step (`predicateOf?_law`). -/
@@ -134,6 +146,18 @@ def targetPredicate? {F : Type} [Field F]
     Option Minidregg.Pred.Pred :=
   predicateOf? profile snapshot directory target
     ((WorldKindLawDependencies.loadTarget deployment directory target).map (·.additional) |>.getD [])
+
+/-- `targetPredicate?` reading the restrictions without hashing the target cell. -/
+def targetPredicate?Fast {F : Type} [Field F]
+    (deployment : CanonicalCellRegistry.Deployment) (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (directory : Directory Nat CanonicalCellRegistry.registry) (target : Nat) :
+    Option Minidregg.Pred.Pred :=
+  predicateOf? profile snapshot directory target
+    (WorldKindLawDependencies.additionalAt deployment directory target)
+
+@[csimp] theorem targetPredicate?_eq_fast : @targetPredicate? = @targetPredicate?Fast := by
+  funext F _ deployment profile snapshot directory target
+  simp only [targetPredicate?, targetPredicate?Fast, WorldKindLawDependencies.additionalAt_eq]
 
 theorem targetPredicate?_law {F : Type} [Field F] [DecidableEq F]
     (deployment : CanonicalCellRegistry.Deployment) (profile : PolicyCompilerProfile F)

@@ -83,6 +83,56 @@ def loadTarget (deployment : CanonicalCellRegistry.Deployment)
       else none
   | _ => none
 
+/-- `loadTarget` with the target's read-guard root supplied by `rootOf` instead of hashed
+from its cell: a ground supplies its snapshot's root (`loadTarget_eq_rooted`), and a caller
+that takes only `additional` supplies anything (`loadTarget_additional`). -/
+def loadTargetRooted (rootOf : Nat → Digest) (deployment : CanonicalCellRegistry.Deployment)
+    (directory : Directory Nat Registry) (target : Nat) : Option Dependencies := do
+  match directory.slots target with
+  | .present cell =>
+      if CanonicalCellRegistry.CellLaw deployment target cell then
+        let dependencies ← ofCell deployment directory cell
+        some { dependencies with readGuards := (target, rootOf target) :: dependencies.readGuards }
+      else none
+  | _ => none
+
+/-- Where `rootOf` is the present cell's physical root, the rooted load is the load. -/
+theorem loadTarget_eq_rooted {rootOf : Nat → Digest} {deployment : CanonicalCellRegistry.Deployment}
+    {directory : Directory Nat Registry} {target : Nat}
+    (exact : ∀ cell, directory.slots target = .present cell →
+      ResourceBirthCodec.physicalRoot (.live cell) = rootOf target) :
+    loadTarget deployment directory target = loadTargetRooted rootOf deployment directory target := by
+  unfold loadTarget loadTargetRooted
+  split
+  · rename_i cell present
+    rw [exact cell present]
+  · rfl
+
+/-- The structural restrictions a load selects never read its guard root. -/
+theorem loadTarget_additional (rootOf : Nat → Digest) (deployment : CanonicalCellRegistry.Deployment)
+    (directory : Directory Nat Registry) (target : Nat) :
+    (loadTarget deployment directory target).map (·.additional) =
+      (loadTargetRooted rootOf deployment directory target).map (·.additional) := by
+  unfold loadTarget loadTargetRooted
+  split
+  · rename_i cell _
+    split
+    · cases ofCell deployment directory cell <;> simp
+    · rfl
+  · rfl
+
+/-- The structural restrictions at `target`, its cell never hashed (`additionalAt_eq`). -/
+def additionalAt (deployment : CanonicalCellRegistry.Deployment)
+    (directory : Directory Nat Registry) (target : Nat) : List PolicyRef :=
+  ((loadTargetRooted (fun _ => ⟨0⟩) deployment directory target).map (·.additional)).getD []
+
+theorem additionalAt_eq (deployment : CanonicalCellRegistry.Deployment)
+    (directory : Directory Nat Registry) (target : Nat) :
+    ((loadTarget deployment directory target).map (·.additional) |>.getD []) =
+      additionalAt deployment directory target := by
+  rw [loadTarget_additional (fun _ => ⟨0⟩)]
+  rfl
+
 /-- A recipient observes the exact admitted post, but structural dependency
 selection cannot change with a payload edit. The receiving source supplies
 the actual old-cell and preserved-binding proofs from that transaction. -/
