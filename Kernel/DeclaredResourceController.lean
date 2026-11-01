@@ -1815,6 +1815,32 @@ def readGuards (prepared : PreparedInvocation deployment profile ambient ground 
   let written := (writes prepared).map DataWrite.cellId
   sourceGuards prepared ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ written
 
+/-- The written cell ids without building the target writes: a target write's id is its
+target's, so no target cell is encoded or hashed for it (`writes_cellIds`). -/
+def writtenIds (prepared : PreparedInvocation deployment profile ambient ground command) :
+    List CellId :=
+  ((List.finRange command.targets.length).filterMap fun i =>
+    if command.targets[i].isRead then none else some (⟨command.targets[i].target⟩ : CellId)) ++
+    (entryWrites prepared).map DataWrite.cellId ++ (computeWrites prepared).map DataWrite.cellId
+
+theorem writes_cellIds (prepared : PreparedInvocation deployment profile ambient ground command) :
+    (writes prepared).map DataWrite.cellId = writtenIds prepared := by
+  simp only [writes, ordinaryWrites, writtenIds, List.map_append, List.map_filterMap]
+  congr 2
+  apply List.filterMap_congr
+  intro i _
+  split <;> rfl
+
+/-- `readGuards` reading the written ids, not the writes. -/
+def readGuardsFast (prepared : PreparedInvocation deployment profile ambient ground command) :
+    List ReadGuard :=
+  let written := writtenIds prepared
+  sourceGuards prepared ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ written
+
+@[csimp] theorem readGuards_eq_fast : @readGuards = @readGuardsFast := by
+  funext F _ deployment profile ambient ground command prepared
+  simp only [readGuards, readGuardsFast, writes_cellIds]
+
 def PhysicalShape (prepared : PreparedInvocation deployment profile ambient ground command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
     (∀ write ∈ writes prepared, write.expectedPre = ground.view.model.roots write.cellId) ∧
@@ -1924,6 +1950,16 @@ def admissionGuards [DecidableEq F] (prepared : PreparedInvocation deployment pr
     (audience : AudienceChecks prepared) : List ReadGuard :=
   let written := (writes prepared).map DataWrite.cellId
   readGuards prepared ++ (audienceGuards audience.targets).filter fun guard => guard.cellId ∉ written
+
+/-- `admissionGuards` reading the written ids, not the writes (`writes_cellIds`). -/
+def admissionGuardsFast [DecidableEq F] (prepared : PreparedInvocation deployment profile ambient ground command)
+    (audience : AudienceChecks prepared) : List ReadGuard :=
+  let written := writtenIds prepared
+  readGuards prepared ++ (audienceGuards audience.targets).filter fun guard => guard.cellId ∉ written
+
+@[csimp] theorem admissionGuards_eq_fast : @admissionGuards = @admissionGuardsFast := by
+  funext F _ deployment profile ambient ground command _ prepared audience
+  simp only [admissionGuards, admissionGuardsFast, writes_cellIds]
 
 /-- The event id of a declared invocation: a digest of the exact signed ingress
 (`signedBytes`, which carries the authority signature `withAcceptedOn`
