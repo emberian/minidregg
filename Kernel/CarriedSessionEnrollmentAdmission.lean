@@ -43,7 +43,7 @@ structure Admitted (config : Config) (opened : Opened config) (ingress : Ingress
   issueIndex : issue.index = ingress.request.issueIndex
   issueReceipt : issue.receipt = ingress.issueReceipt
   ticketResource : issue.spec.ticket.resource = ingress.request.ticketResource
-  checked : ApplicationGrainSessionEnrollmentAdmission.Checked config opened ingress
+  checked : ApplicationGrainSessionEnrollmentAdmission.Checked config opened.ground ingress
     issue.spec issue.receipt
 
 /-- Reuses actual current interface/ticket/role checks, current signed DRC, and
@@ -55,7 +55,7 @@ def admitAt (config : Config) (opened : Opened config)
   if issueIndex : issue.index = ingress.request.issueIndex then
     if issueReceipt : issue.receipt = ingress.issueReceipt then
       if ticketResource : issue.spec.ticket.resource = ingress.request.ticketResource then
-        match ← ApplicationGrainSessionEnrollmentAdmission.admitAt config opened ingress
+        match ← ApplicationGrainSessionEnrollmentAdmission.admitAt config opened.ground ingress
             issue.spec issue.receipt with
         | .error detail => return .error detail
         | .ok checked => return .ok ⟨issue, issueIndex, issueReceipt, ticketResource, checked⟩

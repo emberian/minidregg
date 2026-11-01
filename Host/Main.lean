@@ -126,7 +126,7 @@ public import Kernel.ApplicationShareIssueGrainAuthoring
 public import Kernel.ApplicationShareIssueGrainReceiver
 public import Kernel.ApplicationShareIssueGrainLookup
 public import Kernel.ApplicationGrainSessionEnrollmentReceiver
-public import Kernel.ApplicationAgentLifetimeGrantLookup
+public import Kernel.ApplicationAgentLifetimeGrantReceiver
 public import Kernel.ApplicationDispatchReceiver
 public import Kernel.ApplicationDispatchLookup
 public import Kernel.ApplicationDispatchAgentReceiver
@@ -249,7 +249,7 @@ meta import Kernel.ApplicationShareIssueGrainAuthoring
 meta import Kernel.ApplicationShareIssueGrainReceiver
 meta import Kernel.ApplicationShareIssueGrainLookup
 meta import Kernel.ApplicationGrainSessionEnrollmentReceiver
-meta import Kernel.ApplicationAgentLifetimeGrantLookup
+meta import Kernel.ApplicationAgentLifetimeGrantReceiver
 meta import Kernel.ApplicationDispatchReceiver
 meta import Kernel.ApplicationDispatchLookup
 meta import Kernel.ApplicationDispatchAgentReceiver
@@ -2107,8 +2107,9 @@ retained by the refreshed verifier walk. It performs no new admission. -/
 def applicationGrainShareIssueLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  match ApplicationShareIssueGrainLookup.lookupVerified session.verified payload with
+  let light := (← sessionCurrent config state).light
+  match ← ApplicationShareIssueGrainLookup.lookupLight config
+      (light.opening.reader config.transport ResourceBirthCodec.rootBytes) light.opened.pins payload with
   | .error .malformed =>
       return .refused .malformed "application-grain-share-issue".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
@@ -2120,18 +2121,19 @@ def applicationGrainShareIssueLookupSession (config : NativeHost.Config)
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
 
-/-- Event28 reselects the original event22 ticket and admits the joint edit
-with separately signed current app, manifest and ticket reads before one CAS. -/
+/-- Event28 reselects the original event22 ticket from the Store's history (re-admitted at its
+own prefix) and admits the joint edit with separately signed current app, manifest and ticket
+reads on the light opening before one CAS. -/
 def applicationSessionEnrollmentSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result ← ApplicationGrainSessionEnrollmentReceiver.receiveVerified
-    session.verified payload
+  let light := (← sessionCurrent config state).light
+  let result ← ApplicationGrainSessionEnrollmentReceiver.receiveServed config config.transport light payload
+    (sessionAdopt config state)
   let outcome : NativeHostCodec.Outcome ← match result with
-    | .confirmed confirmed => do
-        sessionSetWalked state confirmed.old confirmed.readback
-        pure (.confirmed confirmed.confirmation confirmed.receipt)
+    | .confirmed confirmed =>
+        sessionConfirmed config state confirmed.kind confirmed.intent.transactionId
+          confirmed.intent.event.eventId
     | .historical receipt => pure (.confirmed .replayed receipt)
     | .rejected detail => pure (.refused .operationRejected "application-session-enrollment".toUTF8.toList
         detail.toUTF8.toList)
@@ -2153,47 +2155,60 @@ def applicationSessionEnrollmentLookupSession (config : NativeHost.Config)
   unless ingress.canonicalBytes.toByteArray == payload.toByteArray do
     return .refused .malformed "application-session-enrollment".toUTF8.toList
       "noncanonical ingress".toUTF8.toList
-  let session ← sessionWalked config state
-  match ApplicationGrainSessionEnrollmentReceiver.lookupVerified session.verified ingress with
-  | none => return .absent
-  | some (.ok receipt) => return .confirmed .replayed receipt
-  | some (.error _) =>
+  let light := (← sessionCurrent config state).light
+  match ← ApplicationGrainSessionEnrollmentReceiver.lookupLight config
+      (light.opening.reader config.transport ResourceBirthCodec.rootBytes) ingress with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok none => return .absent
+  | .ok (some (.ok receipt)) => return .confirmed .replayed receipt
+  | .ok (some (.error _)) =>
       return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
 
 /-- Event27 grant installation is a durable Mini receipt, never a dispatch
-permit. The receiver re-derives its original event22 ticket and exact current
-app delegation before one CAS and verifies the recorded readback. -/
+permit. The receiver re-derives its original event22 ticket from the Store's history (re-admitted
+at its own prefix) and the exact current app delegation on the light opening before one CAS. -/
 def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result ← ApplicationAgentLifetimeGrantReceiver.receiveVerified
-    session.verified payload
-  let outcome : NativeHostCodec.Outcome := match result with
-    | .confirmed kind receipt _ _ => .confirmed kind receipt
-    | .rejected detail => .refused .operationRejected "application-agent-lifetime-grant".toUTF8.toList
-        detail.toUTF8.toList
-    | .transactionConflict => .refused .conflict "replay".toUTF8.toList
-        "transaction identity conflict".toUTF8.toList
-    | .contention => .contention
-    | .unavailable detail => .unavailable detail.toUTF8.toList
-    | .uncertain detail => .uncertain detail.toUTF8.toList
+  let light := (← sessionCurrent config state).light
+  let result ← ApplicationAgentLifetimeGrantReceiver.receiveServed config config.transport light payload
+    (sessionAdopt config state)
+  let outcome : NativeHostCodec.Outcome ← match result with
+    | .confirmed confirmed =>
+        sessionConfirmed config state confirmed.kind confirmed.intent.transactionId
+          confirmed.intent.event.eventId
+    | .historical receipt => pure (.confirmed .replayed receipt)
+    | .rejected detail => pure (.refused .operationRejected "application-agent-lifetime-grant".toUTF8.toList
+        detail.toUTF8.toList)
+    | .transactionConflict => pure (.refused .conflict "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList)
+    | .contention => pure .contention
+    | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+    | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
   NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
-/-- Grant recovery selects the exact event27 original from a verified walk.
+/-- Grant recovery reads the exact event27 original's record through the Store's history.
 It returns its receipt only and cannot grant a later agent dispatch. -/
 def agentLifetimeGrantLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  match ApplicationAgentLifetimeGrantLookup.lookupVerified session.verified payload with
-  | .error _ =>
+  let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode payload
+    | return .refused .malformed "application-agent-lifetime-grant".toUTF8.toList
+        "noncanonical or conflicting lookup ingress".toUTF8.toList
+  unless ingress.canonicalBytes.toByteArray == payload.toByteArray do
+    return .refused .malformed "application-agent-lifetime-grant".toUTF8.toList
+      "noncanonical or conflicting lookup ingress".toUTF8.toList
+  let light := (← sessionCurrent config state).light
+  match ← ApplicationAgentLifetimeGrantReceiver.lookupLight config
+      (light.opening.reader config.transport ResourceBirthCodec.rootBytes) ingress with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok none => return .absent
+  | .ok (some (.ok receipt)) => return .confirmed .replayed receipt
+  | .ok (some (.error _)) =>
       return .refused .malformed "application-agent-lifetime-grant".toUTF8.toList
         "noncanonical or conflicting lookup ingress".toUTF8.toList
-  | .ok none => return .absent
-  | .ok (some original) => return .confirmed .replayed original.receipt
 
 /-- Historical dispatch lookup is receipt-only. It rechecks the original
 special event at its verifier-selected prefix and never mints a delivery
@@ -8436,10 +8451,10 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             return ((209 : UInt8), outcomeCodec.encode
                               (NativeHost.publicSubmissionOutcome (ApplicationFailedStartEndpoint.lookup session.verified payload)))
                         | 74 =>
-                            let session ← sessionWalked pinnedConfig state
+                            let light := (← sessionCurrent pinnedConfig state).light
                             let plan ← IO.ofExcept <|
-                              ApplicationAgentLifetimeGrantAuthoring.prepareRequestLoaded
-                                session.verified payload
+                              (← ApplicationAgentLifetimeGrantAuthoring.prepareRequestLight
+                                pinnedConfig light payload)
                             let bytes := ApplicationAgentLifetimeGrantAuthoring.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "agent lifetime grant plan exceeds host frame bound")
@@ -8450,10 +8465,10 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                 planBytes
                               | throw (RequestRefusal.malformed "noncanonical agent lifetime grant plan")
                             let signatures ← decodeSignatures signaturesBytes
-                            let session ← sessionWalked pinnedConfig state
+                            let light := (← sessionCurrent pinnedConfig state).light
                             let ingress ← IO.ofExcept <|
-                              ApplicationAgentLifetimeGrantAuthoring.assembleCurrent
-                                session.verified plan signatures
+                              (← ApplicationAgentLifetimeGrantAuthoring.assembleCurrentLight
+                                pinnedConfig light plan signatures)
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "agent lifetime grant ingress exceeds host frame bound")
                             return ((75 : UInt8), ingress)
@@ -8481,9 +8496,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               IO.ofExcept (← ExceptT.run (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestSuffix
                                 pinnedConfig session.verified payload))
                             else do
-                              let session ← sessionWalked pinnedConfig state
-                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.prepareRequestVerified
-                                pinnedConfig session.verified payload)
+                              let light := (← sessionCurrent pinnedConfig state).light
+                              IO.ofExcept (← ApplicationGrainSessionEnrollmentAuthoring.prepareRequestLight
+                                pinnedConfig light payload)
                             let bytes := ApplicationGrainSessionEnrollmentAuthoring.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "session enrollment plan exceeds host frame bound")
@@ -8499,9 +8514,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               IO.ofExcept (← ExceptT.run (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrentSuffix
                                 pinnedConfig session.verified plan signatures))
                             else do
-                              let session ← sessionWalked pinnedConfig state
-                              IO.ofExcept (ApplicationGrainSessionEnrollmentAuthoring.assembleCurrent
-                                pinnedConfig session.verified plan signatures)
+                              let light := (← sessionCurrent pinnedConfig state).light
+                              IO.ofExcept (← ApplicationGrainSessionEnrollmentAuthoring.assembleCurrentLight
+                                pinnedConfig light plan signatures)
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "session enrollment ingress exceeds host frame bound")
                             return ((83 : UInt8), ingress)

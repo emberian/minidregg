@@ -170,26 +170,22 @@ structure PriorIssue (config : Config) where
   evidence : ApplicationDispatchHistoricalCore.IssuedEvidence config
 theorem PriorIssue.sourceExact {config : Config} (prior : PriorIssue config) :
     (∃ (pins : Minidregg.Theory.ResourceBirth.FactoryPins)
-       (original : ResourceBirthController.Concrete.Durable)
-       (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
-       (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
+       (ground : ServedBasis.Ground config.deployment)
        (height : Minidregg.Theory.TypedAuthorization.Height)
        (ingress : ApplicationShareIssueSource.Ingress)
        (accepted : ApplicationShareIssueAdmission.Accepted config.profile config
-         pins (.ofLoaded original directory authority) height ingress),
+         pins ground height ingress),
        prior.evidence.spec = ingress.spec ∧
          prior.evidence.ingressBytes = ApplicationShareIssueSource.ingressCodec.encode ingress ∧
          prior.evidence.descriptor = accepted.birth.descriptor ∧
          prior.evidence.record = DurableReceiver.IntentRecord.ofIntent
            (ApplicationShareIssueReceiver.intent accepted)) ∨
     (∃ (pins : Minidregg.Theory.ResourceBirth.FactoryPins)
-       (original : ResourceBirthController.Concrete.Durable)
-       (directory : CredentialAuthorityDomainReceiver.LoadedDirectory original)
-       (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment original.snapshot)
+       (ground : ServedBasis.Ground config.deployment)
        (ambient : DeclaredResourceController.Ambient)
        (ingress : ApplicationShareIssueGrainSource.Ingress)
        (accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config
-         pins (.ofLoaded original directory authority) ambient ingress),
+         pins ground ambient ingress),
        prior.evidence.spec = ingress.spec ∧
          prior.evidence.ingressBytes = ingress.canonicalBytes ∧
          prior.evidence.descriptor = accepted.decoded.source.birth ∧
@@ -208,7 +204,7 @@ structure SessionEnrollmentAt (config : Config) (opened : Opened config)
   issueReceipt : issue.receipt = ingress.issueReceipt
   ticketResource : issue.evidence.spec.ticket.resource = ingress.request.ticketResource
   present : opened.durable.image.accepted[issue.index]? = some issue.evidence.record
-  checked : ApplicationGrainSessionEnrollmentAdmission.Checked config opened ingress
+  checked : ApplicationGrainSessionEnrollmentAdmission.Checked config opened.ground ingress
     issue.evidence.spec issue.receipt
 theorem SessionEnrollmentAt.ticket_record_at {config : Config} {opened : Opened config}
     {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
@@ -648,6 +644,83 @@ def selectCreated (config : Config) {store : DurableHistory.StoreIdentity}
       | .ok candidate => return .ok (.v4 candidate)
       | .error v4Detail =>
           return .error s!"{v2Detail}; as a retry completion: {v4Detail}"
+
+/-! ## An event22 ticket issue read from the Store's history (the light route) -/
+
+/-- **An event22 ticket issue selected from the Store's history** at 0-based `index` under
+`head` and re-admitted at its own prefix: the record verified at height `index + 1` and the
+state after `index` records (`NativeHistorySelection.select`), the grain-backed issue natively
+admitted on that prior state under `pins`, and the record exactly that admission's intent.
+The walk mints a `PriorIssue` by the same admission at the same prefix. -/
+structure IssueSelected (config : Config) {store : DurableHistory.StoreIdentity}
+    (head : DurableHistory.Head store) (index : Nat) where
+  private mk ::
+  candidate : NativeHistorySelection.Candidate config head index
+  pins : Minidregg.Theory.ResourceBirth.FactoryPins
+  ingress : ApplicationShareIssueGrainSource.Ingress
+  accepted : ApplicationShareIssueGrainAdmission.Accepted config.profile config pins
+    candidate.ground ⟨config.federation, config.genesisHeight + candidate.ground.height⟩ ingress
+  matched : NativeHistorySelection.Matched candidate (ApplicationShareIssueGrainReceiver.intent accepted)
+
+namespace IssueSelected
+
+variable {config : Config} {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
+  {index : Nat}
+
+/-- The issue's source evidence, admitted on its prefix ground. -/
+def evidence (selected : IssueSelected config head index) :
+    ApplicationDispatchHistoricalCore.IssuedEvidence config :=
+  .fromGrainAccepted config selected.pins selected.candidate.ground
+    ⟨config.federation, config.genesisHeight + selected.candidate.ground.height⟩ selected.ingress
+    selected.accepted selected.candidate.record selected.matched.candidateRecord
+
+/-- The issue's receipt: the selected record's, at its height (`NativeHost.receiptOfRecord`). -/
+def receipt (selected : IssueSelected config head index) : NativeHostCodec.Receipt :=
+  ⟨selected.candidate.read.record.transactionId, selected.candidate.read.record.event.eventId,
+    index + 1, selected.candidate.read.verified.root⟩
+
+/-- **What a selected issue proves**: the record verified under `head` at height `index + 1`
+is exactly the intent of the grain-backed issue admitted on the state after `index` records;
+its evidence carries that record and that issue's spec; its receipt names that record and
+height. -/
+theorem exact (selected : IssueSelected config head index) :
+    (∃ read : DurableHistoryReader.Record head (index + 1),
+        read.record = DurableReceiver.IntentRecord.ofIntent
+          (ApplicationShareIssueGrainReceiver.intent selected.accepted)) ∧
+      selected.candidate.prior.height = index ∧
+      selected.evidence.record = selected.candidate.record ∧
+      selected.evidence.spec = selected.ingress.spec ∧
+      selected.receipt = ⟨selected.candidate.read.record.transactionId,
+        selected.candidate.read.record.event.eventId, index + 1, selected.candidate.read.verified.root⟩ :=
+  ⟨⟨selected.candidate.read, selected.candidate.recordExact.trans selected.matched.candidateRecord⟩,
+    selected.candidate.priorHeight, rfl, rfl, rfl⟩
+
+end IssueSelected
+
+/-- Select the event22 issue at 0-based `index` (below `bound`) and re-admit it at its prefix.
+Its keys are its own record's (its transaction id and nullifiers), read verified first; an
+admission that reads any other key refuses on the undeclared answer. -/
+def selectIssue (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store)
+    (pins : Minidregg.Theory.ResourceBirth.FactoryPins) (bound index : Nat) :
+    IO (Except String (IssueSelected config reader.head index)) := do
+  let probe ← match ← reader.atHeight (index + 1) with
+    | .error refusal => return .error refusal.message
+    | .ok read => pure read.record
+  let candidate ← match ← NativeHistorySelection.select config reader bound index
+      ⟨[probe.transactionId], probe.nullifiers⟩ with
+    | .error detail => return .error detail
+    | .ok candidate => pure candidate
+  let ambient : DeclaredResourceController.Ambient :=
+    ⟨config.federation, config.genesisHeight + candidate.ground.height⟩
+  let admitted ← match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config pins
+      config.signature candidate.ground ambient (sourceBytes candidate.record) with
+    | .error detail => return .error s!"original event22 issue refused at its prefix: {detail}"
+    | .ok admitted => pure admitted
+  match NativeHistorySelection.matchIntent candidate
+      (ApplicationShareIssueGrainReceiver.intent admitted.2) with
+  | .error detail => return .error detail
+  | .ok matched => return .ok ⟨candidate, pins, admitted.1, admitted.2, matched⟩
 
 private def selectCreatedAt (config : Config) (opened : Opened config)
     {store : DurableHistory.StoreIdentity}
@@ -2036,7 +2109,7 @@ private def admitSessionEnrollmentAt (config : Config) (opened : Opened config)
             ingress.request.ticketResource then
           if present : opened.durable.image.accepted[issue.index]? =
               some issue.evidence.record then
-            match ← ApplicationGrainSessionEnrollmentAdmission.admitAt config opened
+            match ← ApplicationGrainSessionEnrollmentAdmission.admitAt config opened.ground
                 ingress issue.evidence.spec issue.receipt with
             | .error reason => return .error reason
             | .ok checked =>
@@ -2901,7 +2974,7 @@ private def issuesAfter (config : Config) (opened : Opened config)
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, receipt,
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromAccepted config opened.pins
-          opened.durable opened.directory opened.authority (logicalHeight config opened.durable)
+          opened.ground (logicalHeight config opened.durable)
           ingress accepted record
           recordExact⟩ :: issues
   | some (.grain ingress accepted intentExact) =>
@@ -2911,7 +2984,7 @@ private def issuesAfter (config : Config) (opened : Opened config)
         exact (recordMatches_iff record derived.intent).mp matched
       ⟨opened.durable.height, receipt,
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromGrainAccepted config opened.pins
-          opened.durable opened.directory opened.authority
+          opened.ground
           ⟨config.federation, logicalHeight config opened.durable⟩
           ingress accepted record recordExact⟩ :: issues
 
@@ -3768,14 +3841,6 @@ def deriveVerified {config : Config} {target : Durable}
   derive config old.opened old.reader old.issues old.reserves old.begins old.beginsV2 old.claimsV2
     old.beginsV3 old.claimsV3 old.createdV3 old.runningV3 old.grants
     old.frontier old.releases old.retry bytes
-
-/-- Fresh enrollment uses only the event22 ticket certificate in the verified
-walk and then rechecks the signed joint command and three same-image reads. -/
-def admitSessionEnrollmentVerified {config : Config} {target : Durable}
-    (old : Verified config target)
-    (ingress : ApplicationGrainSessionEnrollmentSource.Ingress) :
-    IO (Except String (SessionEnrollmentAt config old.opened ingress)) :=
-  admitSessionEnrollmentAt config old.opened old.issues ingress
 
 /-- A fresh v2 BEGIN is checked on the same verified current image and then
 converted to the exact native admission used by physical CAS readback. Its

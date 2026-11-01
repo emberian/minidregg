@@ -1,9 +1,7 @@
 /-
-Receipt-only lookup for grain-backed share issue event 22. Cold callers
-re-admit a selected original prefix; persistent callers consume the compact
-issue certificate and receipt from the same native verifier walk. Both require
-exact source bytes and full IntentRecord equality, never event-shaped journal
-bytes alone.
+Receipt-only lookup for grain-backed share issue event 22, on the light opening's
+history Reader: the original re-admitted at its own selected prefix, exact source bytes
+and full IntentRecord equality, never event-shaped journal bytes alone.
 -/
 module
 
@@ -25,70 +23,36 @@ inductive Error where
   | nativeHistoryUnavailable
   deriving DecidableEq, Repr
 
-/-- A persistent lookup consumes only the private issue certificate minted by
-this exact verified walk. That certificate already retains original native
-admission and complete IntentRecord equality; exact ingress bytes preserve the
-original-prefix lookup contract without repeating genesis re-admission. The
-same-walk receipt remains the original receipt after later appends. -/
-def lookupVerified {config : Config} {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (bytes : List UInt8) :
-    Except Error (Option NativeHostCodec.Receipt) := do
-  let some ingress := ApplicationShareIssueGrainSource.codec.decode bytes
-    | .error .malformed
-  let some grain := ingress.decodeGrain
-    | .error .malformed
-  let transactionId := grain.source.birth.transactionId
-  let some index := verified.opened.durable.firstIndex (transactionId)
-    | .ok none
-  let some record := verified.opened.durable.image.accepted[index]?
-    | .error .nativeHistoryUnavailable
-  let some receipt := verified.receiptAt index
-    | .error .nativeHistoryUnavailable
-  let some issue := verified.issues.find? (fun issue => issue.index == index)
-    | .error .transactionConflict
-  if issue.evidence.ingressBytes == bytes &&
-      DurableReceiverCodec.intentStream.encode record ==
-        DurableReceiverCodec.intentStream.encode issue.evidence.record &&
-      record.event.codecVersion == 22 &&
-      receipt == issue.receipt &&
-      receipt.transactionId == transactionId &&
-      receipt.eventId == record.event.eventId &&
-      receipt.acceptedCount == index + 1 then
-    .ok (some receipt)
-  else .error .transactionConflict
-
-/-- One-shot callers retain original selected-prefix re-admission. The
-persistent Host calls `lookupVerified` on its refreshed walked session. -/
-def lookupOriginal (config : Config) (target : Durable) (bytes : List UInt8) :
+/-- **Receipt-only lookup through the Store's history.** The issue's transaction id is read by
+the Reader; its record (the record at that height) is the original issue only when the issue
+re-admitted at its own prefix (`NativeHostReplay.selectIssue`: native admission on the state
+before it, complete `IntentRecord` equality) has exactly these ingress bytes; its receipt is that
+record's. A transaction recorded with any other original is a conflict; event-shaped journal
+bytes alone never answer. -/
+def lookupLight (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (pins : Minidregg.Theory.ResourceBirth.FactoryPins) (bytes : List UInt8) :
     IO (Except Error (Option NativeHostCodec.Receipt)) := do
   let some ingress := ApplicationShareIssueGrainSource.codec.decode bytes
     | return .error .malformed
   let some grain := ingress.decodeGrain
     | return .error .malformed
   let transactionId := grain.source.birth.transactionId
-  let some index := target.firstIndex (transactionId)
-    | return .ok none
-  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
-    | .error _ => return .error .nativeHistoryUnavailable
-    | .ok reader => pure reader
-  let .ok selection ← NativeHostReplay.verifyLoadedSelected config reader target index
-    | return .error .nativeHistoryUnavailable
-  let before := selection.selected.before
-  let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, NativeHost.logicalHeight config before.durable⟩
-  let .ok ⟨admittedIngress, accepted⟩ ←
-      ApplicationShareIssueGrainAdmission.admitNative config.profile config
-        before.pins config.signature (.ofLoaded before.durable before.directory before.authority)
-        ambient bytes
-    | return .error .transactionConflict
-  let intent := ApplicationShareIssueGrainReceiver.intent accepted
-  let receipt := selection.selected.receipt
-  if admittedIngress.canonicalBytes == bytes &&
-      NativeHostReplay.recordMatches selection.selected.record intent &&
-      receipt.transactionId == transactionId &&
-      receipt.eventId == intent.event.eventId &&
-      receipt.acceptedCount == index + 1 then
-    return .ok (some receipt)
-  else return .error .transactionConflict
+  match ← reader.byTx transactionId with
+  | .error _ => return .error .nativeHistoryUnavailable
+  | .ok (.absent _) => return .ok none
+  | .ok (.present found) =>
+      if found.height = 0 then return .error .nativeHistoryUnavailable
+      let index := found.height - 1
+      match ← NativeHostReplay.selectIssue config reader pins reader.head.height index with
+      | .error _ => return .error .transactionConflict
+      | .ok issue =>
+          let receipt := issue.receipt
+          if issue.ingress.canonicalBytes == bytes &&
+              issue.candidate.record.event.codecVersion == 22 &&
+              receipt.transactionId == transactionId &&
+              receipt.acceptedCount == found.height then
+            return .ok (some receipt)
+          else return .error .transactionConflict
 
 end Minidregg.Kernel.ApplicationShareIssueGrainLookup

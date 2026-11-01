@@ -29,8 +29,6 @@ Host/ObjectiveTurnTotalityRunner.lean
 Host/SourceAgreementReader.lean
 # EXPORTER (turn-log R4a f916e16f / R4b f8bc8bdf): exportLog folds EVERY record of the Store into the Turn log; reading the whole log is its job, not a full-path use of the receiver
 Host/TurnLogFollower.lean
-Kernel/ApplicationAgentLifetimeGrantLookup.lean
-Kernel/ApplicationAgentLifetimeGrantReceiver.lean
 Kernel/CarriedSegment.lean
 Kernel/ConsentAnchor.lean
 Kernel/ContentResource.lean

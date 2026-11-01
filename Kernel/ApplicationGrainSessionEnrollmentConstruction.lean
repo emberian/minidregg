@@ -33,9 +33,9 @@ structure Current where
   ticketRoot : Digest
   command : DeclaredResourceController.Command
 
-private def cellAt (config : Config) (opened : Opened config) (resource : Nat) :
-    Option (PackedCell CanonicalCellRegistry.registry) :=
-  match opened.directory.directory.slots resource with
+private def cellAt {deployment : CanonicalCellRegistry.Deployment} (ground : ServedBasis.Ground deployment)
+    (resource : Nat) : Option (PackedCell CanonicalCellRegistry.registry) :=
+  match ground.directory.slots resource with
   | .present cell => some cell
   | _ => none
 
@@ -54,7 +54,7 @@ private def descriptorPage (cell : PackedCell CanonicalCellRegistry.registry) :
   | ⟨.content, payload⟩ => some payload.logical
   | _ => none
 
-def prepare (config : Config) (opened : Opened config)
+def prepare (config : Config) (ground : ServedBasis.Ground config.deployment)
     (request : Request) (spec : ApplicationShareIssueSource.Spec) :
     Except String Current := do
   let ticket := spec.ticket
@@ -65,12 +65,12 @@ def prepare (config : Config) (opened : Opened config)
   let descriptor := ticket.participant.descriptorResource
   if app == session || app == descriptor || session == descriptor then
     throw "app, session and descriptor must be distinct"
-  let appCell ← NativeHost.need "current app cell absent" (cellAt config opened app)
+  let appCell ← NativeHost.need "current app cell absent" (cellAt ground app)
   let appState ← NativeHost.need "current app state absent"
     (ApplicationDispatchAdmission.appState app appCell)
   if appState.phase != 4 then throw "app is not serving"
   let manifestCell ← NativeHost.need "current package manifest absent"
-    (cellAt config opened request.packageManifest)
+    (cellAt ground request.packageManifest)
   let manifest ← NativeHost.need "installed package manifest absent"
     (ApplicationDispatchAdmission.installedManifest config.deployment.domain
       request.packageManifest app appState.packageVersion manifestCell)
@@ -91,13 +91,13 @@ def prepare (config : Config) (opened : Opened config)
   if !ApplicationDispatchAuthority.withinCeilingCheck requested ceiling then
     throw "enrollment role exceeds issued ceiling"
   let ticketCell ← NativeHost.need "current ticket cell absent"
-    (cellAt config opened ticket.resource)
+    (cellAt ground ticket.resource)
   let currentTicket ← NativeHost.need "installed ticket absent"
     (ApplicationDispatchAdmission.installedTicket config.deployment.domain
       ticket.resource ticketCell)
   if currentTicket != ticket then throw "installed ticket differs from admitted issue"
   let sessionCell ← NativeHost.need "current session cell absent"
-    (cellAt config opened session)
+    (cellAt ground session)
   let before ← NativeHost.need "current session state absent"
     (sessionState session sessionCell)
   let kind := if ticket.participant.kind == .web then
@@ -106,7 +106,7 @@ def prepare (config : Config) (opened : Opened config)
       !(before.status == .inactive || before.status == .closed) then
     throw "session is not available for enrollment"
   let descriptorCell ← NativeHost.need "current descriptor cell absent"
-    (cellAt config opened descriptor)
+    (cellAt ground descriptor)
   let page ← NativeHost.need "current descriptor page absent"
     (descriptorPage descriptorCell)
   let previous := Hyperdocument.lookup page .atoms

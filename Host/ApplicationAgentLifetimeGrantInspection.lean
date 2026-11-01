@@ -5,7 +5,7 @@ This projection is not a grant receipt or a permission to dispatch an agent.
 module
 
 public import Host.ApplicationAgentLifetimeGrantAuthoring
-public import Kernel.ApplicationAgentLifetimeGrantLookup
+public import Kernel.ApplicationAgentLifetimeGrantReceiver
 public import Kernel.ApplicationAgentLifetimeDispatchReserveContext
 public import Lean.Data.Json
 
