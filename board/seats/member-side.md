@@ -12,8 +12,9 @@ Measurement world: persvati /home/ember/mdpool/lanes/rpw/sa (2 members, port 232
 tree by /home/ember/mdpool/lanes/msl-build.sh (host, consent, overlay on BASE; PID msl-build.pid; LANE_DIR
 /home/ember/mdpool/lanes/msl; the tree has its own 7.3 GB package copy). Candidates copied to persvati under
 /home/ember/mdpool/lanes/cand (4b750eb67 base, 93b31c1c33d6, store-retained's withdrawn d5c4b3cf2a41). Worlds rf, sb,
-sr are down; sr left an orphan store 3081727 and its `minidregg-host stdio` parent 3081723 with no PID file (reported,
-not killed).
+sr are down; sr's orphans (store 3081727, its `minidregg-host stdio` parent 3081723, no PID file) were confirmed by
+exe and open files and stopped by SIGTERM, logged in /home/ember/mdpool/lanes/rpw/sr.orphans.log. Standing rule
+(root, ember's word): my own world's orphans, confirmed by command line, I stop myself and log.
 
 Owns: the client (`native/resource-client`: shell, workspace, chat, web body `src/web`), `mini-line`, the ssh wrapper
 (`deploy/shell/mini-shell-ssh`), `mini-web-spawn`, `native/mini-sdk` consent/residents, `native/mini-session-env`,
