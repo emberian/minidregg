@@ -42,19 +42,86 @@ composed() {
   local RUN=$R/c-${S8:0:6}${SUF:-} N=5 PORT=${PORT:-22640} CV=FAIL CDETAIL="world not built"
   mkdir -p $RUN/log; local W=$RUN/w RC=$SRC/native/resource-client
   export JWORLD_ROUTE_FRONT_PORT=${JWORLD_ROUTE_FRONT_PORT:-22643} JWORLD_MANAGEMENT=${JWORLD_MANAGEMENT:-distinct} JWORLD_ROOT_HANDOFFS=${JWORLD_ROOT_HANDOFFS:-1}
+  export COMPOSED_ROOT_HANDOFFS=${COMPOSED_ROOT_HANDOFFS:-sudo}
+  stop_broker() {
+    local f p
+    for f in "$RUN/broker-daemon.pid" "$RUN/broker/broker.pid"; do
+      [ -f "$f" ] && p=$(tr -dc '0-9' <"$f") && [ -n "$p" ] && kill "$p" 2>/dev/null
+      rm -f "$f"
+    done
+  }
+  provider_units_stop() {
+    local u
+    for u in $(systemctl --user list-units --all --no-legend --plain 'mini-resident-fixture-provider@*.service' 'mini-grain-controller@*.service' 'mini-grain-resident@*.service' | awk '{print $1}'); do
+      systemctl --user stop "$u" 2>/dev/null; systemctl --user reset-failed "$u" 2>/dev/null
+    done
+  }
+  broker_start() {
+    [ -e "$W/root/etc/mini/credentials.key" ] || head -c 32 /dev/urandom | install -m 0600 /dev/stdin "$W/root/etc/mini/credentials.key"
+    install -d -m 0700 "$W/root/var/lib/mini/credentials"
+    install -d "$(dirname "$(jq -r .socket "$W/root/etc/mini/keys/broker.json")")" "$W/root/run/mini-keys" 2>/dev/null
+    install -d -m 0700 "$(dirname "$(jq -r .spool "$W/root/etc/mini/keys/broker.json")")" 2>/dev/null
+    (
+      local b=$W/root/etc/mini/keys/broker.json cfg=$RUN/broker last="" bp="" cur
+      install -d -m 0700 "$cfg"
+      trap '[ -n "$bp" ] && kill "$bp" 2>/dev/null; exit 0' TERM INT
+      while :; do
+        cur=$(sha256sum "$b" 2>/dev/null | cut -d' ' -f1)
+        if [ "$cur" != "$last" ] || { [ -n "$bp" ] && ! kill -0 "$bp" 2>/dev/null; }; then
+          [ -n "$bp" ] && kill "$bp" 2>/dev/null && sleep 1
+          install -m 0600 "$b" "$cfg/broker.json"
+          "$C/bin/mini-keys" serve --config "$cfg/broker.json" >>"$cfg/keys.log" 2>&1 </dev/null &
+          bp=$!; echo "$bp" >"$cfg/broker.pid"; last=$cur
+        fi
+        sleep 1
+      done
+    ) </dev/null >/dev/null 2>&1 &
+    echo $! > "$RUN/broker-daemon.pid"
+  }
+  seal_frame() {
+    local base=$W/root v=$W/root/var/lib/mini task d
+    task=$(jq -r .task "$RUN/inputs/resident-binding.json" 2>/dev/null) || return 0
+    mkdir -p "$v/controllers/$task"
+    for d in "$R" "$RUN" "$W" "$base" "$base/var" "$base/var/lib" "$v" "$v/controllers" "$v/candidate" "$base/etc" "$base/etc/mini" "$base/etc/mini/keys" "$base/usr" "$base/usr/local" "$base/usr/local/lib"; do
+      sudo -n chown root:root "$d" && sudo -n chmod 755 "$d"
+    done
+    sudo -n chown -R root:root "$v/candidate"/*/ 2>/dev/null; sudo -n chown -h root:root "$v"/candidate/* 2>/dev/null; sudo -n chmod -R a+rX "$v/candidate"
+    sudo -n chown -R root:root "$base/usr/local/lib/mini" && sudo -n chmod -R a+rX,go-w "$base/usr/local/lib/mini"
+    sudo -n chmod g-w,o-w "$base/etc/mini" 2>/dev/null
+    sudo -n install -d -m 0755 -o root -g root "$base/etc/mini/controllers"; sudo -n chmod 0755 "$base/etc/mini/controllers"
+  }
+  unseal_frame() {
+    local u="$(id -u):$(id -g)"
+    sudo -n chown "$u" "$R" 2>/dev/null; sudo -n chmod 755 "$R" 2>/dev/null
+    [ -d "$RUN" ] && sudo -n chown -R "$u" "$RUN" 2>/dev/null
+  }
+  trap 'stop_broker; unseal_frame' EXIT
+  provider_units_stop
+  sudo -n sh -c "rm -rf $HOME/.config/systemd/user/mini-grain-*" 2>/dev/null
+  jq '. + {providerServices: [{providerResourceId: 8805, tariff: {version: "1", model: "mini-hermes-completion-cut",
+        routes: {user: {perOp: "1"}, pool: {perOp: "1", inputMicroPerMillion: "0", outputMicroPerMillion: "0"},
+                 homelab: {perOp: "1", inputMicroPerMillion: "0", outputMicroPerMillion: "0"}}}}]}' \
+    "$SRC/native/resource-client/genesis-params.example.json" > "$RUN/genesis-params.json" \
+    && export JWORLD_PARAMS=$RUN/genesis-params.json
   if flock -o $LOCK "$EDGE/journey/jworld-scratch.sh" up "$EDGE" "$C" "$W" "$N" "$PORT" > $RUN/log/world.out 2> $RUN/log/world.err; then
     export MINI_TEST_SPK=${MINI_TEST_SPK:-$(TEST_SPK=ethercalc sh $SRC/scripts/spk-platform/fetch-test-spk.sh $I/spk-cache)}   # the box default /srv/lanes/prod-spk need not exist
     mkdir -m 700 $RUN/composed; local EXTRA=()
     if bash $SRC/scripts/spk-platform/composed-inputs.sh "$W/WORLD-IDENTITY.json" "$C" "$RUN/inputs" > $RUN/log/inputs.out 2> $RUN/log/inputs.err; then
-      read -r -a EXTRA < "$RUN/inputs/composed-args.txt"; else say "GATE $S8 composed-inputs refused: $(tail -n1 $RUN/log/inputs.err)"; fi
+      read -r -a EXTRA < "$RUN/inputs/composed-args.txt"
+      broker_start
+      seal_frame
+    else say "GATE $S8 composed-inputs refused: $(tail -n1 $RUN/log/inputs.err)"; fi
     if python3 $RC/composed-scenario.py spec "$W/WORLD-IDENTITY.json" "$RUN/composed/state" "$N" jd3 "${EXTRA[@]}" > $RUN/composed/spec.json 2> $RUN/log/spec.err; then
       python3 $RC/composed-scenario.py gate $RUN/composed/spec.json $RUN/composed/gate.json > $RUN/log/composed.out 2> $RUN/log/composed.err
       if [ -s $RUN/composed/gate.json ]; then CV=$(jq -r .verdict $RUN/composed/gate.json)
         CDETAIL=$(jq -r '[.phases | to_entries[] | "\(.key)=\(.value | tostring | .[0:90])"] | join("; ")' $RUN/composed/gate.json)
       else CDETAIL="composed wrote no result: $(tail -n1 $RUN/log/composed.err)"; fi
     else CDETAIL="spec refused: $(tail -n1 $RUN/log/spec.err)"; fi
+    stop_broker
+    unseal_frame
     if [ -n "${KEEP_WORLD:-}" ]; then say "GATE $S8 composed world KEPT UP at $W (inputs $RUN/inputs); down: world-down.sh $RUN/inputs then jworld-scratch.sh down $W"
     else
+    provider_units_stop
     [ -f $RUN/inputs/broker-setup/recovery.json ] && bash $SRC/scripts/spk-platform/world-down.sh $RUN/inputs > $RUN/log/world-down.log 2>&1
     "$EDGE/journey/jworld-scratch.sh" down "$W" > $RUN/log/down.log 2>&1
     fi
@@ -99,31 +166,35 @@ PY
   fi
   say "GATE $S8 j14-apps: $(cut -f2,3 $G/j14.tsv | tr '\t' ' ' | cut -c1-200)"
 }
-P=" ${PHASES:-tour composed enrol j14} "
+P=" ${PHASES:-tour composed enrol j14 flatness} "
 [[ $P == *" tour "* ]] && { tour > $G/tour.log 2>&1 & echo $! > $G/tour.pid; }
 [[ $P == *" composed "* ]] && { composed > $G/composed.log 2>&1 & echo $! > $G/composed.pid; }
 [[ $P == *" enrol "* ]] && { enrol & echo $! > $G/enrol.pid; }
 [[ $P == *" j14 "* ]] && { j14apps > $G/j14-phase.log 2>&1 & echo $! > $G/j14.pid; }
 wait
-[ -f $G/TOUR.tsv ] || cp ${TOUR_FROM:-/nonexistent} $G/TOUR.tsv 2>/dev/null
-# Law 17 is mandatory, including phase-selective reruns: never reuse another run's
-# flatness verdict. It runs after the other workloads to avoid timing their contention.
-FROOT=$R/f-${S8:0:6}${SUF:-}
-printf 'flatness-submit\tFAIL\tnot completed\nflatness-get\tFAIL\tnot completed\n' > "$G/flatness.tsv"
-if [[ -f $SRC/scripts/perf/flatness-gate.sh ]]; then
-  MINI_MARKET_CACHE=$I/spk-cache bash "$SRC/scripts/perf/flatness-gate.sh" "$C" "$FROOT" \
-    "${FLATNESS_N:-1000}" "${FLATNESS_LO:-10}" > "$G/flatness.log" 2>&1 &
-  echo $! > "$G/flatness.pid"
-  wait "$(cat "$G/flatness.pid")"; flatness_rc=$?
-  [[ ! -s $FROOT/gate.tsv ]] || cp "$FROOT/gate.tsv" "$G/flatness.tsv"
-  # Failure before fresh-root creation must not adopt an older green result.
-  if [[ $flatness_rc != 0 ]]; then
-    printf 'flatness-run\tFAIL\texit=%s; %s/flatness.log\n' "$flatness_rc" "$G" >> "$G/flatness.tsv"
+[ -f $G/TOUR.tsv ] || cp ${TOUR_FROM:-$I/gate-$S8/TOUR.tsv} $G/TOUR.tsv 2>/dev/null
+[ -f $G/composed-result.json ] || cp $I/gate-$S8/composed-result.json $G/composed-result.json 2>/dev/null
+if [[ $P == *" flatness "* ]]; then
+  # Law 17 runs after the other workloads to avoid timing their contention.
+  FROOT=$R/f-${S8:0:6}${SUF:-}
+  printf 'flatness-submit\tFAIL\tnot completed\nflatness-get\tFAIL\tnot completed\n' > "$G/flatness.tsv"
+  if [[ -f $SRC/scripts/perf/flatness-gate.sh ]]; then
+    MINI_MARKET_CACHE=$I/spk-cache bash "$SRC/scripts/perf/flatness-gate.sh" "$C" "$FROOT" \
+      "${FLATNESS_N:-1000}" "${FLATNESS_LO:-10}" > "$G/flatness.log" 2>&1 &
+    echo $! > "$G/flatness.pid"
+    wait "$(cat "$G/flatness.pid")"; flatness_rc=$?
+    [[ ! -s $FROOT/gate.tsv ]] || cp "$FROOT/gate.tsv" "$G/flatness.tsv"
+    # Failure before fresh-root creation must not adopt an older green result.
+    if [[ $flatness_rc != 0 ]]; then
+      printf 'flatness-run\tFAIL\texit=%s; %s/flatness.log\n' "$flatness_rc" "$G" >> "$G/flatness.tsv"
+    fi
+  else
+    echo 'candidate harness lacks scripts/perf/flatness-gate.sh' > "$G/flatness.log"
   fi
+  say "GATE $S8 flatness: $(tr '\n' ';' < "$G/flatness.tsv")"
 else
-  echo 'candidate harness lacks scripts/perf/flatness-gate.sh' > "$G/flatness.log"
+  [ -f $G/flatness.tsv ] || cp $I/gate-$S8/flatness.tsv $G/flatness.tsv 2>/dev/null
 fi
-say "GATE $S8 flatness: $(tr '\n' ';' < "$G/flatness.tsv")"
 python3 $EDGE/gate-from-runs.py --sums $(sha256sum $C/SHA256SUMS | cut -d' ' -f1) --commit $SHA --ran-on "$(hostname)" --composed $G/composed-result.json --tour $G/TOUR.tsv --tour "$G/flatness.tsv" $([[ -f $G/j14.tsv ]] && echo --tour $G/j14.tsv) > $G/gate.json 2> $G/gate.err
 say "GATE $S8 verdict $(jq -r .verdict $G/gate.json 2>/dev/null)"
 # lane trash (ember 2026-10-31): gate roots and worlds of candidates two or more behind, unless kept ($I/keep) or in use
