@@ -74,8 +74,10 @@ resident footprint (a few MB per member), web pages.
 ## Numbers
 - persvati, store-retained's held served state 4f60d20e9ef7 vs base 4b750eb67, fresh worlds, interleaved blocks
   of 10 (Host ms): base 85, 92, 99, 120, 115, 123; held 93, 97, 126, 130, 143, 148. The held overlay's Host is
-  slower (+5..+28% from block 3) and grows faster; sent to store-retained (its perf needs the Host on disk: the
-  memfd-exec'd Host does not symbolize). Worlds rpw/tb (23300) and rpw/tr (23400) left up for it.
+  slower (+5..+28% from block 3) and grows faster. Store-retained confirmed and found it: `Held.replayed`
+  re-bound every record that `replay` had bound (fixed on wip/retained-held 4ca511c70). It hot-swaps rpw/tr itself;
+  leave rpw/tb (23300) and rpw/tr (23400) up for it. Flat perf of the memfd-exec'd Host: copy the binary into a
+  symfs dir as `memfd:mini-pinned-image (deleted)` and pass `--symfs`; DWARF stacks still do not unwind.
 - persvati, fresh world on base 4b750eb67 (before a014ff501), member-1 `doc new` blocks of 10 (wall / Host /
   consent): 255/101/110, 239/101/108, 276/111/131, 356/151/533 (outlier), 413/276/227, 398/198/173. Still grows,
   milder than 93b31c1c33d6. After (overlay e0cd5307229b = main 467e698ef host+consent on 4b750eb67, carries
@@ -99,7 +101,9 @@ resident footprint (a few MB per member), web pages.
   236 of 2,466 samples (9.6%) of a batch-8 provider's `doc new`. There is no end-to-end after-number yet (see Next 1).
 
 ## Next (in order)
-1. LAW 17 (consent's half): a014ff501 measured (consent near flat). Next, the law-17 form (store-retained):
+1. LAW 17 (consent's half): a014ff501 measured (consent near flat). Check `IntentRecord.bind?` on the walk's
+   `Loaded.replay`: it checks `rootBytes post = exactPost`, a whole private-trie build per authority write (store-
+   retained's finding); profile a provider block with the symfs trick before changing it. Then the law-17 form (store-retained):
    the walk carries each record's own write patch as data beside the Prop admission (`Derived`), so it never
    decodes or diffs a whole cell; `Patch.diff` stays the bytes-only fallback. Then measure on the first main candidate (build-loop sends its path; measure on persvati): a provider's `doc new`
    catch-up profile and wall, against the batch-8 numbers above. That is the after-number for rows 16 and 19,
