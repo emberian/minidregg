@@ -49,6 +49,46 @@ fn wbo_native_write_acknowledged_and_independent_replay() {
     let values=result.outcome.unwrap();assert_eq!(values[0]["id"],"owned");assert_eq!(values[0]["x2"],120);
 }
 #[test]
+fn wbo_rejected_write_is_named_at_once_and_decided() {
+    // WBO rejects a write with `mutation_rejected {reason, clientMutationId}` (server/socket/broadcasts.mjs
+    // emitMutationRejected) and never echoes it; the ack step's refuseOn ends the step on that frame.
+    let d=Declaration::load(include_bytes!("../../../apps/interfaces/wbo.json")).unwrap();
+    let b=binding("d3b06718d12bc377db7b494679440b91");
+    let mut receives=0;
+    let result=d.execute("rectangle.write",&json!({"board":"human","id":"owned","color":"#123456","size":4,"opacity":1,"x":10,"y":10,"x2":120,"y2":90}),&json!({"operationId":"wbo-write"}),&b,|_,p| {
+        let q:Value=serde_json::from_slice(&p.body).unwrap();
+        let mut frames=vec![];
+        if q["op"]=="open" { frames.push(r#"0{"sid":"s","pingInterval":25000}"#.into()); }
+        if q["op"]=="receive" { receives+=1; }
+        if q["op"]=="send" {
+            let text=q["text"].as_str().unwrap();
+            if text=="40" {frames.push("40".into()); frames.push(r#"42["broadcast",{"type":0,"fromSeq":0,"seq":0,"_children":[]}]"#.into());}
+            else {
+                frames.push(r#"42["mutation_rejected",{"reason":"other","clientMutationId":"someone-else"}]"#.into());
+                frames.push(r#"42["mutation_rejected",{"reason":"rate limit exceeded","clientMutationId":"owned"}]"#.into());
+            }
+        }
+        Ok(reply(&q,frames))
+    });
+    let refusal=result.outcome.unwrap_err();
+    assert_eq!(refusal.name,"app-refused: rate limit exceeded");
+    assert!(!refusal.uncertain);
+    assert_eq!(receives,0, "no poll after the rejection arrived");
+}
+#[test]
+fn an_unmatched_conversation_names_what_did_arrive() {
+    let d=Declaration::load(include_bytes!("../../../apps/interfaces/wbo.json")).unwrap();
+    let b=binding("d3b06718d12bc377db7b494679440b91");
+    let result=d.execute("board.read",&json!({"board":"human"}),&json!({"operationId":"wbo-read"}),&b,|_,p| {
+        let q:Value=serde_json::from_slice(&p.body).unwrap();
+        let frames=if q["op"]=="open" {vec![r#"0{"sid":"r","pingInterval":25000}"#.into()]}
+        else if q["text"]=="40" {vec!["40".into(),r#"42["user_joined",{}]"#.into()]}
+        else {vec![]}; Ok(reply(&q,frames))
+    });
+    let name=result.outcome.unwrap_err().name;
+    assert!(name.starts_with("conversation-terminal-incomplete (unmatched: user_joined x1"), "{name}");
+}
+#[test]
 fn scrumblr_native_room_and_matching_card_snapshot() {
     let d=Declaration::load(include_bytes!("../../../apps/interfaces/scrumblr.json")).unwrap();
     let result=d.execute("cards.read",&json!({"room":"/human"}),&json!({"operationId":"scrum-read"}),&binding("57fa8aab611f5e0ab656e73324d48879"),|_,p| {

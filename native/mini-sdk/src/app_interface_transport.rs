@@ -427,6 +427,36 @@ impl Wire {
         }
     }
 }
+const APP_REFUSED: &str = "app-refused: ";
+
+/// A queued frame that a pending receive's `refuseOn` names (the app's own rejection of the awaited
+/// result, e.g. WBO's `mutation_rejected` for this clientMutationId) ends the step at once with the
+/// app's reason, instead of polling until the step's bound.
+fn app_refusal(
+    pending: &[Value],
+    queue: &std::collections::VecDeque<Packet>,
+    args: &Value,
+    context: &Value,
+    results: &Value,
+) -> Result<Option<Refusal>> {
+    for condition in pending {
+        let Some(refusals) = condition.get("refuseOn").and_then(Value::as_array) else { continue };
+        for packet in queue {
+            for refusal in refusals {
+                if check_packet(packet, refusal, args, context, results)? {
+                    let reason = lookup(&packet.value, &refusal["reason"])
+                        .ok()
+                        .map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))
+                        .unwrap_or_else(|| "no reason given".into());
+                    let reason: String = reason.chars().filter(|c| !c.is_control()).take(200).collect();
+                    return Ok(Some(refuse(&format!("{APP_REFUSED}{reason}"))));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn check_packet(
     packet: &Packet,
     condition: &Value,
@@ -689,20 +719,35 @@ impl Declaration {
                         if pending.is_empty() {
                             break;
                         }
+                        if let Some(refusal) = app_refusal(&pending, &queue, args, context, &results)? {
+                            return Err(refusal);
+                        }
                         self.generic_receive(
                             name, binding, &path, &query, &channel, end, &mut wire, &mut queue,
                             dispatch, receipts,
                         )?;
                     }
                     if !pending.is_empty() {
-                        return Err(refuse("conversation-terminal-incomplete"));
+                        // Name what did arrive, so the refusal says why the awaited frame never matched.
+                        let mut seen = std::collections::BTreeMap::<String, usize>::new();
+                        for packet in &queue {
+                            *seen.entry(packet.event.clone().unwrap_or_else(|| "message".into())).or_default() += 1;
+                        }
+                        let seen: Vec<_> = seen.iter().map(|(e, n)| format!("{e} x{n}")).collect();
+                        return Err(refuse(&format!(
+                            "conversation-terminal-incomplete (unmatched: {})",
+                            if seen.is_empty() { "nothing".into() } else { seen.join(", ") }
+                        )));
                     }
                 }
             }
             resolve(&b["result"], args, context, &results)
         })()
         .map_err(|mut e: Refusal| {
-            e.uncertain |= mutated;
+            // An app refusal names this very mutation's rejection (`refuseOn`): decided, not uncertain.
+            if !e.name.starts_with(APP_REFUSED) {
+                e.uncertain |= mutated;
+            }
             e
         });
         let close = self.conversation_at(
@@ -936,7 +981,25 @@ pub(super) fn validate_binding(b: &Value) -> Result<()> {
             if keys != ["id", "receive"] {
                 return Err(refuse("conversation-step-invalid"));
             }
-            validate_condition(&step["receive"], wire)?;
+            let mut receive = step["receive"].clone();
+            if let Some(refusals) = receive.as_object_mut().and_then(|o| o.remove("refuseOn")) {
+                let refusals = refusals
+                    .as_array()
+                    .filter(|a| !a.is_empty() && a.len() <= 8)
+                    .ok_or_else(|| refuse("conversation-check-invalid"))?
+                    .clone();
+                for mut refusal in refusals {
+                    let reason = refusal.as_object_mut().and_then(|o| o.remove("reason"));
+                    if !reason.as_ref().and_then(Value::as_array).is_some_and(|a| {
+                        a.len() <= 32 && a.iter().all(|v| v.is_string() || v.as_u64().is_some())
+                    }) || refusal.get("where").is_none()
+                    {
+                        return Err(refuse("conversation-check-invalid"));
+                    }
+                    validate_condition(&refusal, wire)?;
+                }
+            }
+            validate_condition(&receive, wire)?;
             vec![&step["id"]]
         } else if o.contains_key("receiveAll") {
             if keys != ["receiveAll"] {
