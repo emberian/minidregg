@@ -553,7 +553,7 @@ theorem cells_ofLoaded {store : StoreIdentity} (basis : Basis deployment store)
     (authority : CredentialAuthorityDomainReceiver.Loaded deployment loaded.snapshot) :
     (ofBasis basis).cells = (Ground.full loaded directory authority).cells := by
   simp only [cells, view, Basis.view, served]
-  rfl
+  exact Minidregg.Compiler.DurableServed.Served.bare_viewAt_ofLoaded loaded sameStart basis.footprint
 
 #assert_axioms cells_ofLoaded
 

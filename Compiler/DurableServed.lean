@@ -79,6 +79,372 @@ def bare (snapshot : DataSnapshot rootBytes) : DataSnapshot rootBytes where
   canonicalBytes := snapshot.canonicalBytes
   coherent := snapshot.coherent
 
+/-! ## The held state (retained mode)
+
+A served state is held, never re-derived per read. `DataSnapshot.install` builds
+each field as a closure over its predecessor, so a session that appended `k`
+records answered every read by walking `k` closures (and kept every older state
+alive), over a base that scanned the checkpoint's cell list. The held state is
+one persistent map from cell id to its canonical bytes and their root, advanced
+by each accepted record's writes (`O(writes · log cells)`), and the allowance
+with every lane evaluated; it answers a read in `O(log cells)` and holds nothing
+older. `Held.Agrees` is its exactness against the specification snapshot:
+`install_agrees` and `replayed_agrees` carry it across `DataSnapshot.install`
+and `replay`, and the producers (`ofState`, `ofSnapshot`) establish it. -/
+
+/-- The held state of a served snapshot. -/
+structure Held (rootBytes : List UInt8 → Digest) where
+  private mk ::
+  cells : Theory.SparseMap CellId (fun _ => List UInt8 × Digest)
+  absentBytes : List UInt8
+  absentRoot : Digest
+  /-- The allowance as data, every lane a number: a `Charge` closure over its
+  predecessor's would make each read walk the history. -/
+  availableTuple : DurableReceiverCodec.ChargeTuple
+  absentExact : rootBytes absentBytes = absentRoot
+  bound : ∀ cellId entry, cells.get? cellId = some entry → rootBytes entry.1 = entry.2
+
+namespace Held
+
+/-- The allowance the held state answers. -/
+@[inline] def available (held : Held rootBytes) : Charge := DurableReceiverCodec.chargeOfTuple held.availableTuple
+
+@[inline] def bytesOf (held : Held rootBytes) (cellId : CellId) : List UInt8 :=
+  ((held.cells.get? cellId).map Prod.fst).getD held.absentBytes
+
+@[inline] def rootOf (held : Held rootBytes) (cellId : CellId) : Digest :=
+  ((held.cells.get? cellId).map Prod.snd).getD held.absentRoot
+
+theorem coherent (held : Held rootBytes) (cellId : CellId) :
+    rootBytes (held.bytesOf cellId) = held.rootOf cellId := by
+  unfold bytesOf rootOf
+  cases found : held.cells.get? cellId with
+  | none => exact held.absentExact
+  | some entry => exact held.bound cellId entry found
+
+/-- The specification snapshot the held state answers for (no journal, history
+or consumed bits: a served state takes those from its footprint, `viewAt`). -/
+def toSnapshot (held : Held rootBytes) : DataSnapshot rootBytes where
+  model :=
+    { roots := held.rootOf
+      consumed := fun _ => false
+      available := held.available
+      history := []
+      journal := [] }
+  canonicalBytes := held.bytesOf
+  coherent := held.coherent
+
+/-- **Exactness**: the held state answers what `snapshot` answers on every cell
+and lane. -/
+structure Agrees (held : Held rootBytes) (snapshot : DataSnapshot rootBytes) : Prop where
+  bytes : snapshot.canonicalBytes = held.bytesOf
+  roots : snapshot.model.roots = held.rootOf
+  available : snapshot.model.available = held.available
+
+theorem agrees_toSnapshot (held : Held rootBytes) : Agrees held held.toSnapshot := ⟨rfl, rfl, rfl⟩
+
+/-- Agreement is equality of the bare snapshot with the held state's. -/
+theorem bare_eq {held : Held rootBytes} {snapshot : DataSnapshot rootBytes}
+    (agrees : Agrees held snapshot) : bare snapshot = held.toSnapshot := by
+  obtain ⟨⟨roots, consumed, available, history, journal⟩, bytes, coherent⟩ := snapshot
+  obtain ⟨sameBytes, sameRoots, sameAvailable⟩ := agrees
+  simp only at sameBytes sameRoots sameAvailable
+  subst sameBytes sameRoots sameAvailable
+  rfl
+
+private theorem getD_or {α : Type} (first second : Option α) (fallback : α) :
+    (first.or second).getD fallback = first.getD (second.getD fallback) := by
+  cases first <;> rfl
+
+/-- The cells after a record's writes: the first write of a cell wins, as in
+`DataSnapshot.lookupPostBytes`. -/
+def setWrites (writes : List DataWrite) (cells : Theory.SparseMap CellId (fun _ => List UInt8 × Digest)) :
+    Theory.SparseMap CellId (fun _ => List UInt8 × Digest) :=
+  writes.foldr (fun write cells => cells.set write.cellId (some (write.canonicalPostBytes, write.exactPost)))
+    cells
+
+theorem setWrites_get (writes : List DataWrite) (cells : Theory.SparseMap CellId (fun _ => List UInt8 × Digest))
+    (cellId : CellId) :
+    (setWrites writes cells).get? cellId =
+      ((writes.find? (·.cellId = cellId)).map fun write => (write.canonicalPostBytes, write.exactPost)).or
+        (cells.get? cellId) := by
+  induction writes with
+  | nil => rfl
+  | cons write rest ih =>
+      by_cases same : write.cellId = cellId
+      · subst same
+        simp [setWrites]
+      · have ne : cellId ≠ write.cellId := Ne.symm same
+        simp only [setWrites, List.foldr_cons] at ih ⊢
+        rw [Theory.SparseMap.set_ne _ _ _ _ ne, ih]
+        simp [List.find?_cons, same]
+
+theorem lookupPostBytes_find (writes : List DataWrite) (cellId : CellId) :
+    DataSnapshot.lookupPostBytes cellId writes =
+      (writes.find? (·.cellId = cellId)).map (·.canonicalPostBytes) := by
+  induction writes with
+  | nil => rfl
+  | cons write rest ih =>
+      by_cases same : write.cellId = cellId
+      · simp [DataSnapshot.lookupPostBytes, List.find?_cons, same]
+      · simp [DataSnapshot.lookupPostBytes, List.find?_cons, same, ih]
+
+theorem lookupPost_find (writes : List DataWrite) (cellId : CellId) :
+    Snapshot.lookupPost cellId (writes.map fun write =>
+        ({ cellId := write.cellId, expectedPre := write.expectedPre, exactPost := write.exactPost } :
+          DurableCommitProtocol.RootWrite CellId)) =
+      (writes.find? (·.cellId = cellId)).map (·.exactPost) := by
+  induction writes with
+  | nil => rfl
+  | cons write rest ih =>
+      by_cases same : write.cellId = cellId
+      · simp [Snapshot.lookupPost, List.find?_cons, same]
+      · simp [Snapshot.lookupPost, List.find?_cons, same, ih]
+
+theorem setWrites_bound (writes : List DataWrite)
+    (cells : Theory.SparseMap CellId (fun _ => List UInt8 × Digest))
+    (written : ∀ write, write ∈ writes → rootBytes write.canonicalPostBytes = write.exactPost)
+    (held : ∀ cellId entry, cells.get? cellId = some entry → rootBytes entry.1 = entry.2) :
+    ∀ cellId entry, (setWrites writes cells).get? cellId = some entry → rootBytes entry.1 = entry.2 := by
+  intro cellId entry found
+  rw [setWrites_get] at found
+  cases first : writes.find? (·.cellId = cellId) with
+  | none => simp only [first, Option.map_none, Option.none_or] at found; exact held cellId entry found
+  | some write =>
+      simp only [first, Option.map_some, Option.some_or, Option.some.injEq] at found
+      subst found
+      exact written write (List.mem_of_find?_eq_some first)
+
+/-- One accepted record, its post roots bound (`roots`, a proof: the replay or
+receive that accepted it checked each write's root, so the held state never
+hashes a cell again): its writes into the map, its charge and credit into the
+allowance. -/
+def installRecord (held : Held rootBytes) (record : IntentRecord)
+    (roots : ∀ write, write ∈ record.writes → rootBytes write.canonicalPostBytes = write.exactPost) :
+    Held rootBytes where
+  cells := setWrites record.writes held.cells
+  absentBytes := held.absentBytes
+  absentRoot := held.absentRoot
+  availableTuple := DurableReceiverCodec.chargeTuple fun lane =>
+    held.available lane - record.exactCharge lane + record.credit lane
+  absentExact := held.absentExact
+  bound := setWrites_bound record.writes held.cells roots held.bound
+
+/-- One accepted intent (`installRecord` of its record; its binding carries the roots). -/
+def install (held : Held rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) : Held rootBytes :=
+  held.installRecord (IntentRecord.ofIntent intent) intent.postRootsBound
+
+/-- **The update rule**: a held state that agrees with `before` agrees, after
+`install`, with `DataSnapshot.install before intent`. -/
+theorem install_agrees {held : Held rootBytes} {before : DataSnapshot rootBytes} (agrees : Agrees held before)
+    (intent : DurableDataIntent.DataIntent rootBytes) :
+    Agrees (held.install intent) (DataSnapshot.install before intent) where
+  bytes := by
+    funext cellId
+    show (DataSnapshot.lookupPostBytes cellId intent.writes).getD (before.canonicalBytes cellId) =
+      (((setWrites intent.writes held.cells).get? cellId).map Prod.fst).getD held.absentBytes
+    rw [setWrites_get, lookupPostBytes_find, agrees.bytes]
+    cases intent.writes.find? (·.cellId = cellId) <;> rfl
+  roots := by
+    funext cellId
+    show (Snapshot.lookupPost cellId intent.erase.rootWrites).getD (before.model.roots cellId) =
+      (((setWrites intent.writes held.cells).get? cellId).map Prod.snd).getD held.absentRoot
+    simp only [DurableDataIntent.DataIntent.erase]
+    rw [setWrites_get, lookupPost_find, agrees.roots]
+    cases intent.writes.find? (·.cellId = cellId) <;> rfl
+  available := by
+    show (fun lane => before.model.available lane - intent.exactCharge lane + intent.credit lane) =
+      DurableReceiverCodec.chargeOfTuple (DurableReceiverCodec.chargeTuple fun lane =>
+        held.available lane - intent.exactCharge lane + intent.credit lane)
+    rw [DurableReceiverCodec.chargeOfTuple_tuple, agrees.available]
+
+/-- Every write of `records` has its root bound to its bytes: `IntentRecord.bind?`'s
+check, as a proposition. -/
+def RootsBound (rootBytes : List UInt8 → Digest) (records : List IntentRecord) : Prop :=
+  ∀ record, record ∈ records → ∀ write, write ∈ record.writes → rootBytes write.canonicalPostBytes = write.exactPost
+
+theorem bind_roots {record : IntentRecord} {intent : DurableDataIntent.DataIntent rootBytes}
+    (bound : record.bind? rootBytes = some intent) :
+    ∀ write, write ∈ record.writes → rootBytes write.canonicalPostBytes = write.exactPost := by
+  rw [← IntentRecord.bind_exact bound]
+  exact intent.postRootsBound
+
+/-- **A replayed suffix's roots are bound**: `replay` binds every record it accepts. -/
+theorem replay_rootsBound : ∀ (before : DataSnapshot rootBytes) (records : List IntentRecord)
+    (after : DataSnapshot rootBytes), replay rootBytes before records = some after → RootsBound rootBytes records
+  | _, [], _, _ => fun _ member => nomatch member
+  | before, record :: records, after, replayedTo => by
+      unfold replay at replayedTo
+      cases bound : record.bind? rootBytes with
+      | none => simp [bound] at replayedTo
+      | some intent =>
+          simp only [bound, bind, Option.bind] at replayedTo
+          cases executed : DurableDataIntent.execute .complete before intent with
+          | accepted next =>
+              rw [executed] at replayedTo
+              intro member found
+              rcases List.mem_cons.mp found with same | later
+              · subst same; exact bind_roots bound
+              · exact replay_rootsBound next records after replayedTo member later
+          | replayed recorded => rw [executed] at replayedTo; cases replayedTo
+          | rejected reason => rw [executed] at replayedTo; cases replayedTo
+          | crashed point next => rw [executed] at replayedTo; cases replayedTo
+
+/-- The held state after records whose roots are bound (`replay_rootsBound`):
+each record's writes set, nothing re-bound or re-hashed. -/
+def replayed (held : Held rootBytes) : (records : List IntentRecord) → RootsBound rootBytes records → Held rootBytes
+  | [], _ => held
+  | record :: records, roots =>
+      (held.installRecord record (roots record (List.mem_cons_self ..))).replayed records
+        fun later member => roots later (List.mem_cons_of_mem _ member)
+
+theorem replayed_agrees : ∀ (records : List IntentRecord) (held : Held rootBytes)
+    (before after : DataSnapshot rootBytes), Agrees held before →
+      replay rootBytes before records = some after → (roots : RootsBound rootBytes records) →
+      Agrees (held.replayed records roots) after
+  | [], held, before, after, agrees, replayedTo, _ => by
+      cases Option.some.inj replayedTo
+      exact agrees
+  | record :: records, held, before, after, agrees, replayedTo, roots => by
+      unfold replay at replayedTo
+      cases bound : record.bind? rootBytes with
+      | none => simp [bound] at replayedTo
+      | some intent =>
+          simp only [bound, bind, Option.bind] at replayedTo
+          cases executed : DurableDataIntent.execute .complete before intent with
+          | accepted next =>
+              rw [executed] at replayedTo
+              have installed := DurableReceiver.execute_accepted_install before intent next executed
+              subst installed
+              have same := IntentRecord.bind_exact bound
+              subst same
+              exact replayed_agrees records (held.install intent) _ after (install_agrees agrees intent)
+                replayedTo _
+          | replayed recorded => rw [executed] at replayedTo; cases replayedTo
+          | rejected reason => rw [executed] at replayedTo; cases replayedTo
+          | crashed point next => rw [executed] at replayedTo; cases replayedTo
+
+private def cellsOf (rootBytes : List UInt8 → Digest) (cells : List (CellId × List UInt8)) :
+    Theory.SparseMap CellId (fun _ => List UInt8 × Digest) :=
+  cells.foldr (fun cell map => map.set cell.1 (some (cell.2, rootBytes cell.2))) ∅
+
+private theorem cellsOf_get (rootBytes : List UInt8 → Digest) (cells : List (CellId × List UInt8))
+    (cellId : CellId) :
+    (cellsOf rootBytes cells).get? cellId = (Seed.lookup cells cellId).map fun bytes => (bytes, rootBytes bytes) := by
+  induction cells with
+  | nil => rfl
+  | cons cell rest ih =>
+      by_cases same : cell.1 = cellId
+      · obtain ⟨identifier, bytes⟩ := cell
+        simp only at same
+        subst same
+        simp [cellsOf, Seed.lookup]
+      · have ne : cellId ≠ cell.1 := Ne.symm same
+        simp only [cellsOf, List.foldr_cons] at ih ⊢
+        rw [Theory.SparseMap.set_ne _ _ _ _ ne, ih]
+        obtain ⟨identifier, bytes⟩ := cell
+        simp only at same
+        simp [Seed.lookup, same]
+
+/-- The held state of a checkpoint state: its cell list read once into the map. -/
+def ofState (rootBytes : List UInt8 → Digest) (base : State) : Held rootBytes where
+  cells := cellsOf rootBytes base.cells
+  absentBytes := base.absentBytes
+  absentRoot := rootBytes base.absentBytes
+  availableTuple := DurableReceiverCodec.chargeTuple base.available
+  absentExact := rfl
+  bound := by
+    intro cellId entry found
+    rw [cellsOf_get] at found
+    cases looked : Seed.lookup base.cells cellId with
+    | none => simp [looked] at found
+    | some bytes =>
+        simp only [looked, Option.map_some, Option.some.injEq] at found
+        subst found
+        rfl
+
+theorem ofState_agrees (rootBytes : List UInt8 → Digest) (base : State) (prefixRecords : List IntentRecord) :
+    Agrees (ofState rootBytes base) (base.snapshot rootBytes prefixRecords) where
+  bytes := by
+    funext cellId
+    show (Seed.lookup base.cells cellId).getD base.absentBytes =
+      (((cellsOf rootBytes base.cells).get? cellId).map Prod.fst).getD base.absentBytes
+    rw [cellsOf_get]
+    cases Seed.lookup base.cells cellId <;> rfl
+  roots := by
+    funext cellId
+    show (match DurableCheckpoint.tableLookup cellId (DurableCheckpoint.rootTable rootBytes base.cells) with
+        | some entry => entry.2
+        | none => rootBytes base.absentBytes) =
+      (((cellsOf rootBytes base.cells).get? cellId).map Prod.snd).getD (rootBytes base.absentBytes)
+    rw [DurableCheckpoint.tableLookup_rootTable, cellsOf_get]
+    cases Seed.lookup base.cells cellId <;> rfl
+  available := (DurableReceiverCodec.chargeOfTuple_tuple base.available).symm
+
+private def cellsOfIds (snapshot : DataSnapshot rootBytes) (ids : List CellId) :
+    Theory.SparseMap CellId (fun _ => List UInt8 × Digest) :=
+  ids.foldr (fun cellId map => map.set cellId (some (snapshot.canonicalBytes cellId, snapshot.model.roots cellId)))
+    ∅
+
+private theorem cellsOfIds_get (snapshot : DataSnapshot rootBytes) (ids : List CellId) (cellId : CellId) :
+    (cellsOfIds snapshot ids).get? cellId =
+      if cellId ∈ ids then some (snapshot.canonicalBytes cellId, snapshot.model.roots cellId) else none := by
+  induction ids with
+  | nil => rfl
+  | cons identifier rest ih =>
+      by_cases same : identifier = cellId
+      · subst same
+        simp [cellsOfIds]
+      · have ne : cellId ≠ identifier := Ne.symm same
+        simp only [cellsOfIds, List.foldr_cons] at ih ⊢
+        rw [Theory.SparseMap.set_ne _ _ _ _ ne, ih]
+        simp [ne]
+
+/-- The held state of a snapshot whose cells outside `ids` hold `absentBytes`:
+each enumerated cell read once (the full open's shape; the light open reads a
+checkpoint's list, `ofState`). -/
+def ofSnapshot (rootBytes : List UInt8 → Digest) (ids : List CellId) (snapshot : DataSnapshot rootBytes)
+    (absentBytes : List UInt8) : Held rootBytes where
+  cells := cellsOfIds snapshot ids
+  absentBytes := absentBytes
+  absentRoot := rootBytes absentBytes
+  availableTuple := DurableReceiverCodec.chargeTuple snapshot.model.available
+  absentExact := rfl
+  bound := by
+    intro cellId entry found
+    rw [cellsOfIds_get] at found
+    split at found
+    · simp only [Option.some.injEq] at found
+      subst found
+      exact snapshot.coherent cellId
+    · cases found
+
+theorem ofSnapshot_agrees (rootBytes : List UInt8 → Digest) (ids : List CellId)
+    (snapshot : DataSnapshot rootBytes) (absentBytes : List UInt8)
+    (outside : ∀ cellId, cellId ∉ ids → snapshot.canonicalBytes cellId = absentBytes) :
+    Agrees (ofSnapshot rootBytes ids snapshot absentBytes) snapshot where
+  bytes := by
+    funext cellId
+    show snapshot.canonicalBytes cellId =
+      (((cellsOfIds snapshot ids).get? cellId).map Prod.fst).getD absentBytes
+    rw [cellsOfIds_get]
+    split
+    · rfl
+    · exact outside cellId (by assumption)
+  roots := by
+    funext cellId
+    show snapshot.model.roots cellId =
+      (((cellsOfIds snapshot ids).get? cellId).map Prod.snd).getD (rootBytes absentBytes)
+    rw [cellsOfIds_get]
+    split
+    · rfl
+    · rename_i missing
+      rw [← snapshot.coherent cellId, outside cellId missing]
+      rfl
+  available := (DurableReceiverCodec.chargeOfTuple_tuple _).symm
+
+end Held
+
 /-- The cells a state enumerates after `records`: the base's, then each newly
 written id in record order (`Image.cellIds`'s order when the base is the seed). -/
 def extendIds (ids : List CellId) (records : List IntentRecord) : List CellId :=
@@ -102,7 +468,7 @@ theorem not_mem_extendIds {ids : List CellId} {records : List IntentRecord} {cel
 
 structure Served (rootBytes : List UInt8 → Digest) (store : StoreIdentity) where
   private mk ::
-  private state : DataSnapshot rootBytes
+  private held : Held rootBytes
   seed : Seed
   /-- Every enumerable cell id at `height` (seeded or written), in enumeration order. -/
   cellIds : List CellId
@@ -110,7 +476,7 @@ structure Served (rootBytes : List UInt8 → Digest) (store : StoreIdentity) whe
   height : Nat
   chain : Digest
   worldRoot : Digest
-  private outsideAbsent : ∀ cellId, cellId ∉ cellIds → state.canonicalBytes cellId = absentBytes
+  private outsideAbsent : ∀ cellId, cellId ∉ cellIds → held.bytesOf cellId = absentBytes
   private cellIdsNodup : cellIds.Nodup
 
 namespace Served
@@ -119,9 +485,12 @@ variable {store : StoreIdentity}
 
 def logStart (_served : Served rootBytes store) : Digest := store.logStart
 
-def roots (served : Served rootBytes store) : CellId → Digest := served.state.model.roots
-def canonicalBytes (served : Served rootBytes store) : CellId → List UInt8 := served.state.canonicalBytes
-def available (served : Served rootBytes store) : Charge := served.state.model.available
+/-- The specification snapshot of the held state. -/
+private def state (served : Served rootBytes store) : DataSnapshot rootBytes := served.held.toSnapshot
+
+@[inline] def roots (served : Served rootBytes store) : CellId → Digest := served.held.rootOf
+@[inline] def canonicalBytes (served : Served rootBytes store) : CellId → List UInt8 := served.held.bytesOf
+@[inline] def available (served : Served rootBytes store) : Charge := served.held.available
 
 theorem coherent (served : Served rootBytes store) (cellId : CellId) :
     rootBytes (served.canonicalBytes cellId) = served.roots cellId :=
@@ -166,11 +535,14 @@ def spentAt {head : Head store} {keys : Keys} (footprint : VerifiedFootprint hea
 only `DataSnapshot` with a journal or consumed bits a `Served` yields. -/
 def viewAt (served : Served rootBytes store) {head : Head store} {keys : Keys}
     (footprint : VerifiedFootprint head keys) : DataSnapshot rootBytes where
-  model := { served.state.model with
-    journal := recordedAt footprint served.height
-    consumed := spentAt footprint served.height }
-  canonicalBytes := served.state.canonicalBytes
-  coherent := served.state.coherent
+  model :=
+    { roots := served.held.rootOf
+      consumed := spentAt footprint served.height
+      available := served.held.available
+      history := []
+      journal := recordedAt footprint served.height }
+  canonicalBytes := served.held.bytesOf
+  coherent := served.held.coherent
 
 @[simp] theorem viewAt_roots (served : Served rootBytes store) {head : Head store} {keys : Keys}
     (footprint : VerifiedFootprint head keys) : (served.viewAt footprint).model.roots = served.roots := rfl
@@ -180,6 +552,10 @@ def viewAt (served : Served rootBytes store) {head : Head store} {keys : Keys}
 @[simp] theorem viewAt_available (served : Served rootBytes store) {head : Head store} {keys : Keys}
     (footprint : VerifiedFootprint head keys) :
     (served.viewAt footprint).model.available = served.available := rfl
+
+theorem agrees_viewAt (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) : Held.Agrees served.held (served.viewAt footprint) :=
+  ⟨rfl, rfl, rfl⟩
 
 theorem recordedAt_lookup_some_list {head : Head store} (height : Nat) (transactionId : TransactionId)
     {intent : Intent TransactionId CellId StableNullifier ReplayEnvelope} :
@@ -342,19 +718,41 @@ theorem viewAt_agrees (served : Served rootBytes store) {head : Head store} {key
 /-! ## Producers -/
 
 /-- From the full verified materialization of the same Store. -/
+private theorem loaded_outside (loaded : Loaded rootBytes) :
+    ∀ cellId, cellId ∉ loaded.cellIds → loaded.snapshot.canonicalBytes cellId = loaded.image.seed.absentBytes := by
+  intro cellId missing
+  rw [Loaded.cellIds_eq] at missing
+  exact DurableCheckpoint.resume_outside_support rootBytes loaded.image loaded.baseHeight loaded.base
+    loaded.snapshot loaded.resumed cellId missing
+
+private theorem loaded_agrees (loaded : Loaded rootBytes) :
+    Held.Agrees (Held.ofSnapshot rootBytes loaded.cellIds loaded.snapshot loaded.image.seed.absentBytes)
+      loaded.snapshot :=
+  Held.ofSnapshot_agrees rootBytes loaded.cellIds loaded.snapshot _ (loaded_outside loaded)
+
 def ofLoaded (loaded : Loaded rootBytes) (_sameStart : store.logStart = loaded.logStart) :
     Served rootBytes store :=
-  ⟨bare loaded.snapshot, loaded.image.seed, loaded.cellIds, loaded.image.seed.absentBytes, loaded.height,
+  ⟨Held.ofSnapshot rootBytes loaded.cellIds loaded.snapshot loaded.image.seed.absentBytes, loaded.image.seed,
+    loaded.cellIds, loaded.image.seed.absentBytes, loaded.height,
     loaded.chain, loaded.worldRoot, fun cellId missing => by
-      rw [Loaded.cellIds_eq] at missing
-      exact DurableCheckpoint.resume_outside_support rootBytes loaded.image loaded.baseHeight loaded.base
-        loaded.snapshot loaded.resumed cellId missing,
+      rw [← (loaded_agrees loaded).bytes]
+      exact loaded_outside loaded cellId missing,
     by rw [Loaded.cellIds_eq]; exact DurableCheckpoint.nodup_eraseDups _⟩
 
 @[simp] theorem ofLoaded_canonicalBytes (loaded : Loaded rootBytes) (sameStart : store.logStart = loaded.logStart) :
-    (ofLoaded loaded sameStart).canonicalBytes = loaded.snapshot.canonicalBytes := rfl
+    (ofLoaded loaded sameStart).canonicalBytes = loaded.snapshot.canonicalBytes :=
+  (loaded_agrees loaded).bytes.symm
 @[simp] theorem ofLoaded_roots (loaded : Loaded rootBytes) (sameStart : store.logStart = loaded.logStart) :
-    (ofLoaded loaded sameStart).roots = loaded.snapshot.model.roots := rfl
+    (ofLoaded loaded sameStart).roots = loaded.snapshot.model.roots :=
+  (loaded_agrees loaded).roots.symm
+
+/-- Every footprint view of the full materialization's served state is, bare of
+its log-derived fields, the loaded snapshot. -/
+theorem bare_viewAt_ofLoaded (loaded : Loaded rootBytes) (sameStart : store.logStart = loaded.logStart)
+    {head : Head store} {keys : Keys} (footprint : VerifiedFootprint head keys) :
+    bare ((ofLoaded loaded sameStart).viewAt footprint) = bare loaded.snapshot := by
+  rw [Held.bare_eq (agrees_viewAt _ footprint), Held.bare_eq (loaded_agrees loaded)]
+  rfl
 
 /-- The full materialization serves exactly what its image enumerates. -/
 theorem ofLoaded_cellIds (loaded : Loaded rootBytes) (sameStart : store.logStart = loaded.logStart) :
@@ -372,28 +770,55 @@ and the records replayed after it: `ids` plus every cell the records wrote, the
 bytes of the replay. Private: only the producers below call it, each from a base
 and records it verified. -/
 private def ofReplay (seed : Seed) (absentBytes : List UInt8) (ids : List CellId)
-    (before : DataSnapshot rootBytes) (outside : ∀ cellId, cellId ∉ ids → before.canonicalBytes cellId = absentBytes)
+    (held : Held rootBytes) (before : DataSnapshot rootBytes) (agrees : Held.Agrees held before)
+    (outside : ∀ cellId, cellId ∉ ids → held.bytesOf cellId = absentBytes)
     (records : List IntentRecord) (snapshot : DataSnapshot rootBytes)
     (replayed : replay rootBytes before records = some snapshot)
     (height : Nat) (chain worldRoot : Digest) : Served rootBytes store :=
-  ⟨bare snapshot, seed, extendIds ids records, absentBytes, height, chain, worldRoot, fun cellId missing => by
+  ⟨held.replayed records (Held.replay_rootsBound before records snapshot replayed), seed, extendIds ids records, absentBytes, height, chain, worldRoot, fun cellId missing => by
       obtain ⟨notBase, notWritten⟩ := not_mem_extendIds missing
-      show snapshot.canonicalBytes cellId = _
-      rw [DurableReceiver.replay_outside_support rootBytes _ _ cellId notWritten snapshot replayed]
+      rw [← (Held.replayed_agrees records held before snapshot agrees replayed _).bytes,
+        DurableReceiver.replay_outside_support rootBytes _ _ cellId notWritten snapshot replayed, agrees.bytes]
       exact outside cellId notBase,
     DurableCheckpoint.nodup_eraseDups _⟩
+
+private theorem ofReplay_roots (seed : Seed) (absentBytes : List UInt8) (ids : List CellId)
+    (held : Held rootBytes) (before : DataSnapshot rootBytes) (agrees : Held.Agrees held before)
+    (outside : ∀ cellId, cellId ∉ ids → held.bytesOf cellId = absentBytes)
+    (records : List IntentRecord) (snapshot : DataSnapshot rootBytes)
+    (replayed : replay rootBytes before records = some snapshot)
+    (height : Nat) (chain worldRoot : Digest) :
+    (ofReplay (store := store) seed absentBytes ids held before agrees outside records snapshot replayed height
+      chain worldRoot).roots = snapshot.model.roots :=
+  (Held.replayed_agrees records held before snapshot agrees replayed _).roots.symm
+
+private theorem ofReplay_canonicalBytes (seed : Seed) (absentBytes : List UInt8) (ids : List CellId)
+    (held : Held rootBytes) (before : DataSnapshot rootBytes) (agrees : Held.Agrees held before)
+    (outside : ∀ cellId, cellId ∉ ids → held.bytesOf cellId = absentBytes)
+    (records : List IntentRecord) (snapshot : DataSnapshot rootBytes)
+    (replayed : replay rootBytes before records = some snapshot)
+    (height : Nat) (chain worldRoot : Digest) :
+    (ofReplay (store := store) seed absentBytes ids held before agrees outside records snapshot replayed height
+      chain worldRoot).canonicalBytes = snapshot.canonicalBytes :=
+  (Held.replayed_agrees records held before snapshot agrees replayed _).bytes.symm
 
 theorem state_snapshot_outside (base : State) (cellId : CellId) (missing : cellId ∉ base.cells.map Prod.fst) :
     (base.snapshot rootBytes []).canonicalBytes cellId = base.absentBytes := by
   simp [State.snapshot, DurableReceiver.Seed.lookup_missing base.cells cellId missing]
+
+theorem held_state_outside (base : State) (cellId : CellId) (missing : cellId ∉ base.cells.map Prod.fst) :
+    (Held.ofState rootBytes base).bytesOf cellId = base.absentBytes := by
+  rw [← (Held.ofState_agrees rootBytes base []).bytes]
+  exact state_snapshot_outside base cellId missing
 
 /-- A served state from a base state and the records replayed after it. -/
 private def ofBase (seed : Seed) (base : State) (records : List IntentRecord)
     (snapshot : DataSnapshot rootBytes)
     (replayed : replay rootBytes (base.snapshot rootBytes []) records = some snapshot)
     (height : Nat) (chain worldRoot : Digest) : Served rootBytes store :=
-  ofReplay seed base.absentBytes (base.cells.map Prod.fst) (base.snapshot rootBytes [])
-    (state_snapshot_outside base) records snapshot replayed height chain worldRoot
+  ofReplay seed base.absentBytes (base.cells.map Prod.fst) (Held.ofState rootBytes base)
+    (base.snapshot rootBytes []) (Held.ofState_agrees rootBytes base []) (held_state_outside base)
+    records snapshot replayed height chain worldRoot
 
 /-- A past height from `Reader.stateAt`: the base's cells plus every cell its
 verified records wrote, the chain after its last verified record (or the
@@ -440,7 +865,9 @@ theorem ofStateAt_chain {seed : Seed} {head : Head store} {height : Nat}
 /-- A past state's bytes are the replay of its verified records from its base. -/
 theorem ofStateAt_canonicalBytes {seed : Seed} {head : Head store} {height : Nat}
     (state : StateAt rootBytes seed head height) :
-    (ofStateAt state).canonicalBytes = state.snapshot.canonicalBytes := rfl
+    (ofStateAt state).canonicalBytes = state.snapshot.canonicalBytes := by
+  simp only [ofStateAt, ofBase]
+  exact ofReplay_canonicalBytes _ _ _ _ _ _ _ _ _ _ _ _ _
 
 /-! ## One accepted record -/
 
@@ -454,17 +881,52 @@ def advance (served : Served rootBytes store) {head : Head store} {keys : Keys}
     (next : DataSnapshot rootBytes)
     (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
     (chain worldRoot : Digest) : Served rootBytes store :=
-  ⟨bare next, served.seed, extendIds served.cellIds [IntentRecord.ofIntent intent], served.absentBytes,
-    served.height + 1, chain, worldRoot, fun cellId missing => by
+  ⟨served.held.install intent, served.seed, extendIds served.cellIds [IntentRecord.ofIntent intent],
+    served.absentBytes, served.height + 1, chain, worldRoot, fun cellId missing => by
       obtain ⟨notOld, notWritten⟩ := not_mem_extendIds missing
-      have installed := DurableReceiver.execute_accepted_install _ intent next executed
-      subst installed
+      rw [← (Held.install_agrees (served.agrees_viewAt footprint) intent).bytes]
       show (DurableDataIntent.DataSnapshot.lookupPostBytes cellId intent.writes).getD
         ((served.viewAt footprint).canonicalBytes cellId) = _
       rw [DurableReceiver.lookupPostBytes_missing intent.writes cellId
         (by simpa [IntentRecord.ofIntent] using notWritten)]
       exact served.outsideAbsent cellId notOld,
     DurableCheckpoint.nodup_eraseDups _⟩
+
+/-- **The served state after an accepted record is the executor's**: its held
+state agrees with the snapshot `execute` accepted (`Held.install_agrees`). -/
+theorem advance_agrees (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
+    (next : DataSnapshot rootBytes)
+    (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
+    (chain worldRoot : Digest) :
+    Held.Agrees (served.advance footprint intent next executed chain worldRoot).held next := by
+  show Held.Agrees (served.held.install intent) next
+  rw [DurableReceiver.execute_accepted_install _ intent next executed]
+  exact Held.install_agrees (served.agrees_viewAt footprint) intent
+
+theorem advance_roots (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
+    (next : DataSnapshot rootBytes)
+    (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
+    (chain worldRoot : Digest) :
+    (served.advance footprint intent next executed chain worldRoot).roots = next.model.roots :=
+  (served.advance_agrees footprint intent next executed chain worldRoot).roots.symm
+
+theorem advance_canonicalBytes (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
+    (next : DataSnapshot rootBytes)
+    (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
+    (chain worldRoot : Digest) :
+    (served.advance footprint intent next executed chain worldRoot).canonicalBytes = next.canonicalBytes :=
+  (served.advance_agrees footprint intent next executed chain worldRoot).bytes.symm
+
+theorem advance_available (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
+    (next : DataSnapshot rootBytes)
+    (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
+    (chain worldRoot : Digest) :
+    (served.advance footprint intent next executed chain worldRoot).available = next.model.available :=
+  (served.advance_agrees footprint intent next executed chain worldRoot).available.symm
 
 @[simp] theorem advance_height (served : Served rootBytes store) {head : Head store} {keys : Keys}
     (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
@@ -722,8 +1184,8 @@ structure Start (rootBytes : List UInt8 → Digest) where
   seed : Seed
   absentBytes : List UInt8
   ids : List CellId
-  before : DataSnapshot rootBytes
-  outside : ∀ cellId, cellId ∉ ids → before.canonicalBytes cellId = absentBytes
+  held : Held rootBytes
+  outside : ∀ cellId, cellId ∉ ids → held.bytesOf cellId = absentBytes
   height : Nat
   chain : Digest
   frontier : List (Nat × Digest)
@@ -732,7 +1194,7 @@ structure Start (rootBytes : List UInt8 → Digest) where
   checkpoint : Nat
   /-- A root tree already evaluated for this start: the predecessor's (a
   refresh) or the checkpoint's, evaluated by its open (`openSealedWith`). -/
-  roots : Option (CachedRoots ids (Served.entriesOf before.model.roots ids height chain)) := none
+  roots : Option (CachedRoots ids (Served.entriesOf held.rootOf ids height chain)) := none
   /-- The fold's World at `height` (the checkpoint's, the seed's genesis World, or the head's). -/
   world : Option HostRefinesWorld.DWorld := none
 
@@ -777,7 +1239,7 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
       return .error message
   lap "index"
   let headChain := chains.getLast?.getD start.chain
-  match replayed : replay rootBytes start.before records with
+  match replayed : replay rootBytes start.held.toSnapshot records with
   | none => return .error "durable log suffix does not replay through the canonical executor"
   | some snapshot =>
       let world := start.world.bind fun w =>
@@ -790,14 +1252,17 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
             WorldRootCache.RootsExact.ofEntries entries⟩
         | some ⟨nodup, cache, exact⟩ =>
             exact.advance (suffixSlots headHeight headChain records)
-              (replay_entries_step start.ids nodup start.before snapshot records replayed
+              (replay_entries_step start.ids nodup start.held.toSnapshot snapshot records replayed
                 start.height headHeight start.chain headChain)
       let roots := rooted.1
       let rootsExact := rooted.2
       let worldRoot := roots.root
       let served : Served rootBytes store :=
-        Served.ofReplay start.seed start.absentBytes start.ids start.before start.outside records snapshot
-          replayed headHeight headChain worldRoot
+        Served.ofReplay start.seed start.absentBytes start.ids start.held start.held.toSnapshot
+          (Held.agrees_toSnapshot start.held) start.outside records snapshot replayed headHeight headChain worldRoot
+      have rootsEq : served.roots = snapshot.model.roots := Served.ofReplay_roots _ _ _ _ _ _ _ _ _ _ _ _ _
+      let rootsExact : WorldRootCache.RootsExact roots
+          (Served.entriesOf served.roots served.cellIds headHeight headChain) := rootsEq ▸ rootsExact
       lap "replay and root"
       if zero : headHeight = 0 then
         if genesisChain : headChain = store.logStart then
@@ -832,6 +1297,13 @@ theorem state_entries (base : State) (nodup : (base.cells.map Prod.fst).Nodup) (
 
 #assert_axioms state_entries
 
+theorem held_state_entries (base : State) (nodup : (base.cells.map Prod.fst).Nodup) (height : Nat)
+    (chain : Digest) :
+    Served.entriesOf (Held.ofState rootBytes base).rootOf (base.cells.map Prod.fst) height chain =
+      DurableCheckpointCodec.stateEntries rootBytes height chain base := by
+  rw [← (Held.ofState_agrees rootBytes base []).roots]
+  exact state_entries base nodup height chain
+
 /-- The start of an open at a base state, with the base's tree when its open evaluated one. -/
 private def startOf (seed : Seed) (base : State) (height : Nat) (chain : Digest)
     (frontier : List (Nat × Digest)) (indexRoot : Digest) (tag : Option (List UInt8))
@@ -839,9 +1311,9 @@ private def startOf (seed : Seed) (base : State) (height : Nat) (chain : Digest)
     (roots : Option ((cache : WorldRootCache.RootCache) ×' WorldRootCache.RootsExact cache
       (DurableCheckpointCodec.stateEntries rootBytes height chain base)))
     (world : Option HostRefinesWorld.DWorld) : Start rootBytes :=
-  ⟨seed, base.absentBytes, base.cells.map Prod.fst, base.snapshot rootBytes [], Served.state_snapshot_outside base,
+  ⟨seed, base.absentBytes, base.cells.map Prod.fst, Held.ofState rootBytes base, Served.held_state_outside base,
     height, chain, frontier, indexRoot, tag, height,
-    roots.map fun built => ⟨nodup, built.1, (state_entries base nodup height chain).symm ▸ built.2⟩, world⟩
+    roots.map fun built => ⟨nodup, built.1, (held_state_entries base nodup height chain).symm ▸ built.2⟩, world⟩
 
 /-- The light opening of an opened Store's head: its checkpoint (or the seed),
 then `extendVerified` over the entries after it. -/
@@ -927,11 +1399,11 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
         return .error "durable log head does not match its entries"
       let served := opening.served
       extendVerified transport rootBytes opening.store opening.live
-        ⟨served.seed, served.absentBytes, served.cellIds, served.state,
+        ⟨served.seed, served.absentBytes, served.cellIds, served.held,
           fun cellId missing => served.outsideAbsent cellId missing, height, opening.head.chain,
           opening.head.frontier, opening.head.indexRoot, none, opening.baseHeight,
           some ⟨served.cellIds_nodup, opening.roots, by
-            simpa [served, Served.roots, opening.heightExact, opening.chainExact] using opening.rootsExact⟩,
+            simpa [served, Served.roots, Served.state, Held.toSnapshot, opening.heightExact, opening.chainExact] using opening.rootsExact⟩,
           opening.world⟩
         stored.entries (fun _ => pure ())
 
@@ -1073,9 +1545,11 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                         | .ok () => pure height
                         | .error _ => pure opening.baseHeight
                       else pure opening.baseHeight
+                    have rootsEq : served'.roots = next.model.roots :=
+                      served.advance_roots footprint intent next executed chain worldRoot
                     return .appended kind
-                      ⟨opening.store, opening.live, head', served', fields.1.symm, fields.2.1.symm, roots.1, roots.2, sealedAt,
-                        worldAfter⟩
+                      ⟨opening.store, opening.live, head', served', fields.1.symm, fields.2.1.symm, roots.1,
+                        by rw [rootsEq]; exact roots.2, sealedAt, worldAfter⟩
                       (by rw [fields.1, ← opening.heightExact]) entry rfl fresh
       match ← transport.append height entry nodes with
       | .installed => confirm .installed true
@@ -1094,5 +1568,17 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
 #assert_axioms Served.entries_step
 #assert_axioms receive_executes_as_full
 #assert_axioms extendIds_eq_fast
+#assert_axioms Held.bare_eq
+#assert_axioms Held.install_agrees
+#assert_axioms Held.replayed_agrees
+#assert_axioms Held.replay_rootsBound
+#assert_axioms Held.ofState_agrees
+#assert_axioms Held.ofSnapshot_agrees
+#assert_axioms Served.advance_agrees
+#assert_axioms Served.advance_roots
+#assert_axioms Served.ofLoaded_roots
+#assert_axioms Served.bare_viewAt_ofLoaded
+#assert_axioms Served.ofStateAt_canonicalBytes
+#assert_axioms held_state_entries
 
 end Minidregg.Compiler.DurableServed

@@ -158,7 +158,8 @@ theorem validateServed_ofLoaded (config : Config) {store : StoreIdentity} (durab
   have sameSeed : (Served.ofLoaded durable sameStart).seed = durable.image.seed := rfl
   have sameLog : (Served.ofLoaded durable sameStart).logStart = durable.logStart := sameStart
   have samePlatform : PlatformCellDomain.recordAt config.deployment (Served.ofLoaded durable sameStart).canonicalBytes =
-      PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes := rfl
+      PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes := by
+    rw [Served.ofLoaded_canonicalBytes]
   have lightCore :
       validateCore config (Served.ofLoaded durable sameStart).seed (Served.ofLoaded durable sameStart).logStart
         (loadServedDirectory (Served.ofLoaded durable sameStart))

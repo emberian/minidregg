@@ -129,8 +129,9 @@ the same rows, so the same decode and the same refusal. -/
 theorem servedRows_ofLoaded {store : StoreIdentity} (loaded : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
     (sameStart : store.logStart = loaded.logStart) :
     servedRows (Served.ofLoaded loaded sameStart) = directoryRows loaded := by
-  simp only [servedRows, directoryRows, Served.cells, DurableReceiverIO.Loaded.cells_eq_cellsCached,
-    DurableReceiverIO.Loaded.cellsCached, List.map_map, Function.comp_def]
+  simp only [servedRows, directoryRows, Served.cells, Served.ofLoaded_canonicalBytes,
+    DurableReceiverIO.Loaded.cells_eq_cellsCached, DurableReceiverIO.Loaded.cellsCached, List.map_map,
+    Function.comp_def]
   rfl
 
 theorem loadServedDirectory_ofLoaded {store : StoreIdentity}
@@ -224,7 +225,8 @@ theorem loadServedAuthority_ofLoaded (deployment : CanonicalCellRegistry.Deploym
   by_cases valid : deployment.Valid
   · rw [dif_pos valid, dif_pos valid]
     have bytes : (Served.ofLoaded loaded sameStart).canonicalBytes (cellIdOf deployment) =
-        loaded.snapshot.canonicalBytes (cellIdOf deployment) := rfl
+        loaded.snapshot.canonicalBytes (cellIdOf deployment) := by
+      rw [Served.ofLoaded_canonicalBytes]
     split
     · rename_i servedNone
       split
