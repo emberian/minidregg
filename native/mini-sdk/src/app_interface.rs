@@ -1670,7 +1670,9 @@ fn scenario_assertions(
             .as_array()
             .ok_or_else(|| refuse("declaration-invalid"))?
         {
-            let ok = if let Some(expected) = check.get("containsText") {
+            let ok = if check["exists"] == true {
+                lookup(value, &check["path"]).is_ok()
+            } else if let Some(expected) = check.get("containsText") {
                 let expected = scalar(&resolve(expected, &json!({}), context, results)?)?;
                 let got = if let Some(path) = check.get("path") {
                     lookup(value, path).ok()

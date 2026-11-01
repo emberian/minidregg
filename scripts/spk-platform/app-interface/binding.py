@@ -518,7 +518,9 @@ def scenario_assertions(step, value, context, results):
                     got = got[p]
             except (KeyError, IndexError, TypeError):
                 raise Refusal('readback-mismatch', step['id']) from None
-            if 'containsText' in check:
+            if check.get('exists') is True:
+                ok = True
+            elif 'containsText' in check:
                 expected = resolve(check['containsText'], {}, context, results)
                 ok = isinstance(got, str) and isinstance(expected, str) and expected in got
             else:
