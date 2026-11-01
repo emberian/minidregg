@@ -1383,7 +1383,14 @@ fn serve_with_mode(
     let _guard = SocketGuard(socket, socket_metadata.dev(), socket_metadata.ino());
     fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("cannot protect socket {}: {e}", socket.display()))?;
-    let mut start = || HostProcess::start_pinned(host, &pinned_config, &host_sha256, &config_bytes);
+    // The serving Host's PID, beside the socket: a Host outlives a server stopped by a
+    // signal (`Drop` does not run), so it must be stoppable by its own PID file.
+    let host_pid_file = socket.with_extension("host.pid");
+    let mut start = || {
+        let process = HostProcess::start_pinned(host, &pinned_config, &host_sha256, &config_bytes)?;
+        write_host_pid(&host_pid_file, process.child.id())?;
+        Ok(process)
+    };
     eprintln!("mini: serving {}", socket.display());
     if let Some(peers) = operator_peers {
         return supervise_operator(listener, socket, &config_bytes, &host_sha256, catalog_enabled, peers, &mut start);
@@ -1454,6 +1461,14 @@ impl PinnedLocalInvocation {
 const MAX_HOST_IMAGE: u64 = 4 << 30;
 
 /// One running Host and its two pipes. Dropping it kills and reaps the process.
+/// Replace `path` with `pid` (write beside it, then rename, so a reader never sees a torn file).
+fn write_host_pid(path: &Path, pid: u32) -> Result<(), String> {
+    let staged = path.with_extension("pid.new");
+    fs::write(&staged, format!("{pid}\n"))
+        .and_then(|()| fs::rename(&staged, path))
+        .map_err(|e| format!("cannot record host pid in {}: {e}", path.display()))
+}
+
 pub(crate) struct HostProcess {
     child: std::process::Child,
     input: std::process::ChildStdin,
