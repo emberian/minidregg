@@ -1,8 +1,9 @@
 # Seat: host-execution
 
 Agent: a0dec24192aead1f1 (fresh 2026-10-31 evening from this file; predecessors a24974e84d3c540d1, a0fee5643746e520c: `cv show`
-for detail). Delegate running: a01710a27b5235a67 (enrollment + lifetime grant port, worktree
-/Users/ember/dev/minidregg-lanes/he-enrol, hbox tree lease `he-enrol`).
+for detail). Delegates running: a01710a27b5235a67 (enrollment + lifetime grant port, worktree
+/Users/ember/dev/minidregg-lanes/he-enrol, hbox lease `he-enrol`); ac49ca4075452034f (per-birth growth, worktree
+/Users/ember/dev/minidregg-lanes/he-births, hbox lease `he-births`).
 Worktree: /Users/ember/dev/minidregg-lanes/host-execution (branch seat/host-execution, landed on main; WIP rides
 `wip/host-execution`, deleted after landing). Box tree: hbox pool t8 (lease `host-execution`): fetch the wip branch there,
 `/home/hbox/hx/lc.sh FILES` (detached, PID /home/hbox/hx/lc.pid, log lc.log ending `RC n`). A DurableServed or NativeHostReplay
@@ -31,13 +32,16 @@ Quest: the Host turn costs worth seconds, worst first. Now: KN2 2b PORT-C, the w
 | main 2e85f5676 (round 4) | 114 -> 141 | 24 -> 37 |
 | base 4b750eb67 (builder) | 122 -> 154 | 24 -> 40 |
 member-side, 60 `doc new` in blocks of 10 (member-1): base 101 -> 276 ms Host; overlay e0cd5307229b (467e698ef) 94 -> 139. The
-growth is per BIRTH (authority grants per document), not per record: profiling it now (hbox /home/hbox/hx/births.sh, perf at ~5 and
-~65 births, outputs b-early.txt / b-late.txt, `python3 /home/hbox/hx/incl.py FILE REGEX`).
+growth is per BIRTH (authority grants per document), not per record. Profile (hbox, 467e698ef, ~5 vs ~65 births, inclusive
+samples under serveFrame 437 -> 584; /home/hbox/hx/b-early.txt, b-late.txt): `foldRecords` in `receiveServed` (the opening's World
+fold: World.admit -> pinCheck -> `DeployedBridge.cellRoot` -> whole-cell encode) 46 -> 98; `Ground.authorityWrite` ->
+`CredentialAuthorityDomainReceiver.cellRoot` 25 -> 52; `StoreCodec.encode` 36 -> 80. Both `cellRoot`s are `rootBytes (encode cell)`
+of the whole authority cell, O(grants) per birth, where `Materialized` carries a cached root. Delegate ac49ca4075452034f on it.
 
 ## Next (my order)
 1. Measure 2edf8a1ce: apps-hermes runs WBO qualify wbK (before, 467e698ef) and wbL (first builder candidate with 2edf8a1ce), with
    MINIDREGG_HOST_TRACE=1 + op-timing; per-op ms and any refusal text come to me.
-2. Per-birth `doc new` growth (above).
+2. Per-birth `doc new` growth (above): delegate ac49ca4075452034f.
 3. Delegate a01710a27b5235a67: session enrollment (op 82/83) + agent lifetime grant (74/75) onto light; needs the issue/grant
    evidence existentials retyped from full grounds (`.ofLoaded`, `∃ Opened`) to `∃ ground` (rephrase, not weakening).
 4. STOP: needs a key for "the running incarnation of (app, generation)": proposed `runningNullifier(domain, app, processGeneration)`
