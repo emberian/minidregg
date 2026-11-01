@@ -18,6 +18,10 @@ Kernel/ApplicationReadPermit.lean (new).
 Quest: the Host turn costs worth seconds, worst first. Now: KN2 2b PORT-C, the walk families off the full-Store walk.
 
 ## Landed (main)
+- e71c9ab59 issue selection names a history read failure (`IssueRefusal`; op55 `historyRefused`; grant/enrollment `.unavailable`).
+- cb38b5612, 901d910c2, 913e66cdf (delegate ac49ca4075452034f): birth post cell built once; **touch-only legs** (a leg guards a
+  cell by its pin root + changed addresses; `pin_fixes_store`, `pin_implies_guards`, `untouched_change_refused`, fold v2);
+  invoke read guards take the written ids. One format epoch with he-enrol's StoreEpoch bump (build-loop re-record notice from it).
 - f955ed8a2 (delegate a01710a27b5235a67, done) **enrollment, lifetime grant, op55 on the light opening**: op82/83, op72/73/74/75,
   op55 serve from the light opening; `NativeHostReplay.selectIssue` re-admits the grain issue at its own prefix;
   `IssuedEvidence`/`PriorIssue.sourceExact` rephrased from `.ofLoaded` grounds to `∃ ground` (audited: same existential shape,
@@ -51,7 +55,8 @@ of the whole authority cell, O(grants) per birth, where `Materialized` carries a
 4. STOP: needs a key for "the running incarnation of (app, generation)": proposed `runningNullifier(domain, app, processGeneration)`
    spent by every running START completion (then `Reader.spent` -> height -> Candidate), or the running receipt carried in a new
    STOP ingress. Until then STOP (op66 STOP plan, BEGIN STOP, its completion) walks.
-5. Dispatch: `priorIssueFor` by bytes -> `Reader.byTx` of the issue birth's descriptor tx id; `dispatchPurseUntouched` (no write to
+5. Dispatch (delegate a01710a27b5235a67, ruled: Store index family 2, cell -> last write height, `lastWrite_untouched`;
+   old Stores refuse dispatch by name, offline migration fills it): `priorIssueFor` by bytes -> `Reader.byTx` of the issue birth's descriptor tx id; `dispatchPurseUntouched` (no write to
    the purse since the reserve) has no key: needs a per-reserve nullifier spent by every purse write, or a monotone write counter.
    Retry v4 family, recovery, share-issue lookup, fn (selected release by `Reader.byTx releaseKey`; frontier audit -> cells/nullifiers).
 6. When the last family leaves: delete `sessionWalked`, `Walked`, `refreshWalked`, `extendVerifiedAppended`; `Verified` stays for audits.
