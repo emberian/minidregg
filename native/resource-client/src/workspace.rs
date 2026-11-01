@@ -2141,6 +2141,12 @@ fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&
 /// container's revision).
 fn host_document(root: &Path, workspace: &Value, host_ref: &Value) -> Result<Value> {
     let (_, _, files) = signed_view(root, workspace, host_ref, "resource")?;
+    read_document(workspace, &files)
+}
+
+/// The kernel's document view of a signed resource read already in hand (its `view.bin`): the
+/// same rendering as `host_document`, with no further read of the Host.
+fn read_document(workspace: &Value, files: &Attempt) -> Result<Value> {
     let host_bin = files.read("view.bin")?.into_owned();
     crate::inspect_bytes(
         &workspace_host(workspace)?,
@@ -3258,13 +3264,13 @@ fn propose_summary_once(
                             content_actions(&payload["actions"], true)?,
                         )?,
                         ("document", None) => content_actions(
-                            &document_actions(root, workspace, local_name, &view, fresh,
+                            &document_actions(root, workspace, local_name, &view, Some(&signed), fresh,
                                 &payload["actions"])?,
                             false,
                         )?,
                         ("document", Some(_)) => legacy_private_content(
                             content_actions(&document_actions(root, workspace, local_name, &view,
-                                fresh, &payload["actions"])?, true)?)?,
+                                Some(&signed), fresh, &payload["actions"])?, true)?)?,
                         ("scalar", Some(_)) => {
                             return Err("--private seals content and stream payloads only".into())
                         }
@@ -5746,11 +5752,14 @@ fn no_document_refusal(name: &str, document: &Value) -> Result<()> {
 
 /// Lower line-level document actions into the Host's content grammar.
 /// `append {text}` · `edit {line,text}` · `link {to,relation}`.
+/// `read`, when given, holds the signed read `view` came from: an append decodes the document from
+/// it, so the line it extends is the one of the root the command pins, and the Host is read once.
 fn document_actions(
     root: &Path,
     workspace: &Value,
     name: &str,
     view: &Value,
+    read: Option<&Attempt>,
     fresh: bool,
     actions: &Value,
 ) -> Result<Value> {
@@ -5795,8 +5804,10 @@ fn document_actions(
             // new line can be named by a range of a run that already covered its neighbour.
             let atom = random_nonce()?;
             if tail_runs.is_none() {
-                let reference = reference(root, name)?;
-                let document = host_document(root, workspace, &reference)?;
+                let document = match read {
+                    Some(files) => read_document(workspace, files)?,
+                    None => host_document(root, workspace, &reference(root, name)?)?,
+                };
                 no_document_refusal(name, &document)?;
                 tail_runs = Some(runs_at_tail(&document)?);
             }
@@ -8236,7 +8247,7 @@ mod tests {
         let seen = seen_doc(&[("100", "a", false), ("200", "b", false)], &[], false);
         retain_seen(&root, "paper", &seen["view"], &seen["document"], &json!({"height":"40","worldRoot":"41"})).unwrap();
         let actions = json!([{"type":"push","bytes":hex(b"a\nB\nc\n")}]);
-        let lowered = document_actions(&root, &json!({}), "paper", &seen["view"], false, &actions).unwrap();
+        let lowered = document_actions(&root, &json!({}), "paper", &seen["view"], None, false, &actions).unwrap();
         let types: Vec<&str> = lowered.as_array().unwrap().iter().map(|a| a["type"].as_str().unwrap()).collect();
         assert_eq!(types, ["editAtom", "createAtom"]);
         assert_eq!(lowered[0]["before"]["payload"], hex(b"b"));
@@ -8480,13 +8491,13 @@ mod tests {
         assert!(content_actions(&lowered, false).is_ok());
         // An edit names the line as this workspace last read it.
         let edit = json!([{"type":"edit","line":"2","text":"better"}]);
-        assert!(document_actions(&root, &workspace, "paper", &current, false, &edit)
+        assert!(document_actions(&root, &workspace, "paper", &current, None, false, &edit)
             .unwrap_err()
             .contains("doc show paper (or doc pull paper) first"));
         let seen = page(vec![atom("401", "first", "7"), atom("402", "old second", "1103")]);
         let order = json!({"order":[{"kind":"atom","element":"401"},{"kind":"atom","element":"402"}]});
         retain_seen(&root, "paper", &seen, &order, &json!({"height":"3","worldRoot":"4"})).unwrap();
-        let lowered = document_actions(&root, &workspace, "paper", &current, false, &edit).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, None, false, &edit).unwrap();
         assert_eq!(lowered[0]["type"], "editAtom");
         assert_eq!(lowered[0]["atom"], "402");
         assert_eq!(lowered[0]["payload"], hex(b"better"));
@@ -8495,16 +8506,16 @@ mod tests {
         assert!(lowered[0]["before"].get("id").is_none() && lowered[0]["before"].get("canonical").is_none());
         assert!(content_actions(&lowered, false).is_ok());
         let past = json!([{"type":"edit","line":"3","text":"x"}]);
-        assert!(document_actions(&root, &workspace, "paper", &current, false, &past)
+        assert!(document_actions(&root, &workspace, "paper", &current, None, false, &past)
             .unwrap_err()
             .contains("had 2 line(s)"));
         // Rereading replaces what an edit names.
         retain_seen(&root, "paper", &current, &order, &json!({"height":"5","worldRoot":"6"})).unwrap();
-        let lowered = document_actions(&root, &workspace, "paper", &current, false, &edit).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, None, false, &edit).unwrap();
         assert_eq!(lowered[0]["before"]["payload"], hex(b"second"));
         let declared = json!({"type":"resource","cell":{"root":"1",
             "entries":[{"key":{"type":"object","field":"0"},"value":"1"}]}});
-        assert!(document_actions(&root, &workspace, "shared", &declared, false, &edit)
+        assert!(document_actions(&root, &workspace, "shared", &declared, None, false, &edit)
             .unwrap_err()
             .contains("not a document"));
         // Line N is the kernel's order, not atom-id order: a reorder of the
@@ -8512,7 +8523,7 @@ mod tests {
         let swapped = json!({"order":[{"kind":"atom","element":"402"},{"kind":"atom","element":"401"}]});
         retain_seen(&root, "paper", &current, &swapped, &json!({"height":"7","worldRoot":"8"})).unwrap();
         let first = json!([{"type":"edit","line":"1","text":"x"}]);
-        let lowered = document_actions(&root, &workspace, "paper", &current, false, &first).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, None, false, &first).unwrap();
         assert_eq!(lowered[0]["atom"], "402");
         fs::remove_dir_all(root).unwrap();
     }
