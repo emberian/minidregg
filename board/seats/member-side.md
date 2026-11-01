@@ -7,8 +7,8 @@ ms-build.pid). Builds: hbox pool (`lane-tree acquire member-side origin/main`, s
 it small). dregg-build2 is obend's now: nothing of mine is left there (t1 released, ~/ms removed).
 hbox leftovers from the predecessor: t8 released; the w8 world and its residents stopped by their PID files;
 hbox:/ci/pc (1.9 GB, the predecessor's scratch) is left in place for ember to decide.
-Measurement world: persvati /home/ember/mdpool/lanes/rpw/sa (2 members, port 23200, PID files in it; up by
-/home/ember/mdpool/rp/up.sh) on overlay /home/ember/mdpool/lanes/msl/candidates/e0cd5307229b, built in my persvati
+Measurement world: none standing (one per seat). rpw/sa is down; bring it up again with
+/home/ember/mdpool/rp/up.sh CAND RUN PORT on overlay /home/ember/mdpool/lanes/msl/candidates/e0cd5307229b, built in my persvati
 tree by /home/ember/mdpool/lanes/msl-build.sh (host, consent, overlay on BASE; PID msl-build.pid; LANE_DIR
 /home/ember/mdpool/lanes/msl; the tree has its own 7.3 GB package copy). Candidates copied to persvati under
 /home/ember/mdpool/lanes/cand (4b750eb67 base, 93b31c1c33d6, store-retained's withdrawn d5c4b3cf2a41). Worlds rf, sb,
@@ -76,7 +76,8 @@ resident footprint (a few MB per member), web pages.
   of 10 (Host ms): base 85, 92, 99, 120, 115, 123; held 93, 97, 126, 130, 143, 148. The held overlay's Host is
   slower (+5..+28% from block 3) and grows faster. Store-retained confirmed and found it: `Held.replayed`
   re-bound every record that `replay` had bound (fixed on wip/retained-held 4ca511c70). It hot-swaps rpw/tr itself;
-  leave rpw/tb (23300) and rpw/tr (23400) up for it. Flat perf of the memfd-exec'd Host: copy the binary into a
+  rpw/tb (23300) and rpw/tr (23400) stay up for it as my one world; stop both by PID file
+  (`scripts/pipeline/world-reap`) when it says done. Flat perf of the memfd-exec'd Host: copy the binary into a
   symfs dir as `memfd:mini-pinned-image (deleted)` and pass `--symfs`; DWARF stacks still do not unwind.
 - persvati, fresh world on base 4b750eb67 (before a014ff501), member-1 `doc new` blocks of 10 (wall / Host /
   consent): 255/101/110, 239/101/108, 276/111/131, 356/151/533 (outlier), 413/276/227, 398/198/173. Still grows,
