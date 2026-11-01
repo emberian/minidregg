@@ -118,6 +118,17 @@ def spent (transport : Transport) {store : StoreIdentity} (head : Head store) (n
       | some height =>
           return .ok ⟨some height, by rw [DurableIndex.heightOf_some decoded] at opens; exact opens⟩
 
+def lastWrite (transport : Transport) {store : StoreIdentity} (head : Head store)
+    (cell : Minidregg.Kernel.DurableDataIntent.CellId) : IO (Except Refusal (LastWrite head cell)) := do
+  match ← indexAnswer transport head (DurableIndex.cellKey cell) with
+  | .error message => return .error (.unavailable 0 message)
+  | .ok ⟨none, opens⟩ => return .ok ⟨none, opens⟩
+  | .ok ⟨some value, opens⟩ =>
+      match decoded : DurableIndex.heightOf value with
+      | none => return .error (.unavailable 0 "the index holds a last-write row that is not a height")
+      | some height =>
+          return .ok ⟨some height, by rw [DurableIndex.heightOf_some decoded] at opens; exact opens⟩
+
 def byTx (transport : Transport) {store : StoreIdentity} (head : Head store) (transactionId : TransactionId) :
     IO (Except Refusal (TxAnswer head transactionId)) := do
   match ← indexAnswer transport head (DurableIndex.transactionKey transactionId) with
@@ -233,6 +244,7 @@ private def readerWith (mint : DurableCheckpointCodec.MacKey → Digest → Stor
     { head, seed := loaded.image.seed
       atHeight := atHeight transport head
       byTx := byTx transport head
+      lastWrite := lastWrite transport head
       spent := spent transport head
       range := range transport head
       stateAt := stateAt transport rootBytes loaded.image.seed head }⟩

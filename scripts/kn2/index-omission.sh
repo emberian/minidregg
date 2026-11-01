@@ -24,8 +24,8 @@ if ! lake env lean scripts/kn2/index-omission.lean > "$out/witness.log" 2>&1; th
   exit 1
 fi
 printf '%s\n' 'CONTROL: full source and kernel-checked wrong-root absence witness pass'
-needle='  insert height store root (keys transactionId nullifiers)'
-replacement='  insert height store root (keys transactionId [])'
+needle='  let (inserted, early) ← insert height store root (keys transactionId nullifiers)'
+replacement='  let (inserted, early) ← insert height store root (keys transactionId [])'
 [[ $(grep -Fxc "$needle" "$control") == 1 ]]
 # No declarations or checks are removed: mutate the sole deployed entry point.
 awk -v needle="$needle" -v replacement="$replacement" \
@@ -41,9 +41,9 @@ if lake env lean "$mutant" > "$out/mutant.log" 2>&1; then
   exit 1
 fi
 # Pin the rejection to the unconditional theorem's proof, not an unrelated error.
-proof_line=$(awk '/^theorem apply_eq_setAll / { found=1 } found && /  exact insert_eq_setAll/ { print NR; exit }' "$mutant")
+proof_line=$(awk '/^theorem apply_steps / { found=1 } found && /insert_eq_setAll height/ { print NR; exit }' "$mutant")
 [[ -n "$proof_line" ]]
 grep -E "index-mutant.lean:${proof_line}:[0-9]+: error" "$out/mutant.log"
-printf '%s\n' 'RED: IndexRows.apply_eq_setAll rejects the omitted consumed nullifiers (no SetPreserves premise)'
+printf '%s\n' 'RED: IndexRows.apply_steps rejects the omitted consumed nullifiers (no SetPreserves premise)'
 printf '%s\n' 'WITNESS: the transaction-only root accepts genuine absence of a logically consumed nullifier'
 printf 'Evidence: %s\n' "$out"
