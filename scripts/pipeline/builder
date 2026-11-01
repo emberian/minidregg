@@ -56,6 +56,7 @@ round() {
   # the gate and sweep run from a copy taken now: integ-build may check out the next tip in src while they run
   if [ -f "$I/candidates/$sha/READY" ] && [ -x "$I/src/scripts/pipeline/gate" ]; then
     cp "$I/src/scripts/pipeline/gate" "$I/src/scripts/pipeline/sweep" "$ST/"
+    cp "$I/src/scripts/pipeline/world-reap" "$ST/" 2>/dev/null || true
     ( cd "$I" && "$ST/gate" "$sha" > "$ST/gate-$s8.out" 2>&1 ) 8>&- & gpid=$!; echo $gpid > "$ST/gate.pid"
   fi
   # the next round may start once src is free (the umbrella tree synced); the umbrellas finish beside it
@@ -69,14 +70,35 @@ round() {
     grep -q $'\tFAIL' "$G/TOUR.tsv" 2>/dev/null && phases="$phases tour"
     grep -q $'\tFAIL' "$G/j14.tsv" 2>/dev/null && phases="$phases j14"
     grep -q 'enrol-resume rc=[1-9]' <(grep "GATE $s8 " "$LOG") && phases="$phases enrol"
-    if [ -n "$phases" ] || grep -q $'\tFAIL' "$G/flatness.tsv" 2>/dev/null; then
+    if [ -n "$phases" ]; then   # flatness alone is published, never rerun (it does not gate)
       ( cd "$I" && PHASES="${phases# }" SUF=-r1 "$ST/gate" "$sha" > "$ST/gate-$s8-r1.out" 2>&1 ) 8>&-; rerun=$I/gate-$s8-r1
     fi
   fi
   reds "$sha" "$G" "$rerun"
+  reap_worlds "$sha"
   # still running umbrellas: REDS.md is rewritten for this round when they end, unless a newer round reported
   if kill -0 $bpid 2>/dev/null; then printf '%s %s %s %s\n' "$sha" "$bpid" "$G" "$rerun" > "$ST/pending"; fi
   say "round ${sha:0:12} done $(( $(date +%s) - t0 )) s: $(head -c 200 "$ST/summary-$s8.txt")"
+}
+
+reap_worlds() {  # SHA: after the verdict, stop every builder gate world's processes (scripts/pipeline/world-reap, by
+  # PID file) except the worlds behind this round's reds, and those of a candidate in $I/keep (root, 10-31: 120
+  # idle Hosts on hbox were mostly finished gate worlds). Builder worlds: $GATE_RUNS/{t,c,e,f,j}-<hex6>[suffix].
+  local sha=$1 s6=${1:0:6} R=${GATE_RUNS:-/ci} keep="" d b k
+  [ -x "$ST/world-reap" ] || { say "reap: no world-reap in this tip; worlds left up"; return 0; }
+  while IFS=$'\t' read -r st _ _; do case $st in
+    gate:composed*) keep="$keep c-$s6" ;; gate:j14*) keep="$keep j-$s6" ;; gate:enrol*) keep="$keep e-$s6" ;;
+    gate:flatness*) ;; gate:*) keep="$keep t-$s6" ;; esac; done < "$ST/signatures-${sha:0:8}.tsv"
+  local roots=()
+  for d in "$R"/[tcefj]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*; do
+    [ -d "$d" ] || continue; b=${d##*/}
+    case " $keep " in *" ${b%%-r1} "*|*" $b "*) continue;; esac
+    for k in $(grep -v '^#' "$I/keep" 2>/dev/null | tr -d ' '); do case ${b#?-} in ${k:0:6}*) continue 2;; esac; done
+    roots+=("$d")
+  done
+  [ ${#roots[@]} = 0 ] && return 0
+  "$ST/world-reap" "${roots[@]}" > "$ST/reap-${sha:0:8}.log" 2>&1
+  say "reap ${sha:0:12}: $(grep -c ' stopped [1-9]' "$ST/reap-${sha:0:8}.log") worlds stopped, $(grep -c UNNAMED "$ST/reap-${sha:0:8}.log") unnamed left (kept:${keep:- none}); $ST/reap-${sha:0:8}.log"
 }
 
 red_owner() {  # STAGE: the seat a red goes to (board/seats/*.md); build stages go to the suspects' owners below
@@ -92,6 +114,26 @@ red_owner() {  # STAGE: the seat a red goes to (board/seats/*.md); build stages 
     umbrella|umbrella-tree|rerecord|gate) echo "build-loop" ;;
     *) echo "suspects' owners" ;;
   esac; }
+
+flatness_table() {  # GATE_DIR: law 17's numbers as a published table (never a red, never stops green)
+  local G=$1 row v d log
+  [ -s "$G/flatness.tsv" ] || return 0
+  echo "## Flatness (published, does not gate \`green\`)"
+  echo
+  echo "| row | verdict | metric | early | late | ratio | bound | owner |"
+  echo "|---|---|---|---|---|---|---|---|"
+  while IFS=$'\t' read -r row v d; do
+    log=$(printf '%s' "$d" | grep -oE '/[^ ;]+\.log' | head -1)
+    if [ -n "$log" ] && grep -q '^FLATNESS ' "$log" 2>/dev/null; then
+      grep '^FLATNESS ' "$log" | while read -r _ m e l r b verdict; do
+        case $e in early=*) printf '| %s | %s | %s | %s | %s | %s | %s | %s |\n' "$row" "$verdict" "$m" "${e#early=}" "${l#late=}" "${r#ratio=}" "${b#bound=}" "$(red_owner "gate:$row")" ;;
+          *) printf '| %s | %s | %s | - | - | - | - | %s |\n' "$row" "$v" "$(echo "$m $e $l $r $b $verdict" | cut -c1-120)" "$(red_owner "gate:$row")" ;; esac
+      done
+    else
+      printf '| %s | %s | %s | - | - | - | - | %s |\n' "$row" "$v" "no numbers: ${d//|//}" "$(red_owner "gate:$row")"
+    fi
+  done < "$G/flatness.tsv"
+}
 
 reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
   local sha=$1 G=$2 R=$3 s8=${1:0:8} out=$ST/REDS-${1:0:8}.md prev=$ST/last-signatures.tsv sig=$ST/signatures-${1:0:8}.tsv
@@ -119,7 +161,8 @@ reds() {  # SHA GATE_DIR RERUN_DIR: write board/REDS.md and move green
   local ul=$I/logs/umbrella-tree-${sha:0:12}.log; [ -e "$ul" ] || ul=$I/logs/umbrella-tree.log
   grep -E '^RED ' "$ul" 2>/dev/null | while read -r _ m; do add umbrella "RED $m" "$ul"; done
   if [ -s "$G/gate.json" ]; then
-    awk -F'\t' '$2 == "FAIL" { print $1 "\t" $3 }' "$G/TOUR.tsv" "$G/flatness.tsv" "$G/j14.tsv" 2>/dev/null |
+    # flatness is published below, never a red (CLAUDE.md: performance is published, never a gate; root 10-31)
+    awk -F'\t' '$2 == "FAIL" { print $1 "\t" $3 }' "$G/TOUR.tsv" "$G/j14.tsv" 2>/dev/null |
       while IFS=$'\t' read -r row detail; do add "gate:$row" "$row FAIL" "${detail:0:240}"; done
     # composed: one row per phase that did not pass (the detail is `phase=verdict: why; phase=...`)
     [ "$(jq -r .composed.verdict "$G/gate.json")" = PASS ] || jq -r .composed.detail "$G/gate.json" | python3 -c '
@@ -134,6 +177,7 @@ for p in parts:
   elif [ -f "$I/candidates/$sha/READY" ]; then add gate "no verdict" "$G/gate.json missing"
   fi
   local n; n=$(grep -c . "$sig" || true)
+  local ft=$ST/flatness-$s8.md; flatness_table "$G" > "$ft"
   {
     echo "# Reds (owned by the builder, rewritten whole each round)"
     echo
@@ -161,6 +205,7 @@ for p in parts:
       echo
       suspects "$green" "$sha"
     fi
+    if [ -s "$ft" ]; then echo; cat "$ft"; fi
   } > "$out"
   cp "$sig" "$prev"
   publish "$out" "builder: REDS.md for ${sha:0:12} ($n red)"

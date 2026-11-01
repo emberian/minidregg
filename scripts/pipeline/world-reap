@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# scripts/pipeline/world-reap [--dry] ROOT...: stop every process of a finished world, by PID file only.
+# A process belongs to ROOT when an argument after argv[0] that is not a binary path (no /bin/ or /candidate/ in it)
+# names ROOT/ (its settings, config, socket, state), or its cwd is under ROOT: a resident that merely runs binaries
+# copied into ROOT for another world (10-31: hot-path's /ci/hpc residents ran c-acc7cf-c2's binaries) is not ROOT's.
+# Signalled, each with its descendants:
+#   - a PID named by any *.pid file under ROOT (world pid/, anchors a/, sessions' .call-slots and consent-anchors);
+#   - a `mini web` body PID recorded as .bodyPid in ROOT's */state/sessions/*.json (jweb-frontend's helper);
+#   - a PID named by $HOME/.mini/consent-anchors/*.pid (journeys run with the box HOME put their residents' files
+#     there) that belongs to ROOT.
+# SIGTERM, up to 10 s, then SIGKILL for what is left of those. A process that belongs to ROOT and no PID file names
+# (nor is a descendant of one) is reported UNNAMED and left. Output: one line per ROOT, then the leftovers.
+set -u
+dry=; [ "${1:-}" = --dry ] && { dry=1; shift; }
+anchors=${HOME:-/nonexistent}/.mini/consent-anchors
+# one pass over /proc: per PID its cwd and its non-binary arguments (one line each), and its command line
+declare -A where=() line=()
+for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = $$ ] && continue
+  mapfile -d '' -t argv < "$d/cmdline" 2>/dev/null || continue; [ ${#argv[@]} -gt 0 ] || continue
+  w=$(readlink "$d/cwd" 2>/dev/null) || w=; a=$w/
+  for x in "${argv[@]:1}"; do case $x in */bin/*|*/candidate/*) ;; *) a+=$'\n'$x ;; esac; done
+  where[$p]=$a; line[$p]="${argv[*]}"
+done
+belongs() {  # PID ROOT: the cwd under ROOT, or a non-binary argument naming ROOT/
+  local a=${where[$1]:-}; [ -n "$a" ] || return 1
+  case ${a%%$'\n'*} in "$2"/*) return 0;; esac
+  case $'\n'${a#*$'\n'} in *"$2/"*) return 0;; esac; return 1; }
+cmd() { printf '%s' "${line[$1]:-}" | cut -c1-140; }
+pids_named() {  # ROOT: "PID<TAB>SOURCE" for every PID record of ROOT and the shared anchors
+  local f p
+  while IFS= read -r f; do p=$( { tr -dc '0-9' < "$f"; } 2>/dev/null); [ -n "$p" ] && printf '%s\t%s\n' "$p" "$f"
+  done < <(find "$1" -name '*.pid' -type f 2>/dev/null; ls "$anchors"/*.pid 2>/dev/null)
+  find "$1" -path '*/state/sessions/*.json' -type f 2>/dev/null | while IFS= read -r f; do
+    p=$(jq -r '.bodyPid // empty' "$f" 2>/dev/null); [ -n "$p" ] && printf '%s\t%s (bodyPid)\n' "$p" "$f"; done; }
+descendants() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do echo "$c"; descendants "$c"; done; }
+for root in "$@"; do
+  root=$(realpath -m "$root"); [ -d "$root" ] || { echo "world-reap: $root: no such directory"; continue; }
+  case $root in /|/home|/home/*/|/tank|/ci) echo "world-reap: refusing $root"; continue;; esac
+  declare -A take=()
+  while IFS=$'\t' read -r p f; do
+    [[ $p =~ ^[0-9]+$ ]] && [ -d "/proc/$p" ] || continue
+    belongs "$p" "$root" || continue
+    take[$p]=$f; for c in $(descendants "$p"); do take[$c]=${take[$c]:-$f (descendant)}; done
+  done < <(pids_named "$root")
+  n=${#take[@]}
+  if [ -n "$dry" ]; then for p in "${!take[@]}"; do echo "  would stop $p ($(cmd $p)) via ${take[$p]}"; done
+  else
+    for p in "${!take[@]}"; do kill -TERM "$p" 2>/dev/null; done
+    for _ in $(seq 1 50); do left=0; for p in "${!take[@]}"; do kill -0 "$p" 2>/dev/null && left=1; done; [ $left = 0 ] && break; sleep 0.2; done
+    for p in "${!take[@]}"; do kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null; done
+  fi
+  un=0
+  for p in "${!where[@]}"; do [ -z "${take[$p]:-}" ] || continue; [ -d "/proc/$p" ] || continue
+    belongs "$p" "$root" || continue
+    case ${line[$p]} in *world-reap*) continue;; esac
+    un=$((un+1)); echo "  UNNAMED $p $(cmd "$p")"
+  done
+  echo "world-reap: $root: $([ -n "$dry" ] && echo "would stop" || echo stopped) $n by PID file; $un unnamed left"
+  unset take
+done
