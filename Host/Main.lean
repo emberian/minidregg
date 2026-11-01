@@ -1699,10 +1699,26 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   if (ApplicationLifecycleRetryBeginV4Ingress.codec.decode payload).isSome then
     return (← applicationLifecycleRetryBeginV4SubmitSession config state payload)
-  let session ← sessionWalked config state
   let some _ := ApplicationLifecycleBeginV3Ingress.codec.decode payload
     | return .refused .malformed "application-lifecycle-begin".toUTF8.toList
         "fresh BEGIN requires canonical launch-bound v3 ingress".toUTF8.toList
+  -- The light route (install, START, upgrade, continue); a STOP still selects its running
+  -- incarnation from the walk below.
+  let current ← sessionCurrent config state
+  match ← ApplicationLifecycleBeginV3Receiver.receiveServed config config.transport current.light payload
+      (sessionAdopt config state) with
+  | .confirmed confirmed =>
+      return ← sessionConfirmed config state confirmed.kind confirmed.accepted.intent.transactionId
+        confirmed.accepted.intent.event.eventId
+  | .rejected detail =>
+      NativeHost.logOperatorRefusal <|
+        .refused .operationRejected "application-lifecycle-begin".toUTF8.toList detail.toUTF8.toList
+      return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+  | .stop => pure ()
+  let session ← sessionWalked config state
   let result ← ApplicationLifecycleBeginV3Receiver.receiveVerified config
     session.verified payload
   match result with
@@ -1819,10 +1835,24 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   if (ApplicationLifecycleRetryCompletionV4Ingress.codec.decode payload).isSome then
     return (← applicationLifecycleRetryCompletionV4SubmitSession config state payload)
-  let session ← sessionWalked config state
   let some _ := ApplicationLifecycleCompletionV2Ingress.codec.decode payload
     | return .refused .malformed "application-lifecycle-completion".toUTF8.toList
         "fresh completion requires canonical launch-bound v2 ingress".toUTF8.toList
+  -- The light route; a STOP's completion still checks its running incarnation from the walk.
+  let current ← sessionCurrent config state
+  match ← ApplicationLifecycleCompletionV2Receiver.receiveServed config config.transport current.light payload
+      (sessionAdopt config state) with
+  | .confirmed confirmed =>
+      let intent := ApplicationLifecycleCompletionV2Core.intent confirmed.conditional
+      return ← sessionConfirmed config state confirmed.kind intent.transactionId intent.event.eventId
+  | .rejected detail =>
+      return .refused .operationRejected "application-lifecycle-completion".toUTF8.toList
+        detail.toUTF8.toList
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+  | .stop => pure ()
+  let session ← sessionWalked config state
   let result ← ApplicationLifecycleCompletionV2Receiver.receiveVerified config
     session.verified payload
   match result with
@@ -3037,37 +3067,28 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
     (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
   if (ApplicationLifecycleRetryClaimV4Ingress.codec.decode payload).isSome then
     return (← dispatchLifecycleRetryClaimV4SubmitSession config state payload output)
-  let session ← sessionWalked config state
   let some _ := ApplicationLifecycleClaimV3Ingress.codec.decode payload
     | writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
           (.refused .malformed "application-lifecycle-claim".toUTF8.toList
             "fresh claim requires canonical launch-bound v3 ingress".toUTF8.toList)
       return
-  let result ← ApplicationLifecycleClaimV3Receiver.receiveVerified config
-    session.verified payload
+  let light := (← sessionCurrent config state).light
+  let result ← ApplicationLifecycleClaimV3Receiver.receiveServed config config.transport light payload
+    (sessionAdopt config state)
   match result with
   | .reserved reservation =>
-      match reservation.confirmation with
-      | .installed =>
-          if reservation.freshCasWinner then
-            let handed ← reservation.withFreshTip fun committedBytes =>
-              writeSessionFrame output 26 committedBytes
-            match handed with
-            | .ok _ => sessionSetWalked state reservation.old reservation.readback
-            | .error detail =>
-                writeSessionFrame output 26 <| outcomeCodec.encode <|
-                  NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
-          else
-            sessionSetWalked state reservation.old reservation.readback
+      if reservation.kind == .installed && reservation.freshCasWinner then
+        let handed ← reservation.withFreshTip config.transport fun committedBytes =>
+          writeSessionFrame output 26 committedBytes
+        match handed with
+        | .ok _ => pure ()
+        | .error detail =>
             writeSessionFrame output 26 <| outcomeCodec.encode <|
-              NativeHost.publicSubmissionOutcome
-                (.confirmed .replayed reservation.receipt)
-      | .recoveredAfterUncertainResponse | .replayed =>
-          sessionSetWalked state reservation.old reservation.readback
-          writeSessionFrame output 26 <| outcomeCodec.encode <|
-            NativeHost.publicSubmissionOutcome
-              (.confirmed .replayed reservation.receipt)
+              NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+      else
+        writeSessionFrame output 26 <| outcomeCodec.encode <|
+          NativeHost.publicSubmissionOutcome (.confirmed .replayed reservation.receipt)
   | .rejected detail =>
       -- The submitter gets the uniform frame; the operator's log keeps the reason.
       let outcome : NativeHostCodec.Outcome :=
@@ -6692,26 +6713,29 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
       let (selectorBytes, payload) ← splitPair payload
       let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
       let pin := selector.beginPin management
-      let session ← sessionWalked pinnedConfig state
-      if let some routed ←
-          retryLifecycleBeginPlan pinnedConfig session pin payload then
-        return routed
+      if (ApplicationLifecycleRetryBeginV4Authoring.requestCodec.decode payload).isSome then
+        if let some routed ←
+            retryLifecycleBeginPlan pinnedConfig (← sessionWalked pinnedConfig state) pin payload then
+          return routed
       let bytes ← if let some request :=
           ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
         if request.kind == .stop then do
+          -- A STOP's running witness is still selected from the walk.
+          let session ← sessionWalked pinnedConfig state
           let plan ← IO.ofExcept <|
             ApplicationLifecycleLaunchBeginAuthoring.prepareStopRequestVerified
               pinnedConfig session.verified pin payload
           pure (ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.encode plan)
         else do
+          let light := (← sessionCurrent pinnedConfig state).light
           let plan ← IO.ofExcept <|
-            ApplicationLifecycleLaunchBeginAuthoring.prepareVerified
-              pinnedConfig session.verified pin request
+            (← ApplicationLifecycleLaunchBeginAuthoring.prepareRequestLight pinnedConfig light pin payload)
           pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
       else do
+        let light := (← sessionCurrent pinnedConfig state).light
         let plan ← IO.ofExcept <|
-          (← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestVerified
-            pinnedConfig session.verified pin payload)
+          (← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestLight
+            pinnedConfig light pin payload)
         pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
       unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "launch BEGIN plan exceeds host frame bound")
@@ -6741,13 +6765,14 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
             "lifecycle management identity is not configured")
       let (selectorBytes, payload) ← splitPair payload
       let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-      let session ← sessionWalked pinnedConfig state
-      if let some routed ← retryLifecycleClaimPlan pinnedConfig session
-          (selector.claimPin management) payload then
-        return routed
+      if (ApplicationLifecycleRetryClaimV4Authoring.requestCodec.decode payload).isSome then
+        if let some routed ← retryLifecycleClaimPlan pinnedConfig (← sessionWalked pinnedConfig state)
+            (selector.claimPin management) payload then
+          return routed
+      let light := (← sessionCurrent pinnedConfig state).light
       let plan ← IO.ofExcept <|
-        ApplicationLifecycleLaunchClaimAuthoring.prepareRequestVerified
-          pinnedConfig session.verified (selector.claimPin management) payload
+        (← ApplicationLifecycleLaunchClaimAuthoring.prepareRequestLight
+          pinnedConfig light (selector.claimPin management) payload)
       let bytes := ApplicationLifecycleLaunchClaimAuthoring.planCodec.encode plan
       unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "launch claim plan exceeds host frame bound")
@@ -6772,13 +6797,14 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
             "lifecycle management identity is not configured")
       let (selectorBytes, payload) ← splitPair payload
       let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-      let session ← sessionWalked pinnedConfig state
-      if let some routed ← retryLifecycleCompletionPlan pinnedConfig session
-          (selector.completionPin management) payload then
-        return routed
+      if (ApplicationLifecycleRetryCompletionV4Authoring.requestCodec.decode payload).isSome then
+        if let some routed ← retryLifecycleCompletionPlan pinnedConfig (← sessionWalked pinnedConfig state)
+            (selector.completionPin management) payload then
+          return routed
+      let light := (← sessionCurrent pinnedConfig state).light
       let plan ← IO.ofExcept <|
-        (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestVerified
-          pinnedConfig session.verified (selector.completionPin management) payload)
+        (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestLight
+          pinnedConfig light (selector.completionPin management) payload)
       let bytes := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.encode plan
       unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "launch completion plan exceeds host frame bound")

@@ -990,6 +990,10 @@ inductive Received (rootBytes : List UInt8 → Digest) (opening : Opening rootBy
   | appended (kind : DurableReceiverIO.Confirmation) (next : Opening rootBytes)
       (height : next.head.height = opening.head.height + 1) (entry : DurableReceiverIO.Entry)
       (entryExact : entry.record = DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent))
+      -- `fresh`: this attempt's own append installed the entry (the Store answered `.installed`),
+      -- not a readback after `.alreadyPresent` or an uncertain response; the one-shot launch power
+      -- of a claim reservation goes only to such a winner.
+      (fresh : Bool)
   /-- The transaction was already accepted: its verified record. -/
   | replayed (recorded : Intent TransactionId CellId StableNullifier ReplayEnvelope)
   | rejected (reason : DurableDataIntent.RejectReason)
@@ -1043,7 +1047,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
         (DurableHistory.completedNodes head.frontier height leaf) indexWrites
       let entry : DurableReceiverIO.Entry := ⟨recordBytes, DurableHistory.trailer key height
         ⟨worldRoot, chain, DurableHistory.frontierDigest height frontierAfter, indexAfter⟩⟩
-      let confirm := fun (kind : DurableReceiverIO.Confirmation) => do
+      let confirm := fun (kind : DurableReceiverIO.Confirmation) (fresh : Bool) => do
         match ← transport.read height false with
         | .error message => return Received.uncertain s!"append attempted; readback unavailable: {message}"
         | .ok none => return .uncertain "append attempted; the Store is not initialized"
@@ -1072,12 +1076,12 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                     return .appended kind
                       ⟨opening.store, opening.live, head', served', fields.1.symm, fields.2.1.symm, roots.1, roots.2, sealedAt,
                         worldAfter⟩
-                      (by rw [fields.1, ← opening.heightExact]) entry rfl
+                      (by rw [fields.1, ← opening.heightExact]) entry rfl fresh
       match ← transport.append height entry nodes with
-      | .installed => confirm .installed
-      | .alreadyPresent => confirm .installed
+      | .installed => confirm .installed true
+      | .alreadyPresent => confirm .installed false
       | .conflict => return .contention
-      | .uncertain _ => confirm .recoveredAfterUncertainResponse
+      | .uncertain _ => confirm .recoveredAfterUncertainResponse false
 
 #assert_axioms Served.recordedAt_some
 #assert_axioms Served.recordedAt_none

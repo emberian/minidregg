@@ -3,10 +3,17 @@ Fresh launch-bound physical lifecycle completion. The original v3 claim is bound
 to the same native-admitted chronological Replay context, the host custodian
 report and current law are checked, and the exact event-25 intent is submitted
 once through one CAS with complete physical post-image readback.
+
+The light route (`receiveServed`, KN2 2b) serves every completion but a STOP's: the original
+claim is selected and re-admitted at its own prefix through the light opening's Reader
+(`ApplicationLifecycleCompletionV2Admission.prepareConditional`), the current part admits on
+the opening's ground at its head, the commit is `DurableServed.receiveServed`. A STOP's
+completion still checks the running incarnation from the walk (`receiveVerified`).
 -/
 module
 
 public import Kernel.NativeHostReplay
+public import Kernel.NativeHostLight
 
 @[expose] public section
 
@@ -105,6 +112,83 @@ def receiveVerified (config : Config) {target : Durable}
       match ordinary with
       | .confirmed _ _ =>
           return .uncertain "checked lifecycle completion lacks exact post-CAS readback"
+      | .rejected _ => return .rejected "durable checked lifecycle completion refused"
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail
+      | .uncertain detail => return .uncertain detail
+
+/-! ## The light route -/
+
+/-- A completion confirmed on the light route: its candidate (original claim re-admitted at its
+own prefix under the opening's head, current law, custodian report and markers on the light
+ground), not a STOP's, its transaction verified unrecorded, the appended record its intent's. -/
+structure LightConfirmed (config : Config) (opening : DurableServed.Opening ResourceBirthCodec.rootBytes) where
+  private mk ::
+  ingress : ApplicationLifecycleCompletionV2Ingress.Ingress
+  grounded : ServedBasis.Grounded config.deployment opening.head
+  conditional : ApplicationLifecycleCompletionV2Admission.Candidate config opening.head grounded.ground ingress
+  notStop : ingress.source.originalBegin.base.source.kind ≠ .stop
+  fresh : grounded.ground.recorded (ApplicationLifecycleCompletionV2Core.intent conditional).transactionId =
+    some none
+  kind : DurableReceiverIO.Confirmation
+  next : DurableServed.Opening ResourceBirthCodec.rootBytes
+  height : next.head.height = opening.head.height + 1
+  entry : DurableReceiverIO.Entry
+  entryExact : entry.record = DurableCheckpointCodec.recordFrame.encode
+    (DurableReceiver.IntentRecord.ofIntent (ApplicationLifecycleCompletionV2Core.intent conditional))
+
+/-- **What a light completion proves**: the appended record is the candidate's intent's, at the
+opening's next height; it carries this ingress's event; its transaction id was verified
+unrecorded on its ground. -/
+theorem LightConfirmed.exact {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
+    (confirmed : LightConfirmed config opening) :
+    confirmed.entry.record = DurableCheckpointCodec.recordFrame.encode
+        (DurableReceiver.IntentRecord.ofIntent (ApplicationLifecycleCompletionV2Core.intent confirmed.conditional)) ∧
+      confirmed.next.head.height = opening.head.height + 1 ∧
+      (ApplicationLifecycleCompletionV2Core.intent confirmed.conditional).event =
+        ApplicationLifecycleCompletionV2Ingress.event confirmed.ingress ∧
+      confirmed.grounded.ground.recorded
+        (ApplicationLifecycleCompletionV2Core.intent confirmed.conditional).transactionId = some none :=
+  ⟨confirmed.entryExact, confirmed.height,
+    ApplicationLifecycleCompletionV2Core.intent_event confirmed.conditional, confirmed.fresh⟩
+
+inductive LightResult (config : Config) (opening : DurableServed.Opening ResourceBirthCodec.rootBytes) where
+  | confirmed (confirmed : LightConfirmed config opening)
+  /-- A STOP's completion: its running incarnation is checked from the walk (`receiveVerified`). -/
+  | stop
+  | rejected (detail : String)
+  | contention
+  | unavailable (detail : String)
+  | uncertain (detail : String)
+
+def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
+    (light : NativeHostLight.Light config) (bytes : List UInt8)
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) :
+    IO (LightResult config light.opening) := do
+  let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes
+    | return .rejected "noncanonical checked lifecycle completion ingress"
+  if notStop : ingress.source.originalBegin.base.source.kind = .stop then return .stop
+  else
+  let grounded ← match ← light.groundedVia transport
+      (ApplicationLifecycleCompletionV2Admission.keys config ingress) with
+    | .error detail => return .unavailable detail
+    | .ok grounded => pure grounded
+  let reader := light.opening.reader transport ResourceBirthCodec.rootBytes
+  let conditional ← match ← ApplicationLifecycleCompletionV2Admission.prepareConditional config reader
+      grounded ingress with
+    | .error detail => return .rejected detail
+    | .ok conditional => pure conditional
+  let intent := ApplicationLifecycleCompletionV2Core.intent conditional
+  match fresh : grounded.ground.recorded intent.transactionId with
+  | none => return .rejected "checked lifecycle completion transaction identity undeclared"
+  | some (some _) => return .rejected "checked lifecycle completion transaction identity already used"
+  | some none =>
+      match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening intent with
+      | .appended kind next height entry entryExact _ =>
+          adopt next none
+          return .confirmed ⟨ingress, grounded, conditional, notStop, fresh, kind, next, height, entry,
+            entryExact⟩
+      | .replayed _ => return .rejected "checked lifecycle completion transaction identity already used"
       | .rejected _ => return .rejected "durable checked lifecycle completion refused"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail

@@ -631,6 +631,24 @@ private def recordPresent {config : Config} (opened : Opened config) (index : Na
         .ok ⟨by rw [exact]⟩
       else .error "historical record differs from the verified prefix"
 
+/-- **The completed create a continue names, read from the Store's history** at the
+reader's head: the event25 first-create completion, or the event72 retry completion,
+each re-admitted at its own prefix (`ApplicationLifecycleCreatedHistory.select`), the
+height bounded by `bound`. The light BEGIN reads it here directly; the replay walk
+joins it with its own chronology (`selectCreatedAt`). -/
+def selectCreated (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (bound : Nat)
+    (binding : ApplicationLifecycleLaunchBinding.Binding) :
+    IO (Except String (CreatedSelected config reader.head binding)) := do
+  match ← ApplicationLifecycleCreatedHistory.select config reader bound binding with
+  | .ok candidate => return .ok (.v2 candidate)
+  | .error v2Detail =>
+      match ← ApplicationLifecycleRetryCompletionV4CreatedHistory.select config reader
+          bound binding with
+      | .ok candidate => return .ok (.v4 candidate)
+      | .error v4Detail =>
+          return .error s!"{v2Detail}; as a retry completion: {v4Detail}"
+
 private def selectCreatedAt (config : Config) (opened : Opened config)
     {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader rootBytes store)
@@ -638,14 +656,9 @@ private def selectCreatedAt (config : Config) (opened : Opened config)
     (binding : ApplicationLifecycleLaunchBinding.Binding) :
     IO (Except String (CreatedAt config opened binding)) := do
   let selected : CreatedSelected config reader.head binding ←
-    match ← ApplicationLifecycleCreatedHistory.select config reader opened.durable.height binding with
-    | .ok candidate => pure (.v2 candidate)
-    | .error v2Detail =>
-        match ← ApplicationLifecycleRetryCompletionV4CreatedHistory.select config reader
-            opened.durable.height binding with
-        | .ok candidate => pure (.v4 candidate)
-        | .error v4Detail =>
-            return .error s!"{v2Detail}; as a retry completion: {v4Detail}"
+    match ← selectCreated config reader opened.durable.height binding with
+    | .ok selected => pure selected
+    | .error detail => return .error detail
   let some prior := created.find? (fun prior =>
       prior.index == selected.index && prior.receipt == selected.receipt)
     | return .error "completed create absent from admitted replay chronology"
@@ -3845,12 +3858,6 @@ def admitClaimV2Verified {config : Config} {target : Durable}
     (ingress : ApplicationLifecycleClaimV2Ingress.Ingress) :
     IO (Except String (ClaimAtV2 config old.opened ingress)) :=
   admitClaimV2At config old.opened old.reader old.beginsV2 ingress
-
-def admitClaimV3Verified {config : Config} {target : Durable}
-    (old : Verified config target)
-    (ingress : ApplicationLifecycleClaimV3Ingress.Ingress) :
-    IO (Except String (ClaimAtV3 config old.opened ingress)) :=
-  admitClaimV3At config old.opened old.reader old.beginsV3 ingress
 
 def admitFailedStartRecoveryVerified {config : Config} {target : Durable}
     (old : Verified config target)
