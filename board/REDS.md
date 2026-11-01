@@ -1,19 +1,29 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `467e698ef56f` (client test: name the Host operation constants in the outcome-reply test). Round finished 2026-11-01T01:03Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-467e698e`.
+Tip: `d5e858b2222b` (builder: REDS.md for 467e698ef56f (5 red)). Round finished 2026-11-01T02:12Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-d5e858b2`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:flatness-submit | flatness-submit FAIL | not rerun | no | host-execution, store-retained | rc=1; /ci/f-467e69/submit.log |
-| gate:flatness-run | flatness-run FAIL | not rerun | no | host-execution, store-retained | exit=1; /home/hbox/lanes/integ/gate-467e698e/flatness.log |
-| gate:composed:residents | composed residents fail | not rerun | no | member-side, infra | fail: residents: REFUSED timeout: managed fixture provider; see /ci/c-467e69/composed/stat |
-| gate:composed:restart | composed restart blocked | not rerun | no | host-execution | blocked: prerequisite residents has not passed |
+| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:flatness-submit | flatness-submit FAIL | not rerun | yes | host-execution, store-retained | rc=1; /ci/f-d5e858/submit.log |
+| gate:flatness-run | flatness-run FAIL | not rerun | yes | host-execution, store-retained | exit=1; /home/hbox/lanes/integ/gate-d5e858b2/flatness.log |
+| gate:composed:residents | composed residents fail | not rerun | yes | member-side, infra | fail: residents: REFUSED timeout: managed fixture provider; see /ci/c-d5e858/composed/stat |
+| gate:composed:restart | composed restart blocked | not rerun | yes | host-execution | blocked: prerequisite residents has not passed |
 
-Suspect commits since green (`git log 83e926874e38..467e698ef56f`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..d5e858b2222b`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `d5e858b2` builder: REDS.md for 467e698ef56f (5 red)
+- `dc721e35` conversations: a receive names the app's own rejection (refuseOn), and an incomplete one says what a
+- `2ca521af` board: store-retained row: held served state in flight (overlay 4f60d20e9ef7, persvati verdict owed) (owner: store-retained)
+- `f937f2b3` mini serve: the serving Host's PID beside the socket (mini.host.pid) (owner: member-side)
+- `e63abb0e` board: host-execution row: per-birth doc new profile, second delegate (owner: host-execution)
+- `f9a530be` board: host-execution row: lifecycle port landed (2edf8a1ce), next steps, delegate (owner: host-execution)
+- `2edf8a1c` host-execution: the app-lifecycle turns serve from the light opening (KN2 2b PORT-C, lifecycle first (owner: build-loop, host-execution)
+- `a1f503b0` board: member-side row: orphans stopped and logged; standing rule
+- `007cedb6` board: privacy row, consent walk measured near flat after a014ff501; Host still grows
+- `b15b9075` board: member-side row: a014ff501 after-number
 - `467e698e` client test: name the Host operation constants in the outcome-reply test (owner: member-side)
 - `043c2c58` board: member-side row after a014ff501
 - `a18cfe5c` board: host-execution row: new seat a0dec24192aead1f1; 7acbdd878 reviewed (owner: host-execution)
@@ -44,13 +54,3 @@ Suspect commits since green (`git log 83e926874e38..467e698ef56f`), newest first
 - `520e33d2` board: build-loop row: new seat a4141abe7297fdc4b; builder relaunched; akapug #4 and #5 landed (owner: build-loop)
 - `64c34e22` fixtures: native runs re-recorded from candidate 9dc9c138cb32 (accepted stale, doc-write stale)
 - `ae98da48` fleet-sign join: bind the selected socket before any key, enrollment or funding (PR #4) (owner: member-side)
-- `d9f333db` capture test: hold the stdout lock so libtest's result lines stay out of the capture (owner: member-side)
-- `4b750eb6` builder: REDS.md for 9dc9c138cb32 (8 red)
-- `dbe87447` Merge remote-tracking branch 'origin/main' into seat/host-execution
-- `7eca2241` board: host-execution row: rounds 3 and 4, persvati measuring, hbox tree (owner: host-execution)
-- `82ef64a4` board: apps-hermes row: WBO certifier starves during the qualify; refusal decode fixed; referer ruli (owner: apps-hermes)
-- `a1e69615` lifetime agent: op76's refusal names its reason instead of one fixed sentence (owner: apps-hermes)
-- `2e85f567` Merge remote-tracking branch 'origin/main' into seat/host-execution
-- `a1769318` host-execution: key status, the certify view and a birth's authored intent read the light served sta (owner: host-execution)
-- `bbfa5e08` board: build-loop row: builder restart, fd-8 fix (owner: build-loop)
-- `f1d2d3bb` builder: children never inherit builder.lock (fd 8) (owner: build-loop)
