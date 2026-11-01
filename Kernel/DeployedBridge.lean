@@ -199,20 +199,22 @@ def retiresCellFast : List UInt8 → Bool
 
 @[csimp] theorem retiresCell_eq_fast : @retiresCell = @retiresCellFast := by
   funext bytes
-  unfold retiresCell LifecycleImage.codec LifecycleImage.rawCodec
-  change (match LifecycleImage.rawDecode CanonicalCellRegistry.registry bytes with
-    | some .retired => true
-    | _ => false) = retiresCellFast bytes
-  unfold LifecycleImage.rawDecode
+  symm
+  unfold retiresCellFast
   split
   · rfl
-  · rfl
-  · rename_i payload
-    cases Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry payload <;> rfl
-  · rename_i other h1 h2 h3
-    unfold retiresCellFast
+  · rename_i hne
+    unfold retiresCell LifecycleImage.codec LifecycleImage.rawCodec LifecycleImage.rawDecode
+    dsimp only
     split
-    · contradiction
+    · rename_i heq
+      split at heq
+      · cases heq
+      · exact False.elim (hne rfl)
+      · rename_i payload
+        cases hp : Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry payload <;>
+          simp [hp] at heq
+      · cases heq
     · rfl
 
 theorem retiresCell_decode (bytes : List UInt8) (retires : retiresCell bytes = true) :

@@ -1139,10 +1139,10 @@ theorem unblinded_blinding_none {kind : CanonicalCellRegistry.Kind}
   | none => simp [hwire] at key
   | some wire =>
       simp only [hwire, decide_eq_true_eq] at unblinded key
-      unfold StoreCodec.blindingKey at unblinded
-      rw [key, Option.some_bind, Option.isSome_map, Bool.not_eq_true, Option.isSome_eq_false_iff,
-        Option.isNone_iff_eq_none] at unblinded
-      exact unblinded
+      cases hval : store address with
+      | none => rfl
+      | some val =>
+          simp [StoreCodec.blindingKey, key, hval] at unblinded
 
 /-- `narrowPacked` as compiled: an un-narrowed read (`fields = none`) of an
 unblinded cell returns `packed` with its cached bytes and root intact. -/
@@ -1157,31 +1157,30 @@ def narrowPackedFast (fields : Option (Finset CellField))
 
 set_option backward.isDefEq.respectTransparency false in
 @[csimp] theorem narrowPacked_eq_fast : @narrowPacked = @narrowPackedFast := by
-  funext fields packed
+  funext fields ⟨kind, payload⟩
   unfold narrowPackedFast
   cases fields with
   | some _ => rfl
   | none =>
-      split
-      · rfl
-      · rename_i unblinded
-        have hfalse : CanonicalCellRegistry.blinded packed.kind packed.payload.logical = false :=
-          Bool.eq_false_iff.mpr unblinded
-        rcases packed with ⟨kind, payload⟩
-        unfold narrowPacked
-        congr 1
-        apply Minidregg.Theory.CellState.Materialized.ext
-        apply Minidregg.Theory.SparseMap.ext
-        intro address
-        by_cases vis : Visible none kind address
-        · exact Minidregg.Theory.SparseMap.filterKeys_apply_pos _ vis
-        · rw [Minidregg.Theory.SparseMap.filterKeys_apply_neg _ vis]
-          have kept : Kept none (fieldOf kind) address := by unfold Kept; split <;> trivial
-          have isKey : CanonicalCellRegistry.isBlinding kind address = true := by
-            cases h : CanonicalCellRegistry.isBlinding kind address
-            · exact False.elim (vis ⟨kept, h⟩)
-            · rfl
-          exact (unblinded_blinding_none hfalse isKey).symm
+      dsimp only
+      cases hfalse : CanonicalCellRegistry.blinded kind payload.logical with
+      | true => rfl
+      | false =>
+          simp only [Bool.false_eq_true, ↓reduceIte]
+          unfold narrowPacked
+          congr 1
+          apply Minidregg.Theory.CellState.Materialized.ext
+          apply Minidregg.Theory.SparseMap.ext
+          intro address
+          by_cases vis : Visible none kind address
+          · exact Minidregg.Theory.SparseMap.filterKeys_apply_pos _ vis
+          · have kept : Kept none (fieldOf kind) address := by unfold Kept; split <;> trivial
+            have isKey : CanonicalCellRegistry.isBlinding kind address = true := by
+              cases h : CanonicalCellRegistry.isBlinding kind address
+              · exact False.elim (vis ⟨kept, h⟩)
+              · rfl
+            exact (Minidregg.Theory.SparseMap.filterKeys_apply_neg _ vis).trans
+              (unblinded_blinding_none hfalse isKey).symm
 
 set_option backward.isDefEq.respectTransparency false in
 /-- Every address a reader receives is one its scope keeps. -/

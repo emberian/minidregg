@@ -1814,9 +1814,10 @@ theorem ofCells_eq_fast_apply (B : Bridge R D) (H : History R TransactionId Stab
     congr 1
     funext w
     unfold Function.comp refusalOfDeltaOn writeRefusal
+    dsimp only
     cases deltaOf B.codec cells w with
     | error e => rfl
-    | ok d => rw [Delta.legAndOk_eq]
+    | ok d => cases d <;> rfl
   have computed : ((intent.writes.map fun w =>
         let δ := deltaOf B.codec cells w
         let lo : Option (Leg R) × Bool := match δ with
@@ -1839,9 +1840,10 @@ theorem ofCells_eq_fast_apply (B : Bridge R D) (H : History R TransactionId Stab
     congr 1
     funext w
     unfold Function.comp
+    dsimp only
     cases deltaOf B.codec cells w with
     | error e => rfl
-    | ok d => rw [Delta.legAndOk_eq]
+    | ok d => cases d <;> rfl
   have turnEq : turnOfDeltasOn B H (deltas B.codec cells intent.writes)
       ((deltas B.codec cells intent.writes).filterMap (fun d => d.2.leg? B.codec d.1)) intent =
       turnOf B H cells intent := rfl

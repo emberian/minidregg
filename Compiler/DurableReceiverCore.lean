@@ -1007,8 +1007,8 @@ def rootPinFails (roots : CellId → Digest) (w : HostRefinesWorld.DWorld)
 
 /-- Admit one already-bound intent against a World using the snapshot's bound
 roots for pin checks (`receiveServed`). -/
-def advanceWorldIntent (roots : CellId → Digest) (w : HostRefinesWorld.DWorld)
-    (height : Nat) (intent : DataIntent ResourceBirthCodec.rootBytes) :
+def advanceWorldIntent {rootBytes : List UInt8 → Digest} (roots : CellId → Digest)
+    (w : HostRefinesWorld.DWorld) (height : Nat) (intent : DataIntent rootBytes) :
     Except String HostRefinesWorld.DWorld :=
   match TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent with
   | .error refusal => .error s!"height {height + 1}: the record is not a turn: {repr refusal}"
