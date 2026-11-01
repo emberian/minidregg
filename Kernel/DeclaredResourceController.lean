@@ -1657,10 +1657,11 @@ re-hashed (`Ground.physicalCurrent`). -/
 def targetWriteFast (prepared : PreparedInvocation deployment profile ambient ground command)
     (i : TargetIndex command) : DataWrite :=
   let after := packTarget command.targets[i] (prepared.targets i).candidate.post
+  let postBytes := ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry (.live after)
   { cellId := ⟨command.targets[i].target⟩
     expectedPre := ground.view.model.roots ⟨command.targets[i].target⟩
-    exactPost := ResourceBirthCodec.physicalRoot (.live after)
-    canonicalPostBytes := ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry (.live after) }
+    exactPost := ResourceBirthCodec.rootBytes postBytes
+    canonicalPostBytes := postBytes }
 
 @[csimp] theorem targetWrite_eq_fast : @targetWrite = @targetWriteFast := by
   funext F _ deployment profile ambient ground command prepared i
