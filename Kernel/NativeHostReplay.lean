@@ -697,29 +697,41 @@ theorem exact (selected : IssueSelected config head index) :
 
 end IssueSelected
 
+/-- Why an issue selection failed, said as what it is (law 10): the Store's history could not be
+read or verified at the issue's height (`history`, never a verdict on the issue), or the record
+read there is not an issue this deployment admits at its prefix (`refused`). -/
+inductive IssueRefusal where
+  | history (detail : String)
+  | refused (detail : String)
+  deriving Repr
+
+def IssueRefusal.message : IssueRefusal → String
+  | .history detail => s!"history unavailable at the issue's height: {detail}"
+  | .refused detail => detail
+
 /-- Select the event22 issue at 0-based `index` (below `bound`) and re-admit it at its prefix.
 Its keys are its own record's (its transaction id and nullifiers), read verified first; an
 admission that reads any other key refuses on the undeclared answer. -/
 def selectIssue (config : Config) {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader rootBytes store)
     (pins : Minidregg.Theory.ResourceBirth.FactoryPins) (bound index : Nat) :
-    IO (Except String (IssueSelected config reader.head index)) := do
+    IO (Except IssueRefusal (IssueSelected config reader.head index)) := do
   let probe ← match ← reader.atHeight (index + 1) with
-    | .error refusal => return .error refusal.message
+    | .error refusal => return .error (.history refusal.message)
     | .ok read => pure read.record
   let candidate ← match ← NativeHistorySelection.select config reader bound index
       ⟨[probe.transactionId], probe.nullifiers⟩ with
-    | .error detail => return .error detail
+    | .error detail => return .error (.history detail)
     | .ok candidate => pure candidate
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, config.genesisHeight + candidate.ground.height⟩
   let admitted ← match ← ApplicationShareIssueGrainAdmission.admitNative config.profile config pins
       config.signature candidate.ground ambient (sourceBytes candidate.record) with
-    | .error detail => return .error s!"original event22 issue refused at its prefix: {detail}"
+    | .error detail => return .error (.refused s!"original event22 issue refused at its prefix: {detail}")
     | .ok admitted => pure admitted
   match NativeHistorySelection.matchIntent candidate
       (ApplicationShareIssueGrainReceiver.intent admitted.2) with
-  | .error detail => return .error detail
+  | .error detail => return .error (.refused detail)
   | .ok matched => return .ok ⟨candidate, pins, admitted.1, admitted.2, matched⟩
 
 private def selectCreatedAt (config : Config) (opened : Opened config)

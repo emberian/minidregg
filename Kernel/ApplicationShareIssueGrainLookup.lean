@@ -21,6 +21,9 @@ inductive Error where
   | malformed
   | transactionConflict
   | nativeHistoryUnavailable
+  /-- The Store's history could not be read or verified for the issue (law 10: a read failure
+  names itself, never a conflict); `detail` is the Reader's refusal, naming the height. -/
+  | historyRefused (detail : String)
   deriving DecidableEq, Repr
 
 /-- **Receipt-only lookup through the Store's history.** The issue's transaction id is read by
@@ -39,13 +42,14 @@ def lookupLight (config : Config) {store : DurableHistory.StoreIdentity}
     | return .error .malformed
   let transactionId := grain.source.birth.transactionId
   match ← reader.byTx transactionId with
-  | .error _ => return .error .nativeHistoryUnavailable
+  | .error refusal => return .error (.historyRefused refusal.message)
   | .ok (.absent _) => return .ok none
   | .ok (.present found) =>
       if found.height = 0 then return .error .nativeHistoryUnavailable
       let index := found.height - 1
       match ← NativeHostReplay.selectIssue config reader pins reader.head.height index with
-      | .error _ => return .error .transactionConflict
+      | .error (.history detail) => return .error (.historyRefused detail)
+      | .error (.refused _) => return .error .transactionConflict
       | .ok issue =>
           let receipt := issue.receipt
           if issue.ingress.canonicalBytes == bytes &&

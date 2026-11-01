@@ -2118,6 +2118,8 @@ def applicationGrainShareIssueLookupSession (config : NativeHost.Config)
         "transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "original grain share issue history unavailable".toUTF8.toList
+  | .error (.historyRefused detail) =>
+      return .unavailable s!"original grain share issue history refused: {detail}".toUTF8.toList
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
 

@@ -162,7 +162,8 @@ def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
     let index := ingress.spec.grant.source.issueIndex
     let issue ← match ← NativeHostReplay.selectIssue config reader light.opened.pins
         grounded.ground.height index with
-      | .error detail => return .rejected s!"agent lifetime grant original event22 issue absent: {detail}"
+      | .error (.history detail) => return .unavailable s!"agent lifetime grant original event22 issue: history unavailable: {detail}"
+      | .error (.refused detail) => return .rejected s!"agent lifetime grant original event22 issue absent: {detail}"
       | .ok issue => pure issue
     if event22 : issue.evidence.record.event.codecVersion = 22 then
       if issueReceipt : issue.receipt = ingress.spec.grant.source.issueReceipt then

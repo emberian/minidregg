@@ -130,7 +130,8 @@ def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
       | .ok grounded => pure grounded
     let issue ← match ← NativeHostReplay.selectIssue config reader light.opened.pins
         grounded.ground.height ingress.request.issueIndex with
-      | .error detail => return .rejected s!"session enrollment original event22 ticket absent: {detail}"
+      | .error (.history detail) => return .unavailable s!"session enrollment original event22 ticket: history unavailable: {detail}"
+      | .error (.refused detail) => return .rejected s!"session enrollment original event22 ticket absent: {detail}"
       | .ok issue => pure issue
     if event22 : issue.evidence.record.event.codecVersion = 22 then
       if issueReceipt : issue.receipt = ingress.issueReceipt then
