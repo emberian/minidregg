@@ -1,19 +1,24 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `359ace71edac` (builder: REDS.md for e00408f660e6 (7 red)). Round finished 2026-11-01T03:31Z.
-green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-359ace71`.
+Tip: `3c6b99064d42` (builder: REDS.md for 359ace71edac (5 red)). Round finished 2026-11-01T03:35Z.
+green: `83e926874e38`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3c6b9906`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | rc=1 see /home/hbox/lanes/integ/logs/umbrella-tree-359ace71edac.log | - | no | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-359ace71edac.log |
-| umbrella | RED Fixtures.NativeAcceptedFixture | - | yes | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-359ace71edac.log |
-| umbrella | RED Fixtures.NativeDocWriteFixture | - | yes | build-loop | /home/hbox/lanes/integ/logs/umbrella-tree-359ace71edac.log |
-| gate:composed:residents | composed residents fail | not rerun | yes | member-side, infra | fail: residents: WAITING root canonical provider custody publication absent: /ci/c-359ace/ |
-| gate:composed:restart | composed restart blocked | not rerun | yes | host-execution | blocked: prerequisite residents has not passed |
+| host | rc=1 error: build failed | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
+| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 83e926874e38..359ace71edac`), newest first; owners are the seats whose
+Suspect commits since green (`git log 83e926874e38..3c6b99064d42`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `3c6b9906` builder: REDS.md for 359ace71edac (5 red) (owner: build-loop)
+- `48b93d3c` write-path: eliminate target cell re-hash in observation prepare and post-bytes decode in birth prep (owner: apps-hermes)
+- `f7031ae1` fixtures: native runs re-recorded from candidate 359ace71edac (accepted stale, doc-write stale)
+- `9c4cc12b` enrol-resume: synchronize background ticker stop with last-tick timestamp (owner: apps-hermes)
+- `a6cfdc7b` gate: perform composed root handoffs and broker supervision; skip flatness on phase reruns
 - `359ace71` builder: REDS.md for e00408f660e6 (7 red) (owner: build-loop)
 - `f81ce864` Kernel.ApplicationShareIssueHistorical: pass Ground.ofLoaded to IssuedEvidence.fromAccepted
 - `e78141bf` fixtures: update leg projections in accepted and doc-write authorities for fold v2
@@ -49,17 +54,3 @@ Suspect commits since green (`git log 83e926874e38..359ace71edac`), newest first
 - `40cde03d` wbo: rectangle.write's numbers carry WBO's own bounds; the qualify size is 10
 - `df55c10a` hummingbird: analytics.record correlates on its event in the live locations stream, not on a referer
 - `8f659b53` board: member-side row: held pair cause; bind? on the walk next
-- `3305b4b0` typed apps: an unclassified controller error and a failed conversation poll name their cause (owner: apps-hermes)
-- `e71c9ab5` host-execution: an issue selection's history read failure is named, never a conflict (law 10)
-- `cb38b561` births: the prepared authority post cell is built once; its write's law needs no decode (owner: apps-hermes)
-- `70f61182` board: host-execution row: f955ed8a2 landed (enrollment, grant, op55), WBO split
-- `f955ed8a` host-execution: session enrollment, agent lifetime grant and the grain share-issue lookup serve from
-
-## Flatness (published, does not gate `green`)
-
-| row | verdict | metric | early | late | ratio | bound | owner |
-|---|---|---|---|---|---|---|---|
-| flatness-submit | FAIL | broken: propose_cpu_ms: early window below measurement resolution; increase --lo | - | - | - | - | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 52.000 | 45.000 | 0.865 | 1.958 | read-path |
-| flatness-get | PASS | get_wall_ms | 133.766 | 133.841 | 1.001 | 1.958 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-359ace71/flatness.log | - | - | - | - | host-execution, store-retained |
