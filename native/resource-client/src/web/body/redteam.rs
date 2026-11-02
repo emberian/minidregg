@@ -414,3 +414,154 @@ fn every_post_form_carries_its_own_attempt() {
     assert_ne!(ids[0], ids[1]);
     assert!(html.contains("<form method=get action=/b></form>"), "a GET form is a read: {html}");
 }
+
+#[test]
+fn receipt_page_shows_pending_anchor_then_verifies_deterministic_cshake256_inclusion() {
+    let (root, site) = site("receipt-inclusion");
+    fs::write(root.join("workspace.json"), r#"{"type":"minidregg-participant-workspace-v1"}"#).unwrap();
+    let id = "w-0123456789ab";
+    let attempt = root.join("attempts").join(id);
+    fs::create_dir_all(&attempt).unwrap();
+    fs::write(attempt.join("call.bin"), b"sealed-call-bytes").unwrap();
+
+    let height = "9";
+    let chain = "314159265";
+    let siblings = vec!["101".to_owned(), "202".to_owned(), "303".to_owned()];
+    let world_root =
+        crate::receipt_continuity::compute_world_root_from_system_opening(height, chain, &siblings)
+            .unwrap()
+            .world_root;
+    fs::write(
+        attempt.join("outcome.json"),
+        json!({
+            "type": "confirmed",
+            "acceptedCount": height,
+            "worldRoot": world_root,
+            "transactionId": "4",
+            "eventId": "8",
+            "confirmation": "installed"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        attempt.join("continuity-witness.json"),
+        json!({
+            "height": height,
+            "worldRoot": world_root,
+            "chain": chain,
+            "siblings": siblings
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    // Before verification: GET /receipts/<id> preserves `inclusion proof pending` for jweb-frontend
+    // and offers the interactive Verify inclusion proof button.
+    let before = get(&site, &["receipts", id], &format!("/receipts/{id}"));
+    assert_eq!(before.status, 200, "{}", before.body);
+    assert!(before.body.contains("inclusion proof pending"), "{}", before.body);
+    assert!(
+        before.body.contains(&format!("action=\"/receipts/{id}/verify-inclusion\"")),
+        "{}",
+        before.body
+    );
+
+    // POST /receipts/<id>/verify-inclusion recomputes and verifies the cSHAKE256 opening offline.
+    let verified_page = post(&site, &["receipts", id, "verify-inclusion"], b"");
+    assert_eq!(verified_page.status, 200, "{}", verified_page.body);
+    assert!(
+        verified_page.body.contains("Verified deterministic world-root inclusion proof"),
+        "{}",
+        verified_page.body
+    );
+    assert!(verified_page.body.contains(&world_root), "{}", verified_page.body);
+    assert!(verified_page.body.contains("<th>direction</th><th>sibling</th><th>parent</th>"), "{}", verified_page.body);
+
+    // Tampering with the opening is caught and surfaced as a refusal.
+    fs::write(
+        attempt.join("inclusion-opening.json"),
+        json!({
+            "height": height,
+            "worldRoot": world_root,
+            "chain": "999999",
+            "siblings": siblings
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        attempt.join("continuity-witness.json"),
+        json!({
+            "height": height,
+            "worldRoot": world_root,
+            "chain": "999999",
+            "siblings": siblings
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let bad_page = post(&site, &["receipts", id, "verify-inclusion"], b"");
+    assert_eq!(bad_page.status, 400, "{}", bad_page.body);
+    assert!(bad_page.body.contains("Inclusion proof verification failed"), "{}", bad_page.body);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn presburger_laws_workbench_renders_presets_verb_matrix_lockout_and_hypothetical_turn() {
+    let (root, site) = site("laws-workbench");
+    let page = get(&site, &["laws"], "/laws");
+    assert_eq!(page.status, 200, "{}", page.body);
+    for label in [
+        "note",
+        "draft",
+        "index",
+        "open",
+        "moderated",
+        "read-only lockout",
+        "cost-capped",
+        "monotone-counter",
+    ] {
+        assert!(page.body.contains(label), "missing preset {label}: {}", page.body);
+    }
+    assert!(page.body.contains("Verb Admissibility Matrix"), "{}", page.body);
+    assert!(page.body.contains("Test-Judge a Hypothetical Turn"), "{}", page.body);
+
+    // Check read-only lockout preset -> flags write self-lockout prominently
+    let lockout = post(&site, &["laws", "check"], b"preset=read-only+lockout");
+    assert_eq!(lockout.status, 200, "{}", lockout.body);
+    assert!(lockout.body.contains("Write lockout warning"), "{}", lockout.body);
+    assert!(lockout.body.contains("unsatisfiable (write lockout)"), "{}", lockout.body);
+
+    // Test-judge a hypothetical turn on monotone-counter: 0 -> 1 admitted, 5 -> 3 refused
+    let form_ok = format!(
+        "clauses={}&verb=write&subject=7&cost=5&before0=0&after0=1",
+        pct("any [ verb == read, all [ verb == write, field 0 monotone, field 0 delta <= 1 ] ]")
+    );
+    let turn_ok = post(&site, &["laws", "test-turn"], form_ok.as_bytes());
+    assert_eq!(turn_ok.status, 200, "{}", turn_ok.body);
+    assert!(turn_ok.body.contains("Hypothetical Turn Verdict"), "{}", turn_ok.body);
+    assert!(turn_ok.body.contains("Admitted: hypothetical `write` turn satisfies all law clauses"), "{}", turn_ok.body);
+
+    let form_bad = format!(
+        "clauses={}&verb=write&subject=7&cost=5&before0=5&after0=3",
+        pct("any [ verb == read, all [ verb == write, field 0 monotone, field 0 delta <= 1 ] ]")
+    );
+    let turn_bad = post(&site, &["laws", "test-turn"], form_bad.as_bytes());
+    assert_eq!(turn_bad.status, 200, "{}", turn_bad.body);
+    assert!(turn_bad.body.contains("Refused (law-denied)"), "{}", turn_bad.body);
+    assert!(turn_bad.body.contains("field 0 monotone"), "{}", turn_bad.body);
+
+    // Hostile payloads in /laws/check and /laws/test-turn render inert
+    let h = hostile();
+    let hostile_check = post(&site, &["laws", "check"], format!("clauses={}&ref={}", pct(&h), pct(&h)).as_bytes());
+    assert_inert("/laws/check", &hostile_check.body);
+    let hostile_turn = post(
+        &site,
+        &["laws", "test-turn"],
+        format!("clauses={}&verb={}&subject={}&cost={}", pct(&h), pct(&h), pct(&h), pct(&h)).as_bytes(),
+    );
+    assert_inert("/laws/test-turn", &hostile_turn.body);
+    let _ = fs::remove_dir_all(&root);
+}
+

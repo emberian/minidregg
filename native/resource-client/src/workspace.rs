@@ -63,7 +63,7 @@ mod can;
 mod inspect_views;
 /// `law check`, the install-time check and `can --any` (C-SAT-2, Host op 150).
 #[path = "lawsat.rs"]
-mod lawsat;
+pub(crate) mod lawsat;
 
 #[path = "world_kind.rs"]
 mod world_kind;
@@ -6827,6 +6827,38 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             };
             args.finish()?;
             print_json(&receipt_continuity::check_retained(&root, &workspace, &attempt, historical)?)
+        }
+        "receipt-inclusion" => {
+            let attempt = path(args.required("attempt")?);
+            let json_out = matches!(
+                args.optional("json").as_deref().and_then(OsStr::to_str),
+                Some("true")
+            );
+            args.finish()?;
+            let verified = receipt_continuity::verify_attempt_inclusion(&root, &workspace, &attempt)?;
+            if json_out {
+                print_json(&verified.json())
+            } else {
+                println!(
+                    "verified cSHAKE256 world-root opening at height {}:\n  worldRoot:  {} (0x{})\n  systemLeaf: {} (0x{})\n  chain:      {} (0x{})\n  keyBits:    {}\n  steps:      {}",
+                    verified.height,
+                    verified.world_root,
+                    verified.world_root_hex,
+                    verified.system_leaf,
+                    verified.system_leaf_hex,
+                    verified.chain,
+                    verified.chain_hex,
+                    verified.key_bits_prefix,
+                    verified.steps.len()
+                );
+                for s in &verified.steps {
+                    println!(
+                        "    step {} (depth {}, {}): sibling 0x{} -> parent 0x{}",
+                        s.step, s.depth, s.direction, s.sibling_hex, s.parent_hex
+                    );
+                }
+                Ok(())
+            }
         }
         "shared-name" => {
             let op = os_string(args.required("op")?, "name operation")?;

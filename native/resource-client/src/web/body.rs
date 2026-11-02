@@ -14,6 +14,8 @@
 //! `--anonymous` is the public reader: no write affordance, every POST refused before any read.
 
 use super::*;
+use crate::workspace::lawsat;
+use serde_json::json;
 use std::os::fd::FromRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::Command;
@@ -333,7 +335,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
             let ending = verb(site, &[format!("can {} --all", quote(name))]);
             Page { status: 200, title: format!("What my grants cover on {name}"), stamp: Stamp::None, body: ending.map(|e| answered(&e, &[])).unwrap_or_else(|| "<p>this body has no shell paths</p>".into()) }
         }
-        ["laws"] => laws(site),
+        ["laws"] => laws(site, target),
         ["keys"] => keys(site),
         ["room", name] => room(site, name),
         ["room", name, "resident"] => {
@@ -343,13 +345,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
             }
             page
         }
-        ["laws", "show"] => match query(target, "ref") {
-            Some(name) => match verb(site, &[format!("law show {}", quote(&name))]) {
-                Some(ending) => Page { status: 200, title: format!("Law on {name}"), stamp: Stamp::None, body: answered(&ending, &[("laws", "/laws")]) },
-                None => simple(500, "Laws", "this body has no shell paths"),
-            },
-            None => simple(400, "Laws", "give a reference"),
-        },
+        ["laws", "show"] => law_show_page(site, target),
         ["doc", name] if !site.front.read_only => {
             let mut page = site.route(&["doc".to_owned(), name.to_string()]);
             if page.status == 200 {
@@ -581,56 +577,131 @@ fn receipt(site: &Site, id: &str) -> Page {
     Page { status: 200, title: format!("Attempt {id}"), stamp: Stamp::None, body }
 }
 
-/// What the retained attempt anchors to: the exact bytes the client sealed before sending
-/// (`call.bin`, by digest and length), the Host's confirmation point (`acceptedCount`,
-/// `worldRoot`, transaction and event ids), and the world-root AuthTrie system-slot inclusion
-/// opening (op 151) when present in custody or served by the Host.
+/// What the retained attempt anchors to, said without overclaiming: the exact bytes the client
+/// sealed before sending (`call.bin`, by digest and length), the Host's confirmation point
+/// (`acceptedCount`, `worldRoot`, the transaction and event ids), and the deterministic `cSHAKE256`
+/// salted-trie world-root inclusion opening (`op 151`, `ValidOpening ∨ ConcreteCollision`).
 fn anchor(attempt: &std::path::Path) -> String {
     use sha2::Digest;
     if !attempt.is_dir() {
         return String::new();
     }
+    let id = attempt
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| workspace_id(s).is_ok())
+        .unwrap_or("");
     let call = std::fs::read(attempt.join("call.bin")).ok();
     let bytes = match &call {
-        Some(b) => format!("<p>Exact call: <code>sha256 {:x}</code>, {} bytes, sealed before it was sent (a retry resends these bytes and no others).</p>", sha2::Sha256::digest(b), b.len()),
+        Some(b) => format!(
+            "<p>Exact call: <code>sha256 {:x}</code>, {} bytes, sealed before it was sent (a retry resends these bytes and no others).</p>",
+            sha2::Sha256::digest(b),
+            b.len()
+        ),
         None => "<p>No sealed call is retained for this attempt (it was never sent).</p>".to_owned(),
     };
+    let verify_button = if id.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<form method=\"post\" action=\"/receipts/{}/verify-inclusion\" class=\"inline\"><button>Verify inclusion proof</button></form>",
+            escape(id)
+        )
+    };
     let point = match crate::workspace::retained_attempt_outcome(attempt) {
-        Ok(crate::workspace::AttemptOutcome::Confirmed(v)) | Ok(crate::workspace::AttemptOutcome::Charged(v)) => {
+        Ok(crate::workspace::AttemptOutcome::Confirmed(v))
+        | Ok(crate::workspace::AttemptOutcome::Charged(v)) => {
             let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
-            let accepted_count = s("acceptedCount");
+            let height = s("acceptedCount");
             let world_root = s("worldRoot");
-            let opening_html = match crate::receipt_continuity::opening_for_attempt(attempt, &accepted_count, &world_root) {
-                Some(opening) => {
-                    let chain = opening.get("chain").and_then(Value::as_str).unwrap_or("?");
-                    let siblings = opening.get("siblings").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0);
-                    format!(
-                        "<p class=\"outcome admitted\">World-root inclusion opening (op 151): log chain <code>{}</code>, <code>{}</code> AuthTrie system-slot sibling(s) opening to <code>worldRoot {}</code>.</p>\
-                         <details><summary>Inclusion opening JSON (op 151)</summary>{}</details>",
-                        escape(chain),
-                        siblings,
-                        escape(&world_root),
-                        json_tree(&opening)
-                    )
+            let header = format!(
+                "<p>Confirmation point: <code>acceptedCount {}</code>, <code>worldRoot {}</code> (transaction {}, event {}, {}{}).</p>",
+                escape(&height),
+                escape(&world_root),
+                escape(&s("transactionId")),
+                escape(&s("eventId")),
+                escape(&s("confirmation")),
+                if v.get("disposition").and_then(Value::as_str) == Some("charged") {
+                    ", charged: only its price was posted"
+                } else {
+                    ""
                 }
+            );
+            let proof = match crate::receipt_continuity::load_verified_attempt_inclusion(
+                attempt,
+                &height,
+                &world_root,
+            ) {
+                Some(Ok(verified)) => render_verified_inclusion(&verified, &verify_button),
+                Some(Err(err)) => format!(
+                    "<p class=\"outcome refused\">World-root inclusion verification failed: {}</p><p>{verify_button}</p>",
+                    escape(&err.to_string())
+                ),
                 None => format!(
-                    "<p class=\"note\">Anchored to <code>worldRoot {}</code> at <code>acceptedCount {}</code>; inclusion proof pending (initialize receipt continuity or query op 151 with a connected Host to attach the AuthTrie system-slot opening).</p>",
-                    escape(&world_root),
-                    escape(&accepted_count)
+                    "<p class=\"outcome undecided\">Anchored to a point; inclusion proof pending: verify the deterministic world-root opening (op 151, cSHAKE256 salted-trie path) below to recompute and bind this receipt into <code>worldRoot</code> offline.</p><p>{verify_button}</p>"
                 ),
             };
-            format!(
-                "<p>Confirmation point: <code>acceptedCount {}</code>, <code>worldRoot {}</code> (transaction {}, event {}, {}{}).</p>{}",
-                escape(&accepted_count), escape(&world_root), escape(&s("transactionId")), escape(&s("eventId")), escape(&s("confirmation")),
-                if v.get("disposition").and_then(Value::as_str) == Some("charged") { ", charged: only its price was posted" } else { "" },
-                opening_html
-            )
+            format!("{header}{proof}")
         }
-        Ok(crate::workspace::AttemptOutcome::Refused) => "<p>Refused: the Host named no point; the refusal's clause is the receipt.</p>".to_owned(),
-        Ok(crate::workspace::AttemptOutcome::Pending) => "<p>Undecided: no confirmation point yet; <code>lookup</code> or <code>retry</code> resolves it.</p>".to_owned(),
+        Ok(crate::workspace::AttemptOutcome::Refused) => {
+            "<p>Refused: the Host named no point; the refusal's clause is the receipt.</p>".to_owned()
+        }
+        Ok(crate::workspace::AttemptOutcome::Pending) => {
+            "<p>Undecided: no confirmation point yet; <code>lookup</code> or <code>retry</code> resolves it.</p>".to_owned()
+        }
         Err(e) => format!("<p>The retained history could not be read: {}</p>", escape(&e)),
     };
     format!("<section class=\"anchor\"><h2>Anchor</h2>{bytes}{point}</section>\n")
+}
+
+fn render_verified_inclusion(
+    verified: &crate::receipt_continuity::VerifiedInclusion,
+    verify_button: &str,
+) -> String {
+    let mut rows = String::new();
+    for step in &verified.steps {
+        rows.push_str(&format!(
+            "<tr><td>{}</td><td>{}</td><td><code>{}</code></td><td><code title=\"{}\">{}</code> (<code>0x{}</code>)</td><td><code title=\"{}\">{}</code> (<code>0x{}</code>)</td></tr>\n",
+            step.step,
+            step.depth,
+            escape(step.direction),
+            escape(&step.sibling),
+            escape(&short(&step.sibling)),
+            escape(&short(&step.sibling_hex)),
+            escape(&step.parent),
+            escape(&short(&step.parent)),
+            escape(&short(&step.parent_hex)),
+        ));
+    }
+    let continuity_hop = match (&verified.start_height, &verified.start_world_root, &verified.start_chain) {
+        (Some(sh), Some(sr), Some(sc)) => format!(
+            "<p class=\"note\">Continuity suffix verified from <code>acceptedCount {}</code> (<code>worldRoot {}</code>, <code>startChain {}</code>) across {} event digest(s) into <code>endChain</code>.</p>",
+            escape(sh),
+            escape(&short(sr)),
+            escape(&short(sc)),
+            verified.suffix.len()
+        ),
+        _ => String::new(),
+    };
+    format!(
+        "<div class=\"outcome admitted\"><p class=\"headline\">Verified deterministic world-root inclusion proof (op 151, cSHAKE256 salted-trie: <code>ValidOpening ∨ ConcreteCollision</code>)</p>\
+         <p>Verified root: <code>worldRoot {}</code> (<code>0x{}</code>) at height <code>acceptedCount {}</code> · key path <code>[{}]</code> ({} branch step(s)).</p>\
+         <p>Leaf &amp; chain digests: <code>systemLeaf {}</code> (<code>0x{}</code>) · <code>endChain {}</code> (<code>0x{}</code>) · <code>leafNode {}</code> (<code>0x{}</code>).</p>\
+         {continuity_hop}\
+         <table><thead><tr><th>step</th><th>depth</th><th>direction</th><th>sibling</th><th>parent</th></tr></thead><tbody>{rows}</tbody></table>\
+         <p>{verify_button} <span class=\"note\"> CLI: <code>inspect inclusion &lt;id&gt;</code></span></p></div>",
+        escape(&verified.world_root),
+        escape(&verified.world_root_hex),
+        escape(&verified.height),
+        escape(&verified.key_bits_prefix),
+        verified.steps.len(),
+        escape(&short(&verified.system_leaf)),
+        escape(&short(&verified.system_leaf_hex)),
+        escape(&short(&verified.chain)),
+        escape(&short(&verified.chain_hex)),
+        escape(&short(&verified.leaf_node_digest)),
+        escape(&short(&verified.leaf_node_hex)),
+    )
 }
 
 fn grants(site: &Site) -> Page {
@@ -700,21 +771,330 @@ fn grants(site: &Site) -> Page {
     Page { status: 200, title: "Grants".into(), stamp: Stamp::None, body }
 }
 
-fn laws(site: &Site) -> Page {
-    let mut body = String::from(
-        "<p>Inspect the installed law on a reference (<code>law show REF</code>) or install a new law (<code>law ID REF \"CLAUSE; …\"</code>).</p>\
-         <form method=\"get\" action=\"/laws/show\" class=\"row\"><label for=\"l-ref\">Reference</label><input id=\"l-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"><button>Show</button></form>\n",
-    );
-    if !site.front.read_only {
-        body.push_str(
-            "<section><h2>Install a law</h2><form method=\"post\" action=\"/laws/install\">\
-             <label for=\"li-ref\">Reference</label><input id=\"li-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\">\
-             <label for=\"li-clauses\">Clauses (semicolon-separated), or predicate JSON</label><textarea id=\"li-clauses\" name=\"clauses\" required maxlength=\"4000\"></textarea>\
-             <p><button>Install</button></p></form></section>\n",
-        );
-    }
-    let _ = site;
+fn check_law_input(site: &Site, input: &str) -> Result<lawsat::LawWorkbenchReport> {
+    let ws = fs::read_to_string(site.root.join("workspace.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .unwrap_or_else(|| json!({}));
+    let (pred, _) = lawsat::parse_law_input(input, &site.subject)?;
+    lawsat::analyze_law_workbench(&site.root, &ws, &site.subject, &pred)
+}
+
+fn laws(site: &Site, target: &str) -> Page {
+    let selected_preset = query(target, "preset").unwrap_or_default();
+    let custom_clauses = query(target, "clauses").unwrap_or_default();
+    let ref_name = query(target, "ref").unwrap_or_default();
+    let active_input = if !custom_clauses.trim().is_empty() {
+        custom_clauses
+    } else if !selected_preset.trim().is_empty() {
+        lawsat::preset_clauses(&selected_preset, &site.subject)
+            .unwrap_or(selected_preset)
+    } else {
+        lawsat::preset_clauses("note", &site.subject).unwrap_or_else(|| "open".into())
+    };
+    let report = check_law_input(site, &active_input).ok();
+    let body = render_law_workbench(site, &ref_name, &active_input, report.as_ref(), None, None);
     Page { status: 200, title: "Laws".into(), stamp: Stamp::None, body }
+}
+
+fn law_show_page(site: &Site, target: &str) -> Page {
+    let Some(name) = query(target, "ref") else {
+        return simple(400, "Laws", "give a reference");
+    };
+    let mut body = String::new();
+    let mut law_text: Option<String> = None;
+    if let Some(ending) = verb(site, &[format!("law show {}", quote(&name))]) {
+        body.push_str(&answered(&ending, &[("laws", "/laws")]));
+        if ending.code == 0 && !ending.stdout.trim().is_empty() {
+            law_text = Some(ending.stdout.trim().to_owned());
+        }
+    } else {
+        // Offline / unit-test workspace fallback: check references.json if no shell runner is attached.
+        if let Ok(raw) = fs::read_to_string(site.root.join("references.json")) {
+            if let Ok(val) = serde_json::from_str::<Value>(&raw) {
+                if let Some(entry) = val.get("references").and_then(|r| r.get(&name)) {
+                    if let Some(l) = entry
+                        .get("law")
+                        .and_then(Value::as_str)
+                        .or_else(|| entry.get("policy").and_then(Value::as_str))
+                    {
+                        law_text = Some(l.to_owned());
+                    } else if let Some(pred) = entry.get("predicate") {
+                        law_text = Some(pred.to_string());
+                    }
+                }
+            }
+        }
+        if law_text.is_none() {
+            return simple(500, "Laws", "this body has no shell paths");
+        }
+    }
+    if let Some(text) = law_text {
+        if let Ok(report) = check_law_input(site, &text) {
+            body.push_str(&format!(
+                "<section class=\"law-matrix\"><h2>Presburger Verb Admissibility Matrix for <code>{}</code></h2>{}</section>\n",
+                escape(&name),
+                render_verb_matrix(&report)
+            ));
+            body.push_str(&render_hypothetical_turn_form(
+                site,
+                &name,
+                &report.rendered_law,
+                None,
+            ));
+        }
+    }
+    Page {
+        status: 200,
+        title: format!("Law on {name}"),
+        stamp: Stamp::None,
+        body,
+    }
+}
+
+fn render_law_workbench(
+    site: &Site,
+    ref_name: &str,
+    clauses_input: &str,
+    report: Option<&lawsat::LawWorkbenchReport>,
+    turn_report: Option<&lawsat::HypotheticalTurnReport>,
+    error_banner: Option<&str>,
+) -> String {
+    let display_clauses = report
+        .map(|r| r.rendered_law.as_str())
+        .unwrap_or(clauses_input);
+    let mut body = String::from(
+        "<p>The Presburger Law Workbench: inspect the law on a reference (<code>law show REF</code>), explore one-click presets, check the 6-verb Presburger admissibility matrix (<code>Pred/Satisfiable.lean</code> / <code>Host/LawSat.lean</code>), test-judge a hypothetical turn clause by clause, or install a law on a reference.</p>\
+         <form method=\"get\" action=\"/laws/show\" class=\"row\"><label for=\"l-ref\">Reference</label><input id=\"l-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\" value=\"",
+    );
+    body.push_str(&escape(ref_name));
+    body.push_str("\"><button>Show</button></form>\n");
+
+    if let Some(err) = error_banner {
+        body.push_str(&format!(
+            "<div class=\"outcome refused\"><p class=\"headline\">Law check error</p><p>{}</p></div>\n",
+            escape(err)
+        ));
+    }
+
+    // 1. One-click law templates / presets
+    body.push_str("<section class=\"law-presets\"><h2>Law presets</h2><p class=\"note\">Pick a template to load its clauses and compute its 6-verb Presburger admissibility matrix:</p><div class=\"presets\">");
+    for preset in lawsat::PRESETS {
+        let resolved = lawsat::preset_clauses(preset.key, &site.subject)
+            .unwrap_or_else(|| preset.clauses_template.to_owned());
+        let slug = preset.key.replace(' ', "-");
+        body.push_str(&format!(
+            "<div class=\"preset-card\"><p><a href=\"/laws?preset={slug}\"><strong>{label}</strong></a> — {summary} (<code>{clauses}</code>)</p>",
+            slug = escape(&slug),
+            label = escape(preset.label),
+            summary = escape(preset.summary),
+            clauses = escape(&resolved),
+        ));
+        if !site.front.read_only {
+            body.push_str(&format!(
+                "<form method=\"post\" action=\"/laws/check\" class=\"inline\"><input type=\"hidden\" name=\"preset\" value=\"{key}\"><input type=\"hidden\" name=\"clauses\" value=\"{clauses}\"><button class=\"quiet\">Load &amp; check {label}</button></form>",
+                key = escape(preset.key),
+                clauses = escape(&resolved),
+                label = escape(preset.label),
+            ));
+        }
+        body.push_str("</div>\n");
+    }
+    body.push_str("</div></section>\n");
+
+    // 2. Verb Admissibility Matrix
+    if let Some(rep) = report {
+        body.push_str("<section class=\"law-matrix\"><h2>Verb Admissibility Matrix</h2>\n");
+        body.push_str(&render_verb_matrix(rep));
+        body.push_str("</section>\n");
+    }
+
+    // 3. Hypothetical turn result (if just evaluated)
+    if let Some(turn) = turn_report {
+        body.push_str(&render_hypothetical_turn_result(turn));
+    }
+
+    // 4. Check custom law form
+    if !site.front.read_only {
+        body.push_str(&format!(
+            "<section><h2>Check a law (Presburger solver)</h2>\
+             <form method=\"post\" action=\"/laws/check\">\
+             <label for=\"lc-clauses\">Clauses (semicolon-separated), preset name, or predicate JSON</label>\
+             <textarea id=\"lc-clauses\" name=\"clauses\" required maxlength=\"4000\">{}</textarea>\
+             <p><button>Check law</button></p></form></section>\n",
+            escape(display_clauses)
+        ));
+    }
+
+    // 5. Test-Judge a Hypothetical Turn form
+    body.push_str(&render_hypothetical_turn_form(
+        site,
+        ref_name,
+        display_clauses,
+        turn_report,
+    ));
+
+    // 6. Install a law form
+    if !site.front.read_only {
+        body.push_str(&format!(
+            "<section><h2>Install a law</h2><form method=\"post\" action=\"/laws/install\">\
+             <label for=\"li-ref\">Reference</label><input id=\"li-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\" value=\"{}\">\
+             <label for=\"li-clauses\">Clauses (semicolon-separated), or the predicate JSON</label><textarea id=\"li-clauses\" name=\"clauses\" required maxlength=\"4000\">{}</textarea>\
+             <label><input type=\"checkbox\" name=\"lockout\" value=\"on\"> Allow deliberate write lockout (<code>--i-lock-myself-out</code>)</label>\
+             <p><button>Install</button></p></form></section>\n",
+            escape(ref_name),
+            escape(display_clauses)
+        ));
+    }
+    body
+}
+
+fn render_verb_matrix(report: &lawsat::LawWorkbenchReport) -> String {
+    let mut out = String::new();
+    for (headline, warning) in [
+        ("Write lockout warning", report.write_lockout_reason.as_deref()),
+        ("Self-lockout warning", report.self_lockout_reason.as_deref()),
+        ("Re-law lockout warning", report.relaw_lockout_reason.as_deref()),
+    ] {
+        if let Some(w) = warning {
+            out.push_str(&format!(
+                "<div class=\"outcome refused\"><p class=\"headline\">{headline}</p><p>{}</p></div>\n",
+                escape(w)
+            ));
+        }
+    }
+    let overall_sat = report.overall_verdict == "witness" || report.overall_verdict == "sat";
+    let overall_class = if overall_sat && !report.write_lockout && !report.self_lockout {
+        "admitted"
+    } else if overall_sat {
+        "undecided"
+    } else {
+        "refused"
+    };
+    out.push_str(&format!(
+        "<p class=\"outcome {overall_class}\">Canonical law: <code>{}</code> · overall Presburger verdict: <strong>{}</strong> ({}){}</p>\n",
+        escape(&report.rendered_law),
+        escape(&report.overall_verdict),
+        escape(&report.overall_summary),
+        if report.write_lockout || report.self_lockout {
+            " · <strong>write self-lockout detected</strong>"
+        } else {
+            ""
+        }
+    ));
+    out.push_str("<table><thead><tr><th>verb</th><th>tag</th><th>Presburger verdict</th><th><code>request/subject</code></th><th><code>request/cost</code></th><th><code>resource/field/*</code></th><th>witness / unsatisfiable core</th></tr></thead><tbody>\n");
+    for row in &report.rows {
+        let badge = if row.admitted {
+            "<span class=\"outcome admitted\">admitted witness</span>".to_owned()
+        } else if row.verb == "write" {
+            "<span class=\"outcome refused\">unsatisfiable (write lockout)</span>".to_owned()
+        } else {
+            format!("<span class=\"outcome refused\">{}</span>", escape(&row.verdict))
+        };
+        out.push_str(&format!(
+            "<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td>{}</td></tr>\n",
+            escape(row.verb),
+            escape(row.tag),
+            badge,
+            escape(&row.subject_witness),
+            escape(&row.cost_witness),
+            escape(&row.field_witness),
+            escape(&row.explanation)
+        ));
+    }
+    out.push_str("</tbody></table>\n");
+    out
+}
+
+fn render_hypothetical_turn_form(
+    site: &Site,
+    ref_name: &str,
+    clauses: &str,
+    turn_report: Option<&lawsat::HypotheticalTurnReport>,
+) -> String {
+    if site.front.read_only {
+        return String::new();
+    }
+    let default_subject = if site.subject.bytes().all(|b| b.is_ascii_digit()) && !site.subject.is_empty() {
+        site.subject.as_str()
+    } else {
+        "1"
+    };
+    let selected_verb = turn_report.map(|t| t.verb.as_str()).unwrap_or("write");
+    let subject_val = turn_report
+        .map(|t| t.subject.to_string())
+        .unwrap_or_else(|| default_subject.to_owned());
+    let cost_val = turn_report
+        .map(|t| t.cost.to_string())
+        .unwrap_or_else(|| "1".to_owned());
+    let mut verb_options = String::new();
+    for (v, code) in [
+        ("read", 1),
+        ("write", 2),
+        ("delegate", 3),
+        ("install", 4),
+        ("revoke", 5),
+        ("renounce", 6),
+    ] {
+        let sel = if v == selected_verb { " selected" } else { "" };
+        verb_options.push_str(&format!(
+            "<option value=\"{v}\"{sel}>{v} ({code})</option>"
+        ));
+    }
+    format!(
+        "<section class=\"law-test-turn\"><h2>Test-Judge a Hypothetical Turn</h2>\
+         <p class=\"note\">Evaluate every semicolon-separated clause of the law against a concrete turn environment before installing it, or synthesize an admitted command with <code>can REF --any</code>.</p>\
+         <form method=\"post\" action=\"/laws/test-turn\">\
+         <label for=\"tt-clauses\">Law clauses to test</label>\
+         <textarea id=\"tt-clauses\" name=\"clauses\" required maxlength=\"4000\">{clauses}</textarea>\
+         <div class=\"row\">\
+         <div><label for=\"tt-verb\">Verb (<code>request/verb</code>)</label><select id=\"tt-verb\" name=\"verb\">{verb_options}</select></div>\
+         <div><label for=\"tt-subject\">Subject (<code>request/subject</code>)</label><input id=\"tt-subject\" name=\"subject\" type=\"text\" required pattern=\"-?[0-9]+\" value=\"{subject}\"></div>\
+         <div><label for=\"tt-cost\">Cost (<code>request/cost</code>)</label><input id=\"tt-cost\" name=\"cost\" type=\"text\" required pattern=\"-?[0-9]+\" value=\"{cost}\"></div>\
+         <div><label for=\"tt-b1\">Before <code>field 0</code></label><input id=\"tt-b1\" name=\"before0\" type=\"text\" pattern=\"-?[0-9]*\" value=\"0\"></div>\
+         <div><label for=\"tt-a1\">After <code>field 0</code></label><input id=\"tt-a1\" name=\"after0\" type=\"text\" pattern=\"-?[0-9]*\" value=\"1\"></div>\
+         <div><label for=\"tt-fields\">Extra after fields (<code>1=10, 2=5</code>)</label><input id=\"tt-fields\" name=\"fields\" type=\"text\" value=\"\"></div>\
+         <button>Test-judge turn</button></div></form>\
+         <form method=\"post\" action=\"/laws/test-turn\" class=\"row\">\
+         <input type=\"hidden\" name=\"mode\" value=\"can-any\">\
+         <div><label for=\"tt-ref\">Synthesize live command on reference (<code>can REF --any</code>)</label><input id=\"tt-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\" value=\"{ref_name}\"></div>\
+         <button class=\"quiet\">Run can --any</button></form></section>\n",
+        clauses = escape(clauses),
+        verb_options = verb_options,
+        subject = escape(&subject_val),
+        cost = escape(&cost_val),
+        ref_name = escape(ref_name),
+    )
+}
+
+fn render_hypothetical_turn_result(turn: &lawsat::HypotheticalTurnReport) -> String {
+    let class = if turn.admitted { "admitted" } else { "refused" };
+    let mut rows = String::new();
+    for c in &turn.clauses {
+        let status = if c.passed {
+            "<span class=\"outcome admitted\">passed</span>"
+        } else {
+            "<span class=\"outcome refused\">refused</span>"
+        };
+        rows.push_str(&format!(
+            "<tr><td>{}</td><td><code>{}</code></td><td>{}</td><td><code>{}</code></td></tr>\n",
+            c.index,
+            escape(&c.clause),
+            status,
+            escape(&c.readings)
+        ));
+    }
+    format!(
+        "<section class=\"turn-verdict\"><h2>Hypothetical Turn Verdict</h2>\
+         <div class=\"outcome {class}\"><p class=\"headline\">{}</p>\
+         <p>Environment: <code>request/verb = {} ({})</code>, <code>request/subject = {}</code>, <code>request/cost = {}</code></p></div>\
+         <table><thead><tr><th>#</th><th>clause</th><th>verdict</th><th>evaluated slots</th></tr></thead><tbody>{rows}</tbody></table></section>\n",
+        escape(&turn.headline),
+        escape(&turn.verb),
+        turn.verb_tag,
+        turn.subject,
+        turn.cost,
+    )
 }
 
 fn keys(site: &Site) -> Page {
@@ -1104,6 +1484,33 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             }
             act(site, &format!("Summon into {name}"), vec![line], "", &[("the resident", &format!("/room/{name}/resident"))])
         }
+        ["receipts", id, "verify-inclusion"] => match workspace_id(id) {
+            Ok(()) => {
+                let attempt = site.root.join("attempts").join(id);
+                let ws = fs::read_to_string(site.root.join("workspace.json"))
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                    .unwrap_or_else(|| json!({}));
+                let mut res = crate::receipt_continuity::verify_attempt_inclusion(&site.root, &ws, &attempt);
+                if res.is_err() && site.shell.is_some() {
+                    let _ = verb(site, &[format!("inspect inclusion {id}")]);
+                    res = crate::receipt_continuity::verify_attempt_inclusion(&site.root, &ws, &attempt);
+                }
+                let mut page = receipt(site, id);
+                if let Err(err) = res {
+                    page.status = 400;
+                    page.body.insert_str(
+                        0,
+                        &format!(
+                            "<section class=\"outcome refused\"><p class=\"headline\">Inclusion proof verification failed</p><p>{}</p></section>\n",
+                            escape(&err.to_string())
+                        ),
+                    );
+                }
+                page
+            }
+            Err(e) => simple(400, "Receipts", &e),
+        },
         ["receipts", id, op @ ("retry" | "lookup" | "publish")] => match workspace_id(id) {
             Ok(()) => act(site, &format!("{op} {id}"), vec![format!("{op} {id}")], id, &[("the attempt", &format!("/receipts/{id}"))]),
             Err(e) => simple(400, "Receipts", &e),
@@ -1127,11 +1534,116 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             }
             act(site, "Revoke", vec![line, format!("submit {id}")], &id, &[("grants", "/grants")])
         }
+        ["laws", "check"] => {
+            let preset = field("preset");
+            let clauses = field("clauses");
+            let ref_name = field("ref");
+            let input = if !clauses.is_empty() {
+                clauses
+            } else if !preset.is_empty() {
+                lawsat::preset_clauses(&preset, &site.subject).unwrap_or(preset)
+            } else {
+                return simple(400, "Laws", "give law clauses or choose a preset");
+            };
+            match check_law_input(site, &input) {
+                Ok(report) => {
+                    let body = render_law_workbench(site, &ref_name, &input, Some(&report), None, None);
+                    Page { status: 200, title: "Laws: Presburger check".into(), stamp: Stamp::None, body }
+                }
+                Err(err) => {
+                    let body = render_law_workbench(site, &ref_name, &input, None, None, Some(&err));
+                    Page { status: 400, title: "Laws: Presburger check".into(), stamp: Stamp::None, body }
+                }
+            }
+        }
+        ["laws", "test-turn"] => {
+            let mode = field("mode");
+            let ref_name = field("ref");
+            if mode == "can-any" {
+                if ref_name.is_empty() {
+                    return simple(400, "Laws", "give a reference for can --any");
+                }
+                return act_as(
+                    site,
+                    &format!("can {ref_name} --any"),
+                    vec![format!("can {} --any", quote(&ref_name))],
+                    "",
+                    &[("laws", "/laws")],
+                    false,
+                );
+            }
+            let clauses = field("clauses");
+            let verb_name = {
+                let v = field("verb");
+                if v.is_empty() { "write".to_owned() } else { v }
+            };
+            let subject = {
+                let s = field("subject");
+                if s.is_empty() {
+                    if site.subject.bytes().all(|b| b.is_ascii_digit()) && !site.subject.is_empty() {
+                        site.subject.clone()
+                    } else {
+                        "1".to_owned()
+                    }
+                } else {
+                    s
+                }
+            };
+            let cost = {
+                let c = field("cost");
+                if c.is_empty() { "1".to_owned() } else { c }
+            };
+            let mut before_parts = Vec::new();
+            let mut after_parts = Vec::new();
+            for (idx, b_key, a_key) in [("0", "before0", "after0"), ("1", "before1", "after1")] {
+                let b_val = field(b_key);
+                if !b_val.is_empty() {
+                    before_parts.push(format!("{idx}={b_val}"));
+                }
+                let a_val = field(a_key);
+                if !a_val.is_empty() {
+                    after_parts.push(format!("{idx}={a_val}"));
+                }
+            }
+            let extra_before = field("before_fields");
+            if !extra_before.is_empty() {
+                before_parts.push(extra_before);
+            }
+            let extra_after = field("fields");
+            if !extra_after.is_empty() {
+                after_parts.push(extra_after);
+            }
+            let before_input = before_parts.join(", ");
+            let after_input = after_parts.join(", ");
+            let matrix = check_law_input(site, &clauses).ok();
+            let parsed_pred = lawsat::parse_law_input(&clauses, &site.subject);
+            let res = parsed_pred.and_then(|(pred, _)| {
+                lawsat::judge_hypothetical_turn(
+                    &pred,
+                    &verb_name,
+                    &subject,
+                    &cost,
+                    &before_input,
+                    &after_input,
+                )
+            });
+            match res {
+                Ok(turn) => {
+                    let body = render_law_workbench(site, &ref_name, &clauses, matrix.as_ref(), Some(&turn), None);
+                    Page { status: 200, title: "Laws: Hypothetical turn".into(), stamp: Stamp::None, body }
+                }
+                Err(err) => {
+                    let body = render_law_workbench(site, &ref_name, &clauses, matrix.as_ref(), None, Some(&err));
+                    Page { status: 400, title: "Laws: Hypothetical turn".into(), stamp: Stamp::None, body }
+                }
+            }
+        }
         ["laws", "install"] => {
             let id = form_attempt(&form);
             let clauses = field("clauses");
             let Some(file) = text_file(site, &id, &clauses) else { return simple(400, "Laws", "clauses must be 1..4096 bytes") };
-            act(site, "Install a law", vec![format!("law {id} {} @{file}", quote(&field("ref"))), format!("submit {id}")], &id, &[("laws", "/laws")])
+            let lockout = if field("lockout") == "on" { " --i-lock-myself-out" } else { "" };
+            act(site, "Install a law", vec![format!("law {id} {} @{file}{lockout}", quote(&field("ref"))), format!("submit {id}")], &id, &[("laws", "/laws")])
         }
         _ => simple(405, "Cannot act", "this address accepts reads only"),
     }

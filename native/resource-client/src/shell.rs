@@ -1644,6 +1644,13 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         "inspect" | "why" => {
             let p = if verb == "why" { crate::shell_grammar::parse(&crate::shell_grammar::WHY, &w)? } else { crate::shell_grammar::parse(&crate::shell_grammar::INSPECT, &w)? };
             let view = if verb == "why" { "why" } else { p.leaf.path[1] };
+            if view == "inclusion" {
+                let mut flags = vec![flag("action", "receipt-inclusion"), flag("dir", ws()), flag("attempt", ws().join("attempts").join(p.arg(0)))];
+                if p.has("--json") {
+                    flags.push(flag("json", "true"));
+                }
+                return Ok(client("workspace", flags));
+            }
             let mut flags = vec![flag("action", "inspect"), flag("dir", ws()), flag("view", view)];
             if let Some(name) = p.opt(0) {
                 flags.push(flag("name", name));
