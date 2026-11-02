@@ -62,12 +62,13 @@ def submitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8)
   match ← SubjectKeyCommitmentAdoption.receiveLoaded config.deployment config.profile.semantics
       config.signature config.transport opened.durable bytes with
   | .confirmed kind receipt =>
-    match ← openExisting config with
+    match ← NativeHostLight.start config with
     | .error detail => return .uncertain s!"adoption receipt readback: {detail}".toUTF8.toList
     | .ok post =>
-      match historicalReceipt config post.durable receipt.transactionId receipt.eventId with
-      | none => return .uncertain "original adoption receipt unavailable".toUTF8.toList
-      | some original => return .confirmed kind original
+      match ← historicalReceiptLight config post receipt.transactionId receipt.eventId with
+      | .error refusal => return .uncertain s!"adoption receipt readback: {refusal.detail}".toUTF8.toList
+      | .ok none => return .uncertain "original adoption receipt unavailable".toUTF8.toList
+      | .ok (some original) => return .confirmed kind original
   | .rejected reason => return refused .operationRejected s!"{repr reason}"
   | .transactionConflict => return refused .conflict "adoption marker conflict"
   | .durableRejected reason => return refused .operationRejected s!"durable: {repr reason}"

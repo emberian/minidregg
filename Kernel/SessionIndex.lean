@@ -290,15 +290,15 @@ theorem TxIndex.admitAt_exact {txs : TxIndex} {records : List IntentRecord}
     simp [differs]
 
 /-- Index a suffix whose predecessor log held `height` records. -/
-def TxIndex.extendFrom (txs : TxIndex) (height : Nat) : List IntentRecord → TxIndex
+def TxIndex.admitRecordsFrom (txs : TxIndex) (height : Nat) : List IntentRecord → TxIndex
   | [] => txs
-  | record :: rest => TxIndex.extendFrom (txs.admitAt height record) (height + 1) rest
+  | record :: rest => TxIndex.admitRecordsFrom (txs.admitAt height record) (height + 1) rest
 
-theorem TxIndex.extendFrom_exact {txs : TxIndex} {records : List IntentRecord}
+theorem TxIndex.admitRecordsFrom_exact {txs : TxIndex} {records : List IntentRecord}
     (exact : txs.Exact records) (more : List IntentRecord) :
-    (txs.extendFrom records.length more).Exact (records ++ more) := by
+    (txs.admitRecordsFrom records.length more).Exact (records ++ more) := by
   induction more generalizing txs records with
-  | nil => simpa [TxIndex.extendFrom] using exact
+  | nil => simpa [TxIndex.admitRecordsFrom] using exact
   | cons record rest ih =>
       have step := ih (TxIndex.admitAt_exact exact record)
       rw [List.length_append, List.length_singleton, List.append_assoc,
@@ -307,11 +307,11 @@ theorem TxIndex.extendFrom_exact {txs : TxIndex} {records : List IntentRecord}
 
 /-- One pass over the log: linear, never `records ++ [record]`. -/
 def TxIndex.ofRecords (records : List IntentRecord) : TxIndex :=
-  (∅ : TxIndex).extendFrom 0 records
+  (∅ : TxIndex).admitRecordsFrom 0 records
 
 theorem TxIndex.ofRecords_exact (records : List IntentRecord) :
     (TxIndex.ofRecords records).Exact records := by
-  have hsimpa := TxIndex.extendFrom_exact TxIndex.empty_exact records
+  have hsimpa := TxIndex.admitRecordsFrom_exact TxIndex.empty_exact records
   simp at hsimpa ⊢
   exact hsimpa
 
@@ -392,16 +392,16 @@ theorem KeyIndex.admitAt_exact {index : KeyIndex K} {keys : IntentRecord → Lis
   rw [KeyIndex.getElem?_foldl, firstKeyIndex_snoc, exact key]
 
 /-- Index a suffix whose predecessor log held `height` records. -/
-def KeyIndex.extendFrom (index : KeyIndex K) (keys : IntentRecord → List K) (height : Nat) :
+def KeyIndex.admitRecordsFrom (index : KeyIndex K) (keys : IntentRecord → List K) (height : Nat) :
     List IntentRecord → KeyIndex K
   | [] => index
-  | record :: rest => KeyIndex.extendFrom (index.admitAt keys height record) keys (height + 1) rest
+  | record :: rest => KeyIndex.admitRecordsFrom (index.admitAt keys height record) keys (height + 1) rest
 
-theorem KeyIndex.extendFrom_exact {index : KeyIndex K} {keys : IntentRecord → List K}
+theorem KeyIndex.admitRecordsFrom_exact {index : KeyIndex K} {keys : IntentRecord → List K}
     {records : List IntentRecord} (exact : index.Exact keys records) (more : List IntentRecord) :
-    (index.extendFrom keys records.length more).Exact keys (records ++ more) := by
+    (index.admitRecordsFrom keys records.length more).Exact keys (records ++ more) := by
   induction more generalizing index records with
-  | nil => simpa [KeyIndex.extendFrom] using exact
+  | nil => simpa [KeyIndex.admitRecordsFrom] using exact
   | cons record rest ih =>
       have step := ih (KeyIndex.admitAt_exact exact record)
       rw [List.length_append, List.length_singleton, List.append_assoc,
@@ -410,11 +410,11 @@ theorem KeyIndex.extendFrom_exact {index : KeyIndex K} {keys : IntentRecord → 
 
 /-- One pass over the log. -/
 def KeyIndex.ofRecords (keys : IntentRecord → List K) (records : List IntentRecord) : KeyIndex K :=
-  (∅ : KeyIndex K).extendFrom keys 0 records
+  (∅ : KeyIndex K).admitRecordsFrom keys 0 records
 
 theorem KeyIndex.ofRecords_exact (keys : IntentRecord → List K) (records : List IntentRecord) :
     (KeyIndex.ofRecords keys records).Exact keys records := by
-  have hsimpa := KeyIndex.extendFrom_exact (KeyIndex.empty_exact keys) records
+  have hsimpa := KeyIndex.admitRecordsFrom_exact (KeyIndex.empty_exact keys) records
   simp at hsimpa ⊢
   exact hsimpa
 
