@@ -24,7 +24,7 @@ accepted this history"; an attacker who can forge it can already forge the
 host's receipts, so no new trust is introduced. Genesis re-admission of every
 signed ingress remains available as the operator `audit` command.
 
-**What is checked on open** (`Compiler.DurableReceiverIO.load`): the chain is
+**What is checked on open** (`Compiler.DurableReceiverIO`): the chain is
 recomputed over every stored record; the latest checkpoint's MAC, key id, world
 root and chain value must all match; every entry's tag must verify
 (`Compiler.DurableLogTags`), refused by height. Any mismatch refuses to open — nothing reinterprets.
@@ -150,7 +150,7 @@ the log-tag MAC label, the history accumulator and spent map, and the command
 codecs its log records carry (a record replays by decoding its command). The
 seed frame names them all, so a Store of another epoch is refused by name — read
 from its seed before anything else, including the physical head anchor
-(`DurableReceiverIO.load`).
+(`DurableReceiverIO`).
 
 The label is a `;`-separated list of parts, each `name/version`. It is read BY
 NAME (`StoreEpoch.parse`), never by position or count: a component that is absent

@@ -7455,11 +7455,11 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               NativeHost.logOperatorRefusal result.1
                               return (2, outcomeCodec.encode (NativeHost.disclose result))
                             else
-                              let opened ← sessionOpened pinnedConfig state
-                              let outcome := match callCodec.decode payload with
-                                | none => NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList
-                                    "noncanonical native host call".toUTF8.toList
-                                | some call => NativeHost.lookupLoaded pinnedConfig opened call
+                              let session ← sessionCurrent pinnedConfig state
+                              let outcome ← match callCodec.decode payload with
+                                | none => pure (NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList
+                                    "noncanonical native host call".toUTF8.toList)
+                                | some call => NativeHost.lookupLight pinnedConfig session.light call
                               return (3, outcomeCodec.encode outcome)
                         | 12 | 13 =>
                             let some selected := service
@@ -8920,16 +8920,19 @@ def runCommandPlanUngated (_arguments : List String) (_configPath command : Stri
             | throw (IO.userError "plan-ungated: the intent's purpose is not an invoke draft")
           let some command := DeclaredResourceController.commandCodec.decode commandBytes
             | throw (RequestRefusal.malformed "noncanonical invoke command")
-          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let light ← IO.ofExcept (← NativeHostLight.start config)
           let targets ← command.targets.mapM fun target => do
-            let .present cell := opened.directory.directory.slots target.target
+            let .present cell := light.opened.directory.directory.slots target.target
               | throw (IO.userError s!"plan-ungated: target {target.target} is absent")
             let some pre := DeclaredResourceController.selectTarget config.deployment target cell
               | throw (IO.userError s!"plan-ungated: target {target.target} does not select its cell")
             pure { target with expectedTargetRoot := pre.root }
-          let draft := NativeHostCodec.Draft.invoke
-            (DeclaredResourceController.commandCodec.encode { command with targets })
-          let plan ← IO.ofExcept (NativeHost.prepareLoaded config opened draft)
+          let invokeBytes := DeclaredResourceController.commandCodec.encode { command with targets }
+          let some keys := NativeHost.invokeKeys config invokeBytes
+            | throw (IO.userError "noncanonical invocation command")
+          let basis ← IO.ofExcept (← light.basis keys)
+          let plan ← IO.ofExcept (NativeHost.prepareInvokeOn config (.ofBasis basis)
+            (config.genesisHeight + basis.height) invokeBytes)
           writeBytes output (signingPlanCodec.encode plan)
           pure 0
   | _ => throw (IO.userError usage)
@@ -9091,9 +9094,9 @@ def runCommandChallengeBatch (_arguments : List String) (_configPath _command : 
   let config := settings.config
   match rest with
   | [input, output] =>
-          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          let light ← IO.ofExcept (← NativeHostLight.start config)
           writeBytes output (← IO.ofExcept
-            (← NativeHost.challengeBatchLoaded config opened (← readBoundedBytes input maxFrame)))
+            (← NativeHost.challengeBatchLight config light (← readBoundedBytes input maxFrame)))
           pure 0
   | _ => throw (IO.userError usage)
 

@@ -8,7 +8,7 @@ provider, so where it starts is the cost of every first command.
 **CONSENT-STORE** (ruling, ember 2026-10-31: "We trust the storage device.
 That isn't 'operator trust', that's just the threat model we're working
 within."). A provider starts from the base the Store's open uses: its latest
-MAC-verified checkpoint (`DurableReceiverIO.loadChained`, at most one checkpoint
+MAC-verified checkpoint (`DurableReceiverIO.Chained`, at most one checkpoint
 interval below the head), or the seed. It natively admits EVERY record after
 its start (`NativeHostReplay.verifySuffixFrom`): full-record comparison,
 tail-law judgement and post-image validation at each original height. Past
@@ -448,7 +448,7 @@ private theorem take_length_take {α : Type} (list : List α) (count : Nat) :
   · have beyond : list.length ≤ count := Nat.le_of_lt (Nat.lt_of_not_le within)
     rw [Nat.min_eq_right beyond, List.take_length, List.take_of_length_le beyond]
 
-/-- Resume over a full open (`DurableReceiverIO.loadChained`): start at the Store's
+/-- Resume over a full open (`DurableReceiverIO.Chained`): start at the Store's
 base or the retained anchor above it (`startHeight`), cut there (`Chained.cutAbove`,
 replaying only the records between the base and the start), validate, and admit
 every record after it. -/
@@ -534,7 +534,7 @@ def Basis.full? (config : Config) {store : DurableHistory.StoreIdentity}
   | .anchored _ => NativeHostReplay.verifyStart config reader target
 
 /-- Extend either basis over a target that is the old one followed by more
-records (`DurableReceiverIO.extendFrom`): only those records are admitted. -/
+records (`DurableReceiverIO`): only those records are admitted. -/
 def Basis.extendAppended (config : Config) {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) {oldTarget : Durable}
     (basis : Basis config oldTarget) (target : Durable)

@@ -3,8 +3,8 @@
 
 Entry `h` of the durable log carries `entryTag key h chainₕ rootₕ` (the root after
 entry `h`, kept at append, then the MAC binding it)
-(`Compiler.DurableCheckpointCodec`). Open (`DurableReceiverIO.load`) and the
-live extension (`DurableReceiverIO.extendFrom`) verify the tag of EVERY entry
+(`Compiler.DurableCheckpointCodec`). Open and the live extension
+(`Compiler.DurableReceiverIO`) verify the tag of EVERY entry
 they read against the chain prefix at its height, and refuse the first one
 that differs by name and height. Before this module only the head entry's tag
 was compared, so a flipped tag below the head opened and passed `audit`.

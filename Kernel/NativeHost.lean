@@ -801,11 +801,20 @@ theorem challengeAnswer_public (config : Config) (ground : ServedBasis.Ground co
           rw [decided] at refused
           cases refused
 
+/-- Challenge creation on a light opening: reads the served basis declaring no
+history keys. -/
+def challengeLight (config : Config) (light : NativeHostLight.Light config)
+    (intentBytes intentSignature : List UInt8) :
+    IO (Except Refusal NativeObservationCodec.Challenge) := do
+  match ← light.basis ⟨[], []⟩ with
+  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+  | .ok basis => Prod.fst <$> challengeOn config (.ofBasis basis) intentBytes intentSignature
+
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
 def challenge (config : Config) (intentBytes intentSignature : List UInt8) :
     IO (Except Refusal NativeObservationCodec.Challenge) := do
-  let opened ← IO.ofExcept (← openExisting config)
-  challengeLoaded config opened intentBytes intentSignature
+  let light ← IO.ofExcept (← NativeHostLight.start config)
+  challengeLight config light intentBytes intentSignature
 
 /-- The steps a command's run claim names, when they exceed the operator's
 synchronous budget `nockFSync` (`Config.nockFSync`); `none` when the command claims
@@ -913,11 +922,17 @@ def challengeRequestLoaded (config : Config) (opened : Opened config) (payload :
     IO (Except Refusal NativeObservationCodec.Challenge) :=
   Prod.fst <$> challengeRequestOn config (observationContext config opened) payload
 
+def challengeRequestLight (config : Config) (light : NativeHostLight.Light config)
+    (payload : List UInt8) : IO (Except Refusal NativeObservationCodec.Challenge) := do
+  match ← light.basis ⟨[], []⟩ with
+  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+  | .ok basis => Prod.fst <$> challengeRequestOn config (.ofBasis basis) payload
+
 /-- Op 4, one-shot. -/
 def challengeRequest (config : Config) (payload : List UInt8) :
     IO (Except Refusal NativeObservationCodec.Challenge) := do
-  let opened ← IO.ofExcept (← openExisting config)
-  challengeRequestLoaded config opened payload
+  let light ← IO.ofExcept (← NativeHostLight.start config)
+  challengeRequestLight config light payload
 
 /-- The fields the requester's observation grant on `target` names (K-FIELDS): the first
 grant of the signed intent naming that target. A target the intent names no grant for is
@@ -1232,6 +1247,12 @@ def challengeBatchOn (config : Config) (ground : ServedBasis.Ground config.deplo
 def challengeBatchLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO (Except Refusal (List UInt8)) :=
   Prod.fst <$> challengeBatchOn config (observationContext config opened) bytes
+
+def challengeBatchLight (config : Config) (light : NativeHostLight.Light config)
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
+  match ← light.basis ⟨[], []⟩ with
+  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+  | .ok basis => Prod.fst <$> challengeBatchOn config (.ofBasis basis) bytes
 
 /-- Every answer invokes ordinary current observation admission against the
 same opened image. It never reopens between elements, releases partial results,
@@ -1571,18 +1592,63 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]
 
+/-- A history refusal as a Host refusal frame: the detail is `Refusal.message`
+verbatim (it names the height); never "absent". -/
+def historyRefusal (refusal : DurableHistory.Refusal) : Refusal :=
+  { reason := .operationRejected, detail := refusal.message }
+
+/-- The receipt a verified record at `height` carries: its original accepted
+prefix (`height`, 1-based), the record's own transaction and event id, and the
+world root the log leaf at that height binds (`Verified.root`, authenticated by
+the inclusion proof against the MAC-bound head). -/
+def receiptOfRecord {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
+    {height : Nat} (read : DurableHistoryReader.Record head height) : Receipt :=
+  ⟨read.record.transactionId, read.record.event.eventId, height, read.verified.root⟩
+
+/-- The receipt of a transaction the spent map named: the record read at its height. -/
+def receiptOfFound {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
+    (transactionId : Digest) (found : DurableHistoryReader.ByTx head transactionId) : Receipt :=
+  { receiptOfRecord found.read with transactionId := transactionId }
+
+/-- Exact receipt of one accepted transaction, by transaction id alone. It
+names the original accepted prefix; a later tip does not replace it. -/
+def receiptByTransactionRead {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (transactionId : Digest) :
+    IO (Except Refusal (Option Receipt)) := do
+  match ← reader.byTx transactionId with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok (.absent _) => return .ok none
+  | .ok (.present found) => return .ok (some (receiptOfFound transactionId found))
+
+/-- Op 102 on a session's light opening: reads the transaction receipt through the light
+opening's Reader without opening the full image. -/
+def receiptByTransactionLight (config : Config) (light : NativeHostLight.Light config)
+    (transactionId : Digest) : IO (Except Refusal (Option Receipt)) :=
+  receiptByTransactionRead (light.opening.reader config.transport ResourceBirthCodec.rootBytes)
+    transactionId
+
+/-- `historicalReceiptVia` through the Reader of a session's light opening (its head
+refreshed by the request): no full image is opened. -/
+def historicalReceiptLight (config : Config) (light : NativeHostLight.Light config)
+    (transactionId eventId : Digest) : IO (Except Refusal (Option Receipt)) := do
+  match ← receiptByTransactionLight config light transactionId with
+  | .error refusal => return .error refusal
+  | .ok none => return .ok none
+  | .ok (some receipt) => return .ok (if receipt.eventId == eventId then some receipt else none)
+
 /-- How a submit route reads its committed receipt back. A one-shot process
-passes `confirmed config` (a cold open); a session passes its own readback
+passes `confirmed config` (a light open); a session passes its own readback
 over the opening it holds, so a submit never re-opens the Store. -/
 abbrev Confirm := DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome
 
 def confirmed (config : Config) : Confirm := fun kind transactionId eventId => do
-  match ← openExisting config with
+  match ← NativeHostLight.start config with
   | .error detail => return .uncertain s!"receipt readback: {detail}".toUTF8.toList
-  | .ok opened =>
-      match historicalReceipt config opened.durable transactionId eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some receipt => return .confirmed kind receipt
+  | .ok light =>
+      match ← historicalReceiptLight config light transactionId eventId with
+      | .error refusal => return .uncertain s!"receipt readback: {refusal.detail}".toUTF8.toList
+      | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+      | .ok (some receipt) => return .confirmed kind receipt
 
 /-- Seal the original prefix of a committed charged failure without erasing
 its typed source cause: the receipt `confirm` reads back, as a charge. -/
@@ -1807,11 +1873,6 @@ def fleetLookupLoaded (config : Config) (opened : Opened config)
     | some (.error _) => refused .conflict "replay" "transaction identity conflict"
     | none => .absent
 
-/-- A history refusal as a Host refusal frame: the detail is `Refusal.message`
-verbatim (it names the height); never "absent". -/
-def historyRefusal (refusal : DurableHistory.Refusal) : Refusal :=
-  { reason := .operationRejected, detail := refusal.message }
-
 /-- The Reader of one loaded Store image: the Store's authenticated head and the
 verify-at-use reads under it. One per request. -/
 def historyReaderOfDurable (config : Config) (durable : Durable) :
@@ -1827,29 +1888,6 @@ def historyReader (config : Config) (opened : Opened config) :
       DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)) :=
   historyReaderOfDurable config opened.durable
 
-/-- The receipt a verified record at `height` carries: its original accepted
-prefix (`height`, 1-based), the record's own transaction and event id, and the
-world root the log leaf at that height binds (`Verified.root`, authenticated by
-the inclusion proof against the MAC-bound head). -/
-def receiptOfRecord {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
-    {height : Nat} (read : DurableHistoryReader.Record head height) : Receipt :=
-  ⟨read.record.transactionId, read.record.event.eventId, height, read.verified.root⟩
-
-/-- The receipt of a transaction the spent map named: the record read at its height. -/
-def receiptOfFound {store : DurableHistory.StoreIdentity} {head : DurableHistory.Head store}
-    (transactionId : Digest) (found : DurableHistoryReader.ByTx head transactionId) : Receipt :=
-  { receiptOfRecord found.read with transactionId := transactionId }
-
-/-- Exact receipt of one accepted transaction, by transaction id alone. It
-names the original accepted prefix; a later tip does not replace it. -/
-def receiptByTransactionRead {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store) (transactionId : Digest) :
-    IO (Except Refusal (Option Receipt)) := do
-  match ← reader.byTx transactionId with
-  | .error refusal => return .error (historyRefusal refusal)
-  | .ok (.absent _) => return .ok none
-  | .ok (.present found) => return .ok (some (receiptOfFound transactionId found))
-
 /-- Op 102 on one opened image: the Reader is built per request from the open. -/
 def receiptByTransactionVia (config : Config) (opened : Opened config)
     (transactionId : Digest) : IO (Except Refusal (Option Receipt)) := do
@@ -1863,22 +1901,6 @@ event id is not `eventId`. A history refusal is returned, never mapped to `none`
 def historicalReceiptVia (config : Config) (opened : Opened config)
     (transactionId eventId : Digest) : IO (Except Refusal (Option Receipt)) := do
   match ← receiptByTransactionVia config opened transactionId with
-  | .error refusal => return .error refusal
-  | .ok none => return .ok none
-  | .ok (some receipt) => return .ok (if receipt.eventId == eventId then some receipt else none)
-
-/-- Op 102 on a session's light opening: reads the transaction receipt through the light
-opening's Reader without opening the full image. -/
-def receiptByTransactionLight (config : Config) (light : NativeHostLight.Light config)
-    (transactionId : Digest) : IO (Except Refusal (Option Receipt)) :=
-  receiptByTransactionRead (light.opening.reader config.transport ResourceBirthCodec.rootBytes)
-    transactionId
-
-/-- `historicalReceiptVia` through the Reader of a session's light opening (its head
-refreshed by the request): no full image is opened. -/
-def historicalReceiptLight (config : Config) (light : NativeHostLight.Light config)
-    (transactionId eventId : Digest) : IO (Except Refusal (Option Receipt)) := do
-  match ← receiptByTransactionLight config light transactionId with
   | .error refusal => return .error refusal
   | .ok none => return .ok none
   | .ok (some receipt) => return .ok (if receipt.eventId == eventId then some receipt else none)
@@ -3700,12 +3722,9 @@ def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
   let result ← match callCodec.decode bytes with
     | none => pure (refused .malformed "wire" "noncanonical or unsupported native host call", .uniform)
     | some call =>
-        match ← openExisting config with
+        match ← NativeHostLight.start config with
         | .error detail => pure (.unavailable detail.toUTF8.toList, .uniform)
-        | .ok opened =>
-            match ← NativeHostLight.start config with
-            | .error detail => pure (.unavailable detail.toUTF8.toList, .uniform)
-            | .ok light => submitDisclosedWith config opened light call (confirmed config)
+        | .ok light => submitDisclosedSession config light call (confirmed config)
   logOperatorRefusal result.1
   return disclose result
 
@@ -3830,13 +3849,142 @@ theorem lookupLoaded_malformed_composite (config : Config) (opened : Opened conf
 /-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_malformed_composite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms lookupLoaded_malformed_composite
 
+/-- The history keys (`DeclaredKeys`: transaction id and replay nullifiers) that
+read-only exact-ingress `lookupLight` needs in its `ServedBasis`, or the immediate
+malformed-ingress refusal when `call` does not decode. -/
+def lookupCallKeys (config : Config) (call : SignedCall) : Except Outcome DurableView.Keys :=
+  let domain := config.deployment.domain
+  let semantics := config.profile.semantics
+  match call with
+  | .renounce bytes =>
+      match CapabilityRenounce.decodeIngress bytes with
+      | none => .error (refused .malformed "renounce" "noncanonical ingress")
+      | some ingress => .ok (CapabilityRenounce.keys domain semantics ingress)
+  | .revoke bytes =>
+      match CapabilityRevocationReceiver.decodeIngress bytes with
+      | none => .error (refused .malformed "revoke" "noncanonical ingress")
+      | some ingress => .ok (CapabilityRevocationReceiver.keys domain semantics ingress)
+  | .delegate bytes =>
+      match CapabilityDelegationReceiver.decodeIngress bytes with
+      | none => .error (refused .malformed "delegate" "noncanonical ingress")
+      | some ingress => .ok (CapabilityDelegationReceiver.keys domain semantics ingress)
+  | .birth bytes =>
+      match GrainResourceBirthPolicyController.decodeIngress bytes with
+      | some ingress => .ok (GrainResourceBirthReceiver.grainKeys domain semantics ingress)
+      | none =>
+          if bytes.take 7 = GrainResourceBirthPolicyController.ingressFrame.take 7 then
+            .error (refused .malformed "grain-birth" "noncanonical ingress")
+          else
+            match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
+            | none => .error (refused .malformed "birth" "noncanonical ingress")
+            | some ingress => .ok (ResourceBirthReceiver.birthKeys domain ingress)
+  | .install bytes =>
+      match PolicyInstallReceiver.decodeIngress bytes with
+      | none => .error (refused .malformed "install" "noncanonical ingress")
+      | some ingress => .ok (PolicyInstallReceiver.keys domain ingress)
+  | .invoke signed =>
+      match DeclaredResourceController.commandCodec.decode signed.commandBytes with
+      | none => .error (refused .malformed "invoke" "noncanonical command")
+      | some command => .ok (DeclaredResourceController.invocationKeys domain semantics command)
+
+/-- Read-only exact-ingress replay on a `ServedBasis.Ground`, parameterized by
+how an original accepted `(transactionId, eventId)` is resolved to its receipt. -/
+def lookupOn (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (finish : Digest → Digest → IO Outcome) (call : SignedCall) : IO Outcome :=
+  match call with
+  | .renounce bytes =>
+      match CapabilityRenounce.decodeIngress bytes with
+      | none => pure (refused .malformed "renounce" "noncanonical ingress")
+      | some ingress =>
+          match CapabilityRenounce.replay config.deployment.domain config.profile.semantics
+              ground ingress with
+          | .fresh => pure .absent
+          | .undeclared => pure (refused .operationRejected "replay" "transaction identity undeclared")
+          | .conflict => pure (refused .conflict "replay" "transaction identity conflict")
+          | .original receipt => finish receipt.transactionId receipt.eventId
+  | .revoke bytes =>
+      match CapabilityRevocationReceiver.decodeIngress bytes with
+      | none => pure (refused .malformed "revoke" "noncanonical ingress")
+      | some ingress =>
+          match CapabilityRevocationReceiver.replay config.deployment.domain config.profile.semantics ground ingress with
+          | .fresh => pure .absent
+          | .undeclared => pure (refused .operationRejected "replay" "transaction identity undeclared")
+          | .conflict => pure (refused .conflict "replay" "transaction identity conflict")
+          | .original receipt => finish receipt.transactionId receipt.eventId
+  | .delegate bytes =>
+      match CapabilityDelegationReceiver.decodeIngress bytes with
+      | none => pure (refused .malformed "delegate" "noncanonical ingress")
+      | some ingress =>
+          match CapabilityDelegationReceiver.replay config.deployment.domain config.profile.semantics ground ingress with
+          | .fresh => pure .absent
+          | .undeclared => pure (refused .operationRejected "replay" "transaction identity undeclared")
+          | .conflict => pure (refused .conflict "replay" "transaction identity conflict")
+          | .original receipt => finish receipt.transactionId receipt.eventId
+  | .birth bytes =>
+      match GrainResourceBirthPolicyController.decodeIngress bytes with
+      | some ingress =>
+          match GrainResourceBirthReceiver.replay ground ingress with
+          | .fresh => pure .absent
+          | .undeclared => pure (refused .operationRejected "replay" "transaction identity undeclared")
+          | .conflict => pure (refused .conflict "replay" "transaction identity conflict")
+          | .original receipt => finish receipt.transactionId receipt.eventId
+      | none =>
+          if bytes.take 7 = GrainResourceBirthPolicyController.ingressFrame.take 7 then
+            pure (refused .malformed "grain-birth" "noncanonical ingress")
+          else
+            match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
+            | none => pure (refused .malformed "birth" "noncanonical ingress")
+            | some ingress =>
+                match ResourceBirthReceiver.replay config.deployment.domain ground ingress with
+                | .fresh => pure .absent
+                | .undeclared => pure (refused .operationRejected "replay" "transaction identity undeclared")
+                | .conflict => pure (refused .conflict "replay" "transaction identity conflict")
+                | .original receipt => finish receipt.transactionId receipt.eventId
+  | .install bytes =>
+      match PolicyInstallReceiver.decodeIngress bytes with
+      | none => pure (refused .malformed "install" "noncanonical ingress")
+      | some ingress =>
+          match PolicyInstallReceiver.replay config.deployment.domain ground ingress with
+          | .fresh => pure .absent
+          | .undeclared => pure (refused .operationRejected "replay" "transaction identity undeclared")
+          | .conflict => pure (refused .conflict "replay" "transaction identity conflict")
+          | .original receipt => finish receipt.transactionId receipt.eventId
+  | .invoke signed =>
+      match DeclaredResourceController.commandCodec.decode signed.commandBytes with
+      | none => pure (refused .malformed "invoke" "noncanonical command")
+      | some command =>
+          match DeclaredResourceController.recordedInvocation config.deployment.domain config.profile.semantics
+              command signed ground with
+          | .error _ => pure (refused .conflict "replay" "transaction identity conflict")
+          | .ok none => pure .absent
+          | .ok (some record) => finish record.transactionId record.event.event.eventId
+
+/-- Read-only exact-ingress replay on a light opening: reads the call's declared
+history keys into a `ServedBasis`, runs the replay check on `Ground.ofBasis`, and
+seals any original receipt via `historicalReceiptLight`. -/
+def lookupLight (config : Config) (light : NativeHostLight.Light config)
+    (call : SignedCall) : IO Outcome := do
+  match lookupCallKeys config call with
+  | .error outcome => return outcome
+  | .ok keys =>
+      match ← light.basis keys with
+      | .error detail => return .unavailable detail.toUTF8.toList
+      | .ok basis =>
+          lookupOn config (.ofBasis basis)
+            (fun transaction event => do
+              match ← historicalReceiptLight config light transaction event with
+              | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+              | .ok none => return .uncertain "historical receipt prefix unavailable".toUTF8.toList
+              | .ok (some receipt) => return .confirmed .replayed receipt)
+            call
+
 def lookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   match callCodec.decode bytes with
   | none => return refused .malformed "wire" "noncanonical native host call"
   | some call =>
-      match ← openExisting config with
+      match ← NativeHostLight.start config with
       | .error detail => return .unavailable detail.toUTF8.toList
-      | .ok opened => return lookupLoaded config opened call
+      | .ok light => lookupLight config light call
 
 end Minidregg.Kernel.NativeHost
 
