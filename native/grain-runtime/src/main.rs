@@ -17285,6 +17285,7 @@ impl Runtime {
                 self.journal.tool_hold = None;
             } else {
                 self.journal.parent_hold = None;
+                self.journal.prompt_witness = None;
             }
             self.journal
                 .reconciliation_log
@@ -17389,6 +17390,9 @@ impl Runtime {
             "operator fixed-charge settlement",
             vec![],
         )?;
+        if !tool {
+            self.journal.prompt_witness = None;
+        }
         self.journal
             .reconciliation_log
             .push(json!({"decisionId":decision.to_string(),

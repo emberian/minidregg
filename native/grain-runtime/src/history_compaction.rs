@@ -36,7 +36,8 @@ fn operation_of(name: &str) -> Option<u64> {
 /// unresolved work, and no provider retry gate.
 pub(crate) fn quiescent(journal: &Journal) -> bool {
     quiescence::retained(journal, quiescence::ResidentEvidence::NotConfigured)
-        .iter().all(|field| *field == "connection_fenced")
+        .iter()
+        .all(|field| matches!(*field, "connection_fenced" | "hermes_pending_prompt"))
         && journal.provider_retry_gate.is_none()
 }
 
