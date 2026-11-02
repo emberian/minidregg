@@ -440,7 +440,7 @@ step_create() {
   local genesis=$NODE/genesis.json reserve
   # The pool hold covers the fee and the metered charge at the token caps.
   reserve=$(jq -r --argjson p "$PURSE_T" '.providerServices[] | select(.providerResourceId == $p) | .tariff.routes.pool
-    | ((.perOp|tonumber) + (((16000 * (.inputMicroPerMillion|tonumber)) + (1024 * (.outputMicroPerMillion|tonumber)) + 999999) / 1000000 | floor)) | tostring' "$CONFIG")
+    | ((.perOp|tonumber) + (((131072 * (.inputMicroPerMillion|tonumber)) + (1024 * (.outputMicroPerMillion|tonumber)) + 999999) / 1000000 | floor)) | tostring' "$CONFIG")
   # The root exists empty and the operator's, for the birth only.
   install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$G"
   jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$RSOCKET" --arg g "$genesis" \
@@ -466,7 +466,7 @@ step_create() {
      toolCharges:{reserve:"2",charge:"1"},
      provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:(($base|tonumber)+15|tostring),controlCapability:(($base|tonumber)+16|tostring),
        budget:"50000",gateway:{providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,provider:$row,reserve:$reserve,
-         maxInputTokens:16000,maxOutputTokens:1024,maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:300,
+         maxInputTokens:131072,maxOutputTokens:1024,maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:300,
          localFixtureHostNetwork:false}},
      room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:$room,account:"unsummoned"}}' \
     >"$SPEC.new"
