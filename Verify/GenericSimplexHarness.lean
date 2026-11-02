@@ -1,3 +1,4 @@
+import Assurance.Deployed
 import Kernel.GenericSimplex
 import Compiler.GenericSimplexPending
 namespace Minidregg.Verify.GenericSimplexHarness
@@ -316,6 +317,12 @@ def main (args : List String) : IO Unit := do
   for seed in List.range 8 do
     let n ← adversarial 256 (seed+1) hostileSeed
     ensure (honestSafe n && restarted n) "adversarial crash replay"
-  IO.println "PASS GenericSimplex event harness: normal, silent-leader fallback, equivocation, old-view continuation, crash replay, roster, timeout"
+  ensure Minidregg.Assurance.DeployedReceiptOpening.checkReceiptOpeningBridge
+    "op 151 receipt-continuity opening bridge audit failed"
+  ensure Minidregg.Assurance.DeployedCertifyingSolvers.checkCertifyingSolversAudit
+    "certifying solvers (Cert-F clearing + Pred.hashEq) audit failed"
+  ensure Minidregg.Assurance.Deployed.checkDeployedAssurance
+    "deployed assurance audit failed"
+  IO.println "PASS GenericSimplex event harness: normal, silent-leader fallback, equivocation, old-view continuation, crash replay, roster, timeout, deployed-assurance"
 end Minidregg.Verify.GenericSimplexHarness
 def main (args : List String) : IO Unit := Minidregg.Verify.GenericSimplexHarness.main args
