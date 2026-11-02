@@ -173,24 +173,43 @@ pub(super) fn grains(site: &Site) -> Page {
             let mut rows = String::new();
             for g in value["receipt"]["grains"].as_array().into_iter().flatten() {
                 let id = g["grain"].as_str().unwrap_or("");
+                let snap_cell = if site.front.read_only || id.is_empty() {
+                    String::new()
+                } else {
+                    render_snapshot_form(id)
+                };
                 rows.push_str(&format!(
-                    "<tr><td><a href=\"/grain/{id}\"><code>{id}</code></a></td><td>{}</td><td>{}</td><td>{}</td><td><a href=\"{}\" data-full>{}</a></td></tr>",
+                    "<tr><td><a href=\"/grain/{id}\"><code>{id}</code></a></td><td>{}</td><td>{}</td><td>{}</td><td><a href=\"{}\" data-full>{}</a></td><td>{snap_cell}</td></tr>",
                     escape(g["indexName"].as_str().unwrap_or("")),
                     escape(g["state"].as_str().unwrap_or("")),
                     if g["shared"] == true { "shared with you" } else { "yours" },
                     url(g["origin"].as_str().unwrap_or("")),
                     escape(g["origin"].as_str().unwrap_or("")),
-                    id = escape(id)
+                    id = escape(id),
+                    snap_cell = snap_cell
                 ));
             }
             format!(
-                "<table><thead><tr><th>grain</th><th>app</th><th>state</th><th></th><th>origin</th></tr></thead><tbody>{rows}</tbody></table>{}",
+                "<table><thead><tr><th>grain</th><th>app</th><th>state</th><th></th><th>origin</th><th>WorldRoot snapshot</th></tr></thead><tbody>{rows}</tbody></table>{}",
                 notice(&value["receipt"])
             )
         }
         None => super::body::outcome_html(&ending, &[("App market", "/apps")]),
     };
     Page { status: 200, title: "Grains".into(), stamp: Stamp::None, body }
+}
+
+/// Render the "Snapshot to Doc (`WorldRoot`)" form for a grain card or grain detail page.
+pub(crate) fn render_snapshot_form(grain_id: &str) -> String {
+    let id = escape(grain_id);
+    let default_slug = format!("grain-{id}-snap");
+    format!(
+        "<form method=\"post\" action=\"/grain/{id}/snapshot\" data-action=\"/act/apps/snapshot\" class=\"row grain-snapshot-form\">\
+         <input type=\"hidden\" name=\"grain\" value=\"{id}\">\
+         <div><label for=\"snap-doc-{id}\">Snapshot to Doc (<code>WorldRoot</code>)</label>\
+         <input id=\"snap-doc-{id}\" name=\"doc\" type=\"text\" value=\"{default_slug}\" placeholder=\"doc-slug\" pattern=\"[A-Za-z0-9_-]+\" required></div>\
+         <button class=\"quiet\" type=\"submit\">Snapshot to Doc (WorldRoot)</button></form>"
+    )
 }
 
 fn notice(receipt: &Value) -> String {
@@ -266,7 +285,9 @@ pub(super) fn grain(site: &Site, n: &str) -> Page {
              <form method=\"post\" action=\"/grain/{id}/renew\" class=\"inline\"><button class=\"quiet\">Renew</button></form> \
              <form method=\"post\" action=\"/grain/{id}/export\" class=\"inline\"><input name=\"file\" type=\"text\" placeholder=\"export.spk\" aria-label=\"Export file name\" required pattern=\"[A-Za-z0-9._-]+\"><button class=\"quiet\">Export</button></form> \
              <form method=\"post\" action=\"/grain/{id}/delete\" class=\"inline\"><button class=\"quiet\">Delete</button></form></p>\
-             <form method=\"post\" action=\"/grain/{id}/share\" class=\"row\"><div><label for=\"sh\">Share with member</label><input id=\"sh\" name=\"member\" type=\"text\" pattern=\"[a-z][a-z0-9-]*\" required></div><button class=\"quiet\">Share</button></form></section>"
+             <form method=\"post\" action=\"/grain/{id}/share\" class=\"row\"><div><label for=\"sh\">Share with member</label><input id=\"sh\" name=\"member\" type=\"text\" pattern=\"[a-z][a-z0-9-]*\" required></div><button class=\"quiet\">Share</button></form>\
+             {snap_form}</section>",
+            snap_form = render_snapshot_form(&id)
         ));
     }
     Page { status: 200, title: format!("Grain {id}"), stamp: Stamp::None, body }
@@ -304,6 +325,61 @@ pub(super) fn grain_action(site: &Site, n: &str, action: &str, form: &std::colle
                     Page { status: 200, title: format!("Open {id}"), stamp: Stamp::None, body }
                 }
                 None => Page { status: 200, title: format!("Open {id}"), stamp: Stamp::None, body: super::body::outcome_html(&ending, &[("Grain", &format!("/grain/{id}"))]) },
+            }
+        }
+        "snapshot" => {
+            let doc_slug = ["doc", "doc_slug", "slug"]
+                .into_iter()
+                .map(field)
+                .find(|v| !v.is_empty())
+                .unwrap_or_default();
+            if !crate::apps::valid_doc_slug(&doc_slug) {
+                return simple(400, "Snapshot", "doc slug must be 1..64 ASCII letters, digits, hyphens or underscores");
+            }
+            let snap = match crate::apps::snapshot_grain_to_doc(
+                Some(site.root.as_path()),
+                std::path::Path::new(crate::apps::DEFAULT_WORKER_SOCKET),
+                &id,
+                &doc_slug,
+            ) {
+                Ok(s) => s,
+                Err(e) => return simple(400, "Snapshot", &e),
+            };
+            let digest = snap["contentSha256"].as_str().unwrap_or("");
+            let snap_body = snap["body"].as_str().unwrap_or("");
+            if let Some(shell) = &site.shell {
+                let req_dir = shell.home.join("requests");
+                let _ = std::fs::create_dir_all(&req_dir);
+                let file_name = format!("snap-{id}-{doc_slug}.txt");
+                let _ = std::fs::write(req_dir.join(&file_name), snap_body.as_bytes());
+                let attempt_id = format!("snap-{id}-{}", &digest[..12.min(digest.len())]);
+                let mut lines = Vec::new();
+                if !site.root.join("refs").join(format!("{doc_slug}.json")).is_file() {
+                    lines.push(format!("doc new {} open", quote(&doc_slug)));
+                }
+                lines.push(format!("doc append {attempt_id} {} @{file_name}", quote(&doc_slug)));
+                lines.push(format!("submit {attempt_id}"));
+                return act(
+                    site,
+                    &format!("Snapshot {id} to {doc_slug}"),
+                    lines,
+                    &attempt_id,
+                    &[("the document", &format!("/doc/{doc_slug}")), ("Grain", &format!("/grain/{id}")), ("Receipts", "/receipts")],
+                );
+            }
+            Page {
+                status: 200,
+                title: format!("Snapshot {id} -> {doc_slug}"),
+                stamp: Stamp::None,
+                body: format!(
+                    "<p class=\"outcome\">Snapshotted grain <code>{id}</code> to document <a href=\"/doc/{doc}\"><code>{doc}</code></a> (SHA-256 <code>{sha}</code>).</p>\
+                     <pre>{body}</pre>\
+                     <p><a href=\"/doc/{doc}\">Open /doc/{doc}</a> · <a href=\"/receipts\">Verify in /receipts</a> · <a href=\"/grain/{id}\">Back to grain {id}</a></p>",
+                    id = escape(&id),
+                    doc = escape(&doc_slug),
+                    sha = escape(digest),
+                    body = escape(snap_body),
+                ),
             }
         }
         "share" => act(site, &format!("Share {id}"), vec![format!("apps share {id} {}", quote(&field("member")))], "", &[("Grain", &format!("/grain/{id}"))]),
@@ -344,4 +420,50 @@ mod tests {
         assert_eq!(value["receipt"]["bootstrapToken"], "t");
         assert!(notice(&serde_json::json!({"identityNotice": "one user"})).contains("one user"));
     }
+
+    #[test]
+    fn snapshot_form_renders_and_grain_action_validates_and_formats_snapshot() {
+        let html = render_snapshot_form("a4501");
+        assert!(html.contains("action=\"/grain/a4501/snapshot\""));
+        assert!(html.contains("data-action=\"/act/apps/snapshot\""));
+        assert!(html.contains("Snapshot to Doc (WorldRoot)"));
+        assert!(html.contains("name=\"doc\""));
+
+        let root = std::env::temp_dir().join(format!(
+            "mini-web-apps-snap-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let site = Site {
+            mutations: std::sync::Mutex::new(()),
+            refs: std::sync::Mutex::new(None),
+            home: None,
+            root: root.clone(),
+            workspace: serde_json::json!({"subject": "7"}),
+            subject: "7".into(),
+            token: "tok".into(),
+            front: Front::loopback(8080, false),
+            base: String::new(),
+            face: Face::Body,
+            shell: None,
+        };
+        let mut form = std::collections::BTreeMap::new();
+        form.insert("doc".into(), "ethercalc-q4".into());
+        let page = grain_action(&site, "a4501", "snapshot", &form);
+        assert_eq!(page.status, 200);
+        assert!(page.body.contains("Snapshotted grain <code>a4501</code> to document"));
+        assert!(page.body.contains("/doc/ethercalc-q4"));
+        assert!(page.body.contains("world_root_anchor: doc/ethercalc-q4"));
+
+        let mut bad_form = std::collections::BTreeMap::new();
+        bad_form.insert("doc".into(), "../bad".into());
+        let bad_page = grain_action(&site, "a4501", "snapshot", &bad_form);
+        assert_eq!(bad_page.status, 400);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
+

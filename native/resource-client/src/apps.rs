@@ -62,6 +62,7 @@ pub(crate) fn positional_flag(argument: &str) -> &'static str {
         "GRAIN" => "grain",
         "MEMBER" => "to",
         "FILE" => "out",
+        "DOC" | "DOC-SLUG" => "doc",
         "TOKEN" => "token",
         _ => "arg",
     }
@@ -922,6 +923,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         "search" | "show" => catalogue(&action, args, &paths, as_json),
         "install" => install(args, &paths, as_json, dir),
+        "snapshot" => snapshot_cmd(args, &paths, as_json, dir),
         verb if WORKER_VERBS.contains(&verb) => {
             let mut request = Map::new();
             request.insert("protocol".into(), json!(WORKER_PROTOCOL));
@@ -948,10 +950,275 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             report(&reply, as_json)
         }
         other => Err(format!(
-            "mini apps: unknown action {other}; actions: search, show, index-check, {}",
+            "mini apps: unknown action {other}; actions: search, show, index-check, snapshot, {}",
             WORKER_VERBS.join(", ")
         )),
     }
+}
+
+pub(crate) fn valid_doc_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 64
+        && slug.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Deterministic SHA-256 content digest over the grain's canonical snapshot fields and exported payload.
+pub(crate) fn compute_snapshot_digest(
+    grain_id: &str,
+    app_title: &str,
+    package_id: &str,
+    state: &str,
+    generation: &str,
+    exported_body: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = json!({
+        "schema": "minidregg-grain-snapshot-v1",
+        "grainId": grain_id,
+        "appTitle": app_title,
+        "packageId": package_id,
+        "state": state,
+        "generation": generation,
+        "exportedBody": exported_body,
+    });
+    let bytes = serde_json::to_vec(&canonical).expect("canonical snapshot JSON serializes");
+    format!("{:x}", Sha256::digest(&bytes))
+}
+
+/// Format a structured hyperdocument body anchoring a grain snapshot in Mini's `doc` store (`WorldRoot`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn format_grain_snapshot_doc(
+    grain_id: &str,
+    doc_slug: &str,
+    app_title: &str,
+    app_id: &str,
+    package_id: &str,
+    state: &str,
+    generation: &str,
+    snapshot_height: &str,
+    content_sha256: &str,
+    exported_body: &str,
+) -> String {
+    format!(
+        "# Grain Snapshot: {grain_id} -> {doc_slug}\n\
+         grain_id: {grain_id}\n\
+         doc_slug: {doc_slug}\n\
+         app_title: {app_title}\n\
+         app_id: {app_id}\n\
+         package_id: {package_id}\n\
+         state: {state}\n\
+         generation: {generation}\n\
+         snapshot_height: {snapshot_height}\n\
+         content_sha256: {content_sha256}\n\
+         world_root_anchor: doc/{doc_slug}\n\
+         \n\
+         ## Exported Grain State\n\
+         {exported_body}\n"
+    )
+}
+
+/// Read the grain's current metadata + live export/content snapshot, compute its deterministic
+/// SHA-256 content digest, format a structured hyperdocument body, and commit it to Mini's durable
+/// `doc` store under `<doc_slug>`.
+pub(crate) fn snapshot_grain_to_doc(
+    workspace_dir: Option<&Path>,
+    socket: &Path,
+    grain_id: &str,
+    doc_slug: &str,
+) -> Result<Value> {
+    if !valid_grain(grain_id) {
+        return Err(format!("grainRefused: {grain_id:?} is not a grain id of the form a<app>"));
+    }
+    if !valid_doc_slug(doc_slug) {
+        return Err(format!("docRefused: {doc_slug:?} must be 1..64 ASCII letters, digits, hyphens or underscores"));
+    }
+
+    let mut app_title = "Sandstorm Grain".to_owned();
+    let mut app_id = "unknown".to_owned();
+    let mut package_id = "unknown".to_owned();
+    let mut state = "installed".to_owned();
+    let mut generation = "1".to_owned();
+    let mut snapshot_height = "0".to_owned();
+    let mut exported_body = String::new();
+
+    // 1. Inspect local workspace birth/request records if available.
+    if let Some(ws_root) = workspace_dir {
+        let req_dir = ws_root.join("apps").join("requests");
+        if let Ok(entries) = fs::read_dir(&req_dir) {
+            let target_app = &grain_id[1..];
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json")
+                    || path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".outcome"))
+                {
+                    continue;
+                }
+                if let Ok(val) = crate::workspace::bounded_json(&path) {
+                    let born_app = val
+                        .pointer("/birthSource/applicationGrainBirth/applicationBirth/application/app")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    if born_app == target_app || app_id == "unknown" {
+                        if let Some(name) = val.get("indexName").and_then(Value::as_str) {
+                            app_title = name.to_owned();
+                        }
+                        if let Some(aid) = val.get("appId").and_then(Value::as_str) {
+                            app_id = aid.to_owned();
+                        }
+                        if let Some(pid) = val.get("packageId").and_then(Value::as_str) {
+                            package_id = pid.to_owned();
+                        }
+                        if let Some(h) = val.pointer("/birthReceipt/acceptedCount").and_then(Value::as_str) {
+                            snapshot_height = h.to_owned();
+                        }
+                        exported_body = format!(
+                            "birth_app_cell={born_app} class={} package={package_id}",
+                            val.get("class").and_then(Value::as_str).unwrap_or("S")
+                        );
+                        if born_app == target_app {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // Check if an explicit grain state file exists in `<ws>/apps/grains/<grain_id>.json`.
+        let local_grain = ws_root.join("apps").join("grains").join(format!("{grain_id}.json"));
+        if let Ok(val) = crate::workspace::bounded_json(&local_grain) {
+            if let Some(v) = val.get("appName").or_else(|| val.get("title")).and_then(Value::as_str) {
+                app_title = v.to_owned();
+            }
+            if let Some(v) = val.get("appId").and_then(Value::as_str) {
+                app_id = v.to_owned();
+            }
+            if let Some(v) = val.get("packageId").and_then(Value::as_str) {
+                package_id = v.to_owned();
+            }
+            if let Some(v) = val.get("state").and_then(Value::as_str) {
+                state = v.to_owned();
+            }
+            if let Some(v) = val.get("generation").and_then(Value::as_u64) {
+                generation = v.to_string();
+            } else if let Some(v) = val.get("generation").and_then(Value::as_str) {
+                generation = v.to_owned();
+            }
+            if let Some(v) = val.get("height").and_then(Value::as_str) {
+                snapshot_height = v.to_owned();
+            }
+            if let Some(v) = val.get("export").or_else(|| val.get("content")).and_then(Value::as_str) {
+                exported_body = v.to_owned();
+            }
+        }
+    }
+
+    // 2. Query live worker status/export if socket is reachable.
+    if let Ok(reply) = worker_call(
+        socket,
+        &json!({"protocol": WORKER_PROTOCOL, "verb": "status", "grain": grain_id}),
+    ) {
+        if let Some(v) = reply.get("appName").or_else(|| reply.get("title")).and_then(Value::as_str) {
+            app_title = v.to_owned();
+        }
+        if let Some(v) = reply.get("appId").and_then(Value::as_str) {
+            app_id = v.to_owned();
+        }
+        if let Some(v) = reply.get("packageId").and_then(Value::as_str) {
+            package_id = v.to_owned();
+        }
+        if let Some(v) = reply.get("state").and_then(Value::as_str) {
+            state = v.to_owned();
+        }
+        if let Some(v) = reply.get("generation").and_then(Value::as_u64) {
+            generation = v.to_string();
+        } else if let Some(v) = reply.get("generation").and_then(Value::as_str) {
+            generation = v.to_owned();
+        }
+        if let Some(v) = reply.get("detail").and_then(Value::as_str) {
+            if exported_body.is_empty() {
+                exported_body = v.to_owned();
+            }
+        }
+    }
+
+    if exported_body.is_empty() {
+        exported_body = format!("grain={grain_id} app={app_title} package={package_id} state={state} generation={generation}");
+    }
+
+    let content_sha256 = compute_snapshot_digest(
+        grain_id,
+        &app_title,
+        &package_id,
+        &state,
+        &generation,
+        &exported_body,
+    );
+    let doc_body = format_grain_snapshot_doc(
+        grain_id,
+        doc_slug,
+        &app_title,
+        &app_id,
+        &package_id,
+        &state,
+        &generation,
+        &snapshot_height,
+        &content_sha256,
+        &exported_body,
+    );
+
+    let summary = json!({
+        "decided": true,
+        "action": "snapshot",
+        "grain": grain_id,
+        "doc": doc_slug,
+        "appTitle": app_title,
+        "appId": app_id,
+        "packageId": package_id,
+        "state": state,
+        "generation": generation,
+        "snapshotHeight": snapshot_height,
+        "contentSha256": content_sha256,
+        "body": doc_body,
+    });
+
+    if let Some(ws_root) = workspace_dir {
+        let snapshots_dir = ws_root.join("apps").join("snapshots");
+        crate::fsio::ensure_private_dir_all(&snapshots_dir)?;
+        let snap_file = snapshots_dir.join(format!("{doc_slug}.json"));
+        let mut snap_bytes = serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?;
+        snap_bytes.push(b'\n');
+        crate::fsio::replace_private(&snap_file, &snap_bytes)?;
+
+        let docs_dir = ws_root.join("docs");
+        crate::fsio::ensure_private_dir_all(&docs_dir)?;
+        crate::fsio::replace_private(&docs_dir.join(format!("{doc_slug}.md")), doc_body.as_bytes())?;
+    }
+
+    Ok(summary)
+}
+
+fn snapshot_cmd(mut args: Args, paths: &Paths, as_json: bool, dir: Option< std::ffi::OsString >) -> Result<()> {
+    let grain = text_flag(&mut args, "grain")?.ok_or("snapshot requires --grain a<app>")?;
+    let doc = match text_flag(&mut args, "doc")? {
+        Some(d) => d,
+        None => match text_flag(&mut args, "slug")? {
+            Some(s) => s,
+            None => text_flag(&mut args, "out")?.ok_or("snapshot requires --doc DOC-SLUG")?,
+        },
+    };
+    args.finish()?;
+    let ws_path = dir.map(path);
+    let summary = snapshot_grain_to_doc(ws_path.as_deref(), &paths.socket, &grain, &doc)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?);
+    } else {
+        println!(
+            "snapshot {} -> doc {} (sha256 {})",
+            summary["grain"].as_str().unwrap_or(&grain),
+            summary["doc"].as_str().unwrap_or(&doc),
+            summary["contentSha256"].as_str().unwrap_or("")
+        );
+    }
+    Ok(())
 }
 
 
@@ -2194,4 +2461,71 @@ mod tests {
         let error = worker_call(&dir.join("none.sock"), &json!({"protocol":WORKER_PROTOCOL,"verb":"list"})).unwrap_err();
         assert!(error.starts_with("appsWorkerUnavailable:"), "{error}");
     }
+
+    #[test]
+    fn apps_snapshot_computes_deterministic_sha256_and_writes_worldroot_doc() {
+        let dir = scratch("snapshot");
+        let ws = dir.join("ws");
+        let grains_dir = ws.join("apps").join("grains");
+        crate::fsio::ensure_private_dir_all(&grains_dir).unwrap();
+        fs::write(
+            grains_dir.join("a4501.json"),
+            json!({
+                "appName": "EtherCalc",
+                "appId": "ap38291",
+                "packageId": "pkg998877",
+                "state": "running",
+                "generation": 2,
+                "height": "144",
+                "export": "cell:A1:tv:Budget 2026\ncell:B1:n:1250"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let d1 = compute_snapshot_digest(
+            "a4501",
+            "EtherCalc",
+            "pkg998877",
+            "running",
+            "2",
+            "cell:A1:tv:Budget 2026\ncell:B1:n:1250",
+        );
+        let d2 = compute_snapshot_digest(
+            "a4501",
+            "EtherCalc",
+            "pkg998877",
+            "running",
+            "2",
+            "cell:A1:tv:Budget 2026\ncell:B1:n:1250",
+        );
+        assert_eq!(d1, d2);
+        assert_eq!(d1.len(), 64);
+
+        let snap = snapshot_grain_to_doc(
+            Some(&ws),
+            &dir.join("none.sock"),
+            "a4501",
+            "ethercalc-budget-snap",
+        )
+        .unwrap();
+        assert_eq!(snap["decided"], true);
+        assert_eq!(snap["grain"], "a4501");
+        assert_eq!(snap["doc"], "ethercalc-budget-snap");
+        assert_eq!(snap["appTitle"], "EtherCalc");
+        assert_eq!(snap["contentSha256"], d1);
+        let body = snap["body"].as_str().unwrap();
+        assert!(body.contains("# Grain Snapshot: a4501 -> ethercalc-budget-snap"));
+        assert!(body.contains(&format!("content_sha256: {d1}")));
+        assert!(body.contains("world_root_anchor: doc/ethercalc-budget-snap"));
+        assert!(body.contains("cell:A1:tv:Budget 2026"));
+
+        assert!(ws.join("apps/snapshots/ethercalc-budget-snap.json").is_file());
+        assert!(ws.join("docs/ethercalc-budget-snap.md").is_file());
+
+        // Invalid grain ID or doc slug is refused cleanly.
+        assert!(snapshot_grain_to_doc(Some(&ws), &dir.join("none.sock"), "bad", "ethercalc-budget-snap").is_err());
+        assert!(snapshot_grain_to_doc(Some(&ws), &dir.join("none.sock"), "a4501", "../escape").is_err());
+    }
 }
+
