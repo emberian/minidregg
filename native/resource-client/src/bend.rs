@@ -836,13 +836,10 @@ fn ended(view: &Value) -> Option<String> {
     (kind != Some("awaiting")).then(|| view.get("height").and_then(Value::as_str).unwrap_or("?").to_owned())
 }
 
-/// `bend settle [--account REF]`: deliver every activity this workspace ran (`bend/objects/`) whose await
-/// is past its deadline, so a run reaches its end and its purse returns without anyone typing
-/// `bend deliver`; one line per activity. The door's tick runs it for every enrolled member
-/// (`mini-door-process`), so a tally nobody delivers still completes at its deadline.
-fn settle_cmd(bend: &Bend, mut args: Args) -> Result<()> {
-    let account = opt(&mut args, "account")?;
-    args.finish()?;
+/// `bend settle [--account REF]` (or `bend tick`): deliver every activity this workspace ran (`bend/objects/`)
+/// whose await is past its deadline, so a run reaches its end and its purse returns without anyone typing
+/// `bend deliver`; one line per activity.
+fn settle_workspace(bend: &Bend, account: Option<&str>) -> usize {
     let mut settled = 0;
     let rows = bend.ws.root.join("bend").join("objects");
     for (name, _, object, _) in registry(&bend.ws.root) {
@@ -866,7 +863,7 @@ fn settle_cmd(bend: &Bend, mut args: Args) -> Result<()> {
                 continue;
             }
             let Some(found) = overdue(&view) else { continue };
-            match deliver_turn(bend, &object, &transaction, found, account.as_deref()) {
+            match deliver_turn(bend, &object, &transaction, found, account) {
                 Ok(Delivery::Submitted(_, _, Ok(Decided::Admitted { height, receipt, .. }))) => {
                     settled += 1;
                     println!("settled {name}: delivered past its deadline at height {height}, receipt {receipt}");
@@ -881,7 +878,83 @@ fn settle_cmd(bend: &Bend, mut args: Args) -> Result<()> {
             let _ = crate::fsio::replace_private(&file, &row_bytes(&row));
         }
     }
+    settled
+}
+
+fn settle_cmd(bend: &Bend, mut args: Args) -> Result<()> {
+    let account = opt(&mut args, "account")?;
+    args.finish()?;
+    let settled = settle_workspace(bend, account.as_deref());
     println!("bend settle: {settled} delivered");
+    Ok(())
+}
+
+/// Discover all member workspace directories inside `root` (those containing `workspace.json` or
+/// `<member>/workspace/workspace.json`), sorted deterministically.
+pub(crate) fn discover_member_workspaces(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut scan_dir = |base: &Path| {
+        if !base.is_dir() {
+            return;
+        }
+        if base.join("workspace.json").is_file() {
+            found.push(base.to_path_buf());
+        }
+        let Ok(entries) = fs::read_dir(base) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if path.join("workspace.json").is_file() {
+                found.push(path.clone());
+            }
+            let nested = path.join("workspace");
+            if nested.join("workspace.json").is_file() {
+                found.push(nested);
+            }
+        }
+    };
+    scan_dir(root);
+    if root == Path::new("/var/lib/mini/workspaces") {
+        scan_dir(Path::new("/var/lib/mini/members"));
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Scan all member workspaces under `root` and settle any overdue `ObjectiveActivity` births (`height > deadline`).
+pub(crate) fn tick_all_workspaces(root: &Path, account: Option<&str>) -> (usize, usize) {
+    let workspaces = discover_member_workspaces(root);
+    let mut scanned = 0usize;
+    let mut settled = 0usize;
+    for ws_dir in workspaces {
+        match Bend::open(ws_dir.clone()) {
+            Ok(bend) => {
+                scanned += 1;
+                settled += settle_workspace(&bend, account);
+            }
+            Err(e) => {
+                eprintln!("bend tick-all: skipping {}: {e}", ws_dir.display());
+            }
+        }
+    }
+    println!("bend tick-all: {scanned} workspaces scanned, {settled} delivered");
+    (scanned, settled)
+}
+
+fn tick_all_cmd(mut args: Args) -> Result<()> {
+    let dir = match opt(&mut args, "workspaces-dir")? {
+        Some(d) => d,
+        None => match opt(&mut args, "dir")? {
+            Some(d) => d,
+            None => std::env::var("MINI_WORKSPACES_DIR").unwrap_or_else(|_| "/var/lib/mini/workspaces".into()),
+        },
+    };
+    let account = opt(&mut args, "account")?;
+    args.finish()?;
+    tick_all_workspaces(Path::new(&dir), account.as_deref());
     Ok(())
 }
 
@@ -993,6 +1066,9 @@ fn answer_cmd(bend: &Bend, mut args: Args) -> Result<()> {
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = text(&mut args, "action")?;
+    if action == "tick-all" {
+        return tick_all_cmd(args);
+    }
     let bend = Bend::open(path(args.required("dir")?))?;
     match action.as_str() {
         "publish" => publish(&bend, args),
@@ -1001,10 +1077,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "await" => await_cmd(&bend, args),
         "answer" => answer_cmd(&bend, args),
         "deliver" => deliver_cmd(&bend, args),
-        "settle" => settle_cmd(&bend, args),
+        "settle" | "tick" => settle_cmd(&bend, args),
         "lookup" => lookup_cmd(&bend, args, false),
         "retry" => lookup_cmd(&bend, args, true),
-        _ => Err("bend --action must be publish, run, show, await, answer, deliver, settle, lookup or retry".into()),
+        _ => Err("bend --action must be publish, run, show, await, answer, deliver, settle, tick, tick-all, lookup or retry".into()),
     }
 }
 
@@ -1264,4 +1340,52 @@ mod tests {
             assert!(world.contains(&format!("'{k}':")), "{k} is not an envelope member of activity_world.MAXIMUM");
         }
     }
+
+    #[test]
+    fn tick_all_discovers_member_workspaces_and_handles_missing_dirs() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-bend-tick-all-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // Non-existent root returns empty without failing.
+        assert!(discover_member_workspaces(&root).is_empty());
+        assert_eq!(tick_all_workspaces(&root, None), (0, 0));
+
+        // Direct child workspace (`<root>/house/workspace.json`) and nested workspace (`<root>/sage/workspace/workspace.json`)
+        let house = root.join("house");
+        let sage_nested = root.join("sage").join("workspace");
+        let ignored = root.join("empty-dir");
+        fs::create_dir_all(&house).unwrap();
+        fs::create_dir_all(&sage_nested).unwrap();
+        fs::create_dir_all(&ignored).unwrap();
+
+        let config_path = root.join("config.json");
+        fs::write(&config_path, json!({"genesisHeight": 0}).to_string()).unwrap();
+
+        let ws_pin = json!({
+            "host": "/nonexistent/host",
+            "socket": "/nonexistent/mini.sock",
+            "config": config_path.display().to_string(),
+            "key": "/nonexistent/key",
+            "subject": "42",
+            "account": "130",
+            "accountCapability": "1030"
+        });
+        fs::write(house.join("workspace.json"), ws_pin.to_string()).unwrap();
+        fs::write(sage_nested.join("workspace.json"), ws_pin.to_string()).unwrap();
+
+        let discovered = discover_member_workspaces(&root);
+        assert_eq!(discovered, vec![house.clone(), sage_nested.clone()]);
+
+        let (scanned, settled) = tick_all_workspaces(&root, None);
+        assert_eq!(scanned, 2);
+        assert_eq!(settled, 0);
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
+

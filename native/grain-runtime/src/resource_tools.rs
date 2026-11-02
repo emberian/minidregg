@@ -814,6 +814,56 @@ pub(crate) fn room_tool_specs() -> Vec<Value> {
             "inputSchema":{"type":"object","properties":{"slot":{"type":"string","pattern":"^[0-9]+$","maxLength":80},
                 "reply":{"type":"object"},"refused":{"type":"string","maxLength":500}},
                 "required":["slot"],"additionalProperties":false}}),
+        json!({"name":"bend_view",
+            "description":"Inspect active Objective Bend births/activities in this workspace (`bend view` or `bend view <name>`). Read-only.",
+            "inputSchema":{"type":"object","properties":{
+                "name":name.clone(),
+                "object":{"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$"},
+                "tx":{"type":"string","pattern":"^[0-9]+$","maxLength":40}},
+                "additionalProperties":false}}),
+        json!({"name":"bend_answer",
+            "description":"Submit a structured JSON reply to an awaiting Objective Activity slot (`bend answer <slot> <answer_json>`). Admitted only when this resident is the slot's decider and before the deadline.",
+            "inputSchema":{"type":"object","properties":{
+                "slot":{"type":"string","pattern":"^[0-9]+$","maxLength":80},
+                "answer":{"description":"Structured JSON reply (`{\"reply\": ...}` or `{\"refused\": \"...\"}`) as an object or JSON string."},
+                "reply":{"type":"object"},
+                "refused":{"type":"string","maxLength":500}},
+                "required":["slot"],"additionalProperties":false}}),
+        json!({"name":"bend_deliver",
+            "description":"Deliver an awaited or timed-out Objective Activity (`bend deliver <object> <tx> [--account <account>]`).",
+            "inputSchema":{"type":"object","properties":{
+                "object":{"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$"},
+                "tx":{"type":"string","pattern":"^[0-9]+$","maxLength":40},
+                "payer":{"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$","description":"Optional payer reference override."}},
+                "required":["object","tx"],"additionalProperties":false}}),
+        json!({"name":"seat_view",
+            "description":"Inspect a SeatStore market/instance (`seat view <object> <package>`). Read-only.",
+            "inputSchema":{"type":"object","properties":{
+                "object":{"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$"},
+                "package":{"type":"string","pattern":"^[0-9]+$","maxLength":40}},
+                "required":["object","package"],"additionalProperties":false}}),
+        json!({"name":"seat_offer",
+            "description":"Fund/place an offer on a SeatStore seat (`seat offer <object> <package> <seat> <role> <holder> <give_json> <want_json>`).",
+            "inputSchema":{"type":"object","properties":{
+                "object":{"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$"},
+                "package":{"type":"string","pattern":"^[0-9]+$","maxLength":40},
+                "seat":{"type":"string","pattern":"^[0-9]+$","maxLength":40},
+                "role":{"type":"string","pattern":"^[0-9]+$","maxLength":40},
+                "holder":{"type":"string","pattern":"^[0-9]+$","maxLength":80},
+                "give":{"description":"Give asset/amount JSON object or compact JSON string."},
+                "want":{"description":"Want asset/amount JSON object or compact JSON string."}},
+                "required":["object","package","seat","role","holder","give","want"],"additionalProperties":false}}),
+        json!({"name":"law_check",
+            "description":"Check a Presburger law expression and/or evaluate a hypothetical turn (`law check <law>`) before answering an Objective World activity, returning a structured JSON verdict. Read-only.",
+            "inputSchema":{"type":"object","properties":{
+                "law":{"type":"string","maxLength":3000,"description":"Law preset, shell law clauses, or Pred JSON."},
+                "clauses":{"type":"string","maxLength":3000},
+                "verb":{"type":"string","maxLength":32},
+                "subject":{"type":"string","pattern":"^[0-9]+$","maxLength":40},
+                "cost":{"type":"string","pattern":"^[0-9]+$","maxLength":40},
+                "before":{"type":"string","maxLength":1024},
+                "after":{"type":"string","maxLength":1024}},
+                "additionalProperties":false}}),
     ]
 }
 
@@ -841,6 +891,9 @@ pub(crate) fn validate_room_write(name: &str, arguments: &Value) -> Result<()> {
             bounded_decimal(arguments, "relation", 10)?;
         }
         "mini_answer_await" => { await_answer(arguments)?; }
+        "bend_answer" => { build_bend_answer_command(arguments)?; }
+        "bend_deliver" => { build_bend_deliver_command(arguments, None)?; }
+        "seat_offer" => { build_seat_offer_command(arguments)?; }
         _ => return Err(format!("{name} is not a room write tool")),
     }
     Ok(())
@@ -855,7 +908,16 @@ pub(crate) fn compact_doc_rendering(text: &str) -> String {
 }
 
 /// The room tools that write (each one a metered turn).
-pub(crate) const ROOM_WRITE_TOOLS: &[&str] = &["mini_say", "mini_doc_link", "mini_doc_append", "mini_doc_review", "mini_answer_await"];
+pub(crate) const ROOM_WRITE_TOOLS: &[&str] = &[
+    "mini_say",
+    "mini_doc_link",
+    "mini_doc_append",
+    "mini_doc_review",
+    "mini_answer_await",
+    "bend_answer",
+    "bend_deliver",
+    "seat_offer",
+];
 
 pub(crate) fn is_room_tool(name: &str) -> bool {
     room_tool_specs().iter().any(|spec| spec["name"] == name)
@@ -924,6 +986,507 @@ fn await_answer(arguments: &Value) -> Result<(String, Value)> {
         return Err("an answer is at most 4096 bytes".into());
     }
     Ok((slot, answer))
+}
+
+fn bounded_name_str(text: &str, key: &str) -> Result<String> {
+    if text.is_empty() || text.len() > 64 || !text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return Err(format!("{key} must be 1..64 ASCII letters, digits or hyphens"));
+    }
+    Ok(text.to_owned())
+}
+
+fn compact_json_arg(value: Option<&Value>, key: &str) -> Result<(Value, String)> {
+    let raw = value.ok_or_else(|| format!("{key} absent"))?;
+    let parsed: Value = match raw {
+        Value::Object(_) | Value::Array(_) => raw.clone(),
+        Value::String(s) => {
+            if s.trim().is_empty() || s.len() > 4096 || s.chars().any(|c| c.is_control()) {
+                return Err(format!("{key} must be 1..4096 bytes of JSON without control characters"));
+            }
+            let v: Value = serde_json::from_str(s).map_err(|e| format!("{key} must be valid JSON: {e}"))?;
+            if !v.is_object() && !v.is_array() {
+                return Err(format!("{key} must be a JSON object or array"));
+            }
+            v
+        }
+        _ => return Err(format!("{key} must be a JSON object or JSON string")),
+    };
+    let compact = serde_json::to_string(&parsed).map_err(|e| e.to_string())?;
+    if compact.len() > 4096 || compact.chars().any(|c| c.is_control()) {
+        return Err(format!("{key} is at most 4096 bytes"));
+    }
+    Ok((parsed, compact))
+}
+
+/// Validate and construct the `bend view` command (`bend view` or `bend view <name>` or `bend view <object> <tx>`).
+pub(crate) fn build_bend_view_command(arguments: &Value) -> Result<String> {
+    only_keys(arguments, &["name", "object", "tx"])?;
+    let name = match arguments.get("name") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(bounded_name(arguments, "name")?),
+    };
+    let object = match arguments.get("object") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(bounded_name(arguments, "object")?),
+    };
+    if let (Some(n), Some(o)) = (&name, &object) {
+        if n != o {
+            return Err("bend_view takes either name or object, not conflicting targets".into());
+        }
+    }
+    let tx = bounded_decimal(arguments, "tx", 40)?;
+    let target = name.or(object);
+    match (target, tx) {
+        (Some(t), Some(tx)) => Ok(format!("bend view {t} {tx}")),
+        (None, Some(_)) => Err("bend_view tx requires name or object".into()),
+        (Some(t), None) => Ok(format!("bend view {t}")),
+        (None, None) => Ok("bend view".into()),
+    }
+}
+
+/// Validate and construct the `bend answer <slot> <answer_json>` command and structured answer payload.
+pub(crate) fn build_bend_answer_command(arguments: &Value) -> Result<(String, Value, String)> {
+    only_keys(arguments, &["slot", "answer", "answer_json", "reply", "refused"])?;
+    let slot = bounded_decimal(arguments, "slot", 80)?.ok_or("slot absent")?;
+    let answer_val = if let Some(ans_arg) = arguments.get("answer").or_else(|| arguments.get("answer_json")) {
+        let (parsed, _) = compact_json_arg(Some(ans_arg), "answer")?;
+        let obj = parsed.as_object().ok_or("answer must be a JSON object")?;
+        if obj.keys().any(|k| k != "reply" && k != "refused") {
+            return Err("answer object may only contain reply or refused".into());
+        }
+        match (obj.get("reply"), obj.get("refused")) {
+            (Some(reply), None) if reply.is_object() => json!({"reply": reply}),
+            (None, Some(Value::String(reason)))
+                if !reason.trim().is_empty() && reason.len() <= 500 && !reason.chars().any(|c| c.is_control()) =>
+            {
+                json!({"refused": reason})
+            }
+            _ => return Err("answer must contain exactly one of reply (an object) or refused (a non-empty reason)".into()),
+        }
+    } else {
+        match (arguments.get("reply"), arguments.get("refused")) {
+            (Some(reply), None) if reply.is_object() => json!({"reply": reply}),
+            (None, Some(Value::String(reason)))
+                if !reason.trim().is_empty() && reason.len() <= 500 && !reason.chars().any(|c| c.is_control()) =>
+            {
+                json!({"refused": reason})
+            }
+            _ => return Err("answer with answer/answer_json or exactly one of reply (an object) or refused (a reason)".into()),
+        }
+    };
+    let answer_json = serde_json::to_string(&answer_val).map_err(|e| e.to_string())?;
+    if answer_json.len() > 4096 || answer_json.chars().any(|c| c.is_control()) {
+        return Err("an answer is at most 4096 bytes".into());
+    }
+    let cmd = format!("bend answer {slot} {answer_json}");
+    Ok((slot, answer_val, cmd))
+}
+
+/// Validate and construct `bend deliver <object> <tx> [--account <account>]`.
+pub(crate) fn build_bend_deliver_command(
+    arguments: &Value,
+    default_account: Option<&str>,
+) -> Result<(String, String, String)> {
+    only_keys(arguments, &["object", "tx", "transaction", "payer", "account"])?;
+    let object = bounded_name(arguments, "object")?;
+    let tx = match bounded_decimal(arguments, "tx", 40)? {
+        Some(t) => t,
+        None => bounded_decimal(arguments, "transaction", 40)?.ok_or("tx absent")?,
+    };
+    let explicit_account = match arguments.get("payer").or_else(|| arguments.get("account")) {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) => Some(bounded_name_str(s, "payer")?),
+        Some(_) => return Err("payer must be a string".into()),
+    };
+    let account = match explicit_account {
+        Some(a) => Some(a),
+        None => match default_account.filter(|s| !s.is_empty()) {
+            Some(a) => Some(bounded_name_str(a, "account")?),
+            None => None,
+        },
+    };
+    let cmd = match account {
+        Some(acct) => format!("bend deliver {object} {tx} --account {acct}"),
+        None => format!("bend deliver {object} {tx}"),
+    };
+    Ok((object, tx, cmd))
+}
+
+/// Validate and construct `seat view <object> <package>`.
+pub(crate) fn build_seat_view_command(arguments: &Value) -> Result<String> {
+    only_keys(arguments, &["object", "package"])?;
+    let object = bounded_name(arguments, "object")?;
+    let package = bounded_decimal(arguments, "package", 40)?.ok_or("package absent")?;
+    Ok(format!("seat view {object} {package}"))
+}
+
+/// Validate and construct `seat offer <object> <package> <seat> <role> <holder> <give_json> <want_json>`.
+pub(crate) fn build_seat_offer_command(arguments: &Value) -> Result<String> {
+    only_keys(
+        arguments,
+        &["object", "package", "seat", "role", "holder", "give", "give_json", "want", "want_json"],
+    )?;
+    let object = bounded_name(arguments, "object")?;
+    let package = bounded_decimal(arguments, "package", 40)?.ok_or("package absent")?;
+    let seat = bounded_decimal(arguments, "seat", 40)?.ok_or("seat absent")?;
+    let role = bounded_decimal(arguments, "role", 40)?.ok_or("role absent")?;
+    let holder = bounded_decimal(arguments, "holder", 80)?.ok_or("holder absent")?;
+    let (_, give_json) = compact_json_arg(arguments.get("give").or_else(|| arguments.get("give_json")), "give")?;
+    let (_, want_json) = compact_json_arg(arguments.get("want").or_else(|| arguments.get("want_json")), "want")?;
+    Ok(format!(
+        "seat offer {object} {package} {seat} {role} {holder} {give_json} {want_json}"
+    ))
+}
+
+/// Validate and construct `law check <law>`.
+pub(crate) fn build_law_check_command(arguments: &Value) -> Result<(String, String)> {
+    only_keys(
+        arguments,
+        &["law", "clauses", "verb", "subject", "cost", "before", "after"],
+    )?;
+    let raw_law = arguments
+        .get("law")
+        .or_else(|| arguments.get("clauses"))
+        .ok_or("law absent")?;
+    let law_text = match raw_law {
+        Value::String(s) => {
+            if s.trim().is_empty() || s.len() > 3000 || s.chars().any(|c| c.is_control() && c != '\n') {
+                return Err("law must be 1..3000 bytes of text".into());
+            }
+            s.trim().replace('\n', " ")
+        }
+        Value::Object(_) => {
+            let s = serde_json::to_string(raw_law).map_err(|e| e.to_string())?;
+            if s.len() > 3000 {
+                return Err("law JSON exceeds 3000 bytes".into());
+            }
+            s
+        }
+        _ => return Err("law must be a string or Pred JSON object".into()),
+    };
+    let cmd = format!("law check {law_text}");
+    Ok((law_text, cmd))
+}
+
+fn parse_simple_clause(clause: &str, subject_default: &str) -> Result<Value> {
+    let t = clause.trim();
+    if t.is_empty() || t == "open" {
+        return Ok(json!({"type": "all", "predicates": []}));
+    }
+    if t == "sealed" {
+        return Ok(json!({"type": "any", "predicates": []}));
+    }
+    if t == "note" {
+        return Ok(json!({
+            "type": "any",
+            "predicates": [
+                {"type": "memberOf", "slot": "request/verb", "values": ["1", "3", "4", "5"]},
+                {"type": "all", "predicates": [
+                    {"type": "eq", "slot": "request/verb", "value": "2"},
+                    {"type": "eq", "slot": "content/atom-edits", "value": "0"},
+                    {"type": "eq", "slot": "content/tombstones", "value": "0"}
+                ]}
+            ]
+        }));
+    }
+    if t == "read-only lockout" || t == "read-only-lockout" {
+        return Ok(json!({"type": "eq", "slot": "request/verb", "value": "1"}));
+    }
+    if t == "monotone-counter" {
+        return Ok(json!({
+            "type": "any",
+            "predicates": [
+                {"type": "memberOf", "slot": "request/verb", "values": ["1", "3", "4", "5"]},
+                {"type": "all", "predicates": [
+                    {"type": "eq", "slot": "request/verb", "value": "2"},
+                    {"type": "monotone", "slot": "resource/field/0/after"},
+                    {"type": "le", "slot": "resource/field/0/delta", "value": "1"}
+                ]}
+            ]
+        }));
+    }
+    if t == "moderated" {
+        return Ok(json!({
+            "type": "any",
+            "predicates": [
+                {"type": "memberOf", "slot": "request/verb", "values": ["1", "2"]},
+                {"type": "all", "predicates": [
+                    {"type": "memberOf", "slot": "request/verb", "values": ["3", "4", "5"]},
+                    {"type": "eq", "slot": "request/subject", "value": subject_default}
+                ]}
+            ]
+        }));
+    }
+    if t.starts_with('{') {
+        let v: Value = serde_json::from_str(t).map_err(|e| format!("invalid Pred JSON: {e}"))?;
+        if v.get("type").and_then(Value::as_str).is_none() {
+            return Err("Pred JSON object requires a string `type` field".into());
+        }
+        return Ok(v);
+    }
+    if t.contains(';') {
+        let mut preds = Vec::new();
+        for part in t.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            preds.push(parse_simple_clause(part, subject_default)?);
+        }
+        return Ok(json!({"type": "all", "predicates": preds}));
+    }
+    if let Some(inner) = t.strip_prefix("not ").map(str::trim) {
+        let inner = inner.strip_prefix('(').and_then(|s| s.strip_suffix(')')).unwrap_or(inner);
+        return Ok(json!({"type": "not", "predicate": parse_simple_clause(inner, subject_default)?}));
+    }
+    if let Some(field_str) = t.strip_prefix("field ").and_then(|s| s.strip_suffix(" monotone")) {
+        let f = field_str.trim();
+        if f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!("invalid field number in `{t}`"));
+        }
+        return Ok(json!({"type": "monotone", "slot": format!("resource/field/{f}/after")}));
+    }
+    if let Some(field_str) = t.strip_prefix("field ").and_then(|s| s.strip_suffix(" writeOnce")) {
+        let f = field_str.trim();
+        if f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!("invalid field number in `{t}`"));
+        }
+        return Ok(json!({"type": "writeOnce", "slot": format!("resource/field/{f}/after")}));
+    }
+    let resolve_slot = |raw: &str| -> Result<String> {
+        let r = raw.trim();
+        match r {
+            "verb" | "request/verb" => Ok("request/verb".into()),
+            "subject" | "request/subject" => Ok("request/subject".into()),
+            "cost" | "request/cost" => Ok("request/cost".into()),
+            _ if r.starts_with("field ") => {
+                let parts: Vec<&str> = r.split_whitespace().collect();
+                match parts.as_slice() {
+                    ["field", n] if n.bytes().all(|b| b.is_ascii_digit()) => Ok(format!("resource/field/{n}/after")),
+                    ["field", n, phase @ ("before" | "after" | "delta")] if n.bytes().all(|b| b.is_ascii_digit()) => {
+                        Ok(format!("resource/field/{n}/{phase}"))
+                    }
+                    _ => Err(format!("unsupported field slot `{r}`")),
+                }
+            }
+            _ if r.starts_with("slot ") => {
+                let s = r.strip_prefix("slot ").unwrap().trim().trim_matches('"');
+                Ok(s.to_owned())
+            }
+            _ if r.contains('/') => Ok(r.trim_matches('"').to_owned()),
+            _ => Err(format!("unrecognized law slot `{r}`")),
+        }
+    };
+    let resolve_value = |slot: &str, raw: &str| -> Result<String> {
+        let v = raw.trim();
+        if slot == "request/verb" {
+            match v {
+                "read" | "observe" | "1" => return Ok("1".into()),
+                "write" | "mutate" | "2" => return Ok("2".into()),
+                "delegate" | "3" => return Ok("3".into()),
+                "install" | "4" => return Ok("4".into()),
+                "revoke" | "5" => return Ok("5".into()),
+                "renounce" | "6" => return Ok("6".into()),
+                _ => {}
+            }
+        }
+        let _: i128 = v.parse().map_err(|_| format!("invalid integer value `{v}` in `{t}`"))?;
+        Ok(v.to_owned())
+    };
+    if let Some((lhs, rhs)) = t.split_once("==") {
+        let slot = resolve_slot(lhs)?;
+        let val = resolve_value(&slot, rhs)?;
+        return Ok(json!({"type": "eq", "slot": slot, "value": val}));
+    }
+    if let Some((lhs, rhs)) = t.split_once("<=") {
+        let slot = resolve_slot(lhs)?;
+        let val = resolve_value(&slot, rhs)?;
+        return Ok(json!({"type": "le", "slot": slot, "value": val}));
+    }
+    if let Some((lhs, rhs)) = t.split_once(">=") {
+        let slot = resolve_slot(lhs)?;
+        let val: i128 = resolve_value(&slot, rhs)?.parse().map_err(|_| "invalid integer")?;
+        // slot >= val  <==>  not (slot <= val - 1)
+        return Ok(json!({
+            "type": "not",
+            "predicate": {"type": "le", "slot": slot, "value": (val - 1).to_string()}
+        }));
+    }
+    Err(format!("unsupported law clause `{t}`"))
+}
+
+fn eval_presburger_pred(
+    pred: &Value,
+    old: &std::collections::BTreeMap<String, i128>,
+    new: &std::collections::BTreeMap<String, i128>,
+) -> bool {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    let s = |k: &str| pred.get(k).and_then(Value::as_str).unwrap_or("");
+    let int_val = |k: &str| -> Option<i128> { pred.get(k)?.as_str()?.parse().ok() };
+    match ty {
+        "eq" => new.get(s("slot")).copied().zip(int_val("value")).is_some_and(|(a, b)| a == b),
+        "le" => new.get(s("slot")).copied().zip(int_val("value")).is_some_and(|(a, b)| a <= b),
+        "memberOf" => {
+            let Some(actual) = new.get(s("slot")).copied() else { return false; };
+            pred.get("values")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str()?.parse::<i128>().ok())
+                .any(|v| v == actual)
+        }
+        "monotone" => {
+            let slot = s("slot");
+            old.get(slot).copied().zip(new.get(slot).copied()).is_some_and(|(a, b)| a <= b)
+        }
+        "writeOnce" => {
+            let slot = s("slot");
+            match old.get(slot).copied() {
+                None => true,
+                Some(o) => o == 0 || new.get(slot).copied() == Some(o),
+            }
+        }
+        "eqSlots" => new.get(s("left")).copied().zip(new.get(s("right")).copied()).is_some_and(|(a, b)| a == b),
+        "leSlots" => new.get(s("left")).copied().zip(new.get(s("right")).copied()).is_some_and(|(a, b)| a <= b),
+        "leSlotsOff" => {
+            let Some(k) = int_val("offset") else { return false; };
+            new.get(s("left")).copied().zip(new.get(s("right")).copied()).is_some_and(|(a, b)| a <= b.saturating_add(k))
+        }
+        "not" => pred.get("predicate").is_some_and(|inner| !eval_presburger_pred(inner, old, new)),
+        "all" => pred.get("predicates").and_then(Value::as_array).is_some_and(|ps| ps.iter().all(|p| eval_presburger_pred(p, old, new))),
+        "any" => pred.get("predicates").and_then(Value::as_array).is_some_and(|ps| ps.iter().any(|p| eval_presburger_pred(p, old, new))),
+        _ => false,
+    }
+}
+
+fn parse_turn_assignments(input: &str) -> Result<std::collections::BTreeMap<String, i128>> {
+    let mut out = std::collections::BTreeMap::new();
+    for token in input.split([',', ';', '\n']).map(str::trim).filter(|s| !s.is_empty()) {
+        let (k, v) = token
+            .split_once('=')
+            .or_else(|| token.split_once(':'))
+            .ok_or_else(|| format!("expected FIELD=VALUE, found `{token}`"))?;
+        let k = k.trim().strip_prefix("field ").map(str::trim).unwrap_or(k.trim());
+        let val: i128 = v.trim().parse().map_err(|_| format!("invalid integer `{}` for `{k}`", v.trim()))?;
+        out.insert(k.to_owned(), val);
+    }
+    Ok(out)
+}
+
+/// Evaluate a Presburger law expression and optional hypothetical turn in-process, returning a structured JSON verdict.
+pub(crate) fn evaluate_law_check(arguments: &Value) -> Result<Value> {
+    let (law_text, cmd) = build_law_check_command(arguments)?;
+    let subject_str = bounded_decimal(arguments, "subject", 40)?.unwrap_or_else(|| "1".into());
+    let cost_str = bounded_decimal(arguments, "cost", 40)?.unwrap_or_else(|| "0".into());
+    let verb_str = match arguments.get("verb") {
+        None | Some(Value::Null) => "write".to_owned(),
+        Some(Value::String(s)) if !s.trim().is_empty() && s.len() <= 32 => s.trim().to_owned(),
+        Some(_) => return Err("verb must be a non-empty string up to 32 bytes".into()),
+    };
+    let verb_tag: i128 = match verb_str.as_str() {
+        "read" | "observe" | "1" => 1,
+        "write" | "mutate" | "2" => 2,
+        "delegate" | "3" => 3,
+        "install" | "4" => 4,
+        "revoke" | "5" => 5,
+        "renounce" | "6" => 6,
+        other => other.parse().map_err(|_| format!("unknown verb `{other}`"))?,
+    };
+    let before_str = match arguments.get("before") {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) if s.len() <= 1024 => s.clone(),
+        Some(_) => return Err("before must be a string up to 1024 bytes".into()),
+    };
+    let after_str = match arguments.get("after") {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) if s.len() <= 1024 => s.clone(),
+        Some(_) => return Err("after must be a string up to 1024 bytes".into()),
+    };
+
+    let pred = parse_simple_clause(&law_text, &subject_str)?;
+    let before_map = parse_turn_assignments(&before_str)?;
+    let after_map = parse_turn_assignments(&after_str)?;
+    let subject_val: i128 = subject_str.parse().map_err(|_| "invalid subject integer")?;
+    let cost_val: i128 = cost_str.parse().map_err(|_| "invalid cost integer")?;
+
+    let mut old = std::collections::BTreeMap::new();
+    let mut new = std::collections::BTreeMap::new();
+    for (k, v) in [("request/verb", verb_tag), ("request/subject", subject_val), ("request/cost", cost_val)] {
+        old.insert(k.to_owned(), v);
+        new.insert(k.to_owned(), v);
+    }
+    for slot in ["content/atom-edits", "content/tombstones", "content/payload-bytes/after"] {
+        old.insert(slot.to_owned(), 0);
+        new.insert(slot.to_owned(), 0);
+    }
+    old.insert("content/names/unique".to_owned(), 1);
+    new.insert("content/names/unique".to_owned(), 1);
+
+    let mut fields: std::collections::BTreeSet<String> = ["0", "1", "2", "3"].into_iter().map(str::to_owned).collect();
+    for k in before_map.keys().chain(after_map.keys()) {
+        if k.bytes().all(|b| b.is_ascii_digit()) {
+            fields.insert(k.clone());
+        }
+    }
+    for f in &fields {
+        let b = before_map.get(f).copied().or_else(|| after_map.get(f).copied()).unwrap_or(0);
+        let a = after_map.get(f).copied().or_else(|| before_map.get(f).copied()).unwrap_or(b);
+        let d = a.saturating_sub(b);
+        old.insert(format!("resource/field/{f}/before"), b);
+        old.insert(format!("resource/field/{f}/after"), b);
+        old.insert(format!("resource/field/{f}/delta"), 0);
+        new.insert(format!("resource/field/{f}/before"), b);
+        new.insert(format!("resource/field/{f}/after"), a);
+        new.insert(format!("resource/field/{f}/delta"), d);
+    }
+    for (k, v) in &before_map {
+        if !k.bytes().all(|b| b.is_ascii_digit()) {
+            old.insert(k.clone(), *v);
+            new.entry(k.clone()).or_insert(*v);
+        }
+    }
+    for (k, v) in &after_map {
+        if !k.bytes().all(|b| b.is_ascii_digit()) {
+            new.insert(k.clone(), *v);
+        }
+    }
+
+    let admitted = eval_presburger_pred(&pred, &old, &new);
+    let top_clauses: Vec<Value> = match pred.get("type").and_then(Value::as_str) {
+        Some("all" | "any") => pred
+            .get("predicates")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| {
+                json!({
+                    "index": i,
+                    "predicate": c,
+                    "passed": eval_presburger_pred(&c, &old, &new),
+                })
+            })
+            .collect(),
+        _ => vec![json!({
+            "index": 0,
+            "predicate": pred.clone(),
+            "passed": admitted,
+        })],
+    };
+    let verdict = if admitted { "witness" } else { "unsat" };
+    Ok(json!({
+        "verdict": verdict,
+        "admitted": admitted,
+        "law": law_text,
+        "predicate": pred,
+        "command": cmd,
+        "turn": {
+            "verb": verb_str,
+            "verbTag": verb_tag,
+            "subject": subject_str,
+            "cost": cost_str,
+            "before": before_str,
+            "after": after_str,
+        },
+        "clauses": top_clauses,
+    }))
 }
 
 /// The births room members announced to the resident: `await OBJECT TRANSACTION` in an entry
@@ -1172,6 +1735,34 @@ impl RoomTools<'_> {
                 let links = Self::ok_or_ending(self.line(&format!("doc links {doc}"))?)?;
                 Ok(json!({"doc":doc,"text":compact_doc_rendering(&run.stdout),"links":rendered_links(&links.stdout)}))
             }
+            "bend_view" => {
+                let cmd = build_bend_view_command(arguments)?;
+                let run = Self::ok_or_ending(self.line(&cmd)?)?;
+                if let Some(parsed) = last_json(&run.stdout) {
+                    Ok(json!({"command": cmd, "view": parsed}))
+                } else {
+                    Ok(json!({"command": cmd, "output": run.stdout.trim()}))
+                }
+            }
+            "seat_view" => {
+                let cmd = build_seat_view_command(arguments)?;
+                let run = Self::ok_or_ending(self.line(&cmd)?)?;
+                if let Some(parsed) = last_json(&run.stdout) {
+                    Ok(json!({"command": cmd, "view": parsed}))
+                } else {
+                    Ok(json!({"command": cmd, "output": run.stdout.trim()}))
+                }
+            }
+            "law_check" => {
+                let mut report = evaluate_law_check(arguments)?;
+                let cmd = report["command"].as_str().unwrap_or("law check open").to_owned();
+                if let Ok(run) = self.line(&cmd) {
+                    if run.code == 0 && !run.stdout.trim().is_empty() {
+                        report["hostOutput"] = json!(run.stdout.trim());
+                    }
+                }
+                Ok(report)
+            }
             _ => Err(format!("{name} is not a room read tool")),
         }
     }
@@ -1382,6 +1973,33 @@ impl RoomTools<'_> {
                 let run = Self::ok_or_ending(self.line_with(&format!("bend answer {slot} @{file}"), spawned)?)?;
                 Ok(json!({"slot":slot,"answered":run.stdout.trim()}))
             }
+            "bend_answer" => {
+                let (slot, answer, canonical_cmd) = build_bend_answer_command(arguments)?;
+                let dir = self.config.workspace.join("answers");
+                fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                fs::write(dir.join(format!("{id}.json")), json!({"slot": slot}).to_string()).map_err(|e| e.to_string())?;
+                let _ = self.request_file(&format!("{id}-answer.json"), &answer.to_string())?;
+                let run = Self::ok_or_ending(self.line_with(&canonical_cmd, spawned)?)?;
+                Ok(json!({"slot": slot, "command": canonical_cmd, "answered": run.stdout.trim()}))
+            }
+            "bend_deliver" => {
+                let (object, tx, cmd) = build_bend_deliver_command(arguments, self.config.account.as_deref())?;
+                let lookup_name = format!("deliver-{}", &crate::sha256_bytes(format!("{object}:{tx}").as_bytes())?[..16]);
+                let dir = self.config.workspace.join("answers");
+                fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                fs::write(
+                    dir.join(format!("{id}.json")),
+                    json!({"lookupName": lookup_name, "object": object, "tx": tx}).to_string(),
+                )
+                .map_err(|e| e.to_string())?;
+                let run = Self::ok_or_ending(self.line_with(&cmd, spawned)?)?;
+                Ok(json!({"object": object, "tx": tx, "command": cmd, "delivered": run.stdout.trim()}))
+            }
+            "seat_offer" => {
+                let cmd = build_seat_offer_command(arguments)?;
+                let run = Self::ok_or_ending(self.line_with(&cmd, spawned)?)?;
+                Ok(json!({"command": cmd, "offered": run.stdout.trim()}))
+            }
             _ => Err(format!("{name} is not a room write tool")),
         }
     }
@@ -1412,9 +2030,14 @@ impl RoomTools<'_> {
         let id = Self::proposal(op);
         let answer = self.config.workspace.join("answers").join(format!("{id}.json"));
         if answer.exists() {
-            // A resolve turn: its exact retained ingress, looked up by `bend lookup` (never resent).
-            let slot = fs::read(&answer).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|a| a["slot"].as_str().map(str::to_owned)).ok_or("answer record has no slot")?;
-            let name = format!("answer-{}", &crate::sha256_bytes(slot.as_bytes())?[..16]);
+            // A resolve or deliver turn: its exact retained ingress, looked up by `bend lookup` (never resent).
+            let record_val = fs::read(&answer).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).ok_or("answer record invalid")?;
+            let name = if let Some(lookup_name) = record_val["lookupName"].as_str() {
+                lookup_name.to_owned()
+            } else {
+                let slot = record_val["slot"].as_str().ok_or("answer record has no slot")?;
+                format!("answer-{}", &crate::sha256_bytes(slot.as_bytes())?[..16])
+            };
             let run = self.line(&format!("bend lookup {name}"))?;
             if run.code == 0 && run.stdout.contains("admitted:") {
                 return Ok(json!({"resolution":"performed","basis":"exact-lookup","proposal":id,"detail":run.stdout.trim()}));
@@ -1949,4 +2572,156 @@ mod tests {
         assert!(super::bounded_text(&serde_json::json!({"text":"hi\u{0007}"}), "text").is_err());
         assert!(super::only_keys(&serde_json::json!({"doc":"x","room":"y"}), &["doc"]).is_err());
     }
+
+    #[test]
+    fn objective_world_tools_schemas_validation_and_commands() {
+        // 1. Verify all 6 Objective World tools are present in room_tool_specs() and properly classified.
+        let specs = super::room_tool_specs();
+        for tool in ["bend_view", "bend_answer", "bend_deliver", "seat_view", "seat_offer", "law_check"] {
+            assert!(
+                specs.iter().any(|s| s["name"] == tool),
+                "missing Objective World tool {tool} in room_tool_specs"
+            );
+            assert!(super::is_room_tool(tool));
+        }
+        for write_tool in ["bend_answer", "bend_deliver", "seat_offer"] {
+            assert!(super::ROOM_WRITE_TOOLS.contains(&write_tool));
+        }
+        for read_tool in ["bend_view", "seat_view", "law_check"] {
+            assert!(!super::ROOM_WRITE_TOOLS.contains(&read_tool));
+        }
+
+        // 2. bend_view command construction & validation
+        assert_eq!(super::build_bend_view_command(&json!({})).unwrap(), "bend view");
+        assert_eq!(
+            super::build_bend_view_command(&json!({"name": "coauthor-1"})).unwrap(),
+            "bend view coauthor-1"
+        );
+        assert_eq!(
+            super::build_bend_view_command(&json!({"object": "4501", "tx": "12"})).unwrap(),
+            "bend view 4501 12"
+        );
+        assert!(super::build_bend_view_command(&json!({"tx": "12"})).is_err());
+        assert!(super::build_bend_view_command(&json!({"name": "a", "object": "b"})).is_err());
+        assert!(super::build_bend_view_command(&json!({"name": "../bad"})).is_err());
+
+        // 3. bend_answer command construction & validation
+        let (slot, ans, cmd) = super::build_bend_answer_command(&json!({
+            "slot": "9001",
+            "answer": {"reply": {"tag": "natural", "value": "42"}}
+        }))
+        .unwrap();
+        assert_eq!(slot, "9001");
+        assert_eq!(ans, json!({"reply": {"tag": "natural", "value": "42"}}));
+        assert_eq!(cmd, r#"bend answer 9001 {"reply":{"tag":"natural","value":"42"}}"#);
+        assert!(super::validate_room_write(
+            "bend_answer",
+            &json!({"slot": "9001", "answer": r#"{"refused":"locked"}"#})
+        )
+        .is_ok());
+        assert!(super::validate_room_write("bend_answer", &json!({"slot": "abc", "reply": {}})).is_err());
+        assert!(super::validate_room_write(
+            "bend_answer",
+            &json!({"slot": "9001", "reply": {}, "refused": "both"})
+        )
+        .is_err());
+
+        // 4. bend_deliver command construction & validation
+        let (obj, tx, dcmd) = super::build_bend_deliver_command(
+            &json!({"object": "coauthor-1", "tx": "17"}),
+            None,
+        )
+        .unwrap();
+        assert_eq!((obj.as_str(), tx.as_str(), dcmd.as_str()), ("coauthor-1", "17", "bend deliver coauthor-1 17"));
+        let (_, _, dcmd_acct) = super::build_bend_deliver_command(
+            &json!({"object": "4501", "tx": "17", "payer": "lab-hermes"}),
+            None,
+        )
+        .unwrap();
+        assert_eq!(dcmd_acct, "bend deliver 4501 17 --account lab-hermes");
+        assert!(super::validate_room_write("bend_deliver", &json!({"object": "4501", "tx": "17"})).is_ok());
+        assert!(super::validate_room_write("bend_deliver", &json!({"object": "bad space", "tx": "17"})).is_err());
+        assert!(super::validate_room_write("bend_deliver", &json!({"object": "4501", "tx": "notnum"})).is_err());
+
+        // 5. seat_view command construction & validation
+        assert_eq!(
+            super::build_seat_view_command(&json!({"object": "bounty-board", "package": "301"})).unwrap(),
+            "seat view bounty-board 301"
+        );
+        assert!(super::build_seat_view_command(&json!({"object": "bounty-board"})).is_err());
+        assert!(super::build_seat_view_command(&json!({"object": "bounty-board", "package": "x"})).is_err());
+
+        // 6. seat_offer command construction & validation
+        let offer_cmd = super::build_seat_offer_command(&json!({
+            "object": "bounty-board",
+            "package": "301",
+            "seat": "0",
+            "role": "1",
+            "holder": "42",
+            "give": {"asset": "1", "amount": "50"},
+            "want": {"asset": "2", "amount": "10"}
+        }))
+        .unwrap();
+        assert_eq!(
+            offer_cmd,
+            r#"seat offer bounty-board 301 0 1 42 {"amount":"50","asset":"1"} {"amount":"10","asset":"2"}"#
+        );
+        assert!(super::validate_room_write(
+            "seat_offer",
+            &json!({
+                "object": "bounty-board",
+                "package": "301",
+                "seat": "0",
+                "role": "1",
+                "holder": "42",
+                "give": r#"{"asset":"1","amount":"50"}"#,
+                "want": r#"{"asset":"2","amount":"10"}"#
+            })
+        )
+        .is_ok());
+        assert!(super::validate_room_write(
+            "seat_offer",
+            &json!({
+                "object": "bounty-board",
+                "package": "301",
+                "seat": "0",
+                "role": "1",
+                "holder": "not-a-number",
+                "give": {},
+                "want": {}
+            })
+        )
+        .is_err());
+
+        // 7. law_check command construction & in-process Presburger turn evaluation
+        let ok_verdict = super::evaluate_law_check(&json!({
+            "law": "monotone-counter",
+            "verb": "write",
+            "subject": "7",
+            "cost": "10",
+            "before": "0=5",
+            "after": "0=6"
+        }))
+        .unwrap();
+        assert_eq!(ok_verdict["verdict"], "witness");
+        assert_eq!(ok_verdict["admitted"], true);
+        assert_eq!(ok_verdict["command"], "law check monotone-counter");
+
+        let refused_verdict = super::evaluate_law_check(&json!({
+            "law": "field 0 monotone; field 0 delta <= 1",
+            "verb": "write",
+            "subject": "7",
+            "cost": "10",
+            "before": "0=5",
+            "after": "0=8"
+        }))
+        .unwrap();
+        assert_eq!(refused_verdict["verdict"], "unsat");
+        assert_eq!(refused_verdict["admitted"], false);
+        assert_eq!(
+            refused_verdict["command"],
+            "law check field 0 monotone; field 0 delta <= 1"
+        );
+    }
 }
+

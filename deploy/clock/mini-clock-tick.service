@@ -51,15 +51,16 @@ Nice=10
 UMask=0077
 Environment=MINI=/var/lib/mini/candidate/current/bin/mini
 Environment=MINI_CLOCK_WORKSPACE=/var/lib/mini/clock
+Environment=MINI_WORKSPACES_DIR=/var/lib/mini/workspaces
 Environment=MINI_CONSENT_ANCHOR_DIR=/var/lib/mini/clock/consent-anchors
 Environment=LEAN_NUM_THREADS=1
-ExecStart=/bin/sh -c 'exec "$MINI" clock --action tick --workspace "$MINI_CLOCK_WORKSPACE"'
+ExecStart=/bin/sh -c '"$MINI" clock --action tick --workspace "$MINI_CLOCK_WORKSPACE" && ("$MINI" bend --action tick-all --dir "${MINI_WORKSPACES_DIR:-/var/lib/mini/workspaces}" || true)'
 TimeoutStartSec=10min
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/mini/clock
+ReadWritePaths=/var/lib/mini/clock -/var/lib/mini/workspaces -/var/lib/mini/members
 MemoryHigh=3G
 MemoryMax=4G
 
