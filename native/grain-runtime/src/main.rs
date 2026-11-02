@@ -10381,6 +10381,10 @@ impl Runtime {
         if current.id != attempt_id || current.meter_report_path.is_some() {
             return Err("provider attempt changed during read-only class quote".into());
         }
+        current.decision = Some(provider_failure::decide(
+            class.clone(),
+            &current.route.credential,
+        ));
         current.meter_report_path = Some(report_path);
         current.meter_report_sha256 = Some(sha256_bytes(&report_bytes)?);
         current.metered_charge = Some(charge);
@@ -10612,6 +10616,23 @@ impl Runtime {
                 .ok_or("metered response digest absent")?,
             task.max_response_bytes,
         )?;
+        let report_path = attempt
+            .meter_report_path
+            .as_ref()
+            .ok_or("metered report absent")?;
+        let report_digest = attempt
+            .meter_report_sha256
+            .as_deref()
+            .ok_or("metered report digest absent")?;
+        let directory = report_path
+            .parent()
+            .ok_or("metered report directory absent")?;
+        let report_len = fs::symlink_metadata(report_path)
+            .map_err(|e| format!("metered report: {e}"))?
+            .len() as usize;
+        let report_bytes = retained_exact(report_path, report_len, report_digest, 16_384)?;
+        let report: Value = serde_json::from_slice(&report_bytes)
+            .map_err(|e| format!("metered report JSON: {e}"))?;
         let (metadata, outcome_class) = if attempt.response_headers_path.is_some() {
             let headers = retained_exact(
                 attempt
@@ -10634,8 +10655,26 @@ impl Runtime {
             {
                 return Err("metered status or Content-Type differs from raw headers".into());
             }
-            let class = (status != 200).then_some("complete-non-200");
-            (provider_metering_metadata(pin, status, &content_type, reserve)?, class)
+            if status == 200
+                && report.get("leg").and_then(Value::as_str) == Some("truncated")
+                && attempt.decision.as_ref().is_some_and(|decision| {
+                    matches!(
+                        decision.class,
+                        provider_failure::FailureClass::Malformed { .. }
+                    )
+                })
+            {
+                (
+                    provider_class_metadata(pin, reserve, "malformed")?,
+                    Some("malformed"),
+                )
+            } else {
+                let class = (status != 200).then_some("complete-non-200");
+                (
+                    provider_metering_metadata(pin, status, &content_type, reserve)?,
+                    class,
+                )
+            }
         } else {
             let class = provider_failure::classify(
                 attempt.send_started,
@@ -10647,21 +10686,6 @@ impl Runtime {
             let name = class.wire_name();
             (provider_class_metadata(pin, reserve, name)?, Some(name))
         };
-        let report_path = attempt
-            .meter_report_path
-            .as_ref()
-            .ok_or("metered report absent")?;
-        let report_digest = attempt
-            .meter_report_sha256
-            .as_deref()
-            .ok_or("metered report digest absent")?;
-        let directory = report_path
-            .parent()
-            .ok_or("metered report directory absent")?;
-        let report_len = fs::symlink_metadata(report_path)
-            .map_err(|e| format!("metered report: {e}"))?
-            .len() as usize;
-        let report_bytes = retained_exact(report_path, report_len, report_digest, 16_384)?;
         let frame = bounded_regular_file(&directory.join("reply.frame"), 16_385)?;
         if frame.len() != report_bytes.len() + 1
             || frame.first() != Some(&19)
@@ -10693,8 +10717,6 @@ impl Runtime {
         {
             return Err("metered metadata or config differs from pinned evidence".into());
         }
-        let report: Value = serde_json::from_slice(&report_bytes)
-            .map_err(|e| format!("metered report JSON: {e}"))?;
         let charge = provider_quote_charge(
             &report,
             pin,
@@ -17478,7 +17500,19 @@ impl Runtime {
                             MeteredAuditPath::ClassSettle(class) => {
                                 self.provider_meter_class_inner(attempt.id, class)
                             }
-                            _ => self.provider_meter_quote_inner(attempt.id, false),
+                            MeteredAuditPath::CompleteResponse => self
+                                .provider_meter_quote_inner(attempt.id, false)
+                                .or_else(|error| {
+                                    if !automatic && attempt.response_status == Some(200) {
+                                        let class = provider_failure::FailureClass::Malformed {
+                                            reason: error,
+                                        };
+                                        self.provider_meter_class_inner(attempt.id, &class)
+                                    } else {
+                                        Err(error)
+                                    }
+                                }),
+                            MeteredAuditPath::ProvenNoSend => unreachable!(),
                         };
                         if let Err(error) = quoted {
                             self.provider_await_host(attempt.id);
