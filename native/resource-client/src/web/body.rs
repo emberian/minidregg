@@ -645,7 +645,17 @@ fn anchor(attempt: &std::path::Path) -> String {
             format!("{header}{proof}")
         }
         Ok(crate::workspace::AttemptOutcome::Refused) => {
-            "<p>Refused: the Host named no point; the refusal's clause is the receipt.</p>".to_owned()
+            let mut msg =
+                "<p>Refused: the Host named no point; the refusal's clause is the receipt.</p>"
+                    .to_owned();
+            if let Ok(bytes) = crate::fsio::read_bounded(&attempt.join("outcome.json"), 64 * 1024) {
+                if let Ok(val) = serde_json::from_slice::<Value>(&bytes) {
+                    if let Some(line) = crate::refusal_line(&val) {
+                        msg.push_str(&law_refusal_diagnosis_html(&line, ""));
+                    }
+                }
+            }
+            msg
         }
         Ok(crate::workspace::AttemptOutcome::Pending) => {
             "<p>Undecided: no confirmation point yet; <code>lookup</code> or <code>retry</code> resolves it.</p>".to_owned()
@@ -1366,7 +1376,7 @@ pub(super) fn surface_shell_lines(
             if let Some(dep) = spec["deposit"].as_str() {
                 line.push_str(&format!(" --deposit {}", quote(dep)));
             }
-            (vec![line], String::new())
+            (vec![line], id.to_owned())
         }
         ("objective-activity", "reply") => {
             let answer_json = spec["answer"].to_string();
@@ -1375,7 +1385,7 @@ pub(super) fn surface_shell_lines(
                 None => quote(&answer_json),
             };
             let line = format!("bend answer {} {arg}", quote(spec["slot"].as_str().unwrap_or("")));
-            (vec![line], String::new())
+            (vec![line], id.to_owned())
         }
         ("objective-send", "deliver") => {
             let mut line = format!(
@@ -1386,7 +1396,7 @@ pub(super) fn surface_shell_lines(
             if let Some(acc) = spec["account"].as_str() {
                 line.push_str(&format!(" --account {}", quote(acc)));
             }
-            (vec![line], String::new())
+            (vec![line], id.to_owned())
         }
         ("seat-store", "create") => {
             let t = &spec["turn"];
@@ -1398,7 +1408,7 @@ pub(super) fn surface_shell_lines(
                 "seat create {obj} {pkg} {payer} --invitations {}",
                 quote(&inv_json)
             );
-            (vec![line], String::new())
+            (vec![line], id.to_owned())
         }
         ("seat-store", "fund") => {
             let t = &spec["turn"];
@@ -1430,7 +1440,7 @@ pub(super) fn surface_shell_lines(
                 quote(&give_json),
                 quote(&want_json)
             );
-            (vec![line], String::new())
+            (vec![line], id.to_owned())
         }
         ("seat-store", "act") => {
             let t = &spec["turn"];
@@ -1447,7 +1457,7 @@ pub(super) fn surface_shell_lines(
                 "seat invoke {obj} {pkg} {payer} {}",
                 quote(&action_json)
             );
-            (vec![line], String::new())
+            (vec![line], id.to_owned())
         }
         ("seat-store", "exit") => {
             let t = &spec["turn"];
@@ -1455,7 +1465,7 @@ pub(super) fn surface_shell_lines(
             let pkg = quote(t["package"].as_str().unwrap_or("0"));
             let seat_id = quote(t["seat"].as_str().unwrap_or("0"));
             let line = format!("seat exit {obj} {pkg} {seat_id}");
-            (vec![line], String::new())
+            (vec![line], id.to_owned())
         }
         ("objective-call", "invoke") => {
             let obj = spec["object"].as_str().unwrap_or("");
@@ -1478,7 +1488,7 @@ pub(super) fn surface_shell_lines(
                     quote(obj),
                     quote(&spec["input"].to_string())
                 );
-                (vec![line], String::new())
+                (vec![line], id.to_owned())
             }
         }
         ("objective-send", "send") => {
@@ -1490,7 +1500,7 @@ pub(super) fn surface_shell_lines(
                 quote(dst),
                 quote(&spec["message"].to_string())
             );
-            (vec![line], String::new())
+            (vec![line], id.to_owned())
         }
         _ => {
             let body_json = spec.to_string();
@@ -1560,6 +1570,7 @@ fn clear_cert_post(site: &Site, form: &std::collections::BTreeMap<String, String
                 crate::clearing_solver::Side::Ask,
             )?;
             orders.extend(asks);
+            orders.sort_by_key(|o| o.seat);
             if orders.is_empty() {
                 return Err("no bid or ask orders provided".to_owned());
             }
@@ -1605,6 +1616,10 @@ fn ballot_commit_post(site: &Site, form: &std::collections::BTreeMap<String, Str
         let v = field("vote");
         if v.is_empty() { "1".to_owned() } else { v }
     };
+    let now = {
+        let n = field("now");
+        if n.is_empty() { "10".to_owned() } else { n }
+    };
     let salt = {
         let s = field("salt");
         if s.is_empty() {
@@ -1628,7 +1643,7 @@ fn ballot_commit_post(site: &Site, form: &std::collections::BTreeMap<String, Str
         },
     );
     match res {
-        Ok(entry) => programs::world_program_with(site, "ballot", None, Some(&entry), None),
+        Ok(entry) => programs::world_program_with(site, "ballot", None, Some((&entry, &now)), None),
         Err(err) => programs::world_program_with(site, "ballot", None, None, Some(&err)),
     }
 }
@@ -2989,6 +3004,15 @@ mod tests {
             b"surface=objective-send&turn=send&source=station-1&target=desk-2&variant=lease&fields=holder%3D42",
         );
         assert_eq!(p_send.status, 200, "{}", p_send.body);
+        for page in [&p_create, &p_fund, &p_act, &p_exit, &p_call, &p_send] {
+            assert!(
+                page.body.contains("World-Root Inclusion Proof")
+                    && page.body.contains("/receipts/w-")
+                    && page.body.contains("mini receipt verify w-"),
+                "surface_post missing inclusion proof bridge: {}",
+                page.body
+            );
+        }
 
         redteam::FAKE_SHELL.with(|f| *f.borrow_mut() = None);
         let log = ran.borrow();
@@ -3071,7 +3095,7 @@ mod tests {
         let commit_page = post(
             &site,
             &["act", "ballot", "commit"],
-            b"object=5001&voter=1&vote=1&salt=111&now=10",
+            b"object=5001&voter=1&vote=1&salt=111&now=25",
         );
         assert_eq!(commit_page.status, 200, "{}", commit_page.body);
         let expected_digest =
@@ -3079,6 +3103,11 @@ mod tests {
         assert!(
             commit_page.body.contains(&expected_digest),
             "missing digest {expected_digest} in {}",
+            commit_page.body
+        );
+        assert!(
+            commit_page.body.contains("now=25"),
+            "missing custom now=25 in {}",
             commit_page.body
         );
         assert!(
