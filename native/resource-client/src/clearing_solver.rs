@@ -183,6 +183,8 @@ impl Transfer {
         json!({
             "from": self.from,
             "to": self.to,
+            "source": self.from,
+            "destination": self.to,
             "asset": self.asset,
             "amount": self.amount,
         })
@@ -243,6 +245,7 @@ impl ClearingSolution {
             .map(|f| {
                 json!({
                     "seat": f.seat,
+                    "units": f.fill,
                     "role": f.role.as_str(),
                     "limitPrice": f.limit_price,
                     "maxGoods": f.max_goods,
@@ -254,12 +257,32 @@ impl ClearingSolution {
                 })
             })
             .collect();
+        let drex_fills: Vec<Value> = self
+            .fills
+            .iter()
+            .filter(|f| f.fill > 0)
+            .map(|f| {
+                json!({
+                    "seat": f.seat,
+                    "units": f.fill,
+                })
+            })
+            .collect();
+        let cert_json = self.cert.to_json();
         let action = json!({
+            "action": "clear",
             "price": self.cert.price,
             "bidPotential": self.cert.bid_potential,
             "askPotential": self.cert.ask_potential,
             "slacks": self.cert.slacks,
             "moves": moves_json,
+            "fills": drex_fills,
+            "certificate": cert_json,
+            "market": {
+                "currency": self.market.currency,
+                "goods": self.market.goods,
+                "epsilon": self.market.epsilon,
+            },
         });
         json!({
             "verified": true,
@@ -304,10 +327,10 @@ pub(crate) fn net_flow(moves: &[Transfer], seat: u64, asset: u64) -> i128 {
 /// and `Theory.CertF.checkCertified` (`Theory/CertF.lean` lines 60–97).
 ///
 /// Verifies:
-/// 1. Market non-degeneracy (`currency != goods`) and positive order quantities (`max_goods > 0`),
+/// 1. Market non-degeneracy (`currency != goods`), distinct seat accounts, and positive order quantities (`max_goods > 0`),
 /// 2. `slackCount`: `cert.slacks.len() == orders.len()`,
-/// 3. `foreignAsset`: every transfer moves `market.currency` or `market.goods`,
-/// 4. `notAnOrder`: every transfer endpoint belongs to an order seat in `orders`,
+/// 3. `foreignAsset`: every transfer moves `market.currency` or `market.goods` with `amount > 0` and `from != to`,
+/// 4. `notAnOrder` / `movesConsistent`: every transfer endpoint belongs to an order seat in `orders` with `goods` moving `Ask -> Bid` and `currency` moving `Bid -> Ask`,
 /// 5. `notUniform`: for every order, `paid == cert.price * fill`,
 /// 6. `PrimalFeasible`: flow conservation `A * f == 0` and box constraints `0 <= fill <= capacity(price)`
 ///    (which together with `paid == price * fill` implies price improvement / budget / reserve),
@@ -322,9 +345,17 @@ pub(crate) fn verify_cert_f(
     if market.currency == market.goods {
         return Err("degenerateMarket: market currency and goods assets must be distinct".into());
     }
+    let mut seen_seats = std::collections::BTreeSet::new();
     for (idx, o) in orders.iter().enumerate() {
         if o.max_goods == 0 {
             return Err(format!("invalidOrder[{idx}]: seat {} max_goods must be > 0", o.seat).into());
+        }
+        if !seen_seats.insert(o.seat) {
+            return Err(format!(
+                "duplicateSeat: order[{idx}] seat {} appears multiple times in orders",
+                o.seat
+            )
+            .into());
         }
     }
     if cert.slacks.len() != orders.len() {
@@ -336,6 +367,16 @@ pub(crate) fn verify_cert_f(
         .into());
     }
     for (idx, t) in moves.iter().enumerate() {
+        if t.amount == 0 {
+            return Err(format!("zeroTransfer: transfer[{idx}] has amount 0").into());
+        }
+        if t.from == t.to {
+            return Err(format!(
+                "selfTransfer: transfer[{idx}] source and destination seat {} are identical",
+                t.from
+            )
+            .into());
+        }
         if t.asset != market.currency && t.asset != market.goods {
             return Err(format!(
                 "foreignAsset: transfer[{idx}] asset {} is neither currency ({}) nor goods ({})",
@@ -343,17 +384,31 @@ pub(crate) fn verify_cert_f(
             )
             .into());
         }
-        if !orders.iter().any(|o| o.seat == t.from) {
+        let Some(src) = orders.iter().find(|o| o.seat == t.from) else {
             return Err(format!(
                 "notAnOrder: transfer[{idx}] source seat {} is not in orders",
                 t.from
             )
             .into());
-        }
-        if !orders.iter().any(|o| o.seat == t.to) {
+        };
+        let Some(dst) = orders.iter().find(|o| o.seat == t.to) else {
             return Err(format!(
                 "notAnOrder: transfer[{idx}] destination seat {} is not in orders",
                 t.to
+            )
+            .into());
+        };
+        if t.asset == market.goods && (src.role != Side::Ask || dst.role != Side::Bid) {
+            return Err(format!(
+                "movesConsistent: goods transfer[{idx}] ({} -> {}) must flow from ask to bid",
+                t.from, t.to
+            )
+            .into());
+        }
+        if t.asset == market.currency && (src.role != Side::Bid || dst.role != Side::Ask) {
+            return Err(format!(
+                "movesConsistent: currency transfer[{idx}] ({} -> {}) must flow from bid to ask",
+                t.from, t.to
             )
             .into());
         }
@@ -947,5 +1002,68 @@ mod tests {
         human_orders.extend(parse_human_orders("20:3:2\n21:4:3", Side::Ask).unwrap());
         let sol2 = solve_clearing(&market, &human_orders).unwrap();
         assert_eq!(sol2.to_json(), sol.to_json());
+
+        let action = &sol.to_json()["seatInvokeAction"];
+        assert_eq!(action["action"], "clear");
+        assert_eq!(action["fills"].as_array().unwrap().len(), 4);
+        assert_eq!(action["price"], 4);
+        assert_eq!(action["certificate"]["price"], 4);
+        assert_eq!(action["moves"][0]["source"], 20);
+        assert_eq!(action["moves"][0]["destination"], 10);
+    }
+
+    #[test]
+    fn verify_cert_f_rejects_duplicate_seats_and_invalid_transfer_directions() {
+        let market = Market::default();
+        let dup_orders = vec![Order::bid(10, 5, 3), Order::ask(10, 3, 3)];
+        let err = solve_clearing(&market, &dup_orders).unwrap_err();
+        assert!(err.contains("duplicate seat"), "expected duplicate seat, got: {err}");
+        let v_err = verify_cert_f(
+            &market,
+            &dup_orders,
+            &[],
+            &Certificate {
+                price: 4,
+                bid_potential: 0,
+                ask_potential: 1,
+                slacks: vec![0, 0],
+            },
+        )
+        .unwrap_err();
+        assert!(v_err.to_string().contains("duplicateSeat"), "got: {v_err}");
+
+        let orders = vec![Order::bid(10, 5, 2), Order::ask(20, 4, 2)];
+        let sol = solve_clearing(&market, &orders).unwrap();
+
+        // Zero-amount transfer must be rejected.
+        let mut zero_moves = sol.moves.clone();
+        zero_moves.push(Transfer {
+            from: 20,
+            to: 10,
+            asset: 2,
+            amount: 0,
+        });
+        let err = verify_cert_f(&market, &orders, &zero_moves, &sol.cert).unwrap_err();
+        assert!(err.to_string().contains("zeroTransfer"), "got: {err}");
+
+        // Self-transfer must be rejected.
+        let self_moves = vec![Transfer {
+            from: 10,
+            to: 10,
+            asset: 1,
+            amount: 5,
+        }];
+        let err = verify_cert_f(&market, &orders, &self_moves, &sol.cert).unwrap_err();
+        assert!(err.to_string().contains("selfTransfer"), "got: {err}");
+
+        // Backwards goods flow (Bid -> Ask) must be rejected.
+        let backwards_moves = vec![Transfer {
+            from: 10,
+            to: 20,
+            asset: 2,
+            amount: 2,
+        }];
+        let err = verify_cert_f(&market, &orders, &backwards_moves, &sol.cert).unwrap_err();
+        assert!(err.to_string().contains("movesConsistent"), "got: {err}");
     }
 }

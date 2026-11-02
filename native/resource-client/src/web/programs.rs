@@ -678,7 +678,7 @@ pub(super) fn clearing_witness_card(
 /// Interactive `Pred.hashEq` (`cSHAKE256("DREGG.PRED.HASHEQ/v2")`) commit generator + one-click reveal table on `/programs/ballot`.
 pub(super) fn ballot_commitment_card(
     site: &Site,
-    latest: Option<&crate::receipt_continuity::BallotCommitment>,
+    latest: Option<(&crate::receipt_continuity::BallotCommitment, &str)>,
     err: Option<&str>,
 ) -> String {
     let default_voter = if decimal(&site.subject) {
@@ -686,6 +686,7 @@ pub(super) fn ballot_commitment_card(
     } else {
         "1"
     };
+    let default_now = latest.map(|(_, n)| n).unwrap_or("10");
     let mut out = format!(
         "<section data-ballot-commit><h2>Compute &amp; Save <code>Pred.hashEq</code> Ballot Commitment (<code>cSHAKE256(\"DREGG.PRED.HASHEQ/v2\")</code>)</h2>\
          <p class=\"note\"><code>world/ballot/SealedBallot.obend</code> enforces <code>law commit_binding: new.commit == 0 or hashEq([vote], salt, commit)</code>. Compute the exact 256-bit <code>cSHAKE256(\"DREGG.PRED.HASHEQ/v2\")</code> commitment digest and retain <code>{{object, voter, vote, salt, digest}}</code> in workspace custody (<code>ballot-commitments.json</code>) for one-click reveal.</p>\
@@ -694,9 +695,10 @@ pub(super) fn ballot_commitment_card(
          <div><label for=\"bc-voter\">Voter subject id</label><input id=\"bc-voter\" name=\"voter\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{}\" required></div>\
          <div><label for=\"bc-vote\">Vote choice (<code>1</code>=yes, <code>0</code>=no, <code>2</code>=abstain)</label><input id=\"bc-vote\" name=\"vote\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"1\" required></div>\
          <div><label for=\"bc-salt\">Salt / blinder (optional; auto-generated if blank)</label><input id=\"bc-salt\" name=\"salt\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\" placeholder=\"auto 64-bit salt\"></div>\
-         <div><label for=\"bc-now\">Commit height (<code>now</code>)</label><input id=\"bc-now\" name=\"now\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"10\"></div>\
+         <div><label for=\"bc-now\">Commit height (<code>now</code>)</label><input id=\"bc-now\" name=\"now\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{}\"></div>\
          <button>Compute &amp; save commitment</button></form>",
-        escape(default_voter)
+        escape(default_voter),
+        escape(default_now)
     );
     if let Some(msg) = err {
         out.push_str(&format!(
@@ -704,8 +706,8 @@ pub(super) fn ballot_commitment_card(
             escape(msg)
         ));
     }
-    if let Some(c) = latest {
-        let commit_fields = format!("voter={}, digest={}, now=10", c.voter, c.digest);
+    if let Some((c, now)) = latest {
+        let commit_fields = format!("voter={}, digest={}, now={}", c.voter, c.digest, now);
         out.push_str(&format!(
             "<div class=\"outcome admitted\" data-hasheq-digest=\"{digest}\">\
              <p class=\"headline\">Saved <code>Pred.hashEq</code> commitment witness in <code>ballot-commitments.json</code></p>\
@@ -776,7 +778,7 @@ pub(super) fn world_program_with(
     site: &Site,
     slug: &str,
     clearing: Option<(&str, &str, &str, &crate::clearing_solver::ClearingSolution)>,
-    ballot_commit: Option<&crate::receipt_continuity::BallotCommitment>,
+    ballot_commit: Option<(&crate::receipt_continuity::BallotCommitment, &str)>,
     err: Option<&str>,
 ) -> Page {
     let Some(p) = WORLD_PROGRAMS.iter().find(|p| p.slug == slug) else {

@@ -1456,11 +1456,17 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             ];
             for (i, arg) in p.leaf.args.iter().enumerate() {
                 if let Some(val) = p.opt(i) {
+                    if let Some(file) = val.strip_prefix('@') {
+                        session_file(file, "seat file")?;
+                    }
                     flags.push(flag(crate::seat::positional_flag(arg.name), val));
                 }
             }
             for (name, value) in &p.flags {
                 if let Some(value) = value {
+                    if let Some(file) = value.strip_prefix('@') {
+                        session_file(file, "seat file")?;
+                    }
                     flags.push(flag(&name[2..], value.clone()));
                 }
             }
