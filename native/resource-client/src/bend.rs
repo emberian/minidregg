@@ -918,10 +918,113 @@ pub(crate) fn discover_member_workspaces(root: &Path) -> Vec<PathBuf> {
     scan_dir(root);
     if root == Path::new("/var/lib/mini/workspaces") {
         scan_dir(Path::new("/var/lib/mini/members"));
+        scan_dir(Path::new("/var/lib/mini/split"));
+        scan_dir(Path::new("/var/lib/mini/sessions"));
+        scan_dir(Path::new("/var/lib/mini/clock"));
     }
-    found.sort();
-    found.dedup();
-    found
+    let mut seen = std::collections::BTreeSet::new();
+    let mut unique = Vec::new();
+    for p in found {
+        let canon = fs::canonicalize(&p).unwrap_or_else(|_| p.clone());
+        if seen.insert(canon) {
+            unique.push(p);
+        }
+    }
+    unique.sort();
+    unique.dedup();
+    unique
+}
+
+fn workspace_has_live_births(ws_dir: &Path) -> bool {
+    let rows = ws_dir.join("bend").join("objects");
+    for (name, _, object, _) in registry(ws_dir) {
+        if decimal_arg(&object, "OBJECT").is_err() {
+            continue;
+        }
+        let file = rows.join(format!("{}.json", workspace::ref_file(&name)));
+        let Ok(row) = fs::read(&file)
+            .map_err(|e| e.to_string())
+            .and_then(|b| serde_json::from_slice::<Value>(&b).map_err(|e| e.to_string()))
+        else {
+            continue;
+        };
+        if !live_births(&row).is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(unix)]
+fn settle_foreign_workspace(
+    ws_dir: &Path,
+    uid: u32,
+    gid: u32,
+    account: Option<&str>,
+) -> usize {
+    use std::os::unix::process::CommandExt;
+    let shell_ssh = Path::new("/usr/local/lib/mini/mini-shell-ssh");
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/var/lib/mini/candidate/current/bin/mini"));
+    let line = match account {
+        Some(acc) => format!("bend settle --account {acc}"),
+        None => "bend settle".to_owned(),
+    };
+    let output = if shell_ssh.is_file()
+        && ws_dir.file_name().and_then(|n| n.to_str()) == Some("workspace")
+        && ws_dir.parent().is_some()
+    {
+        let home = ws_dir.parent().unwrap();
+        let Ok(pin_bytes) = fs::read(ws_dir.join("workspace.json")) else { return 0 };
+        let Ok(pin) = serde_json::from_slice::<Value>(&pin_bytes) else { return 0 };
+        let host = pin.get("host").and_then(Value::as_str).unwrap_or("/var/lib/mini/candidate/current/bin/minidregg-host");
+        let config = pin.get("config").and_then(Value::as_str).unwrap_or("/var/lib/mini/store/node/deployment/pinned-config.json");
+        let socket = pin.get("socket").and_then(Value::as_str).unwrap_or("/var/lib/mini/store/node/public/mini.sock");
+        let mut cmd = std::process::Command::new(shell_ssh);
+        cmd.arg(&exe)
+            .arg(host)
+            .arg(config)
+            .arg(socket)
+            .arg(ws_dir)
+            .arg(home)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("LANG", "C.UTF-8")
+            .env("SSH_ORIGINAL_COMMAND", &line)
+            .uid(uid)
+            .gid(gid);
+        cmd.output()
+    } else {
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.arg("bend")
+            .arg("--action")
+            .arg("settle")
+            .arg("--dir")
+            .arg(ws_dir);
+        if let Some(acc) = account {
+            cmd.arg("--account").arg(acc);
+        }
+        cmd.uid(uid).gid(gid);
+        cmd.output()
+    };
+    let Ok(out) = output else { return 0 };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    for l in stdout.lines() {
+        if l.starts_with("settled ") {
+            println!("{l}");
+        }
+    }
+    for l in stderr.lines() {
+        if !l.starts_with("workspace continuity:") && !l.trim().is_empty() {
+            eprintln!("{l}");
+        }
+    }
+    stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("bend settle: "))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(0)
 }
 
 /// Scan all member workspaces under `root` and settle any overdue `ObjectiveActivity` births (`height > deadline`).
@@ -929,10 +1032,29 @@ pub(crate) fn tick_all_workspaces(root: &Path, account: Option<&str>) -> (usize,
     let workspaces = discover_member_workspaces(root);
     let mut scanned = 0usize;
     let mut settled = 0usize;
+    #[cfg(unix)]
+    let euid = unsafe { libc::geteuid() };
     for ws_dir in workspaces {
         match Bend::open(ws_dir.clone()) {
             Ok(bend) => {
                 scanned += 1;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if let Ok(meta) = fs::metadata(&ws_dir) {
+                        if meta.uid() != euid {
+                            if euid == 0 && workspace_has_live_births(&ws_dir) {
+                                settled += settle_foreign_workspace(
+                                    &ws_dir,
+                                    meta.uid(),
+                                    meta.gid(),
+                                    account,
+                                );
+                            }
+                            continue;
+                        }
+                    }
+                }
                 settled += settle_workspace(&bend, account);
             }
             Err(e) => {
@@ -953,6 +1075,10 @@ fn tick_all_cmd(mut args: Args) -> Result<()> {
         },
     };
     let account = opt(&mut args, "account")?;
+    let _socket = opt(&mut args, "socket")?;
+    let _host = opt(&mut args, "host")?;
+    let _config = opt(&mut args, "config")?;
+    let _workspace = opt(&mut args, "workspace")?;
     args.finish()?;
     tick_all_workspaces(Path::new(&dir), account.as_deref());
     Ok(())

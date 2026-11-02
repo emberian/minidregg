@@ -627,6 +627,15 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("another controller owns this task".into());
     }
+    struct FlockGuard(File);
+    impl Drop for FlockGuard {
+        fn drop(&mut self) {
+            unsafe {
+                libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+    }
+    let _lock_guard = FlockGuard(lock);
     let journal_path = target.state_dir.join("journal.json");
     let current_bytes = private(&journal_path, JOURNAL_LIMIT)?;
     let archive = target.state_dir.join("application-enrollments");

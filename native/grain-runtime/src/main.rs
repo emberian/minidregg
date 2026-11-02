@@ -3759,12 +3759,22 @@ impl Drop for ActiveProvider {
     }
 }
 
+struct FlockFile(File);
+
+impl Drop for FlockFile {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
 struct Runtime {
     config: Config,
     config_path: PathBuf,
     journal: Journal,
     child: Option<Child>,
-    _lock: File,
+    _lock: FlockFile,
     stdin_gone: bool,
     current_pgid: Arc<AtomicI32>,
     hard_connection: Arc<AtomicBool>,
@@ -6973,7 +6983,7 @@ impl Runtime {
             config_path,
             journal,
             child: None,
-            _lock: lock,
+            _lock: FlockFile(lock),
             stdin_gone: false,
             current_pgid: Arc::new(AtomicI32::new(0)),
             hard_connection: Arc::new(AtomicBool::new(false)),

@@ -174,6 +174,9 @@ pub(crate) fn positional_flag(name: &str) -> &'static str {
         "WANT-JSON" => "want",
         "ACTION-JSON" => "input",
         "ORDERS-JSON" => "orders",
+        "VOTER" => "voter",
+        "VOTE" => "vote",
+        "SALT" => "salt",
         _ => "object",
     }
 }
@@ -612,6 +615,46 @@ pub(crate) fn build_high_level_command_in(
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = args.required("action")?.into_string().map_err(|_| "seat action must be UTF-8")?;
     let home = args.optional("home").map(path);
+
+    if action == "ballot-commit" {
+        let ws_dir = args
+            .optional("workspace")
+            .or_else(|| args.optional("dir"))
+            .map(path);
+        let object = args
+            .required("object")?
+            .into_string()
+            .map_err(|_| "--object must be UTF-8")?;
+        let voter = args
+            .required("voter")?
+            .into_string()
+            .map_err(|_| "--voter must be UTF-8")?;
+        let vote = args
+            .required("vote")?
+            .into_string()
+            .map_err(|_| "--vote must be UTF-8")?;
+        let salt = match args.optional("salt") {
+            Some(s) => s.into_string().map_err(|_| "--salt must be UTF-8")?,
+            None => "777".to_string(),
+        };
+        args.finish()?;
+        let digest = crate::receipt_continuity::hasheq_commit_digest(&object, &salt, &[&vote])?;
+        let entry = crate::receipt_continuity::BallotCommitment {
+            object,
+            voter,
+            vote,
+            salt,
+            digest,
+        };
+        if let Some(root) = ws_dir {
+            crate::receipt_continuity::save_ballot_commitment(&root, entry.clone())?;
+        }
+        println!(
+            "{}",
+            serde_json::to_string(&entry.to_json()).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
 
     if action == "clear-cert" {
         let _ = args.optional("workspace").or_else(|| args.optional("dir"));

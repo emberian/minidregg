@@ -534,15 +534,36 @@ fn parse_history_line(line: &str) -> (&str, &str, String) {
     }
 }
 
+fn find_read_journal_entry(root: &std::path::Path, target_id: &str) -> Option<(String, String, String)> {
+    for journal in ["read-journal.tsv", "read-journal.tsv.1"] {
+        let Ok(text) = std::fs::read_to_string(root.join(journal)) else {
+            continue;
+        };
+        for line in text.lines().rev() {
+            let cells: Vec<&str> = line.split('\t').collect();
+            if let [_, height, "read", outcome, now, name] = cells[..] {
+                if name.trim() == target_id {
+                    return Some((height.to_owned(), outcome.to_owned(), now.to_owned()));
+                }
+            }
+        }
+    }
+    None
+}
+
 fn receipt(site: &Site, id: &str) -> Page {
     if workspace_id(id).is_err() {
         return simple(404, "Receipts", "not an attempt id");
     }
     let mut body = String::new();
     let attempt_dir = site.root.join("attempts").join(id);
+    let has_write_artifacts = attempt_dir.join("call.bin").is_file()
+        || attempt_dir.join("plan.bin").is_file()
+        || attempt_dir.join("outcome.json").is_file();
     let is_read_attempt = id.starts_with("read-")
-        || attempt_dir.join("signed-observation.bin").is_file()
-        || (attempt_dir.join("challenge.json").is_file() && !attempt_dir.join("call.bin").is_file());
+        || (!has_write_artifacts
+            && (attempt_dir.join("signed-observation.bin").is_file()
+                || attempt_dir.join("challenge.json").is_file()));
     if is_read_attempt {
         let challenge = crate::workspace::bounded_json(&attempt_dir.join("challenge.json"))
             .or_else(|_| crate::workspace::bounded_json(&attempt_dir.join("0/challenge.json")))
@@ -559,6 +580,18 @@ fn receipt(site: &Site, id: &str) -> Page {
         }
         body.push_str(&anchor(&attempt_dir));
         return Page { status: 200, title: format!("Attempt {id}"), stamp: Stamp::None, body };
+    }
+    if !attempt_dir.is_dir() {
+        if let Some((height, outcome, now)) = find_read_journal_entry(&site.root, id) {
+            body.push_str(&format!(
+                "<section><h2>Signed read</h2><p>This attempt is a signed read (no write transaction was submitted): reference <code>{}</code>, {} at height <code>{}</code> (clock <code>{}</code>).</p></section>\n",
+                escape(id),
+                escape(&outcome),
+                escape(&height),
+                escape(&now),
+            ));
+            return Page { status: 200, title: format!("Attempt {id}"), stamp: Stamp::None, body };
+        }
     }
     // `lookup` asks the Host for the retained attempt's decided outcome (a transition's class);
     // the receipt and the explanation are reads.
@@ -1554,8 +1587,13 @@ fn clear_cert_post(site: &Site, form: &std::collections::BTreeMap<String, String
         if p.is_empty() { "130".to_owned() } else { p }
     };
     let orders_json = field("orders_json");
+    let raw_orders = field("orders");
     let parsed = if !orders_json.is_empty() {
         crate::clearing_solver::parse_orders_json(&orders_json)
+    } else if !raw_orders.is_empty()
+        && (raw_orders.starts_with('[') || raw_orders.starts_with('{'))
+    {
+        crate::clearing_solver::parse_orders_json(&raw_orders)
     } else {
         let currency = field("currency").parse::<u64>().unwrap_or(1);
         let goods = field("goods").parse::<u64>().unwrap_or(2);
@@ -1570,6 +1608,24 @@ fn clear_cert_post(site: &Site, form: &std::collections::BTreeMap<String, String
                 crate::clearing_solver::Side::Ask,
             )?;
             orders.extend(asks);
+            if orders.is_empty() && !raw_orders.is_empty() {
+                for (idx, chunk) in raw_orders
+                    .split([',', ';', '\n'])
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .enumerate()
+                {
+                    let default_side = if idx % 2 == 0 {
+                        crate::clearing_solver::Side::Bid
+                    } else {
+                        crate::clearing_solver::Side::Ask
+                    };
+                    orders.extend(crate::clearing_solver::parse_human_orders(
+                        chunk,
+                        default_side,
+                    )?);
+                }
+            }
             orders.sort_by_key(|o| o.seat);
             if orders.is_empty() {
                 return Err("no bid or ask orders provided".to_owned());
@@ -1657,6 +1713,9 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
     match parts {
         ["act", "surface", "clear-cert"] => return clear_cert_post(site, &form),
         ["act", "ballot", "commit"] => return ballot_commit_post(site, &form),
+        ["act", "apps", "snapshot"] | ["apps", "snapshot"] => {
+            return apps::grain_action(site, &field("grain"), "snapshot", &form);
+        }
         ["act", "surface"] => return surface_post(site, &form),
         _ => {}
     }
@@ -1874,7 +1933,15 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         }
         ["laws", "check"] | ["act", "law", "check"] => {
             let preset = field("preset");
-            let clauses = field("clauses");
+            let clauses = {
+                let c = field("clauses");
+                if !c.is_empty() {
+                    c
+                } else {
+                    let p = field("predicate");
+                    if !p.is_empty() { p } else { field("law") }
+                }
+            };
             let ref_name = field("ref");
             let input = if !clauses.is_empty() {
                 clauses
@@ -1910,7 +1977,15 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
                     false,
                 );
             }
-            let clauses = field("clauses");
+            let clauses = {
+                let c = field("clauses");
+                if !c.is_empty() {
+                    c
+                } else {
+                    let p = field("predicate");
+                    if !p.is_empty() { p } else { field("law") }
+                }
+            };
             let verb_name = {
                 let v = field("verb");
                 if v.is_empty() { "write".to_owned() } else { v }

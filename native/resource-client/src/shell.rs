@@ -1875,10 +1875,10 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 "retry" => flags.push(flag("retry", p.arg(0))),
                 "list" => {}
-                "share" | "export" | "revoke-identity" => {
+                "share" | "export" | "revoke-identity" | "snapshot" => {
                     if !crate::apps::valid_grain(p.arg(0)) { return Err(u.to_owned()); }
                     flags.push(flag("grain", p.arg(0)));
-                    flags.push(flag(match action { "share" => "to", "export" => "out", _ => "token" }, p.arg(1)));
+                    flags.push(flag(match action { "share" => "to", "export" => "out", "snapshot" => "doc", _ => "token" }, p.arg(1)));
                 }
                 _ => {
                     if !crate::apps::valid_grain(p.arg(0)) { return Err(u.to_owned()); }
@@ -2464,15 +2464,26 @@ fn history(session: &Session, all: bool, newest: Option<usize>) {
     }
     // Signed reads keep one journal line each (`read-journal.tsv`, rotated at 1 MiB), not an attempt.
     if all {
+        let mut read_rows: Vec<(std::time::SystemTime, String, String)> = Vec::new();
         for journal in ["read-journal.tsv.1", "read-journal.tsv"] {
             let Ok(text) = fs::read_to_string(session.workspace.join(journal)) else { continue };
             for line in text.lines() {
                 let cells: Vec<&str> = line.split('\t').collect();
                 if let [unix, height, "read", outcome, _, name] = cells[..] {
                     let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix.parse().unwrap_or(0));
-                    rows.push((at, format!("read\t{name}\tsigned read, {outcome} at height {height}")));
+                    let row = format!("read\t{name}\tsigned read, {outcome} at height {height}");
+                    if newest.is_some() {
+                        if let Some(existing) = read_rows.iter_mut().find(|(_, n, _)| n == name) {
+                            *existing = (at, name.to_owned(), row);
+                            continue;
+                        }
+                    }
+                    read_rows.push((at, name.to_owned(), row));
                 }
             }
+        }
+        for (at, _, row) in read_rows {
+            rows.push((at, row));
         }
     }
     if let Ok(entries) = fs::read_dir(session.home.join("enroll")) {

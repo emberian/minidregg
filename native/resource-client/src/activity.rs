@@ -48,11 +48,17 @@ pub(crate) fn ws(root: PathBuf) -> Result<Ws> {
     if let Some(sha) = pin.get("hostSha256").and_then(Value::as_str) {
         crate::pin_workspace_host(&host, sha)?;
     }
+    let key = pin
+        .get("key")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("client.key"));
     Ok(Ws {
         host,
         socket: PathBuf::from(field(&pin, "socket")?),
         config: PathBuf::from(field(&pin, "config")?),
-        key: PathBuf::from(field(&pin, "key")?),
+        key,
         subject: field(&pin, "subject")?.to_string(),
         root,
     })

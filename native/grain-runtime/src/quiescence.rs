@@ -373,6 +373,16 @@ pub(crate) struct ResidentGuard {
     config_sha256: String,
 }
 
+impl Drop for ResidentGuard {
+    fn drop(&mut self) {
+        if let Some(lock) = &self._lock {
+            unsafe {
+                libc::flock(lock.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+    }
+}
+
 /// Operator socket client; neither attaches a worker nor changes connection mode.
 pub(crate) fn client(args: &[std::ffi::OsString]) -> Result<()> {
     let usage="usage: grain-runtime quiescence status ADMIN_SOCKET | quiescence inspect ADMIN_SOCKET RESIDENT_STATE_DIR|none";
