@@ -5,7 +5,7 @@
 import {readFileSync,mkdirSync,writeFileSync,existsSync} from "node:fs";
 import {join,resolve,dirname} from "node:path";
 import {createHash} from "node:crypto";
-import {capture,preview} from "./front.ts";
+import {readPreview,runCommands} from "./front.ts";
 const [cohortPath,outputRootRaw,leanBinary,leanPath]=process.argv.slice(2);
 if(!cohortPath||!outputRootRaw||!leanBinary||!leanPath)throw Error("usage: check-preview COHORT_JSON NEW_OUTPUT_ROOT LEAN_BINARY LEAN_PATH");
 const env={lean:leanBinary,leanPath};
@@ -51,19 +51,46 @@ const kernelProtocol=(item:any,turns:any[])=>{
 mkdirSync(outputRoot,{recursive:true});
 const cohort=JSON.parse(readFileSync(cohortPath,"utf8"));
 const requests:string[]=[];const results:any[]=[];
+const captureCmds:string[][]=[];
 for(const item of cohort){
  const dir=join(outputRoot,item.name);mkdirSync(dir);
  const packageInput={schema:"dregg.objective-bend.package-input.v1",edition:"objective-bend-1",
   modules:item.modules.map((m:any)=>({name:m.name,sourcePath:join(cohortDir,m.source),imports:m.imports??[]})),
   entryModule:String(item.modules.length-1),entryDefinition:item.entry};
  const packagePath=join(dir,"package-input.json");writeFileSync(packagePath,JSON.stringify(packageInput,null,2)+"\n",{flag:"wx"});
- capture(packagePath,join(dir,"capture"),env);
+ captureCmds.push(["capture",packagePath,join(dir,"capture")]);
+}
+const captureCmdsPath=join(outputRoot,"capture-commands.json");
+writeFileSync(captureCmdsPath,JSON.stringify(captureCmds)+"\n",{flag:"wx"});
+runCommands(captureCmdsPath,env);
+const previewCmds:string[][]=[];
+for(const item of cohort){
+ const dir=join(outputRoot,item.name);
  const capturePath=join(dir,"capture","objective.json");
  const request={schema:"dregg.objective-bend.preview-input.v2",capturePath,captureSha256:sha(capturePath),
   argumentEncoding:item.argumentEncoding??"legacy-values-v1",arguments:item.arguments,projections:item.projections??[],responses:item.responses??[],
   limits:{ticks:"100000",heap:"100000",stack:"10000",typeFuel:"4096"}};
  const requestPath=join(dir,"request.json");writeFileSync(requestPath,JSON.stringify(request,null,2)+"\n",{flag:"wx"});requests.push(requestPath);
- const out:any=preview(requestPath,join(dir,"preview"),env);
+ previewCmds.push(["preview",requestPath,join(dir,"preview")]);
+}
+const firstFinished=cohort.findIndex((c:any)=>c.expectedStatus!=="refused");
+const original=JSON.parse(readFileSync(requests[firstFinished],"utf8"));
+const refuserSpecs=[
+ ["WrongCapture",{captureSha256:"0".repeat(64)},"refused"],
+ ["TypingBudget",{limits:{...original.limits,typeFuel:"1"}},"refused"],
+ ["Ticks",{limits:{...original.limits,ticks:"1"}},"suspended"],
+ ["Capacity",{limits:{...original.limits,heap:"1"}},"suspended"]
+] as const;
+for(const [name,change] of refuserSpecs){
+ const request=join(outputRoot,name+"-request.json");writeFileSync(request,JSON.stringify({...original,...change})+"\n",{flag:"wx"});
+ previewCmds.push(["preview",request,join(outputRoot,name)]);
+}
+const previewCmdsPath=join(outputRoot,"preview-commands.json");
+writeFileSync(previewCmdsPath,JSON.stringify(previewCmds)+"\n",{flag:"wx"});
+runCommands(previewCmdsPath,env);
+for(const item of cohort){
+ const dir=join(outputRoot,item.name);
+ const out:any=readPreview(join(dir,"preview"));
  const turns=out.preview?.turns??[];
  results.push({name:item.name,status:out.status,type:out.preview?.type?.tag??null,result:out.preview?.result??null,turns:turns.length,diagnostic:out.diagnostic?.message??null});
  if(item.expectedStatus==="refused"){require(out.status==="refused","source typing refusal differs: "+item.name+" "+out.status);
@@ -93,16 +120,8 @@ for(const item of cohort){
  if(out.preview.result.value!==undefined)require(canonical(out.preview.resultData)===canonical(out.preview.result),"deep view of a scalar differs from its weak-head view: "+item.name+" "+JSON.stringify(out.preview.resultData));
  require(out.preview.sameDecodedTerm===true&&out.preview.uses.length===0,"checked/executed join differs: "+item.name);
 }
-const firstFinished=cohort.findIndex((c:any)=>c.expectedStatus!=="refused");
-const original=JSON.parse(readFileSync(requests[firstFinished],"utf8"));
-for(const [name,change,expect] of [
- ["WrongCapture",{captureSha256:"0".repeat(64)},"refused"],
- ["TypingBudget",{limits:{...original.limits,typeFuel:"1"}},"refused"],
- ["Ticks",{limits:{...original.limits,ticks:"1"}},"suspended"],
- ["Capacity",{limits:{...original.limits,heap:"1"}},"suspended"]
-] as const){
- const request=join(outputRoot,name+"-request.json");writeFileSync(request,JSON.stringify({...original,...change})+"\n",{flag:"wx"});
- const result:any=preview(request,join(outputRoot,name),env);
+for(const [name,_,expect] of refuserSpecs){
+ const result:any=readPreview(join(outputRoot,name));
  require(result.status===expect,"preview refusal/exhaustion differs: "+name+" "+result.status);
  if(name==="TypingBudget")require(String(result.diagnostic?.message??"").startsWith("checker budget refused"),"a budget refusal is not named as one: "+result.diagnostic?.message);
  require(expect!=="suspended"||result.preview?.result===null,"exhaustion falsely returned a source result");

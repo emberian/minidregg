@@ -55,12 +55,46 @@ def fieldOf (name : String) : Data → Option Int
   | .record fields => firstScalarField name fields
   | _ => none
 
+/-- The sum of the fields `names` of `new`, or `none` if any named field is absent. -/
+def sumFields (new : Data) : List String → Option Int
+  | [] => some 0
+  | name :: rest => do
+    let x ← fieldOf name new
+    let y ← sumFields new rest
+    pure (x + y)
+
+/-- The values of the fields `names` of `new` in order, or `none` if any named field is absent. -/
+def fieldsOf (new : Data) : List String → Option (List Int)
+  | [] => some []
+  | name :: rest => match fieldOf name new, fieldsOf new rest with
+    | some x, some xs => some (x :: xs)
+    | _, _ => none
+
+/-- The `hashEq` opening read off `facts` (`target`) and `new` (`values` and `blinder`). -/
+def hashEqOpeningOf (facts : Facts) (new : Data) (values : List String) (blinder commit : String) :
+    Option Minidregg.Pred.HashEqDigest.Opening :=
+  match fieldsOf new values, fieldOf blinder new with
+  | some xs, some r =>
+      let o : Minidregg.Pred.HashEqDigest.Opening :=
+        ⟨Int.ofNat facts.target, values.map Minidregg.Compiler.ObjectiveBendLaw.fieldSlot,
+         Minidregg.Compiler.ObjectiveBendLaw.fieldSlot blinder,
+         Minidregg.Compiler.ObjectiveBendLaw.fieldSlot commit, xs, r⟩
+      if o.Admissible then some o else none
+  | _, _ => none
+
+/-- The `hashEq` decision read off `facts` and `new` under `HashEqDigest.deployed`. -/
+def hashEqDenote (facts : Facts) (new : Data) (values : List String) (blinder commit : String) : Bool :=
+  match hashEqOpeningOf facts new values blinder commit, fieldOf commit new with
+  | some o, some c =>
+      decide (Minidregg.Pred.HashEqDigest.digestWith Minidregg.Pred.HashEqDigest.deployed o = c)
+  | _, _ => false
+
 end Minidregg.Kernel.ObjectLaw
 
 /-! ## The fragment's meaning (in the syntax's namespace, so `law.denote` reads) -/
 namespace Minidregg.Compiler.ObjectiveBendLaw
 open Minidregg.Kernel.ObjectRecord
-open Minidregg.Kernel.ObjectLaw (scalarOf firstScalarField fieldOf)
+open Minidregg.Kernel.ObjectLaw (scalarOf firstScalarField fieldOf sumFields fieldsOf hashEqOpeningOf hashEqDenote)
 open Minidregg.Theory.ObjectiveBendDemandData (Data)
 open Minidregg.Pred (Slot)
 set_option autoImplicit false
@@ -106,6 +140,12 @@ def LawExpr.denote (facts : Facts) (old : Option Data) (new : Data) : LawExpr �
       match old.bind (fieldOf field) with
       | none => true
       | some before => before == 0 || decide (fieldOf field new = some before)
+  | .sumEq left right =>
+      match sumFields new left, sumFields new right with
+      | some x, some y => decide (x = y)
+      | _, _ => false
+  | .hashEq values blinder commit =>
+      hashEqDenote facts new values blinder commit
   | .not body => !body.denote facts old new
   | .and left right => left.denote facts old new && right.denote facts old new
   | .or left right => left.denote facts old new || right.denote facts old new
@@ -502,6 +542,53 @@ theorem old_view_reads_field (facts : Facts) (old : Option Data) (oldSlots : Lis
   | none => rw [none_ rfl]; rfl
   | some value => rw [stateSlots_get_field value oldSlots (some_ value rfl) name noDot noAt]; rfl
 
+theorem new_view_sumOf (facts : Facts) (new : Data) (slots : List (Slot × Int))
+    (projected : stateSlots new = some slots) (names : List String)
+    (plain : names.all plainName = true) :
+    Minidregg.Pred.sumOf ⟨facts.slots ++ slots⟩ (names.map fieldSlot) = sumFields new names := by
+  induction names with
+  | nil => rfl
+  | cons name rest ih =>
+      simp only [List.all_cons, Bool.and_eq_true] at plain
+      have readHere : State.get ⟨facts.slots ++ slots⟩ (fieldSlot name) = fieldOf name new :=
+        new_view_reads facts new slots projected (.field name) plain.1
+      simp only [List.map_cons, Minidregg.Pred.sumOf, sumFields, readHere, ih plain.2]
+
+theorem facts_get_target (facts : Facts) :
+    State.get ⟨facts.slots⟩ Minidregg.Pred.hashEqCellSlot = some (Int.ofNat facts.target) := by
+  cases hs : facts.subject <;>
+    simp [State.get, Facts.slots, hs, Minidregg.Pred.hashEqCellSlot, Minidregg.Pred.objectiveArtifactSlot]
+
+theorem new_view_target (facts : Facts) (slots : List (Slot × Int)) :
+    State.get ⟨facts.slots ++ slots⟩ Minidregg.Pred.hashEqCellSlot = some (Int.ofNat facts.target) := by
+  rw [get_append, facts_get_target]
+  rfl
+
+theorem new_view_getAll (facts : Facts) (new : Data) (slots : List (Slot × Int))
+    (projected : stateSlots new = some slots) (names : List String)
+    (plain : names.all plainName = true) :
+    State.getAll ⟨facts.slots ++ slots⟩ (names.map fieldSlot) = fieldsOf new names := by
+  induction names with
+  | nil => rfl
+  | cons name rest ih =>
+      simp only [List.all_cons, Bool.and_eq_true] at plain
+      have readHere : State.get ⟨facts.slots ++ slots⟩ (fieldSlot name) = fieldOf name new :=
+        new_view_reads facts new slots projected (.field name) plain.1
+      simp only [List.map_cons, State.getAll, fieldsOf, readHere, ih plain.2]
+      cases fieldOf name new <;> cases fieldsOf new rest <;> rfl
+
+theorem new_view_hashEqOpening (facts : Facts) (new : Data) (slots : List (Slot × Int))
+    (projected : stateSlots new = some slots) (values : List String) (blinder commit : String)
+    (plainValues : values.all plainName = true) (plainBlinder : plainName blinder = true) :
+    Minidregg.Pred.hashEqOpening ⟨facts.slots ++ slots⟩ (values.map fieldSlot)
+      (fieldSlot blinder) (fieldSlot commit) =
+      hashEqOpeningOf facts new values blinder commit := by
+  have readBlinder : State.get ⟨facts.slots ++ slots⟩ (fieldSlot blinder) = fieldOf blinder new :=
+    new_view_reads facts new slots projected (.field blinder) plainBlinder
+  simp only [Minidregg.Pred.hashEqOpening, hashEqOpeningOf, new_view_target,
+    new_view_getAll facts new slots projected values plainValues, readBlinder]
+  cases fieldsOf new values <;> cases fieldOf blinder new <;> rfl
+
 /-- **`compile_sound`**: on the views the kernel judges a write by, the compiled law
 evaluates to the law's own meaning, for every law whose fields are plain names. -/
 theorem compile_sound (facts : Facts) (old : Option Data) (new : Data) (before after : State)
@@ -544,14 +631,29 @@ theorem compile_sound (facts : Facts) (old : Option Data) (new : Data) (before a
       cases LawRef.read facts new left <;> cases LawRef.read facts new right <;> rfl
   | monotone field =>
       simp only [LawExpr.fieldsPlain] at plain
-      simp only [compile, eval, Minidregg.Pred.evalWith, LawExpr.denote, readOld field plain,
+      simp only [compile, fieldSlot, eval, Minidregg.Pred.evalWith, LawExpr.denote, readOld field plain,
         readNewField field plain]
       cases old.bind (fieldOf field) <;> cases fieldOf field new <;> rfl
   | writeOnce field =>
       simp only [LawExpr.fieldsPlain] at plain
-      simp only [compile, eval, Minidregg.Pred.evalWith, LawExpr.denote, readOld field plain,
+      simp only [compile, fieldSlot, eval, Minidregg.Pred.evalWith, LawExpr.denote, readOld field plain,
         readNewField field plain]
       cases old.bind (fieldOf field) <;> rfl
+  | sumEq left right =>
+      simp only [LawExpr.fieldsPlain, Bool.and_eq_true] at plain
+      simp only [compile, eval, Minidregg.Pred.evalWith, LawExpr.denote,
+        new_view_sumOf facts new newSlots newProjected left plain.1,
+        new_view_sumOf facts new newSlots newProjected right plain.2]
+      cases sumFields new left <;> cases sumFields new right <;> rfl
+  | hashEq values blinder commit =>
+      simp only [LawExpr.fieldsPlain, Bool.and_eq_true] at plain
+      have readCommit : State.get ⟨facts.slots ++ newSlots⟩ (fieldSlot commit) = fieldOf commit new :=
+        readNew (.field commit) plain.2
+      simp only [compile, eval, Minidregg.Pred.evalWith, Minidregg.Pred.hashEqHolds,
+        LawExpr.denote, hashEqDenote,
+        new_view_hashEqOpening facts new newSlots newProjected values blinder commit plain.1.1 plain.1.2,
+        readCommit]
+      cases hashEqOpeningOf facts new values blinder commit <;> cases fieldOf commit new <;> rfl
   | not body ih =>
       simp only [LawExpr.fieldsPlain] at plain
       rw [compile, Minidregg.Pred.eval_not, ih plain, LawExpr.denote]
@@ -632,6 +734,33 @@ theorem tally_meaning_decides :
       tallyLaw.denote tallyFacts (some (tally 5)) (tally 1001) = false := by
   decide +kernel
 
+def sampleOpening : Minidregg.Pred.HashEqDigest.Opening :=
+  ⟨1, ["state/choice"], "state/salt", "state/commit", [1], 42⟩
+
+def sampleCommit : Nat :=
+  (Minidregg.Pred.HashEqDigest.digestWith Minidregg.Pred.HashEqDigest.deployed sampleOpening).toNat
+
+def ballotSample (yes no choice salt commit : Nat) : Data :=
+  .record [
+    ("yes", .natural yes),
+    ("no", .natural no),
+    ("tallied", .natural (yes + no)),
+    ("choice", .natural choice),
+    ("salt", .natural salt),
+    ("commit", .natural commit)
+  ]
+
+def ballotSampleLaw : LawExpr :=
+  .and (.sumEq ["yes", "no"] ["tallied"]) (.hashEq ["choice"] "salt" "commit")
+
+theorem sumEq_and_hashEq_meaning_decides :
+    ballotSampleLaw.fieldsPlain = true ∧
+      ballotSampleLaw.denote tallyFacts none (ballotSample 3 2 1 42 sampleCommit) = true ∧
+      ballotSampleLaw.denote tallyFacts none (ballotSample 3 2 0 42 sampleCommit) = false ∧
+      (LawExpr.sumEq ["yes", "no"] ["tallied"]).denote tallyFacts none
+        (.record [("yes", .natural 3), ("no", .natural 2), ("tallied", .natural 6)]) = false := by
+  decide +kernel
+
 #assert_axioms get_append
 #assert_axioms get_none
 #assert_axioms slotsOf_keys
@@ -642,6 +771,11 @@ theorem tally_meaning_decides :
 #assert_axioms stateSlots_keys
 #assert_axioms new_view_reads
 #assert_axioms old_view_reads_field
+#assert_axioms new_view_sumOf
+#assert_axioms facts_get_target
+#assert_axioms new_view_target
+#assert_axioms new_view_getAll
+#assert_axioms new_view_hashEqOpening
 #assert_axioms views_parts
 #assert_axioms compile_sound
 #assert_axioms packageLaw_sound
@@ -649,4 +783,5 @@ theorem tally_meaning_decides :
 #assert_axioms package_law_enforced_seed
 #assert_axioms tally_views_inhabited
 #assert_axioms tally_meaning_decides
+#assert_axioms sumEq_and_hashEq_meaning_decides
 end Minidregg.Kernel.ObjectLaw

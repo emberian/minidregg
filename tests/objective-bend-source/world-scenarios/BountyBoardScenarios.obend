@@ -1,0 +1,76 @@
+edition ObjectiveBend 1
+# Scenario assertions for world/bounty/BountyBoard.obend.
+import ./BountyBoard.obend as B
+
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+def escrowHeld(s: B.State) -> Nat:
+  if B.isTerminal(s) then 0n else B.postedOf(s).reward
+
+def escrowConserved(t: B.Transition, before: B.State) -> Bool:
+  match t:
+    case refused(s): escrowHeld(s) == escrowHeld(before)
+    case moved(s): escrowHeld(s) == escrowHeld(before) && not(B.isTerminal(s))
+    case disbursed(m): escrowHeld(m.next) == 0n && m.payout.amount == escrowHeld(before) && B.isTerminal(m.next)
+
+def demo() -> B.Posted:
+  {poster: 1n, title: "translate the README", reward: 50n, deadline: 100n, review: 20n}
+
+def demoOpen() -> B.State:
+  B.State.open(demo())
+
+def demoClaimed() -> B.State:
+  B.stateOf(B.react(demoOpen(), B.Event.claim({claimant: 7n, now: 10n})))
+
+def demoSubmitted() -> B.State:
+  B.stateOf(B.react(demoClaimed(), B.Event.submit({claimant: 7n, work: "doc-hash-1", now: 40n})))
+
+def firstClaimerWins() -> Bool:
+  let late = B.react(demoClaimed(), B.Event.claim({claimant: 9n, now: 11n}))
+  B.wasRefused(late) && B.phaseOf(B.stateOf(late)) == "claimed"
+
+def posterCannotClaim() -> Bool:
+  B.wasRefused(B.react(demoOpen(), B.Event.claim({claimant: 1n, now: 10n})))
+
+def strangerCannotSubmit() -> Bool:
+  B.wasRefused(B.react(demoClaimed(), B.Event.submit({claimant: 9n, work: "doc-hash-9", now: 40n})))
+
+def cancelOnlyWhileUnclaimed() -> Bool:
+  not(B.wasRefused(B.react(demoOpen(), B.Event.cancel({actor: 1n, now: 5n})))) && B.wasRefused(B.react(demoClaimed(), B.Event.cancel({actor: 1n, now: 11n}))) && B.wasRefused(B.react(demoOpen(), B.Event.cancel({actor: 9n, now: 5n})))
+
+def onlyPosterApproves() -> Bool:
+  B.wasRefused(B.react(demoSubmitted(), B.Event.approve({actor: 7n, now: 41n}))) && not(B.wasRefused(B.react(demoSubmitted(), B.Event.approve({actor: 1n, now: 41n}))))
+
+def earlyExpiryRefused() -> Bool:
+  B.wasRefused(B.react(demoOpen(), B.Event.expire({now: 99n}))) && not(B.wasRefused(B.react(demoOpen(), B.Event.expire({now: 100n}))))
+
+def silencePays() -> Bool:
+  B.wasRefused(B.react(demoSubmitted(), B.Event.expire({now: 60n}))) && B.phaseOf(B.stateOf(B.react(demoSubmitted(), B.Event.expire({now: 61n})))) == "paid"
+
+def approvedPayout() -> Nat:
+  match B.react(demoSubmitted(), B.Event.approve({actor: 1n, now: 41n})):
+    case disbursed(m): m.payout.amount
+    case refused(_): 0n
+    case moved(_): 0n
+
+def approvedPayee() -> Nat:
+  match B.react(demoSubmitted(), B.Event.approve({actor: 1n, now: 41n})):
+    case disbursed(m): m.payout.to
+    case refused(_): 0n
+    case moved(_): 0n
+
+def expiredClaimRefundsPoster() -> Nat:
+  match B.react(demoClaimed(), B.Event.expire({now: 100n})):
+    case disbursed(m): m.payout.to
+    case refused(_): 0n
+    case moved(_): 0n
+
+def rejectReopens() -> Bool:
+  B.phaseOf(B.stateOf(B.react(demoSubmitted(), B.Event.reject({actor: 1n, now: 45n})))) == "open"
+
+def conservedFrom(s: B.State) -> Bool:
+  escrowConserved(B.react(s, B.Event.claim({claimant: 9n, now: 11n})), s) && escrowConserved(B.react(s, B.Event.submit({claimant: 7n, work: "w", now: 40n})), s) && escrowConserved(B.react(s, B.Event.approve({actor: 1n, now: 41n})), s) && escrowConserved(B.react(s, B.Event.reject({actor: 1n, now: 45n})), s) && escrowConserved(B.react(s, B.Event.cancel({actor: 1n, now: 5n})), s) && escrowConserved(B.react(s, B.Event.expire({now: 200n})), s)
+
+def escrowLawHolds() -> Bool:
+  conservedFrom(demoOpen()) && conservedFrom(demoClaimed()) && conservedFrom(demoSubmitted()) && conservedFrom(B.State.paid({taken: {posted: demo(), claimant: 7n}, work: "w", submittedAt: 40n})) && conservedFrom(B.State.refunded(demo()))

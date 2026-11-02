@@ -43,6 +43,7 @@ the method; the contract can propose only what its code computes.
 module
 
 public import Kernel.Seat
+public import Kernel.CertifiedClearing
 public import Kernel.SeatCell
 public import Kernel.ObjectiveKernelConfig
 public import Compiler.RefusalReason
@@ -403,9 +404,58 @@ def decodeTerm : Data → Option (String × Nat)
   | .record fields => do pure (← labelField fields "name", ← natField fields "value")
   | _ => none
 
+def decodeInt : Data → Option Int
+  | .natural value => some (Int.ofNat value)
+  | _ => none
+
+/-- Decode a clearing market (`currency`, `goods`, `epsilon`) from either a nested `market`
+record field or top-level fields on the `clear` action record. -/
+def decodeMarket (fields : List (String × Data)) : Option CertifiedClearing.Market :=
+  let fromRecord (f : List (String × Data)) : Option CertifiedClearing.Market := do
+    pure ⟨← natField f "currency", ← natField f "goods", ← natField f "epsilon"⟩
+  match ObjectiveActivity.fieldOf fields "market" with
+  | some (.record mfields) => fromRecord mfields
+  | _ => fromRecord fields
+
+/-- Decode a Cert-F clearing certificate (`price`, `bidPotential`, `askPotential`, `slacks`). -/
+def decodeCertificate (fuel : Nat) : Data → Option CertifiedClearing.Certificate
+  | .record fields => do
+    let price ← natField fields "price"
+    let bidPotential ← natField fields "bidPotential"
+    let askPotential ← natField fields "askPotential"
+    let slacks ← decodeList decodeInt fuel (← ObjectiveActivity.fieldOf fields "slacks")
+    pure ⟨price, (Int.ofNat bidPotential, Int.ofNat askPotential), slacks⟩
+  | _ => none
+
+/-- A member of the Plan a contract method returns on the native route: ordinary seat actions
+plus `clear`, which settles a uniform-price batch auction only if the transfers and certificate
+pass `CertifiedClearing.judge` over the instance's open order seats. -/
+inductive PlanAction where
+  | reallocate (transfers : List Transfer)
+  | clear (market : CertifiedClearing.Market) (transfers : List Transfer)
+      (certificate : CertifiedClearing.Certificate)
+  | mint (role : String) (terms : List (String × Nat)) (holder : SubjectId)
+  | exit (seat : AccountId)
+  | terminate
+  deriving DecidableEq, Repr
+
+/-- Every store `PlanAction` projects to the seat kernel's own `Seats.PlanAction` (`clear`
+posts its transfers through `Seats.PlanAction.reallocate`). -/
+def PlanAction.toSeat : PlanAction → Seats.PlanAction
+  | .reallocate transfers => .reallocate transfers
+  | .clear _ transfers _ => .reallocate transfers
+  | .mint role terms holder => .mint role terms holder
+  | .exit seat => .exit seat
+  | .terminate => .terminate
+
 def decodeAction (fuel : Nat) : Data → Option PlanAction
   | .variant "reallocate" (.record fields) => do
     pure (.reallocate (← decodeList decodeTransfer fuel (← ObjectiveActivity.fieldOf fields "moves")))
+  | .variant "clear" (.record fields) => do
+    let market ← decodeMarket fields
+    let moves ← decodeList decodeTransfer fuel (← ObjectiveActivity.fieldOf fields "moves")
+    let cert ← decodeCertificate fuel (← ObjectiveActivity.fieldOf fields "certificate")
+    pure (.clear market moves cert)
   | .variant "mint" (.record fields) => do
     pure (.mint (← labelField fields "role") (← decodeList decodeTerm fuel (← ObjectiveActivity.fieldOf fields "terms"))
       ⟨← natField fields "holder"⟩)
@@ -413,13 +463,112 @@ def decodeAction (fuel : Nat) : Data → Option PlanAction
   | .variant "terminate" _ => some .terminate
   | _ => none
 
-/-- The Plan a method returned: a list of `reallocate {moves}`, `mint {role,
-terms, holder}`, `exit {seat}`, `terminate {}`. The same members an
-offer-triggered resident contract (an activity) will one day yield. -/
+/-- The Plan a method returned: a list of `reallocate {moves}`, `clear {market, moves, certificate}`,
+`mint {role, terms, holder}`, `exit {seat}`, `terminate {}`. -/
 def decodePlan (fuel : Nat) (data : Data) : Except Refusal (List PlanAction) :=
   match decodeList (decodeAction fuel) fuel data with
   | some plan => .ok plan
-  | none => .error (.plan "the method must return a list of reallocate | mint | exit | terminate")
+  | none => .error (.plan "the method must return a list of reallocate | clear | mint | exit | terminate")
+
+/-- Run one `PlanAction`: a `clear` action is judged by `CertifiedClearing.judge` before
+executing its underlying `Seats.step` reallocation. -/
+def stepCertifiedPlan (height : Nat) (inst : Instance) (mintId : Nat → InvitationId) (world : World)
+    (index : Nat) (action : PlanAction) : Except Refusal (World × Batch) :=
+  match action with
+  | .clear market transfers certificate =>
+    match CertifiedClearing.judge market (CertifiedClearing.batchOrders world inst.id market) transfers certificate with
+    | .error reason => .error (.plan (reprStr reason))
+    | .ok () => kernel (Seats.step world height (.inst inst.id) (.reallocate inst.id transfers))
+  | other => kernel (Seats.step world height (.inst inst.id) (other.toSeat.action inst mintId index))
+
+/-- Run a `Plan`: every `clear` action is certified on the world at its step, and every
+action executes through `Seats.step`. -/
+def runCertifiedPlan (height : Nat) (inst : Instance) (mintId : Nat → InvitationId) (world : World)
+    (index : Nat) : List PlanAction → Except Refusal (World × Batch)
+  | [] => .ok (world, noPostings)
+  | action :: rest => do
+    let (mid, first) ← stepCertifiedPlan height inst mintId world index action
+    let (final, later) ← runCertifiedPlan height inst mintId mid (index + 1) rest
+    .ok (final, seqBatch first later)
+
+theorem stepCertifiedPlan_toSeat {height : Nat} {inst : Instance} {mintId : Nat → InvitationId}
+    {world next : World} {index : Nat} {action : PlanAction} {batch : Batch}
+    (ran : stepCertifiedPlan height inst mintId world index action = .ok (next, batch)) :
+    Seats.step world height (.inst inst.id) (action.toSeat.action inst mintId index) = .ok (next, batch) := by
+  cases action with
+  | clear market transfers certificate =>
+      simp only [stepCertifiedPlan, PlanAction.toSeat, Seats.PlanAction.action] at ran ⊢
+      split at ran
+      · cases ran
+      · simp only [kernel] at ran
+        split at ran
+        · rename_i stepped
+          cases ran
+          exact stepped
+        · cases ran
+  | reallocate _ | mint _ _ _ | exit _ | terminate =>
+      simp only [stepCertifiedPlan, kernel] at ran
+      split at ran
+      · rename_i stepped
+        cases ran
+        exact stepped
+      · cases ran
+
+theorem runCertifiedPlan_toSeat {height : Nat} {inst : Instance} {mintId : Nat → InvitationId}
+    {world next : World} {index : Nat} {plan : List PlanAction} {batch : Batch}
+    (ran : runCertifiedPlan height inst mintId world index plan = .ok (next, batch)) :
+    Seats.runPlan height inst mintId world index (plan.map PlanAction.toSeat) = .ok (next, batch) := by
+  induction plan generalizing world index batch with
+  | nil =>
+      simp only [runCertifiedPlan, Except.ok.injEq, Prod.mk.injEq] at ran
+      obtain ⟨rfl, rfl⟩ := ran
+      rfl
+  | cons action rest ih =>
+      simp only [runCertifiedPlan, Bind.bind, Except.bind] at ran
+      split at ran
+      · cases ran
+      · rename_i midStep hStep
+        rcases midStep with ⟨mid, first⟩
+        split at ran
+        · cases ran
+        · rename_i restStep hRest
+          rcases restStep with ⟨final, later⟩
+          simp only [Except.ok.injEq, Prod.mk.injEq] at ran
+          obtain ⟨rfl, rfl⟩ := ran
+          simp only [List.map_cons, Seats.runPlan, stepCertifiedPlan_toSeat hStep, ih hRest]
+
+/-- **Every admitted `clear` plan step is a `CertifiedClearing.clear` step**, inheriting
+`clear_certified`, `clear_epsilon_optimal`, `clear_uniform_price`, `clear_fills_cross`,
+`clear_offer_safe`, and `clear_conserves`. -/
+theorem stepCertifiedPlan_clear {height : Nat} {inst : Instance} {mintId : Nat → InvitationId}
+    {world next : World} {index : Nat} {market : CertifiedClearing.Market}
+    {transfers : List Transfer} {certificate : CertifiedClearing.Certificate} {batch : Batch}
+    (ran : stepCertifiedPlan height inst mintId world index (.clear market transfers certificate) = .ok (next, batch)) :
+    CertifiedClearing.clear world height inst.id market transfers certificate = .ok next := by
+  simp only [stepCertifiedPlan] at ran
+  unfold CertifiedClearing.clear
+  split at ran
+  · cases ran
+  · rename_i judged
+    rw [judged]
+    simp only [kernel] at ran
+    split at ran
+    · rename_i stepped
+      simp only [Except.ok.injEq, Prod.mk.injEq] at ran
+      obtain ⟨rfl, rfl⟩ := ran
+      rw [stepped]
+    · cases ran
+
+theorem clear_action_certified {height : Nat} {inst : Instance} {mintId : Nat → InvitationId}
+    {world next : World} {index : Nat} {market : CertifiedClearing.Market}
+    {transfers : List Transfer} {certificate : CertifiedClearing.Certificate} {batch : Batch}
+    (ran : stepCertifiedPlan height inst mintId world index (.clear market transfers certificate) = .ok (next, batch)) :
+    Theory.CertF.Certified
+      (CertifiedClearing.lpOf market (CertifiedClearing.batchOrders world inst.id market) certificate.price)
+      (CertifiedClearing.fills market (CertifiedClearing.batchOrders world inst.id market) transfers)
+      certificate.π
+      (certificate.s (CertifiedClearing.batchOrders world inst.id market).length) :=
+  CertifiedClearing.clear_certified (stepCertifiedPlan_clear ran)
 
 /-- The output codec a contract artifact names: its entry is a function from
 the call to a Plan, never an `Activity`. -/
@@ -544,7 +693,7 @@ inductive KernelRun (height : Nat) (world : World) : World → Batch → Prop
   | nothing : KernelRun height world world noPostings
   | stepped {actor : Actor} {action : Action} {next : World} {batch : Batch} :
       Seats.step world height actor action = .ok (next, batch) → KernelRun height world next batch
-  | planned {inst : Instance} {mintId : Nat → InvitationId} {plan : List PlanAction} {next : World} {batch : Batch} :
+  | planned {inst : Instance} {mintId : Nat → InvitationId} {plan : List Seats.PlanAction} {next : World} {batch : Batch} :
       runPlan height inst mintId world 0 plan = .ok (next, batch) → KernelRun height world next batch
   | ended {record : Nat} {next : World} {batch : Batch} :
       closeHeld world height record = .ok (next, batch) → KernelRun height world next batch
@@ -948,10 +1097,10 @@ def decideTurn {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snap
         | _ => none
       let minted ← ids.mapM (loadInvitation snapshot domain)
       let loaded : Loaded := { instances := [body], invitations := minted.filterMap (fun found => found), seats := seats }
-      match ran : runPlan height body.inst (mintId transaction inst) (loaded.world logical) 0 plan with
-      | .error reason => throw (.kernel reason)
+      match ran : runCertifiedPlan height body.inst (mintId transaction inst) (loaded.world logical) 0 plan with
+      | .error reason => throw reason
       | .ok (next, batch) =>
-        finish config snapshot height request loaded book bookExact next batch (.planned ran)
+        finish config snapshot height request loaded book bookExact next batch (.planned (runCertifiedPlan_toSeat ran))
           ⟨[], [.fee account config.collector config.asset (config.tariff.workOf envelope)], []⟩ rfl none []
           (packageCell domain body.inst.package :: ids.map (invitationCell domain)) [] (by rw [hturn]; rfl)
           (by intro _ _ h; rw [hturn] at h; cases h)
@@ -1115,7 +1264,8 @@ theorem Decided.exit_retires_cell {rootBytes : Bytes → Digest} {config : Confi
   rw [bodySeat, foundAccount] at retired
   exact retired
 
-#assert_axioms seatAccount_protected KernelRun.posts KernelRun.reachable KernelRun.inv Decided.conserves
+#assert_axioms seatAccount_protected stepCertifiedPlan_toSeat runCertifiedPlan_toSeat
+  stepCertifiedPlan_clear clear_action_certified KernelRun.posts KernelRun.reachable KernelRun.inv Decided.conserves
   Decided.inv Decided.book_post HeldEnd.closes offer_refuses_taken_cell HeldEnd.retires statePosts_retires Decided.exit_retires_cell
 
 end Minidregg.Kernel.SeatStore

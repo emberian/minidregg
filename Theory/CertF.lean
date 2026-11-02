@@ -39,12 +39,31 @@ statements and proofs unchanged. Dropped: §6 (emit half, imports `Dregg2.Circui
 `#guard` smoke lines (replaced by the named theorems `ringF_value` and `zeroFlow_gap_value`).
 Added: `ringLPAt`, `zeroFlow_refused_at_two`, `zeroFlow_certified_at_three`.
 -/
-import Theory.AxiomPin
-import Mathlib.Data.Matrix.Mul
-import Mathlib.LinearAlgebra.Matrix.DotProduct
-import Mathlib.Algebra.BigOperators.Fin
-import Mathlib.Tactic.Linarith
-import Mathlib.Tactic.FinCases
+module
+
+public import Theory.AxiomPin
+public import Mathlib.Data.Matrix.Mul
+public import Mathlib.LinearAlgebra.Matrix.DotProduct
+public import Mathlib.Algebra.BigOperators.Fin
+public import Mathlib.Tactic.Linarith
+public import Mathlib.Tactic.FinCases
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.CertF
 

@@ -1,0 +1,268 @@
+edition ObjectiveBend 1
+# Scenario suite for world/workshop/{CatalogReview,OrderedCapacity,ReusableWorkshop,MemberExtension}.obend.
+import ./CatalogReview.obend as Review
+import ./OrderedCapacity.obend as Cap
+import ./ReusableWorkshop.obend as Shop
+import ./MemberExtension.obend as Member
+
+# ---- CatalogReview scenarios ---------------------------------------------------
+
+def proposalExact(expected: Review.Candidate, candidate: Review.Candidate, policy: String, result: Review.Adoption) -> Bool:
+  match result:
+    case hold(_): true
+    case propose(p): Review.candidateEq(p.expected, expected) && Review.candidateEq(p.selected, candidate) && p.policy == policy
+
+def isHold(a: Review.Adoption) -> Bool:
+  match a:
+    case hold(_): true
+    case propose(_): false
+
+def isPropose(a: Review.Adoption) -> Bool:
+  match a:
+    case hold(_): false
+    case propose(_): true
+
+def current() -> Review.Candidate:
+  {source: "catalog/audit", program: "p-7", revision: 1n}
+
+def selected() -> Review.Candidate:
+  {source: "catalog/audit", program: "p-7", revision: 2n}
+
+def recommendation(ready: Bool) -> Review.Recommendation:
+  {candidate: selected(), policy: "policy-9", ready: ready}
+
+def decision(endorsed: Bool) -> Review.Decision:
+  {candidate: selected(), policy: "policy-9", endorsed: endorsed}
+
+def proposesWhenEligible() -> Bool:
+  isPropose(Review.prepare(current(), selected(), "policy-9", recommendation(true), decision(true)))
+
+def unreadyNeverProposes() -> Bool:
+  isHold(Review.prepare(current(), selected(), "policy-9", recommendation(false), decision(true)))
+
+def unendorsedNeverProposes() -> Bool:
+  isHold(Review.prepare(current(), selected(), "policy-9", recommendation(true), decision(false)))
+
+def staleReviewHolds() -> Bool:
+  isHold(Review.prepare(current(), selected(), "policy-9", {candidate: current(), policy: "policy-9", ready: true}, decision(true)))
+
+def otherPolicyHolds() -> Bool:
+  isHold(Review.prepare(current(), selected(), "policy-8", recommendation(true), decision(true)))
+
+def proposalIsExact() -> Bool:
+  proposalExact(current(), selected(), "policy-9", Review.prepare(current(), selected(), "policy-9", recommendation(true), decision(true))) && proposalExact(current(), selected(), "policy-9", Review.prepare(current(), selected(), "policy-9", recommendation(false), decision(true)))
+
+def proposedPredecessorRevision() -> Nat:
+  match Review.prepare(current(), selected(), "policy-9", recommendation(true), decision(true)):
+    case hold(_): 99n
+    case propose(p): p.expected.revision
+
+def proposedSelectedRevision() -> Nat:
+  match Review.prepare(current(), selected(), "policy-9", recommendation(true), decision(true)):
+    case hold(_): 99n
+    case propose(p): p.selected.revision
+
+def allHold() -> Bool:
+  proposesWhenEligible() && unreadyNeverProposes() && unendorsedNeverProposes() && staleReviewHolds() && otherPolicyHolds() && proposalIsExact()
+
+# ---- OrderedCapacity scenarios -------------------------------------------------
+
+def capacityEq(a: Cap.Capacity, b: Cap.Capacity) -> Bool:
+  a.target == b.target && a.token == b.token && a.root == b.root
+
+def stockIsEmpty(xs: Cap.Stock) -> Bool:
+  match xs:
+    case empty(_): true
+    case item(_): false
+
+def stockItemEq(capacity: Cap.Capacity, rest: Cap.Stock, ys: Cap.Stock) -> Bool:
+  match ys:
+    case empty(_): false
+    case item(j): capacityEq(capacity, j.capacity) && stockEq(rest, j.rest)
+
+def stockEq(xs: Cap.Stock, ys: Cap.Stock) -> Bool:
+  match xs:
+    case empty(_): stockIsEmpty(ys)
+    case item(i): stockItemEq(i.capacity, i.rest, ys)
+
+def grantsIsEmpty(xs: Cap.Grants) -> Bool:
+  match xs:
+    case none(_): true
+    case grant(_): false
+
+def grantEq(subject: String, stock: Cap.Stock, rest: Cap.Grants, ys: Cap.Grants) -> Bool:
+  match ys:
+    case none(_): false
+    case grant(h): subject == h.subject && stockEq(stock, h.stock) && grantsEq(rest, h.rest)
+
+def grantsEq(xs: Cap.Grants, ys: Cap.Grants) -> Bool:
+  match xs:
+    case none(_): grantsIsEmpty(ys)
+    case grant(g): grantEq(g.subject, g.stock, g.rest, ys)
+
+def stockCount(xs: Cap.Stock) -> Nat:
+  match xs:
+    case empty(_): 0n
+    case item(i): 1n + stockCount(i.rest)
+
+def splitConserves(n: Nat, stock: Cap.Stock) -> Bool:
+  stockEq(Cap.join(Cap.prefix(n, stock), Cap.suffix(n, stock)), stock)
+
+def allocationConserves(requests: Cap.Requests, stock: Cap.Stock) -> Bool:
+  stockEq(Cap.join(Cap.assigned(Cap.allocate(requests, stock)), Cap.remaining(requests, stock)), stock)
+
+def first() -> Cap.Capacity:
+  {target: 1n, token: "token-1", root: "root-11"}
+
+def second() -> Cap.Capacity:
+  {target: 2n, token: "token-2", root: "root-12"}
+
+def third() -> Cap.Capacity:
+  {target: 3n, token: "token-3", root: "root-13"}
+
+def contributedStock() -> Cap.Stock:
+  Cap.Stock.item({capacity: first(), rest: Cap.Stock.item({capacity: second(), rest: Cap.Stock.item({capacity: third(), rest: Cap.Stock.empty()})})})
+
+def memberRequests() -> Cap.Requests:
+  Cap.Requests.request({subject: "member-A", units: 2n, rest: Cap.Requests.request({subject: "member-B", units: 2n, rest: Cap.Requests.none()})})
+
+def demonstration() -> Cap.Grants:
+  Cap.allocate(memberRequests(), contributedStock())
+
+def expectedGrants() -> Cap.Grants:
+  Cap.Grants.grant({subject: "member-A", stock: Cap.Stock.item({capacity: first(), rest: Cap.Stock.item({capacity: second(), rest: Cap.Stock.empty()})}), rest: Cap.Grants.grant({subject: "member-B", stock: Cap.Stock.item({capacity: third(), rest: Cap.Stock.empty()}), rest: Cap.Grants.none()})})
+
+def demonstrationResult() -> Bool:
+  grantsEq(demonstration(), expectedGrants())
+
+def demonstrationRemaining() -> Bool:
+  stockIsEmpty(Cap.remaining(memberRequests(), contributedStock()))
+
+def assignedCount() -> Nat:
+  stockCount(Cap.assigned(demonstration()))
+
+def remainingCount() -> Nat:
+  stockCount(Cap.remaining(memberRequests(), contributedStock()))
+
+def demonstrationConserves() -> Bool:
+  allocationConserves(memberRequests(), contributedStock()) && splitConserves(2n, contributedStock()) && splitConserves(5n, contributedStock()) && splitConserves(0n, contributedStock())
+
+def undersubscribedRemaining() -> Nat:
+  stockCount(Cap.remaining(Cap.Requests.request({subject: "member-A", units: 1n, rest: Cap.Requests.none()}), contributedStock()))
+
+def zeroRequestKeepsPosition() -> Bool:
+  grantsEq(Cap.allocate(Cap.Requests.request({subject: "member-Z", units: 0n, rest: Cap.Requests.none()}), contributedStock()), Cap.Grants.grant({subject: "member-Z", stock: Cap.Stock.empty(), rest: Cap.Grants.none()}))
+
+def swappedRequests() -> Cap.Requests:
+  Cap.Requests.request({subject: "member-B", units: 2n, rest: Cap.Requests.request({subject: "member-A", units: 2n, rest: Cap.Requests.none()})})
+
+def frozenOrderMatters() -> Bool:
+  grantsEq(Cap.allocate(swappedRequests(), contributedStock()), expectedGrants())
+
+def tokenOrderMatters() -> Bool:
+  stockEq(Cap.Stock.item({capacity: first(), rest: Cap.Stock.item({capacity: second(), rest: Cap.Stock.empty()})}), Cap.Stock.item({capacity: second(), rest: Cap.Stock.item({capacity: first(), rest: Cap.Stock.empty()})}))
+
+# ---- ReusableWorkshop scenarios ------------------------------------------------
+
+def alpha() -> Review.Candidate:
+  {source: "catalog/alpha", program: "p-1", revision: 1n}
+
+def beta() -> Review.Candidate:
+  {source: "catalog/beta", program: "p-2", revision: 0n}
+
+def gamma() -> Review.Candidate:
+  {source: "catalog/gamma", program: "p-3", revision: 4n}
+
+def alphaNewRevision() -> Review.Candidate:
+  {source: "catalog/alpha", program: "p-1", revision: 2n}
+
+def rows() -> Shop.Catalog:
+  Shop.Catalog.row({candidate: alpha(), label: "Alpha", rest: Shop.Catalog.row({candidate: beta(), label: "Beta", rest: Shop.Catalog.empty()})})
+
+def isFound(l: Shop.Lookup) -> Bool:
+  match l:
+    case missing(_): false
+    case found(_): true
+
+def foundLabelIs(l: Shop.Lookup, wanted: String) -> Bool:
+  match l:
+    case missing(_): false
+    case found(f): f.label == wanted
+
+def catalogFindsAlpha() -> Bool:
+  foundLabelIs(Shop.plainWorkshop(rows()).catalog(alpha()), "Alpha")
+
+def catalogFindsBeta() -> Bool:
+  foundLabelIs(Shop.plainWorkshop(rows()).catalog(beta()), "Beta")
+
+def catalogMissesGamma() -> Bool:
+  isFound(Shop.plainWorkshop(rows()).catalog(gamma()))
+
+def catalogMissesNewRevision() -> Bool:
+  isFound(Shop.plainWorkshop(rows()).catalog(alphaNewRevision()))
+
+def catalogedIsReady() -> Bool:
+  Shop.plainWorkshop(rows()).review(alpha(), "policy-1").ready
+
+def uncataloguedIsNotReady() -> Bool:
+  Shop.plainWorkshop(rows()).review(gamma(), "policy-1").ready
+
+def reviewKeepsPolicy() -> Bool:
+  Shop.plainWorkshop(rows()).review(alpha(), "policy-1").policy == "policy-1"
+
+def presentationCarriesLabelAndVerdict() -> Bool:
+  Shop.plainWorkshop(rows()).present(alpha(), "policy-1", "Catalog entry").label == "Catalog entry" && Shop.plainWorkshop(rows()).present(alpha(), "policy-1", "Catalog entry").review.ready
+
+spec PinnedCatalog for Shop.Workshop:
+  def catalog(candidate: Review.Candidate) -> Shop.Lookup:
+    Shop.Lookup.found({candidate: candidate, label: "Pinned"})
+
+def overriddenWorkshop(r: Shop.Catalog) -> Shop.Workshop:
+  fix(compose(Shop.CatalogLookup, Shop.CatalogReviewer, PinnedCatalog), Shop.seed(r))
+
+def overrideObservedByReviewer() -> Bool:
+  overriddenWorkshop(rows()).review(gamma(), "policy-1").ready
+
+def recommendationEq(a: Review.Recommendation, b: Review.Recommendation) -> Bool:
+  Review.candidateEq(a.candidate, b.candidate) && a.policy == b.policy && a.ready == b.ready
+
+def auditSourceExact() -> Bool:
+  recommendationEq(Shop.strengthen({candidate: alpha(), policy: "policy-1", ready: true}, true), {candidate: alpha(), policy: "policy-1", ready: true}) && recommendationEq(Shop.strengthen({candidate: alpha(), policy: "policy-1", ready: true}, false), {candidate: alpha(), policy: "policy-1", ready: false})
+
+def deniedReviewStaysDenied() -> Bool:
+  recommendationEq(Shop.strengthen({candidate: alpha(), policy: "policy-1", ready: false}, true), {candidate: alpha(), policy: "policy-1", ready: false})
+
+def failedAuditDenies() -> Bool:
+  recommendationEq(Shop.strengthen({candidate: alpha(), policy: "policy-1", ready: true}, false), {candidate: alpha(), policy: "policy-1", ready: false})
+
+def recommendationEqSeesVerdict() -> Bool:
+  recommendationEq({candidate: alpha(), policy: "policy-1", ready: true}, {candidate: alpha(), policy: "policy-1", ready: false})
+
+# ---- MemberExtension scenarios -------------------------------------------------
+
+def zeroRevisionDenied() -> Bool:
+  Member.audited(beta())
+
+def positiveRevisionAllowed() -> Bool:
+  Member.audited(alpha())
+
+def alphaStaysReady() -> Bool:
+  Member.memberWorkshop(rows()).review(alpha(), "policy-1").ready
+
+def betaReadyWithoutAudit() -> Bool:
+  Shop.plainWorkshop(rows()).review(beta(), "policy-1").ready
+
+def betaDeniedByAudit() -> Bool:
+  Member.memberWorkshop(rows()).review(beta(), "policy-1").ready
+
+def gammaStaysDenied() -> Bool:
+  Member.memberWorkshop(rows()).review(gamma(), "policy-1").ready
+
+def auditedReviewKeepsPolicy() -> Bool:
+  Member.memberWorkshop(rows()).review(alpha(), "policy-1").policy == "policy-1"
+
+def alternateLabelIsReviewed() -> Bool:
+  Member.memberWorkshop(rows()).present(alpha(), "policy-1", "ignored").label == "Reviewed"
+
+def alternatePresentationCarriesAuditedVerdict() -> Bool:
+  Member.memberWorkshop(rows()).present(beta(), "policy-1", "ignored").review.ready

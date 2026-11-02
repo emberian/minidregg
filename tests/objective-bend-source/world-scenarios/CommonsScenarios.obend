@@ -1,0 +1,499 @@
+edition ObjectiveBend 1
+# Scenario and equality suite for world/commons/ResidentServiceCommons.obend.
+import ./ResidentServiceCommons.obend as C
+
+def paymentEq(a: C.Payment, b: C.Payment) -> Bool:
+  a.book == b.book && a.root == b.root && a.payer == b.payer && a.escrow == b.escrow && a.providerAccount == b.providerAccount && a.asset == b.asset && a.available == b.available
+
+def requestEq(a: C.Request, b: C.Request) -> Bool:
+  C.identityEq(a.identity, b.identity) && C.pinEq(a.residentHome, b.residentHome) && C.pinEq(a.room, b.room) && a.consumer == b.consumer && a.recipient == b.recipient && a.audience == b.audience && a.keyEpoch == b.keyEpoch && a.acceptor == b.acceptor && C.methodEq(a.criterion, b.criterion) && a.dispatchDeadline == b.dispatchDeadline && a.units == b.units && a.budget == b.budget && paymentEq(a.payment, b.payment)
+
+def offerEq(a: C.Offer, b: C.Offer) -> Bool:
+  C.identityEq(a.identity, b.identity) && a.provider == b.provider && C.pinEq(a.providerHome, b.providerHome) && a.capacity == b.capacity && a.rate == b.rate && a.expires == b.expires && a.claim == b.claim
+
+def sponsorshipEq(a: C.Sponsorship, b: C.Sponsorship) -> Bool:
+  C.identityEq(a.identity, b.identity) && a.provider == b.provider && C.pinEq(a.policy, b.policy) && a.maxAmount == b.maxAmount && a.approved == b.approved
+
+def reservationEq(a: C.Reservation, b: C.Reservation) -> Bool:
+  requestEq(a.request, b.request) && offerEq(a.offer, b.offer) && sponsorshipEq(a.sponsorship, b.sponsorship) && a.amount == b.amount
+
+def completionEq(a: C.Completion, b: C.Completion) -> Bool:
+  C.runEq(a.run, b.run) && a.provider == b.provider && a.output == b.output && a.recipient == b.recipient && a.audience == b.audience && a.keyEpoch == b.keyEpoch && C.pinEq(a.receipt, b.receipt)
+
+def reviewEq(a: C.Review, b: C.Review) -> Bool:
+  a.runIdentity == b.runIdentity && a.output == b.output && C.methodEq(a.criterion, b.criterion) && a.reviewer == b.reviewer && a.accepted == b.accepted
+
+def transferEq(a: C.Transfer, b: C.Transfer) -> Bool:
+  a.source == b.source && a.destination == b.destination && a.asset == b.asset && a.amount == b.amount
+
+def blankMethod() -> C.Method:
+  {artifact: "", program: "", exportName: "", inputSchema: "", resultSchema: ""}
+
+def blankIdentity() -> C.Identity:
+  {request: "", method: blankMethod(), input: "", context: ""}
+
+def blankPin() -> C.Pin:
+  {resource: 0n, root: ""}
+
+def blankRequest() -> C.Request:
+  {identity: blankIdentity(), residentHome: blankPin(), room: blankPin(), consumer: "", recipient: "", audience: "", keyEpoch: "", acceptor: "", criterion: blankMethod(), dispatchDeadline: 0n, units: 0n, budget: 0n, payment: {book: 0n, root: "", payer: 0n, escrow: 0n, providerAccount: 0n, asset: 0n, available: 0n}}
+
+def blankOffer() -> C.Offer:
+  {identity: blankIdentity(), provider: "", providerHome: blankPin(), capacity: 0n, rate: 0n, expires: 0n, claim: ""}
+
+def blankSponsorship() -> C.Sponsorship:
+  {identity: blankIdentity(), provider: "", policy: blankPin(), maxAmount: 0n, approved: false}
+
+def blankReservation() -> C.Reservation:
+  {request: blankRequest(), offer: blankOffer(), sponsorship: blankSponsorship(), amount: 0n}
+
+def blankRun() -> C.Run:
+  {identity: "", requestCell: 0n, sequence: 0n, assignedResident: 0n, operation: "", activity: blankPin(), ordinal: 0n, binding: blankIdentity()}
+
+def blankCompletion() -> C.Completion:
+  {run: blankRun(), provider: "", output: "", recipient: "", audience: "", keyEpoch: "", receipt: blankPin()}
+
+def blankReview() -> C.Review:
+  {runIdentity: "", output: "", criterion: blankMethod(), reviewer: "", accepted: false}
+
+def reservationOf(s: C.State) -> C.Reservation:
+  match s:
+    case vacant(_): blankReservation()
+    case held(r): r
+    case running(a): a.reservation
+    case uncertain(a): a.reservation
+    case delivered(d): d.reservation
+    case finished(f): f.reservation
+    case cancelled(r): r
+
+def runOf(s: C.State) -> C.Run:
+  match s:
+    case vacant(_): blankRun()
+    case held(_): blankRun()
+    case running(a): a.run
+    case uncertain(a): a.run
+    case delivered(d): d.run
+    case finished(f): f.run
+    case cancelled(_): blankRun()
+
+def completionOf(s: C.State) -> C.Completion:
+  match s:
+    case vacant(_): blankCompletion()
+    case held(_): blankCompletion()
+    case running(_): blankCompletion()
+    case uncertain(_): blankCompletion()
+    case delivered(d): d.completion
+    case finished(f): f.completion
+    case cancelled(_): blankCompletion()
+
+def reviewOf(s: C.State) -> C.Review:
+  match s:
+    case vacant(_): blankReview()
+    case held(_): blankReview()
+    case running(_): blankReview()
+    case uncertain(_): blankReview()
+    case delivered(_): blankReview()
+    case finished(f): f.review
+    case cancelled(_): blankReview()
+
+def stateEq(a: C.State, b: C.State) -> Bool:
+  C.phaseOf(a) == C.phaseOf(b) && reservationEq(reservationOf(a), reservationOf(b)) && C.runEq(runOf(a), runOf(b)) && completionEq(completionOf(a), completionOf(b)) && reviewEq(reviewOf(a), reviewOf(b))
+
+def effectKind(e: C.Effect) -> String:
+  match e:
+    case nothing(_): "nothing"
+    case money(_): "money"
+    case capacity(_): "capacity"
+    case publishRequest(_): "publishRequest"
+    case awaitExisting(_): "awaitExisting"
+    case retainCompletion(_): "retainCompletion"
+    case returnResult(_): "returnResult"
+
+def blankMoney() -> C.MoneyEffect:
+  {book: 0n, expectedRoot: "", transfer: {source: 0n, destination: 0n, asset: 0n, amount: 0n}}
+
+def blankCapacity() -> C.CapacityEffect:
+  {home: blankPin(), before: 0n, after: 0n}
+
+def blankPublish() -> C.PublishEffect:
+  {home: blankPin(), room: blankPin(), request: blankRequest(), run: blankRun()}
+
+def blankRetain() -> C.RetainEffect:
+  {run: blankRun(), completion: blankCompletion()}
+
+def blankReturn() -> C.ReturnEffect:
+  {recipient: "", audience: "", keyEpoch: "", output: ""}
+
+def moneyOf(e: C.Effect) -> C.MoneyEffect:
+  match e:
+    case nothing(_): blankMoney()
+    case money(m): m
+    case capacity(_): blankMoney()
+    case publishRequest(_): blankMoney()
+    case awaitExisting(_): blankMoney()
+    case retainCompletion(_): blankMoney()
+    case returnResult(_): blankMoney()
+
+def capacityOf(e: C.Effect) -> C.CapacityEffect:
+  match e:
+    case nothing(_): blankCapacity()
+    case money(_): blankCapacity()
+    case capacity(c): c
+    case publishRequest(_): blankCapacity()
+    case awaitExisting(_): blankCapacity()
+    case retainCompletion(_): blankCapacity()
+    case returnResult(_): blankCapacity()
+
+def publishOf(e: C.Effect) -> C.PublishEffect:
+  match e:
+    case nothing(_): blankPublish()
+    case money(_): blankPublish()
+    case capacity(_): blankPublish()
+    case publishRequest(p): p
+    case awaitExisting(_): blankPublish()
+    case retainCompletion(_): blankPublish()
+    case returnResult(_): blankPublish()
+
+def awaitedOf(e: C.Effect) -> C.Run:
+  match e:
+    case nothing(_): blankRun()
+    case money(_): blankRun()
+    case capacity(_): blankRun()
+    case publishRequest(_): blankRun()
+    case awaitExisting(r): r
+    case retainCompletion(_): blankRun()
+    case returnResult(_): blankRun()
+
+def retainOf(e: C.Effect) -> C.RetainEffect:
+  match e:
+    case nothing(_): blankRetain()
+    case money(_): blankRetain()
+    case capacity(_): blankRetain()
+    case publishRequest(_): blankRetain()
+    case awaitExisting(_): blankRetain()
+    case retainCompletion(r): r
+    case returnResult(_): blankRetain()
+
+def returnOf(e: C.Effect) -> C.ReturnEffect:
+  match e:
+    case nothing(_): blankReturn()
+    case money(_): blankReturn()
+    case capacity(_): blankReturn()
+    case publishRequest(_): blankReturn()
+    case awaitExisting(_): blankReturn()
+    case retainCompletion(_): blankReturn()
+    case returnResult(r): r
+
+def moneyEq(a: C.MoneyEffect, b: C.MoneyEffect) -> Bool:
+  a.book == b.book && a.expectedRoot == b.expectedRoot && transferEq(a.transfer, b.transfer)
+
+def capacityEq(a: C.CapacityEffect, b: C.CapacityEffect) -> Bool:
+  C.pinEq(a.home, b.home) && a.before == b.before && a.after == b.after
+
+def publishEq(a: C.PublishEffect, b: C.PublishEffect) -> Bool:
+  C.pinEq(a.home, b.home) && C.pinEq(a.room, b.room) && requestEq(a.request, b.request) && C.runEq(a.run, b.run)
+
+def retainEq(a: C.RetainEffect, b: C.RetainEffect) -> Bool:
+  C.runEq(a.run, b.run) && completionEq(a.completion, b.completion)
+
+def returnEq(a: C.ReturnEffect, b: C.ReturnEffect) -> Bool:
+  a.recipient == b.recipient && a.audience == b.audience && a.keyEpoch == b.keyEpoch && a.output == b.output
+
+def effectEq(a: C.Effect, b: C.Effect) -> Bool:
+  effectKind(a) == effectKind(b) && moneyEq(moneyOf(a), moneyOf(b)) && capacityEq(capacityOf(a), capacityOf(b)) && publishEq(publishOf(a), publishOf(b)) && C.runEq(awaitedOf(a), awaitedOf(b)) && retainEq(retainOf(a), retainOf(b)) && returnEq(returnOf(a), returnOf(b))
+
+def effectsIsEmpty(xs: C.Effects) -> Bool:
+  match xs:
+    case none(_): true
+    case more(_): false
+
+def effectsMoreEq(head: C.Effect, tail: C.Effects, ys: C.Effects) -> Bool:
+  match ys:
+    case none(_): false
+    case more(n): effectEq(head, n.head) && effectsEq(tail, n.tail)
+
+def effectsEq(xs: C.Effects, ys: C.Effects) -> Bool:
+  match xs:
+    case none(_): effectsIsEmpty(ys)
+    case more(m): effectsMoreEq(m.head, m.tail, ys)
+
+def effectCount(xs: C.Effects) -> Nat:
+  match xs:
+    case none(_): 0n
+    case more(m): 1n + effectCount(m.tail)
+
+def refusedEq(x: C.State, b: C.Transition) -> Bool:
+  match b:
+    case refused(y): stateEq(x, y)
+    case proposed(_): false
+
+def proposedEq(p: C.Proposal, b: C.Transition) -> Bool:
+  match b:
+    case refused(_): false
+    case proposed(q): stateEq(p.expected, q.expected) && stateEq(p.successor, q.successor) && effectsEq(p.effects, q.effects)
+
+def transitionEq(a: C.Transition, b: C.Transition) -> Bool:
+  match a:
+    case refused(x): refusedEq(x, b)
+    case proposed(p): proposedEq(p, b)
+
+def isRefused(t: C.Transition) -> Bool:
+  match t:
+    case refused(_): true
+    case proposed(_): false
+
+def refusedUnchanged(t: C.Transition, before: C.State) -> Bool:
+  match t:
+    case refused(x): stateEq(x, before)
+    case proposed(_): false
+
+def linkedRun(l: C.ActivityLink) -> C.Run:
+  match l:
+    case noActivity(_): blankRun()
+    case existing(x): x.run
+
+# ---- the named scenario ---------------------------------------------------------
+
+def pin(resource: Nat, root: String) -> C.Pin:
+  {resource: resource, root: root}
+
+def method() -> C.Method:
+  {artifact: "artifact-1", program: "program-2", exportName: "export-3", inputSchema: "input-4", resultSchema: "result-5"}
+
+def identity() -> C.Identity:
+  {request: "request-20", method: method(), input: "input-21", context: "context-22"}
+
+def request(root: String) -> C.Request:
+  {identity: identity(), residentHome: pin(10n, root), room: pin(11n, root), consumer: "subject-7", recipient: "subject-7", audience: "audience-8", keyEpoch: "epoch-1", acceptor: "subject-9", criterion: method(), dispatchDeadline: 100n, units: 2n, budget: 8n, payment: {book: 9n, root: root, payer: 1n, escrow: 4n, providerAccount: 5n, asset: 8n, available: 20n}}
+
+def offer(root: String) -> C.Offer:
+  {identity: identity(), provider: "provider-6", providerHome: pin(12n, root), capacity: 5n, rate: 3n, expires: 90n, claim: "claim-55"}
+
+def sponsor(root: String, approved: Bool) -> C.Sponsorship:
+  {identity: identity(), provider: "provider-6", policy: pin(14n, root), maxAmount: 8n, approved: approved}
+
+def reservation(root: String) -> C.Reservation:
+  {request: request(root), offer: offer(root), sponsorship: sponsor(root, true), amount: 6n}
+
+def run(root: String) -> C.Run:
+  {identity: "operation-31", requestCell: 17n, sequence: 2n, assignedResident: 7n, operation: "operation-31", activity: pin(13n, root), ordinal: 4n, binding: identity()}
+
+def otherRun(root: String) -> C.Run:
+  {identity: "operation-32", requestCell: 18n, sequence: 3n, assignedResident: 7n, operation: "operation-32", activity: pin(13n, root), ordinal: 5n, binding: identity()}
+
+def completion(root: String, output: String) -> C.Completion:
+  {run: run(root), provider: "provider-6", output: output, recipient: "subject-7", audience: "audience-8", keyEpoch: "epoch-1", receipt: pin(15n, root)}
+
+def review(output: String) -> C.Review:
+  {runIdentity: "operation-31", output: output, criterion: method(), reviewer: "subject-9", accepted: true}
+
+def r0() -> String:
+  "root-40"
+
+def r1() -> String:
+  "root-60"
+
+def held0() -> C.State:
+  C.State.held(reservation(r0()))
+
+def running0() -> C.State:
+  C.State.running({reservation: reservation(r0()), run: run(r0())})
+
+def uncertain0() -> C.State:
+  C.State.uncertain({reservation: reservation(r0()), run: run(r0())})
+
+def delivered0() -> C.State:
+  C.State.delivered({reservation: reservation(r0()), run: run(r0()), completion: completion(r0(), "output-41")})
+
+def finished0() -> C.State:
+  C.State.finished({reservation: reservation(r0()), run: run(r0()), completion: completion(r0(), "output-41"), review: review("output-41")})
+
+def reserve0() -> C.Transition:
+  C.reserve(request(r0()), offer(r0()), sponsor(r0(), true), 80n)
+
+def effectAt(effects: C.Effects, n: Nat) -> C.Effect:
+  match effects:
+    case none(_): C.Effect.nothing()
+    case more(m): effectAtStep(m.head, m.tail, n)
+
+def effectAtStep(head: C.Effect, tail: C.Effects, n: Nat) -> C.Effect:
+  match n:
+    case 0n: head
+    case 1n+q: effectAt(tail, q)
+
+def proposedEffect(t: C.Transition, n: Nat) -> C.Effect:
+  match t:
+    case refused(_): C.Effect.nothing()
+    case proposed(p): effectAt(p.effects, n)
+
+def reservesExactBudgetAndCapacity() -> Bool:
+  transitionEq(reserve0(), C.proposal(C.State.vacant(), held0(), C.two(C.Effect.money({book: 9n, expectedRoot: r0(), transfer: {source: 1n, destination: 4n, asset: 8n, amount: 6n}}), C.Effect.capacity({home: pin(12n, r0()), before: 5n, after: 3n}))))
+
+def escrowAmount() -> Nat:
+  moneyOf(proposedEffect(reserve0(), 0n)).transfer.amount
+
+def escrowPayer() -> Nat:
+  moneyOf(proposedEffect(reserve0(), 0n)).transfer.source
+
+def escrowAccount() -> Nat:
+  moneyOf(proposedEffect(reserve0(), 0n)).transfer.destination
+
+def capacityBeforeReserve() -> Nat:
+  capacityOf(proposedEffect(reserve0(), 1n)).before
+
+def capacityAfterReserve() -> Nat:
+  capacityOf(proposedEffect(reserve0(), 1n)).after
+
+def reserveEffectCount() -> Nat:
+  match reserve0():
+    case refused(_): 999n
+    case proposed(p): effectCount(p.effects)
+
+def retainsBeforeDispatch() -> Bool:
+  transitionEq(C.start(held0(), run(r0()), 80n), C.proposal(held0(), running0(), C.one(C.Effect.publishRequest({home: pin(10n, r0()), room: pin(11n, r0()), request: request(r0()), run: run(r0())}))))
+
+def expiredUnstartedCannotDispatch() -> Bool:
+  refusedUnchanged(C.start(held0(), run(r0()), 101n), held0())
+
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+def startAtDeadlineAllowed() -> Bool:
+  not(isRefused(C.start(held0(), run(r0()), 100n)))
+
+def completionIsNotPayment() -> Bool:
+  transitionEq(C.resumeAfterStatus(running0(), completion(r0(), "output-41"), true), C.proposal(running0(), delivered0(), C.one(C.Effect.retainCompletion({run: run(r0()), completion: completion(r0(), "output-41")}))))
+
+def completionEffectKind() -> String:
+  effectKind(proposedEffect(C.resumeAfterStatus(running0(), completion(r0(), "output-41"), true), 0n))
+
+def completionEffectCount() -> Nat:
+  match C.resumeAfterStatus(running0(), completion(r0(), "output-41"), true):
+    case refused(_): 999n
+    case proposed(p): effectCount(p.effects)
+
+def reviewedResultPaysOnce() -> Bool:
+  transitionEq(C.accept(delivered0(), review("output-41"), pin(12n, r1()), 3n, r1()), C.proposal(delivered0(), finished0(), C.three(C.Effect.money({book: 9n, expectedRoot: r1(), transfer: {source: 4n, destination: 5n, asset: 8n, amount: 6n}}), C.Effect.capacity({home: pin(12n, r1()), before: 3n, after: 5n}), C.Effect.returnResult({recipient: "subject-7", audience: "audience-8", keyEpoch: "epoch-1", output: "output-41"}))))
+
+def payoutAmount() -> Nat:
+  moneyOf(proposedEffect(C.accept(delivered0(), review("output-41"), pin(12n, r1()), 3n, r1()), 0n)).transfer.amount
+
+def payoutFrom() -> Nat:
+  moneyOf(proposedEffect(C.accept(delivered0(), review("output-41"), pin(12n, r1()), 3n, r1()), 0n)).transfer.source
+
+def payoutTo() -> Nat:
+  moneyOf(proposedEffect(C.accept(delivered0(), review("output-41"), pin(12n, r1()), 3n, r1()), 0n)).transfer.destination
+
+def capacityAfterRelease() -> Nat:
+  capacityOf(proposedEffect(C.accept(delivered0(), review("output-41"), pin(12n, r1()), 3n, r1()), 1n)).after
+
+def uncertainKeepsRun() -> Bool:
+  transitionEq(C.uncertain(running0()), C.proposal(running0(), uncertain0(), C.one(C.Effect.awaitExisting(run(r0())))))
+
+def failedStatusRetainsUncertainty() -> Bool:
+  transitionEq(C.resumeAfterStatus(running0(), completion(r0(), "output-41"), false), C.proposal(running0(), uncertain0(), C.one(C.Effect.awaitExisting(run(r0())))))
+
+def uncertainStaysUncertain() -> Bool:
+  transitionEq(C.uncertain(uncertain0()), C.proposal(uncertain0(), uncertain0(), C.one(C.Effect.awaitExisting(run(r0())))))
+
+def uncertainCannotRedispatch() -> Bool:
+  refusedUnchanged(C.start(uncertain0(), otherRun(r0()), 80n), uncertain0()) && refusedUnchanged(C.start(uncertain0(), run(r0()), 80n), uncertain0())
+
+def uncertainCannotTimeoutRefund() -> Bool:
+  refusedUnchanged(C.cancel(uncertain0(), "subject-7", 1000n, pin(12n, r1()), 3n, r1()), uncertain0()) && refusedUnchanged(C.cancel(running0(), "subject-7", 1000n, pin(12n, r1()), 3n, r1()), running0())
+
+def finishedCannotPayTwice() -> Bool:
+  refusedUnchanged(C.accept(finished0(), review("output-41"), pin(12n, r1()), 3n, r1()), finished0())
+
+def sponsorDenialNeverReserves() -> Bool:
+  refusedUnchanged(C.reserve(request(r0()), offer(r0()), sponsor(r0(), false), 80n), C.State.vacant())
+
+def uncertaintyKeepsActivity() -> Bool:
+  C.runEq(linkedRun(C.activityLink(uncertain0())), run(r0())) && C.hasLink(C.activityLink(uncertain0()))
+
+def deliveryKeepsActivity() -> Bool:
+  C.runEq(linkedRun(C.activityLink(delivered0())), run(r0())) && C.hasLink(C.activityLink(delivered0()))
+
+def heldHasNoActivityLink() -> Bool:
+  C.hasLink(C.activityLink(held0()))
+
+def deliveredCannotBeDeliveredAgain() -> Bool:
+  refusedUnchanged(C.deliver(delivered0(), completion(r0(), "output-41")), delivered0())
+
+def completionForOtherProviderRefused() -> Bool:
+  refusedUnchanged(C.deliver(running0(), {run: run(r0()), provider: "provider-0", output: "output-41", recipient: "subject-7", audience: "audience-8", keyEpoch: "epoch-1", receipt: pin(15n, r0())}), running0())
+
+def completionForOtherRecipientRefused() -> Bool:
+  refusedUnchanged(C.deliver(running0(), {run: run(r0()), provider: "provider-6", output: "output-41", recipient: "subject-0", audience: "audience-8", keyEpoch: "epoch-1", receipt: pin(15n, r0())}), running0())
+
+def completionForOtherRunRefused() -> Bool:
+  refusedUnchanged(C.deliver(running0(), {run: otherRun(r0()), provider: "provider-6", output: "output-41", recipient: "subject-7", audience: "audience-8", keyEpoch: "epoch-1", receipt: pin(15n, r0())}), running0())
+
+def completionRetainedFromUncertain() -> Bool:
+  transitionEq(C.deliver(uncertain0(), completion(r0(), "output-41")), C.proposal(uncertain0(), delivered0(), C.one(C.Effect.retainCompletion({run: run(r0()), completion: completion(r0(), "output-41")}))))
+
+def reviewOfOtherOutputRefused() -> Bool:
+  refusedUnchanged(C.accept(delivered0(), review("output-99"), pin(12n, r1()), 3n, r1()), delivered0())
+
+def reviewByOtherReviewerRefused() -> Bool:
+  refusedUnchanged(C.accept(delivered0(), {runIdentity: "operation-31", output: "output-41", criterion: method(), reviewer: "subject-1", accepted: true}, pin(12n, r1()), 3n, r1()), delivered0())
+
+def rejectedReviewRefused() -> Bool:
+  refusedUnchanged(C.accept(delivered0(), {runIdentity: "operation-31", output: "output-41", criterion: method(), reviewer: "subject-9", accepted: false}, pin(12n, r1()), 3n, r1()), delivered0())
+
+def reviewAgainstOtherHomeRefused() -> Bool:
+  refusedUnchanged(C.accept(delivered0(), review("output-41"), pin(99n, r1()), 3n, r1()), delivered0())
+
+def acceptOutsideDeliveredRefused() -> Bool:
+  refusedUnchanged(C.accept(running0(), review("output-41"), pin(12n, r1()), 3n, r1()), running0()) && refusedUnchanged(C.accept(held0(), review("output-41"), pin(12n, r1()), 3n, r1()), held0())
+
+def reserveRefusedForCapacity() -> Bool:
+  isRefused(C.reserve(request(r0()), {identity: identity(), provider: "provider-6", providerHome: pin(12n, r0()), capacity: 1n, rate: 3n, expires: 90n, claim: "claim-55"}, sponsor(r0(), true), 80n))
+
+def reserveRefusedForBudget() -> Bool:
+  isRefused(C.reserve(request(r0()), {identity: identity(), provider: "provider-6", providerHome: pin(12n, r0()), capacity: 5n, rate: 5n, expires: 90n, claim: "claim-55"}, sponsor(r0(), true), 80n))
+
+def reserveRefusedWhenOfferExpired() -> Bool:
+  isRefused(C.reserve(request(r0()), offer(r0()), sponsor(r0(), true), 91n))
+
+def reserveAllowedAtExpiry() -> Bool:
+  not(isRefused(C.reserve(request(r0()), offer(r0()), sponsor(r0(), true), 90n)))
+
+def reserveRefusedForOtherIdentity() -> Bool:
+  isRefused(C.reserve(request(r0()), offer(r0()), {identity: {request: "request-77", method: method(), input: "input-21", context: "context-22"}, provider: "provider-6", policy: pin(14n, r0()), maxAmount: 8n, approved: true}, 80n))
+
+def reserveRefusedForOtherProvider() -> Bool:
+  isRefused(C.reserve(request(r0()), offer(r0()), {identity: identity(), provider: "provider-0", policy: pin(14n, r0()), maxAmount: 8n, approved: true}, 80n))
+
+def reserveRefusedAboveSponsorCap() -> Bool:
+  isRefused(C.reserve(request(r0()), offer(r0()), {identity: identity(), provider: "provider-6", policy: pin(14n, r0()), maxAmount: 5n, approved: true}, 80n))
+
+def reserveRefusedForAliasedEscrow() -> Bool:
+  isRefused(C.reserve({identity: identity(), residentHome: pin(10n, r0()), room: pin(11n, r0()), consumer: "subject-7", recipient: "subject-7", audience: "audience-8", keyEpoch: "epoch-1", acceptor: "subject-9", criterion: method(), dispatchDeadline: 100n, units: 2n, budget: 8n, payment: {book: 9n, root: r0(), payer: 4n, escrow: 4n, providerAccount: 5n, asset: 8n, available: 20n}}, offer(r0()), sponsor(r0(), true), 80n))
+
+def reserveRefusedForThinFunds() -> Bool:
+  isRefused(C.reserve({identity: identity(), residentHome: pin(10n, r0()), room: pin(11n, r0()), consumer: "subject-7", recipient: "subject-7", audience: "audience-8", keyEpoch: "epoch-1", acceptor: "subject-9", criterion: method(), dispatchDeadline: 100n, units: 2n, budget: 8n, payment: {book: 9n, root: r0(), payer: 1n, escrow: 4n, providerAccount: 5n, asset: 8n, available: 5n}}, offer(r0()), sponsor(r0(), true), 80n))
+
+def reserveRefusedForZeroUnits() -> Bool:
+  isRefused(C.reserve({identity: identity(), residentHome: pin(10n, r0()), room: pin(11n, r0()), consumer: "subject-7", recipient: "subject-7", audience: "audience-8", keyEpoch: "epoch-1", acceptor: "subject-9", criterion: method(), dispatchDeadline: 100n, units: 0n, budget: 8n, payment: {book: 9n, root: r0(), payer: 1n, escrow: 4n, providerAccount: 5n, asset: 8n, available: 20n}}, offer(r0()), sponsor(r0(), true), 80n))
+
+def cancelRefundsEscrow() -> Bool:
+  transitionEq(C.cancel(held0(), "subject-7", 50n, pin(12n, r1()), 3n, r1()), C.proposal(held0(), C.State.cancelled(reservation(r0())), C.two(C.Effect.money({book: 9n, expectedRoot: r1(), transfer: {source: 4n, destination: 1n, asset: 8n, amount: 6n}}), C.Effect.capacity({home: pin(12n, r1()), before: 3n, after: 5n}))))
+
+def strangerCannotCancelBeforeDeadline() -> Bool:
+  refusedUnchanged(C.cancel(held0(), "subject-0", 50n, pin(12n, r1()), 3n, r1()), held0())
+
+def strangerMayCancelAfterDeadline() -> Bool:
+  not(isRefused(C.cancel(held0(), "subject-0", 101n, pin(12n, r1()), 3n, r1())))
+
+def transitionEqSeesCapacity() -> Bool:
+  transitionEq(reserve0(), C.proposal(C.State.vacant(), held0(), C.two(C.Effect.money({book: 9n, expectedRoot: r0(), transfer: {source: 1n, destination: 4n, asset: 8n, amount: 6n}}), C.Effect.capacity({home: pin(12n, r0()), before: 5n, after: 4n}))))
+
+def stateEqSeesRun() -> Bool:
+  stateEq(running0(), C.State.running({reservation: reservation(r0()), run: otherRun(r0())}))
+
+def stateEqSeesPhase() -> Bool:
+  stateEq(running0(), uncertain0())
+
+def effectsEqSeesOrder() -> Bool:
+  effectsEq(C.two(C.Effect.nothing(), C.Effect.awaitExisting(run(r0()))), C.two(C.Effect.awaitExisting(run(r0())), C.Effect.nothing()))

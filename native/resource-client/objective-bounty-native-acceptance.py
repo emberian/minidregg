@@ -359,13 +359,11 @@ def publish_contract(label, plant):
     PUB_COUNT[0] += 1
     pub = root / f'publication-{label}'
     (pub / 'src').mkdir(parents=True)
-    shutil.copy(REPO / 'world/workshop/NatOrder.obend', pub / 'src' / 'NatOrder.obend')
     (pub / 'src' / 'BountyEscrow.obend').write_text(contract_source(plant))
     spec = {'schema': 'dregg.objective-bend.package-input.v1', 'edition': 'objective-bend-1',
-            'modules': [{'name': 'NatOrder', 'sourcePath': str(pub / 'src' / 'NatOrder.obend'), 'imports': []},
-                        {'name': 'BountyEscrow', 'sourcePath': str(pub / 'src' / 'BountyEscrow.obend'),
-                         'imports': [{'alias': 'Order', 'path': './NatOrder.obend', 'module': '0'}]}],
-            'entryModule': '1', 'entryDefinition': 'bounty'}
+            'modules': [{'name': 'BountyEscrow', 'sourcePath': str(pub / 'src' / 'BountyEscrow.obend'),
+                         'imports': []}],
+            'entryModule': '0', 'entryDefinition': 'bounty'}
     (pub / 'spec.json').write_text(json.dumps(spec))
     published = last_json(sh(f'publication-{label}', host, config, 'objective-publication', pub / 'spec.json', 'seat',
                              pub / 'out'))

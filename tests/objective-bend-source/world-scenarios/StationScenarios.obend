@@ -1,0 +1,237 @@
+edition ObjectiveBend 1
+# Scenario assertions for world/station/{LeaseDesk,SharedConsequences,EngineeringStation}.obend.
+import ./SharedConsequences.obend as Lib
+import ./EngineeringStation.obend as Eng
+import ./LeaseDesk.obend as Desk
+
+def refEq(a: Lib.Ref, b: Lib.Ref) -> Bool:
+  a.target == b.target && a.root == b.root
+
+def writeEq(a: Lib.Write, b: Lib.Write) -> Bool:
+  a.field == b.field && a.before == b.before && a.after == b.after
+
+def writesIsEmpty(xs: Lib.Writes) -> Bool:
+  match xs:
+    case empty(_): true
+    case more(_): false
+
+def writesEq(xs: Lib.Writes, ys: Lib.Writes) -> Bool:
+  match xs:
+    case empty(_): writesIsEmpty(ys)
+    case more(m):
+      match ys:
+        case empty(_): false
+        case more(n): writeEq(m.head, n.head) && writesEq(m.tail, n.tail)
+
+def effectsIsEmpty(xs: Lib.Effects) -> Bool:
+  match xs:
+    case none(_): true
+    case scalar(_): false
+
+def effectsEq(xs: Lib.Effects, ys: Lib.Effects) -> Bool:
+  match xs:
+    case none(_): effectsIsEmpty(ys)
+    case scalar(s):
+      match ys:
+        case none(_): false
+        case scalar(t): refEq(s.ref, t.ref) && writesEq(s.writes, t.writes) && effectsEq(s.rest, t.rest)
+
+def readsIsEmpty(xs: Lib.Reads) -> Bool:
+  match xs:
+    case none(_): true
+    case root(_): false
+
+def readsEq(xs: Lib.Reads, ys: Lib.Reads) -> Bool:
+  match xs:
+    case none(_): readsIsEmpty(ys)
+    case root(r):
+      match ys:
+        case none(_): false
+        case root(t): refEq(r.ref, t.ref) && readsEq(r.rest, t.rest)
+
+def candidateEq(a: Lib.Candidate, b: Lib.Candidate) -> Bool:
+  Lib.sourceEq(a.source, b.source) && readsEq(a.reads, b.reads) && effectsEq(a.effects, b.effects)
+
+def resultEq(a: Lib.Result, b: Lib.Result) -> Bool:
+  match a:
+    case refused(c):
+      match b:
+        case refused(d): c == d
+        case proposed(_): false
+    case proposed(p):
+      match b:
+        case refused(_): false
+        case proposed(q): candidateEq(p, q)
+
+def reasonOf(r: Lib.Result) -> Nat:
+  match r:
+    case refused(c): c
+    case proposed(_): 0n
+
+def v1() -> Lib.SourceVersion:
+  {artifact: "station/shared", definition: "rules", revision: 1n}
+
+def v2() -> Lib.SourceVersion:
+  {artifact: "station/shared", definition: "rules", revision: 2n}
+
+def ruleRef() -> Lib.Ref:
+  {target: 10n, root: "r-rules"}
+
+def playerRef() -> Lib.Ref:
+  {target: 20n, root: "r-player"}
+
+def propRef() -> Lib.Ref:
+  {target: 30n, root: "r-prop"}
+
+def supplyRef() -> Lib.Ref:
+  {target: 40n, root: "r-supply"}
+
+def corridor() -> Lib.Edge:
+  {src: 1n, dst: 2n, cost: 2n}
+
+def rules() -> Lib.Rules:
+  {source: v1(), ref: ruleRef(), edges: Lib.Edges.more({head: corridor(), tail: Lib.Edges.empty()})}
+
+def player(scene: Nat) -> Lib.Player:
+  {ref: playerRef(), subject: 7n, scene: scene, turn: 4n}
+
+def groundProp(scene: Nat) -> Lib.Property:
+  {ref: propRef(), scene: scene, owner: Lib.Owner.ground(), generation: 9n}
+
+def heldProp(holder: Nat) -> Lib.Property:
+  {ref: propRef(), scene: 1n, owner: Lib.Owner.held(holder), generation: 9n}
+
+def supply(remaining: Nat) -> Lib.Supply:
+  {ref: supplyRef(), remaining: remaining, generation: 5n}
+
+def takeJointEffects() -> Bool:
+  resultEq(Lib.take(v1(), rules(), player(1n), groundProp(1n)), Lib.takeCandidate(v1(), ruleRef(), player(1n), groundProp(1n))) && Lib.ownerWord(Lib.Owner.held(7n)) == 8n
+
+def takeDoesNotMatchADifferentOwner() -> Bool:
+  Lib.ownerWord(Lib.Owner.held(7n)) == Lib.ownerWord(Lib.Owner.held(8n))
+
+def takeReason() -> Nat:
+  reasonOf(Lib.take(v1(), rules(), player(1n), groundProp(1n)))
+
+def takeStaleSourceReason() -> Nat:
+  reasonOf(Lib.take(v2(), rules(), player(1n), groundProp(1n)))
+
+def takeHeldReason() -> Nat:
+  reasonOf(Lib.take(v1(), rules(), player(1n), heldProp(8n)))
+
+def takeHeldByMeReason() -> Nat:
+  reasonOf(Lib.take(v1(), rules(), player(1n), heldProp(7n)))
+
+def takeWrongSceneReason() -> Nat:
+  reasonOf(Lib.take(v1(), rules(), player(2n), groundProp(1n)))
+
+def takeAliasedReason() -> Nat:
+  reasonOf(Lib.take(v1(), rules(), player(1n), {ref: playerRef(), scene: 1n, owner: Lib.Owner.ground(), generation: 9n}))
+
+def takeAliasedRuleReason() -> Nat:
+  reasonOf(Lib.take(v1(), rules(), player(1n), {ref: ruleRef(), scene: 1n, owner: Lib.Owner.ground(), generation: 9n}))
+
+def dropJointEffects() -> Bool:
+  resultEq(Lib.drop(v1(), rules(), player(2n), heldProp(7n)), Lib.dropCandidate(v1(), ruleRef(), player(2n), heldProp(7n), 7n)) && Lib.ownerWord(Lib.Owner.ground()) == 0n
+
+def dropReason() -> Nat:
+  reasonOf(Lib.drop(v1(), rules(), player(2n), heldProp(7n)))
+
+def dropOtherHolderReason() -> Nat:
+  reasonOf(Lib.drop(v1(), rules(), player(2n), heldProp(8n)))
+
+def dropGroundReason() -> Nat:
+  reasonOf(Lib.drop(v1(), rules(), player(2n), groundProp(2n)))
+
+def dropStaleSourceReason() -> Nat:
+  reasonOf(Lib.drop(v2(), rules(), player(2n), heldProp(7n)))
+
+def dropAliasedReason() -> Nat:
+  reasonOf(Lib.drop(v1(), rules(), player(2n), {ref: playerRef(), scene: 1n, owner: Lib.Owner.held(7n), generation: 9n}))
+
+def moveJointEffects() -> Bool:
+  let expected = Lib.Result.proposed({source: v1(), reads: Lib.reads3(ruleRef(), playerRef(), supplyRef()), effects: Lib.effects2(playerRef(), Lib.two({field: 0n, before: 1n, after: 2n}, {field: 1n, before: 4n, after: 5n}), supplyRef(), Lib.two({field: 0n, before: 6n, after: 4n}, {field: 1n, before: 5n, after: 6n}))})
+  resultEq(Lib.move(v1(), rules(), player(1n), supply(6n), corridor()), expected)
+
+def moveReason() -> Nat:
+  reasonOf(Lib.move(v1(), rules(), player(1n), supply(6n), corridor()))
+
+def moveStaleSourceReason() -> Nat:
+  reasonOf(Lib.move(v2(), rules(), player(1n), supply(6n), corridor()))
+
+def moveAbsentEdgeReason() -> Nat:
+  reasonOf(Lib.move(v1(), rules(), player(1n), supply(6n), {src: 1n, dst: 3n, cost: 1n}))
+
+def moveWrongCostReason() -> Nat:
+  reasonOf(Lib.move(v1(), rules(), player(1n), supply(6n), {src: 1n, dst: 2n, cost: 1n}))
+
+def moveWrongSceneReason() -> Nat:
+  reasonOf(Lib.move(v1(), rules(), player(2n), supply(6n), corridor()))
+
+def moveThinSupplyReason() -> Nat:
+  reasonOf(Lib.move(v1(), rules(), player(1n), supply(1n), corridor()))
+
+def moveExactSupplyReason() -> Nat:
+  reasonOf(Lib.move(v1(), rules(), player(1n), supply(2n), corridor()))
+
+def moveAliasedReason() -> Nat:
+  reasonOf(Lib.move(v1(), rules(), player(1n), {ref: playerRef(), remaining: 6n, generation: 5n}, corridor()))
+
+def spendConservesInstances() -> Bool:
+  Lib.spendCorrect(2n, 6n) && Lib.spendCorrect(2n, 2n) && Lib.spendCorrect(2n, 1n) && Lib.spendCorrect(0n, 0n)
+
+def sampleReply() -> Lib.Narrative:
+  Lib.gmReply("req-1", "gm-3", v1(), Lib.reads3(ruleRef(), playerRef(), propRef()), "The airlock hums.", Lib.take(v1(), rules(), player(1n), groundProp(1n)))
+
+def gmReplyKeepsFields() -> Bool:
+  let r = sampleReply()
+  r.request == "req-1" && r.resident == "gm-3" && Lib.sourceEq(r.source, v1()) && readsEq(r.observed, Lib.reads3(ruleRef(), playerRef(), propRef())) && resultEq(r.suggestion, Lib.take(v1(), rules(), player(1n), groundProp(1n)))
+
+def gmReplyKeepsText() -> Bool:
+  sampleReply().text == "The airlock hums."
+
+def resultEqSeesCode() -> Bool:
+  resultEq(Lib.Result.refused(1n), Lib.Result.refused(2n))
+
+def refusedOldSource() -> Nat:
+  reasonOf(Eng.moveScene(Eng.version(1n), ruleRef(), 2n, player(1n), supply(6n), {src: 1n, dst: 2n, cost: 2n}))
+
+def refusedOldSourceIsCodeOne() -> Bool:
+  refusedOldSource() == 1n
+
+def stationEdgesAgree() -> Bool:
+  Lib.containsEdge({src: 1n, dst: 2n, cost: 2n}, Eng.edges()) && Lib.containsEdge({src: 2n, dst: 3n, cost: 1n}, Eng.edges())
+
+def stationWithoutShortcut() -> Bool:
+  Lib.containsEdge({src: 1n, dst: 3n, cost: 3n}, Eng.edges())
+
+def engineeringToInfirmaryMoves() -> Bool:
+  reasonOf(Eng.moveScene(Eng.version(1n), ruleRef(), 1n, player(1n), supply(6n), {src: 1n, dst: 2n, cost: 2n})) == 0n
+
+def infirmaryToEngineeringReason() -> Nat:
+  reasonOf(Eng.moveScene(Eng.version(1n), ruleRef(), 1n, player(2n), supply(6n), {src: 2n, dst: 1n, cost: 2n}))
+
+def stationTakeMatchesLibrary() -> Bool:
+  resultEq(Eng.takeItem(Eng.version(1n), ruleRef(), 1n, player(1n), groundProp(1n)), Lib.take(Eng.version(1n), Eng.rules(ruleRef(), 1n), player(1n), groundProp(1n)))
+
+def stationDropMatchesLibrary() -> Bool:
+  resultEq(Eng.dropItem(Eng.version(1n), ruleRef(), 1n, player(2n), heldProp(7n)), Lib.drop(Eng.version(1n), Eng.rules(ruleRef(), 1n), player(2n), heldProp(7n)))
+
+def sampleDesk() -> Desk.DeskState:
+  Desk.openDesk({tenant: 1n, treasury: 2n, bay: 4n, unitRate: 5n, expiresAt: 100n}, 30n)
+
+def openLeaseWorks() -> Bool:
+  let s0 = sampleDesk()
+  Desk.isActive(s0.phase) && s0.deposited == 30n && s0.held == 30n && s0.consumed == 0n && s0.refunded == 0n
+
+def meterTickChargesDeposit() -> Bool:
+  let s1 = Desk.stateOf(Desk.reactDesk(sampleDesk(), Desk.DeskEvent.draw({actor: 1n, units: 3n, now: 20n})))
+  s1.consumed == 15n && s1.held == 15n && s1.refunded == 0n && s1.deposited == 30n
+
+def closeLeaseSettlesAndConserves() -> Bool:
+  let s1 = Desk.stateOf(Desk.reactDesk(sampleDesk(), Desk.DeskEvent.draw({actor: 1n, units: 3n, now: 20n})))
+  let s2 = Desk.stateOf(Desk.reactDesk(s1, Desk.DeskEvent.checkout({actor: 1n, now: 50n})))
+  s2.consumed == 15n && s2.refunded == 15n && s2.held == 0n && s2.held + s2.consumed + s2.refunded == s2.deposited
+
+def strangerCannotClose() -> Bool:
+  Desk.wasRefused(Desk.reactDesk(sampleDesk(), Desk.DeskEvent.checkout({actor: 99n, now: 50n})))

@@ -25,10 +25,18 @@ export function capture(specPath:string,dir:string,env=frontEnv()){
  return JSON.parse(lastLine(r.stdout));
 }
 // preview: the preview result (finished/suspended/...) or the refusal record, as written.
+export function readPreview(dir:string,fallback=""):any{
+ for(const name of ["preview.json","diagnostic.json"])if(existsSync(join(dir,name)))return JSON.parse(readFileSync(join(dir,name),"utf8"));
+ return {status:"refused",diagnostic:{stage:"objective-front",message:fallback.trim().slice(0,400)}};
+}
 export function preview(requestPath:string,dir:string,env=frontEnv()){
  const r=front(["preview",requestPath,dir],env);
- for(const name of ["preview.json","diagnostic.json"])if(existsSync(join(dir,name)))return JSON.parse(readFileSync(join(dir,name),"utf8"));
- return {status:"refused",diagnostic:{stage:"objective-front",message:(r.stderr||r.stdout).trim().slice(0,400)}};
+ return readPreview(dir,r.stderr||r.stdout);
+}
+// commands: run multiple capture/preview commands in one process.
+export function runCommands(commandsPath:string,env=frontEnv()){
+ const r=front(["commands",commandsPath],env);
+ if(r.status!==0)throw JSON.parse(lastLine(r.stderr)||'{"message":"commands failed"}');
 }
 // batch: run in-memory jobs in one process.
 export function batch(jobsPath:string,outPath:string,env=frontEnv()){

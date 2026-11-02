@@ -1,0 +1,158 @@
+edition ObjectiveBend 1
+# Scenario assertions for world/ballot/SealedBallot.obend.
+import ./SealedBallot.obend as B
+
+# Preview test fixture digest helper for scenario inputs (kernel writes use cSHAKE256 Pred.hashEq).
+def testDigest(voter: Nat, vote: Nat, salt: Nat) -> Nat:
+  (voter * 65537n + salt * 257n + vote + 1n) * 97n
+
+def lawHolds(p: B.Poll) -> Bool:
+  B.yesCount(p.openings) + B.noCount(p.openings) == B.openCount(p.openings) && B.openCount(p.openings) <= B.commitCount(p.commits) && B.commitCount(p.commits) <= B.size(p.terms.electorate)
+
+def electorate() -> B.Voters:
+  B.Voters.more({head: 1n, tail: B.Voters.more({head: 2n, tail: B.Voters.more({head: 3n, tail: B.Voters.more({head: 4n, tail: B.Voters.empty()})})})})
+
+def terms() -> B.Terms:
+  {electorate: electorate(), quorum: 2n, commitEnd: 50n, revealEnd: 100n}
+
+def fresh() -> B.Poll:
+  B.open(terms())
+
+def commits(p: B.Poll, voter: Nat, vote: Nat, salt: Nat, now: Nat) -> B.Poll:
+  B.pollOf(B.react(p, B.Event.commit({voter: voter, digest: testDigest(voter, vote, salt), now: now})))
+
+def reveals(p: B.Poll, voter: Nat, vote: Nat, salt: Nat, now: Nat) -> B.Poll:
+  B.pollOf(B.react(p, B.Event.reveal({voter: voter, vote: vote, salt: salt, digest: testDigest(voter, vote, salt), now: now})))
+
+def tryReveal(p: B.Poll, voter: Nat, vote: Nat, salt: Nat, now: Nat) -> B.Transition:
+  B.react(p, B.Event.reveal({voter: voter, vote: vote, salt: salt, digest: testDigest(voter, vote, salt), now: now}))
+
+def tryCommit(p: B.Poll, voter: Nat, vote: Nat, salt: Nat, now: Nat) -> B.Transition:
+  B.react(p, B.Event.commit({voter: voter, digest: testDigest(voter, vote, salt), now: now}))
+
+def tryTally(p: B.Poll, now: Nat) -> B.Transition:
+  B.react(p, B.Event.tally({now: now}))
+
+def sealed3() -> B.Poll:
+  commits(commits(commits(fresh(), 1n, 1n, 111n, 10n), 2n, 1n, 222n, 11n), 3n, 0n, 333n, 12n)
+
+def revealed3() -> B.Poll:
+  reveals(reveals(reveals(sealed3(), 1n, 1n, 111n, 60n), 2n, 1n, 222n, 61n), 3n, 0n, 333n, 62n)
+
+def closed3() -> B.Poll:
+  B.pollOf(tryTally(revealed3(), 100n))
+
+def resultYes(p: B.Poll) -> Nat:
+  B.resultOf(p).yes
+
+def resultNo(p: B.Poll) -> Nat:
+  B.resultOf(p).no
+
+def resultAbstain(p: B.Poll) -> Nat:
+  B.resultOf(p).abstain
+
+def commitsAfterThree() -> Nat:
+  B.commitCount(sealed3().commits)
+
+def openingsBeforeReveal() -> Nat:
+  B.openCount(sealed3().openings)
+
+def honestTally() -> Bool:
+  resultYes(closed3()) == 2n && resultNo(closed3()) == 1n && resultAbstain(closed3()) == 0n && B.resultOf(closed3()).passed && closed3().closed
+
+def yesTally() -> Nat:
+  resultYes(closed3())
+
+def noTally() -> Nat:
+  resultNo(closed3())
+
+def publishedRegime() -> String:
+  B.resultOf(closed3()).regime
+
+def mismatchedVoteRefused() -> Bool:
+  B.wasRefused(tryReveal(sealed3(), 1n, 0n, 111n, 60n)) && B.openCount(reveals(sealed3(), 1n, 0n, 111n, 60n).openings) == 0n
+
+def mismatchedSaltRefused() -> Bool:
+  B.wasRefused(tryReveal(sealed3(), 1n, 1n, 112n, 60n)) && B.wasRefused(tryReveal(sealed3(), 3n, 0n, 111n, 60n))
+
+def copiedCommitmentCannotOpen() -> Bool:
+  let copied = B.pollOf(B.react(sealed3(), B.Event.commit({voter: 4n, digest: testDigest(1n, 1n, 111n), now: 20n})))
+  B.commitCount(copied.commits) == 4n && B.wasRefused(tryReveal(copied, 4n, 1n, 111n, 60n)) && B.wasRefused(tryReveal(copied, 4n, 0n, 111n, 60n))
+
+def doubleCommitRefused() -> Bool:
+  B.wasRefused(tryCommit(sealed3(), 1n, 0n, 999n, 20n)) && B.wasRefused(tryCommit(sealed3(), 1n, 1n, 111n, 20n))
+
+def doubleRevealRefused() -> Bool:
+  let once = reveals(sealed3(), 1n, 1n, 111n, 60n)
+  B.wasRefused(tryReveal(once, 1n, 1n, 111n, 70n)) && B.openCount(once.openings) == 1n
+
+def lateCommitRefused() -> Bool:
+  B.wasRefused(tryCommit(fresh(), 1n, 1n, 111n, 50n)) && B.not(B.wasRefused(tryCommit(fresh(), 1n, 1n, 111n, 49n)))
+
+def earlyRevealRefused() -> Bool:
+  B.wasRefused(tryReveal(sealed3(), 1n, 1n, 111n, 49n)) && B.not(B.wasRefused(tryReveal(sealed3(), 1n, 1n, 111n, 50n)))
+
+def lateRevealRefused() -> Bool:
+  B.wasRefused(tryReveal(sealed3(), 1n, 1n, 111n, 100n)) && B.not(B.wasRefused(tryReveal(sealed3(), 1n, 1n, 111n, 99n)))
+
+def tallyBeforeCloseRefused() -> Bool:
+  B.wasRefused(tryTally(revealed3(), 99n)) && B.wasRefused(tryTally(fresh(), 10n)) && B.not(B.wasRefused(tryTally(revealed3(), 100n)))
+
+def doubleTallyRefused() -> Bool:
+  B.wasRefused(tryTally(closed3(), 200n)) && B.wasRefused(tryReveal(closed3(), 4n, 1n, 1n, 70n))
+
+def strangerCommitRefused() -> Bool:
+  B.wasRefused(tryCommit(fresh(), 9n, 1n, 5n, 10n)) && B.wasRefused(tryCommit(fresh(), 0n, 1n, 5n, 10n))
+
+def revealWithoutCommitRefused() -> Bool:
+  B.wasRefused(tryReveal(sealed3(), 4n, 1n, 444n, 60n)) && B.wasRefused(tryReveal(sealed3(), 9n, 1n, 444n, 60n))
+
+def outOfRangeVoteRefused() -> Bool:
+  let odd = commits(fresh(), 1n, 5n, 111n, 10n)
+  B.commitCount(odd.commits) == 1n && B.wasRefused(tryReveal(odd, 1n, 5n, 111n, 60n))
+
+def partialReveal() -> B.Poll:
+  B.pollOf(tryTally(reveals(sealed3(), 1n, 1n, 111n, 60n), 100n))
+
+def unrevealedAbstain() -> Nat:
+  resultAbstain(partialReveal())
+
+def partialYes() -> Nat:
+  resultYes(partialReveal())
+
+def quorumNotMet() -> Bool:
+  B.not(B.resultOf(partialReveal()).passed) && B.resultOf(partialReveal()).yes == 1n
+
+def nobodyRevealed() -> Bool:
+  let p = B.pollOf(tryTally(sealed3(), 100n))
+  B.resultOf(p).yes == 0n && B.resultOf(p).no == 0n && B.resultOf(p).abstain == 3n && B.not(B.resultOf(p).passed)
+
+def dissentDoesNotBlock() -> Bool:
+  B.resultOf(closed3()).passed && resultNo(closed3()) == 1n && resultAbstain(closed3()) == 0n
+
+def zeroQuorum() -> B.Terms:
+  {electorate: electorate(), quorum: 0n, commitEnd: 50n, revealEnd: 100n}
+
+def unattainableQuorum() -> B.Terms:
+  {electorate: electorate(), quorum: 5n, commitEnd: 50n, revealEnd: 100n}
+
+def repeatedElector() -> B.Terms:
+  {electorate: B.Voters.more({head: 1n, tail: B.Voters.more({head: 1n, tail: B.Voters.empty()})}), quorum: 1n, commitEnd: 50n, revealEnd: 100n}
+
+def unsealableElector() -> B.Terms:
+  {electorate: B.Voters.more({head: 0n, tail: B.Voters.empty()}), quorum: 1n, commitEnd: 50n, revealEnd: 100n}
+
+def noRevealWindow() -> B.Terms:
+  {electorate: electorate(), quorum: 2n, commitEnd: 100n, revealEnd: 100n}
+
+def voidTerms() -> Bool:
+  B.not(B.validTerms(zeroQuorum())) && B.not(B.validTerms(unattainableQuorum())) && B.not(B.validTerms(repeatedElector())) && B.not(B.validTerms(unsealableElector())) && B.not(B.validTerms(noRevealWindow())) && B.validTerms(terms())
+
+def voidTermsRefuseCommit() -> Bool:
+  B.wasRefused(tryCommit(B.open(zeroQuorum()), 1n, 1n, 111n, 10n))
+
+def lawHoldsSealed() -> Bool:
+  lawHolds(sealed3()) && lawHolds(revealed3()) && lawHolds(closed3()) && lawHolds(partialReveal())
+
+def sealBinds() -> Bool:
+  B.deciderFor(fresh(), 0n) == 1n && B.deciderFor(revealed3(), 0n) == 4n

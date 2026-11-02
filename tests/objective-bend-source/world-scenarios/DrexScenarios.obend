@@ -1,0 +1,76 @@
+edition ObjectiveBend 1
+# Scenario assertions for world/drex/DrexBatch.obend.
+import ./DrexBatch.obend as D
+
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+def demoMarket() -> D.Market:
+  {currency: 200n, goods: 100n, epsilon: 0n, close: 6n, deadline: 20n}
+
+def amount(asset: Nat, value: Nat) -> D.Amounts:
+  D.Amounts.cons({head: {asset: asset, amount: value}, tail: D.Amounts.nil()})
+
+def both(first: D.Amount, second: D.Amount) -> D.Amounts:
+  D.Amounts.cons({head: first, tail: D.Amounts.cons({head: second, tail: D.Amounts.nil()})})
+
+def blind() -> D.Disclosed:
+  {offerer: D.Shown.hidden(), payee: D.Shown.hidden(), holder: D.Shown.hidden()}
+
+def bidView(seat: Nat, budget: Nat, qty: Nat) -> D.SeatView:
+  {seat: seat, role: "bid", terms: D.Terms.nil(), give: amount(200n, budget), want: amount(100n, qty), exit: D.Exit.onDemand(), opened: 0n, allocation: both({asset: 200n, amount: budget}, {asset: 100n, amount: 0n}), disclosed: blind()}
+
+def askView(seat: Nat, qty: Nat, reserve: Nat) -> D.SeatView:
+  {seat: seat, role: "ask", terms: D.Terms.nil(), give: amount(100n, qty), want: amount(200n, reserve), exit: D.Exit.onDemand(), opened: 0n, allocation: both({asset: 100n, amount: qty}, {asset: 200n, amount: 0n}), disclosed: blind()}
+
+def demoSeats() -> D.Seats:
+  D.Seats.cons({head: bidView(51n, 10n, 2n), tail: D.Seats.cons({head: bidView(52n, 12n, 3n), tail: D.Seats.cons({head: askView(53n, 2n, 6n), tail: D.Seats.cons({head: askView(54n, 3n, 12n), tail: D.Seats.nil()})})})})
+
+def nats4(a: Nat, b: Nat, c: Nat, d: Nat) -> D.Nats:
+  D.Nats.cons({head: a, tail: D.Nats.cons({head: b, tail: D.Nats.cons({head: c, tail: D.Nats.cons({head: d, tail: D.Nats.nil()})})})})
+
+def fill(seat: Nat, units: Nat, rest: D.Fills) -> D.Fills:
+  D.Fills.cons({head: {seat: seat, units: units}, tail: rest})
+
+def fullProposal() -> D.Proposal:
+  {fills: fill(51n, 2n, fill(52n, 3n, fill(53n, 2n, fill(54n, 3n, D.Fills.nil())))), certificate: {price: 4n, bidPotential: 0n, askPotential: 1n, slacks: nats4(0n, 0n, 2n, 2n)}}
+
+def partialProposal() -> D.Proposal:
+  {fills: fill(51n, 2n, fill(53n, 2n, D.Fills.nil())), certificate: {price: 4n, bidPotential: 0n, askPotential: 1n, slacks: nats4(0n, 0n, 2n, 2n)}}
+
+def demoClear(height: Nat, proposal: D.Proposal) -> D.Plan:
+  D.market(demoMarket(), {input: D.Input.clear(proposal), height: height, invoker: D.Shown.hidden(), seats: demoSeats()})
+
+def demoFullClearing() -> D.Plan:
+  demoClear(6n, fullProposal())
+
+def demoPartialClearing() -> D.Plan:
+  demoClear(6n, partialProposal())
+
+def isEmpty(plan: D.Plan) -> Bool:
+  match plan:
+    case nil(_): true
+    case cons(_): false
+
+def planLength(plan: D.Plan) -> Nat:
+  match plan:
+    case nil(_): 0n
+    case cons(c): 1n + planLength(c.tail)
+
+def noClearingOutsideWindow() -> Bool:
+  isEmpty(demoClear(5n, fullProposal())) && isEmpty(demoClear(20n, fullProposal())) && not(isEmpty(demoClear(19n, fullProposal())))
+
+def mintsOnlyWhileOpen() -> Bool:
+  not(isEmpty(D.market(demoMarket(), {input: D.Input.mint({role: "bid", holder: 1n}), height: 5n, invoker: D.Shown.hidden(), seats: D.Seats.nil()}))) && isEmpty(D.market(demoMarket(), {input: D.Input.mint({role: "bid", holder: 1n}), height: 6n, invoker: D.Shown.hidden(), seats: D.Seats.nil()})) && isEmpty(D.market(demoMarket(), {input: D.Input.mint({role: "broker", holder: 1n}), height: 1n, invoker: D.Shown.hidden(), seats: D.Seats.nil()}))
+
+def demoAbort(height: Nat) -> D.Plan:
+  D.market(demoMarket(), {input: D.Input.abort(), height: height, invoker: D.Shown.hidden(), seats: demoSeats()})
+
+def abortExitsEverySeat() -> Bool:
+  isEmpty(demoAbort(19n)) && planLength(demoAbort(20n)) == 4n
+
+def unbalancedRoutesWhatPairs() -> D.Plan:
+  demoClear(6n, {fills: fill(52n, 3n, fill(53n, 2n, D.Fills.nil())), certificate: {price: 4n, bidPotential: 0n, askPotential: 1n, slacks: nats4(0n, 0n, 2n, 2n)}})
+
+def demoBatch(start: {}) -> Activity<D.Step, D.Response, String>:
+  D.batch(demoMarket())

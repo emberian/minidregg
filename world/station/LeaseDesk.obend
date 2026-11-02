@@ -1,0 +1,202 @@
+edition ObjectiveBend 1
+# LeaseDesk: station bay lease, deposit escrow, shared utility meter, and epoch settlement.
+# Enforces monotone utility consumption (`meter_monotone`) and exact deposit conservation
+# across held deposit, metered consumption, and tenant refund (`deposit_conserved`).
+law meter_monotone: request.turn in [1, 4] or monotone(consumed)
+law deposit_conserved: sumEq([held, consumed, refunded], [deposited])
+
+record BayTerms:
+  tenant: Nat
+  treasury: Nat
+  bay: Nat
+  unitRate: Nat
+  expiresAt: Nat
+
+sum DeskPhase:
+  active: {}
+  settled: {}
+  void: {}
+
+record DeskState:
+  terms: BayTerms
+  deposited: Nat
+  held: Nat
+  consumed: Nat
+  refunded: Nat
+  phase: DeskPhase
+
+record Payout:
+  to: Nat
+  amount: Nat
+
+record DrawIn:
+  actor: Nat
+  units: Nat
+  now: Nat
+
+record TopUpIn:
+  actor: Nat
+  amount: Nat
+  now: Nat
+
+record CheckoutIn:
+  actor: Nat
+  now: Nat
+
+sum DeskEvent:
+  draw: DrawIn
+  topUp: TopUpIn
+  checkout: CheckoutIn
+
+record SettledMove:
+  state: DeskState
+  payout: Payout
+
+sum DeskTransition:
+  refused: DeskState
+  updated: DeskState
+  settled: SettledMove
+
+def isActive(p: DeskPhase) -> Bool:
+  match p:
+    case active(_): true
+    case settled(_): false
+    case void(_): false
+
+def validBay(t: BayTerms, deposit: Nat) -> Bool:
+  t.tenant != t.treasury && 0n < t.bay && 0n < t.unitRate && 0n < deposit
+
+def openDesk(t: BayTerms, deposit: Nat) -> DeskState:
+  if validBay(t, deposit) then {terms: t, deposited: deposit, held: deposit, consumed: 0n, refunded: 0n, phase: DeskPhase.active()} else {terms: t, deposited: 0n, held: 0n, consumed: 0n, refunded: 0n, phase: DeskPhase.void()}
+
+def drawUtility(s: DeskState, actor: Nat, units: Nat, now: Nat) -> DeskTransition:
+  let charge = units * s.terms.unitRate
+  if isActive(s.phase) && (actor == s.terms.tenant || actor == s.terms.treasury) && now < s.terms.expiresAt && 0n < units && charge <= s.held then DeskTransition.settled({state: {terms: s.terms, deposited: s.deposited, held: s.held - charge, consumed: s.consumed + charge, refunded: s.refunded, phase: s.phase}, payout: {to: s.terms.treasury, amount: charge}}) else DeskTransition.refused(s)
+
+def topUpBay(s: DeskState, actor: Nat, amount: Nat, now: Nat) -> DeskTransition:
+  if isActive(s.phase) && actor == s.terms.tenant && now < s.terms.expiresAt && 0n < amount then DeskTransition.updated({terms: s.terms, deposited: s.deposited + amount, held: s.held + amount, consumed: s.consumed, refunded: s.refunded, phase: s.phase}) else DeskTransition.refused(s)
+
+def checkoutMove(s: DeskState, next: DeskState) -> DeskTransition:
+  if 0n < s.held then DeskTransition.settled({state: next, payout: {to: s.terms.tenant, amount: s.held}}) else DeskTransition.updated(next)
+
+def checkoutBay(s: DeskState, actor: Nat, now: Nat) -> DeskTransition:
+  let next = {terms: s.terms, deposited: s.deposited, held: 0n, consumed: s.consumed, refunded: s.held, phase: DeskPhase.settled()}
+  if isActive(s.phase) && (actor == s.terms.tenant || s.terms.expiresAt <= now) then checkoutMove(s, next) else DeskTransition.refused(s)
+
+def reactDesk(s: DeskState, e: DeskEvent) -> DeskTransition:
+  match e:
+    case draw(d): drawUtility(s, d.actor, d.units, d.now)
+    case topUp(u): topUpBay(s, u.actor, u.amount, u.now)
+    case checkout(c): checkoutBay(s, c.actor, c.now)
+
+def stateOf(tr: DeskTransition) -> DeskState:
+  match tr:
+    case refused(s): s
+    case updated(s): s
+    case settled(m): m.state
+
+def wasRefused(tr: DeskTransition) -> Bool:
+  match tr:
+    case refused(_): true
+    case updated(_): false
+    case settled(_): false
+
+record Ledger:
+  deposited: Nat
+  held: Nat
+  consumed: Nat
+  refunded: Nat
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+record Write:
+  deposited: EditNat
+  held: EditNat
+  consumed: EditNat
+  refunded: EditNat
+record Ask:
+  decider: Nat
+record At:
+  at: Nat
+sum Source:
+  reply: Ask
+  height: At
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+record Pay:
+  to: Nat
+  amount: Nat
+  write: Write
+record CommitPlan:
+  write: Write
+sum Plan:
+  await: Await
+  transfer: Pay
+  commit: CommitPlan
+sum Outcome:
+  reply: DeskEvent
+  settled: {}
+  refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
+record View:
+  version: Nat
+  state: Ledger
+record Step:
+  outcome: Outcome
+  view: View
+sum Response:
+  resumed: Step
+
+def keepWrite() -> Write:
+  {deposited: EditNat.keep(), held: EditNat.keep(), consumed: EditNat.keep(), refunded: EditNat.keep()}
+
+def writeState(s: DeskState) -> Write:
+  {deposited: EditNat.set(s.deposited), held: EditNat.set(s.held), consumed: EditNat.set(s.consumed), refunded: EditNat.set(s.refunded)}
+
+def serveDesk(s: DeskState, w: Write) -> Activity<Plan, Response, Nat>:
+  if isActive(s.phase) then awaitDesk(s, w) else s.consumed
+
+def awaitDesk(s: DeskState, w: Write) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.await({write: w, on: Source.reply({decider: s.terms.tenant}), patience: 64n})):
+    case resumed(r):
+      match r.outcome:
+        case reply(e): stepDesk(s, reactDesk(s, e))
+        case settled(_): serveDesk(s, keepWrite())
+        case refused(_): serveDesk(s, keepWrite())
+        case unknown(_): serveDesk(s, keepWrite())
+        case timedOut(_): serveDesk(s, keepWrite())
+        case broken(_): serveDesk(s, keepWrite())
+        case upgraded(_): serveDesk(s, keepWrite())
+
+def stepDesk(before: DeskState, tr: DeskTransition) -> Activity<Plan, Response, Nat>:
+  match tr:
+    case refused(unchanged): serveDesk(unchanged, keepWrite())
+    case updated(next): serveDesk(next, writeState(next))
+    case settled(m): settleDesk(before, m)
+
+def settleDesk(before: DeskState, m: SettledMove) -> Activity<Plan, Response, Nat>:
+  match perform(Plan.transfer({to: m.payout.to, amount: m.payout.amount, write: writeState(m.state)})):
+    case resumed(r):
+      match r.outcome:
+        case settled(_): serveDesk(m.state, keepWrite())
+        case refused(_): serveDesk(before, keepWrite())
+        case reply(_): serveDesk(before, keepWrite())
+        case unknown(_): serveDesk(before, keepWrite())
+        case timedOut(_): serveDesk(before, keepWrite())
+        case broken(_): serveDesk(before, keepWrite())
+        case upgraded(_): serveDesk(before, keepWrite())
+
+record DeskOpening:
+  terms: BayTerms
+  deposit: Nat
+  fresh: Bool
+
+def desk(o: DeskOpening) -> Activity<Plan, Response, Nat>:
+  let s = openDesk(o.terms, o.deposit)
+  serveDesk(s, if o.fresh then writeState(s) else keepWrite())

@@ -1,0 +1,120 @@
+edition ObjectiveBend 1
+# Scenario assertions for world/play/CommitReveal.obend.
+import ./CommitReveal.obend as P
+
+def not(b: Bool) -> Bool:
+  if b then false else true
+
+def potConserved(t: P.Transition, before: P.Game) -> Bool:
+  match t:
+    case refused(g): P.phaseOf(g) == P.phaseOf(before) && P.dueOf(g) == P.dueOf(before)
+    case moved(g): not(P.isSettled(g)) && P.pot(P.tableOf(g)) == P.pot(P.tableOf(before))
+    case ended(v): v.toA + v.toB == P.pot(P.tableOf(before))
+
+def demo() -> P.Game:
+  P.start(1n, 2n, 10n, 5n, 0n)
+
+def commitAt(g: P.Game, who: Nat, move: Nat, salt: Nat, now: Nat) -> P.Game:
+  P.stateOf(P.react(g, P.Event.commit({who: who, seal: P.seal(move, salt), now: now})))
+
+def revealAt(g: P.Game, who: Nat, move: Nat, salt: Nat, now: Nat) -> P.Game:
+  P.stateOf(P.react(g, P.Event.reveal({who: who, move: move, salt: salt, now: now})))
+
+def demoAfterA() -> P.Game:
+  commitAt(demo(), 1n, 1n, 7n, 2n)
+
+def demoSealed() -> P.Game:
+  commitAt(demoAfterA(), 2n, 0n, 4n, 4n)
+
+def demoOneOpen() -> P.Game:
+  revealAt(demoSealed(), 1n, 1n, 7n, 6n)
+
+def play2(x: Nat, y: Nat) -> P.Game:
+  revealAt(revealAt(commitAt(commitAt(demo(), 1n, x, 7n, 2n), 2n, y, 4n, 4n), 1n, x, 7n, 6n), 2n, y, 4n, 8n)
+
+def outcome(x: Nat, y: Nat) -> String:
+  P.phaseOf(play2(x, y))
+
+def paidA(g: P.Game) -> Nat:
+  match g:
+    case settled(v): v.toA
+    case commitA(_): 0n
+    case commitB(_): 0n
+    case revealA(_): 0n
+    case revealB(_): 0n
+
+def paidB(g: P.Game) -> Nat:
+  match g:
+    case settled(v): v.toB
+    case commitA(_): 0n
+    case commitB(_): 0n
+    case revealA(_): 0n
+    case revealB(_): 0n
+
+def paperBeatsRock() -> String:
+  outcome(1n, 0n)
+
+def rockLosesToPaper() -> String:
+  outcome(0n, 1n)
+
+def scissorsDraw() -> String:
+  outcome(2n, 2n)
+
+def allPairsPayThePot() -> Bool:
+  let p = P.pot({a: 1n, b: 2n, stake: 10n, window: 5n})
+  paidA(play2(0n, 0n)) + paidB(play2(0n, 0n)) == p && paidA(play2(0n, 1n)) + paidB(play2(0n, 1n)) == p && paidA(play2(0n, 2n)) + paidB(play2(0n, 2n)) == p && paidA(play2(1n, 0n)) + paidB(play2(1n, 0n)) == p && paidA(play2(1n, 1n)) + paidB(play2(1n, 1n)) == p && paidA(play2(1n, 2n)) + paidB(play2(1n, 2n)) == p && paidA(play2(2n, 0n)) + paidB(play2(2n, 0n)) == p && paidA(play2(2n, 1n)) + paidB(play2(2n, 1n)) == p && paidA(play2(2n, 2n)) + paidB(play2(2n, 2n)) == p
+
+def winnerTakesThePot() -> Nat:
+  paidA(play2(1n, 0n))
+
+def loserGetsNothing() -> Nat:
+  paidB(play2(1n, 0n))
+
+def drawRefundsBoth() -> Bool:
+  paidA(play2(2n, 2n)) == 10n && paidB(play2(2n, 2n)) == 10n
+
+def outOfTurnRefused() -> Bool:
+  P.wasRefused(P.react(demo(), P.Event.commit({who: 2n, seal: 12n, now: 2n}))) && P.wasRefused(P.react(demoAfterA(), P.Event.reveal({who: 1n, move: 1n, salt: 7n, now: 3n}))) && P.wasRefused(P.react(demoSealed(), P.Event.reveal({who: 2n, move: 0n, salt: 4n, now: 5n}))) && P.wasRefused(P.react(demoAfterA(), P.Event.commit({who: 1n, seal: 22n, now: 3n}))) && P.wasRefused(P.react(demoOneOpen(), P.Event.reveal({who: 1n, move: 1n, salt: 7n, now: 7n})))
+
+def strangerRefused() -> Bool:
+  P.wasRefused(P.react(demo(), P.Event.commit({who: 9n, seal: 22n, now: 2n}))) && P.wasRefused(P.react(demoSealed(), P.Event.reveal({who: 9n, move: 1n, salt: 7n, now: 6n}))) && P.wasRefused(P.react(demoOneOpen(), P.Event.reveal({who: 9n, move: 0n, salt: 4n, now: 8n})))
+
+def mismatchRefused() -> Bool:
+  P.wasRefused(P.react(demoSealed(), P.Event.reveal({who: 1n, move: 2n, salt: 7n, now: 6n}))) && P.wasRefused(P.react(demoSealed(), P.Event.reveal({who: 1n, move: 1n, salt: 8n, now: 6n}))) && P.wasRefused(P.react(demoOneOpen(), P.Event.reveal({who: 2n, move: 1n, salt: 4n, now: 8n}))) && P.phaseOf(revealAt(demoSealed(), 1n, 2n, 7n, 6n)) == "revealA" && P.phaseOf(revealAt(revealAt(demoSealed(), 1n, 2n, 7n, 6n), 1n, 1n, 7n, 7n)) == "revealB"
+
+def outOfRangeMoveRefused() -> Bool:
+  P.seal(3n, 7n) == P.seal(0n, 8n) && P.wasRefused(P.react(commitAt(commitAt(demo(), 1n, 0n, 8n, 2n), 2n, 0n, 4n, 4n), P.Event.reveal({who: 1n, move: 3n, salt: 7n, now: 6n})))
+
+def lateMoveRefused() -> Bool:
+  P.wasRefused(P.react(demo(), P.Event.commit({who: 1n, seal: 22n, now: 6n}))) && P.wasRefused(P.react(demoAfterA(), P.Event.commit({who: 2n, seal: 12n, now: 8n}))) && P.wasRefused(P.react(demoSealed(), P.Event.reveal({who: 1n, move: 1n, salt: 7n, now: 10n}))) && P.wasRefused(P.react(demoOneOpen(), P.Event.reveal({who: 2n, move: 0n, salt: 4n, now: 12n})))
+
+def lastMomentAllowed() -> Bool:
+  not(P.wasRefused(P.react(demo(), P.Event.commit({who: 1n, seal: 22n, now: 5n})))) && not(P.wasRefused(P.react(demoOneOpen(), P.Event.reveal({who: 2n, move: 0n, salt: 4n, now: 11n}))))
+
+def earlyTimeoutRefused() -> Bool:
+  P.wasRefused(P.react(demo(), P.Event.timeout({now: 5n}))) && P.wasRefused(P.react(demoSealed(), P.Event.timeout({now: 9n}))) && P.wasRefused(P.react(demoOneOpen(), P.Event.timeout({now: 11n}))) && not(P.wasRefused(P.react(demoOneOpen(), P.Event.timeout({now: 12n}))))
+
+def commitLapseVoids() -> Bool:
+  P.phaseOf(P.stateOf(P.react(demo(), P.Event.timeout({now: 6n})))) == "voided" && P.phaseOf(P.stateOf(P.react(demoAfterA(), P.Event.timeout({now: 8n})))) == "voided" && paidA(P.stateOf(P.react(demoAfterA(), P.Event.timeout({now: 8n})))) == 10n && paidB(P.stateOf(P.react(demoAfterA(), P.Event.timeout({now: 8n})))) == 10n
+
+def aRevealLapseForfeits() -> String:
+  P.phaseOf(P.stateOf(P.react(demoSealed(), P.Event.timeout({now: 10n}))))
+
+def bRevealLapseForfeits() -> String:
+  P.phaseOf(P.stateOf(P.react(demoOneOpen(), P.Event.timeout({now: 12n}))))
+
+def forfeitPaysTheOther() -> Nat:
+  paidA(P.stateOf(P.react(demoOneOpen(), P.Event.timeout({now: 12n}))))
+
+def walkingAwayNeverPays() -> Bool:
+  paidB(P.stateOf(P.react(demoOneOpen(), P.Event.timeout({now: 12n})))) == paidB(play2(1n, 0n)) && paidB(P.stateOf(P.react(demoOneOpen(), P.Event.timeout({now: 12n})))) == 0n
+
+def settledIsFinal() -> Bool:
+  let done = play2(1n, 0n)
+  P.wasRefused(P.react(done, P.Event.commit({who: 1n, seal: 22n, now: 9n}))) && P.wasRefused(P.react(done, P.Event.reveal({who: 1n, move: 1n, salt: 7n, now: 9n}))) && P.wasRefused(P.react(done, P.Event.timeout({now: 99n})))
+
+def lawFrom(g: P.Game) -> Bool:
+  potConserved(P.react(g, P.Event.commit({who: 1n, seal: 22n, now: 3n})), g) && potConserved(P.react(g, P.Event.commit({who: 2n, seal: 12n, now: 4n})), g) && potConserved(P.react(g, P.Event.reveal({who: 1n, move: 1n, salt: 7n, now: 6n})), g) && potConserved(P.react(g, P.Event.reveal({who: 2n, move: 0n, salt: 4n, now: 8n})), g) && potConserved(P.react(g, P.Event.timeout({now: 50n})), g) && potConserved(P.react(g, P.Event.timeout({now: 1n})), g)
+
+def potLawHolds() -> Bool:
+  lawFrom(demo()) && lawFrom(demoAfterA()) && lawFrom(demoSealed()) && lawFrom(demoOneOpen()) && lawFrom(play2(1n, 0n)) && lawFrom(P.stateOf(P.react(demoOneOpen(), P.Event.timeout({now: 12n}))))

@@ -1,24 +1,13 @@
 edition ObjectiveBend 1
-# Source-authored service commons over ordinary world state, canonical money,
-# admitted room request rows and activity pending/outcome identities. These
-# typed proposals are NOT native authority, provider truth or receipts.
+# ResidentServiceCommons: service commons lifecycle over ordinary world state,
+# canonical money, admitted room request rows, and activity pending/outcome
+# identities.
 #
-# The contract (ServiceCommons STATUS): quote -> reserve (escrow + capacity +
-# held-state, jointly) -> start (retain the exact native operation BEFORE the
-# provider call) -> uncertain-retain (the same operation; no redispatch, no
-# timeout refund) -> completion (retained, no monetary effect) -> recipient
-# acceptance (exact output/criterion/reviewer) -> payout + capacity release +
-# recipient return commitment. Sponsorship authorizes bounded spending under
-# its policy root; it does not attest provider claims or factual answer truth.
-#
-# Port of world/Workshop/ResidentServiceCommons.bend (+ ServiceCommonsDemonstration)
-# in two layers:
-#   1. Pure transition functions over a sum-typed State (this file, first half).
-#   2. The same lifecycle as an Activity that yields one Plan per step and is
-#      resumed with a typed Response (second half).
-# Byte lists are Strings. The Gen-1 `Book.Transfer` shape (S1 owns the book
-# port) is declared locally as `Transfer`; unify at integration.
-import ./NatOrder.obend as Order
+# Quote -> reserve (escrow + capacity + held-state, jointly) -> start (retain
+# exact native operation BEFORE provider call) -> uncertain-retain (same
+# operation; no redispatch, no timeout refund) -> completion (retained, no
+# monetary effect) -> recipient acceptance (exact output/criterion/reviewer) ->
+# payout + capacity release + recipient return commitment.
 
 record Transfer:
   source: Nat
@@ -67,9 +56,6 @@ record Request:
   budget: Nat
   payment: Payment
 
-# Claim/evidence remains an authored provider assertion; source identity does
-# not prove the capability advertised. Current native provider authority is
-# separate.
 record Offer:
   identity: Identity
   provider: String
@@ -79,8 +65,6 @@ record Offer:
   expires: Nat
   claim: String
 
-# A sponsor rule is an exact bounded spending endorsement, NOT a statement that
-# the provider's claim or the future answer is true.
 record Sponsorship:
   identity: Identity
   provider: String
@@ -94,10 +78,6 @@ record Reservation:
   sponsorship: Sponsorship
   amount: Nat
 
-# The existing public resident request row identity: request CELL + SEQUENCE,
-# the assigned resident and the EXACT request/method/input/context binding.
-# identity equals the original native operation bytes, not a fresh wrapper id.
-# The native operation identity is retained through uncertain work.
 record Run:
   identity: String
   requestCell: Nat
@@ -148,8 +128,6 @@ sum State:
   finished: Settlement
   cancelled: Reservation
 
-# Logical effects are lowered ONLY by generic native Plan/Activity/book bridges.
-# Neither request identity nor these constructors can select a capability.
 record MoneyEffect:
   book: Nat
   expectedRoot: String
@@ -198,8 +176,6 @@ sum Transition:
   refused: State
   proposed: Proposal
 
-# ---- equality (the Gen-1 method_eq / identity_eq / pin_eq / run_eq and the rest) --
-
 def methodEq(a: Method, b: Method) -> Bool:
   a.artifact == b.artifact && a.program == b.program && a.exportName == b.exportName && a.inputSchema == b.inputSchema && a.resultSchema == b.resultSchema
 
@@ -212,63 +188,6 @@ def pinEq(a: Pin, b: Pin) -> Bool:
 def runEq(a: Run, b: Run) -> Bool:
   a.identity == b.identity && a.requestCell == b.requestCell && a.sequence == b.sequence && a.assignedResident == b.assignedResident && a.operation == b.operation && pinEq(a.activity, b.activity) && a.ordinal == b.ordinal && identityEq(a.binding, b.binding)
 
-def paymentEq(a: Payment, b: Payment) -> Bool:
-  a.book == b.book && a.root == b.root && a.payer == b.payer && a.escrow == b.escrow && a.providerAccount == b.providerAccount && a.asset == b.asset && a.available == b.available
-
-def requestEq(a: Request, b: Request) -> Bool:
-  identityEq(a.identity, b.identity) && pinEq(a.residentHome, b.residentHome) && pinEq(a.room, b.room) && a.consumer == b.consumer && a.recipient == b.recipient && a.audience == b.audience && a.keyEpoch == b.keyEpoch && a.acceptor == b.acceptor && methodEq(a.criterion, b.criterion) && a.dispatchDeadline == b.dispatchDeadline && a.units == b.units && a.budget == b.budget && paymentEq(a.payment, b.payment)
-
-def offerEq(a: Offer, b: Offer) -> Bool:
-  identityEq(a.identity, b.identity) && a.provider == b.provider && pinEq(a.providerHome, b.providerHome) && a.capacity == b.capacity && a.rate == b.rate && a.expires == b.expires && a.claim == b.claim
-
-def sponsorshipEq(a: Sponsorship, b: Sponsorship) -> Bool:
-  identityEq(a.identity, b.identity) && a.provider == b.provider && pinEq(a.policy, b.policy) && a.maxAmount == b.maxAmount && a.approved == b.approved
-
-def reservationEq(a: Reservation, b: Reservation) -> Bool:
-  requestEq(a.request, b.request) && offerEq(a.offer, b.offer) && sponsorshipEq(a.sponsorship, b.sponsorship) && a.amount == b.amount
-
-def completionEq(a: Completion, b: Completion) -> Bool:
-  runEq(a.run, b.run) && a.provider == b.provider && a.output == b.output && a.recipient == b.recipient && a.audience == b.audience && a.keyEpoch == b.keyEpoch && pinEq(a.receipt, b.receipt)
-
-def reviewEq(a: Review, b: Review) -> Bool:
-  a.runIdentity == b.runIdentity && a.output == b.output && methodEq(a.criterion, b.criterion) && a.reviewer == b.reviewer && a.accepted == b.accepted
-
-def transferEq(a: Transfer, b: Transfer) -> Bool:
-  a.source == b.source && a.destination == b.destination && a.asset == b.asset && a.amount == b.amount
-
-# Zero values: a state that lacks a component compares its component against
-# one of these. Two states with the same phase lack the same components, so
-# comparing every component is exact.
-def blankMethod() -> Method:
-  {artifact: "", program: "", exportName: "", inputSchema: "", resultSchema: ""}
-
-def blankIdentity() -> Identity:
-  {request: "", method: blankMethod(), input: "", context: ""}
-
-def blankPin() -> Pin:
-  {resource: 0n, root: ""}
-
-def blankRequest() -> Request:
-  {identity: blankIdentity(), residentHome: blankPin(), room: blankPin(), consumer: "", recipient: "", audience: "", keyEpoch: "", acceptor: "", criterion: blankMethod(), dispatchDeadline: 0n, units: 0n, budget: 0n, payment: {book: 0n, root: "", payer: 0n, escrow: 0n, providerAccount: 0n, asset: 0n, available: 0n}}
-
-def blankOffer() -> Offer:
-  {identity: blankIdentity(), provider: "", providerHome: blankPin(), capacity: 0n, rate: 0n, expires: 0n, claim: ""}
-
-def blankSponsorship() -> Sponsorship:
-  {identity: blankIdentity(), provider: "", policy: blankPin(), maxAmount: 0n, approved: false}
-
-def blankReservation() -> Reservation:
-  {request: blankRequest(), offer: blankOffer(), sponsorship: blankSponsorship(), amount: 0n}
-
-def blankRun() -> Run:
-  {identity: "", requestCell: 0n, sequence: 0n, assignedResident: 0n, operation: "", activity: blankPin(), ordinal: 0n, binding: blankIdentity()}
-
-def blankCompletion() -> Completion:
-  {run: blankRun(), provider: "", output: "", recipient: "", audience: "", keyEpoch: "", receipt: blankPin()}
-
-def blankReview() -> Review:
-  {runIdentity: "", output: "", criterion: blankMethod(), reviewer: "", accepted: false}
-
 def phaseOf(s: State) -> String:
   match s:
     case vacant(_): "vacant"
@@ -278,198 +197,6 @@ def phaseOf(s: State) -> String:
     case delivered(_): "delivered"
     case finished(_): "finished"
     case cancelled(_): "cancelled"
-
-def reservationOf(s: State) -> Reservation:
-  match s:
-    case vacant(_): blankReservation()
-    case held(r): r
-    case running(a): a.reservation
-    case uncertain(a): a.reservation
-    case delivered(d): d.reservation
-    case finished(f): f.reservation
-    case cancelled(r): r
-
-def runOf(s: State) -> Run:
-  match s:
-    case vacant(_): blankRun()
-    case held(_): blankRun()
-    case running(a): a.run
-    case uncertain(a): a.run
-    case delivered(d): d.run
-    case finished(f): f.run
-    case cancelled(_): blankRun()
-
-def completionOf(s: State) -> Completion:
-  match s:
-    case vacant(_): blankCompletion()
-    case held(_): blankCompletion()
-    case running(_): blankCompletion()
-    case uncertain(_): blankCompletion()
-    case delivered(d): d.completion
-    case finished(f): f.completion
-    case cancelled(_): blankCompletion()
-
-def reviewOf(s: State) -> Review:
-  match s:
-    case vacant(_): blankReview()
-    case held(_): blankReview()
-    case running(_): blankReview()
-    case uncertain(_): blankReview()
-    case delivered(_): blankReview()
-    case finished(f): f.review
-    case cancelled(_): blankReview()
-
-def stateEq(a: State, b: State) -> Bool:
-  phaseOf(a) == phaseOf(b) && reservationEq(reservationOf(a), reservationOf(b)) && runEq(runOf(a), runOf(b)) && completionEq(completionOf(a), completionOf(b)) && reviewEq(reviewOf(a), reviewOf(b))
-
-def effectKind(e: Effect) -> String:
-  match e:
-    case nothing(_): "nothing"
-    case money(_): "money"
-    case capacity(_): "capacity"
-    case publishRequest(_): "publishRequest"
-    case awaitExisting(_): "awaitExisting"
-    case retainCompletion(_): "retainCompletion"
-    case returnResult(_): "returnResult"
-
-def blankMoney() -> MoneyEffect:
-  {book: 0n, expectedRoot: "", transfer: {source: 0n, destination: 0n, asset: 0n, amount: 0n}}
-
-def blankCapacity() -> CapacityEffect:
-  {home: blankPin(), before: 0n, after: 0n}
-
-def blankPublish() -> PublishEffect:
-  {home: blankPin(), room: blankPin(), request: blankRequest(), run: blankRun()}
-
-def blankRetain() -> RetainEffect:
-  {run: blankRun(), completion: blankCompletion()}
-
-def blankReturn() -> ReturnEffect:
-  {recipient: "", audience: "", keyEpoch: "", output: ""}
-
-def moneyOf(e: Effect) -> MoneyEffect:
-  match e:
-    case nothing(_): blankMoney()
-    case money(m): m
-    case capacity(_): blankMoney()
-    case publishRequest(_): blankMoney()
-    case awaitExisting(_): blankMoney()
-    case retainCompletion(_): blankMoney()
-    case returnResult(_): blankMoney()
-
-def capacityOf(e: Effect) -> CapacityEffect:
-  match e:
-    case nothing(_): blankCapacity()
-    case money(_): blankCapacity()
-    case capacity(c): c
-    case publishRequest(_): blankCapacity()
-    case awaitExisting(_): blankCapacity()
-    case retainCompletion(_): blankCapacity()
-    case returnResult(_): blankCapacity()
-
-def publishOf(e: Effect) -> PublishEffect:
-  match e:
-    case nothing(_): blankPublish()
-    case money(_): blankPublish()
-    case capacity(_): blankPublish()
-    case publishRequest(p): p
-    case awaitExisting(_): blankPublish()
-    case retainCompletion(_): blankPublish()
-    case returnResult(_): blankPublish()
-
-def awaitedOf(e: Effect) -> Run:
-  match e:
-    case nothing(_): blankRun()
-    case money(_): blankRun()
-    case capacity(_): blankRun()
-    case publishRequest(_): blankRun()
-    case awaitExisting(r): r
-    case retainCompletion(_): blankRun()
-    case returnResult(_): blankRun()
-
-def retainOf(e: Effect) -> RetainEffect:
-  match e:
-    case nothing(_): blankRetain()
-    case money(_): blankRetain()
-    case capacity(_): blankRetain()
-    case publishRequest(_): blankRetain()
-    case awaitExisting(_): blankRetain()
-    case retainCompletion(r): r
-    case returnResult(_): blankRetain()
-
-def returnOf(e: Effect) -> ReturnEffect:
-  match e:
-    case nothing(_): blankReturn()
-    case money(_): blankReturn()
-    case capacity(_): blankReturn()
-    case publishRequest(_): blankReturn()
-    case awaitExisting(_): blankReturn()
-    case retainCompletion(_): blankReturn()
-    case returnResult(r): r
-
-def effectEq(a: Effect, b: Effect) -> Bool:
-  effectKind(a) == effectKind(b) && moneyEq(moneyOf(a), moneyOf(b)) && capacityEq(capacityOf(a), capacityOf(b)) && publishEq(publishOf(a), publishOf(b)) && runEq(awaitedOf(a), awaitedOf(b)) && retainEq(retainOf(a), retainOf(b)) && returnEq(returnOf(a), returnOf(b))
-
-def moneyEq(a: MoneyEffect, b: MoneyEffect) -> Bool:
-  a.book == b.book && a.expectedRoot == b.expectedRoot && transferEq(a.transfer, b.transfer)
-
-def capacityEq(a: CapacityEffect, b: CapacityEffect) -> Bool:
-  pinEq(a.home, b.home) && a.before == b.before && a.after == b.after
-
-def publishEq(a: PublishEffect, b: PublishEffect) -> Bool:
-  pinEq(a.home, b.home) && pinEq(a.room, b.room) && requestEq(a.request, b.request) && runEq(a.run, b.run)
-
-def retainEq(a: RetainEffect, b: RetainEffect) -> Bool:
-  runEq(a.run, b.run) && completionEq(a.completion, b.completion)
-
-def returnEq(a: ReturnEffect, b: ReturnEffect) -> Bool:
-  a.recipient == b.recipient && a.audience == b.audience && a.keyEpoch == b.keyEpoch && a.output == b.output
-
-def effectsEq(xs: Effects, ys: Effects) -> Bool:
-  match xs:
-    case none(_): effectsIsEmpty(ys)
-    case more(m): effectsMoreEq(m.head, m.tail, ys)
-
-def effectsMoreEq(head: Effect, tail: Effects, ys: Effects) -> Bool:
-  match ys:
-    case none(_): false
-    case more(n): effectEq(head, n.head) && effectsEq(tail, n.tail)
-
-def effectsIsEmpty(xs: Effects) -> Bool:
-  match xs:
-    case none(_): true
-    case more(_): false
-
-def effectCount(xs: Effects) -> Nat:
-  match xs:
-    case none(_): 0n
-    case more(m): 1n + effectCount(m.tail)
-
-def transitionEq(a: Transition, b: Transition) -> Bool:
-  match a:
-    case refused(x): refusedEq(x, b)
-    case proposed(p): proposedEq(p, b)
-
-def refusedEq(x: State, b: Transition) -> Bool:
-  match b:
-    case refused(y): stateEq(x, y)
-    case proposed(_): false
-
-def proposedEq(p: Proposal, b: Transition) -> Bool:
-  match b:
-    case refused(_): false
-    case proposed(q): stateEq(p.expected, q.expected) && stateEq(p.successor, q.successor) && effectsEq(p.effects, q.effects)
-
-def isRefused(t: Transition) -> Bool:
-  match t:
-    case refused(_): true
-    case proposed(_): false
-
-# The refused transition returns the state it was given, exactly.
-def refusedUnchanged(t: Transition, before: State) -> Bool:
-  match t:
-    case refused(x): stateEq(x, before)
-    case proposed(_): false
 
 def one(e: Effect) -> Effects:
   Effects.more({head: e, tail: Effects.none()})
@@ -489,23 +216,21 @@ def reserveAmount(request: Request, offer: Offer) -> Nat:
   offer.rate * request.units
 
 def reserveAllowed(request: Request, offer: Offer, sponsorship: Sponsorship, now: Nat) -> Bool:
-  sponsorship.approved && identityEq(request.identity, offer.identity) && identityEq(request.identity, sponsorship.identity) && offer.provider == sponsorship.provider && Order.less(0n, request.units) && Order.lessOrEqual(request.units, offer.capacity) && Order.lessOrEqual(now, offer.expires) && Order.lessOrEqual(offer.expires, request.dispatchDeadline) && Order.lessOrEqual(reserveAmount(request, offer), request.budget) && Order.lessOrEqual(reserveAmount(request, offer), sponsorship.maxAmount) && Order.lessOrEqual(reserveAmount(request, offer), request.payment.available) && Order.not(request.payment.payer == request.payment.escrow)
+  sponsorship.approved && identityEq(request.identity, offer.identity) && identityEq(request.identity, sponsorship.identity) && offer.provider == sponsorship.provider && 0n < request.units && request.units <= offer.capacity && now <= offer.expires && offer.expires <= request.dispatchDeadline && reserveAmount(request, offer) <= request.budget && reserveAmount(request, offer) <= sponsorship.maxAmount && reserveAmount(request, offer) <= request.payment.available && request.payment.payer != request.payment.escrow
 
 def escrowEffect(request: Request, amount: Nat) -> Effect:
   Effect.money({book: request.payment.book, expectedRoot: request.payment.root, transfer: {source: request.payment.payer, destination: request.payment.escrow, asset: request.payment.asset, amount: amount}})
 
 def holdCapacityEffect(request: Request, offer: Offer) -> Effect:
-  Effect.capacity({home: offer.providerHome, before: offer.capacity, after: Order.minus(offer.capacity, request.units)})
+  Effect.capacity({home: offer.providerHome, before: offer.capacity, after: offer.capacity - request.units})
 
 def reserve(request: Request, offer: Offer, sponsorship: Sponsorship, now: Nat) -> Transition:
   if reserveAllowed(request, offer, sponsorship, now) then proposal(State.vacant(), State.held({request: request, offer: offer, sponsorship: sponsorship, amount: reserveAmount(request, offer)}), two(escrowEffect(request, reserveAmount(request, offer)), holdCapacityEffect(request, offer))) else Transition.refused(State.vacant())
 
 # ---- start: retain the exact pending operation BEFORE dispatch ------------------
-# Starting does not claim the physical provider call occurred. No checkpoint is
-# client supplied.
 
 def startAllowed(reservation: Reservation, run: Run, now: Nat) -> Bool:
-  Order.lessOrEqual(now, reservation.request.dispatchDeadline) && identityEq(reservation.request.identity, run.binding) && run.identity == run.operation
+  now <= reservation.request.dispatchDeadline && identityEq(reservation.request.identity, run.binding) && run.identity == run.operation
 
 def startHeld(reservation: Reservation, run: Run, now: Nat) -> Transition:
   if startAllowed(reservation, run, now) then proposal(State.held(reservation), State.running({reservation: reservation, run: run}), one(Effect.publishRequest({home: reservation.request.residentHome, room: reservation.request.room, request: reservation.request, run: run}))) else Transition.refused(State.held(reservation))
@@ -521,8 +246,6 @@ def start(state: State, run: Run, now: Nat) -> Transition:
     case cancelled(_): Transition.refused(state)
 
 # ---- uncertain: retain the exact run; observe, never redispatch -----------------
-# Recovery requests an observation of the existing operation, never a second
-# dispatch and never timeout-driven payout or refund.
 
 def uncertain(state: State) -> Transition:
   match state:
@@ -535,8 +258,6 @@ def uncertain(state: State) -> Transition:
     case cancelled(_): Transition.refused(state)
 
 # ---- deliver: retain the observed completion, with no monetary effect -----------
-# The completion is an admitted native observation bound to the exact pending
-# operation; a provider's opaque uploaded receipt bytes are not that observation.
 
 def completionMatches(request: Request, offer: Offer, run: Run, completion: Completion) -> Bool:
   runEq(run, completion.run) && offer.provider == completion.provider && request.recipient == completion.recipient && request.audience == completion.audience && request.keyEpoch == completion.keyEpoch
@@ -555,9 +276,6 @@ def deliver(state: State, completion: Completion) -> Transition:
     case cancelled(_): Transition.refused(state)
 
 # ---- accept: the recipient's review proposes payout, release and return ---------
-# Capacity return uses a fresh admitted provider-home snapshot, not the original
-# now-stale reservation root. The exact same native intent installs payment,
-# phase and return commitment; a source proposal alone authorizes none of them.
 
 def reviewMatches(request: Request, run: Run, completion: Completion, review: Review) -> Bool:
   run.identity == review.runIdentity && completion.output == review.output && methodEq(request.criterion, review.criterion) && request.acceptor == review.reviewer && review.accepted
@@ -588,11 +306,9 @@ def accept(state: State, review: Review, capacityHome: Pin, capacity: Nat, curre
     case cancelled(_): Transition.refused(state)
 
 # ---- cancel: only an unstarted reservation may refund ---------------------------
-# Started or uncertain work requires exact native reconciliation; elapsed time
-# is not proof of non-execution.
 
 def cancelAllowed(reservation: Reservation, actor: String, now: Nat, capacityHome: Pin) -> Bool:
-  reservation.offer.providerHome.resource == capacityHome.resource && (Order.less(reservation.request.dispatchDeadline, now) || actor == reservation.request.consumer)
+  reservation.offer.providerHome.resource == capacityHome.resource && (reservation.request.dispatchDeadline < now || actor == reservation.request.consumer)
 
 def refundEffect(reservation: Reservation, currentBookRoot: String) -> Effect:
   Effect.money({book: reservation.request.payment.book, expectedRoot: currentBookRoot, transfer: {source: reservation.request.payment.escrow, destination: reservation.request.payment.payer, asset: reservation.request.payment.asset, amount: reservation.amount}})
@@ -613,17 +329,10 @@ def cancel(state: State, actor: String, now: Nat, capacityHome: Pin, capacity: N
     case finished(_): Transition.refused(state)
     case cancelled(_): Transition.refused(state)
 
-# The finite-Bool continuation entry. Completion data comes from the separately
-# admitted result slot bound to the pending operation. A true status only
-# retains the completion; it cannot bypass the recipient's review and payment.
 def resumeAfterStatus(state: State, completion: Completion, success: Bool) -> Transition:
   if success then deliver(state, completion) else uncertain(state)
 
 # ---- activity link (ServiceCommonsFaces.activity_link) --------------------------
-# The same run link survives uncertain and delivered state: an observation of the
-# existing activity, never a fresh one. Surface rows (domain_face, source_face,
-# activity_face) are NOT ported: they need the WorldSurface records and sums in
-# Objective Bend (docs/OBJECTIVE-BEND-SURFACE.md), which do not exist yet.
 
 record ActivityRef:
   run: Run
@@ -649,26 +358,14 @@ def activityLink(state: State) -> ActivityLink:
     case finished(f): existingOf(f.run)
     case cancelled(_): ActivityLink.noActivity()
 
-def linkedRun(l: ActivityLink) -> Run:
-  match l:
-    case noActivity(_): blankRun()
-    case existing(x): x.run
-
 def hasLink(l: ActivityLink) -> Bool:
   match l:
     case noActivity(_): false
     case existing(_): true
 
 # ---- the lifecycle as an Activity on the kernel (Kernel/ObjectiveActivity) -------
-# A resident serves one request. It yields the kernel's `await {write, on, patience}` (the keeper,
-# one decider, relays each typed Event); the pure transition above decides. A refusal yields
-# nothing new (the activity awaits again, state unchanged); a proposal yields ONE `commit {write}`:
-# the admission is WRITTEN into the object's declared state (`Admitted`: the successor's phase and
-# the count of admissions) through the object's law, decided at the yield (`settled`; a law that
-# refuses the write refuses the whole turn, nothing is written and the activity stays at its yield).
-# The Plan is derived from the same Transition value the pure layer returns, so there is one
-# mechanism. The proposal's money effects are not carried by the commit: moving value is a
-# `transfer` Plan's, one recipient per yield (an action list is not a kernel Plan).
+
+law admissions_monotone: request.turn in [1, 4] or monotone(admissions)
 
 record ReserveInput:
   request: Request
@@ -794,8 +491,6 @@ def react(state: State, e: Event) -> Transition:
     case reviewed(i): accept(state, i.review, i.capacityHome, i.capacity, i.bookRoot)
     case cancelRequested(i): cancel(state, i.actor, i.now, i.capacityHome, i.capacity, i.bookRoot)
 
-# The result is the terminal phase ("finished" or "cancelled"). Every unfolding past a yield costs
-# one admitted turn; an unanswered await (unknown, timed out, broken) waits again.
 def serve(o: Opening, state: State, w: Write) -> Activity<Plan, Response, String>:
   match perform(Plan.await({write: w, on: Source.reply({decider: o.keeper}), patience: 64n})):
     case resumed(r):

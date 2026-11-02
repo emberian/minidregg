@@ -254,7 +254,7 @@ def lowerDecoded (modules : List SourceModule) (decoded : List ObjectiveBendElab
       | _ => "dregg.objective-bend.argument-values.v1"
   checkTemplates output (entry.name ++ "." ++ entryDefinition) modules typeFuel
   for (m, index) in decoded.zipIdx do
-    if index != entryModule && !m.laws.isEmpty then
+    if mode == "definition" && index != entryModule && !m.laws.isEmpty then
       throw (elaborationRefusal ("a law belongs to the package's entry module; " ++ m.name ++
         " is imported and declares " ++ toString m.laws.length ++ " law(s)"))
   let laws := (decoded[entryModule]?.map (·.laws)).getD []
