@@ -312,12 +312,13 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["grain"] => apps::grains(site),
         ["grain", n] => apps::grain(site, n),
         ["grain", n, "pane"] => apps::pane(site, n),
-        ["bend"] => programs::index(site),
-        ["bend", "await"] => match (query(target, "object"), query(target, "transaction")) {
+        ["bend"] | ["programs"] => programs::index(site),
+        ["bend", "await"] | ["programs", "await"] => match (query(target, "object"), query(target, "transaction")) {
             (Some(object), Some(transaction)) => programs::awaits(site, object.trim(), transaction.trim()),
             _ => simple(400, "Programs", "give an object cell and a birth transaction"),
         },
-        ["bend", "await", object, transaction] => programs::awaits(site, object, transaction),
+        ["bend", "await", object, transaction] | ["programs", "await", object, transaction] => programs::awaits(site, object, transaction),
+        ["programs", slug] | ["bend", slug] => programs::world_program(site, slug),
         ["story"] => stories::page(site),
         ["verb"] => verbs::index(site),
         ["verb", name] => verbs::page(site, name, target),
@@ -1344,13 +1345,80 @@ fn room_new_form() -> String {
 
 // ---------------------------------------------------------------- POST
 
+fn surface_post(site: &Site, form: &std::collections::BTreeMap<String, String>) -> Page {
+    let field = |key: &str| form.get(key).map(String::as_str).unwrap_or("").trim().to_owned();
+    let surface = field("surface");
+    let turn = field("turn");
+    let spec = match super::world::compile_surface_turn(&surface, &turn, form) {
+        Ok(spec) => spec,
+        Err(err) => return simple(400, "Surface turn", &err),
+    };
+    let id = form_attempt(form);
+    let title = format!("{surface}: {turn}");
+    match (surface.as_str(), turn.as_str()) {
+        ("objective-activity", "spawn") => {
+            let mut line = format!(
+                "bend run {} {} --input {}",
+                quote(spec["bend"].as_str().unwrap_or("")),
+                quote(spec["object"].as_str().unwrap_or("")),
+                quote(&spec["input"].to_string())
+            );
+            if let Some(seed) = spec.get("seed") {
+                line.push_str(&format!(" --seed {}", quote(&seed.to_string())));
+            }
+            if let Some(dep) = spec["deposit"].as_str() {
+                line.push_str(&format!(" --deposit {}", quote(dep)));
+            }
+            act(site, &title, vec![line], "", &[("programs", "/bend")])
+        }
+        ("objective-activity", "reply") => {
+            let answer_json = spec["answer"].to_string();
+            let arg = match text_file(site, &id, &answer_json) {
+                Some(file) => format!("@{file}"),
+                None => quote(&answer_json),
+            };
+            let line = format!("bend answer {} {arg}", quote(spec["slot"].as_str().unwrap_or("")));
+            act(site, &title, vec![line], "", &[("programs", "/bend")])
+        }
+        ("objective-send", "deliver") => {
+            let mut line = format!(
+                "bend deliver {} {}",
+                quote(spec["object"].as_str().unwrap_or("")),
+                quote(spec["transaction"].as_str().unwrap_or(""))
+            );
+            if let Some(acc) = spec["account"].as_str() {
+                line.push_str(&format!(" --account {}", quote(acc)));
+            }
+            act(site, &title, vec![line], "", &[("programs", "/bend")])
+        }
+        _ => {
+            let body_json = spec.to_string();
+            let arg = match text_file(site, &id, &body_json) {
+                Some(file) => format!("@{file}"),
+                None => quote(&body_json),
+            };
+            act(
+                site,
+                &title,
+                vec![format!("propose {id} {arg}"), format!("submit {id}")],
+                &id,
+                &[("programs", "/bend")],
+            )
+        }
+    }
+}
+
 fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
     let form = match editor::form(body) {
         Ok(form) => form,
         Err(e) => return simple(400, "Form", &e),
     };
     let field = |key: &str| form.get(key).map(String::as_str).unwrap_or("").trim().to_owned();
+    if !field("surface").is_empty() && !field("turn").is_empty() {
+        return surface_post(site, &form);
+    }
     match parts {
+        ["act", "surface"] => surface_post(site, &form),
         // The editor and creation forms keep their own pinned-diff path.
         ["doc", name, "edit", id] => editor::post(site, name, id, body, false),
         ["doc", name, "edit", id, "lookup"] => editor::post(site, name, id, body, true),
@@ -1559,7 +1627,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             }
             act(site, "Revoke", vec![line, format!("submit {id}")], &id, &[("grants", "/grants")])
         }
-        ["laws", "check"] => {
+        ["laws", "check"] | ["act", "law", "check"] => {
             let preset = field("preset");
             let clauses = field("clauses");
             let ref_name = field("ref");
@@ -1581,7 +1649,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
                 }
             }
         }
-        ["laws", "test-turn"] => {
+        ["laws", "test-turn"] | ["act", "law", "test-turn"] => {
             let mode = field("mode");
             let ref_name = field("ref");
             if mode == "can-any" {
@@ -1663,7 +1731,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
                 }
             }
         }
-        ["laws", "install"] => {
+        ["laws", "install"] | ["act", "law", "install"] => {
             let id = form_attempt(&form);
             let clauses = field("clauses");
             let Some(file) = text_file(site, &id, &clauses) else { return simple(400, "Laws", "clauses must be 1..4096 bytes") };

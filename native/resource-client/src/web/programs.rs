@@ -17,12 +17,13 @@ fn decimal(text: &str) -> bool {
     !text.is_empty() && text.len() <= 80 && text.bytes().all(|b| b.is_ascii_digit()) && (text == "0" || !text.starts_with('0'))
 }
 
-/// Split `text` on commas or newlines at top level (outside `(...)`, `{...}`, and `"..."`).
+/// Split `text` on commas or newlines at top level (outside `(...)`, `{...}`, `[...]`, and `"..."`).
 pub(crate) fn split_top_level(text: &str) -> Vec<String> {
     let mut items = Vec::new();
     let mut current = String::new();
     let mut paren = 0usize;
     let mut brace = 0usize;
+    let mut bracket = 0usize;
     let mut quoted = false;
     for ch in text.chars() {
         match ch {
@@ -46,7 +47,15 @@ pub(crate) fn split_top_level(text: &str) -> Vec<String> {
                 brace = brace.saturating_sub(1);
                 current.push(ch);
             }
-            ',' | '\n' | ';' if !quoted && paren == 0 && brace == 0 => {
+            '[' if !quoted => {
+                bracket += 1;
+                current.push(ch);
+            }
+            ']' if !quoted => {
+                bracket = bracket.saturating_sub(1);
+                current.push(ch);
+            }
+            ',' | '\n' | ';' if !quoted && paren == 0 && brace == 0 && bracket == 0 => {
                 let trimmed = current.trim();
                 if !trimmed.is_empty() {
                     items.push(trimmed.to_owned());
@@ -63,7 +72,7 @@ pub(crate) fn split_top_level(text: &str) -> Vec<String> {
     items
 }
 
-/// Parse one human-friendly scalar, record (`{k=v, ...}`), or variant (`tag(payload)`) into tagged `Data` JSON.
+/// Parse one human-friendly scalar, list (`[a, b]`), record (`{k=v, ...}`), or variant (`tag(payload)`) into tagged `Data` JSON.
 pub(crate) fn parse_human_value(raw: &str) -> std::result::Result<Value, String> {
     let text = raw.trim();
     if text.is_empty() {
@@ -84,6 +93,22 @@ pub(crate) fn parse_human_value(raw: &str) -> std::result::Result<Value, String>
     if let Some(inner) = text.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
         return Ok(json!({"tag": "label", "value": inner}));
     }
+    if let Some(inner) = text.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        let mut list = json!({"tag": "variant", "label": "nil", "payload": {"tag": "record", "fields": []}});
+        for item in split_top_level(inner).into_iter().rev() {
+            let head = if item.contains('=') && !item.starts_with('{') {
+                parse_human_fields(&item)?
+            } else {
+                parse_human_value(&item)?
+            };
+            list = json!({
+                "tag": "variant",
+                "label": "cons",
+                "payload": {"tag": "record", "fields": [{"name": "head", "value": head}, {"name": "tail", "value": list}]},
+            });
+        }
+        return Ok(list);
+    }
     if let Some(inner) = text.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
         return parse_human_fields(inner);
     }
@@ -103,7 +128,7 @@ pub(crate) fn parse_human_value(raw: &str) -> std::result::Result<Value, String>
     if text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'/' || b == b'.') {
         return Ok(json!({"tag": "label", "value": text}));
     }
-    Err(format!("cannot parse `{text}` as human-friendly Data (use e.g. `7`, `true`, `alice`, `set(0)`, or `k=v`)"))
+    Err(format!("cannot parse `{text}` as human-friendly Data (use e.g. `7`, `true`, `alice`, `[1, 2]`, `set(0)`, or `k=v`)"))
 }
 
 /// Parse `key=value` pairs into a tagged `Data::record` JSON object.
@@ -360,6 +385,7 @@ fn surface_forms() -> String {
         "<section data-surface=\"objective-activity\"><h2>ObjectiveActivity · <code>spawn</code> &amp; <code>reply</code></h2>\
          <p class=note>Start an activity or answer a reply slot using human-friendly <code>key=value</code> fields (e.g. <code>amount=7</code> or <code>init=set(0), decider=42</code>) instead of nested tagged JSON.</p>\
          <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"spawn\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-activity\"><input type=\"hidden\" name=\"turn\" value=\"spawn\">\
          <div><label for=\"oa-bend\">Program (bend)</label><input id=\"oa-bend\" name=\"bend\" type=\"text\" pattern=\"[A-Za-z0-9-]+\" required></div>\
          <div><label for=\"oa-obj\">Object reference</label><input id=\"oa-obj\" name=\"object\" type=\"text\" pattern=\"[A-Za-z0-9/-]+\" required></div>\
          <div><label for=\"oa-var\">Input variant (optional)</label><input id=\"oa-var\" name=\"variant\" type=\"text\" placeholder=\"e.g. start\"></div>\
@@ -370,6 +396,7 @@ fn surface_forms() -> String {
          <section data-surface=\"objective-call\"><h2>ObjectiveCall · <code>invoke</code></h2>\
          <p class=note>Invoke a synchronous method on a pinned object with structured field inputs.</p>\
          <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"invoke\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-call\"><input type=\"hidden\" name=\"turn\" value=\"invoke\">\
          <div><label for=\"oc-obj\">Object reference</label><input id=\"oc-obj\" name=\"object\" type=\"text\" pattern=\"[A-Za-z0-9/-]+\" required></div>\
          <div><label for=\"oc-method\">Method / action</label><input id=\"oc-method\" name=\"method\" type=\"text\" placeholder=\"e.g. claim, approve, vote\" required></div>\
          <div><label for=\"oc-var\">Variant tag (optional)</label><input id=\"oc-var\" name=\"variant\" type=\"text\" placeholder=\"defaults to method\"></div>\
@@ -378,12 +405,14 @@ fn surface_forms() -> String {
          <section data-surface=\"objective-send\"><h2>ObjectiveSend · <code>send</code> &amp; <code>deliver</code></h2>\
          <p class=note>Queue an asynchronous message between objects or deliver a settled message / await.</p>\
          <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"send\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-send\"><input type=\"hidden\" name=\"turn\" value=\"send\">\
          <div><label for=\"os-src\">Source object</label><input id=\"os-src\" name=\"source\" type=\"text\" required></div>\
          <div><label for=\"os-dst\">Target object</label><input id=\"os-dst\" name=\"target\" type=\"text\" required></div>\
          <div><label for=\"os-var\">Message tag</label><input id=\"os-var\" name=\"variant\" type=\"text\" placeholder=\"e.g. credit, lease\" required></div>\
          <div><label for=\"os-fields\">Payload fields (<code>key=value</code>)</label><input id=\"os-fields\" name=\"fields\" type=\"text\" placeholder=\"amount=25, epoch=3\"></div>\
          <button>Send message</button></form>\
          <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"deliver\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-send\"><input type=\"hidden\" name=\"turn\" value=\"deliver\">\
          <div><label for=\"od-obj\">Object cell</label><input id=\"od-obj\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"od-tx\">Birth / message transaction</label><input id=\"od-tx\" name=\"transaction\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"od-acc\">Account (optional)</label><input id=\"od-acc\" name=\"account\" type=\"text\"></div>\
@@ -391,6 +420,214 @@ fn surface_forms() -> String {
          <section data-surface=\"seat-store\"><h2>SeatStore · <code>create</code>, <code>fund</code>, <code>act</code>, <code>exit</code></h2>\
          <p class=note>Open any object under <code>/object/REF/behavior</code> to inspect open seats, invitations, and certified batch clearings or drive <code>create</code>, <code>fund</code>, <code>act</code>, and <code>exit</code> turns with human-friendly inputs.</p></section>\n",
     )
+}
+
+struct WorldProgramSpec {
+    slug: &'static str,
+    title: &'static str,
+    surface: &'static str,
+    turn: &'static str,
+    summary: &'static str,
+    laws: &'static str,
+    source_name: &'static str,
+    source: &'static str,
+}
+
+const WORLD_PROGRAMS: &[WorldProgramSpec] = &[
+    WorldProgramSpec {
+        slug: "bounty",
+        title: "Bounty Board & Escrow",
+        surface: "objective-activity",
+        turn: "spawn",
+        summary: "Milestone bounty board with escrowed rewards, claimant submission, reviewer decision awaits, and automatic settlement.",
+        laws: "monotone claimed; monotone paid; paid <= reward",
+        source_name: "world/bounty/BountyBoard.obend",
+        source: include_str!("../../../../world/bounty/BountyBoard.obend"),
+    },
+    WorldProgramSpec {
+        slug: "ballot",
+        title: "Sealed Ballot",
+        surface: "objective-activity",
+        turn: "spawn",
+        summary: "Two-phase cryptographic commit-reveal election with participant-routed awaits (`deciderFor`) and kernel-verified `Pred.hashEq` openings.",
+        laws: "commit_binding: new.commit == 0 or hashEq([vote], salt, commit); monotone yes; monotone no; monotone abstain",
+        source_name: "world/ballot/SealedBallot.obend",
+        source: include_str!("../../../../world/ballot/SealedBallot.obend"),
+    },
+    WorldProgramSpec {
+        slug: "market",
+        title: "Canonical Uniform & Book Settlement",
+        surface: "seat-store",
+        turn: "act",
+        summary: "Certified uniform-price and order-book batch clearing over open seats with Cert-F slack and conservation verification.",
+        laws: "CertifiedClearing conservation, price-improvement, and complementary slackness",
+        source_name: "world/market/CanonicalUniformSettlement.obend",
+        source: include_str!("../../../../world/market/CanonicalUniformSettlement.obend"),
+    },
+    WorldProgramSpec {
+        slug: "drex",
+        title: "Drex Batch Clearing",
+        surface: "seat-store",
+        turn: "act",
+        summary: "Dual-asset batch clearing house emitting `Action.clear({moves, certificate})` over escrowed bid and ask seats.",
+        laws: "CertifiedClearing dual-feasibility and exact conservation",
+        source_name: "world/drex/DrexBatch.obend",
+        source: include_str!("../../../../world/drex/DrexBatch.obend"),
+    },
+    WorldProgramSpec {
+        slug: "dues",
+        title: "Standing Dues",
+        surface: "objective-activity",
+        turn: "spawn",
+        summary: "Recurring membership dues collection with epoch deadlines, grace windows, and arrears tracking.",
+        laws: "monotone epoch; monotone collected",
+        source_name: "world/dues/StandingDues.obend",
+        source: include_str!("../../../../world/dues/StandingDues.obend"),
+    },
+    WorldProgramSpec {
+        slug: "station",
+        title: "Engineering Station & Lease Desk",
+        surface: "objective-send",
+        turn: "send",
+        summary: "Shared station capacity and tool lease desk coordinating asynchronous cross-object messages (`ObjectiveSend`).",
+        laws: "activeLeases <= capacity; monotone epoch",
+        source_name: "world/station/LeaseDesk.obend",
+        source: include_str!("../../../../world/station/LeaseDesk.obend"),
+    },
+    WorldProgramSpec {
+        slug: "story",
+        title: "Co-Author Story",
+        surface: "objective-activity",
+        turn: "spawn",
+        summary: "Turn-based collaborative canon authoring where each chapter awaits the designated co-author's signed contribution.",
+        laws: "monotone chapter; writeOnce canon",
+        source_name: "world/story/CoAuthor.obend",
+        source: include_str!("../../../../world/story/CoAuthor.obend"),
+    },
+    WorldProgramSpec {
+        slug: "commons",
+        title: "Resident Service Commons",
+        surface: "objective-call",
+        turn: "invoke",
+        summary: "Quota-metered shared service commons with stewardship allocation and replenishment.",
+        laws: "used <= quota; monotone epoch",
+        source_name: "world/commons/ResidentServiceCommons.obend",
+        source: include_str!("../../../../world/commons/ResidentServiceCommons.obend"),
+    },
+    WorldProgramSpec {
+        slug: "collective",
+        title: "Collective Adoption",
+        surface: "objective-activity",
+        turn: "spawn",
+        summary: "Threshold collective proposal adoption with member ballot awaits and quorum enforcement.",
+        laws: "monotone approvals; adopted implies approvals >= quorum",
+        source_name: "world/collective/CollectiveAdoption.obend",
+        source: include_str!("../../../../world/collective/CollectiveAdoption.obend"),
+    },
+    WorldProgramSpec {
+        slug: "play",
+        title: "Commit-Reveal Play",
+        surface: "objective-activity",
+        turn: "spawn",
+        summary: "Two-player commit-reveal match with deadline forfeit and hash-bound reveal verification.",
+        laws: "monotone round; commit binding",
+        source_name: "world/play/CommitReveal.obend",
+        source: include_str!("../../../../world/play/CommitReveal.obend"),
+    },
+    WorldProgramSpec {
+        slug: "workshop",
+        title: "Workshop Catalog Review",
+        surface: "objective-call",
+        turn: "invoke",
+        summary: "Ordered workshop capacity and artifact review pipeline with monotone revision numbers.",
+        laws: "monotone revision; allocated <= capacity",
+        source_name: "world/workshop/CatalogReview.obend",
+        source: include_str!("../../../../world/workshop/CatalogReview.obend"),
+    },
+];
+
+fn world_catalog_table() -> String {
+    let mut rows = String::new();
+    for p in WORLD_PROGRAMS {
+        rows.push_str(&format!(
+            "<tr><td><a href=\"/programs/{slug}\"><strong>{title}</strong></a> (<code>{slug}</code>)</td><td><code>{surface}</code> · <code>{turn}</code></td><td>{summary}</td><td><code>{laws}</code></td></tr>\n",
+            slug = escape(p.slug),
+            title = escape(p.title),
+            surface = escape(p.surface),
+            turn = escape(p.turn),
+            summary = escape(p.summary),
+            laws = escape(p.laws),
+        ));
+    }
+    format!(
+        "<section data-world-catalog><h2>World programs</h2>\
+         <p class=note>11 self-contained Objective Bend contracts spanning <code>ObjectiveActivity</code>, <code>ObjectiveCall</code>, <code>ObjectiveSend</code>, and <code>SeatStore</code>.</p>\
+         <table><thead><tr><th>program</th><th>surface</th><th>summary</th><th>laws</th></tr></thead><tbody>{rows}</tbody></table></section>\n"
+    )
+}
+
+fn surface_action_card(p: &WorldProgramSpec) -> String {
+    let surface = escape(p.surface);
+    let title = escape(p.title);
+    let turn = escape(p.turn);
+    let slug = escape(p.slug);
+    let inputs = match (p.surface, p.turn) {
+        ("objective-call", "invoke") => format!(
+            "<div><label for=\"wp-obj\">Object / instance</label><input id=\"wp-obj\" name=\"object\" type=\"text\" placeholder=\"e.g. {slug}-1\" required></div>\
+             <div><label for=\"wp-method\">Method / action</label><input id=\"wp-method\" name=\"method\" type=\"text\" placeholder=\"e.g. allocate, review, approve\" required></div>\
+             <div><label for=\"wp-var\">Variant tag (optional)</label><input id=\"wp-var\" name=\"variant\" type=\"text\" placeholder=\"defaults to method\"></div>\
+             <div><label for=\"wp-fields\">Fields (<code>key=value</code>)</label><input id=\"wp-fields\" name=\"fields\" type=\"text\" placeholder=\"amount=10, epoch=1\"></div>"
+        ),
+        ("objective-send", "send") => format!(
+            "<div><label for=\"wp-src\">Source object</label><input id=\"wp-src\" name=\"source\" type=\"text\" placeholder=\"e.g. {slug}-1\" required></div>\
+             <div><label for=\"wp-dst\">Target object</label><input id=\"wp-dst\" name=\"target\" type=\"text\" placeholder=\"e.g. desk-1\" required></div>\
+             <div><label for=\"wp-var\">Message tag</label><input id=\"wp-var\" name=\"variant\" type=\"text\" placeholder=\"e.g. lease, return\" required></div>\
+             <div><label for=\"wp-fields\">Payload fields (<code>key=value</code>)</label><input id=\"wp-fields\" name=\"fields\" type=\"text\" placeholder=\"holder=42, epoch=1\"></div>"
+        ),
+        ("seat-store", "act") => String::from(
+            "<div><label for=\"wp-inst\">Instance id</label><input id=\"wp-inst\" name=\"instance\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" placeholder=\"e.g. 90\" required></div>\
+             <div><label for=\"wp-pay\">Payer account</label><input id=\"wp-pay\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" placeholder=\"e.g. 130\" required></div>\
+             <div><label for=\"wp-var\">Action / variant</label><input id=\"wp-var\" name=\"variant\" type=\"text\" placeholder=\"e.g. clear, reallocate, settle\"></div>\
+             <div><label for=\"wp-fields\">Action fields (<code>key=value</code>)</label><input id=\"wp-fields\" name=\"fields\" type=\"text\" placeholder=\"price=50, currency=1, goods=2, epsilon=0\"></div>"
+        ),
+        _ => format!(
+            "<div><label for=\"wp-bend\">Program / bend</label><input id=\"wp-bend\" name=\"bend\" type=\"text\" value=\"{slug}\" required></div>\
+             <div><label for=\"wp-obj\">Object / instance</label><input id=\"wp-obj\" name=\"object\" type=\"text\" placeholder=\"e.g. {slug}-1\" required></div>\
+             <div><label for=\"wp-var\">Variant / method (optional)</label><input id=\"wp-var\" name=\"variant\" type=\"text\" placeholder=\"e.g. start, cast, clear\"></div>\
+             <div><label for=\"wp-fields\">Fields (<code>key=value</code>)</label><input id=\"wp-fields\" name=\"fields\" type=\"text\" placeholder=\"amount=100, deadline=50\"></div>"
+        ),
+    };
+    format!(
+        "<section data-surface=\"{surface}\"><h2>Drive <code>{title}</code> (<code>{surface}</code> · <code>{turn}</code>)</h2>\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"{turn}\">\
+         <input type=\"hidden\" name=\"surface\" value=\"{surface}\"><input type=\"hidden\" name=\"turn\" value=\"{turn}\">\
+         {inputs}\
+         <button>Submit turn</button></form></section>\n"
+    )
+}
+
+pub(super) fn world_program(site: &Site, slug: &str) -> Page {
+    let Some(p) = WORLD_PROGRAMS.iter().find(|p| p.slug == slug) else {
+        return simple(404, "Program not found", "no such world program");
+    };
+    let action_card = if site.front.read_only {
+        String::new()
+    } else {
+        surface_action_card(p)
+    };
+    let body = format!(
+        "<p class=\"eyebrow\"><a href=\"/programs\">World programs</a> · <code>{surface}</code></p>\
+         <p>{summary}</p>\
+         <section><h2>Kernel laws</h2><p><code>{laws}</code></p></section>\n\
+         {action_card}\
+         <section><h2>Source (<code>{source_name}</code>)</h2><pre><code>{source}</code></pre></section>\n",
+        surface = escape(p.surface),
+        summary = escape(p.summary),
+        laws = escape(p.laws),
+        source_name = escape(p.source_name),
+        source = escape(p.source),
+    );
+    Page { status: 200, title: p.title.into(), stamp: Stamp::None, body }
 }
 
 pub(super) fn index(site: &Site) -> Page {
@@ -411,9 +648,11 @@ pub(super) fn index(site: &Site) -> Page {
     } else {
         format!("<table><thead><tr><th>reference</th><th>bend</th><th>object</th><th>birth transaction</th><th></th></tr></thead><tbody>{rows}</tbody></table>")
     };
+    let catalog = world_catalog_table();
     let forms = if site.front.read_only { String::new() } else { surface_forms() };
     let body = format!(
         "<p class=\"eyebrow\">Objective Bend programs</p><p>Follow the programs you have started and answer the decisions that are yours. Each activity names the reply slot decider and deadline height; only that subject's signed answer is admitted, once.</p>\n\
+         {catalog}\
          <section><h2>Your programs</h2>{list}</section>\n\
          <section><h2>Inspect any activity</h2><p class=note>Look up an activity by object cell and birth transaction (<code>await OBJECT TRANSACTION</code>).</p>\
          <form method=\"get\" action=\"/bend/await\" class=\"row\"><div><label for=\"aw-o\">Object cell</label><input id=\"aw-o\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
@@ -486,6 +725,7 @@ pub(super) fn card(v: &Value, me: &str) -> String {
             out.push_str(&format!(
                 "<p>This slot is yours to decide. Enter human-friendly <code>key=value</code> fields (e.g. <code>amount=7</code> or <code>choice=1, salt=42</code>) to build your signed <code>reply</code> turn, or use the command form below.</p>\
                  <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-surface=\"objective-activity\" data-turn=\"reply\">\
+                 <input type=\"hidden\" name=\"surface\" value=\"objective-activity\"><input type=\"hidden\" name=\"turn\" value=\"reply\">\
                  <input type=\"hidden\" name=\"slot\" value=\"{esc_slot}\">\
                  <div><label for=\"reply-mode-{esc_slot}\">Decision</label><select id=\"reply-mode-{esc_slot}\" name=\"mode\"><option value=\"reply\">reply</option><option value=\"refused\">refused</option></select></div>\
                  <div><label for=\"reply-var-{esc_slot}\">Variant (optional)</label><input id=\"reply-var-{esc_slot}\" name=\"variant\" type=\"text\" placeholder=\"e.g. approve\"></div>\
@@ -571,5 +811,39 @@ mod tests {
         fs::write(dir.join("bend/objects/broken.json"), "not json").unwrap();
         assert_eq!(registry(&dir), vec![("ask-alice".into(), "tally".into(), "12".into(), "34".into())]);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn surface_action_card_renders_surface_specific_inputs_for_all_world_programs() {
+        assert_eq!(WORLD_PROGRAMS.len(), 11);
+        for p in WORLD_PROGRAMS {
+            let html = surface_action_card(p);
+            assert!(html.contains("action=\"/act/surface\""), "missing /act/surface form for {}", p.slug);
+            assert!(
+                html.contains(&format!("data-surface=\"{}\"", p.surface)),
+                "missing data-surface for {}",
+                p.slug
+            );
+            assert!(
+                html.contains(&format!("data-turn=\"{}\"", p.turn)),
+                "missing data-turn for {}",
+                p.slug
+            );
+            match (p.surface, p.turn) {
+                ("objective-call", "invoke") => {
+                    assert!(html.contains("name=\"object\"") && html.contains("name=\"method\""), "{}", p.slug);
+                }
+                ("objective-send", "send") => {
+                    assert!(html.contains("name=\"source\"") && html.contains("name=\"target\""), "{}", p.slug);
+                }
+                ("seat-store", "act") => {
+                    assert!(html.contains("name=\"instance\"") && html.contains("name=\"payer\""), "{}", p.slug);
+                }
+                ("objective-activity", "spawn") => {
+                    assert!(html.contains("name=\"bend\"") && html.contains("name=\"object\""), "{}", p.slug);
+                }
+                other => panic!("unexpected surface/turn {other:?}"),
+            }
+        }
     }
 }
