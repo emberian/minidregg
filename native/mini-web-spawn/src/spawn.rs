@@ -365,6 +365,11 @@ impl Spawner {
         let mut selected = mini_session_env::delegated_consent(&mini, &host, &config, &member.home)?;
         if let Layout::Box(layout) = &self.layout {
             selected.extend(mini_session_env::shared_codec(&layout.session_codec_file())?);
+            if layout.root == Path::new("/") {
+                let scope = format!("{unit}.scope");
+                let _ = Command::new("systemctl").args(["stop", "--quiet", &scope]).status();
+                let _ = Command::new("systemctl").args(["reset-failed", "--quiet", &scope]).status();
+            }
         }
         let env: Vec<(&str, String)> = selected.into_iter()
             .map(|(name, value)| (name, value.to_string_lossy().into_owned())).collect();

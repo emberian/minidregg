@@ -1535,14 +1535,19 @@ mod tests {
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let state = root.join("state");
         fs::write(&state, "not-submitted").unwrap();
+        let attempt = root.join("a/1");
+        fs::create_dir_all(&attempt).unwrap();
         let fake = root.join("mini");
-        fs::write(&fake, format!("#!/bin/sh\ncase \"$*\" in\n*lookup-operation*) echo \"{{\\\"type\\\":\\\"minidregg-operation-recovery-v1\\\",\\\"status\\\":\\\"$(cat '{s}')\\\",\\\"attempt\\\":\\\"/a/1\\\"}}\" ;;\nretry*--attempt\\ /a/1\\ --mode\\ submit*) echo confirmed > '{s}' ;;\n*) exit 9 ;;\nesac\n", s = state.display())).unwrap();
+        fs::write(&fake, format!("#!/bin/sh\ncase \"$*\" in\n*lookup-operation*) echo \"{{\\\"type\\\":\\\"minidregg-operation-recovery-v1\\\",\\\"status\\\":\\\"$(cat '{s}')\\\",\\\"attempt\\\":\\\"{a}\\\"}}\" ;;\nretry*--attempt\\ {a}\\ --mode\\ submit*) echo confirmed > '{s}' ;;\n*) exit 9 ;;\nesac\n", s = state.display(), a = attempt.display())).unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
         let config: RoomToolsConfig = serde_json::from_value(json!({"mini":fake,"host":"/h","hostConfig":"/c",
             "socket":"/s","workspace":root,"home":root,"room":"lab"})).unwrap();
         let tools = RoomTools { config: &config };
         fs::write(tools.operation_record("g1", "write").unwrap(), b"{}").unwrap();
-        // not-submitted: resubmitted, and the lookup that follows decides.
+        // Without call.bin on disk, a not-submitted write cannot be resubmitted.
+        assert!(matches!(tools.resubmit_unsubmitted_write("g1"), Some(Err(_))));
+        fs::write(attempt.join("call.bin"), b"signed call").unwrap();
+        // With call.bin present, not-submitted is resubmitted once and the lookup that follows decides.
         assert!(matches!(tools.resubmit_unsubmitted_write("g1"), Some(Ok(()))));
         assert_eq!(tools.lookup_operation("g1", "write").unwrap()["resolution"], "performed");
         // A write the Host holds (confirmed) or refused is never resubmitted.

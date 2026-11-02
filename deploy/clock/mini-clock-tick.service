@@ -51,6 +51,8 @@ Nice=10
 UMask=0077
 Environment=MINI=/var/lib/mini/candidate/current/bin/mini
 Environment=MINI_CLOCK_WORKSPACE=/var/lib/mini/clock
+Environment=MINI_CONSENT_ANCHOR_DIR=/var/lib/mini/clock/consent-anchors
+Environment=LEAN_NUM_THREADS=1
 ExecStart=/bin/sh -c 'exec "$MINI" clock --action tick --workspace "$MINI_CLOCK_WORKSPACE"'
 TimeoutStartSec=10min
 NoNewPrivileges=yes

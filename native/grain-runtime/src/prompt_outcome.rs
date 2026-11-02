@@ -334,6 +334,13 @@ pub(crate) fn read(state_dir: &Path, prompt: u64) -> Result<Option<Record>> {
     Ok(Some(resolution.record))
 }
 
+fn prompt_quiescent(journal: &Journal) -> bool {
+    quiescence::retained(journal, quiescence::ResidentEvidence::NotConfigured)
+        .iter()
+        .all(|field| matches!(*field, "connection_fenced" | "hermes_pending_prompt"))
+        && journal.provider_retry_gate.is_none()
+}
+
 impl Runtime {
     fn clear_audited_pending_prompt(&mut self) -> Result<()> {
         if let Some(session) = self.journal.hermes_session.as_mut() {
@@ -354,7 +361,7 @@ impl Runtime {
         if op == 0 || op.to_string() != id { return Err("prompt operation must be canonical positive u64".into()); }
         let original = read_original(&self.config.state_dir, op)?.ok_or("prompt outcome absent")?;
         if self.child.is_some() || self.prompt_active || self.foreground_operation.is_some()
-            || self.prompt_decision.is_some() || !history_compaction::quiescent(&self.journal) {
+            || self.prompt_decision.is_some() || !prompt_quiescent(&self.journal) {
             return Err("prompt audit requires every invocation and retained custody to be reconciled".into());
         }
         let origin = self.journal.resident_prompt_origin.as_ref().ok_or("current resident prompt origin absent")?;
@@ -658,7 +665,7 @@ pub(crate) mod tests {
         let capture: Value = serde_json::from_slice(&fs::read(p).unwrap()).unwrap();
         let journal: Journal = serde_json::from_value(capture["journal"].clone()).unwrap();
         let original: Record = serde_json::from_value(capture["outcome"].clone()).unwrap();
-        assert!(history_compaction::quiescent(&journal));
+        assert!(prompt_quiescent(&journal));
         let origin=journal.resident_prompt_origin.as_ref().unwrap();
         assert_eq!(origin.prompt_operation_id, original.prompt_operation_id);
         assert_eq!(Some(&origin.resident_prompt_id), original.resident_prompt_id.as_ref());

@@ -498,6 +498,7 @@ fn run(
     }
     // Close the listener before joining workers; the RAII guard cancels and
     // joins all of them. No detached task can retain a socket after exit.
+    unsafe { libc::shutdown(std::os::fd::AsRawFd::as_raw_fd(&listener), libc::SHUT_RDWR) };
     drop(listener);
     drop(workers);
     Ok(())

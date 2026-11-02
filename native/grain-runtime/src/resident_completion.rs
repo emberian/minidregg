@@ -922,7 +922,7 @@ pub(crate) mod tests {
         let request=rt.config.state_dir.join("provider-0000000000000043.controller-request");let response=rt.config.state_dir.join("provider-response");let meter=rt.config.state_dir.join("provider-meter");
         write_new(&request,b"request").unwrap();write_new(&response,b"response").unwrap();write_new(&meter,b"meter").unwrap();
         rt.journal.provider_replays.push(ProviderReplay{prompt_operation_id:42,parent_generation:"1".into(),request_path:request,request_bytes:7,request_sha256:sha256_bytes(b"request").unwrap(),response_path:response,response_bytes:8,response_sha256:sha256_bytes(b"response").unwrap(),status:200,content_type:"text/event-stream".into(),response_headers_path:None,response_headers_bytes:None,response_headers_sha256:None,meter_report_path:Some(meter),meter_report_sha256:Some(sha256_bytes(b"meter").unwrap()),metered_charge:Some("1".into())});
-        let attempt=rt.config.state_dir.join("attempt-0000000000000044");fs::create_dir(&attempt).unwrap();
+        let attempt=rt.config.state_dir.join("attempt-0000000000000044");fs::create_dir(&attempt).unwrap();fs::set_permissions(&attempt,fs::Permissions::from_mode(0o700)).unwrap();
         let source=json!({"intentNonce":"44","grain":{"task":"7104","subject":"10","context":{"operationId":"44"},"operation":{"type":"settle","charge":"1"}}});
         atomic_json(&rt.config.state_dir.join("source-0000000000000044.json"),&source).unwrap();write_new(&attempt.join("call.bin"),b"call").unwrap();write_new(&attempt.join("outcome.bin"),b"outcome").unwrap();
         atomic_json(&attempt.join("outcome.json"),&json!({"type":"confirmed","confirmation":"installed","transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"})).unwrap();
