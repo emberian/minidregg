@@ -206,29 +206,37 @@ fn audit_chain(rows: &[Value], record: &Record) -> Result<Vec<Value>> {
         chain.push(w.clone());
     }
     if retry.admin.iter().any(|v| v == "reconcile provider audited") {
-        let provider_req = rows.iter().find(|r| decision(r).is_some_and(|d| d > after_worker)
+        let is_provider_req = |r: &Value| decision(r).is_some_and(|d| d > after_worker)
             && r["authority"] == "provider"
             && ((r["action"] == "settle-provider-source-metered-charge"
                 && matches!(r["stage"].as_str(), Some("operator-audited-requested" | "delivered-response-recovery-requested")))
                 || (r["action"] == "abort-definitively-unreserved-provider-request"
-                    && r["stage"] == "signed-origin-confirmed")))
+                    && r["stage"] == "signed-origin-confirmed"));
+        let is_provider_settled = |req: &Value, r: &Value| decision(r) == decision(req)
+            && r["authority"] == "provider"
+            && matches!(r["stage"].as_str(), Some("signed-settlement-confirmed" | "operator-audited-terminal-without-held-receipt"));
+        let provider_req = rows.iter().find(|r| is_provider_req(r)
+            && (r["action"] != "settle-provider-source-metered-charge"
+                || rows.iter().any(|s| is_provider_settled(r, s))))
+            .or_else(|| rows.iter().find(|r| is_provider_req(r)))
             .ok_or("prompt has no subsequent provider audit request")?;
         chain.push(provider_req.clone());
         if provider_req["action"] == "settle-provider-source-metered-charge" {
-            let provider_settled = rows.iter().find(|r| decision(r) == decision(provider_req)
-                && r["authority"] == "provider"
-                && matches!(r["stage"].as_str(), Some("signed-settlement-confirmed" | "operator-audited-terminal-without-held-receipt")))
+            let provider_settled = rows.iter().find(|r| is_provider_settled(provider_req, r))
                 .ok_or("prompt provider settlement is not confirmed")?;
             chain.push(provider_settled.clone());
         }
     }
-    let parent = rows.iter().find(|r| decision(r).is_some_and(|d| d > after_worker)
+    let is_parent_req = |r: &Value| decision(r).is_some_and(|d| d > after_worker)
         && r["authority"] == "parent" && r["action"] == "settle-held-allowance"
-        && r["stage"] == "requested" && r["reserveAttempt"].as_str().is_some())
-        .ok_or("prompt has no subsequent exact parent settlement request")?;
-    let settled = rows.iter().find(|r| decision(r) == decision(parent)
+        && r["stage"] == "requested" && r["reserveAttempt"].as_str().is_some();
+    let is_parent_settled = |req: &Value, r: &Value| decision(r) == decision(req)
         && r["authority"] == "parent"
-        && matches!(r["stage"].as_str(), Some("signed-settlement-confirmed" | "confirmed-no-active-reservation")))
+        && matches!(r["stage"].as_str(), Some("signed-settlement-confirmed" | "confirmed-no-active-reservation"));
+    let parent = rows.iter().find(|r| is_parent_req(r) && rows.iter().any(|s| is_parent_settled(r, s)))
+        .or_else(|| rows.iter().find(|r| is_parent_req(r)))
+        .ok_or("prompt has no subsequent exact parent settlement request")?;
+    let settled = rows.iter().find(|r| is_parent_settled(parent, r))
         .ok_or("prompt parent settlement is not confirmed")?;
     let effects = rows.iter().find(|r| decision(r).is_some_and(|d| d > decision(parent).unwrap())
         && r["stage"] == "acknowledged" && r["externalEffectsAcknowledged"] == true
