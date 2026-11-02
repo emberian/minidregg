@@ -149,7 +149,7 @@ fn serve(site: &Site, mut stream: UnixStream, deadline: Instant) -> Result<()> {
     let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
     let page = match request.method.as_str() {
         "GET" | "HEAD" => {
-            let draft = matches!(parts.as_slice(), ["new-document", ..] | ["doc", _, "edit", ..]);
+            let draft = matches!(parts.as_slice(), ["new-document", ..] | ["doc", _, "edit", ..] | ["room", _, "new-document"]);
             if draft && site.front.read_only {
                 simple(403, "Read only", ANONYMOUS)
             } else {
@@ -249,24 +249,29 @@ fn answer(stream: &mut UnixStream, page: &Page, site: &Site) -> Result<()> {
 // ---------------------------------------------------------------- GET
 
 fn get(site: &Site, parts: &[&str], target: &str) -> Page {
+    if site.front.read_only
+        && matches!(
+            parts,
+            [] | ["doc", ..] | ["at", _, "doc", ..] | ["room", ..] | ["board", ..] | ["object", ..] | ["search", ..]
+        )
+    {
+        import_inbox(site);
+    }
     match parts {
         ["tour"] => tour(site, None),
         ["activity"] => Page { status: 200, title: "Life in this world".into(), stamp: Stamp::None, body: operations(site) },
-        ["export"] if !site.front.read_only => export_page(site, None),
-        ["subscribe"] if !site.front.read_only => super::subscribe::page(site, None),
+        ["export"] => if site.front.read_only { simple(401, "Sign in required", ANONYMOUS) } else { export_page(site, None) },
+        ["subscribe"] => if site.front.read_only { simple(401, "Sign in required", ANONYMOUS) } else { super::subscribe::page(site, None) },
         [] | ["doc"] => {
-            if site.front.read_only {
-                import_inbox(site);
-                if parts.is_empty() {
-                    return public_front(site);
-                }
+            if site.front.read_only && parts.is_empty() {
+                return public_front(site);
             }
-            let mut page = site.index();
+            let mut page = if parts == ["doc"] { site.doc_index() } else { site.index() };
             if site.front.read_only {
                 page.title = "Mini".into();
                 page.body = format!(
-                    "<p>The world as the public reader sees it: the documents members published, the box's own operations room, \
-                     the <a href=\"/receipts\">receipts stream</a> and the <a href=\"/registry\">laws of the box</a>. A <a href=\"/tour\">tour</a> shows what a member can do.</p>\n{}{}",
+                    "<p>Published documents, operations activity, <a href=\"/receipts\">receipts</a>, \
+                     and <a href=\"/registry\">Host operation laws</a>. See <a href=\"/tour\">the tour</a> for member workflows.</p>\n{}{}",
                     operations(site),
                     page.body
                 );
@@ -281,11 +286,11 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
                 let waiting = stories::waiting(site);
                 if !waiting.is_empty() {
                     let names: Vec<String> = waiting.iter().map(|i| format!("<code>{}</code>", escape(&i.story))).collect();
-                    page.body.insert_str(0, &format!("<section class=\"notice\" data-invited=\"{}\"><h2>You are invited to play</h2><p>An invitation to {} waits in your requests: <a href=\"/story#invitations\">join it</a>.</p></section>\n", waiting.len(), names.join(", ")));
+                    page.body.insert_str(0, &format!("<section class=\"notice\" data-invited=\"{}\"><h2>Story invitation</h2><p>An invitation to {} is in your requests: <a href=\"/story#invitations\">join it</a>.</p></section>\n", waiting.len(), names.join(", ")));
                 }
             }
             if !site.front.read_only && now_secs() >= EXPORT_NOTICE_FROM {
-                page.body.insert_str(0, "<section class=\"notice\"><h2>This demo ends on 11 November</h2><p>Take your world with you: <a href=\"/export\">Export my world</a> hands you one archive of your documents, attempts, rooms and keys' public half, with the world root it was read at.</p></section>\n");
+                page.body.insert_str(0, "<section class=\"notice\"><h2>This demo ends on 11 November</h2><p><a href=\"/export\">Export my world</a> packages your documents, attempts, rooms, and public keys with the world root.</p></section>\n");
             }
             if !site.front.read_only {
                 page.body.push_str(
@@ -393,19 +398,19 @@ fn public_front(site: &Site) -> Page {
 
 fn public_front_with_welcome(site: &Site, welcome: Option<Page>) -> Page {
     let (stamp, reading) = match welcome {
-        Some(page) => (page.stamp, format!("<section><h2>{}</h2>{}<p><a href=\"/doc\">Every published document →</a> · <a href=\"/receipts\">Receipts</a> · <a href=\"/registry\">The laws of the box</a> · <a href=\"/tour\">The tour</a> · <a href=\"/join\">Join</a></p></section>", escape(&page.title), page.body)),
-        None => (Stamp::None, format!("<section><h2>From the community</h2><p>Explore what members have shared with the public reader.</p>{}</section>", site.index().body)),
+        Some(page) => (page.stamp, format!("<section><h2>{}</h2>{}<p><a href=\"/doc\">All published documents →</a> · <a href=\"/receipts\">Receipts</a> · <a href=\"/registry\">Host laws</a> · <a href=\"/tour\">Tour</a> · <a href=\"/join\">Join</a></p></section>", escape(&page.title), page.body)),
+        None => (Stamp::None, format!("<section><h2>Published documents</h2><p>Documents shared with the public reader.</p>{}</section>", site.doc_index().body)),
     };
     Page { status: 200, title: "Welcome to Mini".into(), stamp, body: format!(
-        "<section class=\"hero\"><p class=\"eyebrow\">A shared world, with rules you can read</p><h2>Make a little world together.</h2>\
-         <p class=\"lede\">Mini brings documents, rooms, apps and AI residents into one shared workspace. Every change meets the world's rules. When a change is refused, the reason is there to read.</p>\
-         <div class=\"actions\"><a class=\"button\" href=\"/join\" data-full>Join this world</a><a class=\"button secondary\" href=\"/tour\">Take the tour</a></div>\
-         <p class=\"note\">You are browsing as the public reader. Explore first; join when you want to make something.</p></section>\
+        "<section class=\"hero\"><p class=\"eyebrow\">Shared workspace on an explicit capability kernel</p><h2>Documents, rooms, apps, and residents under explicit laws.</h2>\
+         <p class=\"lede\">Every read and write is signed and checked against the resource's installed law. Admitted turns produce receipts; refused turns name the exact clause.</p>\
+         <div class=\"actions\"><a class=\"button\" href=\"/join\" data-full>Join</a><a class=\"button secondary\" href=\"/tour\">Tour</a></div>\
+         <p class=\"note\">Browsing as the public reader.</p></section>\
          <div class=\"front-grid\">{reading}{}</div>\
-         <section><div class=\"section-heading\"><h2>Tools to make it yours</h2><a href=\"/apps\">Browse all apps →</a></div>\
-         <p class=\"note\">Apps from the Sandstorm catalogue. Publisher claims and this box's verdict are shown separately.</p>{}</section>\
-         <section><div class=\"section-heading\"><h2>Find your way around</h2><a href=\"/registry\">Read the world's laws →</a></div>\
-         <ul class=\"place-list\"><li><a href=\"/room\">Gather in a room</a></li><li><a href=\"/story\">Step into a story</a></li><li><a href=\"/receipts\">Follow the receipts</a></li></ul></section>",
+         <section><div class=\"section-heading\"><h2>App market</h2><a href=\"/apps\">Browse all apps →</a></div>\
+         <p class=\"note\">Sandstorm packages with publisher claims and box verification verdicts shown side by side.</p>{}</section>\
+         <section><div class=\"section-heading\"><h2>Places</h2><a href=\"/registry\">Host operation registry →</a></div>\
+         <ul class=\"place-list\"><li><a href=\"/room\">Rooms</a></li><li><a href=\"/story\">Stories</a></li><li><a href=\"/receipts\">Receipts</a></li></ul></section>",
         operations(site), apps::catalogue(site, "", "", true)
     ) }
 }
@@ -413,19 +418,37 @@ fn public_front_with_welcome(site: &Site, welcome: Option<Page>) -> Page {
 /// `/board` and `/room`: the workspace's references, each opened as that place.
 fn place_index(site: &Site, place: &str) -> Page {
     let mut rows = String::new();
-    for name in site.names() {
+    let names = if place == "board" { site.board_names() } else { site.names() };
+    for name in names {
         // The shell's `room list` shows only references that name a room; every other reference
         // (an account, a document, a story cast) is not a room and is not offered as one.
-        if place == "room" && crate::workspace::reference(&site.root, &name).ok().is_none_or(|r| r.get("room").and_then(Value::as_str).is_none()) {
+        if place == "room"
+            && crate::workspace::reference(&site.root, &name)
+                .ok()
+                .is_none_or(|r| r.get("room").is_none_or(Value::is_null))
+        {
             continue;
         }
         rows.push_str(&format!("<li><a href=\"/{place}/{n}\">{n}</a></li>\n", n = escape(&name)));
     }
-    let (title, note) = match place {
-        "board" => ("Boards", "See work as a board: tasks, their state and who has taken them. Open a reference below in the board layout."),
-        _ => ("Rooms", "Gather around a conversation, shared documents and a resident. Open a reference below as a room to see what your grants cover."),
+    let (title, note, extra) = match place {
+        "board" => (
+            "Boards",
+            "Task boards stored as declared scalar cells (task n state = field 2n+2, owner = field 2n+3).",
+            if !site.front.read_only { board_new_form() } else { String::new() },
+        ),
+        _ => (
+            "Rooms",
+            "Shared rooms with member streams, documents, and Hermes residents.",
+            if !site.front.read_only { room_new_form() } else { String::new() },
+        ),
     };
-    Page { status: 200, title: title.into(), stamp: Stamp::None, body: format!("<p>{note}</p>\n<ul class=\"place-list\">{rows}</ul>{}", if place == "room" && !site.front.read_only { room_new_form() } else { String::new() }) }
+    let list = if rows.is_empty() {
+        format!("<p class=\"empty\">No {place} references in this workspace yet.</p><ul class=\"place-list\"></ul>")
+    } else {
+        format!("<ul class=\"place-list\">{rows}</ul>")
+    };
+    Page { status: 200, title: title.into(), stamp: Stamp::None, body: format!("<p>{note}</p>\n{list}{extra}") }
 }
 
 fn room(site: &Site, name: &str) -> Page {
@@ -443,7 +466,7 @@ fn room(site: &Site, name: &str) -> Page {
         }
         if !site.front.read_only {
             page.body.push_str(&format!(
-                "<form method=\"post\" action=\"/room/{n}/say\" class=\"row\"><div><label for=\"say-{n}\">Add to the conversation</label><input id=\"say-{n}\" type=\"text\" name=\"text\" maxlength=\"2000\" required autocomplete=\"off\"></div><button>Send</button></form>\n",
+                "<form method=\"post\" action=\"/room/{n}/say\" class=\"row\"><div><label for=\"say-{n}\">Message</label><input id=\"say-{n}\" type=\"text\" name=\"text\" maxlength=\"2000\" required autocomplete=\"off\"></div><button>Send</button></form>\n",
                 n = escape(name)
             ));
         }
@@ -457,8 +480,8 @@ const RECEIPTS_PAGE: usize = 50;
 
 fn receipts(site: &Site) -> Page {
     let mut body = String::from(
-        "<p>The newest retained attempts of this workspace with their last Host outcome, as <code>history all -n 50</code> prints them (<code>history all</code> lists every one). \
-         Open an attempt to see the Host's receipt and refusal frame, ask again (<code>lookup</code>) or retry an undecided one (<code>retry</code>: exact, never a second write).</p>\n",
+        "<p>Newest retained attempts in this workspace (<code>history all -n 50</code>). \
+         Select an attempt to inspect its Host receipt, refusal clause, or exact retry.</p>\n",
     );
     // The newest page only: `history all -n` reads that many attempts, not every one retained.
     match verb(site, &[format!("history all -n {RECEIPTS_PAGE}")]) {
@@ -467,9 +490,15 @@ fn receipts(site: &Site) -> Page {
             let mut rows = String::new();
             // Newest first: the stream reads down from the latest attempt.
             for line in text.lines().rev() {
-                let id = line.split_whitespace().next().unwrap_or("");
+                let (kind, id, summary) = parse_history_line(line);
                 if id.len() > 1 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
-                    rows.push_str(&format!("<tr><td><a href=\"/receipts/{id}\">{id}</a></td><td>{}</td></tr>\n", escape(line[id.len()..].trim())));
+                    let linkable = kind == "attempt" || kind == "read" || site.root.join("attempts").join(id).is_dir();
+                    let cell = if linkable {
+                        format!("<a href=\"/receipts/{id}\">{id}</a>")
+                    } else {
+                        format!("<code>{}</code> ({})", escape(id), escape(kind))
+                    };
+                    rows.push_str(&format!("<tr><td>{cell}</td><td>{}</td></tr>\n", escape(&summary)));
                 }
             }
             if rows.is_empty() {
@@ -485,11 +514,55 @@ fn receipts(site: &Site) -> Page {
     Page { status: 200, title: "Receipts".into(), stamp: Stamp::None, body }
 }
 
+fn parse_history_line(line: &str) -> (&str, &str, String) {
+    let cols: Vec<&str> = line.split('\t').collect();
+    if let [k @ ("attempt" | "read" | "enroll"), id, rest @ ..] = cols.as_slice() {
+        return (*k, id.trim(), rest.join(" "));
+    }
+    let mut parts = line.split_whitespace();
+    match (parts.next(), parts.next()) {
+        (Some(k @ ("attempt" | "read" | "enroll")), Some(id)) => {
+            let rest: Vec<&str> = parts.collect();
+            (k, id, rest.join(" "))
+        }
+        (Some(id), rest_first) => {
+            let mut rest = Vec::new();
+            if let Some(first) = rest_first {
+                rest.push(first);
+            }
+            rest.extend(parts);
+            ("attempt", id, rest.join(" "))
+        }
+        _ => ("attempt", "", String::new()),
+    }
+}
+
 fn receipt(site: &Site, id: &str) -> Page {
     if workspace_id(id).is_err() {
         return simple(404, "Receipts", "not an attempt id");
     }
     let mut body = String::new();
+    let attempt_dir = site.root.join("attempts").join(id);
+    let is_read_attempt = id.starts_with("read-")
+        || attempt_dir.join("signed-observation.bin").is_file()
+        || (attempt_dir.join("challenge.json").is_file() && !attempt_dir.join("call.bin").is_file());
+    if is_read_attempt {
+        let challenge = crate::workspace::bounded_json(&attempt_dir.join("challenge.json"))
+            .or_else(|_| crate::workspace::bounded_json(&attempt_dir.join("0/challenge.json")))
+            .ok();
+        body.push_str("<section><h2>Signed read</h2><p>This attempt is a signed read (no write transaction was submitted).</p>");
+        if let Some(ch) = challenge {
+            body.push_str(&json_tree(&ch));
+        }
+        body.push_str("</section>\n");
+        if let Some(ending) = verb(site, &[format!("why {id}")]) {
+            if ending.code == 0 {
+                body.push_str(&format!("<section><h2>Why</h2>{}</section>\n", outcome_of(&ending, &[], false)));
+            }
+        }
+        body.push_str(&anchor(&attempt_dir));
+        return Page { status: 200, title: format!("Attempt {id}"), stamp: Stamp::None, body };
+    }
     // `lookup` asks the Host for the retained attempt's decided outcome (a transition's class);
     // the receipt and the explanation are reads.
     for (heading, line, transition) in [("Outcome", format!("lookup {id}"), true), ("Receipt", format!("inspect receipt {id}"), false), ("Why", format!("why {id}"), false)] {
@@ -497,7 +570,7 @@ fn receipt(site: &Site, id: &str) -> Page {
             body.push_str(&format!("<section><h2>{heading}</h2>{}</section>\n", outcome_of(&ending, &[], transition)));
         }
     }
-    body.push_str(&anchor(&site.root.join("attempts").join(id)));
+    body.push_str(&anchor(&attempt_dir));
     if !site.front.read_only {
         body.push_str(&format!(
             "<p class=\"next\"><form method=\"post\" action=\"/receipts/{id}/retry\" class=\"inline\"><button class=\"quiet\">retry {id}</button></form> \
@@ -508,11 +581,10 @@ fn receipt(site: &Site, id: &str) -> Page {
     Page { status: 200, title: format!("Attempt {id}"), stamp: Stamp::None, body }
 }
 
-/// What the retained attempt anchors to, said without overclaiming: the exact bytes the client
-/// sealed before sending (`call.bin`, by digest and length) and the Host's confirmation point
-/// (`acceptedCount`, `worldRoot`, the transaction and event ids). The inclusion opening of that
-/// receipt against the published world root (op 151, DEMO-EXPERIENCE A10) is L1's and is not
-/// here yet: the page says so rather than implying the receipt is verifiable today.
+/// What the retained attempt anchors to: the exact bytes the client sealed before sending
+/// (`call.bin`, by digest and length), the Host's confirmation point (`acceptedCount`,
+/// `worldRoot`, transaction and event ids), and the world-root AuthTrie system-slot inclusion
+/// opening (op 151) when present in custody or served by the Host.
 fn anchor(attempt: &std::path::Path) -> String {
     use sha2::Digest;
     if !attempt.is_dir() {
@@ -526,11 +598,32 @@ fn anchor(attempt: &std::path::Path) -> String {
     let point = match crate::workspace::retained_attempt_outcome(attempt) {
         Ok(crate::workspace::AttemptOutcome::Confirmed(v)) | Ok(crate::workspace::AttemptOutcome::Charged(v)) => {
             let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
+            let accepted_count = s("acceptedCount");
+            let world_root = s("worldRoot");
+            let opening_html = match crate::receipt_continuity::opening_for_attempt(attempt, &accepted_count, &world_root) {
+                Some(opening) => {
+                    let chain = opening.get("chain").and_then(Value::as_str).unwrap_or("?");
+                    let siblings = opening.get("siblings").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0);
+                    format!(
+                        "<p class=\"outcome admitted\">World-root inclusion opening (op 151): log chain <code>{}</code>, <code>{}</code> AuthTrie system-slot sibling(s) opening to <code>worldRoot {}</code>.</p>\
+                         <details><summary>Inclusion opening JSON (op 151)</summary>{}</details>",
+                        escape(chain),
+                        siblings,
+                        escape(&world_root),
+                        json_tree(&opening)
+                    )
+                }
+                None => format!(
+                    "<p class=\"note\">Anchored to <code>worldRoot {}</code> at <code>acceptedCount {}</code>; inclusion proof pending (initialize receipt continuity or query op 151 with a connected Host to attach the AuthTrie system-slot opening).</p>",
+                    escape(&world_root),
+                    escape(&accepted_count)
+                ),
+            };
             format!(
-                "<p>Confirmation point: <code>acceptedCount {}</code>, <code>worldRoot {}</code> (transaction {}, event {}, {}{}).</p>\
-                 <p class=\"outcome undecided\">Anchored to a point; inclusion proof pending: the opening of this receipt against the published world root (op 151) is not yet issued by the Host, so this page shows the point the Host named and does not claim a stranger can verify it offline.</p>",
-                escape(&s("acceptedCount")), escape(&s("worldRoot")), escape(&s("transactionId")), escape(&s("eventId")), escape(&s("confirmation")),
-                if v.get("disposition").and_then(Value::as_str) == Some("charged") { ", charged: only its price was posted" } else { "" }
+                "<p>Confirmation point: <code>acceptedCount {}</code>, <code>worldRoot {}</code> (transaction {}, event {}, {}{}).</p>{}",
+                escape(&accepted_count), escape(&world_root), escape(&s("transactionId")), escape(&s("eventId")), escape(&s("confirmation")),
+                if v.get("disposition").and_then(Value::as_str) == Some("charged") { ", charged: only its price was posted" } else { "" },
+                opening_html
             )
         }
         Ok(crate::workspace::AttemptOutcome::Refused) => "<p>Refused: the Host named no point; the refusal's clause is the receipt.</p>".to_owned(),
@@ -541,11 +634,21 @@ fn anchor(attempt: &std::path::Path) -> String {
 }
 
 fn grants(site: &Site) -> Page {
-    let mut body = String::from("<p>The grants you hold, as the Host's capability view names them (capability, scope, expiry, ancestors), drawn as a tree; then what they cover, verb by verb, prepared and dry-run against the Host (<code>can --all</code>; nothing is submitted).</p>\n");
+    let mut body = String::from("<p>Held capabilities (capability id, scope, expiry, ancestors) and dry-run verb checks (<code>can --all</code>).</p>\n");
     if let Some(ending) = verb(site, &["inspect caps --json".to_owned()]) {
-        match serde_json::from_str::<Value>(ending.stdout.trim()) {
-            Ok(view) if ending.code == 0 => body.push_str(&format!("<section class=\"grants\"><h2>Capability tree</h2>{}</section>\n", json_tree(&view))),
-            _ => body.push_str(&answered(&ending, &[])),
+        let views: Vec<Value> = serde_json::Deserializer::from_str(ending.stdout.trim())
+            .into_iter::<Value>()
+            .filter_map(|v| v.ok())
+            .collect();
+        if ending.code == 0 && !views.is_empty() {
+            let combined = if views.len() == 1 {
+                views.into_iter().next().unwrap()
+            } else {
+                Value::Array(views)
+            };
+            body.push_str(&format!("<section class=\"grants\"><h2>Capability tree</h2>{}</section>\n", json_tree(&combined)));
+        } else {
+            body.push_str(&answered(&ending, &[]));
         }
     }
     // What the grants cover, one reference at a time: each is its own dry run (op 130 per verb),
@@ -553,7 +656,7 @@ fn grants(site: &Site) -> Page {
     // sections in turn; without JavaScript each section is a link to its own page). One bare
     // `can` over every grant would outlast a browser on a used workspace.
     let names = site.names();
-    body.push_str(&format!("<section><h2>What they cover</h2><p class=\"note\">{} reference(s), each judged by its own dry run as the page fills; <code>can REF</code> in the shell is the same question for one.</p>\n", names.len()));
+    body.push_str(&format!("<section><h2>What they cover</h2><p class=\"note\">{} reference(s), each judged by its own dry run (<code>can REF</code>).</p>\n", names.len()));
     for name in &names {
         body.push_str(&format!(
             "<section class=\"grant\" data-load=\"/grants/judge/{0}\"><h3><code>{0}</code></h3><div class=\"fill\"><p class=\"note\"><a href=\"/grants/judge/{0}\">judge what my grants cover on {0}</a></p></div></section>\n",
@@ -578,7 +681,7 @@ fn grants(site: &Site) -> Page {
     }
     if !site.front.read_only {
         body.push_str(
-            "<section><h2>Delegate</h2><p class=note>Delegate verbs on one of your references to another subject, with a cost ceiling; the proposal is submitted at once, and <code>publish</code> hands the recipient their reference.</p>\
+            "<section><h2>Delegate</h2><p class=note>Delegate verbs on a reference to another subject with a cost ceiling.</p>\
              <form method=\"post\" action=\"/grants/delegate\" class=\"row\">\
              <div><label for=\"d-ref\">Reference</label><input id=\"d-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"></div>\
              <div><label for=\"d-to\">Recipient subject</label><input id=\"d-to\" name=\"recipient\" type=\"text\" required pattern=\"[0-9a-z-]+\"></div>\
@@ -588,6 +691,7 @@ fn grants(site: &Site) -> Page {
              <section><h2>Revoke</h2><form method=\"post\" action=\"/grants/revoke\" class=\"row\">\
              <div><label for=\"r-ref\">Reference</label><input id=\"r-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"></div>\
              <div><label for=\"r-to\">Recipient subject</label><input id=\"r-to\" name=\"recipient\" type=\"text\" required pattern=\"[0-9a-z-]+\"></div>\
+             <div><label for=\"r-cap\">Capability (optional)</label><input id=\"r-cap\" name=\"capability\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\"></div>\
              <button>Revoke</button></form></section>\n"
                 .replace("@MAX@", PUBLIC_READ_MAX_COST.trim())
                 .as_str(),
@@ -598,14 +702,14 @@ fn grants(site: &Site) -> Page {
 
 fn laws(site: &Site) -> Page {
     let mut body = String::from(
-        "<p>The law on a reference, as the Host holds it (<code>law show REF</code>); install a law with clauses (<code>law ID REF \"CLAUSE; …\"</code>). The Host first asks whether the law can ever pass.</p>\
+        "<p>Inspect the installed law on a reference (<code>law show REF</code>) or install a new law (<code>law ID REF \"CLAUSE; …\"</code>).</p>\
          <form method=\"get\" action=\"/laws/show\" class=\"row\"><label for=\"l-ref\">Reference</label><input id=\"l-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"><button>Show</button></form>\n",
     );
     if !site.front.read_only {
         body.push_str(
             "<section><h2>Install a law</h2><form method=\"post\" action=\"/laws/install\">\
              <label for=\"li-ref\">Reference</label><input id=\"li-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\">\
-             <label for=\"li-clauses\">Clauses (semicolon-separated), or the predicate JSON</label><textarea id=\"li-clauses\" name=\"clauses\" required maxlength=\"4000\"></textarea>\
+             <label for=\"li-clauses\">Clauses (semicolon-separated), or predicate JSON</label><textarea id=\"li-clauses\" name=\"clauses\" required maxlength=\"4000\"></textarea>\
              <p><button>Install</button></p></form></section>\n",
         );
     }
@@ -615,26 +719,26 @@ fn laws(site: &Site) -> Page {
 
 fn keys(site: &Site) -> Page {
     let mut body = String::from(
-        "<p>Your signing key is <strong>hosted</strong>: it lives in your account's home on this box (readable by the operator, by your own account, and by no other member), and everything on this box is world-readable. \
-         The browser never holds it; this session is a cookie that names your account.</p>\n",
+        "<p>Your signing key is <strong>hosted</strong> in your account's home directory on this box. \
+         Browser sessions use an HTTP-only cookie that names your account.</p>\n",
     );
     for (heading, line) in [("Who am I", "whoami"), ("Key status", "key-status")] {
         if let Some(ending) = verb(site, &[line.to_owned()]) {
             body.push_str(&format!("<section><h2>{heading}</h2>{}</section>\n", answered(&ending, &[])));
         }
     }
-    body.push_str("<p><a href=\"/sessions\">Your browser sessions</a> (list and revoke) · <a href=\"/term\">Terminal</a> for <code>rotate-key</code> and <code>adopt-next-key</code>, which take the next key's file.</p>");
+    body.push_str("<p><a href=\"/sessions\">Browser sessions</a> (list and revoke) · <a href=\"/term\">Terminal</a> for <code>rotate-key</code> and <code>adopt-next-key</code>.</p>");
     Page { status: 200, title: "Keys".into(), stamp: Stamp::None, body }
 }
 
 fn append_form(name: &str) -> String {
     format!(
         "<section><h2>Append</h2><form method=\"post\" action=\"/doc/{n}/append\">\
-         <label for=\"ap-{n}\">Text to append (one proposal, submitted at once)</label><textarea id=\"ap-{n}\" name=\"text\" required maxlength=\"4096\"></textarea>\
+         <label for=\"ap-{n}\">Text to append</label><textarea id=\"ap-{n}\" name=\"text\" required maxlength=\"4096\"></textarea>\
          <p><button>Append</button> <a href=\"/doc/{n}/edit\">Edit and inspect</a></p></form></section>\n\
          <section><h2>Link</h2><form method=\"post\" action=\"/doc/{n}/link\" class=\"row\">\
-         <div><label for=\"lk-{n}\">To (a reference)</label><input id=\"lk-{n}\" name=\"to\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"></div>\
-         <div><label for=\"lr-{n}\">Relation</label><input id=\"lr-{n}\" name=\"relation\" type=\"text\" pattern=\"[A-Za-z0-9-]*\" value=\"\"></div>\
+         <div><label for=\"lk-{n}\">To (reference)</label><input id=\"lk-{n}\" name=\"to\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"></div>\
+         <div><label for=\"lr-{n}\">Relation (decimal)</label><input id=\"lr-{n}\" name=\"relation\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\" value=\"0\"></div>\
          <button>Link</button></form></section>\n",
         n = escape(name)
     )
@@ -644,7 +748,7 @@ fn append_form(name: &str) -> String {
 /// `publish`, which writes the recipient reference the helper hands over); unpublish revokes it.
 fn publish_form(name: &str, subject: &str) -> String {
     format!(
-        "<section><h2>Publish</h2><p class=note>Publishing delegates <code>observe</code> on <code>{n}</code> to the public reader (subject <code>{s}</code>); every visitor then reads it as the public reader does. Revoking takes it down; the page says everything on this box is world-readable anyway.</p>\
+        "<section><h2>Publish</h2><p class=note>Delegates <code>observe</code> on <code>{n}</code> to the public reader (subject <code>{s}</code>). Unpublish revokes that grant.</p>\
          <form method=\"post\" action=\"/doc/{n}/publish\" class=\"inline\"><button>Publish to the public reader</button></form> \
          <form method=\"post\" action=\"/doc/{n}/unpublish\" class=\"inline\"><button class=\"quiet\">Unpublish</button></form></section>\n",
         n = escape(name),
@@ -657,7 +761,7 @@ fn publish_form(name: &str, subject: &str) -> String {
 /// grant for the same document), one of another target with another capability gets
 /// NAME-CAPABILITY, so no author takes over another's page; a capability already imported is skipped. Import records a
 /// hint; the signed read decides what is shown.
-fn import_inbox(site: &Site) {
+pub(super) fn import_inbox(site: &Site) {
     let Some(shell) = site.shell.as_ref() else { return };
     let Ok(entries) = fs::read_dir(shell.home.join("inbox")) else { return };
     let held: Vec<String> = site
@@ -702,10 +806,27 @@ fn import_inbox(site: &Site) {
 
 /// The box's own operations room: the reference `operations` in this workspace (the public reader
 /// is granted it; `mini-s-box` posts the ships, drills, certifier ticks and backup receipts into it
-/// as signed turns). Until it is shared, the page says so by name.
+/// as signed turns). When `operations` is not held, falls back to `lobby` if joined, or a concise
+/// rooms & activity card.
 fn operations(site: &Site) -> String {
-    if !site.names().iter().any(|n| n == "operations") {
-        return "<section class=\"ops\"><h2>Operations room</h2><p class=note>The box's operations room (<code>operations</code>, posted into by the box's own member <code>mini-s-box</code>) is not yet shared with the public reader: nothing to show by that name.</p></section>\n".to_owned();
+    let names = site.names();
+    if !names.iter().any(|n| n == "operations") {
+        if names.iter().any(|n| n == "lobby")
+            && site
+                .shell
+                .as_ref()
+                .is_some_and(|shell| shell.home.join("chat").join("rooms").join("lobby.json").is_file())
+        {
+            if let Some(ending) = verb(site, &["tail -n 12 --in lobby".to_owned()]) {
+                if ending.code == 0 {
+                    return format!(
+                        "<section class=\"ops chat\" data-live=\"30000\" data-live-path=\"/activity\"><p class=\"eyebrow\">From the lobby room</p><h2>Recent room activity</h2><pre class=\"turns\">{}</pre><p><a href=\"/room/lobby\">Open lobby</a> · <a href=\"/room\">All rooms</a></p></section>\n",
+                        escape(ending.text().trim())
+                    );
+                }
+            }
+        }
+        return "<section class=\"ops\"><h2>Rooms &amp; activity</h2><p class=note>Signed room streams and Host receipts live under <a href=\"/room\">Rooms</a> and <a href=\"/receipts\">Receipts</a>.</p></section>\n".to_owned();
     }
     // The reference alone is not the room: this session reads it once it holds the room record
     // (`chat join operations INVITATION`). Without one the shell's refusal ("this session has no room
@@ -715,7 +836,7 @@ fn operations(site: &Site) -> String {
     }
     match verb(site, &["tail -n 20 --in operations".to_owned()]) {
         Some(ending) if ending.code == 0 => format!(
-            "<section class=\"ops chat\" data-live=\"30000\" data-live-path=\"/activity\"><p class=\"eyebrow\">From the operations room</p><h2>Life in this world</h2><p class=note>Ships, drills, checkpoints and backups, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
+            "<section class=\"ops chat\" data-live=\"30000\" data-live-path=\"/activity\"><p class=\"eyebrow\">From the operations room</p><h2>Operations stream</h2><p class=note>Ships, drills, checkpoints and backups posted as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
             escape(ending.text().trim())
         ),
         Some(ending) => format!("<section class=\"ops\"><h2>Operations room</h2>{}</section>\n", answered(&ending, &[])),
@@ -738,41 +859,41 @@ fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
             .collect()
     };
     let steps: Vec<(&str, String, String)> = vec![
-        ("lands", "The world as the public reader may observe it: published documents, the laws of the box (the operation registry, the consent plans), the receipts stream, the operations room, the shutdown date, the world-readable sentence.".into(),
-            format!("<p><a href=\"/\">the front page</a> · <a href=\"/registry\">the registry</a> · <a href=\"/receipts\">receipts</a></p>{}", operations(site))),
-        ("joins", "A name; optionally an ssh public key, Discord, pay-to-enrol. Without an ssh key the box makes the hosted key and the door answers a one-time <em>Open your session</em> link.".into(),
-            "<p><a href=\"/join\" data-full>the door</a></p>".into()),
-        ("writes", "A new document, an append, a link to another document, a transclusion; after every action the outcome partial: admitted at a height, or the refusal's clause, or undecided with its exact retry. The append form carries the <em>lose this reply</em> switch: a fault in your own client (<code>submit ID --lose-reply-once</code>) that writes the exact call and never reads the answer; the Host admits once, the receipt is undecided with one link, the exact retry, which answers the same decided outcome: one append, one charge.".into(),
+        ("Public view", "Published documents, Host operation laws, consent plans, receipts, and operations activity.".into(),
+            format!("<p><a href=\"/\">Front page</a> · <a href=\"/registry\">Registry</a> · <a href=\"/receipts\">Receipts</a></p>{}", operations(site))),
+        ("Enrolment", "Choose a name and optionally provide an SSH public key or Discord handle. Without an SSH key, the door provisions a hosted key and returns a one-time session link.".into(),
+            "<p><a href=\"/join\" data-full>Door (/join)</a></p>".into()),
+        ("Documents & uncertain replies", "Create a document, append lines, link another document, or embed a transclusion. The append form includes a <em>lose this reply</em> switch (<code>submit ID --lose-reply-once</code>) that drops the reply after sealing `call.bin`; retrying the attempt resends the exact bytes and recovers the single admitted outcome.".into(),
             if member {
                 format!("{}{}{}{}",
                     forms(3, &[("doc", "doc new")]),
-                    verbs::form_for("doc", "doc append", "/tour/3", "<input type=\"hidden\" name=\"verb\" value=\"doc\"><label class=\"check\"><input type=\"checkbox\" name=\"lose\" value=\"on\"> lose this reply once (a client-side fault; the Host still decides)</label>").unwrap_or_default(),
+                    verbs::form_for("doc", "doc append", "/tour/3", "<input type=\"hidden\" name=\"verb\" value=\"doc\"><label class=\"check\"><input type=\"checkbox\" name=\"lose\" value=\"on\"> lose this reply once (client-side fault; Host still decides once)</label>").unwrap_or_default(),
                     forms(3, &[("doc", "doc link")]),
                     forms(3, &[("doc", "doc transclude")]))
             } else { String::new() }),
-        ("is refused, and reads why", "Try to edit a document you do not own: refused, with the clause of the law that refused it. <code>can</code> shows which verbs would pass; <code>why</code> explains the last refusal in the kernel's words.".into(),
+        ("Refusals & dry runs", "Edits outside your grant or the document's law are refused with the exact clause. <code>can</code> dry-runs which verbs pass; <code>why</code> explains the last refusal.".into(),
             forms(4, &[("can", "can"), ("why", "why"), ("inspect", "inspect law")])),
-        ("delegates, bounded", "A narrower grant on one document to another member, then its revocation; both are receipts; the other member's attempt after revocation is refused with that clause.".into(),
+        ("Bounded delegation & revocation", "Delegate a narrower grant on a document to another subject, then revoke it. Subsequent attempts under the revoked grant are refused.".into(),
             forms(5, &[("delegate", "delegate"), ("revoke", "revoke"), ("renounce", "renounce")])),
-        ("summons an agent", "Hermes lives in the <code>lobby</code>, the house's shared room every member joins at the door. First a bounded grant on one document to Hermes's subject (<code>delegate … --until H</code>: the grant's expiry is a height); <code>summon lobby as librarian</code> answers that it is already there (the house summoned it and pays its turns from the room's budget); ask it to read the document and post a summary: its turns land as paid, admitted writes with receipts, and every member of the lobby sees the reply; a write outside its grant is refused <code>no-grant</code> as a receipt; <code>revoke</code> ends the grant.".into(),
+        ("Room residents (Hermes)", "Delegate a height-bounded grant (<code>delegate … --until H</code>) to the room's Hermes resident, summon or check its status, and ask it to summarize a document into the room stream.".into(),
             if member {
                 format!("{}{}", PURSE_LATER, forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke")]))
             } else { String::new() }),
-        ("installs an application", "The Sandstorm store index; install any SPK; the grain opens on its own origin in a pane; its grants are Mini capabilities on the Grants page.".into(),
-            format!("<p><a href=\"/apps\">the market</a> · <a href=\"/grain\">your grains</a></p>{}", forms(7, &[("apps", "apps search")]))),
-        ("asks the oracle", "The veri7vn grain: a question, an answer with its evidence and the machine-checked function it rests on (the oracle appliance lands on the same grain path).".into(), String::new()),
-        ("links Discord", "<code>/mini link CODE</code> in Discord with the code the door's status page shows; <code>/mini say</code> then lands as your turn and appears in the web room.".into(), String::new()),
-        ("opens the terminal", "<code>mini shell</code> in the page, or over ssh with the key you gave: the same verbs, the same receipts.".into(),
+        ("Sandstorm grains", "Install a package from the app market; each grain runs on its own origin with capabilities tracked on the Grants page.".into(),
+            format!("<p><a href=\"/apps\">App market</a> · <a href=\"/grain\">Your grains</a></p>{}", forms(7, &[("apps", "apps search")]))),
+        ("Verification oracle", "Query the veri7vn grain for answers paired with machine-checked evidence.".into(), String::new()),
+        ("Discord bridge", "Run <code>/mini link CODE</code> in Discord using the code from the door status page; <code>/mini say</code> posts signed turns into the room.".into(), String::new()),
+        ("Browser & SSH terminal", "Run <code>mini shell</code> in the browser terminal or over SSH with the same verbs and receipts.".into(),
             "<p><a href=\"/term\">Terminal</a></p>".into()),
-        ("plays", "A story room from the built-in tale (<em>The Lamplighter's House</em>): <code>story new T --from tale</code>, <code>story seal T</code>, then invite yourself and join with the invitation the invite prints. <code>look</code> shows your scene; <code>go north</code> from the hallway is a legal move, admitted; <code>go north</code> again from the anteroom needs the key and is refused with that clause. The rule of the game is the Lean theorem <code>sealed_story_scene_monotone</code>, proved for the built-in tale's generator (the law of a table you write yourself is checked, not proved).".into(),
+        ("Sealed story tables", "Create a story room from the built-in tale (<em>The Lamplighter's House</em>) with <code>story new T --from tale</code>, seal its law (<code>story seal T</code>), invite yourself, and join. <code>look</code> inspects your scene; <code>go north</code> from the hallway is admitted, while <code>go north</code> from the anteroom without the key is refused by clause. The built-in tale's law satisfies the Lean theorem <code>sealed_story_scene_monotone</code>, proved for the built-in tale's generator.".into(),
             forms(11, &[("story", "story new"), ("story", "story seal"), ("story", "story invite"), ("story", "story join"), ("story", "story enter"), ("look", "look"), ("go", "go"), ("take", "take"), ("act", "act"), ("narrate", "narrate")])),
-        ("changes the rules", "A law on your own document that refuses even you: <code>law check</code> first says whether any write could ever pass it (nothing is installed); then install it; your next append is refused with the clause; revise the law (installs are not writes, so the law stays changeable: <code>--i-lock-myself-out</code> is a different door) and the append is admitted. Every outcome is a receipt.".into(),
+        ("Revising resource laws", "Test a candidate law with <code>law check</code>, install it on your document, observe an append refused by the new clause, and install a revised law (policy installation is distinct from writes unless <code>--i-lock-myself-out</code> is used).".into(),
             forms(12, &[("law", "law check"), ("law", "law"), ("doc", "doc append"), ("law", "law show")])),
     ];
-    let mut body = String::from("<p>Fifteen minutes, from a browser, nothing installed. Every form below is the real form: the words of one shell verb, run as you, answered by the Host; its outcome lands under the step.</p>\n<ol class=\"tour\">");
+    let mut body = String::from("<p>Twelve interactive steps using live shell verb forms; each submission runs under your account and renders its receipt or refusal below the step.</p>\n<ol class=\"tour\">");
     for (i, (title, text, forms_html)) in steps.iter().enumerate() {
         let n = i + 1;
-        body.push_str(&format!("<li id=\"step-{n}\" class=\"step\"><h2>{n}. The stranger {title}</h2><p>{text}</p>{forms_html}"));
+        body.push_str(&format!("<li id=\"step-{n}\" class=\"step\"><h2>{n}. {title}</h2><p>{text}</p>{forms_html}"));
         if let Some((step, html)) = &outcome {
             if *step == n {
                 body.push_str(&format!("<div class=\"step-outcome\">{html}</div>"));
@@ -788,16 +909,20 @@ fn board_forms(name: &str) -> String {
     let n = escape(name);
     format!(
         "<section><h2>Act</h2>\
-         <form method=\"post\" action=\"/board/{n}/add\" class=\"row\"><div><label for=\"ba-{n}\">Add task</label><input id=\"ba-{n}\" name=\"task\" type=\"text\" required pattern=\"[0-9]+\"></div><button>Add</button></form>\
+         <form method=\"post\" action=\"/board/{n}/add\" class=\"row\"><div><label for=\"ba-{n}\">Add task (0 or 1 on standard board law)</label><input id=\"ba-{n}\" name=\"task\" type=\"text\" required pattern=\"[0-9]+\"></div><button>Add</button></form>\
          <form method=\"post\" action=\"/board/{n}/move\" class=\"row\"><div><label for=\"bm-{n}\">Move task</label><input id=\"bm-{n}\" name=\"task\" type=\"text\" required pattern=\"[0-9]+\"></div>\
          <div><label for=\"bf-{n}\">from</label><input id=\"bf-{n}\" name=\"from\" type=\"text\" required pattern=\"[A-Za-z0-9-]+\"></div><div><label for=\"bt-{n}\">to</label><input id=\"bt-{n}\" name=\"to\" type=\"text\" required pattern=\"[A-Za-z0-9-]+\"></div><button>Move</button></form>\
          <form method=\"post\" action=\"/board/{n}/take\" class=\"row\"><div><label for=\"bk-{n}\">Take task</label><input id=\"bk-{n}\" name=\"task\" type=\"text\" required pattern=\"[0-9]+\"></div><button>Take</button></form></section>\n"
     )
 }
 
+fn board_new_form() -> String {
+    "<section><h2>New board</h2><form method=\"post\" action=\"/board/new\" class=\"row\"><div><label for=\"bn\">Name</label><input id=\"bn\" name=\"name\" type=\"text\" required pattern=\"[A-Za-z0-9-]+\"></div><button>Create</button></form></section>\n".to_owned()
+}
+
 fn summon_form(name: &str) -> String {
     format!(
-        "<section><h2>Summon a resident</h2><p class=note>The founder summons a Hermes resident into the room in a role, with a budget funded from the founder's account; in a room that already has one (the lobby), a member's summon says so, and every member asks it there.</p>\
+        "<section><h2>Summon a resident</h2><p class=note>Summon a Hermes resident into the room with a compute budget funded from the founder's account.</p>\
          <form method=\"post\" action=\"/room/{n}/summon\" class=\"row\"><div><label for=\"sr-{n}\">Role</label><select id=\"sr-{n}\" name=\"role\"><option>librarian</option><option>runner</option></select></div>\
          <div><label for=\"sb-{n}\">Budget</label><input id=\"sb-{n}\" name=\"budget\" type=\"text\" pattern=\"[0-9]+\" value=\"100\"></div><button>Summon</button></form></section>\n",
         n = escape(name)
@@ -882,7 +1007,10 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["tour", step] => {
             let Some(name) = form.get("verb").map(String::as_str).filter(|v| v.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else { return simple(400, "Tour", "which verb?") };
             let outcome = verbs::post(site, name, &form);
-            tour(site, Some((step.parse().unwrap_or(0), outcome.body)))
+            let status = outcome.status;
+            let mut page = tour(site, Some((step.parse().unwrap_or(0), outcome.body)));
+            page.status = status;
+            page
         }
         ["apps", "install"] => apps::install(site, &form),
         ["grain", n, action] => apps::grain_action(site, n, action, &form),
@@ -913,11 +1041,18 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["doc", name, "link"] => {
             let id = form_attempt(&form);
             let relation = field("relation");
+            if !relation.is_empty() && !relation.bytes().all(|b| b.is_ascii_digit()) {
+                return simple(400, "Link", "relation must be a non-negative integer (e.g. 0)");
+            }
             let mut line = format!("doc link {id} {} {}", quote(name), quote(&field("to")));
             if !relation.is_empty() {
                 line.push_str(&format!(" {}", quote(&relation)));
             }
             act(site, &format!("Link from {name}"), vec![line, format!("submit {id}")], &id, &[("the document", &format!("/doc/{name}"))])
+        }
+        ["board", "new"] => {
+            let name = field("name");
+            act(site, &format!("Board {name}"), vec![format!("board new {}", quote(&name))], "", &[("the board", &format!("/board/{name}")), ("boards", "/board")])
         }
         ["board", name, op @ ("add" | "move" | "take")] => {
             let id = form_attempt(&form);
@@ -985,7 +1120,12 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         }
         ["grants", "revoke"] => {
             let id = form_attempt(&form);
-            act(site, "Revoke", vec![format!("revoke {id} {} {}", quote(&field("ref")), quote(&field("recipient"))), format!("submit {id}")], &id, &[("grants", "/grants")])
+            let cap = field("capability");
+            let mut line = format!("revoke {id} {} {}", quote(&field("ref")), quote(&field("recipient")));
+            if !cap.is_empty() {
+                line.push_str(&format!(" --capability {}", quote(&cap)));
+            }
+            act(site, "Revoke", vec![line, format!("submit {id}")], &id, &[("grants", "/grants")])
         }
         ["laws", "install"] => {
             let id = form_attempt(&form);
@@ -1195,7 +1335,7 @@ fn export_page(site: &Site, said: Option<String>) -> Page {
     preparing.sort();
     for (name, bytes) in &ready {
         body.push_str(&format!(
-            "<form method=\"post\" action=\"/export/{n}/download\" class=\"row\"><p><code>{n}</code>, {bytes} bytes</p><button>Download</button></form>\n",
+            "<form method=\"post\" action=\"/export/{n}/download\" class=\"row\" data-full><p><code>{n}</code>, {bytes} bytes</p><button>Download</button></form>\n",
             n = escape(name)
         ));
     }
@@ -1568,7 +1708,8 @@ pub(super) fn query(target: &str, key: &str) -> Option<String> {
 /// `retry ID` again is in the shell; a fresh page draws a fresh one.
 const ATTEMPT: &str = "attempt";
 
-/// Every POST form of a rendered page, with its own fresh `attempt` field.
+/// Every same-origin POST form of a rendered page (except stateful editor/creation drafts and
+/// cross-origin bootstrap forms), with its own fresh `attempt` field.
 fn with_attempts(body: &str) -> String {
     let mut out = String::with_capacity(body.len() + 256);
     let mut rest = body;
@@ -1576,7 +1717,15 @@ fn with_attempts(body: &str) -> String {
         let Some(close) = rest[at..].find('>').map(|c| at + c + 1) else { break };
         out.push_str(&rest[..close]);
         let tag = rest[at..close].to_ascii_lowercase();
-        if tag.contains("method=\"post\"") || tag.contains("method=post") {
+        let post = tag.contains("method=\"post\"") || tag.contains("method='post'") || tag.contains("method=post");
+        let skip = tag.contains("data-full")
+            || tag.contains("action=\"http://")
+            || tag.contains("action=\"https://")
+            || tag.contains("action='http://")
+            || tag.contains("action='https://")
+            || tag.contains("/new-document/")
+            || (tag.contains("/doc/") && tag.contains("/edit/"));
+        if post && !skip {
             out.push_str(&format!("<input type=\"hidden\" name=\"{ATTEMPT}\" value=\"{}\">", fresh_id()));
         }
         rest = &rest[close..];
@@ -1835,3 +1984,21 @@ fn structured_capture_follows_the_grammar() {
     assert!(!structured_answer(&["say \"--json\"".into()]));
     assert!(!structured_answer(&["apps search --json".into(), "whoami".into()]));
 }
+
+#[cfg(test)]
+#[test]
+fn parse_history_line_handles_tab_and_whitespace_columns() {
+    assert_eq!(
+        parse_history_line("attempt\tw-123\tadmitted\tcapsule-append"),
+        ("attempt", "w-123", "admitted capsule-append".to_owned())
+    );
+    assert_eq!(
+        parse_history_line("read read-300001-100 answered target=77"),
+        ("read", "read-300001-100", "answered target=77".to_owned())
+    );
+    assert_eq!(
+        parse_history_line("w-999 admitted capsule-append"),
+        ("attempt", "w-999", "admitted capsule-append".to_owned())
+    );
+}
+

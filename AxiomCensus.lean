@@ -9,5 +9,8 @@ any package constant rests on `sorryAx` or a declared axiom. Built by
 -/
 import Deployed
 import Theory.AssertAxioms
+import TokenCensus.Core
+import TokenCensus.Table
 
 #assert_axioms_tree
+#assert_token_census_within Minidregg.TokenCensus.table Assurance

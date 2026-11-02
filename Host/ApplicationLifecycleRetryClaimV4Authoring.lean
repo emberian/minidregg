@@ -8,6 +8,7 @@ module
 
 public import Host.ApplicationLifecycleClaimOperator
 public import Kernel.ApplicationLifecycleRetryClaimV4Core
+public import Kernel.ApplicationLifecycleRetryClaimV4Projection
 public import Kernel.NativeHostReplay
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -84,9 +85,9 @@ def planStream : StreamCodec Plan :=
 def planCodec : LawfulCodec Plan := NativeHostCodec.framed
   "DREGG/APPLICATION/RETRY-CREATE-CLAIM-OPERATOR-PLAN/v4".toUTF8.toList planStream
 
-private def cellAt (config : Config) (opened : Opened config) (resource : Nat) :
-    Option (PackedCell CanonicalCellRegistry.registry) :=
-  match opened.directory.directory.slots resource with
+private def cellAtOn {deployment : CanonicalCellRegistry.Deployment} (ground : ServedBasis.Ground deployment)
+    (resource : Nat) : Option (PackedCell CanonicalCellRegistry.registry) :=
+  match ground.directory.slots resource with
   | .present cell => some cell
   | .absent => none
 
@@ -96,18 +97,10 @@ private def fixedHeader (pin : Pin) (slot : SigningSlot) : Except String Unit :=
   unless header.keyId == pin.managementKeyId do
     throw "retry claim signer differs from operator key pin"
 
-/-- The plan repeats the v3 claim plan against the admitted retry BEGIN-v4.
-`ApplicationLifecycleRetryClaimV4Core.prepare` admits signed envelopes, so it
-runs at op26 on the assembled ingress; here only its unsigned gates (the
-exact original projection, the installed descriptor and the retry markers)
-are checked before any management header escapes. -/
-def prepareVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
-    (request : Request) : Except String Plan := do
-  let some prior := verified.retry.beginsV4.find?
-      (fun begin => begin.index == request.originalIndex)
-    | throw "original retry BEGIN-v4 absent from verified history"
-  let begin := prior.ingress
+private def sourceOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) (begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress) (index : Nat) :
+    Except String (ApplicationLifecycleClaim.Source ×
+      PackedCell CanonicalCellRegistry.registry × PackedCell CanonicalCellRegistry.registry) := do
   let beginSource := begin.begin.base.source
   unless beginSource.app == pin.app &&
       beginSource.packageManifest == pin.packageManifest &&
@@ -117,23 +110,9 @@ def prepareVerified (config : Config) {target : Durable}
     throw "historical retry BEGIN differs from fixed claim operator pin"
   unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 config.storeIdentity begin.begin do
     throw "historical retry BEGIN is outside resident host profile"
-  let opened := verified.opened
-  let some retained := opened.durable.image.accepted[prior.index]?
-    | throw "original retry BEGIN record absent from verified tip"
-  unless DurableReceiverCodec.intentStream.encode retained ==
-      DurableReceiverCodec.intentStream.encode prior.record do
-    throw "original retry BEGIN record differs from verified history"
-  let some originalReceipt := verified.receiptAt prior.index
-    | throw "original retry BEGIN receipt absent from verified chronology"
-  unless originalReceipt.transactionId == prior.record.transactionId &&
-      originalReceipt.eventId == prior.record.event.eventId &&
-      originalReceipt.acceptedCount == prior.index + 1 do
-    throw "original retry BEGIN receipt differs from verified record/index"
-  unless ApplicationFailedCreateRetryEvidence.markersCurrent config opened.ground begin.retry do
-    throw "retry CLAIM first/created/recovery/one-use token markers refuse"
-  let some appCell := cellAt config opened pin.app
+  let some appCell := cellAtOn ground pin.app
     | throw "current retry claim app cell unavailable"
-  let some packageCell := cellAt config opened pin.packageManifest
+  let some packageCell := cellAtOn ground pin.packageManifest
     | throw "current retry claim package cell unavailable"
   unless packageCell.kind == .content do
     throw "current retry claim package is not a content resource"
@@ -141,24 +120,39 @@ def prepareVerified (config : Config) {target : Durable}
     | throw "current retry claim app state unavailable"
   let source : ApplicationLifecycleClaim.Source :=
     { begin := begin.begin.base
-      originalIndex := prior.index
+      originalIndex := index
       before := before
       currentAppRoot := appCell.payload.root
       currentPackageRoot := packageCell.payload.root
-      currentWorldRoot := opened.durable.worldRoot
+      currentWorldRoot := ground.worldRoot
       appObserveCapability := pin.appObserveCapability
       packageObserveCapability := pin.packageObserveCapability
       queryNonce := request.queryNonce }
   unless source.valid do throw "current app is not at original pending retry BEGIN state"
+  return (source, appCell, packageCell)
+
+private def planKeys (config : Config) (begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress)
+    (source : ApplicationLifecycleClaim.Source) : DurableView.Keys :=
+  let current := DeclaredResourceController.invocationKeys config.deployment.domain config.profile.semantics
+    (ApplicationLifecycleClaim.command config.deployment.domain config.profile.semantics source)
+  let retry := ApplicationFailedCreateRetryEvidence.keys begin.retry
+  ⟨current.transactions ++ retry.transactions, current.nullifiers ++ retry.nullifiers⟩
+
+private def prepareOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) (begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress) (index : Nat)
+    (originalReceipt : NativeHostCodec.Receipt) : Except String Plan := do
+  let (source, appCell, packageCell) ← sourceOn config ground pin request begin index
+  unless ApplicationFailedCreateRetryEvidence.markersCurrent config ground begin.retry do
+    throw "retry CLAIM first/created/recovery/one-use token markers refuse"
   let command := ApplicationLifecycleClaim.command config.deployment.domain
     config.profile.semantics source
   let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+    ⟨config.federation, config.genesisHeight + ground.height⟩
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ambient opened.ground command
+      config.profile ambient ground command
     | throw "current retry claim command preparation refused"
   unless ApplicationLifecycleClaimCurrent.linkedCurrentPolicy config.deployment
-      config.profile ambient opened.ground source prepared do
+      config.profile ambient ground source prepared do
     throw "current retry claim app/package law differs"
   unless decide (DeclaredResourceController.PhysicalShape prepared) do
     throw "current retry claim physical shape refused"
@@ -166,7 +160,7 @@ def prepareVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let appWanted := ApplicationLifecycleClaimCurrent.observationRequest config.deployment
-    config.profile ambient opened.ground source prepared pin.app
+    config.profile ambient ground source prepared pin.app
     pin.appObserveCapability source.currentAppRoot
   let .ok appSelected := ResourceObservationAdmission.prepare context config.profile
       appWanted marker pin.appObserveCapability source.canonicalBytes
@@ -175,7 +169,7 @@ def prepareVerified (config : Config) {target : Durable}
       CanonicalCellRegistry.cellCodec.encode appCell do
     throw "retry claim app observation differs from current image"
   let packageWanted := ApplicationLifecycleClaimCurrent.observationRequest config.deployment
-    config.profile ambient opened.ground source prepared pin.packageManifest
+    config.profile ambient ground source prepared pin.packageManifest
     pin.packageObserveCapability source.currentPackageRoot
   let .ok packageSelected := ResourceObservationAdmission.prepare context config.profile
       packageWanted marker pin.packageObserveCapability source.canonicalBytes
@@ -187,15 +181,15 @@ def prepareVerified (config : Config) {target : Durable}
       packageSelected.observed.before do
     throw "current installed package differs from exact retry descriptor"
   let commandBytes := DeclaredResourceController.commandCodec.encode command
-  let .ok invocation := NativeHost.prepareLoaded config opened (.invoke commandBytes)
+  let .ok invocation := NativeHost.prepareInvokeOn config ground (config.genesisHeight + ground.height) commandBytes
     | throw "current retry claim invocation plan refused"
   unless invocation.finalizedDraft == .invoke commandBytes do
     throw "retry claim invocation plan differs from source"
   let .ok appHeader := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, appWanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, appWanted⟩ : PackedEffectRequest)
     | throw "current retry claim app observation signing key unavailable"
   let .ok packageHeader := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, packageWanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, packageWanted⟩ : PackedEffectRequest)
     | throw "current retry claim package observation signing key unavailable"
   let appSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode appHeader⟩
@@ -207,12 +201,123 @@ def prepareVerified (config : Config) {target : Durable}
   return ⟨source.canonicalBytes, begin.canonicalBytes, originalReceipt, invocation,
     appSlot, packageSlot⟩
 
-def prepareRequestVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
-    (bytes : List UInt8) : Except String Plan := do
+def prepareRequestLight (config : Config) (light : NativeHostLight.Light config) (pin : Pin)
+    (bytes : List UInt8) : IO (Except String Plan) := do
   let some request := requestCodec.decode bytes
-    | throw "noncanonical retry claim operator request"
-  prepareVerified config verified pin request
+    | return .error "noncanonical retry claim operator request"
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let read ← match ← reader.atHeight (request.originalIndex + 1) with
+    | .error refusal => return .error refusal.message
+    | .ok read => pure read
+  let some begin := ApplicationLifecycleRetryBeginV4Ingress.codec.decode (NativeHostReplay.sourceBytes read.record)
+    | return .error "original retry BEGIN-v4 absent from verified history"
+  let original ← match ← NativeHistorySelection.select config reader light.opening.head.height
+      request.originalIndex (ApplicationLifecycleRetryBeginV4Admission.keys begin) with
+    | .error detail => return .error detail
+    | .ok original => pure original
+  let originalAccepted ← match ← ApplicationLifecycleRetryBeginV4Admission.admitNative
+      config reader original.grounded begin with
+    | .error detail => return .error detail
+    | .ok accepted => pure accepted
+  match NativeHistorySelection.matchIntent original originalAccepted.intent with
+  | .error detail => return .error detail
+  | .ok _ =>
+      let originalReceipt := NativeHost.receiptOfRecord read
+      let cells ← match ← light.basis ⟨[], []⟩ with
+        | .error detail => return .error detail
+        | .ok basis => pure basis
+      match sourceOn config (.ofBasis cells) pin request begin request.originalIndex with
+      | .error detail => return .error detail
+      | .ok (source, _, _) =>
+          match ← light.basis (planKeys config begin source) with
+          | .error detail => return .error detail
+          | .ok basis => return prepareOn config (.ofBasis basis) pin request begin request.originalIndex originalReceipt
+
+structure LightReservation (config : Config) (opening : DurableServed.Opening ResourceBirthCodec.rootBytes) where
+  ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress
+  grounded : ServedBasis.Grounded config.deployment opening.head
+  conditional : ApplicationLifecycleRetryClaimV4Core.Conditional config opening.head grounded.ground ingress
+  fresh : grounded.ground.recorded conditional.intent.transactionId = some none
+  kind : DurableReceiverIO.Confirmation
+  next : DurableServed.Opening ResourceBirthCodec.rootBytes
+  height : next.head.height = opening.head.height + 1
+  entry : DurableReceiverIO.Entry
+  entryExact : entry.record =
+    DurableCheckpointCodec.recordFrame.encode (DurableReceiver.IntentRecord.ofIntent conditional.intent)
+  freshCasWinner : Bool
+
+def LightReservation.receipt {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
+    (reservation : LightReservation config opening) : NativeHostCodec.Receipt :=
+  ⟨reservation.conditional.intent.transactionId, reservation.conditional.intent.event.eventId,
+    reservation.next.head.height, reservation.next.served.worldRoot⟩
+
+def LightReservation.projection {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
+    (reservation : LightReservation config opening) : ApplicationLifecycleRetryClaimV4Projection.Committed :=
+  let source := reservation.ingress.base.source
+  let served := reservation.next.served
+  { core :=
+      { source := source
+        originalTransaction := reservation.conditional.original.record.transactionId
+        originalEvent := reservation.conditional.original.record.event.eventId
+        originalNullifier :=
+          (ApplicationLifecycleBegin.stableNullifier config.deployment.domain
+            config.profile.semantics source.begin.source).nullifierId
+        claimReceipt := reservation.receipt
+        claimNullifier :=
+          (ApplicationLifecycleClaim.stableNullifier config.deployment.domain
+            config.profile.semantics source).nullifierId
+        appPhysicalRoot := served.roots ⟨source.begin.source.app⟩
+        packagePhysicalRoot := served.roots ⟨source.begin.source.packageManifest⟩
+        authorityPhysicalRoot := served.roots ⟨config.deployment.authorityCellId⟩
+        postWorldRoot := reservation.receipt.worldRoot }
+    originalClaim := reservation.ingress }
+
+def LightReservation.withFreshTip {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
+    {α : Type} (reservation : LightReservation config opening) (transport : DurableReceiverIO.Transport)
+    (handoff : List UInt8 → IO α) : IO (Except String α) := do
+  unless reservation.kind == .installed && reservation.freshCasWinner do
+    return .error "retry claim was not freshly installed"
+  let .ok current ← DurableReceiverIO.tipIs transport reservation.next.head.height reservation.entry
+    | return .error "retry claim physical tip unavailable before handoff"
+  if current then
+    return .ok (← handoff reservation.projection.canonicalBytes)
+  else return .error "retry claim physical tip changed before handoff"
+
+inductive LightResult (config : Config) (opening : DurableServed.Opening ResourceBirthCodec.rootBytes) where
+  | reserved (reservation : LightReservation config opening)
+  | rejected (detail : String)
+  | contention
+  | unavailable (detail : String)
+  | uncertain (detail : String)
+
+def receiveLight (config : Config) (transport : DurableReceiverIO.Transport)
+    (light : NativeHostLight.Light config) (bytes : List UInt8)
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) :
+    IO (LightResult config light.opening) := do
+  let some ingress := ApplicationLifecycleRetryClaimV4Ingress.codec.decode bytes
+    | return .rejected "noncanonical retry claim ingress"
+  let grounded ← match ← light.groundedVia transport (ApplicationLifecycleRetryClaimV4Core.keys ingress) with
+    | .error detail => return .unavailable detail
+    | .ok grounded => pure grounded
+  let reader := light.opening.reader transport ResourceBirthCodec.rootBytes
+  let conditional ← match ← ApplicationLifecycleRetryClaimV4Core.prepare config reader grounded ingress with
+    | .error detail => return .rejected s!"retry BEGIN absent or current retry claim authority refused: {detail}"
+    | .ok conditional => pure conditional
+  match fresh : grounded.ground.recorded conditional.intent.transactionId with
+  | none => return .rejected "retry claim transaction identity undeclared"
+  | some (some _) => return .rejected "retry claim transaction identity already used"
+  | some none =>
+      match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening
+          conditional.intent with
+      | .appended kind next height entry entryExact freshCasWinner =>
+          adopt next none
+          return .reserved ⟨ingress, grounded, conditional, fresh, kind, next, height, entry, entryExact,
+            freshCasWinner⟩
+      | .replayed _ => return .rejected "retry claim transaction identity already used"
+      | .rejected _ => return .rejected "durable retry claim refused"
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail
+      | .uncertain detail => return .uncertain detail
 
 private def envelope (slot : SigningSlot) (signature : List UInt8) :
     Except String (List UInt8) := do

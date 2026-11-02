@@ -1426,6 +1426,26 @@ def Opening.reader (transport : DurableReceiverIO.Transport) (rootBytes : List U
     range := DurableHistoryStore.range transport opening.head
     stateAt := DurableHistoryStore.stateAt transport rootBytes opening.served.seed opening.head }
 
+/-- **Hand off only while the Store's tip is this opening's head**: the Store's head height is the
+opening's, and its head entry's tag authenticates as the head at the opening's chain and frontier
+(`Head.verify`, the open's own check). A point-in-time check, not a lease against later writers. -/
+def Opening.withFreshTip {α : Type} (transport : DurableReceiverIO.Transport) (opening : Opening rootBytes)
+    (handoff : IO α) : IO (Except String α) := do
+  if opening.head.height = 0 then return .error "the handoff requires a nonempty history"
+  match ← transport.read opening.head.height false with
+  | .error message => return .error s!"physical tip unavailable: {message}"
+  | .ok none => return .error "physical tip unavailable: the Store is not initialized"
+  | .ok (some stored) =>
+      match stored.entries with
+      | [entry] =>
+          if stored.head = opening.head.height then
+            match DurableHistory.Head.verify opening.store opening.head.height entry.tag opening.head.chain
+                opening.head.frontier with
+            | .ok _ => return .ok (← handoff)
+            | .error _ => return .error "physical tip does not verify as the opening's head"
+          else return .error "physical tip changed before handoff"
+      | _ => return .error "physical tip changed before handoff"
+
 /-- The keys the shared executor consults for an intent (`DurableView.executeFamily`). -/
 def intentKeys (intent : DurableDataIntent.DataIntent rootBytes) : Keys :=
   ⟨[intent.transactionId], intent.nullifiers⟩

@@ -22,4 +22,6 @@ RestrictRealtime=yes
 SystemCallArchitectures=native
 CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
 TasksMax=64
-MemoryMax=768M
+MemoryHigh=3G
+MemoryMax=4G
+

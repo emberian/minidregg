@@ -75,7 +75,7 @@ def genesis (factory : Minidregg.Pred.Pred) : NativeHostGenesis.Config where
   platformOwnerBudget := 100000
   platformLifetime := 10000
 
-/-- The genesis image opened purely: the same open and validation as `NativeHost.openExisting`,
+/-- The genesis image opened purely: the same open and validation as `NativeHost.validateLoaded`,
 over the seed instead of a Store. -/
 def opened (factory : Minidregg.Pred.Pred) :
     Except String ((config : NativeHost.Config) × NativeHost.Opened config) := do

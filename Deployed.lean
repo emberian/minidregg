@@ -24,10 +24,42 @@ import Pred
 import Effects
 import Assurance.EvaluatorAudit  -- required evaluator admission poles, outside Host runtime imports
 import Assurance.StoryLaw  -- P-STORY: a sealed story's table is the law on every player's cell (sealed_story_scene_monotone, sealed_story_never_relawed); kernel-level, not proof-system Assurance: it imports Kernel.LawView and Kernel only
+import Assurance.StoryHistory
+import Assurance.CanonicalResourceBookInvariantAudit
+import Assurance.DeployedCredentialLifecycle
+import Assurance.CapabilityRevocationAudit
+import Assurance.CredentialDelegationLineageAudit
+import Assurance.CredentialDelegationLineageWitness
+import Assurance.CredentialFoundationMigrationAudit
+import Assurance.CredentialSignedEnvelopeEndpoint
+import Assurance.CredentialSourceAdmissionAudit
+import Assurance.CredentialTokenLocalEndpoint
+import Assurance.HyperdocumentFinalizedDomainCrawler
+import Assurance.ItemLaw
+import Assurance.KeyPreRotationAudit
+import Assurance.NativeObservationAudit
+import Assurance.NativeProviderHistoryAdmission
+import Assurance.NoteSpendCoreAcceptedCellEffect
+import Assurance.ObjectiveZkTraceDisclosure
+import Assurance.RenounceAudit
+import Assurance.ResourceMoneyOperationDomainAudit
+import Assurance.SheetLaw
+import Assurance.TwoRegimeQueryBudget
+import Assurance.WorldPrototypeConstructionChecks
 import Host
 -- Kernel and policy modules `Minidregg` roots beside the per-directory roots
 -- (none imports Selvage or Assurance; the arithmetization and zkML roots stay research):
+import Kernel.ApplicationFailedStartRecoveryLookup
+import Kernel.ApplicationFailedStartRecoveryReceiver
 import Kernel.ApplicationGrainLaws
+import Kernel.ApplicationLifecycleCompletionLookup
+import Kernel.ApplicationLifecycleCompletionV2Lookup
+import Kernel.ApplicationLifecycleRetryBeginV4Receiver
+import Kernel.ApplicationLifecycleRetryClaimV4Receiver
+import Kernel.ApplicationLifecycleRetryCompletionV4Receiver
+import Kernel.ApplicationLifecycleRetryV4Lookup
+import Kernel.ApplicationLifecycleV2Lookup
+import Kernel.ApplicationLifecycleV3Lookup
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep

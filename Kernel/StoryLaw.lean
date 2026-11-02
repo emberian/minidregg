@@ -9,7 +9,26 @@ that the two agree), and the premise a receiver discharges (`StoryInstalled`, `c
 It lives in `Kernel` so a Host receiver may import it; the theorems about the law are in
 `Assurance.StoryLaw` and `Assurance.StoryHistory`.
 -/
-import Kernel.LawHistory
+module
+
+public import Kernel.LawHistory
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.StoryLaw
 
@@ -146,7 +165,7 @@ def taleEmbedded (S : Int) : Pred :=
 -- END GENERATED
 
 /-- **The client's generated law is this file's `law`** of the generated table. -/
-theorem tale_embedded_is_law (S : Int) : taleEmbedded S = law taleTable S := rfl
+theorem tale_embedded_is_law (S : Int) : taleEmbedded S = law taleTable S := by rfl
 section Kernel
 open Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Kernel.MultiCellHyperedge

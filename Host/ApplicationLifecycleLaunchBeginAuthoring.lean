@@ -545,6 +545,158 @@ def prepareContinueRequestLight (config : Config) (light : NativeHostLight.Light
           createIndex := none }
       prepareSelectedLight config light pin beginRequest descriptor (some binding)
 
+private def decodeRunningCompletion (record : DurableReceiver.IntentRecord) :
+    Option NativeHostReplay.CompletionIngress :=
+  let bytes := NativeHostReplay.sourceBytes record
+  match ApplicationLifecycleRetryCompletionV4Ingress.codec.decode bytes with
+  | some ingress => some (.v4 ingress)
+  | none => (ApplicationLifecycleCompletionV2Ingress.codec.decode bytes).map .v2
+
+private def admitRunningAt (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (bound index : Nat) (completion : NativeHostReplay.CompletionIngress) :
+    IO (Except String Unit) := do
+  match completion with
+  | .v2 ingress =>
+      let selected ← match ← NativeHistorySelection.select config reader bound index
+          (ApplicationLifecycleCompletionV2Admission.keys config ingress) with
+        | .error detail => return .error detail
+        | .ok selected => pure selected
+      let candidate ← match ← ApplicationLifecycleCompletionV2Admission.prepareConditional
+          config reader selected.grounded ingress with
+        | .error detail => return .error detail
+        | .ok candidate => pure candidate
+      match NativeHistorySelection.matchIntent selected (ApplicationLifecycleCompletionV2Core.intent candidate) with
+      | .error detail => return .error detail
+      | .ok _ => return .ok ()
+  | .v4 ingress =>
+      let selected ← match ← NativeHistorySelection.select config reader bound index
+          (ApplicationLifecycleRetryCompletionV4Admission.keys config ingress) with
+        | .error detail => return .error detail
+        | .ok selected => pure selected
+      let candidate ← match ← ApplicationLifecycleRetryCompletionV4Admission.prepareConditional
+          config reader selected.grounded ingress with
+        | .error detail => return .error detail
+        | .ok candidate => pure candidate
+      match NativeHistorySelection.matchIntent selected (ApplicationLifecycleRetryCompletionV4Core.intent candidate) with
+      | .error detail => return .error detail
+      | .ok _ => return .ok ()
+
+/-- Scan backwards from `bound` in the Store's authenticated history for the newest running
+START completion of `source.app`, re-admitting it at its own prefix (`NativeHistorySelection.select`
++ `prepareConditional` + `matchIntent`) and checking the exact generation, unit, image, and
+volume custody (`Verified.selectRunning` on the light opening). -/
+def selectRunningLight (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (bound : Nat) (source : ApplicationLifecycleBegin.Source) :
+    IO (Except String RunningWitness) :=
+  let rec go : Nat → IO (Except String RunningWitness)
+    | 0 => pure (.error "STOP has no admitted running incarnation at current generation")
+    | height + 1 => do
+        let read ← match ← reader.atHeight (height + 1) with
+          | .error refusal => return .error refusal.message
+          | .ok read => pure read
+        match decodeRunningCompletion read.record with
+        | some completion =>
+            if completion.physical.outcome == .running &&
+                completion.beginSource.kind == .start &&
+                completion.beginSource.app == source.app then
+              match ← admitRunningAt config reader bound height completion with
+              | .error detail => return .error detail
+              | .ok () =>
+                  unless completion.beginSource.processGeneration == source.before.generation do
+                    return .error "STOP generation differs from admitted running incarnation"
+                  unless completion.physical.unit == source.processIdentity do
+                    return .error "STOP unit differs from admitted running incarnation"
+                  unless completion.physical.materializedImage == source.imageIdentity do
+                    return .error "STOP image differs from admitted running incarnation"
+                  let some custody := completion.physical.volumeCustody
+                    | return .error "admitted running completion has no volume custody"
+                  return .ok
+                    { index := height
+                      receipt := NativeHost.receiptOfRecord read
+                      generation := completion.beginSource.processGeneration
+                      unit := completion.physical.unit
+                      image := completion.physical.materializedImage
+                      invocationId := completion.physical.invocationId
+                      controlGroup := completion.physical.controlGroup
+                      custody := custody }
+            else go height
+        | none => go height
+  go bound
+
+def prepareStopLight (config : Config) (light : NativeHostLight.Light config)
+    (pin : Pin) (request : Request) : IO (Except String StopPlan) := do
+  unless request.kind == .stop && request.createIndex == none do
+    return .error "versioned STOP plan requires STOP without create action"
+  let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical
+      request.descriptorBytes
+    | return .error "noncanonical signed-SPK launch descriptor"
+  unless descriptor.valid do return .error "invalid signed-SPK launch descriptor"
+  let base ← match ← prepareSelectedLight config light pin request descriptor none with
+    | .error detail => return .error detail
+    | .ok base => pure base
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let running ← match ← selectRunningLight config reader light.opening.head.height base.unsigned.base.source with
+    | .error detail => return .error detail
+    | .ok running => pure running
+  let plan : StopPlan := { base := base, running := running }
+  unless plan.shape do return .error "STOP running-witness plan differs from verified source"
+  return .ok plan
+
+def prepareStopRequestLight (config : Config) (light : NativeHostLight.Light config)
+    (pin : Pin) (bytes : List UInt8) : IO (Except String StopPlan) := do
+  let some request := requestCodec.decode bytes
+    | return .error "noncanonical launch STOP operator request"
+  prepareStopLight config light pin request
+
+inductive StopResult where
+  | confirmed (kind : DurableReceiverIO.Confirmation) (transactionId : Digest)
+      (eventId : Digest)
+  | rejected (detail : String)
+  | contention
+  | unavailable (detail : String)
+  | uncertain (detail : String)
+
+/-- Receive a v3 STOP BEGIN on the light opening: select and re-admit the newest running START
+completion for the app via `selectRunningLight`, admit the STOP BEGIN on `light.basisVia`, and
+commit via `DurableServed.receiveServed`. -/
+def receiveStopLight (config : Config) (transport : DurableReceiverIO.Transport)
+    (light : NativeHostLight.Light config) (bytes : List UInt8)
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO StopResult := do
+  let some ingress := ApplicationLifecycleBeginV3Ingress.codec.decode bytes
+    | return .rejected "noncanonical launch-bound lifecycle BEGIN"
+  unless ingress.start == none && ingress.base.source.kind == .stop do
+    return .rejected "current launch-bound lifecycle BEGIN refused: STOP requires no start binding"
+  let reader := light.opening.reader transport ResourceBirthCodec.rootBytes
+  match ← selectRunningLight config reader light.opening.head.height ingress.base.source with
+  | .error detail => return .rejected s!"current launch-bound lifecycle BEGIN refused: {detail}"
+  | .ok _ => pure ()
+  let basis ← match ← light.basisVia transport (ApplicationLifecycleBeginV3Admission.keys ingress) with
+    | .error detail => return .unavailable detail
+    | .ok basis => pure basis
+  let ambient : DeclaredResourceController.Ambient := ⟨config.federation, config.genesisHeight + basis.height⟩
+  let accepted ← match ← ApplicationLifecycleBeginV3Admission.admitNative config.deployment
+      config.profile ambient config.signature (.ofBasis basis) ingress with
+    | .error detail => return .rejected s!"current launch-bound lifecycle BEGIN refused: {detail}"
+    | .ok accepted => pure accepted
+  unless accepted.intent.event == ApplicationLifecycleBeginV3Ingress.event ingress do
+    return .rejected "source-admitted v3 BEGIN event differs from ingress"
+  match (ServedBasis.Ground.ofBasis basis).recorded accepted.intent.transactionId with
+  | none => return .rejected "launch-bound BEGIN transaction identity undeclared"
+  | some (some _) => return .rejected "launch-bound BEGIN transaction identity already used"
+  | some none =>
+      match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening
+          accepted.intent with
+      | .appended kind next _ _ _ _ =>
+          adopt next none
+          return .confirmed kind accepted.intent.transactionId accepted.intent.event.eventId
+      | .replayed _ => return .rejected "launch-bound BEGIN transaction identity already used"
+      | .rejected _ => return .rejected "durable v3 lifecycle BEGIN refused"
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail
+      | .uncertain detail => return .uncertain detail
+
 /-- Detached assembly binds the same authorization ID, descriptor and action.
 Fresh event23 admission still rechecks current image, signatures and history. -/
 private def assembleBase (plan : Plan) (signatures : List (List UInt8)) :

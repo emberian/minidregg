@@ -23,14 +23,15 @@ stores (`local_field_exact`: the common, byte and joint blocks hold no such key;
 a scalar target's projection is `scalarSlots`), and `coherent_of_step` turns that plus `Step` into
 `Coherent`.
 
-**Named residuals (premises, not proved here).** (R2a) The Host discharging `StoryInstalled`: nothing
-in the Host runs `checkInstalled`/`checkActiveComponent`, and it cannot call `StoryLaw.checkInstalled`
-(the Host may not import Assurance); see the census doc, Door 11. (R2b) `Chained` for the receiver's
-actual sequence of accepted writes (the CAS chain). (R3) A concrete `CheckedLeg` on the tale,
-inhabiting `Realized` (the satisfiable pole below inhabits every premise except that one, through
-`Step`). The main theorem is proved given these.
+**Named residuals (premises, not proved here).** (R2a) `Kernel.StoryLaw.checkInstalled` is wired into
+the Host's policy-leg inspection path (`Kernel.PreparedInvocationDiagnostics.PreparedPolicyLeg.checkStoryInstalled`
+and `preparePolicyLegStoryInstalled`, proved sound by `realized_of_preparePolicyLegStoryInstalled` below).
+(R2b) `Chained` for the receiver's actual sequence of accepted writes (the CAS chain). (R3) A concrete
+`CheckedLeg` on the tale, inhabiting `Realized` (the satisfiable pole below inhabits every premise except
+that one, through `Step`). The main theorem is proved given these.
 -/
 import Assurance.StoryLaw
+import Kernel.PreparedInvocationDiagnostics
 
 namespace Minidregg.Assurance.StoryHistory
 
@@ -359,6 +360,26 @@ theorem realized_step {t : Table} {S : Int} {n : State} (h : Realized t S n) : S
     envelope, ⟨leg⟩, installed, -, rfl, w⟩ := h
   exact kernel_story_step_full t S leg installed w
 
+/-- **R2a bridge.** A `CheckedLeg` whose policy leg passes `preparePolicyLegStoryInstalled`
+on a scalar target with `request/verb = 2` inhabits `Realized`. -/
+theorem realized_of_preparePolicyLegStoryInstalled
+    {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient}
+    {ground : Ground deployment} {command : Command}
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (envelope : List UInt8) (t : Table) (S : Int)
+    (checkedLeg : CheckedLeg prepared tuple incidence envelope)
+    {proof : PLift (StoryInstalled t S tuple incidence)}
+    (installed : preparePolicyLegStoryInstalled prepared tuple incidence t S = some proof)
+    (scalar : ∃ s, command.targets[incidence.getD (firstIndex prepared)].payload = .scalar s)
+    (writeVerb : (fullStep prepared tuple incidence).newState.get "request/verb" = some 2) :
+    Realized t S (fullStep prepared tuple incidence).newState :=
+  ⟨F, inferInstance, inferInstance, deployment, profile, ambient, ground, command,
+    prepared, tuple, incidence, envelope, ⟨checkedLeg⟩,
+    preparePolicyLegStoryInstalled_sound prepared tuple incidence t S installed,
+    scalar, rfl, writeVerb⟩
+
 /-- **R1.** A realized leg's `resource/field` keys are read from `scalarSlots` of the cell's
 before and after field stores. -/
 theorem realized_scalar {t : Table} {S : Int} {n : State} (h : Realized t S n) :
@@ -649,6 +670,8 @@ theorem unchained_breaks_conclusion :
 
 /-- info: 'Minidregg.Assurance.StoryHistory.realized_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms realized_step
+/-- info: 'Minidregg.Assurance.StoryHistory.realized_of_preparePolicyLegStoryInstalled' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms realized_of_preparePolicyLegStoryInstalled
 /-- info: 'Minidregg.Assurance.StoryHistory.story_history_monotone_of' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms story_history_monotone_of
 /-- info: 'Minidregg.Assurance.StoryHistory.story_history_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/

@@ -185,10 +185,10 @@ fn audit_chain(rows: &[Value], record: &Record) -> Result<Vec<Value>> {
     let Outcome::Undecided { retry, .. } = &record.outcome else {
         return Err("only an undecided prompt can be audited".into());
     };
-    if retry.operation.is_some() || !retry.admin.iter().any(|v| v == "reconcile worker audited")
-        || !retry.admin.iter().any(|v| v == "reconcile parent audited")
+    if retry.operation.is_some()
+        || retry.admin.is_empty()
         || retry.admin.iter().any(|v| !matches!(v.as_str(),
-            "reconcile worker audited" | "reconcile parent audited" | "reconcile effects")) {
+            "reconcile worker audited" | "reconcile provider audited" | "reconcile parent audited" | "reconcile effects")) {
         return Err("prompt audit requires the retained worker/parent recovery boundary".into());
     }
     let op = record.prompt_operation_id;
@@ -196,9 +196,33 @@ fn audit_chain(rows: &[Value], record: &Record) -> Result<Vec<Value>> {
         && r["operationId"] == op.to_string()
         && ((r["action"] == "recover-gated-worker" && r["stage"] == "physical-stop-verified" && r["machineProven"] == true)
             || (r["action"] == "clear-stranded-child-after-physical-audit"
-                && r["stage"] == "physical-audit-recorded" && r["operatorAudited"] == true)))
-        .ok_or("prompt has no exact worker stop audit")?;
-    let parent = rows.iter().find(|r| decision(r).is_some_and(|d| d > decision(worker).unwrap())
+                && r["stage"] == "physical-audit-recorded" && r["operatorAudited"] == true)));
+    if retry.admin.iter().any(|v| v == "reconcile worker audited") && worker.is_none() {
+        return Err("prompt has no exact worker stop audit".into());
+    }
+    let after_worker = worker.and_then(decision).unwrap_or(op);
+    let mut chain = Vec::new();
+    if let Some(w) = worker {
+        chain.push(w.clone());
+    }
+    if retry.admin.iter().any(|v| v == "reconcile provider audited") {
+        let provider_req = rows.iter().find(|r| decision(r).is_some_and(|d| d > after_worker)
+            && r["authority"] == "provider"
+            && ((r["action"] == "settle-provider-source-metered-charge"
+                && matches!(r["stage"].as_str(), Some("operator-audited-requested" | "delivered-response-recovery-requested")))
+                || (r["action"] == "abort-definitively-unreserved-provider-request"
+                    && r["stage"] == "signed-origin-confirmed")))
+            .ok_or("prompt has no subsequent provider audit request")?;
+        chain.push(provider_req.clone());
+        if provider_req["action"] == "settle-provider-source-metered-charge" {
+            let provider_settled = rows.iter().find(|r| decision(r) == decision(provider_req)
+                && r["authority"] == "provider"
+                && matches!(r["stage"].as_str(), Some("signed-settlement-confirmed" | "operator-audited-terminal-without-held-receipt")))
+                .ok_or("prompt provider settlement is not confirmed")?;
+            chain.push(provider_settled.clone());
+        }
+    }
+    let parent = rows.iter().find(|r| decision(r).is_some_and(|d| d > after_worker)
         && r["authority"] == "parent" && r["action"] == "settle-held-allowance"
         && r["stage"] == "requested" && r["reserveAttempt"].as_str().is_some())
         .ok_or("prompt has no subsequent exact parent settlement request")?;
@@ -214,9 +238,15 @@ fn audit_chain(rows: &[Value], record: &Record) -> Result<Vec<Value>> {
         && r["details"].as_array().is_some_and(|details| details.iter().any(|v|
             v.as_str() == Some(format!("worker operation {op} stopped after controller restart; external effects need acknowledgement").as_str())
             || v.as_str() == Some("parent reserved operation may have external effects; explicit operator acknowledgement required")
-            || v.as_str() == Some("parent confirmed reservation was externally settled; explicit effects acknowledgement required"))))
+            || v.as_str() == Some("parent confirmed reservation was externally settled; explicit effects acknowledgement required")
+            || v.as_str().is_some_and(|s| s.starts_with(&format!("Hermes prompt {op}: "))
+                || s == "provider reservation fenced; external send/response requires exact audit"
+                || (s.starts_with("provider request ") && s.ends_with(" external effects require explicit acknowledgement"))))))
         .ok_or("prompt lacks subsequent bound external-effects closure")?;
-    Ok(vec![worker.clone(), parent.clone(), settled.clone(), effects.clone()])
+    chain.push(parent.clone());
+    chain.push(settled.clone());
+    chain.push(effects.clone());
+    Ok(chain)
 }
 
 /// Identity survives legitimate controller policy/enrollment updates. The
@@ -232,7 +262,9 @@ fn controller_identity(binding: &Value) -> Result<Value> {
 }
 
 fn reserve_ordinal(identity: &Value, audit: &[Value], op: u64) -> Result<u64> {
-    let attempt = audit[1]["reserveAttempt"].as_str().ok_or("audited parent reserve attempt absent")?;
+    let parent = audit.iter().find(|r| r["authority"] == "parent" && r["action"] == "settle-held-allowance" && r["stage"] == "requested")
+        .ok_or("audited parent settlement request absent")?;
+    let attempt = parent["reserveAttempt"].as_str().ok_or("audited parent reserve attempt absent")?;
     let directory = Path::new(identity["stateDir"].as_str().ok_or("state directory absent")?);
     let p = Path::new(attempt);
     let name = p.file_name().and_then(|v| v.to_str()).ok_or("parent reserve leaf invalid")?;
@@ -242,8 +274,10 @@ fn reserve_ordinal(identity: &Value, audit: &[Value], op: u64) -> Result<u64> {
         return Err("parent audit does not name a preceding exact local reserve".into());
     }
     let expected_unit = format!("mini-grain-t{}-o{op}", identity["task"].as_str().ok_or("task absent")?);
-    if audit[0]["unit"].as_str().or_else(|| audit[0]["recordedUnit"].as_str()) != Some(&expected_unit) {
-        return Err("worker audit does not bind this controller task and prompt".into());
+    if let Some(worker) = audit.iter().find(|r| r["action"] == "recover-gated-worker" || r["action"] == "clear-stranded-child-after-physical-audit") {
+        if worker["unit"].as_str().or_else(|| worker["recordedUnit"].as_str()) != Some(&expected_unit) {
+            return Err("worker audit does not bind this controller task and prompt".into());
+        }
     }
     Ok(n)
 }

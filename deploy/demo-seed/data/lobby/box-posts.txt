@@ -1,3 +1,2 @@
-Welcome to the lobby. This is a public room: everything said here is a signed turn.
-Start with the document called welcome, then come back and say hello.
-Type: say your message   to post, and: tail   to read.
+Lobby stream online. Messages here are signed appends to each member's stream cell, merged in admission-height order.
+Published docs (welcome, what-is-mini, house-rules, field-notes) and the shared task board are live in the workspace index.

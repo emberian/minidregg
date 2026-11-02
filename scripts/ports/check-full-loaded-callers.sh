@@ -7,7 +7,7 @@
 # loadBytes / extendFrom, NativeHost.openExisting, NativeHistorySelection.loadPrefix.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-pattern='(DurableReceiverIO\.)?(loadChained|loadImage|loadSeed|loadBytes|extendFrom|openExisting|loadPrefix)\b|DurableReceiverIO\.load\b|\bload transport\b|\bload config\.transport\b'
+pattern='(DurableReceiverIO\.)?\b(loadChained|loadImage|loadSeed|loadBytes|extendFrom|openExisting|loadPrefix)\b|DurableReceiverIO\.load\b|\bload transport\b|\bload config\.transport\b'
 home='^(Compiler/DurableReceiver(IO|Core)\.lean)$'
 actual=$(git grep -lP "$pattern" -- '*.lean' | grep -vE "$home" | sort -u)
 listed=$(grep -v '^#' scripts/ports/full-loaded-callers.txt | sed '/^$/d' | sort -u)

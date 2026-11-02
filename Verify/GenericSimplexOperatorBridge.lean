@@ -1,5 +1,9 @@
-import Verify.GenericSimplexSourceHarness
-import Kernel.NativeHost
+module
+
+public import Verify.GenericSimplexSourceHarness
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Verify.GenericSimplexOperatorBridge
 open Minidregg.Compiler

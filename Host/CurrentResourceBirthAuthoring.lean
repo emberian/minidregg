@@ -9,6 +9,7 @@ module
 
 public import Host.Json
 public import Kernel.NativeHost
+public import Kernel.NativeHostBookInvariant
 
 @[expose] public section
 
@@ -78,5 +79,25 @@ def intentLoadedAuthorized (config : NativeHost.Config)
     (json : Lean.Json) (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) :
     IO (Except String (List UInt8)) :=
   intentAuthorizedOn config opened.ground signedObservationBytes json providerRoutes
+
+/-- Every genesis configuration's initial resource book satisfies `Book.AccountSupported`
+(`Kernel.NativeHostBookInvariant`). -/
+theorem genesis_initialBook_accountSupported (config : NativeHostGenesis.Config) :
+    config.initialBook.AccountSupported :=
+  NativeHostGenesis.initialBook_accountSupported config
+
+/-- Every prepared resource birth on a loaded `Ground` preserves `Book.AccountSupported`
+from its loaded book to its post-birth book (`Kernel.NativeHostBookInvariant`). -/
+theorem preparedBirth_preserves_accountSupported
+    {F : Type} [Field F] {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {pins : ResourceBirth.FactoryPins}
+    {ground : ServedBasis.Ground deployment} {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
+    (prepared : ResourceBirthController.Concrete.PreparedBirth profile deployment pins ground descriptor) :
+    (CanonicalResourceKernel.logicalBook prepared.book.payload.logical).AccountSupported ∧
+      (CanonicalResourceKernel.logicalBook prepared.resources.post.logical).AccountSupported :=
+  ⟨prepared.book_accountSupported, prepared.post_book_accountSupported⟩
+
+#assert_axioms genesis_initialBook_accountSupported
+#assert_axioms preparedBirth_preserves_accountSupported
 
 end Minidregg.Host.CurrentResourceBirthAuthoring

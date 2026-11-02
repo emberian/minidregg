@@ -26,10 +26,10 @@ pub(super) fn market(site: &Site, target: &str) -> Page {
     let term = super::body::query(target, "q").unwrap_or_default();
     let category = super::body::query(target, "category").unwrap_or_default();
     let body = format!(
-        "<p class=\"eyebrow\">The app market</p><p class=\"lede\">Your next project starts here. Write together, organise a team, build something, or make room to play.</p>\
-         <p class=\"note\">Names, descriptions and publishers are catalogue claims. Package verdicts and declared agent interfaces are shown separately.</p>{installed}{}",
+        "<p class=\"eyebrow\">App market</p><p class=\"lede\">Install and run packaged applications as isolated grains.</p>\
+         <p class=\"note\">Names, descriptions, and publishers come from the package index; host verification verdicts and agent interfaces are listed alongside each package.</p>{installed}{}",
         catalogue(site, &term, &category, false),
-        installed = if site.front.read_only { "" } else { "<p><a href=\"/grain\">Open your installed apps →</a></p>" }
+        installed = if site.front.read_only { "" } else { "<p><a href=\"/grain\">Installed grains →</a></p>" }
     );
     Page { status: 200, title: "Apps".into(), stamp: Stamp::None, body }
 }
@@ -40,7 +40,7 @@ fn search(site: &Site, term: &str, category: &str) -> std::result::Result<Value,
     if !category.is_empty() { line.push_str(" --category "); line.push_str(&quote(category)); }
     line.push_str(" --json");
     let Some(ending) = verb(site, &[line]) else {
-        return Err("<p class=note>The app catalogue is unavailable: this body has no shell paths.</p>".into());
+        return Err("<p class=note>App catalogue unavailable: shell paths are not configured.</p>".into());
     };
     reply(&ending).filter(|_| ending.code == 0).ok_or_else(||
         super::body::answer_html(&ending, &[("Browse app commands", "/verb/apps")]))
@@ -79,7 +79,7 @@ pub(super) fn catalogue(site: &Site, term: &str, category: &str, featured_only: 
         for app in &featured {
             groups.entry(app["categories"][0].as_str().unwrap_or("Other")).or_default().push(app);
         }
-        out.push_str(&format!("<p class=\"catalogue-count\"><strong>{}</strong> featured apps · <a href=\"/apps\">Explore the whole catalogue</a></p>", featured.len()));
+        out.push_str(&format!("<p class=\"catalogue-count\"><strong>{}</strong> featured apps · <a href=\"/apps\">Full catalogue</a></p>", featured.len()));
         for (category, apps) in groups {
             out.push_str(&format!("<section class=\"catalogue-category\"><h3>{} <span class=\"note\">{}</span></h3><div class=\"app-gallery\">{}</div></section>",
                 escape(category), apps.len(), apps.iter().map(|a| app_card(a, writes, 4)).collect::<String>()));
@@ -94,7 +94,7 @@ pub(super) fn catalogue(site: &Site, term: &str, category: &str, featured_only: 
         }
     }
     if featured.is_empty() && (featured_only || rest.is_empty()) {
-        out.push_str("<div class=\"empty\"><h3>No apps found</h3><p>Try another search, or <a href=\"/apps\">browse the whole catalogue</a>.</p></div>");
+        out.push_str("<div class=\"empty\"><h3>No apps found</h3><p><a href=\"/apps\">All apps</a></p></div>");
     }
     out
 }
@@ -108,7 +108,7 @@ fn agent_interface(app: &Value) -> String {
         "<li><strong><code>{}</code></strong> <span class=\"note\">{}</span><p>{}</p><details><summary>Input and output types</summary><p>Input</p>{}<p>Output</p>{}</details></li>",
         escape(op["name"].as_str().unwrap_or("")), if op["write"] == true { "writes" } else { "reads" },
         escape(op["description"].as_str().unwrap_or("")), super::body::json_tree_html(&op["input"]), super::body::json_tree_html(&op["output"]))).collect();
-    format!("<div class=\"app-agent\"><p class=\"eyebrow\">For agents</p><p>{names}</p><details><summary>Declared operations · {}</summary><ul>{details}</ul><details><summary>Shared types</summary>{}</details></details></div>",
+    format!("<div class=\"app-agent\"><p class=\"eyebrow\">Agent operations</p><p>{names}</p><details><summary>Declared operations · {}</summary><ul>{details}</ul><details><summary>Shared types</summary>{}</details></details></div>",
         escape(interface["status"].as_str().unwrap_or("qualification not reported")), super::body::json_tree_html(&interface["$defs"]))
 }
 
@@ -141,7 +141,7 @@ pub(super) fn show(site: &Site, app: &str) -> Page {
     let Some(ending) = verb(site, &[format!("apps show {} --json", quote(app))]) else { return simple(500, "Apps", "this body has no shell paths") };
     let mut body = match reply(&ending).filter(|_| ending.code == 0) {
         Some(value) => format!("{}<details><summary>Package details and publisher claims</summary>{}</details>", app_card(&value, false, 2), super::body::json_tree_html(&value)),
-        None => super::body::outcome_html(&ending, &[("the market", "/apps")]),
+        None => super::body::outcome_html(&ending, &[("App market", "/apps")]),
     };
     if !site.front.read_only {
         body.push_str(&format!(
@@ -162,7 +162,7 @@ pub(super) fn install(site: &Site, form: &std::collections::BTreeMap<String, Str
     if let Some(class) = form.get("class").map(|c| c.trim()).filter(|c| matches!(*c, "S" | "M" | "L")) {
         line.push_str(&format!(" --class {class}"));
     }
-    act(site, &format!("Install {app}"), vec![line], "", &[("your grains", "/grain"), ("the market", "/apps")])
+    act(site, &format!("Install {app}"), vec![line], "", &[("Grains", "/grain"), ("App market", "/apps")])
 }
 
 /// `/grain`: the grains this member owns or was shared.
@@ -188,7 +188,7 @@ pub(super) fn grains(site: &Site) -> Page {
                 notice(&value["receipt"])
             )
         }
-        None => super::body::outcome_html(&ending, &[("the market", "/apps")]),
+        None => super::body::outcome_html(&ending, &[("App market", "/apps")]),
     };
     Page { status: 200, title: "Grains".into(), stamp: Stamp::None, body }
 }
@@ -197,22 +197,42 @@ fn notice(receipt: &Value) -> String {
     receipt["identityNotice"].as_str().map(|n| format!("<p class=\"outcome undecided\">{}</p>", escape(n))).unwrap_or_default()
 }
 
+/// Fetch grain status and auto-resume a hibernated (`stopped`) grain when in a writable session.
+fn status_with_autoresume(site: &Site, id: &str) -> Option<(Ending, Option<Value>, bool)> {
+    let ending = verb(site, &[format!("apps status {id} --json")])?;
+    let parsed = reply(&ending).filter(|_| ending.code == 0);
+    if !site.front.read_only && parsed.as_ref().and_then(|v| v["state"].as_str()) == Some("stopped") {
+        let _ = verb(site, &[format!("apps start {id} --json")]);
+        if let Some(fresh_ending) = verb(site, &[format!("apps status {id} --json")]) {
+            let fresh_parsed = reply(&fresh_ending).filter(|_| fresh_ending.code == 0);
+            if fresh_parsed.is_some() {
+                return Some((fresh_ending, fresh_parsed, true));
+            }
+        }
+    }
+    Some((ending, parsed, false))
+}
+
 /// `/grain/N`: the grain's state, routes, identities, and the actions on it.
 pub(super) fn grain(site: &Site, n: &str) -> Page {
     let Some(id) = grain_id(n) else { return simple(404, "Grain", "not a grain id") };
-    let Some(ending) = verb(site, &[format!("apps status {id} --json")]) else { return simple(500, "Grain", "this body has no shell paths") };
-    let mut body = match reply(&ending).filter(|_| ending.code == 0) {
+    let Some((ending, parsed, resumed)) = status_with_autoresume(site, &id) else { return simple(500, "Grain", "this body has no shell paths") };
+    let mut body = match parsed {
         Some(value) => {
             let r = &value["receipt"];
             let origin = r["origin"].as_str().unwrap_or("");
-            let mut out = format!(
+            let mut out = String::new();
+            if resumed {
+                out.push_str("<p class=\"outcome\">Resumed hibernated grain.</p>");
+            }
+            out.push_str(&format!(
                 "<p><strong>{}</strong> <code>{id}</code>: {} (class {}); origin <a href=\"{u}\" data-full>{o}</a></p>",
                 escape(r["indexName"].as_str().unwrap_or("")),
                 escape(value["state"].as_str().unwrap_or("?")),
                 escape(r["class"].as_str().unwrap_or("?")),
                 u = url(origin),
                 o = escape(origin)
-            );
+            ));
             if let Some(runs) = r["runs"].as_array() {
                 out.push_str("<section><h2>Runs</h2>");
                 out.push_str(&super::body::json_tree_html(&Value::Array(runs.clone())));
@@ -221,13 +241,13 @@ pub(super) fn grain(site: &Site, n: &str) -> Page {
             let routes: Vec<String> = r["routes"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_owned)).collect();
             out.push_str(&format!("<section><h2>Routes</h2><p>{}</p></section>", if routes.is_empty() { "none".to_owned() } else { routes.iter().map(|r| format!("<code>{}</code>", escape(r))).collect::<Vec<_>>().join(" ") }));
             if let Some(identities) = r["identities"].as_array() {
-                out.push_str("<section><h2>Identities this grain holds</h2>");
+                out.push_str("<section><h2>Saved identities</h2>");
                 if identities.is_empty() {
                     out.push_str("<p class=note>none</p>");
                 } else {
                     out.push_str(&super::body::json_tree_html(&Value::Array(identities.clone())));
                     if !site.front.read_only {
-                        out.push_str(&format!("<form method=\"post\" action=\"/grain/{id}/revoke-identity\" class=\"row\"><div><label for=\"tok\">Revoke a saved identity (its token)</label><input id=\"tok\" name=\"token\" type=\"text\" required></div><button class=\"quiet\">Revoke</button></form>"));
+                        out.push_str(&format!("<form method=\"post\" action=\"/grain/{id}/revoke-identity\" class=\"row\"><div><label for=\"tok\">Identity token</label><input id=\"tok\" name=\"token\" type=\"text\" required></div><button class=\"quiet\">Revoke</button></form>"));
                     }
                 }
                 out.push_str("</section>");
@@ -235,18 +255,18 @@ pub(super) fn grain(site: &Site, n: &str) -> Page {
             out.push_str(&notice(r));
             out
         }
-        None => super::body::outcome_html(&ending, &[("your grains", "/grain")]),
+        None => super::body::outcome_html(&ending, &[("Grains", "/grain")]),
     };
     if !site.front.read_only {
         body.push_str(&format!(
-            "<section><h2>Act</h2><p>\
+            "<section><h2>Actions</h2><p>\
              <form method=\"post\" action=\"/grain/{id}/open\" class=\"inline\"><button>Open</button></form> \
              <form method=\"post\" action=\"/grain/{id}/start\" class=\"inline\"><button class=\"quiet\">Start</button></form> \
              <form method=\"post\" action=\"/grain/{id}/stop\" class=\"inline\"><button class=\"quiet\">Stop</button></form> \
              <form method=\"post\" action=\"/grain/{id}/renew\" class=\"inline\"><button class=\"quiet\">Renew</button></form> \
              <form method=\"post\" action=\"/grain/{id}/export\" class=\"inline\"><input name=\"file\" type=\"text\" placeholder=\"export.spk\" aria-label=\"Export file name\" required pattern=\"[A-Za-z0-9._-]+\"><button class=\"quiet\">Export</button></form> \
              <form method=\"post\" action=\"/grain/{id}/delete\" class=\"inline\"><button class=\"quiet\">Delete</button></form></p>\
-             <form method=\"post\" action=\"/grain/{id}/share\" class=\"row\"><div><label for=\"sh\">Share with (member name)</label><input id=\"sh\" name=\"member\" type=\"text\" pattern=\"[a-z][a-z0-9-]*\" required></div><button class=\"quiet\">Share</button></form></section>"
+             <form method=\"post\" action=\"/grain/{id}/share\" class=\"row\"><div><label for=\"sh\">Share with member</label><input id=\"sh\" name=\"member\" type=\"text\" pattern=\"[a-z][a-z0-9-]*\" required></div><button class=\"quiet\">Share</button></form></section>"
         ));
     }
     Page { status: 200, title: format!("Grain {id}"), stamp: Stamp::None, body }
@@ -265,9 +285,9 @@ pub(super) fn grain_action(site: &Site, n: &str, action: &str, form: &std::colle
                     let origin = r["origin"].as_str().unwrap_or("").to_owned();
                     let body = match r["bootstrapToken"].as_str() {
                         Some(token) => format!(
-                            "<p>Your route on <code>{id}</code> is ready. The grain lives on its own origin and keeps its own cookie, so the one-time token is posted there from your browser, not from here:</p>\
+                            "<p>Route on <code>{id}</code> ready. Each grain runs on its own origin with an isolated session cookie:</p>\
                              <form method=\"post\" action=\"{}\" target=\"_blank\" data-full data-autosubmit><input type=\"hidden\" name=\"token\" value=\"{}\"><button>Sign in to {id} on {o}</button></form>\
-                             <p class=\"note\">Then <a href=\"/grain/{id}/pane\">open it in a pane</a>. The token works once; a fresh route needs a new share.</p>{}",
+                             <p class=\"note\"><a href=\"/grain/{id}/pane\">Open in pane</a> · One-time bootstrap token.</p>{}",
                             url(&format!("{origin}{}", r["bootstrapPath"].as_str().unwrap_or("/__mini/bootstrap"))),
                             escape(token),
                             notice(r),
@@ -283,14 +303,14 @@ pub(super) fn grain_action(site: &Site, n: &str, action: &str, form: &std::colle
                     };
                     Page { status: 200, title: format!("Open {id}"), stamp: Stamp::None, body }
                 }
-                None => Page { status: 200, title: format!("Open {id}"), stamp: Stamp::None, body: super::body::outcome_html(&ending, &[("the grain", &format!("/grain/{id}"))]) },
+                None => Page { status: 200, title: format!("Open {id}"), stamp: Stamp::None, body: super::body::outcome_html(&ending, &[("Grain", &format!("/grain/{id}"))]) },
             }
         }
-        "share" => act(site, &format!("Share {id}"), vec![format!("apps share {id} {}", quote(&field("member")))], "", &[("the grain", &format!("/grain/{id}"))]),
-        "revoke-identity" => act(site, &format!("Revoke an identity on {id}"), vec![format!("apps revoke-identity {id} {}", quote(&field("token")))], "", &[("the grain", &format!("/grain/{id}"))]),
-        "export" => act(site, &format!("export {id}"), vec![format!("apps export {id} {}", quote(&field("file")))], "", &[("the grain", &format!("/grain/{id}"))]),
-        "renew" => act(site, &format!("Renew the enrollment on {id}"), vec![format!("apps renew {id}")], "", &[("the grain", &format!("/grain/{id}"))]),
-        "stop" | "start" | "delete" => act(site, &format!("{action} {id}"), vec![format!("apps {action} {id}")], "", &[("the grain", &format!("/grain/{id}")), ("your grains", "/grain")]),
+        "share" => act(site, &format!("Share {id}"), vec![format!("apps share {id} {}", quote(&field("member")))], "", &[("Grain", &format!("/grain/{id}"))]),
+        "revoke-identity" => act(site, &format!("Revoke identity on {id}"), vec![format!("apps revoke-identity {id} {}", quote(&field("token")))], "", &[("Grain", &format!("/grain/{id}"))]),
+        "export" => act(site, &format!("Export {id}"), vec![format!("apps export {id} {}", quote(&field("file")))], "", &[("Grain", &format!("/grain/{id}"))]),
+        "renew" => act(site, &format!("Renew enrollment on {id}"), vec![format!("apps renew {id}")], "", &[("Grain", &format!("/grain/{id}"))]),
+        "stop" | "start" | "delete" => act(site, &format!("{action} {id}"), vec![format!("apps {action} {id}")], "", &[("Grain", &format!("/grain/{id}")), ("Grains", "/grain")]),
         _ => simple(404, "Grain", "no such action"),
     }
 }
@@ -298,8 +318,8 @@ pub(super) fn grain_action(site: &Site, n: &str, action: &str, form: &std::colle
 /// `/grain/N/pane`: the grain's origin in a frame (the gateway's `frame-src` names the grain origins).
 pub(super) fn pane(site: &Site, n: &str) -> Page {
     let Some(id) = grain_id(n) else { return simple(404, "Grain", "not a grain id") };
-    let Some(ending) = verb(site, &[format!("apps status {id} --json")]) else { return simple(500, "Grain", "no shell paths") };
-    match reply(&ending).and_then(|v| v["receipt"]["origin"].as_str().map(str::to_owned)) {
+    let Some((ending, parsed, _)) = status_with_autoresume(site, &id) else { return simple(500, "Grain", "no shell paths") };
+    match parsed.and_then(|v| v["receipt"]["origin"].as_str().map(str::to_owned)) {
         Some(origin) => Page {
             status: 200,
             title: format!("{id}"),

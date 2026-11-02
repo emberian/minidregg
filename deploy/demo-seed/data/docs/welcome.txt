@@ -1,9 +1,9 @@
-# Welcome to Mini
-You are looking at a shared world that was seeded just before the door opened. Everything here was written by a member through the same verbs you have.
-Read what-is-mini first: it says what this place is in a few lines.
-Try a link: type  doc links welcome  to see where this page points, and  doc backlinks what-is-mini  to see who points at it.
-Try a transclusion: the first lines of what-is-mini are shown inside this page as a live range. Edit the source and this page changes. Type  doc transclusions welcome.
-Try history: type  history  to see every attempt you have made, admitted, refused or undecided, with receipts.
-Try a refusal: house-rules is readable but not writable by you. See a-refusal-explains-itself.
-Try the lobby: a public room with a few posts and a resident called Hermes. Type  tail  after  chat enter lobby.
-Try the story: the-lamplighters-note, then the story room called tale.
+Welcome to Mini
+Mini is a shared workspace where documents, rooms, task boards, and Sandstorm applications live under explicit capability grants and machine-checked rules.
+what-is-mini covers the architecture: proposals, the Lean admission kernel, and world-root receipts.
+a-refusal-explains-itself shows how rejected writes return the exact rule clause that stopped them, and how can --any derives an admissible request.
+the-lost-reply explains how undecided network calls are retained locally so retries never double-apply or double-charge.
+house-rules is read-only for most accounts; attempts to append without a mutation grant are refused.
+field-notes is open to delegated collaborators under a bounded per-turn cost ceiling.
+the-lamplighters-note introduces tale, a text adventure governed by a sealed transition law.
+Shared rooms include lobby (general conversation with the Hermes librarian resident) and operations (build, checkpoint, and backup logs).

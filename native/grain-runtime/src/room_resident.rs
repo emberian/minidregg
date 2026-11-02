@@ -313,8 +313,23 @@ fn close_refused_pending(config:&Config,journal:&mut ResidentState,state:&Path)-
     let record=prompt_outcome::read_bound(&config.state_dir,op,id,sha)?;
     match record.outcome {
         prompt_outcome::Outcome::Refused{..}=>{}
-        prompt_outcome::Outcome::Undecided{retry,..}=>return Err(format!(
-            "resident prompt {op} is undecided; resolve it with admin {:?} (operation {:?}); it is never replayed",retry.admin,retry.operation)),
+        prompt_outcome::Outcome::Undecided{retry,..}=>{
+            let mut reconciled = false;
+            let admin_sock = config.state_dir.join("admin.sock");
+            if retry.operation.is_none() && admin_sock.exists() {
+                if let Ok(reply) = control::admin_call(&admin_sock, &format!("reconcile prompt audited {op}")) {
+                    if prompt_outcome::successful_admin_reply(&op.to_string(), &reply) {
+                        if let Ok(updated) = prompt_outcome::read_bound(&config.state_dir, op, id, sha) {
+                            reconciled = matches!(updated.outcome, prompt_outcome::Outcome::Refused { .. });
+                        }
+                    }
+                }
+            }
+            if !reconciled {
+                return Err(format!(
+                    "resident prompt {op} is undecided; resolve it with admin {:?} (operation {:?}); it is never replayed",retry.admin,retry.operation));
+            }
+        }
         prompt_outcome::Outcome::Admitted{..}=>return Err(format!(
             "resident prompt {op} ended {} over an admitted outcome record; retained for review",frame["outcome"])),
     }

@@ -1,4 +1,5 @@
-# House rules
-This document belongs to the box member. Anyone may read it.
-Members who were given the right to write here may; everyone else is refused, and the refusal names the clause.
-sage holds only a reading grant on this document, so sage's attempt to add a line is refused. Look in sage's history, or read a-refusal-explains-itself.
+House Rules
+Owned by box. Readable by anyone with an observation grant; writable only by accounts holding an explicit mutation grant.
+1. Every state transition is a signed turn checked against current authority.
+2. Policy revisions apply to subsequent turns without erasing prior admitted history.
+sage holds an observation grant on this document without mutation rights; sage's append attempt (sage-overstep) is refused at submission.

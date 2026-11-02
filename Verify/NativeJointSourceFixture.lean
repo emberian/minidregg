@@ -7,11 +7,15 @@ original call with `await-call` and waits for four identical receipts. No suppli
 record, validation callback, checked engine input, or accepted history is seeded.
 This source is WIP until checked with the common receiver's qualified outputs.
 -/
-import Kernel.NativeHostGenesis
-import Kernel.NativeHostContext
-import Compiler.GenericSimplexSourceAnchor
-import Verify.GenericSimplexOperatorBridge
-import Lean
+module
+
+public import Kernel.NativeHostGenesis
+public import Kernel.NativeHostContext
+public import Compiler.GenericSimplexSourceAnchor
+public import Verify.GenericSimplexOperatorBridge
+public import Lean.Data.Json
+
+@[expose] public section
 
 set_option stderrAsMessages false
 namespace Minidregg.Verify.NativeJointSourceFixture
@@ -67,18 +71,19 @@ def replicaSpec (root : System.FilePath) (helpers : Helpers) (index : Nat)
     pairKeys := ((List.range 4).filter (· != index)).map fun peer => (peer,pairPath root index peer) }
 
 def baseConfig (root : System.FilePath) (helpers : Helpers)
-    (context : Context) (index : Nat) : NativeHost.Config :=
-  { deployment := ⟨⟨8500⟩, 10, 11, 12⟩
-    federation := ⟨9⟩
-    template := {issuer := ⟨5⟩, ownerBudget := 100000, lifetime := 10000}
-    tariff := ⟨3, 2, 1, 0, 99, 0⟩
-    genesisHeight := 10
-    expectedSeed := ⟨0⟩
-    storage := { binary := helpers.store, root := replicaDirectory root index / "source", key := replicaDirectory root index / "checkpoint.key", checkpointEvery := 8 }
-    signature := ⟨helpers.signature⟩
-    jointControl := none
-    activityControl := none
-    jointConsensus := some context }
+    (context : Context) (index : Nat) (expectedSeed : Digest := ⟨0⟩) : NativeHost.Config :=
+  NativeHost.Config.ofInputs
+    { deployment := ⟨⟨8500⟩, 10, 11, 12⟩
+      federation := ⟨9⟩
+      template := {issuer := ⟨5⟩, ownerBudget := 100000, lifetime := 10000}
+      tariff := ⟨3, 2, 1, 0, 99, 0⟩
+      genesisHeight := 10
+      expectedSeed := expectedSeed
+      storage := { binary := helpers.store, root := replicaDirectory root index / "source", key := replicaDirectory root index / "checkpoint.key", checkpointEvery := 8 }
+      signature := ⟨helpers.signature⟩
+      jointControl := none
+      activityControl := none
+      jointConsensus := some context }
 
 def subjectKey (subject : Nat) (bytes : List UInt8) : KeyRecord :=
   ⟨7000 + subject, 2, CredentialSignatureAdmission.ed25519Algorithm,
@@ -98,11 +103,17 @@ def genesis (config : NativeHost.Config) (alice bob : List UInt8) :
        ⟨subjectKey 8 bob, 8, ⟨42⟩, ⟨45⟩, ⟨47⟩, 100000, .all []⟩]
     factoryController := ⟨⟨7⟩, ⟨43⟩⟩
     meterAllowance := fun _ => 10000000
+    payControlCapabilityId := ⟨48⟩
+    clockControlCapabilityId := ⟨49⟩
     clockTickers := []
     tailBound := 10000
     clockGenesisNow := 0
     clockMaxStepSeconds := 300
-    issuanceCap := 1000000000000000 }
+    issuanceCap := 1000000000000000
+    platformGrainBirth := none
+    platformCustodianKey := none
+    platformOwnerBudget := config.template.ownerBudget
+    platformLifetime := config.template.lifetime }
 
 def derive (root : System.FilePath) (helpers : Helpers) (context : Context)
     (alice bob : List UInt8) : IO (NativeHostGenesis.Built
@@ -156,8 +167,7 @@ def initializeStores (root : System.FilePath) (helpers : Helpers)
   writePrivate (root / "context.bin") (contextStream.encode bound).toByteArray
   writePrivate (root / "genesis.bin") (DurableReceiverCodec.encode built.image).toByteArray
   for index in List.range 4 do
-    let config := {baseConfig root helpers bound index with
-      expectedSeed := NativeHost.seedIdentity built.image.seed}
+    let config := baseConfig root helpers bound index (NativeHost.seedIdentity built.image.seed)
     require (config.runtimeParameters == (baseConfig root helpers context 0).runtimeParameters)
       "binding exact source anchor changed the normalized runtime semantics"
     IO.ofExcept (← bootstrapFresh config (DurableReceiverCodec.encode built.image))
@@ -189,8 +199,7 @@ def openReplica (root : System.FilePath) (helpers : Helpers) (index : Nat) (writ
   let built ← derive root helpers context alice bob
   require (context.instanceBytes == GenericSimplexSourceAnchor.anchorBytes 10 built.image.seed)
     "source fixture context does not bind this exact source genesis"
-  let config := {baseConfig root helpers context index with
-    expectedSeed := NativeHost.seedIdentity built.image.seed}
+  let config := baseConfig root helpers context index (NativeHost.seedIdentity built.image.seed)
   let loaded ← IO.ofExcept (← DurableReceiverIO.load config.physicalTransport ResourceBirthCodec.rootBytes)
   let ⟨_, reader⟩ ← IO.ofExcept ((← DurableHistoryStore.readerOf config.physicalTransport
     ResourceBirthCodec.rootBytes loaded).mapError (fun detail => s!"source fixture history reader: {detail}"))
@@ -301,6 +310,36 @@ def auditJournal (root : System.FilePath) (index : Nat) : IO Unit := do
   | .ok s => IO.println s!"AUDITED replica {index}: {ordered.length} segments from genesis, view {s.current}, committed tip of {s.committedTip.length} blocks"
   | .error detail => throw (IO.userError s!"audit of replica {index} failed: {detail}")
 
+/-- `write-audit-fixture`: build a deterministic 2-segment replica-0 journal
+fixture in `ROOT` (an archived genesis segment `agreement.log.upto-1` and a live
+checkpointed `agreement.log` continuing from its replayed state) so
+`audit-journal ROOT 0` is exercised in-process by `scripts/gates/check-generic-simplex`.
+With `--plant corrupt-segment`, the live segment's snapshot disagrees with the
+previous segment's replayed state. -/
+def writeAuditFixture (root : System.FilePath) (corrupt : Bool) : IO Unit := do
+  privateDirectory root
+  let dir := replicaDirectory root 0
+  privateDirectory dir
+  let context : Context :=
+    ⟨[1,2,3], 0, [4,5,6], ⟨4,1,100000,8,3⟩,
+      (List.range 4).map fun i => List.replicate 1952 (UInt8.ofNat (i + 1))⟩
+  writePrivate (root / "context.bin") (contextStream.encode context).toByteArray
+  let empty : Journal := ⟨context,0,0,[],[],none⟩
+  let some r0 := openRestored context (Log.encode ⟨empty,[]⟩)
+    | throw (IO.userError "audit fixture base journal refused")
+  let some (r1,frame1) := appendRestored r0 [encodeInput (.offer [1,2,3]), encodeInput (.tick 1)] []
+    | throw (IO.userError "audit fixture segment 0 append refused")
+  writePrivate (dir / "agreement.log.upto-1") (Log.encode ⟨empty,[]⟩ ++ frame1).toByteArray
+  let (cp,cpBytes) := checkpointRestored r1
+  let liveBytes ← if corrupt then
+      let (_,badBytes) := checkpointRestored r0
+      pure badBytes
+    else
+      let some (_,frame2) := appendRestored cp [encodeInput (.tick 2)] []
+        | throw (IO.userError "audit fixture segment 1 append refused")
+      pure (cpBytes ++ frame2)
+  writePrivate (journalPath root 0) liveBytes.toByteArray
+
 end Minidregg.Verify.NativeJointSourceFixture
 
 open Minidregg.Verify.NativeJointSourceFixture
@@ -324,4 +363,8 @@ def main (args : List String) : IO Unit := do
   | ["audit-journal", root, index] =>
       let some index := index.toNat? | throw (IO.userError "invalid replica index")
       auditJournal root index
-  | _ => throw (IO.userError "usage: NativeJointSourceFixture audit-journal ROOT INDEX | init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | run ROOT STORE SIGNATURE AGREEMENT CALL FUEL | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME")
+  | ["write-audit-fixture", root] =>
+      writeAuditFixture root false
+  | ["write-audit-fixture", root, "--plant", "corrupt-segment"] =>
+      writeAuditFixture root true
+  | _ => throw (IO.userError "usage: NativeJointSourceFixture audit-journal ROOT INDEX | write-audit-fixture ROOT [--plant corrupt-segment] | init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | run ROOT STORE SIGNATURE AGREEMENT CALL FUEL | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME")

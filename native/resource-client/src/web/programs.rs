@@ -20,7 +20,7 @@ pub(super) fn index(site: &Site) -> Page {
     let mut rows = String::new();
     for (name, bend, object, transaction) in registry(&site.root) {
         let link = if decimal(&object) && decimal(&transaction) {
-            format!("<a href=\"/bend/await/{object}/{transaction}\">what it awaits</a>")
+            format!("<a href=\"/bend/await/{object}/{transaction}\">inspect activity</a>")
         } else {
             String::new()
         };
@@ -30,17 +30,24 @@ pub(super) fn index(site: &Site) -> Page {
         ));
     }
     let list = if rows.is_empty() {
-        "<p class=\"empty\">You have run no bend program from this workspace yet (<code>bend publish</code>, then <code>bend run</code>, on <a href=\"/verb/bend\">the bend page</a>).</p>".to_owned()
+        "<p class=\"empty\">No bend instances started from this workspace yet (<code>bend publish</code>, then <code>bend run</code> on <a href=\"/verb/bend\">/verb/bend</a>).</p>".to_owned()
     } else {
         format!("<table><thead><tr><th>reference</th><th>bend</th><th>object</th><th>birth transaction</th><th></th></tr></thead><tbody>{rows}</tbody></table>")
     };
-    let body = format!(
-        "<p class=\"eyebrow\">Work that can wait for you</p><p>Follow the programs you have started and answer the decisions that are yours. Each activity names who can reply and its deadline; only that subject's answer is admitted, once.</p>\n\
-         <section><h2>Your programs</h2>{list}</section>\n\
-         <section><h2>Any activity</h2><p class=note>An await someone announced (<code>await OBJECT TRANSACTION</code> in a room) is read the same way.</p>\
+    let mut body = format!(
+        "<p class=\"eyebrow\">Objective Bend programs</p><p>Each activity names the reply slot decider and deadline height; only that subject's signed answer is admitted, once.</p>\n\
+         <section><h2>Your programs</h2>{list}</section>\n"
+    );
+    if !site.front.read_only {
+        body.push_str("<section><h2>Start or answer a bend</h2><details><summary>Run a published bend</summary>");
+        body.push_str(&super::verbs::form_for_filled("bend", "bend run", "/verb/bend", "", &[]).unwrap_or_default());
+        body.push_str("</details></section>\n");
+    }
+    body.push_str(
+        "<section><h2>Inspect any activity</h2><p class=note>Look up an activity by object cell and birth transaction (<code>await OBJECT TRANSACTION</code>).</p>\
          <form method=\"get\" action=\"/bend/await\" class=\"row\"><div><label for=\"aw-o\">Object cell</label><input id=\"aw-o\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"aw-t\">Birth transaction</label><input id=\"aw-t\" name=\"transaction\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div><button>Read</button></form></section>\n\
-         <p><a href=\"/verb/bend\">publish, run, show, look up or retry a bend</a></p>"
+         <p><a href=\"/verb/bend\">All bend commands (publish, run, show, lookup, answer, retry)</a></p>",
     );
     Page { status: 200, title: "Programs".into(), stamp: Stamp::None, body }
 }
@@ -56,17 +63,21 @@ pub(super) fn awaits(site: &Site, object: &str, transaction: &str) -> Page {
     };
     let parsed = (ending.code == 0).then(|| serde_json::from_str::<Value>(ending.stdout.trim()).ok()).flatten().filter(|v| v["type"] == "mini-bend-await-v1");
     let body = match parsed {
-        Some(v) => format!("{}<details><summary>the shell's answer</summary>{}</details>", card(&v, &site.subject), answer_html(&ending, &[])),
+        Some(v) => format!("{}<details><summary>Shell output</summary>{}</details>", card(&v, &site.subject), answer_html(&ending, &[])),
         None => answer_html(&ending, &[("programs", "/bend")]),
     };
     Page { status: if ending.code == 0 { 200 } else { 403 }, title, stamp: Stamp::None, body }
 }
 
 /// One `mini-bend-await-v1` answer as a card: phase, state, and the reply slot with its decider and
-/// deadline; the answer form when the slot is `me`'s to decide.
+/// deadline; the answer form when the slot is `me`'s to decide and the deadline has not passed.
 pub(super) fn card(v: &Value, me: &str) -> String {
     let s = |k: &str| v[k].as_str().map(str::to_owned).unwrap_or_else(|| if v[k].is_null() { String::new() } else { v[k].to_string() });
-    let (phase, slot, decider) = (s("phase"), s("slot"), s("decider"));
+    let (phase, slot, decider, height_s, deadline_s) = (s("phase"), s("slot"), s("decider"), s("height"), s("deadline"));
+    let expired = match (height_s.parse::<u64>().ok(), deadline_s.parse::<u64>().ok()) {
+        (Some(h), Some(d)) => h > d,
+        _ => false,
+    };
     let mut rows = format!(
         "<tr><th>phase</th><td><strong>{}</strong></td></tr><tr><th>object</th><td><code>{}</code></td></tr><tr><th>birth transaction</th><td><code>{}</code></td></tr>",
         escape(&phase), escape(&s("object")), escape(&s("transaction"))
@@ -80,21 +91,25 @@ pub(super) fn card(v: &Value, me: &str) -> String {
     let mine = !decider.is_empty() && decider == me;
     if !slot.is_empty() {
         rows.push_str(&format!(
-            "<tr><th>reply slot</th><td><code>{}</code></td></tr><tr><th>decider</th><td><code>{}</code>{}</td></tr><tr><th>deadline</th><td>height <code>{}</code></td></tr>",
-            escape(&slot), escape(&decider), if mine { " (you)" } else { "" }, escape(&s("deadline"))
+            "<tr><th>reply slot</th><td><code>{}</code></td></tr><tr><th>decider</th><td><code>{}</code>{}</td></tr><tr><th>deadline</th><td>height <code>{}</code>{}</td></tr>",
+            escape(&slot), escape(&decider), if mine { " (you)" } else { "" }, escape(&deadline_s), if expired { " (expired)" } else { "" }
         ));
     }
     let mut out = format!(
-        "<section class=\"await\" data-phase=\"{}\" data-slot=\"{}\" data-decider=\"{}\" data-mine=\"{mine}\"><h2>What it awaits</h2><table><tbody>{rows}</tbody></table>",
+        "<section class=\"await\" data-phase=\"{}\" data-slot=\"{}\" data-decider=\"{}\" data-mine=\"{mine}\"><h2>Activity status</h2><table><tbody>{rows}</tbody></table>",
         escape(&phase), escape(&slot), escape(&decider)
     );
-    match (phase.as_str(), slot.is_empty()) {
-        ("none", _) => out.push_str("<p>No activity record: this transaction made none on this object, or has not yet.</p>"),
-        (_, false) if mine => {
-            out.push_str("<p>This slot is yours to decide. Your answer is one resolve turn signed by you, admitted once: <code>{\"reply\": DATA}</code> resumes the program with DATA (tagged data, as the program's reply type reads it, e.g. Tally's <code>{\"tag\":\"record\",\"fields\":[{\"name\":\"amount\",\"value\":{\"tag\":\"natural\",\"value\":\"7\"}}]}</code>), <code>{\"refused\": REASON}</code> declines.</p>");
+    match (phase.as_str(), slot.is_empty(), expired) {
+        ("none", _, _) => out.push_str("<p>No activity record: this transaction made none on this object, or has not yet.</p>"),
+        ("awaiting", false, true) => out.push_str(&format!(
+            "<p class=note>Reply slot <code>{}</code> expired at height <code>{}</code> (read at height <code>{}</code>): answers are refused <code>pastDeadline</code>.</p>",
+            escape(&slot), escape(&deadline_s), escape(&height_s)
+        )),
+        ("awaiting", false, false) if mine => {
+            out.push_str("<p>This slot is yours to decide. Submit a JSON reply once: <code>{\"reply\": DATA}</code> resumes the program (for example Tally's <code>{\"reply\":{\"tag\":\"record\",\"fields\":[{\"name\":\"amount\",\"value\":{\"tag\":\"natural\",\"value\":\"7\"}}]}}</code>); <code>{\"refused\": REASON}</code> declines.</p>");
             out.push_str(&super::verbs::form_for_filled("bend", "bend answer", "/verb/bend", "", &[("slot", &slot)]).unwrap_or_default());
         }
-        (_, false) => out.push_str(&format!(
+        ("awaiting", false, false) => out.push_str(&format!(
             "<p class=note>Only subject <code>{}</code> decides this slot: an answer signed by anyone else is refused <code>notDecider</code>.</p>",
             escape(&decider)
         )),
@@ -119,6 +134,10 @@ mod tests {
         assert!(mine.contains("{total=0}") && mine.contains("height <code>120</code>"));
         let theirs = card(&v, "43");
         assert!(theirs.contains("data-mine=\"false\"") && !theirs.contains("action=\"/verb/bend\"") && theirs.contains("notDecider"), "{theirs}");
+        let past = json!({"type":"mini-bend-await-v1","object":"12","transaction":"34","record":"77","height":"121","phase":"awaiting",
+            "state":null,"stateText":"{total=0}","slot":"5551","decider":"42","deadline":"120"});
+        let expired = card(&past, "42");
+        assert!(!expired.contains("action=\"/verb/bend\"") && expired.contains("pastDeadline"), "expired await must not offer answer form: {expired}");
         let none = card(&json!({"type":"mini-bend-await-v1","object":"1","transaction":"1","record":"","phase":"none"}), "42");
         assert!(none.contains("data-phase=\"none\"") && none.contains("No activity record") && !none.contains("<form"), "{none}");
         assert!(card(&json!({"phase":"<b>"}), "1").contains("&lt;b&gt;"));

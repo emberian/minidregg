@@ -1243,13 +1243,15 @@ fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -
     if field(&command_view, "canonical")? != hex(&command) {
         return Err("enrollment possession command differs from retained bytes".into());
     }
-    let header = crate::client_consent::possession(Path::new(""), &directory.join("config.json"),
-        &command, &subject, &signing, &candidate)?;
     // This explicit action accepts the operator's offered command. Retain
     // exactly what custody accepted before producing the possession signature.
     let local = crate::client_consent::configured_record()?
         .ok_or("possession requires independently retained local consent selection")?;
     let local_config = Path::new(field(&local, "config")?);
+    let dir_config = directory.join("config.json");
+    let config_path: &Path = if dir_config.is_file() { &dir_config } else { local_config };
+    let header = crate::client_consent::possession(Path::new(""), config_path,
+        &command, &subject, &signing, &candidate)?;
     let acceptance = json!({"type":"minidregg-participant-possession-acceptance-v1",
         "origin":"operator-offered-command", "action":"possess",
         "subject":subject,"publicKey":public_key,"commandHex":hex(&command),

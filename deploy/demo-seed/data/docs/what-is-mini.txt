@@ -1,8 +1,7 @@
-# What Mini is
-Mini is one shared world. People, applications and agents all ask it to change things, and every ask goes through the same gate.
-The gate is a small program written in Lean, a language where behaviour can be proved. It decides yes or no, and nothing else can change the world.
-When the answer is yes, the world gets a new root: a short fingerprint of everything in it. Your receipt names that root.
-When the answer is no, you are told which rule said no (see a-refusal-explains-itself).
-When a reply gets lost on the way back, nothing is done twice (see the-lost-reply).
-A program can propose a change, but only the gate can make it. That is the whole idea: computation proposes, authority admits.
-Try it: read welcome, follow its links, then type "history" to see your own attempts.
+What Mini Is
+People, Sandstorm grains, and autonomous agents all share one state tree and submit signed proposals through the same admission gate.
+The admission kernel is written in Lean. Every transition is checked against current capability grants and the target resource's installed law before any state changes.
+Each admitted turn advances the world root and produces a signed receipt binding the new state digest.
+Rejected turns leave state untouched and return a structured refusal naming the exact clause that failed.
+Dropped network replies leave an attempt undecided in local custody so retrying resends the exact sealed call bytes once.
+Computation proposes; authority admits.

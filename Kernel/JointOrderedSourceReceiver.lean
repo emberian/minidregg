@@ -2,9 +2,14 @@
 The exact complete source record selected by the common domain log is still
 freshly derived by the real native receiver at the exact current source prefix.
 Only then can the unchanged physical CAS/readback append it. -/
-import Kernel.NativeHostReplay
-import Kernel.JointReceiver
-import Compiler.GenericSimplexSourceAnchor
+module
+
+public import Kernel.NativeHostReplay
+public import Kernel.JointReceiver
+public import Compiler.GenericSimplexSourceAnchor
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointOrderedSourceReceiver
 open Minidregg.Theory
 open Minidregg.Compiler

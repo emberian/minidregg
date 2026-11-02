@@ -88,9 +88,9 @@ def planStream : StreamCodec Plan :=
 def planCodec : LawfulCodec Plan := NativeHostCodec.framed
   "DREGG/APPLICATION/LIFECYCLE-CLAIM-OPERATOR-PLAN/v1".toUTF8.toList planStream
 
-private def cellAt (config : Config) (opened : Opened config) (resource : Nat) :
-    Option (PackedCell CanonicalCellRegistry.registry) :=
-  match opened.directory.directory.slots resource with
+private def cellAtOn {deployment : CanonicalCellRegistry.Deployment} (ground : ServedBasis.Ground deployment)
+    (resource : Nat) : Option (PackedCell CanonicalCellRegistry.registry) :=
+  match ground.directory.slots resource with
   | .present cell => some cell
   | .absent => none
 
@@ -100,12 +100,10 @@ private def fixedHeader (pin : Pin) (slot : SigningSlot) : Except String Unit :=
   unless header.keyId == pin.managementKeyId do
     throw "claim signer differs from operator key pin"
 
-def prepareVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
-    (request : Request) : Except String Plan := do
-  let some prior := verified.beginsV2.find? (fun begin => begin.index == request.originalIndex)
-    | throw "original descriptor-bound BEGIN absent from verified history"
-  let begin := prior.ingress
+private def sourceOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) (begin : ApplicationLifecycleBeginV2Ingress.Ingress) (index : Nat) :
+    Except String (ApplicationLifecycleClaim.Source ×
+      PackedCell CanonicalCellRegistry.registry × PackedCell CanonicalCellRegistry.registry) := do
   let beginSource := begin.base.source
   unless beginSource.app == pin.app &&
       beginSource.packageManifest == pin.packageManifest &&
@@ -115,15 +113,9 @@ def prepareVerified (config : Config) {target : Durable}
     throw "historical BEGIN differs from fixed claim operator pin"
   unless ApplicationLifecycleResidentProfile.beginMatches config.storeIdentity begin do
     throw "historical BEGIN is outside resident host profile"
-  let opened := verified.opened
-  let some retained := opened.durable.image.accepted[prior.index]?
-    | throw "original BEGIN record absent from verified tip"
-  unless DurableReceiverCodec.intentStream.encode retained ==
-      DurableReceiverCodec.intentStream.encode prior.record do
-    throw "original BEGIN record differs from verified history"
-  let some appCell := cellAt config opened pin.app
+  let some appCell := cellAtOn ground pin.app
     | throw "current claim app cell unavailable"
-  let some packageCell := cellAt config opened pin.packageManifest
+  let some packageCell := cellAtOn ground pin.packageManifest
     | throw "current claim package cell unavailable"
   unless packageCell.kind == .content do
     throw "current claim package is not a content resource"
@@ -131,24 +123,34 @@ def prepareVerified (config : Config) {target : Durable}
     | throw "current claim app state unavailable"
   let source : ApplicationLifecycleClaim.Source :=
     { begin := begin.base
-      originalIndex := prior.index
+      originalIndex := index
       before := before
       currentAppRoot := appCell.payload.root
       currentPackageRoot := packageCell.payload.root
-      currentWorldRoot := opened.durable.worldRoot
+      currentWorldRoot := ground.worldRoot
       appObserveCapability := pin.appObserveCapability
       packageObserveCapability := pin.packageObserveCapability
       queryNonce := request.queryNonce }
   unless source.valid do throw "current app is not at original pending BEGIN state"
+  return (source, appCell, packageCell)
+
+private def planKeys (config : Config) (source : ApplicationLifecycleClaim.Source) : DurableView.Keys :=
+  DeclaredResourceController.invocationKeys config.deployment.domain config.profile.semantics
+    (ApplicationLifecycleClaim.command config.deployment.domain config.profile.semantics source)
+
+def prepareOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) (begin : ApplicationLifecycleBeginV2Ingress.Ingress) (index : Nat) :
+    Except String Plan := do
+  let (source, appCell, packageCell) ← sourceOn config ground pin request begin index
   let command := ApplicationLifecycleClaim.command config.deployment.domain
     config.profile.semantics source
   let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+    ⟨config.federation, config.genesisHeight + ground.height⟩
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ambient opened.ground command
+      config.profile ambient ground command
     | throw "current claim command preparation refused"
   unless ApplicationLifecycleClaimCurrent.linkedCurrentPolicy config.deployment
-      config.profile ambient opened.ground source prepared do
+      config.profile ambient ground source prepared do
     throw "current claim app/package law differs"
   unless decide (DeclaredResourceController.PhysicalShape prepared) do
     throw "current claim physical shape refused"
@@ -156,7 +158,7 @@ def prepareVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let appWanted := ApplicationLifecycleClaimCurrent.observationRequest config.deployment
-    config.profile ambient opened.ground source prepared pin.app
+    config.profile ambient ground source prepared pin.app
     pin.appObserveCapability source.currentAppRoot
   let .ok appSelected := ResourceObservationAdmission.prepare context config.profile
       appWanted marker pin.appObserveCapability source.canonicalBytes
@@ -165,7 +167,7 @@ def prepareVerified (config : Config) {target : Durable}
       CanonicalCellRegistry.cellCodec.encode appCell do
     throw "claim app observation differs from current image"
   let packageWanted := ApplicationLifecycleClaimCurrent.observationRequest config.deployment
-    config.profile ambient opened.ground source prepared pin.packageManifest
+    config.profile ambient ground source prepared pin.packageManifest
     pin.packageObserveCapability source.currentPackageRoot
   let .ok packageSelected := ResourceObservationAdmission.prepare context config.profile
       packageWanted marker pin.packageObserveCapability source.canonicalBytes
@@ -177,15 +179,15 @@ def prepareVerified (config : Config) {target : Durable}
       packageSelected.observed.before do
     throw "current installed package differs from original signed descriptor"
   let commandBytes := DeclaredResourceController.commandCodec.encode command
-  let .ok invocation := NativeHost.prepareLoaded config opened (.invoke commandBytes)
+  let .ok invocation := NativeHost.prepareInvokeOn config ground (config.genesisHeight + ground.height) commandBytes
     | throw "current claim invocation plan refused"
   unless invocation.finalizedDraft == .invoke commandBytes do
     throw "claim invocation plan differs from source"
   let .ok appHeader := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, appWanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, appWanted⟩ : PackedEffectRequest)
     | throw "current claim app observation signing key unavailable"
   let .ok packageHeader := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, packageWanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, packageWanted⟩ : PackedEffectRequest)
     | throw "current claim package observation signing key unavailable"
   let appSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode appHeader⟩
@@ -197,12 +199,60 @@ def prepareVerified (config : Config) {target : Durable}
   return ⟨source.canonicalBytes, begin.canonicalBytes, invocation,
     appSlot, packageSlot⟩
 
+def prepareVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+    (request : Request) : Except String Plan := do
+  let some prior := verified.beginsV2.find? (fun begin => begin.index == request.originalIndex)
+    | throw "original descriptor-bound BEGIN absent from verified history"
+  let begin := prior.ingress
+  let opened := verified.opened
+  let some retained := opened.durable.image.accepted[prior.index]?
+    | throw "original BEGIN record absent from verified tip"
+  unless DurableReceiverCodec.intentStream.encode retained ==
+      DurableReceiverCodec.intentStream.encode prior.record do
+    throw "original BEGIN record differs from verified history"
+  prepareOn config opened.ground pin request begin prior.index
+
 def prepareRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
     (bytes : List UInt8) : Except String Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical claim operator request"
   prepareVerified config verified pin request
+
+def prepareRequestLight (config : Config) (light : NativeHostLight.Light config) (pin : Pin)
+    (bytes : List UInt8) : IO (Except String Plan) := do
+  let some request := requestCodec.decode bytes
+    | return .error "noncanonical claim operator request"
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let read ← match ← reader.atHeight (request.originalIndex + 1) with
+    | .error refusal => return .error refusal.message
+    | .ok read => pure read
+  let some begin := ApplicationLifecycleBeginV2Ingress.codec.decode (NativeHostReplay.sourceBytes read.record)
+    | return .error "original descriptor-bound BEGIN absent from verified history"
+  let original ← match ← NativeHistorySelection.select config reader light.opening.head.height
+      request.originalIndex (ApplicationLifecycleBeginV2Admission.keys begin) with
+    | .error detail => return .error detail
+    | .ok original => pure original
+  let originalAmbient : DeclaredResourceController.Ambient :=
+    ⟨config.federation, config.genesisHeight + original.ground.height⟩
+  let originalAccepted ← match ← ApplicationLifecycleBeginV2Admission.admitNative
+      config.deployment config.profile originalAmbient config.signature
+      original.ground begin with
+    | .error detail => return .error s!"original v2 lifecycle begin refused: {detail}"
+    | .ok accepted => pure accepted
+  match NativeHistorySelection.matchIntent original originalAccepted.intent with
+  | .error detail => return .error detail
+  | .ok _ =>
+      let cells ← match ← light.basis ⟨[], []⟩ with
+        | .error detail => return .error detail
+        | .ok basis => pure basis
+      match sourceOn config (.ofBasis cells) pin request begin request.originalIndex with
+      | .error detail => return .error detail
+      | .ok (source, _, _) =>
+          match ← light.basis (planKeys config source) with
+          | .error detail => return .error detail
+          | .ok basis => return prepareOn config (.ofBasis basis) pin request begin request.originalIndex
 
 private def envelope (slot : SigningSlot) (signature : List UInt8) :
     Except String (List UInt8) := do

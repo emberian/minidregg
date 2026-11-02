@@ -65,7 +65,14 @@ fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+pub(super) fn missing_room_ref(text: &str) -> bool {
+    text.contains("unknown reference")
+        || text.contains("No such file or directory")
+        || text.contains("subscribers.json")
+}
+
 pub(super) fn page(site: &Site, said: Option<String>) -> Page {
+    super::body::import_inbox(site);
     let mut body = String::new();
     body.push_str(&format!("<section><h2>What it buys</h2><p>{}</p>", summary().unwrap_or_else(|| "This box's provider table has no subscriber route.".to_owned())));
     body.push_str(&format!("<p class=\"policy\">{}</p></section>\n", escape(RETENTION.trim_end())));
@@ -73,21 +80,33 @@ pub(super) fn page(site: &Site, said: Option<String>) -> Page {
         body.push_str(&said);
     }
     if let Some(ending) = verb(site, &[format!("tariff {ROOM}")]) {
-        body.push_str(&format!("<section><h2>Price</h2>{}</section>\n", answer_html(&ending, &[])));
+        if ending.code == 0 {
+            body.push_str(&format!("<section><h2>Price</h2>{}</section>\n", answer_html(&ending, &[])));
+        } else if missing_room_ref(&ending.stderr) {
+            body.push_str(&format!("<section><h2>Price</h2><p class=\"note\">This workspace does not hold the <code>{ROOM}</code> room reference yet.</p></section>\n"));
+        } else {
+            body.push_str(&format!("<section><h2>Price</h2>{}</section>\n", answer_html(&ending, &[])));
+        }
     }
     body.push_str("<section data-load=\"/purse/meter\"><div class=\"fill\"><p class=\"note\"><a href=\"/purse\">your purse, as a meter</a></p></div></section>\n");
     if let Some(ending) = verb(site, &[format!("room status {ROOM}")]) {
-        let (height, until) = window(&ending.stdout);
-        let when = match (height, until) {
-            (Some(h), Some(a)) if a >= h => format!("<p class=\"big\">Member until height {a}: about <strong>{}</strong> (at one height a minute).</p>", utc(now() + (a - h) * 60)),
-            (Some(h), Some(a)) => format!("<p class=\"big\">Your window ended at height {a}, about {} ago.</p>", minutes(h - a)),
-            _ => "<p class=\"big\">Not a member yet.</p>".to_owned(),
-        };
-        body.push_str(&format!("<section><h2>Your window</h2>{when}{}</section>\n", answer_html(&ending, &[])));
+        if ending.code != 0 && missing_room_ref(&ending.stderr) {
+            body.push_str(&format!(
+                "<section><h2>Your window</h2><p class=\"big\">Not a member yet.</p><p class=\"note\">No <code>{ROOM}</code> reference in this workspace yet.</p></section>\n"
+            ));
+        } else {
+            let (height, until) = window(&ending.stdout);
+            let when = match (height, until) {
+                (Some(h), Some(a)) if a >= h => format!("<p class=\"big\">Member until height {a}: about <strong>{}</strong> (at one height a minute).</p>", utc(now() + (a - h) * 60)),
+                (Some(h), Some(a)) => format!("<p class=\"big\">Your window ended at height {a}, about {} ago.</p>", minutes(h - a)),
+                _ => "<p class=\"big\">Not a member yet.</p>".to_owned(),
+            };
+            body.push_str(&format!("<section><h2>Your window</h2>{when}{}</section>\n", answer_html(&ending, &[])));
+        }
     }
     body.push_str(&format!(
-        "<section><h2>Subscribe</h2><form method=\"post\" action=\"/subscribe/pay\"><p><code>pay {ROOM} week</code>: the room's price from your purse, for its period; paying again extends the window.</p><button>Subscribe</button></form>\
-         <form method=\"post\" action=\"/subscribe/join\"><p>Then join the room's chat once: <code>chat join {ROOM}</code> with the invitation the room's concierge put in your inbox.</p><button>Join the room</button></form></section>\n"
+        "<section><h2>Subscribe</h2><form method=\"post\" action=\"/subscribe/pay\"><p><code>pay {ROOM} week</code>: pays the room tariff from your purse for one week; paying again extends the window.</p><button>Subscribe</button></form>\
+         <form method=\"post\" action=\"/subscribe/join\"><p>Join the room chat once with the invitation from your inbox (<code>chat join {ROOM}</code>).</p><button>Join the room</button></form></section>\n"
     ));
     Page { status: 200, title: "Subscribe".into(), stamp: Stamp::None, body }
 }
@@ -97,6 +116,12 @@ fn minutes(n: u64) -> String {
 }
 
 pub(super) fn pay(site: &Site) -> Page {
+    super::body::import_inbox(site);
+    if let Some(ending) = verb(site, &[format!("tariff {ROOM}")]) {
+        if ending.code != 0 && missing_room_ref(&ending.stderr) {
+            return page(site, Some(format!("<p class=\"note\">This workspace does not hold the <code>{ROOM}</code> room reference yet.</p>")));
+        }
+    }
     let mut page = act(site, "Subscribe", vec![format!("pay {ROOM} week")], "", &[("subscribe", "/subscribe")]);
     page.title = "Subscribe".into();
     page
@@ -119,6 +144,7 @@ fn invitation(shell: &Shell, me: &str, target: &str) -> Option<(String, Value)> 
 }
 
 pub(super) fn join(site: &Site) -> Page {
+    super::body::import_inbox(site);
     let Some(shell) = site.shell.as_ref() else { return page(site, Some("<p class=\"note\">This body has no shell paths.</p>".into())) };
     let target = verb(site, &[format!("room status {ROOM}")]).and_then(|e| {
         e.stdout.lines().find_map(|l| l.trim().strip_prefix(&format!("room {ROOM} (")).and_then(|r| r.split(')').next()).map(str::to_owned))
@@ -154,5 +180,12 @@ mod tests {
         assert_eq!(super::window("room subscribers (123) at height 1000\n  my window: none (guest; `pay subscribers week` buys one)\n"), (Some(1000), None));
         assert_eq!(super::utc(1_794_268_800), "2026-11-10 00:00 UTC");
         assert_eq!(super::utc(0), "1970-01-01 00:00 UTC");
+    }
+
+    #[test]
+    fn missing_subscribers_ref_error_is_detected() {
+        assert!(super::missing_room_ref("error: cannot read /var/lib/mini/members/uxprobe/home/workspace/refs/subscribers.json: No such file or directory (os error 2)"));
+        assert!(super::missing_room_ref("error: unknown reference subscribers"));
+        assert!(!super::missing_room_ref("error: permission denied"));
     }
 }

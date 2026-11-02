@@ -64,6 +64,7 @@ pub(crate) fn streams<T>(body: impl FnOnce() -> T) -> std::io::Result<(T, Vec<u8
 
 /// Run `body` with stdout and stderr pointed at `out` and `err`, which are handed back.
 fn streams_into<T>(out: File, err: File, body: impl FnOnce() -> T) -> std::io::Result<(T, File, File)> {
+    let _report = std::io::stdout().lock();
     let _ = std::io::stdout().flush();
     let saved_out = redirect(&out, 1)?;
     let saved_err = match redirect(&err, 2) {

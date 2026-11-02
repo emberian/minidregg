@@ -31,6 +31,7 @@ fn fields(target: &str) -> Result<BTreeMap<String, String>> {
         for pair in query.split('&').filter(|s| !s.is_empty()) {
             let (key, value) = pair.split_once('=').ok_or("invalid search form")?;
             let key = decode(key)?;
+            let key = if key == "q" { "query".to_owned() } else { key };
             if !matches!(key.as_str(), "query" | "scope" | "offset" | "cursor")
                 || out.insert(key, decode(value)?).is_some()
             {

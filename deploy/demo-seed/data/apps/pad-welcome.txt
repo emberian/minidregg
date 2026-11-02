@@ -1,1 +1,1 @@
-Welcome to the pad. Type here; anyone you share this grain with sees it live.
+Shared scratchpad running inside an isolated Sandstorm grain.

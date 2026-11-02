@@ -1,0 +1,3 @@
+checkpoint verified: world root anchored and signed observation controller online
+backup snapshot retained: store and workspace custody journals synced
+certifier tick: active capability tree and policy registry consistent

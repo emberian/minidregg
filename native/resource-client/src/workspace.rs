@@ -3098,6 +3098,7 @@ fn propose_summary_once(
         std::collections::BTreeMap::new();
     let nonce = random_nonce()?;
     let mut delegation = None::<Value>;
+    let mut revocation = None::<Value>;
     let mut renounce = None::<Value>;
     let intent = match member(&request, "action")? {
         "invoke" => {
@@ -3586,6 +3587,12 @@ fn propose_summary_once(
                 .and_then(Value::as_str)
                 .ok_or("signed resource view lacks cell root")?;
             field_decimal(target_root, "revocation target root")?;
+            revocation = Some(json!({
+                "name": member(&request, "name")?,
+                "target": target,
+                "recipient": recipient,
+                "capability": victim,
+            }));
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
                 "purpose":{"type":"prepare","draft":{"type":"revoke-source",
                     "command":{"kind":kind,"subject":member(workspace,"subject")?,
@@ -3674,7 +3681,7 @@ fn propose_summary_once(
     let summary = json!({"type":"minidregg-workspace-proposal-result-v1",
         "proposalId":proposal_id,"intentPath":proposal_dir.join("intent.json"),
         "intentSha256":intent_sha,"effect":"none","authority":"requires-current-admission",
-        "delegation":delegation,"renounce":renounce});
+        "delegation":delegation,"revocation":revocation,"renounce":renounce});
     let bytes = serde_json::to_vec_pretty(&summary).map_err(|error| error.to_string())?;
     create_private(&proposal_dir.join("proposal.json"), &bytes)?;
     Ok(summary)
@@ -6617,22 +6624,107 @@ pub(crate) fn kick_remaining(root: &Path, workspace: &Value, name: &str, subject
     ))
 }
 
-fn delegated_capability(root: &Path, name: &str, target: &str, recipient: &str) -> Result<String> {
-    let mut found = std::collections::BTreeSet::new();
-    if let Ok(entries) = fs::read_dir(root.join("proposals")) {
-        for entry in entries.flatten() {
-            let Ok(summary) = bounded_json(&entry.path().join("proposal.json")) else {
-                continue;
-            };
-            let delegation = &summary["delegation"];
-            if delegation.get("name").and_then(Value::as_str) == Some(name)
-                && delegation.get("target").and_then(Value::as_str) == Some(target)
-                && delegation.get("recipient").and_then(Value::as_str) == Some(recipient)
-            {
-                found.insert(member(delegation, "childCapability")?.to_owned());
+fn proposal_attempt_confirmed(root: &Path, proposal_id: &str, proposal_dir: &Path) -> Option<bool> {
+    let is_confirmed = |attempt_dir: &Path| -> bool {
+        bounded_json(&attempt_dir.join("outcome.json"))
+            .ok()
+            .and_then(|outcome| {
+                outcome
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .map(|t| t == "confirmed")
+            })
+            .unwrap_or(false)
+    };
+    let direct = root.join("attempts").join(proposal_id);
+    if direct.is_dir() && is_confirmed(&direct) {
+        return Some(true);
+    }
+    let mut saw_attempt = direct.is_dir();
+    if root.join("attempts").is_dir() {
+        if let Ok(intent_bytes) = fs::read(proposal_dir.join("intent.json")) {
+            for candidate in rerun_candidates(root, &intent_bytes) {
+                if fs::read(candidate.join("intent.json")).ok().as_deref()
+                    == Some(intent_bytes.as_slice())
+                {
+                    saw_attempt = true;
+                    if is_confirmed(&candidate) {
+                        return Some(true);
+                    }
+                }
             }
         }
     }
+    if saw_attempt {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn delegated_capability(root: &Path, name: &str, target: &str, recipient: &str) -> Result<String> {
+    let mut found = std::collections::BTreeSet::new();
+    let mut revoked = std::collections::BTreeSet::new();
+    let has_workspace = root.join("workspace.json").is_file();
+    if let Ok(entries) = fs::read_dir(root.join("proposals")) {
+        for entry in entries.flatten() {
+            let proposal_id = entry.file_name().to_string_lossy().into_owned();
+            if proposal_id.starts_with("can-") {
+                continue;
+            }
+            let dir = entry.path();
+            let attempt_confirmed = proposal_attempt_confirmed(root, &proposal_id, &dir);
+            if attempt_confirmed == Some(false) {
+                continue;
+            }
+            let collect_revocation =
+                attempt_confirmed == Some(true) || (attempt_confirmed.is_none() && !has_workspace);
+            if let Ok(summary) = bounded_json(&dir.join("proposal.json")) {
+                let delegation = &summary["delegation"];
+                if delegation.get("name").and_then(Value::as_str) == Some(name)
+                    && delegation.get("target").and_then(Value::as_str) == Some(target)
+                    && delegation.get("recipient").and_then(Value::as_str) == Some(recipient)
+                {
+                    found.insert(member(delegation, "childCapability")?.to_owned());
+                }
+                if collect_revocation {
+                    let revocation = &summary["revocation"];
+                    if let Some(cap) = revocation.get("capability").and_then(Value::as_str) {
+                        if revocation.get("target").and_then(Value::as_str).is_none_or(|t| t == target) {
+                            revoked.insert(cap.to_owned());
+                        }
+                    }
+                    if summary.get("action").and_then(Value::as_str) == Some("revoke") {
+                        for key in ["capability", "childCapability", "revokedCapability"] {
+                            if let Some(cap) = summary.get(key).and_then(Value::as_str) {
+                                revoked.insert(cap.to_owned());
+                            }
+                        }
+                    }
+                }
+            }
+            if collect_revocation {
+                if let Ok(intent) = bounded_json(&dir.join("intent.json")) {
+                    if intent.pointer("/purpose/draft/type").and_then(Value::as_str) == Some("revoke-source") {
+                        let cmd = &intent["purpose"]["draft"]["command"];
+                        if cmd.get("target").and_then(Value::as_str).is_none_or(|t| t == target) {
+                            if let Some(cap) = cmd.get("capability").and_then(Value::as_str) {
+                                revoked.insert(cap.to_owned());
+                            }
+                        }
+                    }
+                }
+                if let Ok(req) = bounded_json(&dir.join("request.json")) {
+                    if req.get("action").and_then(Value::as_str) == Some("revoke") {
+                        if let Some(cap) = req.get("capability").and_then(Value::as_str) {
+                            revoked.insert(cap.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found.retain(|cap| !revoked.contains(cap));
     match found.len() {
         0 => Err(format!("this workspace delegated nothing on {name} to {recipient}")),
         1 => Ok(found.into_iter().next().expect("one element")),
@@ -8570,6 +8662,67 @@ mod tests {
         )
         .unwrap();
         assert!(delegated_capability(&root, "shared", "12", "42").unwrap_err().contains("901, 903"));
+
+        // Revoking 901 (via proposal.json revocation or intent.json revoke-source) leaves 903 as the single active capability.
+        fs::create_dir_all(root.join("proposals").join("r1")).unwrap();
+        fs::write(
+            root.join("proposals").join("r1").join("proposal.json"),
+            br#"{"revocation":{"name":"shared","target":"12","recipient":"42","capability":"901"}}"#,
+        )
+        .unwrap();
+        assert_eq!(delegated_capability(&root, "shared", "12", "42").unwrap(), "903");
+
+        // A refused revocation attempt (outcome.json with type != "confirmed") does not filter out 903.
+        fs::create_dir_all(root.join("proposals").join("r2-refused")).unwrap();
+        fs::write(
+            root.join("proposals").join("r2-refused").join("intent.json"),
+            br#"{"purpose":{"draft":{"type":"revoke-source","command":{"target":"12","capability":"903"}}}}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("attempts").join("r2-refused")).unwrap();
+        fs::write(
+            root.join("attempts").join("r2-refused").join("outcome.json"),
+            br#"{"type":"refused"}"#,
+        )
+        .unwrap();
+        assert_eq!(delegated_capability(&root, "shared", "12", "42").unwrap(), "903");
+
+        // A prepare-refused or transmit-refused attempt (attempt dir exists without outcome.json) does not filter out 903.
+        fs::create_dir_all(root.join("proposals").join("r2-prepare-refused")).unwrap();
+        fs::write(
+            root.join("proposals").join("r2-prepare-refused").join("intent.json"),
+            br#"{"purpose":{"draft":{"type":"revoke-source","command":{"target":"12","capability":"903"}}}}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("attempts").join("r2-prepare-refused")).unwrap();
+        assert_eq!(delegated_capability(&root, "shared", "12", "42").unwrap(), "903");
+
+        // In an initialized workspace (workspace.json exists), an unsubmitted revoke proposal does not filter out 903.
+        fs::create_dir_all(root.join("attempts").join("r1")).unwrap();
+        fs::write(
+            root.join("attempts").join("r1").join("outcome.json"),
+            br#"{"type":"confirmed"}"#,
+        )
+        .unwrap();
+        fs::write(root.join("workspace.json"), br#"{"subject":"1"}"#).unwrap();
+        fs::create_dir_all(root.join("proposals").join("r2-unsubmitted")).unwrap();
+        fs::write(
+            root.join("proposals").join("r2-unsubmitted").join("proposal.json"),
+            br#"{"revocation":{"name":"shared","target":"12","recipient":"42","capability":"903"}}"#,
+        )
+        .unwrap();
+        assert_eq!(delegated_capability(&root, "shared", "12", "42").unwrap(), "903");
+        fs::remove_file(root.join("workspace.json")).unwrap();
+        fs::remove_dir_all(root.join("proposals").join("r2-unsubmitted")).unwrap();
+
+        // Revoking 903 via historical intent.json revoke-source leaves no active capability.
+        fs::create_dir_all(root.join("proposals").join("r2")).unwrap();
+        fs::write(
+            root.join("proposals").join("r2").join("intent.json"),
+            br#"{"purpose":{"draft":{"type":"revoke-source","command":{"target":"12","capability":"903"}}}}"#,
+        )
+        .unwrap();
+        assert!(delegated_capability(&root, "shared", "12", "42").unwrap_err().contains("delegated nothing"));
         fs::remove_dir_all(root).unwrap();
     }
 
