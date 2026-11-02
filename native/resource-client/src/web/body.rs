@@ -771,11 +771,30 @@ fn grants(site: &Site) -> Page {
     Page { status: 200, title: "Grants".into(), stamp: Stamp::None, body }
 }
 
-fn check_law_input(site: &Site, input: &str) -> Result<lawsat::LawWorkbenchReport> {
-    let ws = fs::read_to_string(site.root.join("workspace.json"))
+fn site_workspace(site: &Site) -> Value {
+    let mut ws = fs::read_to_string(site.root.join("workspace.json"))
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .unwrap_or_else(|| json!({}));
+        .unwrap_or_else(|| site.workspace.clone());
+    if !ws.is_object() {
+        ws = json!({});
+    }
+    if ws.get("subject").and_then(Value::as_str).is_none() && !site.subject.is_empty() {
+        ws["subject"] = json!(site.subject);
+    }
+    if let Some(shell) = &site.shell {
+        if ws.get("host").and_then(Value::as_str).is_none() {
+            ws["host"] = json!(shell.host.to_string_lossy());
+        }
+        if ws.get("config").and_then(Value::as_str).is_none() {
+            ws["config"] = json!(shell.config.to_string_lossy());
+        }
+    }
+    ws
+}
+
+fn check_law_input(site: &Site, input: &str) -> Result<lawsat::LawWorkbenchReport> {
+    let ws = site_workspace(site);
     let (pred, _) = lawsat::parse_law_input(input, &site.subject)?;
     lawsat::analyze_law_workbench(&site.root, &ws, &site.subject, &pred)
 }
@@ -972,12 +991,17 @@ fn render_verb_matrix(report: &lawsat::LawWorkbenchReport) -> String {
         "refused"
     };
     out.push_str(&format!(
-        "<p class=\"outcome {overall_class}\">Canonical law: <code>{}</code> · overall Presburger verdict: <strong>{}</strong> ({}){}</p>\n",
+        "<p class=\"outcome {overall_class}\">Canonical law: <code>{}</code> · overall Presburger verdict: <strong>{}</strong> ({}){}{}</p>\n",
         escape(&report.rendered_law),
         escape(&report.overall_verdict),
         escape(&report.overall_summary),
         if report.write_lockout || report.self_lockout {
             " · <strong>write self-lockout detected</strong>"
+        } else {
+            ""
+        },
+        if report.relaw_lockout {
+            " · <strong>re-law lockout detected</strong>"
         } else {
             ""
         }
@@ -1069,6 +1093,10 @@ fn render_hypothetical_turn_form(
 
 fn render_hypothetical_turn_result(turn: &lawsat::HypotheticalTurnReport) -> String {
     let class = if turn.admitted { "admitted" } else { "refused" };
+    let first_refused_note = match &turn.first_refused_clause {
+        Some(clause) => format!(" · first refused clause: <code>{}</code>", escape(clause)),
+        None => String::new(),
+    };
     let mut rows = String::new();
     for c in &turn.clauses {
         let status = if c.passed {
@@ -1087,7 +1115,7 @@ fn render_hypothetical_turn_result(turn: &lawsat::HypotheticalTurnReport) -> Str
     format!(
         "<section class=\"turn-verdict\"><h2>Hypothetical Turn Verdict</h2>\
          <div class=\"outcome {class}\"><p class=\"headline\">{}</p>\
-         <p>Environment: <code>request/verb = {} ({})</code>, <code>request/subject = {}</code>, <code>request/cost = {}</code></p></div>\
+         <p>Environment: <code>request/verb = {} ({})</code>, <code>request/subject = {}</code>, <code>request/cost = {}</code>{first_refused_note}</p></div>\
          <table><thead><tr><th>#</th><th>clause</th><th>verdict</th><th>evaluated slots</th></tr></thead><tbody>{rows}</tbody></table></section>\n",
         escape(&turn.headline),
         escape(&turn.verb),
@@ -1487,10 +1515,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["receipts", id, "verify-inclusion"] => match workspace_id(id) {
             Ok(()) => {
                 let attempt = site.root.join("attempts").join(id);
-                let ws = fs::read_to_string(site.root.join("workspace.json"))
-                    .ok()
-                    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                    .unwrap_or_else(|| json!({}));
+                let ws = site_workspace(site);
                 let mut res = crate::receipt_continuity::verify_attempt_inclusion(&site.root, &ws, &attempt);
                 if res.is_err() && site.shell.is_some() {
                     let _ = verb(site, &[format!("inspect inclusion {id}")]);
