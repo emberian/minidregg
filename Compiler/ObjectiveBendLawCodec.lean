@@ -60,6 +60,8 @@ inductive Token where
   | leROff (left right : LawRef) (offset : Int)
   | monotone (field : String)
   | writeOnce (field : String)
+  | sumEq (left right : List String)
+  | hashEq (values : List String) (blinder commit : String)
   | not
   | and
   | or
@@ -80,6 +82,12 @@ def encodeToken : Token → List UInt8
   | .and => [9]
   | .or => [10]
   | .implies => [11]
+  | .sumEq left right =>
+      12 :: ((StreamCodec.list PolicyRecordCodec.stringStream).encode left ++
+        (StreamCodec.list PolicyRecordCodec.stringStream).encode right)
+  | .hashEq values blinder commit =>
+      13 :: ((StreamCodec.list PolicyRecordCodec.stringStream).encode values ++
+        (PolicyRecordCodec.stringStream.encode blinder ++ PolicyRecordCodec.stringStream.encode commit))
 
 def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 0 :: bytes => do
@@ -117,6 +125,15 @@ def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 9 :: rest => some (.and, rest)
   | 10 :: rest => some (.or, rest)
   | 11 :: rest => some (.implies, rest)
+  | 12 :: bytes => do
+      let (left, rest) ← (StreamCodec.list PolicyRecordCodec.stringStream).decodePrefix bytes
+      let (right, rest) ← (StreamCodec.list PolicyRecordCodec.stringStream).decodePrefix rest
+      some (.sumEq left right, rest)
+  | 13 :: bytes => do
+      let (values, rest) ← (StreamCodec.list PolicyRecordCodec.stringStream).decodePrefix bytes
+      let (blinder, rest) ← PolicyRecordCodec.stringStream.decodePrefix rest
+      let (commit, rest) ← PolicyRecordCodec.stringStream.decodePrefix rest
+      some (.hashEq values blinder commit, rest)
   | _ => none
 
 theorem decodeToken_encode (token : Token) (suffix : List UInt8) :
@@ -166,7 +183,11 @@ theorem encodeToken_decodeToken (bytes : List UInt8) (value : Token) (suffix : L
   · subst t10; token_arm
   by_cases t11 : tag = 11
   · subst t11; token_arm
-  simp [decodeToken, t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11] at decoded
+  by_cases t12 : tag = 12
+  · subst t12; token_arm
+  by_cases t13 : tag = 13
+  · subst t13; token_arm
+  simp [decodeToken, t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13] at decoded
 
 def tokenStream : StreamCodec Token where
   encode := encodeToken
@@ -183,6 +204,8 @@ def step : Token → List LawExpr → Option (List LawExpr)
   | .leROff left right offset, stack => some (.leROff left right offset :: stack)
   | .monotone field, stack => some (.monotone field :: stack)
   | .writeOnce field, stack => some (.writeOnce field :: stack)
+  | .sumEq left right, stack => some (.sumEq left right :: stack)
+  | .hashEq values blinder commit, stack => some (.hashEq values blinder commit :: stack)
   | .not, body :: stack => some (.not body :: stack)
   | .and, right :: left :: stack => some (.and left right :: stack)
   | .or, right :: left :: stack => some (.or left right :: stack)
@@ -205,6 +228,8 @@ def tokensInto : LawExpr → List Token → List Token
   | .leROff left right offset, suffix => .leROff left right offset :: suffix
   | .monotone field, suffix => .monotone field :: suffix
   | .writeOnce field, suffix => .writeOnce field :: suffix
+  | .sumEq left right, suffix => .sumEq left right :: suffix
+  | .hashEq values blinder commit, suffix => .hashEq values blinder commit :: suffix
   | .not body, suffix => tokensInto body (.not :: suffix)
   | .and left right, suffix => tokensInto left (tokensInto right (.and :: suffix))
   | .or left right, suffix => tokensInto left (tokensInto right (.or :: suffix))
@@ -222,6 +247,8 @@ theorem runTokens_tokensInto (law : LawExpr) :
   | leROff => intro suffix stack; rfl
   | monotone => intro suffix stack; rfl
   | writeOnce => intro suffix stack; rfl
+  | sumEq => intro suffix stack; rfl
+  | hashEq => intro suffix stack; rfl
   | not body ih => intro suffix stack; rw [tokensInto, ih]; rfl
   | and left right ihLeft ihRight => intro suffix stack; rw [tokensInto, ihLeft, ihRight]; rfl
   | or left right ihLeft ihRight => intro suffix stack; rw [tokensInto, ihLeft, ihRight]; rfl

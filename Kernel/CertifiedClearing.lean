@@ -50,8 +50,31 @@ own package method returns (ROOT ruling 10-05). The package
 clearer's fills into seat-to-seat moves and returns them with the certificate.
 Wiring `clear` as the receiver's judgment of that Plan action is the native leg,
 after SEATS-NATIVE lands. -/
-import Kernel.Seat
-import Theory.CertF
+module
+
+public import Kernel.Seat
+public import Theory.CertF
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Mathlib.Data.List.Sort
+import all Kernel.Invitation
+import all Kernel.Seat
+import all Theory.TypedAuthorization
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CertifiedClearing
 open Minidregg.Theory.CanonicalResourceKernel

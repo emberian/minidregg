@@ -1,0 +1,121 @@
+edition ObjectiveBend 1
+# Scenario assertions for world/story/CoAuthor.obend.
+import ./CoAuthor.obend as S
+
+def crowd() -> S.Electorate:
+  {first: 10n, count: 3n}
+
+def demo() -> S.Story:
+  S.start("the lighthouse", 10n, 3n, crowd(), 0n)
+
+def prop(s: S.Story, author: Nat, text: String, now: Nat) -> S.Story:
+  S.storyOf(S.react(s, S.Event.propose({author: author, text: text, now: now})))
+
+def ballot(s: S.Story, voter: Nat, pick: Nat, now: Nat) -> S.Story:
+  S.storyOf(S.react(s, S.Event.vote({voter: voter, pick: pick, now: now})))
+
+def sealAt(s: S.Story, now: Nat) -> S.Story:
+  S.storyOf(S.react(s, S.Event.seal({now: now})))
+
+def edited(s: S.Story, author: Nat, id: Nat, text: String, now: Nat) -> S.Story:
+  S.storyOf(S.react(s, S.Event.edit({author: author, id: id, text: text, now: now})))
+
+def twoProposed() -> S.Story:
+  prop(prop(demo(), 1n, "a light on the rock", 1n), 2n, "a ship in the fog", 2n)
+
+def voted3() -> S.Story:
+  ballot(ballot(ballot(twoProposed(), 10n, 2n, 3n), 11n, 2n, 4n), 12n, 1n, 5n)
+
+def chapterOne() -> S.Story:
+  sealAt(voted3(), 11n)
+
+def finished() -> S.Story:
+  let r2 = ballot(prop(chapterOne(), 3n, "the keeper wakes", 12n), 10n, 3n, 13n)
+  let r3 = ballot(ballot(prop(prop(sealAt(r2, 22n), 1n, "the lamp goes out", 23n), 2n, "the fog lifts", 24n), 11n, 4n, 25n), 12n, 5n, 26n)
+  sealAt(r3, 33n)
+
+def reasonOfEdit(s: S.Story, author: Nat, id: Nat, now: Nat) -> String:
+  S.reasonOf(S.react(s, S.Event.edit({author: author, id: id, text: "rewritten", now: now})))
+
+def firstChapterText() -> String:
+  S.textOf(chapterOne().chapters, 1n)
+
+def firstChapterVotes() -> Nat:
+  S.votesOfChapter(chapterOne().chapters, 1n)
+
+def firstChapterAuthor() -> Nat:
+  S.authorOfChapter(chapterOne().chapters, 1n)
+
+def sealOpensNextRound() -> Bool:
+  S.proposalCount(chapterOne().round.proposals) == 0n && chapterOne().round.closes == 21n && S.chapterCount(chapterOne().chapters) == 1n && S.not(chapterOne().done)
+
+def threeRoundsComplete() -> Bool:
+  finished().done && S.chapterCount(finished().chapters) == 3n
+
+def tieGoesToEarliest() -> String:
+  S.textOf(finished().chapters, 3n)
+
+def secondChapterText() -> String:
+  S.textOf(finished().chapters, 2n)
+
+def sealedChapterStays() -> Bool:
+  S.textOf(finished().chapters, 1n) == "a ship in the fog" && S.authorOfChapter(finished().chapters, 1n) == 2n && S.votesOfChapter(finished().chapters, 1n) == 2n
+
+def lonePropositionWins() -> String:
+  S.textOf(sealAt(prop(demo(), 1n, "a light on the rock", 1n), 11n).chapters, 1n)
+
+def emptyRoundExtends() -> Bool:
+  S.chapterCount(sealAt(demo(), 11n).chapters) == 0n && sealAt(demo(), 11n).round.closes == 21n
+
+def editedProposalWins() -> String:
+  S.textOf(sealAt(ballot(edited(twoProposed(), 2n, 2n, "a ship in the mist", 3n), 10n, 2n, 4n), 11n).chapters, 1n)
+
+def editByNonAuthor() -> String:
+  reasonOfEdit(twoProposed(), 1n, 2n, 3n)
+
+def editBySealedChapter() -> String:
+  reasonOfEdit(chapterOne(), 2n, 2n, 13n)
+
+def editOfLoserAfterSeal() -> String:
+  reasonOfEdit(chapterOne(), 1n, 1n, 13n)
+
+def editOfUnknown() -> String:
+  reasonOfEdit(twoProposed(), 1n, 99n, 3n)
+
+def lateEdit() -> String:
+  reasonOfEdit(twoProposed(), 2n, 2n, 11n)
+
+def lateProposal() -> String:
+  S.reasonOf(S.react(demo(), S.Event.propose({author: 1n, text: "too late", now: 11n})))
+
+def lastMomentProposalAllowed() -> String:
+  S.reasonOf(S.react(demo(), S.Event.propose({author: 1n, text: "just in time", now: 10n})))
+
+def doubleProposal() -> String:
+  S.reasonOf(S.react(twoProposed(), S.Event.propose({author: 1n, text: "another", now: 3n})))
+
+def doubleVote() -> String:
+  S.reasonOf(S.react(voted3(), S.Event.vote({voter: 10n, pick: 1n, now: 6n})))
+
+def strangerVote() -> String:
+  S.reasonOf(S.react(twoProposed(), S.Event.vote({voter: 77n, pick: 1n, now: 3n})))
+
+def voteForUnknown() -> String:
+  S.reasonOf(S.react(twoProposed(), S.Event.vote({voter: 10n, pick: 99n, now: 3n})))
+
+def lateVote() -> String:
+  S.reasonOf(S.react(twoProposed(), S.Event.vote({voter: 10n, pick: 1n, now: 11n})))
+
+def earlySeal() -> String:
+  S.reasonOf(S.react(voted3(), S.Event.seal({now: 10n})))
+
+def sealAtCloseHeightPlusOne() -> String:
+  S.reasonOf(S.react(voted3(), S.Event.seal({now: 11n})))
+
+def completeRefusesAll() -> Bool:
+  S.reasonOf(S.react(finished(), S.Event.propose({author: 1n, text: "more", now: 50n}))) == "complete" && S.reasonOf(S.react(finished(), S.Event.vote({voter: 10n, pick: 1n, now: 50n}))) == "complete" && S.reasonOf(S.react(finished(), S.Event.edit({author: 1n, id: 4n, text: "x", now: 50n}))) == "complete" && S.reasonOf(S.react(finished(), S.Event.seal({now: 99n}))) == "complete"
+
+def refusalChangesNothing() -> Bool:
+  let before = voted3()
+  let after = S.storyOf(S.react(before, S.Event.vote({voter: 10n, pick: 1n, now: 6n})))
+  S.proposalCount(after.round.proposals) == S.proposalCount(before.round.proposals) && S.votesFor(1n, after.round.ballots) == S.votesFor(1n, before.round.ballots) && S.votesFor(2n, after.round.ballots) == S.votesFor(2n, before.round.ballots) && after.round.closes == before.round.closes && after.nextId == before.nextId

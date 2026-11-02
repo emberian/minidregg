@@ -1,13 +1,36 @@
 edition ObjectiveBend 1
-# The preview scenarios of world/dues: the named account shapes and the cohort's boolean and
-# numeric entries, over the standing-dues lifecycle imported qualified. Preview only; the
-# lifecycle (StandingDues.obend) is the module an app installs and the native route publishes.
+# Scenario assertions for world/dues/StandingDues.obend.
 import ./StandingDues.obend as D
 
-# ---- the named scenario ------------------------------------------------------
-# Payer 1 owes room 2 an amount of 10 every 10 heights from height 100, for 4
-# periods (due at 100, 110, 120, 130), with a notice window of 3 heights. The lease
-# variant has the same terms and a deposit of 25: two draws, then it cannot cover.
+def transferAmount(tr: D.Transition) -> Nat:
+  match tr:
+    case refused(_): 0n
+    case quiet(_): 0n
+    case moved(m): m.transfer.amount
+
+def transferFrom(tr: D.Transition) -> Nat:
+  match tr:
+    case refused(_): 0n
+    case quiet(_): 0n
+    case moved(m): m.transfer.fromAccount
+
+def transferTo(tr: D.Transition) -> Nat:
+  match tr:
+    case refused(_): 0n
+    case quiet(_): 0n
+    case moved(m): m.transfer.toAccount
+
+def duesLaw(a: D.Account) -> Bool:
+  a.paid == a.k * a.terms.amount && a.k <= a.terms.periods && (if a.terms.lease then a.paid + a.prepaid + a.refunded == a.deposited else a.prepaid == 0n && a.deposited == 0n && a.refunded == 0n)
+
+def movedAtMostOnce(tr: D.Transition, before: D.Account) -> Bool:
+  match tr:
+    case refused(after): after.paid == before.paid && after.k == before.k && after.prepaid == before.prepaid && after.refunded == before.refunded
+    case quiet(after): after.paid == before.paid && after.k == before.k && after.refunded == before.refunded
+    case moved(m): (m.account.k == before.k + 1n && m.account.paid == before.paid + before.terms.amount && m.transfer.amount == before.terms.amount) || (D.phaseName(before) == "lapsed" && D.phaseName(m.account) == "settled" && m.transfer.amount == before.prepaid && m.account.prepaid == 0n)
+
+def lawPreserved(tr: D.Transition, before: D.Account) -> Bool:
+  duesLaw(D.accountOf(tr)) && movedAtMostOnce(tr, before)
 
 def terms() -> D.Terms:
   {payer: 1n, room: 2n, amount: 10n, period: 10n, start: 100n, periods: 4n, window: 3n, lease: false}
@@ -39,15 +62,14 @@ def afterFour() -> D.Account:
 def isPhase(a: D.Account, name: String) -> Bool:
   D.phaseName(a) == name
 
-# On time: period 0 at its due height pays one amount, from the payer to the room.
 def onTimePays() -> Bool:
-  D.transferAmount(tryDischarge(fresh(), 0n, 100n)) == 10n && discharged(fresh(), 0n, 100n).k == 1n
+  transferAmount(tryDischarge(fresh(), 0n, 100n)) == 10n && discharged(fresh(), 0n, 100n).k == 1n
 
 def paymentFromPayer() -> Nat:
-  D.transferFrom(tryDischarge(fresh(), 0n, 100n))
+  transferFrom(tryDischarge(fresh(), 0n, 100n))
 
 def paymentToRoom() -> Nat:
-  D.transferTo(tryDischarge(fresh(), 0n, 100n))
+  transferTo(tryDischarge(fresh(), 0n, 100n))
 
 def fullTermCompletes() -> Bool:
   isPhase(afterFour(), "complete") && afterFour().paid == 40n && afterFour().k == 4n
@@ -55,23 +77,18 @@ def fullTermCompletes() -> Bool:
 def fullTermPaid() -> Nat:
   afterFour().paid
 
-# Never early.
-def earlyRefused() -> Bool:
-  D.wasRefused(tryDischarge(fresh(), 0n, 99n)) && negated(D.wasRefused(tryDischarge(fresh(), 0n, 100n)))
-
 def negated(b: Bool) -> Bool:
   if b then false else true
 
-# Double trigger: period 0 once. A replay names a period behind the cursor.
+def earlyRefused() -> Bool:
+  D.wasRefused(tryDischarge(fresh(), 0n, 99n)) && negated(D.wasRefused(tryDischarge(fresh(), 0n, 100n)))
+
 def doubleTriggerRefused() -> Bool:
   D.wasRefused(tryDischarge(discharged(fresh(), 0n, 100n), 0n, 100n)) && discharged(discharged(fresh(), 0n, 100n), 0n, 105n).k == 1n
 
-# A skip names a period ahead of the cursor.
 def skipRefused() -> Bool:
   D.wasRefused(tryDischarge(fresh(), 1n, 150n)) && D.wasRefused(tryDischarge(discharged(fresh(), 0n, 100n), 2n, 150n))
 
-# Catching up: at 125 periods 0, 1 and 2 are due; three discharges pay three times,
-# and a fourth naming period 3 is refused (it falls due at 130).
 def behindAtCatchUp() -> Nat:
   D.behindBy(fresh(), 125n)
 
@@ -84,11 +101,9 @@ def catchUpStopsAtDue() -> Bool:
 def behindAfterTerm() -> Nat:
   D.behindBy(afterFour(), 500n)
 
-# A completed term takes no further period.
 def afterTermRefused() -> Bool:
   D.wasRefused(tryDischarge(afterFour(), 4n, 500n)) && D.wasRefused(tryDischarge(afterFour(), 0n, 500n))
 
-# Cancellation: the payer alone, at a period boundary window; never mid-period.
 def cancelAtBoundary() -> Bool:
   isPhase(D.accountOf(tryCancel(discharged(fresh(), 0n, 100n), 1n, 110n)), "cancelled") && isPhase(D.accountOf(tryCancel(discharged(fresh(), 0n, 100n), 1n, 112n)), "cancelled")
 
@@ -110,9 +125,8 @@ def cancelledTakesNoMore() -> Bool:
 def cancelledPaidOnce() -> Nat:
   D.accountOf(tryCancel(discharged(fresh(), 0n, 100n), 1n, 110n)).paid
 
-# Prepaid lease: each discharge draws from the deposit and the law conserves value.
 def leaseDraws() -> Bool:
-  leased().prepaid == 25n && discharged(leased(), 0n, 100n).prepaid == 15n && discharged(leased(), 0n, 100n).paid == 10n && D.transferAmount(tryDischarge(leased(), 0n, 100n)) == 10n
+  leased().prepaid == 25n && discharged(leased(), 0n, 100n).prepaid == 15n && discharged(leased(), 0n, 100n).paid == 10n && transferAmount(tryDischarge(leased(), 0n, 100n)) == 10n
 
 def leaseTwice() -> D.Account:
   discharged(discharged(leased(), 0n, 100n), 1n, 110n)
@@ -123,7 +137,6 @@ def leaseShortRefused() -> Bool:
 def lapseWhenShort() -> Bool:
   isPhase(D.accountOf(D.react(leaseTwice(), D.Event.lapse({now: 120n}))), "lapsed")
 
-# Not before the period is due, and not while the deposit still covers it.
 def lapseEarlyRefused() -> Bool:
   D.wasRefused(D.react(leaseTwice(), D.Event.lapse({now: 119n}))) && D.wasRefused(D.react(leased(), D.Event.lapse({now: 100n}))) && D.wasRefused(D.react(fresh(), D.Event.lapse({now: 500n})))
 
@@ -131,14 +144,14 @@ def lapsedAccount() -> D.Account:
   D.accountOf(D.react(leaseTwice(), D.Event.lapse({now: 120n})))
 
 def settleRefunds() -> Nat:
-  D.transferAmount(D.react(lapsedAccount(), D.Event.settle({now: 121n})))
+  transferAmount(D.react(lapsedAccount(), D.Event.settle({now: 121n})))
 
 def settleRefundsPayer() -> Nat:
-  D.transferTo(D.react(lapsedAccount(), D.Event.settle({now: 121n})))
+  transferTo(D.react(lapsedAccount(), D.Event.settle({now: 121n})))
 
 def settledOnce() -> Bool:
   let after = D.accountOf(D.react(lapsedAccount(), D.Event.settle({now: 121n})))
-  D.wasRefused(D.react(after, D.Event.settle({now: 122n}))) && after.prepaid == 0n && after.refunded == 5n && D.duesLaw(after)
+  D.wasRefused(D.react(after, D.Event.settle({now: 122n}))) && after.prepaid == 0n && after.refunded == 5n && duesLaw(after)
 
 def settleWhileRunningRefused() -> Bool:
   D.wasRefused(D.react(leased(), D.Event.settle({now: 100n})))
@@ -146,23 +159,19 @@ def settleWhileRunningRefused() -> Bool:
 def topUpOnlyByPayer() -> Bool:
   D.wasRefused(D.react(leaseTwice(), D.Event.topUp({actor: 2n, amount: 5n}))) && D.wasRefused(D.react(leaseTwice(), D.Event.topUp({actor: 9n, amount: 5n}))) && negated(D.wasRefused(D.react(leaseTwice(), D.Event.topUp({actor: 1n, amount: 5n}))))
 
-# A top-up lets the lease cover the next period.
 def topUpThenDraw() -> Bool:
   let topped = D.accountOf(D.react(leaseTwice(), D.Event.topUp({actor: 1n, amount: 5n})))
-  topped.deposited == 30n && negated(D.wasRefused(tryDischarge(topped, 2n, 120n))) && D.duesLaw(discharged(topped, 2n, 120n))
+  topped.deposited == 30n && negated(D.wasRefused(tryDischarge(topped, 2n, 120n))) && duesLaw(discharged(topped, 2n, 120n))
 
 def payAsYouGoTakesNoTopUp() -> Bool:
   D.wasRefused(D.react(fresh(), D.Event.topUp({actor: 1n, amount: 5n})))
 
-# Invalid terms never run.
 def voidTerms() -> Bool:
   isPhase(D.open({payer: 1n, room: 2n, amount: 0n, period: 10n, start: 100n, periods: 4n, window: 3n, lease: false}, 0n), "void") && isPhase(D.open({payer: 1n, room: 1n, amount: 10n, period: 10n, start: 100n, periods: 4n, window: 3n, lease: false}, 0n), "void") && isPhase(D.open({payer: 1n, room: 2n, amount: 10n, period: 10n, start: 100n, periods: 4n, window: 11n, lease: false}, 0n), "void")
 
-# The D.dues law over every event kind, from every shape of account.
 def lawFrom(a: D.Account) -> Bool:
-  D.duesLaw(a) && D.lawPreserved(tryDischarge(a, a.k, 125n), a) && D.lawPreserved(tryDischarge(a, a.k, 500n), a) && D.lawPreserved(tryDischarge(a, 0n, 100n), a) && D.lawPreserved(tryCancel(a, 1n, 110n), a) && D.lawPreserved(D.react(a, D.Event.topUp({actor: 1n, amount: 5n})), a) && D.lawPreserved(D.react(a, D.Event.lapse({now: 500n})), a) && D.lawPreserved(D.react(a, D.Event.settle({now: 500n})), a)
+  duesLaw(a) && lawPreserved(tryDischarge(a, a.k, 125n), a) && lawPreserved(tryDischarge(a, a.k, 500n), a) && lawPreserved(tryDischarge(a, 0n, 100n), a) && lawPreserved(tryCancel(a, 1n, 110n), a) && lawPreserved(D.react(a, D.Event.topUp({actor: 1n, amount: 5n})), a) && lawPreserved(D.react(a, D.Event.lapse({now: 500n})), a) && lawPreserved(D.react(a, D.Event.settle({now: 500n})), a)
 
-# One row per account shape: each is a separate run under the preview's tick budget.
 def lawHoldsFresh() -> Bool:
   lawFrom(fresh())
 

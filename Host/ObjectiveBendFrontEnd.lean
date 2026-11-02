@@ -436,13 +436,27 @@ def batchCommand (jobsPath outPath : String) : IO UInt32 := do
   IO.FS.writeFile outPath ((Json.arr results).compress ++ "\n")
   return 0
 
+def commandsCommand (path : String) : IO UInt32 := do
+  let cmds ← match ← (readJson path).run with
+    | .ok (_, j) => pure ((j.getArr?).toOption.getD #[])
+    | .error d => return ← report none d
+  for cmd in cmds do
+    let args := ((cmd.getArr?).toOption.getD #[]).toList.filterMap fun x => (x.getStr?).toOption
+    let rc ← match args with
+      | ["capture", spec, dir] => captureCommand spec dir false
+      | ["capture", spec, dir, "--objective-edition-1"] => captureCommand spec dir true
+      | ["preview", request, dir] => previewCommand request dir
+      | _ => pure 2
+    if rc != 0 && args.head? == some "capture" then return rc
+  return 0
+
 def identityJson : Json :=
   Json.mkObj [("schema", toJson "dregg.objective-bend.front-end-identity.v1"), ("frontEnd", toJson identity),
     ("manifest", toJson ObjectiveBendFrontEndIdentity.manifest)]
 
 def usage : String :=
   "usage: objective-front identity | parse SOURCE.obend | capture PACKAGE_SPEC NEW_DIR [--objective-edition-1] | " ++
-  "elaborate CAPTURE PREFIX [ARGS] [PROJECTIONS] [LIMITS] [application|definition] | preview REQUEST NEW_DIR | batch JOBS OUT"
+  "elaborate CAPTURE PREFIX [ARGS] [PROJECTIONS] [LIMITS] [application|definition] | preview REQUEST NEW_DIR | batch JOBS OUT | commands CMDS"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -459,6 +473,7 @@ def run (arguments : List String) : IO UInt32 := do
     elaborateCommand capture prefix_ args projections limits mode
   | ["preview", request, dir] => previewCommand request dir
   | ["batch", jobs, out] => batchCommand jobs out
+  | ["commands", path] => commandsCommand path
   | _ => IO.eprintln usage; return 2
 
 end Minidregg.Host.ObjectiveBendFrontEnd

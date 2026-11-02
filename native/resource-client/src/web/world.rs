@@ -1,5 +1,168 @@
-//! Two useful faces of a member-defined kind or instance, over current signed reads.
+//! Two useful faces of a member-defined kind, instance, or native object/seat world (`ObjectiveCall`,
+//! `ObjectiveSend`, `ObjectiveActivity`, and `SeatStore`), over current signed reads.
+//!
+//! In addition to rendering `worldInstance` and `worldKind` records, `/object/NAME` and
+//! `/object/NAME/behavior` inspect native object state, open seats, invitations, and certified
+//! batch clearings, and render structured human-friendly form inputs (`key=value`, `asset:amount`,
+//! `role:holder`) for `ObjectiveCall` (`invoke`), `ObjectiveSend` (`send`, `deliver`),
+//! `ObjectiveActivity` (`spawn`, `reply`), and `SeatStore` (`create`, `fund`, `act`, `exit`) turns.
+
+use super::programs::{
+    deliver_turn_spec, format_human_data, inspect_data_table, invoke_turn, parse_human_data,
+    reply_turn, send_turn, spawn_turn, split_top_level,
+};
 use super::*;
+use serde_json::{json, Value};
+
+fn decimal(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 80
+        && text.bytes().all(|b| b.is_ascii_digit())
+        && (text == "0" || !text.starts_with('0'))
+}
+
+/// Parse human-friendly `asset:amount` pairs (e.g. `1:500, 2:10`) for a `SeatStore` `fund` (`offer`) turn.
+pub(crate) fn parse_asset_amounts(text: &str) -> std::result::Result<Vec<Value>, String> {
+    let mut out = Vec::new();
+    for item in split_top_level(text) {
+        let Some((asset, amount)) = item.split_once(':').or_else(|| item.split_once('=')) else {
+            return Err(format!("entry `{item}` must be `asset:amount` (e.g. `1:500`)"));
+        };
+        let (asset, amount) = (asset.trim(), amount.trim());
+        if !decimal(asset) || !decimal(amount) {
+            return Err(format!("asset `{asset}` and amount `{amount}` must be canonical decimals"));
+        }
+        out.push(json!([asset, amount]));
+    }
+    Ok(out)
+}
+
+/// Parse human-friendly `role:holder` pairs (e.g. `bidder:42, seller:43`) for a `SeatStore` `create` turn.
+pub(crate) fn parse_invitation_roles(text: &str) -> std::result::Result<Vec<Value>, String> {
+    let mut out = Vec::new();
+    for item in split_top_level(text) {
+        let Some((role, holder)) = item.split_once(':').or_else(|| item.split_once('=')) else {
+            return Err(format!("invitation `{item}` must be `role:holder` (e.g. `bidder:42`)"));
+        };
+        let (role, holder) = (role.trim(), holder.trim());
+        if role.is_empty() || !decimal(holder) {
+            return Err(format!("role `{role}` must be non-empty and holder `{holder}` a decimal subject id"));
+        }
+        out.push(json!({"role": role, "holder": holder, "terms": []}));
+    }
+    Ok(out)
+}
+
+/// Build a `SeatStore` `create` turn from human-friendly inputs.
+pub(crate) fn seat_create_turn(
+    object: &str,
+    package: &str,
+    payer: &str,
+    invitations_text: &str,
+) -> std::result::Result<Value, String> {
+    let (object, package, payer) = (object.trim(), package.trim(), payer.trim());
+    if !decimal(object) || !decimal(package) || !decimal(payer) {
+        return Err("object cell, package id, and payer account must be canonical decimals".into());
+    }
+    let invitations = parse_invitation_roles(invitations_text)?;
+    Ok(json!({
+        "surface": "SeatStore",
+        "turn": {
+            "kind": "create",
+            "object": object,
+            "package": package,
+            "payer": payer,
+            "clause": {"type": "all", "predicates": []},
+            "invitations": invitations,
+        }
+    }))
+}
+
+/// Build a `SeatStore` `fund` (`offer`) turn from human-friendly `give` / `want` `asset:amount` pairs.
+pub(crate) fn seat_fund_turn(
+    invitation: &str,
+    funding: &str,
+    payee: &str,
+    give_text: &str,
+    want_text: &str,
+    exit_rule: &str,
+    confirm_donation: bool,
+) -> std::result::Result<Value, String> {
+    let (invitation, funding, payee) = (invitation.trim(), funding.trim(), payee.trim());
+    if !decimal(invitation) || !decimal(funding) || !decimal(payee) {
+        return Err("invitation id, funding account, and payee account must be canonical decimals".into());
+    }
+    let give = parse_asset_amounts(give_text)?;
+    let want = parse_asset_amounts(want_text)?;
+    let donate = want.is_empty();
+    if donate && !confirm_donation {
+        return Err("an offer with empty `want` is a donation; confirm_donation must be true".into());
+    }
+    let exit = if let Some(due) = exit_rule.trim().strip_prefix("afterDeadline:") {
+        let due = due.trim();
+        if !decimal(due) {
+            return Err("afterDeadline height must be a canonical decimal".into());
+        }
+        json!({"afterDeadline": due})
+    } else {
+        json!("onDemand")
+    };
+    Ok(json!({
+        "surface": "SeatStore",
+        "confirmDonation": confirm_donation,
+        "turn": {
+            "kind": "offer",
+            "invitation": invitation,
+            "funding": funding,
+            "payee": payee,
+            "proposal": {
+                "give": give,
+                "want": want,
+                "exit": exit,
+                "donate": donate,
+                "disclosure": {"offerer": true, "payee": true, "holder": true},
+            }
+        }
+    }))
+}
+
+/// Build a `SeatStore` `act` (`invoke`) turn from human-friendly method/variant and `key=value` fields.
+pub(crate) fn seat_act_turn(
+    instance: &str,
+    payer: &str,
+    variant: &str,
+    fields: &str,
+) -> std::result::Result<Value, String> {
+    let (instance, payer) = (instance.trim(), payer.trim());
+    if !decimal(instance) || !decimal(payer) {
+        return Err("instance id and payer account must be canonical decimals".into());
+    }
+    let argument = parse_human_data(variant, fields)?;
+    Ok(json!({
+        "surface": "SeatStore",
+        "turn": {
+            "kind": "invoke",
+            "instance": instance,
+            "payer": payer,
+            "argument": argument,
+        }
+    }))
+}
+
+/// Build a `SeatStore` `exit` turn from a seat account id.
+pub(crate) fn seat_exit_turn(seat: &str) -> std::result::Result<Value, String> {
+    let seat = seat.trim();
+    if !decimal(seat) {
+        return Err("seat account coordinate must be a canonical decimal".into());
+    }
+    Ok(json!({
+        "surface": "SeatStore",
+        "turn": {
+            "kind": "exit",
+            "seat": seat,
+        }
+    }))
+}
 
 pub(super) fn page(site: &Site, name: &str, behavior: bool) -> Page {
     let reference = match site.reference(name) {
@@ -11,9 +174,16 @@ pub(super) fn page(site: &Site, name: &str, behavior: bool) -> Page {
             Some(mut body) => {
                 if behavior {
                     body.push_str("<h2>Current law</h2>");
-                    match site.read(&reference,"policy") {
-                        Ok((law,head,_)) => body.push_str(&format!("<p>Law read at height {}.</p><details><summary>Disclosed law</summary><pre>{}</pre></details>",escape(head["height"].as_str().unwrap_or("?")),escape(&serde_json::to_string_pretty(&law).unwrap_or_default()))),
-                        Err(error) => body.push_str(&format!("<p class=refusal>Law unavailable: {}</p>",escape(&refusal_text(&error).unwrap_or(error)))),
+                    match site.read(&reference, "policy") {
+                        Ok((law, head, _)) => body.push_str(&format!(
+                            "<p>Law read at height {}.</p><details><summary>Disclosed law</summary><pre>{}</pre></details>",
+                            escape(head["height"].as_str().unwrap_or("?")),
+                            escape(&serde_json::to_string_pretty(&law).unwrap_or_default())
+                        )),
+                        Err(error) => body.push_str(&format!(
+                            "<p class=refusal>Law unavailable: {}</p>",
+                            escape(&refusal_text(&error).unwrap_or(error))
+                        )),
                     }
                 }
                 Page {
@@ -41,6 +211,110 @@ pub(super) fn body(site: &Site, name: &str, view: &Value, behavior: bool) -> Opt
     render(&site.base(), name, view, behavior)
 }
 
+/// Render structured human-friendly controls for `ObjectiveCall` (`invoke`), `ObjectiveSend`
+/// (`send`, `deliver`), `ObjectiveActivity` (`spawn`, `reply`), and `SeatStore` (`create`, `fund`,
+/// `act`, `exit`) on the behavior face of an object.
+fn native_surface_controls(name: &str, object: &Value) -> String {
+    let n = escape(name);
+    let mut method_options = String::new();
+    if let Some(methods) = object["methods"].as_array() {
+        for m in methods {
+            if let Some(mname) = m["name"].as_str() {
+                method_options.push_str(&format!("<option value=\"{0}\">{0}</option>", escape(mname)));
+            }
+        }
+    }
+    let method_control = if method_options.is_empty() {
+        format!("<input id=\"wc-method-{n}\" name=\"method\" type=\"text\" placeholder=\"e.g. claim, approve, vote\" required>")
+    } else {
+        format!("<select id=\"wc-method-{n}\" name=\"method\">{method_options}</select>")
+    };
+    format!(
+        "<section data-world-surfaces>\
+         <h2>Drive turns (structured inputs)</h2>\
+         <p class=note>Enter human-friendly <code>key=value</code> fields, <code>asset:amount</code> pairs, or <code>role:holder</code> invitations instead of raw nested tagged JSON.</p>\
+         <article data-surface=\"objective-call\"><h3>ObjectiveCall · <code>invoke</code></h3>\
+         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"invoke\">\
+         <input type=\"hidden\" name=\"object\" value=\"{n}\">\
+         <div><label for=\"wc-method-{n}\">Method</label>{method_control}</div>\
+         <div><label for=\"wc-var-{n}\">Variant tag (optional)</label><input id=\"wc-var-{n}\" name=\"variant\" type=\"text\" placeholder=\"defaults to method\"></div>\
+         <div><label for=\"wc-fields-{n}\">Fields (<code>key=value</code>)</label><input id=\"wc-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"amount=10, milestone=1\"></div>\
+         <button>Invoke</button></form></article>\
+         <article data-surface=\"objective-send\"><h3>ObjectiveSend · <code>send</code> &amp; <code>deliver</code></h3>\
+         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"send\">\
+         <input type=\"hidden\" name=\"source\" value=\"{n}\">\
+         <div><label for=\"ws-target-{n}\">Target object</label><input id=\"ws-target-{n}\" name=\"target\" type=\"text\" required></div>\
+         <div><label for=\"ws-var-{n}\">Message tag</label><input id=\"ws-var-{n}\" name=\"variant\" type=\"text\" placeholder=\"e.g. credit, lease\" required></div>\
+         <div><label for=\"ws-fields-{n}\">Payload fields (<code>key=value</code>)</label><input id=\"ws-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"amount=25, epoch=3\"></div>\
+         <button>Send</button></form>\
+         <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"deliver\">\
+         <div><label for=\"wd-obj-{n}\">Object cell</label><input id=\"wd-obj-{n}\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"wd-tx-{n}\">Transaction</label><input id=\"wd-tx-{n}\" name=\"transaction\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <button>Deliver</button></form></article>\
+         <article data-surface=\"objective-activity\"><h3>ObjectiveActivity · <code>spawn</code> &amp; <code>reply</code></h3>\
+         <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"spawn\">\
+         <input type=\"hidden\" name=\"object\" value=\"{n}\">\
+         <div><label for=\"wa-bend-{n}\">Program (bend)</label><input id=\"wa-bend-{n}\" name=\"bend\" type=\"text\" required></div>\
+         <div><label for=\"wa-fields-{n}\">Input fields (<code>key=value</code>)</label><input id=\"wa-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"init=set(0), decider=42\"></div>\
+         <div><label for=\"wa-seed-{n}\">Seed fields (optional)</label><input id=\"wa-seed-{n}\" name=\"seed_fields\" type=\"text\" placeholder=\"total=0\"></div>\
+         <button>Spawn</button></form>\
+         <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"reply\">\
+         <div><label for=\"war-slot-{n}\">Reply slot</label><input id=\"war-slot-{n}\" name=\"slot\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"war-fields-{n}\">Reply fields (<code>key=value</code>)</label><input id=\"war-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"amount=7\"></div>\
+         <button>Reply</button></form></article>\
+         <article data-surface=\"seat-store\"><h3>SeatStore · <code>create</code>, <code>fund</code>, <code>act</code>, <code>exit</code></h3>\
+         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"create\">\
+         <div><label for=\"sc-obj-{n}\">Object cell</label><input id=\"sc-obj-{n}\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sc-pkg-{n}\">Package id</label><input id=\"sc-pkg-{n}\" name=\"package\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sc-pay-{n}\">Payer account</label><input id=\"sc-pay-{n}\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sc-inv-{n}\">Invitations (<code>role:holder</code>)</label><input id=\"sc-inv-{n}\" name=\"invitations\" type=\"text\" placeholder=\"bidder:42, seller:43\"></div>\
+         <button>Create instance</button></form>\
+         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"fund\">\
+         <div><label for=\"sf-inv-{n}\">Invitation id</label><input id=\"sf-inv-{n}\" name=\"invitation\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sf-fund-{n}\">Funding account</label><input id=\"sf-fund-{n}\" name=\"funding\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sf-pay-{n}\">Payee account</label><input id=\"sf-pay-{n}\" name=\"payee\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sf-give-{n}\">Give (<code>asset:amount</code>)</label><input id=\"sf-give-{n}\" name=\"give\" type=\"text\" placeholder=\"1:500\" required></div>\
+         <div><label for=\"sf-want-{n}\">Want (<code>asset:amount</code>)</label><input id=\"sf-want-{n}\" name=\"want\" type=\"text\" placeholder=\"2:10\"></div>\
+         <div><label for=\"sf-exit-{n}\">Exit rule</label><input id=\"sf-exit-{n}\" name=\"exit_rule\" type=\"text\" value=\"onDemand\"></div>\
+         <button>Fund seat</button></form>\
+         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"act\">\
+         <div><label for=\"sa-inst-{n}\">Instance id</label><input id=\"sa-inst-{n}\" name=\"instance\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sa-pay-{n}\">Payer account</label><input id=\"sa-pay-{n}\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sa-var-{n}\">Action / variant</label><input id=\"sa-var-{n}\" name=\"variant\" type=\"text\" placeholder=\"clear, reallocate, settle\"></div>\
+         <div><label for=\"sa-fields-{n}\">Action fields (<code>key=value</code>)</label><input id=\"sa-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"price=50, currency=1, goods=2, epsilon=0\"></div>\
+         <button>Act / settle</button></form>\
+         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"exit\">\
+         <div><label for=\"se-seat-{n}\">Seat account</label><input id=\"se-seat-{n}\" name=\"seat\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <button>Exit seat</button></form></article></section>"
+    )
+}
+
+/// Render open seats and invitations if the object view includes a `seatStore` or `seats` projection.
+fn render_seat_store_summary(object: &Value) -> String {
+    let mut out = String::new();
+    if let Some(state) = object.get("declaredState").or_else(|| object.get("state")).filter(|s| s.is_object()) {
+        let table = inspect_data_table(state);
+        if !table.is_empty() {
+            out.push_str(&format!("<section data-declared-state><h2>Declared state</h2><p><code>{}</code></p>{table}</section>", escape(&format_human_data(state))));
+        }
+    }
+    if let Some(seats) = object.get("seats").and_then(Value::as_array) {
+        out.push_str("<section data-seat-table><h2>Open seats</h2><table><tr><th>Seat account</th><th>Offerer</th><th>Payee</th><th>Give</th><th>Want</th></tr>");
+        for seat in seats {
+            out.push_str(&format!(
+                "<tr><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td></tr>",
+                escape(seat["account"].as_str().unwrap_or("?")),
+                escape(seat["offerer"].as_str().unwrap_or("?")),
+                escape(seat["payee"].as_str().unwrap_or("?")),
+                escape(&seat["give"].to_string()),
+                escape(&seat["want"].to_string()),
+            ));
+        }
+        out.push_str("</table></section>");
+    }
+    out
+}
+
 fn render(base: &str, name: &str, view: &Value, behavior: bool) -> Option<String> {
     let cell = &view["cell"];
     let (object, is_kind) = if cell["worldInstance"].is_object() {
@@ -52,10 +326,13 @@ fn render(base: &str, name: &str, view: &Value, behavior: bool) -> Option<String
     };
     let n = escape(name);
     let descriptor = &object["descriptor"];
-    let mut html = format!("<nav data-object-views><a href=\"{base}/object/{n}\">Fields</a> · \
+    let mut html = format!(
+        "<nav data-object-views><a href=\"{base}/object/{n}\">Fields</a> · \
         <a href=\"{base}/object/{n}/behavior\">Behavior and meaning</a></nav><p>{} · kind <code>{}</code> · revision <code>{}</code></p>",
-        if is_kind {"Kind definition"} else {"Instance"},escape(descriptor["kind"].as_str().unwrap_or("?")),
-        escape(descriptor["revision"].as_str().unwrap_or("?")));
+        if is_kind { "Kind definition" } else { "Instance" },
+        escape(descriptor["kind"].as_str().unwrap_or("?")),
+        escape(descriptor["revision"].as_str().unwrap_or("?"))
+    );
     if let Some(root) = object["kindRoot"].as_str() {
         html.push_str(&format!(
             "<p data-pinned-kind>Instance meaning pinned to kind root <code>{}</code>.</p>",
@@ -64,6 +341,7 @@ fn render(base: &str, name: &str, view: &Value, behavior: bool) -> Option<String
     }
     if !behavior {
         html.push_str(&fields(object));
+        html.push_str(&render_seat_store_summary(object));
     } else {
         html.push_str("<section data-object-behavior><h2>Methods</h2>");
         match object["methods"].as_array() {
@@ -72,8 +350,11 @@ fn render(base: &str, name: &str, view: &Value, behavior: bool) -> Option<String
                     html.push_str("<p>This definition has no named methods.</p>");
                 }
                 for method in methods {
-                    html.push_str(&format!("<article><h3>{}</h3><p>Program <code>{}</code></p><table><tr><th>Output</th><th>Field</th><th>Key</th></tr>",
-                        escape(method["name"].as_str().unwrap_or("?")),escape(method["program"].as_str().unwrap_or("?"))));
+                    html.push_str(&format!(
+                        "<article><h3>{}</h3><p>Program <code>{}</code></p><table><tr><th>Output</th><th>Field</th><th>Key</th></tr>",
+                        escape(method["name"].as_str().unwrap_or("?")),
+                        escape(method["program"].as_str().unwrap_or("?"))
+                    ));
                     if let Some(outputs) = method["outputs"].as_array() {
                         for output in outputs {
                             html.push_str(&format!(
@@ -102,6 +383,8 @@ fn render(base: &str, name: &str, view: &Value, behavior: bool) -> Option<String
             }
         }
         html.push_str("</table>");
+        html.push_str(&render_seat_store_summary(object));
+        html.push_str(&native_surface_controls(name, object));
         for (key, label) in [
             ("sampleSlots", "Source sample slots"),
             ("definitionBytes", "Canonical definition"),
@@ -150,12 +433,54 @@ fn fields(object: &Value) -> String {
             } else {
                 value.to_owned()
             };
-            html.push_str(&format!("<tr><td>{} <small><code>{}</code></small></td><td>{}</td><td><pre>{}</pre></td></tr>",
-                escape(label),escape(id),escape(entry["key"].as_str().unwrap_or("?")),escape(&shown)));
+            html.push_str(&format!(
+                "<tr><td>{} <small><code>{}</code></small></td><td>{}</td><td><pre>{}</pre></td></tr>",
+                escape(label),
+                escape(id),
+                escape(entry["key"].as_str().unwrap_or("?")),
+                escape(&shown)
+            ));
         }
     }
     html.push_str("</table>");
     html
+}
+
+/// Dispatch a structured form submission for any of the four native surfaces (`ObjectiveCall`,
+/// `ObjectiveSend`, `ObjectiveActivity`, `SeatStore`) into its canonical turn JSON.
+pub(crate) fn compile_surface_turn(
+    surface: &str,
+    turn: &str,
+    form: &std::collections::BTreeMap<String, String>,
+) -> std::result::Result<Value, String> {
+    let f = |k: &str| form.get(k).map(String::as_str).unwrap_or("").trim();
+    match (surface, turn) {
+        ("objective-call", "invoke") => invoke_turn(f("object"), f("pin"), f("method"), f("variant"), f("fields")),
+        ("objective-send", "send") => send_turn(f("source"), f("target"), f("variant"), f("fields")),
+        ("objective-send", "deliver") => deliver_turn_spec(f("object"), f("transaction"), (!f("account").is_empty()).then(|| f("account"))),
+        ("objective-activity", "spawn") => spawn_turn(
+            f("bend"),
+            f("object"),
+            f("variant"),
+            f("fields"),
+            f("seed_fields"),
+            (!f("deposit").is_empty()).then(|| f("deposit")),
+        ),
+        ("objective-activity", "reply") => reply_turn(f("slot"), f("mode"), f("variant"), f("fields"), f("refused")),
+        ("seat-store", "create") => seat_create_turn(f("object"), f("package"), f("payer"), f("invitations")),
+        ("seat-store", "fund") => seat_fund_turn(
+            f("invitation"),
+            f("funding"),
+            f("payee"),
+            f("give"),
+            f("want"),
+            f("exit_rule"),
+            f("donate") == "on" || f("confirmDonation") == "true",
+        ),
+        ("seat-store", "act") => seat_act_turn(f("instance"), f("payer"), f("variant"), f("fields")),
+        ("seat-store", "exit") => seat_exit_turn(f("seat")),
+        _ => Err(format!("unknown surface `{surface}` / turn `{turn}`")),
+    }
 }
 
 #[cfg(test)]
@@ -176,6 +501,10 @@ mod tests {
         assert!(behavior.contains("number of approvals"));
         assert!(behavior.contains("vote"));
         assert!(behavior.contains("world/before/Votes"));
+        assert!(behavior.contains("data-surface=\"objective-call\""));
+        assert!(behavior.contains("data-surface=\"objective-send\""));
+        assert!(behavior.contains("data-surface=\"objective-activity\""));
+        assert!(behavior.contains("data-surface=\"seat-store\""));
         for view in [fields, behavior] {
             assert!(view.contains("901"));
             assert!(view.contains("/object/poll/behavior"));
@@ -187,5 +516,30 @@ mod tests {
             false
         )
         .is_none());
+    }
+
+    #[test]
+    fn seat_store_and_native_surfaces_compile_from_structured_form_inputs() {
+        let created = seat_create_turn("90", "777", "130", "bidder:42, seller:43").unwrap();
+        assert_eq!(created["turn"]["kind"], "create");
+        assert_eq!(created["turn"]["invitations"].as_array().unwrap().len(), 2);
+
+        let funded = seat_fund_turn("501", "130", "130", "1:500", "2:10", "afterDeadline:200", false).unwrap();
+        assert_eq!(funded["turn"]["kind"], "offer");
+        assert_eq!(funded["turn"]["proposal"]["give"], json!([["1", "500"]]));
+        assert_eq!(funded["turn"]["proposal"]["want"], json!([["2", "10"]]));
+        assert_eq!(funded["turn"]["proposal"]["exit"], json!({"afterDeadline": "200"}));
+
+        // Donation guard requires explicit confirmation when `want` is empty.
+        assert!(seat_fund_turn("501", "130", "130", "1:500", "", "onDemand", false).is_err());
+        let donated = seat_fund_turn("501", "130", "130", "1:500", "", "onDemand", true).unwrap();
+        assert_eq!(donated["turn"]["proposal"]["donate"], true);
+
+        let acted = seat_act_turn("90", "130", "clear", "price=50, currency=1, goods=2, epsilon=0").unwrap();
+        assert_eq!(acted["turn"]["kind"], "invoke");
+        assert_eq!(acted["turn"]["argument"]["label"], "clear");
+
+        let exited = seat_exit_turn("808").unwrap();
+        assert_eq!(exited["turn"], json!({"kind": "exit", "seat": "808"}));
     }
 }

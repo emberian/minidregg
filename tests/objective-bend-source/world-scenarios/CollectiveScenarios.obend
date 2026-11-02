@@ -1,0 +1,274 @@
+edition ObjectiveBend 1
+# Scenario suite for world/collective/CollectiveAdoption.obend.
+import ./CatalogReview.obend as Review
+import ./CollectiveAdoption.obend as C
+
+def current() -> Review.Candidate:
+  {source: "catalog/audit", program: "p-7", revision: 1n}
+
+def selected() -> Review.Candidate:
+  {source: "catalog/audit", program: "p-7", revision: 2n}
+
+def recommendation(ready: Bool) -> Review.Recommendation:
+  {candidate: selected(), policy: "policy-9", ready: ready}
+
+def subjectsIsEmpty(xs: C.Subjects) -> Bool:
+  match xs:
+    case empty(_): true
+    case more(_): false
+
+def subjectsMoreEq(head: String, tail: C.Subjects, ys: C.Subjects) -> Bool:
+  match ys:
+    case empty(_): false
+    case more(n): head == n.head && subjectsEq(tail, n.tail)
+
+def subjectsEq(xs: C.Subjects, ys: C.Subjects) -> Bool:
+  match xs:
+    case empty(_): subjectsIsEmpty(ys)
+    case more(m): subjectsMoreEq(m.head, m.tail, ys)
+
+def voteEq(a: C.Vote, b: C.Vote) -> Bool:
+  a.subject == b.subject && a.yes == b.yes
+
+def votesIsEmpty(xs: C.Votes) -> Bool:
+  match xs:
+    case empty(_): true
+    case more(_): false
+
+def votesMoreEq(head: C.Vote, tail: C.Votes, ys: C.Votes) -> Bool:
+  match ys:
+    case empty(_): false
+    case more(n): voteEq(head, n.head) && votesEq(tail, n.tail)
+
+def votesEq(xs: C.Votes, ys: C.Votes) -> Bool:
+  match xs:
+    case empty(_): votesIsEmpty(ys)
+    case more(m): votesMoreEq(m.head, m.tail, ys)
+
+def proposalEq(a: C.Proposal, b: C.Proposal) -> Bool:
+  a.round == b.round && Review.candidateEq(a.base, b.base) && Review.candidateEq(a.candidate, b.candidate) && a.basePrototype == b.basePrototype && a.candidatePrototype == b.candidatePrototype && a.baseKindRoot == b.baseKindRoot && a.instanceRoot == b.instanceRoot && a.migration == b.migration && a.policy == b.policy && subjectsEq(a.electorate, b.electorate) && a.quorum == b.quorum
+
+def ballotsEq(a: C.Ballots, b: C.Ballots) -> Bool:
+  proposalEq(a.proposal, b.proposal) && votesEq(a.votes, b.votes) && a.closed == b.closed
+
+def castExact(before: C.Ballots, actor: String, yes: Bool, result: C.CastResult) -> Bool:
+  match result:
+    case refused(unchanged): ballotsEq(unchanged, before)
+    case accepted(a): ballotsEq(a.expected, before) && ballotsEq(a.successor, {proposal: before.proposal, votes: C.Votes.more({head: {subject: actor, yes: yes}, tail: before.votes}), closed: false}) && a.yesCount == C.yesCount(C.Votes.more({head: {subject: actor, yes: yes}, tail: before.votes})) && a.totalCount == 1n + C.totalCount(before.votes)
+
+def adoptionExact(current: Review.Candidate, candidate: Review.Candidate, policy: String, a: Review.Adoption) -> Bool:
+  match a:
+    case hold(_): false
+    case propose(p): Review.candidateEq(p.expected, current) && Review.candidateEq(p.selected, candidate) && p.policy == policy
+
+def installProposalExact(current: Review.Candidate, candidate: Review.Candidate, policy: String, proposal: C.Proposal, i: C.Install) -> Bool:
+  proposalEq(i.binding, proposal) && adoptionExact(current, candidate, policy, i.adoption)
+
+def installationExact(current: Review.Candidate, candidate: Review.Candidate, policy: String, proposal: C.Proposal, result: C.Installation) -> Bool:
+  match result:
+    case refused(_): true
+    case install(i): installProposalExact(current, candidate, policy, proposal, i)
+
+def electorate3() -> C.Subjects:
+  C.Subjects.more({head: "alice", tail: C.Subjects.more({head: "bob", tail: C.Subjects.more({head: "carol", tail: C.Subjects.empty()})})})
+
+def proposal(quorum: Nat, electorate: C.Subjects) -> C.Proposal:
+  {round: "round-1", base: current(), candidate: selected(), basePrototype: "proto-base", candidatePrototype: "proto-next", baseKindRoot: "kind-root-1", instanceRoot: "instance-root-1", migration: "migration-1", policy: "policy-9", electorate: electorate, quorum: quorum}
+
+def fresh(quorum: Nat, electorate: C.Subjects) -> C.Ballots:
+  {proposal: proposal(quorum, electorate), votes: C.Votes.empty(), closed: false}
+
+def initial() -> C.Ballots:
+  fresh(2n, electorate3())
+
+def afterCast(r: C.CastResult) -> C.Ballots:
+  match r:
+    case refused(unchanged): unchanged
+    case accepted(a): a.successor
+
+def afterResolution(r: C.Resolution) -> C.Ballots:
+  match r:
+    case unresolved(unchanged): unchanged
+    case resolved(x): x.successor
+
+def aliceYes() -> C.Ballots:
+  afterCast(C.cast(initial(), "alice", "round-1", true))
+
+def bobYes() -> C.Ballots:
+  afterCast(C.cast(aliceYes(), "bob", "round-1", true))
+
+def carolNo() -> C.Ballots:
+  afterCast(C.cast(bobYes(), "carol", "round-1", false))
+
+def closedAfterBob() -> C.Ballots:
+  afterResolution(C.resolve(bobYes()))
+
+def castYes(r: C.CastResult) -> Nat:
+  match r:
+    case refused(_): 999n
+    case accepted(a): a.yesCount
+
+def castTotal(r: C.CastResult) -> Nat:
+  match r:
+    case refused(_): 999n
+    case accepted(a): a.totalCount
+
+def isRefusedCast(r: C.CastResult) -> Bool:
+  match r:
+    case refused(_): true
+    case accepted(_): false
+
+def isResolved(r: C.Resolution) -> Bool:
+  match r:
+    case unresolved(_): false
+    case resolved(_): true
+
+def isInstall(r: C.Installation) -> Bool:
+  match r:
+    case refused(_): false
+    case install(_): true
+
+def initialIsValid() -> Bool:
+  C.valid(initial())
+
+def aliceYesCount() -> Nat:
+  castYes(C.cast(initial(), "alice", "round-1", true))
+
+def aliceTotalCount() -> Nat:
+  castTotal(C.cast(initial(), "alice", "round-1", true))
+
+def bobYesCount() -> Nat:
+  castYes(C.cast(aliceYes(), "bob", "round-1", true))
+
+def bobTotalCount() -> Nat:
+  castTotal(C.cast(aliceYes(), "bob", "round-1", true))
+
+def carolNoYesCount() -> Nat:
+  castYes(C.cast(bobYes(), "carol", "round-1", false))
+
+def carolNoTotalCount() -> Nat:
+  castTotal(C.cast(bobYes(), "carol", "round-1", false))
+
+def castsAreExact() -> Bool:
+  castExact(initial(), "alice", true, C.cast(initial(), "alice", "round-1", true)) && castExact(aliceYes(), "bob", true, C.cast(aliceYes(), "bob", "round-1", true)) && castExact(bobYes(), "carol", false, C.cast(bobYes(), "carol", "round-1", false))
+
+def duplicateVoteRefused() -> Bool:
+  isRefusedCast(C.cast(aliceYes(), "alice", "round-1", false)) && castExact(aliceYes(), "alice", false, C.cast(aliceYes(), "alice", "round-1", false))
+
+def nonElectorRefused() -> Bool:
+  isRefusedCast(C.cast(initial(), "mallory", "round-1", true)) && castExact(initial(), "mallory", true, C.cast(initial(), "mallory", "round-1", true))
+
+def wrongRoundRefused() -> Bool:
+  isRefusedCast(C.cast(initial(), "alice", "round-0", true)) && castExact(initial(), "alice", true, C.cast(initial(), "alice", "round-0", true))
+
+def castAfterCloseRefused() -> Bool:
+  isRefusedCast(C.cast(closedAfterBob(), "carol", "round-1", true))
+
+def belowQuorumResolves() -> Bool:
+  isResolved(C.resolve(aliceYes()))
+
+def atQuorumResolved() -> Bool:
+  isResolved(C.resolve(bobYes()))
+
+def dissentDoesNotBlockQuorum() -> Bool:
+  isResolved(C.resolve(carolNo()))
+
+def resolutionClosesSameImage() -> Bool:
+  ballotsEq(closedAfterBob(), {proposal: bobYes().proposal, votes: bobYes().votes, closed: true}) && closedAfterBob().closed
+
+def resolutionRetainsPredecessor() -> Bool:
+  match C.resolve(bobYes()):
+    case unresolved(_): false
+    case resolved(x): ballotsEq(x.expected, bobYes()) && x.decision.endorsed && x.decision.policy == "policy-9" && Review.candidateEq(x.decision.candidate, selected())
+
+def doubleResolutionAccepted() -> Bool:
+  isResolved(C.resolve(closedAfterBob()))
+
+def votesWereKept() -> Nat:
+  C.totalCount(closedAfterBob().votes)
+
+def zeroQuorumResolves() -> Bool:
+  isResolved(C.resolve({proposal: proposal(0n, electorate3()), votes: C.Votes.more({head: {subject: "alice", yes: true}, tail: C.Votes.empty()}), closed: false}))
+
+def zeroQuorumRefusesVotes() -> Bool:
+  isRefusedCast(C.cast(fresh(0n, electorate3()), "alice", "round-1", true))
+
+def unattainableQuorumRefusesVotes() -> Bool:
+  isRefusedCast(C.cast(fresh(4n, electorate3()), "alice", "round-1", true))
+
+def duplicateElectorateIsValid() -> Bool:
+  C.valid(fresh(1n, C.Subjects.more({head: "alice", tail: C.Subjects.more({head: "alice", tail: C.Subjects.empty()})})))
+
+def stuffedBallotIsValid() -> Bool:
+  C.valid({proposal: proposal(2n, electorate3()), votes: C.Votes.more({head: {subject: "alice", yes: true}, tail: C.Votes.more({head: {subject: "alice", yes: true}, tail: C.Votes.empty()})}), closed: false})
+
+def ruleCarriesAtQuorum() -> Bool:
+  C.rule().carries(2n, 2n)
+
+def ruleCarriesZeroQuorum() -> Bool:
+  C.rule().carries(0n, 5n)
+
+def ruleCarriesShortOfQuorum() -> Bool:
+  C.rule().carries(3n, 2n)
+
+def ruleAttainsAtSeats() -> Bool:
+  C.rule().attainable(3n, 3n)
+
+def ruleAttainsAboveSeats() -> Bool:
+  C.rule().attainable(4n, 3n)
+
+def installFrom(state: C.Ballots, curr: Review.Candidate, kindRoot: String, migration: String, rev: Review.Recommendation) -> C.Installation:
+  C.prepareInstall(state, curr, "proto-base", kindRoot, "instance-root-1", migration, rev)
+
+def installsFromClosedQuorum() -> Bool:
+  isInstall(installFrom(closedAfterBob(), current(), "kind-root-1", "migration-1", recommendation(true)))
+
+def installationIsExact() -> Bool:
+  installationExact(current(), selected(), "policy-9", closedAfterBob().proposal, installFrom(closedAfterBob(), current(), "kind-root-1", "migration-1", recommendation(true)))
+
+def installedExpectedRevision(a: Review.Adoption) -> Nat:
+  match a:
+    case hold(_): 999n
+    case propose(p): p.expected.revision
+
+def installedPredecessorRevision() -> Nat:
+  match installFrom(closedAfterBob(), current(), "kind-root-1", "migration-1", recommendation(true)):
+    case refused(_): 999n
+    case install(i): installedExpectedRevision(i.adoption)
+
+def installedChosenRevision(a: Review.Adoption) -> Nat:
+  match a:
+    case hold(_): 999n
+    case propose(p): p.selected.revision
+
+def installedSelectedRevision() -> Nat:
+  match installFrom(closedAfterBob(), current(), "kind-root-1", "migration-1", recommendation(true)):
+    case refused(_): 999n
+    case install(i): installedChosenRevision(i.adoption)
+
+def openBallotsInstall() -> Bool:
+  isInstall(installFrom(bobYes(), current(), "kind-root-1", "migration-1", recommendation(true)))
+
+def changedBaseInstalls() -> Bool:
+  isInstall(installFrom(closedAfterBob(), selected(), "kind-root-1", "migration-1", recommendation(true)))
+
+def changedKindRootInstalls() -> Bool:
+  isInstall(installFrom(closedAfterBob(), current(), "kind-root-2", "migration-1", recommendation(true)))
+
+def changedMigrationInstalls() -> Bool:
+  isInstall(installFrom(closedAfterBob(), current(), "kind-root-1", "migration-2", recommendation(true)))
+
+def unreadyReviewInstalls() -> Bool:
+  isInstall(installFrom(closedAfterBob(), current(), "kind-root-1", "migration-1", recommendation(false)))
+
+def closedShortOfQuorumInstalls() -> Bool:
+  isInstall(installFrom({proposal: proposal(2n, electorate3()), votes: C.Votes.more({head: {subject: "alice", yes: true}, tail: C.Votes.empty()}), closed: true}, current(), "kind-root-1", "migration-1", recommendation(true)))
+
+def ballotsEqSeesVotes() -> Bool:
+  ballotsEq(aliceYes(), bobYes())
+
+def castExactSeesActor() -> Bool:
+  castExact(initial(), "bob", true, C.cast(initial(), "alice", "round-1", true))
+
+def installationExactSeesPolicy() -> Bool:
+  installationExact(current(), selected(), "policy-8", closedAfterBob().proposal, installFrom(closedAfterBob(), current(), "kind-root-1", "migration-1", recommendation(true)))

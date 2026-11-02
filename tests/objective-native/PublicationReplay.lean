@@ -71,7 +71,24 @@ def main (args : List String) : IO UInt32 := do
     | .ok _ => return ← fail (label ++ ": accepted")
     | .error d => if d.message != "offered laws differ from the front end's replay of the package" then
         return ← fail (label ++ ": refused for another reason: " ++ d.message)
+  -- 6. hashEq and sumEq laws travel through publication, codec, and replayAccept
+  let extLawsSrc := bytes.toList ++
+    "law commit_binding: hashEq([vote], salt, commit)\nlaw deposit_conserved: sumEq([held, consumed, refunded], [deposited])\n".toUTF8.toList
+  let extPkg := { package with modules := [⟨"Method", extLawsSrc, []⟩] }
+  let some extPub := (Host.ObjectivePackageAuthor.publication extPkg "generic").toOption
+    | return ← fail "a package with hashEq/sumEq laws was not published"
+  let some extArt := Compiler.ObjectiveBendSourceArtifact.decode extPub.artifact
+    | return ← fail "hashEq/sumEq law artifact does not decode"
+  let some extDec := Compiler.ObjectiveSourcePackage.decode extPub.package
+    | return ← fail "hashEq/sumEq law package does not decode"
+  let expectedExtLaws : List (String × Compiler.ObjectiveBendLaw.LawExpr) :=
+    [ ("commit_binding", .hashEq ["vote"] "salt" "commit")
+    , ("deposit_conserved", .sumEq ["held", "consumed", "refunded"] ["deposited"]) ]
+  if extArt.laws != expectedExtLaws then
+    return ← fail "artifact laws do not match expected hashEq/sumEq LawExprs"
+  if !(Compiler.ObjectiveBendPublication.replayAccept extDec extArt.typedCore extArt.laws 16384).toBool then
+    return ← fail "honest hashEq/sumEq laws were refused by replayAccept"
   IO.println ("PUBLICATION REPLAY PASS: " ++ toString artifact.typedCore.length ++ "-byte core; front end " ++
     Compiler.ObjectiveBendFrontEndIdentity.identity ++ "; foreign pin refused; changed source and tampered core differ; " ++
-    "the law travels in the artifact, the identity commits it, a tampered or dropped law is refused")
+    "laws (including hashEq and sumEq) travel in the artifact, the identity commits them, a tampered or dropped law is refused")
   return 0

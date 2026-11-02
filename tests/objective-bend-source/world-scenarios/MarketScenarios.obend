@@ -187,12 +187,6 @@ def uniGridCleared(levels: Nat) -> Bool:
   uniformCleared(Uniform.allocate(levels, rationedBook()))
 
 # ---- CanonicalBookSettlement ----
-# The named receiving scenario (STATUS.txt, CollectiveDemonstration.bend): stock 7 and
-# proceeds 10 in account 1 (goods asset 7, money asset 8); A bids limit 5 qty 4 with
-# funds 20 / goods 0 (account 2); B bids limit 3 qty 5 with funds 15 / goods 2 (account 3).
-# The allocation clears at price 3 filling 4 and 3, so the book transfers are
-# 1->2 goods 4, 2->1 money 12, 1->3 goods 3, 3->1 money 9; the private results are
-# A: units 4 price 3 payment 12 unspent 8, B: units 3 price 3 payment 9 unspent 6.
 def account(id: Nat, asset: Nat, balance: Nat) -> Book.Account:
   {account: id, asset: asset, balance: balance}
 
@@ -281,11 +275,9 @@ def resultEqual(a: Book.Result, b: Book.Result) -> Bool:
         case refused(_): false
         case prepared(y): preparedEqual(x, y)
 
-# The old actual_source_settlement law: settle(input) == expected, as one Bool.
 def bookMatchesExpected(fundsA: Nat, fundsAssetA: Nat, accountB: Nat) -> Bool:
   resultEqual(bookSettled(fundsA, fundsAssetA, accountB), expectedBook())
 
-# The prepared payload; a refusal reads as the all-zero payload.
 def preparedOf(result: Book.Result) -> Book.Prepared:
   match result:
     case refused(_): {book: 0n, expectedRoot: "", operations: Book.TransferList.nil(), returns: Book.PrivateResultList.nil(), allocation: {price: 0n, fills: Seller.FillList.nil(), remaining: 0n}}
@@ -339,15 +331,12 @@ def returnCount(rs: Book.PrivateResultList) -> Nat:
     case nil(_): 0n
     case cons(c): 1n + returnCount(c.tail)
 
-# Transfer `index` of the named scenario: field 0 source, 1 destination, 2 asset, 3 amount.
 def bookTransfer(index: Nat, field: Nat) -> Nat:
   transferAt(preparedOf(bookScenario()).operations, index, field)
 
-# Private result `index`: field 0 units, 1 price, 2 payment, 3 unspent reserved.
 def bookReturn(index: Nat, field: Nat) -> Nat:
   returnAt(preparedOf(bookScenario()).returns, index, field)
 
-# 0 book id, 1 transfer count, 2 private-result count, 3 allocation price, 4 allocation remaining.
 def bookTop(which: Nat) -> Nat:
   match which:
     case 0n: preparedOf(bookScenario()).book
@@ -362,21 +351,13 @@ def bookTop(which: Nat) -> Nat:
                 case 0n: preparedOf(bookScenario()).allocation.price
                 case 1n+w4: preparedOf(bookScenario()).allocation.remaining
 
-# Unspent funds of bid A stay reserved: with funds f, A's unspent is f - 12.
 def bookUnspentA(fundsA: Nat) -> Nat:
   returnAt(preparedOf(bookSettled(fundsA, 8n, 3n)).returns, 0n, 3n)
 
-# The prepared result carries exactly the input book id and expected root.
 def bookExactRoot() -> Bool:
   preparedOf(bookScenario()).book == 9n && preparedOf(bookScenario()).expectedRoot == "root0"
 
 # ---- CanonicalUniformSettlement ----
-# The rationed book (UniformProRata above) settled over a book: bids B1 (limit 6 qty 4,
-# funds 40) and B2 (limit 5 qty 4, funds 40), asks A1 (limit 3 qty 3, goods 10) and A2
-# (limit 5 qty 4, goods 10), in accounts 11..14 (money asset 8, goods asset 7), with
-# pools 100 (money) and 101 (goods). It clears at price 5, volume 7: units 4, 3, 3, 4.
-# Collect: 11->100 money 20, 12->100 money 15, 13->101 goods 3, 14->101 goods 4.
-# Distribute: 101->11 goods 4, 101->12 goods 3, 100->13 money 15, 100->14 money 20.
 def participant(order: Uniform.Order, funds: Book.Account, goods: Book.Account, audience: String) -> UBook.Participant:
   {order: order, funds: funds, goods: goods, audience: audience, keyEpoch: "epoch1"}
 
@@ -391,7 +372,6 @@ def ubookPrepared(fundsB1: Nat, levels: Nat) -> Bool:
     case refused(_): false
     case prepared(_): true
 
-# A refusal reads as the all-zero payload.
 def ubookOf(result: UBook.Result) -> UBook.Prepared:
   match result:
     case refused(_): {book: 0n, expectedRoot: "", operations: Book.TransferList.nil(), returns: UBook.PrivateResultList.nil(), clearing: {price: 0n, volume: 0n, fills: Uniform.FillList.nil()}}
@@ -427,18 +407,20 @@ def ubookReturnIsBid(rs: UBook.PrivateResultList, index: Nat) -> Bool:
         case 0n: Uniform.sameSide(c.head.side, Uniform.Side.bid())
         case 1n+i: ubookReturnIsBid(c.tail, i)
 
-# Transfer `index` of the scenario: field 0 source, 1 destination, 2 asset, 3 amount.
 def ubookTransfer(index: Nat, field: Nat) -> Nat:
   transferAt(ubookScenario().operations, index, field)
 
-# Private result `index`: field 0 units, 1 price, 2 payment, 3 unspent reserved.
 def ubookReturn(index: Nat, field: Nat) -> Nat:
   ubookReturnAt(ubookScenario().returns, index, field)
 
 def ubookReturnBid(index: Nat) -> Bool:
   ubookReturnIsBid(ubookScenario().returns, index)
 
-# 0 price, 1 volume, 2 transfer count, 3 private-result count.
+def ubookResultCount(rs: UBook.PrivateResultList) -> Nat:
+  match rs:
+    case nil(_): 0n
+    case cons(c): 1n + ubookResultCount(c.tail)
+
 def ubookTop(which: Nat) -> Nat:
   match which:
     case 0n: ubookScenario().clearing.price
@@ -450,11 +432,6 @@ def ubookTop(which: Nat) -> Nat:
             case 0n: transferCount(ubookScenario().operations)
             case 1n+w3: ubookResultCount(ubookScenario().returns)
 
-def ubookResultCount(rs: UBook.PrivateResultList) -> Nat:
-  match rs:
-    case nil(_): 0n
-    case cons(c): 1n + ubookResultCount(c.tail)
-
 def flowInto(ts: Book.TransferList, account: Nat, asset: Nat) -> Nat:
   match ts:
     case nil(_): 0n
@@ -465,15 +442,10 @@ def flowOutOf(ts: Book.TransferList, account: Nat, asset: Nat) -> Nat:
     case nil(_): 0n
     case cons(c): Math.chooseNat(c.head.amount, 0n, c.head.source == account && c.head.asset == asset) + flowOutOf(c.tail, account, asset)
 
-# Both clearing pools finish at their pre-balances: what flows in flows out.
 def ubookPoolsBalanced() -> Bool:
   flowInto(ubookScenario().operations, 100n, 8n) == flowOutOf(ubookScenario().operations, 100n, 8n) && flowInto(ubookScenario().operations, 101n, 7n) == flowOutOf(ubookScenario().operations, 101n, 7n)
 
 # ---- SharedBookSettlement ----
-# Two orders of one subject debit the SAME account 2 (money asset 8, goods asset 7): budgets
-# 20 + 15 against one sampled balance. Funds 35/35 prepares (samples deduped to 4 rows,
-# transfers 4/12/3/9, reserved budgets 20 and 15 with unspent 8 and 6); copied funds
-# 20/20 and inconsistent aliases 35/36 refuse.
 def sharedInput(firstFunds: Nat, secondFunds: Nat) -> Book.Input:
   {book: 9n, root: "root0", stock: account(1n, 7n, 7n), proceeds: account(1n, 8n, 10n), bids: Book.BidList.cons({head: bookBid(order("S", "21", 5n, 4n), account(2n, 8n, firstFunds), account(2n, 7n, 0n), "audS"), tail: Book.BidList.cons({head: bookBid(order("S", "22", 3n, 5n), account(2n, 8n, secondFunds), account(2n, 7n, 0n), "audS"), tail: Book.BidList.nil()})})}
 
@@ -536,21 +508,17 @@ def sharedReturnAt(rs: Shared.PrivateResultList, index: Nat, field: Nat) -> Nat:
         case 0n: sharedReturnField(c.head, field)
         case 1n+i: sharedReturnAt(c.tail, i, field)
 
-# Sample row `index`: field 0 account, 1 asset, 2 balance.
 def sharedSample(index: Nat, field: Nat) -> Nat:
   sharedSampleAt(sharedScenario().samples, index, field)
 
 def sharedSamples() -> Nat:
   sharedSampleCount(sharedScenario().samples)
 
-# Transfer `index`: field 0 source, 1 destination, 2 asset, 3 amount.
 def sharedTransfer(index: Nat, field: Nat) -> Nat:
   transferAt(sharedScenario().operations, index, field)
 
-# Private result `index`: field 0 reserved budget, 1 units, 2 price, 3 payment, 4 unspent budget.
 def sharedReturn(index: Nat, field: Nat) -> Nat:
   sharedReturnAt(sharedScenario().returns, index, field)
 
-# The prepared result carries exactly the input book id and expected root (prepared_exact).
 def sharedExactRoot() -> Bool:
   sharedScenario().book == 9n && sharedScenario().expectedRoot == "root0"

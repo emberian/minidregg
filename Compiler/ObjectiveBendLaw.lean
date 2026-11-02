@@ -63,6 +63,8 @@ inductive LawExpr where
   | leROff (left right : LawRef) (offset : Int)
   | monotone (field : String)
   | writeOnce (field : String)
+  | sumEq (left right : List String)
+  | hashEq (values : List String) (blinder commit : String)
   | not (body : LawExpr)
   | and (left right : LawExpr)
   | or (left right : LawExpr)
@@ -78,6 +80,8 @@ def LawExpr.fields : LawExpr → List String
   | .eqC ref _ | .leC ref _ | .inC ref _ => ref.fields
   | .eqR left right | .leR left right | .leROff left right _ => left.fields ++ right.fields
   | .monotone field | .writeOnce field => [field]
+  | .sumEq left right => left ++ right
+  | .hashEq values blinder commit => values ++ [blinder, commit]
   | .not body => body.fields
   | .and left right | .or left right | .implies left right => left.fields ++ right.fields
 
@@ -97,14 +101,20 @@ def LawExpr.fieldsPlain : LawExpr → Bool
   | .eqC ref _ | .leC ref _ | .inC ref _ => ref.plain
   | .eqR left right | .leR left right | .leROff left right _ => left.plain && right.plain
   | .monotone field | .writeOnce field => plainName field
+  | .sumEq left right => left.all plainName && right.all plainName
+  | .hashEq values blinder commit =>
+      values.all plainName && plainName blinder && plainName commit
   | .not body => body.fieldsPlain
   | .and left right | .or left right | .implies left right => left.fieldsPlain && right.fieldsPlain
 
 /-! ## Compilation to the kernel's predicate -/
 
+/-- The view slot a top-level state field reads (`ObjectRecord.stateSlots`). -/
+def fieldSlot (field : String) : Slot := "state/" ++ field
+
 /-- The view slot a reference reads (`ObjectRecord.stateSlots`, `Facts.slots`). -/
 def LawRef.slot : LawRef → Slot
-  | .field name => "state/" ++ name
+  | .field name => fieldSlot name
   | .subject => "request/subject"
   | .caller => "request/caller"
   | .height => "request/height"
@@ -119,8 +129,11 @@ def compile : LawExpr → Pred
   | .eqR left right => .eqSlots left.slot right.slot
   | .leR left right => .leSlots left.slot right.slot
   | .leROff left right offset => .leSlotsOff left.slot right.slot offset
-  | .monotone field => .monotone ("state/" ++ field)
-  | .writeOnce field => .writeOnce ("state/" ++ field)
+  | .monotone field => .monotone (fieldSlot field)
+  | .writeOnce field => .writeOnce (fieldSlot field)
+  | .sumEq left right => .sumEq (left.map fieldSlot) (right.map fieldSlot)
+  | .hashEq values blinder commit =>
+      .hashEq (values.map fieldSlot) (fieldSlot blinder) (fieldSlot commit)
   | .not body => .not (compile body)
   | .and left right => Pred.all [compile left, compile right]
   | .or left right => Pred.any [compile left, compile right]
@@ -150,6 +163,9 @@ def LawExpr.render : LawExpr → String
   | .leROff left right offset => s!"{left.render} <= {right.render} + {offset}"
   | .monotone field => s!"monotone({field})"
   | .writeOnce field => s!"writeOnceNonzero({field})"
+  | .sumEq left right => s!"sumEq([{", ".intercalate left}], [{", ".intercalate right}])"
+  | .hashEq values blinder commit =>
+      s!"hashEq([{", ".intercalate values}], {blinder}, {commit})"
   | .not body => s!"not ({body.render})"
   | .and left right => s!"({left.render}) and ({right.render})"
   | .or left right => s!"({left.render}) or ({right.render})"
@@ -248,6 +264,33 @@ def parseIntList : Nat → List Tok → Except String (List Int × List Tok)
       return (value :: values, after)
     | _ => return ([value], ← expectSym "]" rest)
 
+def parseFieldName : List Tok → Except String (String × List Tok)
+  | .ident "new" :: .sym "." :: .ident field :: rest =>
+    match rest with
+    | .sym "." :: _ => refuse ("the nested field path new." ++ field ++ ".… (edition 1 reads top-level fields of the \
+        declared state only)")
+    | _ => .ok (field, rest)
+  | .ident "old" :: _ => refuse "old.FIELD outside monotone(FIELD) and writeOnceNonzero(FIELD)"
+  | .ident "request" :: _ => refuse "request.FACT where a top-level state field was expected"
+  | .ident field :: rest =>
+    match rest with
+    | .sym "." :: _ => refuse ("the nested field path " ++ field ++ ".… (edition 1 reads top-level fields of the \
+        declared state only)")
+    | _ => .ok (field, rest)
+  | t :: _ => refuse (t.render ++ " where a top-level field name was expected")
+  | [] => refuse "expected a top-level field name at the end of the law"
+
+def parseFieldList : Nat → List Tok → Except String (List String × List Tok)
+  | 0, _ => refuse "list capacity"
+  | _ + 1, .sym "]" :: after => .ok ([], after)
+  | fuel + 1, toks => do
+    let (field, rest) ← parseFieldName toks
+    match rest with
+    | .sym "," :: more =>
+      let (fields, after) ← parseFieldList fuel more
+      return (field :: fields, after)
+    | _ => return ([field], ← expectSym "]" rest)
+
 def parseComparison (fuel : Nat) (toks : List Tok) : Except String (LawExpr × List Tok) := do
   let (left, rest) ← parseRef toks
   match rest with
@@ -325,12 +368,29 @@ def parseUnary : Nat → List Tok → Except String (LawExpr × List Tok)
     | .ident "monotone" :: .sym "(" :: .ident field :: .sym ")" :: after => .ok (.monotone field, after)
     | .ident "writeOnceNonzero" :: .sym "(" :: .ident field :: .sym ")" :: after =>
         .ok (.writeOnce field, after)
+    | .ident "sumEq" :: .sym "(" :: .sym "[" :: rest => do
+      let (left, rest) ← parseFieldList fuel rest
+      let rest ← expectSym "," rest
+      let rest ← expectSym "[" rest
+      let (right, rest) ← parseFieldList fuel rest
+      return (.sumEq left right, ← expectSym ")" rest)
+    | .ident "hashEq" :: .sym "(" :: .sym "[" :: rest => do
+      let (values, rest) ← parseFieldList fuel rest
+      let rest ← expectSym "," rest
+      let (blinder, rest) ← parseFieldName rest
+      let rest ← expectSym "," rest
+      let (commit, rest) ← parseFieldName rest
+      return (.hashEq values blinder commit, ← expectSym ")" rest)
     | .ident "monotone" :: _ => refuse "monotone takes one top-level field name: monotone(FIELD)"
     | .ident "writeOnce" :: _ => refuse "writeOnce(FIELD): 0 is the unwritten sentinel and every \
         law field (a natural or a boolean) can hold 0, so a field holding 0 is not write-once; \
         write writeOnceNonzero(FIELD) (a nonzero value, once written, never changes)"
     | .ident "writeOnceNonzero" :: _ =>
         refuse "writeOnceNonzero takes one top-level field name: writeOnceNonzero(FIELD)"
+    | .ident "sumEq" :: _ =>
+        refuse "sumEq takes two field lists: sumEq([FIELD, ...], [FIELD, ...])"
+    | .ident "hashEq" :: _ =>
+        refuse "hashEq takes value fields, blinder field, and commit field: hashEq([FIELD, ...], BLINDER, COMMIT)"
     | _ => parseComparison fuel toks
 end
 
@@ -373,9 +433,18 @@ theorem parse_writeOnce_acknowledged :
       (parse "writeOnceNonzero(owner)").toOption = some (.writeOnce "owner") := by
   native_decide
 
+theorem parse_sumEq_and_hashEq :
+    (parse "sumEq([reserve], [yes, no, abstain]) and hashEq([vote], salt, commit)").toOption =
+      some (.and (.sumEq ["reserve"] ["yes", "no", "abstain"])
+        (.hashEq ["vote"] "salt" "commit")) ∧
+      (parse "sumEq([new.reserve], [new.a, new.b]) and hashEq([new.v1, new.v2], new.salt, new.commit)").toOption =
+        some (.and (.sumEq ["reserve"] ["a", "b"]) (.hashEq ["v1", "v2"] "salt" "commit")) := by
+  native_decide
+
 end Minidregg.Compiler.ObjectiveBendLaw
 
 #assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_writeOnce_acknowledged
+#assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_sumEq_and_hashEq
 #assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_tally
 #assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_precedence
 #assert_compiled Minidregg.Compiler.ObjectiveBendLaw.parse_refuses_nested

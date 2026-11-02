@@ -190,10 +190,11 @@ try:
         a.state_type = a.state_type or json.dumps(row_type(moves='natural'))
     BALLOT_SPEC = lambda: record(first=nat(1), count=nat(3), quorum=nat(2), commitEnd=nat(50), revealEnd=nat(100),
                                  keeper=nat(second_acct), fresh=boolean(True))
-    BALLOT_STATE = row_type(yes='natural', no='natural', abstain='natural', passed='boolean', published='boolean')
+    BALLOT_STATE = row_type(yes='natural', no='natural', abstain='natural', vote='natural', salt='natural',
+                            commit='natural', passed='boolean', published='boolean')
     if a.scenario == 'ballot':
-        # world/ballot/SealedBallot.obend: `Spec` :322 {first, count, quorum, commitEnd, revealEnd, keeper, fresh};
-        # `Published` :211 is the declared state (yes, no, abstain: Nat; passed, published: Bool).
+        # world/ballot/SealedBallot.obend: `Spec` {first, count, quorum, commitEnd, revealEnd, keeper, fresh};
+        # `Published` is the declared state (yes, no, abstain, vote, salt, commit: Nat; passed, published: Bool).
         a.birth_input = json.dumps(BALLOT_SPEC())
         a.state_type = a.state_type or json.dumps(BALLOT_STATE)
     STORY_OPENING = lambda: record(title=label('the lighthouse'), window=nat(10), total=nat(1),
@@ -484,14 +485,13 @@ try:
             w.check('refused-payout-waits-for-the-next-event', waits_again(again), {'source': source_of(again)})
     if a.scenario == 'ballot':
         # Ballot law natively (world/ballot/README.md:9-10 "TALLY ...: anyone closes the poll, once; the result is
-        # derived from the retained openings"; SealedBallot.obend `publish` :307, `publication` :282). Voters 1 and 2
-        # commit `seal` (:88) = 2*(salt*1000+voter)+vote: voter 1 yes, salt 111 -> 222003; voter 2 yes, salt 222 ->
-        # 444005; both open inside the reveal window; the tally at the close is the one `commit {write}` that
-        # publishes yes 2, no 0, abstain 0, passed (quorum 2), decided `settled` at the yield. Events: Cast :61,
-        # Reveal :66, Tick :72.
+        # derived from the retained openings"; SealedBallot.obend `publish`, `publication`). Voters 1 and 2 commit
+        # their digests and open inside the reveal window; the tally at the close is the one `commit {write}` that
+        # publishes yes 2, no 0, abstain 0, passed (quorum 2), decided `settled` at the yield.
         rec = v['recordCell']
         cast = lambda voter, digest, now: ev('commit', voter=nat(voter), digest=nat(digest), now=nat(now))
-        open_ = lambda voter, vote, salt, now: ev('reveal', voter=nat(voter), vote=nat(vote), salt=nat(salt), now=nat(now))
+        open_ = lambda voter, vote, salt, digest, now: ev('reveal', voter=nat(voter), vote=nat(vote), salt=nat(salt),
+                                                          digest=nat(digest), now=nat(now))
         tally = lambda now: ev('tally', now=nat(now))
         with w.group('ballot'):
             w.check('born-awaiting-the-keeper-unpublished',
@@ -499,8 +499,8 @@ try:
                     and field_of(v.get('state'), 'yes') == 0, {'source': source_of(v), 'state': v.get('state')})
             _, v1 = drive('obj', 'commit-1', tx, rec, v, cast(1, 222003, 10))
             _, v2 = drive('obj', 'commit-2', tx, rec, v1, cast(2, 444005, 11))
-            _, v3 = drive('obj', 'reveal-1', tx, rec, v2, open_(1, 1, 111, 60))
-            _, v4 = drive('obj', 'reveal-2', tx, rec, v3, open_(2, 1, 222, 61))
+            _, v3 = drive('obj', 'reveal-1', tx, rec, v2, open_(1, 1, 111, 222003, 60))
+            _, v4 = drive('obj', 'reveal-2', tx, rec, v3, open_(2, 1, 222, 444005, 61))
             _, v5 = drive('obj', 'tally', tx, rec, v4, tally(100))
             st = v5.get('state')
             w.check('tally-commit-publishes-the-derived-result',
@@ -519,7 +519,7 @@ try:
             tx3, b = birth_of('lawful', BALLOT_SPEC(), a.deposit, 'birth-lawful')
             rec3 = b['recordCell']
             _, c1 = drive('lawful', 'commit-1-lawful', tx3, rec3, b, cast(1, 222003, 10))
-            _, c2 = drive('lawful', 'reveal-1-lawful', tx3, rec3, c1, open_(1, 1, 111, 60))
+            _, c2 = drive('lawful', 'reveal-1-lawful', tx3, rec3, c1, open_(1, 1, 111, 222003, 60))
             w.turn('resolve-tally-lawful', w.second, {'kind': 'resolve', 'slot': source_of(c2)['slot'],
                                                        'answer': {'reply': tally(100)}}, 'installed')
             w.turn('deliver-tally-law-refused', w.sponsor, {'kind': 'deliver', 'record': rec3,
@@ -528,7 +528,7 @@ try:
             w.check('law-refused-publication-writes-nothing',
                     a3.get('state') == c2.get('state') and a3.get('stateVersion') == c2.get('stateVersion')
                     and scalar_of(a3.get('state'), 'published', 'boolean') is False
-                    and World.await_of(a3).get('id') == World.await_of(c2).get('id'),
+                    and World.await_of(a3).get('id') == World.await_of(c2)['id'],
                     {'state': a3.get('state'), 'version': [c2.get('stateVersion'), a3.get('stateVersion')]})
     if a.scenario == 'story':
         # Story law natively (world/story/README.md:10 "The proposal with the most votes becomes the next chapter for
