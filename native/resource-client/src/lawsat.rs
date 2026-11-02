@@ -39,6 +39,11 @@ fn ask(
     from_here: bool,
     tag: &str,
 ) -> Result<Value> {
+    let host = member_path(workspace, "host").ok();
+    let config = member_path(workspace, "config").ok();
+    if !host.as_ref().is_some_and(|h| h.is_file()) || !config.as_ref().is_some_and(|c| c.is_file()) {
+        return decide_local(law, extra, from_here);
+    }
     let mut request = json!({"type":REQUEST_TYPE,"predicate":law});
     if let Some(extra) = extra {
         request["extra"] = extra.clone();
@@ -58,8 +63,8 @@ fn ask(
         &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
     )?;
     host_law_sat(
-        &member_path(workspace, "host")?,
-        &member_path(workspace, "config")?,
+        &host.expect("checked"),
+        &config.expect("checked"),
         &input,
         &output,
     )
@@ -664,6 +669,1242 @@ pub(super) fn can_any(root: &Path, workspace: &Value, name: &str) -> Result<()> 
     Ok(())
 }
 
+// ------------------------------------------------------------------ Interactive Presburger /laws Workbench
+
+pub(crate) struct LawPreset {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub summary: &'static str,
+    pub clauses_template: &'static str,
+}
+
+pub(crate) const PRESETS: &[LawPreset] = &[
+    LawPreset {
+        key: "note",
+        label: "note (append-only)",
+        summary: "Reads and management verbs pass; writes may append only (no atom edits or tombstones).",
+        clauses_template: r#"any [ verb in {read,delegate,install,revoke}, all [ verb == write, slot "content/atom-edits" == 0, slot "content/tombstones" == 0 ] ]"#,
+    },
+    LawPreset {
+        key: "draft",
+        label: "draft (<= 16 KiB)",
+        summary: "Reads and management verbs pass; writes pass while payload stays at or below 16384 bytes.",
+        clauses_template: r#"any [ verb in {read,delegate,install,revoke}, all [ verb == write, slot "content/payload-bytes/after" <= 16384 ] ]"#,
+    },
+    LawPreset {
+        key: "index",
+        label: "index (unique names)",
+        summary: "Non-write verbs pass; content writes must preserve unique live shared names.",
+        clauses_template: r#"any [ not (verb == write), slot "content/names/unique" == 1 ]"#,
+    },
+    LawPreset {
+        key: "open",
+        label: "open",
+        summary: "Every verb and slot assignment is admitted by policy (capability authority still gates access).",
+        clauses_template: "open",
+    },
+    LawPreset {
+        key: "moderated",
+        label: "moderated",
+        summary: "Anyone with a grant may read or write; only the moderator subject may delegate, install, or revoke.",
+        clauses_template: "any [ verb in {read,write}, all [ verb in {delegate,install,revoke}, subject == {SUBJECT} ] ]",
+    },
+    LawPreset {
+        key: "read-only lockout",
+        label: "read-only lockout",
+        summary: "Only read passes; all writes, delegations, revocations, and re-laws are unsatisfiable (self-lockout warning).",
+        clauses_template: "verb == read",
+    },
+    LawPreset {
+        key: "cost-capped",
+        label: "cost-capped",
+        summary: "Reads are unconstrained; writes and management verbs require request/cost <= 100.",
+        clauses_template: "any [ verb == read, all [ verb in {write,delegate,install,revoke}, cost <= 100 ] ]",
+    },
+    LawPreset {
+        key: "monotone-counter",
+        label: "monotone-counter",
+        summary: "Reads and management verbs pass; writes must keep field 0 monotone non-decreasing with step delta <= 1.",
+        clauses_template: "any [ verb in {read,delegate,install,revoke}, all [ verb == write, field 0 monotone, field 0 delta <= 1 ] ]",
+    },
+];
+
+pub(crate) fn preset_clauses(key: &str, subject: &str) -> Option<String> {
+    let key_norm = key.trim().replace('-', " ");
+    let sub = if subject.trim().is_empty() || !subject.trim().bytes().all(|b| b.is_ascii_digit()) {
+        "1"
+    } else {
+        subject.trim()
+    };
+    PRESETS
+        .iter()
+        .find(|p| p.key == key.trim() || p.key.replace('-', " ") == key_norm)
+        .map(|p| p.clauses_template.replace("{SUBJECT}", sub))
+}
+
+/// Parse law input from a preset name, shell law grammar clauses, or raw `Pred` JSON.
+pub(crate) fn parse_law_input(input: &str, subject: &str) -> Result<(Value, String)> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("law clauses cannot be empty".into());
+    }
+    if let Some(clauses) = preset_clauses(trimmed, subject) {
+        let pred = crate::shell::law::parse(&clauses)?;
+        return Ok((pred, clauses));
+    }
+    if trimmed.starts_with('{') {
+        let pred: Value = serde_json::from_str(trimmed).map_err(|e| format!("invalid predicate JSON: {e}"))?;
+        let rendered = crate::shell::law::render_clause(&pred);
+        return Ok((pred, rendered));
+    }
+    let pred = crate::shell::law::parse(trimmed)?;
+    Ok((pred.clone(), crate::shell::law::render_clause(&pred)))
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VerbMatrixRow {
+    pub verb: &'static str,
+    pub tag: &'static str,
+    pub verdict: String,
+    pub admitted: bool,
+    pub subject_witness: String,
+    pub cost_witness: String,
+    pub field_witness: String,
+    pub explanation: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LawWorkbenchReport {
+    pub rendered_law: String,
+    pub overall_verdict: String,
+    pub overall_summary: String,
+    pub write_lockout: bool,
+    pub write_lockout_reason: Option<String>,
+    pub self_lockout: bool,
+    pub self_lockout_reason: Option<String>,
+    pub relaw_lockout: bool,
+    pub relaw_lockout_reason: Option<String>,
+    pub rows: Vec<VerbMatrixRow>,
+}
+
+fn extract_witness_columns(answer: &Value, pinned_verb: &str) -> (String, String, String) {
+    let mut subj = "any".to_owned();
+    let mut cost = "any".to_owned();
+    let mut fields = Vec::new();
+    for (arr_key, suffix) in [("new", ""), ("old", " (before)")] {
+        for item in answer
+            .get(arr_key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let slot = text(item, "slot");
+            let val = text(item, "text");
+            if slot == "request/verb" && val == pinned_verb {
+                continue;
+            }
+            if slot == "request/subject" && suffix.is_empty() {
+                subj = val.to_owned();
+            } else if slot == "request/cost" && suffix.is_empty() {
+                cost = val.to_owned();
+            } else {
+                fields.push(format!("{}{suffix} = {val}", text(item, "name")));
+            }
+        }
+    }
+    let field_str = if fields.is_empty() {
+        "any (unconstrained)".into()
+    } else {
+        fields.join(", ")
+    };
+    (subj, cost, field_str)
+}
+
+/// Run `law check` and build the 6-verb Admissibility Matrix (`read`, `write`, `delegate`, `install`, `revoke`, `renounce`).
+pub(crate) fn analyze_law_workbench(
+    root: &Path,
+    workspace: &Value,
+    subject: &str,
+    law: &Value,
+) -> Result<LawWorkbenchReport> {
+    let mut ws = workspace.clone();
+    let subj = if !subject.trim().is_empty() && subject.trim().bytes().all(|b| b.is_ascii_digit()) {
+        subject.trim().to_owned()
+    } else {
+        member(workspace, "subject").unwrap_or("1").to_owned()
+    };
+    if ws.get("subject").and_then(Value::as_str).is_none() {
+        ws["subject"] = json!(subj);
+    }
+    let checked = check(root, &ws, law)?;
+    let lines = check_lines(&checked);
+    let overall_verdict = verdict(&checked.any).to_owned();
+    let overall_summary = lines.first().cloned().unwrap_or_default();
+    let self_lock = locks_out(&checked);
+    let relaw_lock = locks_relaw(&checked) || verdict(&checked.any) == "unsat";
+
+    let mut rows = Vec::with_capacity(6);
+    for (verb_name, tag_num) in [
+        ("read", "1"),
+        ("write", "2"),
+        ("delegate", "3"),
+        ("install", "4"),
+        ("revoke", "5"),
+    ] {
+        let extra = json!({"type":"eq","slot":"request/verb","value":tag_num});
+        let ans = if overall_verdict == "outside" {
+            checked.any.clone()
+        } else {
+            ask(root, &ws, law, Some(&extra), false, &format!("matrix-{verb_name}"))?
+        };
+        let v = verdict(&ans).to_owned();
+        let (admitted, subj_w, cost_w, field_w, expl) = match v.as_str() {
+            "witness" => {
+                let (sw, cw, fw) = extract_witness_columns(&ans, verb_name);
+                (true, sw, cw, fw, format!("Admitted: e.g. {}", witness_text(&ans)))
+            }
+            "unsat" => (
+                false,
+                "—".into(),
+                "—".into(),
+                "—".into(),
+                unsat_lines(&ans, &format!("pin `verb == {verb_name}`")).join(" | "),
+            ),
+            "outside" => (false, "—".into(), "—".into(), "—".into(), outside_text(&ans)),
+            _ => (false, "—".into(), "—".into(), "—".into(), unknown_text(&ans)),
+        };
+        rows.push(VerbMatrixRow {
+            verb: verb_name,
+            tag: tag_num,
+            verdict: v,
+            admitted,
+            subject_witness: subj_w,
+            cost_witness: cost_w,
+            field_witness: field_w,
+            explanation: expl,
+        });
+    }
+
+    // `renounce`: K-RENOUNCE is holder-signed with no policy gate in kernel admission; we also check
+    // whether the predicate itself admits an non-crud verb tag (tag 6) for completeness.
+    let renounce_extra = json!({"type":"eq","slot":"request/verb","value":"6"});
+    let renounce_ans = if overall_verdict == "outside" {
+        checked.any.clone()
+    } else {
+        ask(root, &ws, law, Some(&renounce_extra), false, "matrix-renounce")?
+    };
+    let renounce_pred_note = match verdict(&renounce_ans) {
+        "witness" => format!("Predicate also admits tag 6 ({})", witness_text(&renounce_ans)),
+        "unsat" => "Predicate refuses tag 6, but K-RENOUNCE bypasses cell policy (holder-signed capability surrender)".into(),
+        _ => "K-RENOUNCE is holder-signed capability surrender (no cell policy gate)".into(),
+    };
+    rows.push(VerbMatrixRow {
+        verb: "renounce",
+        tag: "K-RENOUNCE",
+        verdict: "holder-signed".into(),
+        admitted: true,
+        subject_witness: "holder".into(),
+        cost_witness: "0".into(),
+        field_witness: "none (capability surrender)".into(),
+        explanation: format!("Admitted (holder-signed; K-RENOUNCE has no policy gate). {renounce_pred_note}"),
+    });
+
+    // Check whether writes are locked out globally OR for this installer subject specifically.
+    let write_global_unsat = verdict(&checked.write) == "unsat";
+    let write_mine_extra = json!({"type":"all","predicates":[
+        {"type":"eq","slot":"request/subject","value":subj},
+        {"type":"eq","slot":"request/verb","value":"2"}
+    ]});
+    let write_mine_ans = if overall_verdict == "witness" && !write_global_unsat {
+        Some(ask(root, &ws, law, Some(&write_mine_extra), false, "matrix-write-mine")?)
+    } else {
+        None
+    };
+    let write_mine_unsat = write_mine_ans.as_ref().is_some_and(|a| verdict(a) == "unsat");
+    let write_lockout = write_global_unsat || write_mine_unsat || overall_verdict == "unsat";
+    let write_lockout_reason = if write_global_unsat || overall_verdict == "unsat" {
+        Some(format!(
+            "WRITE LOCKOUT WARNING: this law admits no write by any subject ({}).",
+            unsat_lines(&checked.write, "pin `verb == write`").join("; ")
+        ))
+    } else if let Some(ans) = &write_mine_ans {
+        if verdict(ans) == "unsat" {
+            Some(format!(
+                "WRITE SELF-LOCKOUT WARNING: no write by you (subject {subj}) can ever pass this law ({}).",
+                unsat_lines(ans, "your subject + write pin").join("; ")
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let self_lockout_reason = if self_lock {
+        checked.mine.as_ref().map(|m| {
+            format!(
+                "TOTAL SELF-LOCKOUT WARNING: no request of any verb by you (subject {subj}) can ever pass this law ({}).",
+                unsat_lines(m, "your own subject pin").join("; ")
+            )
+        })
+    } else {
+        None
+    };
+
+    let relaw_lockout_reason = if relaw_lock {
+        checked.relaw.as_ref().map(|r| {
+            format!(
+                "RE-LAW LOCKOUT WARNING: once installed, you (subject {subj}) can never revise or replace this law ({}).",
+                unsat_lines(r, "your own re-law pin").join("; ")
+            )
+        }).or_else(|| {
+            if overall_verdict == "unsat" {
+                Some("RE-LAW LOCKOUT WARNING: this law admits no step at all (`sealed`), so it can never be revised once installed.".into())
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+
+    Ok(LawWorkbenchReport {
+        rendered_law: crate::shell::law::render_clause(law),
+        overall_verdict,
+        overall_summary,
+        write_lockout,
+        write_lockout_reason,
+        self_lockout: self_lock,
+        self_lockout_reason,
+        relaw_lockout: relaw_lock,
+        relaw_lockout_reason,
+        rows,
+    })
+}
+
+// ------------------------------------------------------------------ Hypothetical Turn Judge & Local Presburger Solver
+
+#[derive(Clone, Debug)]
+pub(crate) struct ClauseVerdict {
+    pub index: usize,
+    pub depth: usize,
+    pub clause: String,
+    pub passed: bool,
+    pub readings: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct HypotheticalTurnReport {
+    pub verb: String,
+    pub verb_tag: i128,
+    pub subject: i128,
+    pub cost: i128,
+    pub admitted: bool,
+    pub headline: String,
+    pub first_refused_clause: Option<String>,
+    pub clauses: Vec<ClauseVerdict>,
+}
+
+pub(crate) fn verb_tag_of(verb: &str) -> Result<(String, i128)> {
+    match verb.trim() {
+        "read" | "observe" | "1" => Ok(("read".into(), 1)),
+        "write" | "mutate" | "2" => Ok(("write".into(), 2)),
+        "delegate" | "3" => Ok(("delegate".into(), 3)),
+        "install" | "4" => Ok(("install".into(), 4)),
+        "revoke" | "5" => Ok(("revoke".into(), 5)),
+        "renounce" | "6" => Ok(("renounce".into(), 6)),
+        "append" | "7" => Ok(("append".into(), 7)),
+        "place" | "10" => Ok(("place".into(), 10)),
+        other => {
+            let n: i128 = other
+                .parse()
+                .map_err(|_| format!("unknown verb `{other}` (use read, write, delegate, install, revoke, renounce, append, place, or a tag number)"))?;
+            Ok((other.to_owned(), n))
+        }
+    }
+}
+
+/// Parse `key=value` or `N=value` pairs (comma, semicolon, or whitespace separated) into field/slot assignments.
+pub(crate) fn parse_field_assignments(input: &str) -> Result<(BTreeMap<String, i128>, BTreeMap<String, i128>)> {
+    let mut fields = BTreeMap::new();
+    let mut raw_slots = BTreeMap::new();
+    for token in input
+        .split([',', ';', '\n'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let (k, v) = token
+            .split_once('=')
+            .or_else(|| token.split_once(':'))
+            .ok_or_else(|| format!("expected `FIELD=VALUE` (e.g. `0=10` or `content/atom-edits=0`), found `{token}`"))?;
+        let k = k.trim();
+        let k = k.strip_prefix("field ").map(str::trim).unwrap_or(k);
+        let val: i128 = v
+            .trim()
+            .parse()
+            .map_err(|_| format!("value `{}` for `{k}` is not an integer", v.trim()))?;
+        if k.bytes().all(|b| b.is_ascii_digit()) {
+            fields.insert(k.to_owned(), val);
+        } else {
+            raw_slots.insert(k.to_owned(), val);
+        }
+    }
+    Ok((fields, raw_slots))
+}
+
+/// Evaluate `Pred` over `(old, new)` states with fail-closed semantics (`Pred/Eval.lean`).
+pub(crate) fn eval_pred(pred: &Value, old: &BTreeMap<String, i128>, new: &BTreeMap<String, i128>) -> bool {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    let s = |k: &str| pred.get(k).and_then(Value::as_str).unwrap_or("");
+    let int_val = |k: &str| -> Option<i128> { pred.get(k)?.as_str()?.parse().ok() };
+    match ty {
+        "eq" => new.get(s("slot")).copied().zip(int_val("value")).is_some_and(|(a, b)| a == b),
+        "le" => new.get(s("slot")).copied().zip(int_val("value")).is_some_and(|(a, b)| a <= b),
+        "memberOf" => {
+            let Some(actual) = new.get(s("slot")).copied() else {
+                return false;
+            };
+            pred.get("values")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str()?.parse::<i128>().ok())
+                .any(|v| v == actual)
+        }
+        "monotone" => {
+            let slot = s("slot");
+            old.get(slot).copied().zip(new.get(slot).copied()).is_some_and(|(a, b)| a <= b)
+        }
+        "writeOnce" => {
+            let slot = s("slot");
+            old.get(slot)
+                .copied()
+                .zip(new.get(slot).copied())
+                .is_some_and(|(a, b)| a == 0 || a == b)
+        }
+        "eqSlots" => new
+            .get(s("left"))
+            .copied()
+            .zip(new.get(s("right")).copied())
+            .is_some_and(|(a, b)| a == b),
+        "leSlots" => new
+            .get(s("left"))
+            .copied()
+            .zip(new.get(s("right")).copied())
+            .is_some_and(|(a, b)| a <= b),
+        "leSlotsOff" => {
+            let Some(k) = int_val("offset") else {
+                return false;
+            };
+            new.get(s("left"))
+                .copied()
+                .zip(new.get(s("right")).copied())
+                .is_some_and(|(a, b)| a <= b.saturating_add(k))
+        }
+        "not" => pred
+            .get("predicate")
+            .is_some_and(|inner| !eval_pred(inner, old, new)),
+        "all" => pred
+            .get("predicates")
+            .and_then(Value::as_array)
+            .is_some_and(|ps| ps.iter().all(|p| eval_pred(p, old, new))),
+        "any" => pred
+            .get("predicates")
+            .and_then(Value::as_array)
+            .is_some_and(|ps| ps.iter().any(|p| eval_pred(p, old, new))),
+        "ran" => {
+            let prog = s("program");
+            new.get(&format!("run/program/{prog}")).copied() == Some(1)
+        }
+        _ => false,
+    }
+}
+
+fn slot_readings_for_clause(
+    clause: &Value,
+    old: &BTreeMap<String, i128>,
+    new: &BTreeMap<String, i128>,
+) -> String {
+    let mut mentioned = BTreeSet::new();
+    slots(clause, &mut mentioned);
+    if mentioned.is_empty() {
+        return "no slots read".into();
+    }
+    let fmt_val = |slot: &str, m: &BTreeMap<String, i128>| -> String {
+        match m.get(slot) {
+            Some(v) => crate::shell::law::render_value(slot, &v.to_string()),
+            None => "absent".into(),
+        }
+    };
+    let mut parts = Vec::new();
+    for slot in mentioned {
+        let name = crate::shell::law::render_slot(&slot);
+        let old_v = fmt_val(&slot, old);
+        let new_v = fmt_val(&slot, new);
+        if old_v != new_v {
+            parts.push(format!("{name}: before={old_v}, after={new_v}"));
+        } else {
+            parts.push(format!("{name}={new_v}"));
+        }
+    }
+    parts.join("; ")
+}
+
+fn collect_clause_verdicts(
+    pred: &Value,
+    old: &BTreeMap<String, i128>,
+    new: &BTreeMap<String, i128>,
+    depth: usize,
+    out: &mut Vec<ClauseVerdict>,
+) {
+    let index = out.len() + 1;
+    let passed = eval_pred(pred, old, new);
+    out.push(ClauseVerdict {
+        index,
+        depth,
+        clause: crate::shell::law::render_clause(pred),
+        passed,
+        readings: slot_readings_for_clause(pred, old, new),
+    });
+    match pred.get("type").and_then(Value::as_str) {
+        Some("all" | "any") => {
+            for child in pred
+                .get("predicates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                collect_clause_verdicts(child, old, new, depth + 1, out);
+            }
+        }
+        Some("not") => {
+            if let Some(inner) = pred.get("predicate") {
+                collect_clause_verdicts(inner, old, new, depth + 1, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Construct the hypothetical `(old, new)` state for a turn and evaluate the law clause-by-clause.
+pub(crate) fn judge_hypothetical_turn(
+    law: &Value,
+    verb_input: &str,
+    subject_input: &str,
+    cost_input: &str,
+    before_input: &str,
+    after_input: &str,
+) -> Result<HypotheticalTurnReport> {
+    let (verb_name, verb_tag) = verb_tag_of(verb_input)?;
+    let subject: i128 = if subject_input.trim().is_empty() {
+        1
+    } else {
+        subject_input
+            .trim()
+            .parse()
+            .map_err(|_| format!("subject `{}` must be an integer", subject_input.trim()))?
+    };
+    let cost: i128 = if cost_input.trim().is_empty() {
+        0
+    } else {
+        cost_input
+            .trim()
+            .parse()
+            .map_err(|_| format!("cost `{}` must be an integer", cost_input.trim()))?
+    };
+    let (before_fields, before_slots) = parse_field_assignments(before_input)?;
+    let (after_fields, after_slots) = parse_field_assignments(after_input)?;
+
+    let mut old = BTreeMap::new();
+    let mut new = BTreeMap::new();
+    for (k, v) in [
+        ("request/verb", verb_tag),
+        ("request/subject", subject),
+        ("request/cost", cost),
+    ] {
+        old.insert(k.to_owned(), v);
+        new.insert(k.to_owned(), v);
+    }
+
+    let (mentioned_fields, mentioned_pairs) = law_fields(law);
+    let mut all_fields: BTreeSet<String> = mentioned_fields;
+    all_fields.extend(before_fields.keys().cloned());
+    all_fields.extend(after_fields.keys().cloned());
+
+    for f in &all_fields {
+        let b_val = before_fields
+            .get(f)
+            .copied()
+            .or_else(|| after_fields.get(f).copied())
+            .unwrap_or(0);
+        let a_val = after_fields
+            .get(f)
+            .copied()
+            .or_else(|| before_fields.get(f).copied())
+            .unwrap_or(b_val);
+        let delta = a_val.saturating_sub(b_val);
+        old.insert(field_slot(f, "before"), b_val);
+        old.insert(field_slot(f, "after"), b_val);
+        old.insert(field_slot(f, "delta"), 0);
+        new.insert(field_slot(f, "before"), b_val);
+        new.insert(field_slot(f, "after"), a_val);
+        new.insert(field_slot(f, "delta"), delta);
+    }
+    for (a, b) in &mentioned_pairs {
+        let da = new.get(&field_slot(a, "delta")).copied().unwrap_or(0);
+        let db = new.get(&field_slot(b, "delta")).copied().unwrap_or(0);
+        let pair_slot = format!("resource/pair/{a}/{b}/delta");
+        old.insert(pair_slot.clone(), 0);
+        new.insert(pair_slot, da.saturating_add(db));
+    }
+    // Default common content slots when a document law is tested without explicit slot overrides.
+    let mut mentioned_all = BTreeSet::new();
+    slots(law, &mut mentioned_all);
+    for s in &mentioned_all {
+        if s.starts_with("content/") && !new.contains_key(s) {
+            let def = if s == "content/names/unique" { 1 } else { 0 };
+            old.insert(s.clone(), def);
+            new.insert(s.clone(), def);
+        }
+    }
+    for (k, v) in before_slots {
+        old.insert(k.clone(), v);
+        new.entry(k).or_insert(v);
+    }
+    for (k, v) in after_slots {
+        new.insert(k, v);
+    }
+
+    let mut clauses = Vec::new();
+    if law.get("type").and_then(Value::as_str) == Some("all") {
+        let children = law
+            .get("predicates")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if children.is_empty() {
+            collect_clause_verdicts(law, &old, &new, 0, &mut clauses);
+        } else {
+            for child in &children {
+                collect_clause_verdicts(child, &old, &new, 0, &mut clauses);
+            }
+        }
+    } else {
+        collect_clause_verdicts(law, &old, &new, 0, &mut clauses);
+    }
+
+    let pred_passed = eval_pred(law, &old, &new);
+    let admitted = pred_passed || verb_name == "renounce";
+    let first_refused_clause = if admitted {
+        None
+    } else {
+        clauses
+            .iter()
+            .find(|c| c.depth == 0 && !c.passed)
+            .or_else(|| clauses.iter().find(|c| !c.passed))
+            .map(|c| format!("{} ({})", c.clause, c.readings))
+    };
+    let headline = if verb_name == "renounce" {
+        if pred_passed {
+            "Admitted: K-RENOUNCE is holder-signed (and predicate clauses also evaluate to true)".into()
+        } else {
+            "Admitted by K-RENOUNCE (holder-signed capability surrender has no cell policy gate; predicate itself evaluated to false)".into()
+        }
+    } else if admitted {
+        format!("Admitted: hypothetical `{verb_name}` turn satisfies all law clauses")
+    } else {
+        format!(
+            "Refused (law-denied): {}",
+            first_refused_clause.as_deref().unwrap_or("law evaluated to false")
+        )
+    };
+
+    Ok(HypotheticalTurnReport {
+        verb: verb_name,
+        verb_tag,
+        subject,
+        cost,
+        admitted,
+        headline,
+        first_refused_clause,
+        clauses,
+    })
+}
+
+// ------------------------------------------------------------------ Pure-Rust mirror of Pred/Satisfiable.lean + Host/LawSat.lean
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum SatNode {
+    Zero,
+    Old(String),
+    New(String),
+}
+
+impl SatNode {
+    fn text(&self) -> String {
+        match self {
+            SatNode::Zero => "0".into(),
+            SatNode::Old(s) => format!("{} (before the step)", crate::shell::law::render_slot(s)),
+            SatNode::New(s) => crate::shell::law::render_slot(s),
+        }
+    }
+    fn value_text(&self, k: i128) -> String {
+        match self {
+            SatNode::Zero => k.to_string(),
+            SatNode::Old(s) | SatNode::New(s) => crate::shell::law::render_value(s, &k.to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SatCon {
+    x: SatNode,
+    y: SatNode,
+    k: i128,
+    clause: String,
+    part: &'static str,
+}
+
+impl SatCon {
+    fn text(&self) -> String {
+        match (&self.x, &self.y) {
+            (SatNode::Zero, SatNode::Zero) => format!("0 <= {}", self.k),
+            (SatNode::Zero, y) => format!("{} >= {}", y.text(), y.value_text(-self.k)),
+            (x, SatNode::Zero) => format!("{} <= {}", x.text(), x.value_text(self.k)),
+            (x, y) => {
+                if self.k == 0 {
+                    format!("{} <= {}", x.text(), y.text())
+                } else if self.k > 0 {
+                    format!("{} <= {} + {}", x.text(), y.text(), self.k)
+                } else {
+                    format!("{} <= {} - {}", x.text(), y.text(), -self.k)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct SatSys {
+    present: BTreeSet<(SatNode, String, &'static str)>,
+    absent: BTreeSet<(SatNode, String, &'static str)>,
+    cons: Vec<SatCon>,
+}
+
+impl SatSys {
+    fn merge(&self, other: &Self) -> Self {
+        let mut present = self.present.clone();
+        present.extend(other.present.iter().cloned());
+        let mut absent = self.absent.clone();
+        absent.extend(other.absent.iter().cloned());
+        let mut cons = self.cons.clone();
+        cons.extend(other.cons.iter().cloned());
+        Self { present, absent, cons }
+    }
+}
+
+fn realize_scalar(pred: &Value) -> std::result::Result<Value, String> {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    let s = |k: &str| pred.get(k).and_then(Value::as_str).unwrap_or("");
+    let scalar_old = |slot: &str| -> Option<std::result::Result<String, Vec<String>>> {
+        let parts: Vec<&str> = slot.split('/').collect();
+        match parts.as_slice() {
+            ["resource", "field", k, "after"] => Some(Ok(format!("resource/field/{k}/before"))),
+            ["resource", "field", _, "before"] => Some(Ok(slot.to_owned())),
+            ["resource", "field", k, "delta"] => Some(Err(vec![format!("resource/field/{k}/before")])),
+            ["resource", "pair", a, b, "delta"] => Some(Err(vec![
+                format!("resource/field/{a}/before"),
+                format!("resource/field/{b}/before"),
+            ])),
+            ["request" | "target" | "clock" | "command" | "run", ..] => Some(Ok(slot.to_owned())),
+            _ => None,
+        }
+    };
+    match ty {
+        "monotone" => {
+            let slot = s("slot");
+            match scalar_old(slot).ok_or_else(|| slot.to_owned())? {
+                Ok(t) => Ok(json!({"type":"leSlots","left":t,"right":slot})),
+                Err(ts) => {
+                    let mut ps: Vec<Value> = ts
+                        .into_iter()
+                        .map(|t| json!({"type":"leSlots","left":t,"right":t}))
+                        .collect();
+                    ps.push(json!({"type":"leSlots","left":slot,"right":slot}));
+                    ps.push(json!({"type":"not","predicate":{"type":"le","slot":slot,"value":"-1"}}));
+                    Ok(json!({"type":"all","predicates":ps}))
+                }
+            }
+        }
+        "writeOnce" => {
+            let slot = s("slot");
+            match scalar_old(slot).ok_or_else(|| slot.to_owned())? {
+                Ok(t) => Ok(json!({"type":"any","predicates":[
+                    {"type":"not","predicate":{"type":"leSlots","left":t,"right":t}},
+                    {"type":"eq","slot":t,"value":"0"},
+                    {"type":"eqSlots","left":slot,"right":t}
+                ]})),
+                Err(_) => Ok(json!({"type":"all","predicates":[]})),
+            }
+        }
+        "not" => {
+            let inner = pred.get("predicate").ok_or_else(|| "?".to_owned())?;
+            Ok(json!({"type":"not","predicate":realize_scalar(inner)?}))
+        }
+        "all" | "any" => {
+            let mut out = Vec::new();
+            for p in pred.get("predicates").and_then(Value::as_array).into_iter().flatten() {
+                out.push(realize_scalar(p)?);
+            }
+            Ok(json!({"type":ty,"predicates":out}))
+        }
+        _ => Ok(pred.clone()),
+    }
+}
+
+const DNF_CAP: usize = 1024;
+
+enum DnfError {
+    Outside { part: &'static str, path: Vec<usize>, clause: String },
+    PastCap,
+}
+
+fn sat_dnf(
+    b: bool,
+    pred: &Value,
+    part: &'static str,
+    path: Vec<usize>,
+) -> std::result::Result<Vec<SatSys>, DnfError> {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    let s = |k: &str| pred.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+    let int_val = |k: &str| -> i128 {
+        pred.get(k)
+            .and_then(Value::as_str)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    };
+    let clause = crate::shell::law::render_clause(pred);
+    let pres = |nodes: Vec<SatNode>, cons: Vec<(SatNode, SatNode, i128)>| -> SatSys {
+        SatSys {
+            present: nodes.into_iter().map(|n| (n, clause.clone(), part)).collect(),
+            absent: BTreeSet::new(),
+            cons: cons
+                .into_iter()
+                .map(|(x, y, k)| SatCon { x, y, k, clause: clause.clone(), part })
+                .collect(),
+        }
+    };
+    let gone = |node: SatNode| -> SatSys {
+        let mut absent = BTreeSet::new();
+        absent.insert((node, clause.clone(), part));
+        SatSys { present: BTreeSet::new(), absent, cons: Vec::new() }
+    };
+    match ty {
+        "not" => {
+            let mut next = path;
+            next.push(0);
+            sat_dnf(!b, pred.get("predicate").unwrap_or(&Value::Null), part, next)
+        }
+        "all" | "any" => {
+            let children = pred
+                .get("predicates")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let is_conj = (ty == "all" && b) || (ty == "any" && !b);
+            if is_conj {
+                let mut acc = vec![SatSys::default()];
+                for (i, child) in children.iter().enumerate() {
+                    let mut p = path.clone();
+                    p.push(i);
+                    let sub = sat_dnf(b, child, part, p)?;
+                    let mut next = Vec::new();
+                    for a in &acc {
+                        for c in &sub {
+                            next.push(a.merge(c));
+                            if next.len() > DNF_CAP {
+                                return Err(DnfError::PastCap);
+                            }
+                        }
+                    }
+                    acc = next;
+                }
+                Ok(acc)
+            } else {
+                let mut acc = Vec::new();
+                for (i, child) in children.iter().enumerate() {
+                    let mut p = path.clone();
+                    p.push(i);
+                    let sub = sat_dnf(b, child, part, p)?;
+                    acc.extend(sub);
+                    if acc.len() > DNF_CAP {
+                        return Err(DnfError::PastCap);
+                    }
+                }
+                Ok(acc)
+            }
+        }
+        "eq" => {
+            let u = SatNode::New(s("slot"));
+            let v = int_val("value");
+            if b {
+                Ok(vec![pres(vec![u.clone()], vec![(u.clone(), SatNode::Zero, v), (SatNode::Zero, u, -v)])])
+            } else {
+                Ok(vec![
+                    gone(u.clone()),
+                    pres(vec![u.clone()], vec![(u.clone(), SatNode::Zero, v - 1)]),
+                    pres(vec![u.clone()], vec![(SatNode::Zero, u, -(v + 1))]),
+                ])
+            }
+        }
+        "le" => {
+            let u = SatNode::New(s("slot"));
+            let v = int_val("value");
+            if b {
+                Ok(vec![pres(vec![u.clone()], vec![(u, SatNode::Zero, v)])])
+            } else {
+                Ok(vec![
+                    gone(u.clone()),
+                    pres(vec![u.clone()], vec![(SatNode::Zero, u, -(v + 1))]),
+                ])
+            }
+        }
+        "memberOf" => {
+            let u = SatNode::New(s("slot"));
+            let mut vals: Vec<i128> = pred
+                .get("values")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str()?.parse().ok())
+                .collect();
+            vals.sort();
+            vals.dedup();
+            if b {
+                if vals.is_empty() {
+                    return Ok(Vec::new());
+                }
+                let mut runs: Vec<(i128, i128)> = Vec::new();
+                for v in vals {
+                    if let Some(last) = runs.last_mut() {
+                        if v == last.1 + 1 {
+                            last.1 = v;
+                            continue;
+                        }
+                    }
+                    runs.push((v, v));
+                }
+                Ok(runs
+                    .into_iter()
+                    .map(|(lo, hi)| {
+                        pres(
+                            vec![u.clone()],
+                            vec![(SatNode::Zero, u.clone(), -lo), (u.clone(), SatNode::Zero, hi)],
+                        )
+                    })
+                    .collect())
+            } else {
+                if vals.is_empty() {
+                    return Ok(vec![SatSys::default()]);
+                }
+                let mut out = vec![
+                    gone(u.clone()),
+                    pres(vec![u.clone()], vec![(u.clone(), SatNode::Zero, vals[0] - 1)]),
+                ];
+                for pair in vals.windows(2) {
+                    if pair[0] + 1 <= pair[1] - 1 {
+                        out.push(pres(
+                            vec![u.clone()],
+                            vec![
+                                (SatNode::Zero, u.clone(), -(pair[0] + 1)),
+                                (u.clone(), SatNode::Zero, pair[1] - 1),
+                            ],
+                        ));
+                    }
+                }
+                let last = *vals.last().unwrap();
+                out.push(pres(vec![u.clone()], vec![(SatNode::Zero, u, -(last + 1))]));
+                Ok(out)
+            }
+        }
+        "monotone" => {
+            let slot = s("slot");
+            let o = SatNode::Old(slot.clone());
+            let n = SatNode::New(slot);
+            if b {
+                Ok(vec![pres(vec![o.clone(), n.clone()], vec![(o, n, 0)])])
+            } else {
+                Ok(vec![
+                    gone(o.clone()),
+                    gone(n.clone()),
+                    pres(vec![o.clone(), n.clone()], vec![(n, o, -1)]),
+                ])
+            }
+        }
+        "writeOnce" => {
+            let slot = s("slot");
+            let o = SatNode::Old(slot.clone());
+            let n = SatNode::New(slot);
+            if b {
+                Ok(vec![
+                    pres(
+                        vec![o.clone(), n.clone()],
+                        vec![(o.clone(), SatNode::Zero, 0), (SatNode::Zero, o.clone(), 0)],
+                    ),
+                    pres(
+                        vec![o.clone(), n.clone()],
+                        vec![(o.clone(), n.clone(), 0), (n, o, 0)],
+                    ),
+                ])
+            } else {
+                Ok(vec![
+                    gone(o.clone()),
+                    gone(n.clone()),
+                    pres(
+                        vec![o.clone(), n.clone()],
+                        vec![(o.clone(), SatNode::Zero, -1), (o.clone(), n.clone(), -1)],
+                    ),
+                    pres(
+                        vec![o.clone(), n.clone()],
+                        vec![(o.clone(), SatNode::Zero, -1), (n.clone(), o.clone(), -1)],
+                    ),
+                    pres(
+                        vec![o.clone(), n.clone()],
+                        vec![(SatNode::Zero, o.clone(), -1), (o.clone(), n.clone(), -1)],
+                    ),
+                    pres(
+                        vec![o.clone(), n.clone()],
+                        vec![(SatNode::Zero, o.clone(), -1), (n, o, -1)],
+                    ),
+                ])
+            }
+        }
+        "eqSlots" => {
+            let l = SatNode::New(s("left"));
+            let r = SatNode::New(s("right"));
+            if b {
+                Ok(vec![pres(
+                    vec![l.clone(), r.clone()],
+                    vec![(l.clone(), r.clone(), 0), (r, l, 0)],
+                )])
+            } else {
+                Ok(vec![
+                    gone(l.clone()),
+                    gone(r.clone()),
+                    pres(vec![l.clone(), r.clone()], vec![(l.clone(), r.clone(), -1)]),
+                    pres(vec![l.clone(), r.clone()], vec![(r, l, -1)]),
+                ])
+            }
+        }
+        "leSlots" | "leSlotsOff" => {
+            let l = SatNode::New(s("left"));
+            let r = SatNode::New(s("right"));
+            let k = if ty == "leSlotsOff" { int_val("offset") } else { 0 };
+            if b {
+                Ok(vec![pres(vec![l.clone(), r.clone()], vec![(l, r, k)])])
+            } else {
+                Ok(vec![
+                    gone(l.clone()),
+                    gone(r.clone()),
+                    pres(vec![l.clone(), r.clone()], vec![(r, l, -k - 1)]),
+                ])
+            }
+        }
+        _ => Err(DnfError::Outside { part, path, clause }),
+    }
+}
+
+fn solve_system(sys: &SatSys) -> std::result::Result<(BTreeMap<String, i128>, BTreeMap<String, i128>), Value> {
+    for (p_node, p_clause, p_part) in &sys.present {
+        if let Some((_, a_clause, a_part)) = sys.absent.iter().find(|(a_node, _, _)| a_node == p_node) {
+            return Err(json!({
+                "kind": "clash",
+                "text": format!("{} must be both present and absent", p_node.text()),
+                "sources": [
+                    {"part": p_part, "path": [0], "clause": p_clause},
+                    {"part": a_part, "path": [0], "clause": a_clause},
+                ]
+            }));
+        }
+    }
+    let mut nodes: BTreeSet<SatNode> = BTreeSet::new();
+    nodes.insert(SatNode::Zero);
+    for (n, _, _) in &sys.present {
+        nodes.insert(n.clone());
+    }
+    for c in &sys.cons {
+        nodes.insert(c.x.clone());
+        nodes.insert(c.y.clone());
+    }
+    let mut dist: BTreeMap<SatNode, i128> = nodes.iter().map(|n| (n.clone(), 0)).collect();
+    let mut pred_edge: BTreeMap<SatNode, usize> = BTreeMap::new();
+    let n_count = nodes.len().max(1);
+    for _ in 0..n_count {
+        let mut changed = false;
+        for (idx, c) in sys.cons.iter().enumerate() {
+            let dy = dist.get(&c.y).copied().unwrap_or(0);
+            let dx = dist.get(&c.x).copied().unwrap_or(0);
+            if dx > dy.saturating_add(c.k) {
+                dist.insert(c.x.clone(), dy.saturating_add(c.k));
+                pred_edge.insert(c.x.clone(), idx);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    // Check for negative cycle
+    for (idx, c) in sys.cons.iter().enumerate() {
+        let dy = dist.get(&c.y).copied().unwrap_or(0);
+        let dx = dist.get(&c.x).copied().unwrap_or(0);
+        if dx > dy.saturating_add(c.k) {
+            let mut cur = c.x.clone();
+            let mut current_edge = idx;
+            for _ in 0..=n_count {
+                let edge = &sys.cons[current_edge];
+                cur = edge.y.clone();
+                if let Some(&prev) = pred_edge.get(&cur) {
+                    current_edge = prev;
+                } else {
+                    break;
+                }
+            }
+            let start = cur.clone();
+            let mut cycle_edges = Vec::new();
+            loop {
+                let Some(&e_idx) = pred_edge.get(&cur) else {
+                    cycle_edges.push(c.clone());
+                    break;
+                };
+                let edge = sys.cons[e_idx].clone();
+                cur = edge.y.clone();
+                cycle_edges.push(edge);
+                if cur == start || cycle_edges.len() > n_count + 1 {
+                    break;
+                }
+            }
+            let sum: i128 = cycle_edges.iter().map(|e| e.k).sum();
+            let sum = if sum >= 0 { -1 } else { sum };
+            let constraints: Vec<Value> = cycle_edges
+                .iter()
+                .map(|e| {
+                    json!({
+                        "text": e.text(),
+                        "k": e.k.to_string(),
+                        "sources": [{"part": e.part, "path": [0], "clause": e.clause}]
+                    })
+                })
+                .collect();
+            return Err(json!({
+                "kind": "cycle",
+                "sum": sum,
+                "sumText": sum.to_string(),
+                "constraints": constraints,
+            }));
+        }
+    }
+    let z = dist.get(&SatNode::Zero).copied().unwrap_or(0);
+    let mut old = BTreeMap::new();
+    let mut new = BTreeMap::new();
+    for (node, _, _) in &sys.present {
+        let val = dist.get(node).copied().unwrap_or(0).saturating_sub(z);
+        match node {
+            SatNode::Zero => {}
+            SatNode::Old(s) => {
+                old.insert(s.clone(), val);
+            }
+            SatNode::New(s) => {
+                new.insert(s.clone(), val);
+            }
+        }
+    }
+    Ok((old, new))
+}
+
+/// Pure-Rust implementation of `Host/LawSatWire.lean` (`answerJson`), used when no compiled Host
+/// binary is present on disk and for standalone unit tests.
+pub(crate) fn decide_local(
+    law: &Value,
+    extra: Option<&Value>,
+    from_here: bool,
+) -> Result<Value> {
+    let extra_pred = extra.cloned().unwrap_or_else(|| json!({"type":"all","predicates":[]}));
+    let (law_target, extra_target) = if from_here {
+        match (realize_scalar(law), realize_scalar(&extra_pred)) {
+            (Ok(l), Ok(e)) => (l, e),
+            (Err(slot), _) | (_, Err(slot)) => {
+                return Ok(json!({
+                    "verdict": "unrealizable",
+                    "slot": slot,
+                    "name": crate::shell::law::render_slot(&slot),
+                }))
+            }
+        }
+    } else {
+        (law.clone(), extra_pred)
+    };
+    let law_sys = match sat_dnf(true, &law_target, "law", Vec::new()) {
+        Ok(s) => s,
+        Err(DnfError::Outside { part, path, clause }) => {
+            return Ok(json!({"verdict":"outside","part":part,"path":path,"clause":clause}))
+        }
+        Err(DnfError::PastCap) => {
+            return Ok(json!({"verdict":"unknown","reason":"cap","cap":DNF_CAP}))
+        }
+    };
+    let extra_sys = match sat_dnf(true, &extra_target, "query", Vec::new()) {
+        Ok(s) => s,
+        Err(DnfError::Outside { part, path, clause }) => {
+            return Ok(json!({"verdict":"outside","part":part,"path":path,"clause":clause}))
+        }
+        Err(DnfError::PastCap) => {
+            return Ok(json!({"verdict":"unknown","reason":"cap","cap":DNF_CAP}))
+        }
+    };
+    let mut combined = Vec::new();
+    for l in &law_sys {
+        for e in &extra_sys {
+            combined.push(l.merge(e));
+            if combined.len() > DNF_CAP {
+                return Ok(json!({"verdict":"unknown","reason":"cap","cap":DNF_CAP}));
+            }
+        }
+    }
+    let sys_count = combined.len();
+    let mut certificates = Vec::new();
+    for sys in &combined {
+        match solve_system(sys) {
+            Ok((old, new)) => {
+                let state_json = |m: &BTreeMap<String, i128>| -> Vec<Value> {
+                    m.iter()
+                        .map(|(slot, v)| {
+                            json!({
+                                "slot": slot,
+                                "name": crate::shell::law::render_slot(slot),
+                                "value": v.to_string(),
+                                "text": crate::shell::law::render_value(slot, &v.to_string()),
+                            })
+                        })
+                        .collect()
+                };
+                return Ok(json!({
+                    "verdict": "witness",
+                    "systems": sys_count,
+                    "old": state_json(&old),
+                    "new": state_json(&new),
+                }));
+            }
+            Err(cert) => certificates.push(cert),
+        }
+    }
+    Ok(json!({
+        "verdict": "unsat",
+        "systems": sys_count,
+        "certificate": certificates,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,5 +1969,58 @@ mod tests {
         let (fields, pairs) = law_fields(&law);
         assert_eq!(fields.into_iter().collect::<Vec<_>>(), ["1", "2", "3"]);
         assert_eq!(pairs, [("1".to_owned(), "3".to_owned())]);
+    }
+
+    #[test]
+    fn all_eight_presets_parse_and_build_six_verb_admissibility_matrix() {
+        assert_eq!(PRESETS.len(), 8);
+        let root = std::env::temp_dir().join(format!("mini-lawsat-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        let ws = json!({"subject": "7"});
+        for preset in PRESETS {
+            let (pred, rendered) = parse_law_input(preset.key, "7").expect(preset.key);
+            assert!(!rendered.is_empty());
+            let report = analyze_law_workbench(&root, &ws, "7", &pred).expect(preset.key);
+            assert_eq!(report.rows.len(), 6, "preset {} must produce 6 verb rows", preset.key);
+            let verbs: Vec<&str> = report.rows.iter().map(|r| r.verb).collect();
+            assert_eq!(verbs, ["read", "write", "delegate", "install", "revoke", "renounce"]);
+            if preset.key == "read-only lockout" {
+                assert!(report.write_lockout, "read-only lockout must flag write_lockout");
+                assert!(report.relaw_lockout, "read-only lockout must flag relaw_lockout");
+                assert!(report.rows[0].admitted, "read must be admitted");
+                assert!(!report.rows[1].admitted, "write must be unsatisfiable");
+                assert!(!report.rows[3].admitted, "install must be unsatisfiable");
+            } else {
+                assert!(!report.write_lockout, "preset {} should not lock out writes", preset.key);
+                assert!(report.rows[0].admitted, "preset {} should admit read", preset.key);
+                assert!(report.rows[1].admitted, "preset {} should admit write", preset.key);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hypothetical_turn_judge_evaluates_clauses_and_pinpoints_refusal() {
+        let (pred, _) = parse_law_input("monotone-counter", "7").unwrap();
+        // Valid write: field 0 goes from 5 to 6 (monotone and delta == 1 <= 1)
+        let ok_turn = judge_hypothetical_turn(&pred, "write", "7", "10", "0=5", "0=6").unwrap();
+        assert!(ok_turn.admitted, "0=5 -> 0=6 should pass monotone-counter: {:?}", ok_turn.clauses);
+        assert!(ok_turn.first_refused_clause.is_none());
+
+        // Refused write: field 0 goes from 5 to 7 (delta == 2 > 1)
+        let bad_delta = judge_hypothetical_turn(&pred, "write", "7", "10", "0=5", "0=7").unwrap();
+        assert!(!bad_delta.admitted);
+        assert!(bad_delta
+            .clauses
+            .iter()
+            .any(|c| !c.passed && c.clause.contains("field 0 delta <= 1")));
+
+        // Refused write: field 0 goes from 5 to 4 (violates field 0 monotone)
+        let bad_mono = judge_hypothetical_turn(&pred, "write", "7", "10", "0=5", "0=4").unwrap();
+        assert!(!bad_mono.admitted);
+        assert!(bad_mono
+            .clauses
+            .iter()
+            .any(|c| !c.passed && c.clause.contains("field 0 monotone")));
     }
 }

@@ -863,6 +863,7 @@ pub(crate) fn finish_attempt(
                 )
             },
         )?;
+        retain_attempt_witness_if_matching(&attempt.root, &attempt.attempt, outcome);
         FINISHED_ATTEMPTS
             .lock()
             .map_err(|_| fail("finished attempt record poisoned"))?
@@ -870,6 +871,26 @@ pub(crate) fn finish_attempt(
         Ok(())
     })();
     result.map_err(|error: String| format!("{error}; receipt acknowledgment refused, but mutation may already be accepted; retain the exact attempt and recover by lookup"))
+}
+
+fn retain_attempt_witness_if_matching(root: &Path, attempt: &Path, outcome: &Value) {
+    let Ok(anchor_val) = read_json(&root.join(DIRECTORY).join("anchor.json")) else {
+        return;
+    };
+    if anchor_val["point"]["height"] == outcome["acceptedCount"]
+        && anchor_val["point"]["worldRoot"] == outcome["worldRoot"]
+        && anchor_val.get("chain").is_some()
+        && anchor_val.get("siblings").is_some()
+    {
+        let witness = json!({
+            "type": "minidregg-world-root-opening-v1",
+            "height": outcome["acceptedCount"],
+            "worldRoot": outcome["worldRoot"],
+            "chain": anchor_val["chain"],
+            "siblings": anchor_val["siblings"],
+        });
+        let _ = save(attempt, "continuity-witness.json", &witness);
+    }
 }
 
 pub(crate) fn initialize(
@@ -1010,52 +1031,520 @@ pub(crate) fn check_retained(
     )
 }
 
-/// Return the world-root AuthTrie system-slot inclusion opening (op 151) for a confirmed
-/// attempt at `(height, world_root)` when available from `opening.json`, the durable
-/// continuity anchor (`receipt-continuity/anchor.json`), or a live op 151 query.
-pub(crate) fn opening_for_attempt(attempt: &Path, height: &str, world_root: &str) -> Option<Value> {
-    if decimal(height).is_err() || decimal(world_root).is_err() {
-        return None;
+// ------------------------------------------------------------------ deterministic cSHAKE256 world-root opening verifier (op 151)
+
+/// `PersistedCodecTags.world_root_v2` (`Kernel/WorldRoot.lean` `worldCustomization`).
+pub(crate) const WORLD_ROOT_CUSTOMIZATION: &[u8] = b"DREGG.WORLD-ROOT/v3";
+/// `PersistedCodecTags.native_host_system_v1` (`Compiler/DurableCheckpointCodec.lean` `systemCustomization`).
+pub(crate) const SYSTEM_LEAF_CUSTOMIZATION: &[u8] = b"DREGG.NATIVE-HOST.SYSTEM/v2";
+/// `Kernel/WorldRoot.lean` `logCustomization`.
+pub(crate) const LOG_CHAIN_CUSTOMIZATION: &[u8] = b"DREGG.LOG/v1";
+
+/// One step of the `AuthTrie.climb` walk from `.leaf .system (systemLeaf height chain)` up to `worldRoot`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BranchStep {
+    pub step: usize,
+    pub depth: usize,
+    pub bit: bool,
+    pub direction: &'static str,
+    pub sibling: String,
+    pub sibling_hex: String,
+    pub parent: String,
+    pub parent_hex: String,
+}
+
+/// Deterministic `cSHAKE256` world-root inclusion opening (`Kernel/ReceiptContinuity.lean` `opens_sound`:
+/// `ValidOpening ∨ ConcreteCollision`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct VerifiedInclusion {
+    pub height: String,
+    pub world_root: String,
+    pub world_root_hex: String,
+    pub chain: String,
+    pub chain_hex: String,
+    pub system_leaf: String,
+    pub system_leaf_hex: String,
+    pub leaf_node_digest: String,
+    pub leaf_node_hex: String,
+    pub key_bits_prefix: String,
+    pub siblings: Vec<String>,
+    pub steps: Vec<BranchStep>,
+    pub start_height: Option<String>,
+    pub start_world_root: Option<String>,
+    pub start_chain: Option<String>,
+    pub suffix: Vec<String>,
+}
+
+impl VerifiedInclusion {
+    pub(crate) fn json(&self) -> Value {
+        let steps: Vec<Value> = self
+            .steps
+            .iter()
+            .map(|s| {
+                json!({
+                    "step": s.step,
+                    "depth": s.depth,
+                    "bit": u8::from(s.bit),
+                    "direction": s.direction,
+                    "sibling": s.sibling,
+                    "siblingHex": s.sibling_hex,
+                    "parent": s.parent,
+                    "parentHex": s.parent_hex,
+                })
+            })
+            .collect();
+        let mut out = json!({
+            "type": "minidregg-world-root-opening-v1",
+            "verified": true,
+            "soundness": "ValidOpening ∨ ConcreteCollision (cSHAKE256, Kernel.ReceiptContinuity.opens_sound)",
+            "height": self.height,
+            "worldRoot": self.world_root,
+            "worldRootHex": self.world_root_hex,
+            "chain": self.chain,
+            "chainHex": self.chain_hex,
+            "systemLeaf": self.system_leaf,
+            "systemLeafHex": self.system_leaf_hex,
+            "leafNodeDigest": self.leaf_node_digest,
+            "leafNodeHex": self.leaf_node_hex,
+            "keyBitsPrefix": self.key_bits_prefix,
+            "siblings": self.siblings,
+            "steps": steps,
+            "suffix": self.suffix,
+        });
+        if let Some(h) = &self.start_height {
+            out["startHeight"] = json!(h);
+        }
+        if let Some(r) = &self.start_world_root {
+            out["startWorldRoot"] = json!(r);
+        }
+        if let Some(c) = &self.start_chain {
+            out["startChain"] = json!(c);
+        }
+        out
     }
-    if let Ok(cached) = read_json_mode(&attempt.join("opening.json"), false) {
-        if cached["point"]["height"].as_str() == Some(height)
-            && cached["point"]["worldRoot"].as_str() == Some(world_root)
-            && cached["chain"].is_string()
-            && cached["siblings"].is_array()
-        {
-            return Some(cached);
+}
+
+fn cshake256_raw32(custom: &[u8], msg: &[u8]) -> [u8; 32] {
+    use sha3::digest::{core_api::CoreWrapper, ExtendableOutput, Update, XofReader};
+    use sha3::CShake256Core;
+    let mut hasher = CoreWrapper::from_core(CShake256Core::new(custom));
+    hasher.update(msg);
+    let mut out = [0u8; 32];
+    XofReader::read(&mut hasher.finalize_xof(), &mut out);
+    out
+}
+
+/// `Kernel.WorldRoot.cshake256Digest`: 32 bytes from `cSHAKE256("", custom, msg)` read as a
+/// little-endian natural (`digestOfBytesLE`), formatted as its canonical decimal string.
+pub(crate) fn cshake256_digest_decimal(custom: &[u8], msg: &[u8]) -> String {
+    let mut bytes = cshake256_raw32(custom, msg);
+    bytes.reverse();
+    mini_sdk::decimal::from_be_bytes(&bytes)
+}
+
+/// Format a canonical 256-bit decimal digest as 64 lowercase hex characters (big-endian natural).
+pub(crate) fn digest_decimal_to_hex(dec: &str) -> Result<String> {
+    decimal(dec)?;
+    let be = mini_sdk::decimal::to_be_bytes32(dec).map_err(|e| fail(e.0))?;
+    Ok(crate::hex(&be))
+}
+
+/// `Theory.StreamCodec.encodeNat`: base-255 little-endian digits terminated by `255` (`0xff`).
+pub(crate) fn encode_nat_decimal(dec: &str) -> Result<Vec<u8>> {
+    decimal(dec)?;
+    let mut be = mini_sdk::decimal::to_be_bytes32(dec).map_err(|e| fail(e.0))?;
+    if be.iter().all(|b| *b == 0) {
+        return Ok(vec![255]);
+    }
+    let mut out = Vec::with_capacity(34);
+    while be.iter().any(|b| *b != 0) {
+        let mut rem = 0u32;
+        for byte in &mut be {
+            let acc = rem * 256 + u32::from(*byte);
+            *byte = (acc / 255) as u8;
+            rem = acc % 255;
+        }
+        out.push(rem as u8);
+    }
+    out.push(255);
+    Ok(out)
+}
+
+/// `DurableCheckpointCodec.systemLeaf height chain`:
+/// `cshake256Digest "DREGG.NATIVE-HOST.SYSTEM/v2" (StreamCodec.nat.encode height ++ digestStream.encode chain)`.
+pub(crate) fn system_leaf_digest(height: &str, chain: &str) -> Result<String> {
+    let mut msg = encode_nat_decimal(height)?;
+    msg.extend(encode_nat_decimal(chain)?);
+    Ok(cshake256_digest_decimal(SYSTEM_LEAF_CUSTOMIZATION, &msg))
+}
+
+/// `Kernel.WorldRoot.worldDig (.leaf .system v)`:
+/// `cshake256Digest "DREGG.WORLD-ROOT/v3" ([1, 0] ++ StreamCodec.nat.encode v.value)`.
+pub(crate) fn leaf_system_node_digest(system_leaf: &str) -> Result<String> {
+    let mut msg = vec![1u8, 0u8];
+    msg.extend(encode_nat_decimal(system_leaf)?);
+    Ok(cshake256_digest_decimal(WORLD_ROOT_CUSTOMIZATION, &msg))
+}
+
+/// `Kernel.WorldRoot.worldDig (.branch l r)`:
+/// `cshake256Digest "DREGG.WORLD-ROOT/v3" ([2] ++ StreamCodec.nat.encode l.value ++ StreamCodec.nat.encode r.value)`.
+pub(crate) fn branch_node_digest(left: &str, right: &str) -> Result<String> {
+    let mut msg = vec![2u8];
+    msg.extend(encode_nat_decimal(left)?);
+    msg.extend(encode_nat_decimal(right)?);
+    Ok(cshake256_digest_decimal(WORLD_ROOT_CUSTOMIZATION, &msg))
+}
+
+/// `Kernel.WorldRoot.chainDigest acc turn`:
+/// `cshake256Digest "DREGG.LOG/v1" (digestStream.encode acc ++ digestStream.encode turn)`.
+pub(crate) fn chain_step_digest(acc: &str, turn: &str) -> Result<String> {
+    let mut msg = encode_nat_decimal(acc)?;
+    msg.extend(encode_nat_decimal(turn)?);
+    Ok(cshake256_digest_decimal(LOG_CHAIN_CUSTOMIZATION, &msg))
+}
+
+/// `Kernel.ReceiptContinuity.chainAfterDigests start suffix`.
+pub(crate) fn chain_after_digests(start: &str, suffix: &[String]) -> Result<String> {
+    decimal(start)?;
+    let mut acc = start.to_owned();
+    for turn in suffix {
+        acc = chain_step_digest(&acc, turn)?;
+    }
+    Ok(acc)
+}
+
+/// `Kernel.WorldRoot.deployedIx .system`: 256 path bits (`bytesBits` of `cSHAKE256("", "DREGG.WORLD-ROOT/v3", [3, 0])`).
+pub(crate) fn deployed_ix_system_bits() -> [bool; 256] {
+    let raw = cshake256_raw32(WORLD_ROOT_CUSTOMIZATION, &[3u8, 0u8]);
+    let mut bits = [false; 256];
+    for (i, byte) in raw.iter().copied().enumerate() {
+        for bit in 0..8 {
+            bits[i * 8 + bit] = (byte & (128u8 >> bit)) != 0;
         }
     }
-    let root = attempt.parent()?.parent()?;
-    let custody = root.join(DIRECTORY);
-    if let Ok(anchor_val) = read_json_mode(&custody.join("anchor.json"), false) {
-        if anchor_val["point"]["height"].as_str() == Some(height)
-            && anchor_val["point"]["worldRoot"].as_str() == Some(world_root)
-            && anchor_val["chain"].is_string()
-            && anchor_val["siblings"].is_array()
-        {
-            return Some(anchor_val);
-        }
+    bits
+}
+
+/// Deterministically compute the `AuthTrie` root and branch steps from `(height, chain, siblings)`.
+pub(crate) fn compute_world_root_from_system_opening(
+    height: &str,
+    chain: &str,
+    siblings: &[String],
+) -> Result<VerifiedInclusion> {
+    decimal(height)?;
+    decimal(chain)?;
+    if siblings.len() > 256 {
+        return Err(fail("endpoint siblings exceed 256-bit trie depth bound"));
     }
-    let workspace = read_json_mode(&root.join("workspace.json"), false).ok()?;
-    let settings = Settings::load(&custody).ok()?;
-    let mut source = HostProof::new(root, &workspace, &settings).ok()?;
-    let target = Point {
-        height: height.to_owned(),
-        world_root: world_root.to_owned(),
-        witness: None,
+    for sib in siblings {
+        decimal(sib)?;
+    }
+    let system_leaf = system_leaf_digest(height, chain)?;
+    let leaf_node_digest = leaf_system_node_digest(&system_leaf)?;
+    let bits = deployed_ix_system_bits();
+    let mut acc = leaf_node_digest.clone();
+    let mut steps = Vec::with_capacity(siblings.len());
+    for (step_idx, depth) in (0..siblings.len()).rev().enumerate() {
+        let bit = bits[depth];
+        let sib = &siblings[depth];
+        let parent = if bit {
+            branch_node_digest(sib, &acc)?
+        } else {
+            branch_node_digest(&acc, sib)?
+        };
+        steps.push(BranchStep {
+            step: step_idx + 1,
+            depth,
+            bit,
+            direction: if bit { "right (1)" } else { "left (0)" },
+            sibling: sib.clone(),
+            sibling_hex: digest_decimal_to_hex(sib)?,
+            parent: parent.clone(),
+            parent_hex: digest_decimal_to_hex(&parent)?,
+        });
+        acc = parent;
+    }
+    let key_bits_prefix = if siblings.is_empty() {
+        "root (depth 0)".to_owned()
+    } else {
+        let mut s = String::from("0b");
+        for b in &bits[..siblings.len()] {
+            s.push(if *b { '1' } else { '0' });
+        }
+        s
     };
-    let (verified, complete) = source.verified_hop(None, &target).ok()?;
-    if !complete || verified != target {
+    Ok(VerifiedInclusion {
+        height: height.to_owned(),
+        world_root: acc.clone(),
+        world_root_hex: digest_decimal_to_hex(&acc)?,
+        chain: chain.to_owned(),
+        chain_hex: digest_decimal_to_hex(chain)?,
+        system_leaf: system_leaf.clone(),
+        system_leaf_hex: digest_decimal_to_hex(&system_leaf)?,
+        leaf_node_digest: leaf_node_digest.clone(),
+        leaf_node_hex: digest_decimal_to_hex(&leaf_node_digest)?,
+        key_bits_prefix,
+        siblings: siblings.to_vec(),
+        steps,
+        start_height: None,
+        start_world_root: None,
+        start_chain: None,
+        suffix: Vec::new(),
+    })
+}
+
+/// Deterministically verify `ReceiptContinuity.opens`: recomputes `systemLeaf(height, chain)` and
+/// climbs `siblings` along `deployedIx Key.system`, refusing unless the computed root equals `expected_world_root`.
+pub(crate) fn verify_world_root_opening(
+    height: &str,
+    expected_world_root: &str,
+    chain: &str,
+    siblings: &[String],
+) -> Result<VerifiedInclusion> {
+    decimal(expected_world_root)?;
+    let computed = compute_world_root_from_system_opening(height, chain, siblings)?;
+    if computed.world_root != expected_world_root {
+        return Err(fail(format!(
+            "world-root inclusion opening refused: computed root {} does not match confirmation worldRoot {}",
+            computed.world_root, expected_world_root
+        )));
+    }
+    Ok(computed)
+}
+
+fn parse_string_list(value: &Value, key: &str, limit: usize) -> Result<Vec<String>> {
+    let arr = value
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| fail(format!("missing {key}")))?;
+    if arr.len() > limit {
+        return Err(fail(format!("{key} exceeds bound")));
+    }
+    arr.iter()
+        .map(|v| {
+            let s = v.as_str().ok_or_else(|| fail(format!("{key} item is not a string")))?;
+            decimal(s)?;
+            Ok(s.to_owned())
+        })
+        .collect()
+}
+
+/// Offline verification of a retained `inclusion-opening.json` if present in `attempt`.
+pub(crate) fn load_verified_attempt_inclusion(
+    attempt: &Path,
+    expected_height: &str,
+    expected_world_root: &str,
+) -> Option<Result<VerifiedInclusion>> {
+    let path = attempt.join("inclusion-opening.json");
+    if !path.is_file() {
         return None;
     }
-    let (chain, siblings) = verified.witness?;
-    Some(json!({
-        "identity": settings.identity,
-        "point": target.json(),
-        "chain": chain,
-        "siblings": siblings,
-    }))
+    Some((|| {
+        let value = read_json_mode(&path, false)?;
+        let height = text(&value, "height")?;
+        let world_root = text(&value, "worldRoot")?;
+        if height != expected_height || world_root != expected_world_root {
+            return Err(fail(
+                "retained inclusion opening point differs from the attempt's confirmation point",
+            ));
+        }
+        let chain = text(&value, "chain")?;
+        let siblings = parse_string_list(&value, "siblings", 256)?;
+        let mut verified = verify_world_root_opening(height, world_root, chain, &siblings)?;
+        if let Some(start_chain) = value.get("startChain").and_then(Value::as_str) {
+            decimal(start_chain)?;
+            let suffix = parse_string_list(&value, "suffix", MAX_HOPS)?;
+            let end = chain_after_digests(start_chain, &suffix)?;
+            if end != chain {
+                return Err(fail(
+                    "retained inclusion opening suffix chain does not fold to endChain",
+                ));
+            }
+            verified.start_chain = Some(start_chain.to_owned());
+            verified.suffix = suffix;
+            if let (Some(sh), Some(sr)) = (
+                value.get("startHeight").and_then(Value::as_str),
+                value.get("startWorldRoot").and_then(Value::as_str),
+            ) {
+                decimal(sh)?;
+                decimal(sr)?;
+                if let Ok(from_siblings) = parse_string_list(&value, "fromSiblings", 256) {
+                    verify_world_root_opening(sh, sr, start_chain, &from_siblings)?;
+                }
+                verified.start_height = Some(sh.to_owned());
+                verified.start_world_root = Some(sr.to_owned());
+            }
+        }
+        Ok(verified)
+    })())
+}
+
+/// Fetch (if not yet cached) and deterministically verify the `cSHAKE256` world-root inclusion opening
+/// (`op 151`) for a confirmed or charged attempt, persisting `attempt/inclusion-opening.json`.
+pub(crate) fn verify_attempt_inclusion(
+    root: &Path,
+    workspace: &Value,
+    attempt: &Path,
+) -> Result<VerifiedInclusion> {
+    let outcome = match workspace::retained_attempt_outcome(attempt)? {
+        workspace::AttemptOutcome::Confirmed(v) | workspace::AttemptOutcome::Charged(v) => v,
+        workspace::AttemptOutcome::Refused => {
+            return Err(fail("refused attempt has no confirmation worldRoot to open"))
+        }
+        workspace::AttemptOutcome::Pending => {
+            return Err(fail(
+                "undecided attempt has no confirmation point yet; run lookup or retry first",
+            ))
+        }
+    };
+    let height = text(&outcome, "acceptedCount")?;
+    let world_root = text(&outcome, "worldRoot")?;
+    decimal(height)?;
+    decimal(world_root)?;
+
+    let mut last_err: Option<String> = None;
+
+    // 1. Check existing `inclusion-opening.json` or `continuity-witness.json` in `attempt`.
+    if let Some(res) = load_verified_attempt_inclusion(attempt, height, world_root) {
+        match res {
+            Ok(verified) => return Ok(verified),
+            Err(err) => last_err = Some(err),
+        }
+    }
+    let witness_file = attempt.join("continuity-witness.json");
+    if witness_file.is_file() {
+        match (|| -> Result<VerifiedInclusion> {
+            let val = read_json_mode(&witness_file, false)?;
+            if val.get("height").and_then(Value::as_str) != Some(height)
+                || val.get("worldRoot").and_then(Value::as_str) != Some(world_root)
+            {
+                return Err(fail(
+                    "retained continuity witness point differs from the attempt's confirmation point",
+                ));
+            }
+            let chain = text(&val, "chain")?;
+            let siblings = parse_string_list(&val, "siblings", 256)?;
+            let verified = verify_world_root_opening(height, world_root, chain, &siblings)?;
+            let _ = create_file(
+                &attempt.join("inclusion-opening.json"),
+                &serde_json::to_vec(&verified.json()).map_err(fail)?,
+            );
+            Ok(verified)
+        })() {
+            Ok(verified) => return Ok(verified),
+            Err(err) => last_err = Some(err),
+        }
+    }
+
+    // 2. Check `receipt-continuity/anchor.json` if it matches this exact confirmation point.
+    let anchor_path = root.join(DIRECTORY).join("anchor.json");
+    if anchor_path.is_file() {
+        if let Ok(anchor_val) = read_json_mode(&anchor_path, false) {
+            if anchor_val["point"]["height"].as_str() == Some(height)
+                && anchor_val["point"]["worldRoot"].as_str() == Some(world_root)
+            {
+                match (|| -> Result<VerifiedInclusion> {
+                    let chain = text(&anchor_val, "chain")?;
+                    let siblings = parse_string_list(&anchor_val, "siblings", 256)?;
+                    let verified = verify_world_root_opening(height, world_root, chain, &siblings)?;
+                    let _ = create_file(
+                        &attempt.join("inclusion-opening.json"),
+                        &serde_json::to_vec(&verified.json()).map_err(fail)?,
+                    );
+                    Ok(verified)
+                })() {
+                    Ok(verified) => return Ok(verified),
+                    Err(err) => last_err = Some(err),
+                }
+            }
+        }
+    }
+
+    // 3. Query Host `op 151` (`RECEIPT_CONTINUITY`) for the deterministic world-root opening at `(height, worldRoot)`.
+    let socket = match SOCKET.get() {
+        Some(s) => s,
+        None => {
+            return Err(last_err.unwrap_or_else(|| {
+                fail("no retained world-root opening for this attempt and no Host socket is connected to request op 151")
+            }))
+        }
+    };
+    let host = workspace::workspace_host(workspace)?;
+    let config = workspace::member_path(workspace, "config")?;
+    let id_val = if let Ok(settings) = Settings::load(&root.join(DIRECTORY)) {
+        settings.identity
+    } else {
+        let sha = workspace
+            .get("hostSha256")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| crate::host_image_sha256(&host).unwrap_or_default());
+        checked_identity(&host, &sha, &config)?
+    };
+    let target = json!({"height": height, "worldRoot": world_root});
+    let mut query = json!({"identity": id_val, "from": Value::Null, "target": target});
+    if anchor_path.is_file() {
+        if let Ok(anchor_val) = read_json_mode(&anchor_path, false) {
+            if let (Some(ah), Some(ar), Some(ac), Some(asib)) = (
+                anchor_val["point"]["height"].as_str(),
+                anchor_val["point"]["worldRoot"].as_str(),
+                anchor_val.get("chain").and_then(Value::as_str),
+                anchor_val.get("siblings").and_then(Value::as_array),
+            ) {
+                if compare(ah, height) != Ordering::Greater
+                    && compare(&mini_sdk::decimal::add(ah, "4096").unwrap_or_else(|_| height.to_owned()), height)
+                        != Ordering::Less
+                {
+                    query["from"] = json!({"height": ah, "worldRoot": ar});
+                    query["fromChain"] = json!(ac);
+                    query["fromSiblings"] = json!(asib);
+                }
+            }
+        }
+    }
+    let query_bytes = serde_json::to_vec(&query).map_err(fail)?;
+    let frame = crate::session_invoke(
+        &host,
+        socket,
+        &config,
+        mini_sdk::host_operations::RECEIPT_CONTINUITY,
+        &query_bytes,
+    )?;
+    if frame.first() != Some(&mini_sdk::host_operations::RECEIPT_CONTINUITY)
+        || frame.len() as u64 > MAX_JSON
+    {
+        return Err(fail("Host refused continuity opening (op 151) or exceeded bound"));
+    }
+    let response: Value = serde_json::from_slice(&frame[1..]).map_err(fail)?;
+    bounded_response(&response)?;
+    if response["to"]["height"].as_str() != Some(height)
+        || response["to"]["worldRoot"].as_str() != Some(world_root)
+    {
+        return Err(fail("Host op 151 response endpoint differs from requested confirmation point"));
+    }
+    let start_chain = text(&response, "startChain")?;
+    let end_chain = text(&response, "endChain")?;
+    let from_siblings = parse_string_list(&response, "fromSiblings", 256)?;
+    let to_siblings = parse_string_list(&response, "toSiblings", 256)?;
+    let suffix = parse_string_list(&response, "suffix", MAX_HOPS)?;
+    let from_height = text(&response["from"], "height")?;
+    let from_root = text(&response["from"], "worldRoot")?;
+    verify_world_root_opening(from_height, from_root, start_chain, &from_siblings)?;
+    if chain_after_digests(start_chain, &suffix)? != end_chain {
+        return Err(fail("Host op 151 suffix digests do not fold to endChain"));
+    }
+    let mut verified = verify_world_root_opening(height, world_root, end_chain, &to_siblings)?;
+    verified.start_height = Some(from_height.to_owned());
+    verified.start_world_root = Some(from_root.to_owned());
+    verified.start_chain = Some(start_chain.to_owned());
+    verified.suffix = suffix;
+    let mut persisted = verified.json();
+    persisted["fromSiblings"] = json!(from_siblings);
+    let _ = create_file(
+        &attempt.join("inclusion-opening.json"),
+        &serde_json::to_vec(&persisted).map_err(fail)?,
+    );
+    Ok(verified)
 }
 
 #[cfg(test)]
@@ -1505,5 +1994,101 @@ mod tests {
         let sibling = root.0.join("attempts").join("a2");
         fs::create_dir_all(&sibling).unwrap();
         assert!(!finished_in_process(&sibling, &outcome).unwrap());
+    }
+
+    #[test]
+    fn encode_nat_decimal_matches_stream_codec_base255_terminator() {
+        assert_eq!(encode_nat_decimal("0").unwrap(), vec![255]);
+        assert_eq!(encode_nat_decimal("1").unwrap(), vec![1, 255]);
+        assert_eq!(encode_nat_decimal("254").unwrap(), vec![254, 255]);
+        assert_eq!(encode_nat_decimal("255").unwrap(), vec![0, 1, 255]);
+        assert_eq!(encode_nat_decimal("256").unwrap(), vec![1, 1, 255]);
+        assert!(encode_nat_decimal("-1").is_err());
+        assert!(encode_nat_decimal("01").is_err());
+    }
+
+    #[test]
+    fn deterministic_cshake256_world_root_opening_verifies_and_rejects_tampering() {
+        let height = "7";
+        let chain0 = "0";
+        let ev1 = "111";
+        let ev2 = "222";
+        let end_chain = chain_after_digests(chain0, &[ev1.to_owned(), ev2.to_owned()]).unwrap();
+        let siblings = vec!["12345".to_owned(), "67890".to_owned(), "54321".to_owned()];
+        let computed = compute_world_root_from_system_opening(height, &end_chain, &siblings).unwrap();
+        let root_dec = computed.world_root;
+        assert_eq!(computed.steps.len(), 3);
+        let verified = verify_world_root_opening(height, &root_dec, &end_chain, &siblings).unwrap();
+        assert_eq!(verified.world_root, root_dec);
+        assert_eq!(verified.height, height);
+        assert_eq!(verified.chain, end_chain);
+        assert_eq!(verified.steps.len(), 3);
+
+        // Any tamper to worldRoot, endChain, height, or siblings is deterministically rejected.
+        assert!(verify_world_root_opening("8", &root_dec, &end_chain, &siblings).is_err());
+        assert!(verify_world_root_opening(height, "999", &end_chain, &siblings).is_err());
+        assert!(verify_world_root_opening(height, &root_dec, "999", &siblings).is_err());
+        let bad_siblings = vec!["12345".to_owned(), "67891".to_owned(), "54321".to_owned()];
+        assert!(verify_world_root_opening(height, &root_dec, &end_chain, &bad_siblings).is_err());
+        let too_many_siblings = vec!["1".to_owned(); deployed_ix_system_bits().len() + 1];
+        assert!(compute_world_root_from_system_opening(height, &end_chain, &too_many_siblings).is_err());
+    }
+
+    #[test]
+    fn verify_attempt_inclusion_persists_verified_opening_and_rejects_tampered_witness() {
+        let root = Temp::new();
+        let ws = json!({"type":"minidregg-participant-workspace-v1"});
+        save(&root.0, "workspace.json", &ws).unwrap();
+
+        let height = "12";
+        let chain = "987654321";
+        let siblings = vec!["42".to_owned(), "84".to_owned()];
+        let world_root = compute_world_root_from_system_opening(height, chain, &siblings)
+            .unwrap()
+            .world_root;
+
+        let attempt = root.0.join("attempts").join("w-abc123");
+        workspace::make_private_dir(&root.0.join("attempts")).unwrap();
+        workspace::make_private_dir(&attempt).unwrap();
+        let confirmation = json!({
+            "type": "confirmed",
+            "acceptedCount": height,
+            "worldRoot": world_root,
+            "transactionId": "10",
+            "eventId": "20",
+            "confirmation": "installed"
+        });
+        save(&attempt, "outcome.json", &confirmation).unwrap();
+        let witness = json!({
+            "height": height,
+            "worldRoot": world_root,
+            "chain": chain,
+            "siblings": siblings
+        });
+        save(&attempt, "continuity-witness.json", &witness).unwrap();
+
+        assert!(load_verified_attempt_inclusion(&attempt, height, &world_root).is_none());
+        let verified = verify_attempt_inclusion(&root.0, &ws, &attempt).unwrap();
+        assert_eq!(verified.world_root, world_root);
+        assert_eq!(verified.steps.len(), 2);
+        assert!(attempt.join("inclusion-opening.json").is_file());
+
+        let loaded = load_verified_attempt_inclusion(&attempt, height, &world_root)
+            .expect("inclusion-opening.json present")
+            .expect("valid opening");
+        assert_eq!(loaded.world_root, world_root);
+        assert_eq!(loaded.system_leaf, verified.system_leaf);
+
+        // Tamper with inclusion-opening.json and continuity-witness.json -> rejected
+        let tampered = json!({
+            "height": height,
+            "worldRoot": world_root,
+            "chain": "111",
+            "siblings": ["42", "84"]
+        });
+        fs::write(attempt.join("inclusion-opening.json"), serde_json::to_vec(&tampered).unwrap()).unwrap();
+        fs::write(attempt.join("continuity-witness.json"), serde_json::to_vec(&tampered).unwrap()).unwrap();
+        assert!(load_verified_attempt_inclusion(&attempt, height, &world_root).unwrap().is_err());
+        assert!(verify_attempt_inclusion(&root.0, &ws, &attempt).is_err());
     }
 }

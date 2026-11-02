@@ -296,6 +296,7 @@ pub static INSPECT: Grammar = Grammar { verb: "inspect", leaves: &[
     Leaf { path: &["inspect", "law"], args: &[arg("REF", Kind::Ref)], flags: &[switch("--json")], effect: Effect::Read, about: "inspect --view law (the installed law and the current value of each slot it names)" },
     Leaf { path: &["inspect", "receipt"], args: &[arg("ID", Kind::Id)], flags: &[switch("--json")], effect: Effect::Read, about: "inspect --view receipt (a Lean view of the retained receipt)" },
     Leaf { path: &["inspect", "turn"], args: &[arg("ID", Kind::Id)], flags: &[switch("--json")], effect: Effect::Read, about: "inspect --view turn (dry-runs the retained turn, op 130; nothing is submitted)" },
+    Leaf { path: &["inspect", "inclusion"], args: &[arg("ID", Kind::Id)], flags: &[switch("--json")], effect: Effect::Read, about: "mini workspace --action inspect --view inclusion (verify the deterministic cSHAKE256 world-root inclusion opening at acceptedCount, op 151)" },
 ] };
 pub static WHY: Grammar = Grammar { verb: "why", leaves: &[
     Leaf { path: &["why"], args: &[opt("ATTEMPT", Kind::Id)], flags: &[switch("--json")], effect: Effect::Local, about: "mini workspace --action inspect --view why --refusals HOME/refusals: the last refusal held, explained from the Host's own frame (clause, slot values, the request value that passes it)" },

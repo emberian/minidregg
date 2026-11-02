@@ -416,6 +416,107 @@ pub(crate) fn parse(text: &str) -> Result<Value, String> {
     Parser { toks, at: 0 }.law()
 }
 
+/// Render a slot in the shell's law grammar (`Compiler/RefusalReason.lean` `LawLeaf.renderSlot`).
+pub(crate) fn render_slot(slot: &str) -> String {
+    let parts: Vec<&str> = slot.split('/').collect();
+    match parts.as_slice() {
+        ["resource", "field", n, "after"] => format!("field {n}"),
+        ["resource", "field", n, "before"] => format!("field {n} before"),
+        ["resource", "field", n, "delta"] => format!("field {n} delta"),
+        ["resource", "pair", a, b, "delta"] => format!("pair {a},{b} delta"),
+        ["request", "subject"] => "subject".into(),
+        ["request", "verb"] => "verb".into(),
+        ["request", "cost"] => "cost".into(),
+        _ => format!("slot {slot:?}"),
+    }
+}
+
+/// Render a slot value in the shell's law grammar (`Compiler/RefusalReason.lean` `LawLeaf.renderValue`).
+pub(crate) fn render_value(slot: &str, value: &str) -> String {
+    if slot == "request/verb" {
+        if let Ok(tag) = value.parse::<i64>() {
+            if let Some((name, _)) = VERBS.iter().find(|(_, t)| *t == tag) {
+                return (*name).to_owned();
+            }
+        }
+    }
+    value.to_owned()
+}
+
+/// Render a `Pred` JSON tree back to the shell's law grammar (`Compiler/RefusalReason.lean` `LawLeaf.renderClause`).
+pub(crate) fn render_clause(pred: &Value) -> String {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    let s = |k: &str| pred.get(k).and_then(Value::as_str).unwrap_or("?");
+    match ty {
+        "eq" => {
+            let slot = s("slot");
+            format!("{} == {}", render_slot(slot), render_value(slot, s("value")))
+        }
+        "le" => {
+            let slot = s("slot");
+            format!("{} <= {}", render_slot(slot), render_value(slot, s("value")))
+        }
+        "memberOf" => {
+            let slot = s("slot");
+            let vals: Vec<String> = pred
+                .get("values")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(|v| render_value(slot, v))
+                .collect();
+            format!("{} in {{{}}}", render_slot(slot), vals.join(","))
+        }
+        "writeOnce" => format!("{} writeOnce", render_slot(s("slot"))),
+        "monotone" => format!("{} monotone", render_slot(s("slot"))),
+        "eqSlots" => format!("{} == {}", render_slot(s("left")), render_slot(s("right"))),
+        "leSlots" => format!("{} <= {}", render_slot(s("left")), render_slot(s("right"))),
+        "leSlotsOff" => format!(
+            "{} <= {} + {}",
+            render_slot(s("left")),
+            render_slot(s("right")),
+            s("offset")
+        ),
+        "hashEq" => {
+            let vals: Vec<String> = pred
+                .get("values")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(render_slot)
+                .collect();
+            format!(
+                "{} opens ({}) with {}",
+                render_slot(s("commit")),
+                vals.join(", "),
+                render_slot(s("blinder"))
+            )
+        }
+        "ran" => format!("ran {}", s("program")),
+        "not" => match pred.get("predicate") {
+            Some(inner) => format!("not ({})", render_clause(inner)),
+            None => "not (?)".into(),
+        },
+        "all" | "any" => {
+            let items: Vec<String> = pred
+                .get("predicates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(render_clause)
+                .collect();
+            match (ty, items.is_empty()) {
+                ("all", true) => "open".into(),
+                ("any", true) => "sealed".into(),
+                _ => format!("{ty} [ {} ]", items.join(", ")),
+            }
+        }
+        _ => pred.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
