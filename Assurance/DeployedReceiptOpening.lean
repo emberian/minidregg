@@ -68,6 +68,36 @@ theorem encodeNat_def (n : Nat) :
 theorem encodeNat_zero : StreamCodec.encodeNat 0 = [255] :=
   rfl
 
+/-- Concrete `StreamCodec.encodeNat` byte vectors matching
+`encode_nat_decimal_matches_stream_codec_base255_terminator` in
+`native/resource-client/src/receipt_continuity.rs`. -/
+theorem encodeNat_vectors :
+    StreamCodec.encodeNat 0 = [255] ∧
+    StreamCodec.encodeNat 1 = [1, 255] ∧
+    StreamCodec.encodeNat 254 = [254, 255] ∧
+    StreamCodec.encodeNat 255 = [0, 1, 255] ∧
+    StreamCodec.encodeNat 256 = [1, 1, 255] := by
+  decide
+
+/-- `WorldRoot.worldCustomization` is the UTF-8 byte list of `"DREGG.WORLD-ROOT/v3"`,
+matching `WORLD_ROOT_CUSTOMIZATION` in `native/resource-client/src/receipt_continuity.rs`. -/
+theorem worldCustomization_eq :
+    WorldRoot.worldCustomization = "DREGG.WORLD-ROOT/v3".toUTF8.toList :=
+  rfl
+
+/-- `PersistedCodecTags.native_host_system_v1` is `"DREGG.NATIVE-HOST.SYSTEM/v2"`,
+matching `SYSTEM_LEAF_CUSTOMIZATION` in `native/resource-client/src/receipt_continuity.rs`. -/
+theorem systemLeafCustomization_eq :
+    Minidregg.Compiler.PersistedCodecTags.native_host_system_v1 =
+      "DREGG.NATIVE-HOST.SYSTEM/v2" :=
+  rfl
+
+/-- `WorldRoot.logCustomization` is the UTF-8 byte list of `"DREGG.LOG/v1"`,
+matching `LOG_CHAIN_CUSTOMIZATION` in `native/resource-client/src/receipt_continuity.rs`. -/
+theorem logCustomization_eq :
+    WorldRoot.logCustomization = "DREGG.LOG/v1".toUTF8.toList :=
+  rfl
+
 /-- `digestStream` encodes a `Digest` by `StreamCodec.encodeNat` of its numeric value. -/
 theorem digestStream_encode_eq (d : Digest) :
     digestStream.encode d = StreamCodec.encodeNat d.value :=
@@ -112,6 +142,24 @@ theorem chainDigest_stream_eq (acc turn : Digest) :
         ((StreamCodec.product digestStream digestStream).encode (acc, turn))).digest :=
   rfl
 
+/-- `AuthTrie.climb` (top-down recursion) equals a bottom-up `List.foldr` over `List.zip bits siblings`,
+which is the exact `(0..siblings.len()).rev()` accumulator loop in
+`compute_world_root_from_system_opening` (`native/resource-client/src/receipt_continuity.rs`). -/
+theorem climb_eq_foldr_zip {K V D : Type} [DecidableEq K] [DecidableEq V] [DecidableEq D]
+    (dig : AuthTrie.NodeIn K V D → D) (bits : List Bool) (siblings : List D) (below : D) :
+    AuthTrie.climb dig bits siblings below =
+      (List.zip bits siblings).foldr
+        (fun bs acc => if bs.1 then dig (.branch bs.2 acc) else dig (.branch acc bs.2))
+        below := by
+  induction bits generalizing siblings with
+  | nil =>
+    cases siblings <;> rfl
+  | cons b bits ih =>
+    cases siblings with
+    | nil => rfl
+    | cons s siblings =>
+      simp only [AuthTrie.climb, List.zip_cons_cons, List.foldr_cons, ih]
+
 /-- `ReceiptContinuity.opens` holds if and only if the sibling path has length at most
 `(WorldRoot.deployedIx .system).length` (`256`) and `AuthTrie.climb` along
 `WorldRoot.deployedIx .system` reconstructs `point.worldRoot`, matching
@@ -127,6 +175,20 @@ theorem opens_iff_climb (point : Point) (chain : Digest) (siblings : List Digest
           point.worldRoot := by
   unfold ReceiptContinuity.opens AuthTrie.verify AuthTrie.Terminal.input
   simp [Bool.and_eq_true, decide_eq_true_eq]
+
+/-- Bottom-up `List.foldr` formulation of `ReceiptContinuity.opens`, matching the reverse loop
+in `compute_world_root_from_system_opening` (`native/resource-client/src/receipt_continuity.rs`). -/
+theorem opens_iff_foldr_zip (point : Point) (chain : Digest) (siblings : List Digest) :
+    ReceiptContinuity.opens point chain siblings = true ↔
+      siblings.length ≤ (WorldRoot.deployedIx .system).length ∧
+        (List.zip ((WorldRoot.deployedIx .system).take siblings.length) siblings).foldr
+          (fun bs acc =>
+            if bs.1 then WorldRoot.worldDig (.branch bs.2 acc)
+            else WorldRoot.worldDig (.branch acc bs.2))
+          (WorldRoot.worldDig
+            (.leaf .system (DurableCheckpointCodec.systemLeaf point.height chain))) =
+          point.worldRoot := by
+  rw [opens_iff_climb, climb_eq_foldr_zip]
 
 /-! ## §2. `StreamCodec` / `LawfulCodec` definitions, roundtrip & canonicality -/
 
@@ -421,6 +483,20 @@ def auditSuffix : List Digest :=
 def opening2 : OpeningRecord :=
   makeAuditOpening 2 (ReceiptContinuity.chainAfterDigests opening0.chain auditSuffix)
 
+/-- Cross-language test vector matching `system_opening_reconstructs_world_root_and_rejects_tamper`
+in `native/resource-client/src/receipt_continuity.rs`:
+`height = 7`, `chain = chainAfterDigests ⟨0⟩ [⟨111⟩, ⟨222⟩]`,
+`siblings = [⟨12345⟩, ⟨67890⟩, ⟨54321⟩]`. -/
+def rustCompatOpening7 : OpeningRecord :=
+  let chain := ReceiptContinuity.chainAfterDigests ⟨0⟩ [⟨111⟩, ⟨222⟩]
+  let siblings : List Digest := [⟨12345⟩, ⟨67890⟩, ⟨54321⟩]
+  let worldRoot :=
+    AuthTrie.climb WorldRoot.worldDig
+      ((WorldRoot.deployedIx .system).take siblings.length)
+      siblings
+      (WorldRoot.worldDig (.leaf .system (DurableCheckpointCodec.systemLeaf 7 chain)))
+  ⟨⟨7, worldRoot⟩, chain, siblings⟩
+
 /-- Authentic continuity query and extension from `opening0` (height 0) to `opening2` (height 2). -/
 def query0to2 : ReceiptContinuity.Query :=
   ⟨auditIdentity, some opening0.point, opening2.point⟩
@@ -456,16 +532,19 @@ def opening2TamperedChain : OpeningRecord :=
 
 /-- Computable audit function exercising positive opening/continuity checks, wire codec
 roundtrips, non-canonical wire rejections, and negative tampered-sibling / tampered-height /
-tampered-chain vectors. -/
+tampered-chain vectors (including the `receipt_continuity.rs` cross-language height-7 vector). -/
 def checkReceiptOpeningBridge : Bool :=
   let accepted (q : ReceiptContinuity.Query) (e : ReceiptContinuity.Extension) : Bool :=
     (ReceiptContinuity.verify q e).isOk
-  -- Positive 1: checkpoint openings at height 0 and height 2 pass
+  -- Positive 1: checkpoint openings at height 0, height 2, and the Rust height-7 vector pass
   checkOpeningRecord opening0 &&
   checkOpeningRecord opening2 &&
+  checkOpeningRecord rustCompatOpening7 &&
   -- Positive 2: wire codecs roundtrip opening records and continuity envelopes
   (openingRecordCodec.decode (openingRecordCodec.encode opening0) == some opening0) &&
   (openingRecordCodec.decode (openingRecordCodec.encode opening2) == some opening2) &&
+  (openingRecordCodec.decode (openingRecordCodec.encode rustCompatOpening7) ==
+    some rustCompatOpening7) &&
   (continuityEnvelopeCodec.decode (continuityEnvelopeCodec.encode (query0to2, ext0to2)) ==
     some (query0to2, ext0to2)) &&
   -- Positive 3: `ReceiptContinuity.verify` accepts both anchored and bootstrap queries
@@ -473,15 +552,18 @@ def checkReceiptOpeningBridge : Bool :=
   accepted queryBootstrap2 extBootstrap2 &&
   -- Negative 1: tampered sibling rejected by `checkOpeningRecord` and `ReceiptContinuity.verify`
   !checkOpeningRecord opening2TamperedSibling &&
+  !checkOpeningRecord { rustCompatOpening7 with siblings := [⟨12345⟩, ⟨67891⟩, ⟨54321⟩] } &&
   !accepted query0to2 { ext0to2 with toSiblings := opening2TamperedSibling.siblings } &&
   !accepted query0to2 { ext0to2 with fromSiblings := tamperFirstSibling opening0.siblings } &&
   !accepted query0to2 { ext0to2 with toSiblings := ⟨0⟩ :: opening2.siblings } &&
   -- Negative 2: tampered height rejected by `checkOpeningRecord` and `ReceiptContinuity.verify`
   !checkOpeningRecord opening2TamperedHeight &&
+  !checkOpeningRecord { rustCompatOpening7 with point := { rustCompatOpening7.point with height := 8 } } &&
   !accepted { query0to2 with target := opening2TamperedHeight.point }
     { ext0to2 with endPoint := opening2TamperedHeight.point } &&
   -- Negative 3: tampered chain rejected by `checkOpeningRecord` and `ReceiptContinuity.verify`
   !checkOpeningRecord opening2TamperedChain &&
+  !checkOpeningRecord { rustCompatOpening7 with chain := ⟨999⟩ } &&
   !accepted query0to2 { ext0to2 with endChain := opening2TamperedChain.chain } &&
   !accepted query0to2 { ext0to2 with startChain := ⟨opening0.chain.value + 1⟩ } &&
   -- Negative 4: tampered suffix / rollback / same-height conflict rejected
@@ -494,8 +576,11 @@ def checkReceiptOpeningBridge : Bool :=
 
 #guard checkOpeningRecord opening0 = true
 #guard checkOpeningRecord opening2 = true
+#guard checkOpeningRecord rustCompatOpening7 = true
 #guard (openingRecordCodec.decode (openingRecordCodec.encode opening0) == some opening0) = true
 #guard (openingRecordCodec.decode (openingRecordCodec.encode opening2) == some opening2) = true
+#guard (openingRecordCodec.decode (openingRecordCodec.encode rustCompatOpening7) ==
+  some rustCompatOpening7) = true
 #guard (continuityEnvelopeCodec.decode (continuityEnvelopeCodec.encode (query0to2, ext0to2)) ==
   some (query0to2, ext0to2)) = true
 #guard (ReceiptContinuity.verify query0to2 ext0to2).isOk = true
@@ -507,7 +592,10 @@ def checkReceiptOpeningBridge : Bool :=
 
 /-! ## §5. Axiom Audit -/
 
+#assert_axioms encodeNat_vectors
+#assert_axioms climb_eq_foldr_zip
 #assert_axioms opens_iff_climb
+#assert_axioms opens_iff_foldr_zip
 #assert_axioms encodeNat_roundtrip
 #assert_axioms encodeNat_canonical
 #assert_axioms noncanonical_zero_rejected
