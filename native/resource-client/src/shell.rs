@@ -100,6 +100,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "job", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "jobs", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "bend", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "seat", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "inbox", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "export", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "pay", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -1444,6 +1445,26 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 if let Some(value) = value { flags.push(flag(&name[2..], value.clone())); }
             }
             client("bend", flags)
+        }
+        "seat" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::SEAT, &w)?;
+            let action = p.leaf.path[1];
+            let mut flags = vec![
+                flag("action", action),
+                flag("workspace", ws()),
+                flag("home", session.home.clone()),
+            ];
+            for (i, arg) in p.leaf.args.iter().enumerate() {
+                if let Some(val) = p.opt(i) {
+                    flags.push(flag(crate::seat::positional_flag(arg.name), val));
+                }
+            }
+            for (name, value) in &p.flags {
+                if let Some(value) = value {
+                    flags.push(flag(&name[2..], value.clone()));
+                }
+            }
+            client("seat", flags)
         }
         "jobs" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::JOBS, &w)?;
