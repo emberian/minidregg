@@ -36,8 +36,6 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-noncomputable section
-
 /-! ## One exact committed registry and envelope -/
 
 def credentialDomain : List UInt8 :=
@@ -304,7 +302,7 @@ def signedAuthorization :
   policyMembershipVerified := rfl
   policyVerified := rfl
 
-noncomputable def acceptedSignature :
+def acceptedSignature :
     AcceptedCredential requestDigestScheme (signaturePortal demoVerifier)
       (authState attenuatedCell) useRequest where
   authorization := signedAuthorization
@@ -612,7 +610,5 @@ structure ProductionCompletion
 /-- info: 'Minidregg.Assurance.CredentialSignedEnvelopeEndpoint.rotated_epoch_rejects_old_key' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms rotated_epoch_rejects_old_key
-
-end
 
 end Minidregg.Assurance.CredentialSignedEnvelopeEndpoint

@@ -14,7 +14,7 @@ Group=mini-door
 Slice=mini.slice
 UMask=0077
 ExecStart=/var/lib/mini/candidate/current/bin/mini-door
-Environment=MINI_DOOR_LISTEN=127.0.0.1:8795 MINI_DOOR_QUEUE=/var/lib/mini-door/queue MINI_DOOR_STATUS=/var/lib/mini-door-status MINI_DOOR_TRUSTED_PROXY=127.0.0.1
+Environment=MINI_DOOR_LISTEN=127.0.0.1:8796 MINI_DOOR_QUEUE=/var/lib/mini-door/queue MINI_DOOR_STATUS=/var/lib/mini-door-status MINI_DOOR_TRUSTED_PROXY=127.0.0.1
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes

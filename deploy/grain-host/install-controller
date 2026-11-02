@@ -280,7 +280,7 @@ UMask=0077
 NoNewPrivileges=yes
 LimitCORE=0
 TasksMax=64
-MemoryMax=1G
+MemoryMax=2G
 
 [Install]
 WantedBy=multi-user.target
@@ -307,7 +307,7 @@ UMask=0077
 NoNewPrivileges=yes
 LimitCORE=0
 TasksMax=64
-MemoryMax=1G
+MemoryMax=2G
 
 [Install]
 WantedBy=default.target

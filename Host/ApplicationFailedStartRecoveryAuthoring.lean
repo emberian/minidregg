@@ -82,9 +82,9 @@ def planCodec : LawfulCodec Plan := NativeHostCodec.framed
   "DREGG/APPLICATION/FAILED-START-RECOVERY-PLAN/v1".toUTF8.toList
   planStream
 
-private def cellAt (config : Config) (opened : Opened config) (resource : Nat) :
-    Option (PackedCell CanonicalCellRegistry.registry) :=
-  match opened.directory.directory.slots resource with
+private def cellAtOn {deployment : CanonicalCellRegistry.Deployment} (ground : ServedBasis.Ground deployment)
+    (resource : Nat) : Option (PackedCell CanonicalCellRegistry.registry) :=
+  match ground.directory.slots resource with
   | .present cell => some cell
   | .absent => none
 
@@ -95,13 +95,13 @@ private def fixedHeaders (pin : Pin) (plan : SigningPlan) : Except String Unit :
     unless header.keyId == pin.managementKeyId do
       throw "completion signing key differs from operator pin"
 
-/-- Op70 obtains a source-derived plan from the exact admitted current image.
+/-- Op206 obtains a source-derived plan from the exact admitted current image.
 The physical report is verified under the platform record's custodian key before
-any management header escapes. Current grants and law remain decisive in op38. -/
-def prepareVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+any management header escapes. Current grants and law remain decisive in op208. -/
+private def prepareOn (config : Config) {store : DurableHistory.StoreIdentity}
+    (ground : ServedBasis.Ground config.deployment)
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (pin : Pin)
     (request : Request) : IO (Except String Plan) := do
-  let opened := verified.opened
   let some begin := ApplicationLifecycleBeginV3Ingress.codec.decode request.beginBytes
     | return .error "noncanonical completion BEGIN-v3 ingress"
   let some claim := ApplicationLifecycleClaimV3Ingress.codec.decode request.claimIngressBytes
@@ -116,7 +116,7 @@ def prepareVerified (config : Config) {target : Durable}
     return .error "completion subject or resource differs from operator pin"
   if !ApplicationLifecycleResidentProfile.beginMatchesV3 config.storeIdentity begin then
     return .error "completion BEGIN is outside resident host profile"
-  let some record := PlatformCellDomain.recordOn config.deployment opened.durable.snapshot
+  let some record := PlatformCellDomain.recordOn config.deployment ground.cells
     | return .error "platform cell unavailable (completion custodian key)"
   let some key := record.completionCustodianKey
     | return .error "physical custodian key unavailable in the platform record"
@@ -124,15 +124,11 @@ def prepareVerified (config : Config) {target : Durable}
       config.deployment.domain config.profile.semantics key begin physical with
   | .error detail => return .error detail
   | .ok _ => pure ()
-  let count := physical.report.claim.core.claimReceipt.acceptedCount
-  if count == 0 || !(verified.claimsV3.any fun prior =>
-      prior.index + 1 == count && prior.ingress == claim &&
-      prior.record.transactionId ==
-        physical.report.claim.core.claimReceipt.transactionId) then
+  if physical.report.claim.core.claimReceipt.acceptedCount == 0 then
     return .error "original claim absent from admitted verified history"
-  let some appCell := cellAt config opened pin.app
+  let some appCell := cellAtOn ground pin.app
     | return .error "current app cell unavailable"
-  let some packageCell := cellAt config opened pin.packageManifest
+  let some packageCell := cellAtOn ground pin.packageManifest
     | return .error "current package cell unavailable"
   let some atomBefore := ApplicationFailedStartRecoveryAdmission.packageAtom
       config.deployment.domain pin.packageManifest pin.app packageCell
@@ -150,7 +146,7 @@ def prepareVerified (config : Config) {target : Durable}
       packageAtomBefore := atomBefore }
   unless source.valid do
     return .error "completion source identities refused"
-  match ← ApplicationFailedStartRecoveryHistory.select config verified.reader opened.durable.height source with
+  match ← ApplicationFailedStartRecoveryHistory.select config reader ground.height source with
   | .error detail => return .error detail
   | .ok _ => pure ()
   if ApplicationFailedStartRecoveryAdmission.appState pin.app appCell !=
@@ -166,30 +162,30 @@ def prepareVerified (config : Config) {target : Durable}
       signed := ⟨[], [], [], []⟩
       packageObservationEnvelope := [] }
   unless ApplicationFailedStartRecoveryAdmission.creationMarkersCurrent
-      config opened.ground preview do
+      config ground preview do
     return .error "completion creation marker state refused"
   let command := source.command config.deployment.domain config.profile.semantics
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.ground command
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground command
     | return .error "current completion command preparation refused"
   if !ApplicationFailedStartRecoveryAdmission.linkedCurrentPolicies config.deployment
-      config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.ground source prepared then
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground source prepared then
     return .error "current completion management/package law differs"
   if !decide (DeclaredResourceController.PhysicalShape prepared) then
     return .error "current completion physical shape refused"
   let commandBytes := DeclaredResourceController.commandCodec.encode command
-  let .ok invocation := NativeHost.prepareLoaded config opened (.invoke commandBytes)
+  let .ok invocation := NativeHost.prepareInvokeOn config ground (config.genesisHeight + ground.height) commandBytes
     | return .error "current completion invocation signing plan refused"
   if invocation.finalizedDraft != .invoke commandBytes then
     return .error "completion invocation plan differs from source"
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let wanted := ApplicationFailedStartRecoveryAdmission.packageRequest
-    config opened.ground source prepared
+    config ground source prepared
   let .ok header := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
     | return .error "current package observation signing key unavailable"
   let packageSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩
@@ -200,6 +196,52 @@ def prepareVerified (config : Config) {target : Durable}
   | .error detail => return .error detail
   | .ok _ => pure ()
   return .ok plan
+
+def prepareVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+    (request : Request) : IO (Except String Plan) :=
+  prepareOn config verified.opened.ground verified.reader pin request
+
+private def planKeys (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) : Option DurableView.Keys := do
+  let begin ← ApplicationLifecycleBeginV3Ingress.codec.decode request.beginBytes
+  let claim ← ApplicationLifecycleClaimV3Ingress.codec.decode request.claimIngressBytes
+  let physical ← ApplicationFailedStartRecoveryReport.signedCodec.decode request.signedReportBytes
+  let appCell ← cellAtOn ground pin.app
+  let packageCell ← cellAtOn ground pin.packageManifest
+  let atomBefore ← ApplicationFailedStartRecoveryAdmission.packageAtom
+      config.deployment.domain pin.packageManifest pin.app packageCell
+  let source : ApplicationFailedStartRecoverySource.Source :=
+    { originalBegin := begin
+      originalClaim := claim
+      physical := physical
+      currentAppRoot := appCell.payload.root
+      currentPackageRoot := packageCell.payload.root
+      appCapability := pin.appCapability
+      appObserveCapability := pin.appObserveCapability
+      packageCapability := pin.packageCapability
+      packageObserveCapability := pin.packageObserveCapability
+      packageAtomBefore := atomBefore }
+  return ApplicationFailedStartRecoveryAdmission.keys config
+    { domain := config.deployment.domain
+      semantics := config.profile.semantics
+      source := source
+      signed := ⟨[], [], [], []⟩
+      packageObservationEnvelope := [] }
+
+def prepareRequestLight (config : Config) (light : NativeHostLight.Light config) (pin : Pin)
+    (bytes : List UInt8) : IO (Except String Plan) := do
+  let some request := requestCodec.decode bytes
+    | return .error "noncanonical completion operator request"
+  let cells ← match ← light.basis ⟨[], []⟩ with
+    | .error detail => return .error detail
+    | .ok basis => pure basis
+  let keys := (planKeys config (.ofBasis cells) pin request).getD ⟨[], []⟩
+  match ← light.basis keys with
+  | .error detail => return .error detail
+  | .ok basis =>
+      prepareOn config (.ofBasis basis) (light.opening.reader config.transport ResourceBirthCodec.rootBytes)
+        pin request
 
 def prepareRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)

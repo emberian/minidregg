@@ -11,8 +11,6 @@ import Assurance.ObjectiveZkLiteralArithmetic
 import Assurance.ObjectiveZkLiteralInstance
 import Assurance.ObjectiveZkRefinementAudit
 import Assurance.ObjectiveZkStepTariff
-import Assurance.ObjectiveZkTraceDisclosure
-import Assurance.ResourceMoneyOperationDomainAudit
 import Compiler.BendCommitmentFrame
 import Compiler.BendCommitmentFrameChecks
 import Compiler.BendCommittedNetwork
@@ -79,10 +77,14 @@ import Compiler.PortableParticipantPinIO
 import Compiler.PrivateCircuitAllocationFast
 import Compiler.QualificationReport
 import Compiler.RoomKeyReleaseCodec
+import Effects.Revival.HostedConversationEngine
 import Effects.Revival.HostedConversationProofs
 import Effects.Revival.HostedConversationStatements
 import Effects.Revival.HostedDavProofs
 import Effects.Revival.HostedDavStatements
+import Effects.Revival.HostedLifecycle
+import Effects.Revival.HostedLifecycleProofs
+import Effects.Revival.HostedLifecycleStatements
 import Host.BendProofWitness
 import Host.ClientConsentSettingsScenario
 import Host.CurrentRecipientVerifier

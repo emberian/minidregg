@@ -5,6 +5,7 @@ cross this boundary. Submission constructs its own current prepared image. -/
 module
 
 public import Kernel.DeclaredResourceController
+public import Kernel.StoryLaw
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -249,10 +250,58 @@ theorem preparePolicyLegs_lawRefusal [DecidableEq F]
   simp only [preparePolicyLegs, PolicyLegs.firstLawRefusal, findSome_map,
     preparePolicyLeg_lawRefusal, firstLawRefusal]
 
+/-- Transport the prepared policy leg's resolved law to the canonical `policyConfig` index. -/
+def PreparedPolicyLeg.preparedLaw [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
+    (leg : PreparedPolicyLeg prepared tuple incidence) :
+    ComposedPolicyAdmission.PreparedLaw (F := F) (policyConfig prepared tuple incidence) :=
+  policyConfigFromStep_exact prepared tuple incidence ▸ (leg.contextExact ▸ leg.law)
+
+/-- Check through `Kernel.StoryLaw.checkInstalled` whether the sealed story law of `t`
+for player `S` is an active component of this prepared policy leg's effective closure. -/
+def PreparedPolicyLeg.checkStoryInstalled [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
+    (leg : PreparedPolicyLeg prepared tuple incidence)
+    (t : Minidregg.Kernel.StoryLaw.Table) (S : Int) :
+    Option (PLift (Minidregg.Kernel.StoryLaw.StoryInstalled t S tuple incidence)) :=
+  Minidregg.Kernel.StoryLaw.checkInstalled t S tuple incidence leg.preparedLaw
+
+theorem PreparedPolicyLeg.storyInstalled_of_check [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
+    (leg : PreparedPolicyLeg prepared tuple incidence)
+    (t : Minidregg.Kernel.StoryLaw.Table) (S : Int)
+    {proof : PLift (Minidregg.Kernel.StoryLaw.StoryInstalled t S tuple incidence)}
+    (_checked : leg.checkStoryInstalled t S = some proof) :
+    Minidregg.Kernel.StoryLaw.StoryInstalled t S tuple incidence :=
+  proof.down
+
+/-- Check whether a prepared policy leg at `incidence` has the sealed story law of `t`
+for player `S` installed (`Kernel.StoryLaw.StoryInstalled`). -/
+def preparePolicyLegStoryInstalled [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (t : Minidregg.Kernel.StoryLaw.Table) (S : Int) :
+    Option (PLift (Minidregg.Kernel.StoryLaw.StoryInstalled t S tuple incidence)) :=
+  (preparePolicyLeg prepared tuple incidence).bind (·.checkStoryInstalled t S)
+
+theorem preparePolicyLegStoryInstalled_sound [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    (t : Minidregg.Kernel.StoryLaw.Table) (S : Int)
+    {proof : PLift (Minidregg.Kernel.StoryLaw.StoryInstalled t S tuple incidence)}
+    (_checked : preparePolicyLegStoryInstalled prepared tuple incidence t S = some proof) :
+    Minidregg.Kernel.StoryLaw.StoryInstalled t S tuple incidence :=
+  proof.down
+
 #assert_axioms preparePolicyLeg_range
 #assert_axioms preparePolicyLeg_cast
 #assert_axioms preparePolicyLeg_law
 #assert_axioms preparePolicyLegs_rangeRefusal
 #assert_axioms preparePolicyLegs_castRefusal
 #assert_axioms preparePolicyLegs_lawRefusal
+#assert_axioms PreparedPolicyLeg.storyInstalled_of_check
+#assert_axioms preparePolicyLegStoryInstalled_sound
 end Minidregg.Kernel.DeclaredResourceController

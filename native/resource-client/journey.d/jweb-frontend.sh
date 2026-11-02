@@ -246,9 +246,9 @@ docpage=$(req GET "/doc/$DOC")
 row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$(st) receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 page=$(req GET "/receipts/${RID:-none}")
 row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st)"
-# The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
-# point and not as a proof (A10's inclusion opening is pending).
-row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
+# The receipt's anchor: the sealed call's digest and the Host's confirmation point (plus op 151
+# world-root inclusion opening when available, or inclusion proof pending when continuity is uninitialized).
+row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -qE 'inclusion proof pending|World-root inclusion opening' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
 # Publication, end to end (lane/un-public-read): the member publishes DOC to the public reader (a second
 # member with its own subject), the helper hands the reference over, and an ANONYMOUS visitor reads
 # the text (200) on /doc/DOC and on the front page; an unpublished document (DOC2) is refused; after

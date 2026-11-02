@@ -7,22 +7,22 @@ use crate::http::html_escape as h;
 use crate::session::Who;
 
 pub const PLACES: &[(&str, &str, &str)] = &[
-    ("Documents", "/doc", "The documents you hold: pages, history, diffs, append and edit."),
+    ("Documents", "/doc", "Documents you hold: pages, history, diffs, append and edit."),
     ("Boards", "/board", "Tasks on columns: add, move, take."),
     ("Rooms", "/room", "Members, streams as chat, residents."),
-    ("Apps", "/apps", "The app market: claims beside verdicts; install; your grains, opened on their own origins."),
-    ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
-    ("Stories", "/story", "The stories you play: invitations waiting, join, invite, enter."),
-    ("Programs", "/bend", "Your bend programs: what each activity awaits; answer a slot you decide."),
-    ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
-    ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
-    ("Subscribe", "/subscribe", "The subscriber tier: a house Hermes in the subscribers room; your window and its end."),
-    ("Export", "/export", "Your world as one archive, to take with you."),
-    ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
-    ("Registry", "/registry", "The box's laws: every Host operation, its receiver and effect; the response markers; the consent plans; the default laws."),
-    ("Tour", "/tour", "Fifteen minutes from a browser: the twelve steps, with the real forms."),
-    ("Commands", "/verb", "Every shell verb as a form, derived from the shell's own table."),
-    ("Terminal", "/term", "mini shell, in the page."),
+    ("Apps", "/apps", "App market: claims beside verdicts; install; grains opened on their own origins."),
+    ("Receipts", "/receipts", "Attempts and decoded outcomes."),
+    ("Stories", "/story", "Interactive stories: invitations, join, invite, enter."),
+    ("Programs", "/bend", "Bend programs: active awaits and reply forms."),
+    ("Purse", "/purse", "Account meter, payments, top-ups, tariffs."),
+    ("Grants & laws", "/grants", "Held grants; delegate, revoke, install a law."),
+    ("Subscribe", "/subscribe", "Subscriber tier: house Hermes in the subscribers room."),
+    ("Export", "/export", "Download your workspace archive."),
+    ("Keys & sessions", "/keys", "Hosted key status and browser sessions."),
+    ("Registry", "/registry", "Host operations, receivers, response markers, consent plans, default laws."),
+    ("Tour", "/tour", "Twelve guided steps with live forms."),
+    ("Commands", "/verb", "Shell verbs rendered as forms."),
+    ("Terminal", "/term", "mini shell in the browser."),
 ];
 
 pub const WORLD_READABLE: &str = "Everything on this box is world-readable: every member can read the whole demo Store, and a hosted account's signing key lives on the box. Keep nothing private or precious here.";
@@ -100,7 +100,7 @@ pub fn page(title: &str, status: u16, who: Option<&Who>, path: &str, stage: &str
          <body data-path=\"{path}\">\n\
          <a class=\"skip\" href=\"#stage\">Skip to content</a>\n\
          <header class=\"top\"><a class=\"brand\" href=\"/\" data-full>Mini</a>\
-         <form method=\"get\" action=\"/search\" class=\"search\" role=\"search\"><input type=\"search\" name=\"q\" placeholder=\"Search documents\" aria-label=\"Search documents\"></form>\
+         <form method=\"get\" action=\"/search\" class=\"search\" role=\"search\"><input type=\"search\" name=\"query\" placeholder=\"Search documents\" aria-label=\"Search documents\"></form>\
          <div class=\"identity\">{identity}</div></header>\n\
          <nav class=\"rail\" aria-label=\"Places\"><ul>{rail}</ul></nav>\n\
          <main class=\"stage\" id=\"stage\" tabindex=\"-1\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><div class=\"pane-head\"><h1 class=\"pane-title\">{title}</h1></div><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\

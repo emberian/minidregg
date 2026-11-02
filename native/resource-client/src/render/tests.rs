@@ -348,3 +348,188 @@ fn a_workspace_is_asked_for_names_only_by_a_page_that_names_something() {
     assert_eq!(text::line_notation(&rendered.lines[0]), "[one](→ notes)");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn html_linked_wires_valid_reference_names_and_transclusion_sources() {
+    let mut document = fixture("k12t-readable");
+    let source = document["transclusions"][0]["opening"]["source"].as_str().unwrap().to_owned();
+    document["order"].as_array_mut().unwrap().insert(
+        0,
+        json!({
+            "element":"9100","parent":"1","kind":"atom","atom":"9100","payload":"73656520776861742d69732d6d696e69",
+            "revision":"1","createdBy":{"subject":"7"},"struck":false,
+            "marks":[
+                {"kind":"link","fresh":true,"linkLive":true,"target":{"type":"document","id":"78"}},
+                {"kind":"link","fresh":true,"linkLive":true,"target":{"type":"document","id":"79"}},
+                {"kind":"link","fresh":true,"linkLive":true,"target":{"type":"document","id":"80"}},
+                {"kind":"link","fresh":true,"linkLive":false,"target":{"type":"document","id":"81"}}
+            ]
+        }),
+    );
+    let names = BTreeMap::from([
+        (source.clone(), "wall".to_owned()),
+        ("78".to_owned(), "what-is-mini".to_owned()),
+        ("79".to_owned(), "a\"b".to_owned()),
+    ]);
+    let lines: BTreeMap<String, usize> = (1..=5).map(|n| (format!("100{n}"), n)).collect();
+    let sources = BTreeMap::from([(source, lines)]);
+    let mut rendered =
+        render(&View { document: &document, entries: &[], names: &names, sources: &sources, me: "7" }).unwrap();
+    rendered.backlinks.push(Backlink {
+        source: "field-notes".to_owned(),
+        link: "901".to_owned(),
+        line: Some(3),
+        rendered: Some("3: field-notes".to_owned()),
+    });
+    rendered.backlinks.push(Backlink {
+        source: "doc:99".to_owned(),
+        link: "902".to_owned(),
+        line: None,
+        rendered: None,
+    });
+
+    // Plain html() stays unlinked (data-target only, span.source in backlinks).
+    let plain = rendered.html("welcome");
+    assert!(plain.contains("<a class=\"link\" data-target=\"what-is-mini\">"));
+    assert!(plain.contains("<span class=\"source\">field-notes</span>"));
+    assert!(!plain.contains("href="));
+
+    // html_linked() links valid reference names, transclusion headers, and backlinks under the given base.
+    let body_html = rendered.html_linked("welcome", "");
+    assert!(
+        body_html.contains("href=\"/doc/what-is-mini\" data-target=\"what-is-mini\""),
+        "{body_html}"
+    );
+    assert!(
+        body_html.contains("<header>⟨from <a href=\"/doc/wall\">wall</a> lines 2..4, snapshot@40⟩</header>"),
+        "{body_html}"
+    );
+    assert!(
+        body_html.contains("<header>⟨from <a href=\"/doc/wall\">wall</a> lines 2..4, live⟩</header>"),
+        "{body_html}"
+    );
+    assert!(
+        body_html.contains("<a class=\"source\" href=\"/doc/field-notes\">field-notes</a>"),
+        "{body_html}"
+    );
+    assert!(
+        body_html.contains("<span class=\"source\">doc:99</span>"),
+        "{body_html}"
+    );
+    // Non-reference targets (hostile names, unresolved doc:ID, dead links) get no href.
+    assert!(body_html.contains("<a class=\"link\" data-target=\"a&quot;b\">"), "{body_html}");
+    assert!(body_html.contains("<a class=\"link\" data-target=\"doc:80\">"), "{body_html}");
+    assert!(body_html.contains("<a class=\"link dead\">"), "{body_html}");
+
+    // Trailing slash on base ("/" or "/s3cret/") is normalized so url() never sees "//doc/...".
+    let slash_html = rendered.html_linked("welcome", "/");
+    assert!(
+        slash_html.contains("href=\"/doc/what-is-mini\" data-target=\"what-is-mini\""),
+        "{slash_html}"
+    );
+    let server_html = rendered.html_linked("welcome", "/s3cret/");
+    assert!(
+        server_html.contains("href=\"/s3cret/doc/what-is-mini\" data-target=\"what-is-mini\""),
+        "{server_html}"
+    );
+    assert!(
+        server_html.contains("<header>⟨from <a href=\"/s3cret/doc/wall\">wall</a> lines 2..4, snapshot@40⟩</header>"),
+        "{server_html}"
+    );
+
+    // A transclusion row that carries its own Deco::Link mark does not emit nested <a> tags.
+    let mut marked = rendered;
+    let trans_line = marked
+        .lines
+        .iter_mut()
+        .find(|l| matches!(l.body, Body::Transclusion(_)))
+        .unwrap();
+    trans_line.decos.push(Deco::Link {
+        target: Some("what-is-mini".to_owned()),
+        stale: false,
+    });
+    let marked_html = marked.html_linked("welcome", "");
+    assert!(
+        marked_html.contains("<header><a class=\"link\" href=\"/doc/what-is-mini\" data-target=\"what-is-mini\">⟨from wall lines 2..4, snapshot@40⟩</a></header>"),
+        "{marked_html}"
+    );
+}
+
+#[test]
+fn demo_seed_docs_and_script_decorations_match_shell_grammar_and_line_counts() {
+    let seed_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/demo-seed");
+    let docs_dir = seed_dir.join("data/docs");
+    let mut line_counts = BTreeMap::<String, usize>::new();
+    for doc in [
+        "welcome",
+        "what-is-mini",
+        "a-refusal-explains-itself",
+        "the-lost-reply",
+        "the-lamplighters-note",
+        "house-rules",
+        "field-notes",
+    ] {
+        let content = std::fs::read_to_string(docs_dir.join(format!("{doc}.txt"))).expect(doc);
+        let non_empty: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+        assert!(!non_empty.is_empty(), "{doc}.txt must not be empty");
+        for line in &non_empty {
+            assert!(!line.starts_with('#'), "{doc}.txt still has raw markdown heading prefix: {line}");
+        }
+        line_counts.insert(doc.to_owned(), non_empty.len());
+    }
+    // sage appends one note to field-notes before line 4 is marked/annotated.
+    let mut max_lines = line_counts.clone();
+    *max_lines.get_mut("field-notes").unwrap() += 1;
+
+    let script = std::fs::read_to_string(seed_dir.join("seed.sh")).expect("seed.sh");
+    let mut mark_count = 0usize;
+    let mut annotate_count = 0usize;
+    for raw in script.lines() {
+        let line = raw.trim();
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            ["doc_mark", _, doc, ln, kind] | ["doc_mark", _, doc, ln, kind, _] => {
+                let n: usize = ln.parse().expect("line number");
+                let limit = *max_lines.get(*doc).expect("seeded doc");
+                assert!((1..=limit).contains(&n), "doc_mark on {doc} line {n} exceeds {limit} lines");
+                let shell_line = if let Some(target) = words.get(5) {
+                    format!("doc mark {doc} {ln} {kind} {target}")
+                } else {
+                    format!("doc mark {doc} {ln} {kind}")
+                };
+                let parsed_words = crate::shell::words(&shell_line).unwrap();
+                crate::shell_grammar::parse(&crate::shell_grammar::DOC, &parsed_words)
+                    .unwrap_or_else(|e| panic!("{shell_line}: {e}"));
+                mark_count += 1;
+            }
+            ["doc_annotate", _, id, doc, ln, ..] => {
+                let n: usize = ln.parse().expect("line number");
+                let limit = *max_lines.get(*doc).expect("seeded doc");
+                assert!((1..=limit).contains(&n), "doc_annotate on {doc} line {n} exceeds {limit} lines");
+                let shell_line = format!("doc annotate {id} {doc} {ln} @{id}.txt");
+                let parsed_words = crate::shell::words(&shell_line).unwrap();
+                crate::shell_grammar::parse(&crate::shell_grammar::DOC, &parsed_words)
+                    .unwrap_or_else(|e| panic!("{shell_line}: {e}"));
+                annotate_count += 1;
+            }
+            _ => {}
+        }
+    }
+    assert!(mark_count >= 25, "expected rich doc_mark calls in seed.sh, found {mark_count}");
+    assert!(annotate_count >= 5, "expected doc_annotate calls in seed.sh, found {annotate_count}");
+    assert!(
+        script.contains("as \"$1\" \"doc show $3\" >/dev/null && as \"$1\" \"doc annotate $2 $3 $4 @$2.txt\""),
+        "doc_annotate must run doc show first so the acting member's seen/<doc>.json is populated"
+    );
+    assert!(
+        script.contains("as public \"import $2 @$2.ref.json\""),
+        "publish_public must import published references into public's workspace immediately"
+    );
+    assert!(
+        !script.contains("welcome-link-"),
+        "welcome links should be created once via doc_mark link, not duplicated by doc link"
+    );
+    assert!(script.contains("chat new operations") && script.contains("chat invite operations $PUBLIC public --verbs observe"));
+    assert!(script.contains("board new board") && script.contains("board move board-done-0 board 0 doing done"));
+}
+

@@ -287,6 +287,9 @@ pub(crate) fn recent_turns(root: &Path, workspace: &Value, name: &str) -> Result
         })
         .cloned()
         .collect();
+    if let Some(first) = rows.first_mut() {
+        first["initial"] = json!(true);
+    }
     if rows.len() > 5 {
         rows.drain(..rows.len() - 5);
     }

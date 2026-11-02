@@ -58,3 +58,6 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/var/lib/mini/clock
+MemoryHigh=3G
+MemoryMax=4G
+

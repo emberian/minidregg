@@ -9,7 +9,6 @@ module
 
 public import Host.ApplicationLifecycleLaunchBeginInspection
 public import Host.ApplicationLifecycleClaimV3Inspection
-public import Kernel.ApplicationLifecycleV3Lookup
 
 @[expose] public section
 
@@ -34,54 +33,70 @@ private def receiptJson (receipt : NativeHostCodec.Receipt) : Json := .mkObj
    ("acceptedCount", decimal receipt.acceptedCount),
    ("worldRoot", decimal receipt.worldRoot.value)]
 
-def inspectVerified {config : NativeHost.Config} {target : NativeHost.Durable}
-    (verified : NativeHostReplay.Verified config target)
-    (planBytes committedBytes : List UInt8) : Except String Json := do
+private def selectReceiptLight {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (transactionId : Minidregg.Theory.TypedAuthorization.Digest)
+    (event : Minidregg.Kernel.DurableDataIntent.StableEvent)
+    (nullifier : Minidregg.Kernel.DurableDataIntent.StableNullifier)
+    (missingMessage : String) : IO (Except String NativeHostCodec.Receipt) := do
+  match ← reader.byTx transactionId with
+  | .error refusal => return .error refusal.message
+  | .ok (.absent _) => return .error missingMessage
+  | .ok (.present found) =>
+      let record := found.read.record
+      let receipt := NativeHost.receiptOfRecord found.read
+      if record.event == event && record.nullifiers.contains nullifier &&
+          receipt.transactionId == transactionId &&
+          receipt.eventId == event.eventId && receipt.acceptedCount == found.height then
+        return .ok receipt
+      else return .error missingMessage
+
+def inspectLight (config : NativeHost.Config) (light : NativeHostLight.Light config)
+    (planBytes committedBytes : List UInt8) : IO (Except String Json) := do
   let some plan := stopPlanCodec.decode planBytes
-    | throw "noncanonical STOP running-witness plan"
-  unless plan.shape do throw "STOP running-witness plan shape refused"
+    | return .error "noncanonical STOP running-witness plan"
+  unless plan.shape do return .error "STOP running-witness plan shape refused"
   let some committed := ApplicationLifecycleClaimV3Projection.codec.decode committedBytes
-    | throw "noncanonical committed launch claim-v3"
-  unless committed.valid do throw "committed launch claim-v3 shape refused"
+    | return .error "noncanonical committed launch claim-v3"
+  unless committed.valid do return .error "committed launch claim-v3 shape refused"
   let claim := committed.originalClaim
   let begin := claim.originalBegin
   unless begin.base.source.kind == .stop do
-    throw "committed claim is not STOP"
+    return .error "committed claim is not STOP"
   let unsigned := plan.base.unsigned
   let expected := { unsigned with base := { unsigned.base with
     signed := begin.base.signed
     packageObservationEnvelope := begin.base.packageObservationEnvelope } }
   unless begin == expected do
-    throw "admitted STOP BEGIN differs from retained operator plan"
-  let beginReceipt ← match ApplicationLifecycleV3Lookup.beginVerified
-      verified begin.canonicalBytes with
-    | .ok (some receipt) => pure receipt
-    | _ => throw "STOP BEGIN original receipt absent from verified history"
-  let claimReceipt ← match ApplicationLifecycleV3Lookup.claimVerified
-      verified claim.canonicalBytes with
-    | .ok (some receipt) => pure receipt
-    | _ => throw "STOP claim original receipt absent from verified history"
+    return .error "admitted STOP BEGIN differs from retained operator plan"
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let beginReceipt ← match ← selectReceiptLight reader begin.base.transactionId
+      (ApplicationLifecycleBeginV3Ingress.event begin)
+      (ApplicationLifecycleBegin.stableNullifier begin.base.domain begin.base.semantics begin.base.source)
+      "STOP BEGIN original receipt absent from verified history" with
+    | .error detail => return .error detail
+    | .ok receipt => pure receipt
+  let claimReceipt ← match ← selectReceiptLight reader claim.base.transactionId
+      (ApplicationLifecycleClaimV3Ingress.event claim)
+      (ApplicationLifecycleClaim.stableNullifier claim.base.domain claim.base.semantics claim.base.source)
+      "STOP claim original receipt absent from verified history" with
+    | .error detail => return .error detail
+    | .ok receipt => pure receipt
   unless claimReceipt == committed.core.claimReceipt do
-    throw "STOP committed claim receipt differs from verified history"
-  let running ← verified.selectRunning begin.base.source
-  let prior := running.prior
-  let physical := prior.ingress.physical
-  let some custody := physical.volumeCustody
-    | throw "admitted running completion lacks volume custody"
-  let selected : RunningWitness :=
-    { index := prior.index
-      receipt := prior.receipt
-      generation := prior.ingress.beginSource.processGeneration
-      unit := physical.unit
-      image := physical.materializedImage
-      invocationId := physical.invocationId
-      controlGroup := physical.controlGroup
-      custody := custody }
+    return .error "STOP committed claim receipt differs from verified history"
+  let selected ← match ← ApplicationLifecycleLaunchBeginAuthoring.selectRunningLight config reader
+      light.opening.head.height begin.base.source with
+    | .error detail => return .error detail
+    | .ok selected => pure selected
   unless selected == plan.running do
-    throw "retained STOP plan differs from verifier-selected running completion"
-  let planView ← ApplicationLifecycleLaunchBeginInspection.inspectStopPlan planBytes
-  let claimView ← ApplicationLifecycleClaimV3Inspection.inspect committedBytes
-  return .mkObj [
+    return .error "retained STOP plan differs from verifier-selected running completion"
+  let planView ← match ApplicationLifecycleLaunchBeginInspection.inspectStopPlan planBytes with
+    | .error detail => return .error detail
+    | .ok view => pure view
+  let claimView ← match ApplicationLifecycleClaimV3Inspection.inspect committedBytes with
+    | .error detail => return .error detail
+    | .ok view => pure view
+  return .ok (.mkObj [
     ("type", .str "application-lifecycle-stop-claim-verified-v1"),
     ("retainedPlanHex", hex planBytes),
     ("freshCommittedFrameHex", hex committedBytes),
@@ -92,6 +107,6 @@ def inspectVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     ("runningIndex", decimal selected.index),
     ("runningReceiptHex", hex (NativeHostCodec.receiptStream.encode selected.receipt)),
     ("plan", planView),
-    ("claim", claimView)]
+    ("claim", claimView)])
 
 end Minidregg.Host.ApplicationLifecycleStopClaimInspection

@@ -98,7 +98,8 @@ PY
   [ "$(id -u)" = 0 ] || { echo "jdoor: --box runs as root on the box" >&2; exit 2; }
   [ "$(tr -d '[:space:]' </etc/mini/tenancy 2>/dev/null)" = split ] || { echo "jdoor: UNCONFIGURED — not a split-tenancy box" >&2; exit 2; }
   [ -f /etc/mini/door.json ] || { echo "jdoor: UNCONFIGURED — no /etc/mini/door.json" >&2; exit 2; }
-  BASE=http://127.0.0.1:8795
+  BASE=http://127.0.0.1:8796
+  curl -sf -m 2 "$BASE/healthz" >/dev/null || BASE=http://127.0.0.1:8795
   row "the form answers on loopback" "$(ok curl -sf -m 5 "$BASE/healthz")" "$BASE/healthz"
   resp=$(post_join "$BASE" free)
   id=$(grep -oE '/join/status/[0-9a-f]{32}' <<<"$resp" | head -n1 | cut -d/ -f4)

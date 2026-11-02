@@ -341,22 +341,92 @@ impl Worker {
         }))
     }
 
-    fn open_route(&self, member: &str, grain: &str, record: Value) -> Value {
-        let Some(route) = record.pointer(&format!("/routes/{member}")) else {
+    fn open_route(&self, member: &str, grain: &str, mut record: Value) -> Value {
+        let lock = self.grain_lock(grain);
+        let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+        if let Ok(Some(fresh)) = self.grain_record(grain) {
+            record = fresh;
+        }
+        if record.pointer(&format!("/routes/{member}")).is_none() {
+            return refused("noRoute", format!("{member} has no route on {grain}; the owner shares it with `mini apps share --grain {grain} --to {member}`"));
+        }
+        let app = record["app"].as_str().unwrap_or("").to_owned();
+        let live_running = self.world.status(&app).ok().and_then(|s| {
+            s.get("runs")?.as_array()?.last()?.get("state")?.as_str().map(|st| st == "running")
+        });
+        let needs_start = record["state"].as_str() != Some("running") || live_running == Some(false);
+        if needs_start && record["state"].as_str() != Some("deleted") {
+            let start_res = {
+                let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
+                self.world.start(&app)
+            };
+            match start_res {
+                Ok(Lifecycle::Done) => {
+                    record["state"] = json!("running");
+                    record["lifecycleAt"] = json!(now());
+                    if let Err(e) = write_json(&grain_file(&self.state, grain), &record).and_then(|_| self.publish_origin(grain, &record)) {
+                        return undecided("stateUnavailable", e, &format!("mini apps open --grain {grain}"));
+                    }
+                    if let Err(error) = self.enroll_routes(grain, &record, None) {
+                        return undecided("enrolling", format!("{grain} started, but its routes are not enrolled against the new generation: {error}"), &format!("mini apps renew --grain {grain}"));
+                    }
+                }
+                Ok(Lifecycle::Undecided(detail)) => {
+                    record["state"] = json!("starting");
+                    let _ = write_json(&grain_file(&self.state, grain), &record);
+                    return undecided("starting", detail, &format!("mini apps open --grain {grain}"));
+                }
+                Err(error) => {
+                    return undecided("start", format!("start did not complete: {error}; the lifecycle's own markers decide, nothing is repeated"), &format!("mini apps status --grain {grain}"));
+                }
+            }
+        }
+        let Some(route) = record.pointer(&format!("/routes/{member}")).cloned() else {
             return refused("noRoute", format!("{member} has no route on {grain}; the owner shares it with `mini apps share --grain {grain} --to {member}`"));
         };
         let directory = PathBuf::from(route["directory"].as_str().unwrap_or(""));
-        if directory.join("bootstrap.used").exists() {
-            return performed("open", format!("{grain}: the bootstrap for this route was used; the browser holds the cookie. A fresh route needs a new share"), json!({
-                "grain":grain,"origin":record["origin"],"bootstrapUsed":true,"identityNotice":IDENTITY_NOTICE}));
+        let used_path = directory.join("bootstrap.used");
+        let token_path = directory.join("bootstrap.token");
+        let was_used = used_path.exists();
+        if was_used {
+            let _ = fs::remove_file(&used_path);
         }
-        let token = match crate::fsio::read_bounded(&directory.join("bootstrap.token"), 128) {
-            Ok(bytes) => String::from_utf8_lossy(&bytes).trim().to_owned(),
-            Err(error) => return undecided("routeUnavailable", format!("the route's bootstrap token is not readable: {error}"), &format!("mini apps open --grain {grain}")),
+        let token = match crate::fsio::read_bounded(&token_path, 128)
+            .ok()
+            .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_owned())
+            .filter(|t| t.len() == 64 && !(was_used && !directory.join("custodian.json").exists()))
+        {
+            Some(existing) => existing,
+            None => match self.mint_bootstrap_token(grain, member, &mut record, &directory) {
+                Ok(fresh) => fresh,
+                Err(error) => return undecided("routeUnavailable", format!("the route's bootstrap token is not readable: {error}"), &format!("mini apps open --grain {grain}")),
+            },
         };
         performed("open", format!("{grain}: visit {}/__mini/bootstrap and paste the one-time token", record["origin"].as_str().unwrap_or("")), json!({
             "grain":grain,"origin":record["origin"],"bootstrapPath":"/__mini/bootstrap","bootstrapToken":token,
             "identityNotice":IDENTITY_NOTICE}))
+    }
+
+    fn mint_bootstrap_token(&self, grain: &str, member: &str, record: &mut Value, directory: &Path) -> Result<String> {
+        private_dir(directory)?;
+        let token = hex(&crate::fsio::random::<32>()?);
+        use sha2::Digest;
+        let token_sha = hex(&sha2::Sha256::digest(token.as_bytes()));
+        let token_path = directory.join("bootstrap.token");
+        fs::write(&token_path, token.as_bytes()).map_err(|e| e.to_string())?;
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+        let _ = fs::remove_file(directory.join("bootstrap.used"));
+        let custodian_path = directory.join("custodian.json");
+        if let Ok(mut custodian) = read_json(&custodian_path) {
+            custodian["bootstrapTokenSha256"] = json!(token_sha);
+            let _ = write_json(&custodian_path, &custodian);
+        }
+        if let Some(route) = record.pointer_mut(&format!("/routes/{member}")) {
+            route["bootstrapTokenSha256"] = json!(token_sha);
+        }
+        write_json(&grain_file(&self.state, grain), record)?;
+        self.publish_origin(grain, record)?;
+        Ok(token)
     }
 
     /// Bring every route's session enrollment up to the app's serving generation. Returns the
@@ -436,7 +506,7 @@ impl Worker {
         }
         let app = record["app"].as_str().unwrap_or("").to_owned();
         let work = self.state.join("work").join(grain).join(format!("share-{to}"));
-        if let Err(e) = private_dir(&work) {
+        if let Err(e) = private_dir(&work).and_then(|_| prepare_route_work(&self.state, grain, &record, &work)) {
             return undecided("stateUnavailable", e, &format!("mini apps share --grain {grain} --to {to}"));
         }
         let host = format!("{grain}.{}", self.world.domain());
@@ -772,6 +842,9 @@ impl Worker {
             "state":"running","routes":{},"createdAt":now(),
         }));
         if record.pointer(&format!("/routes/{member}")).is_none() {
+            if let Err(e) = prepare_route_work(&self.state, &grain, &record, &work) {
+                return undecided("stateUnavailable", e, &retry);
+            }
             let host = format!("{grain}.{}", self.world.domain());
             match self.bind_route(&work, &installed.app, &member, &host) {
                 Ok(bound) => {
@@ -781,6 +854,7 @@ impl Worker {
                     }
                 }
                 Err(error) => {
+                    let _ = write_json(&grain_file(&self.state, &grain), &record);
                     return undecided("routing", format!("the owner's route is not bound yet: {error}"), &retry);
                 }
             }
@@ -875,6 +949,96 @@ impl Worker {
         let www = routes_dir.parent().ok_or_else(|| refused("stateUnavailable", "routes directory has no app directory"))?.join("www.sock");
         UnixStream::connect(&www).map_err(|e| refused("grainStopped", format!("{}: {e}", www.display())))
     }
+}
+
+/// Copy or materialize `birth-source.json`, `delegation.json`, and `share-delegation.json`
+/// from the grain's install work directory or retained request into `work` before `route(...)`.
+pub(crate) fn prepare_route_work(state: &Path, grain: &str, record: &Value, work: &Path) -> Result<()> {
+    let request_id = record.get("requestId").and_then(Value::as_str).unwrap_or("");
+    let retained_docs = (!request_id.is_empty())
+        .then(|| read_json(&request_file(state, request_id)).ok())
+        .flatten()
+        .and_then(|r| r.get("documents").cloned());
+    for (filename, doc_key) in [
+        ("birth-source.json", "birthSource"),
+        ("delegation.json", "delegation"),
+        ("share-delegation.json", "shareDelegation"),
+    ] {
+        let dst = work.join(filename);
+        if dst.exists() {
+            continue;
+        }
+        let mut candidates = Vec::new();
+        if !request_id.is_empty() {
+            candidates.push(state.join("work").join(request_id).join(filename));
+        }
+        candidates.push(state.join("work").join(grain).join(filename));
+        if let Some(app) = record.get("app").and_then(Value::as_str).filter(|a| !a.is_empty()) {
+            candidates.push(state.join("work").join(app).join(filename));
+        }
+        if let Some(src) = candidates.into_iter().find(|p| p.exists()) {
+            let doc = read_json(&src)?;
+            write_json(&dst, &doc)?;
+            continue;
+        }
+        if let Some(doc) = retained_docs.as_ref().and_then(|d| d.get(doc_key)).filter(|d| d.is_object()) {
+            write_json(&dst, doc)?;
+        }
+    }
+    Ok(())
+}
+
+/// Load or persist the `(base, session, ticket, cap)` tuple for one route bind in `{work}/{label}-nonce.json`
+/// so retrying a partial share reuses the exact same `session` and `ticket` as `{label}-session-attempt`.
+pub(crate) fn route_nonce(work: &Path, label: &str, alloc: impl FnOnce() -> Result<u64>) -> Result<(u64, u64, u64, u64)> {
+    let nonce_path = work.join(format!("{label}-nonce.json"));
+    if nonce_path.exists() {
+        let saved = read_json(&nonce_path)?;
+        let base = saved
+            .get("base")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
+            .ok_or("corrupt route nonce")?;
+        let (session, ticket) = share_ids(base)?;
+        let cap = 300_000 + (base % 100_000) * 10;
+        return Ok((base, session, ticket, cap));
+    }
+    let recovered = read_json(&work.join(format!("{label}-session-source.json")))
+        .ok()
+        .and_then(|src| src.get("nonce")?.as_str()?.parse::<u64>().ok())
+        .and_then(|n| n.checked_sub(100));
+    let base = match recovered {
+        Some(base) => {
+            let (_, expected_ticket) = share_ids(base)?;
+            let ticket_req = work.join(format!("{label}-ticket")).join("request.json");
+            let ticket_matches = !ticket_req.exists()
+                || read_json(&ticket_req)
+                    .ok()
+                    .and_then(|r| r.pointer("/spec/ticket/resource")?.as_str().map(|s| s == expected_ticket.to_string()))
+                    .unwrap_or(false);
+            if ticket_matches {
+                base
+            } else {
+                for suffix in ["session-attempt", "session-author", "ticket"] {
+                    let _ = fs::remove_dir_all(work.join(format!("{label}-{suffix}")));
+                }
+                let _ = fs::remove_file(work.join(format!("{label}-session-source.json")));
+                alloc()?
+            }
+        }
+        None => alloc()?,
+    };
+    let (session, ticket) = share_ids(base)?;
+    let cap = 300_000 + (base % 100_000) * 10;
+    write_json(
+        &nonce_path,
+        &json!({
+            "base": base,
+            "session": session.to_string(),
+            "ticket": ticket.to_string(),
+            "cap": cap.to_string(),
+        }),
+    )?;
+    Ok((base, session, ticket, cap))
 }
 
 /// The owner's role basis for one grain: the world's basis (`allAccess` on the
@@ -1504,6 +1668,56 @@ impl ProcessWorld {
         }
         Self::confirmed(&attempt.join("outcome.json")).map(|_| ())
     }
+
+    /// A route bound after START is served only once the running resident admits it through its
+    /// own route-control socket (`spk-host grain register-route`).
+    fn register_hot_route(&self, work: &Path, app: &str, member: &str, generation: &str, enroll_attempt: &Path) -> Result<()> {
+        let state_app = self.identities_root.join(app);
+        let control_sock = state_app.join(format!("g{generation}")).join("route-control.sock");
+        let route_dir = state_app.join("routes").join(format!("member-{member}"));
+        if !control_sock.exists() || route_dir.join("http.sock").exists() || !route_dir.join("dispatch-custody.json").exists() {
+            return Ok(());
+        }
+        let reg_dir = work.join(format!("register-{member}-g{generation}"));
+        private_dir(&reg_dir)?;
+        let req_path = reg_dir.join("request.json");
+        if !req_path.exists() {
+            let inspected = read_json(&enroll_attempt.join("plan-inspected.json"))?;
+            let sgen = inspected
+                .pointer("/enrollment/sessionGeneration")
+                .and_then(Value::as_str)
+                .ok_or("enrollment plan lacks sessionGeneration")?;
+            let custody = route_dir.join("dispatch-custody.json");
+            let custodian = route_dir.join("custodian.json");
+            let req = json!({
+                "protocol": "mini-spk-route-register-v1",
+                "registrationNonceHex": hex(&crate::fsio::random::<32>()?),
+                "expectedApp": app,
+                "expectedAppGeneration": generation,
+                "expectedSessionGeneration": sgen,
+                "directory": route_dir,
+                "dispatchCustody": custody,
+                "dispatchCustodySha256": Self::sha_file(&custody)?,
+                "custodianSha256": Self::sha_file(&custodian)?,
+                "displayName": member,
+                "preferredHandle": member,
+            });
+            write_json(&req_path, &req)?;
+        }
+        self.run(
+            &self.spk_host,
+            &[
+                "grain",
+                "register-route",
+                "--socket",
+                control_sock.to_str().unwrap_or(""),
+                "--request",
+                req_path.to_str().unwrap_or(""),
+            ],
+            &reg_dir.join("reply.json"),
+        )?;
+        Ok(())
+    }
 }
 
 /// The capability a share ticket is issued under. The issuer is the management subject (the dispatch
@@ -1620,21 +1834,20 @@ impl World for ProcessWorld {
         serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())
     }
     fn route(&self, work: &Path, app: &str, member: &str, expected_host: &str) -> Result<RouteBound> {
-        // The journey's share(): session birth, ticket issue, observe delegation, route; then enroll.
-        let base = self.nonce()?;
-        let (session, ticket) = share_ids(base)?;
-        let cap = 300_000 + (base % 100_000) * 10;
-        let label = format!("route-{member}");
-        self.birth_session(work, &format!("{label}-session"), app, session, "web", cap, base)?;
+        // The journey's share(): validate retained documents first, persist the route's nonce,
+        // then session birth, ticket issue, observe delegation, route; then enroll.
         let state_app = self.identities_root.join(app);
         let pkgdir = state_app.join("install").join("launch-descriptor").join("package-v1");
         let schema = read_json(&pkgdir.join("schema-inspection.json"))?;
         let launch = read_json(&state_app.join("install").join("launch-descriptor").join("launch-inspection.json"))?;
         let birth_source = read_json(&work.join("birth-source.json"))?;
+        let delegation_doc = read_json(&work.join("delegation.json"))?;
+        if delegation_doc.get("protocol").and_then(Value::as_str) != Some("mini-spk-grain-lifecycle-delegation-v1") {
+            return Err("delegationRefused: the hosting delegation is not mini-spk-grain-lifecycle-delegation-v1".into());
+        }
         // The management subject observes the app and its package through the owner's lifecycle delegation;
         // the owner capabilities in the birth source are the member's own (they are the manager's only when it is the owner).
-        let delegated = read_json(&work.join("delegation.json")).ok()
-            .filter(|d| d.get("appOwner").and_then(Value::as_str).is_some_and(|o| o != self.management_subject));
+        let delegated = (delegation_doc.get("appOwner").and_then(Value::as_str).is_some_and(|o| o != self.management_subject)).then_some(delegation_doc);
         let observed = |field: &str| delegated.as_ref().and_then(|d| d.pointer(&format!("/selector/{field}"))).and_then(Value::as_str).map(str::to_owned);
         let appcap = match observed("appObserveCapability") {
             Some(cap) => cap,
@@ -1645,6 +1858,15 @@ impl World for ProcessWorld {
             Some(cap) => cap,
             None => birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned(),
         };
+        let package_manifest = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageManifest").and_then(Value::as_str).ok_or("birth source lacks packageManifest")?.to_owned();
+        let label = format!("route-{member}");
+        let (base, session, ticket, cap) = route_nonce(work, &label, || self.nonce())?;
+        if let Err(err) = self.birth_session(work, &format!("{label}-session"), app, session, "web", cap, base) {
+            if !work.join(format!("{label}-session-attempt")).exists() {
+                let _ = fs::remove_file(work.join(format!("{label}-nonce.json")));
+            }
+            return Err(err);
+        }
         let (app_state, _) = self.query(work, &format!("{label}-app-state"), app, &appcap, base + 300, "resource")?;
         let pversion = app_state["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "2")).and_then(|x| x["value"].as_str()).unwrap_or("0").to_owned();
         let t = work.join(format!("{label}-ticket"));
@@ -1707,7 +1929,7 @@ impl World for ProcessWorld {
             api_token_sha256: text(&custodian, "apiTokenSha256")?.to_owned(),
             enrollment: json!({"session":session.to_string(),"cap":cap.to_string(),"ticket":ticket.to_string(),
                 "appObserveCapability":appcap,"packageObserveCapability":pkgcap,
-                "packageManifest":birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageManifest").and_then(Value::as_str).ok_or("birth source lacks packageManifest")?,
+                "packageManifest":package_manifest,
                 "ticketIssue":t.join("issue")}),
             directory,
         })
@@ -1742,6 +1964,7 @@ impl World for ProcessWorld {
             .ok_or("the app cell carries no generation")?.to_owned();
         let attempt = work.join(format!("{label}-g{generation}"));
         if fs::metadata(attempt.join("receipt.json")).map(|m| m.len() > 0).unwrap_or(false) {
+            self.register_hot_route(work, app, member, &generation, &attempt)?;
             return Ok(Enrolled::Current(generation));
         }
         let [h, c, o, s] = [self.host.to_str().unwrap_or(""), self.config.to_str().unwrap_or(""), self.operator_socket.to_str().unwrap_or(""), self.public_socket.to_str().unwrap_or("")];
@@ -1813,6 +2036,7 @@ impl World for ProcessWorld {
         if !fs::metadata(attempt.join("receipt.json")).map(|m| m.len() > 0).unwrap_or(false) {
             return Err(format!("the enrollment for generation {generation} has no receipt (attempt {})", attempt.display()));
         }
+        self.register_hot_route(work, app, member, &generation, &attempt)?;
         Ok(Enrolled::Renewed(generation))
     }
     fn export(&self, app: &str, out: &Path) -> Result<()> {
@@ -2338,6 +2562,76 @@ mod tests {
         let retry = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"retry","requestId":id}));
         assert_eq!(retry["state"], "running", "{retry}");
         assert_eq!(*fake(&w).installs.lock().unwrap(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apps_worker_share_copies_install_docs_reuses_route_nonce_reissues_bootstrap_and_wakes_stopped_grain() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker("bug6");
+        let id = "6".repeat(32);
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        let installed = w.handle("alice", &install_request(&id));
+        assert_eq!(installed["state"], "running", "{installed}");
+
+        // 1. Sharing copies birth-source.json, delegation.json, and share-delegation.json into state/work/<grain>/share-<to>/
+        let shared = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"share","grain":"a4501","to":"bob"}));
+        assert_eq!(shared["state"], "shared", "{shared}");
+        let share_work = w.state.join("work").join("a4501").join("share-bob");
+        for name in ["birth-source.json", "delegation.json", "share-delegation.json"] {
+            assert!(share_work.join(name).is_file(), "missing {name} in {}", share_work.display());
+        }
+
+        // 2. route_nonce persists {label}-nonce.json so retrying a partial share reuses the exact same (base, session, ticket, cap)
+        let partial_work = root.join("partial-share");
+        private_dir(&partial_work).unwrap();
+        let counter = std::cell::Cell::new(70_000_000_u64);
+        let first_nonce = route_nonce(&partial_work, "route-carol", || {
+            let next = counter.get() + 1000;
+            counter.set(next);
+            Ok(next)
+        })
+        .unwrap();
+        assert!(partial_work.join("route-carol-nonce.json").is_file());
+        let retry_nonce = route_nonce(&partial_work, "route-carol", || {
+            panic!("route_nonce must reuse the persisted nonce instead of allocating a new one")
+        })
+        .unwrap();
+        assert_eq!(first_nonce, retry_nonce);
+        assert_eq!(counter.get(), 70_001_000);
+
+        // 3. When bootstrap.used exists (or bootstrap.token was consumed), open_route re-arms/mints a usable bootstrap token
+        let alice_dir = root.join("routes").join("alice");
+        fs::write(alice_dir.join("bootstrap.used"), b"used\n").unwrap();
+        let reopened = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"open","grain":"a4501"}));
+        assert_eq!(reopened["state"], "open", "{reopened}");
+        assert!(!alice_dir.join("bootstrap.used").exists());
+        let fresh_token = reopened["receipt"]["bootstrapToken"].as_str().expect("bootstrapToken returned");
+        assert_eq!(fresh_token.len(), 64);
+        assert_eq!(fs::metadata(alice_dir.join("bootstrap.token")).unwrap().len(), 64);
+        assert_ne!(fresh_token, "b0".repeat(32));
+
+        // 4. With custodian.json present (live spk-host route), open_route removes bootstrap.used and preserves the custodian-bound token
+        let bob_dir = root.join("routes").join("bob");
+        fs::write(bob_dir.join("custodian.json"), br#"{"bootstrapTokenSha256":"2222222222222222222222222222222222222222222222222222222222222222"}"#).unwrap();
+        fs::write(bob_dir.join("bootstrap.used"), b"used\n").unwrap();
+        let bob_open = w.handle("bob", &json!({"protocol":WORKER_PROTOCOL,"verb":"open","grain":"a4501"}));
+        assert_eq!(bob_open["state"], "open", "{bob_open}");
+        assert!(!bob_dir.join("bootstrap.used").exists());
+        assert_eq!(bob_open["receipt"]["bootstrapToken"], "b0".repeat(32));
+
+        // 5. Stopping the grain and then calling open auto-wakes the grain and re-enrolls its routes against the new generation
+        assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"stop","grain":"a4501"}))["state"], "stopped");
+        *fake(&w).generation.lock().unwrap() = 9;
+        let woken = w.handle("bob", &json!({"protocol":WORKER_PROTOCOL,"verb":"open","grain":"a4501"}));
+        assert_eq!(woken["state"], "open", "{woken}");
+        assert!(woken["receipt"]["bootstrapToken"].is_string());
+        let record = read_json(&grain_file(&w.state, "a4501")).unwrap();
+        assert_eq!(record["state"], "running");
+        let enrolled = fake(&w).enrolled.lock().unwrap().clone();
+        assert!(enrolled.contains(&("alice".to_owned(), "9".to_owned())));
+        assert!(enrolled.contains(&("bob".to_owned(), "9".to_owned())));
+
         let _ = fs::remove_dir_all(&root);
     }
 }

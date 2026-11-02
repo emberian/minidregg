@@ -18,7 +18,7 @@ It was made against `demo-vm` at `434aeb6` and checks clean there. What it chang
 | `edge/mini/mini-reenroll` | **custody**: plans from the member's PUBLIC key, hands the four public plan files to the member's account, which signs possession there (`mini enroll --action possess` as `mini-s-NAME`), then seals with that detached signature; `MINI_REENROLL_FUNDING` (default 1000); finds `friends/door/NAME.pub`; `--all` includes door entries | the old flow copied `keys/mini.key` into the sponsor's home before enrolling (RUST-TRIAGE §4 row 1). Now no file outside the member's 0700 home ever holds the key |
 | `edge/mini/install.sh` | creates `mini-door` (no groups) and the door's directories; refuses members in group `mini-discord`; removes the `mini-session-run` sudoers rule; the Discord drop-in no longer lifts `NoNewPrivileges` and sets `MINI_SESSION_RUNNER=/run/mini-session-run.sock`, `ReadWritePaths=/var/lib/mini-discord` only; installs the five new units | the runner is a socket now; the entrance keeps its hardening |
 | `edge/mini/mini-components` | `door`/`door-process` on with split tenancy, both binaries and `/etc/mini/door.json`; `session-run` socket on with split tenancy and the Discord entrance | |
-| `edge/demo/host/caddy/Caddyfile` | `handle /join*` → `127.0.0.1:8795` with `X-Real-IP` and a 4 KB body cap; the root answer names `/join` | |
+| `edge/demo/host/caddy/Caddyfile` | `handle /join*` → `127.0.0.1:8796` with `X-Real-IP` and a 4 KB body cap; the root answer names `/join` | |
 
 ## 2. Copy the files
 
@@ -61,7 +61,7 @@ It was made against `demo-vm` at `434aeb6` and checks clean there. What it chang
 
 ```sh
 systemctl status mini-door mini-door-process.timer mini-session-run.socket
-curl -s http://127.0.0.1:8795/healthz                  # ok
+curl -s http://127.0.0.1:8796/healthz                  # ok
 /var/lib/mini/candidate/current/bin/mini-door-process  # one pass by hand; it writes door-state.json
 cat /var/lib/mini-door-status/door-state.json
 MINI_ROOT= bash ~/minidregg/native/resource-client/journey.d/jdoor.sh --box   # the box journey (root)

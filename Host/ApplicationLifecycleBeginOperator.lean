@@ -6,6 +6,7 @@ derives the current app state, roots, generation, command and exact headers.
 module
 
 public import Kernel.NativeHost
+public import Kernel.NativeHostLight
 public import Kernel.NativeHostReplay
 public import Kernel.NativeHostStoreIdentity
 public import Kernel.ApplicationLifecycleBeginV2Admission
@@ -90,9 +91,9 @@ def planStream : StreamCodec Plan :=
 def planCodec : LawfulCodec Plan := NativeHostCodec.framed
   "DREGG/APPLICATION/RESIDENT-BEGIN-OPERATOR-PLAN/v1".toUTF8.toList planStream
 
-private def cellAt (config : Config) (opened : Opened config) (resource : Nat) :
-    Option (PackedCell CanonicalCellRegistry.registry) :=
-  match opened.directory.directory.slots resource with
+private def cellAtOn {deployment : CanonicalCellRegistry.Deployment} (ground : ServedBasis.Ground deployment)
+    (resource : Nat) : Option (PackedCell CanonicalCellRegistry.registry) :=
+  match ground.directory.slots resource with
   | .present cell => some cell
   | .absent => none
 
@@ -102,21 +103,18 @@ private def fixedHeader (pin : Pin) (slot : SigningSlot) : Except String Unit :=
   unless header.keyId == pin.managementKeyId do
     throw "resident BEGIN signer differs from operator key pin"
 
-/-- A source-authored current-image plan. Signatures are absent; op22 later
-rechecks both the ordinary invocation and separate package observation under
-the current authority snapshot before recording a pending BEGIN. -/
-def prepareVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
-    (request : Request) : Except String Plan := do
+private def sourceOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) :
+    Except String (ApplicationSpkPackageIdentity.Descriptor × PackedCell CanonicalCellRegistry.registry ×
+      ApplicationLifecycleBegin.Source) := do
   unless request.kind == .install || request.kind == .start do
     throw "resident BEGIN plan supports INSTALL or START only"
   let some descriptor := ApplicationSpkPackageIdentity.decodeCanonical request.descriptorBytes
     | throw "noncanonical signed-SPK descriptor"
   unless descriptor.valid do throw "invalid signed-SPK descriptor"
-  let opened := verified.opened
-  let some appCell := cellAt config opened pin.app
+  let some appCell := cellAtOn ground pin.app
     | throw "current application cell unavailable"
-  let some packageCell := cellAt config opened pin.packageManifest
+  let some packageCell := cellAtOn ground pin.packageManifest
     | throw "current package manifest cell unavailable"
   unless packageCell.kind == .content do
     throw "current package manifest is not a content resource"
@@ -141,15 +139,23 @@ def prepareVerified (config : Config) {target : Durable}
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
         config.storeIdentity pin.app (before.generation + 1) }
   unless source.valid do throw "current application does not admit requested BEGIN phase"
+  return (descriptor, packageCell, source)
+
+/-- A source-authored current-image plan on any `Ground`. Signatures are
+absent; op22 later rechecks both the ordinary invocation and separate package
+observation under the current authority snapshot before recording a pending BEGIN. -/
+def prepareOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) : Except String Plan := do
+  let (descriptor, packageCell, source) ← sourceOn config ground pin request
   let command := ApplicationLifecycleBegin.command config.deployment.domain
     config.profile.semantics source
   let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+    ⟨config.federation, config.genesisHeight + ground.height⟩
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ambient opened.ground command
+      config.profile ambient ground command
     | throw "current resident BEGIN command preparation refused"
   unless ApplicationLifecycleBeginReceiver.linkedCurrentPolicy config.deployment
-      config.profile ambient opened.ground source prepared do
+      config.profile ambient ground source prepared do
     throw "current resident BEGIN app/package law differs"
   unless decide (DeclaredResourceController.PhysicalShape prepared) do
     throw "current resident BEGIN physical shape refused"
@@ -170,7 +176,7 @@ def prepareVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let wanted := ApplicationLifecycleBeginReceiver.packageRequest config.deployment
-    config.profile ambient opened.ground source prepared
+    config.profile ambient ground source prepared
   let .ok selected := ResourceObservationAdmission.prepare context config.profile
       wanted marker source.packageObserveCapability source.canonicalBytes
     | throw "current package observation preparation refused"
@@ -178,12 +184,12 @@ def prepareVerified (config : Config) {target : Durable}
       CanonicalCellRegistry.cellCodec.encode packageCell do
     throw "package observation differs from current old image"
   let commandBytes := DeclaredResourceController.commandCodec.encode command
-  let .ok invocation := NativeHost.prepareLoaded config opened (.invoke commandBytes)
+  let .ok invocation := NativeHost.prepareInvokeOn config ground (config.genesisHeight + ground.height) commandBytes
     | throw "current resident BEGIN invocation plan refused"
   unless invocation.finalizedDraft == .invoke commandBytes do
     throw "resident BEGIN invocation plan differs from source"
   let .ok header := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
     | throw "current package observation signing key unavailable"
   let packageSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩
@@ -192,12 +198,43 @@ def prepareVerified (config : Config) {target : Durable}
   return ⟨source.canonicalBytes, descriptor.canonicalBytes,
     invocation, packageSlot⟩
 
+def prepareVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+    (request : Request) : Except String Plan :=
+  prepareOn config verified.opened.ground pin request
+
 def prepareRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
     (bytes : List UInt8) : Except String Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical resident BEGIN operator request"
   prepareVerified config verified pin request
+
+def prepareLight (config : Config) (light : NativeHostLight.Light config)
+    (pin : Pin) (request : Request) : IO (Except String Plan) := do
+  let cells ← match ← light.basis ⟨[], []⟩ with
+    | .error message => return .error message
+    | .ok basis => pure basis
+  let (descriptor, _, source) ← match sourceOn config (.ofBasis cells) pin request with
+    | .ok value => pure value
+    | .error message => return .error message
+  let base : ApplicationLifecycleBeginIngress.Ingress :=
+    { domain := config.deployment.domain
+      semantics := config.profile.semantics
+      source := source
+      signed := ⟨[], [], [], []⟩
+      packageObservationEnvelope := [] }
+  let unsigned : ApplicationLifecycleBeginV2Ingress.Ingress :=
+    { base := base, descriptor := descriptor }
+  match ← light.basis (ApplicationLifecycleBeginV2Admission.keys unsigned) with
+  | .error message => return .error message
+  | .ok basis => return prepareOn config (.ofBasis basis) pin request
+
+def prepareRequestLight (config : Config) (light : NativeHostLight.Light config)
+    (pin : Pin) (bytes : List UInt8) : IO (Except String Plan) := do
+  let some request := requestCodec.decode bytes
+    | return .error "noncanonical resident BEGIN operator request"
+  prepareLight config light pin request
 
 /-- Insert the detached signatures in the exact plan order. Decoding a plan
 does not make it current; op22 rechecks the complete ingress on a fresh tip.

@@ -105,6 +105,7 @@ pub(super) fn post(site: &Site, name: &str, id: &str, body: &[u8], lookup: bool)
         Ok(fields) => fields,
         Err(error) => return simple(400, "Cannot save", &error),
     };
+    fields.remove("attempt");
     if lookup {
         if !fields.is_empty() {
             return simple(400, "Cannot check save", "unexpected form fields");
@@ -153,7 +154,7 @@ fn display(value: &Value) -> String {
 
 fn predicate_html(predicate: &Value, depth: usize) -> String {
     if depth > 32 {
-        return "<p>Nested law: inspect the full definition below.</p>".into();
+        return "<p>Nested law: inspect full definition below.</p>".into();
     }
     let kind = predicate["type"].as_str().unwrap_or("");
     if matches!(kind, "all" | "any") {
@@ -225,10 +226,11 @@ fn predicate_html(predicate: &Value, depth: usize) -> String {
 
 /// An action shares the editor's one durable operation identity.
 pub(super) fn action(site: &Site, name: &str, id: &str, body: &[u8]) -> Page {
-    let fields = match form(body) {
+    let mut fields = match form(body) {
         Ok(fields) => fields,
         Err(error) => return simple(400, "Cannot connect", &error),
     };
+    fields.remove("attempt");
     let value = Value::Object(
         fields
             .into_iter()
@@ -267,7 +269,7 @@ fn connections(url: &str) -> String {
         <label>If an endpoint disappears <select name=death><option value=invalidate>Show unavailable</option>\
         <option value=keepTombstone>Keep its place</option><option value=preferPrevious>Follow previous</option>\
         <option value=preferNext>Follow next</option></select></label><button>Insert quote</button></form>\
-        <p>Publish the range in the source first. Opening this quote always asks for the reader's own source access.</p></details>\
+        <p>Requires a published range in the source document and source read access.</p></details>\
         <details><summary>Link another resource</summary><form method=post action=\"{target}\">\
         <input type=hidden name=type value=link><label>Target reference <input name=to required></label>\
         <input type=hidden name=relation value=0><button>Add link</button></form></details></section>")
@@ -327,7 +329,7 @@ fn inspector(site: &Site, name: &str) -> String {
                     escape(&verbs),escape(challenge["height"].as_str().unwrap_or("?")),escape(&serde_json::to_string_pretty(head).unwrap_or_default())));
             }
             Err(error) => out.push_str(&format!(
-                "<p class=note>Grant details unavailable: {}. Saving asks the current law.</p>",
+                "<p class=note>Grant details unavailable: {}.</p>",
                 escape(&refusal_text(&error).unwrap_or(error))
             )),
         }
@@ -347,18 +349,21 @@ fn inspector(site: &Site, name: &str) -> String {
                     escape(h),
                     escape(row["subject"].as_str().unwrap_or("?"))
                 ));
-                if let Some(before) = h.parse::<u64>().ok().and_then(|h| h.checked_sub(1)) {
-                    out.push_str(&format!(
-                        " · <a href=\"{}/doc/{}/diff/{}/{}\">changes</a>",
-                        site.base(),
-                        escape(name),
-                        before,
-                        escape(h)
-                    ));
+                let is_initial = row["initial"].as_bool().unwrap_or(false);
+                if !is_initial {
+                    if let Some(before) = h.parse::<u64>().ok().and_then(|h| h.checked_sub(1)) {
+                        out.push_str(&format!(
+                            " · <a href=\"{}/doc/{}/diff/{}/{}\">changes</a>",
+                            site.base(),
+                            escape(name),
+                            before,
+                            escape(h)
+                        ));
+                    }
                 }
                 out.push_str("</li>");
             }
-            out.push_str("</ol><p class=note>Recent turns visible to your current grant. Open a turn to read its historical content.</p>");
+            out.push_str("</ol><p class=note>Recent turns visible to your current grant.</p>");
         }
         Err(error) => out.push_str(&format!(
             "<p>{}</p>",

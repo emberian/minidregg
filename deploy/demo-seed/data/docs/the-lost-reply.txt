@@ -1,6 +1,5 @@
-# The lost reply
-Networks drop answers. If you ask Mini to do something and the reply never reaches you, you cannot know whether it happened.
-Most systems let you ask again and hope. Mini keeps your exact attempt, undecided, until you look it up.
-The retry is not a second attempt. It is the same attempt submitted again, and the world sees one effect and one charge, however many times you press it.
-Try it: type "history" and look for an attempt marked undecided, then type: retry   with its name, or "lookup" to ask what became of it.
-The idea is in what-is-mini. The refusal side of the story is in a-refusal-explains-itself.
+The Lost Reply
+When a connection drops after a request is sent, the client cannot tell from silence alone whether the kernel admitted the turn.
+Before transmitting any proposal, the workspace seals the exact request bytes to disk as a durable attempt record.
+lookup <attempt-id>  |  retry <attempt-id>
+Retrying an undecided attempt resends those exact bytes under the same attempt identifier. The kernel deduplicates by attempt, so the transition executes at most once and charges at most once.

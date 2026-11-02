@@ -6,6 +6,7 @@ This returns exact native credential headers, not an authorization to complete.
 module
 
 public import Host.ApplicationLifecycleCompletionOperator
+public import Host.ApplicationLifecycleLaunchBeginAuthoring
 public import Kernel.ApplicationLifecycleCompletionV2Admission
 public import Kernel.NativeHostReplay
 public import Kernel.NativeHost
@@ -292,5 +293,90 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) :
       source := source
       signed := signedCommand
       packageObservationEnvelope := packageEnvelope }
+
+inductive StopResult where
+  | confirmed (kind : DurableReceiverIO.Confirmation) (transactionId : Digest)
+      (eventId : Digest)
+  | rejected (detail : String)
+  | contention
+  | unavailable (detail : String)
+  | uncertain (detail : String)
+
+/-- Receive a v2 STOP completion on the light opening: prepare the conditional completion on
+`light.groundedVia`, select and re-admit the newest running START completion via
+`ApplicationLifecycleLaunchBeginAuthoring.selectRunningLight`, check the exact unit, invocationId,
+controlGroup, and volumeCustody, and commit via `DurableServed.receiveServed`. -/
+def receiveStopLight (config : Config) (transport : DurableReceiverIO.Transport)
+    (light : NativeHostLight.Light config) (bytes : List UInt8)
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO StopResult := do
+  let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes
+    | return .rejected "noncanonical checked lifecycle completion ingress"
+  unless ingress.source.originalBegin.base.source.kind == .stop do
+    return .rejected "checked lifecycle completion is not a STOP completion"
+  let grounded ← match ← light.groundedVia transport
+      (ApplicationLifecycleCompletionV2Admission.keys config ingress) with
+    | .error detail => return .unavailable detail
+    | .ok grounded => pure grounded
+  let reader := light.opening.reader transport ResourceBirthCodec.rootBytes
+  let conditional ← match ← ApplicationLifecycleCompletionV2Admission.prepareConditional config reader
+      grounded ingress with
+    | .error detail => return .rejected detail
+    | .ok conditional => pure conditional
+  let running ← match ← ApplicationLifecycleLaunchBeginAuthoring.selectRunningLight config reader
+      light.opening.head.height ingress.source.originalBegin.base.source with
+    | .error detail => return .rejected detail
+    | .ok running => pure running
+  unless ingress.source.physical.report.unit == running.unit do
+    return .rejected "STOP unit differs from admitted running incarnation"
+  unless ingress.source.physical.report.invocationId == running.invocationId do
+    return .rejected "STOP invocation differs from admitted running incarnation"
+  unless ingress.source.physical.report.controlGroup == running.controlGroup do
+    return .rejected "STOP cgroup differs from admitted running incarnation"
+  unless ingress.source.physical.report.volumeCustody == some running.custody do
+    return .rejected "STOP volume custody differs from running incarnation"
+  let intent := ApplicationLifecycleCompletionV2Core.intent conditional
+  match grounded.ground.recorded intent.transactionId with
+  | none => return .rejected "checked lifecycle completion transaction identity undeclared"
+  | some (some _) => return .rejected "checked lifecycle completion transaction identity already used"
+  | some none =>
+      match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening intent with
+      | .appended kind next _ _ _ _ =>
+          adopt next none
+          return .confirmed kind intent.transactionId intent.event.eventId
+      | .replayed _ => return .rejected "checked lifecycle completion transaction identity already used"
+      | .rejected _ => return .rejected "durable checked lifecycle completion refused"
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail
+      | .uncertain detail => return .uncertain detail
+
+/-- Operator-local admission diagnosis on the light opening (`diagnose-completion`).
+Does not derive an intent, send a CAS, or return a receipt or physical permit. -/
+def diagnoseLight (config : Config) (light : NativeHostLight.Light config)
+    (ingress : ApplicationLifecycleCompletionV2Ingress.Ingress) : IO (Except String Unit) := do
+  let grounded ← match ← light.groundedVia config.transport
+      (ApplicationLifecycleCompletionV2Admission.keys config ingress) with
+    | .error detail => return .error detail
+    | .ok grounded => pure grounded
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let _ ← match ← ApplicationLifecycleCompletionV2Admission.prepareConditional config reader
+      grounded ingress with
+    | .error detail => return .error detail
+    | .ok conditional => pure conditional
+  if ingress.source.originalBegin.base.source.kind == .stop then
+    let running ← match ← ApplicationLifecycleLaunchBeginAuthoring.selectRunningLight config reader
+        light.opening.head.height ingress.source.originalBegin.base.source with
+      | .error detail => return .error detail
+      | .ok running => pure running
+    unless ingress.source.physical.report.unit == running.unit do
+      return .error "STOP unit differs from admitted running incarnation"
+    unless ingress.source.physical.report.invocationId == running.invocationId do
+      return .error "STOP invocation differs from admitted running incarnation"
+    unless ingress.source.physical.report.controlGroup == running.controlGroup do
+      return .error "STOP cgroup differs from admitted running incarnation"
+    unless ingress.source.physical.report.volumeCustody == some running.custody do
+      return .error "STOP volume custody differs from running incarnation"
+    return .ok ()
+  else
+    return .ok ()
 
 end Minidregg.Host.ApplicationLifecycleLaunchCompletionAuthoring

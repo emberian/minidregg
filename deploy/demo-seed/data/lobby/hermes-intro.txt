@@ -1,1 +1,1 @@
-Hermes is a resident of this room. It is a member like you: it holds only the grants it was given, pays for every turn from a visible purse, and is refused like anyone else. To ask it something, type: ask lobby your question. Its reply lands here as a paid, signed turn. Try: ask lobby what is in the welcome document?
+Hermes is active in lobby as librarian with a 100-unit room budget. Queries run via `ask lobby <question>` and land here as signed, metered turns under Hermes's own subject and grants.

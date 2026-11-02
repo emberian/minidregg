@@ -1010,6 +1010,54 @@ pub(crate) fn check_retained(
     )
 }
 
+/// Return the world-root AuthTrie system-slot inclusion opening (op 151) for a confirmed
+/// attempt at `(height, world_root)` when available from `opening.json`, the durable
+/// continuity anchor (`receipt-continuity/anchor.json`), or a live op 151 query.
+pub(crate) fn opening_for_attempt(attempt: &Path, height: &str, world_root: &str) -> Option<Value> {
+    if decimal(height).is_err() || decimal(world_root).is_err() {
+        return None;
+    }
+    if let Ok(cached) = read_json_mode(&attempt.join("opening.json"), false) {
+        if cached["point"]["height"].as_str() == Some(height)
+            && cached["point"]["worldRoot"].as_str() == Some(world_root)
+            && cached["chain"].is_string()
+            && cached["siblings"].is_array()
+        {
+            return Some(cached);
+        }
+    }
+    let root = attempt.parent()?.parent()?;
+    let custody = root.join(DIRECTORY);
+    if let Ok(anchor_val) = read_json_mode(&custody.join("anchor.json"), false) {
+        if anchor_val["point"]["height"].as_str() == Some(height)
+            && anchor_val["point"]["worldRoot"].as_str() == Some(world_root)
+            && anchor_val["chain"].is_string()
+            && anchor_val["siblings"].is_array()
+        {
+            return Some(anchor_val);
+        }
+    }
+    let workspace = read_json_mode(&root.join("workspace.json"), false).ok()?;
+    let settings = Settings::load(&custody).ok()?;
+    let mut source = HostProof::new(root, &workspace, &settings).ok()?;
+    let target = Point {
+        height: height.to_owned(),
+        world_root: world_root.to_owned(),
+        witness: None,
+    };
+    let (verified, complete) = source.verified_hop(None, &target).ok()?;
+    if !complete || verified != target {
+        return None;
+    }
+    let (chain, siblings) = verified.witness?;
+    Some(json!({
+        "identity": settings.identity,
+        "point": target.json(),
+        "chain": chain,
+        "siblings": siblings,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

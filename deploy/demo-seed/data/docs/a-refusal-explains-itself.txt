@@ -1,7 +1,7 @@
-# A refusal explains itself
-Most systems say "permission denied" and stop. Mini tells you which rule refused you and with what values.
-Try it on house-rules: you may read it, but you were never given the right to change it. Type: doc append mine house-rules "hello"  and then: submit mine
-The answer is a refusal. Type: why   to see the rule that said no, with the request it judged.
-Now type: can --any   and Mini prints the one request the law would have admitted from where you stand, as a line you can paste.
-Compare what-is-mini for the idea, and field-notes for a document you MAY write to.
-Every refusal is a receipt too. It sits in your history next to the things that worked.
+A Refusal Explains Itself
+When a transition is rejected, the kernel returns the specific law clause or capability check that failed along with the values it evaluated.
+For example, house-rules grants public observation but restricts mutation to its owner. Submitting an append without a mutation grant fails with a no-grant refusal.
+why <attempt-id>
+can --any <ref>
+The why verb decodes the retained refusal frame in the kernel's terms, while can --any dry-runs the resource law to find an operation your current grants cover.
+Refusals are retained in workspace history alongside admitted turns. By contrast, field-notes carries a mutation grant for sage.

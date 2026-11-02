@@ -578,6 +578,10 @@ impl Rendered {
     pub fn html(&self, title: &str) -> String {
         html::document(self, title)
     }
+
+    pub fn html_linked(&self, title: &str, base: &str) -> String {
+        html::document_linked(self, title, base)
+    }
 }
 
 /// Live line number -> atom, for a source document's own view: what places a

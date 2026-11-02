@@ -197,7 +197,7 @@ pub static DELEGATE: Grammar = Grammar { verb: "delegate", leaves: &[
     Leaf { path: &["delegate"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("RECIPIENT", Kind::Subject), arg("VERB[,VERB...]", Kind::Word), arg("MAX-COST", Kind::Number)], flags: &[valued("--until", "H", Kind::Number)], effect: Effect::Propose, about: "mini workspace --action propose (action delegate; --until H: the grant's notAfter height)" },
 ] };
 pub static REVOKE: Grammar = Grammar { verb: "revoke", leaves: &[
-    Leaf { path: &["revoke"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("RECIPIENT", Kind::Subject)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
+    Leaf { path: &["revoke"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("RECIPIENT", Kind::Subject)], flags: &[valued("--capability", "CAPABILITY", Kind::Number)], effect: Effect::Propose, about: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT, or --capability CAPABILITY)" },
 ] };
 pub static RENOUNCE: Grammar = Grammar { verb: "renounce", leaves: &[
     Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },

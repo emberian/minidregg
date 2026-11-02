@@ -9,7 +9,7 @@
 //!
 //! | variable | default |
 //! |---|---|
-//! | `MINI_DOOR_LISTEN` | `127.0.0.1:8795` (loopback only) |
+//! | `MINI_DOOR_LISTEN` | `127.0.0.1:8796` (loopback only) |
 //! | `MINI_DOOR_QUEUE` | `/var/lib/mini-door/queue` (this uid's, 0700) |
 //! | `MINI_DOOR_STATUS` | `/var/lib/mini-door-status` (root:mini-door 0750; the processor writes it) |
 //! | `MINI_DOOR_TRUSTED_PROXY` | `127.0.0.1` (the only peer whose `X-Real-IP` is believed) |
@@ -102,6 +102,30 @@ fn source_key(peer: IpAddr, real_ip: Option<&str>, trusted: IpAddr) -> String {
     }
 }
 
+/// Refuse cross-origin browser `POST` submissions (`Origin` and `Sec-Fetch-Site`).
+fn same_origin_post(req: &minidregg_discord_entrance::http::Request) -> Result<(), &'static str> {
+    if let Some(site) = req.header("sec-fetch-site").map(str::trim) {
+        if !site.eq_ignore_ascii_case("same-origin") && !site.eq_ignore_ascii_case("none") {
+            return Err("cross-site POST refused");
+        }
+    }
+    if let Some(origin) = req.header("origin").map(str::trim) {
+        let origin_host = origin
+            .strip_prefix("https://")
+            .or_else(|| origin.strip_prefix("http://"))
+            .unwrap_or("");
+        if origin_host.is_empty() || origin_host.contains('/') {
+            return Err("cross-origin POST refused");
+        }
+        if let Some(host) = req.header("host").map(str::trim).filter(|h| !h.is_empty()) {
+            if !origin_host.eq_ignore_ascii_case(host) {
+                return Err("cross-origin POST refused");
+            }
+        }
+    }
+    Ok(())
+}
+
 const STYLE: &str = include_str!("../../../mini-web/assets/app.css");
 
 /// The vendored scripts the wallet page loads (assets/vendor/VENDOR.md pins them) and the page's
@@ -154,7 +178,7 @@ const WALLET_PAGE: &str = r#"(async () => {
 fn page(title: &str, body: &str) -> Vec<u8> {
     format!(
         "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><meta name=color-scheme content=\"light dark\">\
-         <title>{} · Mini</title><style>{STYLE}</style><body class=\"standalone\"><a class=\"skip\" href=\"#main\">Skip to content</a><header><a class=\"brand\" href=\"/\">Mini</a><a href=\"/tour\">Explore the demo</a></header><main id=\"main\"><p class=\"eyebrow\">Your place in the world</p><h1>{}</h1>{body}</main></body></html>",
+         <title>{} · Mini</title><style>{STYLE}</style><body class=\"standalone\"><a class=\"skip\" href=\"#main\">Skip to content</a><header><a class=\"brand\" href=\"/\">Mini</a><a href=\"/tour\">Explore the demo</a></header><main id=\"main\"><p class=\"eyebrow\">Account signup</p><h1>{}</h1>{body}</main></body></html>",
         html(title),
         html(title)
     )
@@ -173,8 +197,8 @@ impl Door {
         let mut body = String::from(
             "<p class=warn><strong>Everything on this box is world-readable</strong> to every member, and your Mini \
              signing key is held on the box (a hosted account). Do not put anything here you would not publish.</p>\
-             <p>You get a Mini account on this demo box: your workspace in the browser, and, if you give an ssh key, \
-             the same account as <code>ssh -t mini-s-NAME@demo.dregg.online</code>. It takes a minute or two after you submit.</p>",
+             <p>You get a Mini account on this demo box: a workspace in the browser, and, if you supply an ssh key, \
+             shell access via <code>ssh -t mini-s-NAME@demo.dregg.online</code>. Provisioning takes a minute or two.</p>",
         );
         if !free && !paid {
             let why = state["freeReason"].as_str().unwrap_or("the door is not open yet");
@@ -445,12 +469,18 @@ impl Door {
             }
             ("POST", p) if matches!(p, "/join" | "/join/sign" | "/join/paid") => {
                 let key = source_key(peer, req.header("x-real-ip"), self.trusted);
-                self.post(p, &req.body, &key, now)
+                match same_origin_post(&req) {
+                    Ok(()) => self.post(p, &req.body, &key, now),
+                    Err(why) => {
+                        eprintln!("mini-door: refused {p} from {key}: 403: {why}");
+                        (403, page("Forbidden", &format!("<p>{}</p><p><a href=/join>Back</a></p>", html(why))))
+                    }
+                }
             }
             ("GET", "/healthz") => (200, b"ok\n".to_vec()),
             _ => (404, page("Not found", "")),
         };
-        let reason = match status { 200 => "OK", 400 => "Bad Request", 404 => "Not Found", 409 => "Conflict", 429 => "Too Many Requests", _ => "Service Unavailable" };
+        let reason = match status { 200 => "OK", 400 => "Bad Request", 403 => "Forbidden", 404 => "Not Found", 409 => "Conflict", 429 => "Too Many Requests", _ => "Service Unavailable" };
         let _ = write_response(&mut stream, status, reason, "text/html; charset=utf-8", &body);
     }
 }
@@ -467,7 +497,7 @@ fn main() {
     if std::env::args_os().len() > 1 {
         fail("takes no arguments; configuration is the environment");
     }
-    let listen = env_or("MINI_DOOR_LISTEN", "127.0.0.1:8795");
+    let listen = env_or("MINI_DOOR_LISTEN", "127.0.0.1:8796");
     let addr: std::net::SocketAddr = listen.parse().unwrap_or_else(|_| fail("MINI_DOOR_LISTEN is not an address"));
     if !addr.ip().is_loopback() {
         fail("MINI_DOOR_LISTEN must be a loopback address: Caddy is the only client");
@@ -505,7 +535,7 @@ fn story_section(story: &Value) -> String {
     let Some(name) = story["name"].as_str().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')) else {
         return String::new();
     };
-    let lead = format!("<section class=story data-story=\"{0}\"><h2>The story <code>{0}</code></h2>", html(name));
+    let lead = format!("<section class=story data-story=\"{0}\"><h2>Story <code>{0}</code></h2>", html(name));
     let state = if story["joined"] == true {
         format!("<p data-story-state=joined>The box invited you to play <code>{0}</code> and you have joined it. Play it from your workspace: <a href=/story>your stories</a> (or <code>look</code> in your shell).</p>", html(name))
     } else if let Some(error) = story["error"].as_str() {
@@ -568,6 +598,23 @@ mod tests {
         assert_eq!(source_key(proxy, Some("203.0.113.9"), proxy), "203.0.113.9");
         assert_eq!(source_key("198.51.100.1".parse().unwrap(), Some("203.0.113.9"), proxy), "198.51.100.1");
         assert_eq!(source_key(proxy, Some("2001:db8:1:2:3:4:5:6"), proxy), "2001:db8:1:2::/64");
+    }
+
+    #[test]
+    fn cross_origin_and_cross_site_posts_are_refused() {
+        let req = |headers: Vec<(&str, &str)>| minidregg_discord_entrance::http::Request {
+            method: "POST".into(),
+            path: "/join".into(),
+            query: String::new(),
+            headers: headers.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            body: Vec::new(),
+        };
+        assert!(same_origin_post(&req(vec![("Host", "demo.dregg.online")])).is_ok());
+        assert!(same_origin_post(&req(vec![("Host", "demo.dregg.online"), ("Origin", "https://demo.dregg.online"), ("Sec-Fetch-Site", "same-origin")])).is_ok());
+        assert!(same_origin_post(&req(vec![("Host", "demo.dregg.online"), ("Origin", "https://evil.example")])).is_err());
+        assert!(same_origin_post(&req(vec![("Host", "demo.dregg.online"), ("Origin", "null")])).is_err());
+        assert!(same_origin_post(&req(vec![("Host", "demo.dregg.online"), ("Sec-Fetch-Site", "cross-site")])).is_err());
+        assert!(same_origin_post(&req(vec![("Host", "demo.dregg.online"), ("Sec-Fetch-Site", "same-site")])).is_err());
     }
 
     #[test]
@@ -706,9 +753,15 @@ mod tests {
 
     #[test]
     fn the_wallet_page_builds_the_quoted_transfer_and_posts_its_signature() {
-        // The page test runs under node against a fake wallet and a fake cluster (tests/pay-page.test.mjs).
+        // The page test runs under node (or bun if node's dylibs are unavailable) against a fake wallet and a fake cluster (tests/pay-page.test.mjs).
         let test = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/pay-page.test.mjs");
-        let out = std::process::Command::new("node").arg(test).output().expect("node is on PATH (the wallet page test needs it)");
+        let home_bun = std::env::var("HOME").ok().map(|h| format!("{h}/.bun/bin/bun")).unwrap_or_default();
+        let out = std::process::Command::new("node").arg(test).output()
+            .ok()
+            .filter(|o| o.status.success() || !String::from_utf8_lossy(&o.stderr).contains("dyld"))
+            .or_else(|| std::process::Command::new("bun").arg(test).output().ok())
+            .or_else(|| (!home_bun.is_empty()).then(|| std::process::Command::new(&home_bun).arg(test).output().ok()).flatten())
+            .expect("node or bun is available (the wallet page test needs it)");
         assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert!(String::from_utf8_lossy(&out.stdout).starts_with("ok: transfer 50000007 atomic"));
     }

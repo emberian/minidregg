@@ -28,5 +28,7 @@ SystemCallArchitectures=native
 IPAddressDeny=any
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 InaccessiblePaths=-/var/lib/mini-keys -/var/lib/mini-backups -/etc/mini/credentials.key
-MemoryMax=2G
+MemoryHigh=3G
+MemoryMax=4G
 TasksMax=256
+

@@ -6,23 +6,16 @@
 # and follower over whole Worlds; reachable from no shipped executable (not in the closure of Host.Main
 # or Host.ClientConsentSession, checked with scripts/lean_imports.py).
 # Includes the fleet head/incoming ops (Kernel/NativeHost.lean, cv 01a114aa-6780).
-Assurance/HyperdocumentLinkFramedRecovery.lean
+# Approved fixture addition: Fixtures/NativeDocWriteFixture.lean (pure in-memory loadImage fixture like Fixtures/NativeAcceptedFixture.lean; reachable from no shipped executable).
 Fixtures/NativeAcceptedFixture.lean
+Fixtures/NativeDocWriteFixture.lean
 Compiler/CarriedSegmentIO.lean
 Compiler/DurableCheckpointCodec.lean
 Compiler/DurableLogTags.lean
 Compiler/DurableStoreAudit.lean
-Compiler/FramedWalRecoveryController.lean
-Compiler/FramedWalRecoveryDeployment.lean
 Compiler/GenericSimplexParticipant.lean
-Compiler/ObjectiveBendNativePlanData.lean
-Compiler/ResourceBirthCodec.lean
-Compiler/StreamCell.lean
-Host/ApplicationAgentLifetimeGrantInspection.lean
 Host/ClientConsentCore.lean
 Host/FnArchivePublisher.lean
-Host/FnInboxView.lean
-Host/Json.lean
 Host/Kn2StoreBench.lean
 Host/Main.lean
 Host/ObjectiveTurnTotalityRunner.lean
@@ -31,9 +24,6 @@ Host/SourceAgreementReader.lean
 Host/TurnLogFollower.lean
 Kernel/CarriedSegment.lean
 Kernel/ConsentAnchor.lean
-Kernel/ContentResource.lean
-Kernel/DomainEpochStream.lean
-Kernel/FleetTurn.lean
 Kernel/FnConsumerNamespaceReceiver.lean
 Kernel/FnConsumerOperation.lean
 Kernel/FnEmptyPollReceiverV2.lean
@@ -47,14 +37,8 @@ Kernel/NativeHostKeyCommitmentAdoption.lean
 Kernel/NativeHostReplay.lean
 Kernel/NativeHostSession.lean
 Kernel/ReceivingLawFixture.lean
-Kernel/ResidentActivityRevision.lean
 Kernel/ResourceBirthReceiver.lean
-Kernel/ResourceTransaction.lean
 Kernel/SessionIndex.lean
-Kernel/StreamResource.lean
-Selvage/ZkmlSuiteRegistry.lean
-Theory/CellSlot.lean
-Theory/Channel/Trace.lean
 Verify/NativeJointSourceFixture.lean
 scripts/durable-receiver.lean
 scripts/kn2/history-tamper.lean

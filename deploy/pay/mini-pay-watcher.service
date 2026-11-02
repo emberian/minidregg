@@ -34,5 +34,7 @@ LockPersonality=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 LimitCORE=0
 TasksMax=32
-MemoryMax=512M
+MemoryHigh=3G
+MemoryMax=4G
 TimeoutStartSec=300s
+

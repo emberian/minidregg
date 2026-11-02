@@ -128,7 +128,6 @@ public import Kernel.ApplicationShareIssueGrainLookup
 public import Kernel.ApplicationGrainSessionEnrollmentReceiver
 public import Kernel.ApplicationAgentLifetimeGrantReceiver
 public import Kernel.ApplicationDispatchReceiver
-public import Kernel.ApplicationDispatchLookup
 public import Kernel.ApplicationDispatchAgentReceiver
 public import Kernel.ApplicationDispatchAgentLookup
 public import Kernel.ApplicationDispatchAgentPaidAuthoring
@@ -138,12 +137,8 @@ public import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
 public import Kernel.ApplicationDispatchAuthoring
 public import Kernel.ApplicationLifecycleBeginV3Receiver
 public import Kernel.ApplicationLifecycleClaimV3Receiver
-public import Kernel.ApplicationLifecycleV2Lookup
-public import Kernel.ApplicationLifecycleV3Lookup
 public import Kernel.ApplicationLifecycleCompletionV2Receiver
 public import Host.ApplicationFailedStartEndpoint
-public import Kernel.ApplicationLifecycleCompletionLookup
-public import Kernel.ApplicationLifecycleCompletionV2Lookup
 public import Host.ApplicationDispatchReady
 public import Host.ApplicationDispatchInspection
 public import Host.ReceiptContinuity
@@ -182,10 +177,6 @@ public import Host.ApplicationLifecycleRetryClaimV4Inspection
 public import Host.ApplicationLifecycleRetryCompletionV4Authoring
 public import Host.ApplicationLifecycleRetryCompletionV4Inspection
 public import Host.ApplicationLifecycleClaimV4Inspection
-public import Kernel.ApplicationLifecycleRetryBeginV4Receiver
-public import Kernel.ApplicationLifecycleRetryClaimV4Receiver
-public import Kernel.ApplicationLifecycleRetryCompletionV4Receiver
-public import Kernel.ApplicationLifecycleRetryV4Lookup
 public import Host.ApplicationLifecycleStopClaimInspection
 public import Host.ApplicationAgentLifetimePaidIngressInspection
 public import Host.ApplicationAgentLifetimeGrantInspection
@@ -251,7 +242,6 @@ meta import Kernel.ApplicationShareIssueGrainLookup
 meta import Kernel.ApplicationGrainSessionEnrollmentReceiver
 meta import Kernel.ApplicationAgentLifetimeGrantReceiver
 meta import Kernel.ApplicationDispatchReceiver
-meta import Kernel.ApplicationDispatchLookup
 meta import Kernel.ApplicationDispatchAgentReceiver
 meta import Kernel.ApplicationDispatchAgentLookup
 meta import Kernel.ApplicationDispatchAgentPaidAuthoring
@@ -261,12 +251,8 @@ meta import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
 meta import Kernel.ApplicationDispatchAuthoring
 meta import Kernel.ApplicationLifecycleBeginV3Receiver
 meta import Kernel.ApplicationLifecycleClaimV3Receiver
-meta import Kernel.ApplicationLifecycleV2Lookup
-meta import Kernel.ApplicationLifecycleV3Lookup
 meta import Kernel.ApplicationLifecycleCompletionV2Receiver
 meta import Host.ApplicationFailedStartEndpoint
-meta import Kernel.ApplicationLifecycleCompletionLookup
-meta import Kernel.ApplicationLifecycleCompletionV2Lookup
 meta import Host.ApplicationDispatchReady
 meta import Host.ApplicationDispatchInspection
 meta import Host.ReceiptContinuity
@@ -305,10 +291,6 @@ meta import Host.ApplicationLifecycleRetryClaimV4Inspection
 meta import Host.ApplicationLifecycleRetryCompletionV4Authoring
 meta import Host.ApplicationLifecycleRetryCompletionV4Inspection
 meta import Host.ApplicationLifecycleClaimV4Inspection
-meta import Kernel.ApplicationLifecycleRetryBeginV4Receiver
-meta import Kernel.ApplicationLifecycleRetryClaimV4Receiver
-meta import Kernel.ApplicationLifecycleRetryCompletionV4Receiver
-meta import Kernel.ApplicationLifecycleRetryV4Lookup
 meta import Host.ApplicationLifecycleStopClaimInspection
 meta import Host.ApplicationAgentLifetimePaidIngressInspection
 meta import Host.ApplicationAgentLifetimeGrantInspection
@@ -1135,19 +1117,10 @@ op26 callback with one newly verified Mini image. This read-only join returns
 the exact prior running event25 witness; it never mints a launch permit. -/
 def inspectStopClaimCurrent (config : NativeHost.Config)
     (planBytes committedBytes : List UInt8) : IO (Except String Lean.Json) := do
-  match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
+  match ← NativeHostLight.start config with
   | .error detail => return .error detail
-  | .ok durable =>
-      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
-          ResourceBirthCodec.rootBytes durable with
-        | .error detail => return .error s!"STOP claim history reader: {detail}"
-        | .ok reader => pure reader
-      match ← NativeHostReplay.verifyStart config reader durable with
-      | .error failure =>
-          return .error s!"STOP claim history refused at entry {failure.index}: {failure.detail}"
-      | .ok verified =>
-          return ApplicationLifecycleStopClaimInspection.inspectVerified
-            verified planBytes committedBytes
+  | .ok light =>
+      ApplicationLifecycleStopClaimInspection.inspectLight config light planBytes committedBytes
 
 /-- Immutable operator-selected protocol metadata. Available before bootstrap;
 this reads neither storage nor protected resource values. Full-width integers
@@ -1621,18 +1594,6 @@ def sessionConfirmed (config : NativeHost.Config)
     | .ok (some receipt) => return .confirmed kind receipt
   catch error => return .uncertain s!"receipt readback: {error}".toUTF8.toList
 
-/-- The exact post-CAS branch already has the verified successor and original
-receipt; retain that verifier-minted tip for the next session request. -/
-def sessionExactConfirmed (config : NativeHost.Config)
-    (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (kind : DurableReceiverIO.Confirmation) {oldTarget : NativeHost.Durable}
-    (old : NativeHostReplay.Verified config oldTarget)
-    (readback : NativeHostReplay.ExactReadback config old)
-    (receipt : NativeHostCodec.Receipt) : IO NativeHostCodec.Outcome := do
-  if let some current ← state.get then
-    state.set (some (← current.rememberReadbackVia old readback))
-  return .confirmed kind receipt
-
 /-- The special receiver accepts raw strict selected-release ingress, not a
 forged ordinary DRC signed command. Its current-key and law checks use the
 same verifier-opened recipient image as the session. -/
@@ -1678,13 +1639,11 @@ completion require separate host custody and current claim validation. -/
 def applicationLifecycleRetryBeginV4SubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result ← ApplicationLifecycleRetryBeginV4Receiver.receiveVerified config
-    session.verified payload
-  match result with
-    | .confirmed confirmed =>
-        sessionSetWalked state confirmed.old confirmed.readback
-        return .confirmed confirmed.confirmation confirmed.receipt
+  let current ← sessionCurrent config state
+  match ← ApplicationLifecycleRetryBeginV4Authoring.receiveLight config config.transport
+      current.light payload (sessionAdopt config state) with
+    | .confirmed kind transactionId eventId =>
+        return ← sessionConfirmed config state kind transactionId eventId
     | .rejected detail =>
         -- The member's frame stays the bare refusal; the operator's log keeps the reason.
         NativeHost.logOperatorRefusal <|
@@ -1702,8 +1661,6 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
   let some _ := ApplicationLifecycleBeginV3Ingress.codec.decode payload
     | return .refused .malformed "application-lifecycle-begin".toUTF8.toList
         "fresh BEGIN requires canonical launch-bound v3 ingress".toUTF8.toList
-  -- The light route (install, START, upgrade, continue); a STOP still selects its running
-  -- incarnation from the walk below.
   let current ← sessionCurrent config state
   match ← ApplicationLifecycleBeginV3Receiver.receiveServed config config.transport current.light payload
       (sessionAdopt config state) with
@@ -1717,80 +1674,98 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
-  | .stop => pure ()
-  let session ← sessionWalked config state
-  let result ← ApplicationLifecycleBeginV3Receiver.receiveVerified config
-    session.verified payload
-  match result with
-    | .confirmed confirmed =>
-        sessionSetWalked state confirmed.old confirmed.readback
-        return .confirmed confirmed.confirmation confirmed.receipt
-    | .rejected detail =>
-        -- The member's frame stays the bare refusal; the operator's log keeps the reason.
-        NativeHost.logOperatorRefusal <|
-          .refused .operationRejected "application-lifecycle-begin".toUTF8.toList detail.toUTF8.toList
-        return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
-    | .contention => return .contention
-    | .unavailable detail => return .unavailable detail.toUTF8.toList
-    | .uncertain detail => return .uncertain detail.toUTF8.toList
+  | .stop =>
+      match ← ApplicationLifecycleLaunchBeginAuthoring.receiveStopLight config config.transport
+          current.light payload (sessionAdopt config state) with
+      | .confirmed kind transactionId eventId =>
+          return ← sessionConfirmed config state kind transactionId eventId
+      | .rejected detail =>
+          -- The member's frame stays the bare refusal; the operator's log keeps the reason.
+          NativeHost.logOperatorRefusal <|
+            .refused .operationRejected "application-lifecycle-begin".toUTF8.toList detail.toUTF8.toList
+          return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail.toUTF8.toList
+      | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+def selectLifecycleReceiptLight {config : NativeHost.Config}
+    (light : NativeHostLight.Light config) (unavailableMessage : String)
+    (transactionId : Minidregg.Theory.TypedAuthorization.Digest)
+    (event : Minidregg.Kernel.DurableDataIntent.StableEvent)
+    (nullifiers : List Minidregg.Kernel.DurableDataIntent.StableNullifier) :
+    IO NativeHostCodec.Outcome := do
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  match ← reader.byTx transactionId with
+  | .error _ => return .uncertain unavailableMessage.toUTF8.toList
+  | .ok (.absent _) => return .absent
+  | .ok (.present found) =>
+      let record := found.read.record
+      let receipt := NativeHost.receiptOfRecord found.read
+      if record.event == event && nullifiers.all record.nullifiers.contains &&
+          receipt.transactionId == transactionId &&
+          receipt.eventId == event.eventId && receipt.acceptedCount == found.height then
+        return .confirmed .replayed receipt
+      else
+        return .refused .conflict "replay".toUTF8.toList
+          "transaction identity conflict".toUTF8.toList
 
 def applicationLifecycleBeginLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result := if (ApplicationLifecycleRetryBeginV4Ingress.codec.decode payload).isSome then
-      (ApplicationLifecycleRetryV4Lookup.beginVerified session.verified payload).mapError fun
-        | .malformed => ApplicationLifecycleV2Lookup.Error.malformed
-        | .transactionConflict => .transactionConflict
-        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
-    else if (ApplicationLifecycleBeginV3Ingress.codec.decode payload).isSome then
-      (ApplicationLifecycleV3Lookup.beginVerified session.verified payload).mapError fun
-        | .malformed => ApplicationLifecycleV2Lookup.Error.malformed
-        | .transactionConflict => .transactionConflict
-        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
-    else if (ApplicationLifecycleBeginV2Ingress.codec.decode payload).isSome then
-      ApplicationLifecycleV2Lookup.beginVerified session.verified payload
-    else ApplicationLifecycleV2Lookup.beginLegacyVerified session.verified payload
-  match result with
-  | .ok none => return .absent
-  | .ok (some receipt) => return .confirmed .replayed receipt
-  | .error .malformed =>
-      return .refused .malformed "application-lifecycle-begin".toUTF8.toList
-        "noncanonical ingress".toUTF8.toList
-  | .error .transactionConflict =>
-      return .refused .conflict "replay".toUTF8.toList
-        "transaction identity conflict".toUTF8.toList
-  | .error .nativeHistoryUnavailable =>
-      return .uncertain "original lifecycle BEGIN receipt unavailable".toUTF8.toList
+  let light := (← sessionCurrent config state).light
+  let unavailable := "original lifecycle BEGIN receipt unavailable"
+  if let some ingress := ApplicationLifecycleRetryBeginV4Ingress.codec.decode payload then
+    let base := ingress.begin.base
+    selectLifecycleReceiptLight light unavailable base.transactionId
+      (ApplicationLifecycleRetryBeginV4Admission.event ingress)
+      [ApplicationLifecycleBegin.stableNullifier base.domain base.semantics base.source]
+  else if let some ingress := ApplicationLifecycleBeginV3Ingress.codec.decode payload then
+    selectLifecycleReceiptLight light unavailable ingress.base.transactionId
+      (ApplicationLifecycleBeginV3Ingress.event ingress)
+      [ApplicationLifecycleBegin.stableNullifier ingress.base.domain
+        ingress.base.semantics ingress.base.source]
+  else if let some ingress := ApplicationLifecycleBeginV2Ingress.codec.decode payload then
+    selectLifecycleReceiptLight light unavailable ingress.base.transactionId
+      (ApplicationLifecycleBeginV2Ingress.event ingress)
+      [ApplicationLifecycleBegin.stableNullifier ingress.base.domain
+        ingress.base.semantics ingress.base.source]
+  else if let some ingress := ApplicationLifecycleBeginIngress.codec.decode payload then
+    selectLifecycleReceiptLight light unavailable ingress.transactionId
+      (ApplicationLifecycleBeginIngress.event ingress)
+      [ApplicationLifecycleBegin.stableNullifier ingress.domain
+        ingress.semantics ingress.source]
+  else
+    return .refused .malformed "application-lifecycle-begin".toUTF8.toList
+      "noncanonical ingress".toUTF8.toList
 
 def applicationLifecycleClaimLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result := if (ApplicationLifecycleRetryClaimV4Ingress.codec.decode payload).isSome then
-      (ApplicationLifecycleRetryV4Lookup.claimVerified session.verified payload).mapError fun
-        | .malformed => ApplicationLifecycleV2Lookup.Error.malformed
-        | .transactionConflict => .transactionConflict
-        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
-    else if (ApplicationLifecycleClaimV3Ingress.codec.decode payload).isSome then
-      (ApplicationLifecycleV3Lookup.claimVerified session.verified payload).mapError fun
-        | .malformed => ApplicationLifecycleV2Lookup.Error.malformed
-        | .transactionConflict => .transactionConflict
-        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
-    else if (ApplicationLifecycleClaimV2Ingress.codec.decode payload).isSome then
-      ApplicationLifecycleV2Lookup.claimVerified session.verified payload
-    else ApplicationLifecycleV2Lookup.claimLegacyVerified session.verified payload
-  match result with
-  | .ok none => return .absent
-  | .ok (some receipt) => return .confirmed .replayed receipt
-  | .error .malformed =>
-      return .refused .malformed "application-lifecycle-claim".toUTF8.toList
-        "noncanonical ingress".toUTF8.toList
-  | .error .transactionConflict =>
-      return .refused .conflict "replay".toUTF8.toList
-        "transaction identity conflict".toUTF8.toList
-  | .error .nativeHistoryUnavailable =>
-      return .uncertain "original lifecycle claim receipt unavailable".toUTF8.toList
+  let light := (← sessionCurrent config state).light
+  let unavailable := "original lifecycle claim receipt unavailable"
+  if let some ingress := ApplicationLifecycleRetryClaimV4Ingress.codec.decode payload then
+    selectLifecycleReceiptLight light unavailable ingress.base.transactionId
+      (ApplicationLifecycleRetryClaimV4Core.event ingress)
+      [ApplicationLifecycleClaim.stableNullifier ingress.base.domain
+        ingress.base.semantics ingress.base.source, ingress.retryToken]
+  else if let some ingress := ApplicationLifecycleClaimV3Ingress.codec.decode payload then
+    selectLifecycleReceiptLight light unavailable ingress.base.transactionId
+      (ApplicationLifecycleClaimV3Ingress.event ingress)
+      [ApplicationLifecycleClaim.stableNullifier ingress.base.domain
+        ingress.base.semantics ingress.base.source]
+  else if let some ingress := ApplicationLifecycleClaimV2Ingress.codec.decode payload then
+    selectLifecycleReceiptLight light unavailable ingress.base.transactionId
+      (ApplicationLifecycleClaimV2Ingress.event ingress)
+      [ApplicationLifecycleClaim.stableNullifier ingress.base.domain
+        ingress.base.semantics ingress.base.source]
+  else if let some ingress := ApplicationLifecycleClaimIngress.codec.decode payload then
+    selectLifecycleReceiptLight light unavailable ingress.transactionId
+      (ApplicationLifecycleClaimIngress.event ingress)
+      [ApplicationLifecycleClaim.stableNullifier ingress.domain
+        ingress.semantics ingress.source]
+  else
+    return .refused .malformed "application-lifecycle-claim".toUTF8.toList
+      "noncanonical ingress".toUTF8.toList
 
 /-- A completion records the custodian's signed physical report only after
 current source/history admission and exact CAS readback. It does not itself
@@ -1798,11 +1773,11 @@ launch or kill a process. -/
 def applicationFailedStartRecoverySubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let outcome : NativeHostCodec.Outcome ← match ← ApplicationFailedStartEndpoint.submit config session.verified payload with
-    | .confirmed confirmed => do
-        sessionSetWalked state confirmed.old confirmed.readback
-        pure (.confirmed confirmed.confirmation confirmed.receipt)
+  let current ← sessionCurrent config state
+  let outcome : NativeHostCodec.Outcome ← match ← ApplicationFailedStartEndpoint.submitLight
+      config config.transport current.light payload (sessionAdopt config state) with
+    | .confirmed kind transactionId eventId =>
+        sessionConfirmed config state kind transactionId eventId
     | .rejected detail => pure (.refused .operationRejected
         "failed-start-recovery".toUTF8.toList detail.toUTF8.toList)
     | .contention => pure .contention
@@ -1814,13 +1789,11 @@ def applicationFailedStartRecoverySubmitSession (config : NativeHost.Config)
 def applicationLifecycleRetryCompletionV4SubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result ← ApplicationLifecycleRetryCompletionV4Receiver.receiveVerified config
-    session.verified payload
-  match result with
-  | .confirmed confirmed =>
-      sessionSetWalked state confirmed.old confirmed.readback
-      return .confirmed confirmed.confirmation confirmed.receipt
+  let current ← sessionCurrent config state
+  match ← ApplicationLifecycleRetryCompletionV4Authoring.receiveLight config config.transport
+      current.light payload (sessionAdopt config state) with
+  | .confirmed kind transactionId eventId =>
+      return ← sessionConfirmed config state kind transactionId eventId
   | .rejected detail =>
       return .refused .operationRejected "application-lifecycle-completion".toUTF8.toList
         detail.toUTF8.toList
@@ -1838,7 +1811,6 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
   let some _ := ApplicationLifecycleCompletionV2Ingress.codec.decode payload
     | return .refused .malformed "application-lifecycle-completion".toUTF8.toList
         "fresh completion requires canonical launch-bound v2 ingress".toUTF8.toList
-  -- The light route; a STOP's completion still checks its running incarnation from the walk.
   let current ← sessionCurrent config state
   match ← ApplicationLifecycleCompletionV2Receiver.receiveServed config config.transport current.light payload
       (sessionAdopt config state) with
@@ -1851,49 +1823,52 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
-  | .stop => pure ()
-  let session ← sessionWalked config state
-  let result ← ApplicationLifecycleCompletionV2Receiver.receiveVerified config
-    session.verified payload
-  match result with
-  | .confirmed confirmed =>
-      sessionSetWalked state confirmed.old confirmed.readback
-      return .confirmed confirmed.confirmation confirmed.receipt
-  | .rejected detail =>
-      return .refused .operationRejected "application-lifecycle-completion".toUTF8.toList
-        detail.toUTF8.toList
-  | .contention => return .contention
-  | .unavailable detail => return .unavailable detail.toUTF8.toList
-  | .uncertain detail => return .uncertain detail.toUTF8.toList
+  | .stop =>
+      match ← ApplicationLifecycleLaunchCompletionAuthoring.receiveStopLight config config.transport
+          current.light payload (sessionAdopt config state) with
+      | .confirmed kind transactionId eventId =>
+          return ← sessionConfirmed config state kind transactionId eventId
+      | .rejected detail =>
+          return .refused .operationRejected "application-lifecycle-completion".toUTF8.toList
+            detail.toUTF8.toList
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail.toUTF8.toList
+      | .uncertain detail => return .uncertain detail.toUTF8.toList
 
 /-- Recovery selects only the original four-field receipt from a verified
 history. It never performs a physical completion or process effect. -/
 def applicationLifecycleCompletionLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result := if (ApplicationLifecycleRetryCompletionV4Ingress.codec.decode payload).isSome then
-      (ApplicationLifecycleRetryV4Lookup.completionVerified session.verified payload).mapError fun
-        | .malformed => ApplicationLifecycleCompletionLookup.Error.malformed
-        | .transactionConflict => .transactionConflict
-        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
-    else if (ApplicationLifecycleCompletionV2Ingress.codec.decode payload).isSome then
-      (ApplicationLifecycleCompletionV2Lookup.verified session.verified payload).mapError fun
-        | .malformed => ApplicationLifecycleCompletionLookup.Error.malformed
-        | .transactionConflict => .transactionConflict
-        | .nativeHistoryUnavailable => .nativeHistoryUnavailable
-    else ApplicationLifecycleCompletionLookup.verified session.verified payload
-  match result with
-  | .ok none => return .absent
-  | .ok (some receipt) => return .confirmed .replayed receipt
-  | .error .malformed =>
-      return .refused .malformed "application-lifecycle-completion".toUTF8.toList
-        "noncanonical ingress".toUTF8.toList
-  | .error .transactionConflict =>
-      return .refused .conflict "replay".toUTF8.toList
-        "transaction identity conflict".toUTF8.toList
-  | .error .nativeHistoryUnavailable =>
-      return .uncertain "original lifecycle completion receipt unavailable".toUTF8.toList
+  let light := (← sessionCurrent config state).light
+  let unavailable := "original lifecycle completion receipt unavailable"
+  if let some ingress := ApplicationLifecycleRetryCompletionV4Ingress.codec.decode payload then
+    let transactionId := DeclaredResourceController.transactionId ingress.domain
+      ingress.semantics (ingress.source.command ingress.domain ingress.semantics)
+    let creation := match ingress.creationMarker with
+      | none => []
+      | some marker => [marker]
+    selectLifecycleReceiptLight light unavailable transactionId
+      (ApplicationLifecycleRetryCompletionV4Ingress.event ingress)
+      (ApplicationLifecycleRetryCompletionV4Ingress.stableNullifier ingress :: creation)
+  else if let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode payload then
+    let transactionId := DeclaredResourceController.transactionId ingress.domain
+      ingress.semantics (ingress.source.command ingress.domain ingress.semantics)
+    let creation := match ingress.creationMarker with
+      | none => []
+      | some marker => [marker]
+    selectLifecycleReceiptLight light unavailable transactionId
+      (ApplicationLifecycleCompletionV2Ingress.event ingress)
+      (ApplicationLifecycleCompletionV2Ingress.stableNullifier ingress :: creation)
+  else if let some ingress := ApplicationLifecycleCompletionIngress.codec.decode payload then
+    let transactionId := DeclaredResourceController.transactionId ingress.domain
+      ingress.semantics (ingress.source.command ingress.domain ingress.semantics)
+    selectLifecycleReceiptLight light unavailable transactionId
+      (ApplicationLifecycleCompletionIngress.event ingress)
+      [ApplicationLifecycleCompletionIngress.stableNullifier ingress]
+  else
+    return .refused .malformed "application-lifecycle-completion".toUTF8.toList
+      "noncanonical ingress".toUTF8.toList
 
 /-- Event20 activates one gateway-bound consumer namespace. The receiver
 rechecks current gateway authority, performs the native CAS, then reopens a
@@ -1922,14 +1897,28 @@ def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
 def fnConsumerNamespaceLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
+  let light := (← sessionCurrent config state).light
   let some ingress := FnConsumerNamespaceRegistration.ingressCodec.decode payload
     | return .refused .malformed "fn-consumer-namespace".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
-  match FnConsumerNamespaceReceiver.lookupVerified session.verified ingress with
-  | none => return .absent
-  | some (.ok receipt) => return .confirmed .replayed receipt
-  | some (.error detail) => return .uncertain detail.toUTF8.toList
+  let tx := FnConsumerNamespaceRegistration.transactionId ingress.spec
+  let ev := (FnConsumerNamespaceRegistration.event ingress).eventId
+  match ← (light.opening.reader config.transport ResourceBirthCodec.rootBytes).byTx tx with
+  | .error refusal => return .unavailable refusal.message.toUTF8.toList
+  | .ok (.absent _) => return .absent
+  | .ok (.present found) =>
+      let record := found.read.record
+      let receipt := NativeHost.receiptOfRecord found.read
+      if record.event.eventId != ev || receipt.eventId != ev then
+        return .uncertain "fn consumer namespace transaction conflict".toUTF8.toList
+      let some original := FnConsumerNamespaceHistory.selectAt
+          config.deployment.domain config.profile.semantics record receipt
+        | return .uncertain "fn consumer namespace original unavailable".toUTF8.toList
+      if original.ingress == ingress &&
+          record.nullifiers.contains (FnConsumerNamespaceRegistration.claimNullifier ingress.spec) then
+        return .confirmed .replayed receipt
+      else
+        return .uncertain "fn consumer namespace original differs".toUTF8.toList
 
 /-- Event17 is a verified Mini commitment to one pinned local first-match
 observation. It never implies that an external fn delivery is complete. -/
@@ -1954,14 +1943,24 @@ def fnSelectedPollSubmitSession (config : NativeHost.Config)
 def fnSelectedPollLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
   let some ingress := FnSelectedPollCoverage.ingressCodec.decode payload
     | return .refused .malformed "fn-selected-poll".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
-  match FnSelectedPollReceiver.lookupVerified session.verified ingress with
-  | none => return .absent
-  | some (.ok receipt) => return .confirmed .replayed receipt
-  | some (.error detail) => return .uncertain detail.toUTF8.toList
+  let light := (← sessionCurrent config state).light
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  match ← reader.byTx (FnSelectedPollCoverage.transactionId ingress.spec) with
+  | .error refusal => return .unavailable refusal.message.toUTF8.toList
+  | .ok (.absent _) => return .absent
+  | .ok (.present found) =>
+      let record := found.read.record
+      let expectedEvent := FnSelectedPollCoverage.event ingress
+      let receipt := NativeHost.receiptOfRecord found.read
+      if record.event.eventId != expectedEvent.eventId || receipt.eventId != expectedEvent.eventId then
+        return .uncertain "selected fn poll transaction conflict".toUTF8.toList
+      else if record.event == expectedEvent &&
+          record.nullifiers.contains (FnSelectedPollCoverage.frontierNullifier ingress.spec) then
+        return .confirmed .replayed receipt
+      else return .uncertain "selected fn poll original differs".toUTF8.toList
 
 /-- Event19 advances the same durable frontier for a bounded empty page. -/
 def fnEmptyPollSubmitSession (config : NativeHost.Config)
@@ -1985,14 +1984,24 @@ def fnEmptyPollSubmitSession (config : NativeHost.Config)
 def fnEmptyPollLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
   let some ingress := FnEmptyPollProgressV2.ingressCodec.decode payload
     | return .refused .malformed "fn-empty-poll-v2".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
-  match FnEmptyPollReceiverV2.lookupVerified session.verified ingress with
-  | none => return .absent
-  | some (.ok receipt) => return .confirmed .replayed receipt
-  | some (.error detail) => return .uncertain detail.toUTF8.toList
+  let light := (← sessionCurrent config state).light
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  match ← reader.byTx (FnEmptyPollProgressV2.transactionId ingress.spec) with
+  | .error refusal => return .unavailable refusal.message.toUTF8.toList
+  | .ok (.absent _) => return .absent
+  | .ok (.present found) =>
+      let record := found.read.record
+      let expectedEvent := FnEmptyPollProgressV2.event ingress
+      let receipt := NativeHost.receiptOfRecord found.read
+      if record.event.eventId != expectedEvent.eventId || receipt.eventId != expectedEvent.eventId then
+        return .uncertain "empty fn poll transaction conflict".toUTF8.toList
+      else if record.event == expectedEvent &&
+          record.nullifiers.contains (FnEmptyPollProgressV2.frontierNullifier ingress.spec) then
+        return .confirmed .replayed receipt
+      else return .uncertain "empty fn poll original differs".toUTF8.toList
 
 /-- This records current source authorization for one selected content version.
 External fn delivery is a separate effect with its own uncertain outcome. -/
@@ -2212,24 +2221,41 @@ def agentLifetimeGrantLookupSession (config : NativeHost.Config)
       return .refused .malformed "application-agent-lifetime-grant".toUTF8.toList
         "noncanonical or conflicting lookup ingress".toUTF8.toList
 
-/-- Historical dispatch lookup is receipt-only. It rechecks the original
-special event at its verifier-selected prefix and never mints a delivery
-permit or replays an application effect. -/
+/-- Historical dispatch lookup is receipt-only. It reads the call's record through the Store's
+history (its exact event and nullifier) and never mints a delivery permit or replays an
+application effect. -/
 def applicationDispatchLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  match ApplicationDispatchLookup.lookupVerified session.verified payload with
-  | .ok none => return .absent
-  | .ok (some receipt) => return .confirmed .replayed receipt
-  | .error .malformed =>
-      return .refused .malformed "application-dispatch".toUTF8.toList
+  let some ingress := ApplicationDispatchAdmissionIngress.codec.decode payload
+    | return .refused .malformed "application-dispatch".toUTF8.toList
         "noncanonical lookup ingress".toUTF8.toList
-  | .error .transactionConflict =>
-      return .refused .conflict "replay".toUTF8.toList
-        "transaction identity conflict".toUTF8.toList
-  | .error .nativeHistoryUnavailable =>
+  let some selection := ApplicationDispatchAdmission.selectCommand ingress
+    | return .refused .malformed "application-dispatch".toUTF8.toList
+        "noncanonical lookup ingress".toUTF8.toList
+  let expectedCommand := ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent
+  let transactionId := DeclaredResourceController.transactionId ingress.dispatch.domain
+    ingress.dispatch.semantics expectedCommand
+  let light := (← sessionCurrent config state).light
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  match ← reader.byTx transactionId with
+  | .error _ =>
       return .uncertain "dispatch original history unavailable".toUTF8.toList
+  | .ok (.absent _) => return .absent
+  | .ok (.present found) =>
+      let record := found.read.record
+      let receipt := NativeHost.receiptOfRecord found.read
+      let expectedEvent := ApplicationDispatchAdmissionIngress.event ingress
+      let expectedNullifier := ApplicationDispatchAdmissionIngress.nullifier ingress
+      if record.event == expectedEvent &&
+          record.nullifiers.contains expectedNullifier &&
+          receipt.transactionId == transactionId &&
+          receipt.eventId == expectedEvent.eventId &&
+          receipt.acceptedCount == found.height then
+        return .confirmed .replayed receipt
+      else
+        return .refused .conflict "replay".toUTF8.toList
+          "transaction identity conflict".toUTF8.toList
 
 /-- Event21 historical lookup returns only its original receipt. It cannot
 recover a fresh physical delivery permit or replay an external effect. -/
@@ -2574,25 +2600,24 @@ def dispatchSession (config : NativeHost.Config)
   | 151 => fnDispatch operation payload
   | 156 =>
       -- Same verifier-selected projection as the detached command. Refresh the
-      -- session's admitted suffix instead of auditing genesis in a new process.
-      let session ← sessionWalked config state
-      let view ← IO.ofExcept <|
-        ApplicationAgentLifetimeGrantInspection.inspectAcceptedVerified session.verified payload
+      -- session's light opening instead of auditing genesis in a new process.
+      let light := (← sessionCurrent config state).light
+      let view ← IO.ofExcept (←
+        ApplicationAgentLifetimeGrantInspection.inspectAcceptedLight config light payload)
       let bytes := view.compress.toUTF8.toList
       unless bytes.length ≤ 2 * 1024 * 1024 do
         throw (IO.userError "accepted grant inspection exceeds native JSON budget")
       return (156, bytes)
   | 155 =>
       -- The operator socket pins this Host image and complete configuration.
-      -- Refresh the verifier-minted chronology held by op26 rather than
+      -- Refresh the light opening held by op26 rather than
       -- reopening and replaying genesis in a detached inspection process.
-      -- New suffixes are still authenticated and semantically re-admitted.
       let (planBytes, committedBytes) ← splitPair payload
       unless !planBytes.isEmpty && !committedBytes.isEmpty do
         throw (RequestRefusal.malformed "empty STOP inspection input")
-      let session ← sessionWalked config state
-      let view ← IO.ofExcept <| ApplicationLifecycleStopClaimInspection.inspectVerified
-        session.verified planBytes committedBytes
+      let light := (← sessionCurrent config state).light
+      let view ← IO.ofExcept (← ApplicationLifecycleStopClaimInspection.inspectLight
+        config light planBytes committedBytes)
       let bytes := view.compress.toUTF8.toList
       unless bytes.length ≤ 2 * 1024 * 1024 do
         throw (IO.userError "STOP claim inspection exceeds native JSON budget")
@@ -3041,31 +3066,22 @@ proof that the external process has started. -/
 def dispatchLifecycleRetryClaimV4SubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionWalked config state
-  let result ← ApplicationLifecycleRetryClaimV4Receiver.receiveVerified config
-    session.verified payload
+  let light := (← sessionCurrent config state).light
+  let result ← ApplicationLifecycleRetryClaimV4Authoring.receiveLight config config.transport
+    light payload (sessionAdopt config state)
   match result with
   | .reserved reservation =>
-      match reservation.confirmation with
-      | .installed =>
-          if reservation.freshCasWinner then
-            let handed ← reservation.withFreshTip fun committedBytes =>
-              writeSessionFrame output 26 committedBytes
-            match handed with
-            | .ok _ => sessionSetWalked state reservation.old reservation.readback
-            | .error detail =>
-                writeSessionFrame output 26 <| outcomeCodec.encode <|
-                  NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
-          else
-            sessionSetWalked state reservation.old reservation.readback
+      if reservation.kind == .installed && reservation.freshCasWinner then
+        let handed ← reservation.withFreshTip config.transport fun committedBytes =>
+          writeSessionFrame output 26 committedBytes
+        match handed with
+        | .ok _ => pure ()
+        | .error detail =>
             writeSessionFrame output 26 <| outcomeCodec.encode <|
-              NativeHost.publicSubmissionOutcome
-                (.confirmed .replayed reservation.receipt)
-      | .recoveredAfterUncertainResponse | .replayed =>
-          sessionSetWalked state reservation.old reservation.readback
-          writeSessionFrame output 26 <| outcomeCodec.encode <|
-            NativeHost.publicSubmissionOutcome
-              (.confirmed .replayed reservation.receipt)
+              NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+      else
+        writeSessionFrame output 26 <| outcomeCodec.encode <|
+          NativeHost.publicSubmissionOutcome (.confirmed .replayed reservation.receipt)
   | .rejected detail =>
       -- The submitter gets the uniform frame; the operator's log keeps the reason.
       let outcome : NativeHostCodec.Outcome :=
@@ -4843,8 +4859,8 @@ def fnFrontierPrepareSession (config : NativeHost.Config)
             projection.sequence + 1 == projection.position &&
             projection.position ≤ cursor.position + FnConsumerScope.maxPollScan do
           throw (IO.userError "selected fn poll is outside authenticated scan window")
-        let original ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginal
-          config session.target session.verified transaction
+        let original ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginalLight
+          config (← sessionCurrent config state).light transaction
           projection.source projection.messageId)
         sourceBytes := projection.source
         selected := some
@@ -5064,24 +5080,24 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
     let executable ← snapshotOperatorFile directory "selected-release-fn-helper"
       fnBinary (64 * 1024 * 1024) "0500"
     let (cursor, report, projection) ← projectFnPoll executable scope cursorPath reportPath
-    let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
-      ResourceBirthCodec.rootBytes)
-    let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
-        ResourceBirthCodec.rootBytes target with
-      | .ok reader => pure reader
-      | .error detail => throw (IO.userError s!"selected-release Mini history reader: {detail}")
-    let verified ← match ← NativeHostReplay.verifyStart config reader target with
-      | .ok verified => pure verified
-      | .error failure =>
-          throw (IO.userError s!"selected-release Mini history refused at {failure.index}: {failure.detail}")
-    let selected ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginal config
-      target verified transactionId projection.source projection.messageId)
+    let light ← IO.ofExcept (← NativeHostLight.start config)
+    let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+    let selected ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginalLight config
+      light transactionId projection.source projection.messageId)
     let coverageBytes ← readBoundedBytes coveragePath 16384
     let some coverage := FnSelectedPollCoverage.ingressCodec.decode coverageBytes
       | throw (IO.userError "selected-release fn ACK lacks canonical event17 ingress")
-    let some (.ok coverageReceipt) :=
-        FnSelectedPollReceiver.lookupVerified verified coverage
-      | throw (IO.userError "selected-release fn ACK lacks an admitted event17 receipt")
+    let covTx := FnSelectedPollCoverage.transactionId coverage.spec
+    let expectedEvent := FnSelectedPollCoverage.event coverage
+    let coverageReceipt : NativeHostCodec.Receipt ← match ← reader.byTx covTx with
+      | .ok (.present found) =>
+          let record := found.read.record
+          let receipt := NativeHost.receiptOfRecord found.read
+          if record.event == expectedEvent && receipt.eventId == expectedEvent.eventId &&
+              record.nullifiers.contains (FnSelectedPollCoverage.frontierNullifier coverage.spec) then
+            pure receipt
+          else throw (IO.userError "selected-release fn ACK lacks an admitted event17 receipt")
+      | _ => throw (IO.userError "selected-release fn ACK lacks an admitted event17 receipt")
     let evidence := coverage.spec.evidence
     unless evidence.key.application == gateway.application &&
         evidence.key.scope == progressScope &&
@@ -5098,8 +5114,18 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
         evidence.selectedSequence == projection.sequence &&
         evidence.toPosition == projection.position do
       throw (IO.userError "selected-release fn ACK differs from durable coverage")
-    let _ ← IO.ofExcept (verified.frontierRegistration evidence.key
-      coverage.spec.registrationReceipt)
+    let regReceipt := coverage.spec.registrationReceipt
+    match ← reader.byTx regReceipt.transactionId with
+    | .ok (.present found) =>
+        let regRecord := found.read.record
+        let actualRegReceipt := NativeHost.receiptOfRecord found.read
+        let some original := FnConsumerNamespaceHistory.selectAt
+            config.deployment.domain config.profile.semantics regRecord actualRegReceipt
+          | throw (IO.userError "fn consumer namespace has no admitted registration")
+        unless original.matches evidence.key regReceipt &&
+            regRecord.nullifiers.contains (FnConsumerNamespaceRegistration.claimNullifier original.ingress.spec) do
+          throw (IO.userError "fn consumer namespace registration or gateway differs")
+    | _ => throw (IO.userError "fn consumer namespace has no admitted registration")
     let (currentPosition, currentStatus) ←
       queryFnConsumerPosition executable scope controlPath
     unless currentPosition == currentStatus.committedAck do
@@ -5176,22 +5202,22 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
     let (inspectedScope, position) ← inspectFnConsumerCursor cursorPath
     unless inspectedScope == progressScope do
       throw (IO.userError "empty fn ACK cursor differs from pinned scope")
-    let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
-      ResourceBirthCodec.rootBytes)
-    let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
-        ResourceBirthCodec.rootBytes target with
-      | .ok reader => pure reader
-      | .error detail => throw (IO.userError s!"empty fn Mini history reader: {detail}")
-    let verified ← match ← NativeHostReplay.verifyStart config reader target with
-      | .ok verified => pure verified
-      | .error failure =>
-          throw (IO.userError s!"empty fn Mini history refused at {failure.index}: {failure.detail}")
+    let light ← IO.ofExcept (← NativeHostLight.start config)
+    let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
     let coverageBytes ← readBoundedBytes coveragePath 12288
     let some coverage := FnEmptyPollProgressV2.ingressCodec.decode coverageBytes
       | throw (IO.userError "empty fn ACK lacks canonical event19 ingress")
-    let some (.ok coverageReceipt) :=
-        FnEmptyPollReceiverV2.lookupVerified verified coverage
-      | throw (IO.userError "empty fn ACK lacks an admitted event19 receipt")
+    let covTx := FnEmptyPollProgressV2.transactionId coverage.spec
+    let expectedEvent := FnEmptyPollProgressV2.event coverage
+    let coverageReceipt : NativeHostCodec.Receipt ← match ← reader.byTx covTx with
+      | .ok (.present found) =>
+          let record := found.read.record
+          let receipt := NativeHost.receiptOfRecord found.read
+          if record.event == expectedEvent && receipt.eventId == expectedEvent.eventId &&
+              record.nullifiers.contains (FnEmptyPollProgressV2.frontierNullifier coverage.spec) then
+            pure receipt
+          else throw (IO.userError "empty fn ACK lacks an admitted event19 receipt")
+      | _ => throw (IO.userError "empty fn ACK lacks an admitted event19 receipt")
     let evidence := coverage.spec.evidence
     unless evidence.key.application == gateway.application &&
         evidence.key.scope == progressScope &&
@@ -5203,8 +5229,18 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
         evidence.reportDigest == FnConsumerFrontierCore.reportDigest report &&
         evidence.toPosition == position do
       throw (IO.userError "empty fn ACK differs from durable progress")
-    let _ ← IO.ofExcept (verified.frontierRegistration evidence.key
-      coverage.spec.registrationReceipt)
+    let regReceipt := coverage.spec.registrationReceipt
+    match ← reader.byTx regReceipt.transactionId with
+    | .ok (.present found) =>
+        let regRecord := found.read.record
+        let actualRegReceipt := NativeHost.receiptOfRecord found.read
+        let some original := FnConsumerNamespaceHistory.selectAt
+            config.deployment.domain config.profile.semantics regRecord actualRegReceipt
+          | throw (IO.userError "fn consumer namespace has no admitted registration")
+        unless original.matches evidence.key regReceipt &&
+            regRecord.nullifiers.contains (FnConsumerNamespaceRegistration.claimNullifier original.ingress.spec) do
+          throw (IO.userError "fn consumer namespace registration or gateway differs")
+    | _ => throw (IO.userError "fn consumer namespace has no admitted registration")
     let (currentPosition, currentStatus) ←
       queryFnConsumerPosition executable scope controlPath
     unless currentPosition == currentStatus.committedAck &&
@@ -6641,14 +6677,14 @@ def retryPhysicalKind (kind : String) : Bool :=
   kind == "application-lifecycle-retry-physical-signed-report"
 
 def retryLifecycleBeginPlan (config : NativeHost.Config)
-    (session : NativeHostSession.Walked config)
+    (light : NativeHostLight.Light config)
     (pin : ApplicationLifecycleBeginOperator.Pin) (payload : List UInt8) :
     IO (Option (UInt8 × List UInt8)) := do
   let some retry := ApplicationLifecycleRetryBeginV4Authoring.requestCodec.decode payload
     | return none
   let plan ← IO.ofExcept <|
-    (← ApplicationLifecycleRetryBeginV4Authoring.prepareVerified
-      config session.verified pin retry)
+    (← ApplicationLifecycleRetryBeginV4Authoring.prepareLight
+      config light pin retry)
   let bytes := ApplicationLifecycleRetryBeginV4Authoring.planCodec.encode plan
   unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
     throw (IO.userError "retry BEGIN plan exceeds host frame bound")
@@ -6665,14 +6701,14 @@ def retryLifecycleBeginAssemble (planBytes : List UInt8) (signatures : List (Lis
   return some (67, ingress)
 
 def retryLifecycleClaimPlan (config : NativeHost.Config)
-    (session : NativeHostSession.Walked config)
+    (light : NativeHostLight.Light config)
     (pin : ApplicationLifecycleClaimOperator.Pin) (payload : List UInt8) :
     IO (Option (UInt8 × List UInt8)) := do
   unless (ApplicationLifecycleRetryClaimV4Authoring.requestCodec.decode payload).isSome do
     return none
   let plan ← IO.ofExcept <|
-    ApplicationLifecycleRetryClaimV4Authoring.prepareRequestVerified
-      config session.verified pin payload
+    (← ApplicationLifecycleRetryClaimV4Authoring.prepareRequestLight
+      config light pin payload)
   let bytes := ApplicationLifecycleRetryClaimV4Authoring.planCodec.encode plan
   unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
     throw (IO.userError "retry claim plan exceeds host frame bound")
@@ -6689,14 +6725,14 @@ def retryLifecycleClaimAssemble (store : Minidregg.Theory.TypedAuthorization.Dig
   return some (69, ingress)
 
 def retryLifecycleCompletionPlan (config : NativeHost.Config)
-    (session : NativeHostSession.Walked config)
+    (light : NativeHostLight.Light config)
     (pin : ApplicationLifecycleCompletionOperator.Pin) (payload : List UInt8) :
     IO (Option (UInt8 × List UInt8)) := do
   unless (ApplicationLifecycleRetryCompletionV4Authoring.requestCodec.decode payload).isSome do
     return none
   let plan ← IO.ofExcept <|
-    (← ApplicationLifecycleRetryCompletionV4Authoring.prepareRequestVerified
-      config session.verified pin payload)
+    (← ApplicationLifecycleRetryCompletionV4Authoring.prepareRequestLight
+      config light pin payload)
   let bytes := ApplicationLifecycleRetryCompletionV4Authoring.planCodec.encode plan
   unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
     throw (IO.userError "retry completion plan exceeds host frame bound")
@@ -6734,26 +6770,23 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
       let (selectorBytes, payload) ← splitPair payload
       let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
       let pin := selector.beginPin management
+      let light := (← sessionCurrent pinnedConfig state).light
       if (ApplicationLifecycleRetryBeginV4Authoring.requestCodec.decode payload).isSome then
         if let some routed ←
-            retryLifecycleBeginPlan pinnedConfig (← sessionWalked pinnedConfig state) pin payload then
+            retryLifecycleBeginPlan pinnedConfig light pin payload then
           return routed
       let bytes ← if let some request :=
           ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
         if request.kind == .stop then do
-          -- A STOP's running witness is still selected from the walk.
-          let session ← sessionWalked pinnedConfig state
           let plan ← IO.ofExcept <|
-            ApplicationLifecycleLaunchBeginAuthoring.prepareStopRequestVerified
-              pinnedConfig session.verified pin payload
+            (← ApplicationLifecycleLaunchBeginAuthoring.prepareStopRequestLight
+              pinnedConfig light pin payload)
           pure (ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.encode plan)
         else do
-          let light := (← sessionCurrent pinnedConfig state).light
           let plan ← IO.ofExcept <|
             (← ApplicationLifecycleLaunchBeginAuthoring.prepareRequestLight pinnedConfig light pin payload)
           pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
       else do
-        let light := (← sessionCurrent pinnedConfig state).light
         let plan ← IO.ofExcept <|
           (← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestLight
             pinnedConfig light pin payload)
@@ -6786,11 +6819,11 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
             "lifecycle management identity is not configured")
       let (selectorBytes, payload) ← splitPair payload
       let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
+      let light := (← sessionCurrent pinnedConfig state).light
       if (ApplicationLifecycleRetryClaimV4Authoring.requestCodec.decode payload).isSome then
-        if let some routed ← retryLifecycleClaimPlan pinnedConfig (← sessionWalked pinnedConfig state)
+        if let some routed ← retryLifecycleClaimPlan pinnedConfig light
             (selector.claimPin management) payload then
           return routed
-      let light := (← sessionCurrent pinnedConfig state).light
       let plan ← IO.ofExcept <|
         (← ApplicationLifecycleLaunchClaimAuthoring.prepareRequestLight
           pinnedConfig light (selector.claimPin management) payload)
@@ -6818,11 +6851,11 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
             "lifecycle management identity is not configured")
       let (selectorBytes, payload) ← splitPair payload
       let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
+      let light := (← sessionCurrent pinnedConfig state).light
       if (ApplicationLifecycleRetryCompletionV4Authoring.requestCodec.decode payload).isSome then
-        if let some routed ← retryLifecycleCompletionPlan pinnedConfig (← sessionWalked pinnedConfig state)
+        if let some routed ← retryLifecycleCompletionPlan pinnedConfig light
             (selector.completionPin management) payload then
           return routed
-      let light := (← sessionCurrent pinnedConfig state).light
       let plan ← IO.ofExcept <|
         (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestLight
           pinnedConfig light (selector.completionPin management) payload)
@@ -8355,10 +8388,10 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                   "lifecycle management identity is not configured")
                             let (selectorBytes, request) ← splitPair payload
                             let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-                            let session ← sessionWalked pinnedConfig state
+                            let light := (← sessionCurrent pinnedConfig state).light
                             let plan ← IO.ofExcept <|
-                              (← ApplicationLifecycleCompletionOperator.prepareRequestVerified
-                                pinnedConfig session.verified (selector.completionPin management) request)
+                              (← ApplicationLifecycleCompletionOperator.prepareRequestLight
+                                pinnedConfig light (selector.completionPin management) request)
                             let bytes := ApplicationLifecycleCompletionOperator.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle completion plan exceeds host frame bound")
@@ -8380,10 +8413,10 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                   "lifecycle management identity is not configured")
                             let (selectorBytes, request) ← splitPair payload
                             let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-                            let session ← sessionWalked pinnedConfig state
+                            let light := (← sessionCurrent pinnedConfig state).light
                             let plan ← IO.ofExcept <|
-                              ApplicationLifecycleBeginOperator.prepareRequestVerified
-                                pinnedConfig session.verified (selector.beginPin management) request
+                              (← ApplicationLifecycleBeginOperator.prepareRequestLight
+                                pinnedConfig light (selector.beginPin management) request)
                             let bytes := ApplicationLifecycleBeginOperator.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resident BEGIN plan exceeds host frame bound")
@@ -8405,10 +8438,10 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                   "lifecycle management identity is not configured")
                             let (selectorBytes, request) ← splitPair payload
                             let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-                            let session ← sessionWalked pinnedConfig state
+                            let light := (← sessionCurrent pinnedConfig state).light
                             let plan ← IO.ofExcept <|
-                              ApplicationLifecycleClaimOperator.prepareRequestVerified
-                                pinnedConfig session.verified (selector.claimPin management) request
+                              (← ApplicationLifecycleClaimOperator.prepareRequestLight
+                                pinnedConfig light (selector.claimPin management) request)
                             let bytes := ApplicationLifecycleClaimOperator.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle claim plan exceeds host frame bound")
@@ -8433,9 +8466,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                   "lifecycle management identity is not configured")
                             let (selectorBytes, payload) ← splitPair payload
                             let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
-                            let session ← sessionWalked pinnedConfig state
-                            let plan ← IO.ofExcept <| (← ApplicationFailedStartEndpoint.prepare
-                              pinnedConfig session.verified (selector.completionPin management) payload)
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            let plan ← IO.ofExcept <| (← ApplicationFailedStartEndpoint.prepareLight
+                              pinnedConfig light (selector.completionPin management) payload)
                             let bytes := ApplicationFailedStartRecoveryAuthoring.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "failed START recovery plan exceeds host frame bound")
@@ -8453,9 +8486,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             return ((208 : UInt8), outcomeCodec.encode
                               (← applicationFailedStartRecoverySubmitSession pinnedConfig state payload))
                         | 209 =>
-                            let session ← sessionWalked pinnedConfig state
+                            let light := (← sessionCurrent pinnedConfig state).light
                             return ((209 : UInt8), outcomeCodec.encode
-                              (NativeHost.publicSubmissionOutcome (ApplicationFailedStartEndpoint.lookup session.verified payload)))
+                              (NativeHost.publicSubmissionOutcome (← ApplicationFailedStartEndpoint.lookupLight light payload)))
                         | 74 =>
                             let light := (← sessionCurrent pinnedConfig state).light
                             let plan ← IO.ofExcept <|
@@ -9299,8 +9332,8 @@ def runCommandDiagnoseCompletion (_arguments : List String) (_configPath _comman
             let bytes ← readBoundedBytes input maxFrame
             let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes
               | throw (RequestRefusal.malformed "noncanonical launch-bound v2 completion ingress")
-            let session ← IO.ofExcept (← NativeHostSession.startWalked pinnedConfig)
-            let result ← NativeHostReplay.admitCompletionV2Verified session.verified ingress
+            let light ← IO.ofExcept (← NativeHostLight.start pinnedConfig)
+            let result ← ApplicationLifecycleLaunchCompletionAuthoring.diagnoseLight pinnedConfig light ingress
             let (status, detail) := match result with
               | .ok _ => ("admitted", "")
               | .error detail => ("rejected", detail)
@@ -9310,7 +9343,7 @@ def runCommandDiagnoseCompletion (_arguments : List String) (_configPath _comman
               [("type", toJson "application-lifecycle-completion-diagnostic-v1"),
                ("status", toJson status),
                ("detail", toJson detail),
-               ("acceptedCount", toJson (toString session.verified.opened.durable.height))])
+               ("acceptedCount", toJson (toString light.opening.head.height))])
             pure 0
   | _ => throw (IO.userError usage)
 

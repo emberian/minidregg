@@ -196,6 +196,7 @@ struct RefEntry {
     name: String,
     reference: Option<Value>,
     born_in: Option<String>,
+    storage: Option<String>,
 }
 
 impl RefIndex {
@@ -222,10 +223,14 @@ impl RefIndex {
             .map(|name| {
                 let reference = workspace::reference(root, &name).ok();
                 // The birth source `create` retains (sources/create-NAME.json on final).
-                let born_in = workspace::bounded_json(&root.join("sources").join(format!("create-{name}.json")))
-                    .ok()
+                let source = workspace::bounded_json(&root.join("sources").join(format!("create-{name}.json"))).ok();
+                let born_in = source
+                    .as_ref()
                     .and_then(|value| value["birth"]["resources"][0]["room"].as_str().map(str::to_owned));
-                RefEntry { name, reference, born_in }
+                let storage = source
+                    .as_ref()
+                    .and_then(|value| value["birth"]["resources"][0]["storage"].as_str().map(str::to_owned));
+                RefEntry { name, reference, born_in, storage }
             })
             .collect();
         Self { stamp, entries }
@@ -583,12 +588,23 @@ pub(crate) fn index_sections(
 /// `linked(height)` says whether that row's `show` and `diff` pages exist (a
 /// server: every row; a static snapshot: the rows it rendered).
 pub(crate) fn render_history(base: &str, name: &str, history: &Value, linked: &dyn Fn(&str) -> bool) -> String {
-    let links = |height: &str| match height.parse::<u64>().ok().and_then(|h| h.checked_sub(1)).filter(|_| linked(height)) {
-        Some(below) => format!(
-            " <a href=\"{base}/at/{h}/doc/{n}\">show</a> | <a href=\"{base}/doc/{n}/diff/{below}/{h}\">diff</a>",
-            h = escape(height),
+    let first_height = history["rows"]
+        .as_array()
+        .and_then(|rows| rows.iter().filter_map(|r| r["height"].as_str()?.parse::<u64>().ok()).min());
+    let links = |height: &str| match height.parse::<u64>().ok().filter(|_| linked(height)) {
+        Some(h) if Some(h) == first_height => format!(
+            " <a href=\"{base}/at/{eh}/doc/{n}\">show</a>",
+            eh = escape(height),
             n = escape(name)
         ),
+        Some(h) => match h.checked_sub(1) {
+            Some(below) => format!(
+                " <a href=\"{base}/at/{eh}/doc/{n}\">show</a> | <a href=\"{base}/doc/{n}/diff/{below}/{eh}\">diff</a>",
+                eh = escape(height),
+                n = escape(name)
+            ),
+            None => String::new(),
+        },
         None => String::new(),
     };
     format!(
@@ -620,7 +636,10 @@ pub(crate) fn render_fields(entries: &[Value], board: bool) -> String {
         for (field, value) in &fields {
             values.entry(*field).or_insert(value.as_str());
         }
-        out.push_str("<section><h2>Tasks</h2>\n<table><tr><th>task</th><th>state</th><th>owner</th></tr>\n");
+        let mut rows = String::new();
+        let mut todo = String::new();
+        let mut doing = String::new();
+        let mut done = String::new();
         let mut count = 0;
         for (&field, &state) in &values {
             if field < 2 || field % 2 != 0 { continue; }
@@ -629,14 +648,35 @@ pub(crate) fn render_fields(entries: &[Value], board: bool) -> String {
             // overflow u128 (whose maximum is odd).
             let owner = values.get(&(field + 1)).copied().unwrap_or("(none)");
             count += 1;
-            out.push_str(&format!(
+            rows.push_str(&format!(
                 "<tr data-task=\"{n}\"><td>{n}</td><td>{}</td><td>{}</td></tr>\n",
                 escape(state),
                 escape(owner)
             ));
+            let card = format!("<li><strong>Task #{n}</strong> · owner <code>{}</code> (state <code>{}</code>)</li>", escape(owner), escape(state));
+            match state {
+                "0" | "open" | "todo" => todo.push_str(&card),
+                "1" | "doing" | "in-progress" | "active" => doing.push_str(&card),
+                _ => done.push_str(&card),
+            }
+        }
+        out.push_str("<section><h2>Tasks</h2>\n");
+        if count > 0 {
+            let col = |title: &str, items: &str| {
+                format!(
+                    "<div class=\"kanban-col\"><h3>{title}</h3>{}</div>",
+                    if items.is_empty() { "<p class=\"note\">none</p>".to_owned() } else { format!("<ul>{items}</ul>") }
+                )
+            };
+            out.push_str(&format!(
+                "<div class=\"kanban\" style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:1rem;margin-bottom:1rem\">{}{}{}</div>\n",
+                col("Open (0)", &todo),
+                col("In progress (1)", &doing),
+                col("Done (2+)", &done),
+            ));
         }
         out.push_str(&format!(
-            "</table><p class=note>{count} task(s), read with the board layout (state = field 2n+2, owner = \
+            "<table><tr><th>task</th><th>state</th><th>owner</th></tr>\n{rows}</table><p class=note>{count} task(s), read with the board layout (state = field 2n+2, owner = \
              field 2n+3); the law that keeps state forward is the cell's own.</p></section>\n"
         ));
     }
@@ -779,6 +819,116 @@ impl Site {
         self.refs().entries.iter().map(|entry| entry.name.clone()).collect()
     }
 
+    fn is_account_entry(entry: &RefEntry) -> bool {
+        entry.reference.as_ref().is_some_and(|r| r["kind"] == "account")
+            || entry.name == "my-account"
+            || entry.name.ends_with("-account")
+    }
+
+    fn is_room_entry(&self, entry: &RefEntry, born_targets: &BTreeSet<&str>) -> bool {
+        entry.reference.as_ref().is_some_and(|r| {
+            r.get("room").is_some_and(|v| !v.is_null())
+                || r["target"].as_str().is_some_and(|t| born_targets.contains(t))
+        }) || matches!(entry.name.as_str(), "lobby" | "operations" | "subscribers")
+            || self
+                .home
+                .as_ref()
+                .is_some_and(|h| h.join("chat/rooms").join(format!("{}.json", entry.name)).exists())
+    }
+
+    fn is_bend_or_world_entry(&self, entry: &RefEntry) -> bool {
+        entry
+            .reference
+            .as_ref()
+            .is_some_and(|r| matches!(r["kind"].as_str(), Some("world-kind" | "world-instance")))
+            || self.root.join("bend/objects").join(format!("{}.json", entry.name)).exists()
+            || self.root.join("bend/packages").join(format!("{}.json", entry.name)).exists()
+    }
+
+    fn is_board_entry(entry: &RefEntry) -> bool {
+        !Self::is_account_entry(entry)
+            && (entry.storage.as_deref() == Some("declared")
+                || entry.name == "board"
+                || entry.name == "roadmap"
+                || entry.name.starts_with("board-")
+                || entry.name.ends_with("-board")
+                || entry.name.ends_with("/board"))
+    }
+
+    fn is_known_doc_entry(entry: &RefEntry) -> bool {
+        entry.storage.as_deref() == Some("content")
+            || matches!(
+                entry.name.as_str(),
+                "welcome"
+                    | "what-is-mini"
+                    | "a-refusal-explains-itself"
+                    | "the-lost-reply"
+                    | "the-lamplighters-note"
+                    | "house-rules"
+                    | "field-notes"
+                    | "getting-started"
+                    | "architecture"
+                    | "faq"
+            )
+            || entry.name.ends_with("/table")
+            || entry.name.ends_with("/index")
+            || entry.name.ends_with("/chapters")
+    }
+
+    fn is_story_aux_entry(entry: &RefEntry) -> bool {
+        entry
+            .name
+            .split_once('/')
+            .is_some_and(|(_, sub)| sub.starts_with("p-") || sub == "scenes" || sub == "map")
+    }
+
+    pub(crate) fn doc_names(&self) -> Vec<String> {
+        let refs = self.refs();
+        let born_targets: BTreeSet<&str> = refs.entries.iter().filter_map(|e| e.born_in.as_deref()).collect();
+        refs.entries
+            .iter()
+            .filter(|e| {
+                !Self::is_account_entry(e)
+                    && !self.is_room_entry(e, &born_targets)
+                    && !self.is_bend_or_world_entry(e)
+                    && !Self::is_board_entry(e)
+                    && !Self::is_story_aux_entry(e)
+            })
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    pub(crate) fn board_names(&self) -> Vec<String> {
+        let refs = self.refs();
+        let born_targets: BTreeSet<&str> = refs.entries.iter().filter_map(|e| e.born_in.as_deref()).collect();
+        refs.entries
+            .iter()
+            .filter(|e| {
+                !Self::is_account_entry(e)
+                    && !self.is_room_entry(e, &born_targets)
+                    && !self.is_bend_or_world_entry(e)
+                    && !Self::is_known_doc_entry(e)
+                    && !Self::is_story_aux_entry(e)
+            })
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    pub(crate) fn room_names(&self) -> Vec<String> {
+        let refs = self.refs();
+        refs.entries
+            .iter()
+            .filter(|e| {
+                !Self::is_account_entry(e)
+                    && !self.is_bend_or_world_entry(e)
+                    && !Self::is_board_entry(e)
+                    && !Self::is_known_doc_entry(e)
+                    && !Self::is_story_aux_entry(e)
+            })
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
     /// Cell id -> this workspace's reference name for it.
     fn targets(&self) -> Vec<(String, String)> {
         self.refs()
@@ -798,6 +948,47 @@ impl Site {
         workspace::signed_view(&self.root, &self.workspace, reference, view)
     }
 
+    pub(crate) fn doc_index(&self) -> Page {
+        let base = self.base();
+        let refs = self.refs();
+        let doc_set: BTreeSet<String> = self.doc_names().into_iter().collect();
+        let mut rows = String::new();
+        let mut count = 0usize;
+        for entry in &refs.entries {
+            if !doc_set.contains(&entry.name) {
+                continue;
+            }
+            count += 1;
+            let name = &entry.name;
+            let Some(reference) = entry.reference.as_ref() else {
+                rows.push_str(&format!("<tr><td>{}</td><td colspan=3>unreadable reference</td></tr>\n", escape(name)));
+                continue;
+            };
+            let target = reference["target"].as_str().unwrap_or("?");
+            let n = escape(name);
+            rows.push_str(&format!(
+                "<tr data-ref=\"{n}\"><td><a href=\"{base}/doc/{n}\">{n}</a></td><td>{k}</td><td>{t}</td>\
+                 <td><a href=\"{base}/doc/{n}\">read</a> | <a href=\"{base}/doc/{n}/history\">history</a> | \
+                 <a href=\"{base}/doc/{n}/inspect\">inspect</a>{}</td></tr>\n",
+                if self.front.read_only { String::new() } else { format!(" | <a href=\"{base}/doc/{n}/edit\">edit</a>") },
+                k = escape(reference["kind"].as_str().unwrap_or("?")),
+                t = short(target),
+            ));
+        }
+        Page {
+            status: 200,
+            title: "Documents".into(),
+            stamp: Stamp::None,
+            body: format!(
+                "<p class=note>Documents held in this workspace. Opening a document runs a signed \
+                 read under your key.</p>\n<table data-refs=\"{count}\">\
+                 <tr><th>document</th><th>kind</th><th>cell</th><th>views</th></tr>\n{rows}</table>\n"
+            ) + &if self.front.read_only { String::new() } else {
+                format!("<p><a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self)
+            },
+        }
+    }
+
     fn index(&self) -> Page {
         let base = self.base();
         let refs = self.refs();
@@ -811,13 +1002,33 @@ impl Site {
                 continue;
             };
             let target = reference["target"].as_str().unwrap_or("?");
-            let room = if rooms.contains(target) { " (room)" } else { "" };
+            let is_room = self.is_room_entry(entry, &rooms);
+            let room = if is_room { " (room)" } else { "" };
+            let n = escape(name);
+            let primary_href = if is_room {
+                format!("{base}/room/{n}")
+            } else if Self::is_account_entry(entry) {
+                if self.face == Face::Body {
+                    format!("{base}/purse")
+                } else {
+                    format!("{base}/board/{n}")
+                }
+            } else if self.is_bend_or_world_entry(entry) {
+                if self.face == Face::Body && self.root.join("bend/objects").join(format!("{name}.json")).exists() {
+                    format!("{base}/bend")
+                } else {
+                    format!("{base}/object/{n}")
+                }
+            } else if Self::is_board_entry(entry) {
+                format!("{base}/board/{n}")
+            } else {
+                format!("{base}/doc/{n}")
+            };
             rows.push_str(&format!(
-                "<tr data-ref=\"{n}\"><td><a href=\"{base}/doc/{n}\">{n}</a>{room}</td><td>{k}</td><td>{t}</td>\
+                "<tr data-ref=\"{n}\"><td><a href=\"{primary_href}\">{n}</a>{room}</td><td>{k}</td><td>{t}</td>\
                  <td><a href=\"{base}/doc/{n}\">doc</a> | <a href=\"{base}/doc/{n}/history\">history</a> | \
                  <a href=\"{base}/board/{n}\">board</a> | <a href=\"{base}/room/{n}\">room</a> | \
                  <a href=\"{base}/object/{n}\">object</a></td></tr>\n",
-                n = escape(name),
                 k = escape(reference["kind"].as_str().unwrap_or("?")),
                 t = short(target),
             ));
@@ -827,8 +1038,8 @@ impl Site {
             title: "Your workspace".into(),
             stamp: Stamp::None,
             body: format!(
-                "<p class=note>The resources this workspace holds a reference to. Opening one is a signed \
-                 read under your key; what you see is what your grants cover.</p>\n<table data-refs=\"{}\">\
+                "<p class=note>Resources referenced by this workspace. Opening one runs a signed \
+                 read under your key; your current grants determine what is visible.</p>\n<table data-refs=\"{}\">\
                  <tr><th>name</th><th>kind</th><th>cell</th><th>views</th></tr>\n{rows}</table>\n",
                 names.len()
             ) + &if self.front.read_only { String::new() } else {
@@ -916,9 +1127,14 @@ impl Site {
             let inspect = format!(" | <a href=\"{base}/doc/{n}/inspect\">source and comments</a>");
             body.push_str(&format!("<p class=note>{edit}<a href=\"{base}/doc/{n}/history\">history</a>{inspect}</p>\n"));
         }
-        // The document is the one renderer's HTML, byte for byte what
-        // `doc show --format html` prints for this read.
-        body.push_str(&rendered.html(name));
+        // `Face::Server` (`mini web`) renders `rendered.html(name)` byte for byte
+        // matching `doc show --format html`; `Face::Body` renders clickable links
+        // for resolved document targets and transclusion sources.
+        if self.face == Face::Body {
+            body.push_str(&rendered.html_linked(name, &base));
+        } else {
+            body.push_str(&rendered.html(name));
+        }
         body.push_str(&index_sections(&base, &names, links.as_deref(), backlinks.as_deref()));
         Page {
             status: 200,

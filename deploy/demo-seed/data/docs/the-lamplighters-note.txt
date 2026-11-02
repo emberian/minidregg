@@ -1,7 +1,5 @@
-# The lamplighter's note
-There is a house at the end of the lane where a lamp upstairs has hummed for forty years, low and patient.
-Nobody remembers who lit it. The lamplighter left a note on the hallway table: "The lamp wants a key, and the key wants a door."
-The door is north of the hallway, behind the anteroom, and it opens for anyone the story's law allows.
-You can walk the house yourself in the story room called tale. Type: story list   then   look
-It is a small tale with a sealed law: you can only go where the law lets you, and the law can be read before you try it.
-Back to welcome, or on to what-is-mini.
+The Lamplighter's Note
+At the end of the lane stands a narrow house where an upstairs lamp has hummed for forty years.
+"The lamp wants a key, and the key wants a door."
+North of the hallway, beyond the anteroom, a locked door waits for whoever holds the brass key.
+The house is modeled as the interactive story tale, governed by a sealed room law checked by the Lean theorem sealed_story_scene_monotone.

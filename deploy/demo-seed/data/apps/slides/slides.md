@@ -2,18 +2,18 @@
 
 ---
 
-## One shared world
+## One shared state tree
 
-People, apps and agents all ask the same gate.
-
----
-
-## A refusal explains itself
-
-It names the clause, and the request that would have passed.
+People, Sandstorm grains, and agents submit signed proposals to the same Lean admission kernel.
 
 ---
 
-## This deck was published by a member's app
+## Refusals carry clauses
 
-It is served from its own origin, with no account and no cookies.
+Rejected writes return the exact rule clause that failed and leave state untouched.
+
+---
+
+## Isolated web grains
+
+Applications run in per-grain sandboxes with explicit Mini capability grants.

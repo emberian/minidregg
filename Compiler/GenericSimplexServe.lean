@@ -1,4 +1,8 @@
-import Compiler.GenericSimplexParticipant
+module
+
+public import Compiler.GenericSimplexParticipant
+
+@[expose] public section
 
 /-!
 Standing replica service. Each replica is its own long-lived process: it

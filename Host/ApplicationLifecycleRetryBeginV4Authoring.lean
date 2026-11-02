@@ -75,9 +75,9 @@ def planCodec : LawfulCodec Plan := NativeHostCodec.framed
   "DREGG/APPLICATION/RETRY-CREATE-BEGIN-OPERATOR-PLAN/v4".toUTF8.toList
   planStream
 
-private def cellAt {config : Config} (opened : Opened config) (resource : Nat) :
-    Option (PackedCell CanonicalCellRegistry.registry) :=
-  match opened.directory.directory.slots resource with
+private def cellAtOn {deployment : CanonicalCellRegistry.Deployment} (ground : ServedBasis.Ground deployment)
+    (resource : Nat) : Option (PackedCell CanonicalCellRegistry.registry) :=
+  match ground.directory.slots resource with
   | .present cell => some cell
   | .absent => none
 
@@ -110,27 +110,24 @@ private def startBinding (domain : Digest) (app : Nat)
   | .stop, some _ => throw "launch STOP cannot select a create action"
   | _, _ => throw "launch BEGIN authoring supports INSTALL, START or STOP only"
 
-def prepareVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
-    (request : Request) : IO (Except String Plan) := do
+private def unsignedOn (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) :
+    Except String (ApplicationLifecycleRetryBeginV4Ingress.Ingress × PackedCell CanonicalCellRegistry.registry) := do
   let launch := request.launch
   unless launch.kind == .start && launch.createIndex.isSome do
-    return .error "retry BEGIN requires explicit repeat CREATE"
+    throw "retry BEGIN requires explicit repeat CREATE"
   let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical launch.descriptorBytes
-    | return .error "noncanonical retry descriptor"
-  unless descriptor.valid do return .error "invalid retry descriptor"
-  let start ← match startBinding config.deployment.domain pin.app descriptor launch.kind launch.createIndex with
-    | .error detail => return .error detail
-    | .ok start => pure start
-  let opened := verified.opened
-  let some appCell := cellAt opened pin.app
-    | return .error "current launch application cell unavailable"
-  let some packageCell := cellAt opened pin.packageManifest
-    | return .error "current launch package manifest unavailable"
+    | throw "noncanonical retry descriptor"
+  unless descriptor.valid do throw "invalid retry descriptor"
+  let start ← startBinding config.deployment.domain pin.app descriptor launch.kind launch.createIndex
+  let some appCell := cellAtOn ground pin.app
+    | throw "current launch application cell unavailable"
+  let some packageCell := cellAtOn ground pin.packageManifest
+    | throw "current launch package manifest unavailable"
   unless packageCell.kind == .content do
-    return .error "current launch package manifest is not content"
+    throw "current launch package manifest is not content"
   let some before := ApplicationLifecycleClaimCurrent.appState pin.app appCell
-    | return .error "current launch application state unavailable"
+    | throw "current launch application state unavailable"
   let source : ApplicationLifecycleBegin.Source :=
     { kind := launch.kind
       app := pin.app
@@ -150,10 +147,6 @@ def prepareVerified (config : Config) {target : Durable}
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
         config.storeIdentity pin.app (if launch.kind == .stop then before.generation
                  else before.generation + 1) }
-  if launch.kind == .stop then
-    match verified.selectRunning source with
-    | .error detail => return .error detail
-    | .ok _ => pure ()
   let base : ApplicationLifecycleBeginIngress.Ingress :=
     { domain := config.deployment.domain
       semantics := config.profile.semantics
@@ -170,22 +163,21 @@ def prepareVerified (config : Config) {target : Durable}
   let unsigned : ApplicationLifecycleRetryBeginV4Ingress.Ingress :=
     (⟨inner, request.retry⟩ : ApplicationLifecycleRetryBeginV4Ingress.Ingress).withAuthorizationId
   unless unsigned.shape do
-    return .error "launch BEGIN authorization, descriptor or action shape refused"
-  let grounded ← match ServedBasis.Grounded.ofLoaded verified.reader.head opened.durable
-      opened.directory opened.authority with
-    | .error detail => return .error s!"retry BEGIN current ground: {detail}"
-    | .ok grounded => pure grounded
-  let evidence ← match ← ApplicationFailedCreateRetryEvidence.prepare config verified.reader
+    throw "launch BEGIN authorization, descriptor or action shape refused"
+  return (unsigned, packageCell)
+
+private def prepareOn (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (grounded : ServedBasis.Grounded config.deployment reader.head)
+    (pin : Pin) (request : Request) : IO (Except String Plan) := do
+  let ground := grounded.ground
+  let (unsigned, packageCell) ← match unsignedOn config ground pin request with
+    | .error detail => return .error detail
+    | .ok pair => pure pair
+  let _ ← match ← ApplicationFailedCreateRetryEvidence.prepare config reader
       grounded request.retry unsigned.begin with
     | .error detail => return .error detail
     | .ok evidence => pure evidence
-  let historical := evidence.recovered.historical
-  let some prior := verified.claimsV3.find? (fun prior => prior.index == historical.index)
-    | return .error "retry original claim absent from admitted chronology"
-  unless prior.ingress == request.retry.recovery.source.originalClaim &&
-      DurableReceiverCodec.intentStream.encode prior.record ==
-        DurableReceiverCodec.intentStream.encode historical.selected.record do
-    return .error "retry original claim differs from admitted chronology"
   unless ApplicationLifecycleBeginV3Admission.installedExact
       config.deployment unsigned.begin packageCell do
     return .error "current installed package differs from signed launch descriptor"
@@ -193,12 +185,12 @@ def prepareVerified (config : Config) {target : Durable}
   let command := ApplicationLifecycleBegin.command config.deployment.domain
     config.profile.semantics source
   let ambient : DeclaredResourceController.Ambient :=
-    ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+    ⟨config.federation, config.genesisHeight + ground.height⟩
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ambient opened.ground command
+      config.profile ambient ground command
     | return .error "current launch BEGIN command preparation refused"
   unless ApplicationLifecycleBeginReceiver.linkedCurrentPolicy config.deployment
-      config.profile ambient opened.ground source prepared do
+      config.profile ambient ground source prepared do
     return .error "current launch BEGIN app/package law differs"
   unless decide (DeclaredResourceController.PhysicalShape prepared) do
     return .error "current launch BEGIN physical shape refused"
@@ -206,7 +198,7 @@ def prepareVerified (config : Config) {target : Durable}
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let wanted := ApplicationLifecycleBeginReceiver.packageRequest config.deployment
-    config.profile ambient opened.ground source prepared
+    config.profile ambient ground source prepared
   let .ok selected := ResourceObservationAdmission.prepare context config.profile
       wanted marker source.packageObserveCapability source.canonicalBytes
     | return .error "current launch package observation preparation refused"
@@ -214,12 +206,12 @@ def prepareVerified (config : Config) {target : Durable}
       CanonicalCellRegistry.cellCodec.encode packageCell do
     return .error "launch package observation differs from current image"
   let commandBytes := DeclaredResourceController.commandCodec.encode command
-  let .ok invocation := NativeHost.prepareLoaded config opened (.invoke commandBytes)
+  let .ok invocation := NativeHost.prepareInvokeOn config ground (config.genesisHeight + ground.height) commandBytes
     | return .error "current launch BEGIN invocation plan refused"
   unless invocation.finalizedDraft == .invoke commandBytes do
     return .error "launch BEGIN invocation plan differs from bound action"
   let .ok header := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
     | return .error "current launch package observation signing key unavailable"
   let packageSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩
@@ -229,12 +221,66 @@ def prepareVerified (config : Config) {target : Durable}
     | .ok _ => pure ()
   return .ok ⟨unsigned, invocation, packageSlot⟩
 
-def prepareRequestVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
-    (bytes : List UInt8) : IO (Except String Plan) := do
+def prepareLight (config : Config) (light : NativeHostLight.Light config)
+    (pin : Pin) (request : Request) : IO (Except String Plan) := do
+  let cells ← match ← light.basis ⟨[], []⟩ with
+    | .error detail => return .error detail
+    | .ok basis => pure basis
+  let (unsigned, _) ← match unsignedOn config (.ofBasis cells) pin request with
+    | .error detail => return .error detail
+    | .ok pair => pure pair
+  let grounded ← match ← light.groundedVia config.transport (ApplicationLifecycleRetryBeginV4Admission.keys unsigned) with
+    | .error detail => return .error detail
+    | .ok grounded => pure grounded
+  prepareOn config (light.opening.reader config.transport ResourceBirthCodec.rootBytes) grounded pin request
+
+def prepareRequestLight (config : Config) (light : NativeHostLight.Light config)
+    (pin : Pin) (bytes : List UInt8) : IO (Except String Plan) := do
   let some request := requestCodec.decode bytes
     | return .error "noncanonical retry BEGIN operator request"
-  prepareVerified config verified pin request
+  prepareLight config light pin request
+
+inductive LightResult where
+  | confirmed (kind : DurableReceiverIO.Confirmation) (transactionId : Digest)
+      (eventId : Digest)
+  | rejected (detail : String)
+  | contention
+  | unavailable (detail : String)
+  | uncertain (detail : String)
+
+/-- Receive a retry v4 BEGIN on the light opening: admit via
+`ApplicationLifecycleRetryBeginV4Admission.admitNative` on `light.groundedVia` (which re-admits the
+recovery and its original v3 claim at their historical prefixes) and commit via
+`DurableServed.receiveServed`. -/
+def receiveLight (config : Config) (transport : DurableReceiverIO.Transport)
+    (light : NativeHostLight.Light config) (bytes : List UInt8)
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO LightResult := do
+  let some ingress := ApplicationLifecycleRetryBeginV4Ingress.codec.decode bytes
+    | return .rejected "noncanonical retry create BEGIN ingress"
+  let grounded ← match ← light.groundedVia transport
+      (ApplicationLifecycleRetryBeginV4Admission.keys ingress) with
+    | .error detail => return .unavailable detail
+    | .ok grounded => pure grounded
+  let reader := light.opening.reader transport ResourceBirthCodec.rootBytes
+  let accepted ← match ← ApplicationLifecycleRetryBeginV4Admission.admitNative config reader grounded ingress with
+    | .error detail => return .rejected detail
+    | .ok accepted => pure accepted
+  let intent := accepted.intent
+  unless intent.event == ApplicationLifecycleRetryBeginV4Admission.event ingress do
+    return .rejected "source-admitted retry BEGIN event differs"
+  match grounded.ground.recorded intent.transactionId with
+  | none => return .rejected "retry BEGIN transaction identity undeclared"
+  | some (some _) => return .rejected "retry BEGIN transaction identity already used"
+  | some none =>
+      match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening intent with
+      | .appended kind next _ _ _ _ =>
+          adopt next none
+          return .confirmed kind intent.transactionId intent.event.eventId
+      | .replayed _ => return .rejected "retry BEGIN transaction identity already used"
+      | .rejected _ => return .rejected "durable retry BEGIN refused"
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail
+      | .uncertain detail => return .uncertain detail
 
 theorem request_decode_encode (request : Request) :
     requestCodec.decode (requestCodec.encode request) = some request := requestCodec.decode_encode request

@@ -77,7 +77,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start fn-wire native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey workspace)
+GATES=(host-operations hygiene lake-build cold-start generic-simplex fn-wire native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey workspace)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -86,6 +86,7 @@ g_host-operations() { python3 scripts/host-operations.py check && python3 script
 g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-sheetlaw.py --check; }
 g_lake-build()    { echo "ResearchWip is opt-in; source classification is checked separately."; bash scripts/build-mini-kernels.sh >/dev/null && echo "lake build $lib_targets$exe_targets" && "$lake" build $lib_targets $exe_targets; }
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
+g_generic-simplex() { bash scripts/gates/check-generic-simplex .lake/build/bin; }
 g_fn-wire()       { bash scripts/check-fn-wire.sh; }
 g_native-transcripts() { bash scripts/check-native-transcripts.sh; }
 g_objective-proofs() { bash scripts/check-objective-proofs.sh proofs; }

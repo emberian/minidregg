@@ -54,7 +54,8 @@ SystemCallErrorNumber=EPERM
 ReadWritePaths=/var/lib/mini-apps /var/lib/mini-spk-worlds/%i /var/lib/mini-market/wanted /run/mini-apps /var/lib/mini/store/node
 # /run/user stays visible: spk-host grain status/start/stop reach mini-core's user manager (XDG_RUNTIME_DIR from the drop-in).
 InaccessiblePaths=-/run/dbus -/etc/mini/credentials.key -/var/lib/mini-keys -/var/lib/mini/sessions -/var/lib/mini/credentials -/var/lib/mini-backups -/var/lib/mini-door-process -/var/lib/mini-discord
-MemoryMax=1G
+MemoryHigh=3G
+MemoryMax=4G
 TasksMax=256
 
 [Install]

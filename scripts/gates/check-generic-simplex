@@ -1,26 +1,29 @@
 #!/usr/bin/env bash
-# Generic Simplex gate: runs the three pure-kernel agreement programs the merge gate builds
-# (exe-roots) and that no gate ran before 2026-10-27, and proves each can go red.
+# Generic Simplex gate: runs the four Verify agreement programs the merge gate builds
+# (exe-roots) and proves each can go red.
 #
 #   scripts/gates/check-generic-simplex [BIN_DIR]     (default .lake/build/bin)
 #
-#   generic-simplex-harness      the recorded 00f711 stall, backoff recovery, idle quiescence, normal
-#                                progress, silent-leader fallback, equivocation, crash replay, roster
-#   generic-simplex-log-reopen   100 000-frame journals reopened in constant stack; torn tail; checkpoint
-#   generic-simplex-load         every operation of a short busy run commits (its timings are printed,
-#                                published, never judged: performance is not a gate)
+#   generic-simplex-harness          the recorded 00f711 stall, backoff recovery, idle quiescence, normal
+#                                    progress, silent-leader fallback, equivocation, crash replay, roster
+#   generic-simplex-log-reopen       100 000-frame journals reopened in constant stack; torn tail; checkpoint
+#   generic-simplex-load             every operation of a short busy run commits (its timings are printed,
+#                                    published, never judged: performance is not a gate)
+#   minidregg-four-source-fixture    2-segment checkpointed agreement journal audit (`write-audit-fixture` +
+#                                    `audit-journal`)
 #
 # Plants, each red with its recorded message (a plant that passes, or fails another way, is red):
-#   harness --plant fixed-timer   the recovery run without backoff (the paper's fixed timer)
-#   harness --plant split-tip     replica 1's committed tip is not a prefix of the others'
-#   log-reopen --plant flip-byte  one bit flipped in the middle of the delta-frame image
-# Not run here: minidregg-four-source-fixture (a four-process mesh with standing replicas and keys;
-# its run is the second-node work, not a seconds-long check).
+#   harness --plant fixed-timer                  the recovery run without backoff (the paper's fixed timer)
+#   harness --plant split-tip                    replica 1's committed tip is not a prefix of the others'
+#   log-reopen --plant flip-byte                 one bit flipped in the middle of the delta-frame image
+#   four-source-fixture --plant corrupt-segment  live segment snapshot disagrees with previous replayed state
 set -uo pipefail
 bin=${1:-.lake/build/bin}
-for e in generic-simplex-harness generic-simplex-log-reopen generic-simplex-load; do
+for e in generic-simplex-harness generic-simplex-log-reopen generic-simplex-load minidregg-four-source-fixture; do
   [[ -x $bin/$e ]] || { echo "check-generic-simplex: $bin/$e is not executable" >&2; exit 2; }
 done
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/generic-simplex-audit.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
 status=0
 start=$(date +%s)
 pass() {  # NAME EXPECTED-LAST-LINE-PREFIX CMD...
@@ -39,8 +42,12 @@ plant() {  # NAME EXPECTED-MESSAGE CMD...
 pass harness 'PASS GenericSimplex event harness' "$bin/generic-simplex-harness"
 pass log-reopen 'PASS checkpoint-then-append' "$bin/generic-simplex-log-reopen"
 pass load "${GENERIC_SIMPLEX_LOAD_OPS:-20}"$'\t' "$bin/generic-simplex-load" "${GENERIC_SIMPLEX_LOAD_OPS:-20}" 10
+pass four-source-audit 'AUDITED replica 0: 2 segments from genesis' \
+  bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/ok" && "$1/minidregg-four-source-fixture" audit-journal "$2/ok" 0' _ "$bin" "$tmp"
 plant fixed-timer 'backoff: pending block never committed' "$bin/generic-simplex-harness" --plant fixed-timer
 plant split-tip 'normal safety/replay' "$bin/generic-simplex-harness" --plant split-tip
 plant flip-byte 'delta-frames: ' "$bin/generic-simplex-log-reopen" --plant flip-byte
+plant corrupt-segment 'segment 1: its snapshot is not the state the previous segment replays to' \
+  bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/bad" --plant corrupt-segment && "$1/minidregg-four-source-fixture" audit-journal "$2/bad" 0' _ "$bin" "$tmp"
 echo "GENERIC-SIMPLEX wall=$(( $(date +%s) - start ))s status=$status"
 exit $status

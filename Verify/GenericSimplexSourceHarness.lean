@@ -1,4 +1,9 @@
-import Compiler.GenericSimplexServe
+module
+
+public import Compiler.GenericSimplexServe
+
+@[expose] public section
+
 namespace Minidregg.Verify.GenericSimplexSourceHarness
 open Minidregg.Kernel.GenericSimplex
 open Minidregg.Compiler.GenericSimplexCodec

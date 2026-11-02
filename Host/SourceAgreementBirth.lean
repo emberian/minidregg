@@ -5,66 +5,44 @@ canonical cells, policies, grants and fee using current height and authority.
 The genesis description is checked against the pinned runtime seed, never
 treated as the current authority snapshot.
 -/
-import Host.SourceAgreementJson
-import Kernel.NativeHost
+module
+
+public import Host.CurrentResourceBirthAuthoring
+public import Host.SourceAgreementJson
+public import Kernel.NativeHost
+public import Kernel.NativeHostBookInvariant
+
+@[expose] public section
 
 namespace Minidregg.Host.SourceAgreementBirth
 
 open Minidregg.Compiler
-open Minidregg.Compiler.NativeHostCodec
-open Minidregg.Compiler.NativeObservationCodec
 open Minidregg.Theory
-open Minidregg.Theory.CellRegistry
 open Minidregg.Kernel
 
 set_option autoImplicit false
 
-/-- A current birth reveals its current height and issuer/policy epochs in the
-authored grants. Require a sponsor-signed factory resource observation against
-this exact opened image before deriving or returning those bytes. -/
+/-- Delegate to `Host.CurrentResourceBirthAuthoring.intentLoadedAuthorized` so there is
+a single resource-birth authoring implementation on the opened image. -/
 def intentLoadedAuthorized (config : NativeHost.Config)
     (opened : NativeHost.Opened config) (signedObservationBytes : List UInt8)
-    (json : Lean.Json) : IO (Except String (List UInt8)) := do
-  let refused := "resource birth observation refused"
-  let some signed := signedCodec.decode signedObservationBytes
-    | return .error refused
-  match signed.challenge.intent.purpose with
-  | .query query =>
-      if query.kind != .object || query.target != config.deployment.factoryId ||
-          query.view != .resource then
-        return .error refused
-  | .prepare _ => return .error refused
-  match ← NativeObservationController.authorize config.signature
-      (NativeHost.observationContext config opened) config.profile
-      config.federation config.genesisHeight signed with
-  | .error _ => return .error refused
-  | .ok _ =>
-      let some current := PlatformCellDomain.recordOn config.deployment opened.durable.snapshot
-        | return .error "platform cell unavailable: the image holds no platform record to price a birth from"
-      match SourceAgreementJson.birthIntentFrom "$" json (fun path source =>
-          SourceAgreementJson.birthCurrent path source config
-            (NativeHost.logicalHeight config opened.durable)
-            opened.authority.snapshot.authState
-            (ResourceBirthPolicyController.Concrete.placementLineage opened.authority.snapshot.cell)
-            current) with
-      | .error reason => return .error reason
-      | .ok intent =>
-          if intent.subject != signed.challenge.intent.subject then
-            return .error refused
-          let .prepare (.birth birthBytes _) := intent.purpose
-            | return .error refused
-          let some descriptor :=
-              (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).decode birthBytes
-            | return .error refused
-          if descriptor.creator != intent.subject then
-            return .error refused
-          -- Named, not folded into `refused`: a content-addressed cell (a Nock
-          -- program) born twice meets exactly this, and must say so.
-          unless descriptor.createRequests.all (fun request =>
-              match opened.directory.directory.slots request.cellId with
-              | .absent => true
-              | .present _ => false) do
-            return .error "resource birth target already present"
-          return .ok (intentCodec.encode intent)
+    (json : Lean.Json) : IO (Except String (List UInt8)) :=
+  CurrentResourceBirthAuthoring.intentLoadedAuthorized config opened signedObservationBytes json
+
+theorem genesis_initialBook_accountSupported (config : NativeHostGenesis.Config) :
+    config.initialBook.AccountSupported :=
+  CurrentResourceBirthAuthoring.genesis_initialBook_accountSupported config
+
+theorem preparedBirth_preserves_accountSupported
+    {F : Type} [Field F] {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {pins : ResourceBirth.FactoryPins}
+    {ground : ServedBasis.Ground deployment} {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
+    (prepared : ResourceBirthController.Concrete.PreparedBirth profile deployment pins ground descriptor) :
+    (CanonicalResourceKernel.logicalBook prepared.book.payload.logical).AccountSupported ∧
+      (CanonicalResourceKernel.logicalBook prepared.resources.post.logical).AccountSupported :=
+  CurrentResourceBirthAuthoring.preparedBirth_preserves_accountSupported prepared
+
+#assert_axioms genesis_initialBook_accountSupported
+#assert_axioms preparedBirth_preserves_accountSupported
 
 end Minidregg.Host.SourceAgreementBirth

@@ -94,16 +94,16 @@ pub(super) fn page(site: &Site) -> Page {
         return simple(200, "Stories", "this face has no home directory: stories are held by the shell's home");
     };
     let mine = held(&home);
-    let mut body = String::from("<p class=\"eyebrow\">Shared worlds to play in</p><p>Accept an invitation, step into a scene, and see where your choices lead. Each player moves their own character; the story's sealed law judges every move.</p><p class=note>The built-in tale's rule is the Lean theorem <code>sealed_story_scene_monotone</code>.</p>\n");
+    let mut body = String::from("<p class=\"eyebrow\">Sealed transition tables</p><p>Each player moves their own character cell; the story's sealed law checks every transition.</p><p class=note>Built-in tale invariant: Lean theorem <code>sealed_story_scene_monotone</code>.</p>\n");
     let pending = pending(&home);
     body.push_str("<section id=\"invitations\"><h2>Invitations waiting</h2>");
     if pending.is_empty() {
-        body.push_str("<p class=\"empty\">No invitations are waiting. You can continue a story below, or start one of your own.</p>");
+        body.push_str("<p class=\"empty\">No invitations waiting.</p>");
     }
     for inv in &pending {
         let to_me = inv.recipient == site.subject;
         body.push_str(&format!(
-            "<article class=\"invitation\" data-story=\"{s}\" data-file=\"{f}\" data-to-me=\"{to_me}\"><h3>{s}</h3><p>From subject <code>{a}</code>, to play as <strong>{r}</strong> (<code>{f}</code> in your requests).</p>",
+            "<article class=\"invitation\" data-story=\"{s}\" data-file=\"{f}\" data-to-me=\"{to_me}\"><h3>{s}</h3><p>From subject <code>{a}</code>, role <strong>{r}</strong> (<code>{f}</code> in requests).</p>",
             s = escape(&inv.story), f = escape(&inv.file), a = escape(&inv.author), r = escape(&inv.role)
         ));
         if to_me {
@@ -121,7 +121,10 @@ pub(super) fn page(site: &Site) -> Page {
     }
     body.push_str("</section>\n<section id=\"stories\"><h2>Your stories</h2>");
     if mine.is_empty() {
-        body.push_str("<p>You play no story yet. Start one from the built-in tale with <a href=\"/verb/story\"><code>story new NAME --from tale</code></a>, or join one from an invitation above.</p>");
+        body.push_str("<p>No stories held yet. Join an invitation above, or create one from the built-in tale:</p>");
+        if !site.front.read_only {
+            body.push_str(&super::verbs::form_for_filled("story", "story new", "/verb/story", "", &[("from", "tale")]).unwrap_or_default());
+        }
     } else {
         body.push_str("<table><thead><tr><th>story</th><th>your role</th><th>author</th><th>GM</th></tr></thead><tbody>");
         for h in &mine {
@@ -143,7 +146,23 @@ pub(super) fn page(site: &Site) -> Page {
             }
         }
     }
-    body.push_str("</section>\n<p><a href=\"/tour/11\">play: the tour's story step</a> · <a href=\"/verb/look\">look</a> · <a href=\"/verb/go\">go</a> · <a href=\"/verb/story\">every story verb</a></p>");
+    body.push_str("</section>\n");
+    if !site.front.read_only {
+        if let Some(cur) = mine.iter().find(|h| h.current) {
+            body.push_str(&format!(
+                "<section id=\"play\" data-current-story=\"{}\"><h2>Play <code>{}</code></h2><p class=\"note\">Inspect your current scene and exits with <code>look</code>, then move (`go`), pick up items (`take`), or act (`act`).</p>",
+                escape(&cur.story), escape(&cur.story)
+            ));
+            for (v, leaf) in [("look", "look"), ("go", "go"), ("take", "take"), ("act", "act")] {
+                body.push_str(&super::verbs::form_for_filled(v, leaf, &format!("/verb/{v}"), "", &[]).unwrap_or_default());
+            }
+            if cur.author == site.subject || cur.gm == site.subject {
+                body.push_str(&super::verbs::form_for_filled("narrate", "narrate", "/verb/narrate", "", &[]).unwrap_or_default());
+            }
+            body.push_str("</section>\n");
+        }
+    }
+    body.push_str("<p><a href=\"/tour#step-11\">Tour step 11: story moves</a> · <a href=\"/verb/look\">look</a> · <a href=\"/verb/go\">go</a> · <a href=\"/verb/story\">all story commands</a></p>");
     Page { status: 200, title: "Stories".into(), stamp: Stamp::None, body }
 }
 

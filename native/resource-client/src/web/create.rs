@@ -10,7 +10,7 @@ pub(super) fn recent(site: &Site) -> String {
     if rows.is_empty() {
         return String::new();
     }
-    let mut body="<section><h2>Your retained document creations</h2><p>Open a creation to check its exact outcome or continue writing.</p><ul>".to_owned();
+    let mut body = "<section><h2>Retained document creations</h2><p>Resume an unfinished creation or check its outcome.</p><ul>".to_owned();
     for row in rows {
         body.push_str(&format!(
             "<li><a href=\"{}/new-document/{}\">{}</a></li>",
@@ -35,6 +35,7 @@ pub(super) fn open(site: &Site, id: Option<&str>, room: Option<&str>) -> Page {
 pub(super) fn post(site: &Site, id: &str, body: &[u8], op: &str) -> Page {
     let result = (|| -> Result<Value> {
         let mut fields = editor::form(body)?;
+        fields.remove("attempt");
         let value = match op {
             "create" => {
                 let name = fields.remove("name").ok_or("document name absent")?;
@@ -74,7 +75,7 @@ fn render(site: &Site, state: &Value) -> Page {
         escape(state["message"].as_str().unwrap_or(""))
     );
     if let Some(room) = state["room"].as_str() {
-        body.push_str(&format!("<p>Inside room <a href=\"{base}/room/{0}\">{0}</a>. Your placing grant and its current law decide admission.</p>",escape(room)));
+        body.push_str(&format!("<p>Room: <a href=\"{base}/room/{0}\">{0}</a> (admitted under your room placement grant).</p>",escape(room)));
     }
     if status == "editing" {
         body.push_str(&format!("<form method=post action=\"{action}\"><label>Document name <input name=name pattern=\"[A-Za-z0-9-]+\" required></label><label>Document law <select name=law><option value=draft>Draft — bounded editable document</option><option value=note>Note — append only</option></select></label><button>Create document</button></form>"));
@@ -90,7 +91,7 @@ fn render(site: &Site, state: &Value) -> Page {
         } else {
             body.push_str(&format!("<form method=post action=\"{action}/lookup\"><button>Check exact outcome</button></form>"));
             if status == "birth-complete" {
-                body.push_str(&format!("<form method=post action=\"{action}/finish\"><button>Finish the empty document</button></form>"));
+                body.push_str(&format!("<form method=post action=\"{action}/finish\"><button>Finish empty document</button></form>"));
             }
         }
         for (key, title) in [

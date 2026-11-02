@@ -471,7 +471,7 @@ fn serve_connection(socket: UnixStream, pins: &Selection, worker: &Mutex<Worker>
         if !allowed(&frame) {
             return Err("consent operation is not delegated".into());
         }
-        let queue_deadline = Instant::now() + IO;
+        let queue_deadline = Instant::now() + REPLAY;
         let mut guard = loop {
             match worker.try_lock() {
                 Ok(g) => break g,
@@ -485,6 +485,7 @@ fn serve_connection(socket: UnixStream, pins: &Selection, worker: &Mutex<Worker>
             }
             std::thread::sleep(Duration::from_millis(10));
         };
+        *deadline.lock().map_err(|_| "deadline lock")? = Instant::now() + REPLAY;
         let reply = guard.request(&frame)?;
         drop(guard);
         *deadline.lock().map_err(|_| "deadline lock")? = Instant::now() + IO;

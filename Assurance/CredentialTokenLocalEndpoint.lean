@@ -37,8 +37,6 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-noncomputable section
-
 /-! ## Stable first-order wire codecs -/
 
 def tokenCodecVersion : Nat := 1
@@ -888,7 +886,5 @@ structure ExternalCompletion
 /-- info: 'Minidregg.Assurance.CredentialTokenLocalEndpoint.LocalStore.restarted_exact_retry_is_idempotent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms LocalStore.restarted_exact_retry_is_idempotent
-
-end
 
 end Minidregg.Assurance.CredentialTokenLocalEndpoint

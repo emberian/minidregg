@@ -14354,7 +14354,23 @@ impl Runtime {
         if self.child.is_none() {
             return Ok(());
         }
-        self.stop_and_reap_owned().map(|_| ())
+        let child_record = self.journal.child.clone();
+        self.stop_and_reap_owned()?;
+        if let Some(record) = child_record {
+            if let Some(unit) = record.unit {
+                let decision_id = self.next_id()?;
+                self.journal.reconciliation_log.push(json!({
+                    "decisionId": decision_id.to_string(),
+                    "action": "recover-gated-worker",
+                    "operationId": record.operation_id.to_string(),
+                    "unit": unit,
+                    "machineProven": true,
+                    "stage": "physical-stop-verified"
+                }));
+                self.save()?;
+            }
+        }
+        Ok(())
     }
     fn disconnect(&mut self) -> Result<()> {
         if self.journal.connection == Connection::Soft
@@ -14389,6 +14405,10 @@ impl Runtime {
         let tool_retry = self.retry_pending(true);
         let dispatch_retry = self.retry_pending_slot(AuthoritySlot::Dispatch);
         let provider_retry = self.retry_pending_slot(AuthoritySlot::Provider);
+        if self.child.is_none() && self.journal.child.is_none() {
+            let _ = self.retire_refused_provider_request();
+            let _ = self.recover_delivered_provider_response();
+        }
         let tool_fenced = tool_retry.and_then(|_| self.fence_tool());
         let dispatch_fenced = dispatch_retry.and_then(|_| match self.fence_dispatch()? {
             DispatchFenceOutcome::Released => Ok(()),
@@ -15091,12 +15111,19 @@ impl Runtime {
         {
             return;
         }
-        if let Err(error) = self.automatic_reconcile() {
-            let decision = self.journal.next_operation_id;
-            self.journal.reconciliation_log.push(json!({
-                "decisionId":decision.to_string(),"action":"post-record-reconcile",
-                "automatic":true,"result":error}));
-            let _ = self.save();
+        match self.automatic_reconcile() {
+            Ok(()) => {
+                if let Some(op) = self.journal.resident_prompt_origin.as_ref().map(|o| o.prompt_operation_id) {
+                    let _ = self.reconcile_prompt_audited(&op.to_string());
+                }
+            }
+            Err(error) => {
+                let decision = self.journal.next_operation_id;
+                self.journal.reconciliation_log.push(json!({
+                    "decisionId":decision.to_string(),"action":"post-record-reconcile",
+                    "automatic":true,"result":error}));
+                let _ = self.save();
+            }
         }
     }
 
@@ -15710,6 +15737,7 @@ impl Runtime {
             Ok(())
         };
         self.revoke_provider_gateway();
+        let child_before_stop = self.journal.child.clone();
         let mut stopped_for_refusal = None;
         let mut failure_retained_before_retirement = false;
         let refused_completion = if invocation.is_prompt() && provider_drained.is_ok() && session.is_ok()
@@ -15793,6 +15821,21 @@ impl Runtime {
             let stopped = match stopped_for_refusal.take() {
                 Some(exit) => Ok(exit), None => self.stop_and_reap_owned(),
             };
+            if stopped.is_ok() {
+                if let Some(record) = child_before_stop {
+                    if let Some(unit) = record.unit {
+                        let decision_id = self.next_id()?;
+                        self.journal.reconciliation_log.push(json!({
+                            "decisionId": decision_id.to_string(),
+                            "action": "recover-gated-worker",
+                            "operationId": record.operation_id.to_string(),
+                            "unit": unit,
+                            "machineProven": true,
+                            "stage": "physical-stop-verified"
+                        }));
+                    }
+                }
+            }
             self.journal
                 .unresolved_external
                 .push(format!("Hermes prompt {id}: {error}"));

@@ -16,6 +16,7 @@ namespace Minidregg.Host.ApplicationAgentLifetimeGrantInspection
 open Lean
 open Minidregg.Compiler
 open Minidregg.Compiler.NativeHostCodec
+open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel
 open Minidregg.Kernel.ApplicationAgentLifetimeGrantAuthoring
@@ -102,62 +103,87 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
 
 /-- Historical route provenance comes from the verifier-selected event27,
 not a proposed grant plan. This does not authorize a current dispatch. -/
-def inspectAcceptedVerified {config : NativeHost.Config}
-    {target : NativeHost.Durable} (verified : NativeHostReplay.Verified config target)
-    (bytes : List UInt8) : Except String Json := do
-  let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes
-    | throw "noncanonical agent lifetime grant ingress"
-  unless ingress.canonicalBytes.toByteArray == bytes.toByteArray do
-    throw "noncanonical agent lifetime grant ingress"
-  match ApplicationAgentLifetimeGrantReceiver.lookupVerified verified ingress with
-  | none => throw "exact agent lifetime grant has not been accepted"
-  | some (.error detail) => throw detail
-  | some (.ok original) =>
-      let grant := original.ingress.spec.grant
-      let receiptJson (receipt : NativeHostCodec.Receipt) := Json.mkObj
-        [("acceptedCount", decimal receipt.acceptedCount),
-         ("transactionId", decimal receipt.transactionId.value),
-         ("eventId", decimal receipt.eventId.value),
-         ("worldRoot", decimal receipt.worldRoot.value)]
-      pure <| .mkObj
-        [("type", "application-agent-lifetime-grant-accepted-v1"),
-         ("canonicalIngressHex", hex original.ingress.canonicalBytes),
-         ("grantIssueIndex", decimal original.index),
-         ("grantIssueReceipt", receiptJson original.receipt),
-         ("grantInitializedRoot", decimal original.finalRoot.value),
-         ("grantDigest", decimal
-           (ApplicationAgentLifetimeDispatchReserveContext.grantDigest grant).value),
-         ("grantResource", decimal grant.source.resource),
-         ("originalEvent22Index", decimal grant.source.issueIndex),
-         ("originalEvent22Receipt", receiptJson grant.source.issueReceipt),
-         ("originalDescriptorHex", hex <|
-           (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
-             original.ticket.evidence.descriptor),
-         ("ticketResource", decimal grant.source.ticketResource),
-         ("ticketDigest", decimal grant.source.ticketDigest.value),
-         ("app", decimal grant.participant.app),
-         ("session", decimal grant.participant.session),
-         ("subject", decimal grant.participant.subject.value),
-         ("parentTask", decimal grant.participant.parentTask),
-         ("originalGeneration", .str (toString grant.participant.originalGeneration)),
-         ("grantObserveCapability", decimal grant.participant.grantObserveCapability.value)]
-
-def inspectAcceptedCurrent (config : NativeHost.Config) (bytes : List UInt8) :
+def inspectAcceptedLight (config : NativeHost.Config)
+    (light : NativeHostLight.Light config) (bytes : List UInt8) :
     IO (Except String Json) := do
-  -- Reject malformed input before opening and replaying a potentially large
-  -- history. The verified lookup below still selects the accepted original.
   let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes
     | return .error "noncanonical agent lifetime grant ingress"
   unless ingress.canonicalBytes.toByteArray == bytes.toByteArray do
     return .error "noncanonical agent lifetime grant ingress"
-  match ← NativeHost.openExisting config with
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let tx := ApplicationAgentLifetimeGrantReceiver.transaction config ingress
+  match ← reader.byTx tx with
+  | .error refusal => return .error refusal.message
+  | .ok (.absent _) => return .error "exact agent lifetime grant has not been accepted"
+  | .ok (.present found) =>
+      if found.height == 0 then
+        return .error "agent lifetime grant transaction is not an admitted event27"
+      let grantIndex := found.height - 1
+      let grantReceipt := NativeHost.receiptOfRecord found.read
+      let selected ← match ← NativeHistorySelection.select config reader light.opening.head.height grantIndex
+          (ApplicationAgentLifetimeGrantReceiver.keys config ingress) with
+        | .error _ => return .error "agent lifetime grant transaction is not an admitted event27"
+        | .ok selected => pure selected
+      let issueIndex := ingress.spec.grant.source.issueIndex
+      let issue ← match ← NativeHostReplay.selectIssue config reader light.opened.pins
+          grantIndex issueIndex with
+        | .error _ => return .error "agent lifetime grant transaction is not an admitted event27"
+        | .ok issue => pure issue
+      unless issue.evidence.record.event.codecVersion == 22 &&
+          issue.receipt == ingress.spec.grant.source.issueReceipt &&
+          ingress.spec.grant.matchesIssued issue.evidence.spec issueIndex issue.receipt do
+        return .error "agent lifetime grant transaction is not an admitted event27"
+      let ⟨decoded, accepted⟩ ← match ← ApplicationAgentLifetimeGrantAdmission.admitNative
+          config.profile config light.opened.pins config.signature selected.ground
+          (config.genesisHeight + selected.ground.height)
+          (NativeHostReplay.sourceBytes selected.record) with
+        | .error _ => return .error "agent lifetime grant transaction is not an admitted event27"
+        | .ok admitted => pure admitted
+      match NativeHistorySelection.matchIntent selected
+          (ApplicationAgentLifetimeGrantIntentTemplate.template accepted) with
+      | .error _ => return .error "agent lifetime grant transaction is not an admitted event27"
+      | .ok _ =>
+          unless decoded.canonicalBytes.toByteArray == ingress.canonicalBytes.toByteArray do
+            return .error "agent lifetime grant original ingress differs"
+          let grant := decoded.spec.grant
+          let finalRoot := (ResourceBirthController.birthWrite accepted.sourceReady.birth.create).exactPost
+          let receiptJson (receipt : NativeHostCodec.Receipt) := Json.mkObj
+            [("acceptedCount", decimal receipt.acceptedCount),
+             ("transactionId", decimal receipt.transactionId.value),
+             ("eventId", decimal receipt.eventId.value),
+             ("worldRoot", decimal receipt.worldRoot.value)]
+          return .ok (.mkObj
+            [("type", "application-agent-lifetime-grant-accepted-v1"),
+             ("canonicalIngressHex", hex decoded.canonicalBytes),
+             ("grantIssueIndex", decimal grantIndex),
+             ("grantIssueReceipt", receiptJson grantReceipt),
+             ("grantInitializedRoot", decimal finalRoot.value),
+             ("grantDigest", decimal
+               (ApplicationAgentLifetimeDispatchReserveContext.grantDigest grant).value),
+             ("grantResource", decimal grant.source.resource),
+             ("originalEvent22Index", decimal grant.source.issueIndex),
+             ("originalEvent22Receipt", receiptJson grant.source.issueReceipt),
+             ("originalDescriptorHex", hex <|
+               (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
+                 issue.evidence.descriptor),
+             ("ticketResource", decimal grant.source.ticketResource),
+             ("ticketDigest", decimal grant.source.ticketDigest.value),
+             ("app", decimal grant.participant.app),
+             ("session", decimal grant.participant.session),
+             ("subject", decimal grant.participant.subject.value),
+             ("parentTask", decimal grant.participant.parentTask),
+             ("originalGeneration", .str (toString grant.participant.originalGeneration)),
+             ("grantObserveCapability", decimal grant.participant.grantObserveCapability.value)])
+
+def inspectAcceptedCurrent (config : NativeHost.Config) (bytes : List UInt8) :
+    IO (Except String Json) := do
+  -- Reject malformed input before opening the Store.
+  let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes
+    | return .error "noncanonical agent lifetime grant ingress"
+  unless ingress.canonicalBytes.toByteArray == bytes.toByteArray do
+    return .error "noncanonical agent lifetime grant ingress"
+  match ← NativeHostLight.start config with
   | .error detail => return .error detail
-  | .ok opened =>
-      let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes opened.durable with
-        | .error detail => return .error s!"agent lifetime grant history reader: {detail}"
-        | .ok reader => pure reader
-      match ← NativeHostReplay.verifyStart config reader opened.durable with
-      | .error _ => return .error "agent lifetime grant history unverified"
-      | .ok verified => return inspectAcceptedVerified verified bytes
+  | .ok light => inspectAcceptedLight config light bytes
 
 end Minidregg.Host.ApplicationAgentLifetimeGrantInspection

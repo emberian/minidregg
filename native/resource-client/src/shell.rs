@@ -750,8 +750,12 @@ fn text_argument(session: &Session, word: &str) -> std::result::Result<String, S
 }
 
 fn document_proposal(session: &Session, id: &str, name: &str, action: Value) -> Plan {
+    document_proposal_actions(session, id, name, vec![action])
+}
+
+fn document_proposal_actions(session: &Session, id: &str, name: &str, actions: Vec<Value>) -> Plan {
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-        "targets":[{"name":name,"payload":{"type":"document","actions":[action]}}]});
+        "targets":[{"name":name,"payload":{"type":"document","actions":actions}}]});
     proposal(session, id, &request)
 }
 
@@ -1214,7 +1218,10 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         }
         "revoke" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::REVOKE, &w)?;
-            let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke","name":p.arg(1),"recipient":p.arg(2)});
+            let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke","name":p.arg(1),"recipient":p.arg(2)});
+            if let Some(Some(cap)) = p.flag("--capability") {
+                request["capability"] = json!(cap);
+            }
             proposal(session, p.arg(0), &request)
         }
         "renounce" => {
@@ -1318,10 +1325,23 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 ["doc", "append"] => {
                     let text = text_argument(session, p.arg(2))?;
-                    document_proposal(session, p.arg(0), p.arg(1), json!({"type":"append","text":text}))
+                    let actions: Vec<Value> = text
+                        .split('\n')
+                        .map(|line| line.trim_end_matches('\r'))
+                        .filter(|line| !line.is_empty())
+                        .map(|line| json!({"type":"append","text":line}))
+                        .collect();
+                    if actions.is_empty() {
+                        return Err("document text must contain at least one non-empty line".into());
+                    }
+                    document_proposal_actions(session, p.arg(0), p.arg(1), actions)
                 }
                 ["doc", "edit"] => {
                     let text = text_argument(session, p.arg(3))?;
+                    let text = text.trim_end_matches(['\r', '\n']);
+                    if text.is_empty() || text.contains('\n') || text.contains('\r') {
+                        return Err("document line edit cannot contain embedded line breaks".into());
+                    }
                     document_proposal(session, p.arg(0), p.arg(1), json!({"type":"edit","line":p.arg(2),"text":text}))
                 }
                 ["doc", "annotate"] => {
@@ -1658,6 +1678,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     return Err(u.to_owned());
                 }
                 let value = json_argument(session, p.arg(1), "reference")?;
+                validate_delegated_reference(session, &value)?;
                 let path = session.home.join("inbox").join(format!("{}.json", ref_file(p.arg(0))));
                 Plan::Client { command: "workspace".into(), flags: vec![flag("action", "import"), flag("dir", ws()), flag("name", p.arg(0)), flag("from-ref", path.clone())], writes: vec![request_file(path, &value)] }
             } else {
@@ -2169,6 +2190,68 @@ fn admit_session_paths(session: &Session, flags: &[(String, OsString)], writes: 
     Ok(())
 }
 
+fn validate_delegated_reference(session: &Session, value: &Value) -> Result<()> {
+    if value.get("type").and_then(Value::as_str) != Some("minidregg-delegated-reference-v1") {
+        return Err("delegated reference is not addressed to this workspace subject".into());
+    }
+    let recipient = value
+        .get("recipient")
+        .and_then(Value::as_str)
+        .ok_or("delegated reference lacks recipient")?;
+    decimal(recipient, "delegated reference recipient")?;
+    if let Some(subject) = read_json(&session.workspace.join("workspace.json"))
+        .and_then(|w| w.get("subject").and_then(Value::as_str).map(str::to_owned))
+    {
+        if recipient != subject {
+            return Err("delegated reference is not addressed to this workspace subject".into());
+        }
+    }
+    let kind = value
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or("delegated reference lacks kind")?;
+    if !matches!(kind, "object" | "account" | "program") {
+        return Err("reference kind must be object, account, or program".into());
+    }
+    let target = value
+        .get("target")
+        .and_then(Value::as_str)
+        .ok_or("delegated reference lacks target")?;
+    decimal(target, "delegated reference target")?;
+    let capability = value
+        .get("capability")
+        .and_then(Value::as_str)
+        .ok_or("delegated reference lacks capability")?;
+    decimal(capability, "delegated reference capability")?;
+    if let Some(room) = value.get("sealedRoom").filter(|v| !v.is_null()) {
+        let room_id = room
+            .as_str()
+            .ok_or("sealedRoom must be a decimal number")?;
+        decimal(room_id, "sealedRoom")?;
+    }
+    let receipt = value
+        .get("receipt")
+        .ok_or("delegated reference lacks receipt")?;
+    if receipt.get("type").and_then(Value::as_str) != Some("confirmed")
+        || !matches!(
+            receipt.get("confirmation").and_then(Value::as_str),
+            Some("installed" | "replayed")
+        )
+    {
+        return Err("delegated reference lacks confirmed admission receipt".into());
+    }
+    for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
+        let v = receipt
+            .get(field)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("delegated reference receipt lacks {field}"))?;
+        if v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!("{field} must be a decimal number"));
+        }
+    }
+    Ok(())
+}
+
 fn execute(session: &Session, plan: Plan) -> Ending {
     let Plan::Client { command, flags, writes } = plan else {
         return Ending::Done;
@@ -2176,9 +2259,28 @@ fn execute(session: &Session, plan: Plan) -> Ending {
     if let Err(e) = admit_session_paths(session, &flags, &writes) {
         return Ending::Client(e);
     }
+    let inbox_dir = session.home.join("inbox");
+    let mut created_inbox = Vec::new();
     for (path, bytes) in &writes {
+        if path.starts_with(&inbox_dir) && path.is_file() {
+            if let Some(file_name) = path.file_name() {
+                if !session.workspace.join("refs").join(file_name).is_file()
+                    && read_json(path)
+                        .is_none_or(|existing| validate_delegated_reference(session, &existing).is_err())
+                {
+                    let _ = fs::remove_file(path);
+                }
+            }
+        }
+        let existed = path.exists();
         if let Err(e) = write_once(path, bytes) {
+            for p in created_inbox {
+                let _ = fs::remove_file(p);
+            }
             return Ending::Client(e);
+        }
+        if !existed && path.starts_with(&inbox_dir) {
+            created_inbox.push(path.clone());
         }
     }
     // The retained attempt this command works on, when it names one: an uncertain transmission
@@ -2197,6 +2299,11 @@ fn execute(session: &Session, plan: Plan) -> Ending {
     let _ = super::take_line_refusal();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::run(args)))
         .unwrap_or_else(|_| Err("the client panicked; see the message above".into()));
+    if result.is_err() {
+        for path in &created_inbox {
+            let _ = fs::remove_file(path);
+        }
+    }
     let _ = io::stdout().flush();
     // The cost of the timer race, visible: how often this command observed again.
     let replanned = super::replan::take_count();
@@ -2206,6 +2313,11 @@ fn execute(session: &Session, plan: Plan) -> Ending {
     let decision = super::take_host_decision();
     if let Some(ending) = super::take_command_ending() {
         let (code, message) = ending.render();
+        if code != 0 {
+            for path in &created_inbox {
+                let _ = fs::remove_file(path);
+            }
+        }
         return Ending::Rendered(i32::from(code), message);
     }
     match (result, decision) {
@@ -3868,6 +3980,13 @@ mod tests {
             json!({"type":"minidregg-workspace-proposal-v1","action":"revoke","name":"shared",
                 "recipient":"11033321548135836207"})
         );
+        let (_, explicit) = request_of(plan(&s, "revoke cut2 shared 11033321548135836207 --capability 903").unwrap());
+        assert_eq!(
+            explicit,
+            json!({"type":"minidregg-workspace-proposal-v1","action":"revoke","name":"shared",
+                "recipient":"11033321548135836207","capability":"903"})
+        );
+        assert!(plan(&s, "revoke cut shared 11033321548135836207 --capability not-a-number").is_err());
         assert!(plan(&s, "revoke cut shared someone").is_err());
         assert_eq!(plan(&s, "revoke cut shared").unwrap_err(), usage_of("revoke"));
     }
@@ -4323,6 +4442,90 @@ mod tests {
         assert!(plan(&s,"doc membership-recover add-bob paper @invite.json").is_ok());
         assert!(plan(&s,"doc share add-bob paper 42 @../../device.json @invite.json").is_err());
         assert!(plan(&s,"doc accept paper catalog @/tmp/invite.json").is_err());
+    }
+
+    #[test]
+    fn import_validates_before_writing_inbox_and_cleans_up_on_failed_execution() {
+        let (root, s) = temp_session("import-poison");
+        fs::write(s.workspace.join("workspace.json"), br#"{"subject":"42"}"#).unwrap();
+        let reqs = s.home.join("requests");
+        fs::create_dir_all(&reqs).unwrap();
+
+        // 1. Invalid JSON structure or wrong recipient is rejected during planning before writing HOME/inbox/shared.json
+        fs::write(reqs.join("bad.json"), br#"{"type":"wrong-type"}"#).unwrap();
+        assert!(plan(&s, "import shared @bad.json").is_err());
+        assert!(!s.home.join("inbox").join("shared.json").exists());
+
+        let wrong_recipient = json!({
+            "type": "minidregg-delegated-reference-v1",
+            "recipient": "99",
+            "kind": "object",
+            "target": "12",
+            "capability": "901",
+            "receipt": {
+                "type": "confirmed",
+                "confirmation": "installed",
+                "transactionId": "1",
+                "eventId": "2",
+                "acceptedCount": "3",
+                "worldRoot": "4"
+            }
+        });
+        fs::write(reqs.join("wrong-recipient.json"), serde_json::to_vec(&wrong_recipient).unwrap()).unwrap();
+        assert!(plan(&s, "import shared @wrong-recipient.json").is_err());
+        assert!(!s.home.join("inbox").join("shared.json").exists());
+
+        let mut bad_room = wrong_recipient.clone();
+        bad_room["recipient"] = json!("42");
+        bad_room["sealedRoom"] = json!("not-a-number");
+        fs::write(reqs.join("bad-room.json"), serde_json::to_vec(&bad_room).unwrap()).unwrap();
+        assert!(plan(&s, "import shared @bad-room.json").is_err());
+        assert!(!s.home.join("inbox").join("shared.json").exists());
+
+        // 2. If execution fails inside workspace::import_reference (e.g. sealedRoom lacks room invite),
+        // execute removes the newly written HOME/inbox/shared.json so the name is not poisoned.
+        let unimportable = json!({
+            "type": "minidregg-delegated-reference-v1",
+            "recipient": "42",
+            "kind": "object",
+            "target": "12",
+            "capability": "901",
+            "sealedRoom": "777",
+            "receipt": {
+                "type": "confirmed",
+                "confirmation": "installed",
+                "transactionId": "1",
+                "eventId": "2",
+                "acceptedCount": "3",
+                "worldRoot": "4"
+            }
+        });
+        fs::write(reqs.join("unimportable.json"), serde_json::to_vec(&unimportable).unwrap()).unwrap();
+        let p = plan(&s, "import shared @unimportable.json").unwrap();
+        let ending = execute(&s, p);
+        assert!(matches!(ending, Ending::Client(_)));
+        assert!(!s.home.join("inbox").join("shared.json").exists());
+
+        // 3. A subsequent valid import under the same name `shared` plans cleanly with no "already holds a different request" error.
+        let valid = json!({
+            "type": "minidregg-delegated-reference-v1",
+            "recipient": "42",
+            "kind": "object",
+            "target": "12",
+            "capability": "901",
+            "receipt": {
+                "type": "confirmed",
+                "confirmation": "installed",
+                "transactionId": "1",
+                "eventId": "2",
+                "acceptedCount": "3",
+                "worldRoot": "4"
+            }
+        });
+        fs::write(reqs.join("valid.json"), serde_json::to_vec(&valid).unwrap()).unwrap();
+        assert!(plan(&s, "import shared @valid.json").is_ok());
+
+        let _ = fs::remove_dir_all(root);
     }
 
 }

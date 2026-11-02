@@ -52,7 +52,14 @@ pub fn url(text: &str) -> String {
     }
 }
 
-fn decorate(body: &str, decos: &[Deco]) -> String {
+fn doc_href(base: Option<&str>, target: &str) -> Option<String> {
+    let base = base?.trim_end_matches('/');
+    crate::workspace::validate_ref_name(target).ok()?;
+    let href = url(&format!("{base}/doc/{target}"));
+    (href != "#refused-url").then_some(href)
+}
+
+fn decorate_html(mut html: String, decos: &[Deco], base: Option<&str>) -> String {
     let strike = |stale: bool, inner: String| {
         if stale {
             format!("<s class=\"stale\">{inner}</s>")
@@ -60,7 +67,6 @@ fn decorate(body: &str, decos: &[Deco]) -> String {
             inner
         }
     };
-    let mut html = escape(body);
     for deco in decos {
         html = match deco {
             Deco::Code { stale } => strike(*stale, format!("<code>{html}</code>")),
@@ -71,10 +77,16 @@ fn decorate(body: &str, decos: &[Deco]) -> String {
                 stale,
             } => strike(
                 *stale,
-                format!(
-                    "<a class=\"link\" data-target=\"{}\">{html}</a>",
-                    escape(target)
-                ),
+                match doc_href(base, target) {
+                    Some(href) => format!(
+                        "<a class=\"link\" href=\"{href}\" data-target=\"{}\">{html}</a>",
+                        escape(target)
+                    ),
+                    None => format!(
+                        "<a class=\"link\" data-target=\"{}\">{html}</a>",
+                        escape(target)
+                    ),
+                },
             ),
             Deco::Link {
                 target: None,
@@ -87,6 +99,10 @@ fn decorate(body: &str, decos: &[Deco]) -> String {
         };
     }
     html
+}
+
+fn decorate(body: &str, decos: &[Deco], base: Option<&str>) -> String {
+    decorate_html(escape(body), decos, base)
 }
 
 fn annotation(a: &Annotation) -> String {
@@ -162,6 +178,14 @@ fn row_attrs(line: &RenderedLine) -> String {
 }
 
 pub fn document(rendered: &Rendered, title: &str) -> String {
+    document_with_base(rendered, title, None)
+}
+
+pub fn document_linked(rendered: &Rendered, title: &str, base: &str) -> String {
+    document_with_base(rendered, title, Some(base))
+}
+
+fn document_with_base(rendered: &Rendered, title: &str, base: Option<&str>) -> String {
     let mut out = vec![format!(
         "<article class=\"doc\" data-name=\"{}\">",
         escape(title)
@@ -220,7 +244,7 @@ pub fn document(rendered: &Rendered, title: &str) -> String {
                 if matches!(line.body, Body::Object { .. }) {
                     classes.push("object");
                 }
-                let inner = decorate(&line.plain(), &line.decos);
+                let inner = decorate(&line.plain(), &line.decos, base);
                 if *struck {
                     classes.push("struck");
                     format!("<del>{inner}</del>")
@@ -230,15 +254,29 @@ pub fn document(rendered: &Rendered, title: &str) -> String {
             }
             Body::Section => {
                 classes.push("section");
-                decorate("", &line.decos)
+                decorate("", &line.decos, base)
             }
             Body::Transclusion(t) => {
                 classes.push("transclusion");
+                let has_link_mark = line.decos.iter().any(|d| matches!(d, Deco::Link { .. }));
+                let prefix = format!("⟨from {}", t.source_name);
+                let header_html = match (
+                    !has_link_mark,
+                    t.header.strip_prefix(&prefix),
+                    doc_href(base, &t.source_name),
+                ) {
+                    (true, Some(rest), Some(href)) => format!(
+                        "⟨from <a href=\"{href}\">{}</a>{}",
+                        escape(&t.source_name),
+                        escape(rest)
+                    ),
+                    _ => escape(&t.header),
+                };
                 let mut block = format!(
                     "<blockquote class=\"transclusion {}\" data-source=\"{}\"><header>{}</header>",
                     escape(&t.view),
                     escape(&t.source_name),
-                    decorate(&t.header, &line.decos)
+                    decorate_html(header_html, &line.decos, base)
                 );
                 for quoted in &t.lines {
                     block.push_str(&format!("<p class=\"quoted\">{}</p>", escape(quoted)));
@@ -259,9 +297,12 @@ pub fn document(rendered: &Rendered, title: &str) -> String {
     if !rendered.backlinks.is_empty() {
         out.push("<section class=\"backlinks\"><ul>".to_owned());
         for b in &rendered.backlinks {
+            let source_html = match doc_href(base, &b.source) {
+                Some(href) => format!("<a class=\"source\" href=\"{href}\">{}</a>", escape(&b.source)),
+                None => format!("<span class=\"source\">{}</span>", escape(&b.source)),
+            };
             out.push(format!(
-                "<li><span class=\"source\">{}</span>{}</li>",
-                escape(&b.source),
+                "<li>{source_html}{}</li>",
                 b.rendered
                     .as_ref()
                     .map(|r| format!(" <span class=\"context\">{}</span>", escape(r)))

@@ -82,9 +82,9 @@ def planCodec : LawfulCodec Plan := NativeHostCodec.framed
   "DREGG/APPLICATION/RETRY-CREATE-COMPLETION-OPERATOR-PLAN/v4".toUTF8.toList
   planStream
 
-private def cellAt (config : Config) (opened : Opened config) (resource : Nat) :
-    Option (PackedCell CanonicalCellRegistry.registry) :=
-  match opened.directory.directory.slots resource with
+private def cellAtOn {deployment : CanonicalCellRegistry.Deployment} (ground : ServedBasis.Ground deployment)
+    (resource : Nat) : Option (PackedCell CanonicalCellRegistry.registry) :=
+  match ground.directory.slots resource with
   | .present cell => some cell
   | .absent => none
 
@@ -99,10 +99,10 @@ private def fixedHeaders (pin : Pin) (plan : SigningPlan) : Except String Unit :
 current image. The physical report is verified under Config's distinct
 custodian key before any management header escapes. Current grants and law
 remain decisive in op38. -/
-def prepareVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+private def prepareOn (config : Config) {store : DurableHistory.StoreIdentity}
+    (ground : ServedBasis.Ground config.deployment)
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (pin : Pin)
     (request : Request) : IO (Except String Plan) := do
-  let opened := verified.opened
   let some begin := ApplicationLifecycleRetryBeginV4Ingress.codec.decode request.beginBytes
     | return .error "noncanonical completion retry BEGIN-v4 ingress"
   let some claim := ApplicationLifecycleRetryClaimV4Ingress.codec.decode
@@ -118,7 +118,7 @@ def prepareVerified (config : Config) {target : Durable}
     return .error "retry completion subject or resource differs from operator pin"
   if !ApplicationLifecycleResidentProfile.beginMatchesV3 config.storeIdentity begin.begin then
     return .error "retry completion BEGIN is outside resident host profile"
-  let some record := PlatformCellDomain.recordOn config.deployment opened.durable.snapshot
+  let some record := PlatformCellDomain.recordOn config.deployment ground.cells
     | return .error "platform cell unavailable (completion custodian key)"
   let some key := record.completionCustodianKey
     | return .error "physical custodian key unavailable in the platform record"
@@ -126,15 +126,11 @@ def prepareVerified (config : Config) {target : Durable}
       config.deployment.domain config.profile.semantics key begin physical with
   | .error detail => return .error detail
   | .ok _ => pure ()
-  let count := physical.report.claim.core.claimReceipt.acceptedCount
-  if count == 0 || !(verified.retry.claimsV4.any fun prior =>
-      prior.index + 1 == count && prior.ingress == claim &&
-      prior.record.transactionId ==
-        physical.report.claim.core.claimReceipt.transactionId) then
+  if physical.report.claim.core.claimReceipt.acceptedCount == 0 then
     return .error "original retry claim absent from admitted verified history"
-  let some appCell := cellAt config opened pin.app
+  let some appCell := cellAtOn ground pin.app
     | return .error "current app cell unavailable"
-  let some packageCell := cellAt config opened pin.packageManifest
+  let some packageCell := cellAtOn ground pin.packageManifest
     | return .error "current package cell unavailable"
   let some atomBefore := ApplicationLifecycleRetryCompletionV4Admission.packageAtom
       config.deployment.domain pin.packageManifest pin.app packageCell
@@ -152,7 +148,7 @@ def prepareVerified (config : Config) {target : Durable}
       packageAtomBefore := atomBefore }
   unless source.valid do
     return .error "retry completion source identities refused"
-  match ← ApplicationLifecycleRetryCompletionV4History.select config verified.reader opened.durable.height source with
+  match ← ApplicationLifecycleRetryCompletionV4History.select config reader ground.height source with
   | .error detail => return .error detail
   | .ok _ => pure ()
   if ApplicationLifecycleRetryCompletionV4Admission.appState pin.app appCell !=
@@ -168,30 +164,30 @@ def prepareVerified (config : Config) {target : Durable}
       signed := ⟨[], [], [], []⟩
       packageObservationEnvelope := [] }
   unless ApplicationLifecycleRetryCompletionV4Admission.creationMarkersCurrent
-      config opened.ground preview do
+      config ground preview do
     return .error "retry completion token/creation marker state refused"
   let command := source.command config.deployment.domain config.profile.semantics
   let .ok prepared := DeclaredResourceController.prepare config.deployment
-      config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.ground command
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground command
     | return .error "current retry completion command preparation refused"
   if !ApplicationLifecycleRetryCompletionV4Admission.linkedCurrentPolicies config.deployment
-      config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.ground source prepared then
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground source prepared then
     return .error "current retry completion management/package law differs"
   if !decide (DeclaredResourceController.PhysicalShape prepared) then
     return .error "current retry completion physical shape refused"
   let commandBytes := DeclaredResourceController.commandCodec.encode command
-  let .ok invocation := NativeHost.prepareLoaded config opened (.invoke commandBytes)
+  let .ok invocation := NativeHost.prepareInvokeOn config ground (config.genesisHeight + ground.height) commandBytes
     | return .error "current retry completion invocation signing plan refused"
   if invocation.finalizedDraft != .invoke commandBytes then
     return .error "retry completion invocation plan differs from source"
   let marker := DeclaredResourceController.operationMarker config.deployment.domain
     config.profile.semantics command
   let wanted := ApplicationLifecycleRetryCompletionV4Admission.packageRequest
-    config opened.ground source prepared
+    config ground source prepared
   let .ok header := CredentialSignatureAdmission.signingHeader
-      opened.ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
+      ground.authority marker (⟨.object, wanted⟩ : PackedEffectRequest)
     | return .error "current package observation signing key unavailable"
   let packageSlot : SigningSlot :=
     ⟨9, 0, CredentialSignedEnvelopeController.headerCodec.encode header⟩
@@ -203,12 +199,83 @@ def prepareVerified (config : Config) {target : Durable}
   | .ok _ => pure ()
   return .ok plan
 
-def prepareRequestVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (pin : Pin)
+private def planKeys (config : Config) (ground : ServedBasis.Ground config.deployment) (pin : Pin)
+    (request : Request) : Option DurableView.Keys := do
+  let begin ← ApplicationLifecycleRetryBeginV4Ingress.codec.decode request.beginBytes
+  let claim ← ApplicationLifecycleRetryClaimV4Ingress.codec.decode request.claimIngressBytes
+  let physical ← ApplicationLifecycleRetryCompletionV4Report.signedCodec.decode request.signedReportBytes
+  let appCell ← cellAtOn ground pin.app
+  let packageCell ← cellAtOn ground pin.packageManifest
+  let atomBefore ← ApplicationLifecycleRetryCompletionV4Admission.packageAtom
+      config.deployment.domain pin.packageManifest pin.app packageCell
+  let source : ApplicationLifecycleRetryCompletionV4Source.Source :=
+    { originalBegin := begin
+      originalClaim := claim
+      physical := physical
+      currentAppRoot := appCell.payload.root
+      currentPackageRoot := packageCell.payload.root
+      appCapability := pin.appCapability
+      appObserveCapability := pin.appObserveCapability
+      packageCapability := pin.packageCapability
+      packageObserveCapability := pin.packageObserveCapability
+      packageAtomBefore := atomBefore }
+  return ApplicationLifecycleRetryCompletionV4Admission.keys config
+    { domain := config.deployment.domain
+      semantics := config.profile.semantics
+      source := source
+      signed := ⟨[], [], [], []⟩
+      packageObservationEnvelope := [] }
+
+def prepareRequestLight (config : Config) (light : NativeHostLight.Light config) (pin : Pin)
     (bytes : List UInt8) : IO (Except String Plan) := do
   let some request := requestCodec.decode bytes
     | return .error "noncanonical retry completion operator request"
-  prepareVerified config verified pin request
+  let cells ← match ← light.basis ⟨[], []⟩ with
+    | .error detail => return .error detail
+    | .ok basis => pure basis
+  let keys := (planKeys config (.ofBasis cells) pin request).getD ⟨[], []⟩
+  match ← light.basis keys with
+  | .error detail => return .error detail
+  | .ok basis =>
+      prepareOn config (.ofBasis basis) (light.opening.reader config.transport ResourceBirthCodec.rootBytes)
+        pin request
+
+inductive LightResult where
+  | confirmed (kind : DurableReceiverIO.Confirmation) (transactionId : Digest)
+      (eventId : Digest)
+  | rejected (detail : String)
+  | contention
+  | unavailable (detail : String)
+  | uncertain (detail : String)
+
+def receiveLight (config : Config) (transport : DurableReceiverIO.Transport)
+    (light : NativeHostLight.Light config) (bytes : List UInt8)
+    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO LightResult := do
+  let some ingress := ApplicationLifecycleRetryCompletionV4Ingress.codec.decode bytes
+    | return .rejected "noncanonical retry completion ingress"
+  let grounded ← match ← light.groundedVia transport
+      (ApplicationLifecycleRetryCompletionV4Admission.keys config ingress) with
+    | .error detail => return .unavailable detail
+    | .ok grounded => pure grounded
+  let reader := light.opening.reader transport ResourceBirthCodec.rootBytes
+  let conditional ← match ← ApplicationLifecycleRetryCompletionV4Admission.prepareConditional config reader
+      grounded ingress with
+    | .error detail => return .rejected detail
+    | .ok conditional => pure conditional
+  let intent := ApplicationLifecycleRetryCompletionV4Core.intent conditional
+  match grounded.ground.recorded intent.transactionId with
+  | none => return .rejected "retry completion transaction identity undeclared"
+  | some (some _) => return .rejected "retry completion transaction identity already used"
+  | some none =>
+      match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening intent with
+      | .appended kind next _ _ _ _ =>
+          adopt next none
+          return .confirmed kind intent.transactionId intent.event.eventId
+      | .replayed _ => return .rejected "retry completion transaction identity already used"
+      | .rejected _ => return .rejected "durable retry completion refused"
+      | .contention => return .contention
+      | .unavailable detail => return .unavailable detail
+      | .uncertain detail => return .uncertain detail
 
 /-- Op71 (v4 frame) only inserts detached Ed25519 signatures into the exact
 op70 plan. Op38 rechecks the current tip, historical retry claim, physical
