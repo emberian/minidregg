@@ -53,7 +53,9 @@ stage() {
   install -m 0600 -o "mini-s-$1" -g "$TENANT_GROUP" /dev/stdin "$S/$1/requests/$2"
 }
 # have MEMBER ID: true if MEMBER already recorded attempt ID.
-have() { as "$1" "history all" && grep -qE "^attempt[[:space:]]+$2[[:space:]]" <<<"$OUT"; }
+have() { [ -f "$S/$1/workspace/attempts/$2/outcome.json" ] || { as "$1" "history all" && grep -qE "^attempt[[:space:]]+$2[[:space:]]" <<<"$OUT"; }; }
+# has_ref MEMBER REF: true if MEMBER has exact local ref file REF.json.
+has_ref() { [ -f "$S/$1/workspace/refs/$2.json" ]; }
 propose_submit() { # MEMBER ID LINE
   have "$1" "$2" && return 0
   as "$1" "$3" && as "$1" "submit $2"
@@ -111,7 +113,7 @@ publish_public() { # MEMBER REF [VERBS]
     as "$1" "delegate $id $2 $PUBLIC $verbs $PUBMAX" && as "$1" "submit $id" && as "$1" "publish $id" \
       || { fail_ "publish $2: $(errtail_)"; return 1; }
   fi
-  if as public "refs" && grep -qw "$2" <<<"$OUT"; then
+  if has_ref public "$2"; then
     skip_ "publish $2 to public: done"
     return 0
   fi
@@ -247,7 +249,7 @@ else
   if [ -f "$src" ]; then
     stage "$BOX" Tally.obend <"$src"
     { as "$BOX" "bend lookup tally" && grep -qi admitted <<<"$OUT"; } || as "$BOX" "bend publish tally @Tally.obend --entry tally" 600
-    if [ "$RC" = 0 ] && { as "$BOX" "refs" && grep -qw lobby-tally <<<"$OUT" || as "$BOX" "create lobby-tally content open"; } \
+    if [ "$RC" = 0 ] && { has_ref "$BOX" lobby-tally || as "$BOX" "create lobby-tally content open"; } \
        && as "$BOX" "bend run tally lobby-tally" 600; then ok_ "bend tally published and run on lobby-tally"
     else fail_ "bend: $(errtail_)"; fi
   else fail_ "bend: Tally.obend not found (TALLY_SRC)"; fi
@@ -256,7 +258,7 @@ fi
 # --- 6. delegations, receipted refusal, and kanban task board
 grant() { # OWNER NAME RECIPIENT-SUBJECT VERBS TO-MEMBER
   local id="g-$2-$5"
-  if have "$1" "$id"; then skip_ "grant $2 -> $5: done"; return 0; fi
+  if have "$1" "$id" && has_ref "$5" "$2"; then skip_ "grant $2 -> $5: done"; return 0; fi
   as "$1" "delegate $id $2 $3 $4 50000" && as "$1" "submit $id" && as "$1" "publish $id" && as "$1" "export $id" || { fail_ "grant $2: $(errtail_)"; return 1; }
   printf '%s\n' "$OUT" | stage "$5" "$2.ref.json"
   as "$5" "import $2 @$2.ref.json" && ok_ "grant $2 ($4) from $1 to $5" || fail_ "import $2 by $5: $(errtail_)"
@@ -283,7 +285,7 @@ do_propose() { # MEMBER ID LINE LABEL
   as "$1" "$3" && as "$1" "submit $2" && ok_ "$4" || fail_ "$4: $(errtail_)"
 }
 # Kanban board (`board` governed by the monotone board law on tasks 0 and 1)
-if as "$BOX" "refs" && grep -qw board <<<"$OUT"; then skip_ "board exists"
+if has_ref "$BOX" board; then skip_ "board exists"
 elif as "$BOX" "board new board"; then ok_ "board created by $BOX"
 else fail_ "board new board: $(errtail_)"; fi
 grant "$BOX" board "$SAGES" observe,mutate "$SAGE"
@@ -296,7 +298,7 @@ do_propose "$SAGE" board-take-1 "board take board-take-1 board 1" "board task 1 
 do_propose "$SAGE" board-doing-1 "board move board-doing-1 board 1 todo doing" "board task 1 moved todo -> doing"
 publish_public "$BOX" board
 
-if as "$BOX" "refs" && grep -qw subscribers <<<"$OUT"; then skip_ "room subscribers exists"
+if has_ref "$BOX" subscribers; then skip_ "room subscribers exists"
 elif as "$BOX" "chat new subscribers"; then ok_ "room subscribers created by $BOX"
 else fail_ "chat new subscribers: $(errtail_)"; fi
 as "$BOX" "tariff subscribers set week 1000" && ok_ "subscribers weekly tariff set" || fail_ "tariff subscribers: $(errtail_)"
