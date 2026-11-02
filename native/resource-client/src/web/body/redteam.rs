@@ -565,3 +565,55 @@ fn presburger_laws_workbench_renders_presets_verb_matrix_lockout_and_hypothetica
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn receipt_page_distinguishes_write_attempts_with_observation_from_journaled_reads() {
+    let (root, site) = site("receipt-read-vs-write");
+    let write_id = "a-9001";
+    let attempt = root.join("attempts").join(write_id);
+    fs::create_dir_all(&attempt).unwrap();
+    fs::write(attempt.join("signed-observation.bin"), b"obs").unwrap();
+    fs::write(attempt.join("challenge.json"), b"{\"height\":\"42\"}").unwrap();
+    fs::write(attempt.join("call.bin"), b"sealed-call").unwrap();
+    fs::write(
+        attempt.join("outcome.json"),
+        json!({
+            "type": "confirmed",
+            "acceptedCount": "42",
+            "worldRoot": "123456789",
+            "transactionId": "11",
+            "eventId": "22",
+            "confirmation": "installed"
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let write_page = get(&site, &["receipts", write_id], &format!("/receipts/{write_id}"));
+    assert_eq!(write_page.status, 200, "{}", write_page.body);
+    assert!(
+        !write_page.body.contains("This attempt is a signed read"),
+        "write attempt with signed-observation.bin must not be misclassified as a signed read: {}",
+        write_page.body
+    );
+    assert!(write_page.body.contains("<h2>Outcome</h2>"), "{}", write_page.body);
+    assert!(write_page.body.contains("Confirmation point: <code>acceptedCount 42</code>"), "{}", write_page.body);
+
+    // Journaled signed read in read-journal.tsv without an attempts/<id> directory
+    fs::write(
+        root.join("read-journal.tsv"),
+        "1793660000\t2971\tread\tanswered\t1793660000\t14271322532083682028\n",
+    )
+    .unwrap();
+    let read_page = get(
+        &site,
+        &["receipts", "14271322532083682028"],
+        "/receipts/14271322532083682028",
+    );
+    assert_eq!(read_page.status, 200, "{}", read_page.body);
+    assert!(read_page.body.contains("<h2>Signed read</h2>"), "{}", read_page.body);
+    assert!(read_page.body.contains("14271322532083682028"), "{}", read_page.body);
+    assert!(read_page.body.contains("2971"), "{}", read_page.body);
+    let _ = fs::remove_dir_all(&root);
+}
+
+

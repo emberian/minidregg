@@ -270,6 +270,7 @@ pub static SEAT: Grammar = Grammar { verb: "seat", leaves: &[
     Leaf { path: &["seat", "exit"], args: &[arg("OBJECT", Kind::Word), arg("PACKAGE", Kind::Word), arg("SEAT", Kind::Word)], flags: &[valued("--prepare-only", "BOOL", Kind::Word)], effect: Effect::Transition, about: "mini seat --action exit: exit a seat and reclaim escrowed assets" },
     Leaf { path: &["seat", "view"], args: &[opt("OBJECT", Kind::Word)], flags: &[valued("--package", "PACKAGE", Kind::Word)], effect: Effect::Read, about: "mini seat --action view: read the public seat-store state (instances, invitations, seats, holdings)" },
     Leaf { path: &["seat", "clear-cert"], args: &[arg("ORDERS-JSON", Kind::Word)], flags: &[valued("--currency", "ASSET", Kind::Number), valued("--goods", "ASSET", Kind::Number), valued("--epsilon", "N", Kind::Number)], effect: Effect::Local, about: "local: deterministically solve and self-verify a Cert-F primal-dual uniform-price market clearing certificate" },
+    Leaf { path: &["seat", "ballot-commit"], args: &[arg("OBJECT", Kind::Number), arg("VOTER", Kind::Number), arg("VOTE", Kind::Number), opt("SALT", Kind::Number)], flags: &[], effect: Effect::Local, about: "local: compute Pred.hashEq cSHAKE256(\"DREGG.PRED.HASHEQ/v2\") ballot commitment digest and save in workspace custody (ballot-commitments.json)" },
 ] };
 pub static JOBS: Grammar = Grammar { verb: "jobs", leaves: &[
     Leaf { path: &["jobs"], args: &[arg("ROOM", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini job --action list --dir WS --room ROOM" },
@@ -434,6 +435,7 @@ pub static APPS: Grammar = Grammar { verb: "apps", leaves: &[
     Leaf { path: &["apps", "delete"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "DELETE through the lifecycle" },
     Leaf { path: &["apps", "identities"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Read, about: "the saved identities the grain holds (who, since, revoked)" },
     Leaf { path: &["apps", "revoke-identity"], args: &[arg("GRAIN", Kind::Word), arg("TOKEN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "revoke one saved identity" },
+    Leaf { path: &["apps", "snapshot"], args: &[arg("GRAIN", Kind::Word), arg("DOC", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "snapshot a grain's deterministic SHA-256 manifest to a WorldRoot hyperdocument" },
 ] };
 
 // Keys, identity, births and the rest.

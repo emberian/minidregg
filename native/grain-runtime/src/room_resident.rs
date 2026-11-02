@@ -401,7 +401,9 @@ pub(crate) fn initialize(controller: &Path, state: &Path) -> Result<()> {
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err("another resident driver owns this room".into());
         }
-        atomic_json(&state.join("resident.json"), &serde_json::to_value(ResidentState::default()).map_err(|e|e.to_string())?)?;
+        let res = atomic_json(&state.join("resident.json"), &serde_json::to_value(ResidentState::default()).map_err(|e|e.to_string())?);
+        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN); }
+        res?;
     }
     let guard = quiescence::ResidentGuard::acquire(&config, Some(state))?;
     let _: ResidentState = serde_json::from_slice(guard.bytes()?).map_err(|e|format!("resident journal: {e}"))?;
@@ -428,6 +430,13 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     fs::set_permissions(&options.state, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
     let lock = OpenOptions::new().create(true).read(true).write(true).mode(0o600).open(options.state.join("resident.lock")).map_err(|e| e.to_string())?;
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 { return Err("another resident driver owns this room".into()); }
+    struct FlockUnlockGuard(std::os::unix::io::RawFd);
+    impl Drop for FlockUnlockGuard {
+        fn drop(&mut self) {
+            unsafe { libc::flock(self.0, libc::LOCK_UN); }
+        }
+    }
+    let _unlock_guard = FlockUnlockGuard(lock.as_raw_fd());
     // Serialize migration publication and all resident Mini side effects.
     let config: crate::Config = serde_json::from_slice(&bounded_regular_file(&options.controller, 262_144)?)
         .map_err(|e| format!("resident controller config after lock: {e}"))?;

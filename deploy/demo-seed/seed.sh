@@ -440,6 +440,41 @@ if [ -n "$DECK_URL" ]; then
   fi
 fi
 for d in welcome what-is-mini a-refusal-explains-itself the-lost-reply the-lamplighters-note house-rules field-notes; do publish_public "$BOX" "$d"; done
+
+# --- 9. app grain WorldRoot hyperdocument snapshot, Pred.hashEq ballot commitment custody, and bend tick-all
+G_SNAP=$(grain_of "Etherpad")
+[ -n "$G_SNAP" ] || G_SNAP=$(grain_of "EtherCalc")
+if [ -n "$G_SNAP" ]; then
+  if [ -s "$S/$BOX/workspace/apps/snapshots/grain-snapshot.json" ] && have "$BOX" grain-snapshot-a1; then
+    skip_ "grain-snapshot doc from $G_SNAP: done"
+  elif as "$BOX" "apps snapshot $G_SNAP grain-snapshot --json"; then
+    doc_build "$BOX" grain-snapshot "$S/$BOX/workspace/docs/grain-snapshot.md"
+    grep -qxF "grain-snapshot $BOX" /etc/mini/house-publications 2>/dev/null || printf '%s\n' "grain-snapshot $BOX" >>/etc/mini/house-publications
+    publish_public "$BOX" grain-snapshot
+  else
+    fail_ "apps snapshot $G_SNAP: $(errtail_)"
+  fi
+else
+  skip_ "grain-snapshot: no grain installed"
+fi
+
+for pair in "$BOX:$BOXS" "$SAGE:$SAGES"; do
+  m=${pair%%:*}; subj=${pair#*:}
+  if [ -s "$S/$m/workspace/ballot-commitments.json" ]; then
+    skip_ "ballot commitment custody for $m: done"
+  elif as "$m" "seat ballot-commit 5001 $subj 1 777"; then
+    ok_ "ballot commitment custody seeded for $m (voter $subj)"
+  else
+    fail_ "seat ballot-commit for $m: $(errtail_)"
+  fi
+done
+
+if "$C/bin/mini" bend --action tick-all --dir /var/lib/mini/workspaces --socket /run/mini/host.sock >/dev/null 2>&1; then
+  ok_ "bend tick-all verified"
+else
+  fail_ "bend tick-all failed"
+fi
+
 for _ in 1 2 3 4 5; do
   [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 http://127.0.0.1:8797/doc/welcome)" = 200 ] && break
   sleep 2

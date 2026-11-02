@@ -1280,8 +1280,19 @@ mod tests {
         // (the `sleep` inside it would otherwise keep the lock, rightly).
         unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL); }
         child.wait().unwrap();
-        // The next tick: lock, prove, look up, re-drive.
-        let lock = lock_pass(&config).unwrap();
+        // The next tick: lock, prove, look up, re-drive (wait briefly for the kernel to finish
+        // closing the killed grandchild `sleep`'s inherited descriptor in the process group).
+        let lock = {
+            let mut acquired = None;
+            for _ in 0..200 {
+                if let Ok(l) = lock_pass(&config) {
+                    acquired = Some(l);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            acquired.unwrap_or_else(|| lock_pass(&config).unwrap())
+        };
         let run = Runner { config: &config, lock: Some(lock.fd()) };
         let mut journal = Journal::open(&config.journal).unwrap();
         assert!(!journal.refunding[&key].submitter_stopped);
