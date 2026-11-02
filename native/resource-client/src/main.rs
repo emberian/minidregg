@@ -149,6 +149,7 @@ mod activity;
 #[cfg(unix)]
 mod private_compute;
 mod bend;
+mod clearing_solver;
 mod seat;
 #[cfg(unix)]
 mod shell;
@@ -1079,16 +1080,36 @@ impl Args {
         }
         let mut raw = raw.peekable();
         // `mini pay ACTION ...` (docs/PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
-        if command == OsStr::new("pay") || command == OsStr::new("store") || command == OsStr::new("apps") {
+        if command == OsStr::new("pay")
+            || command == OsStr::new("store")
+            || command == OsStr::new("apps")
+            || command == OsStr::new("seat")
+        {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
-                // `mini apps share a4501 bob`: the grammar leaf's positionals are the flags
-                // `--grain a4501 --to bob` (the same words the shell takes).
-                let leaf = (command == OsStr::new("apps")).then(|| action.to_str()).flatten()
-                    .and_then(|name| shell_grammar::leaf(&shell_grammar::APPS, &["apps", name]));
+                // `mini apps share a4501 bob` / `mini seat create ...`: the grammar leaf's positionals
+                // are mapped to their flags (the same words the shell takes).
+                let leaf = if command == OsStr::new("apps") {
+                    action
+                        .to_str()
+                        .and_then(|name| shell_grammar::leaf(&shell_grammar::APPS, &["apps", name]))
+                } else if command == OsStr::new("seat") {
+                    action
+                        .to_str()
+                        .and_then(|name| shell_grammar::leaf(&shell_grammar::SEAT, &["seat", name]))
+                } else {
+                    None
+                };
                 values.push((OsString::from("--action"), action));
                 for argument in leaf.map(|l| l.args).unwrap_or(&[]) {
                     match raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
-                        Some(value) => values.push((OsString::from(format!("--{}", apps::positional_flag(argument.name))), value)),
+                        Some(value) => {
+                            let flag_name = if command == OsStr::new("seat") {
+                                seat::positional_flag(argument.name)
+                            } else {
+                                apps::positional_flag(argument.name)
+                            };
+                            values.push((OsString::from(format!("--{flag_name}")), value));
+                        }
                         None => break,
                     }
                 }

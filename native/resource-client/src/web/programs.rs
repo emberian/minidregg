@@ -384,7 +384,7 @@ fn surface_forms() -> String {
     String::from(
         "<section data-surface=\"objective-activity\"><h2>ObjectiveActivity · <code>spawn</code> &amp; <code>reply</code></h2>\
          <p class=note>Start an activity or answer a reply slot using human-friendly <code>key=value</code> fields (e.g. <code>amount=7</code> or <code>init=set(0), decider=42</code>) instead of nested tagged JSON.</p>\
-         <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"spawn\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"spawn\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-activity\"><input type=\"hidden\" name=\"turn\" value=\"spawn\">\
          <div><label for=\"oa-bend\">Program (bend)</label><input id=\"oa-bend\" name=\"bend\" type=\"text\" pattern=\"[A-Za-z0-9-]+\" required></div>\
          <div><label for=\"oa-obj\">Object reference</label><input id=\"oa-obj\" name=\"object\" type=\"text\" pattern=\"[A-Za-z0-9/-]+\" required></div>\
@@ -395,7 +395,7 @@ fn surface_forms() -> String {
          <button>Spawn activity</button></form></section>\n\
          <section data-surface=\"objective-call\"><h2>ObjectiveCall · <code>invoke</code></h2>\
          <p class=note>Invoke a synchronous method on a pinned object with structured field inputs.</p>\
-         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"invoke\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"invoke\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-call\"><input type=\"hidden\" name=\"turn\" value=\"invoke\">\
          <div><label for=\"oc-obj\">Object reference</label><input id=\"oc-obj\" name=\"object\" type=\"text\" pattern=\"[A-Za-z0-9/-]+\" required></div>\
          <div><label for=\"oc-method\">Method / action</label><input id=\"oc-method\" name=\"method\" type=\"text\" placeholder=\"e.g. claim, approve, vote\" required></div>\
@@ -404,14 +404,14 @@ fn surface_forms() -> String {
          <button>Invoke call</button></form></section>\n\
          <section data-surface=\"objective-send\"><h2>ObjectiveSend · <code>send</code> &amp; <code>deliver</code></h2>\
          <p class=note>Queue an asynchronous message between objects or deliver a settled message / await.</p>\
-         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"send\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"send\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-send\"><input type=\"hidden\" name=\"turn\" value=\"send\">\
          <div><label for=\"os-src\">Source object</label><input id=\"os-src\" name=\"source\" type=\"text\" required></div>\
          <div><label for=\"os-dst\">Target object</label><input id=\"os-dst\" name=\"target\" type=\"text\" required></div>\
          <div><label for=\"os-var\">Message tag</label><input id=\"os-var\" name=\"variant\" type=\"text\" placeholder=\"e.g. credit, lease\" required></div>\
          <div><label for=\"os-fields\">Payload fields (<code>key=value</code>)</label><input id=\"os-fields\" name=\"fields\" type=\"text\" placeholder=\"amount=25, epoch=3\"></div>\
          <button>Send message</button></form>\
-         <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"deliver\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"deliver\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-send\"><input type=\"hidden\" name=\"turn\" value=\"deliver\">\
          <div><label for=\"od-obj\">Object cell</label><input id=\"od-obj\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"od-tx\">Birth / message transaction</label><input id=\"od-tx\" name=\"transaction\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
@@ -586,6 +586,7 @@ fn surface_action_card(p: &WorldProgramSpec) -> String {
         ),
         ("seat-store", "act") => String::from(
             "<div><label for=\"wp-inst\">Instance id</label><input id=\"wp-inst\" name=\"instance\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" placeholder=\"e.g. 90\" required></div>\
+             <div><label for=\"wp-pkg\">Package id</label><input id=\"wp-pkg\" name=\"package\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"101\" required></div>\
              <div><label for=\"wp-pay\">Payer account</label><input id=\"wp-pay\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" placeholder=\"e.g. 130\" required></div>\
              <div><label for=\"wp-var\">Action / variant</label><input id=\"wp-var\" name=\"variant\" type=\"text\" placeholder=\"e.g. clear, reallocate, settle\"></div>\
              <div><label for=\"wp-fields\">Action fields (<code>key=value</code>)</label><input id=\"wp-fields\" name=\"fields\" type=\"text\" placeholder=\"price=50, currency=1, goods=2, epsilon=0\"></div>"
@@ -606,15 +607,197 @@ fn surface_action_card(p: &WorldProgramSpec) -> String {
     )
 }
 
+/// Interactive **"Synthesize Cert-F Clearing Witness"** card for `/programs/drex` and `/programs/market`.
+pub(super) fn clearing_witness_card(
+    slug: &str,
+    instance: &str,
+    package: &str,
+    payer: &str,
+    synthesis: Option<&crate::clearing_solver::ClearingSolution>,
+    err: Option<&str>,
+) -> String {
+    let esc_slug = escape(slug);
+    let esc_inst = escape(if instance.is_empty() { "90" } else { instance });
+    let esc_pkg = escape(if package.is_empty() { "101" } else { package });
+    let esc_payer = escape(if payer.is_empty() { "130" } else { payer });
+    let mut out = format!(
+        "<section data-clearing-witness><h2>Synthesize Cert-F Clearing Witness</h2>\
+         <p class=\"note\">Deterministic integer primal-dual / uniform-price market clearing solver (<code>Kernel/CertifiedClearing.lean</code> &amp; <code>Theory/CertF.lean</code>). Enter open bids and asks as <code>seat:limit_price:qty</code> to synthesize and self-verify <code>price</code>, <code>bidPotential</code>, <code>askPotential</code>, <code>slacks</code>, and matched <code>moves</code> with zero duality gap.</p>\
+         <form method=\"post\" action=\"/act/surface/clear-cert\" class=\"row\">\
+         <input type=\"hidden\" name=\"program\" value=\"{esc_slug}\">\
+         <div><label for=\"cf-inst\">Instance / object</label><input id=\"cf-inst\" name=\"instance\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{esc_inst}\" required></div>\
+         <div><label for=\"cf-pkg\">Package id</label><input id=\"cf-pkg\" name=\"package\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{esc_pkg}\" required></div>\
+         <div><label for=\"cf-pay\">Payer account</label><input id=\"cf-pay\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{esc_payer}\" required></div>\
+         <div><label for=\"cf-cur\">Currency asset</label><input id=\"cf-cur\" name=\"currency\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"1\" required></div>\
+         <div><label for=\"cf-gds\">Goods asset</label><input id=\"cf-gds\" name=\"goods\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"2\" required></div>\
+         <div><label for=\"cf-eps\">Slack tolerance (<code>epsilon</code>)</label><input id=\"cf-eps\" name=\"epsilon\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"0\" required></div>\
+         <div><label for=\"cf-bids\">Bids (<code>seat:limit_price:qty</code>)</label><input id=\"cf-bids\" name=\"bids\" type=\"text\" value=\"10:5:3, 11:4:2\" required></div>\
+         <div><label for=\"cf-asks\">Asks (<code>seat:limit_price:qty</code>)</label><input id=\"cf-asks\" name=\"asks\" type=\"text\" value=\"20:3:2, 21:4:3\" required></div>\
+         <button>Synthesize Cert-F witness</button></form>"
+    );
+    if let Some(msg) = err {
+        out.push_str(&format!(
+            "<div class=\"outcome refused\"><p class=\"headline\">Cert-F synthesis refused</p><p>{}</p></div>",
+            escape(msg)
+        ));
+    }
+    if let Some(sol) = synthesis {
+        let sol_json = sol.to_json();
+        let action_json = sol_json["seatInvokeAction"].to_string();
+        let cert_pretty = serde_json::to_string_pretty(&sol_json["certificate"]).unwrap_or_default();
+        let moves_pretty = serde_json::to_string_pretty(&sol_json["moves"]).unwrap_or_default();
+        out.push_str(&format!(
+            "<div class=\"outcome admitted\" data-cert-f-verified=\"true\">\
+             <p class=\"headline\">Verified Cert-F Clearing Certificate (<code>price = {price}</code>, <code>clearedVolume = {vol}</code>, <code>dualityGap = 0</code>)</p>\
+             <p>Dual potentials: <code>bidPotential = {:?}</code> · <code>askPotential = {:?}</code> · <code>slacks = {:?}</code></p>\
+             <details open><summary>Certificate &amp; matched moves JSON</summary><pre><code>certificate: {}\nmoves: {}</code></pre></details>\
+             <p class=\"note\">CLI: <code>seat invoke {esc_inst} {esc_pkg} {esc_payer} '{}'</code></p>\
+             <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"act\">\
+             <input type=\"hidden\" name=\"surface\" value=\"seat-store\">\
+             <input type=\"hidden\" name=\"turn\" value=\"act\">\
+             <input type=\"hidden\" name=\"instance\" value=\"{esc_inst}\">\
+             <input type=\"hidden\" name=\"package\" value=\"{esc_pkg}\">\
+             <input type=\"hidden\" name=\"payer\" value=\"{esc_payer}\">\
+             <input type=\"hidden\" name=\"action_json\" value=\"{}\">\
+             <button>Submit verified Cert-F clearing via seat invoke</button></form></div>",
+            sol.cert.bid_potential,
+            sol.cert.ask_potential,
+            sol.cert.slacks,
+            escape(&cert_pretty),
+            escape(&moves_pretty),
+            escape(&action_json),
+            escape(&action_json),
+            price = sol.cert.price,
+            vol = sol.volume,
+        ));
+    }
+    out.push_str("</section>\n");
+    out
+}
+
+/// Interactive `Pred.hashEq` (`cSHAKE256("DREGG.PRED.HASHEQ/v2")`) commit generator + one-click reveal table on `/programs/ballot`.
+pub(super) fn ballot_commitment_card(
+    site: &Site,
+    latest: Option<&crate::receipt_continuity::BallotCommitment>,
+    err: Option<&str>,
+) -> String {
+    let default_voter = if decimal(&site.subject) {
+        site.subject.as_str()
+    } else {
+        "1"
+    };
+    let mut out = format!(
+        "<section data-ballot-commit><h2>Compute &amp; Save <code>Pred.hashEq</code> Ballot Commitment (<code>cSHAKE256(\"DREGG.PRED.HASHEQ/v2\")</code>)</h2>\
+         <p class=\"note\"><code>world/ballot/SealedBallot.obend</code> enforces <code>law commit_binding: new.commit == 0 or hashEq([vote], salt, commit)</code>. Compute the exact 256-bit <code>cSHAKE256(\"DREGG.PRED.HASHEQ/v2\")</code> commitment digest and retain <code>{{object, voter, vote, salt, digest}}</code> in workspace custody (<code>ballot-commitments.json</code>) for one-click reveal.</p>\
+         <form method=\"post\" action=\"/act/ballot/commit\" class=\"row\">\
+         <div><label for=\"bc-obj\">Ballot object cell</label><input id=\"bc-obj\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"5001\" required></div>\
+         <div><label for=\"bc-voter\">Voter subject id</label><input id=\"bc-voter\" name=\"voter\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{}\" required></div>\
+         <div><label for=\"bc-vote\">Vote choice (<code>1</code>=yes, <code>0</code>=no, <code>2</code>=abstain)</label><input id=\"bc-vote\" name=\"vote\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"1\" required></div>\
+         <div><label for=\"bc-salt\">Salt / blinder (optional; auto-generated if blank)</label><input id=\"bc-salt\" name=\"salt\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\" placeholder=\"auto 64-bit salt\"></div>\
+         <div><label for=\"bc-now\">Commit height (<code>now</code>)</label><input id=\"bc-now\" name=\"now\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"10\"></div>\
+         <button>Compute &amp; save commitment</button></form>",
+        escape(default_voter)
+    );
+    if let Some(msg) = err {
+        out.push_str(&format!(
+            "<div class=\"outcome refused\"><p class=\"headline\">Ballot commitment error</p><p>{}</p></div>",
+            escape(msg)
+        ));
+    }
+    if let Some(c) = latest {
+        let commit_fields = format!("voter={}, digest={}, now=10", c.voter, c.digest);
+        out.push_str(&format!(
+            "<div class=\"outcome admitted\" data-hasheq-digest=\"{digest}\">\
+             <p class=\"headline\">Saved <code>Pred.hashEq</code> commitment witness in <code>ballot-commitments.json</code></p>\
+             <p>Object <code>{obj}</code> · voter <code>{voter}</code> · vote <code>{vote}</code> · salt <code>{salt}</code> · digest <code>{digest}</code></p>\
+             <form method=\"post\" action=\"/act/surface\" class=\"inline\">\
+             <input type=\"hidden\" name=\"surface\" value=\"objective-activity\">\
+             <input type=\"hidden\" name=\"turn\" value=\"spawn\">\
+             <input type=\"hidden\" name=\"bend\" value=\"ballot\">\
+             <input type=\"hidden\" name=\"object\" value=\"{obj}\">\
+             <input type=\"hidden\" name=\"variant\" value=\"commit\">\
+             <input type=\"hidden\" name=\"fields\" value=\"{fields}\">\
+             <button>Submit commit turn (voter {voter})</button></form></div>",
+            obj = escape(&c.object),
+            voter = escape(&c.voter),
+            vote = escape(&c.vote),
+            salt = escape(&c.salt),
+            digest = escape(&c.digest),
+            fields = escape(&commit_fields),
+        ));
+    }
+    out.push_str("</section>\n");
+
+    let saved = crate::receipt_continuity::load_ballot_commitments(&site.root);
+    out.push_str("<section data-saved-commitments><h2>Saved Ballot Commitments (One-Click Reveal)</h2>");
+    if saved.is_empty() {
+        out.push_str("<p class=\"empty\">No saved ballot commitments in this workspace yet. Use the form above to compute and retain a commitment witness.</p>");
+    } else {
+        out.push_str("<table><thead><tr><th>object</th><th>voter</th><th>vote</th><th>salt</th><th>digest (<code>DREGG.PRED.HASHEQ/v2</code>)</th><th>reveal phase</th></tr></thead><tbody>");
+        for c in &saved {
+            let reveal_fields = format!(
+                "voter={}, vote={}, salt={}, digest={}, now=60",
+                c.voter, c.vote, c.salt, c.digest
+            );
+            out.push_str(&format!(
+                "<tr data-saved-object=\"{obj}\" data-saved-voter=\"{voter}\">\
+                 <td><code>{obj}</code></td>\
+                 <td><code>{voter}</code></td>\
+                 <td><code>{vote}</code></td>\
+                 <td><code>{salt}</code></td>\
+                 <td><code>{digest}</code></td>\
+                 <td><form method=\"post\" action=\"/act/surface\" class=\"inline\" data-turn=\"spawn\">\
+                 <input type=\"hidden\" name=\"surface\" value=\"objective-activity\">\
+                 <input type=\"hidden\" name=\"turn\" value=\"spawn\">\
+                 <input type=\"hidden\" name=\"bend\" value=\"ballot\">\
+                 <input type=\"hidden\" name=\"object\" value=\"{obj}\">\
+                 <input type=\"hidden\" name=\"variant\" value=\"reveal\">\
+                 <input type=\"hidden\" name=\"fields\" value=\"{fields}\">\
+                 <button>One-click reveal (voter {voter})</button></form></td></tr>\n",
+                obj = escape(&c.object),
+                voter = escape(&c.voter),
+                vote = escape(&c.vote),
+                salt = escape(&c.salt),
+                digest = escape(&c.digest),
+                fields = escape(&reveal_fields),
+            ));
+        }
+        out.push_str("</tbody></table>");
+    }
+    out.push_str("</section>\n");
+    out
+}
+
 pub(super) fn world_program(site: &Site, slug: &str) -> Page {
+    world_program_with(site, slug, None, None, None)
+}
+
+pub(super) fn world_program_with(
+    site: &Site,
+    slug: &str,
+    clearing: Option<(&str, &str, &str, &crate::clearing_solver::ClearingSolution)>,
+    ballot_commit: Option<&crate::receipt_continuity::BallotCommitment>,
+    err: Option<&str>,
+) -> Page {
     let Some(p) = WORLD_PROGRAMS.iter().find(|p| p.slug == slug) else {
         return simple(404, "Program not found", "no such world program");
     };
     let action_card = if site.front.read_only {
         String::new()
     } else {
-        surface_action_card(p)
+        let mut cards = surface_action_card(p);
+        if matches!(p.slug, "drex" | "market") {
+            let (inst, pkg, payer, sol) = match clearing {
+                Some((i, pk, py, s)) => (i, pk, py, Some(s)),
+                None => ("90", "101", "130", None),
+            };
+            cards.push_str(&clearing_witness_card(p.slug, inst, pkg, payer, sol, err));
+        } else if p.slug == "ballot" {
+            cards.push_str(&ballot_commitment_card(site, ballot_commit, err));
+        }
+        cards
     };
+    let status = if err.is_some() { 400 } else { 200 };
     let body = format!(
         "<p class=\"eyebrow\"><a href=\"/programs\">World programs</a> · <code>{surface}</code></p>\
          <p>{summary}</p>\
@@ -627,7 +810,7 @@ pub(super) fn world_program(site: &Site, slug: &str) -> Page {
         source_name = escape(p.source_name),
         source = escape(p.source),
     );
-    Page { status: 200, title: p.title.into(), stamp: Stamp::None, body }
+    Page { status, title: p.title.into(), stamp: Stamp::None, body }
 }
 
 pub(super) fn index(site: &Site) -> Page {

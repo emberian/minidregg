@@ -234,7 +234,7 @@ fn native_surface_controls(name: &str, object: &Value) -> String {
          <h2>Drive turns (structured inputs)</h2>\
          <p class=note>Enter human-friendly <code>key=value</code> fields, <code>asset:amount</code> pairs, or <code>role:holder</code> invitations instead of raw nested tagged JSON.</p>\
          <article data-surface=\"objective-call\"><h3>ObjectiveCall · <code>invoke</code></h3>\
-         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"invoke\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"invoke\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-call\"><input type=\"hidden\" name=\"turn\" value=\"invoke\">\
          <input type=\"hidden\" name=\"object\" value=\"{n}\">\
          <div><label for=\"wc-method-{n}\">Method</label>{method_control}</div>\
@@ -242,56 +242,56 @@ fn native_surface_controls(name: &str, object: &Value) -> String {
          <div><label for=\"wc-fields-{n}\">Fields (<code>key=value</code>)</label><input id=\"wc-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"amount=10, milestone=1\"></div>\
          <button>Invoke</button></form></article>\
          <article data-surface=\"objective-send\"><h3>ObjectiveSend · <code>send</code> &amp; <code>deliver</code></h3>\
-         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"send\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"send\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-send\"><input type=\"hidden\" name=\"turn\" value=\"send\">\
          <input type=\"hidden\" name=\"source\" value=\"{n}\">\
          <div><label for=\"ws-target-{n}\">Target object</label><input id=\"ws-target-{n}\" name=\"target\" type=\"text\" required></div>\
          <div><label for=\"ws-var-{n}\">Message tag</label><input id=\"ws-var-{n}\" name=\"variant\" type=\"text\" placeholder=\"e.g. credit, lease\" required></div>\
          <div><label for=\"ws-fields-{n}\">Payload fields (<code>key=value</code>)</label><input id=\"ws-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"amount=25, epoch=3\"></div>\
          <button>Send</button></form>\
-         <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"deliver\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"deliver\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-send\"><input type=\"hidden\" name=\"turn\" value=\"deliver\">\
          <div><label for=\"wd-obj-{n}\">Object cell</label><input id=\"wd-obj-{n}\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"wd-tx-{n}\">Transaction</label><input id=\"wd-tx-{n}\" name=\"transaction\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <button>Deliver</button></form></article>\
          <article data-surface=\"objective-activity\"><h3>ObjectiveActivity · <code>spawn</code> &amp; <code>reply</code></h3>\
-         <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"spawn\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"spawn\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-activity\"><input type=\"hidden\" name=\"turn\" value=\"spawn\">\
          <input type=\"hidden\" name=\"object\" value=\"{n}\">\
          <div><label for=\"wa-bend-{n}\">Program (bend)</label><input id=\"wa-bend-{n}\" name=\"bend\" type=\"text\" required></div>\
          <div><label for=\"wa-fields-{n}\">Input fields (<code>key=value</code>)</label><input id=\"wa-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"init=set(0), decider=42\"></div>\
          <div><label for=\"wa-seed-{n}\">Seed fields (optional)</label><input id=\"wa-seed-{n}\" name=\"seed_fields\" type=\"text\" placeholder=\"total=0\"></div>\
          <button>Spawn</button></form>\
-         <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"reply\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"reply\">\
          <input type=\"hidden\" name=\"surface\" value=\"objective-activity\"><input type=\"hidden\" name=\"turn\" value=\"reply\">\
          <div><label for=\"war-slot-{n}\">Reply slot</label><input id=\"war-slot-{n}\" name=\"slot\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"war-fields-{n}\">Reply fields (<code>key=value</code>)</label><input id=\"war-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"amount=7\"></div>\
          <button>Reply</button></form></article>\
          <article data-surface=\"seat-store\"><h3>SeatStore · <code>create</code>, <code>fund</code>, <code>act</code>, <code>exit</code></h3>\
-         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"create\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"create\">\
          <input type=\"hidden\" name=\"surface\" value=\"seat-store\"><input type=\"hidden\" name=\"turn\" value=\"create\">\
          <div><label for=\"sc-obj-{n}\">Object cell</label><input id=\"sc-obj-{n}\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sc-pkg-{n}\">Package id</label><input id=\"sc-pkg-{n}\" name=\"package\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sc-pay-{n}\">Payer account</label><input id=\"sc-pay-{n}\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sc-inv-{n}\">Invitations (<code>role:holder</code>)</label><input id=\"sc-inv-{n}\" name=\"invitations\" type=\"text\" placeholder=\"bidder:42, seller:43\"></div>\
          <button>Create instance</button></form>\
-         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"fund\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"fund\">\
          <input type=\"hidden\" name=\"surface\" value=\"seat-store\"><input type=\"hidden\" name=\"turn\" value=\"fund\">\
-         <div><label for=\"sf-inv-{n}\">Invitation id</label><input id=\"sf-inv-{n}\" name=\"invitation\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
-         <div><label for=\"sf-fund-{n}\">Funding account</label><input id=\"sf-fund-{n}\" name=\"funding\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sf-inv-{n}\">Invitation / seat id</label><input id=\"sf-inv-{n}\" name=\"invitation\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
+         <div><label for=\"sf-fund-{n}\">Funding / holder account</label><input id=\"sf-fund-{n}\" name=\"funding\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sf-pay-{n}\">Payee account</label><input id=\"sf-pay-{n}\" name=\"payee\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sf-give-{n}\">Give (<code>asset:amount</code>)</label><input id=\"sf-give-{n}\" name=\"give\" type=\"text\" placeholder=\"1:500\" required></div>\
          <div><label for=\"sf-want-{n}\">Want (<code>asset:amount</code>)</label><input id=\"sf-want-{n}\" name=\"want\" type=\"text\" placeholder=\"2:10\"></div>\
          <div><label for=\"sf-exit-{n}\">Exit rule</label><input id=\"sf-exit-{n}\" name=\"exit_rule\" type=\"text\" value=\"onDemand\"></div>\
          <button>Fund seat</button></form>\
-         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"act\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"act\">\
          <input type=\"hidden\" name=\"surface\" value=\"seat-store\"><input type=\"hidden\" name=\"turn\" value=\"act\">\
          <div><label for=\"sa-inst-{n}\">Instance id</label><input id=\"sa-inst-{n}\" name=\"instance\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sa-pay-{n}\">Payer account</label><input id=\"sa-pay-{n}\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sa-var-{n}\">Action / variant</label><input id=\"sa-var-{n}\" name=\"variant\" type=\"text\" placeholder=\"clear, reallocate, settle\"></div>\
          <div><label for=\"sa-fields-{n}\">Action fields (<code>key=value</code>)</label><input id=\"sa-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"price=50, currency=1, goods=2, epsilon=0\"></div>\
          <button>Act / settle</button></form>\
-         <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"exit\">\
+         <form method=\"post\" action=\"/act/surface\" class=\"row\" data-turn=\"exit\">\
          <input type=\"hidden\" name=\"surface\" value=\"seat-store\"><input type=\"hidden\" name=\"turn\" value=\"exit\">\
          <div><label for=\"se-seat-{n}\">Seat account</label><input id=\"se-seat-{n}\" name=\"seat\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <button>Exit seat</button></form></article></section>"
@@ -467,14 +467,25 @@ pub(crate) fn compile_surface_turn(
         let v = f(k1);
         if v.is_empty() { f(k2) } else { v }
     };
+    let dec_or = |val: &str, default: &str| -> String {
+        if decimal(val) {
+            val.to_owned()
+        } else {
+            default.to_owned()
+        }
+    };
     match (surface, turn) {
-        ("objective-call", "invoke") => invoke_turn(
-            f("object"),
-            f("pin"),
-            f_or("method", "variant"),
-            f("variant"),
-            f("fields"),
-        ),
+        ("objective-call", "invoke") => {
+            let mut spec = invoke_turn(
+                f("object"),
+                f_or("pin", "bend"),
+                f_or("method", "variant"),
+                f("variant"),
+                f("fields"),
+            )?;
+            spec["hasFields"] = json!(!f("fields").is_empty());
+            Ok(spec)
+        }
         ("objective-send", "send") => send_turn(
             f_or("source", "bend"),
             f_or("target", "object"),
@@ -492,22 +503,91 @@ pub(crate) fn compile_surface_turn(
         ),
         ("objective-activity", "reply") => reply_turn(f("slot"), f("mode"), f("variant"), f("fields"), f("refused")),
         ("seat-store", "create") => seat_create_turn(f("object"), f("package"), f("payer"), f("invitations")),
-        ("seat-store", "fund") => seat_fund_turn(
-            f("invitation"),
-            f("funding"),
-            f("payee"),
-            f("give"),
-            f("want"),
-            f("exit_rule"),
-            f("donate") == "on" || f("confirmDonation") == "true",
-        ),
-        ("seat-store", "act") => seat_act_turn(
-            f_or("instance", "object"),
-            f("payer"),
-            f("variant"),
-            f("fields"),
-        ),
-        ("seat-store", "exit") => seat_exit_turn(f_or("seat", "object")),
+        ("seat-store", "fund") => {
+            let invitation = f_or("invitation", "seat");
+            let funding = f_or("funding", "holder");
+            let payee = {
+                let p = f_or("payee", "holder");
+                if p.is_empty() { funding } else { p }
+            };
+            let mut spec = seat_fund_turn(
+                invitation,
+                funding,
+                payee,
+                f("give"),
+                f("want"),
+                f("exit_rule"),
+                f("donate") == "on" || f("confirmDonation") == "true",
+            )?;
+            let give_objs: Vec<Value> = spec["turn"]["proposal"]["give"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|pair| {
+                            let p = pair.as_array()?;
+                            Some(json!({
+                                "asset": p.first()?.as_str()?,
+                                "amount": p.get(1)?.as_str()?,
+                            }))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let want_objs: Vec<Value> = spec["turn"]["proposal"]["want"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|pair| {
+                            let p = pair.as_array()?;
+                            Some(json!({
+                                "asset": p.first()?.as_str()?,
+                                "amount": p.get(1)?.as_str()?,
+                            }))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            spec["turn"]["object"] = json!(dec_or(f_or("object", "instance"), "0"));
+            spec["turn"]["package"] = json!(dec_or(f("package"), "0"));
+            spec["turn"]["seat"] = json!(if !f("seat").is_empty() { f("seat") } else { invitation });
+            spec["turn"]["role"] = json!(if f("role").is_empty() { "bid" } else { f("role") });
+            spec["turn"]["holder"] = json!(if !f("holder").is_empty() { f("holder") } else { funding });
+            spec["turn"]["giveJson"] = json!(give_objs);
+            spec["turn"]["wantJson"] = json!(want_objs);
+            Ok(spec)
+        }
+        ("seat-store", "act") => {
+            let instance = f_or("instance", "object");
+            let payer = f("payer");
+            let mut spec = if !f("action_json").is_empty() {
+                if !decimal(instance) || !decimal(payer) {
+                    return Err("instance id and payer account must be canonical decimals".into());
+                }
+                let raw_action: Value = serde_json::from_str(f("action_json"))
+                    .map_err(|e| format!("invalid action_json: {e}"))?;
+                let argument = crate::seat::to_data_json(&raw_action);
+                json!({
+                    "surface": "SeatStore",
+                    "turn": {
+                        "kind": "invoke",
+                        "instance": instance,
+                        "payer": payer,
+                        "argument": argument,
+                        "actionJson": raw_action,
+                    }
+                })
+            } else {
+                seat_act_turn(instance, payer, f("variant"), f("fields"))?
+            };
+            spec["turn"]["package"] = json!(dec_or(f("package"), "0"));
+            Ok(spec)
+        }
+        ("seat-store", "exit") => {
+            let mut spec = seat_exit_turn(f_or("seat", "object"))?;
+            spec["turn"]["object"] = json!(dec_or(f_or("object", "instance"), "0"));
+            spec["turn"]["package"] = json!(dec_or(f("package"), "0"));
+            Ok(spec)
+        }
         _ => Err(format!("unknown surface `{surface}` / turn `{turn}`")),
     }
 }

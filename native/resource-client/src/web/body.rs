@@ -1345,17 +1345,14 @@ fn room_new_form() -> String {
 
 // ---------------------------------------------------------------- POST
 
-fn surface_post(site: &Site, form: &std::collections::BTreeMap<String, String>) -> Page {
-    let field = |key: &str| form.get(key).map(String::as_str).unwrap_or("").trim().to_owned();
-    let surface = field("surface");
-    let turn = field("turn");
-    let spec = match super::world::compile_surface_turn(&surface, &turn, form) {
-        Ok(spec) => spec,
-        Err(err) => return simple(400, "Surface turn", &err),
-    };
-    let id = form_attempt(form);
-    let title = format!("{surface}: {turn}");
-    match (surface.as_str(), turn.as_str()) {
+pub(super) fn surface_shell_lines(
+    site: Option<&Site>,
+    surface: &str,
+    turn: &str,
+    spec: &Value,
+    id: &str,
+) -> (Vec<String>, String) {
+    match (surface, turn) {
         ("objective-activity", "spawn") => {
             let mut line = format!(
                 "bend run {} {} --input {}",
@@ -1369,16 +1366,16 @@ fn surface_post(site: &Site, form: &std::collections::BTreeMap<String, String>) 
             if let Some(dep) = spec["deposit"].as_str() {
                 line.push_str(&format!(" --deposit {}", quote(dep)));
             }
-            act(site, &title, vec![line], "", &[("programs", "/bend")])
+            (vec![line], String::new())
         }
         ("objective-activity", "reply") => {
             let answer_json = spec["answer"].to_string();
-            let arg = match text_file(site, &id, &answer_json) {
+            let arg = match site.and_then(|s| text_file(s, id, &answer_json)) {
                 Some(file) => format!("@{file}"),
                 None => quote(&answer_json),
             };
             let line = format!("bend answer {} {arg}", quote(spec["slot"].as_str().unwrap_or("")));
-            act(site, &title, vec![line], "", &[("programs", "/bend")])
+            (vec![line], String::new())
         }
         ("objective-send", "deliver") => {
             let mut line = format!(
@@ -1389,22 +1386,250 @@ fn surface_post(site: &Site, form: &std::collections::BTreeMap<String, String>) 
             if let Some(acc) = spec["account"].as_str() {
                 line.push_str(&format!(" --account {}", quote(acc)));
             }
-            act(site, &title, vec![line], "", &[("programs", "/bend")])
+            (vec![line], String::new())
+        }
+        ("seat-store", "create") => {
+            let t = &spec["turn"];
+            let obj = quote(t["object"].as_str().unwrap_or("0"));
+            let pkg = quote(t["package"].as_str().unwrap_or("0"));
+            let payer = quote(t["payer"].as_str().unwrap_or("0"));
+            let inv_json = t["invitations"].to_string();
+            let line = format!(
+                "seat create {obj} {pkg} {payer} --invitations {}",
+                quote(&inv_json)
+            );
+            (vec![line], String::new())
+        }
+        ("seat-store", "fund") => {
+            let t = &spec["turn"];
+            let obj = quote(t["object"].as_str().unwrap_or("0"));
+            let pkg = quote(t["package"].as_str().unwrap_or("0"));
+            let seat_id = quote(
+                t["seat"]
+                    .as_str()
+                    .or_else(|| t["invitation"].as_str())
+                    .unwrap_or("0"),
+            );
+            let role = quote(t["role"].as_str().unwrap_or("bid"));
+            let holder = quote(
+                t["holder"]
+                    .as_str()
+                    .or_else(|| t["funding"].as_str())
+                    .unwrap_or("0"),
+            );
+            let give_json = t
+                .get("giveJson")
+                .unwrap_or(&t["proposal"]["give"])
+                .to_string();
+            let want_json = t
+                .get("wantJson")
+                .unwrap_or(&t["proposal"]["want"])
+                .to_string();
+            let line = format!(
+                "seat offer {obj} {pkg} {seat_id} {role} {holder} {} {}",
+                quote(&give_json),
+                quote(&want_json)
+            );
+            (vec![line], String::new())
+        }
+        ("seat-store", "act") => {
+            let t = &spec["turn"];
+            let obj = quote(
+                t["instance"]
+                    .as_str()
+                    .or_else(|| t["object"].as_str())
+                    .unwrap_or("0"),
+            );
+            let pkg = quote(t["package"].as_str().unwrap_or("0"));
+            let payer = quote(t["payer"].as_str().unwrap_or("0"));
+            let action_json = t.get("actionJson").unwrap_or(&t["argument"]).to_string();
+            let line = format!(
+                "seat invoke {obj} {pkg} {payer} {}",
+                quote(&action_json)
+            );
+            (vec![line], String::new())
+        }
+        ("seat-store", "exit") => {
+            let t = &spec["turn"];
+            let obj = quote(t["object"].as_str().unwrap_or("0"));
+            let pkg = quote(t["package"].as_str().unwrap_or("0"));
+            let seat_id = quote(t["seat"].as_str().unwrap_or("0"));
+            let line = format!("seat exit {obj} {pkg} {seat_id}");
+            (vec![line], String::new())
+        }
+        ("objective-call", "invoke") => {
+            let obj = spec["object"].as_str().unwrap_or("");
+            let method = spec["method"].as_str().unwrap_or("");
+            let pin = spec["pin"].as_str().unwrap_or("");
+            let has_fields = spec["hasFields"].as_bool().unwrap_or(false);
+            if pin.is_empty() && !has_fields {
+                (
+                    vec![
+                        format!("instance call {id} {} {}", quote(obj), quote(method)),
+                        format!("submit {id}"),
+                    ],
+                    id.to_owned(),
+                )
+            } else {
+                let prog = if !pin.is_empty() { pin } else { method };
+                let line = format!(
+                    "bend run {} {} --input {}",
+                    quote(prog),
+                    quote(obj),
+                    quote(&spec["input"].to_string())
+                );
+                (vec![line], String::new())
+            }
+        }
+        ("objective-send", "send") => {
+            let src = spec["source"].as_str().unwrap_or("");
+            let dst = spec["target"].as_str().unwrap_or("");
+            let line = format!(
+                "bend run {} {} --input {}",
+                quote(src),
+                quote(dst),
+                quote(&spec["message"].to_string())
+            );
+            (vec![line], String::new())
         }
         _ => {
             let body_json = spec.to_string();
-            let arg = match text_file(site, &id, &body_json) {
+            let arg = match site.and_then(|s| text_file(s, id, &body_json)) {
                 Some(file) => format!("@{file}"),
                 None => quote(&body_json),
             };
-            act(
-                site,
-                &title,
+            (
                 vec![format!("propose {id} {arg}"), format!("submit {id}")],
-                &id,
-                &[("programs", "/bend")],
+                id.to_owned(),
             )
         }
+    }
+}
+
+fn surface_post(site: &Site, form: &std::collections::BTreeMap<String, String>) -> Page {
+    let field = |key: &str| form.get(key).map(String::as_str).unwrap_or("").trim().to_owned();
+    let surface = field("surface");
+    let turn = field("turn");
+    let spec = match super::world::compile_surface_turn(&surface, &turn, form) {
+        Ok(spec) => spec,
+        Err(err) => return simple(400, "Surface turn", &err),
+    };
+    let id = form_attempt(form);
+    let title = format!("{surface}: {turn}");
+    let (lines, act_id) = surface_shell_lines(Some(site), &surface, &turn, &spec, &id);
+    act(site, &title, lines, &act_id, &[("programs", "/bend")])
+}
+
+fn clear_cert_post(site: &Site, form: &std::collections::BTreeMap<String, String>) -> Page {
+    let field = |key: &str| form.get(key).map(String::as_str).unwrap_or("").trim().to_owned();
+    let slug = {
+        let p = field("program");
+        if matches!(p.as_str(), "market" | "drex") {
+            p
+        } else {
+            "drex".to_owned()
+        }
+    };
+    let instance = {
+        let i = field("instance");
+        if i.is_empty() { field("object") } else { i }
+    };
+    let instance = if instance.is_empty() { "90".to_owned() } else { instance };
+    let package = {
+        let p = field("package");
+        if p.is_empty() { "101".to_owned() } else { p }
+    };
+    let payer = {
+        let p = field("payer");
+        if p.is_empty() { "130".to_owned() } else { p }
+    };
+    let orders_json = field("orders_json");
+    let parsed = if !orders_json.is_empty() {
+        crate::clearing_solver::parse_orders_json(&orders_json)
+    } else {
+        let currency = field("currency").parse::<u64>().unwrap_or(1);
+        let goods = field("goods").parse::<u64>().unwrap_or(2);
+        let epsilon = field("epsilon").parse::<u128>().unwrap_or(0);
+        crate::clearing_solver::parse_human_orders(
+            &field("bids"),
+            crate::clearing_solver::Side::Bid,
+        )
+        .and_then(|mut orders| {
+            let asks = crate::clearing_solver::parse_human_orders(
+                &field("asks"),
+                crate::clearing_solver::Side::Ask,
+            )?;
+            orders.extend(asks);
+            if orders.is_empty() {
+                return Err("no bid or ask orders provided".to_owned());
+            }
+            Ok((
+                crate::clearing_solver::Market {
+                    currency,
+                    goods,
+                    epsilon,
+                },
+                orders,
+            ))
+        })
+    };
+    let result = parsed.and_then(|(market, orders)| crate::clearing_solver::solve_clearing(&market, &orders));
+    match result {
+        Ok(sol) => programs::world_program_with(
+            site,
+            &slug,
+            Some((&instance, &package, &payer, &sol)),
+            None,
+            None,
+        ),
+        Err(err) => programs::world_program_with(site, &slug, None, None, Some(&err)),
+    }
+}
+
+fn ballot_commit_post(site: &Site, form: &std::collections::BTreeMap<String, String>) -> Page {
+    let field = |key: &str| form.get(key).map(String::as_str).unwrap_or("").trim().to_owned();
+    let object = field("object");
+    let voter = {
+        let v = field("voter");
+        if v.is_empty() {
+            if !site.subject.is_empty() && site.subject.bytes().all(|b| b.is_ascii_digit()) {
+                site.subject.clone()
+            } else {
+                "1".to_owned()
+            }
+        } else {
+            v
+        }
+    };
+    let vote = {
+        let v = field("vote");
+        if v.is_empty() { "1".to_owned() } else { v }
+    };
+    let salt = {
+        let s = field("salt");
+        if s.is_empty() {
+            let bytes = crate::fsio::random::<8>().unwrap_or([0, 0, 0, 0, 0, 0, 0, 111]);
+            u64::from_be_bytes(bytes).max(1).to_string()
+        } else {
+            s
+        }
+    };
+    let res = crate::receipt_continuity::hasheq_commit_digest(&object, &salt, &[&vote]).and_then(
+        |digest| {
+            let entry = crate::receipt_continuity::BallotCommitment {
+                object: object.clone(),
+                voter: voter.clone(),
+                vote: vote.clone(),
+                salt: salt.clone(),
+                digest,
+            };
+            crate::receipt_continuity::save_ballot_commitment(&site.root, entry.clone())?;
+            Ok(entry)
+        },
+    );
+    match res {
+        Ok(entry) => programs::world_program_with(site, "ballot", None, Some(&entry), None),
+        Err(err) => programs::world_program_with(site, "ballot", None, None, Some(&err)),
     }
 }
 
@@ -1414,11 +1639,16 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         Err(e) => return simple(400, "Form", &e),
     };
     let field = |key: &str| form.get(key).map(String::as_str).unwrap_or("").trim().to_owned();
+    match parts {
+        ["act", "surface", "clear-cert"] => return clear_cert_post(site, &form),
+        ["act", "ballot", "commit"] => return ballot_commit_post(site, &form),
+        ["act", "surface"] => return surface_post(site, &form),
+        _ => {}
+    }
     if !field("surface").is_empty() && !field("turn").is_empty() {
         return surface_post(site, &form);
     }
     match parts {
-        ["act", "surface"] => surface_post(site, &form),
         // The editor and creation forms keep their own pinned-diff path.
         ["doc", name, "edit", id] => editor::post(site, name, id, body, false),
         ["doc", name, "edit", id, "lookup"] => editor::post(site, name, id, body, true),
@@ -2126,6 +2356,64 @@ pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: boo
     outcome_parts(ending, next, transition, "")
 }
 
+fn extract_attempt_id_from_text(text: &str) -> Option<String> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .find(|tok| {
+            tok.starts_with("w-")
+                && tok.len() >= 4
+                && tok.len() <= 64
+                && workspace_id(tok).is_ok()
+        })
+        .map(str::to_owned)
+}
+
+fn law_refusal_diagnosis_html(headline: &str, detail: &str) -> String {
+    let raw_clause = headline
+        .strip_prefix("refused: law-denied: ")
+        .or_else(|| headline.strip_prefix("read refused: law-denied: "))
+        .or_else(|| headline.strip_prefix("refused: objectWrite: "))
+        .or_else(|| headline.strip_prefix("refused: "))
+        .or_else(|| headline.strip_prefix("read refused: "))
+        .unwrap_or(headline)
+        .trim();
+    if raw_clause.is_empty() || raw_clause.eq_ignore_ascii_case("refused") {
+        return String::new();
+    }
+    let stripped_clause = raw_clause
+        .split(" (before ")
+        .next()
+        .unwrap_or(raw_clause)
+        .trim();
+    let bounded_clause: String = stripped_clause.chars().take(240).collect();
+
+    let mut explanation = if bounded_clause.contains("monotone") || detail.contains("monotone") {
+        "Monotonicity clause failed: every guarded field's after-value must be greater than or equal to its before-value (`after >= before`).".to_owned()
+    } else if bounded_clause.contains("writeOnce") || detail.contains("writeOnce") {
+        "Write-once clause failed: once a guarded field is non-zero, subsequent writes may not change its value (`before == 0 || after == before`).".to_owned()
+    } else if bounded_clause.contains("hashEq") || bounded_clause.contains("commit_binding") || detail.contains("hashEq") {
+        "Commit-binding (`Pred.hashEq`) clause failed: `new.commit` must equal `0` or the 256-bit `cSHAKE256(\"DREGG.PRED.HASHEQ/v2\")` digest of `(object, salt, values)`.".to_owned()
+    } else if bounded_clause.contains("delta") {
+        "Step-delta bound failed: the single-turn field change (`after - before`) exceeded the law's allowed delta.".to_owned()
+    } else {
+        format!(
+            "Turn refused by clause `{bounded_clause}`: inspect or test-judge the clause in the Presburger Law Workbench to synthesize a satisfying witness (`can REF --any`)."
+        )
+    };
+
+    if let Ok((_, rendered)) = lawsat::parse_law_input(&bounded_clause, "1") {
+        explanation.push_str(&format!(" (Presburger canonical clause: `{rendered}`.)"));
+    }
+
+    let laws_href = format!("/laws?clauses={}", pct(&bounded_clause));
+    format!(
+        "<div class=\"law-diagnosis\" data-law-diagnosis=\"true\">\
+         <p class=\"note\"><strong>Law Refusal Diagnosis:</strong> {} \
+         <a class=\"law-workbench-link\" href=\"{}\">Open in Presburger Law Workbench (<code>/laws</code>)</a></p></div>",
+        escape(&explanation),
+        escape(&laws_href)
+    )
+}
+
 fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste: &str) -> String {
     let (class, headline) = ending.class(transition);
     let mut links = String::new();
@@ -2147,8 +2435,31 @@ fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste
     } else {
         String::new()
     };
+    let receipt_id = next
+        .iter()
+        .find_map(|(_, href)| href.strip_prefix("/receipts/"))
+        .filter(|id| workspace_id(id).is_ok())
+        .map(str::to_owned)
+        .or_else(|| extract_attempt_id_from_text(&detail));
+    let loop_bridge = if class == "admitted" {
+        if let Some(id) = &receipt_id {
+            let esc_id = escape(id);
+            format!(
+                "<div class=\"inclusion-proof-bridge\" data-inclusion-proof=\"{esc_id}\">\
+                 <p class=\"note\"><strong>World-Root Inclusion Proof (<code>cSHAKE256</code> · <code>op 151</code>):</strong> \
+                 <a href=\"/receipts/{esc_id}\">Open <code>/receipts/{esc_id}</code></a> · \
+                 CLI: <code>mini receipt verify {esc_id}</code> / <code>inspect inclusion {esc_id}</code></p></div>"
+            )
+        } else {
+            String::new()
+        }
+    } else if class == "refused" {
+        law_refusal_diagnosis_html(&headline, &detail)
+    } else {
+        String::new()
+    };
     format!(
-        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{explained}{}{}</div>\n",
+        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{explained}{loop_bridge}{}{}</div>\n",
         headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
         paste,
@@ -2577,6 +2888,245 @@ mod tests {
         // A receipt path that is not an attempt id is not offered as one.
         assert!(!outcome_of(&refused, &[("x", "/receipts/a/b")], true).contains("from="));
     }
+
+    fn test_site(tag: &str) -> (PathBuf, Site) {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "mini-body-test-{tag}-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("refs")).unwrap();
+        fs::create_dir_all(root.join("home")).unwrap();
+        let site = Site {
+            refs: Mutex::new(None),
+            mutations: Mutex::new(()),
+            home: Some(root.join("home")),
+            root: root.clone(),
+            workspace: Value::Null,
+            subject: "7".into(),
+            token: String::new(),
+            front: Front {
+                origins: Vec::new(),
+                read_only: false,
+            },
+            base: String::new(),
+            face: Face::Body,
+            shell: Some(Shell {
+                host: "/unused".into(),
+                config: "/unused".into(),
+                home: root.join("home"),
+                public_subject: Some("99".into()),
+                front_doc: None,
+                pool: Default::default(),
+            }),
+        };
+        (root, site)
+    }
+
+    #[test]
+    fn surface_post_dispatches_seat_store_objective_call_and_objective_send_to_real_shell_commands() {
+        let (root, site) = test_site("surface-dispatch");
+        let ran: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = Default::default();
+        let seen = ran.clone();
+        redteam::FAKE_SHELL.with(|f| {
+            *f.borrow_mut() = Some(Box::new(move |lines: &[String]| {
+                seen.borrow_mut().push(lines.to_vec());
+                Ending {
+                    code: 0,
+                    stdout: "admitted w-abc123\n".into(),
+                    stderr: String::new(),
+                }
+            }))
+        });
+
+        // 1. seat-store create -> seat create <object> <package> <payer> --invitations <json>
+        let p_create = post(
+            &site,
+            &["act", "surface"],
+            b"surface=seat-store&turn=create&object=90&package=777&payer=130&invitations=bidder%3A42",
+        );
+        assert_eq!(p_create.status, 200, "{}", p_create.body);
+
+        // 2. seat-store fund -> seat offer <object> <package> <seat> <role> <holder> <give_json> <want_json>
+        let p_fund = post(
+            &site,
+            &["act", "surface"],
+            b"surface=seat-store&turn=fund&object=90&package=777&invitation=10&funding=42&payee=42&role=bid&give=1%3A500&want=2%3A10",
+        );
+        assert_eq!(p_fund.status, 200, "{}", p_fund.body);
+
+        // 3. seat-store act -> seat invoke <object> <package> <payer> <action_json>
+        let p_act = post(
+            &site,
+            &["act", "surface"],
+            b"surface=seat-store&turn=act&instance=90&package=777&payer=130&variant=clear&fields=price%3D4",
+        );
+        assert_eq!(p_act.status, 200, "{}", p_act.body);
+
+        // 4. seat-store exit -> seat exit <object> <package> <seat>
+        let p_exit = post(
+            &site,
+            &["act", "surface"],
+            b"surface=seat-store&turn=exit&object=90&package=777&seat=10",
+        );
+        assert_eq!(p_exit.status, 200, "{}", p_exit.body);
+
+        // 5. objective-call invoke with fields -> bend run <method> <object> --input <json>
+        let p_call = post(
+            &site,
+            &["act", "surface"],
+            b"surface=objective-call&turn=invoke&object=commons-1&method=allocate&fields=amount%3D10",
+        );
+        assert_eq!(p_call.status, 200, "{}", p_call.body);
+
+        // 6. objective-send send -> bend run <source> <target> --input <json>
+        let p_send = post(
+            &site,
+            &["act", "surface"],
+            b"surface=objective-send&turn=send&source=station-1&target=desk-2&variant=lease&fields=holder%3D42",
+        );
+        assert_eq!(p_send.status, 200, "{}", p_send.body);
+
+        redteam::FAKE_SHELL.with(|f| *f.borrow_mut() = None);
+        let log = ran.borrow();
+        assert_eq!(log.len(), 6, "{log:?}");
+        assert!(
+            log[0][0].starts_with("seat create 90 777 130 --invitations "),
+            "unexpected create line: {:?}",
+            log[0]
+        );
+        assert!(
+            log[1][0].starts_with("seat offer 90 777 10 bid 42 "),
+            "unexpected fund line: {:?}",
+            log[1]
+        );
+        assert!(
+            log[2][0].starts_with("seat invoke 90 777 130 "),
+            "unexpected act line: {:?}",
+            log[2]
+        );
+        assert_eq!(
+            log[3],
+            vec!["seat exit 90 777 10".to_owned()],
+            "unexpected exit line: {:?}",
+            log[3]
+        );
+        assert!(
+            log[4][0].starts_with("bend run allocate commons-1 --input "),
+            "unexpected objective-call line: {:?}",
+            log[4]
+        );
+        assert!(
+            log[5][0].starts_with("bend run station-1 desk-2 --input "),
+            "unexpected objective-send line: {:?}",
+            log[5]
+        );
+        // Verify each emitted seat command parses cleanly through shell::plan!
+        let session = crate::shell::Session {
+            workspace: root.clone(),
+            home: root.join("home"),
+            host: "/unused".into(),
+            config: "/unused".into(),
+        };
+        for idx in 0..4 {
+            let (code, _, stderr) = crate::shell::plan_ending(&session, &log[idx][0]);
+            assert_eq!(code, 0, "seat line {} failed shell::plan: {stderr}", log[idx][0]);
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn post_clear_cert_and_post_ballot_commit_and_closed_ui_turn_loop() {
+        let (root, site) = test_site("solvers-and-loop");
+
+        // 1. POST /act/surface/clear-cert synthesizes a verified Cert-F clearing certificate
+        let clear_page = post(
+            &site,
+            &["act", "surface", "clear-cert"],
+            b"program=drex&instance=90&package=101&payer=130&currency=1&goods=2&epsilon=0&bids=10%3A5%3A3%2C+11%3A4%3A2&asks=20%3A3%3A2%2C+21%3A4%3A3",
+        );
+        assert_eq!(clear_page.status, 200, "{}", clear_page.body);
+        assert!(
+            clear_page.body.contains("data-cert-f-verified=\"true\""),
+            "{}",
+            clear_page.body
+        );
+        assert!(
+            clear_page.body.contains("price = 4") && clear_page.body.contains("clearedVolume = 5"),
+            "{}",
+            clear_page.body
+        );
+        assert!(
+            clear_page
+                .body
+                .contains("Submit verified Cert-F clearing via seat invoke"),
+            "{}",
+            clear_page.body
+        );
+
+        // 2. POST /act/ballot/commit computes Pred.hashEq digest and saves in ballot-commitments.json
+        let commit_page = post(
+            &site,
+            &["act", "ballot", "commit"],
+            b"object=5001&voter=1&vote=1&salt=111&now=10",
+        );
+        assert_eq!(commit_page.status, 200, "{}", commit_page.body);
+        let expected_digest =
+            crate::receipt_continuity::hasheq_commit_digest("5001", "111", &["1"]).unwrap();
+        assert!(
+            commit_page.body.contains(&expected_digest),
+            "missing digest {expected_digest} in {}",
+            commit_page.body
+        );
+        assert!(
+            commit_page
+                .body
+                .contains("Saved Ballot Commitments (One-Click Reveal)"),
+            "{}",
+            commit_page.body
+        );
+        assert!(
+            commit_page.body.contains("One-click reveal (voter 1)"),
+            "{}",
+            commit_page.body
+        );
+        let saved = crate::receipt_continuity::load_ballot_commitments(&root);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].digest, expected_digest);
+
+        // 3. Closed UI Turn Loop: admitted outcome includes World-Root Inclusion Proof link + CLI snippet
+        let ok = Ending {
+            code: 0,
+            stdout: "admitted\n".into(),
+            stderr: String::new(),
+        };
+        let admitted_html = outcome_of(&ok, &[("the receipt", "/receipts/w-abc123")], true);
+        assert!(
+            admitted_html.contains("World-Root Inclusion Proof")
+                && admitted_html.contains("/receipts/w-abc123")
+                && admitted_html.contains("mini receipt verify w-abc123"),
+            "{admitted_html}"
+        );
+
+        // 4. Closed UI Turn Loop: refused outcome includes Law Refusal Diagnosis + pre-filled /laws link
+        let refused = Ending {
+            code: 3,
+            stdout: String::new(),
+            stderr: "refused: law-denied: field 2 monotone (before 2, after 1)\n".into(),
+        };
+        let refused_html = outcome_of(&refused, &[("the receipt", "/receipts/w-ref999")], true);
+        assert!(
+            refused_html.contains("Law Refusal Diagnosis")
+                && refused_html.contains("Monotonicity clause failed")
+                && refused_html.contains("/laws?clauses=field%202%20monotone"),
+            "{refused_html}"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
 
 #[cfg(test)]
@@ -2606,4 +3156,5 @@ fn parse_history_line_handles_tab_and_whitespace_columns() {
         ("attempt", "w-999", "admitted capsule-append".to_owned())
     );
 }
+
 

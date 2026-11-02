@@ -1614,6 +1614,136 @@ pub(crate) fn verify_attempt_inclusion(
     Ok(verified)
 }
 
+// ------------------------------------------------------------------ Pred.hashEq commit-reveal witness custody (DREGG.PRED.HASHEQ/v2)
+
+/// `Pred.HashEqDigest.deployedCustomization` (`Pred/HashEqDigest.lean`).
+pub(crate) const HASHEQ_CUSTOMIZATION: &[u8] = b"DREGG.PRED.HASHEQ/v2";
+
+/// Durable per-workspace ballot commitment witness store file.
+pub(crate) const BALLOT_COMMITMENTS_FILE: &str = "ballot-commitments.json";
+
+/// One saved ballot commitment witness in workspace custody (`ballot-commitments.json`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BallotCommitment {
+    pub object: String,
+    pub voter: String,
+    pub vote: String,
+    pub salt: String,
+    pub digest: String,
+}
+
+impl BallotCommitment {
+    pub(crate) fn to_json(&self) -> Value {
+        json!({
+            "object": self.object,
+            "voter": self.voter,
+            "vote": self.vote,
+            "salt": self.salt,
+            "digest": self.digest,
+        })
+    }
+
+    pub(crate) fn from_json(v: &Value) -> Option<Self> {
+        Some(Self {
+            object: v.get("object")?.as_str()?.to_owned(),
+            voter: v.get("voter")?.as_str()?.to_owned(),
+            vote: v.get("vote")?.as_str()?.to_owned(),
+            salt: v.get("salt")?.as_str()?.to_owned(),
+            digest: v.get("digest")?.as_str()?.to_owned(),
+        })
+    }
+}
+
+/// Compute the canonical `Pred.hashEq` commitment digest (`cSHAKE256("", "DREGG.PRED.HASHEQ/v2", Opening.preimage)`)
+/// matching `Pred/HashEqDigest.lean` and `hasheq_commit` in `world-activity-admit.py`.
+///
+/// Each element of `values` may be either a bare integer/natural string (defaulting the slot name
+/// to `"state/vote"` for slot 0 and `"state/value{i}"` for subsequent slots, matching
+/// `world/ballot/SealedBallot.obend`'s `hashEq([vote], salt, commit)`) or `"slot=value"`.
+pub(crate) fn hasheq_commit_digest(
+    object_cell: &str,
+    salt: &str,
+    values: &[&str],
+) -> Result<String> {
+    let object_cell = object_cell.trim();
+    let salt = salt.trim();
+    decimal(object_cell)?;
+    decimal(salt)?;
+    let cell_u64 = object_cell
+        .parse::<u64>()
+        .map_err(|_| fail("object cell must fit in 64-bit unsigned integer"))?;
+    let blinder_bytes = mini_sdk::decimal::to_be_bytes32(salt).map_err(|e| fail(e.0))?;
+
+    let mut parsed_slots: Vec<(String, i128)> = Vec::with_capacity(values.len());
+    for (idx, raw) in values.iter().enumerate() {
+        let trimmed = raw.trim();
+        let (slot_name, val_str) = if let Some((slot, val)) = trimmed.split_once('=') {
+            let slot = slot.trim();
+            let full_slot = if slot.contains('/') {
+                slot.to_owned()
+            } else {
+                format!("state/{slot}")
+            };
+            (full_slot, val.trim())
+        } else {
+            let default_slot = if idx == 0 {
+                "state/vote".to_owned()
+            } else {
+                format!("state/value{idx}")
+            };
+            (default_slot, trimmed)
+        };
+        let val_i128 = val_str
+            .parse::<i128>()
+            .map_err(|_| fail(format!("value `{val_str}` must be an integer")))?;
+        parsed_slots.push((slot_name, val_i128));
+    }
+
+    let pre = crate::market::preimage(
+        cell_u64,
+        &parsed_slots,
+        "state/salt",
+        "state/commit",
+        &blinder_bytes,
+    );
+    let raw = cshake256_raw32(HASHEQ_CUSTOMIZATION, &pre);
+    Ok(mini_sdk::decimal::from_be_bytes(&raw))
+}
+
+/// Load saved ballot commitments from `root/ballot-commitments.json`.
+pub(crate) fn load_ballot_commitments(root: &Path) -> Vec<BallotCommitment> {
+    let path = root.join(BALLOT_COMMITMENTS_FILE);
+    let Ok(bytes) = crate::fsio::read_bounded(&path, MAX_JSON as usize) else {
+        return Vec::new();
+    };
+    let Ok(val) = serde_json::from_slice::<Value>(&bytes) else {
+        return Vec::new();
+    };
+    val.as_array()
+        .map(|arr| arr.iter().filter_map(BallotCommitment::from_json).collect())
+        .unwrap_or_default()
+}
+
+/// Save a `BallotCommitment` into `root/ballot-commitments.json` and return the updated list.
+pub(crate) fn save_ballot_commitment(
+    root: &Path,
+    entry: BallotCommitment,
+) -> Result<Vec<BallotCommitment>> {
+    decimal(&entry.object)?;
+    decimal(&entry.voter)?;
+    decimal(&entry.vote)?;
+    decimal(&entry.salt)?;
+    decimal(&entry.digest)?;
+    let mut entries = load_ballot_commitments(root);
+    entries.retain(|e| !(e.object == entry.object && e.voter == entry.voter && e.digest == entry.digest));
+    entries.push(entry);
+    let json_arr: Vec<Value> = entries.iter().map(BallotCommitment::to_json).collect();
+    let mut bytes = serde_json::to_vec_pretty(&json_arr).map_err(fail)?;
+    bytes.push(b'\n');
+    crate::fsio::replace_private(&root.join(BALLOT_COMMITMENTS_FILE), &bytes)?;
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2197,4 +2327,137 @@ mod tests {
         assert_eq!(verified.world_root, world_root);
         assert!(attempt.join("inclusion-opening.json").is_file());
     }
+
+    #[test]
+    fn hasheq_commit_digest_matches_world_activity_admit_reference_vectors_and_persists_custody() {
+        // Exact port of `hasheq_commit(cell, vote, salt)` from `native/resource-client/world-activity-admit.py`
+        fn python_reference_hasheq_commit(cell: u64, vote: i128, salt: u128) -> String {
+            const RC: [u64; 24] = [
+                1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001,
+                0x8000000080008081, 0x8000000000008009, 0x8a, 0x88, 0x80008009, 0x8000000a,
+                0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003,
+                0x8000000000008002, 0x8000000000000080, 0x800a, 0x800000008000000a,
+                0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008,
+            ];
+            const ROT: [u32; 25] = [
+                0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2,
+                61, 56, 14,
+            ];
+            const PI: [usize; 25] = [
+                0, 10, 20, 5, 15, 16, 1, 11, 21, 6, 7, 17, 2, 12, 22, 23, 8, 18, 3, 13, 14, 24, 9,
+                19, 4,
+            ];
+            let nm = |s: &str| {
+                let mut v = (s.len() as u32).to_be_bytes().to_vec();
+                v.extend_from_slice(s.as_bytes());
+                v
+            };
+            let mut pre = Vec::new();
+            pre.extend_from_slice(&cell.to_be_bytes());
+            pre.extend_from_slice(&1u32.to_be_bytes());
+            pre.extend_from_slice(&nm("state/vote"));
+            pre.extend_from_slice(&nm("state/salt"));
+            pre.extend_from_slice(&nm("state/commit"));
+            let mut vote_word = if vote < 0 { [0xffu8; 32] } else { [0u8; 32] };
+            vote_word[16..].copy_from_slice(&vote.to_be_bytes());
+            vote_word[0] ^= 0x80;
+            pre.extend_from_slice(&vote_word);
+            let mut salt_word = [0u8; 32];
+            salt_word[16..].copy_from_slice(&salt.to_be_bytes());
+            pre.extend_from_slice(&salt_word);
+
+            let mut msg = vec![1u8, 136, 1, 0, 1, 160];
+            msg.extend_from_slice(b"DREGG.PRED.HASHEQ/v2");
+            msg.extend_from_slice(&[0u8; 110]);
+            msg.extend_from_slice(&pre);
+            msg.push(0x04);
+            while msg.len() % 136 != 0 {
+                msg.push(0);
+            }
+            if let Some(last) = msg.last_mut() {
+                *last |= 0x80;
+            }
+            let mut st = [0u64; 25];
+            for off in (0..msg.len()).step_by(136) {
+                for i in 0..17 {
+                    let mut chunk = [0u8; 8];
+                    chunk.copy_from_slice(&msg[off + 8 * i..off + 8 * i + 8]);
+                    st[i] ^= u64::from_le_bytes(chunk);
+                }
+                for rc in RC {
+                    let mut c = [0u64; 5];
+                    for x in 0..5 {
+                        c[x] = st[x] ^ st[x + 5] ^ st[x + 10] ^ st[x + 15] ^ st[x + 20];
+                    }
+                    let mut d = [0u64; 5];
+                    for x in 0..5 {
+                        d[x] = c[(x + 4) % 5] ^ c[(x + 1) % 5].rotate_left(1);
+                    }
+                    for i in 0..25 {
+                        st[i] ^= d[i % 5];
+                    }
+                    let mut b = [0u64; 25];
+                    for i in 0..25 {
+                        b[PI[i]] = st[i].rotate_left(ROT[i]);
+                    }
+                    for i in 0..25 {
+                        let row = 5 * (i / 5);
+                        st[i] = b[i] ^ ((!b[row + (i + 1) % 5]) & b[row + (i + 2) % 5]);
+                    }
+                    st[0] ^= rc;
+                }
+            }
+            let mut out = [0u8; 32];
+            for i in 0..4 {
+                out[8 * i..8 * i + 8].copy_from_slice(&st[i].to_le_bytes());
+            }
+            mini_sdk::decimal::from_be_bytes(&out)
+        }
+
+        for (cell, vote, salt) in [(5001u64, 1i128, 111u128), (5001, 1, 222), (42, 0, 999999), (42, 2, 0)] {
+            let expected = python_reference_hasheq_commit(cell, vote, salt);
+            let actual = hasheq_commit_digest(&cell.to_string(), &salt.to_string(), &[&vote.to_string()]).unwrap();
+            assert_eq!(actual, expected, "mismatch for cell={cell}, vote={vote}, salt={salt}");
+            let explicit_slot = hasheq_commit_digest(
+                &cell.to_string(),
+                &salt.to_string(),
+                &[&format!("vote={vote}")],
+            )
+            .unwrap();
+            assert_eq!(explicit_slot, expected);
+        }
+
+        let root = Temp::new();
+        let d1 = hasheq_commit_digest("5001", "111", &["1"]).unwrap();
+        let d2 = hasheq_commit_digest("5001", "222", &["0"]).unwrap();
+        let saved1 = save_ballot_commitment(
+            &root.0,
+            BallotCommitment {
+                object: "5001".into(),
+                voter: "1".into(),
+                vote: "1".into(),
+                salt: "111".into(),
+                digest: d1.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(saved1.len(), 1);
+        let saved2 = save_ballot_commitment(
+            &root.0,
+            BallotCommitment {
+                object: "5001".into(),
+                voter: "2".into(),
+                vote: "0".into(),
+                salt: "222".into(),
+                digest: d2.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(saved2.len(), 2);
+        let loaded = load_ballot_commitments(&root.0);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].digest, d1);
+        assert_eq!(loaded[1].digest, d2);
+    }
 }
+
