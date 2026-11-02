@@ -1,5 +1,6 @@
 /- Executable native-Nock constructor probes. General byte/definition and
 complete native admission results live in the imported source modules. -/
+import Assurance.Deployed
 import Kernel.WorldPrototypeConstruction
 import Kernel.NockEntry
 import Theory.AssertAxioms

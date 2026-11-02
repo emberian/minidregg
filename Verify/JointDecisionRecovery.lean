@@ -1,3 +1,4 @@
+import Assurance.Deployed
 import Kernel.NativeJointAgreement
 import Theory.AssertAxioms
 
@@ -24,3 +25,15 @@ cryptographic-finality claim; no closed-case #guard replaces a theorem. -/
 #assert_axioms Minidregg.Kernel.JointDecisionRecovery.abort_stable_under_trace
 
 #assert_axioms Minidregg.Kernel.NativeJointAgreement.journal_encode_injective
+
+#assert_axioms Minidregg.Assurance.DeployedReceiptOpening.wireOpening_sound
+#assert_axioms Minidregg.Assurance.DeployedReceiptOpening.wireContinuity_verify_sound
+#assert_axioms Minidregg.Assurance.DeployedReceiptOpening.wireContinuity_known_binds_chain
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.decodeAction_clear_inferred
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.verifyClearing_sound
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.decoded_clear_action_sound
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.hashEq_rejects_mismatched_digest
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.hashEq_concrete_binding
+#assert_axioms Minidregg.Assurance.Deployed.deployedAssuranceFrontier
+#guard Minidregg.Assurance.Deployed.checkDeployedAssurance = true
+
