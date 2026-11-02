@@ -1168,6 +1168,47 @@ pub(crate) fn build_law_check_command(arguments: &Value) -> Result<(String, Stri
     Ok((law_text, cmd))
 }
 
+fn split_top_level_clauses(text: &str, sep: char) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut depth_paren = 0usize;
+    let mut depth_brack = 0usize;
+    let mut depth_brace = 0usize;
+    let mut in_quotes = false;
+    for ch in text.chars() {
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            current.push(ch);
+            continue;
+        }
+        if !in_quotes {
+            match ch {
+                '(' => depth_paren += 1,
+                ')' => depth_paren = depth_paren.saturating_sub(1),
+                '[' => depth_brack += 1,
+                ']' => depth_brack = depth_brack.saturating_sub(1),
+                '{' => depth_brace += 1,
+                '}' => depth_brace = depth_brace.saturating_sub(1),
+                c if c == sep && depth_paren == 0 && depth_brack == 0 && depth_brace == 0 => {
+                    let trimmed = current.trim().to_owned();
+                    if !trimmed.is_empty() {
+                        parts.push(trimmed);
+                    }
+                    current.clear();
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        current.push(ch);
+    }
+    let trimmed = current.trim().to_owned();
+    if !trimmed.is_empty() {
+        parts.push(trimmed);
+    }
+    parts
+}
+
 fn parse_simple_clause(clause: &str, subject_default: &str) -> Result<Value> {
     let t = clause.trim();
     if t.is_empty() || t == "open" {
@@ -1224,16 +1265,39 @@ fn parse_simple_clause(clause: &str, subject_default: &str) -> Result<Value> {
         }
         return Ok(v);
     }
-    if t.contains(';') {
+    let top_semi = split_top_level_clauses(t, ';');
+    if top_semi.len() > 1 {
         let mut preds = Vec::new();
-        for part in t.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-            preds.push(parse_simple_clause(part, subject_default)?);
+        for part in top_semi {
+            preds.push(parse_simple_clause(&part, subject_default)?);
         }
         return Ok(json!({"type": "all", "predicates": preds}));
     }
-    if let Some(inner) = t.strip_prefix("not ").map(str::trim) {
-        let inner = inner.strip_prefix('(').and_then(|s| s.strip_suffix(')')).unwrap_or(inner);
-        return Ok(json!({"type": "not", "predicate": parse_simple_clause(inner, subject_default)?}));
+    let t = top_semi.into_iter().next().unwrap_or_default();
+    let t = t.as_str();
+    for combinator in ["all", "any"] {
+        if let Some(rest) = t.strip_prefix(combinator) {
+            let rest = rest.trim();
+            if let Some(inner) = rest.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                let mut items = Vec::new();
+                for item in split_top_level_clauses(inner, ',') {
+                    items.push(parse_simple_clause(&item, subject_default)?);
+                }
+                return Ok(json!({"type": combinator, "predicates": items}));
+            }
+        }
+    }
+    if let Some(inner) = t.strip_prefix("not").map(str::trim) {
+        if inner.starts_with('(') || !t.starts_with("note") {
+            let inner = inner.strip_prefix('(').and_then(|s| s.strip_suffix(')')).unwrap_or(inner);
+            return Ok(json!({"type": "not", "predicate": parse_simple_clause(inner, subject_default)?}));
+        }
+    }
+    if let Some(prog) = t.strip_prefix("ran ").map(str::trim) {
+        if !prog.is_empty() && prog.bytes().all(|b| b.is_ascii_digit()) {
+            return Ok(json!({"type": "ran", "program": prog}));
+        }
+        return Err(format!("invalid program number in `{t}`"));
     }
     if let Some(field_str) = t.strip_prefix("field ").and_then(|s| s.strip_suffix(" monotone")) {
         let f = field_str.trim();
@@ -1283,19 +1347,62 @@ fn parse_simple_clause(clause: &str, subject_default: &str) -> Result<Value> {
                 "install" | "4" => return Ok("4".into()),
                 "revoke" | "5" => return Ok("5".into()),
                 "renounce" | "6" => return Ok("6".into()),
+                "append" | "7" => return Ok("7".into()),
+                "place" | "10" => return Ok("10".into()),
                 _ => {}
             }
         }
         let _: i128 = v.parse().map_err(|_| format!("invalid integer value `{v}` in `{t}`"))?;
         Ok(v.to_owned())
     };
+    if let Some((lhs, rhs)) = t.split_once(" in ") {
+        let slot = resolve_slot(lhs)?;
+        let set_inner = rhs
+            .trim()
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .ok_or_else(|| format!("expected `{{...}}` after `in` in `{t}`"))?;
+        let mut vals = Vec::new();
+        for item in set_inner.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            vals.push(Value::String(resolve_value(&slot, item)?));
+        }
+        return Ok(json!({"type": "memberOf", "slot": slot, "values": vals}));
+    }
+    if let Some((lhs, rhs)) = t.split_once("!=") {
+        return Ok(json!({
+            "type": "not",
+            "predicate": parse_simple_clause(&format!("{lhs} == {rhs}"), subject_default)?
+        }));
+    }
     if let Some((lhs, rhs)) = t.split_once("==") {
         let slot = resolve_slot(lhs)?;
+        if let Ok(val) = resolve_value(&slot, rhs) {
+            return Ok(json!({"type": "eq", "slot": slot, "value": val}));
+        }
+        if let Ok(right_slot) = resolve_slot(rhs) {
+            return Ok(json!({"type": "eqSlots", "left": slot, "right": right_slot}));
+        }
         let val = resolve_value(&slot, rhs)?;
         return Ok(json!({"type": "eq", "slot": slot, "value": val}));
     }
     if let Some((lhs, rhs)) = t.split_once("<=") {
         let slot = resolve_slot(lhs)?;
+        if let Ok(val) = resolve_value(&slot, rhs) {
+            return Ok(json!({"type": "le", "slot": slot, "value": val}));
+        }
+        if let Some((slot_rhs, off_rhs)) = rhs.rsplit_once('+') {
+            if let (Ok(right_slot), Ok(off)) = (resolve_slot(slot_rhs), off_rhs.trim().parse::<i128>()) {
+                return Ok(json!({
+                    "type": "leSlotsOff",
+                    "left": slot,
+                    "right": right_slot,
+                    "offset": off.to_string(),
+                }));
+            }
+        }
+        if let Ok(right_slot) = resolve_slot(rhs) {
+            return Ok(json!({"type": "leSlots", "left": slot, "right": right_slot}));
+        }
         let val = resolve_value(&slot, rhs)?;
         return Ok(json!({"type": "le", "slot": slot, "value": val}));
     }
@@ -1348,10 +1455,96 @@ fn eval_presburger_pred(
             let Some(k) = int_val("offset") else { return false; };
             new.get(s("left")).copied().zip(new.get(s("right")).copied()).is_some_and(|(a, b)| a <= b.saturating_add(k))
         }
+        "ran" => {
+            let prog = s("program");
+            new.get(&format!("run/program/{prog}")).copied().unwrap_or(1) != 0
+        }
         "not" => pred.get("predicate").is_some_and(|inner| !eval_presburger_pred(inner, old, new)),
         "all" => pred.get("predicates").and_then(Value::as_array).is_some_and(|ps| ps.iter().all(|p| eval_presburger_pred(p, old, new))),
         "any" => pred.get("predicates").and_then(Value::as_array).is_some_and(|ps| ps.iter().any(|p| eval_presburger_pred(p, old, new))),
         _ => false,
+    }
+}
+
+fn collect_slot_witness_hints(
+    pred: &Value,
+    under_not: bool,
+    hints: &mut std::collections::BTreeMap<String, Vec<i128>>,
+    fields: &mut std::collections::BTreeSet<String>,
+) {
+    let note_field = |slot: &str, fields: &mut std::collections::BTreeSet<String>| {
+        if let Some(rest) = slot.strip_prefix("resource/field/") {
+            if let Some((f, _)) = rest.split_once('/') {
+                if !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit()) {
+                    fields.insert(f.to_owned());
+                }
+            }
+        }
+    };
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    let s = |k: &str| pred.get(k).and_then(Value::as_str).unwrap_or("");
+    let int_val = |k: &str| -> Option<i128> { pred.get(k)?.as_str()?.parse().ok() };
+    match ty {
+        "eq" => {
+            let slot = s("slot");
+            note_field(slot, fields);
+            if let Some(v) = int_val("value") {
+                let entry = hints.entry(slot.to_owned()).or_default();
+                if !under_not {
+                    entry.insert(0, v);
+                } else {
+                    entry.push(v.saturating_add(1));
+                }
+            }
+        }
+        "le" => {
+            let slot = s("slot");
+            note_field(slot, fields);
+            if let Some(v) = int_val("value") {
+                let entry = hints.entry(slot.to_owned()).or_default();
+                if !under_not {
+                    entry.push(v);
+                } else {
+                    entry.insert(0, v.saturating_add(1));
+                }
+            }
+        }
+        "memberOf" => {
+            let slot = s("slot");
+            note_field(slot, fields);
+            for v in pred
+                .get("values")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|x| x.as_str()?.parse::<i128>().ok())
+            {
+                let entry = hints.entry(slot.to_owned()).or_default();
+                if !under_not {
+                    entry.push(v);
+                } else {
+                    entry.push(v.saturating_add(1));
+                }
+            }
+        }
+        "monotone" | "writeOnce" => {
+            note_field(s("slot"), fields);
+        }
+        "eqSlots" | "leSlots" | "leSlotsOff" => {
+            note_field(s("left"), fields);
+            note_field(s("right"), fields);
+        }
+        "not" => {
+            if let Some(inner) = pred.get("predicate") {
+                collect_slot_witness_hints(inner, !under_not, hints, fields);
+            }
+        }
+        "all" | "any" => {
+            for p in pred.get("predicates").and_then(Value::as_array).into_iter().flatten() {
+                collect_slot_witness_hints(p, under_not, hints, fields);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1372,6 +1565,12 @@ fn parse_turn_assignments(input: &str) -> Result<std::collections::BTreeMap<Stri
 /// Evaluate a Presburger law expression and optional hypothetical turn in-process, returning a structured JSON verdict.
 pub(crate) fn evaluate_law_check(arguments: &Value) -> Result<Value> {
     let (law_text, cmd) = build_law_check_command(arguments)?;
+    let has_explicit_subject = arguments.get("subject").is_some_and(|v| !v.is_null());
+    let has_explicit_verb = arguments.get("verb").is_some_and(|v| !v.is_null());
+    let has_explicit_cost = arguments.get("cost").is_some_and(|v| !v.is_null());
+    let has_explicit_turn = arguments.get("before").is_some_and(|v| !v.is_null())
+        || arguments.get("after").is_some_and(|v| !v.is_null());
+
     let subject_str = bounded_decimal(arguments, "subject", 40)?.unwrap_or_else(|| "1".into());
     let cost_str = bounded_decimal(arguments, "cost", 40)?.unwrap_or_else(|| "0".into());
     let verb_str = match arguments.get("verb") {
@@ -1386,6 +1585,8 @@ pub(crate) fn evaluate_law_check(arguments: &Value) -> Result<Value> {
         "install" | "4" => 4,
         "revoke" | "5" => 5,
         "renounce" | "6" => 6,
+        "append" | "7" => 7,
+        "place" | "10" => 10,
         other => other.parse().map_err(|_| format!("unknown verb `{other}`"))?,
     };
     let before_str = match arguments.get("before") {
@@ -1405,6 +1606,15 @@ pub(crate) fn evaluate_law_check(arguments: &Value) -> Result<Value> {
     let subject_val: i128 = subject_str.parse().map_err(|_| "invalid subject integer")?;
     let cost_val: i128 = cost_str.parse().map_err(|_| "invalid cost integer")?;
 
+    let mut hints = std::collections::BTreeMap::new();
+    let mut fields: std::collections::BTreeSet<String> = ["0", "1", "2", "3"].into_iter().map(str::to_owned).collect();
+    collect_slot_witness_hints(&pred, false, &mut hints, &mut fields);
+    for k in before_map.keys().chain(after_map.keys()) {
+        if k.bytes().all(|b| b.is_ascii_digit()) {
+            fields.insert(k.clone());
+        }
+    }
+
     let mut old = std::collections::BTreeMap::new();
     let mut new = std::collections::BTreeMap::new();
     for (k, v) in [("request/verb", verb_tag), ("request/subject", subject_val), ("request/cost", cost_val)] {
@@ -1418,15 +1628,40 @@ pub(crate) fn evaluate_law_check(arguments: &Value) -> Result<Value> {
     old.insert("content/names/unique".to_owned(), 1);
     new.insert("content/names/unique".to_owned(), 1);
 
-    let mut fields: std::collections::BTreeSet<String> = ["0", "1", "2", "3"].into_iter().map(str::to_owned).collect();
-    for k in before_map.keys().chain(after_map.keys()) {
-        if k.bytes().all(|b| b.is_ascii_digit()) {
-            fields.insert(k.clone());
-        }
-    }
     for f in &fields {
-        let b = before_map.get(f).copied().or_else(|| after_map.get(f).copied()).unwrap_or(0);
-        let a = after_map.get(f).copied().or_else(|| before_map.get(f).copied()).unwrap_or(b);
+        let b = before_map
+            .get(f)
+            .copied()
+            .or_else(|| {
+                if !has_explicit_turn {
+                    hints.get(&format!("resource/field/{f}/before")).and_then(|v| v.first()).copied()
+                } else {
+                    None
+                }
+            })
+            .or_else(|| after_map.get(f).copied())
+            .unwrap_or(0);
+        let a = after_map
+            .get(f)
+            .copied()
+            .or_else(|| {
+                if !has_explicit_turn {
+                    hints
+                        .get(&format!("resource/field/{f}/after"))
+                        .and_then(|v| v.first())
+                        .copied()
+                        .or_else(|| {
+                            hints
+                                .get(&format!("resource/field/{f}/delta"))
+                                .and_then(|v| v.first())
+                                .map(|d| b.saturating_add(*d))
+                        })
+                } else {
+                    None
+                }
+            })
+            .or_else(|| before_map.get(f).copied())
+            .unwrap_or(b);
         let d = a.saturating_sub(b);
         old.insert(format!("resource/field/{f}/before"), b);
         old.insert(format!("resource/field/{f}/after"), b);
@@ -1434,6 +1669,24 @@ pub(crate) fn evaluate_law_check(arguments: &Value) -> Result<Value> {
         new.insert(format!("resource/field/{f}/before"), b);
         new.insert(format!("resource/field/{f}/after"), a);
         new.insert(format!("resource/field/{f}/delta"), d);
+    }
+    if !has_explicit_subject {
+        if let Some(&cand) = hints.get("request/subject").and_then(|v| v.first()) {
+            old.insert("request/subject".to_owned(), cand);
+            new.insert("request/subject".to_owned(), cand);
+        }
+    }
+    if !has_explicit_verb {
+        if let Some(&cand) = hints.get("request/verb").and_then(|v| v.first()) {
+            old.insert("request/verb".to_owned(), cand);
+            new.insert("request/verb".to_owned(), cand);
+        }
+    }
+    if !has_explicit_cost {
+        if let Some(&cand) = hints.get("request/cost").and_then(|v| v.first()) {
+            old.insert("request/cost".to_owned(), cand);
+            new.insert("request/cost".to_owned(), cand);
+        }
     }
     for (k, v) in &before_map {
         if !k.bytes().all(|b| b.is_ascii_digit()) {
@@ -1737,7 +1990,28 @@ impl RoomTools<'_> {
             }
             "bend_view" => {
                 let cmd = build_bend_view_command(arguments)?;
-                let run = Self::ok_or_ending(self.line(&cmd)?)?;
+                let mut parts = cmd.split_whitespace().skip(2);
+                let run = match (parts.next(), parts.next()) {
+                    (Some(t), Some(tx)) => Self::ok_or_ending(self.line(&format!("bend await {t} {tx}"))?)?,
+                    (Some(t), None) => Self::ok_or_ending(self.line(&format!("bend show {t}"))?)?,
+                    (None, None) => {
+                        let mut command = Command::new(&self.config.mini);
+                        command
+                            .args(["bend", "--action", "view", "--dir"])
+                            .arg(&self.config.workspace)
+                            .arg("--socket")
+                            .arg(&self.config.socket);
+                        let output = self
+                            .client(&mut command)
+                            .map_err(|e| crate::deadline::describe("bend view", e))?;
+                        Self::ok_or_ending(LineRun {
+                            code: output.status.code().unwrap_or(-1),
+                            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                        })?
+                    }
+                    (None, Some(_)) => return Err("bend_view tx requires object or name".into()),
+                };
                 if let Some(parsed) = last_json(&run.stdout) {
                     Ok(json!({"command": cmd, "view": parsed}))
                 } else {
@@ -1978,8 +2252,8 @@ impl RoomTools<'_> {
                 let dir = self.config.workspace.join("answers");
                 fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 fs::write(dir.join(format!("{id}.json")), json!({"slot": slot}).to_string()).map_err(|e| e.to_string())?;
-                let _ = self.request_file(&format!("{id}-answer.json"), &answer.to_string())?;
-                let run = Self::ok_or_ending(self.line_with(&canonical_cmd, spawned)?)?;
+                let file = self.request_file(&format!("{id}-answer.json"), &answer.to_string())?;
+                let run = Self::ok_or_ending(self.line_with(&format!("bend answer {slot} @{file}"), spawned)?)?;
                 Ok(json!({"slot": slot, "command": canonical_cmd, "answered": run.stdout.trim()}))
             }
             "bend_deliver" => {
@@ -1997,6 +2271,21 @@ impl RoomTools<'_> {
             }
             "seat_offer" => {
                 let cmd = build_seat_offer_command(arguments)?;
+                let dir = self.config.workspace.join("seat-offers");
+                fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                fs::write(
+                    dir.join(format!("{id}.json")),
+                    json!({
+                        "object": arguments["object"],
+                        "package": arguments["package"],
+                        "seat": arguments["seat"],
+                        "role": arguments["role"],
+                        "holder": arguments["holder"],
+                        "command": cmd,
+                    })
+                    .to_string(),
+                )
+                .map_err(|e| e.to_string())?;
                 let run = Self::ok_or_ending(self.line_with(&cmd, spawned)?)?;
                 Ok(json!({"command": cmd, "offered": run.stdout.trim()}))
             }
@@ -2046,6 +2335,29 @@ impl RoomTools<'_> {
                 return Ok(json!({"resolution":"refused","basis":"host-refusal-or-not-submitted","proposal":id,"detail":run.ending()}));
             }
             return Ok(json!({"resolution":"uncertain","basis":"lookup-inconclusive","proposal":id,"detail":run.ending()}));
+        }
+        let seat_offer = self.config.workspace.join("seat-offers").join(format!("{id}.json"));
+        if seat_offer.exists() {
+            let record_val = fs::read(&seat_offer).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).ok_or("seat-offer record invalid")?;
+            let object = record_val["object"].as_str().unwrap_or_default();
+            let package = record_val["package"].as_str().unwrap_or_default();
+            let seat = record_val["seat"].as_str().unwrap_or_default();
+            let holder = record_val["holder"].as_str().unwrap_or_default();
+            let run = self.line(&format!("seat view {object} {package}"))?;
+            if run.code == 0 {
+                if let Some(view) = last_json(&run.stdout) {
+                    let matched = view["seats"].as_array().is_some_and(|seats| {
+                        seats.iter().any(|s| {
+                            (s["seat"].as_str() == Some(seat) || s["index"].as_str() == Some(seat) || s["seat"].to_string() == seat)
+                                && (s["holder"].as_str() == Some(holder) || s["holder"].to_string() == holder)
+                        })
+                    });
+                    if matched {
+                        return Ok(json!({"resolution":"performed","basis":"seat-view-confirmed","proposal":id}));
+                    }
+                }
+            }
+            return Ok(json!({"resolution":"uncertain","basis":"seat-offer-lookup-inconclusive","proposal":id,"detail":run.ending()}));
         }
         let attempt = self.config.workspace.join("attempts").join(&id);
         if !attempt.join("call.bin").exists() {
@@ -2722,6 +3034,85 @@ mod tests {
             refused_verdict["command"],
             "law check field 0 monotone; field 0 delta <= 1"
         );
+
+        // Witness inference when before/after are unpinned, plus compound any/all/in/slot-to-slot clauses
+        let unpinned_witness = super::evaluate_law_check(&json!({
+            "law": "field 0 == 5; subject == 42"
+        }))
+        .unwrap();
+        assert_eq!(unpinned_witness["verdict"], "witness");
+        assert_eq!(unpinned_witness["admitted"], true);
+
+        let compound_witness = super::evaluate_law_check(&json!({
+            "law": "any [ subject == 11, not (verb == 2) ]; field 0 in {0, 1, 2}; field 0 <= field 1 + 5; field 0 == field 1",
+            "before": "0=2, 1=2",
+            "after": "0=2, 1=2"
+        }))
+        .unwrap();
+        assert_eq!(compound_witness["verdict"], "witness");
+        assert_eq!(compound_witness["admitted"], true);
+
+        let sealed_unsat = super::evaluate_law_check(&json!({
+            "law": "sealed"
+        }))
+        .unwrap();
+        assert_eq!(sealed_unsat["verdict"], "unsat");
+        assert_eq!(sealed_unsat["admitted"], false);
+
+        // 8. RoomTools::write("bend_answer") stages @file for shell_grammar compatibility while returning canonical command
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "mini-obj-tools-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let mini = root.join("mini");
+        let ran = root.join("ran.txt");
+        fs::write(
+            &mini,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nprintf 'admitted: tx 77\\n'\nexit 0\n",
+                ran.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = RoomToolsConfig {
+            restrict_tools: true,
+            mini,
+            host: "/unused".into(),
+            host_config: "/unused".into(),
+            socket: "/unused".into(),
+            workspace: root.join("workspace"),
+            home: root.join("home"),
+            room: "lab".into(),
+            account: Some("lab-hermes".into()),
+        };
+        let tools = RoomTools { config: &config };
+        let res = tools
+            .write(
+                "op-ans",
+                "bend_answer",
+                &json!({"slot": "9001", "reply": {"tag": "natural", "value": "42"}}),
+                &mut |_| {},
+            )
+            .unwrap();
+        assert_eq!(
+            res["command"],
+            r#"bend answer 9001 {"reply":{"tag":"natural","value":"42"}}"#
+        );
+        let shell_invocations = fs::read_to_string(&ran).unwrap();
+        assert!(
+            shell_invocations.contains("bend answer 9001 @hr-op-ans-answer.json"),
+            "expected @file invocation in shell, got: {shell_invocations}"
+        );
+        let staged_answer = fs::read_to_string(root.join("home/requests/hr-op-ans-answer.json")).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&staged_answer).unwrap(),
+            json!({"reply": {"tag": "natural", "value": "42"}})
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }
 

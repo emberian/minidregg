@@ -1064,6 +1064,73 @@ fn answer_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     }
 }
 
+pub(crate) fn view_workspace_summary(root: &Path) -> Value {
+    let items: Vec<Value> = registry(root)
+        .into_iter()
+        .map(|(name, bend_name, object, transaction)| {
+            let row_path = root.join("bend").join("objects").join(format!("{}.json", workspace::ref_file(&name)));
+            let row: Value = fs::read(&row_path)
+                .ok()
+                .and_then(|b| serde_json::from_slice(&b).ok())
+                .unwrap_or_else(|| json!({}));
+            json!({
+                "name": name,
+                "bend": bend_name,
+                "object": object,
+                "transaction": transaction,
+                "record": row.get("record").cloned().unwrap_or(Value::Null),
+                "ended": row.get("ended").cloned().unwrap_or(Value::Null),
+                "liveBirths": live_births(&row),
+            })
+        })
+        .collect();
+    json!({
+        "type": "mini-bend-view-v1",
+        "objects": items,
+    })
+}
+
+fn view_cmd(bend: &Bend, mut args: Args) -> Result<()> {
+    let object_opt = match opt(&mut args, "object")? {
+        Some(o) => Some(o),
+        None => opt(&mut args, "name")?,
+    };
+    let tx_opt = match opt(&mut args, "transaction")? {
+        Some(t) => Some(t),
+        None => opt(&mut args, "tx")?,
+    };
+    args.finish()?;
+    match (object_opt, tx_opt) {
+        (Some(object_ref), Some(transaction)) => {
+            let object = if mini_sdk::decimal::is_canonical_max(&object_ref, 80) {
+                object_ref
+            } else {
+                bend.object(&object_ref)?.0
+            };
+            decimal_arg(&object, "OBJECT")?;
+            decimal_arg(&transaction, "TRANSACTION")?;
+            let view = activity::view(
+                &bend.ws,
+                &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]}),
+            )?;
+            println!("{}", await_of_view(&view, &object, &transaction));
+            Ok(())
+        }
+        (Some(object_ref), None) => {
+            let fake_args = Args {
+                command: "bend".into(),
+                values: vec![("--object".into(), object_ref.into())],
+            };
+            show(bend, fake_args)
+        }
+        (None, Some(_)) => Err("bend view: --transaction requires --object or --name".into()),
+        (None, None) => {
+            println!("{}", view_workspace_summary(&bend.ws.root));
+            Ok(())
+        }
+    }
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = text(&mut args, "action")?;
     if action == "tick-all" {
@@ -1074,13 +1141,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "publish" => publish(&bend, args),
         "run" => run_bend(&bend, args),
         "show" => show(&bend, args),
+        "view" => view_cmd(&bend, args),
         "await" => await_cmd(&bend, args),
         "answer" => answer_cmd(&bend, args),
         "deliver" => deliver_cmd(&bend, args),
         "settle" | "tick" => settle_cmd(&bend, args),
         "lookup" => lookup_cmd(&bend, args, false),
         "retry" => lookup_cmd(&bend, args, true),
-        _ => Err("bend --action must be publish, run, show, await, answer, deliver, settle, tick, tick-all, lookup or retry".into()),
+        _ => Err("bend --action must be publish, run, show, view, await, answer, deliver, settle, tick, tick-all, lookup or retry".into()),
     }
 }
 
@@ -1359,7 +1427,7 @@ mod tests {
         let house = root.join("house");
         let sage_nested = root.join("sage").join("workspace");
         let ignored = root.join("empty-dir");
-        fs::create_dir_all(&house).unwrap();
+        fs::create_dir_all(house.join("bend").join("objects")).unwrap();
         fs::create_dir_all(&sage_nested).unwrap();
         fs::create_dir_all(&ignored).unwrap();
 
@@ -1377,6 +1445,19 @@ mod tests {
         });
         fs::write(house.join("workspace.json"), ws_pin.to_string()).unwrap();
         fs::write(sage_nested.join("workspace.json"), ws_pin.to_string()).unwrap();
+
+        // Corrupted JSON row alongside a valid ended row in `house/bend/objects/`
+        fs::write(house.join("bend/objects/corrupt.json"), b"{not-valid-json").unwrap();
+        fs::write(
+            house.join("bend/objects/coauthor-1.json"),
+            json!({"bend": "coauthor", "object": "70", "transaction": "100", "record": "3070", "ended": "50"}).to_string(),
+        )
+        .unwrap();
+
+        let summary = view_workspace_summary(&house);
+        assert_eq!(summary["type"], "mini-bend-view-v1");
+        assert_eq!(summary["objects"].as_array().unwrap().len(), 1);
+        assert_eq!(summary["objects"][0]["name"], "coauthor-1");
 
         let discovered = discover_member_workspaces(&root);
         assert_eq!(discovered, vec![house.clone(), sage_nested.clone()]);

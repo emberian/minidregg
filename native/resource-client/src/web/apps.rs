@@ -352,13 +352,13 @@ pub(super) fn grain_action(site: &Site, n: &str, action: &str, form: &std::colle
                 let _ = std::fs::create_dir_all(&req_dir);
                 let file_name = format!("snap-{id}-{doc_slug}.txt");
                 let _ = std::fs::write(req_dir.join(&file_name), snap_body.as_bytes());
-                let attempt_id = format!("snap-{id}-{}", &digest[..12.min(digest.len())]);
-                let mut lines = Vec::new();
-                if !site.root.join("refs").join(format!("{doc_slug}.json")).is_file() {
-                    lines.push(format!("doc new {} open", quote(&doc_slug)));
-                }
-                lines.push(format!("doc append {attempt_id} {} @{file_name}", quote(&doc_slug)));
-                lines.push(format!("submit {attempt_id}"));
+                let (attempt_id, lines) = build_snapshot_shell_lines(
+                    &site.root,
+                    &id,
+                    &doc_slug,
+                    digest,
+                    &file_name,
+                );
                 return act(
                     site,
                     &format!("Snapshot {id} to {doc_slug}"),
@@ -389,6 +389,23 @@ pub(super) fn grain_action(site: &Site, n: &str, action: &str, form: &std::colle
         "stop" | "start" | "delete" => act(site, &format!("{action} {id}"), vec![format!("apps {action} {id}")], "", &[("Grain", &format!("/grain/{id}")), ("Grains", "/grain")]),
         _ => simple(404, "Grain", "no such action"),
     }
+}
+
+pub(crate) fn build_snapshot_shell_lines(
+    workspace_root: &std::path::Path,
+    grain_id: &str,
+    doc_slug: &str,
+    digest: &str,
+    file_name: &str,
+) -> (String, Vec<String>) {
+    let attempt_id = format!("snap-{grain_id}-{}", &digest[..12.min(digest.len())]);
+    let mut lines = Vec::new();
+    if !workspace_root.join("refs").join(format!("{doc_slug}.json")).is_file() {
+        lines.push(format!("doc new {} open", quote(doc_slug)));
+    }
+    lines.push(format!("doc append {attempt_id} {} @{file_name}", quote(doc_slug)));
+    lines.push(format!("submit {attempt_id}"));
+    (attempt_id, lines)
 }
 
 /// `/grain/N/pane`: the grain's origin in a frame (the gateway's `frame-src` names the grain origins).
@@ -458,6 +475,41 @@ mod tests {
         assert!(page.body.contains("Snapshotted grain <code>a4501</code> to document"));
         assert!(page.body.contains("/doc/ethercalc-q4"));
         assert!(page.body.contains("world_root_anchor: doc/ethercalc-q4"));
+
+        // Verify shell lines when target doc_slug is new vs already present in `refs/`
+        let (attempt_new, lines_new) = build_snapshot_shell_lines(
+            &root,
+            "a4501",
+            "ethercalc-q4",
+            "0123456789abcdef0123456789abcdef",
+            "snap-a4501-ethercalc-q4.txt",
+        );
+        assert_eq!(attempt_new, "snap-a4501-0123456789ab");
+        assert_eq!(
+            lines_new,
+            vec![
+                "doc new ethercalc-q4 open",
+                "doc append snap-a4501-0123456789ab ethercalc-q4 @snap-a4501-ethercalc-q4.txt",
+                "submit snap-a4501-0123456789ab",
+            ]
+        );
+        std::fs::create_dir_all(root.join("refs")).unwrap();
+        std::fs::write(root.join("refs/ethercalc-q4.json"), b"{}").unwrap();
+        let (_, lines_existing) = build_snapshot_shell_lines(
+            &root,
+            "a4501",
+            "ethercalc-q4",
+            "0123456789abcdef0123456789abcdef",
+            "snap-a4501-ethercalc-q4.txt",
+        );
+        assert_eq!(
+            lines_existing,
+            vec![
+                "doc append snap-a4501-0123456789ab ethercalc-q4 @snap-a4501-ethercalc-q4.txt",
+                "submit snap-a4501-0123456789ab",
+            ],
+            "existing doc ref skips `doc new` and only appends + submits"
+        );
 
         let mut bad_form = std::collections::BTreeMap::new();
         bad_form.insert("doc".into(), "../bad".into());

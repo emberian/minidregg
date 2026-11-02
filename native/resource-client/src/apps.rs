@@ -1116,26 +1116,72 @@ pub(crate) fn snapshot_grain_to_doc(
         socket,
         &json!({"protocol": WORKER_PROTOCOL, "verb": "status", "grain": grain_id}),
     ) {
-        if let Some(v) = reply.get("appName").or_else(|| reply.get("title")).and_then(Value::as_str) {
+        if let Some(v) = reply
+            .get("appName")
+            .or_else(|| reply.get("title"))
+            .or_else(|| reply.pointer("/receipt/indexName"))
+            .or_else(|| reply.pointer("/receipt/appName"))
+            .and_then(Value::as_str)
+        {
             app_title = v.to_owned();
         }
-        if let Some(v) = reply.get("appId").and_then(Value::as_str) {
+        if let Some(v) = reply
+            .get("appId")
+            .or_else(|| reply.pointer("/receipt/appId"))
+            .and_then(Value::as_str)
+        {
             app_id = v.to_owned();
         }
-        if let Some(v) = reply.get("packageId").and_then(Value::as_str) {
+        if let Some(v) = reply
+            .get("packageId")
+            .or_else(|| reply.pointer("/receipt/packageId"))
+            .and_then(Value::as_str)
+        {
             package_id = v.to_owned();
         }
-        if let Some(v) = reply.get("state").and_then(Value::as_str) {
+        if let Some(v) = reply
+            .get("state")
+            .or_else(|| reply.pointer("/receipt/state"))
+            .and_then(Value::as_str)
+        {
             state = v.to_owned();
         }
-        if let Some(v) = reply.get("generation").and_then(Value::as_u64) {
+        let gen_val = reply
+            .get("generation")
+            .or_else(|| reply.pointer("/receipt/generation"))
+            .or_else(|| {
+                reply
+                    .pointer("/receipt/runs")
+                    .and_then(Value::as_array)
+                    .and_then(|runs| runs.last())
+                    .and_then(|r| r.get("generation"))
+            });
+        if let Some(v) = gen_val.and_then(Value::as_u64) {
             generation = v.to_string();
-        } else if let Some(v) = reply.get("generation").and_then(Value::as_str) {
+        } else if let Some(v) = gen_val.and_then(Value::as_str) {
             generation = v.to_owned();
         }
-        if let Some(v) = reply.get("detail").and_then(Value::as_str) {
+        if let Some(v) = reply
+            .pointer("/receipt/export")
+            .or_else(|| reply.pointer("/receipt/content"))
+            .or_else(|| reply.get("detail"))
+            .and_then(Value::as_str)
+        {
             if exported_body.is_empty() {
                 exported_body = v.to_owned();
+            }
+        }
+    }
+    if exported_body.is_empty() {
+        if let Ok(exp_reply) = worker_call(
+            socket,
+            &json!({"protocol": WORKER_PROTOCOL, "verb": "export", "grain": grain_id}),
+        ) {
+            if let Some(exp_dir) = exp_reply.pointer("/receipt/export").and_then(Value::as_str) {
+                let manifest = Path::new(exp_dir).join("manifest.json");
+                if let Ok(bytes) = crate::fsio::read_bounded(&manifest, 64 * 1024) {
+                    exported_body = String::from_utf8_lossy(&bytes).trim().to_owned();
+                }
             }
         }
     }
@@ -2522,6 +2568,36 @@ mod tests {
 
         assert!(ws.join("apps/snapshots/ethercalc-budget-snap.json").is_file());
         assert!(ws.join("docs/ethercalc-budget-snap.md").is_file());
+
+        // Live worker socket returning `performed(...)` with nested `receipt` fields (`indexName`, `appId`, `runs`).
+        let sock = dir.join("worker.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || {
+            if let Some(Ok(mut stream)) = listener.incoming().next() {
+                let mut line = String::new();
+                let _ = BufReader::new(&mut stream).read_line(&mut line);
+                let reply = json!({
+                    "protocol": WORKER_PROTOCOL,
+                    "decided": true,
+                    "state": "running",
+                    "detail": "a9001 generation 5",
+                    "receipt": {
+                        "grain": "a9001",
+                        "indexName": "Etherpad",
+                        "appId": "h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60",
+                        "packageId": "aee0806c9547d1f53c1ccef38ac195ba",
+                        "runs": [{"generation": "5", "state": "running"}]
+                    }
+                });
+                let _ = writeln!(stream, "{reply}");
+            }
+        });
+        let live_snap = snapshot_grain_to_doc(Some(&ws), &sock, "a9001", "etherpad-live-snap").unwrap();
+        assert_eq!(live_snap["appTitle"], "Etherpad");
+        assert_eq!(live_snap["appId"], "h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60");
+        assert_eq!(live_snap["packageId"], "aee0806c9547d1f53c1ccef38ac195ba");
+        assert_eq!(live_snap["generation"], "5");
+        assert_eq!(live_snap["state"], "running");
 
         // Invalid grain ID or doc slug is refused cleanly.
         assert!(snapshot_grain_to_doc(Some(&ws), &dir.join("none.sock"), "bad", "ethercalc-budget-snap").is_err());
