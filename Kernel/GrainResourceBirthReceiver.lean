@@ -367,17 +367,39 @@ def receive {F : Type} [Field F] [DecidableEq F]
     (transport : DurableReceiverIO.Transport) (bytes : List UInt8) : IO Result := do
   match GrainResourceBirthPolicyController.decodeIngress bytes with
   | none => return .rejected .malformedIngress
-  | some _ =>
-      match ← DurableReceiverIO.load transport rootBytes with
+  | some ingress =>
+      match ← DurableServed.openHead transport rootBytes with
       | .error detail => return .unavailable detail
-      | .ok durable =>
-          match CredentialAuthorityDomainReceiver.loadDirectory durable with
+      | .ok opening =>
+          match CredentialAuthorityServed.loadServedDirectory opening.served with
           | none => return .rejected (.birthPreparation .directory)
           | some directory =>
-              match CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot with
+              match CredentialAuthorityServed.loadServedAuthority deployment opening.served with
               | none => return .rejected (.birthPreparation .authorityDomain)
               | some authority =>
-                  receiveLoaded profile deployment pins tariff ambient native transport durable
-                    directory authority bytes
+                  let keys := grainKeys deployment.domain profile.semantics ingress
+                  match ← (opening.reader transport rootBytes).footprint keys with
+                  | .error refusal => return .unavailable refusal.message
+                  | .ok footprint =>
+                      have below : opening.served.height ≤ opening.head.height := by
+                        rw [opening.heightExact]
+                      let basis : Minidregg.Compiler.ServedBasis.Basis deployment opening.store :=
+                        ⟨opening.served, directory, authority, opening.head, below, keys, footprint⟩
+                      let ground : Ground deployment := .ofBasis basis
+                      match replay ground ingress with
+                      | .original recorded => return .historical recorded
+                      | .conflict => return .rejected .transactionConflict
+                      | .undeclared => return .rejected .undeclaredTransaction
+                      | .fresh =>
+                          let issued := receipt deployment.domain ingress
+                          admitOn profile deployment pins tariff ambient native ground ingress
+                            (fun reason => return .rejected reason) fun intent => do
+                              match ← DurableServed.receiveServed transport rootBytes opening intent with
+                              | .appended kind .. => return .confirmed kind issued
+                              | .replayed _ => return .confirmed .replayed issued
+                              | .rejected reason => return .rejected (.durable reason)
+                              | .contention => return .contention
+                              | .unavailable detail => return .unavailable detail
+                              | .uncertain detail => return .uncertain detail
 
 end Minidregg.Kernel.GrainResourceBirthReceiver

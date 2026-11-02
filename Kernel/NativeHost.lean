@@ -1867,12 +1867,18 @@ def historicalReceiptVia (config : Config) (opened : Opened config)
   | .ok none => return .ok none
   | .ok (some receipt) => return .ok (if receipt.eventId == eventId then some receipt else none)
 
+/-- Op 102 on a session's light opening: reads the transaction receipt through the light
+opening's Reader without opening the full image. -/
+def receiptByTransactionLight (config : Config) (light : NativeHostLight.Light config)
+    (transactionId : Digest) : IO (Except Refusal (Option Receipt)) :=
+  receiptByTransactionRead (light.opening.reader config.transport ResourceBirthCodec.rootBytes)
+    transactionId
+
 /-- `historicalReceiptVia` through the Reader of a session's light opening (its head
 refreshed by the request): no full image is opened. -/
 def historicalReceiptLight (config : Config) (light : NativeHostLight.Light config)
     (transactionId eventId : Digest) : IO (Except Refusal (Option Receipt)) := do
-  match ← receiptByTransactionRead (light.opening.reader config.transport ResourceBirthCodec.rootBytes)
-      transactionId with
+  match ← receiptByTransactionLight config light transactionId with
   | .error refusal => return .error refusal
   | .ok none => return .ok none
   | .ok (some receipt) => return .ok (if receipt.eventId == eventId then some receipt else none)
@@ -1890,11 +1896,28 @@ def acceptedRecordE (config : Config) (opened : Opened config) (transactionId : 
       | .ok (.absent _) => return .ok none
       | .ok (.present found) => return .ok (some found.read.record)
 
+/-- `acceptedRecordE` through the Reader of a light opening (`Reader.byTx`), without
+materializing the full image. -/
+def acceptedRecordLightE (config : Config) (light : NativeHostLight.Light config)
+    (transactionId : Digest) : IO (Except Refusal (Option DurableReceiver.IntentRecord)) := do
+  match ← (light.opening.reader config.transport ResourceBirthCodec.rootBytes).byTx transactionId with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok (.absent _) => return .ok none
+  | .ok (.present found) => return .ok (some found.read.record)
+
 /-- `acceptedRecordE` for IO callers that fail by exception: the refusal message
 is thrown, never mapped to none. -/
 def acceptedRecord (config : Config) (opened : Opened config) (transactionId : Digest) :
     IO (Option DurableReceiver.IntentRecord) := do
   match ← acceptedRecordE config opened transactionId with
+  | .error refusal => throw (IO.userError refusal.detail)
+  | .ok record => return record
+
+/-- `acceptedRecordLightE` for IO callers that fail by exception: the refusal message
+is thrown, never mapped to none. -/
+def acceptedRecordLight (config : Config) (light : NativeHostLight.Light config)
+    (transactionId : Digest) : IO (Option DurableReceiver.IntentRecord) := do
+  match ← acceptedRecordLightE config light transactionId with
   | .error refusal => throw (IO.userError refusal.detail)
   | .ok record => return record
 

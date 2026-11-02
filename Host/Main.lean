@@ -1176,10 +1176,10 @@ def profileDescription (config : NativeHost.Config)
 /-- The deployment's description on the loaded image. A grain birth is offered while that
 image's platform record prices it (`record.grainBirth`), the same record the grain receiver
 reads (`GrainResourceBirthAdmission.grainTariffAt`). -/
-def descriptionOn (config : NativeHost.Config)
-    (snapshot : Minidregg.Kernel.DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) :
+def descriptionAt (config : NativeHost.Config)
+    (canonicalBytes : Minidregg.Kernel.DurableDataIntent.CellId → List UInt8) :
     Lean.Json := Id.run do
-  let grainBirth := ((PlatformCellDomain.recordOn config.deployment snapshot).bind
+  let grainBirth := ((PlatformCellDomain.recordAt config.deployment canonicalBytes).bind
     (·.grainBirth)).isSome
   let n := fun value : Nat => toJson (toString value)
   return Lean.Json.mkObj
@@ -1199,12 +1199,17 @@ def descriptionOn (config : NativeHost.Config)
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
 
+def descriptionOn (config : NativeHost.Config)
+    (snapshot : Minidregg.Kernel.DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) :
+    Lean.Json :=
+  descriptionAt config snapshot.canonicalBytes
+
 def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config) : Lean.Json :=
   descriptionOn config opened.durable.snapshot
 
 def description (config : NativeHost.Config) : IO Lean.Json := do
-  let opened ← IO.ofExcept (← NativeHost.openExisting config)
-  return descriptionLoaded config opened
+  let light ← IO.ofExcept (← NativeHostLight.start config)
+  return descriptionAt config light.opening.served.canonicalBytes
 
 /-- Measurement: time the per-state costs a request pays on this Store. -/
 def storeBench (config : NativeHost.Config) : IO Unit := do
@@ -1559,12 +1564,12 @@ def sessionOpened (config : NativeHost.Config)
   sessionFull config state
 
 /-- The live directory, for the Nock program reads (ops 131-137): the session's
-held one (`LoadedDirectory.load_eq`: it is what `loadDirectory` would return),
-never a per-request decode of every stored cell. -/
+held light one (`ServedDirectory.load_eq`: it is what `loadServedDirectory` would return),
+never a per-request decode of every stored cell or full log materialization. -/
 def nockDirectory (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry) := do
-  return (← sessionOpened config state).directory.directory
+  return (← sessionCurrent config state).light.opened.directory.directory
 
 /-- Unauthenticated evaluator assistance shares the operator's synchronous fuel
 bound. The supplied caller is sample data, never payment authorization. Larger
@@ -2301,16 +2306,16 @@ def applicationCurrentBirthIntentSession (config : NativeHost.Config)
     (application : Bool) (payload : List UInt8) : IO (List UInt8) := do
   unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
     throw (RequestRefusal.malformed "application birth request exceeds host frame bound")
-  let opened ← sessionOpened config state
+  let light := (← sessionCurrent config state).light
   let some text := String.fromUTF8? payload.toByteArray
     | throw (RequestRefusal.malformed "application birth request is not UTF-8")
   let json ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
   if application then
-    IO.ofExcept <| Minidregg.Host.ApplicationCurrentBirthAuthoring.applicationIntentLoaded
-      config opened json
+    IO.ofExcept <| Minidregg.Host.ApplicationCurrentBirthAuthoring.applicationIntentLight
+      config light json
   else
-    IO.ofExcept <| Minidregg.Host.ApplicationCurrentBirthAuthoring.sessionIntentLoaded
-      config opened json
+    IO.ofExcept <| Minidregg.Host.ApplicationCurrentBirthAuthoring.sessionIntentLight
+      config light json
 
 def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
   unless payload.length ≥ 2 do throw (RequestRefusal.malformed "short native host kind frame")
@@ -4402,10 +4407,10 @@ def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
     IO (Except String (FnConsumerOperation.PortableInbox × String × Nat)) := do
   let some gateway := config.fnGateway
     | return .error "fn gateway is not pinned in operator config"
-  let opened ← match ← NativeHost.openExisting config with
-    | .ok opened => pure opened
+  let light ← match ← NativeHostLight.start config with
+    | .ok light => pure light
     | .error detail => return .error detail
-  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+  let found ← match ← NativeHost.acceptedRecordLightE config light ⟨transactionId⟩ with
     | .error refusal => return .error refusal.detail
     | .ok found => pure found
   let some record := found
@@ -4437,10 +4442,10 @@ def exportConsumerPoll (config : NativeHost.Config) (transactionId : Nat) :
     IO (Except String (FnConsumerOperation.StorePollInbox × String × Nat)) := do
   let some gateway := config.fnGateway
     | return .error "fn gateway is not pinned in operator config"
-  let opened ← match ← NativeHost.openExisting config with
-    | .ok opened => pure opened
+  let light ← match ← NativeHostLight.start config with
+    | .ok light => pure light
     | .error detail => return .error detail
-  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+  let found ← match ← NativeHost.acceptedRecordLightE config light ⟨transactionId⟩ with
     | .error refusal => return .error refusal.detail
     | .ok found => pure found
   let some record := found
@@ -5967,8 +5972,8 @@ def runFnAckSession (config : NativeHost.Config)
   let pin := rawPin.withExecution service.fnExecutable service.fnPublicKey
   let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
   let gateway ← requireGateway config
-  let opened ← sessionOpened config state
-  let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+  let light := (← sessionCurrent config state).light
+  let some record ← NativeHost.acceptedRecordLight config light ⟨transactionId⟩
     | throw (IO.userError "fn ack Mini transaction is absent")
   let selectedScope ← IO.ofExcept scope.progressScope
   if let some skipped := FnConsumerProgress.originalSkip gateway selectedScope
@@ -6113,12 +6118,12 @@ def runFnOriginOutboxExportSession (config : NativeHost.Config)
   let transaction := String.fromUTF8! payload.toByteArray
   let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
   let gateway ← requireGateway config
-  let opened ← sessionOpened config state
+  let light := (← sessionCurrent config state).light
   let refused := fun (reason : String) =>
     ((18 : UInt8), (Lean.Json.mkObj
       [("type", toJson "fn-a-origin-outbox-export-v1"),
        ("status", toJson "refused"), ("reason", toJson reason)]).compress.toUTF8.toList)
-  let found ← match ← NativeHost.acceptedRecordE config opened ⟨transactionId⟩ with
+  let found ← match ← NativeHost.acceptedRecordLightE config light ⟨transactionId⟩ with
     | .error refusal => return refused refusal.detail
     | .ok found => pure found
   let some record := found
@@ -6126,7 +6131,7 @@ def runFnOriginOutboxExportSession (config : NativeHost.Config)
   let some prepared := FnOriginOutbox.originalPrepared gateway
       config.deployment.domain config.profile.semantics record
     | return refused "transaction is not an accepted prepared R outbox"
-  let outboxReceipt ← match ← NativeHost.historicalReceiptVia config opened
+  let outboxReceipt ← match ← NativeHost.historicalReceiptLight config light
       record.transactionId record.event.eventId with
     | .error refusal => return refused refusal.detail
     | .ok receipt => pure receipt
@@ -7674,8 +7679,8 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               | .ok (.absent _) => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
                                   transactionId none).compress.toUTF8.toList)
                             else
-                              let opened ← sessionOpened pinnedConfig state
-                              match ← NativeHost.receiptByTransactionVia pinnedConfig opened
+                              let light := (← sessionCurrent pinnedConfig state).light
+                              match ← NativeHost.receiptByTransactionLight pinnedConfig light
                                   ⟨transactionId⟩ with
                               | .ok receipt => return (102, (Minidregg.Host.Json.fleetReceiptLookupJson
                                   transactionId receipt).compress.toUTF8.toList)
@@ -8203,10 +8208,10 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               | throw (IO.userError "nock run request is not UTF-8")
                             let (programId, caller, room, targets, values) ← IO.ofExcept
                               (Minidregg.Host.Json.nockRunRequest source)
-                            -- One session read per request: the directory is this image's held one.
-                            let opened ← sessionOpened pinnedConfig state
-                            let height := NativeHost.logicalHeight pinnedConfig opened.durable
-                            let directory := opened.directory.directory
+                            -- One session read per request: the directory is this image's held light one.
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            let height := pinnedConfig.genesisHeight + light.opening.served.height
+                            let directory := light.opened.directory.directory
                             checkNockServiceBudget pinnedConfig directory programId
                             let verdict := Minidregg.Kernel.Run.dryRun
                               pinnedConfig.disabledEvaluators
@@ -9974,8 +9979,8 @@ def runCommandReplyConsumerExportResult (_arguments : List String) (_configPath 
   | [transaction, resultPath, inboxPath, cursorPath, reportPath] =>
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
-          let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+          let light ← IO.ofExcept (← NativeHostLight.start config)
+          let some record ← NativeHost.acceptedRecordLight config light ⟨transactionId⟩
             | throw (IO.userError "A reply result transaction is absent")
           let some (result, inbox) :=
               FnReplyConsumption.originalResult gateway config.deployment.domain
@@ -10010,8 +10015,8 @@ def runCommandReplyConsumerAckPoll (_arguments : List String) (_configPath _comm
              "queryVersion", "viewVersion", "registrationEpoch", "node", "schema"] scopeJson)
           let pin : FnPortablePin ← IO.ofExcept (fromJson? pinJson)
           let scope : FnPollScopePin ← IO.ofExcept (fromJson? scopeJson)
-          let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+          let light ← IO.ofExcept (← NativeHostLight.start config)
+          let some record ← NativeHost.acceptedRecordLight config light ⟨transactionId⟩
             | throw (IO.userError "A reply result transaction is absent")
           let some (_, inbox) := FnReplyConsumption.originalResult gateway
               config.deployment.domain config.profile.semantics record
@@ -10191,8 +10196,8 @@ def runCommandConsumerExportReply (_arguments : List String) (_configPath _comma
   | [transaction, replyPath] =>
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
-          let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+          let light ← IO.ofExcept (← NativeHostLight.start config)
+          let some record ← NativeHost.acceptedRecordLight config light ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, _) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
@@ -10230,8 +10235,8 @@ def runCommandConsumerStageReplyPlan (_arguments : List String) (_configPath _co
           let principal ← IO.ofExcept (decodeCanonicalHex "fn reply principal" signer.principal)
           let edPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply Ed25519 key" signer.edPublicKey)
           let mlPublicKey ← IO.ofExcept (decodeCanonicalHex "fn reply ML-DSA-65 key" signer.mlPublicKeyHex)
-          let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+          let light ← IO.ofExcept (← NativeHostLight.start config)
+          let some record ← NativeHost.acceptedRecordLight config light ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, some store) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain
@@ -10331,8 +10336,8 @@ def runCommandConsumerStageReplySign (_arguments : List String) (_configPath _co
           unless principal == (← readBoundedBytes principalPath 32) &&
               edPublicKey == (← readBoundedBytes edPublicPath 32) do
             throw (IO.userError "fn reply signer public files differ from pin")
-          let opened ← IO.ofExcept (← NativeHost.openExisting config)
-          let some record ← NativeHost.acceptedRecord config opened ⟨transactionId⟩
+          let light ← IO.ofExcept (← NativeHostLight.start config)
+          let some record ← NativeHost.acceptedRecordLight config light ⟨transactionId⟩
             | throw (IO.userError "exact Mini consumer transaction is absent")
           let some (binding, some _, some store) :=
               FnConsumerOperation.originalBindingWithInbox gateway config.deployment.domain

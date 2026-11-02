@@ -815,17 +815,40 @@ def receive
   let _ := attempts
   match decodeIngress bytes with
   | none => return .rejected .malformedIngress
-  | some _ =>
-      match ← DurableReceiverIO.load transport rootBytes with
+  | some ingress =>
+      match ← DurableServed.openHead transport rootBytes with
       | .error detail => return .unavailable detail
-      | .ok durable =>
-          match CredentialAuthorityDomainReceiver.loadDirectory durable with
+      | .ok opening =>
+          match CredentialAuthorityServed.loadServedDirectory opening.served with
           | none => return .rejected (.admission (.preparation .directory))
           | some directory =>
-              match CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot with
+              match CredentialAuthorityServed.loadServedAuthority deployment opening.served with
               | none => return .rejected (.admission (.preparation .authorityDomain))
               | some authority =>
-                  receiveLoaded profile deployment pins native transport durable directory authority
-                    height bytes
+                  let keys := birthKeys deployment.domain ingress
+                  match ← (opening.reader transport rootBytes).footprint keys with
+                  | .error refusal => return .unavailable refusal.message
+                  | .ok footprint =>
+                      have below : opening.served.height ≤ opening.head.height := by
+                        rw [opening.heightExact]
+                      let basis : Minidregg.Compiler.ServedBasis.Basis deployment opening.store :=
+                        ⟨opening.served, directory, authority, opening.head, below, keys, footprint⟩
+                      let ground : Ground deployment := .ofBasis basis
+                      match replay deployment.domain ground ingress with
+                      | .original recorded => return .confirmed .replayed recorded
+                      | .conflict => return .rejected .transactionConflict
+                      | .undeclared => return .rejected .undeclaredTransaction
+                      | .fresh =>
+                          match ← admitDecodedNative profile deployment pins native ground height ingress with
+                          | .error reason => return .rejected (.admission reason)
+                          | .ok accepted =>
+                              let issued := receipt deployment.domain ingress
+                              match ← DurableServed.receiveServed transport rootBytes opening (intent accepted) with
+                              | .appended kind .. => return .confirmed kind issued
+                              | .replayed _ => return .confirmed .replayed issued
+                              | .rejected reason => return .rejected (.durable reason)
+                              | .contention => return .contention
+                              | .unavailable detail => return .unavailable detail
+                              | .uncertain detail => return .uncertain detail
 
 end Minidregg.Kernel.ResourceBirthReceiver

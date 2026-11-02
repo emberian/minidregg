@@ -47,18 +47,29 @@ inductive Result where
 
 def confirmReadback (config : NativeHost.Config) (ingress : Ingress)
     (kind : DurableReceiverIO.Confirmation) : IO Result := do
-  match ← NativeHost.openExisting config with
+  match ← NativeHostLight.start config with
   | .error _ => return .uncertain "fn consumer namespace readback unavailable"
-  | .ok opened =>
-      let ⟨_, reader⟩ ← match ← NativeHost.historyReaderOfDurable config opened.durable with
-        | .error refusal => return .uncertain ("fn consumer namespace readback history reader: " ++ refusal.detail)
-        | .ok reader => pure reader
-      match ← NativeHostReplay.verifyStart config reader opened.durable with
-      | .error _ => return .uncertain "fn consumer namespace readback unverified"
-      | .ok verified =>
-          match lookupVerified verified ingress with
-          | some (.ok receipt) => return .confirmed kind receipt
-          | _ => return .uncertain "fn consumer namespace original receipt unavailable"
+  | .ok light =>
+      let tx := transactionId ingress.spec
+      let ev := (event ingress).eventId
+      match ← (light.opening.reader config.transport ResourceBirthCodec.rootBytes).byTx tx with
+      | .error refusal =>
+          return .uncertain ("fn consumer namespace readback history reader: " ++ refusal.message)
+      | .ok (.absent _) =>
+          return .uncertain "fn consumer namespace original receipt unavailable"
+      | .ok (.present found) =>
+          let record := found.read.record
+          let receipt := NativeHost.receiptOfRecord found.read
+          if record.event.eventId != ev || receipt.eventId != ev then
+            return .uncertain "fn consumer namespace original receipt unavailable"
+          let some original := FnConsumerNamespaceHistory.selectAt
+              config.deployment.domain config.profile.semantics record receipt
+            | return .uncertain "fn consumer namespace original receipt unavailable"
+          if original.ingress == ingress &&
+              record.nullifiers.contains (claimNullifier ingress.spec) then
+            return .confirmed kind receipt
+          else
+            return .uncertain "fn consumer namespace original receipt unavailable"
 
 def receiveVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (bytes : List UInt8) :

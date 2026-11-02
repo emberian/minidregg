@@ -41,18 +41,24 @@ inductive Result where
 
 def confirmReadback (config : NativeHost.Config) (ingress : Ingress)
     (kind : DurableReceiverIO.Confirmation) : IO Result := do
-  match ← NativeHost.openExisting config with
+  match ← NativeHostLight.start config with
   | .error _ => return .uncertain "empty fn poll readback unavailable"
-  | .ok opened =>
-      let ⟨_, reader⟩ ← match ← NativeHost.historyReaderOfDurable config opened.durable with
-        | .error refusal => return .uncertain ("empty fn poll readback history reader: " ++ refusal.detail)
-        | .ok reader => pure reader
-      match ← NativeHostReplay.verifyStart config reader opened.durable with
-      | .error _ => return .uncertain "empty fn poll readback unverified"
-      | .ok verified =>
-          match lookupVerified verified ingress with
-          | some (.ok receipt) => return .confirmed kind receipt
-          | _ => return .uncertain "empty fn poll original receipt unavailable"
+  | .ok light =>
+      let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+      match ← reader.byTx (transactionId ingress.spec) with
+      | .error refusal =>
+          return .uncertain ("empty fn poll readback history reader: " ++ refusal.message)
+      | .ok (.absent _) =>
+          return .uncertain "empty fn poll original receipt unavailable"
+      | .ok (.present found) =>
+          let record := found.read.record
+          let expectedEvent := event ingress
+          let receipt := NativeHost.receiptOfRecord found.read
+          if record.event == expectedEvent && receipt.eventId == expectedEvent.eventId &&
+              record.nullifiers.contains (frontierNullifier ingress.spec) then
+            return .confirmed kind receipt
+          else
+            return .uncertain "empty fn poll original receipt unavailable"
 
 def receiveVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (bytes : List UInt8) :
