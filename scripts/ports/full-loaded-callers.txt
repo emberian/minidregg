@@ -10,12 +10,9 @@
 Fixtures/NativeAcceptedFixture.lean
 Fixtures/NativeDocWriteFixture.lean
 Compiler/CarriedSegmentIO.lean
-Compiler/DurableCheckpointCodec.lean
-Compiler/DurableLogTags.lean
 Compiler/DurableStoreAudit.lean
 Compiler/GenericSimplexParticipant.lean
 Host/ClientConsentCore.lean
-Host/FnArchivePublisher.lean
 Host/Kn2StoreBench.lean
 Host/Main.lean
 Host/ObjectiveTurnTotalityRunner.lean
@@ -23,9 +20,7 @@ Host/SourceAgreementReader.lean
 # EXPORTER (turn-log R4a f916e16f / R4b f8bc8bdf): exportLog folds EVERY record of the Store into the Turn log; reading the whole log is its job, not a full-path use of the receiver
 Host/TurnLogFollower.lean
 Kernel/CarriedSegment.lean
-Kernel/ConsentAnchor.lean
 Kernel/FnConsumerOperation.lean
-Kernel/FnEvidence.lean
 Kernel/JointSourcePrefixValidation.lean
 Kernel/NativeCurrentMemberKeyIO.lean
 Kernel/NativeHost.lean

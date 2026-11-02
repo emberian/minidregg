@@ -442,13 +442,11 @@ def gate (profile : Profile) (committed : Nat) (committee : Bool) (finalized : O
     unless last ≤ final do throw s!"heights through {last} are not final (final {final})"
   pure last
 
-def bundleAt (config : NativeHost.Config) (opened : NativeHost.Opened config) (first last : Nat) :
+def bundleAt (config : NativeHost.Config) (light : NativeHostLight.Light config) (first last : Nat) :
     IO (Except String Bundle) := do
   -- One bounded Reader window (`Reader.range` refuses more than 4096 records):
   -- each record verified at use, each receipt sealed by the verified leaf's root.
-  let ⟨_, reader⟩ ← match ← NativeHost.historyReader config opened with
-    | .error refusal => return .error refusal.detail
-    | .ok reader => pure reader
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
   if last < first then return .error s!"empty bundle window {first}..{last}"
   let reads ← match ← reader.range first last with
     | .error refusal => return .error refusal.message
@@ -572,10 +570,10 @@ def publish (config : NativeHost.Config) (ops : Ops) (archivePath firstText fina
   let archive ← loadConfig archivePath
   let some first := firstText.toNat? | throw (IO.userError "FIRST must be a decimal height")
   let finalized := if finalizedText == "-" then none else finalizedText.toNat?
-  let opened ← IO.ofExcept (← NativeHost.openExisting config)
-  let committed := opened.durable.height
+  let light ← IO.ofExcept (← NativeHostLight.start config)
+  let committed := light.opening.served.height
   let last ← IO.ofExcept (gate archive.profile committed config.jointConsensus.isSome finalized first)
-  let bundle ← IO.ofExcept (← bundleAt config opened first last)
+  let bundle ← IO.ofExcept (← bundleAt config light first last)
   let source ← match render archive.profile bundle with
     | .ok bytes => pure bytes
     | .error refusal => throw (IO.userError refusal.word)
@@ -713,8 +711,8 @@ def fund (config : NativeHost.Config) (archivePath amountText txText eventText r
   let some amount := amountText.toNat? | throw (IO.userError "AMOUNT must be decimal")
   let some tx := txText.toNat? | throw (IO.userError "TXID must be decimal")
   let some ev := eventText.toNat? | throw (IO.userError "EVENTID must be decimal")
-  let opened ← IO.ofExcept (← NativeHost.openExisting config)
-  let receipt ← match ← NativeHost.receiptByTransactionVia config opened ⟨tx⟩ with
+  let light ← IO.ofExcept (← NativeHostLight.start config)
+  let receipt ← match ← NativeHost.receiptByTransactionLight config light ⟨tx⟩ with
     | .error refusal => throw (IO.userError refusal.detail)
     | .ok (some receipt) =>
         if receipt.eventId == ⟨ev⟩ then pure receipt

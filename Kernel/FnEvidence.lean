@@ -35,21 +35,18 @@ def exportPackage (config : Config) (signedCall : List UInt8)
     return .error "signed call exceeds evidence bound"
   let some call := callCodec.decode signedCall
     | return .error "noncanonical native signed call"
-  let opened ← match ← NativeHost.openExisting config with
-    | .ok opened => pure opened
+  let light ← match ← NativeHostLight.start config with
+    | .ok light => pure light
     | .error detail => return .error s!"source native history: {detail}"
-  let .confirmed .replayed receipt := NativeHost.lookupLoaded config opened call
+  let .confirmed .replayed receipt ← NativeHost.lookupLight config light call
     | return .error "exact signed call is absent or conflicts with source history"
   unless 1 ≤ receipt.acceptedCount &&
-      receipt.acceptedCount ≤ opened.durable.height do
+      receipt.acceptedCount ≤ light.opening.served.height do
     return .error "original receipt is outside accepted history"
   -- The original prefix is read through the Store's verified `Reader`, in
   -- bounded windows, and the read stops as soon as the encoded records pass
   -- the package's prefix bound.
-  let ⟨_, reader⟩ ← match ← DurableHistoryStore.readerOf config.transport
-      ResourceBirthCodec.rootBytes opened.durable with
-    | .error detail => return .error s!"source history reader: {detail}"
-    | .ok sealed => pure sealed
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
   let gathered ← NativeHistorySelection.foldRange reader 1 receipt.acceptedCount
     (([] : List DurableReceiver.IntentRecord), 0)
     fun (held, size) window =>
