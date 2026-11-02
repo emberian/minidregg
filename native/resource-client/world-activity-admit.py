@@ -155,7 +155,8 @@ try:
         sys.exit(code)
     # a further birth on `obj` would write a state that already exists (`blindWrite`): a row that births again
     # (the underfunded teeth, the law teeth) births its own second object
-    w.bring_up(['obj', 'lawful'] if a.scenario in ('effect', 'ballot', 'story', 'commons')
+    w.bring_up(['obj', 'lawful', 'forged'] if a.scenario == 'ballot'
+               else ['obj', 'lawful'] if a.scenario in ('effect', 'story', 'commons')
                else ['obj', 'poor'] if a.scenario in ('bounty', 'play') else ['obj'])
     if a.scenario == 'effect':
         # world/activity/Effects.obend: commit {total: set 5}, then transfer 1 to the second subject's account
@@ -485,10 +486,45 @@ try:
             w.check('refused-payout-waits-for-the-next-event', waits_again(again), {'source': source_of(again)})
     if a.scenario == 'ballot':
         # Ballot law natively (world/ballot/README.md:9-10 "TALLY ...: anyone closes the poll, once; the result is
-        # derived from the retained openings"; SealedBallot.obend `publish`, `publication`). Voters 1 and 2 commit
-        # their digests and open inside the reveal window; the tally at the close is the one `commit {write}` that
-        # publishes yes 2, no 0, abstain 0, passed (quorum 2), decided `settled` at the yield.
+        # derived from the retained openings"; SealedBallot.obend `publish`, `publication`, `eventWrite`). Voters 1 and
+        # 2 commit their cSHAKE256("DREGG.PRED.HASHEQ/v2") digests and open inside the reveal window (checked on every
+        # reveal by `law commit_binding: new.commit == 0 or hashEq([vote], salt, commit)`); the tally at the close is
+        # the one `commit {write}` that publishes yes 2, no 0, abstain 0, passed (quorum 2), decided `settled`.
+        RC = [1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081,
+              0x8000000000008009, 0x8a, 0x88, 0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b,
+              0x8000000000008089, 0x8000000000008003, 0x8000000000008002, 0x8000000000000080, 0x800a,
+              0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008]
+        ROT = [0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14]
+        PI = [0, 10, 20, 5, 15, 16, 1, 11, 21, 6, 7, 17, 2, 12, 22, 23, 8, 18, 3, 13, 14, 24, 9, 19, 4]
+        M64 = (1 << 64) - 1
+        rol = lambda x, n: ((x << n) | (x >> (64 - n))) & M64
+
+        def hasheq_commit(cell, vote, salt):
+            nm = lambda s: len(s).to_bytes(4, 'big') + s.encode()
+            pre = (int(cell).to_bytes(8, 'big') + (1).to_bytes(4, 'big') + nm('state/vote') + nm('state/salt')
+                   + nm('state/commit') + (int(vote) + (1 << 255)).to_bytes(32, 'big') + int(salt).to_bytes(32, 'big'))
+            msg = bytearray(bytes([1, 136, 1, 0, 1, 160]) + b'DREGG.PRED.HASHEQ/v2' + bytes(110) + pre + b'\x04')
+            while len(msg) % 136:
+                msg.append(0)
+            msg[-1] |= 0x80
+            st = [0] * 25
+            for off in range(0, len(msg), 136):
+                for i in range(17):
+                    st[i] ^= int.from_bytes(msg[off + 8 * i:off + 8 * i + 8], 'little')
+                for rc in RC:
+                    c = [st[x] ^ st[x + 5] ^ st[x + 10] ^ st[x + 15] ^ st[x + 20] for x in range(5)]
+                    d = [c[(x - 1) % 5] ^ rol(c[(x + 1) % 5], 1) for x in range(5)]
+                    st = [st[i] ^ d[i % 5] for i in range(25)]
+                    b = [0] * 25
+                    for i in range(25):
+                        b[PI[i]] = rol(st[i], ROT[i])
+                    st = [b[i] ^ ((~b[5 * (i // 5) + (i + 1) % 5]) & b[5 * (i // 5) + (i + 2) % 5]) for i in range(25)]
+                    st[0] ^= rc
+            return int.from_bytes(b''.join(st[i].to_bytes(8, 'little') for i in range(4)), 'big')
+
         rec = v['recordCell']
+        obj_cell = int(w.objects['obj']['object'])
+        d1, d2 = hasheq_commit(obj_cell, 1, 111), hasheq_commit(obj_cell, 1, 222)
         cast = lambda voter, digest, now: ev('commit', voter=nat(voter), digest=nat(digest), now=nat(now))
         open_ = lambda voter, vote, salt, digest, now: ev('reveal', voter=nat(voter), vote=nat(vote), salt=nat(salt),
                                                           digest=nat(digest), now=nat(now))
@@ -497,10 +533,13 @@ try:
             w.check('born-awaiting-the-keeper-unpublished',
                     source_of(v).get('kind') == 'reply' and scalar_of(v.get('state'), 'published', 'boolean') is False
                     and field_of(v.get('state'), 'yes') == 0, {'source': source_of(v), 'state': v.get('state')})
-            _, v1 = drive('obj', 'commit-1', tx, rec, v, cast(1, 222003, 10))
-            _, v2 = drive('obj', 'commit-2', tx, rec, v1, cast(2, 444005, 11))
-            _, v3 = drive('obj', 'reveal-1', tx, rec, v2, open_(1, 1, 111, 222003, 60))
-            _, v4 = drive('obj', 'reveal-2', tx, rec, v3, open_(2, 1, 222, 444005, 61))
+            _, v1 = drive('obj', 'commit-1', tx, rec, v, cast(1, d1, 10))
+            _, v2 = drive('obj', 'commit-2', tx, rec, v1, cast(2, d2, 11))
+            _, v3 = drive('obj', 'reveal-1', tx, rec, v2, open_(1, 1, 111, d1, 60))
+            _, v4 = drive('obj', 'reveal-2', tx, rec, v3, open_(2, 1, 222, d2, 61))
+            w.check('reveals-checked-by-commit-binding-law',
+                    field_of(v3.get('state'), 'commit') == d1 and field_of(v4.get('state'), 'commit') == d2,
+                    {'reveal1': field_of(v3.get('state'), 'commit'), 'reveal2': field_of(v4.get('state'), 'commit')})
             _, v5 = drive('obj', 'tally', tx, rec, v4, tally(100))
             st = v5.get('state')
             w.check('tally-commit-publishes-the-derived-result',
@@ -512,14 +551,25 @@ try:
                     v6.get('state') == st and v6.get('stateVersion') == v5.get('stateVersion')
                     and v6['record'].get('phase', {}).get('kind') != 'awaiting',
                     {'phase': v6['record'].get('phase'), 'state': v6.get('state')})
-        # Teeth: an object whose law is `yes <= 0` refuses the publication of a result with a yes vote: the tally's
-        # delivery is refused `objectWrite` as a whole turn, nothing is written and the activity stays at its yield.
+        # Teeth: (1) a forged non-cSHAKE256 digest is refused `objectWrite` on reveal by `commit_binding`, and
+        # (2) an object whose law is `yes <= 0` refuses the publication of a result with a yes vote (`objectWrite`).
         with w.group('ballot-teeth-law-refuses-publication'):
+            w.create('create-forged', w.sponsor, 'forged', aw.PERMIT_ALL, 'installed', state_type=BALLOT_STATE)
+            txf, bf = birth_of('forged', BALLOT_SPEC(), a.deposit, 'birth-forged')
+            recf = bf['recordCell']
+            _, cf1 = drive('forged', 'commit-forged', txf, recf, bf, cast(1, 222003, 10))
+            w.turn('resolve-forged-reveal', w.second, {'kind': 'resolve', 'slot': source_of(cf1)['slot'],
+                                                       'answer': {'reply': open_(1, 1, 111, 222003, 60)}}, 'installed')
+            w.turn('deliver-forged-reveal-refused', w.sponsor, {'kind': 'deliver', 'record': recf,
+                   'await': World.await_of(cf1)['id'], 'account': '0', 'accountCapability': '0'},
+                   'refused', 'objectWrite')
             w.create('create-lawful', w.sponsor, 'lawful', aw.le('state/yes', 0), 'installed', state_type=BALLOT_STATE)
+            lawful_cell = int(w.objects['lawful']['object'])
+            dl1 = hasheq_commit(lawful_cell, 1, 111)
             tx3, b = birth_of('lawful', BALLOT_SPEC(), a.deposit, 'birth-lawful')
             rec3 = b['recordCell']
-            _, c1 = drive('lawful', 'commit-1-lawful', tx3, rec3, b, cast(1, 222003, 10))
-            _, c2 = drive('lawful', 'reveal-1-lawful', tx3, rec3, c1, open_(1, 1, 111, 222003, 60))
+            _, c1 = drive('lawful', 'commit-1-lawful', tx3, rec3, b, cast(1, dl1, 10))
+            _, c2 = drive('lawful', 'reveal-1-lawful', tx3, rec3, c1, open_(1, 1, 111, dl1, 60))
             w.turn('resolve-tally-lawful', w.second, {'kind': 'resolve', 'slot': source_of(c2)['slot'],
                                                        'answer': {'reply': tally(100)}}, 'installed')
             w.turn('deliver-tally-law-refused', w.sponsor, {'kind': 'deliver', 'record': rec3,

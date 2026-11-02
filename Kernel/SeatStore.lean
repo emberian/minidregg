@@ -409,13 +409,19 @@ def decodeInt : Data → Option Int
   | _ => none
 
 /-- Decode a clearing market (`currency`, `goods`, `epsilon`) from either a nested `market`
-record field or top-level fields on the `clear` action record. -/
-def decodeMarket (fields : List (String × Data)) : Option CertifiedClearing.Market :=
+record field, top-level fields on the `clear` action record, or the leading bid/ask transfer pair
+when the contract emits `Action.clear({moves, certificate})` (`world/drex/DrexBatch.obend`). -/
+def decodeMarket (fields : List (String × Data)) (moves : List Transfer) : Option CertifiedClearing.Market :=
   let fromRecord (f : List (String × Data)) : Option CertifiedClearing.Market := do
-    pure ⟨← natField f "currency", ← natField f "goods", ← natField f "epsilon"⟩
+    pure ⟨← natField f "currency", ← natField f "goods", (natField f "epsilon").getD 0⟩
+  let inferred : CertifiedClearing.Market :=
+    let eps := (natField fields "epsilon").getD 0
+    match moves with
+    | t1 :: t2 :: _ => ⟨t1.asset, t2.asset, eps⟩
+    | _ => ⟨1, 2, eps⟩
   match ObjectiveActivity.fieldOf fields "market" with
   | some (.record mfields) => fromRecord mfields
-  | _ => fromRecord fields
+  | _ => (fromRecord fields).orElse fun _ => some inferred
 
 /-- Decode a Cert-F clearing certificate (`price`, `bidPotential`, `askPotential`, `slacks`). -/
 def decodeCertificate (fuel : Nat) : Data → Option CertifiedClearing.Certificate
@@ -452,9 +458,9 @@ def decodeAction (fuel : Nat) : Data → Option PlanAction
   | .variant "reallocate" (.record fields) => do
     pure (.reallocate (← decodeList decodeTransfer fuel (← ObjectiveActivity.fieldOf fields "moves")))
   | .variant "clear" (.record fields) => do
-    let market ← decodeMarket fields
     let moves ← decodeList decodeTransfer fuel (← ObjectiveActivity.fieldOf fields "moves")
     let cert ← decodeCertificate fuel (← ObjectiveActivity.fieldOf fields "certificate")
+    let market ← decodeMarket fields moves
     pure (.clear market moves cert)
   | .variant "mint" (.record fields) => do
     pure (.mint (← labelField fields "role") (← decodeList decodeTerm fuel (← ObjectiveActivity.fieldOf fields "terms"))

@@ -229,6 +229,12 @@ def created() -> Write:
 def publication(r: Result) -> Write:
   {yes: EditNat.set(r.yes), no: EditNat.set(r.no), abstain: EditNat.set(r.abstain), vote: EditNat.set(0n), salt: EditNat.set(0n), commit: EditNat.set(0n), passed: EditBool.set(r.passed), published: EditBool.set(true)}
 
+def eventWrite(e: Event) -> Write:
+  match e:
+    case commit(_): keepAll()
+    case reveal(r): {yes: EditNat.keep(), no: EditNat.keep(), abstain: EditNat.keep(), vote: EditNat.set(r.vote), salt: EditNat.set(r.salt), commit: EditNat.set(r.digest), passed: EditBool.keep(), published: EditBool.keep()}
+    case tally(_): keepAll()
+
 def serve(keeper: Nat, p: Poll, w: Write) -> Activity<Plan, Response, Result>:
   if live(p) then await(keeper, p, w) else resultOf(p)
 
@@ -236,7 +242,7 @@ def await(keeper: Nat, p: Poll, w: Write) -> Activity<Plan, Response, Result>:
   match perform(Plan.await({write: w, on: Source.reply({decider: deciderFor(p, keeper)}), patience: 64n})):
     case resumed(r):
       match r.outcome:
-        case reply(e): step(keeper, p, react(p, e))
+        case reply(e): step(keeper, p, e, react(p, e))
         case settled(_): serve(keeper, p, keepAll())
         case refused(_): serve(keeper, p, keepAll())
         case unknown(_): serve(keeper, p, keepAll())
@@ -244,10 +250,10 @@ def await(keeper: Nat, p: Poll, w: Write) -> Activity<Plan, Response, Result>:
         case broken(_): serve(keeper, p, keepAll())
         case upgraded(_): serve(keeper, p, keepAll())
 
-def step(keeper: Nat, p: Poll, t: Transition) -> Activity<Plan, Response, Result>:
+def step(keeper: Nat, p: Poll, e: Event, t: Transition) -> Activity<Plan, Response, Result>:
   match t:
     case refused(unchanged): serve(keeper, unchanged, keepAll())
-    case moved(next): if next.closed then publish(keeper, p, next) else serve(keeper, next, keepAll())
+    case moved(next): if next.closed then publish(keeper, p, next) else serve(keeper, next, eventWrite(e))
 
 def publish(keeper: Nat, before: Poll, closed: Poll) -> Activity<Plan, Response, Result>:
   match perform(Plan.commit({write: publication(resultOf(closed))})):

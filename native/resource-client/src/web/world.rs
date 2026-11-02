@@ -235,6 +235,7 @@ fn native_surface_controls(name: &str, object: &Value) -> String {
          <p class=note>Enter human-friendly <code>key=value</code> fields, <code>asset:amount</code> pairs, or <code>role:holder</code> invitations instead of raw nested tagged JSON.</p>\
          <article data-surface=\"objective-call\"><h3>ObjectiveCall · <code>invoke</code></h3>\
          <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"invoke\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-call\"><input type=\"hidden\" name=\"turn\" value=\"invoke\">\
          <input type=\"hidden\" name=\"object\" value=\"{n}\">\
          <div><label for=\"wc-method-{n}\">Method</label>{method_control}</div>\
          <div><label for=\"wc-var-{n}\">Variant tag (optional)</label><input id=\"wc-var-{n}\" name=\"variant\" type=\"text\" placeholder=\"defaults to method\"></div>\
@@ -242,34 +243,40 @@ fn native_surface_controls(name: &str, object: &Value) -> String {
          <button>Invoke</button></form></article>\
          <article data-surface=\"objective-send\"><h3>ObjectiveSend · <code>send</code> &amp; <code>deliver</code></h3>\
          <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"send\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-send\"><input type=\"hidden\" name=\"turn\" value=\"send\">\
          <input type=\"hidden\" name=\"source\" value=\"{n}\">\
          <div><label for=\"ws-target-{n}\">Target object</label><input id=\"ws-target-{n}\" name=\"target\" type=\"text\" required></div>\
          <div><label for=\"ws-var-{n}\">Message tag</label><input id=\"ws-var-{n}\" name=\"variant\" type=\"text\" placeholder=\"e.g. credit, lease\" required></div>\
          <div><label for=\"ws-fields-{n}\">Payload fields (<code>key=value</code>)</label><input id=\"ws-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"amount=25, epoch=3\"></div>\
          <button>Send</button></form>\
          <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"deliver\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-send\"><input type=\"hidden\" name=\"turn\" value=\"deliver\">\
          <div><label for=\"wd-obj-{n}\">Object cell</label><input id=\"wd-obj-{n}\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"wd-tx-{n}\">Transaction</label><input id=\"wd-tx-{n}\" name=\"transaction\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <button>Deliver</button></form></article>\
          <article data-surface=\"objective-activity\"><h3>ObjectiveActivity · <code>spawn</code> &amp; <code>reply</code></h3>\
          <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"spawn\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-activity\"><input type=\"hidden\" name=\"turn\" value=\"spawn\">\
          <input type=\"hidden\" name=\"object\" value=\"{n}\">\
          <div><label for=\"wa-bend-{n}\">Program (bend)</label><input id=\"wa-bend-{n}\" name=\"bend\" type=\"text\" required></div>\
          <div><label for=\"wa-fields-{n}\">Input fields (<code>key=value</code>)</label><input id=\"wa-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"init=set(0), decider=42\"></div>\
          <div><label for=\"wa-seed-{n}\">Seed fields (optional)</label><input id=\"wa-seed-{n}\" name=\"seed_fields\" type=\"text\" placeholder=\"total=0\"></div>\
          <button>Spawn</button></form>\
          <form method=\"post\" action=\"/verb/bend\" class=\"row\" data-turn=\"reply\">\
+         <input type=\"hidden\" name=\"surface\" value=\"objective-activity\"><input type=\"hidden\" name=\"turn\" value=\"reply\">\
          <div><label for=\"war-slot-{n}\">Reply slot</label><input id=\"war-slot-{n}\" name=\"slot\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"war-fields-{n}\">Reply fields (<code>key=value</code>)</label><input id=\"war-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"amount=7\"></div>\
          <button>Reply</button></form></article>\
          <article data-surface=\"seat-store\"><h3>SeatStore · <code>create</code>, <code>fund</code>, <code>act</code>, <code>exit</code></h3>\
          <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"create\">\
+         <input type=\"hidden\" name=\"surface\" value=\"seat-store\"><input type=\"hidden\" name=\"turn\" value=\"create\">\
          <div><label for=\"sc-obj-{n}\">Object cell</label><input id=\"sc-obj-{n}\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sc-pkg-{n}\">Package id</label><input id=\"sc-pkg-{n}\" name=\"package\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sc-pay-{n}\">Payer account</label><input id=\"sc-pay-{n}\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sc-inv-{n}\">Invitations (<code>role:holder</code>)</label><input id=\"sc-inv-{n}\" name=\"invitations\" type=\"text\" placeholder=\"bidder:42, seller:43\"></div>\
          <button>Create instance</button></form>\
          <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"fund\">\
+         <input type=\"hidden\" name=\"surface\" value=\"seat-store\"><input type=\"hidden\" name=\"turn\" value=\"fund\">\
          <div><label for=\"sf-inv-{n}\">Invitation id</label><input id=\"sf-inv-{n}\" name=\"invitation\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sf-fund-{n}\">Funding account</label><input id=\"sf-fund-{n}\" name=\"funding\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sf-pay-{n}\">Payee account</label><input id=\"sf-pay-{n}\" name=\"payee\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
@@ -278,12 +285,14 @@ fn native_surface_controls(name: &str, object: &Value) -> String {
          <div><label for=\"sf-exit-{n}\">Exit rule</label><input id=\"sf-exit-{n}\" name=\"exit_rule\" type=\"text\" value=\"onDemand\"></div>\
          <button>Fund seat</button></form>\
          <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"act\">\
+         <input type=\"hidden\" name=\"surface\" value=\"seat-store\"><input type=\"hidden\" name=\"turn\" value=\"act\">\
          <div><label for=\"sa-inst-{n}\">Instance id</label><input id=\"sa-inst-{n}\" name=\"instance\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sa-pay-{n}\">Payer account</label><input id=\"sa-pay-{n}\" name=\"payer\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <div><label for=\"sa-var-{n}\">Action / variant</label><input id=\"sa-var-{n}\" name=\"variant\" type=\"text\" placeholder=\"clear, reallocate, settle\"></div>\
          <div><label for=\"sa-fields-{n}\">Action fields (<code>key=value</code>)</label><input id=\"sa-fields-{n}\" name=\"fields\" type=\"text\" placeholder=\"price=50, currency=1, goods=2, epsilon=0\"></div>\
          <button>Act / settle</button></form>\
          <form method=\"post\" action=\"/paste\" class=\"row\" data-turn=\"exit\">\
+         <input type=\"hidden\" name=\"surface\" value=\"seat-store\"><input type=\"hidden\" name=\"turn\" value=\"exit\">\
          <div><label for=\"se-seat-{n}\">Seat account</label><input id=\"se-seat-{n}\" name=\"seat\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\
          <button>Exit seat</button></form></article></section>"
     )
@@ -454,9 +463,24 @@ pub(crate) fn compile_surface_turn(
     form: &std::collections::BTreeMap<String, String>,
 ) -> std::result::Result<Value, String> {
     let f = |k: &str| form.get(k).map(String::as_str).unwrap_or("").trim();
+    let f_or = |k1: &str, k2: &str| {
+        let v = f(k1);
+        if v.is_empty() { f(k2) } else { v }
+    };
     match (surface, turn) {
-        ("objective-call", "invoke") => invoke_turn(f("object"), f("pin"), f("method"), f("variant"), f("fields")),
-        ("objective-send", "send") => send_turn(f("source"), f("target"), f("variant"), f("fields")),
+        ("objective-call", "invoke") => invoke_turn(
+            f("object"),
+            f("pin"),
+            f_or("method", "variant"),
+            f("variant"),
+            f("fields"),
+        ),
+        ("objective-send", "send") => send_turn(
+            f_or("source", "bend"),
+            f_or("target", "object"),
+            f("variant"),
+            f("fields"),
+        ),
         ("objective-send", "deliver") => deliver_turn_spec(f("object"), f("transaction"), (!f("account").is_empty()).then(|| f("account"))),
         ("objective-activity", "spawn") => spawn_turn(
             f("bend"),
@@ -477,8 +501,13 @@ pub(crate) fn compile_surface_turn(
             f("exit_rule"),
             f("donate") == "on" || f("confirmDonation") == "true",
         ),
-        ("seat-store", "act") => seat_act_turn(f("instance"), f("payer"), f("variant"), f("fields")),
-        ("seat-store", "exit") => seat_exit_turn(f("seat")),
+        ("seat-store", "act") => seat_act_turn(
+            f_or("instance", "object"),
+            f("payer"),
+            f("variant"),
+            f("fields"),
+        ),
+        ("seat-store", "exit") => seat_exit_turn(f_or("seat", "object")),
         _ => Err(format!("unknown surface `{surface}` / turn `{turn}`")),
     }
 }
@@ -505,6 +534,8 @@ mod tests {
         assert!(behavior.contains("data-surface=\"objective-send\""));
         assert!(behavior.contains("data-surface=\"objective-activity\""));
         assert!(behavior.contains("data-surface=\"seat-store\""));
+        assert!(behavior.contains("name=\"surface\" value=\"objective-call\""));
+        assert!(behavior.contains("name=\"surface\" value=\"seat-store\""));
         for view in [fields, behavior] {
             assert!(view.contains("901"));
             assert!(view.contains("/object/poll/behavior"));
@@ -535,11 +566,46 @@ mod tests {
         let donated = seat_fund_turn("501", "130", "130", "1:500", "", "onDemand", true).unwrap();
         assert_eq!(donated["turn"]["proposal"]["donate"], true);
 
-        let acted = seat_act_turn("90", "130", "clear", "price=50, currency=1, goods=2, epsilon=0").unwrap();
+        let acted = seat_act_turn("90", "130", "clear", "price=50, currency=1, goods=2, epsilon=0, slacks=[0, 1]").unwrap();
         assert_eq!(acted["turn"]["kind"], "invoke");
         assert_eq!(acted["turn"]["argument"]["label"], "clear");
+        let slacks_field = acted["turn"]["argument"]["payload"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == "slacks")
+            .unwrap();
+        assert_eq!(slacks_field["value"]["tag"], "variant");
+        assert_eq!(slacks_field["value"]["label"], "cons");
 
         let exited = seat_exit_turn("808").unwrap();
         assert_eq!(exited["turn"], json!({"kind": "exit", "seat": "808"}));
+
+        let mut form = std::collections::BTreeMap::new();
+        form.insert("object".into(), "poll".into());
+        form.insert("method".into(), "vote".into());
+        form.insert("fields".into(), "choice=1".into());
+        let invoked = compile_surface_turn("objective-call", "invoke", &form).unwrap();
+        assert_eq!(invoked["surface"], "ObjectiveCall");
+        assert_eq!(invoked["method"], "vote");
+
+        let mut send_form = std::collections::BTreeMap::new();
+        send_form.insert("source".into(), "station-1".into());
+        send_form.insert("target".into(), "desk-2".into());
+        send_form.insert("variant".into(), "issue".into());
+        send_form.insert("fields".into(), "slot=3, holder=42".into());
+        let sent = compile_surface_turn("objective-send", "send", &send_form).unwrap();
+        assert_eq!(sent["surface"], "ObjectiveSend");
+        assert_eq!(sent["source"], "station-1");
+        assert_eq!(sent["target"], "desk-2");
+
+        let mut seat_form = std::collections::BTreeMap::new();
+        seat_form.insert("instance".into(), "90".into());
+        seat_form.insert("payer".into(), "130".into());
+        seat_form.insert("variant".into(), "clear".into());
+        seat_form.insert("fields".into(), "price=50, slacks=[0, 1]".into());
+        let seat_acted = compile_surface_turn("seat-store", "act", &seat_form).unwrap();
+        assert_eq!(seat_acted["turn"]["kind"], "invoke");
+        assert_eq!(seat_acted["turn"]["instance"], "90");
     }
 }

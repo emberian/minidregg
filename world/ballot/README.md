@@ -31,15 +31,14 @@ before the reveal window ends turns 2 red.
 close once. Its README says ballot secrecy is out of scope; here the commit phase is the secrecy
 mechanism. Shape from `CollectiveAdoption` (unique ballot, quorum) and `Kernel/SealedMarket`.
 
-## Not yet native — and what is NOT claimed
-* **No hiding.** Core4 has no hash primitive. `seal(voter, vote, salt) = 2*(salt*1000+voter)+vote`
-  is an arithmetic stand-in: injective (binding) on ids below 1000 and votes 0/1, but the vote
-  is readable from the digest. The preview shows the state machine, not secrecy. The native
-  digest is the kernel's cSHAKE256 over the whole tuple (`Pred.hashEq`, as `Kernel/SealedMarket`
-  does for bids); that needs a native digest atom in the language, which does not exist.
-* Native: native scenario `ballot` in world-activity-admit.py (not yet run; runs in the central gate).
-* No native route: the Plans are proposals; heights are caller-supplied `now` fields. Native
-  needs the activity route with height awaits (commit end, reveal end) and the electors as
-  authenticated actors (here the voter id is a field, not an authenticated subject).
+## Kernel laws and participant turns
+* **Cryptographic commit-reveal (`Pred.hashEq`).** `SealedBallot.obend` declares
+  `law commit_binding: new.commit == 0 or hashEq([vote], salt, commit)` alongside monotone tally
+  laws (`monotone yes`, `monotone no`, `monotone abstain`). Every accepted reveal writes
+  `{vote, salt, commit}` to the object state, and the kernel verifies the 32-byte
+  `cSHAKE256("DREGG.PRED.HASHEQ/v2")` commitment opening via `Pred.HashEqDigest.deployed`.
+* **Participant-signed turns (`deciderFor`).** When `keeper == 0n`, `deciderFor` routes each await's
+  `Source.reply` decider to the next eligible voter (`nextVoter`), while a non-zero `keeper` pins a
+  designated coordinator for scripted cohorts.
 * Front-end note: typed entry arguments cannot carry sum values, so the entry takes a count of
   electors with consecutive ids.
