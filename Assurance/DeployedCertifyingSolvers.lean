@@ -75,8 +75,19 @@ theorem decodeMarket_inferred
       some ⟨t1.asset, t2.asset, (natField fields "epsilon").getD 0⟩ := by
   simp [decodeMarket, hNoMarket, hNoCurrency, Option.orElse]
 
-/-- Explicit-market decoding: when `"market"` is a record carrying `"currency"` and `"goods"`,
-`SeatStore.decodeMarket` produces `some ⟨currency, goods, (natField mfields "epsilon").getD 0⟩`. -/
+/-- When `"market"` and `"currency"` are omitted and `moves` is empty (`[]`, as in 0-fill clearings
+like `integrality_gap_admitted_at_four` in `world/drex/DrexBatch.obend`), `SeatStore.decodeMarket`
+infers `⟨1, 2, (natField fields "epsilon").getD 0⟩`. -/
+theorem decodeMarket_inferred_empty
+    (fields : List (String × Data))
+    (hNoMarket : ObjectiveActivity.fieldOf fields "market" = none)
+    (hNoCurrency : natField fields "currency" = none) :
+    decodeMarket fields [] =
+      some ⟨1, 2, (natField fields "epsilon").getD 0⟩ := by
+  simp [decodeMarket, hNoMarket, hNoCurrency, Option.orElse]
+
+/-- Explicit nested-record market decoding: when `"market"` is a record carrying `"currency"` and
+`"goods"`, `SeatStore.decodeMarket` produces `some ⟨currency, goods, (natField mfields "epsilon").getD 0⟩`. -/
 theorem decodeMarket_explicit
     (fields mfields : List (String × Data))
     (moves : List Transfer) (currency goods : Nat)
@@ -86,6 +97,19 @@ theorem decodeMarket_explicit
     decodeMarket fields moves =
       some ⟨currency, goods, (natField mfields "epsilon").getD 0⟩ := by
   simp [decodeMarket, hMarket, hCurrency, hGoods]
+
+/-- Top-level market field decoding: when `"market"` is omitted and `"currency"` and `"goods"` are
+present as top-level natural fields on `.variant "clear"`, `SeatStore.decodeMarket` produces
+`some ⟨currency, goods, (natField fields "epsilon").getD 0⟩`. -/
+theorem decodeMarket_topLevel
+    (fields : List (String × Data))
+    (moves : List Transfer) (currency goods : Nat)
+    (hNoMarket : ObjectiveActivity.fieldOf fields "market" = none)
+    (hCurrency : natField fields "currency" = some currency)
+    (hGoods : natField fields "goods" = some goods) :
+    decodeMarket fields moves =
+      some ⟨currency, goods, (natField fields "epsilon").getD 0⟩ := by
+  simp [decodeMarket, hNoMarket, hCurrency, hGoods, Option.orElse]
 
 /-- Characterization of `SeatStore.decodeAction` on `.variant "clear" (.record fields)`. -/
 theorem decodeAction_clear_iff
@@ -136,6 +160,19 @@ theorem decodeAction_clear_inferred
 `CertifiedClearing.judge`. -/
 abbrev verifyClearing := CertifiedClearing.judge
 
+/-- Limit-price / price-improvement characterization of `Order.crosses`:
+a `.bid` order crosses `price` iff `price * order.qty ≤ order.total` (the buyer never pays more per
+unit than their budget `total / qty`), and an `.ask` order crosses `price` iff
+`order.total ≤ price * order.qty` (the seller never receives less per unit than their reserve
+`total / qty`). -/
+theorem order_crosses_price_improvement (price : Nat) (order : Order) :
+    order.crosses price = true ↔
+      match order.side with
+      | .bid => price * order.qty ≤ order.total
+      | .ask => order.total ≤ price * order.qty := by
+  unfold Order.crosses
+  cases order.side <;> simp [decide_eq_true_eq]
+
 /-- **Soundness of `CertifiedClearing.judge` (`verifyClearing`)**:
 When `verifyClearing market orders transfers cert = .ok ()`, the clearing satisfies:
 1. Uniform fill pricing (`order.paid market transfers = cert.price * order.fill market transfers`),
@@ -169,8 +206,9 @@ theorem verifyClearing_sound
 Whenever a `.variant "clear"` record decodes via `SeatStore.decodeAction` to `action` and
 `SeatStore.stepCertifiedPlan height inst mintId world index action = .ok (next, batch)`,
 the action is a `.clear market transfers cert` and the transition guarantees:
-1. **Exact asset conservation**: `∀ asset, next.book.totalAsset asset = world.book.totalAsset asset`
-   and `Inv next` (when `Inv world`), plus LP flow conservation `A *ᵥ f = 0`,
+1. **Exact asset conservation & offer safety**: `∀ asset, next.book.totalAsset asset = world.book.totalAsset asset`,
+   `Inv next` (when `Inv world`), offer-safety preservation (`safeAt next.book seat.account seat.proposal = true`
+   for all `seat ∈ next.seats` from any seat-empty genesis), plus LP flow conservation `A *ᵥ f = 0`,
 2. **Uniform price & price improvement**:
    `∀ order ∈ batchOrders world inst.id market, order.paid market transfers = cert.price * order.fill market transfers`,
    and for every traded order (`0 < fills ... edge`), `(orders.get edge).crosses cert.price = true`
@@ -193,6 +231,8 @@ theorem decoded_clear_action_sound
       CertifiedClearing.clear world height inst.id market transfers cert = .ok next ∧
       (∀ asset, next.book.totalAsset asset = world.book.totalAsset asset) ∧
       (Seats.Inv world → Seats.Inv next) ∧
+      (∀ genesis : World, genesis.seats = [] → Seats.Reachable genesis world →
+        ∀ seat ∈ next.seats, safeAt next.book seat.account seat.proposal = true) ∧
       (∀ order ∈ orders,
         order.paid market transfers = (cert.price : Int) * order.fill market transfers) ∧
       (∀ edge : Fin orders.length, 0 < f edge →
@@ -210,6 +250,7 @@ theorem decoded_clear_action_sound
   exact ⟨market, moves, cert, rfl, hClear,
     clear_conserves hClear,
     fun hinv => clear_inv hinv hClear,
+    fun _ hempty hreach => clear_offer_safe hempty hreach hClear,
     clear_uniform_price hClear,
     fun edge hpos => clear_fills_cross hClear edge hpos,
     hCert.1,
@@ -275,6 +316,26 @@ theorem hashEq_rejects_wrong_commit_value
   rw [hSalt] at hsalt; cases hsalt
   exact hMismatch
 
+/-- Direct `cSHAKE256("DREGG.PRED.HASHEQ/v2")` image rejection:
+if `new.get digestField` does not equal the 256-bit big-endian integer of
+`cshake256Bytes (utf8 "DREGG.PRED.HASHEQ/v2") o.preimage`, then
+`Pred.eval (.hashEq fields saltField digestField) old new = false`. -/
+theorem hashEq_rejects_non_cshake256_image
+    (fields : List Pred.Slot) (saltField digestField : Pred.Slot)
+    (old new : Pred.State)
+    (objectId : Int) (fieldValues : List Int) (salt : Int)
+    (hObj : new.get hashEqCellSlot = some objectId)
+    (hVals : new.getAll fields = some fieldValues)
+    (hSalt : new.get saltField = some salt)
+    (hMismatch : new.get digestField ≠
+      some (ofBE (cshake256Bytes (utf8 "DREGG.PRED.HASHEQ/v2")
+        (⟨objectId, fields, saltField, digestField, fieldValues, salt⟩ : Opening).preimage) : Int)) :
+    Pred.eval (.hashEq fields saltField digestField) old new = false := by
+  apply hashEq_rejects_wrong_commit_value fields saltField digestField old new
+    objectId fieldValues salt hObj hVals hSalt
+  rw [hashEq_deployed_cshake256_image, hashEq_customization_eq]
+  exact hMismatch
+
 /-- **Concrete binding up to `cSHAKE256("DREGG.PRED.HASHEQ/v2")` collision**:
 If two state writes `new` and `new'` both pass `Pred.eval (.hashEq fields saltField digestField)`
 with the same committed digest at `digestField`, then either they open the exact same
@@ -297,6 +358,28 @@ theorem hashEq_concrete_binding
     obtain ⟨hcell', hvals', hsalt', -⟩ := hashEqOpening_eq_some.mp ho'
     exact .inl ⟨by rw [hcell, hcell'], by rw [hvals, hvals'], by rw [hsalt, hsalt']⟩
   · exact .inr hcol
+
+/-- Explicit `cSHAKE256("DREGG.PRED.HASHEQ/v2")` collision form of `hashEq_concrete_binding`:
+if two accepted state writes `new` and `new'` share `new.get digestField = new'.get digestField`,
+either they open the exact same `(objectId, fieldValues, salt)` tuple or there exist two
+canonical preimages `x ≠ y` from the two openings with
+`ofBE (cshake256Bytes (utf8 "DREGG.PRED.HASHEQ/v2") x) = ofBE (cshake256Bytes (utf8 "DREGG.PRED.HASHEQ/v2") y)`. -/
+theorem hashEq_cshake256_collision_on_reopen
+    {fields : List Pred.Slot} {saltField digestField : Pred.Slot}
+    {old new old' new' : Pred.State}
+    (h : Pred.eval (.hashEq fields saltField digestField) old new = true)
+    (h' : Pred.eval (.hashEq fields saltField digestField) old' new' = true)
+    (sameCommit : new.get digestField = new'.get digestField) :
+    (new.get hashEqCellSlot = new'.get hashEqCellSlot ∧
+      new.getAll fields = new'.getAll fields ∧
+      new.get saltField = new'.get saltField) ∨
+      ∃ x y : List UInt8, x ≠ y ∧
+        ofBE (cshake256Bytes (utf8 "DREGG.PRED.HASHEQ/v2") x) =
+          ofBE (cshake256Bytes (utf8 "DREGG.PRED.HASHEQ/v2") y) := by
+  rcases hashEq_concrete_binding h h' sameCommit with hsame | ⟨x, y, _, _, hne, hcol⟩
+  · exact .inl hsame
+  · rw [deployed_eq_cshake256Bytes, hashEq_customization_eq] at hcol
+    exact .inr ⟨x, y, hne, hcol⟩
 
 /-! ## §4. Computable Audit Fixtures & Positive/Negative Test Vectors -/
 
@@ -353,6 +436,24 @@ def exampleClearInferredData : Data :=
     [ ("moves", encodeDataList (exampleInferredTransfers.map encodeTransferData))
     , ("certificate", exampleHonestCertData) ])
 
+/-- Top-level market fields (`"currency"`, `"goods"`, `"epsilon"` without nested `"market"`)
+`.variant "clear"` action `Data` for `Example.fullClearing`. -/
+def exampleClearTopLevelData : Data :=
+  .variant "clear" (.record
+    [ ("currency", .natural Example.C)
+    , ("goods", .natural Example.G)
+    , ("epsilon", .natural 0)
+    , ("moves", encodeDataList (Example.fullClearing.map encodeTransferData))
+    , ("certificate", exampleHonestCertData) ])
+
+/-- Empty-moves inferred-market `.variant "clear"` action `Data` (as in 0-fill clearings with
+`epsilon = 4`). -/
+def exampleClearEmptyMovesData : Data :=
+  .variant "clear" (.record
+    [ ("epsilon", .natural 4)
+    , ("moves", encodeDataList [])
+    , ("certificate", encodeCertificateData 1 0 0 [0, 0, 0, 0]) ])
+
 /-- Unbooked transfer (account `999` is not an order seat). -/
 def unbookedTransfer : Transfer :=
   ⟨999, Example.aliceSeat, Example.G, 1⟩
@@ -389,7 +490,7 @@ def auditOrderHashEqPred : Pred :=
   .hashEq ["order/price", "order/qty"] "order/salt" "order/commit"
 
 /-- Computable audit function covering:
-1. `Cert-F` clearing acceptance (both explicit market and inferred market when `market` is omitted),
+1. `Cert-F` clearing acceptance (explicit market, top-level market, and inferred market when `market` is omitted),
 2. `Cert-F` conservation / order-book / uniform-price violation rejection,
 3. `Cert-F` complementary slackness / duality gap & dual feasibility violation rejection,
 4. `Pred.hashEq` valid opening acceptance under `cSHAKE256("DREGG.PRED.HASHEQ/v2")`, and
@@ -401,9 +502,13 @@ def checkCertifyingSolversAudit : Bool :=
     .clear Example.market Example.fullClearing Example.honest
   let expectedInferred : SeatStore.PlanAction :=
     .clear Example.market exampleInferredTransfers Example.honest
-  -- 1. `SeatStore.decodeAction` accepts both explicit-market and inferred-market `.variant "clear"`
+  let expectedEmptyMoves : SeatStore.PlanAction :=
+    .clear ⟨1, 2, 4⟩ [] ⟨1, (0, 0), [0, 0, 0, 0]⟩
+  -- 1. `SeatStore.decodeAction` accepts explicit, top-level, and inferred-market `.variant "clear"`
   let decodeExplicitOk := decodeAction fuel exampleClearExplicitData == some expectedExplicit
+  let decodeTopLevelOk := decodeAction fuel exampleClearTopLevelData == some expectedExplicit
   let decodeInferredOk := decodeAction fuel exampleClearInferredData == some expectedInferred
+  let decodeEmptyMovesOk := decodeAction fuel exampleClearEmptyMovesData == some expectedEmptyMoves
   -- 2. `CertifiedClearing.clear` and `SeatStore.stepCertifiedPlan` accept both and conserve assets
   let clearExplicitOk :=
     match CertifiedClearing.clear Example.opened 6 1 Example.market
@@ -504,7 +609,9 @@ def checkCertifyingSolversAudit : Bool :=
     !Pred.eval auditOrderHashEqPred auditOrderOldState missingQtyState &&
     !Pred.eval auditOrderHashEqPred auditOrderOldState negativeSaltState
   decodeExplicitOk &&
+  decodeTopLevelOk &&
   decodeInferredOk &&
+  decodeEmptyMovesOk &&
   clearExplicitOk &&
   stepInferredOk &&
   conservationAndUniformRejectOk &&
@@ -514,8 +621,12 @@ def checkCertifyingSolversAudit : Bool :=
 
 #guard (decodeAction 16 exampleClearExplicitData ==
   some (.clear Example.market Example.fullClearing Example.honest)) = true
+#guard (decodeAction 16 exampleClearTopLevelData ==
+  some (.clear Example.market Example.fullClearing Example.honest)) = true
 #guard (decodeAction 16 exampleClearInferredData ==
   some (.clear Example.market exampleInferredTransfers Example.honest)) = true
+#guard (decodeAction 16 exampleClearEmptyMovesData ==
+  some (.clear ⟨1, 2, 4⟩ [] ⟨1, (0, 0), [0, 0, 0, 0]⟩)) = true
 #guard (CertifiedClearing.clear Example.opened 6 1 Example.market
   Example.fullClearing Example.honest).isOk = true
 #guard (CertifiedClearing.judge Example.market Example.book
@@ -536,15 +647,20 @@ def checkCertifyingSolversAudit : Bool :=
 /-! ## §5. Axiom Audit -/
 
 #assert_axioms decodeMarket_inferred
+#assert_axioms decodeMarket_inferred_empty
 #assert_axioms decodeMarket_explicit
+#assert_axioms decodeMarket_topLevel
 #assert_axioms decodeAction_clear_iff
 #assert_axioms decodeAction_clear_inferred
+#assert_axioms order_crosses_price_improvement
 #assert_axioms verifyClearing_sound
 #assert_axioms decoded_clear_action_sound
 #assert_axioms hashEq_deployed_cshake256_image
 #assert_axioms hashEq_rejects_mismatched_digest
 #assert_axioms hashEq_rejects_wrong_commit_value
+#assert_axioms hashEq_rejects_non_cshake256_image
 #assert_axioms hashEq_concrete_binding
+#assert_axioms hashEq_cshake256_collision_on_reopen
 
 /-- info: 'Minidregg.Assurance.DeployedCertifyingSolvers.verifyClearing_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms verifyClearing_sound

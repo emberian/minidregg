@@ -44,14 +44,22 @@ theorem deployedAssuranceFrontier :
    Minidregg.Pred.HashEqDigest.deployed_eq_cshake256Bytes⟩
 
 #assert_axioms deployedAssuranceFrontier
+#assert_axioms Minidregg.Assurance.DeployedReceiptOpening.encodeNat_vectors
+#assert_axioms Minidregg.Assurance.DeployedReceiptOpening.climb_eq_foldr_zip
+#assert_axioms Minidregg.Assurance.DeployedReceiptOpening.opens_iff_foldr_zip
 #assert_axioms Minidregg.Assurance.DeployedReceiptOpening.wireOpening_sound
 #assert_axioms Minidregg.Assurance.DeployedReceiptOpening.wireContinuity_verify_sound
 #assert_axioms Minidregg.Assurance.DeployedReceiptOpening.wireContinuity_known_binds_chain
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.decodeMarket_inferred_empty
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.decodeMarket_topLevel
 #assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.decodeAction_clear_inferred
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.order_crosses_price_improvement
 #assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.verifyClearing_sound
 #assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.decoded_clear_action_sound
 #assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.hashEq_rejects_mismatched_digest
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.hashEq_rejects_non_cshake256_image
 #assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.hashEq_concrete_binding
+#assert_axioms Minidregg.Assurance.DeployedCertifyingSolvers.hashEq_cshake256_collision_on_reopen
 
 /-- info: 'Minidregg.Assurance.Deployed.deployedAssuranceFrontier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms deployedAssuranceFrontier
