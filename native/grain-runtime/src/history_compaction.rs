@@ -37,7 +37,7 @@ fn operation_of(name: &str) -> Option<u64> {
 pub(crate) fn quiescent(journal: &Journal) -> bool {
     quiescence::retained(journal, quiescence::ResidentEvidence::NotConfigured)
         .iter()
-        .all(|field| matches!(*field, "connection_fenced" | "hermes_pending_prompt"))
+        .all(|field| *field == "connection_fenced")
         && journal.provider_retry_gate.is_none()
 }
 
@@ -386,7 +386,7 @@ mod tests {
             source_sha256:sha256_file(&source_path).unwrap(), born:born.clone(), route:None, born_bundle:vec![],
             selected_application:None, selected_shared:None, authored_intent_sha256:None,
             tool_view:view.clone(), parent_view:view, prompt_operation_id:1, session_id:"session".into(), work_origin:None };
-        let attempt = state.join("attempt-0000000000000031"); fs::create_dir(&attempt).unwrap();
+        let attempt = state.join("attempt-0000000000000031"); fs::create_dir(&attempt).unwrap(); fs::set_permissions(&attempt, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(attempt.join("call.bin"), b"exact call").unwrap();
         fs::write(attempt.join("outcome.bin"), b"exact outcome").unwrap();
         let outcome = attempt.join("outcome.json");

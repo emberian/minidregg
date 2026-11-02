@@ -88,13 +88,13 @@ doc_build() { # MEMBER NAME FILE
   [ "$fail" = 0 ] && ok_ "doc $n: $i lines"
 }
 doc_load_json() { # MEMBER DOC
-  if as "$1" "doc show $2 --json"; then DOC_JSON=$OUT; else DOC_JSON='{}'; fi
+  if as "$1" "doc show $2 --json" 300; then DOC_JSON=$OUT; else DOC_JSON='{}'; fi
 }
 doc_mark() { # MEMBER DOC LINE KIND [TARGET]
   local m=$1 d=$2 ln=$3 k=$4 t=${5:-}
   if jq -e --argjson ln "$ln" --arg k "$k" \
     '.lines[]? | select(.line == $ln) | .marks[]? | select(.kind == $k and .fresh == true)' \
-    <<<"${DOC_JSON:-{}}" >/dev/null 2>&1; then
+    <<<"$DOC_JSON" >/dev/null 2>&1; then
     skip_ "mark $d:$ln $k${t:+ -> $t}: done"
     return 0
   fi
@@ -174,21 +174,21 @@ doc_mark "$BOX" field-notes 3 link house-rules
 doc_annotate "$BOX" field-notes-ann-1 field-notes 2 "Delegated with observe,mutate up to cost 50000."
 
 # --- 2. rooms: lobby and operations
-if as "$BOX" "chat rooms" && grep -qw lobby <<<"$OUT"; then skip_ "room lobby exists"
+if has_ref "$BOX" lobby || { as "$BOX" "chat rooms" && grep -qw lobby <<<"$OUT"; }; then skip_ "room lobby exists"
 elif as "$BOX" "chat new lobby"; then ok_ "room lobby founded by $BOX"
 else fail_ "chat new lobby: $(errtail_)"; fi
-if as "$SAGE" "chat rooms" && grep -qw lobby <<<"$OUT"; then skip_ "$SAGE already in lobby"
+if has_ref "$SAGE" lobby || { as "$SAGE" "chat rooms" && grep -qw lobby <<<"$OUT"; }; then skip_ "$SAGE already in lobby"
 elif as "$BOX" "chat invite lobby $SAGES $SAGE"; then
   join=$(grep '^chat join lobby ' <<<"$OUT" | tail -1)
   if [ -n "$join" ] && as "$SAGE" "$join"; then ok_ "$SAGE joined lobby"; else fail_ "$SAGE joining lobby: ${join:-no join line printed}: $(errtail_)"; fi
 else fail_ "chat invite lobby: $(errtail_)"; fi
 post() { # MEMBER TEXT
-  as "$1" "tail -n 200"; if grep -qF -- "${2:0:48}" <<<"$OUT"; then skip_ "post by $1 already there"; return; fi
-  as "$1" "say $2" && ok_ "post by $1: ${2:0:48}" || fail_ "say by $1: $(errtail_)"
+  as "$1" "tail -n 200 --in lobby" 300; if grep -qF -- "${2:0:48}" <<<"$OUT"; then skip_ "post by $1 already there"; return; fi
+  as "$1" "say --in lobby $2" 300 && ok_ "post by $1: ${2:0:48}" || fail_ "say by $1: $(errtail_)"
 }
 post_in() { # MEMBER ROOM TEXT
-  as "$1" "tail -n 200 --in $2"; if grep -qF -- "${3:0:48}" <<<"$OUT"; then skip_ "post in $2 by $1 already there"; return; fi
-  as "$1" "say --in $2 $3" && ok_ "post in $2 by $1: ${3:0:48}" || fail_ "say in $2 by $1: $(errtail_)"
+  as "$1" "tail -n 200 --in $2" 300; if grep -qF -- "${3:0:48}" <<<"$OUT"; then skip_ "post in $2 by $1 already there"; return; fi
+  as "$1" "say --in $2 $3" 300 && ok_ "post in $2 by $1: ${3:0:48}" || fail_ "say in $2 by $1: $(errtail_)"
 }
 while IFS= read -r l; do [ -n "$l" ] && post "$BOX" "$l"; done <"$D/lobby/box-posts.txt"
 while IFS= read -r l; do [ -n "$l" ] && post "$SAGE" "$l"; done <"$D/lobby/sage-posts.txt"
@@ -201,16 +201,16 @@ post "$BOX" "$(cat "$D/lobby/hermes-intro.txt")"
 publish_public "$BOX" lobby
 
 # --- 3b. operations room: founded by box, shared with sage and public, populated with operational turns
-if as "$BOX" "chat rooms" && grep -qw operations <<<"$OUT"; then skip_ "room operations exists"
+if has_ref "$BOX" operations || { as "$BOX" "chat rooms" && grep -qw operations <<<"$OUT"; }; then skip_ "room operations exists"
 elif as "$BOX" "chat new operations"; then ok_ "room operations founded by $BOX"
 else fail_ "chat new operations: $(errtail_)"; fi
-if as "$SAGE" "chat rooms" && grep -qw operations <<<"$OUT"; then skip_ "$SAGE already in operations"
+if has_ref "$SAGE" operations || { as "$SAGE" "chat rooms" && grep -qw operations <<<"$OUT"; }; then skip_ "$SAGE already in operations"
 elif as "$BOX" "chat invite operations $SAGES $SAGE --verbs observe"; then
   join=$(grep '^chat join operations ' <<<"$OUT" | tail -1)
   if [ -n "$join" ] && as "$SAGE" "$join"; then ok_ "$SAGE joined operations"
   else fail_ "$SAGE joining operations: ${join:-no join line printed}: $(errtail_)"; fi
 else fail_ "chat invite operations ($SAGE): $(errtail_)"; fi
-if as public "chat rooms" && grep -qw operations <<<"$OUT"; then skip_ "public already in operations"
+if has_ref public operations || { as public "chat rooms" && grep -qw operations <<<"$OUT"; }; then skip_ "public already in operations"
 elif as "$BOX" "chat invite operations $PUBLIC public --verbs observe"; then
   join=$(grep '^chat join operations ' <<<"$OUT" | tail -1)
   if [ -n "$join" ] && as public "$join"; then ok_ "public joined operations"
@@ -221,15 +221,15 @@ as "$BOX" "chat enter lobby" >/dev/null 2>&1 || true
 as "$SAGE" "chat enter lobby" >/dev/null 2>&1 || true
 
 # --- 4. story table: sealed law and opening scene
-if as "$BOX" "story list" && grep -qw tale <<<"$OUT"; then skip_ "story tale exists"
+if has_ref "$BOX" tale || { as "$BOX" "story list" && grep -qw tale <<<"$OUT"; }; then skip_ "story tale exists"
 else
   as "$BOX" "story new tale --from tale --gm $SAGES" 600 || fail_ "story new: $(errtail_)"
 fi
-if as "$BOX" "story list" && grep -qw tale <<<"$OUT"; then
+if has_ref "$BOX" tale || { as "$BOX" "story list" && grep -qw tale <<<"$OUT"; }; then
   as "$BOX" "story seal tale" 600 \
     && ok_ "story tale installed under the sealed law, GM $SAGE" || fail_ "story seal: $(errtail_)"
 fi
-if as "$SAGE" "story list" && grep -qw tale <<<"$OUT"; then skip_ "$SAGE already in story tale"
+if has_ref "$SAGE" tale || { as "$SAGE" "story list" && grep -qw tale <<<"$OUT"; }; then skip_ "$SAGE already in story tale"
 elif as "$BOX" "story invite tale $SAGES gm"; then
   inv=$(sed -n 's/^story join tale //p' <<<"$OUT" | tail -1)
   if [ -n "$inv" ]; then
@@ -361,24 +361,31 @@ install_app() { # NAME -> GRAIN in $G
 }
 DECK_URL=
 if install_app EtherCalc; then
-  if open_grain "$G"; then
+  if [ -f "/var/tmp/mini-seed-app-done-$G" ]; then
+    skip_ "EtherCalc sheet lobby-tally already written"
+  elif open_grain "$G"; then
     c=$(web "$G" PUT /_/lobby-tally -H 'Content-Type: text/csv' --data-binary @"$D/apps/calc.csv")
-    case $c in 20*) ok_ "EtherCalc sheet lobby-tally written ($c)";; *) fail_ "EtherCalc write: HTTP $c";; esac
+    case $c in 20*) touch "/var/tmp/mini-seed-app-done-$G"; ok_ "EtherCalc sheet lobby-tally written ($c)";; *) fail_ "EtherCalc write: HTTP $c";; esac
   else fail_ "EtherCalc: could not open $G"; fi
 fi
 if install_app Etherpad; then
-  if open_grain "$G"; then
+  if [ -f "/var/tmp/mini-seed-app-done-$G" ]; then
+    skip_ "Etherpad pad welcome already imported"
+  elif open_grain "$G"; then
     c=$(web "$G" POST /p/welcome/import -F "file=@$D/apps/pad-welcome.txt;filename=welcome.txt;type=text/plain")
     if [ "$c" = 200 ] && jq -e '.code == 0' "$T/body" >/dev/null 2>&1; then
       c=$(web "$G" GET /p/welcome/export/txt)
-      if [ "$c" = 200 ] && grep -Eq 'Shared scratchpad|Welcome to the pad' "$T/body"; then ok_ "Etherpad pad welcome imported and read back"
+      if [ "$c" = 200 ] && grep -Eq 'Shared scratchpad|Welcome to the pad' "$T/body"; then touch "/var/tmp/mini-seed-app-done-$G"; ok_ "Etherpad pad welcome imported and read back"
       else fail_ "Etherpad import readback: HTTP $c"; fi
     else fail_ "Etherpad pad import: HTTP $c $(tail -c 400 "$T/body" | tr '\n' ' ')"; fi
   else fail_ "Etherpad: could not open $G"; fi
 fi
 DECK_APP="reveal.js markdown decks"
 if install_app "$DECK_APP"; then
-  if open_grain "$G"; then
+  if [ -f "/var/tmp/mini-seed-app-done-$G" ] && compgen -G "/var/lib/mini-spk-worlds/*/vars/*-${G#a}/www/deck.md" >/dev/null; then
+    DECK_URL=$(cat "/var/tmp/mini-seed-app-done-$G")
+    skip_ "reveal.js deck already published at $DECK_URL"
+  elif open_grain "$G"; then
     www=$(sed -E 's#^(https?://[^./]+)\.#\1-www.#' <<<"$ORIGIN")
     c=$(web "$G" PUT /deck.md -H 'Content-Type: text/markdown' --data-binary @"$D/apps/slides/slides.md")
     if [ "$c" = 204 ] || [ "$c" = 200 ]; then
@@ -393,7 +400,7 @@ if install_app "$DECK_APP"; then
           fi
         done
         c=$(curl -sS --max-time 120 -H "Host: ${www#https://}" -o "$T/deck" -w '%{http_code}' "$APPS_FRONT/")
-        if [ "$c" = 200 ]; then DECK_URL=$www; ok_ "reveal.js deck written, read back and published at $www"
+        if [ "$c" = 200 ]; then DECK_URL=$www; printf '%s\n' "$www" >"/var/tmp/mini-seed-app-done-$G"; ok_ "reveal.js deck written, read back and published at $www"
         else fail_ "reveal.js public deck page: HTTP $c"; fi
       else fail_ "reveal.js deck readback: HTTP $c"; fi
     else fail_ "reveal.js deck write: HTTP $c"; fi

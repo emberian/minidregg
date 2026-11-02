@@ -171,7 +171,7 @@ fn verify_bindings(config: &Config, pending: &Pending, marker: &Marker) -> Resul
                 )),
                 16_384,
             )?
-        || copied_config != read(&config.host_config, 65_536)?
+        || copied_config != bounded_regular_file(&config.host_config, 65_536)?
     {
         return Err(
             "continuity rejection differs from controller source or operator config".into(),
