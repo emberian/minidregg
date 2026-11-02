@@ -327,6 +327,20 @@ pub(crate) fn read(state_dir: &Path, prompt: u64) -> Result<Option<Record>> {
 }
 
 impl Runtime {
+    fn clear_audited_pending_prompt(&mut self) -> Result<()> {
+        if let Some(session) = self.journal.hermes_session.as_mut() {
+            if session.pending_prompt {
+                if let Ok(Some(fp)) = hermes_state_fingerprint(&session.workspace.join(".hermes")) {
+                    session.state_fingerprint = Some(fp);
+                    session.retention_issue = None;
+                }
+                session.pending_prompt = false;
+                self.save()?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn reconcile_prompt_audited(&mut self, id: &str) -> Result<Value> {
         let op = id.parse::<u64>().map_err(|_| "prompt operation must be canonical positive u64")?;
         if op == 0 || op.to_string() != id { return Err("prompt operation must be canonical positive u64".into()); }
@@ -344,6 +358,7 @@ impl Runtime {
         let target = resolution_path(&self.config.state_dir, op);
         if target.try_exists().map_err(|e| e.to_string())? {
             let resolved = read(&self.config.state_dir, op)?.ok_or("resolved prompt absent")?;
+            self.clear_audited_pending_prompt()?;
             return resolution_result(&self.config.state_dir, &target, &resolved);
         }
         let audit = audit_chain(&self.journal.reconciliation_log, &original)?;
@@ -383,6 +398,7 @@ impl Runtime {
             Ok(_) => return Err("prompt already has a different audited resolution".into()),
         }
         let resolved = read(&self.config.state_dir, op)?.ok_or("resolved prompt absent")?;
+        self.clear_audited_pending_prompt()?;
         resolution_result(&self.config.state_dir, &target, &resolved)
     }
 }
