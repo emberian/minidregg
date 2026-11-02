@@ -39,35 +39,37 @@ fn ask(
     from_here: bool,
     tag: &str,
 ) -> Result<Value> {
-    let host = member_path(workspace, "host").ok();
-    let config = member_path(workspace, "config").ok();
-    if !host.as_ref().is_some_and(|h| h.is_file()) || !config.as_ref().is_some_and(|c| c.is_file()) {
+    let (Some(host), Some(config)) = (
+        member_path(workspace, "host").ok().filter(|h| h.is_file()),
+        member_path(workspace, "config").ok().filter(|c| c.is_file()),
+    ) else {
         return decide_local(law, extra, from_here);
+    };
+    let host_result = (|| -> Result<Value> {
+        let mut request = json!({"type":REQUEST_TYPE,"predicate":law});
+        if let Some(extra) = extra {
+            request["extra"] = extra.clone();
+        }
+        if from_here {
+            request["fromHere"] = json!(true);
+        }
+        let directory = root.join("lawsat");
+        if !directory.exists() {
+            make_private_dir(&directory)?;
+        }
+        let nonce = random_nonce()?;
+        let input = directory.join(format!("{tag}-{nonce}.request.json"));
+        let output = directory.join(format!("{tag}-{nonce}.answer.json"));
+        create_private(
+            &input,
+            &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+        )?;
+        host_law_sat(&host, &config, &input, &output)
+    })();
+    match host_result {
+        Ok(val) => Ok(val),
+        Err(_) => decide_local(law, extra, from_here),
     }
-    let mut request = json!({"type":REQUEST_TYPE,"predicate":law});
-    if let Some(extra) = extra {
-        request["extra"] = extra.clone();
-    }
-    if from_here {
-        request["fromHere"] = json!(true);
-    }
-    let directory = root.join("lawsat");
-    if !directory.exists() {
-        make_private_dir(&directory)?;
-    }
-    let nonce = random_nonce()?;
-    let input = directory.join(format!("{tag}-{nonce}.request.json"));
-    let output = directory.join(format!("{tag}-{nonce}.answer.json"));
-    create_private(
-        &input,
-        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
-    )?;
-    host_law_sat(
-        &host.expect("checked"),
-        &config.expect("checked"),
-        &input,
-        &output,
-    )
 }
 
 fn verdict(answer: &Value) -> &str {
@@ -446,9 +448,23 @@ pub(super) fn install_check(
 pub(crate) fn slots(predicate: &Value, into: &mut BTreeSet<String>) {
     match predicate {
         Value::Object(object) => {
-            for key in ["slot", "left", "right"] {
+            for key in ["slot", "left", "right", "blinder", "commit"] {
                 if let Some(Value::String(slot)) = object.get(key) {
                     into.insert(slot.clone());
+                }
+            }
+            for key in ["left", "right", "values"] {
+                if let Some(Value::Array(arr)) = object.get(key) {
+                    for item in arr {
+                        if let Some(slot) = item.as_str() {
+                            into.insert(slot.to_owned());
+                        }
+                    }
+                }
+            }
+            if object.get("type").and_then(Value::as_str) == Some("ran") {
+                if let Some(prog) = object.get("program").and_then(Value::as_str) {
+                    into.insert(format!("run/program/{prog}"));
                 }
             }
             if let Some(child) = object.get("predicate") {
@@ -787,7 +803,7 @@ pub(crate) struct LawWorkbenchReport {
     pub rows: Vec<VerbMatrixRow>,
 }
 
-fn extract_witness_columns(answer: &Value, pinned_verb: &str) -> (String, String, String) {
+fn extract_witness_columns(answer: &Value, _pinned_verb: &str) -> (String, String, String) {
     let mut subj = "any".to_owned();
     let mut cost = "any".to_owned();
     let mut fields = Vec::new();
@@ -800,7 +816,7 @@ fn extract_witness_columns(answer: &Value, pinned_verb: &str) -> (String, String
         {
             let slot = text(item, "slot");
             let val = text(item, "text");
-            if slot == "request/verb" && val == pinned_verb {
+            if slot == "request/verb" {
                 continue;
             }
             if slot == "request/subject" && suffix.is_empty() {
@@ -1077,10 +1093,10 @@ pub(crate) fn eval_pred(pred: &Value, old: &BTreeMap<String, i128>, new: &BTreeM
         }
         "writeOnce" => {
             let slot = s("slot");
-            old.get(slot)
-                .copied()
-                .zip(new.get(slot).copied())
-                .is_some_and(|(a, b)| a == 0 || a == b)
+            match old.get(slot).copied() {
+                None => true,
+                Some(o) => o == 0 || new.get(slot).copied() == Some(o),
+            }
         }
         "eqSlots" => new
             .get(s("left"))
@@ -1100,6 +1116,18 @@ pub(crate) fn eval_pred(pred: &Value, old: &BTreeMap<String, i128>, new: &BTreeM
                 .copied()
                 .zip(new.get(s("right")).copied())
                 .is_some_and(|(a, b)| a <= b.saturating_add(k))
+        }
+        "sumEq" => {
+            let sum_of = |key: &str| -> Option<i128> {
+                let arr = pred.get(key)?.as_array()?;
+                let mut total = 0i128;
+                for item in arr {
+                    let slot = item.as_str()?;
+                    total = total.checked_add(*new.get(slot)?)?;
+                }
+                Some(total)
+            };
+            sum_of("left").zip(sum_of("right")).is_some_and(|(a, b)| a == b)
         }
         "not" => pred
             .get("predicate")
@@ -1331,7 +1359,7 @@ pub(crate) fn judge_hypothetical_turn(
     })
 }
 
-// ------------------------------------------------------------------ Pure-Rust mirror of Pred/Satisfiable.lean + Host/LawSat.lean
+// ------------------------------------------------------------------ Pure-Rust mirror of Pred/Satisfiable.lean + Host/LawSat.lean + Host/LawSatWire.lean
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum SatNode {
@@ -1354,15 +1382,20 @@ impl SatNode {
             SatNode::Old(s) | SatNode::New(s) => crate::shell::law::render_value(s, &k.to_string()),
         }
     }
+    fn json(&self) -> Value {
+        match self {
+            SatNode::Zero => json!({"view": "zero"}),
+            SatNode::Old(s) => json!({"view": "old", "slot": s, "name": crate::shell::law::render_slot(s)}),
+            SatNode::New(s) => json!({"view": "new", "slot": s, "name": crate::shell::law::render_slot(s)}),
+        }
+    }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SatCon {
     x: SatNode,
     y: SatNode,
     k: i128,
-    clause: String,
-    part: &'static str,
 }
 
 impl SatCon {
@@ -1384,14 +1417,30 @@ impl SatCon {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct SatSys {
-    present: BTreeSet<(SatNode, String, &'static str)>,
-    absent: BTreeSet<(SatNode, String, &'static str)>,
+    present: Vec<SatNode>,
+    absent: Vec<SatNode>,
     cons: Vec<SatCon>,
 }
 
 impl SatSys {
+    fn pres(present: Vec<SatNode>, cons: Vec<(SatNode, SatNode, i128)>) -> Self {
+        Self {
+            present,
+            absent: Vec::new(),
+            cons: cons.into_iter().map(|(x, y, k)| SatCon { x, y, k }).collect(),
+        }
+    }
+
+    fn gone(node: SatNode) -> Self {
+        Self {
+            present: Vec::new(),
+            absent: vec![node],
+            cons: Vec::new(),
+        }
+    }
+
     fn merge(&self, other: &Self) -> Self {
         let mut present = self.present.clone();
         present.extend(other.present.iter().cloned());
@@ -1401,6 +1450,42 @@ impl SatSys {
         cons.extend(other.cons.iter().cloned());
         Self { present, absent, cons }
     }
+
+    fn sub(&self, other: &Self) -> bool {
+        self.present.iter().all(|v| other.present.contains(v))
+            && self.absent.iter().all(|v| other.absent.contains(v))
+            && self.cons.iter().all(|c| other.cons.contains(c))
+    }
+
+    fn nodes(&self) -> Vec<SatNode> {
+        let mut out = vec![SatNode::Zero];
+        for n in &self.present {
+            if !out.contains(n) {
+                out.push(n.clone());
+            }
+        }
+        for c in &self.cons {
+            if !out.contains(&c.x) {
+                out.push(c.x.clone());
+            }
+            if !out.contains(&c.y) {
+                out.push(c.y.clone());
+            }
+        }
+        out
+    }
+}
+
+fn prune_systems(list: Vec<SatSys>) -> Vec<SatSys> {
+    let mut acc: Vec<SatSys> = Vec::new();
+    for s in list {
+        if acc.iter().any(|t| t.sub(&s)) {
+            continue;
+        }
+        acc.retain(|t| !s.sub(t));
+        acc.push(s);
+    }
+    acc
 }
 
 fn realize_scalar(pred: &Value) -> std::result::Result<Value, String> {
@@ -1464,17 +1549,148 @@ fn realize_scalar(pred: &Value) -> std::result::Result<Value, String> {
 
 const DNF_CAP: usize = 1024;
 
-enum DnfError {
-    Outside { part: &'static str, path: Vec<usize>, clause: String },
-    PastCap,
+fn outside_path(pred: &Value) -> Option<Vec<usize>> {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    match ty {
+        "sumEq" | "witnessed" | "hashEq" | "ran" => Some(Vec::new()),
+        "not" => outside_path(pred.get("predicate")?).map(|mut p| {
+            p.insert(0, 0);
+            p
+        }),
+        "all" | "any" => {
+            for (i, child) in pred
+                .get("predicates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                if let Some(mut p) = outside_path(child) {
+                    p.insert(0, i);
+                    return Some(p);
+                }
+            }
+            None
+        }
+        "eq" | "le" | "memberOf" | "writeOnce" | "monotone" | "eqSlots" | "leSlots" | "leSlotsOff" => None,
+        _ => Some(Vec::new()),
+    }
 }
 
-fn sat_dnf(
-    b: bool,
-    pred: &Value,
-    part: &'static str,
-    path: Vec<usize>,
-) -> std::result::Result<Vec<SatSys>, DnfError> {
+fn subterm<'a>(pred: &'a Value, path: &[usize]) -> Option<&'a Value> {
+    let Some((&head, rest)) = path.split_first() else {
+        return Some(pred);
+    };
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    match ty {
+        "not" if head == 0 => subterm(pred.get("predicate")?, rest),
+        "all" | "any" => {
+            let child = pred.get("predicates")?.as_array()?.get(head)?;
+            subterm(child, rest)
+        }
+        _ => None,
+    }
+}
+
+fn is_atom_pred(pred: &Value) -> bool {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    match ty {
+        "not" => {
+            let inner_ty = pred
+                .get("predicate")
+                .and_then(|p| p.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            !matches!(inner_ty, "not" | "all" | "any")
+        }
+        "all" | "any" => false,
+        _ => true,
+    }
+}
+
+fn clause_at(orig: &Value, path: &[usize]) -> (Vec<usize>, Value) {
+    for k in 0..=path.len() {
+        let prefix = &path[..k];
+        if let Some(c) = subterm(orig, prefix) {
+            if is_atom_pred(c) {
+                return (prefix.to_vec(), c.clone());
+            }
+        }
+    }
+    (path.to_vec(), orig.clone())
+}
+
+fn source_json(law: &Value, query_pred: &Value, path: &[usize]) -> Value {
+    let (at, clause) = clause_at(query_pred, path);
+    let rendered = crate::shell::law::render_clause(&clause);
+    if at.first() == Some(&0) {
+        let rest = &at[1..];
+        let mut obj = json!({
+            "part": "law",
+            "path": rest,
+            "clause": rendered,
+        });
+        if let Some(&top_idx) = rest.first() {
+            if let Some(top_c) = subterm(law, &[top_idx]) {
+                obj["top"] = json!({
+                    "index": top_idx,
+                    "clause": crate::shell::law::render_clause(top_c),
+                });
+            }
+        }
+        obj
+    } else {
+        let rest = if at.is_empty() { &[][..] } else { &at[1..] };
+        json!({
+            "part": "query",
+            "path": rest,
+            "clause": rendered,
+        })
+    }
+}
+
+fn collect_leaves(b: bool, path: Vec<usize>, pred: &Value, out: &mut Vec<(Vec<usize>, bool, Value)>) {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    match ty {
+        "not" => {
+            if let Some(inner) = pred.get("predicate") {
+                let mut next = path;
+                next.push(0);
+                collect_leaves(!b, next, inner, out);
+            }
+        }
+        "all" | "any" => {
+            for (i, child) in pred
+                .get("predicates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                let mut next = path.clone();
+                next.push(i);
+                collect_leaves(b, next, child, out);
+            }
+        }
+        _ => out.push((path, b, pred.clone())),
+    }
+}
+
+fn leaf_sources(target_pred: &Value, keep: impl Fn(&SatSys) -> bool) -> Vec<Vec<usize>> {
+    let mut leaves = Vec::new();
+    collect_leaves(true, Vec::new(), target_pred, &mut leaves);
+    let mut out = Vec::new();
+    for (path, b, atom) in leaves {
+        if let Some(ss) = atom_dnf(b, &atom) {
+            if ss.iter().any(&keep) && !out.contains(&path) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+fn atom_dnf(b: bool, pred: &Value) -> Option<Vec<SatSys>> {
     let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
     let s = |k: &str| pred.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
     let int_val = |k: &str| -> i128 {
@@ -1483,77 +1699,20 @@ fn sat_dnf(
             .and_then(|v| v.parse().ok())
             .unwrap_or(0)
     };
-    let clause = crate::shell::law::render_clause(pred);
-    let pres = |nodes: Vec<SatNode>, cons: Vec<(SatNode, SatNode, i128)>| -> SatSys {
-        SatSys {
-            present: nodes.into_iter().map(|n| (n, clause.clone(), part)).collect(),
-            absent: BTreeSet::new(),
-            cons: cons
-                .into_iter()
-                .map(|(x, y, k)| SatCon { x, y, k, clause: clause.clone(), part })
-                .collect(),
-        }
-    };
-    let gone = |node: SatNode| -> SatSys {
-        let mut absent = BTreeSet::new();
-        absent.insert((node, clause.clone(), part));
-        SatSys { present: BTreeSet::new(), absent, cons: Vec::new() }
-    };
     match ty {
-        "not" => {
-            let mut next = path;
-            next.push(0);
-            sat_dnf(!b, pred.get("predicate").unwrap_or(&Value::Null), part, next)
-        }
-        "all" | "any" => {
-            let children = pred
-                .get("predicates")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            let is_conj = (ty == "all" && b) || (ty == "any" && !b);
-            if is_conj {
-                let mut acc = vec![SatSys::default()];
-                for (i, child) in children.iter().enumerate() {
-                    let mut p = path.clone();
-                    p.push(i);
-                    let sub = sat_dnf(b, child, part, p)?;
-                    let mut next = Vec::new();
-                    for a in &acc {
-                        for c in &sub {
-                            next.push(a.merge(c));
-                            if next.len() > DNF_CAP {
-                                return Err(DnfError::PastCap);
-                            }
-                        }
-                    }
-                    acc = next;
-                }
-                Ok(acc)
-            } else {
-                let mut acc = Vec::new();
-                for (i, child) in children.iter().enumerate() {
-                    let mut p = path.clone();
-                    p.push(i);
-                    let sub = sat_dnf(b, child, part, p)?;
-                    acc.extend(sub);
-                    if acc.len() > DNF_CAP {
-                        return Err(DnfError::PastCap);
-                    }
-                }
-                Ok(acc)
-            }
-        }
         "eq" => {
             let u = SatNode::New(s("slot"));
             let v = int_val("value");
             if b {
-                Ok(vec![pres(vec![u.clone()], vec![(u.clone(), SatNode::Zero, v), (SatNode::Zero, u, -v)])])
+                Some(vec![SatSys::pres(
+                    vec![u.clone()],
+                    vec![(u.clone(), SatNode::Zero, v), (SatNode::Zero, u, -v)],
+                )])
             } else {
-                Ok(vec![
-                    gone(u.clone()),
-                    pres(vec![u.clone()], vec![(u.clone(), SatNode::Zero, v - 1)]),
-                    pres(vec![u.clone()], vec![(SatNode::Zero, u, -(v + 1))]),
+                Some(vec![
+                    SatSys::gone(u.clone()),
+                    SatSys::pres(vec![u.clone()], vec![(u.clone(), SatNode::Zero, v - 1)]),
+                    SatSys::pres(vec![u.clone()], vec![(SatNode::Zero, u, -(v + 1))]),
                 ])
             }
         }
@@ -1561,84 +1720,71 @@ fn sat_dnf(
             let u = SatNode::New(s("slot"));
             let v = int_val("value");
             if b {
-                Ok(vec![pres(vec![u.clone()], vec![(u, SatNode::Zero, v)])])
+                Some(vec![SatSys::pres(vec![u.clone()], vec![(u, SatNode::Zero, v)])])
             } else {
-                Ok(vec![
-                    gone(u.clone()),
-                    pres(vec![u.clone()], vec![(SatNode::Zero, u, -(v + 1))]),
+                Some(vec![
+                    SatSys::gone(u.clone()),
+                    SatSys::pres(vec![u.clone()], vec![(SatNode::Zero, u, -(v + 1))]),
                 ])
             }
         }
         "memberOf" => {
             let u = SatNode::New(s("slot"));
-            let mut vals: Vec<i128> = pred
+            let xs: Vec<i128> = pred
                 .get("values")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
                 .filter_map(|v| v.as_str()?.parse().ok())
                 .collect();
-            vals.sort();
-            vals.dedup();
             if b {
-                if vals.is_empty() {
-                    return Ok(Vec::new());
-                }
-                let mut runs: Vec<(i128, i128)> = Vec::new();
-                for v in vals {
-                    if let Some(last) = runs.last_mut() {
-                        if v == last.1 + 1 {
-                            last.1 = v;
-                            continue;
+                let extend_up = |mut h: i128| -> i128 {
+                    for _ in 0..xs.len() {
+                        if xs.contains(&(h + 1)) {
+                            h += 1;
+                        } else {
+                            break;
                         }
                     }
-                    runs.push((v, v));
-                }
-                Ok(runs
-                    .into_iter()
-                    .map(|(lo, hi)| {
-                        pres(
+                    h
+                };
+                let extend_down = |mut h: i128| -> i128 {
+                    for _ in 0..xs.len() {
+                        if xs.contains(&(h - 1)) {
+                            h -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    h
+                };
+                let raw: Vec<SatSys> = xs
+                    .iter()
+                    .map(|&x| {
+                        let hi = extend_up(x);
+                        let lo = extend_down(x);
+                        SatSys::pres(
                             vec![u.clone()],
-                            vec![(SatNode::Zero, u.clone(), -lo), (u.clone(), SatNode::Zero, hi)],
+                            vec![(u.clone(), SatNode::Zero, hi), (SatNode::Zero, u.clone(), -lo)],
                         )
                     })
-                    .collect())
+                    .collect();
+                Some(prune_systems(raw))
             } else {
-                if vals.is_empty() {
-                    return Ok(vec![SatSys::default()]);
-                }
-                let mut out = vec![
-                    gone(u.clone()),
-                    pres(vec![u.clone()], vec![(u.clone(), SatNode::Zero, vals[0] - 1)]),
-                ];
-                for pair in vals.windows(2) {
-                    if pair[0] + 1 <= pair[1] - 1 {
-                        out.push(pres(
-                            vec![u.clone()],
-                            vec![
-                                (SatNode::Zero, u.clone(), -(pair[0] + 1)),
-                                (u.clone(), SatNode::Zero, pair[1] - 1),
-                            ],
-                        ));
+                let mut out = Vec::with_capacity(xs.len() + 2);
+                out.push(SatSys::gone(u.clone()));
+                out.push(SatSys::pres(
+                    vec![u.clone()],
+                    xs.iter().map(|&y| (u.clone(), SatNode::Zero, y - 1)).collect(),
+                ));
+                for &x in &xs {
+                    let mut cons = vec![(SatNode::Zero, u.clone(), -(x + 1))];
+                    for &y in xs.iter().filter(|&&y| x < y) {
+                        cons.push((u.clone(), SatNode::Zero, y - 1));
                     }
+                    out.push(SatSys::pres(vec![u.clone()], cons));
                 }
-                let last = *vals.last().unwrap();
-                out.push(pres(vec![u.clone()], vec![(SatNode::Zero, u, -(last + 1))]));
-                Ok(out)
-            }
-        }
-        "monotone" => {
-            let slot = s("slot");
-            let o = SatNode::Old(slot.clone());
-            let n = SatNode::New(slot);
-            if b {
-                Ok(vec![pres(vec![o.clone(), n.clone()], vec![(o, n, 0)])])
-            } else {
-                Ok(vec![
-                    gone(o.clone()),
-                    gone(n.clone()),
-                    pres(vec![o.clone(), n.clone()], vec![(n, o, -1)]),
-                ])
+                Some(out)
             }
         }
         "writeOnce" => {
@@ -1646,36 +1792,47 @@ fn sat_dnf(
             let o = SatNode::Old(slot.clone());
             let n = SatNode::New(slot);
             if b {
-                Ok(vec![
-                    pres(
-                        vec![o.clone(), n.clone()],
+                Some(vec![
+                    SatSys::gone(o.clone()),
+                    SatSys::pres(
+                        vec![o.clone()],
                         vec![(o.clone(), SatNode::Zero, 0), (SatNode::Zero, o.clone(), 0)],
                     ),
-                    pres(
+                    SatSys::pres(
                         vec![o.clone(), n.clone()],
-                        vec![(o.clone(), n.clone(), 0), (n, o, 0)],
+                        vec![(n.clone(), o.clone(), 0), (o, n, 0)],
                     ),
                 ])
             } else {
-                Ok(vec![
-                    gone(o.clone()),
-                    gone(n.clone()),
-                    pres(
-                        vec![o.clone(), n.clone()],
-                        vec![(o.clone(), SatNode::Zero, -1), (o.clone(), n.clone(), -1)],
-                    ),
-                    pres(
-                        vec![o.clone(), n.clone()],
-                        vec![(o.clone(), SatNode::Zero, -1), (n.clone(), o.clone(), -1)],
-                    ),
-                    pres(
-                        vec![o.clone(), n.clone()],
-                        vec![(SatNode::Zero, o.clone(), -1), (o.clone(), n.clone(), -1)],
-                    ),
-                    pres(
-                        vec![o.clone(), n.clone()],
-                        vec![(SatNode::Zero, o.clone(), -1), (n, o, -1)],
-                    ),
+                let old_nz = [
+                    SatSys::pres(vec![o.clone()], vec![(o.clone(), SatNode::Zero, -1)]),
+                    SatSys::pres(vec![o.clone()], vec![(SatNode::Zero, o.clone(), -1)]),
+                ];
+                let new_ne = [
+                    SatSys::gone(n.clone()),
+                    SatSys::pres(vec![n.clone()], vec![(n.clone(), o.clone(), -1)]),
+                    SatSys::pres(vec![n.clone()], vec![(o, n, -1)]),
+                ];
+                let mut out = Vec::with_capacity(6);
+                for a in &old_nz {
+                    for c in &new_ne {
+                        out.push(a.merge(c));
+                    }
+                }
+                Some(out)
+            }
+        }
+        "monotone" => {
+            let slot = s("slot");
+            let o = SatNode::Old(slot.clone());
+            let n = SatNode::New(slot);
+            if b {
+                Some(vec![SatSys::pres(vec![o.clone(), n.clone()], vec![(o, n, 0)])])
+            } else {
+                Some(vec![
+                    SatSys::gone(o.clone()),
+                    SatSys::gone(n.clone()),
+                    SatSys::pres(vec![o.clone(), n.clone()], vec![(n, o, -1)]),
                 ])
             }
         }
@@ -1683,16 +1840,16 @@ fn sat_dnf(
             let l = SatNode::New(s("left"));
             let r = SatNode::New(s("right"));
             if b {
-                Ok(vec![pres(
+                Some(vec![SatSys::pres(
                     vec![l.clone(), r.clone()],
                     vec![(l.clone(), r.clone(), 0), (r, l, 0)],
                 )])
             } else {
-                Ok(vec![
-                    gone(l.clone()),
-                    gone(r.clone()),
-                    pres(vec![l.clone(), r.clone()], vec![(l.clone(), r.clone(), -1)]),
-                    pres(vec![l.clone(), r.clone()], vec![(r, l, -1)]),
+                Some(vec![
+                    SatSys::gone(l.clone()),
+                    SatSys::gone(r.clone()),
+                    SatSys::pres(vec![l.clone(), r.clone()], vec![(l.clone(), r.clone(), -1)]),
+                    SatSys::pres(vec![l.clone(), r.clone()], vec![(r, l, -1)]),
                 ])
             }
         }
@@ -1701,114 +1858,178 @@ fn sat_dnf(
             let r = SatNode::New(s("right"));
             let k = if ty == "leSlotsOff" { int_val("offset") } else { 0 };
             if b {
-                Ok(vec![pres(vec![l.clone(), r.clone()], vec![(l, r, k)])])
+                Some(vec![SatSys::pres(vec![l.clone(), r.clone()], vec![(l, r, k)])])
             } else {
-                Ok(vec![
-                    gone(l.clone()),
-                    gone(r.clone()),
-                    pres(vec![l.clone(), r.clone()], vec![(r, l, -k - 1)]),
+                Some(vec![
+                    SatSys::gone(l.clone()),
+                    SatSys::gone(r.clone()),
+                    SatSys::pres(vec![l.clone(), r.clone()], vec![(r, l, -k - 1)]),
                 ])
             }
         }
-        _ => Err(DnfError::Outside { part, path, clause }),
+        _ => None,
     }
 }
 
-fn solve_system(sys: &SatSys) -> std::result::Result<(BTreeMap<String, i128>, BTreeMap<String, i128>), Value> {
-    for (p_node, p_clause, p_part) in &sys.present {
-        if let Some((_, a_clause, a_part)) = sys.absent.iter().find(|(a_node, _, _)| a_node == p_node) {
-            return Err(json!({
-                "kind": "clash",
-                "text": format!("{} must be both present and absent", p_node.text()),
-                "sources": [
-                    {"part": p_part, "path": [0], "clause": p_clause},
-                    {"part": a_part, "path": [0], "clause": a_clause},
-                ]
-            }));
-        }
-    }
-    let mut nodes: BTreeSet<SatNode> = BTreeSet::new();
-    nodes.insert(SatNode::Zero);
-    for (n, _, _) in &sys.present {
-        nodes.insert(n.clone());
-    }
-    for c in &sys.cons {
-        nodes.insert(c.x.clone());
-        nodes.insert(c.y.clone());
-    }
-    let mut dist: BTreeMap<SatNode, i128> = nodes.iter().map(|n| (n.clone(), 0)).collect();
-    let mut pred_edge: BTreeMap<SatNode, usize> = BTreeMap::new();
-    let n_count = nodes.len().max(1);
-    for _ in 0..n_count {
-        let mut changed = false;
-        for (idx, c) in sys.cons.iter().enumerate() {
-            let dy = dist.get(&c.y).copied().unwrap_or(0);
-            let dx = dist.get(&c.x).copied().unwrap_or(0);
-            if dx > dy.saturating_add(c.k) {
-                dist.insert(c.x.clone(), dy.saturating_add(c.k));
-                pred_edge.insert(c.x.clone(), idx);
-                changed = true;
+fn sat_dnf(b: bool, pred: &Value) -> Option<Vec<SatSys>> {
+    let ty = pred.get("type").and_then(Value::as_str).unwrap_or("");
+    match ty {
+        "not" => sat_dnf(!b, pred.get("predicate")?),
+        "all" | "any" => {
+            let children = pred.get("predicates")?.as_array()?;
+            let is_conj = (ty == "all" && b) || (ty == "any" && !b);
+            if is_conj {
+                let mut acc = vec![SatSys::default()];
+                for child in children.iter().rev() {
+                    let a = sat_dnf(b, child)?;
+                    let mut raw = Vec::with_capacity(a.len().saturating_mul(acc.len()));
+                    for s in &a {
+                        for r in &acc {
+                            raw.push(s.merge(r));
+                            if raw.len() > DNF_CAP {
+                                return None;
+                            }
+                        }
+                    }
+                    acc = prune_systems(raw);
+                }
+                Some(acc)
+            } else {
+                let mut acc = Vec::new();
+                for child in children.iter().rev() {
+                    let mut a = sat_dnf(b, child)?;
+                    if a.len() + acc.len() > DNF_CAP {
+                        return None;
+                    }
+                    a.extend(acc);
+                    acc = prune_systems(a);
+                }
+                Some(acc)
             }
         }
-        if !changed {
-            break;
+        _ => {
+            let ss = atom_dnf(b, pred)?;
+            if ss.len() <= DNF_CAP {
+                Some(ss)
+            } else {
+                None
+            }
         }
     }
-    // Check for negative cycle
-    for (idx, c) in sys.cons.iter().enumerate() {
-        let dy = dist.get(&c.y).copied().unwrap_or(0);
-        let dx = dist.get(&c.x).copied().unwrap_or(0);
-        if dx > dy.saturating_add(c.k) {
-            let mut cur = c.x.clone();
-            let mut current_edge = idx;
-            for _ in 0..=n_count {
-                let edge = &sys.cons[current_edge];
-                cur = edge.y.clone();
-                if let Some(&prev) = pred_edge.get(&cur) {
-                    current_edge = prev;
-                } else {
-                    break;
+}
+
+fn split_cycle(walk: &[SatCon]) -> Option<(Vec<SatCon>, Vec<SatCon>, Vec<SatCon>)> {
+    let mut acc: Vec<SatCon> = Vec::new();
+    for (idx, e) in walk.iter().enumerate() {
+        acc.push(e.clone());
+        if let Some(i) = acc.iter().position(|c| c.x == e.y) {
+            let pre = acc[..i].to_vec();
+            let cyc = acc[i..].to_vec();
+            let post = walk[idx + 1..].to_vec();
+            return Some((pre, cyc, post));
+        }
+    }
+    None
+}
+
+fn find_neg_cycle(mut fuel: usize, mut walk: Vec<SatCon>) -> Option<Vec<SatCon>> {
+    while fuel > 0 {
+        fuel -= 1;
+        let (pre, cyc, post) = split_cycle(&walk)?;
+        let sum: i128 = cyc.iter().map(|c| c.k).sum();
+        if sum < 0 {
+            return Some(cyc);
+        }
+        walk = pre;
+        walk.extend(post);
+    }
+    None
+}
+
+fn solve_system(
+    sys: &SatSys,
+    law: &Value,
+    query_pred: &Value,
+    target_pred: &Value,
+) -> std::result::Result<(BTreeMap<String, i128>, BTreeMap<String, i128>), Value> {
+    if let Some(v) = sys.present.iter().find(|v| sys.absent.contains(v)) {
+        let srcs: Vec<Value> = leaf_sources(target_pred, |s| s.present.contains(v) || s.absent.contains(v))
+            .into_iter()
+            .map(|p| source_json(law, query_pred, &p))
+            .collect();
+        return Err(json!({
+            "kind": "clash",
+            "node": v.json(),
+            "text": format!("{} must be both present and absent", v.text()),
+            "sources": srcs,
+        }));
+    }
+    let vs = sys.nodes();
+    let mut table: Vec<(SatNode, i128, Vec<SatCon>)> =
+        vs.iter().map(|v| (v.clone(), 0i128, Vec::new())).collect();
+    let look = |t: &[(SatNode, i128, Vec<SatCon>)], node: &SatNode| -> (i128, Vec<SatCon>) {
+        t.iter()
+            .find(|(n, _, _)| n == node)
+            .map(|(_, d, w)| (*d, w.clone()))
+            .unwrap_or((0, Vec::new()))
+    };
+    for _ in 0..vs.len() {
+        for c in &sys.cons {
+            let (dy, wy) = look(&table, &c.y);
+            let (dx, _) = look(&table, &c.x);
+            if dy.saturating_add(c.k) < dx {
+                let mut walk = Vec::with_capacity(wy.len() + 1);
+                walk.push(c.clone());
+                walk.extend(wy);
+                for entry in &mut table {
+                    if entry.0 == c.x {
+                        entry.1 = dy.saturating_add(c.k);
+                        entry.2 = walk.clone();
+                    }
                 }
             }
-            let start = cur.clone();
-            let mut cycle_edges = Vec::new();
-            loop {
-                let Some(&e_idx) = pred_edge.get(&cur) else {
-                    cycle_edges.push(c.clone());
-                    break;
-                };
-                let edge = sys.cons[e_idx].clone();
-                cur = edge.y.clone();
-                cycle_edges.push(edge);
-                if cur == start || cycle_edges.len() > n_count + 1 {
-                    break;
-                }
-            }
-            let sum: i128 = cycle_edges.iter().map(|e| e.k).sum();
-            let sum = if sum >= 0 { -1 } else { sum };
-            let constraints: Vec<Value> = cycle_edges
-                .iter()
-                .map(|e| {
-                    json!({
-                        "text": e.text(),
-                        "k": e.k.to_string(),
-                        "sources": [{"part": e.part, "path": [0], "clause": e.clause}]
-                    })
+        }
+    }
+    if let Some(violated) = sys.cons.iter().find(|c| {
+        let (dx, _) = look(&table, &c.x);
+        let (dy, _) = look(&table, &c.y);
+        dx > dy.saturating_add(c.k)
+    }) {
+        let (_, wy) = look(&table, &violated.y);
+        let mut walk = Vec::with_capacity(wy.len() + 1);
+        walk.push(violated.clone());
+        walk.extend(wy);
+        let cyc = find_neg_cycle(walk.len() + 1, walk).unwrap_or_else(|| vec![violated.clone()]);
+        let sum: i128 = cyc.iter().map(|e| e.k).sum();
+        let constraints: Vec<Value> = cyc
+            .iter()
+            .map(|e| {
+                let srcs: Vec<Value> = leaf_sources(target_pred, |s| s.cons.contains(e))
+                    .into_iter()
+                    .map(|p| source_json(law, query_pred, &p))
+                    .collect();
+                json!({
+                    "text": e.text(),
+                    "x": e.x.json(),
+                    "y": e.y.json(),
+                    "k": e.k,
+                    "sources": srcs,
                 })
-                .collect();
-            return Err(json!({
-                "kind": "cycle",
-                "sum": sum,
-                "sumText": sum.to_string(),
-                "constraints": constraints,
-            }));
-        }
+            })
+            .collect();
+        return Err(json!({
+            "kind": "cycle",
+            "sum": sum,
+            "sumText": sum.to_string(),
+            "constraints": constraints,
+        }));
     }
-    let z = dist.get(&SatNode::Zero).copied().unwrap_or(0);
+    let (z, _) = look(&table, &SatNode::Zero);
     let mut old = BTreeMap::new();
     let mut new = BTreeMap::new();
-    for (node, _, _) in &sys.present {
-        let val = dist.get(node).copied().unwrap_or(0).saturating_sub(z);
+    for node in &vs {
+        let (d, _) = look(&table, node);
+        let val = d.saturating_sub(z);
         match node {
             SatNode::Zero => {}
             SatNode::Old(s) => {
@@ -1830,10 +2051,27 @@ pub(crate) fn decide_local(
     from_here: bool,
 ) -> Result<Value> {
     let extra_pred = extra.cloned().unwrap_or_else(|| json!({"type":"all","predicates":[]}));
-    let (law_target, extra_target) = if from_here {
-        match (realize_scalar(law), realize_scalar(&extra_pred)) {
-            (Ok(l), Ok(e)) => (l, e),
-            (Err(slot), _) | (_, Err(slot)) => {
+    let query_pred = json!({"type":"all","predicates":[law.clone(), extra_pred.clone()]});
+    if let Some(path) = outside_path(&query_pred) {
+        let (part, rest) = match path.split_first() {
+            Some((0, rest)) => ("law", rest),
+            Some((_, rest)) => ("query", rest),
+            None => ("query", &[][..]),
+        };
+        let clause = subterm(&query_pred, &path)
+            .map(crate::shell::law::render_clause)
+            .unwrap_or_default();
+        return Ok(json!({
+            "verdict": "outside",
+            "part": part,
+            "path": rest,
+            "clause": clause,
+        }));
+    }
+    let target_pred = if from_here {
+        match realize_scalar(&query_pred) {
+            Ok(t) => t,
+            Err(slot) => {
                 return Ok(json!({
                     "verdict": "unrealizable",
                     "slot": slot,
@@ -1842,67 +2080,49 @@ pub(crate) fn decide_local(
             }
         }
     } else {
-        (law.clone(), extra_pred)
+        query_pred.clone()
     };
-    let law_sys = match sat_dnf(true, &law_target, "law", Vec::new()) {
-        Ok(s) => s,
-        Err(DnfError::Outside { part, path, clause }) => {
-            return Ok(json!({"verdict":"outside","part":part,"path":path,"clause":clause}))
-        }
-        Err(DnfError::PastCap) => {
-            return Ok(json!({"verdict":"unknown","reason":"cap","cap":DNF_CAP}))
-        }
+    let Some(systems) = sat_dnf(true, &target_pred) else {
+        return Ok(json!({"verdict":"unknown","reason":"cap","cap":DNF_CAP}));
     };
-    let extra_sys = match sat_dnf(true, &extra_target, "query", Vec::new()) {
-        Ok(s) => s,
-        Err(DnfError::Outside { part, path, clause }) => {
-            return Ok(json!({"verdict":"outside","part":part,"path":path,"clause":clause}))
-        }
-        Err(DnfError::PastCap) => {
-            return Ok(json!({"verdict":"unknown","reason":"cap","cap":DNF_CAP}))
-        }
-    };
-    let mut combined = Vec::new();
-    for l in &law_sys {
-        for e in &extra_sys {
-            combined.push(l.merge(e));
-            if combined.len() > DNF_CAP {
-                return Ok(json!({"verdict":"unknown","reason":"cap","cap":DNF_CAP}));
-            }
-        }
-    }
-    let sys_count = combined.len();
+    let sys_count = systems.len();
     let mut certificates = Vec::new();
-    for sys in &combined {
-        match solve_system(sys) {
+    for sys in &systems {
+        match solve_system(sys, law, &query_pred, &target_pred) {
             Ok((old, new)) => {
-                let state_json = |m: &BTreeMap<String, i128>| -> Vec<Value> {
-                    m.iter()
-                        .map(|(slot, v)| {
-                            json!({
-                                "slot": slot,
-                                "name": crate::shell::law::render_slot(slot),
-                                "value": v.to_string(),
-                                "text": crate::shell::law::render_value(slot, &v.to_string()),
+                if eval_pred(&target_pred, &old, &new) {
+                    let state_json = |m: &BTreeMap<String, i128>| -> Vec<Value> {
+                        m.iter()
+                            .map(|(slot, v)| {
+                                json!({
+                                    "slot": slot,
+                                    "name": crate::shell::law::render_slot(slot),
+                                    "value": v.to_string(),
+                                    "text": crate::shell::law::render_value(slot, &v.to_string()),
+                                })
                             })
-                        })
-                        .collect()
-                };
-                return Ok(json!({
-                    "verdict": "witness",
-                    "systems": sys_count,
-                    "old": state_json(&old),
-                    "new": state_json(&new),
-                }));
+                            .collect()
+                    };
+                    return Ok(json!({
+                        "verdict": "witness",
+                        "systems": sys_count,
+                        "old": state_json(&old),
+                        "new": state_json(&new),
+                    }));
+                }
             }
             Err(cert) => certificates.push(cert),
         }
     }
-    Ok(json!({
-        "verdict": "unsat",
-        "systems": sys_count,
-        "certificate": certificates,
-    }))
+    if certificates.len() == sys_count {
+        Ok(json!({
+            "verdict": "unsat",
+            "systems": sys_count,
+            "certificate": certificates,
+        }))
+    } else {
+        Ok(json!({"verdict":"unknown","reason":"decide"}))
+    }
 }
 
 #[cfg(test)]
@@ -2022,5 +2242,89 @@ mod tests {
             .clauses
             .iter()
             .any(|c| !c.passed && c.clause.contains("field 0 monotone")));
+    }
+
+    #[test]
+    fn write_once_absent_old_and_negation_match_pred_core_and_satisfiable_lean() {
+        let wo = json!({"type":"writeOnce","slot":"resource/field/0/after"});
+        let empty = BTreeMap::new();
+        let mut new_five = BTreeMap::new();
+        new_five.insert("resource/field/0/after".into(), 5);
+        // Absent in old -> writeOnce is true (`Pred/Core.lean` line 348)
+        assert!(eval_pred(&wo, &empty, &empty));
+        assert!(eval_pred(&wo, &empty, &new_five));
+        // Old == 0 -> writeOnce is true even if absent in new (`Pred/Core.lean` line 350)
+        let mut old_zero = BTreeMap::new();
+        old_zero.insert("resource/field/0/after".into(), 0);
+        assert!(eval_pred(&wo, &old_zero, &empty));
+        assert!(eval_pred(&wo, &old_zero, &new_five));
+        // Old == 5 -> writeOnce requires new == Some(5)
+        let mut old_five = BTreeMap::new();
+        old_five.insert("resource/field/0/after".into(), 5);
+        assert!(!eval_pred(&wo, &old_five, &empty));
+        assert!(eval_pred(&wo, &old_five, &new_five));
+
+        // Negated writeOnce (`not (field 0 writeOnce)`) must produce a witness that actually falsifies writeOnce
+        let not_wo = json!({"type":"not","predicate":wo.clone()});
+        let ans = decide_local(&not_wo, None, false).unwrap();
+        assert_eq!(verdict(&ans), "witness");
+        let to_map = |key: &str| -> BTreeMap<String, i128> {
+            ans.get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| Some((e.get("slot")?.as_str()?.to_owned(), e.get("value")?.as_str()?.parse().ok()?)))
+                .collect()
+        };
+        let w_old = to_map("old");
+        let w_new = to_map("new");
+        assert!(eval_pred(&not_wo, &w_old, &w_new), "witness must satisfy not(writeOnce): old={w_old:?} new={w_new:?}");
+
+        // `field 0 writeOnce && not (field 0 writeOnce)` is unsatisfiable
+        let contra = json!({"type":"all","predicates":[wo, not_wo]});
+        let contra_ans = decide_local(&contra, None, false).unwrap();
+        assert_eq!(verdict(&contra_ans), "unsat");
+    }
+
+    #[test]
+    fn decide_local_matches_lean_falsifier_outside_sum_eq_and_guarded_pruning() {
+        // 1. Falsifier cycle names clause [0] and clause [2] (excluding monotone)
+        let (fals, _) = parse_law_input("field 1 <= 0; field 1 monotone; field 1 == 1", "7").unwrap();
+        let ans = decide_local(&fals, None, false).unwrap();
+        assert_eq!(verdict(&ans), "unsat");
+        let lines = unsat_lines(&ans, "the check");
+        assert!(lines.iter().any(|l| l.contains("clause [0] `field 1 <= 0`")), "lines: {lines:?}");
+        assert!(lines.iter().any(|l| l.contains("clause [2] `field 1 == 1`")), "lines: {lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("monotone")), "monotone must not be in cycle: {lines:?}");
+
+        // 2. `ran` leaf is outside the arithmetic fragment at path [1]
+        let ran_law = json!({"type":"all","predicates":[
+            {"type":"le","slot":"resource/field/1/after","value":"5"},
+            {"type":"ran","program":"7"}
+        ]});
+        let ran_ans = decide_local(&ran_law, None, false).unwrap();
+        assert_eq!(verdict(&ran_ans), "outside");
+        assert!(outside_text(&ran_ans).contains("outside the decidable fragment: `ran 7` (at [1])"));
+
+        // 3. Guarded 8-clause law prunes subsumed systems to 4 systems instead of 4^8
+        let guarded_clauses: Vec<String> = (1..=8)
+            .map(|i| format!("any [ field {i} monotone, not (verb == write) ]"))
+            .collect();
+        let (guarded_pred, _) = parse_law_input(&guarded_clauses.join("; "), "7").unwrap();
+        let guarded_ans = decide_local(&guarded_pred, None, false).unwrap();
+        assert_eq!(verdict(&guarded_ans), "witness");
+        assert_eq!(guarded_ans["systems"].as_u64(), Some(4));
+
+        // 4. `sumEq` evaluation in `eval_pred`
+        let sum_eq = json!({"type":"sumEq","left":["a","b"],"right":["c"]});
+        let mut st = BTreeMap::new();
+        st.insert("a".into(), 2);
+        st.insert("b".into(), 3);
+        st.insert("c".into(), 5);
+        assert!(eval_pred(&sum_eq, &BTreeMap::new(), &st));
+        st.insert("c".into(), 6);
+        assert!(!eval_pred(&sum_eq, &BTreeMap::new(), &st));
+        st.remove("b");
+        assert!(!eval_pred(&sum_eq, &BTreeMap::new(), &st));
     }
 }

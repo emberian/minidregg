@@ -592,6 +592,18 @@ impl HostProof<'_> {
         {
             return Err(fail("verifier result and response disagree"));
         }
+        record_verified_witness(
+            &response["from"]["height"],
+            &response["from"]["worldRoot"],
+            &response["startChain"],
+            &response["fromSiblings"],
+        );
+        record_verified_witness(
+            &response["to"]["height"],
+            &response["to"]["worldRoot"],
+            &response["endChain"],
+            &response["toSiblings"],
+        );
         Ok((point, complete))
     }
 }
@@ -873,23 +885,61 @@ pub(crate) fn finish_attempt(
     result.map_err(|error: String| format!("{error}; receipt acknowledgment refused, but mutation may already be accepted; retain the exact attempt and recover by lookup"))
 }
 
-fn retain_attempt_witness_if_matching(root: &Path, attempt: &Path, outcome: &Value) {
-    let Ok(anchor_val) = read_json(&root.join(DIRECTORY).join("anchor.json")) else {
+static VERIFIED_WITNESSES: std::sync::Mutex<Vec<(String, String, String, Value)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn record_verified_witness(height: &Value, world_root: &Value, chain: &Value, siblings: &Value) {
+    let (Some(h), Some(r), Some(c)) = (height.as_str(), world_root.as_str(), chain.as_str()) else {
         return;
     };
-    if anchor_val["point"]["height"] == outcome["acceptedCount"]
-        && anchor_val["point"]["worldRoot"] == outcome["worldRoot"]
-        && anchor_val.get("chain").is_some()
-        && anchor_val.get("siblings").is_some()
-    {
+    if !siblings.is_array() {
+        return;
+    }
+    if let Ok(mut cache) = VERIFIED_WITNESSES.lock() {
+        cache.retain(|(eh, er, _, _)| !(eh == h && er == r));
+        cache.push((h.to_owned(), r.to_owned(), c.to_owned(), siblings.clone()));
+    }
+}
+
+fn retain_attempt_witness_if_matching(root: &Path, attempt: &Path, outcome: &Value) {
+    let (Some(height), Some(world_root)) = (
+        outcome["acceptedCount"].as_str(),
+        outcome["worldRoot"].as_str(),
+    ) else {
+        return;
+    };
+    let mut found: Option<(Value, Value)> = None;
+    if let Ok(anchor_val) = read_json(&root.join(DIRECTORY).join("anchor.json")) {
+        if anchor_val["point"]["height"].as_str() == Some(height)
+            && anchor_val["point"]["worldRoot"].as_str() == Some(world_root)
+            && anchor_val.get("chain").is_some()
+            && anchor_val.get("siblings").is_some()
+        {
+            found = Some((anchor_val["chain"].clone(), anchor_val["siblings"].clone()));
+        }
+    }
+    if found.is_none() {
+        if let Ok(cache) = VERIFIED_WITNESSES.lock() {
+            if let Some((_, _, chain, siblings)) = cache
+                .iter()
+                .rev()
+                .find(|(h, r, _, _)| h == height && r == world_root)
+            {
+                found = Some((json!(chain), siblings.clone()));
+            }
+        }
+    }
+    if let Some((chain, siblings)) = found {
         let witness = json!({
             "type": "minidregg-world-root-opening-v1",
-            "height": outcome["acceptedCount"],
-            "worldRoot": outcome["worldRoot"],
-            "chain": anchor_val["chain"],
-            "siblings": anchor_val["siblings"],
+            "height": height,
+            "worldRoot": world_root,
+            "chain": chain,
+            "siblings": siblings,
         });
-        let _ = save(attempt, "continuity-witness.json", &witness);
+        if let Ok(bytes) = serde_json::to_vec(&witness) {
+            let _ = crate::fsio::replace_private(&attempt.join("continuity-witness.json"), &bytes);
+        }
     }
 }
 
@@ -1026,6 +1076,11 @@ pub(crate) fn check_retained(
             Mode::Ordinary
         },
     )?;
+    retain_attempt_witness_if_matching(
+        root,
+        &attempt,
+        &json!({"acceptedCount": point["height"], "worldRoot": point["worldRoot"]}),
+    );
     Ok(
         json!({"type":"minidregg-receipt-continuity-checked-v1","historical":historical,"point":point}),
     )
@@ -1386,19 +1441,31 @@ pub(crate) fn verify_attempt_inclusion(
     workspace: &Value,
     attempt: &Path,
 ) -> Result<VerifiedInclusion> {
-    let outcome = match workspace::retained_attempt_outcome(attempt)? {
-        workspace::AttemptOutcome::Confirmed(v) | workspace::AttemptOutcome::Charged(v) => v,
+    let (height_str, world_root_str) = match workspace::retained_attempt_outcome(attempt)? {
+        workspace::AttemptOutcome::Confirmed(v) | workspace::AttemptOutcome::Charged(v) => (
+            text(&v, "acceptedCount")?.to_owned(),
+            text(&v, "worldRoot")?.to_owned(),
+        ),
         workspace::AttemptOutcome::Refused => {
             return Err(fail("refused attempt has no confirmation worldRoot to open"))
         }
         workspace::AttemptOutcome::Pending => {
-            return Err(fail(
-                "undecided attempt has no confirmation point yet; run lookup or retry first",
-            ))
+            let witness_file = attempt.join("continuity-witness.json");
+            if witness_file.is_file() {
+                let val = read_json_mode(&witness_file, false)?;
+                (
+                    text(&val, "height")?.to_owned(),
+                    text(&val, "worldRoot")?.to_owned(),
+                )
+            } else {
+                return Err(fail(
+                    "undecided attempt has no confirmation point yet; run lookup or retry first",
+                ));
+            }
         }
     };
-    let height = text(&outcome, "acceptedCount")?;
-    let world_root = text(&outcome, "worldRoot")?;
+    let height = height_str.as_str();
+    let world_root = world_root_str.as_str();
     decimal(height)?;
     decimal(world_root)?;
 
@@ -1425,7 +1492,7 @@ pub(crate) fn verify_attempt_inclusion(
             let chain = text(&val, "chain")?;
             let siblings = parse_string_list(&val, "siblings", 256)?;
             let verified = verify_world_root_opening(height, world_root, chain, &siblings)?;
-            let _ = create_file(
+            let _ = crate::fsio::replace_private(
                 &attempt.join("inclusion-opening.json"),
                 &serde_json::to_vec(&verified.json()).map_err(fail)?,
             );
@@ -1447,7 +1514,7 @@ pub(crate) fn verify_attempt_inclusion(
                     let chain = text(&anchor_val, "chain")?;
                     let siblings = parse_string_list(&anchor_val, "siblings", 256)?;
                     let verified = verify_world_root_opening(height, world_root, chain, &siblings)?;
-                    let _ = create_file(
+                    let _ = crate::fsio::replace_private(
                         &attempt.join("inclusion-opening.json"),
                         &serde_json::to_vec(&verified.json()).map_err(fail)?,
                     );
@@ -1540,7 +1607,7 @@ pub(crate) fn verify_attempt_inclusion(
     verified.suffix = suffix;
     let mut persisted = verified.json();
     persisted["fromSiblings"] = json!(from_siblings);
-    let _ = create_file(
+    let _ = crate::fsio::replace_private(
         &attempt.join("inclusion-opening.json"),
         &serde_json::to_vec(&persisted).map_err(fail)?,
     );
@@ -2090,5 +2157,44 @@ mod tests {
         fs::write(attempt.join("continuity-witness.json"), serde_json::to_vec(&tampered).unwrap()).unwrap();
         assert!(load_verified_attempt_inclusion(&attempt, height, &world_root).unwrap().is_err());
         assert!(verify_attempt_inclusion(&root.0, &ws, &attempt).is_err());
+    }
+
+    #[test]
+    fn retain_attempt_witness_and_verify_from_cached_hop_or_public_mode_dir() {
+        let root = Temp::new();
+        let ws = json!({"type":"minidregg-participant-workspace-v1"});
+        save(&root.0, "workspace.json", &ws).unwrap();
+
+        let height = "15";
+        let chain = "555666777";
+        let siblings = vec!["101".to_owned(), "202".to_owned()];
+        let world_root = compute_world_root_from_system_opening(height, chain, &siblings)
+            .unwrap()
+            .world_root;
+
+        // Simulate a verified hop where `from` was at height 15 while `anchor.json` is at height 30
+        record_verified_witness(
+            &json!(height),
+            &json!(world_root),
+            &json!(chain),
+            &json!(siblings),
+        );
+
+        // Create attempt directory with standard 0755 permissions (not 0700) and no outcome.json (as in check_retained)
+        let attempt = root.0.join("attempts").join("r-hist15");
+        fs::create_dir_all(&attempt).unwrap();
+        fs::set_permissions(&attempt, fs::Permissions::from_mode(0o755)).unwrap();
+
+        retain_attempt_witness_if_matching(
+            &root.0,
+            &attempt,
+            &json!({"acceptedCount": height, "worldRoot": world_root}),
+        );
+        assert!(attempt.join("continuity-witness.json").is_file());
+
+        let verified = verify_attempt_inclusion(&root.0, &ws, &attempt).unwrap();
+        assert_eq!(verified.height, height);
+        assert_eq!(verified.world_root, world_root);
+        assert!(attempt.join("inclusion-opening.json").is_file());
     }
 }
