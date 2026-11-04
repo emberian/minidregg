@@ -8,7 +8,7 @@ it waits); every later turn also sends the ordinary model reply itself so the
 controller's final delivery must recognise it instead of writing twice. Which
 author is served first is the controller's decision and is never assumed here.
 """
-import hashlib,http.client,json,os,pathlib,sqlite3,subprocess,sys,time,urllib.parse
+import hashlib,http.client,json,os,pathlib,re,sqlite3,subprocess,sys,time,urllib.parse
 os.umask(0o077)
 W=pathlib.Path('/workspace'); HOME=W/'.hermes'; SID='native-completion-cut'
 def save(name,value): (W/name).write_text(json.dumps(value,indent=2))
@@ -102,13 +102,23 @@ for line in sys.stdin:
         if written.get('isError'):raise RuntimeError('source protected summary write failed: '+str(written))
         verified=call('tools/call',{'name':'mini_doc_show','arguments':{'doc':output}})
         save('shared-summary-readback-'+tag+'.json',verified)
-        # The provider echoes the captured document, which has several lines in a composed world; the document renders a
-        # newline as U+2424, so the appended body is looked for in that rendering, not as the raw text.
+        # The provider echoes the captured document, which has several lines in a composed world, so the appended
+        # body is looked for in the document's own rendering, not as the raw text. The renderer numbers every line
+        # (`NNN  ` gutter): a multi-line append comes back as consecutive numbered lines, matched here with the
+        # gutter stripped once per line. An older renderer joined the lines with U+2424; that is still accepted.
         def body_present():
             if text in json.dumps(verified): return True
             try: rendered=json.loads(verified['content'][0]['text']).get('text','')
             except (ValueError,KeyError,IndexError,TypeError,AttributeError): return False
-            return text.replace('\n','\u2424') in rendered
+            if text.replace('\n','\u2424') in rendered: return True
+            got=[re.sub(r'^\s*\d+  ','',line,count=1).rstrip() for line in rendered.split('\n')]
+            wanted=[line.rstrip() for line in text.split('\n')]
+            while wanted and not wanted[0]: wanted.pop(0)
+            while wanted and not wanted[-1]: wanted.pop()
+            def contiguous(haystack,needle):
+                return bool(needle) and any(haystack[i:i+len(needle)]==needle for i in range(len(haystack)-len(needle)+1))
+            # Blank appended lines may be rendered or dropped: accept the exact sequence or the non-blank one.
+            return contiguous(got,wanted) or contiguous([l for l in got if l],[l for l in wanted if l])
         if verified.get('isError') or not body_present():raise RuntimeError('source summary readback did not verify body')
         # Later turns exercise ordinary native model-say deduplication; the
         # first still requires the delayed final delivery after the held rows.
