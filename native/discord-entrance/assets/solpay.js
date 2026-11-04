@@ -116,6 +116,7 @@
     toString() { return this.toBase58(); }
     equals(o) { const b = o.toBytes(); return b.length === 32 && b.every((x, i) => x === this._b[i]); }
   }
+  const SYSTEM_PROGRAM = new PublicKey(new Uint8Array(32));
   const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
   const MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
   const PDA_TAG = new TextEncoder().encode("ProgramDerivedAddress");
@@ -129,7 +130,16 @@
   }
   const ata = (owner, tokenProgram, mint) => findProgramAddress([owner.toBytes(), tokenProgram.toBytes(), mint.toBytes()], ATA_PROGRAM)[0];
 
-  // ---- the two instructions ----
+  // ---- the instructions ----
+  function createAtaIdempotent({ payer, ata, owner, mint, tokenProgram }) {
+    return { programId: ATA_PROGRAM, data: Uint8Array.of(1), keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: ata, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: false, isWritable: false },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: SYSTEM_PROGRAM, isSigner: false, isWritable: false },
+      { pubkey: tokenProgram, isSigner: false, isWritable: false } ] };
+  }
   function transferChecked({ tokenProgram, source, mint, destination, owner, amount, decimals }) {
     const data = new Uint8Array(10);
     data[0] = 12; // TransferChecked
@@ -256,6 +266,6 @@
     }
   }
 
-  return { b58encode, b58decode, sha256, isOnCurve, PublicKey, ATA_PROGRAM, MEMO_PROGRAM, findProgramAddress, ata, transferChecked, memo,
+  return { b58encode, b58decode, sha256, isOnCurve, PublicKey, SYSTEM_PROGRAM, ATA_PROGRAM, MEMO_PROGRAM, findProgramAddress, ata, createAtaIdempotent, transferChecked, memo,
     compileMessage, unsignedWire, wireWith, decodeWire, Connection };
 });

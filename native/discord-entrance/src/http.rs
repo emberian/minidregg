@@ -130,3 +130,17 @@ pub fn write_response(
     stream.write_all(body)?;
     stream.flush()
 }
+
+pub fn write_attachment(
+    stream: &mut TcpStream,
+    filename: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{filename}\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes())?;
+    stream.write_all(body)?;
+    stream.flush()
+}

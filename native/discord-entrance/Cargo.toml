@@ -45,6 +45,7 @@ rustls-pemfile = "=2.2.0"
 sha2 = "=0.10.9"
 # The key broker client: the mirror posts and reads through it and holds no Discord secret.
 minidregg-mini-keys = { path = "../mini-keys", default-features = false }
+minidregg-mini-session-env = { path = "../mini-session-env" }
 
 [dev-dependencies]
 # The broker itself, so the mirror's tests reach the fake Discord through a real one.

@@ -1066,14 +1066,18 @@ impl Args {
         let mut values = Vec::new();
         let no_command = || format!("no command given\n\n{USAGE}");
         let mut command = raw.next().ok_or_else(no_command)?;
-        if command == OsStr::new("--verify-host") {
-            VERIFY_HOST.store(true, Ordering::Relaxed);
-            command = raw.next().ok_or_else(no_command)?;
-        }
-        if command == OsStr::new("--remote") {
-            let destination = raw.next().ok_or("missing value for --remote")?;
-            values.push((command, destination));
-            command = raw.next().ok_or_else(no_command)?;
+        loop {
+            if command == OsStr::new("--verify-host") {
+                VERIFY_HOST.store(true, Ordering::Relaxed);
+                command = raw.next().ok_or_else(no_command)?;
+            } else if command == OsStr::new("--remote") || command == OsStr::new("--socket") {
+                let name = command.to_string_lossy().into_owned();
+                let destination = raw.next().ok_or_else(|| format!("missing value for {name}"))?;
+                values.push((command, destination));
+                command = raw.next().ok_or_else(no_command)?;
+            } else {
+                break;
+            }
         }
         if command == OsStr::new("--help") || command == OsStr::new("-h") {
             return Err(USAGE.to_owned());

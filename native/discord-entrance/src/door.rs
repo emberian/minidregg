@@ -100,7 +100,7 @@ pub fn is_link_code(s: &str) -> bool {
     s.len() == 16 && s.bytes().all(|c| B32.contains(&c))
 }
 
-fn b64_decode(text: &str) -> Option<Vec<u8>> {
+pub fn b64_decode(text: &str) -> Option<Vec<u8>> {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     if text.len() % 4 != 0 {
         return None;

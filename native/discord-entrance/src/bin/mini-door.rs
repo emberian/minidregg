@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use minidregg_discord_entrance::door::{self, html, Request, Route};
-use minidregg_discord_entrance::http::{read_request, write_response};
+use minidregg_discord_entrance::http::{read_request, write_attachment, write_response};
 use minidregg_discord_entrance::{env_u64, now_s};
 use serde_json::Value;
 
@@ -194,11 +194,13 @@ impl Door {
         let state = self.state();
         let free = state["free"].as_bool().unwrap_or(false);
         let paid = state["paid"].as_bool().unwrap_or(false);
-        let mut body = String::from(
-            "<p class=warn><strong>Everything on this box is world-readable</strong> to every member, and your Mini \
-             signing key is held on the box (a hosted account). Do not put anything here you would not publish.</p>\
-             <p>You get a Mini account on this demo box: a workspace in the browser, and, if you supply an ssh key, \
-             shell access via <code>ssh -t mini-s-NAME@demo.dregg.online</code>. Provisioning takes a minute or two.</p>",
+        let port = state["sshPort"].as_u64().unwrap_or(2222);
+        let port_flag = if port == 22 { String::new() } else { format!("-p {port} ") };
+        let mut body = format!(
+            "<p class=warn><strong>Public demo box:</strong> everything here is readable by other members, and your account key \
+             is hosted on the box. Do not post private data.</p>\
+             <p>Get a Mini account with a browser workspace and (if you add an SSH key) shell access via \
+             <code>ssh -t {port_flag}mini-s-NAME@demo.dregg.online</code>.</p>"
         );
         if !free && !paid {
             let why = state["freeReason"].as_str().unwrap_or("the door is not open yet");
@@ -206,24 +208,17 @@ impl Door {
             return page("Join the Mini demo", &body);
         }
         body.push_str("<form method=post action=/join>\
-            <p><label>Name (2 to 25 letters, digits or -, starting with a letter; you log in as <code>mini-s-NAME</code>)<br>\
+            <p><label>Account name (2–25 lowercase letters, digits or <code>-</code>, starting with a letter)<br>\
             <input type=text name=name required maxlength=25 pattern=\"[a-z][a-z0-9-]{1,24}\"></label></p>\
-            <p><label>Your ssh public key, <em>optional</em> (the one line in <code>~/.ssh/id_ed25519.pub</code>; make one with \
-            <code>ssh-keygen -t ed25519</code>). Without one, your account opens in the browser only, through the one-time link the \
-            status page shows; the paid route needs a key (its memo is signed with it).<br><textarea name=key rows=3 maxlength=600></textarea></label></p>");
+            <p><label>SSH public key (<code>ssh-ed25519 …</code>; optional for free accounts, required for paid entry)<br>\
+            <textarea name=key rows=3 maxlength=600></textarea></label></p>");
         if free {
-            // The amount is the processor's configured funding (door.json), published in door-state.json.
-            let funded = match state["funding"].as_str().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
-                Some(n) => format!("Free: the box funds {} credits, enough for two apps and their weeks", html(n)),
-                None => "Free: the box funds a starting balance (the amount is published once the door's processor has run)".to_owned(),
-            };
-            body.push_str(&format!("<p><label><input type=radio name=route value=free checked> {funded}</label><br>"));
-            // Only when the door holds seats for invite codes; with no reserve the page says nothing of codes.
+            body.push_str("<p><label><input type=radio name=route value=free checked> Free: sponsored starter account</label><br>");
             if state["inviteReserve"].as_u64().unwrap_or(0) > 0 {
                 let open = state["openSeats"].as_u64().unwrap_or(0);
                 let held = state["reservedSeats"].as_u64().unwrap_or(0);
-                body.push_str(&format!("{open} open free seats remain; {held} more are held for people with an invite code (a code is single-use and issued by the operator).<br>\
-                    <label>Invite code, <em>optional</em> (free route only)<br><input type=text name=invite maxlength=64 pattern=\"[A-Za-z0-9-]{{8,64}}\" autocomplete=off></label><br>"));
+                body.push_str(&format!("{open} open free seats remain ({held} reserved for invite codes).<br>\
+                    <label>Invite code, <em>optional</em><br><input type=text name=invite maxlength=64 pattern=\"[A-Za-z0-9-]{{8,64}}\" autocomplete=off></label><br>"));
             }
         } else {
             let why = state["freeReason"].as_str().unwrap_or("closed");
@@ -232,22 +227,17 @@ impl Door {
         if paid {
             let network = state["network"].as_str().unwrap_or("?");
             body.push_str(&format!(
-                "<label><input type=radio name=route value=paid{}> Pay: 50 DREGG a week on Solana, from your wallet in the browser or by pasting a signature {} (your wallet, ssh key and account are then publicly linked on-chain)</label>",
+                "<label><input type=radio name=route value=paid{}> Pay: 50 DREGG / week on Solana ({})</label>",
                 if free { "" } else { " checked" },
                 html(network)
             ));
         }
-        body.push_str(&format!("</p><p class=policy>{}</p><p><label><input type=checkbox name=research value=cc0> contribute my data for research (CC0; kept private until reviewed)</label></p>", html(door::RETENTION_POLICY)));
-        body.push_str("<p><label><input type=checkbox name=discord value=on> Link a Discord account (you get a one-time code)</label></p>\
-            <p><button>Request an account</button></p></form>");
+        body.push_str(&format!("</p><p class=policy>{}</p><p><label><input type=checkbox name=research value=cc0> Contribute my activity for research (CC0)</label></p>", html(door::RETENTION_POLICY)));
+        body.push_str("<p><label><input type=checkbox name=discord value=on> Link a Discord account</label></p>\
+            <p><button>Create account</button></p></form>");
         page("Join the Mini demo", &body)
     }
 
-    /// The stranger's status page. Beside the login lines it says where the built-in story welcome
-    /// stands (`story` on the request: the author's invitation handed to the member's
-    /// HOME/requests, then the member's join): joined, on its way, or stopped with the processor's
-    /// reason. Joining and playing happen in the member's workspace (`/story`, same origin), where
-    /// the invitation waits; the door retries a failed join on its next run.
     fn status_page(&self, id: &str) -> (u16, Vec<u8>) {
         let Some(v) = read_json(&self.status.join(format!("{id}.json"))) else {
             if self.queue.join(format!("join-{id}.json")).exists() {
@@ -260,70 +250,73 @@ impl Door {
         let mut body = format!("<p>Request <code>{}</code> for <code>{}</code>: <strong>{}</strong>.</p>", html(id), html(name), html(phase));
         if let Some(detail) = v["detail"].as_str() {
             body.push_str(&format!("<p>{}</p>", html(detail)));
+        } else if matches!(phase, "account" | "keyed" | "signed" | "paid") {
+            body.push_str("<p>Provisioning in progress; reload in a minute.</p>");
         }
-        if let Some(login) = v["login"].as_str() {
-            body.push_str(&format!("<p>Log in with:</p><pre>ssh -t {}</pre>", html(login)));
-        }
-        if let Some(n) = v["funding"].as_str() {
-            body.push_str(&format!("<p>The box funded your account with <strong>{} credits</strong>.</p>", html(n)));
+        if phase == "enrolled" {
+            if let Some(login) = v["login"].as_str() {
+                body.push_str(&format!("<p>Log in with:</p><pre>ssh -t {}</pre>", html(login)));
+            }
         }
         if let Some(web) = v["webLogin"].as_str() {
             body.push_str(&format!(
-                "<p>{lead} open your workspace in the browser (this link works once, within 7 days; it opens a session, never a key):</p><pre><a href=\"{web}\">{web}</a></pre>",
+                "<p>{lead} open your workspace in the browser (one-time link, valid for 7 days):</p><pre><a href=\"{web}\">{web}</a></pre>",
                 web = html(web),
-                lead = if v["login"].is_null() { "Your account has no ssh login (you gave no key):" } else { "Or" }
+                lead = if phase != "enrolled" || v["login"].is_null() { "Browser workspace —" } else { "Or" }
             ));
         }
         if let Some(code) = v["linkCode"].as_str() {
-            body.push_str(&format!("<p>In Discord, type (once, within 7 days):</p><pre>/mini line:link {}</pre>", html(code)));
+            body.push_str(&format!("<p>In Discord, run once within 7 days:</p><pre>/mini line:link {}</pre>", html(code)));
         }
         body.push_str(&story_section(&v["story"]));
         if phase == "sign" {
-            if let Some(message) = v["sign"]["message"].as_str() {
+            if v["sign"]["message"].as_str().is_some() {
                 body.push_str(&format!(
-                    "<p>Prove you hold the ssh key: on your machine run</p>\
-                     <pre>printf '%s' '{}' | base64 -d &gt; dregg-enrol.msg\nssh-keygen -Y sign -n {} -f ~/.ssh/id_ed25519 dregg-enrol.msg</pre>\
-                     <p>and paste the whole of <code>dregg-enrol.msg.sig</code> here before chain hour {}:</p>\
-                     <form method=post action=/join/sign><input type=hidden name=id value=\"{}\">\
-                     <textarea name=signature rows=8 required maxlength=2048></textarea><p><button>Send the signature</button></p></form>",
-                    html(message),
-                    html(v["sign"]["namespace"].as_str().unwrap_or("dregg-enrol@v2")),
-                    html(&v["sign"]["expiryHour"].to_string()),
-                    html(id)
+                    "<p>1. <a href=\"/join/status/{id}/dregg-enrol.msg\" download=\"dregg-enrol.msg\">Download <code>dregg-enrol.msg</code></a> and sign it with your SSH key:</p>\
+                     <pre>ssh-keygen -Y sign -n {namespace} -f ~/.ssh/id_ed25519 dregg-enrol.msg</pre>\
+                     <p>2. Paste <code>dregg-enrol.msg.sig</code> (before chain hour {expiry}):</p>\
+                     <form method=post action=/join/sign><input type=hidden name=id value=\"{id}\">\
+                     <textarea name=signature rows=8 required maxlength=2048></textarea><p><button>Submit signature</button></p></form>",
+                    id = html(id),
+                    namespace = html(v["sign"]["namespace"].as_str().unwrap_or("dregg-enrol@v2")),
+                    expiry = html(&v["sign"]["expiryHour"].to_string()),
                 ));
             }
         }
         if phase == "awaiting-payment" {
             let p = &v["payment"];
-            // The quote, once, as data: the wallet script reads it from here (the same recipient,
-            // amount, mint and memo the paste path shows), and the request id it posts with.
             let mut quote = p.clone();
             quote["id"] = Value::String(id.to_owned());
             let quote_json = serde_json::to_string(&quote).unwrap_or_default().replace("</", "<\\/");
             body.push_str(&format!(
-                "<p>Pay exactly <strong>{} atomic units</strong> ({}) to</p><pre>{}</pre><p>with this memo (one SPL Memo instruction):</p><pre>{}</pre>\
-                 <p>before chain hour {}.</p>\
+                "<p>Send <strong>{}</strong> (<code>{}</code> atomic units) to:</p><pre>{}</pre><p>with SPL Memo:</p><pre>{}</pre>\
                  <script type=\"application/json\" id=\"quote\">{quote_json}</script>\
                  <section id=\"wallet-pay\"><h2>Pay with your wallet</h2>\
-                 <p>Your browser builds the transfer (your token account to the recipient's, with the memo above, byte for byte), your wallet signs it, \
-                 your browser sends it to <code>{}</code> and posts the signature here. The box never sees your wallet. <noscript>This needs JavaScript; the paste path below does not.</noscript></p>\
+                 <p>Connect a Solana wallet to sign and send this transfer via <code>{}</code>. <noscript>Requires JavaScript; or paste the transaction signature below.</noscript></p>\
                  <p class=wallets></p><p class=status role=status></p><p class=sent></p></section>\
                  <section><h2>Or paste the transaction signature</h2>\
                  <form method=post action=/join/paid><input type=hidden name=id value=\"{}\">\
                  <input type=text name=transaction required maxlength=88><p><button>I have paid</button></p></form></section>\
                  <script src=/join/assets/solpay.js></script><script src=/join/assets/wallet.js></script><script src=/join/assets/pay.js></script>\
                  <script>{WALLET_PAGE}</script>",
+                html(p["amountTokens"].as_str().unwrap_or("?")),
                 html(p["amountAtomic"].as_str().unwrap_or("?")),
-                html(p["amountTokens"].as_str().unwrap_or("")),
                 html(p["recipient"].as_str().unwrap_or("?")),
                 html(p["memo"].as_str().unwrap_or("?")),
-                html(&p["expiryHour"].to_string()),
                 html(p["rpc"].as_str().unwrap_or("the cluster")),
                 html(id)
             ));
         }
-        body.push_str("<p>This page is your request's only key: keep its address private.</p>");
+        body.push_str("<p>Bookmark this page to check your request status.</p>");
         (200, page("Your Mini account", &body))
+    }
+
+    fn challenge_file(&self, id: &str) -> Option<Vec<u8>> {
+        if !door::is_request_id(id) {
+            return None;
+        }
+        let v = read_json(&self.status.join(format!("{id}.json")))?;
+        door::b64_decode(v["sign"]["message"].as_str()?)
     }
 
     fn admit_post(&self, key: &str, now: u64) -> Result<(), (u16, String)> {
@@ -459,6 +452,12 @@ impl Door {
             if let Some((bytes, kind)) = asset(&req.path) {
                 let _ = write_response(&mut stream, 200, "OK", kind, bytes);
                 return;
+            }
+            if let Some(id) = req.path.strip_prefix("/join/status/").and_then(|s| s.strip_suffix("/dregg-enrol.msg")) {
+                if let Some(bytes) = self.challenge_file(id) {
+                    let _ = write_attachment(&mut stream, "dregg-enrol.msg", &bytes);
+                    return;
+                }
             }
         }
         let (status, body) = match (req.method.as_str(), req.path.as_str()) {
@@ -660,8 +659,25 @@ mod tests {
         let body = String::from_utf8(body).unwrap();
         assert_eq!(status, 200);
         assert!(body.contains("&lt;script&gt;") && !body.contains("<script>"));
-        assert!(body.contains("ssh-keygen -Y sign -n dregg-enrol@v2"));
+        assert!(body.contains(&format!("/join/status/{id}/dregg-enrol.msg")) && !body.contains("base64 -d"), "{body}");
+        assert!(body.contains("ssh-keygen -Y sign -n dregg-enrol@v2 -f ~/.ssh/id_ed25519 dregg-enrol.msg"));
         assert!(body.contains("action=/join/sign"));
+        assert_eq!(d.challenge_file(&id).as_deref(), Some(&b"ABC"[..]));
+        assert_eq!(d.challenge_file("not-a-request-id"), None);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        use std::io::{Read, Write};
+        client.write_all(format!("GET /join/status/{id}/dregg-enrol.msg HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes()).unwrap();
+        d.connection(server);
+        let mut resp = Vec::new();
+        client.read_to_end(&mut resp).unwrap();
+        let resp_str = String::from_utf8(resp).unwrap();
+        assert!(resp_str.starts_with("HTTP/1.1 200 OK\r\n"), "{resp_str}");
+        assert!(resp_str.contains("Content-Type: application/octet-stream\r\n"), "{resp_str}");
+        assert!(resp_str.contains("Content-Disposition: attachment; filename=\"dregg-enrol.msg\"\r\n"), "{resp_str}");
+        assert!(resp_str.ends_with("\r\n\r\nABC"), "{resp_str}");
         assert_eq!(d.status_page(&door::new_request_id().unwrap()).0, 404);
     }
 
@@ -709,18 +725,20 @@ mod tests {
     }
 
     #[test]
-    fn the_free_route_and_the_enrolled_status_name_the_configured_funding() {
+    fn the_join_and_status_pages_omit_internal_credits_and_show_ssh_login_only_when_enrolled() {
         let d = door("funding");
         let page = String::from_utf8(d.join_page()).unwrap();
-        assert!(page.contains("Free: the box funds 10000 credits"), "the amount comes from door-state.json");
+        assert!(page.contains("Free: sponsored starter account") && !page.contains("credits") && !page.contains("10000"), "{page}");
+        assert!(page.contains("ssh -t -p 2222 mini-s-NAME@demo.dregg.online"), "{page}");
         let id = door::new_request_id().unwrap();
+        std::fs::write(d.status.join(format!("{id}.json")), serde_json::json!({"phase":"sign","name":"alice","login":"-p 2222 mini-s-alice@demo.dregg.online"}).to_string()).unwrap();
+        let signing = String::from_utf8(d.status_page(&id).1).unwrap();
+        assert!(!signing.contains("Log in with:"), "not shown before enrolled: {signing}");
         std::fs::write(d.status.join(format!("{id}.json")), serde_json::json!({"phase":"enrolled","name":"alice","funding":"10000",
-            "webLogin":"https://demo.example/login/X"}).to_string()).unwrap();
+            "login":"-p 2222 mini-s-alice@demo.dregg.online","webLogin":"https://demo.example/login/X"}).to_string()).unwrap();
         let body = String::from_utf8(d.status_page(&id).1).unwrap();
-        assert!(body.contains("funded your account with <strong>10000 credits</strong>"));
-        std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false}"#).unwrap();
-        let page = String::from_utf8(d.join_page()).unwrap();
-        assert!(!page.contains("10000") && page.contains("published once"), "no number without the processor's");
+        assert!(!body.contains("credits") && !body.contains("10000"), "{body}");
+        assert!(body.contains("<pre>ssh -t -p 2222 mini-s-alice@demo.dregg.online</pre>"), "{body}");
     }
 
     #[test]
@@ -773,7 +791,7 @@ mod tests {
         assert!(!page.to_lowercase().contains("invite"), "no reserve, no mention of codes");
         std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false,"funding":"10000","inviteReserve":20,"openSeats":12,"reservedSeats":20}"#).unwrap();
         let page = String::from_utf8(d.join_page()).unwrap();
-        assert!(page.contains("12 open free seats remain; 20 more are held for people with an invite code (a code is single-use and issued by the operator)"), "{page}");
+        assert!(page.contains("12 open free seats remain (20 reserved for invite codes)."), "{page}");
         assert!(page.contains("name=invite"));
         // A code rides in the queued request; open seats gone and no code is refused by name.
         let (status, _) = d.post("/join", b"name=alice&route=free&invite=INVITE001-abcdef", "203.0.113.9", 100);
