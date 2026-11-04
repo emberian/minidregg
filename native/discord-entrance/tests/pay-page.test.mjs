@@ -68,11 +68,29 @@ assert.equal(posted.options.method, "POST");
 assert.equal(posted.options.body, "id=7f3a&transaction=" + fakeSignature, "the paste path's field, filled automatically");
 assert.ok(said.some((t) => t.startsWith("the wallet is signing")) && said.some((t) => t.startsWith("sent " + fakeSignature)));
 
-// A missing recipient account is refused before anything is signed; nothing is created.
-let signedWhenMissing = false;
-const refusing = makeDoorPay(sol, quote, { conn: { ...conn, getAccountInfo: async () => null }, fetch: fetchImpl });
-await assert.rejects(refusing.pay({ ...provider, async signTransaction(bytes) { signedWhenMissing = true; return bytes; } }), /does not exist/);
-assert.equal(signedWhenMissing, false);
+// A missing recipient account prepends createAtaIdempotent before transferChecked and memo.
+{
+  let sentMissing = null;
+  const creating = makeDoorPay(sol, quote, {
+    conn: { ...conn, getAccountInfo: async () => null, sendRawTransaction: async (raw) => { sentMissing = raw; return fakeSignature; } },
+    fetch: fetchImpl,
+  });
+  await creating.pay(provider);
+  const tx3 = sol.decodeWire(sentMissing);
+  assert.equal(tx3.instructions.length, 3, "createAtaIdempotent, transferChecked, memo");
+  assert.equal(tx3.instructions[0].programId.toBase58(), sol.ATA_PROGRAM.toBase58());
+  assert.deepEqual(Array.from(tx3.instructions[0].data), [1], "CreateIdempotent = 1");
+  assert.deepEqual(tx3.instructions[0].keys.map((k) => [k.pubkey.toBase58(), k.isSigner, k.isWritable]), [
+    [payer.publicKey.toBase58(), true, true],
+    [ata(recipient).toBase58(), false, true],
+    [recipient.toBase58(), false, false],
+    [mint.toBase58(), false, false],
+    [sol.SYSTEM_PROGRAM.toBase58(), false, false],
+    [quote.tokenProgram, false, false],
+  ]);
+  assert.equal(tx3.instructions[1].data[0], 12, "TransferChecked");
+  assert.equal(Buffer.from(tx3.instructions[2].data).toString("utf8"), quote.memo);
+}
 // Fix 6: a wallet that swaps the recipient's account is refused before anything is sent.
 {
   let sentSwapped = false;
@@ -96,16 +114,15 @@ assert.equal(signedWhenMissing, false);
   assert.equal(held, fakeSignature);
 }
 
-// Fix 3: a quote past its expiry hour is refused before the wallet is asked to sign.
+// Fix 3: a quote past its initial expiry hour is still accepted by the page (the door processor auto-accepts late pending claims).
 {
   let asked = false;
   const old = { ...quote, expiryHour: "1001", asOfHour: "1000", quotedAt: 1_000_000 };
   const later = makeDoorPay(sol, old, { conn, fetch: fetchImpl, now: () => (1_000_000 + 2 * 3600 + 5) * 1000 });
-  assert.match(later.stale(), /expired at processing-chain hour 1001 \(it is now about hour 1002\)/);
-  await assert.rejects(later.pay({ ...provider, async signTransaction(bytes) { asked = true; return bytes; } }), /expired/);
-  assert.equal(asked, false);
-  const fresh = makeDoorPay(sol, old, { conn, fetch: fetchImpl, now: () => (1_000_000 + 1800) * 1000 });
-  assert.equal(fresh.stale(), null, "inside the hour the quote stands");
+  assert.equal(later.stale(), null, "late payment is auto-accepted by the door processor");
+  const r = await later.pay({ ...provider, async signTransaction(bytes) { asked = true; return signWire(payer, bytes); } });
+  assert.equal(asked, true);
+  assert.equal(r.signature, fakeSignature);
 }
 
 console.log("ok: transfer " + amount + " atomic (decimals 6) " + ata(payer.publicKey).toBase58().slice(0, 6) + "… -> " + ata(recipient).toBase58().slice(0, 6) + "…, memo " + JSON.stringify(quote.memo) + ", posted " + fakeSignature.slice(0, 8) + "…");

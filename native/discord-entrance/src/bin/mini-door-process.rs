@@ -81,6 +81,7 @@ struct DoorConfig {
     sponsor_floor: u128,
     link_ttl_s: u64,
     login_host: String,
+    ssh_port: Option<u16>,
     pay: Option<PayConfig>,
     /// The built-in story every member joins at enrolment (`story`: `{"author": "box", "name":
     /// "tale"}`): the author's account invites the member as a player and the member joins, so the
@@ -129,7 +130,7 @@ impl DoorConfig {
     fn load(path: &Path) -> Result<Self, String> {
         let v: Value = serde_json::from_slice(&std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?)
             .map_err(|e| format!("door config: {e}"))?;
-        let known = ["version", "funding", "freeCap", "inviteReserve", "inviteCodes", "dailyCap", "perRun", "sponsorFloor", "linkTtlHours", "loginHost", "pay", "story", "room"];
+        let known = ["version", "funding", "freeCap", "inviteReserve", "inviteCodes", "dailyCap", "perRun", "sponsorFloor", "linkTtlHours", "loginHost", "sshPort", "pay", "story", "room"];
         if let Some(k) = v.as_object().ok_or("door config is not an object")?.keys().find(|k| !known.contains(&k.as_str())) {
             return Err(format!("door config has an unknown key {k}"));
         }
@@ -164,6 +165,10 @@ impl DoorConfig {
         if login_host.is_empty() || !login_host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
             return Err("loginHost is a host name".into());
         }
+        let ssh_port = match &v["sshPort"] {
+            Value::Null => None,
+            n => Some(n.as_u64().and_then(|p| u16::try_from(p).ok()).filter(|&p| p > 0).ok_or("sshPort is 1..65535")?),
+        };
         let free_cap = nat("freeCap", 50)? as usize;
         let invite_reserve = nat("inviteReserve", 0)? as usize;
         if invite_reserve > free_cap {
@@ -202,6 +207,7 @@ impl DoorConfig {
             sponsor_floor: big("sponsorFloor", 20_000)?,
             link_ttl_s: nat("linkTtlHours", 168)?.saturating_mul(3600),
             login_host,
+            ssh_port,
             pay,
             story,
             room,
@@ -377,8 +383,30 @@ impl BoxOps for RealBox {
         run(cmd)
     }
     fn tenant_mini(&self, name: &str, args: &[String]) -> Ran {
+        let home = self.p.home(name);
+        let mini = self.p.candidate().join("bin/mini");
+        let host = self.p.candidate().join("bin/minidregg-host");
+        let config = self.p.config();
         let mut cmd = self.as_tenant(name);
-        cmd.arg(self.p.candidate().join("bin/mini")).args(args);
+        cmd.arg(format!("HOME={}", home.display()))
+            .arg(format!("MINI_CONSENT_ANCHOR_DIR={}", home.join(".mini/consent-anchors").display()));
+        if std::fs::read_to_string(self.p.etc().join("session-consent")).ok().as_deref().map(str::trim) == Some("thin") {
+            cmd.arg("MINI_THIN_CONSENT=1");
+        }
+        match mini_session_env::delegated_consent(&mini, &host, &config, &home) {
+            Ok(vars) => {
+                for (k, v) in vars {
+                    cmd.arg(format!("{k}={}", v.to_string_lossy()));
+                }
+            }
+            Err(e) => return Ran { ok: false, stdout: String::new(), stderr: format!("error: {e}") },
+        }
+        if let Ok(vars) = mini_session_env::shared_codec(&self.p.etc().join("session-codec")) {
+            for (k, v) in vars {
+                cmd.arg(format!("{k}={}", v.to_string_lossy()));
+            }
+        }
+        cmd.arg(mini).args(args);
         run(cmd)
     }
     fn reenroll(&self, name: &str, funding: u128) -> Ran {
@@ -481,6 +509,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
     sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// A paid deposit's claim files and acceptance nonce, from its transaction signature: a 16-hex
+/// file tag and a u64 nonce (both from SHA-256 of the signature, so any spelling is file-safe).
+fn claim_tag(transaction: &str) -> (String, u64) {
+    let digest = sha256_hex(format!("minidregg-door-claim-v1\n{transaction}").as_bytes());
+    let nonce = u64::from_str_radix(&digest[16..32], 16).unwrap_or(1).max(1);
+    (digest[..16].to_owned(), nonce)
+}
+
 fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
     use std::io::Write;
     let dir = path.parent().ok_or("no parent")?;
@@ -576,8 +612,9 @@ impl<O: BoxOps> Processor<O> {
                 v[k] = r[k].clone();
             }
         }
-        if r["webOnly"] != true && matches!(r["phase"].as_str(), Some("enrolled" | "sign" | "signed" | "awaiting-payment" | "paid" | "keyed" | "account")) {
-            v["login"] = json!(format!("mini-s-{}@{}", r["name"].as_str().unwrap_or(""), self.cfg.login_host));
+        if r["webOnly"] != true && r["phase"] == "enrolled" {
+            let port = self.cfg.ssh_port.filter(|&p| p != 22).map(|p| format!("-p {p} ")).unwrap_or_default();
+            v["login"] = json!(format!("{port}mini-s-{}@{}", r["name"].as_str().unwrap_or(""), self.cfg.login_host));
         }
         self.publish(&format!("{}.json", r["id"].as_str().unwrap_or("x")), &v)
     }
@@ -618,10 +655,10 @@ impl<O: BoxOps> Processor<O> {
 
     // ── names, keys and caps ───────────────────────────────────────────────────────────────
 
-    fn roster_keys(&self) -> HashMap<String, String> {
+    fn roster_keys_in(&self, dirs: &[PathBuf]) -> HashMap<String, String> {
         let mut out = HashMap::new();
-        for dir in [self.p.friends(), self.p.door_friends()] {
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for dir in dirs {
+            let Ok(entries) = std::fs::read_dir(dir) else { continue };
             for e in entries.flatten() {
                 let path = e.path();
                 let Some(name) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".pub")) else { continue };
@@ -638,9 +675,14 @@ impl<O: BoxOps> Processor<O> {
         out
     }
 
+    fn roster_keys(&self) -> HashMap<String, String> {
+        self.roster_keys_in(&[self.p.friends(), self.p.door_friends()])
+    }
+
     fn day(&self) -> u64 { self.now / 86_400 }
 
     /// Accounts the door has made or is making (not refused, past `queued`), other than `except`.
+    /// On the paid route, only requests that have reached `paid` or `enrolled` count against caps.
     fn counted(&self, route: Option<&str>, today: bool, except: Option<&str>) -> usize {
         self.requests().iter().filter(|r| {
             r["phase"] != "refused"
@@ -648,6 +690,7 @@ impl<O: BoxOps> Processor<O> {
                 && route.is_none_or(|w| r["route"] == w)
                 && (!today || r["day"].as_u64() == Some(self.day()))
                 && r["phase"] != "queued"
+                && (r["route"] != "paid" || matches!(r["phase"].as_str(), Some("paid" | "enrolled")))
         }).count()
     }
 
@@ -789,20 +832,57 @@ impl<O: BoxOps> Processor<O> {
                 }
                 let mut r = json!({"id":id,"at":at,"day":self.day(),"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"research":research,"invite":invite,"phase":"queued"});
                 std::fs::remove_file(file).map_err(|e| e.to_string())?;
-                let keys = self.roster_keys();
-                let blob = ssh_key.split(' ').nth(1).unwrap_or("").to_owned();
-                let taken_by_request = self.requests().iter().any(|o| o["name"] == name && o["phase"] != "refused");
-                if keys.contains_key(&format!("name:{name}")) || taken_by_request || self.ops.uid(&format!("mini-s-{name}")).is_some() {
-                    return self.refuse(&mut r, "that name is taken; ask again with another");
-                }
-                if keys.contains_key(&blob) {
-                    return self.refuse(&mut r, "that ssh key already has an account on this box");
-                }
                 if route == Route::Paid && self.cfg.pay.is_none() {
                     return self.refuse(&mut r, "this box does not take payments");
                 }
                 if self.counted(None, true, None) >= self.cfg.daily_cap {
                     return self.refuse(&mut r, &format!("today's {} accounts are taken; try tomorrow", self.cfg.daily_cap));
+                }
+                let blob = ssh_key.split(' ').nth(1).unwrap_or("").to_owned();
+                let p = self.p.clone();
+                let is_unpaid_paid = |o: &Value| {
+                    let o_name = o["name"].as_str().unwrap_or("");
+                    o["route"] == "paid"
+                        && !matches!(o["phase"].as_str(), Some("paid" | "enrolled"))
+                        && !p.home(o_name).join("workspace/workspace.json").exists()
+                };
+                let static_keys = self.roster_keys_in(&[self.p.friends()]);
+                let conflicts: Vec<Value> = self.requests().into_iter().filter(|o| {
+                    let o_blob = o["sshKey"].as_str().unwrap_or("").split(' ').nth(1).unwrap_or("");
+                    o["name"].as_str() == Some(name.as_str()) || (!blob.is_empty() && o_blob == blob)
+                }).collect();
+                let blocked_by_active = conflicts.iter().any(|o| o["phase"] != "refused" && !is_unpaid_paid(o));
+                let uid_taken = self.ops.uid(&format!("mini-s-{name}")).is_some()
+                    && (self.p.home(&name).join("workspace/workspace.json").exists()
+                        || !self.requests().iter().any(|o| o["name"] == name));
+                if !static_keys.contains_key(&format!("name:{name}"))
+                    && (blob.is_empty() || !static_keys.contains_key(&blob))
+                    && !uid_taken
+                    && !blocked_by_active
+                {
+                    for mut o in conflicts {
+                        if is_unpaid_paid(&o) {
+                            let old_name = o["name"].as_str().unwrap_or("").to_owned();
+                            if !old_name.is_empty() {
+                                let _ = std::fs::remove_file(self.p.door_friends().join(format!("{old_name}.pub")));
+                                let old_home = self.p.home(&old_name);
+                                for stale in ["detached-quote.json", "sshsig-message.bin", "join.json", "latest-payment.json", "preparation.json"] {
+                                    let _ = std::fs::remove_file(old_home.join(stale));
+                                }
+                            }
+                            if o["phase"] != "refused" {
+                                self.refuse(&mut o, "superseded by a newer request")?;
+                            }
+                        }
+                    }
+                }
+                let keys = self.roster_keys();
+                let taken_by_request = self.requests().iter().any(|o| o["name"] == name && o["phase"] != "refused");
+                if keys.contains_key(&format!("name:{name}")) || taken_by_request || uid_taken {
+                    return self.refuse(&mut r, "that name is taken; ask again with another");
+                }
+                if !blob.is_empty() && keys.contains_key(&blob) {
+                    return self.refuse(&mut r, "that ssh key already has an account on this box");
                 }
                 self.say(format!("request {id} accepted for {name} ({})", route.word()));
                 self.save(&mut r)
@@ -822,8 +902,14 @@ impl<O: BoxOps> Processor<O> {
             Request::Paid { id, transaction, .. } => {
                 std::fs::remove_file(file).map_err(|e| e.to_string())?;
                 match existing {
-                    Some(mut r) if r["phase"] == "awaiting-payment" => {
+                    Some(mut r)
+                        if r["phase"] == "awaiting-payment"
+                            || (r["route"] == "paid"
+                                && !matches!(r["phase"].as_str(), Some("paid" | "enrolled"))
+                                && self.p.home(r["name"].as_str().unwrap_or("")).join("latest-payment.json").exists()) =>
+                    {
                         r["transaction"] = json!(transaction);
+                        r["paidAt"] = json!(self.now);
                         r["phase"] = json!("paid");
                         r["detail"] = json!("payment reported; waiting for the box's payment watcher to see it final");
                         self.save(&mut r)
@@ -848,9 +934,35 @@ impl<O: BoxOps> Processor<O> {
             }
             if matches!(phase.as_str(), "sign" | "awaiting-payment") {
                 if self.now.saturating_sub(r["at"].as_u64().unwrap_or(0)) > PAID_TTL_S {
+                    if let Some(name) = r["name"].as_str().filter(|n| !n.is_empty()) {
+                        let _ = std::fs::remove_file(self.p.door_friends().join(format!("{name}.pub")));
+                    }
                     self.refuse(&mut r, "the payment was not finished within 7 days; the account stays, unfunded")?;
+                    continue;
                 }
-                continue;
+                if phase == "sign" {
+                    let expired = match r["sign"]["expiryHour"].as_u64() {
+                        Some(exp) => {
+                            let cur_hour = match (r["sign"]["asOfHour"].as_u64(), r["sign"]["quotedAt"].as_u64()) {
+                                (Some(as_of), Some(at)) => as_of.saturating_add(self.now.saturating_sub(at) / 3600),
+                                _ => self.now / 3600,
+                            };
+                            cur_hour > exp
+                        }
+                        None => false,
+                    };
+                    if expired {
+                        let home = self.p.home(r["name"].as_str().unwrap_or(""));
+                        for stale in ["detached-quote.json", "sshsig-message.bin", "preparation.json"] {
+                            let _ = std::fs::remove_file(home.join(stale));
+                        }
+                        r["phase"] = json!("keyed");
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
             }
             done += 1;
             // Steps until the request waits for the stranger, finishes, or a step fails.
@@ -968,23 +1080,28 @@ impl<O: BoxOps> Processor<O> {
                 }
                 let quote = read_json(&home.join("detached-quote.json")).ok_or("join left no detached quote")?;
                 let message = std::fs::read(home.join("sshsig-message.bin")).map_err(|e| format!("statement: {e}"))?;
-                r["sign"] = json!({"message":b64(&message),"namespace":"dregg-enrol@v2","expiryHour":quote["expiryHour"].as_str().and_then(|h| h.parse::<u64>().ok())});
+                r["sign"] = json!({"message":b64(&message),"namespace":"dregg-enrol@v2","expiryHour":quote["expiryHour"].as_str().and_then(|h| h.parse::<u64>().ok()),
+                    "asOfHour":quote["quote"]["asOf"]["hour"].as_str().and_then(|h| h.parse::<u64>().ok()),"quotedAt":self.now});
                 r["phase"] = json!("sign");
                 r["detail"] = Value::Null;
                 self.save(r)
             }
             "signed" => {
                 let pay = self.cfg.pay.clone().ok_or("this box no longer takes payments")?;
-                let signature = r["signature"].as_str().unwrap_or("").to_owned();
-                self.ops.give(&name, &home.join("door/ssh.sig"), signature.as_bytes())?;
-                let ran = self.ops.tenant_mini(&name, &self.join_args(&name, &pay, Some(&home.join("door/ssh.sig"))));
-                r["signature"] = Value::Null;
-                if !ran.ok {
-                    let why = ran.why();
-                    // An expired quote is requoted; a signature that does not verify is asked for again.
-                    r["phase"] = json!(if why.contains("expired") { "keyed" } else { "sign" });
-                    r["detail"] = json!(format!("not accepted: {why}"));
-                    return self.save(r);
+                if !home.join("latest-payment.json").exists() {
+                    let signature = r["signature"].as_str().unwrap_or("").to_owned();
+                    self.ops.give(&name, &home.join("door/ssh.sig"), signature.as_bytes())?;
+                    let ran = self.ops.tenant_mini(&name, &self.join_args(&name, &pay, Some(&home.join("door/ssh.sig"))));
+                    r["signature"] = Value::Null;
+                    if !ran.ok {
+                        let why = ran.why();
+                        // An expired quote is requoted; a signature that does not verify is asked for again.
+                        r["phase"] = json!(if why.contains("expired") { "keyed" } else { "sign" });
+                        r["detail"] = json!(format!("not accepted: {why}"));
+                        return self.save(r);
+                    }
+                } else {
+                    r["signature"] = Value::Null;
                 }
                 let payment = read_json(&home.join("latest-payment.json")).ok_or("join left no payment record")?;
                 let recipient = payment["enrolAddress"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its recipient")?;
@@ -993,11 +1110,12 @@ impl<O: BoxOps> Processor<O> {
                 // browser sends to. The paste path reads the same recipient, amount and memo.
                 let mint = payment["mint"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its mint")?;
                 let token_program = payment["tokenProgram"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its token program")?;
-                let decimals = match &payment["quote"]["decimals"] { Value::String(s) => s.clone(), Value::Number(n) => n.to_string(), _ => return Err("payment record lacks the token's decimals".into()) };
+                let decimals = match (&payment["enrolPin"]["decimals"], &payment["quote"]["decimals"]) {
+                    (Value::String(s), _) | (_, Value::String(s)) => s.clone(),
+                    (Value::Number(n), _) | (_, Value::Number(n)) => n.to_string(),
+                    _ => return Err("payment record lacks the token's decimals".into()),
+                };
                 let tokens = payment["amountAtomic"].as_str().and_then(|a| decimal_tokens(a, decimals.parse().ok()?)).map(|t| format!("{t} {}", pay.symbol));
-                // The quote's processing-chain hour when `mini join` checked it, and when that was:
-                // the page refuses to send once the expiry hour has passed (a late memo is a pending
-                // claim, not an enrolment).
                 r["payment"] = json!({"recipient":recipient,"amountAtomic":payment["amountAtomic"],"amountTokens":tokens,"memo":payment["memo"],
                     "expiryHour":r["sign"]["expiryHour"],"asOfHour":payment["asOfHour"],"quotedAt":self.now,"network":pay.network,
                     "mint":mint,"tokenProgram":token_program,"decimals":decimals,"rpc":pay.rpc});
@@ -1007,13 +1125,85 @@ impl<O: BoxOps> Processor<O> {
             }
             "paid" => {
                 let pay = self.cfg.pay.clone().ok_or("this box no longer takes payments")?;
+                let entry = self.p.door_friends().join(format!("{name}.pub"));
+                if !entry.exists() {
+                    let text = format!("# door request {}{}\n{} {name}\n", r["id"].as_str().unwrap_or(""), if r["webOnly"] == true { " (web-only: the secret of this login key was destroyed)" } else { "" }, r["sshKey"].as_str().unwrap_or(""));
+                    std::fs::create_dir_all(self.p.door_friends()).map_err(|e| e.to_string())?;
+                    write_atomic(&entry, text.as_bytes(), 0o644)?;
+                    let ran = self.ops.render();
+                    if !ran.ok {
+                        return Err(format!("render-authorized-keys.sh: {}", ran.why()));
+                    }
+                }
                 let mut args = self.common_args(&name, &pay);
                 args.extend(["--wait".into(), "--signature".into(), r["transaction"].as_str().unwrap_or("").into(),
                     "--timeout".into(), "5".into()]);
                 if let Some(context) = &pay.birth_context {
                     args.extend(["--birth-context".into(), context.display().to_string()]);
                 }
-                let ran = self.ops.tenant_mini(&name, &args);
+                let mut ran = self.ops.tenant_mini(&name, &args);
+                if !ran.ok && ran.why().contains("admission pending; request current quote") {
+                    let payment = read_json(&home.join("latest-payment.json")).unwrap_or(Value::Null);
+                    let weeks = payment["quote"]["split"]["weeks"].as_str().unwrap_or("1").to_owned();
+                    let starter = payment["quote"]["split"]["minimumStarterCredit"].as_str().unwrap_or("0").to_owned();
+                    // One claim per deposit: the command, its evidence and the operation record are
+                    // named by the transaction, and the nonce is derived from it, so a second late
+                    // deposit on this account is a new acceptance, never a lookup of the first.
+                    let (tag, nonce) = claim_tag(r["transaction"].as_str().unwrap_or(""));
+                    let cmd_path = home.join(format!("door/claim-{tag}.cmd"));
+                    let sidecar_path = home.join(format!("door/claim-{tag}.cmd.quote.json"));
+                    let evidence_path = home.join(format!("door/claim-{tag}.cmd.evidence"));
+                    let accept_dir = home.join(format!("door/claim-{tag}-accept"));
+                    let quote_args = |expiry_hour: String| vec![
+                        "pay-claim".into(),
+                        "--socket".into(), self.p.socket().display().to_string(),
+                        "--action".into(), "quote".into(),
+                        "--join-dir".into(), home.display().to_string(),
+                        "--host".into(), self.p.candidate().join("bin/minidregg-host").display().to_string(),
+                        "--config".into(), self.p.config().display().to_string(),
+                        "--mode".into(), "enrol".into(),
+                        "--weeks".into(), weeks.clone(),
+                        "--starter-credit".into(), starter.clone(),
+                        "--expiry-hour".into(), expiry_hour,
+                        "--nonce".into(), nonce.to_string(),
+                        "--output".into(), cmd_path.display().to_string(),
+                    ];
+                    let quoted = if accept_dir.exists() {
+                        Ran { ok: true, stdout: String::new(), stderr: String::new() }
+                    } else {
+                        let _ = std::fs::remove_file(&cmd_path);
+                        let _ = std::fs::remove_file(&sidecar_path);
+                        let _ = std::fs::remove_dir_all(&evidence_path);
+                        let q = self.ops.tenant_mini(&name, &quote_args((self.now / 3600 + 1).to_string()));
+                        if q.ok {
+                            q
+                        } else {
+                            let _ = std::fs::remove_file(&cmd_path);
+                            let _ = std::fs::remove_file(&sidecar_path);
+                            let _ = std::fs::remove_dir_all(&evidence_path);
+                            self.ops.tenant_mini(&name, &quote_args((self.now / 3600).to_string()))
+                        }
+                    };
+                    if quoted.ok {
+                        let accept = self.ops.tenant_mini(&name, &[
+                            "pay-claim".into(),
+                            "--socket".into(), self.p.socket().display().to_string(),
+                            "--action".into(), "accept".into(),
+                            "--join-dir".into(), home.display().to_string(),
+                            "--host".into(), self.p.candidate().join("bin/minidregg-host").display().to_string(),
+                            "--config".into(), self.p.config().display().to_string(),
+                            "--command".into(), cmd_path.display().to_string(),
+                            "--operation-record".into(), accept_dir.display().to_string(),
+                        ]);
+                        if accept.ok {
+                            ran = self.ops.tenant_mini(&name, &args);
+                        } else {
+                            ran = accept;
+                        }
+                    } else {
+                        ran = quoted;
+                    }
+                }
                 if ran.ok {
                     return self.enrolled(r);
                 }
@@ -1021,7 +1211,8 @@ impl<O: BoxOps> Processor<O> {
                 if why.contains("negative journal") || why.contains("differs from retained") || why.contains("obtain a new renewal quote") {
                     return self.refuse(r, &format!("the payment did not enrol this account: {why}. Ember can comp a journalled payment."));
                 }
-                if self.now.saturating_sub(r["at"].as_u64().unwrap_or(0)) > PAID_TTL_S {
+                let since = r["paidAt"].as_u64().or_else(|| r["at"].as_u64()).unwrap_or(0);
+                if self.now.saturating_sub(since) > PAID_TTL_S {
                     return self.refuse(r, &format!("the payment was not seen within 7 days: {why}"));
                 }
                 r["detail"] = json!(format!("waiting: {why}"));
@@ -1033,7 +1224,7 @@ impl<O: BoxOps> Processor<O> {
 
     fn common_args(&self, name: &str, _pay: &PayConfig) -> Vec<String> {
         let c = self.p.candidate();
-        vec!["--socket".into(), self.p.socket().display().to_string(), "join".into(), "--memo-version".into(), "v2".into(),
+        vec!["join".into(), "--socket".into(), self.p.socket().display().to_string(), "--memo-version".into(), "v2".into(),
             "--host".into(), c.join("bin/minidregg-host").display().to_string(), "--config".into(), self.p.config().display().to_string(),
             "--dir".into(), self.p.home(name).display().to_string()]
     }
@@ -1194,7 +1385,7 @@ impl<O: BoxOps> Processor<O> {
         let paid = self.cfg.pay.is_some() && address.is_some() && self.counted(None, true, None) < self.cfg.daily_cap;
         let v = json!({"type":door::STATE_TYPE,"free":free_reason.is_none(),"freeReason":free_reason,"paid":paid,
             "enrolAddress":address,"network":self.cfg.pay.as_ref().map(|p| p.network.clone()),"at":self.now,
-            "funding":self.cfg.funding.to_string(),
+            "funding":self.cfg.funding.to_string(),"sshPort":self.cfg.ssh_port,
             "inviteReserve":self.cfg.invite_reserve,"openSeats":open_seats,"reservedSeats":reserved_seats});
         self.publish("door-state.json", &v)
     }
@@ -1541,10 +1732,27 @@ mod tests {
             Ran { ok: true, stdout: String::new(), stderr: String::new() }
         }
         fn tenant_mini(&self, name: &str, args: &[String]) -> Ran {
-            self.calls.borrow_mut().push(format!("{name}: mini {}", args.iter().skip(2).take(1).cloned().collect::<String>()));
+            self.calls.borrow_mut().push(format!("{name}: mini {}", args.first().cloned().unwrap_or_default()));
             let home = self.p.home(name);
             let ok = Ran { ok: true, stdout: String::new(), stderr: String::new() };
+            if args.first().map(String::as_str) == Some("pay-claim") {
+                let action = args.iter().position(|a| a == "--action").and_then(|i| args.get(i + 1)).map(String::as_str).unwrap_or("");
+                self.calls.borrow_mut().push(format!("{name}: pay-claim {action}"));
+                if action == "quote" {
+                    let out = args.iter().position(|a| a == "--output").and_then(|i| args.get(i + 1)).unwrap();
+                    std::fs::create_dir_all(Path::new(out).parent().unwrap()).unwrap();
+                    std::fs::write(out, b"cmd").unwrap();
+                } else if action == "accept" {
+                    let rec = args.iter().position(|a| a == "--operation-record").and_then(|i| args.get(i + 1)).unwrap();
+                    std::fs::create_dir_all(rec).unwrap();
+                    let _ = std::fs::remove_file(self.p.root.join("pending-v2"));
+                }
+                return ok;
+            }
             if args.contains(&"--wait".to_string()) {
+                if self.p.root.join("pending-v2").exists() {
+                    return Ran { ok: false, stdout: String::new(), stderr: "error: payment processed as pendingV2 (expired): admission pending; request current quote and sign acceptance or key rotation\n".into() };
+                }
                 return ok;
             }
             if let Some(i) = args.iter().position(|a| a == "--ssh-signature") {
@@ -1553,10 +1761,10 @@ mod tests {
                     return Ran { ok: false, stdout: String::new(), stderr: "error: sshSigInvalid".into() };
                 }
                 std::fs::write(home.join("latest-payment.json"), json!({"enrolAddress":"0a".repeat(32),"amountAtomic":"50000007","memo":"enrol:v2:AAAA","asOfHour":"1000",
-                    "mint":"08".repeat(32),"tokenProgram":"06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9","quote":{"decimals":"6"}}).to_string()).unwrap();
+                    "mint":"08".repeat(32),"tokenProgram":"06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9","quote":{"decimals":"6","split":{"weeks":"1","minimumStarterCredit":"0"}}}).to_string()).unwrap();
                 return ok;
             }
-            std::fs::write(home.join("detached-quote.json"), r#"{"expiryHour":"1001"}"#).unwrap();
+            std::fs::write(home.join("detached-quote.json"), r#"{"expiryHour":"1001","quote":{"asOf":{"hour":"1000"}}}"#).unwrap();
             std::fs::write(home.join("sshsig-message.bin"), b"statement").unwrap();
             ok
         }
@@ -1589,7 +1797,7 @@ mod tests {
         std::fs::write(&pin, r#"{"enrolAddress":"Fresh1111111111111111111111111111111111111"}"#).unwrap();
         let me = std::fs::metadata(&root).map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap();
         let cfg = DoorConfig { funding: 1000, free_cap: 2, invite_reserve: 0, invite_codes: None, daily_cap: 10, per_run: 4, sponsor_floor: 500, link_ttl_s: 3600,
-            login_host: "demo.example".into(), story: None, room: None, pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into(), symbol: "DREGG".into(), rpc: "https://api.devnet.solana.com".into() }) };
+            login_host: "demo.example".into(), ssh_port: None, story: None, room: None, pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into(), symbol: "DREGG".into(), rpc: "https://api.devnet.solana.com".into() }) };
         Processor { ops: Fake { p: p.clone(), me, balance: RefCell::new(3000), calls: RefCell::new(Vec::new()), fail_reenroll: RefCell::new(false) },
             p, cfg, now: 1_000_000, sponsor: None, log: Vec::new() }
     }
@@ -1919,6 +2127,21 @@ mod tests {
         assert_eq!(s["payment"]["asOfHour"], "1000");
         assert!(s["payment"]["quotedAt"].is_u64());
         assert_eq!(s["payment"]["rpc"], "https://api.devnet.solana.com");
+        // Resuming `"signed"` when `latest-payment.json` already exists skips `tenant_mini` and reads `enrolPin.decimals`.
+        std::fs::write(w.p.home("alice").join("latest-payment.json"), json!({"enrolAddress":"0a".repeat(32),"amountAtomic":"50000354","memo":"enrol:v2:BBBB","asOfHour":"1001",
+            "mint":"08".repeat(32),"tokenProgram":"06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9","enrolPin":{"decimals":"6"}}).to_string()).unwrap();
+        let mut req = read_json(&w.request_path(a.id())).unwrap();
+        req["phase"] = json!("signed");
+        req["signature"] = json!(armour("BAD"));
+        w.save(&mut req).unwrap();
+        let calls_before = w.ops.calls.borrow().len();
+        run(&mut w);
+        assert_eq!(w.ops.calls.borrow().len(), calls_before, "tenant_mini is skipped when latest-payment.json already exists");
+        let s = status(&w, a.id());
+        assert_eq!(s["phase"], "awaiting-payment", "{s}");
+        assert_eq!(s["payment"]["decimals"], "6");
+        assert_eq!(s["payment"]["amountTokens"], "50.000354 DREGG");
+        assert_eq!(s["payment"]["memo"], "enrol:v2:BBBB");
         let tx = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
         submit(&w, &Request::Paid { id: a.id().into(), at: 3, transaction: tx.into() });
         run(&mut w);
@@ -2091,5 +2314,73 @@ mod tests {
         let mut v = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "ab".into(), ssh_key: KEY.into(), discord: false, route: Route::Paid, research: false, invite: None }.to_json();
         v["invite"] = json!(code(1));
         assert!(Request::parse(v.to_string().as_bytes()).is_err(), "a paid request carries no code");
+    }
+
+    #[test]
+    fn a_paid_join_that_lands_as_pending_v2_is_auto_accepted_via_pay_claim() {
+        let mut w = world("pending-v2", true);
+        let a = join("alice", KEY, Route::Paid, false);
+        submit(&w, &a);
+        run(&mut w);
+        let armour = |body: &str| format!("-----BEGIN SSH SIGNATURE-----\n{body}\n-----END SSH SIGNATURE-----\n");
+        submit(&w, &Request::Sign { id: a.id().into(), at: 2, signature: armour("GOOD") });
+        run(&mut w);
+        assert_eq!(status(&w, a.id())["phase"], "awaiting-payment");
+        // Even if the request first times out after PAID_TTL_S (removing door_friends/alice.pub),
+        // a late /join/paid restores the roster entry and auto-accepts pendingV2 via pay-claim.
+        w.now += PAID_TTL_S + 100;
+        run(&mut w);
+        assert_eq!(status(&w, a.id())["phase"], "refused");
+        assert!(!w.p.door_friends().join("alice.pub").exists());
+        std::fs::write(w.p.root.join("pending-v2"), b"").unwrap();
+        let tx = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+        submit(&w, &Request::Paid { id: a.id().into(), at: w.now, transaction: tx.into() });
+        run(&mut w);
+        assert_eq!(status(&w, a.id())["phase"], "enrolled");
+        assert!(w.p.door_friends().join("alice.pub").exists(), "late /join/paid restores door_friends/alice.pub");
+        let calls = w.ops.calls.borrow();
+        assert!(calls.contains(&"alice: pay-claim quote".to_string()), "{calls:?}");
+        assert!(calls.contains(&"alice: pay-claim accept".to_string()), "{calls:?}");
+        let (tag, nonce) = claim_tag(tx);
+        assert!(w.p.home("alice").join(format!("door/claim-{tag}-accept")).exists());
+        assert!(nonce > 1, "the nonce is derived from the transaction, not a constant");
+        let (other_tag, other_nonce) = claim_tag("3Bnb2qVqw3ZcNWlxG6GYbqZfCFkeyEbuMo8owKlihUTYct60TzZTy977cYjsQhk9RRWC68vyLIKH2ZGwlSdGk5U");
+        assert!(other_tag != tag && other_nonce != nonce, "a second deposit gets its own claim files and nonce");
+    }
+
+    #[test]
+    fn an_unpaid_paid_request_auto_requotes_does_not_spend_daily_cap_and_is_superseded_by_a_newer_join() {
+        let mut w = world("supersede-paid", true);
+        w.cfg.daily_cap = 1;
+        let a = join("alice", KEY, Route::Paid, false);
+        submit(&w, &a);
+        run(&mut w);
+        let s = status(&w, a.id());
+        assert_eq!(s["phase"], "sign", "{s}");
+        assert_eq!(s["sign"]["asOfHour"], 1000);
+        assert_eq!(w.counted(None, true, None), 0, "an unpaid paid request does not spend daily_cap");
+        // Advance past expiryHour (1001): progress() auto-requotes the sign request.
+        w.now += 2 * 3600 + 10;
+        let calls_before = w.ops.calls.borrow().iter().filter(|c| *c == "alice: mini join").count();
+        run(&mut w);
+        let calls_after = w.ops.calls.borrow().iter().filter(|c| *c == "alice: mini join").count();
+        assert_eq!(calls_after, calls_before + 1, "expired sign request is re-quoted");
+        assert_eq!(status(&w, a.id())["phase"], "sign");
+        // Submitting a new /join with the same name and SSH key supersedes the unpaid request.
+        let a2 = join("alice", KEY, Route::Paid, false);
+        submit(&w, &a2);
+        run(&mut w);
+        let old_s = status(&w, a.id());
+        assert_eq!(old_s["phase"], "refused", "{old_s}");
+        assert!(old_s["detail"].as_str().unwrap().contains("superseded"), "{old_s}");
+        assert_eq!(status(&w, a2.id())["phase"], "sign");
+        // Submitting a new /join with a different name and the same SSH key also supersedes a2.
+        let a3 = join("alice-two", KEY, Route::Paid, false);
+        submit(&w, &a3);
+        run(&mut w);
+        assert_eq!(status(&w, a2.id())["phase"], "refused");
+        assert_eq!(status(&w, a3.id())["phase"], "sign");
+        assert!(!w.p.door_friends().join("alice.pub").exists());
+        assert!(w.p.door_friends().join("alice-two.pub").exists());
     }
 }

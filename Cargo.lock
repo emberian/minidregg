@@ -861,6 +861,7 @@ dependencies = [
  "libc",
  "minidregg-mini-keys",
  "minidregg-mini-sdk",
+ "minidregg-mini-session-env",
  "rustls",
  "rustls-pemfile",
  "serde_json",

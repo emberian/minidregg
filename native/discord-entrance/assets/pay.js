@@ -4,15 +4,19 @@
 // wallet's to sign, the cluster's to admit, and the door's observer matches what landed.
 //
 //   const pay = makeDoorPay(solpay, quote, { conn, fetch })
-//   pay.instructions(owner)      -> [transferChecked(owner's ATA -> recipient's ATA, amount, decimals), memo(exact bytes)]
+//   pay.instructions(owner, createRecipientAta)
+//                                -> [createAtaIdempotent(recipient's ATA) when it is missing,
+//                                    transferChecked(owner's ATA -> recipient's ATA, amount, decimals), memo(exact bytes)]
 //   await pay.pay(provider, say, onSent)   (provider.signTransaction takes the unsigned transaction's wire bytes
 //                                   and returns the signed wire bytes: the Wallet Standard shape)
-//                                -> { signature, status, tx }: refuse a quote past its expiry hour; connect, check
-//                                   both token accounts, build, sign; refuse a signed transaction that is not exactly
+//                                -> { signature, status, tx }: connect, check the payer's token account (the
+//                                   recipient's is created in the same transaction if absent), build, sign; refuse a
+//                                   signed transaction that is not exactly
 //                                   the one built; send from the browser; hand the signature to onSent at once (the
 //                                   payer holds it before anything else can fail); post it to /join/paid (the paste
 //                                   path's field) and throw, naming the signature, unless the door accepted it.
-//   pay.stale()                  -> null, or why this quote must not be paid (its processing-chain hour has passed)
+//   pay.stale()                  -> null: a payment after the quote's expiry hour is a pending claim the door
+//                                   processor accepts with the hosted account's key (`mini pay-claim`)
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory();
   else root.makeDoorPay = factory();
@@ -29,15 +33,10 @@
     const ata = (owner) => sol.ata(owner, tokenProgram, mint);
     const now = deps.now || (() => Date.now());
 
-    // The processing-chain hour advances with the chain's clock; from the hour `mini join` saw when
-    // it quoted (asOfHour) and when that was (quotedAt), the hour now is at least asOfHour plus the
-    // whole hours since. A memo processed after expiryHour is a pending claim, never an enrolment.
+    // The door processor holds the hosted account's mini.key and auto-accepts a late payment
+    // (pendingV2) via `mini pay-claim`, so the browser never refuses a quote after expiryHour.
     function stale() {
-      if (quote.asOfHour === undefined || quote.asOfHour === null || !quote.quotedAt) return null;
-      const hour = Number(quote.asOfHour) + Math.floor((now() / 1000 - Number(quote.quotedAt)) / 3600);
-      return hour > Number(quote.expiryHour)
-        ? "this quote expired at processing-chain hour " + quote.expiryHour + " (it is now about hour " + hour + "): paying it now would leave a pending claim, not an account. Start a new request at /join."
-        : null;
+      return null;
     }
 
     // The wallet must sign exactly what was built: the same instructions, accounts, flags and data,
@@ -58,8 +57,12 @@
       return null;
     }
 
-    function instructions(owner) {
-      return [sol.transferChecked({ tokenProgram, source: ata(owner), mint, destination: ata(recipient), owner, amount, decimals }), sol.memo(owner, memoBytes)];
+    function instructions(owner, createRecipientAta) {
+      const ixs = [sol.transferChecked({ tokenProgram, source: ata(owner), mint, destination: ata(recipient), owner, amount, decimals }), sol.memo(owner, memoBytes)];
+      if (createRecipientAta) {
+        ixs.unshift(sol.createAtaIdempotent({ payer: owner, ata: ata(recipient), owner: recipient, mint, tokenProgram }));
+      }
+      return ixs;
     }
 
     async function pay(provider, say, onSent) {
@@ -72,16 +75,14 @@
       const owner = new PublicKey(((connected && connected.publicKey) || provider.publicKey).toString());
       say("checking the token accounts");
       const to = ata(recipient);
-      if (!(await deps.conn.getAccountInfo(to))) {
-        throw new Error("the recipient's token account for this mint does not exist on the cluster the page names; this page will not create it. Pay by the paste path below and tell the operator.");
-      }
+      const createRecipientAta = !(await deps.conn.getAccountInfo(to));
       const from = ata(owner);
       const balance = await deps.conn.getTokenAccountBalance(from).catch(() => null);
       if (!balance || BigInt(balance.value.amount) < amount) {
         throw new Error("your wallet " + owner.toBase58() + " holds " + (balance ? balance.value.amount : "no account") + " of this token; the quote needs " + quote.amountAtomic + " atomic units.");
       }
       const { blockhash } = await deps.conn.getLatestBlockhash("confirmed");
-      const message = sol.compileMessage({ feePayer: owner, recentBlockhash: blockhash, instructions: instructions(owner) });
+      const message = sol.compileMessage({ feePayer: owner, recentBlockhash: blockhash, instructions: instructions(owner, createRecipientAta) });
       say("the wallet is signing");
       const builtWire = sol.unsignedWire(message);
       const signedBytes = Uint8Array.from(await provider.signTransaction(builtWire));
