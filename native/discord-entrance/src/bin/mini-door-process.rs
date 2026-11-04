@@ -840,18 +840,28 @@ impl<O: BoxOps> Processor<O> {
                 }
                 let blob = ssh_key.split(' ').nth(1).unwrap_or("").to_owned();
                 let p = self.p.clone();
-                let is_unpaid_paid = |o: &Value| {
+                // A newer request replaces an older one only when it names the same account AND the
+                // same ssh key, and only before any payment record can exist: a paid request still
+                // waiting for its signature, or a request still queued (no world effect yet). A
+                // request awaiting payment is never replaced (its memo may already be paid, and the
+                // page keeps working past the quote's hour); nothing replaced deletes a payment record.
+                let replaceable = |o: &Value| {
                     let o_name = o["name"].as_str().unwrap_or("");
-                    o["route"] == "paid"
-                        && !matches!(o["phase"].as_str(), Some("paid" | "enrolled"))
+                    let o_blob = o["sshKey"].as_str().unwrap_or("").split(' ').nth(1).unwrap_or("");
+                    let early = match o["route"].as_str() {
+                        Some("paid") => matches!(o["phase"].as_str(), Some("queued" | "account" | "keyed" | "sign")),
+                        _ => o["phase"] == "queued",
+                    };
+                    o_name == name && !blob.is_empty() && o_blob == blob && early
                         && !p.home(o_name).join("workspace/workspace.json").exists()
+                        && !p.home(o_name).join("latest-payment.json").exists()
                 };
                 let static_keys = self.roster_keys_in(&[self.p.friends()]);
                 let conflicts: Vec<Value> = self.requests().into_iter().filter(|o| {
                     let o_blob = o["sshKey"].as_str().unwrap_or("").split(' ').nth(1).unwrap_or("");
-                    o["name"].as_str() == Some(name.as_str()) || (!blob.is_empty() && o_blob == blob)
+                    o["phase"] != "refused" && (o["name"].as_str() == Some(name.as_str()) || (!blob.is_empty() && o_blob == blob))
                 }).collect();
-                let blocked_by_active = conflicts.iter().any(|o| o["phase"] != "refused" && !is_unpaid_paid(o));
+                let blocked_by_active = conflicts.iter().any(|o| !replaceable(o));
                 let uid_taken = self.ops.uid(&format!("mini-s-{name}")).is_some()
                     && (self.p.home(&name).join("workspace/workspace.json").exists()
                         || !self.requests().iter().any(|o| o["name"] == name));
@@ -861,19 +871,16 @@ impl<O: BoxOps> Processor<O> {
                     && !blocked_by_active
                 {
                     for mut o in conflicts {
-                        if is_unpaid_paid(&o) {
-                            let old_name = o["name"].as_str().unwrap_or("").to_owned();
-                            if !old_name.is_empty() {
-                                let _ = std::fs::remove_file(self.p.door_friends().join(format!("{old_name}.pub")));
-                                let old_home = self.p.home(&old_name);
-                                for stale in ["detached-quote.json", "sshsig-message.bin", "join.json", "latest-payment.json", "preparation.json"] {
-                                    let _ = std::fs::remove_file(old_home.join(stale));
-                                }
-                            }
-                            if o["phase"] != "refused" {
-                                self.refuse(&mut o, "superseded by a newer request")?;
+                        // Same name and key: the roster line is the new request's too; it is
+                        // written again when the new request is processed.
+                        let _ = std::fs::remove_file(self.p.door_friends().join(format!("{name}.pub")));
+                        if o["route"] == "paid" && o["phase"] != "queued" {
+                            let old_home = self.p.home(o["name"].as_str().unwrap_or(""));
+                            for stale in ["detached-quote.json", "sshsig-message.bin"] {
+                                let _ = std::fs::remove_file(old_home.join(stale));
                             }
                         }
+                        self.refuse(&mut o, &format!("superseded by request {id}"))?;
                     }
                 }
                 let keys = self.roster_keys();
@@ -1001,7 +1008,10 @@ impl<O: BoxOps> Processor<O> {
                             InviteState::Mine(s) | InviteState::Unspent(s) => serial = Some(s),
                         }
                     }
-                    // The seat check comes before the strike: a refusal for seats burns no code.
+                    // The seat check comes before the strike: a refusal for seats burns no code. A
+                    // sponsor balance the box cannot read (its Store down) is the box's fault: the
+                    // request waits and retries, never refused for it.
+                    self.sponsor_balance()?;
                     if let Some(why) = self.free_closed(Some(&id), serial.is_some()) {
                         return self.refuse(r, &why);
                     }
@@ -1048,6 +1058,7 @@ impl<O: BoxOps> Processor<O> {
             "keyed" if r["route"] == "free" => {
                 // The caps are checked again at the one step that spends the sponsor's credit.
                 let id = r["id"].as_str().unwrap_or("").to_owned();
+                self.sponsor_balance()?;
                 if let Some(why) = self.free_closed(Some(&id), !r["inviteSerial"].is_null()) {
                     return self.refuse(r, &why);
                 }
@@ -1468,7 +1479,11 @@ impl<O: BoxOps> Processor<O> {
     /// and `/doc/welcome` read the document the lobby points a newcomer to. Each step is recorded on the
     /// request before the next; a rerun resumes (an undecided submit is the exact `retry ID`).
     fn hand_publications(&mut self) -> Result<(), String> {
-        let publications = self.house_publications();
+        // A house document named like the room or story every member already joins under that name
+        // is held already (its invitation took the name in the member's inbox): handing it again
+        // would only be refused (`inbox/NAME.json already holds a different request`) every run.
+        let joined: Vec<String> = [&self.cfg.room, &self.cfg.story].into_iter().flatten().map(|c| c.name.clone()).collect();
+        let publications: Vec<(String, String)> = self.house_publications().into_iter().filter(|(doc, _)| !joined.contains(doc)).collect();
         if publications.is_empty() {
             return Ok(());
         }
@@ -1777,6 +1792,9 @@ mod tests {
             Ran { ok: true, stdout: format!("{name} 4100\n"), stderr: String::new() }
         }
         fn sponsor_credit(&self) -> Ran {
+            if self.p.root.join("store-down").exists() {
+                return Ran { ok: false, stdout: String::new(), stderr: "error: cannot connect to /var/lib/mini/store/node/public/mini.sock: No such file or directory".into() };
+            }
             Ran { ok: true, stdout: format!("credit {}  (asset 0, account 5, signed read at height 9)\n", self.balance.borrow()), stderr: String::new() }
         }
         fn give(&self, _name: &str, path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -1979,6 +1997,42 @@ mod tests {
         let s = read_json(&w.request_path(r.id())).unwrap();
         assert_ne!(s["publications"]["welcome"]["id"].as_str().unwrap(), id);
         assert_eq!(count(&w, "alice: import welcome"), 2);
+    }
+
+    /// The live box's `lobby house` publication and `lobby` room: the member already holds `lobby`
+    /// from the room's invitation, so the publication is not handed (it was refused every run).
+    #[test]
+    fn a_house_publication_named_like_the_room_is_not_handed_again() {
+        let mut w = world("pubs-room", false);
+        w.cfg.room = Some(StoryConfig { author: "box".into(), name: "lobby".into() });
+        std::fs::create_dir_all(w.p.config().parent().unwrap()).unwrap();
+        std::fs::write(w.p.config(), b"world one").unwrap();
+        std::fs::write(w.p.etc().join("house-publications"), "welcome box\nlobby box\n").unwrap();
+        let r = join("alice", KEY, Route::Free, false);
+        submit(&w, &r);
+        run(&mut w);
+        run(&mut w);
+        let s = read_json(&w.request_path(r.id())).unwrap();
+        assert_eq!(s["publications"]["welcome"]["joined"], true, "{s}");
+        assert!(s["publications"]["lobby"].is_null(), "{s}");
+        assert!(!w.ops.calls.borrow().iter().any(|c| c.contains("import lobby @lobby-reference.json")));
+    }
+
+    /// The live outage: the Store down, a free request is not refused for it; it waits and is made
+    /// once the sponsor's balance reads again.
+    #[test]
+    fn a_free_request_waits_out_a_store_outage_instead_of_being_refused() {
+        let mut w = world("store-down", false);
+        std::fs::write(w.p.root.join("store-down"), b"").unwrap();
+        let r = join("josephus", KEY, Route::Free, false);
+        submit(&w, &r);
+        run(&mut w);
+        let s = status(&w, r.id());
+        assert_eq!(s["phase"], "queued", "{s}");
+        assert!(s["detail"].as_str().unwrap().starts_with("the box will retry"), "{s}");
+        std::fs::remove_file(w.p.root.join("store-down")).unwrap();
+        run(&mut w);
+        assert_eq!(status(&w, r.id())["phase"], "enrolled");
     }
 
     #[test]
@@ -2374,13 +2428,26 @@ mod tests {
         assert_eq!(old_s["phase"], "refused", "{old_s}");
         assert!(old_s["detail"].as_str().unwrap().contains("superseded"), "{old_s}");
         assert_eq!(status(&w, a2.id())["phase"], "sign");
-        // Submitting a new /join with a different name and the same SSH key also supersedes a2.
+        // A different name with the same SSH key, or the same name with a different key, never
+        // replaces a request: the newcomer is refused and a2 stands.
         let a3 = join("alice-two", KEY, Route::Paid, false);
         submit(&w, &a3);
         run(&mut w);
-        assert_eq!(status(&w, a2.id())["phase"], "refused");
-        assert_eq!(status(&w, a3.id())["phase"], "sign");
-        assert!(!w.p.door_friends().join("alice.pub").exists());
-        assert!(w.p.door_friends().join("alice-two.pub").exists());
+        assert_eq!(status(&w, a3.id())["phase"], "refused");
+        assert_eq!(status(&w, a2.id())["phase"], "sign");
+        let a4 = join("alice", KEY2, Route::Paid, false);
+        submit(&w, &a4);
+        run(&mut w);
+        assert_eq!(status(&w, a4.id())["phase"], "refused", "a stranger's key cannot take alice's pending request");
+        assert_eq!(status(&w, a2.id())["phase"], "sign");
+        assert!(w.p.door_friends().join("alice.pub").exists());
+        // Once a payment record exists (awaiting payment), even the same name and key cannot replace it.
+        std::fs::write(w.p.home("alice").join("latest-payment.json"), b"{}").unwrap();
+        let a5 = join("alice", KEY, Route::Paid, false);
+        submit(&w, &a5);
+        run(&mut w);
+        assert_eq!(status(&w, a5.id())["phase"], "refused");
+        assert_eq!(status(&w, a2.id())["phase"], "sign");
+        assert!(w.p.home("alice").join("latest-payment.json").exists(), "a payment record is never deleted");
     }
 }

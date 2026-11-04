@@ -209,7 +209,7 @@ impl Door {
         }
         body.push_str("<form method=post action=/join>\
             <p><label>Account name (2–25 lowercase letters, digits or <code>-</code>, starting with a letter)<br>\
-            <input type=text name=name required maxlength=25 pattern=\"[a-z][a-z0-9-]{1,24}\"></label></p>\
+            <input type=text name=name required maxlength=25 pattern=\"[A-Za-z][A-Za-z0-9-]{1,24}\" title=\"2 to 25 letters, digits or -, starting with a letter\"></label></p>\
             <p><label>SSH public key (<code>ssh-ed25519 …</code>; optional for free accounts, required for paid entry)<br>\
             <textarea name=key rows=3 maxlength=600></textarea></label></p>");
         if free {
@@ -353,9 +353,21 @@ impl Door {
         let field = |name: &str| fields.get(name).map(String::as_str).unwrap_or("");
         let request = match path {
             "/join" => {
-                let name = field("name").trim();
+                let lowered = field("name").trim().to_ascii_lowercase();
+                let name = lowered.as_str();
                 if !door::is_door_name(name) {
-                    return refuse(400, "that name is not available: 2 to 25 lowercase letters, digits or -, starting with a letter, and not a reserved word");
+                    let why = if door::RESERVED.contains(&name) {
+                        format!("the name {name} is reserved for the box; choose another")
+                    } else if !(2..=25).contains(&name.len()) {
+                        "a name is 2 to 25 characters".to_owned()
+                    } else if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+                        "a name starts with a letter".to_owned()
+                    } else if name.ends_with('-') {
+                        "a name does not end with -".to_owned()
+                    } else {
+                        "a name uses only letters, digits and - (no spaces, dots or _)".to_owned()
+                    };
+                    return refuse(400, &why);
                 }
                 let ssh_key = if field("key").trim().is_empty() {
                     String::new()
