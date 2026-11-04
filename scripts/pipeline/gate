@@ -14,6 +14,10 @@ I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; SHA=${1:?}; C=$I/candidates/$SHA; S8=
 EDGE=${EDGE:-$I/dregg-infra-${EDGE_REV:-3ddd90f}/edge/mini}; R=${GATE_RUNS:-/ci}; LOCK=${WORLD_UP_LOCK:-/tank/lanes/world-up.lock}
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)} DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}
 export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH
+# The frame locks with util-linux flock on a file descriptor (`flock -w 60 9`); a user-level shim named flock
+# ahead of it on PATH (dregg-build2 2026-11-04: obend's ~/.elan/bin/flock, a per-target lake lock that strips
+# the flags and runs the rest through timeout) breaks every roster render. The system's flock comes first.
+case $(command -v flock) in /usr/bin/flock|/bin/flock) ;; *) export PATH=/usr/bin:/bin:$PATH ;; esac
 export PLAYWRIGHT_DIR=${PLAYWRIGHT_DIR:-$I/pw/node_modules}
 say(){ echo "$(date -Is) $*" >> $LOG; }
 [ -f $C/READY ] || { say "gate: no READY $C"; exit 2; }
