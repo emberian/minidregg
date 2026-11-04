@@ -18,8 +18,8 @@ export PLAYWRIGHT_DIR=${PLAYWRIGHT_DIR:-$I/pw/node_modules}
 say(){ echo "$(date -Is) $*" >> $LOG; }
 [ -f $C/READY ] || { say "gate: no READY $C"; exit 2; }
 mkdir -p $G && SRC=$G/src && mkdir -p $SRC && tar -xf $C/source.tar -C $SRC
-if [ -n "${HARNESS:-}" ]; then   # the harness (scripts/, native/resource-client scripts, journey.d) from HARNESS over the candidate source
-  git -C $I/src fetch -q origin && git -C $I/src archive "$HARNESS" scripts deploy/spk-host native/resource-client/journey.d $(git -C $I/src ls-tree --name-only "$HARNESS" native/resource-client/ | grep -E '\.(py|sh)$') | tar -x -C $SRC || { say "gate: harness overlay $HARNESS failed"; exit 3; }
+if [ -n "${HARNESS:-}" ]; then   # the harness (scripts/, testing/journeys, native/resource-client scripts, journey.d) from HARNESS over the candidate source
+  git -C $I/src fetch -q origin && git -C $I/src archive "$HARNESS" scripts deploy/spk-host testing/journeys native/resource-client/journey.d $(git -C $I/src ls-tree --name-only "$HARNESS" native/resource-client/ | grep -E '\.(py|sh)$') | tar -x -C $SRC || { say "gate: harness overlay $HARNESS failed"; exit 3; }
 fi
 say "GATE $S8 start (harness = candidate source)"
 tour() {
