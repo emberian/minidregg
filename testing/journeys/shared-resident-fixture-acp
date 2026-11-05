@@ -111,7 +111,7 @@ for line in sys.stdin:
             try: rendered=json.loads(verified['content'][0]['text']).get('text','')
             except (ValueError,KeyError,IndexError,TypeError,AttributeError): return False
             if text.replace('\n','\u2424') in rendered: return True
-            got=[re.sub(r'^\s*\d+  ','',line,count=1).rstrip() for line in rendered.split('\n')]
+            got=[re.sub(r'^\s*\d+(  |$)','',line,count=1).rstrip() for line in rendered.split('\n')]   # a blank line renders as its bare number
             wanted=[line.rstrip() for line in text.split('\n')]
             while wanted and not wanted[0]: wanted.pop(0)
             while wanted and not wanted[-1]: wanted.pop()

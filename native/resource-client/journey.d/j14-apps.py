@@ -87,7 +87,7 @@ Do not call mini_say or perform unrelated index, digest, or document maintenance
         self.shell('alice','doc show lab-hermes-librarian')
         self.shell('alice','doc push apps-program lab-hermes-librarian @apps-program.md')
         shown=self.shell('alice','doc show lab-hermes-librarian').read_text()
-        rendered=[re.sub(r'^\s*\d+  ','',line,count=1).rstrip() for line in shown.split('\n')]
+        rendered=[re.sub(r'^\s*\d+(  |$)','',line,count=1).rstrip() for line in shown.split('\n')]   # a blank line renders as its bare number
         wanted=[line.rstrip() for line in program.rstrip('\n').split('\n')]
         if not any(rendered[i:i+len(wanted)]==wanted for i in range(len(rendered)-len(wanted)+1)):
             raise ValueError('the signed app-assistant program was not verified after publication')
