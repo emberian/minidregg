@@ -145,13 +145,21 @@ upgrade() {
   [ "$(jq -er '.pinnedConfigSha256' "$STATE/state.json")" = "$(candidate_sha256 "$CONFIG")" ] \
     || candidate_die "pinned config differs from recorded state"
   candidate_require_stopped
-  service_config=$STATE/public/mini.config
-  if [ -e "$service_config" ] || [ -L "$service_config" ]; then
-    [ -f "$service_config" ] && [ ! -L "$service_config" ] \
-      || candidate_die "retained service config is not a regular file"
-    cmp -s "$CONFIG" "$service_config" \
-      || candidate_die "retained service config differs from pinned config"
-  fi
+  # The retained service configs follow the pinned one: the public reader's (public/mini.config) and,
+  # under the private-Host topology, the operator's (operator/mini.config, the Host's own retained copy:
+  # a Store restarted on a rebound pinned config with the old operator copy refuses `retained host
+  # config differs from requested service config`, demo-dry 2026-11-05). Each must be a regular file
+  # equal to the pinned config before the rebind; each becomes the rebound one after.
+  service_configs=()
+  for service_config in "$STATE/public/mini.config" "$STATE/operator/mini.config"; do
+    if [ -e "$service_config" ] || [ -L "$service_config" ]; then
+      [ -f "$service_config" ] && [ ! -L "$service_config" ] \
+        || candidate_die "retained service config is not a regular file: $service_config"
+      cmp -s "$CONFIG" "$service_config" \
+        || candidate_die "retained service config differs from pinned config: $service_config"
+      service_configs+=("$service_config")
+    fi
+  done
   candidate_resolve "$upgrade_manifest"
   candidate_verify_outputs "$CANDIDATE_MANIFEST"
   upgrade_tmp=$(mktemp -d "$STATE/tmp/upgrade.XXXXXX")
@@ -163,10 +171,10 @@ upgrade() {
     '.manifest = $manifest | .hostSha256 = $host | .pinnedConfigSha256 = $config' \
     "$STATE/state.json" >"$upgrade_tmp/state.json"
   candidate_require_stopped
-  if [ -f "$service_config" ]; then
+  for service_config in "${service_configs[@]}"; do
     cp "$upgrade_tmp/config.json" "$upgrade_tmp/service.json"
     mv "$upgrade_tmp/service.json" "$service_config"
-  fi
+  done
   mv "$upgrade_tmp/config.json" "$CONFIG"
   mv "$upgrade_tmp/state.json" "$STATE/state.json"
   rm -rf -- "$upgrade_tmp"
