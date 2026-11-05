@@ -47,6 +47,9 @@ round() {
   # 1. the build (detached: it holds build.lock, src, until its umbrella tree has synced, then runs the umbrellas)
   # integ-build at the tip being built (src is still at the previous round's commit until integ-build checks out SHA)
   local build=$ST/integ-build; git -C "$REPO" show "$sha:scripts/pipeline/integ-build" > "$build" && chmod +x "$build"
+  # the reaper is taken at round start: a round whose build stops before READY still has gate worlds of its
+  # own and earlier rounds' to end (2026-11-05: "no world-reap in this tip" after a red host stage, worlds left up)
+  git -C "$REPO" show "$sha:scripts/pipeline/world-reap" > "$ST/world-reap" 2>/dev/null && chmod +x "$ST/world-reap" || rm -f "$ST/world-reap"
   ( cd "$I" && BUILDER_ROOT=$I "$build" "$sha" > "$ST/build-$s8.out" 2>&1 ) 8>&- & local bpid=$!; echo $bpid > "$ST/build.pid"
   while kill -0 $bpid 2>/dev/null && [ ! -f "$I/candidates/$sha/READY" ]; do sleep 30; done
   # build.lock held (another build in src): not a round; the tip is tried again, nothing is published
