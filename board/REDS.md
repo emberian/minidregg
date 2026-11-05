@@ -1,20 +1,21 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `1c2da07121c0` (gate: the system's flock comes first on PATH). Round finished 2026-11-04T23:51Z.
-green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-1c2da071`.
+Tip: `0852014c3222` (mini-web-spawn: warm every live public body, and again every two minutes). Round finished 2026-11-05T02:08Z.
+green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-0852014c`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| rust-check | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| host | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
+| host | rc=1 see /home/hbox/lanes/integ/logs/host.log | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
+| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 6ba8fe37fa18..1c2da07121c0`), newest first; owners are the seats whose
+Suspect commits since green (`git log 6ba8fe37fa18..0852014c3222`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `0852014c` mini-web-spawn: warm every live public body, and again every two minutes
+- `86b7a942` builder: REDS.md for 1c2da07121c0 (6 red) (owner: build-loop)
 - `1c2da071` gate: the system's flock comes first on PATH
 - `2099fc9b` builder: REDS.md for e4796e5f773d (6 red) (owner: build-loop)
 - `e4796e5f` main: merge the perf-client lane's original commits so the live candidate's source stays reachable
@@ -53,5 +54,3 @@ Suspect commits since green (`git log 6ba8fe37fa18..1c2da07121c0`), newest first
 - `532bb29c` wave3-hermes-apps-tick: fix bend_answer @file staging, law_check witness & compound clauses, bend vi (owner: apps-hermes)
 - `faae71ba` wave3(lane2): add Hermes objective-world tools, bend tick-all clock automation, and app grain WorldR (owner: apps-hermes)
 - `90224826` resource-client: fix SeatJson/ObjectiveBendDataWire wire compliance, Cert-F self-verification, and c (owner: apps-hermes)
-- `ecd37eea` wave3-surface-solvers: wire seat/objective dispatch, Cert-F clearing solver, Pred.hashEq ballot cust (owner: apps-hermes)
-- `17a7c081` world-overhaul: infer DrexBatch clear market, wire POST /act/surface, and enforce cSHAKE256 hasheq_c (owner: apps-hermes)
