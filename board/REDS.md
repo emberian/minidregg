@@ -1,11 +1,15 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `158ffd6fb027` (builder: --once resolves the id it is given to the full commit). Round finished 2026-11-05T05:20Z.
+Tip: `158ffd6fb027` (builder: --once resolves the id it is given to the full commit). Round finished 2026-11-05T17:08Z.
 green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-158ffd6f`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
+| host | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 | gate | no verdict | - | no | build-loop | /home/hbox/lanes/integ/gate-158ffd6f/gate.json missing |
 
 Suspect commits since green (`git log 6ba8fe37fa18..158ffd6fb027`), newest first; owners are the seats whose
