@@ -1,17 +1,17 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `2b8befa571bd` (summon: the program document goes in as one push action). Round finished 2026-11-05T19:09Z.
-green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-2b8befa5`.
+Tip: `2ef06fb15eed` (summon: the program is appended line by line, sixteen actions a proposal). Round finished 2026-11-05T19:30Z.
+green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-2ef06fb1`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:j14-apps | j14-apps FAIL | yes, red again | yes | apps-hermes | rc=1; /ci/j-2b8bef/journey.log |
-| gate:composed:residents | composed residents fail | yes, red again | no | member-side, infra | fail: residents: UNKNOWN room-summon ended 1 after a possible native submission (00039-roo |
-| gate:composed:restart | composed restart blocked | yes, red again | no | host-execution | blocked: prerequisite residents has not passed |
+| gate:j14-apps | j14-apps FAIL | yes, red again | yes | apps-hermes | rc=1; /ci/j-2ef06f/journey.log |
 
-Suspect commits since green (`git log 6ba8fe37fa18..2b8befa571bd`), newest first; owners are the seats whose
+Suspect commits since green (`git log 6ba8fe37fa18..2ef06fb15eed`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `2ef06fb1` summon: the program is appended line by line, sixteen actions a proposal (owner: apps-hermes)
+- `ae7fc140` builder: REDS.md for 2b8befa571bd (3 red) (owner: build-loop)
 - `2b8befa5` summon: the program document goes in as one push action (owner: apps-hermes)
 - `73291505` builder: REDS.md for a30cb1fdfb9b (1 red) (owner: build-loop)
 - `a30cb1fd` summon: the program document is appended one line per action (owner: apps-hermes)
@@ -50,17 +50,15 @@ Suspect commits since green (`git log 6ba8fe37fa18..2b8befa571bd`), newest first
 - `1c09d26c` resource-client: fix SeatJson/ObjectiveBendDataWire wire compliance, Cert-F self-verification, and c (owner: apps-hermes)
 - `fdb94167` wave3-surface-solvers: wire seat/objective dispatch, Cert-F clearing solver, Pred.hashEq ballot cust (owner: apps-hermes)
 - `b331bb34` world-overhaul: infer DrexBatch clear market, wire POST /act/surface, and enforce cSHAKE256 hasheq_c (owner: apps-hermes)
-- `702cd5ee` world,kernel,compiler,web: execute 3-phase preview museum overhaul (owner: apps-hermes, read-path)
-- `bc7070cf` Fix Presburger writeOnce/pruning/cert parity and receipt witness retention (owner: apps-hermes)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.311 | 0.219 | 0.704 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | submit_wall_ms | 53.565 | 63.379 | 1.183 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.239 | 0.193 | 0.808 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 30.993 | 81.225 | 2.621 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.504 | 0.478 | 0.948 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 145.549 | 160.148 | 1.100 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-2b8befa5/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.217 | 0.193 | 0.889 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 56.463 | 66.328 | 1.175 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.125 | 0.186 | 1.493 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 35.548 | 82.145 | 2.311 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.506 | 0.412 | 0.813 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 151.362 | 158.889 | 1.050 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-2ef06fb1/flatness.log | - | - | - | - | host-execution, store-retained |
