@@ -178,34 +178,35 @@ PY
   say "GATE $S8 j14-apps: $(cut -f2,3 $G/j14.tsv | tr '\t' ' ' | cut -c1-200)"
 }
 P=" ${PHASES:-tour composed enrol j14 flatness} "
-[[ $P == *" tour "* ]] && { tour > $G/tour.log 2>&1 & echo $! > $G/tour.pid; }
-[[ $P == *" composed "* ]] && { composed > $G/composed.log 2>&1 & echo $! > $G/composed.pid; }
-[[ $P == *" enrol "* ]] && { enrol & echo $! > $G/enrol.pid; }
-[[ $P == *" j14 "* ]] && { j14apps > $G/j14-phase.log 2>&1 & echo $! > $G/j14.pid; }
-wait
-[ -f $G/TOUR.tsv ] || cp ${TOUR_FROM:-$I/gate-$S8/TOUR.tsv} $G/TOUR.tsv 2>/dev/null
-[ -f $G/composed-result.json ] || cp $I/gate-$S8/composed-result.json $G/composed-result.json 2>/dev/null
-if [[ $P == *" flatness "* ]]; then
-  # Law 17 runs after the other workloads to avoid timing their contention.
-  FROOT=$R/f-${S8:0:6}${SUF:-}
+flatness() {
+  # Law 17's ratios are published, never a gate (ruling 2026-10-27; builder 9317f32fc), so they run beside the
+  # other phases instead of after them: the serial run added 4-5 minutes to every round (hbox 2026-11-05,
+  # 14.7-minute rounds of which 4.4 were flatness). The contention of the parallel phases shows in the
+  # published wall ratios and is named here; the cpu ratios carry the law.
+  local FROOT=$R/f-${S8:0:6}${SUF:-} rc
   printf 'flatness-submit\tFAIL\tnot completed\nflatness-get\tFAIL\tnot completed\n' > "$G/flatness.tsv"
   if [[ -f $SRC/scripts/perf/flatness-gate.sh ]]; then
     MINI_MARKET_CACHE=$I/spk-cache bash "$SRC/scripts/perf/flatness-gate.sh" "$C" "$FROOT" \
-      "${FLATNESS_N:-1000}" "${FLATNESS_LO:-20}" > "$G/flatness.log" 2>&1 &
-    echo $! > "$G/flatness.pid"
-    wait "$(cat "$G/flatness.pid")"; flatness_rc=$?
+      "${FLATNESS_N:-1000}" "${FLATNESS_LO:-20}" > "$G/flatness.log" 2>&1; rc=$?
     [[ ! -s $FROOT/gate.tsv ]] || cp "$FROOT/gate.tsv" "$G/flatness.tsv"
     # Failure before fresh-root creation must not adopt an older green result.
-    if [[ $flatness_rc != 0 ]]; then
-      printf 'flatness-run\tFAIL\texit=%s; %s/flatness.log\n' "$flatness_rc" "$G" >> "$G/flatness.tsv"
+    if [[ $rc != 0 ]]; then
+      printf 'flatness-run\tFAIL\texit=%s; %s/flatness.log\n' "$rc" "$G" >> "$G/flatness.tsv"
     fi
   else
     echo 'candidate harness lacks scripts/perf/flatness-gate.sh' > "$G/flatness.log"
   fi
-  say "GATE $S8 flatness: $(tr '\n' ';' < "$G/flatness.tsv")"
-else
-  [ -f $G/flatness.tsv ] || cp $I/gate-$S8/flatness.tsv $G/flatness.tsv 2>/dev/null
-fi
+  say "GATE $S8 flatness (beside the other phases): $(tr '\n' ';' < "$G/flatness.tsv")"
+}
+[[ $P == *" tour "* ]] && { tour > $G/tour.log 2>&1 & echo $! > $G/tour.pid; }
+[[ $P == *" composed "* ]] && { composed > $G/composed.log 2>&1 & echo $! > $G/composed.pid; }
+[[ $P == *" enrol "* ]] && { enrol & echo $! > $G/enrol.pid; }
+[[ $P == *" j14 "* ]] && { j14apps > $G/j14-phase.log 2>&1 & echo $! > $G/j14.pid; }
+[[ $P == *" flatness "* ]] && { flatness & echo $! > $G/flatness.pid; }
+wait
+[ -f $G/TOUR.tsv ] || cp ${TOUR_FROM:-$I/gate-$S8/TOUR.tsv} $G/TOUR.tsv 2>/dev/null
+[ -f $G/composed-result.json ] || cp $I/gate-$S8/composed-result.json $G/composed-result.json 2>/dev/null
+[[ $P == *" flatness "* ]] || [ -f $G/flatness.tsv ] || cp $I/gate-$S8/flatness.tsv $G/flatness.tsv 2>/dev/null
 python3 $EDGE/gate-from-runs.py --sums $(sha256sum $C/SHA256SUMS | cut -d' ' -f1) --commit $SHA --ran-on "$(hostname)" --composed $G/composed-result.json --tour $G/TOUR.tsv --tour "$G/flatness.tsv" $([[ -f $G/j14.tsv ]] && echo --tour $G/j14.tsv) > $G/gate.json 2> $G/gate.err
 say "GATE $S8 verdict $(jq -r .verdict $G/gate.json 2>/dev/null)"
 # lane trash (ember 2026-10-31): gate roots and worlds of candidates two or more behind, unless kept ($I/keep) or in use

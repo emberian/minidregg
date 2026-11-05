@@ -66,8 +66,10 @@ round() {
   while kill -0 $bpid 2>/dev/null && [ ! -f "$I/logs/umbrella-synced-${sha:0:12}" ]; do sleep 15; done
   [ -z "$gpid" ] || wait $gpid
   local G=$I/gate-$s8 rerun=""
-  # reruns: each red gate phase once, alone
-  if [ -s "$G/gate.json" ] && [ "$(jq -r .verdict "$G/gate.json")" != PASS ]; then
+  # reruns: each red gate phase once, alone, when BUILDER_RERUN=1. Off by default since 2026-11-05: the
+  # rerun doubled a red round's gate time (4-8 minutes) to fill the "reruns?" column, and the next round on
+  # the fix answers the same question through "same place as last round?".
+  if [ "${BUILDER_RERUN:-0}" = 1 ] && [ -s "$G/gate.json" ] && [ "$(jq -r .verdict "$G/gate.json")" != PASS ]; then
     local phases=""
     [ "$(jq -r .composed.verdict "$G/gate.json")" = PASS ] || phases="$phases composed"
     grep -q $'\tFAIL' "$G/TOUR.tsv" 2>/dev/null && phases="$phases tour"
@@ -78,7 +80,8 @@ round() {
     fi
   fi
   reds "$sha" "$G" "$rerun"
-  reap_worlds "$sha"
+  # the reap runs beside the next round: it is housekeeping (2.5 minutes on hbox), not the verdict
+  ( reap_worlds "$sha" ) 8>&- &
   # still running umbrellas: REDS.md is rewritten for this round when they end, unless a newer round reported
   if kill -0 $bpid 2>/dev/null; then printf '%s %s %s %s\n' "$sha" "$bpid" "$G" "$rerun" > "$ST/pending"; fi
   say "round ${sha:0:12} done $(( $(date +%s) - t0 )) s: $(head -c 200 "$ST/summary-$s8.txt")"
