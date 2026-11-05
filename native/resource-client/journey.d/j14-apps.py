@@ -21,7 +21,7 @@ mini_app_<alias>_qualify through the controller (the same fixed `controller-tool
 scenario's write and read-back each cross Mini admission and settlement; the result and the controller's
 exported application evidence are retained under the step directory. No LLM turn is made.
 """
-import base64, hashlib, http.client, importlib.util, json, os, shutil, socket, sys, time
+import base64, hashlib, http.client, importlib.util, json, os, shutil, socket, sys, time,re
 from pathlib import Path
 HERE=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('j14_oracle',HERE/'j14-oracle.py')
@@ -81,11 +81,15 @@ Use one final text response to answer the requesting member; Mini delivers it.
 Do not call mini_say or perform unrelated index, digest, or document maintenance.
 '''
         path=self.homes/'alice/requests/apps-program.md';path.write_text(program)
+        # Since wave1 (5330c7d00) a line edit is one line and a document renders each line under its own
+        # gutter; the program is a whole document, so it goes in as `doc push` (diffed against the last
+        # `doc show`, proposed and submitted in one), and is verified line by line in the rendering.
         self.shell('alice','doc show lab-hermes-librarian')
-        self.shell('alice','doc edit apps-program lab-hermes-librarian 1 @apps-program.md')
-        self.shell('alice','submit apps-program')
+        self.shell('alice','doc push apps-program lab-hermes-librarian @apps-program.md')
         shown=self.shell('alice','doc show lab-hermes-librarian').read_text()
-        if program.rstrip('\n').replace('\n','␤') not in shown:
+        rendered=[re.sub(r'^\s*\d+  ','',line,count=1).rstrip() for line in shown.split('\n')]
+        wanted=[line.rstrip() for line in program.rstrip('\n').split('\n')]
+        if not any(rendered[i:i+len(wanted)]==wanted for i in range(len(rendered)-len(wanted)+1)):
             raise ValueError('the signed app-assistant program was not verified after publication')
 
     def capture_failure(self):
