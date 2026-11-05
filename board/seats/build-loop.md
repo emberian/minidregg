@@ -48,6 +48,15 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   the pool's packages-3a3779933df4 then `lane-tree native src` (its own hard-linked copy), build outputs
   warm-linked from pool tree t1 (e53e4515) and t1's `.lake/native` copied. Its first round (0852014c3, cold
   tree) was red at `host` on a missing .lake/packages and wrote REDS.md so; the next tip rebuilds warm.
+  Then: the Oct 31 builder (pid 1235827, its tree deleted under it) woke on the new src and raced the new
+  loop until ember had it killed; `--once` now rev-parses its id (158ffd6fb); the reaper is taken at round
+  start (240295848); the copied runtime root needed its venv interpreter link and umask-022 modes; j14 then
+  found wave1's one-line `doc edit` rule against summon's one-action program (fixed on main: 2ef06fb15,
+  0264f390e). Round 0264f390e: 0 reds, j14 PASS, composed PASS, tour 73 PASS, flatness published;
+  `green` -> 0264f390ecf7 (2026-11-05 19:53Z), the first move since 6ba8fe37fa18 (11-01). The loop is
+  `builder-run.sh` (builder.pid); two unnamed processes of the 11-05 00:xx collided tour world
+  (`mini serve` 2392553, `mini-web-spawn --dev` 2392988, root /ci/t-158ffd) have no PID file and are left
+  for ember or the sweep.
 - Knobs: `scripts/pipeline/builder --once`, `--reds SHA` (rewrite REDS.md from existing logs), BUILDER_DRY=1 (print,
   never push). $I/keep lists candidate prefixes that sweep and reap never touch. integ-build stops below 25 GB free.
 
