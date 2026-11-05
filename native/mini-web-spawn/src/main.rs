@@ -53,6 +53,8 @@ struct PublicBody {
     basis: String,
     warm: Option<Arc<AtomicU8>>,
     tries: u32,
+    /// When the last warming request was sent (a warmed body is warmed again after [`REWARM`]).
+    sent: Option<Instant>,
 }
 
 const WARMING: u8 = 0;
@@ -62,6 +64,11 @@ const COLD: u8 = 2;
 const WARM_TRIES: u32 = 5;
 /// The warming request waits longer than the gateway's 120 s: it is the one meant to be slow.
 const WARM_DEADLINE: Duration = Duration::from_secs(600);
+/// A warmed public body is warmed again this long after its last warming request, at a sweep: the
+/// chain behind it (the shell pool's clients, the consent worker, the codec resident) cools within
+/// minutes (demo-dry 2026-11-05: 18-26 s for the first front page after twenty idle minutes, 4-6 s
+/// after two, 1.4 s back to back), and the body a visitor started was never warmed at all.
+const REWARM: Duration = Duration::from_secs(120);
 
 fn run_main() {
     if let Err(error) = run() {
@@ -300,7 +307,7 @@ impl Helper {
             session.body_pid = Some(pid);
             self.store.save(session)?;
             if member.anonymous {
-                self.public = Some(PublicBody { pid, basis: self.spawner.public_basis(member), warm: None, tries: 0 });
+                self.public = Some(PublicBody { pid, basis: self.spawner.public_basis(member), warm: None, tries: 0, sent: None });
             }
             eprintln!("mini-web-spawn: body {pid} started for {}", member.account);
             // The listener lives in the body now; the kernel queues our connect until it accepts.
@@ -335,8 +342,16 @@ impl Helper {
         let mut session = self.store.public();
         self.retire_stale_public(&mut session, &member);
         if self.live(&session) {
+            // A live body is warmed when it never was (a visitor started it), again after a failed
+            // warming (WARM_TRIES in all), and again REWARM after a warming that succeeded.
             let retry = self.public.as_ref().is_some_and(|p| {
-                p.pid == session.body_pid.unwrap_or(0) && p.tries < WARM_TRIES && p.warm.as_ref().is_some_and(|w| w.load(Ordering::Acquire) == COLD)
+                p.pid == session.body_pid.unwrap_or(0)
+                    && match p.warm.as_ref().map(|w| w.load(Ordering::Acquire)) {
+                        None => true,
+                        Some(COLD) => p.tries < WARM_TRIES,
+                        Some(WARM) => p.sent.is_none_or(|t| t.elapsed() >= REWARM),
+                        _ => false,
+                    }
             });
             if retry {
                 match UnixStream::connect(self.body_path(&session)) {
@@ -356,9 +371,12 @@ impl Helper {
     /// logged and kept for [`Helper::warm_public`]'s retry.
     fn send_warm(&mut self, mut stream: UnixStream) {
         let Some(public) = self.public.as_mut() else { return };
+        // A warming after a success starts the failure count over: WARM_TRIES bounds a run of failures.
+        if public.warm.as_ref().is_some_and(|w| w.load(Ordering::Acquire) == WARM) { public.tries = 0; }
         let state = Arc::new(AtomicU8::new(WARMING));
         public.warm = Some(state.clone());
         public.tries += 1;
+        public.sent = Some(Instant::now());
         let pid = public.pid;
         std::thread::spawn(move || {
             let began = Instant::now();
