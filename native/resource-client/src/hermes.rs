@@ -522,23 +522,31 @@ fn ensure_doc(session: &Session, room: &str, name: &str, law: &Value) -> Result<
     Ok("law installed")
 }
 
-/// The program, proposed and submitted as one `push` action carrying the whole text, the shape the
-/// shell's `doc push` sends (workspace.rs doc_push): the document then holds it line by line. A
-/// document line holds no line break (since wave1 a line edit refuses one, `doc push` cannot diff a
-/// file against one, and the renderer numbers each line), so a program appended as one `append`
-/// action was a document nothing could edit or push afterwards (the gate's j14-apps row, 2026-11-05:
-/// `line 1 holds a newline; a file cannot carry it as one line`); one append per line met the
-/// proposal's 16-action bound (`document proposal requires 1..16 actions`) on the librarian's.
+/// The program, appended to its document one action per non-empty line as the shell's `doc append`
+/// sends text, in proposals of at most ACTIONS_PER_PROPOSAL actions, each proposed and submitted in
+/// turn. A document line holds no line break (since wave1 a line edit refuses one, `doc push` cannot
+/// diff a file against one, and the renderer numbers each line), so a program appended as ONE action
+/// was a document nothing could edit or push afterwards (the gate's j14-apps row, 2026-11-05: `line 1
+/// holds a newline; a file cannot carry it as one line`); a `push` action needs the proposer's own
+/// prior read (`a push is a diff against your last read`), which a summon has not made.
 fn append_doc(session: &Session, name: &str, text: &str) -> Result<Value, Done> {
-    if text.trim().is_empty() {
+    const ACTIONS_PER_PROPOSAL: usize = 16; // workspace.rs: `document proposal requires 1..16 actions`
+    let actions: Vec<Value> = text
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r'))
+        .filter(|line| !line.is_empty())
+        .map(|line| json!({"type":"append","text":line}))
+        .collect();
+    if actions.is_empty() {
         return Err(usage("a program must contain at least one non-empty line"));
     }
-    let mut bytes = text.trim_end_matches(['\r', '\n']).to_owned();
-    bytes.push('\n');
-    let hex: String = bytes.bytes().map(|b| format!("{b:02x}")).collect();
-    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-        "targets":[{"name":name,"payload":{"type":"document","actions":[{"type":"push","bytes":hex}]}}]});
-    propose_submit(session, "hermes-program", &request)
+    let mut last = Value::Null;
+    for chunk in actions.chunks(ACTIONS_PER_PROPOSAL) {
+        let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+            "targets":[{"name":name,"payload":{"type":"document","actions":chunk}}]});
+        last = propose_submit(session, "hermes-program", &request)?;
+    }
+    Ok(last)
 }
 
 fn target(session: &Session, name: &str) -> Result<String, Done> {
