@@ -84,12 +84,15 @@ candidate_resolve() {
     named=$(jq -r --arg role "$role" '.[$role]' "$manifest")
     [ "$named" = "$path" ] || [ "$(candidate_realpath "$named")" = "$path" ] \
       || candidate_die "manifest .$role does not name its candidate output"
+    # The role keeps the manifest's own form: what init pins into the Store's configuration (storageBinary,
+    # signatureBinary) and what the entrypoints run is the path the manifest names, so a box manifest through
+    # candidate/current pins through it, and a same-Host candidate switch never moves a pin.
     case "$role" in
-      host) HOST=$path ;;
-      mini) MINI=$path ;;
-      store) STORE=$path ;;
-      verifier) VERIFIER=$path ;;
-      consent) CONSENT=$path ;;
+      host) HOST=$named ;;
+      mini) MINI=$named ;;
+      store) STORE=$named ;;
+      verifier) VERIFIER=$named ;;
+      consent) CONSENT=$named ;;
     esac
   done
 }
