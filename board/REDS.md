@@ -1,15 +1,19 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `240295848cbf` (builder: take the world reaper at round start, not only after READY). Round finished 2026-11-05T17:25Z.
-green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-24029584`.
+Tip: `54ae5b6b05a4` (run.sh upgrade: an empty retained-config list under set -u). Round finished 2026-11-05T17:45Z.
+green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-54ae5b6b`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:j14-apps | j14-apps FAIL | yes, red again | no | apps-hermes | rc=1; /ci/j-240295/journey.log |
+| gate:j14-apps | j14-apps FAIL | yes, red again | yes | apps-hermes | rc=1; /ci/j-54ae5b/journey.log |
+| gate:composed:composed | composed composed fail | yes, red again | no | infra, member-side | scratch world: jworld FAIL init /ci-composed/c-54ae5b/w/root/var/lib/mini/candidate/current/run.sh: 153: Syntax error: "(" unexpected (expecting "}") |
 
-Suspect commits since green (`git log 6ba8fe37fa18..240295848cbf`), newest first; owners are the seats whose
+Suspect commits since green (`git log 6ba8fe37fa18..54ae5b6b05a4`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `54ae5b6b` run.sh upgrade: an empty retained-config list under set -u
+- `f11c9722` run.sh upgrade: the operator's retained service config follows the pinned config too
+- `dad657c2` builder: REDS.md for 240295848cbf (1 red) (owner: build-loop)
 - `24029584` builder: take the world reaper at round start, not only after READY (owner: build-loop)
 - `f774ce7b` builder: REDS.md for 158ffd6fb027 (6 red) (owner: build-loop)
 - `aa1ba047` builder: REDS.md for 158ffd6fb027 (2 red) (owner: build-loop)
@@ -47,18 +51,15 @@ Suspect commits since green (`git log 6ba8fe37fa18..240295848cbf`), newest first
 - `548bd808` fix(grain-runtime): clear hermes_session.pending_prompt and refresh fingerprint on reconcile_prompt_ (owner: apps-hermes)
 - `64ba07cc` fix(grain-runtime): clear prompt_witness on parent hold reconcile and allow hermes_pending_prompt in (owner: apps-hermes)
 - `8568da8b` fix(grain-runtime): class-settle malformed 200 provider responses at hold during audited reconciliat (owner: apps-hermes)
-- `5330c7d0` feat(wave1): integrate Host light opening, Assurance/Verify detwin, world/seed overhaul, and grain/c (owner: apps-hermes, read-path)
-- `3f44281e` gate harness: the resident fixture reads a multi-line append line by line; HARNESS overlays testing/
-- `8d11fca5` door: fixes from the first strangers' attempts on demo-dry
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.235 | 0.236 | 1.003 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | submit_wall_ms | 48.399 | 68.599 | 1.417 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.174 | 0.181 | 1.041 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 30.343 | 82.270 | 2.711 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.612 | 0.493 | 0.805 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 173.859 | 158.824 | 0.914 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-24029584/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.396 | 0.291 | 0.733 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 69.993 | 70.881 | 1.013 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.205 | 0.233 | 1.133 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 42.071 | 88.975 | 2.115 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.497 | 0.382 | 0.769 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 152.740 | 159.991 | 1.047 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-54ae5b6b/flatness.log | - | - | - | - | host-execution, store-retained |
