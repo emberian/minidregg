@@ -150,14 +150,14 @@ upgrade() {
   # a Store restarted on a rebound pinned config with the old operator copy refuses `retained host
   # config differs from requested service config`, demo-dry 2026-11-05). Each must be a regular file
   # equal to the pinned config before the rebind; each becomes the rebound one after.
-  service_configs=()
+  service_configs=""
   for service_config in "$STATE/public/mini.config" "$STATE/operator/mini.config"; do
     if [ -e "$service_config" ] || [ -L "$service_config" ]; then
       [ -f "$service_config" ] && [ ! -L "$service_config" ] \
         || candidate_die "retained service config is not a regular file: $service_config"
       cmp -s "$CONFIG" "$service_config" \
         || candidate_die "retained service config differs from pinned config: $service_config"
-      service_configs+=("$service_config")
+      service_configs="$service_configs $service_config"
     fi
   done
   candidate_resolve "$upgrade_manifest"
@@ -171,7 +171,7 @@ upgrade() {
     '.manifest = $manifest | .hostSha256 = $host | .pinnedConfigSha256 = $config' \
     "$STATE/state.json" >"$upgrade_tmp/state.json"
   candidate_require_stopped
-  for service_config in ${service_configs[@]+"${service_configs[@]}"}; do   # set -u: the array may be empty
+  for service_config in $service_configs; do   # POSIX sh (dash): no arrays; the state paths carry no spaces
     cp "$upgrade_tmp/config.json" "$upgrade_tmp/service.json"
     mv "$upgrade_tmp/service.json" "$service_config"
   done
