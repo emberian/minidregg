@@ -1,20 +1,19 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `fa361191b` (board: build-loop row: the hbox builder root rebuilt and warmed on 2026-11-05). Round finished 2026-11-05T04:41Z.
-green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-fa361191`.
+Tip: `158ffd6fb027` (builder: --once resolves the id it is given to the full commit). Round finished 2026-11-05T05:18Z.
+green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-158ffd6f`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| rust-check | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| host | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
+| gate | no verdict | - | no | build-loop | /home/hbox/lanes/integ/gate-158ffd6f/gate.json missing |
 
-Suspect commits since green (`git log 6ba8fe37fa18..fa361191b`), newest first; owners are the seats whose
+Suspect commits since green (`git log 6ba8fe37fa18..158ffd6fb027`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `158ffd6f` builder: --once resolves the id it is given to the full commit (owner: build-loop)
+- `3b554e43` builder: REDS.md for fa361191b (6 red) (owner: build-loop)
+- `75d53e42` fixtures: native runs re-recorded from candidate fa361191bfa9 (accepted stale, doc-write current)
 - `fa361191` board: build-loop row: the hbox builder root rebuilt and warmed on 2026-11-05
 - `cda6ea02` builder: REDS.md for 0852014c3222 (5 red) (owner: build-loop)
 - `0852014c` mini-web-spawn: warm every live public body, and again every two minutes
@@ -52,6 +51,15 @@ Suspect commits since green (`git log 6ba8fe37fa18..fa361191b`), newest first; o
 - `4db48b13` wave3-converge: wire apps snapshot grammar/web alias, seat ballot-commit CLI, and seed.sh Section 9 (owner: apps-hermes)
 - `981556b5` Strengthen op 151 receipt-opening and certifying-solver assurance
 - `75ccd797` assurance,verify: add op 151 receipt-opening and certifying-solver bridges
-- `f6b7aff3` host/kernel: port lookupLight, FnEvidence, FnArchivePublisher to DurableServed (-5 ratchet callers) (owner: read-path)
-- `03e7d5a5` Port 7 full-loaded callers and 13 Host.Main sites to DurableServed
-- `532bb29c` wave3-hermes-apps-tick: fix bend_answer @file staging, law_check witness & compound clauses, bend vi (owner: apps-hermes)
+
+## Flatness (published, does not gate `green`)
+
+| row | verdict | metric | early | late | ratio | bound | owner |
+|---|---|---|---|---|---|---|---|
+| flatness-submit | PASS | submit_cpu_ms | 0.208 | 0.299 | 1.436 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 56.569 | 70.898 | 1.253 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_cpu_ms | 0.132 | 0.224 | 1.693 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 33.725 | 79.183 | 2.348 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.414 | 0.397 | 0.958 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 259.506 | 254.162 | 0.979 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-158ffd6f/flatness.log | - | - | - | - | host-execution, store-retained |
