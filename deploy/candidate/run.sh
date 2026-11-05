@@ -171,7 +171,7 @@ upgrade() {
     '.manifest = $manifest | .hostSha256 = $host | .pinnedConfigSha256 = $config' \
     "$STATE/state.json" >"$upgrade_tmp/state.json"
   candidate_require_stopped
-  for service_config in "${service_configs[@]}"; do
+  for service_config in ${service_configs[@]+"${service_configs[@]}"}; do   # set -u: the array may be empty
     cp "$upgrade_tmp/config.json" "$upgrade_tmp/service.json"
     mv "$upgrade_tmp/service.json" "$service_config"
   done
