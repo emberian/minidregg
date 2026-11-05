@@ -1,6 +1,6 @@
 # Seat: build-loop
 
-Agent: none live (handoff 2026-11-01 02:40Z). Last: a4141abe7297fdc4b (`cv show agent-a4141abe7297fdc4b`), before it
+Agent: none live (the 2026-11-05 rebuild was done by the demo-dry takeover session; handoff 2026-11-01 02:40Z before it). Last: a4141abe7297fdc4b (`cv show agent-a4141abe7297fdc4b`), before it
 a6c58cb72b0764dbb. A new agent needs only the repo, `cv` and ~/swarm (MACHINES.md, RULES.md); this file is the whole
 continuation.
 Owns: the builder (`scripts/pipeline/{builder,integ-build,gate,sweep,world-reap}`) and `board/REDS.md`, the `green`
@@ -38,9 +38,16 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   A new builder script on main takes effect only on restart. integ-build, gate, sweep and world-reap are taken
   from the tip each round. A second builder refuses (builder/builder.lock). A build lock held by another build
   defers the round (`deferred: build.lock held`, retried every 120 s) and publishes nothing.
-- Live now: pid 1235827, started 22:16 EDT 10-31 on main 9317f32fc. It deferred round ea8a115cf while round
-  c509ff14's build (started by the previous builder) held build.lock. That build ends by itself; the next round
-  then builds the tip.
+- Live now (2026-11-05 02:30Z): rebuilt from scratch after ember's 2026-11-04 cleanup removed the whole
+  /home/hbox/lanes/integ and /home/hbox/pool/lanes (the old builder had been dead since 11-01 on a GitHub key
+  denial; the deploy key itself still works). The new root: `src` (fresh blob:none clone, deploy key as
+  core.sshCommand), `builder-run.sh` as above plus `EDGE_REV=cf0b94f`, `PLAYWRIGHT_DIR=$I/pw/node_modules`,
+  `PLAYWRIGHT_BROWSERS_PATH=$I/pw/browsers`; `j14-hroot`, `j14-data`, `spk-cache`, `pw` copied from
+  dregg-build2:/srv/integ (where they were staged 10-31); `j14-secrets/openrouter.key` from the Mac's
+  ~/.openrouter-key; `dregg-infra-cf0b94f/edge`. `src` was warmed the pool's way: `.lake/packages` linked to
+  the pool's packages-3a3779933df4 then `lane-tree native src` (its own hard-linked copy), build outputs
+  warm-linked from pool tree t1 (e53e4515) and t1's `.lake/native` copied. Its first round (0852014c3, cold
+  tree) was red at `host` on a missing .lake/packages and wrote REDS.md so; the next tip rebuilds warm.
 - Knobs: `scripts/pipeline/builder --once`, `--reds SHA` (rewrite REDS.md from existing logs), BUILDER_DRY=1 (print,
   never push). $I/keep lists candidate prefixes that sweep and reap never touch. integ-build stops below 25 GB free.
 
