@@ -1,20 +1,19 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `158ffd6fb027` (builder: --once resolves the id it is given to the full commit). Round finished 2026-11-05T17:08Z.
-green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-158ffd6f`.
+Tip: `240295848cbf` (builder: take the world reaper at round start, not only after READY). Round finished 2026-11-05T17:25Z.
+green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-24029584`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| host | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate | no verdict | - | no | build-loop | /home/hbox/lanes/integ/gate-158ffd6f/gate.json missing |
+| gate:j14-apps | j14-apps FAIL | yes, red again | no | apps-hermes | rc=1; /ci/j-240295/journey.log |
 
-Suspect commits since green (`git log 6ba8fe37fa18..158ffd6fb027`), newest first; owners are the seats whose
+Suspect commits since green (`git log 6ba8fe37fa18..240295848cbf`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `24029584` builder: take the world reaper at round start, not only after READY (owner: build-loop)
+- `f774ce7b` builder: REDS.md for 158ffd6fb027 (6 red) (owner: build-loop)
+- `aa1ba047` builder: REDS.md for 158ffd6fb027 (2 red) (owner: build-loop)
+- `888cc9a3` builder: REDS.md for 158ffd6fb027 (2 red) (owner: build-loop)
 - `158ffd6f` builder: --once resolves the id it is given to the full commit (owner: build-loop)
 - `3b554e43` builder: REDS.md for fa361191b (6 red) (owner: build-loop)
 - `75d53e42` fixtures: native runs re-recorded from candidate fa361191bfa9 (accepted stale, doc-write current)
@@ -51,19 +50,15 @@ Suspect commits since green (`git log 6ba8fe37fa18..158ffd6fb027`), newest first
 - `5330c7d0` feat(wave1): integrate Host light opening, Assurance/Verify detwin, world/seed overhaul, and grain/c (owner: apps-hermes, read-path)
 - `3f44281e` gate harness: the resident fixture reads a multi-line append line by line; HARNESS overlays testing/
 - `8d11fca5` door: fixes from the first strangers' attempts on demo-dry
-- `7896466b` door: paid v2 flow fixes from the live mainnet signup (owner: apps-hermes)
-- `4db48b13` wave3-converge: wire apps snapshot grammar/web alias, seat ballot-commit CLI, and seed.sh Section 9 (owner: apps-hermes)
-- `981556b5` Strengthen op 151 receipt-opening and certifying-solver assurance
-- `75ccd797` assurance,verify: add op 151 receipt-opening and certifying-solver bridges
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.208 | 0.299 | 1.436 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | submit_wall_ms | 56.569 | 70.898 | 1.253 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_cpu_ms | 0.132 | 0.224 | 1.693 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 33.725 | 79.183 | 2.348 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.414 | 0.397 | 0.958 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 259.506 | 254.162 | 0.979 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-158ffd6f/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.235 | 0.236 | 1.003 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 48.399 | 68.599 | 1.417 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.174 | 0.181 | 1.041 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 30.343 | 82.270 | 2.711 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.612 | 0.493 | 0.805 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 173.859 | 158.824 | 0.914 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-24029584/flatness.log | - | - | - | - | host-execution, store-retained |
