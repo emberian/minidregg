@@ -1,15 +1,17 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `38ac5b7f678f` (run.sh upgrade: POSIX sh, no arrays (dash runs this file; the previous commit broke every ). Round finished 2026-11-05T18:06Z.
-green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-38ac5b7f`.
+Tip: `ebabcc294d24` (j14-apps: the app-assistant program goes in as doc push and is verified line by line). Round finished 2026-11-05T18:26Z.
+green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ebabcc29`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:j14-apps | j14-apps FAIL | yes, red again | yes | apps-hermes | rc=1; /ci/j-38ac5b/journey.log |
+| gate:j14-apps | j14-apps FAIL | yes, red again | yes | apps-hermes | rc=1; /ci/j-ebabcc/journey.log |
 
-Suspect commits since green (`git log 6ba8fe37fa18..38ac5b7f678f`), newest first; owners are the seats whose
+Suspect commits since green (`git log 6ba8fe37fa18..ebabcc294d24`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `ebabcc29` j14-apps: the app-assistant program goes in as doc push and is verified line by line (owner: apps-hermes)
+- `1a9a9bc0` builder: REDS.md for 38ac5b7f678f (1 red) (owner: build-loop)
 - `38ac5b7f` run.sh upgrade: POSIX sh, no arrays (dash runs this file; the previous commit broke every world init
 - `75ec22c9` builder: REDS.md for 54ae5b6b05a4 (2 red) (owner: build-loop)
 - `54ae5b6b` run.sh upgrade: an empty retained-config list under set -u
@@ -48,17 +50,15 @@ Suspect commits since green (`git log 6ba8fe37fa18..38ac5b7f678f`), newest first
 - `01a60d40` grain-runtime/demo-seed: preserve compaction quiescence, operator audit boundary, split-tenancy cont (owner: apps-hermes)
 - `76d0996a` fix(grain-runtime): prefer confirmed settlement rows in prompt_outcome::audit_chain and auto-run ret (owner: apps-hermes)
 - `98363a39` fix(demo-seed): check exact ref files in has_ref and fast-path have() via outcome.json
-- `0a398a61` fix(hermes): raise demo provider maxInputTokens to 131072 matching j14 (owner: apps-hermes)
-- `548bd808` fix(grain-runtime): clear hermes_session.pending_prompt and refresh fingerprint on reconcile_prompt_ (owner: apps-hermes)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.200 | 0.186 | 0.932 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | submit_wall_ms | 43.227 | 66.499 | 1.538 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.136 | 0.173 | 1.265 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 26.083 | 87.163 | 3.342 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.352 | 0.344 | 0.976 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 133.565 | 158.726 | 1.188 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-38ac5b7f/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.214 | 0.230 | 1.075 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 48.866 | 70.301 | 1.439 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.155 | 0.170 | 1.098 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 28.524 | 79.692 | 2.794 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.552 | 0.529 | 0.960 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 149.121 | 161.458 | 1.083 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-ebabcc29/flatness.log | - | - | - | - | host-execution, store-retained |
