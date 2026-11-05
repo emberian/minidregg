@@ -19,6 +19,12 @@ candidate_abs() {
   esac
 }
 
+candidate_realpath() {   # the physical path a (possibly linked) file path resolves to; empty when absent
+  case "$1" in /*) ;; *) return 0 ;; esac
+  [ -e "$1" ] || return 0
+  printf '%s/%s\n' "$(CDPATH='' cd -- "$(dirname -- "$1")" 2>/dev/null && pwd -P)" "$(basename -- "$1")" | sed 's#//*#/#g'
+}
+
 candidate_sha256() {
   sha256sum "$1" | cut -d ' ' -f 1
 }
@@ -68,10 +74,15 @@ candidate_resolve() {
     (["host", "consent", "mini", "store", "verifier", "keys"] |
       all(. as $r | $p.binaries[$r].path | type == "string"))
     ' "$manifest" >/dev/null || candidate_die "manifest output identity is incomplete or differs from provenance"
+  # A role path names this candidate's output either physically or through a link that resolves to it
+  # (a box names every role through candidate/current, so a same-Host candidate switch is one link flip
+  # and the pinned config's bytes never move: its helper pins, the members' consent pins and the
+  # controller registrations all hold; demo-dry 2026-11-05).
   for role in host mini store verifier consent; do
     rel=$(jq -er --arg role "$role" '.binaries[$role].path' "$CANDIDATE_PROVENANCE")
     path=$CANDIDATE_DIR/$rel
-    [ "$(jq -r --arg role "$role" '.[$role]' "$manifest")" = "$path" ] \
+    named=$(jq -r --arg role "$role" '.[$role]' "$manifest")
+    [ "$named" = "$path" ] || [ "$(candidate_realpath "$named")" = "$path" ] \
       || candidate_die "manifest .$role does not name its candidate output"
     case "$role" in
       host) HOST=$path ;;
