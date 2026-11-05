@@ -1,19 +1,22 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `0852014c3222` (mini-web-spawn: warm every live public body, and again every two minutes). Round finished 2026-11-05T02:08Z.
-green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-0852014c`.
+Tip: `fa361191b` (board: build-loop row: the hbox builder root rebuilt and warmed on 2026-11-05). Round finished 2026-11-05T04:41Z.
+green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-fa361191`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| host | rc=1 see /home/hbox/lanes/integ/logs/host.log | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
-| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
+| rust-check | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| host | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 6ba8fe37fa18..0852014c3222`), newest first; owners are the seats whose
+Suspect commits since green (`git log 6ba8fe37fa18..fa361191b`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `fa361191` board: build-loop row: the hbox builder root rebuilt and warmed on 2026-11-05
+- `cda6ea02` builder: REDS.md for 0852014c3222 (5 red) (owner: build-loop)
 - `0852014c` mini-web-spawn: warm every live public body, and again every two minutes
 - `86b7a942` builder: REDS.md for 1c2da07121c0 (6 red) (owner: build-loop)
 - `1c2da071` gate: the system's flock comes first on PATH
@@ -52,5 +55,3 @@ Suspect commits since green (`git log 6ba8fe37fa18..0852014c3222`), newest first
 - `f6b7aff3` host/kernel: port lookupLight, FnEvidence, FnArchivePublisher to DurableServed (-5 ratchet callers) (owner: read-path)
 - `03e7d5a5` Port 7 full-loaded callers and 13 Host.Main sites to DurableServed
 - `532bb29c` wave3-hermes-apps-tick: fix bend_answer @file staging, law_check witness & compound clauses, bend vi (owner: apps-hermes)
-- `faae71ba` wave3(lane2): add Hermes objective-world tools, bend tick-all clock automation, and app grain WorldR (owner: apps-hermes)
-- `90224826` resource-client: fix SeatJson/ObjectiveBendDataWire wire compliance, Cert-F self-verification, and c (owner: apps-hermes)
