@@ -1,15 +1,17 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `ebabcc294d24` (j14-apps: the app-assistant program goes in as doc push and is verified line by line). Round finished 2026-11-05T18:26Z.
-green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ebabcc29`.
+Tip: `a30cb1fdfb9b` (summon: the program document is appended one line per action). Round finished 2026-11-05T18:48Z.
+green: `6ba8fe37fa18`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-a30cb1fd`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:j14-apps | j14-apps FAIL | yes, red again | yes | apps-hermes | rc=1; /ci/j-ebabcc/journey.log |
+| gate:j14-apps | j14-apps FAIL | yes, red again | yes | apps-hermes | rc=1; /ci/j-a30cb1/journey.log |
 
-Suspect commits since green (`git log 6ba8fe37fa18..ebabcc294d24`), newest first; owners are the seats whose
+Suspect commits since green (`git log 6ba8fe37fa18..a30cb1fdfb9b`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `a30cb1fd` summon: the program document is appended one line per action (owner: apps-hermes)
+- `aebb9867` builder: REDS.md for ebabcc294d24 (1 red) (owner: build-loop)
 - `ebabcc29` j14-apps: the app-assistant program goes in as doc push and is verified line by line (owner: apps-hermes)
 - `1a9a9bc0` builder: REDS.md for 38ac5b7f678f (1 red) (owner: build-loop)
 - `38ac5b7f` run.sh upgrade: POSIX sh, no arrays (dash runs this file; the previous commit broke every world init
@@ -48,17 +50,15 @@ Suspect commits since green (`git log 6ba8fe37fa18..ebabcc294d24`), newest first
 - `bc7070cf` Fix Presburger writeOnce/pruning/cert parity and receipt witness retention (owner: apps-hermes)
 - `1c4acd0f` resource-client: deterministic cSHAKE256 world-root receipt inclusion (op 151) & interactive Presbur (owner: apps-hermes)
 - `01a60d40` grain-runtime/demo-seed: preserve compaction quiescence, operator audit boundary, split-tenancy cont (owner: apps-hermes)
-- `76d0996a` fix(grain-runtime): prefer confirmed settlement rows in prompt_outcome::audit_chain and auto-run ret (owner: apps-hermes)
-- `98363a39` fix(demo-seed): check exact ref files in has_ref and fast-path have() via outcome.json
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.214 | 0.230 | 1.075 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | submit_wall_ms | 48.866 | 70.301 | 1.439 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.155 | 0.170 | 1.098 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 28.524 | 79.692 | 2.794 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.552 | 0.529 | 0.960 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 149.121 | 161.458 | 1.083 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-ebabcc29/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.259 | 0.195 | 0.752 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 67.111 | 67.247 | 1.002 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.166 | 0.189 | 1.142 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 37.519 | 88.007 | 2.346 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.487 | 0.497 | 1.021 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 150.117 | 160.410 | 1.069 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-a30cb1fd/flatness.log | - | - | - | - | host-execution, store-retained |
