@@ -19,7 +19,7 @@ ssh command does (the world's `mini-shell-ssh`, a chosen `mini`) and reports wal
 each role spent (client, Store Host, Store helper, consent provider, codec, relay), summed over every
 thread (`/proc/PID/task/*/schedstat`). `/ci/pc/demo/meas.py SETTLE CMD...` runs a Host command,
 samples RSS every 20 ms and timestamps the `MINI_OPEN_TIMING` lap lines; `/ci/pc/demo/mc.py
-PROVIDER CONFIG` cold-starts a consent provider on a Store and times its admission (frame 237).
+PROVIDER CONFIG` cold-starts a consent provider on a Store and times its first admission (it sends a frame the provider admits before refusing).
 `/ci/pc/demo/overlay.sh NAME` copies the base candidate and swaps in this lane's `mini` and consent
 provider. Wall numbers on hbox are inflated by its load; CPU numbers much less.
 
@@ -76,7 +76,7 @@ Staging 7fee25ff's `mini` (it carries the exorcist's batches) unless said otherw
 | 17 | twin selection of a member's delegated consent and shared codec (`mini-line`, `mini-web-spawn`) | each read `consent/peer.sock`, `peer.pins` (or hashed the provider) and `/etc/mini/session-codec` itself | one member's two sessions must select alike | correctness, not cost | `native/mini-session-env` is the one reading | caa988a88 |
 | 18 | `workspace::recheck_commitment` in a resident (`line-resident`, `command-resident`, the client resident) | cached "checked" in a process static: once per resident lifetime | a rotation or revocation by another holder between commands is what the check exists to catch | a correctness bug, not a cost (batches 8 and 9 not shippable without it) | `capture::argv` forgets the checks before each resident command; composing verbs' in-process steps still share one check | d035d8250 (batch 10) |
 | 11 | world bring-up (`jworld-scratch.sh up`, dregg-infra) | 219 s for a five-member scratch world | | every measurement world and journey pays it | for whoever owns world bring-up | noted |
-| 19 | the consent provider's admission of other writers' records (`ClientConsentCore.serve` -> `refresh`/`refreshHeld`), made on the member's next frame | every record anyone appended since the member's last command was admitted inside that command | the records landed seconds or hours earlier; the member is waiting now | ~8 ms of consent CPU per foreign record on the command path (30 records: `credit` 228 to 256 ms); the demo's 1,050 ms `credit`; at a lag of 64, a full open (row 20) | frame 237 (`CONSENT_CATCH_UP`): admission alone. The member's resident (`mini_sdk::consent`) and the delegated worker's own verifier run a catch-up thread (`HeadWatch`: the Store's `STORE.head-anchor` is renamed on every append; stat'ed every 100 ms, once a second without it) that admits as records land; the first catch-up is the start admission | 82a555e85 (on main): 30 foreign records then `credit` 228 to 256 ms before, 8 to 9 ms after; idle cost ~2 ms CPU per second across six residents |
+| 19 | the consent provider's admission of other writers' records (`ClientConsentCore.serve` -> `refresh`/`refreshHeld`), made on the member's next frame | every record anyone appended since the member's last command was admitted inside that command; a shared provider started cold inside the first command after a restart (38 s on the demo) | the records landed seconds or hours earlier; the member is waiting now | ~8 ms of consent CPU per foreign record on the command path (30 records: `credit` 228 to 256 ms); the demo's 1,047 ms `credit`; at a lag of 64, a full open (row 20) | the member's resident (`mini_sdk::consent`, which `--resident-dir` workers relay to) and the delegated worker's own verifier run a catch-up thread: `HeadWatch` stats the Store's `STORE.head-anchor` (renamed on every append) every 100 ms, once a second without it, and sends full readiness (236, empty), which the provider already admits to the head before answering; the first catch-up is the start admission. No new frame: the Host image is unchanged | 82a555e85 (frame 237, withdrawn: it changed the Host image through the protocol table), 7b20a1379 and 7d809f349 (236) on main; hotfix `hotfix/door-on-8f2d`. 30 foreign records then `credit`: 228 to 256 ms before, 8 to 12 ms after; idle cost ~2 ms CPU per second across six residents |
 | 20 | every full open (`DurableReceiverIO.loadChained`: `transport.read 1 true`, `openState`, `openLoaded`) | reads every entry into `List UInt8` lists, decodes every prefix record, keeps the decoded log (`Loaded.image.accepted`) | the checkpoint already holds the prefix's state; `List UInt8` is 24 bytes per byte | demo Store: 8.9 s, 2.23 GB peak, 1.22 GB held (row in the table above); a consent provider's start 10.6 s and 1.25 GB | the structural fix is an open that neither reads nor holds the prefix (the "journal read at use" unit of `DurableFastForwardSpec`; the KN2 deletion of the full shape) and bytes as `ByteArray`; a constant-factor step inside the current types: parse the read into one packed buffer and decode prefix records from it (`StreamCodec.decodeAt`, already native for `recordFrame`) without building the entry lists (peak ~-1 GB, the held 1.2 GB unchanged) | open (largest memory cost; not on the warm path since row 19) |
 | 21 | split tenancy as deployed on the demo: each hosted member's `serve-controller-consent` runs its OWN provider (no `--resident-dir`) | one 1.25 GB provider per member, each admitting every record | the providers are byte-identical work (row 8) | 1.25 GB resident and the whole admission CPU per member | render the units with `--resident-dir` (a36d8bdfa: ONE operator resident; a member's worker is a 2 MB relay); infra's | ops: ready since batch 7 |
 | 22 | consent rebase (`refreshExtended`: lag >= `checkpointEvery` -> `verifyInitial`) | a provider 64 records behind restarts from the checkpoint with a full open | the open is O(the whole log) (row 20) while the catch-up it replaces is O(lag) | 7 to 9 s at the demo's height, growing with the log | with row 19 the lag stays at the last moment's records, so it fires only after a restart or outage; the open itself is row 20 | mitigated by row 19 |
@@ -106,7 +106,7 @@ Memory method: `smaps_rollup` Pss and Private over the resident processes (`cons
 
 ## Row 19, before and after (hbox, base ae74dca4ec2d on /ci/pc/w9 against its overlay cand-pc1 on /ci/pc/w10)
 
-| member-1's `credit`, ms wall (consent CPU) | base | frame 237 |
+| member-1's `credit`, ms wall (consent CPU) | base | catch-up (237 build; 236 build: 11 and 12 ms after 10 and 30) |
 |---|---|---|
 | warm, nothing written since | 8 (2) | 7 (3) |
 | right after member-2 wrote 10 records | 93 (76) | 9 (1) |
@@ -115,8 +115,8 @@ Memory method: `smaps_rollup` Pss and Private over the resident processes (`cons
 
 The admission CPU is unchanged; it is spent as records land instead of inside the next command.
 Idle, the catch-up threads cost ~2 ms of CPU per second across a world's six residents (a stat
-every 100 ms each). A cold provider on the demo Store copy answers 237 in 10.6 s and then 0 ms per
-237 with nothing new: the cold start now happens when the resident starts, not when a member asks.
+every 100 ms each). A cold provider on the demo Store copy finishes its first admission in 10.6 s and then answers a
+catch-up with nothing new in 0 ms: the cold start now happens when the resident starts, not when a member asks.
 
 At height ~1,560 on the overlay world (1,500 `say` records written by members 2 to 4, catch-up
 live): `credit` 12 to 13 ms (Store Host 5 ms CPU, consent 2), `say` 79 to 100 ms (Store Host
@@ -188,8 +188,8 @@ Follow-up 59dd7ded4 (staging db074a736, batch 6): a resident also ends when the 
 Batch 2 (5415aecf7, staging 227451d8c, batch 7): row 9.
 Batch 3 (b34173dad, with f95edc7bf; staging 8ca47d577, batch 7): row 10.
 Batch 4 (a36d8bdfa with 394039fb1): row 8 under split tenancy (opt-in: units from infra).
-Batch 9 (997905c0b): rows 14, 15. Batch 10 (staging): rows 16, 17, 18. 82a555e85 (main): row 19 (frame 237 and the
-catch-up threads; needs the consent provider, `mini` and the protocol table from one candidate).
+Batch 9 (997905c0b): rows 14, 15. Batch 10 (staging): rows 16, 17, 18. 7b20a1379 + 7d809f349 (main): row 19 (catch-up threads in `mini`'s residents
+and the delegated worker, through frame 236; no Lean or protocol change, so it ships with `mini` alone).
 
 Client syscalls per verb, for the record: a warm ssh `say` is 2,365 syscalls for the whole client tree
 (wrapper included). The explorer's 12,031 on batch 5 counted the residents that `strace -f` followed for
