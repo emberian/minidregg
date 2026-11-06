@@ -383,12 +383,21 @@ class Dev:
     def __init__(self, be, mul="logexp"):
         self.be = be
         # Bulk multiply kernels: log/exp tables (768 B shared) or the 64 KiB product table.
+        self.mulv = mul
         self.k = {n: n + ("_full" if mul == "full" else "") for n in ("t256_mul", "ntt_scale", "ntt_butterfly", "fri_fold")}
         self.xp = be.xp
         self.one = be.asarray(np.array([[1, 0, 0, 0]], dtype=np.uint64))
         self.leaf_mid = be.asarray(np.array(PyCShake(LEAF_CUSTOM).midstate(), dtype=np.uint64))
         self.node_mid = be.asarray(np.array(PyCShake(NODE_CUSTOM).midstate(), dtype=np.uint64))
         self.counts = {"mul": 0, "keccak": 0}
+
+    def bulk(self, name, items, *args):
+        """A bulk multiply kernel over `items` work items: the bit-sliced fused variant (32 items
+        per thread) when chosen and items is a multiple of 32, else the table kernel."""
+        if self.mulv == "bs" and items >= 32 and items % 32 == 0:
+            self.be.call(name + "_bsx", items // 32, *args)
+        else:
+            self.be.call(self.k[name], items, *args)
 
     def empty(self, n):
         return self.xp.zeros((n, 4), dtype=np.uint64)
@@ -400,7 +409,7 @@ class Dev:
         """a * b elementwise; b may be one row (a scalar)."""
         a, b = self.c(a), self.c(b)
         out = self.empty(a.shape[0])
-        self.be.call(self.k["t256_mul"], a.shape[0], a, b, out, 0 if b.shape[0] == 1 else 1)
+        self.bulk("t256_mul", a.shape[0], a, b, out, 0 if b.shape[0] == 1 else 1)
         self.counts["mul"] += a.shape[0]
         return out
 
@@ -485,7 +494,7 @@ class Dev:
         tmp = self.empty(L)
         for d, (powers, _) in enumerate(depths):
             bsz = l >> d
-            self.be.call(self.k["ntt_scale"], L, a, powers, tmp, bsz)
+            self.bulk("ntt_scale", L, a, powers, tmp, bsz)
             self.counts["mul"] += L
             sz = bsz
             while sz >= 4:
@@ -502,7 +511,7 @@ class Dev:
         nxt = self.empty(N)
         for d in reversed(range(d_end)):
             size = n >> d
-            self.be.call(self.k["ntt_butterfly"], N // 2, cur, depths[d][1], nxt, size)
+            self.bulk("ntt_butterfly", N // 2, cur, depths[d][1], nxt, size)
             self.counts["mul"] += N // 2
             cur, nxt = nxt, cur
         return cur
@@ -529,7 +538,7 @@ class Dev:
     def fold(self, w, c):
         half = w.shape[0] // 2
         out = self.empty(half)
-        self.be.call(self.k["fri_fold"], half, self.c(w), self.c(c), out)
+        self.bulk("fri_fold", half, self.c(w), self.c(c), out)
         self.counts["mul"] += half
         return out
 
@@ -759,6 +768,68 @@ def check_mul(dev, path):
             "inv_checked": ni, "inv_mismatch": int((goti != inv[:, 1]).any(axis=1).sum())}
 
 
+def check_bitslice(dev, path, rng, big=1 << 20, reps=5):
+    """The bit-sliced multiply: bit-exact against binary_tower_256.rs (mul_check.bin) through
+    both the resident path (to_sliced, t256_mul_bs, from_sliced) and the fused one
+    (t256_mul_bsx); then against the table kernel on `big` random products; then rates."""
+    be = dev.be
+    raw = open(path, "rb").read()
+    n = int.from_bytes(raw[:8], "little")
+    body = np.frombuffer(raw[16:16 + 96 * n], dtype="<u8").reshape(n, 3, 4).astype(np.uint64)
+    assert n % 32 == 0
+    g = n // 32
+    a, b = be.asarray(body[:, 0]), be.asarray(body[:, 1])
+    sa, sb, sr = dev.empty(n * 2), dev.empty(n * 2), dev.empty(n * 2)  # 256 u32 planes per group
+    be.call("t256_to_sliced", g, a, sa)
+    be.call("t256_to_sliced", g, b, sb)
+    be.call("t256_mul_bs", g, sa, sb, sr)
+    r1 = dev.empty(n)
+    be.call("t256_from_sliced", g, sr, r1)
+    r2 = dev.empty(n)
+    be.call("t256_mul_bsx", g, a, b, r2, 1)
+    want = body[:, 2]
+    out = {"bs_checked": n,
+           "bs_resident_mismatch": int((be.host(r1) != want).any(axis=1).sum()),
+           "bs_fused_mismatch": int((be.host(r2) != want).any(axis=1).sum())}
+    # A large batch against the table kernel (itself checked against the Rust reference).
+    A = be.asarray(rng.integers(0, 2**63, size=(big, 4), dtype=np.uint64) * 2 + 1)
+    B = be.asarray(rng.integers(0, 2**63, size=(big, 4), dtype=np.uint64) * 2 + 1)
+    G = big // 32
+    ref = dev.empty(big)
+    be.call("t256_mul", big, A, B, ref, 1)
+    SA, SB, SR = dev.empty(big * 2), dev.empty(big * 2), dev.empty(big * 2)
+    be.call("t256_to_sliced", G, A, SA)
+    be.call("t256_to_sliced", G, B, SB)
+    fused, res_el = dev.empty(big), dev.empty(big)
+
+    def timed(fn):
+        fn()
+        be.sync()
+        best = None
+        for _ in range(reps):
+            t0 = time.perf_counter()
+            fn()
+            be.sync()
+            dt = time.perf_counter() - t0
+            best = dt if best is None else min(best, dt)
+        return best
+
+    t_res = timed(lambda: be.call("t256_mul_bs", G, SA, SB, SR))
+    t_fused = timed(lambda: be.call("t256_mul_bsx", G, A, B, fused, 1))
+    t_tab = timed(lambda: be.call("t256_mul", big, A, B, ref, 1))
+    t_in = timed(lambda: be.call("t256_to_sliced", G, A, SA))
+    t_out = timed(lambda: be.call("t256_from_sliced", G, SR, res_el))
+    out["bs_big_checked"] = big
+    out["bs_big_resident_mismatch"] = int((be.host(res_el) != be.host(ref)).any(axis=1).sum())
+    out["bs_big_fused_mismatch"] = int((be.host(fused) != be.host(ref)).any(axis=1).sum())
+    out["rates"] = {"bs_resident_per_s": big / t_res, "bs_fused_per_s": big / t_fused,
+                    "table_per_s": big / t_tab, "to_sliced_elems_per_s": big / t_in,
+                    "from_sliced_elems_per_s": big / t_out,
+                    "seconds": {"bs_resident": t_res, "bs_fused": t_fused, "table": t_tab,
+                                "to_sliced": t_in, "from_sliced": t_out}}
+    return out
+
+
 def check_lean(dev, path):
     vecs = json.load(open(path))["vectors"]
     res = []
@@ -804,7 +875,9 @@ def main():
     ap.add_argument("--rust-bench", help="tower256_fri_fast_bench binary: CPU timings on this box")
     ap.add_argument("--rust-threads", default="1,4")
     ap.add_argument("--rate-threads", type=int, default=40 * 1024)
-    ap.add_argument("--mul", default="logexp", choices=["logexp", "full"], help="bulk multiply kernels")
+    ap.add_argument("--mul", default="logexp", choices=["logexp", "full", "bs"], help="bulk multiply kernels")
+    ap.add_argument("--bitslice-bench", action="store_true", help="check and time the bit-sliced multiply")
+    ap.add_argument("--bitslice-big", type=int, default=1 << 20)
     ap.add_argument("--batch", type=int, default=0, help="words in the batched encode+commit measurement")
     ap.add_argument("--batch-ell", type=int, default=14)
     ap.add_argument("--source", help="compile tower256_fri.cu with NVRTC instead of loading --cubin")
@@ -838,6 +911,22 @@ def main():
     res["checks"].update(check_keccak(dev, rng))
     res["checks"].update(check_mul(dev, os.path.join(a.data, "mul_check.bin")))
     print("checks", res["checks"], flush=True)
+    if a.bitslice_bench:
+        bs = check_bitslice(dev, os.path.join(a.data, "mul_check.bin"), rng,
+                            big=a.bitslice_big, reps=a.reps + 2)
+        res["bitslice"] = bs
+        if "clock_khz" in res:
+            lanes = res["sm_count"] * 64 * res["clock_khz"] * 1e3
+            r = bs["rates"]
+            best = max(r["bs_resident_per_s"], r["bs_fused_per_s"])
+            res["tower256_mul_per_s"] = best
+            res["tower256_mul_variant"] = "bit-sliced resident" if best == r["bs_resident_per_s"] else "bit-sliced fused"
+            res["ops_per_mul"] = lanes / best
+            res["ops_per_mul_fused"] = lanes / r["bs_fused_per_s"]
+            res["ops_per_mul_table"] = lanes / r["table_per_s"]
+            res["ops_per_mul_f3_assumption"] = 718
+        print("bitslice", bs, flush=True)
+        save()
     res["lean_vectors"] = check_lean(dev, os.path.join(a.data, "tower256_fri_vectors.json"))
     print("lean", res["lean_vectors"], flush=True)
     save()
@@ -941,7 +1030,10 @@ def main():
                                           capture_output=True, text=True).stdout.strip()
         print("rust", res["rust_cpu"], flush=True)
         save()
-    allok = (res["checks"]["keccak_mismatch"] == 0 and res["checks"]["mul_mismatch"] == 0
+    bsr = res.get("bitslice", {})
+    allok = (all(bsr.get(k, 0) == 0 for k in ("bs_resident_mismatch", "bs_fused_mismatch", "bs_big_resident_mismatch",
+                                               "bs_big_fused_mismatch"))
+             and res["checks"]["keccak_mismatch"] == 0 and res["checks"]["mul_mismatch"] == 0
              and res["checks"]["inv_mismatch"] == 0 and all(v["identical"] for v in res["lean_vectors"])
              and all(r["receipt_identical"] and r["request_identical"] for r in res["prove"])
              and res.get("batch", {}).get("roots_match_single", True))

@@ -799,3 +799,218 @@ FULL_KERNEL t256_mul_rate_full(const u64* seed, u64* out, u64 iters, u64 n) {
     store8(out + 4 * i, x);
     GS_END
 }
+
+// ------------------------------------------------------------------------------------------
+// Bit-sliced Tower256 multiply. A group is 32 elements as 256 bit planes (plane p, bit l = bit p
+// of element l). One thread multiplies a group: Karatsuba (three products per level, the
+// generator map y_{K-1} as XORs) down to T_4, whose 81 leaf products (16 planes each) run in
+// registers by the bit-level recursion (AND at T_0). Resident layout (t256_mul_bs): plane p of
+// group g at u32 index p * G + g. (A first version cut at T_5 and recombined through a flat
+// table of 166 terms into a 256-word accumulator; it spilled 6.5-11 KB per thread and ran
+// 8.0e7 products/s on the T4, accel-tower-bitslice-01 version 1.)
+
+#ifdef HOST_EMU
+#define BS_CONST static const
+#define SDEV static inline
+#define UNROLL
+#else
+#define BS_CONST __constant__
+#define SDEV __device__ __forceinline__ static
+#define UNROLL _Pragma("unroll")
+#endif
+
+template <int K> struct BS {
+    // x <- x * y_{K-1} in T_K (2^K planes), in place.
+    SDEV void gen(uint32_t* x) {
+        const int h = 1 << (K - 1);
+        uint32_t t[h];
+        UNROLL for (int i = 0; i < h; ++i) t[i] = x[h + i];
+        BS<K - 1>::gen(t);
+        UNROLL for (int i = 0; i < h; ++i) { uint32_t lo = x[i]; x[i] = x[h + i]; x[h + i] = lo ^ t[i]; }
+    }
+    SDEV void mul(const uint32_t* a, const uint32_t* b, uint32_t* r) {
+        const int h = 1 << (K - 1);
+        uint32_t p0[h], p1[h], m[h], sa[h], sb[h];
+        UNROLL for (int i = 0; i < h; ++i) { sa[i] = a[i] ^ a[h + i]; sb[i] = b[i] ^ b[h + i]; }
+        BS<K - 1>::mul(a, b, p0);
+        BS<K - 1>::mul(a + h, b + h, p1);
+        BS<K - 1>::mul(sa, sb, m);
+        UNROLL for (int i = 0; i < h; ++i) r[i] = p0[i] ^ p1[i];
+        BS<K - 1>::gen(p1);
+        UNROLL for (int i = 0; i < h; ++i) r[h + i] = m[i] ^ r[i] ^ p1[i];
+    }
+};
+template <> struct BS<0> {
+    SDEV void gen(uint32_t*) {}
+    SDEV void mul(const uint32_t* a, const uint32_t* b, uint32_t* r) { r[0] = a[0] & b[0]; }
+};
+
+// out[j] bit l = in[l] bit j (32x32, in place): five swap stages with constant masks.
+template <int J> DEV void tstage(uint32_t* x, uint32_t m) {
+    UNROLL for (int k = 0; k < 32; ++k) {
+        if (!(k & J)) {
+            uint32_t t = ((x[k] >> J) ^ x[k + J]) & m;
+            x[k] ^= t << J;
+            x[k + J] ^= t;
+        }
+    }
+}
+DEV void transpose32(uint32_t* x) {
+    tstage<16>(x, 0x0000FFFFu);
+    tstage<8>(x, 0x00FF00FFu);
+    tstage<4>(x, 0x0F0F0F0Fu);
+    tstage<2>(x, 0x33333333u);
+    tstage<1>(x, 0x55555555u);
+}
+
+#ifdef HOST_EMU
+#define NOINLINE_DEV static __attribute__((noinline))
+#else
+#define NOINLINE_DEV __device__ __noinline__ static
+#endif
+
+// The tree above T_4, depth first: r (2^K planes) = a * b, with plane p of a at a[p * sa].
+// Children: p0 into r's low half, p1 into its high half, the middle product from the half-sums
+// (materialized in scratch). Combine: low = p0 + p1; high = m + low + y_{K-2} p1. scratch holds
+// 3 * 2^(K-1) words for this level plus the levels below (720 words at K = 8). Levels 5..8 are
+// out-of-line calls, so the 81 register-resident T_4 leaves are only three inlined copies.
+template <int K> struct BT {
+    NOINLINE_DEV void mul(const uint32_t* a, u64 sa, const uint32_t* b, u64 sb, uint32_t* r, uint32_t* scratch) {
+        const int h = 1 << (K - 1);
+        uint32_t* xa = scratch;
+        uint32_t* xb = scratch + h;
+        uint32_t* m = scratch + 2 * h;
+        uint32_t* deeper = scratch + 3 * h;
+        BT<K - 1>::mul(a, sa, b, sb, r, deeper);
+        BT<K - 1>::mul(a + h * sa, sa, b + h * sb, sb, r + h, deeper);
+        for (int i = 0; i < h; ++i) { xa[i] = a[i * sa] ^ a[(h + i) * sa]; xb[i] = b[i * sb] ^ b[(h + i) * sb]; }
+        BT<K - 1>::mul(xa, 1, xb, 1, m, deeper);
+        for (int i = 0; i < h; ++i) { uint32_t lo = r[i] ^ r[h + i]; r[i] = lo; m[i] ^= lo; }
+        BS<K - 1>::gen(r + h);
+        for (int i = 0; i < h; ++i) r[h + i] ^= m[i];
+    }
+};
+template <> struct BT<4> {
+    SDEV void mul(const uint32_t* a, u64 sa, const uint32_t* b, u64 sb, uint32_t* r, uint32_t*) {
+        uint32_t x[16], y[16], z[16];
+        UNROLL for (int i = 0; i < 16; ++i) { x[i] = a[i * sa]; y[i] = b[i * sb]; }
+        BS<4>::mul(x, y, z);
+        UNROLL for (int i = 0; i < 16; ++i) r[i] = z[i];
+    }
+};
+
+// acc (256 planes) = A * B, with plane p of A at A[p * stride].
+DEV void bs_core(const uint32_t* A, const uint32_t* B, u64 stride, uint32_t* acc) {
+    uint32_t scratch[720];
+    BT<8>::mul(A, stride, B, stride, acc, scratch);
+}
+
+// Resident: R = A * B for n groups (interleaved planes).
+KERNEL void t256_mul_bs(const u64* A64, const u64* B64, u64* R64, u64 n) {
+    KBEGIN(n)
+    uint32_t acc[256];
+    bs_core((const uint32_t*)A64 + i, (const uint32_t*)B64 + i, n, acc);
+    uint32_t* R = (uint32_t*)R64;
+    UNROLL for (int k = 0; k < 256; ++k) R[(u64)k * n + i] = acc[k];
+    KEND
+}
+
+// Elements (4 limbs) of group i -> interleaved planes, and back.
+KERNEL void t256_to_sliced(const u64* X, u64* S64, u64 n) {
+    KBEGIN(n)
+    uint32_t* S = (uint32_t*)S64;
+    const uint32_t* Xw = (const uint32_t*)X;
+    for (int w = 0; w < 8; ++w) {
+        uint32_t rows[32];
+        UNROLL for (int l = 0; l < 32; ++l) rows[l] = Xw[8 * (32 * i + l) + w];
+        transpose32(rows);
+        UNROLL for (int j = 0; j < 32; ++j) S[(u64)(32 * w + j) * n + i] = rows[j];
+    }
+    KEND
+}
+KERNEL void t256_from_sliced(const u64* S64, u64* X, u64 n) {
+    KBEGIN(n)
+    const uint32_t* S = (const uint32_t*)S64;
+    uint32_t* Xw = (uint32_t*)X;
+    for (int w = 0; w < 8; ++w) {
+        uint32_t rows[32];
+        UNROLL for (int j = 0; j < 32; ++j) rows[j] = S[(u64)(32 * w + j) * n + i];
+        transpose32(rows);
+        UNROLL for (int l = 0; l < 32; ++l) Xw[8 * (32 * i + l) + w] = rows[l];
+    }
+    KEND
+}
+
+// Fused: gather 32 elements of each operand (element l at a + 4 * ia(l), b + 4 * ib(l)),
+// slice them in registers, multiply, unslice into prod[l][8].
+template <class FA, class FB>
+DEV void bs_mul32(const u64* a, FA ia, const u64* b, FB ib, uint32_t prod[32][8]) {
+    uint32_t As[256], Bs[256], acc[256];
+    const uint32_t* aw = (const uint32_t*)a;
+    const uint32_t* bw = (const uint32_t*)b;
+    for (int w = 0; w < 8; ++w) {
+        uint32_t ra[32], rb[32];
+        UNROLL for (int l = 0; l < 32; ++l) { ra[l] = aw[8 * ia(l) + w]; rb[l] = bw[8 * ib(l) + w]; }
+        transpose32(ra);
+        transpose32(rb);
+        UNROLL for (int j = 0; j < 32; ++j) { As[32 * w + j] = ra[j]; Bs[32 * w + j] = rb[j]; }
+    }
+    bs_core(As, Bs, 1, acc);
+    for (int w = 0; w < 8; ++w) {
+        uint32_t r[32];
+        UNROLL for (int j = 0; j < 32; ++j) r[j] = acc[32 * w + j];
+        transpose32(r);
+        UNROLL for (int l = 0; l < 32; ++l) prod[l][w] = r[l];
+    }
+}
+
+// The bulk kernels on 32 items per thread (n = items / 32; items a multiple of 32).
+KERNEL void t256_mul_bsx(const u64* a, const u64* b, u64* out, u64 b_stride, u64 n) {
+    KBEGIN(n)
+    uint32_t prod[32][8];
+    u64 g0 = 32 * i;
+    bs_mul32(a, [&](int l) { return g0 + l; }, b, [&](int l) { return (g0 + l) * b_stride; }, prod);
+    uint32_t* ow = (uint32_t*)out;
+    for (int l = 0; l < 32; ++l) UNROLL for (int w = 0; w < 8; ++w) ow[8 * (g0 + l) + w] = prod[l][w];
+    KEND
+}
+KERNEL void ntt_scale_bsx(const u64* a, const u64* powers, u64* out, u64 bsz, u64 n) {
+    KBEGIN(n)
+    uint32_t prod[32][8];
+    u64 g0 = 32 * i;
+    bs_mul32(a, [&](int l) { return g0 + l; }, powers, [&](int l) { return (g0 + l) % bsz; }, prod);
+    uint32_t* ow = (uint32_t*)out;
+    for (int l = 0; l < 32; ++l) UNROLL for (int w = 0; w < 8; ++w) ow[8 * (g0 + l) + w] = prod[l][w];
+    KEND
+}
+KERNEL void ntt_butterfly_bsx(const u64* src, const u64* z, u64* dst, u64 size, u64 n) {
+    KBEGIN(n)
+    uint32_t prod[32][8];
+    u64 g0 = 32 * i, h = size >> 1;
+    bs_mul32(z, [&](int l) { return (g0 + l) % h; }, src,
+             [&](int l) { u64 g = g0 + l; return (g / h) * size + h + g % h; }, prod);
+    const uint32_t* sw = (const uint32_t*)src;
+    uint32_t* dw = (uint32_t*)dst;
+    for (int l = 0; l < 32; ++l) {
+        u64 g = g0 + l, blk = g / h, j = g % h, base = blk * size;
+        UNROLL for (int w = 0; w < 8; ++w) {
+            uint32_t e = prod[l][w] ^ sw[8 * (base + j) + w];
+            dw[8 * (base + 2 * j) + w] = e;
+            dw[8 * (base + 2 * j + 1) + w] = e ^ sw[8 * (base + h + j) + w];
+        }
+    }
+    KEND
+}
+// next[k] = w[k] + c[k] (w[k] + w[k + half]); half = 32 n. The sum is formed before slicing.
+KERNEL void fri_fold_bsx(const u64* w, const u64* c, u64* next, u64 n) {
+    KBEGIN(n)
+    uint32_t prod[32][8];
+    u64 g0 = 32 * i, half = 32 * n;
+    uint32_t sum[32][8];
+    const uint32_t* ww = (const uint32_t*)w;
+    for (int l = 0; l < 32; ++l) UNROLL for (int k = 0; k < 8; ++k) sum[l][k] = ww[8 * (g0 + l) + k] ^ ww[8 * (g0 + l + half) + k];
+    bs_mul32(c, [&](int l) { return g0 + l; }, (const u64*)&sum[0][0], [&](int l) { return (u64)l; }, prod);
+    uint32_t* nw = (uint32_t*)next;
+    for (int l = 0; l < 32; ++l) UNROLL for (int k = 0; k < 8; ++k) nw[8 * (g0 + l) + k] = prod[l][k] ^ ww[8 * (g0 + l) + k];
+    KEND
+}
