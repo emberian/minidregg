@@ -31,6 +31,11 @@ struct PendingIdentity {
     request_id: u64,
     #[serde(default)]
     resident_prompt_id: Option<String>,
+    /// The resident records which source request its prompt selected (room_resident: `selectedRequest`,
+    /// null for a maintenance prompt); the reconciliation refused every such record as an unknown field
+    /// (demo-dry 2026-11-06, the lobby's lost prompt).
+    #[serde(default)]
+    selected_request: Option<Value>,
 }
 
 #[derive(Deserialize)]

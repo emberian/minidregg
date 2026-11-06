@@ -1143,12 +1143,11 @@ impl Broker {
                     config = config.display(),
                 );
                 self.render_store_supervisor(&store, &app, &runtime)?;
-                write_operator_text(
-                    &self.unit_tag_path(&unit),
-                    &format!("{store}\n"),
-                    0o600,
-                    false,
-                )?;
+                // The unit's store tag: an existing tag of this same store (an earlier candidate's text under the
+                // name, demo-dry 2026-11-06) is replaced; a tag naming another store is refused.
+                let tag_path = self.unit_tag_path(&unit);
+                let same_store = fs::read_to_string(&tag_path).ok().is_some_and(|current| current.contains(store.as_str()));
+                write_operator_text(&tag_path, &format!("{store}\n"), 0o600, same_store)?;
                 // A unit of this same identity (the rendered-by header: store, app, generation) is replaced
                 // when its text differs: after a candidate switch the pinned runtime (ExecStart, its sha) is the
                 // new one, and the retained unit named the old (demo-dry 2026-11-06: STOP refused `exists with
