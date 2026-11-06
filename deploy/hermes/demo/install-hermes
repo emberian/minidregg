@@ -495,6 +495,7 @@ step_create() {
   # socket) resumes: the grain is born and recorded under $G/create; grain-runtime resumes a create whose
   # spec bytes match the recorded sha, and refuses by name when they differ (never a second birth).
   if [ -s "$G/create/birth/outcome.json" ]; then
+    chown -R "$RESIDENT:$RESIDENT" "$G"   # root gave the root to the resident after the birth; a resume gives it again
     if [ "$(sha256sum "$SPEC" | cut -d' ' -f1)" != "$(tr -d '[:space:]' <"$G/create/spec.sha256")" ]; then
       # A spec that differs only in the candidate directory its binaries live in is the same create: the
       # birth intent carries no binary path (specs recorded before 2026-11-06 named the physical directory).
