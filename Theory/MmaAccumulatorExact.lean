@@ -266,4 +266,160 @@ theorem kar_lazy_commutes (v : List (Bool × Bool × Bool × Bool)) :
       intro ih; subst ih
       cases a0 <;> cases a1 <;> cases b0 <;> cases b1 <;> cases p <;> cases q <;> cases r <;> decide
 
+/-! ### GF(2) inner products as the parity of an exact integer sum (the rotation, 2026-11-06)
+
+The tensor-core route for binary fields on hardware without a 1-bit MMA (Blackwell: emulated; Hopper: xor
+emulated): operands 0/1 as FP8 e4m3 or FP4 e2m1 (both exact), products 0/1, accumulate in the FP
+accumulator, read the parity of the exact count.  Exact while the count stays below `2^m`; with a promotion
+to an integer or a parity register every block, exact at every length. -/
+
+def bit (b : Bool) : Int := if b then 1 else 0
+
+/-- The products of a GF(2) inner product as one (right-nested) summation tree, with a `0` initial value. -/
+def prodTree : List (Bool × Bool) → STree
+  | [] => .leaf 0
+  | (a, b) :: rest => .node (.leaf (bit (a && b))) (prodTree rest)
+
+/-- The GF(2) inner product. -/
+def xorDot : List (Bool × Bool) → Bool
+  | [] => false
+  | (a, b) :: rest => xor (a && b) (xorDot rest)
+
+theorem prodTree_bounded : ∀ v : List (Bool × Bool), (prodTree v).Bounded 1
+  | [] => by simp [prodTree, STree.Bounded]
+  | (a, b) :: rest => by
+      refine ⟨?_, prodTree_bounded rest⟩
+      cases a <;> cases b <;> simp [bit, STree.Bounded]
+
+theorem prodTree_size : ∀ v : List (Bool × Bool), (prodTree v).size = v.length + 1
+  | [] => rfl
+  | (_, _) :: rest => by simp [prodTree, STree.size, prodTree_size rest]; omega
+
+theorem prodTree_exact_nonneg : ∀ v : List (Bool × Bool), 0 ≤ (prodTree v).exact
+  | [] => by decide
+  | (a, b) :: rest => by
+      have := prodTree_exact_nonneg rest
+      simp only [prodTree, STree.exact]
+      cases a <;> cases b <;> simp [bit] <;> omega
+
+/-- The exact count's parity is the GF(2) inner product. -/
+theorem prodTree_exact_parity : ∀ v : List (Bool × Bool), (prodTree v).exact % 2 = bit (xorDot v)
+  | [] => by decide
+  | (a, b) :: rest => by
+      have ih := prodTree_exact_parity rest
+      simp only [prodTree, STree.exact, xorDot]
+      revert ih
+      generalize (prodTree rest).exact = e
+      generalize xorDot rest = x
+      intro ih
+      cases a <;> cases b <;> cases x <;> simp [bit] at ih ⊢ <;> omega
+
+/-- **GF(2) inner product through a floating accumulator.**  Any accumulator that holds integers below
+`2^m` (post-addition rounding, `HoldsBelow`), `N + 1 < 2^m` 0/1 products: the parity of the hardware sum is
+the GF(2) inner product. -/
+theorem gf2_dot_via_fp (m : Nat) (rnd : Int → Int) (hr : HoldsBelow m rnd) (v : List (Bool × Bool))
+    (hN : v.length + 1 < 2 ^ m) : (prodTree v).hw rnd % 2 = bit (xorDot v) := by
+  rw [hw_exact m 1 rnd hr (prodTree v) (prodTree_bounded v) (by rw [prodTree_size]; omega)]
+  exact prodTree_exact_parity v
+
+/-- The same through the wrapping `.s32` register (INT8 0/1 operands, or `.b1 and.popc`): no bound. -/
+theorem gf2_dot_via_s32 (v : List (Bool × Bool)) : (prodTree v).hwWrap % 2 = bit (xorDot v) := by
+  rw [s32_parity_exact]; exact prodTree_exact_parity v
+
+theorem xorDot_append : ∀ u w : List (Bool × Bool), xorDot (u ++ w) = xor (xorDot u) (xorDot w)
+  | [], w => by simp [xorDot]
+  | (a, b) :: rest, w => by
+      simp only [List.cons_append, xorDot, xorDot_append rest w]
+      cases (a && b) <;> cases xorDot rest <;> cases xorDot w <;> rfl
+
+/-- Parity bit of an exact integer, as a Bool. -/
+def par (x : Int) : Bool := x % 2 == 1
+
+theorem par_bit (b : Bool) : par (bit b) = b := by cases b <;> decide
+
+/-- **Promotion: exact at every length.**  Split the products into blocks, each shorter than `2^m - 1`,
+accumulate each block on the floating accumulator, and xor the blocks' parity bits (the promotion).  The
+result is the GF(2) inner product of the whole vector. -/
+theorem gf2_dot_blocks (m : Nat) (rnd : Int → Int) (hr : HoldsBelow m rnd) :
+    ∀ blocks : List (List (Bool × Bool)), (∀ blk ∈ blocks, blk.length + 1 < 2 ^ m) →
+      (blocks.map fun blk => par ((prodTree blk).hw rnd)).foldr xor false = xorDot blocks.flatten
+  | [], _ => rfl
+  | blk :: rest, h => by
+      have h1 := gf2_dot_via_fp m rnd hr blk (h blk (List.mem_cons_self ..))
+      have h2 := gf2_dot_blocks m rnd hr rest (fun b hb => h b (List.mem_cons_of_mem _ hb))
+      simp only [List.map, List.foldr, List.flatten_cons, xorDot_append, h2]
+      congr 1
+      unfold par; rw [h1]; cases xorDot blk <;> decide
+
+/-- Falsifier: nine products `1·1` through a 3-bit truncating accumulator (one past `2^3`): the count 9 is
+held as 8 and the parity flips. -/
+theorem gf2_fp_fails_past_block :
+    (prodTree (List.replicate 9 (true, true))).hw (trunc 3) % 2 ≠
+      bit (xorDot (List.replicate 9 (true, true))) := by decide
+
+/-- Non-vacuity: six mixed products inside a 3-bit block (`6 + 1 < 2^3`): the parity is read correctly. -/
+theorem gf2_fp_inside :
+    (prodTree [(true, true), (true, false), (true, true), (false, true), (true, true), (true, true)]).hw
+      (trunc 3) % 2 = bit (xorDot [(true, true), (true, false), (true, true), (false, true), (true, true),
+        (true, true)]) := by decide
+
+/-! ### Lazy reduction of any GF(2)-bilinear map
+
+For a fixed bilinear map over GF(2) (output coordinate given by a coefficient table `T j k`), the sum of
+`B(a_n, b_n)` over a block equals `T` applied once to the GF(2) outer-product sum `S j k = Σ a_n j b_n k`.
+Every coordinate of a Tower256 product is such a map in any fixed basis, so the inner product is: count on
+the tensor core, take parities (`gf2_dot_via_fp` per `S j k`), apply `T` once per block.  The instance for
+minidregg's `Coordinate.mul` needs its bilinearity, which is not proved here. -/
+
+def pairs (d : Nat) : List (Fin d × Fin d) :=
+  (List.finRange d).flatMap fun j => (List.finRange d).map fun k => (j, k)
+
+def bil (d : Nat) (T : Fin d → Fin d → Bool) (a b : Fin d → Bool) : Bool :=
+  xsum ((pairs d).map fun jk => T jk.1 jk.2 && (a jk.1 && b jk.2))
+
+theorem xsum_map_xor {α} (L : List α) (f g : α → Bool) :
+    xsum (L.map fun x => xor (f x) (g x)) = xor (xsum (L.map f)) (xsum (L.map g)) := by
+  induction L with
+  | nil => rfl
+  | cons x xs ih =>
+      simp only [List.map, xsum, ih]
+      cases f x <;> cases g x <;> cases xsum (xs.map f) <;> cases xsum (xs.map g) <;> rfl
+
+theorem xsum_map_false {α} (L : List α) : xsum (L.map fun _ => false) = false := by
+  induction L with
+  | nil => rfl
+  | cons _ _ ih => simp only [List.map, xsum, ih]; rfl
+
+theorem lazy_bilinear (d : Nat) (T : Fin d → Fin d → Bool) :
+    ∀ v : List ((Fin d → Bool) × (Fin d → Bool)),
+      xsum (v.map fun ab => bil d T ab.1 ab.2) =
+        xsum ((pairs d).map fun jk => T jk.1 jk.2 && xsum (v.map fun ab => ab.1 jk.1 && ab.2 jk.2))
+  | [] => by
+      simp only [List.map, xsum]
+      have : ∀ jk : Fin d × Fin d, (T jk.1 jk.2 && false) = false := fun _ => by simp
+      simp only [this]; exact (xsum_map_false _).symm
+  | ab :: rest => by
+      have ih := lazy_bilinear d T rest
+      simp only [List.map, xsum]
+      have hd : ∀ jk : Fin d × Fin d,
+          (T jk.1 jk.2 && xor (ab.1 jk.1 && ab.2 jk.2) (xsum (rest.map fun ab => ab.1 jk.1 && ab.2 jk.2))) =
+          xor (T jk.1 jk.2 && (ab.1 jk.1 && ab.2 jk.2))
+              (T jk.1 jk.2 && xsum (rest.map fun ab => ab.1 jk.1 && ab.2 jk.2)) := by
+        intro jk
+        cases T jk.1 jk.2 <;> cases (ab.1 jk.1 && ab.2 jk.2) <;>
+          cases xsum (rest.map fun ab => ab.1 jk.1 && ab.2 jk.2) <;> rfl
+      simp only [hd, xsum_map_xor, ← ih]
+      rfl
+
+/-- Concrete check: GF(2)[x]/(x^2+x+1) (GF(4)), coordinates (1, x).  Product coordinate 0 is
+`a0 b0 + a1 b1`, coordinate 1 is `a0 b1 + a1 b0 + a1 b1`; the lazy form agrees on a 3-term block. -/
+def gf4T1 : Fin 2 → Fin 2 → Bool := fun j k => !(j.val == 0 && k.val == 0)
+
+theorem gf4_lazy_check :
+    let v : List ((Fin 2 → Bool) × (Fin 2 → Bool)) :=
+      [(fun i => i.val == 1, fun _ => true), (fun _ => true, fun i => i.val == 0), (fun _ => true, fun _ => true)]
+    xsum (v.map fun ab => bil 2 gf4T1 ab.1 ab.2) =
+      xsum ((pairs 2).map fun jk => gf4T1 jk.1 jk.2 && xsum (v.map fun ab => ab.1 jk.1 && ab.2 jk.2)) := by
+  decide
+
 end MmaAccumulatorExact
