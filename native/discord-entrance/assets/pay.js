@@ -78,8 +78,11 @@
       const createRecipientAta = !(await deps.conn.getAccountInfo(to));
       const from = ata(owner);
       const balance = await deps.conn.getTokenAccountBalance(from).catch(() => null);
-      if (!balance || BigInt(balance.value.amount) < amount) {
-        throw new Error("your wallet " + owner.toBase58() + " holds " + (balance ? balance.value.amount : "no account") + " of this token; the quote needs " + quote.amountAtomic + " atomic units.");
+      if (!balance) {
+        throw new Error("your wallet " + owner.toBase58() + " has no associated token account " + from.toBase58() + " for this mint (this page pays from the associated account only: move the tokens there in your wallet, or pay from any account and paste the transaction signature below)");
+      }
+      if (BigInt(balance.value.amount) < amount) {
+        throw new Error("your wallet " + owner.toBase58() + " holds " + balance.value.amount + " of this token in its associated account; the quote needs " + quote.amountAtomic + " atomic units.");
       }
       const { blockhash } = await deps.conn.getLatestBlockhash("confirmed");
       const message = sol.compileMessage({ feePayer: owner, recentBlockhash: blockhash, instructions: instructions(owner, createRecipientAta) });

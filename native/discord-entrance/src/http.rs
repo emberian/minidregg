@@ -122,6 +122,12 @@ pub fn write_response(
     content_type: &str,
     body: &[u8],
 ) -> std::io::Result<()> {
+    // A redirect (303 after a door submission): the body is the location, and nothing else is sent.
+    if status == 303 {
+        let location = String::from_utf8_lossy(body);
+        let head = format!("HTTP/1.1 303 {reason}\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return stream.write_all(head.as_bytes());
+    }
     let head = format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()

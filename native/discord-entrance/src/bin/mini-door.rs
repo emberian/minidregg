@@ -175,6 +175,16 @@ const WALLET_PAGE: &str = r#"(async () => {
   } catch (e) { say("The wallet page could not start: " + String(e && e.message || e) + ". The paste path below still works."); }
 })();"#;
 
+/// A page that reloads itself every `seconds` while the door waits on the processor.
+fn page_refreshing(title: &str, body: &str, seconds: u32) -> Vec<u8> {
+    let mut bytes = page(title, body);
+    let tag = format!("<meta http-equiv=\"refresh\" content=\"{seconds}\">");
+    if let Some(at) = bytes.windows(7).position(|w| w == b"<title>") {
+        bytes.splice(at..at, tag.into_bytes());
+    }
+    bytes
+}
+
 fn page(title: &str, body: &str) -> Vec<u8> {
     format!(
         "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><meta name=color-scheme content=\"light dark\">\
@@ -239,19 +249,32 @@ impl Door {
     }
 
     fn status_page(&self, id: &str) -> (u16, Vec<u8>) {
+        // What the door has queued for this request and the processor has not taken yet: the status page
+        // says so, and refreshes itself until the processor's answer is on it.
+        let queued = ["join", "sign", "paid"].into_iter().find(|k| self.queue.join(format!("{k}-{id}.json")).exists());
         let Some(v) = read_json(&self.status.join(format!("{id}.json"))) else {
-            if self.queue.join(format!("join-{id}.json")).exists() {
-                return (200, page("Request queued", "<p>Your request is queued. Reload this page in a minute.</p>"));
+            if queued.is_some() {
+                return (200, page_refreshing("Request queued", "<p>Your request is queued; the box takes it within seconds. This page refreshes itself.</p>", 4));
             }
             return (404, page("Unknown request", "<p>No request has this id.</p>"));
         };
         let phase = v["phase"].as_str().unwrap_or("");
         let name = v["name"].as_str().unwrap_or("");
         let mut body = format!("<p>Request <code>{}</code> for <code>{}</code>: <strong>{}</strong>.</p>", html(id), html(name), html(phase));
-        if let Some(detail) = v["detail"].as_str() {
+        let mut refresh = None;
+        if let Some(kind) = queued {
+            let what = match kind { "sign" => "signature", "paid" => "payment notice", _ => "request" };
+            body.push_str(&format!("<p>Your {what} is queued; the box checks it within seconds. This page refreshes itself.</p>"));
+            refresh = Some(4);
+        } else if let Some(detail) = v["detail"].as_str() {
             body.push_str(&format!("<p>{}</p>", html(detail)));
+            if detail.starts_with("the box will retry") {
+                body.push_str("<p>The box retries this step on its own, about once a minute. This page refreshes itself.</p>");
+                refresh = Some(20);
+            }
         } else if matches!(phase, "account" | "keyed" | "signed" | "paid") {
-            body.push_str("<p>Provisioning in progress; reload in a minute.</p>");
+            body.push_str("<p>Provisioning in progress: the box is making your account and workspace. This page refreshes itself.</p>");
+            refresh = Some(6);
         }
         if phase == "enrolled" {
             if let Some(login) = v["login"].as_str() {
@@ -308,7 +331,10 @@ impl Door {
             ));
         }
         body.push_str("<p>Bookmark this page to check your request status.</p>");
-        (200, page("Your Mini account", &body))
+        match refresh {
+            Some(seconds) => (200, page_refreshing("Your Mini account", &body, seconds)),
+            None => (200, page("Your Mini account", &body)),
+        }
     }
 
     fn challenge_file(&self, id: &str) -> Option<Vec<u8>> {
@@ -438,9 +464,10 @@ impl Door {
             Ok(()) => {
                 let id = request.id();
                 eprintln!("mini-door: queued {} from {key}", request.file_name());
-                (200, page("Request queued", &format!(
-                    "<p>Queued. Your status page is <a href=/join/status/{0}>/join/status/{0}</a>: open it now and keep its address; \
-                     it is the only way back to this request.</p>", html(id))))
+                // The browser lands on the status page itself (303), which names what is queued and refreshes
+                // itself until the processor has taken it: a bare "queued, follow this link" page sent every
+                // submitter to a dead end and a manual reload (ember, 2026-11-06).
+                (303, format!("/join/status/{id}").into_bytes())
             }
             Err(e) => refuse(409, &e),
         }
@@ -491,7 +518,7 @@ impl Door {
             ("GET", "/healthz") => (200, b"ok\n".to_vec()),
             _ => (404, page("Not found", "")),
         };
-        let reason = match status { 200 => "OK", 400 => "Bad Request", 403 => "Forbidden", 404 => "Not Found", 409 => "Conflict", 429 => "Too Many Requests", _ => "Service Unavailable" };
+        let reason = match status { 200 => "OK", 303 => "See Other", 400 => "Bad Request", 403 => "Forbidden", 404 => "Not Found", 409 => "Conflict", 429 => "Too Many Requests", _ => "Service Unavailable" };
         let _ = write_response(&mut stream, status, reason, "text/html; charset=utf-8", &body);
     }
 }
@@ -633,7 +660,7 @@ mod tests {
         let d = door("post");
         let body = format!("name=alice&key={}&route=free&discord=on", enc(KEY));
         let (status, _) = d.post("/join", body.as_bytes(), "203.0.113.9", 100);
-        assert_eq!(status, 200);
+        assert_eq!(status, 303);
         let files = door::spool_list(&d.queue).unwrap();
         assert_eq!(files.len(), 1);
         match Request::parse(&std::fs::read(&files[0]).unwrap()).unwrap() {
@@ -649,7 +676,7 @@ mod tests {
         }
         assert_eq!(door::spool_list(&d.queue).unwrap().len(), 1);
         // The queue bound, then the per-source bound.
-        assert_eq!(d.post("/join", format!("name=bob&key={}&route=free", enc(KEY)).as_bytes(), "198.51.100.7", 102).0, 200);
+        assert_eq!(d.post("/join", format!("name=bob&key={}&route=free", enc(KEY)).as_bytes(), "198.51.100.7", 102).0, 303);
         assert_eq!(d.post("/join", format!("name=carol&key={}&route=free", enc(KEY)).as_bytes(), "198.51.100.8", 103).0, 503);
         let mut d = door("rate");
         d.max_queued = 10;
@@ -731,7 +758,7 @@ mod tests {
             for f in std::fs::read_dir(&d.queue).unwrap().flatten() { let _ = std::fs::remove_file(f.path()); }
         }
         let (status, _) = d.post("/join/paid", format!("id={id}&transaction={tx}").as_bytes(), "1.2.3.4", 1001);
-        assert_eq!(status, 200, "the paid step of an admitted request is not counted against the address");
+        assert_eq!(status, 303, "the paid step of an admitted request is not counted against the address");
         let (status, _) = d.post("/join", b"name=carol&route=free", "1.2.3.4", 1002);
         assert_eq!(status, 429, "a fourth new request from the address is still refused");
     }
@@ -807,7 +834,7 @@ mod tests {
         assert!(page.contains("name=invite"));
         // A code rides in the queued request; open seats gone and no code is refused by name.
         let (status, _) = d.post("/join", b"name=alice&route=free&invite=INVITE001-abcdef", "203.0.113.9", 100);
-        assert_eq!(status, 200);
+        assert_eq!(status, 303);
         let files = door::spool_list(&d.queue).unwrap();
         assert!(matches!(Request::parse(&std::fs::read(&files[0]).unwrap()).unwrap(), Request::Join { invite: Some(c), .. } if c == "INVITE001-abcdef"));
         std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false,"inviteReserve":20,"openSeats":0,"reservedSeats":20}"#).unwrap();
