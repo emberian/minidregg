@@ -759,7 +759,10 @@ theorem sumEq_and_hashEq_meaning_decides :
       ballotSampleLaw.denote tallyFacts none (ballotSample 3 2 0 42 sampleCommit) = false ∧
       (LawExpr.sumEq ["yes", "no"] ["tallied"]).denote tallyFacts none
         (.record [("yes", .natural 3), ("no", .natural 2), ("tallied", .natural 6)]) = false := by
-  decide +kernel
+  -- A fact about concrete data: the deployed hash of the sample opening. Checked by compiled
+  -- evaluation (ember, 2026-11-06: concrete data by the compiler, general theorems by the
+  -- kernel); `decide +kernel` evaluated cSHAKE in the kernel, 81 s and 16.5 GB for this module.
+  native_decide
 
 #assert_axioms get_append
 #assert_axioms get_none
@@ -783,5 +786,5 @@ theorem sumEq_and_hashEq_meaning_decides :
 #assert_axioms package_law_enforced_seed
 #assert_axioms tally_views_inhabited
 #assert_axioms tally_meaning_decides
-#assert_axioms sumEq_and_hashEq_meaning_decides
+#assert_compiled sumEq_and_hashEq_meaning_decides
 end Minidregg.Kernel.ObjectLaw
