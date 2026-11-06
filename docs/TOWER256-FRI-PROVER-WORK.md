@@ -133,3 +133,22 @@ catalog `[9101, 9104]`, native ABI codecs `[9001, 9011, 9013]`. That is a new ar
 `MinidreggV1Artifact.bundle` and its catalog `[9101]` are unchanged (`v1_lacks_work`); the
 Stage-0 artifact (`[9101, 9102, 9103]`) is unchanged and does not contain `9104`. The reply's
 only route to authority is `acceptResponse_iff`, which is `checkBytes_iff`.
+
+## 6. The compiled honest prover, and what the umbrella costs to build (2026-11-06)
+
+`lake exe tower256-prover-run` (`Compiler/Tower256SuccinctProverRun.lean`) ran on hbox in 68 s.
+- ell = 4, m = 2, three queries: the receipt is 1,140 bytes.
+- ell = 8, m = 3, four queries: the receipt is 3,561 bytes.
+
+Both receipts are accepted by `check` and by `checkBytes`. Each shape's mutant fails exactly
+the opening parts named in the runner.
+
+**Whole-tree build of this branch (`lake build Minidregg`, 10,420 jobs).**
+- Under 12G it is killed for running out of memory when it reaches the umbrella modules, even
+  with one Lean worker: those modules load nearly the whole tree.
+- Under a one-time 32G grant (one Lean worker, `/tank/dregg-build/fable-tower/md`) it passed in
+  2,018 s.
+- The peak summed RSS of the `lean` and `lake` processes, sampled every 3 s, was 19.4 GB
+  (19,445,332 KB).
+
+Size an umbrella seat at no less than 20 GB plus slack. A 12G lane cap cannot run it.
