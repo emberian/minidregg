@@ -1,12 +1,12 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `87b6c82dc0a6` (builder: the board-only skip line without the doubled prefix). Round finished 2026-11-06T05:53Z.
+Tip: `87b6c82dc0a6` (builder: the board-only skip line without the doubled prefix). Round finished 2026-11-06T06:02Z.
 green: `f5d5df8145a6`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-87b6c82d`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:composed:documents | composed documents fail | not rerun | no | infra, member-side | fail: documents:protected: no stderr; see /ci-composed/c-87b6c8/composed/state/evidence/01 |
-| gate:composed:store-restart | composed store-restart blocked | not rerun | no | host-execution | blocked: prerequisite documents has not passed |
+| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
 Suspect commits since green (`git log f5d5df8145a6..87b6c82dc0a6`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
@@ -23,10 +23,10 @@ Suspect commits since green (`git log f5d5df8145a6..87b6c82dc0a6`), newest first
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.212 | 0.223 | 1.053 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 37.903 | 64.917 | 1.713 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.157 | 0.222 | 1.413 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_wall_ms | 112.575 | 82.839 | 0.736 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.310 | 0.323 | 1.042 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 250.034 | 139.035 | 0.556 | 1.856 | read-path |
+| flatness-submit | PASS | submit_cpu_ms | 0.200 | 0.322 | 1.613 | 1.849 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 61.343 | 257.759 | 4.202 | 1.849 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_cpu_ms | 0.175 | 0.440 | 2.518 | 1.849 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 72.884 | 331.263 | 4.545 | 1.849 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.373 | 0.318 | 0.851 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 164.664 | 150.897 | 0.916 | 1.856 | read-path |
 | flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-87b6c82d/flatness.log | - | - | - | - | host-execution, store-retained |
