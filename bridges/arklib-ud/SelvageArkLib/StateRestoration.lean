@@ -143,6 +143,87 @@ theorem selvageExtractor_isLocallyBounded [Finite r.PMsg] (rbr : RbrKnowledgeSou
       exact ENNReal.ofReal_le_ofReal
         ((rbr.extract_sound δ hδ st ⟨rs.length, hi⟩ rs rfl message).trans (herr _))
 
+/-! ## Backward extraction is Selvage's Construction B.5 -/
+
+/-- The completed rounds read off an ArkLib execution path of the `n`-round presentation. -/
+def pathRounds [Finite r.PMsg] :
+    (n : ℕ) → (protocol (List.replicate n (round r))).tree.ExecutionPath →
+      List (r.PMsg × r.Chal)
+  | 0, _ => []
+  | n + 1, path => (⟨path.1, path.2.1⟩ : r.PMsg × r.Chal) :: pathRounds n path.2.2
+
+@[simp] theorem pathRounds_length [Finite r.PMsg] :
+    (n : ℕ) → (path : (protocol (List.replicate n (round r))).tree.ExecutionPath) →
+      (pathRounds n path).length = n
+  | 0, _ => rfl
+  | n + 1, path => by simp [pathRounds, pathRounds_length n path.2.2]
+
+/-- The terminal knowledge state of an execution path is Selvage's state on the full
+transcript it records. -/
+theorem terminalState_selvageExtractor [Finite r.PMsg] (rbr : RbrKnowledgeSoundness r) (δ : ℝ)
+    (st : Stmt r) : (n : ℕ) → (rs : List (r.PMsg × r.Chal)) →
+    (path : (protocol (List.replicate n (round r))).tree.ExecutionPath) →
+    (selvageExtractor rbr δ st n rs).terminalState path =
+      kstateAt rbr δ st ⟨rs ++ pathRounds n path, none⟩
+  | 0, rs, _ => by
+      change kstateAt rbr δ st ⟨rs, none⟩ = _
+      simp [pathRounds]
+  | n + 1, rs, path => by
+      change (selvageExtractor rbr δ st n
+        (rs ++ [(⟨path.1, path.2.1⟩ : r.PMsg × r.Chal)])).terminalState path.2.2 = _
+      rw [terminalState_selvageExtractor rbr δ st n _ path.2.2]
+      simp [pathRounds]
+
+/-- A Selvage witness, carried to the terminal carrier of a path (an identity cast). -/
+def toTerminal [Finite r.PMsg] (rbr : RbrKnowledgeSoundness r) (δ : ℝ) (st : Stmt r) (n : ℕ)
+    (rs : List (r.PMsg × r.Chal))
+    (path : (protocol (List.replicate n (round r))).tree.ExecutionPath) (w : r.W) :
+    ((selvageExtractor rbr δ st n rs).terminalState path).Witness :=
+  cast (congrArg KnowledgeState.Witness (terminalState_selvageExtractor rbr δ st n rs path)).symm w
+
+/-- Construction B.5 with the completed prefix `rs` explicit: walk `rest` forward, extract
+backward. -/
+def backward (rbr : RbrKnowledgeSoundness r) (st : Stmt r) :
+    List (r.PMsg × r.Chal) → List (r.PMsg × r.Chal) → r.W → r.W
+  | _, [], w => w
+  | rs, x :: rest, w => rbr.extract st ⟨rs ++ [x], none⟩ (backward rbr st (rs ++ [x]) rest w)
+
+/-- ArkLib's named backward extraction along `selvageExtractor` is Selvage's backward fold.
+The right side does not mention `δ`: one extractor serves every proximity bound. -/
+theorem extractWitness_selvageExtractor [Finite r.PMsg] (rbr : RbrKnowledgeSoundness r)
+    (δ : ℝ) (st : Stmt r) : (n : ℕ) → (rs : List (r.PMsg × r.Chal)) →
+    (path : (protocol (List.replicate n (round r))).tree.ExecutionPath) → (w : r.W) →
+    (selvageExtractor rbr δ st n rs).extractWitness path (toTerminal rbr δ st n rs path w) =
+      backward rbr st rs (pathRounds n path) w
+  | 0, _, _, _ => rfl
+  | n + 1, rs, path, w =>
+      congrArg (rbr.extract st ⟨rs ++ [(⟨path.1, path.2.1⟩ : r.PMsg × r.Chal)], none⟩)
+        (extractWitness_selvageExtractor rbr δ st n _ path.2.2 w)
+
+/-- The backward fold from position `i` is Selvage's `wAt` at `i`. -/
+theorem backward_take_drop_eq_wAt (rbr : RbrKnowledgeSoundness r) (st : Stmt r)
+    (rounds : List (r.PMsg × r.Chal)) (w : r.W) :
+    ∀ m i, rounds.length - i = m → i ≤ rounds.length →
+      backward rbr st (rounds.take i) (rounds.drop i) w = wAt rbr st rounds w i
+  | 0, i, hm, hi => by
+      have hi' : i = rounds.length := by omega
+      subst hi'
+      rw [List.drop_length, wAt_of_le rbr st rounds w le_rfl]
+      rfl
+  | m + 1, i, hm, hi => by
+      have hlt : i < rounds.length := by omega
+      rw [List.drop_eq_getElem_cons hlt, wAt_of_lt rbr st rounds w hlt]
+      change rbr.extract st ⟨rounds.take i ++ [rounds[i]], none⟩
+          (backward rbr st (rounds.take i ++ [rounds[i]]) (rounds.drop (i + 1)) w) = _
+      rw [List.take_concat_get' rounds i hlt,
+        backward_take_drop_eq_wAt rbr st rounds w m (i + 1) (by omega) (by omega)]
+
+/-- Selvage's `srExtract` reads exactly the backward fold of the final transcript. -/
+theorem backward_nil_eq_wAt (rbr : RbrKnowledgeSoundness r) (st : Stmt r)
+    (rounds : List (r.PMsg × r.Chal)) (w : r.W) :
+    backward rbr st [] rounds w = wAt rbr st rounds w 0 := by
+  simpa using backward_take_drop_eq_wAt rbr st rounds w _ 0 rfl (Nat.zero_le _)
+
 end SelvageArkLib.StateRestoration
 
 /-- info: 'SelvageArkLib.StateRestoration.selvageExtractor_isProverPreserving' depends on axioms: [propext, choice, Quot.sound] -/
@@ -152,3 +233,7 @@ end SelvageArkLib.StateRestoration
 /-- info: 'SelvageArkLib.StateRestoration.selvageExtractor_isLocallyBounded' depends on axioms: [propext, choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms SelvageArkLib.StateRestoration.selvageExtractor_isLocallyBounded
+
+/-- info: 'SelvageArkLib.StateRestoration.extractWitness_selvageExtractor' depends on axioms: [propext, choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms SelvageArkLib.StateRestoration.extractWitness_selvageExtractor
