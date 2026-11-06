@@ -1,18 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `5bcbbfe94934` (builder: REDS.md for 87b6c82dc0a6 (2 red)). Round finished 2026-11-06T06:12Z.
-green: `f5d5df8145a6`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-5bcbbfe9`.
+Tip: `8f2d63fab93f` (grain-runtime: the lost resident prompt is recorded before the startup-recovery early retu). Round finished 2026-11-06T06:38Z.
+green: `5bcbbfe94934`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-8f2d63fa`.
 
-No reds: `green` moves to `5bcbbfe94934`.
+No reds: `green` moves to `8f2d63fab93f`.
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.170 | 0.207 | 1.221 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 29.656 | 76.830 | 2.591 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.140 | 0.175 | 1.253 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 23.278 | 74.377 | 3.195 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.314 | 0.294 | 0.938 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 203.510 | 193.140 | 0.949 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-5bcbbfe9/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.159 | 0.209 | 1.314 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 31.720 | 93.565 | 2.950 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.132 | 0.207 | 1.568 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 27.317 | 99.360 | 3.637 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.345 | 0.338 | 0.978 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 135.662 | 128.205 | 0.945 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-8f2d63fa/flatness.log | - | - | - | - | host-execution, store-retained |
