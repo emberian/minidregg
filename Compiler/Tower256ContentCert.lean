@@ -32,9 +32,13 @@ equal digests, or the differing leaf). The collision is pinned to the two trees,
 existential over the suite, which pigeonhole would inhabit outright. It is never stated over
 `BindingCommitment`/`PositionBinding` (§6).
 
-Differences from breadstuffs `Dfa`, not bridged by a theorem here: `DfaTable.run` is a fold, and
-on the empty word the verdict is the initial state's, whereas `DfaAccepts` needs a nonempty trace;
-an adapter to `BoundStatement` restricts to nonempty words and commits `(length, contentCommit)`.
+Breadstuffs' run semantics: a run there is a NONEMPTY list of steps (`Dfa.DfaAccepts`), so the
+relation requires a nonempty record, and `accepts_iff_dfaAccepts` proves that on a nonempty word
+the table's fold accepts exactly when `DfaAccepts` (restated as `Bread.DfaAccepts`, since this
+package cannot import breadstuffs) has a run reading the word under the table's own transition
+relation, initial state and accepting set. `named_dfaAccepts_or_collision` is the
+`dfa_bound_identifies_record_or_collides` shape. An adapter to `BoundStatement` commits
+`(length, contentCommit)`.
 
 Not here: a receipt that keeps the record private. That one is a Tower256 trace with an AIR and
 the succinct FRI of `Tower256SuccinctCheck` over this `contentRoot`; no AIR layer exists yet.
@@ -233,6 +237,147 @@ def accepts (w : List UInt8) : Bool := t.accepting.getD (t.run w) false
 
 end DfaTable
 
+/-! ## Breadstuffs' run semantics, and the table's run inside it
+
+Restated from breadstuffs `metatheory/Dregg2/Crypto/Dfa.lean` at `19d6da41f` (`Step`,
+`stepValid`, `chained` as `Hypergraph.chain`, `DfaAccepts`, `traceWord`): that package is on
+another toolchain and cannot be imported here. A run there is a NONEMPTY list of steps. The
+relation `Holds` therefore requires a nonempty record, and `accepts_iff_dfaAccepts` says the
+table's fold accepts a nonempty word exactly when breadstuffs' `DfaAccepts` has a run reading it,
+for the table's own transition relation, initial state and accepting set. -/
+
+namespace Bread
+
+structure Step (State Sym : Type) where
+  state : State
+  sym : Sym
+  next : State
+
+def chain {α : Type} (R : α → α → Prop) : List α → Prop
+  | [] => True
+  | [_] => True
+  | a :: b :: rest => R a b ∧ chain R (b :: rest)
+
+def DfaAccepts {State Sym : Type} (δ : State → Sym → State → Prop) (q₀ : State)
+    (accept : State → Prop) (trace : List (Step State Sym)) : Prop :=
+  ∃ first last,
+    trace.head? = some first ∧
+    trace.getLast? = some last ∧
+    first.state = q₀ ∧
+    accept last.next ∧
+    (∀ s ∈ trace, δ s.state s.sym s.next) ∧
+    chain (fun a b => b.state = a.next) trace
+
+def traceWord {State Sym : Type} (trace : List (Step State Sym)) : List Sym := trace.map (·.sym)
+
+end Bread
+
+namespace DfaTable
+
+variable (t : DfaTable)
+
+def step (s : Nat) (b : UInt8) : Nat := t.delta.getD (256 * s + b.toNat) 0
+
+/-- The table's transition relation, as breadstuffs' `δ`. -/
+def δ : Nat → UInt8 → Nat → Prop := fun s b n => n = t.step s b
+
+/-- The table's accept predicate, as breadstuffs' `accept`. -/
+def acceptP : Nat → Prop := fun s => t.accepting.getD s false = true
+
+/-- The run of the table from `s` over `w`, as breadstuffs steps. -/
+def traceFrom : Nat → List UInt8 → List (Bread.Step Nat UInt8)
+  | _, [] => []
+  | s, b :: rest => ⟨s, b, t.step s b⟩ :: traceFrom (t.step s b) rest
+
+theorem traceWord_traceFrom : ∀ (s : Nat) (w : List UInt8), Bread.traceWord (t.traceFrom s w) = w
+  | _, [] => rfl
+  | s, b :: rest => congrArg (List.cons b) (traceWord_traceFrom (t.step s b) rest)
+
+theorem valid_traceFrom : ∀ (s : Nat) (w : List UInt8),
+    ∀ x ∈ t.traceFrom s w, t.δ x.state x.sym x.next
+  | _, [] => by simp [traceFrom]
+  | s, b :: rest => by
+      intro x hx
+      simp only [traceFrom, List.mem_cons] at hx
+      rcases hx with rfl | hx
+      · rfl
+      · exact valid_traceFrom (t.step s b) rest x hx
+
+theorem chain_traceFrom : ∀ (s : Nat) (w : List UInt8),
+    Bread.chain (fun a b => b.state = a.next) (t.traceFrom s w)
+  | _, [] => trivial
+  | _, [_] => trivial
+  | s, b :: c :: rest => ⟨rfl, chain_traceFrom (t.step s b) (c :: rest)⟩
+
+theorem last_traceFrom : ∀ (s : Nat) (b : UInt8) (rest : List UInt8),
+    ∃ last, (t.traceFrom s (b :: rest)).getLast? = some last ∧
+      last.next = (b :: rest).foldl t.step s
+  | _, _, [] => ⟨_, rfl, rfl⟩
+  | s, b, c :: rest => by
+      obtain ⟨l, hl, hn⟩ := last_traceFrom (t.step s b) c rest
+      refine ⟨l, ?_, hn⟩
+      simp only [traceFrom] at hl ⊢
+      rw [List.getLast?_cons_cons]
+      exact hl
+
+/-- A valid chained run from `s` is the table's run from `s` over its own word. -/
+theorem eq_traceFrom : ∀ (s : Nat) (tr : List (Bread.Step Nat UInt8)),
+    (∀ x ∈ tr, t.δ x.state x.sym x.next) →
+    Bread.chain (fun a b => b.state = a.next) tr →
+    (∀ x, tr.head? = some x → x.state = s) →
+    tr = t.traceFrom s (Bread.traceWord tr)
+  | _, [], _, _, _ => rfl
+  | s, [x], hv, _, hh => by
+      have h1 := hh x rfl
+      have h2 := hv x (by simp)
+      obtain ⟨xs, xb, xn⟩ := x
+      simp only at h1 h2
+      subst h1 h2
+      rfl
+  | s, x :: y :: rest, hv, hc, hh => by
+      have h1 := hh x rfl
+      have h2 := hv x (by simp)
+      have ih := eq_traceFrom x.next (y :: rest)
+        (fun z hz => hv z (List.mem_cons_of_mem _ hz)) hc.2
+        (fun z hz => by
+          simp only [List.head?_cons, Option.some.injEq] at hz
+          subst hz
+          exact hc.1)
+      obtain ⟨xs, xb, xn⟩ := x
+      simp only at h1 h2 ih
+      subst h1 h2
+      exact congrArg (List.cons _) ih
+
+/-- **On a nonempty word, the table's verdict is breadstuffs' acceptance.** -/
+theorem accepts_iff_dfaAccepts (w : List UInt8) (hw : w ≠ []) :
+    t.accepts w = true ↔
+      ∃ trace, Bread.DfaAccepts t.δ t.initial t.acceptP trace ∧ Bread.traceWord trace = w := by
+  obtain ⟨b, rest, rfl⟩ := List.exists_cons_of_ne_nil hw
+  constructor
+  · intro hacc
+    obtain ⟨l, hl, hn⟩ := t.last_traceFrom t.initial b rest
+    refine ⟨t.traceFrom t.initial (b :: rest),
+      ⟨_, l, rfl, hl, rfl, ?_, t.valid_traceFrom _ _, t.chain_traceFrom _ _⟩,
+      t.traceWord_traceFrom _ _⟩
+    show t.accepting.getD l.next false = true
+    rw [hn]
+    exact hacc
+  · rintro ⟨tr, ⟨first, last, hf, hl, hq, ha, hv, hc⟩, hwd⟩
+    have htr := t.eq_traceFrom t.initial tr hv hc (fun x hx => by
+      rw [hf, Option.some.injEq] at hx
+      subst hx
+      exact hq)
+    rw [hwd] at htr
+    subst htr
+    obtain ⟨l, hl', hn⟩ := t.last_traceFrom t.initial b rest
+    have hll : l = last := Option.some.inj (hl'.symm.trans hl)
+    show t.accepting.getD (t.run (b :: rest)) false = true
+    have : t.run (b :: rest) = last.next := by rw [← hll]; exact hn.symm
+    rw [this]
+    exact ha
+
+end DfaTable
+
 def contentCommit (w : List UInt8) : Digest := denseRoot (w.map UInt8.toNat)
 
 def deltaCommit (t : DfaTable) : Digest := denseRoot t.delta
@@ -322,7 +467,7 @@ theorem automatonCommit_eq_or_collision (t₁ t₂ : DfaTable) (h₁ : t₁.Well
 /-- **The relation**: the table is well formed and is the statement's automaton, the word is the
 statement's record, and the claim is the automaton's verdict on it. -/
 def Holds (stmt : ContentCert) (t : DfaTable) (w : List UInt8) : Prop :=
-  t.WellFormed ∧ automatonCommit t = stmt.automatonRoot ∧
+  t.WellFormed ∧ automatonCommit t = stmt.automatonRoot ∧ w ≠ [] ∧
     w.length = stmt.recordLength ∧ contentCommit w = stmt.contentRoot ∧
     stmt.claim = .accept (t.accepts w)
 
@@ -356,7 +501,7 @@ theorem named_or_collision (stmt : ContentCert) (r : Receipt) (accepted : check 
       AutomatonCollision r.table t ∨
       DenseCollision r.table.delta t.delta ∨
       DenseCollision (r.word.map UInt8.toNat) (w.map UInt8.toNat) := by
-  obtain ⟨hwf, ha, hl, hc, hclaim⟩ := (check_iff stmt r).mp accepted
+  obtain ⟨hwf, ha, -, hl, hc, hclaim⟩ := (check_iff stmt r).mp accepted
   obtain ⟨twf, ta, tl, tc⟩ := named
   rcases automatonCommit_eq_or_collision _ _ hwf twf (by rw [ha, ta]) with htab | c | c
   · rcases denseRoot_eq_or_collision _ _ (by simp [hl, tl]) (byte_lt _) (byte_lt _)
@@ -369,6 +514,29 @@ theorem named_or_collision (stmt : ContentCert) (r : Receipt) (accepted : check 
     · exact Or.inr (Or.inr (Or.inr col))
   · exact Or.inr (Or.inl c)
   · exact Or.inr (Or.inr (Or.inl c))
+
+/-- **The breadstuffs form.** An accepted receipt claiming acceptance gives, for any named table
+and record the statement commits to, a run of `Dfa.DfaAccepts` (restated as `Bread.DfaAccepts`)
+for the named table that reads the named record; or one of the three named collisions. -/
+theorem named_dfaAccepts_or_collision (stmt : ContentCert) (r : Receipt)
+    (accepted : check stmt r = true) (hclaim : stmt.claim = .accept true)
+    (t : DfaTable) (w : List UInt8) (named : Commits stmt t w) :
+    (∃ trace, Bread.DfaAccepts t.δ t.initial t.acceptP trace ∧ Bread.traceWord trace = w) ∨
+      AutomatonCollision r.table t ∨
+      DenseCollision r.table.delta t.delta ∨
+      DenseCollision (r.word.map UInt8.toNat) (w.map UInt8.toNat) := by
+  have hne : w ≠ [] := by
+    obtain ⟨-, -, hrw, hrl, -⟩ := (check_iff stmt r).mp accepted
+    intro hw
+    apply hrw
+    apply List.eq_nil_of_length_eq_zero
+    rw [hrl, ← named.2.2.1, hw]
+    rfl
+  rcases named_or_collision stmt r accepted t w named with ⟨-, -, hc⟩ | c
+  · left
+    rw [hclaim] at hc
+    exact (t.accepts_iff_dfaAccepts w hne).mp (ClaimData.accept.inj hc).symm
+  · exact Or.inr c
 
 /-! ## Teeth: absence of `ab` as the padded complement `neg(any* · ab · any*)` -/
 
@@ -433,6 +601,18 @@ def dirty : List UInt8 := bytesOf "xxab"
     !check (stmtFor noAB dirty (.accept true)) ⟨acc, dirty⟩ &&
     deltaCommit ini == deltaCommit noAB && decide ini.WellFormed && !ini.accepts clean &&
     !check (stmtFor noAB clean (.accept false)) ⟨ini, clean⟩
+
+-- The empty record is refused even with the initial state's verdict as claim: breadstuffs'
+-- runs are nonempty.
+#guard noAB.accepts [] && !check (stmtFor noAB [] (.accept true)) ⟨noAB, []⟩
+
+-- The table's run on `clean`, as breadstuffs steps, starts at the initial state, chains, and
+-- reads `clean`.
+#guard
+  let tr := noAB.traceFrom noAB.initial clean
+  tr.length == clean.length && Bread.traceWord tr == clean &&
+    (tr.head?.map (·.state)) == some noAB.initial &&
+    (tr.getLast?.map (·.next)) == some (noAB.run clean)
 
 -- Claims this instance does not decide are refused.
 #guard !check (stmtFor noAB clean (.count 1)) ⟨noAB, clean⟩
