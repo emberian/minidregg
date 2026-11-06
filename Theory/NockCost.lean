@@ -1147,27 +1147,44 @@ def forgeShape (iron wood sword : Nat) : Shape :=
 
 def forgeSubject : Noun := .cell forgeProgram forgeSample
 
-theorem pole_forge_cues : (cue forgeJam).isSome = true := by native_decide
+/-- Every concrete forge fact of this module, in ONE compiled evaluation: `forgeProgram` is the cue of the 566 KB `forge.jam`, now decoded once instead of once per theorem (each `native_decide` used to re-run `cue` in the interpreter, 7-11 s apiece, 65 s for the module). Each named fact below is a projection, its statement unchanged. Concrete data is checked by compiled evaluation (ember, 2026-11-06). -/
+theorem forge_facts :
+    ((cue forgeJam).isSome = true) ∧
+    (steps 4096 forgeSubject (slam 2) = 1345) ∧
+    (HasShape forgeSubject (forgeShape 3 2 0)) ∧
+    (cost (forgeShape 3 2 0) (slam 2) = some 1345) ∧
+    (cost (forgeShape 3 3 3) (slam 2) = some 1365) ∧
+    (cost (forgeShape 25 25 25) (slam 2) = some 2685) ∧
+    (cost (forgeShape 1000 1000 1000) (slam 2) = some 61185) := by
+  native_decide
+
+theorem pole_forge_cues : (cue forgeJam).isSome = true :=
+  forge_facts.1
 
 /-- MEASURED, in Lean: the run op 120 charged (K-RAN row 6) is 1,345 steps. -/
-theorem pole_forge_steps : steps 4096 forgeSubject (slam 2) = 1345 := by native_decide
+theorem pole_forge_steps : steps 4096 forgeSubject (slam 2) = 1345 :=
+  forge_facts.2.1
 
-theorem forge_sample_fits : HasShape forgeSubject (forgeShape 3 2 0) := by native_decide
+theorem forge_sample_fits : HasShape forgeSubject (forgeShape 3 2 0) :=
+  forge_facts.2.2.1
 
 /-- **THE NUMBER.** With each field bounded by the sample's own value, the bound is 1,345: ratio
 1.00 against the measured count. -/
-theorem pole_forge_bound : cost (forgeShape 3 2 0) (slam 2) = some 1345 := by native_decide
+theorem pole_forge_bound : cost (forgeShape 3 2 0) (slam 2) = some 1345 :=
+  forge_facts.2.2.2.1
 
 /-- Every field in `[0, 3]`: 1,365 (= the count at iron = wood = sword = 3). -/
-theorem pole_forge_bound_3 : cost (forgeShape 3 3 3) (slam 2) = some 1365 := by native_decide
+theorem pole_forge_bound_3 : cost (forgeShape 3 3 3) (slam 2) = some 1365 :=
+  forge_facts.2.2.2.2.1
 
 /-- Every field in `[0, 25]`: 2,685 — the widest uniform range still within 2× of 1,345. -/
-theorem pole_forge_bound_25 : cost (forgeShape 25 25 25) (slam 2) = some 2685 := by native_decide
+theorem pole_forge_bound_25 : cost (forgeShape 25 25 25) (slam 2) = some 2685 :=
+  forge_facts.2.2.2.2.2.1
 
 /-- Every field in `[0, 1000]`: 61,185 — `1185 + 60·V`, linear in the declared maximum, because
 `gte`/`sub`/`dec` run unjetted and their step counts are the values. -/
-theorem pole_forge_bound_1000 : cost (forgeShape 1000 1000 1000) (slam 2) = some 61185 := by
-  native_decide
+theorem pole_forge_bound_1000 : cost (forgeShape 1000 1000 1000) (slam 2) = some 61185 :=
+  forge_facts.2.2.2.2.2.2
 
 /-- The price, as a theorem: every sample of forge's shape runs in at most 1,345 steps. -/
 theorem forge_priced {s : Noun} (hs : HasShape s (forgeShape 3 2 0)) (fuel : Nat) (h : 1345 ≤ fuel) :
@@ -1225,21 +1242,21 @@ open Minidregg.Theory.AssertAxioms
 #assert_axioms forgeSample_cue
 #assert_axioms overclaimingOracle_not_sound
 
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_cues' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_cues._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_cues' depends on axioms: [propext, Classical.choice, Quot.sound, forge_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_cues
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_steps' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_steps._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_steps' depends on axioms: [propext, Classical.choice, Quot.sound, forge_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_steps
-/-- info: 'Minidregg.Theory.NockCost.forge_sample_fits' depends on axioms: [propext, Classical.choice, Quot.sound, forge_sample_fits._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.forge_sample_fits' depends on axioms: [propext, Classical.choice, Quot.sound, forge_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms forge_sample_fits
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_bound' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_bound._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_bound' depends on axioms: [propext, Classical.choice, Quot.sound, forge_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_bound
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_bound_3' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_bound_3._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_bound_3' depends on axioms: [propext, Classical.choice, Quot.sound, forge_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_bound_3
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_bound_25' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_bound_25._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_bound_25' depends on axioms: [propext, Classical.choice, Quot.sound, forge_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_bound_25
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_bound_1000' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_bound_1000._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_bound_1000' depends on axioms: [propext, Classical.choice, Quot.sound, forge_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_bound_1000
-/-- info: 'Minidregg.Theory.NockCost.forge_priced' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_bound._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.forge_priced' depends on axioms: [propext, Classical.choice, Quot.sound, forge_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms forge_priced
 
 end NockCost

@@ -590,8 +590,29 @@ def forgeGate : Noun :=
 /-- The hoon stdlib core of forge's gate (axis 1023). -/
 def forgeStdlib : Noun := (axis 1023 forgeGate).getD (atom 0)
 
-theorem forge_dec_arm : axis 2398 forgeStdlib = some decArm := by native_decide
-theorem forge_sub_arm : axis 79 forgeStdlib = some subArm := by native_decide
+/-- The sub gate over `a ∈ [alo, ahi]`, `b ∈ [blo, bhi]`, forge's stdlib. -/
+def subShape (alo ahi blo bhi : Nat) : Shape :=
+  .cell (.exact subBody) (.cell (.cell (.range alo ahi) (.range blo bhi)) (.exact forgeStdlib))
+
+/-- Every concrete forge fact of this module, in ONE compiled evaluation: `forgeStdlib` is decoded from the 566 KB `forge.jam` once instead of once per theorem (each `native_decide` used to re-run `cue` in the interpreter, 6-8 s apiece, 76 s for the module). Each named fact below is a projection, its statement unchanged. Concrete data is checked by compiled evaluation (ember, 2026-11-06). -/
+theorem forge_summaries_facts :
+    (axis 2398 forgeStdlib = some decArm) ∧
+    (axis 79 forgeStdlib = some subArm) ∧
+    (steps 1000 (subGate 5 3 forgeStdlib) subBody = 381) ∧
+    (run 380 (subGate 5 3 forgeStdlib) subBody = .error .exhausted) ∧
+    (costSym (subShape (2 ^ 63) (2 ^ 64) 0 (2 ^ 32)) subBody = some (subBound (2 ^ 64) (2 ^ 32))) ∧
+    (costSym (forgeShape 3 2 0) (slam 2) = some 1345) ∧
+    (costSym (forgeShape 3 3 3) (slam 2) = some 1365) ∧
+    (costSym (forgeShape 1000 1000 1000) (slam 2) = some 61185) ∧
+    (costSym (forgeShape (10 ^ 6) (10 ^ 6) (10 ^ 6)) (slam 2) = some (1185 + 60 * 10 ^ 6)) ∧
+    (costSym (forgeShape (2 ^ 32) (2 ^ 32) (2 ^ 32)) (slam 2) = some (1185 + 60 * 2 ^ 32)) ∧
+    (costSym (forgeShape (2 ^ 64) (2 ^ 64) (2 ^ 64)) (slam 2) = some (1185 + 60 * 2 ^ 64)) := by
+  native_decide
+
+theorem forge_dec_arm : axis 2398 forgeStdlib = some decArm :=
+  forge_summaries_facts.1
+theorem forge_sub_arm : axis 79 forgeStdlib = some subArm :=
+  forge_summaries_facts.2.1
 
 /-- **`sub` on forge's own stdlib, for every `b ≤ a`**: `9 + 74·b + 10·a·b` steps, exactly — the
 closed form, instantiated on the real core (only `forge_dec_arm` is native). -/
@@ -600,28 +621,27 @@ theorem forge_sub_steps (a b : Nat) (h : b ≤ a) :
   steps_of_runs (sub_runs forgeStdlib forge_dec_arm b a h) le_rfl
 
 /-- The closed form against the interpreter, not the proof: `a = 5, b = 3` is 381 steps. -/
-theorem pole_sub_steps : steps 1000 (subGate 5 3 forgeStdlib) subBody = 381 := by native_decide
+theorem pole_sub_steps : steps 1000 (subGate 5 3 forgeStdlib) subBody = 381 :=
+  forge_summaries_facts.2.2.1
 
 /-- One step under exhausts: the closed form is the count, not a slack bound. -/
-theorem pole_sub_exhausted_380 : run 380 (subGate 5 3 forgeStdlib) subBody = .error .exhausted := by
-  native_decide
-
-/-- The sub gate over `a ∈ [alo, ahi]`, `b ∈ [blo, bhi]`, forge's stdlib. -/
-def subShape (alo ahi blo bhi : Nat) : Shape :=
-  .cell (.exact subBody) (.cell (.cell (.range alo ahi) (.range blo bhi)) (.exact forgeStdlib))
+theorem pole_sub_exhausted_380 : run 380 (subGate 5 3 forgeStdlib) subBody = .error .exhausted :=
+  forge_summaries_facts.2.2.2.1
 
 /-- **Summary 2 at `2⁶⁴ × 2³²`**: `a ∈ [2⁶³, 2⁶⁴]`, `b ≤ 2³²` — `9 + 74·2³² + 10·2⁶⁴·2³²`. -/
 theorem pole_sub_symbolic :
-    costSym (subShape (2 ^ 63) (2 ^ 64) 0 (2 ^ 32)) subBody = some (subBound (2 ^ 64) (2 ^ 32)) := by
-  native_decide
+    costSym (subShape (2 ^ 63) (2 ^ 64) 0 (2 ^ 32)) subBody = some (subBound (2 ^ 64) (2 ^ 32)) :=
+  forge_summaries_facts.2.2.2.2.1
 
 /-- **THE NUMBER, again**: with the summaries, forge at the sample's own maxima is still 1,345. -/
-theorem pole_forge_sym_bound : costSym (forgeShape 3 2 0) (slam 2) = some 1345 := by native_decide
+theorem pole_forge_sym_bound : costSym (forgeShape 3 2 0) (slam 2) = some 1345 :=
+  forge_summaries_facts.2.2.2.2.2.1
 
-theorem pole_forge_sym_3 : costSym (forgeShape 3 3 3) (slam 2) = some 1365 := by native_decide
+theorem pole_forge_sym_3 : costSym (forgeShape 3 3 3) (slam 2) = some 1365 :=
+  forge_summaries_facts.2.2.2.2.2.2.1
 
-theorem pole_forge_sym_1000 : costSym (forgeShape 1000 1000 1000) (slam 2) = some 61185 := by
-  native_decide
+theorem pole_forge_sym_1000 : costSym (forgeShape 1000 1000 1000) (slam 2) = some 61185 :=
+  forge_summaries_facts.2.2.2.2.2.2.2.1
 
 /-- The symbolic and the unrolled interpreter agree on forge where both run. -/
 theorem cost_sym_eq_cost_320 : costSym (forgeShape 3 2 0) (slam 2) = cost (forgeShape 3 2 0) (slam 2) :=
@@ -635,18 +655,18 @@ theorem cost_sym_eq_cost_1000 :
   pole_forge_sym_1000.trans pole_forge_bound_1000.symm
 
 theorem pole_forge_sym_10_6 :
-    costSym (forgeShape (10 ^ 6) (10 ^ 6) (10 ^ 6)) (slam 2) = some (1185 + 60 * 10 ^ 6) := by
-  native_decide
+    costSym (forgeShape (10 ^ 6) (10 ^ 6) (10 ^ 6)) (slam 2) = some (1185 + 60 * 10 ^ 6) :=
+  forge_summaries_facts.2.2.2.2.2.2.2.2.1
 
 theorem pole_forge_sym_2_32 :
-    costSym (forgeShape (2 ^ 32) (2 ^ 32) (2 ^ 32)) (slam 2) = some (1185 + 60 * 2 ^ 32) := by
-  native_decide
+    costSym (forgeShape (2 ^ 32) (2 ^ 32) (2 ^ 32)) (slam 2) = some (1185 + 60 * 2 ^ 32) :=
+  forge_summaries_facts.2.2.2.2.2.2.2.2.2.1
 
 /-- **`pole_forge_symbolic`** — the exit number: forge with every field declared `≤ 2⁶⁴` is priced
 at `1185 + 60·2⁶⁴` without unrolling (NC-1's `cost` would walk `2⁶⁴` decrements). -/
 theorem pole_forge_symbolic :
-    costSym (forgeShape (2 ^ 64) (2 ^ 64) (2 ^ 64)) (slam 2) = some (1185 + 60 * 2 ^ 64) := by
-  native_decide
+    costSym (forgeShape (2 ^ 64) (2 ^ 64) (2 ^ 64)) (slam 2) = some (1185 + 60 * 2 ^ 64) :=
+  forge_summaries_facts.2.2.2.2.2.2.2.2.2.2
 
 /-- The price, as a theorem: every sample of forge's shape at `2⁶⁴` runs within `1185 + 60·2⁶⁴`. -/
 theorem forge_priced_2_64 {s : Noun} (hs : HasShape s (forgeShape (2 ^ 64) (2 ^ 64) (2 ^ 64)))
@@ -702,31 +722,31 @@ open Minidregg.Theory.AssertAxioms
 
 /-! The forge facts are `native_decide` (the kernel cannot reduce `cue`/`exec` on 566 KB); each pins
 exactly its own compiler-trust axiom, and the derived ones inherit only those. -/
-/-- info: 'Minidregg.Theory.NockCost.forge_dec_arm' depends on axioms: [propext, Classical.choice, Quot.sound, forge_dec_arm._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.forge_dec_arm' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms forge_dec_arm
-/-- info: 'Minidregg.Theory.NockCost.forge_sub_arm' depends on axioms: [propext, Classical.choice, Quot.sound, forge_sub_arm._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.forge_sub_arm' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms forge_sub_arm
-/-- info: 'Minidregg.Theory.NockCost.pole_sub_steps' depends on axioms: [propext, Classical.choice, Quot.sound, pole_sub_steps._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_sub_steps' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_sub_steps
-/-- info: 'Minidregg.Theory.NockCost.pole_sub_exhausted_380' depends on axioms: [propext, Classical.choice, Quot.sound, pole_sub_exhausted_380._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_sub_exhausted_380' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_sub_exhausted_380
-/-- info: 'Minidregg.Theory.NockCost.pole_sub_symbolic' depends on axioms: [propext, Classical.choice, Quot.sound, pole_sub_symbolic._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_sub_symbolic' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_sub_symbolic
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_bound' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_sym_bound._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_bound' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_sym_bound
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_3' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_sym_3._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_3' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_sym_3
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_1000' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_sym_1000._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_1000' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_sym_1000
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_10_6' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_sym_10_6._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_10_6' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_sym_10_6
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_2_32' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_sym_2_32._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_sym_2_32' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_sym_2_32
-/-- info: 'Minidregg.Theory.NockCost.pole_forge_symbolic' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_symbolic._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.pole_forge_symbolic' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_forge_symbolic
-/-- info: 'Minidregg.Theory.NockCost.forge_priced_2_64' depends on axioms: [propext, Classical.choice, Quot.sound, pole_forge_symbolic._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.forge_priced_2_64' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms forge_priced_2_64
-/-- info: 'Minidregg.Theory.NockCost.forge_sub_steps' depends on axioms: [propext, Classical.choice, Quot.sound, forge_dec_arm._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Theory.NockCost.forge_sub_steps' depends on axioms: [propext, Classical.choice, Quot.sound, forge_summaries_facts._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms forge_sub_steps
 
 end NockCost

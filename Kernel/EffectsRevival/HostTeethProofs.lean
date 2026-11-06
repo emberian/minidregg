@@ -9,14 +9,18 @@ The twin half is `noTwin` at code 1.  The ghost half compares the host dispatch 
 ghost handler's firing at the blinded cell of `ContentProofs` (a link admitted): the
 dispatch's post blinding is one ratchet step of the pre blinding
 (`StoreCodec.Blinding.run_leg_blinding`), the ghost's is the pre blinding unchanged.  That the
-step MOVES the blinding is a fact about cSHAKE256 (`ratchet_moves`), decided by the kernel
-(`decide +kernel`, one cSHAKE step over a 32-byte key, well under a minute); every proof here
-is kernel-checked.
+step MOVES the blinding is a fact about cSHAKE256 on concrete bytes (`ratchet_moves`), checked by
+compiled evaluation (`native_decide`, pinned by `#assert_compiled`); every other proof here is
+kernel-checked.
 -/
 module
 
 public import Kernel.EffectsRevival.ContentProofs
 public import Theory.AssertAxioms
+-- `ratchet_moves` is evaluated by compiled code (native_decide): its definitions must be available at
+-- compile time, and `#assert_compiled` re-runs it.
+public meta import Compiler.HyperdocumentCell
+meta import Theory.AssertCompiled
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -54,7 +58,11 @@ def zeroBlindingKey : List UInt8 :=
 /-- **The one hash fact**: a ratchet step at height 0 moves the zero blinding. -/
 theorem ratchet_moves :
     (HyperdocumentCell.contentBlinding.step 0 zeroBlindingKey != zeroBlindingKey) = true := by
-  decide +kernel
+  -- A fact about concrete data (one cSHAKE256 step over a 32-byte key): checked by compiled
+  -- evaluation, on the Rust kernel behind `@[extern]` (ember, 2026-11-06: concrete data by the
+  -- compiler, general theorems by the kernel). `decide +kernel` ran cSHAKE in the kernel: 37 s and
+  -- 8.3 GB for this module.
+  native_decide
 
 set_option backward.isDefEq.respectTransparency false in
 theorem blindedStore_key :
@@ -194,7 +202,7 @@ theorem hostTeeth : HostTeeth := ⟨hostGhost_disagrees, hostTwin_refuted⟩
 #assert_axioms sampleLinkOps_key
 #assert_axioms ghost_exec_blinded
 #assert_axioms hostTwin_refuted
-#assert_axioms ratchet_moves
-#assert_axioms hostTeeth
+#assert_compiled ratchet_moves
+#assert_compiled hostTeeth
 
 end Minidregg.Effects.Revival
