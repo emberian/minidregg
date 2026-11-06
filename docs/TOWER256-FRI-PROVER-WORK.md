@@ -30,9 +30,7 @@ pattern, with an `OpaqueProofRunner`. Native code needs:
 **Request** (Lean encodes it): `pins.statementBytes`, the basis and offset (`ell` + 1
 coordinates), `m`, `q`, the degree schedule, and the input word's coefficients. The proof's
 statement is then the input word's root, which the native reply carries and Lean compares with
-`initialRoot`. **Response:** the receipt bytes. A work-profile ID is to be assigned in
-`MinidreggV1Artifact.nativeWorkCatalog`. Doing so changes artifact identity, so it is not done
-in this step.
+`initialRoot`. **Response:** the receipt bytes. The work profile is registered (§5).
 
 ## 2. The counts
 
@@ -69,12 +67,15 @@ Mults are Tower256 multiplications. A single Fan–Paar product is 4^8 = 65,536 
   other leaf's hash, rebuilt in `openingDenote`. Per query and round the wire drops `k + 1`
   digests and two length prefixes: `3k − 1` digests become `2k − 2`, so path bytes fall by
   `(k+1)/(3k−1)`, toward 1/3. Measured at ell = 2, m = 1, two queries: openings 551 → 337
-  bytes, receipt 724 → 510. The checker still hashes both leaves' paths; hashing the shared
-  part once (the same 1/3 off verifier Keccak-f) needs the lemma that the two leaves differ
-  exactly in the last address bit, not yet written.
-  **Next, priced, not landed:** round `j`'s next-level leaf is one of round `j+1`'s pair, so for
-  `j < m − 1` its `k − 1`-digest path and its value repeat what round `j+1` carries. Dropping
-  them takes per-round path digests from `2k − 2` to `k − 1`.
+  bytes, receipt 724 → 510.
+  **Landed after the 2026-11-06 merge:** (a) the checker recomputes one path per pair
+  (`recomputesC_pair`, from `recompute_pair` and the last-address-bit lemma `liftBitC_apply` /
+  `addressBits_apply`), halving the pair's verifier hashing; (b) no next-level leaf travels.
+  Round `j`'s next leaf is round `j+1`'s pair leaf on the side of its last coordinate
+  (`coherent_succ`), or at the last round the final polynomial's evaluation, whose path the
+  denotation reads from the final column (`CReceipt.nextOf`); `opened_all_iff` shows the compact
+  checks are the full ones given the last-root clause. Per query-round the wire now carries two
+  coordinates and `k − 1` digests (`3k − 1` digests and three coordinates originally).
 - **Proof bytes are path-bound too.** They run from 1.5 to 5 MB at UD-100. Rate is a
   per-leaf trade. At equal message size 2^14, rate 1/2 (`ell` = 15) halves the prover's
   Keccak-f (145k against 272k) but costs 1.48× the proof bytes (2.86 MB against 1.93 MB) and
@@ -108,4 +109,27 @@ Mults are Tower256 multiplications. A single Fan–Paar product is 4^8 = 65,536 
    - the last-level recommitment as a computable Merkle fold over the native cSHAKE extern;
    - the final evaluation by `Tower256FinalPolynomialCheck.evalCoeffs`.
 2. The receipt `LawfulCodec` and its pin.
-3. The work profile and catalog entry (an artifact-identity change: ember's call).
+3. The work profile and catalog entry: registered 2026-11-06 (§5), ember's call made
+   ("we're allowed to change ALL shapes").
+
+## 5. Registration and the artifact-identity change (2026-11-06)
+
+`Compiler/Tower256FriNativeDeployment.lean` registers the work:
+
+| field | value |
+|---|---|
+| work | `9104` |
+| carrier | `MinidreggV1Artifact.gf2Tower256Carrier` |
+| request codec | `9011` / value type `9012`, native ABI, shape `tower256FriProveRequestStream`: `requestStream` (statement bytes, `ell`, `m`, `q`, basis, offset, degree schedule, input word), a `LawfulCodec` (`request_decode_encode`) |
+| response codec | `9013` / value type `9014`, native ABI, shape `tower256SuccinctReceiptStream`: `Tower256SuccinctReceiptCodec.receiptStream` at the request's shape |
+| kernel tag | `tower256AdditiveFriProve` (Rust entry named `tower256_additive_fri_prove_bytes`; not yet written) |
+
+**Identity.** Two closed enums gained constructors at their ends: `KernelTag` (one) and
+`ByteCodecShape` (two). Both derive `Encodable`, so the encodings of existing constructors are
+unchanged, but any artifact digest computed over the enum's type, and every exhaustive match
+(`NativeGlueGen`, `KernelTag.name`, `ByteCodecShape.name`), changed with them. The new
+`Tower256FriNativeDeployment.artifact` is `MinidreggV1Artifact.bundle` extended by the pack:
+catalog `[9101, 9104]`, native ABI codecs `[9001, 9011, 9013]`. That is a new artifact identity.
+`MinidreggV1Artifact.bundle` and its catalog `[9101]` are unchanged (`v1_lacks_work`); the
+Stage-0 artifact (`[9101, 9102, 9103]`) is unchanged and does not contain `9104`. The reply's
+only route to authority is `acceptResponse_iff`, which is `checkBytes_iff`.

@@ -342,6 +342,9 @@ inductive KernelTag where
   descriptor from 833 supplied variable words.  The generated table of gate rows
   is data; the reply is candidate words for Lean's `descriptorHoldsCheck`. -/
   | evmStage0AddAux
+  /-- The Tower256 additive-FRI honest prover: from a Lean-encoded statement and input word,
+  the succinct receipt bytes that `Tower256SuccinctReceiptCodec.checkBytes` decides. -/
+  | tower256AdditiveFriProve
 deriving DecidableEq, Repr, Encodable
 
 /-- Closed byte-layout vocabulary used by generated transport glue. -/
@@ -356,6 +359,12 @@ inductive ByteCodecShape where
   /-- 4,131 canonical BabyBear words, u32 little-endian (16,524 bytes): the
   Stage-0 descriptor's total wire vector. -/
   | evmStage0AddWiresU32LE
+  /-- The Tower256 FRI prove request: a self-delimiting `StreamCodec` record
+  (`Tower256FriNativeDeployment.requestStream`). -/
+  | tower256FriProveRequestStream
+  /-- A succinct additive-FRI receipt: `Tower256SuccinctReceiptCodec.receiptStream` at the
+  request's `ell`, `m` and query count. Variable length. -/
+  | tower256SuccinctReceiptStream
 deriving DecidableEq, Repr, Encodable
 
 /-- Codec identifiers live in one of two explicit registries.  Manifest codecs
@@ -685,6 +694,7 @@ def KernelTag.name : KernelTag -> String
   | .tower256DotProduct => "tower256_dot_product"
   | .babyBearAdd1ZeroWitness => "baby_bear_add1_zero_witness"
   | .evmStage0AddAux => "evm_stage0_add_aux"
+  | .tower256AdditiveFriProve => "tower256_additive_fri_prove"
 
 def ByteCodecShape.name : ByteCodecShape -> String
   | .tower256PairVectorsU32LE => "tower256_pair_vectors_u32_le"
@@ -693,6 +703,8 @@ def ByteCodecShape.name : ByteCodecShape -> String
   | .babyBearAdd1DescriptorU32LE => "baby_bear_add1_descriptor_u32_le"
   | .evmStage0AddVarsU32LE => "evm_stage0_add_vars_u32_le"
   | .evmStage0AddWiresU32LE => "evm_stage0_add_wires_u32_le"
+  | .tower256FriProveRequestStream => "tower256_fri_prove_request_stream"
+  | .tower256SuccinctReceiptStream => "tower256_succinct_receipt_stream"
 
 def ByteCodecRegistry.name : ByteCodecRegistry -> String
   | .semanticManifest => "semantic_manifest"

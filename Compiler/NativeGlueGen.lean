@@ -78,6 +78,8 @@ private def responseWidth : ByteCodecShape → Nat
   | .babyBearAdd1DescriptorU32LE => 144
   | .evmStage0AddVarsU32LE => 4 * evmStage0RequestWords
   | .evmStage0AddWiresU32LE => 4 * evmStage0ResponseWords
+  | .tower256FriProveRequestStream => 0
+  | .tower256SuccinctReceiptStream => 0
 
 private def requestShapeConstants (stem : String) : ByteCodecShape → List String
   | .tower256PairVectorsU32LE =>
@@ -99,17 +101,23 @@ private def requestShapeConstants (stem : String) : ByteCodecShape → List Stri
       ["pub const " ++ stem ++ "_REQUEST_WIRE_WIDTH: usize = 4;",
        "pub const " ++ stem ++ "_REQUEST_WIRE_COUNT: usize = " ++
          toString evmStage0ResponseWords ++ ";"]
+  | .tower256FriProveRequestStream =>
+      ["pub const " ++ stem ++ "_REQUEST_COORDINATE_WIDTH: usize = 32;"]
+  | .tower256SuccinctReceiptStream =>
+      ["pub const " ++ stem ++ "_REQUEST_COORDINATE_WIDTH: usize = 32;"]
 
 private def kernelFunction : KernelTag → String
   | .tower256DotProduct => "crate::native_dispatch::tower256_dot_product_bytes"
   | .babyBearAdd1ZeroWitness =>
       "crate::native_dispatch::baby_bear_add1_zero_witness_bytes"
   | .evmStage0AddAux => "crate::native_dispatch::evm_stage0_add_aux_bytes"
+  | .tower256AdditiveFriProve => "crate::native_dispatch::tower256_additive_fri_prove_bytes"
 
 private def kernelConstructor : KernelTag → String
   | .tower256DotProduct => "tower256_dot_product"
   | .babyBearAdd1ZeroWitness => "baby_bear_add1_zero_witness"
   | .evmStage0AddAux => "evm_stage0_add_aux"
+  | .tower256AdditiveFriProve => "tower256_additive_fri_prove"
 
 private def benchmarkConstants (stem : String) : KernelTag → List String
   | .tower256DotProduct =>
@@ -126,6 +134,7 @@ private def benchmarkConstants (stem : String) : KernelTag → List String
          rustByteSlice tower256DotProductBenchmarkSentinelResponseBytes ++ ";"]
   | .babyBearAdd1ZeroWitness => []
   | .evmStage0AddAux => []
+  | .tower256AdditiveFriProve => []
 
 /-- Lean-emitted candidate for the fixed all-zero add-1 work item.  These are
 the gate-evaluated descriptor bytes, not a Rust-side arithmetic definition. -/
@@ -141,6 +150,7 @@ private def fixedCandidateConstants (stem : String) : KernelTag → List String
       ["pub const " ++ stem ++ "_FIXED_CANDIDATE_RESPONSE: &[u8] = " ++
         rustByteSlice babyBearAdd1ZeroCandidateBytes ++ ";"]
   | .evmStage0AddAux => []
+  | .tower256AdditiveFriProve => []
 
 /-! ## Descriptor rows as generated data
 
@@ -233,6 +243,7 @@ the zero-checked operands (data for Lean's checker, not evaluated by Rust). -/
 private def descriptorRowConstants (stem : String) : KernelTag → List String
   | .tower256DotProduct => []
   | .babyBearAdd1ZeroWitness => []
+  | .tower256AdditiveFriProve => []
   | .evmStage0AddAux =>
       let d := EvmAddAir.evmAddDescriptor
       ["pub const " ++ stem ++ "_FIELD_MODULUS: u64 = " ++ toString babyBearP ++ ";",
