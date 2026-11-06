@@ -67,8 +67,11 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   current and resumable, apps-worker publishes front tables, broker keeps a generation's runtime pin, the
   resident context brief bounds row provenance, the operator's refuse-unadmitted verb) and in dregg-infra
   (grain-world refresh in the plain walk, the entrance restarted after the Store, the ship refuses over an
-  active checkpoint plan, mini-checkpoint --abandon). Open product item: a resident prompt whose reply was
-  lost at a controller restart has no typed close (see the demo-dry ops memory).
+  active checkpoint plan, mini-checkpoint --abandon). A resident prompt whose reply was lost at a controller
+  restart now gets an outcome at recovery and the resident closes it by audit (a37e28146, 8f2d63fab; verified on
+  the lobby). Tonight hbox was shared with other Lean builds: rounds ran 470-630 s; a flaky composed row
+  (documents:protected, a `doc share` refused at admission in one round and admitted in the next with the same
+  candidate) cost one re-round.
 - Knobs: `scripts/pipeline/builder --once`, `--reds SHA` (rewrite REDS.md from existing logs), BUILDER_DRY=1 (print,
   never push). $I/keep lists candidate prefixes that sweep and reap never touch. integ-build stops below 25 GB free.
 
