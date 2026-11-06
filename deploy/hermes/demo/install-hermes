@@ -259,7 +259,7 @@ ProtectKernelModules=yes
 LockPersonality=yes
 EOF
   systemctl daemon-reload
-  systemctl enable --now "$ROUTE_UNIT.socket"
+  systemctl enable "$ROUTE_UNIT.socket" >/dev/null; systemctl restart "$ROUTE_UNIT.socket"   # a rewritten unit: --now alone leaves the old listener
   as_res "$MINI" operator-status --socket "$RSOCKET" --host "$HOST" --config "$CONFIG" >/dev/null \
     || die "the resident's route does not answer operator-status (journalctl -u $ROUTE_UNIT)"
   mark route
@@ -303,7 +303,7 @@ PrivateTmp=yes
 LockPersonality=yes
 EOF
   systemctl daemon-reload
-  systemctl enable --now "$CONSENT_UNIT.socket"
+  systemctl enable "$CONSENT_UNIT.socket" >/dev/null; systemctl restart "$CONSENT_UNIT.socket"   # a rewritten unit: --now alone leaves the old listener
   # The selection (deploy/shell/README.md: the hosted member's variables).
   printf '%s\n' "MINI_CONSENT_SOCKET=$csock" "MINI_CONSENT_PEER_UID=0" "MINI_CONSENT_SHA256=$image" \
     "MINI_CONSENT_CONFIG_SHA256=$settings" "MINI_LOCAL_HOST=$HOST" "MINI_CONSENT_HOST=$consent" \
@@ -474,7 +474,16 @@ step_create() {
   # 1. The operator signs the birth through its own socket (the sponsor key
   #    never leaves the operator); 2. root gives the root to the resident;
   # 3. the resident creates the rest through its route.
-  as_op "$GRAIN" create "$SPEC" --birth-socket "$SOCKET" | as_op tee "$RECORD/grain-birth.json"
+  # A create that stopped after the birth (demo-dry 2026-11-05: the resident's phase found no consent
+  # socket) resumes: the grain is born and recorded under $G/create; grain-runtime resumes a create whose
+  # spec bytes match the recorded sha, and refuses by name when they differ (never a second birth).
+  if [ -s "$G/create/birth/outcome.json" ]; then
+    [ "$(sha256sum "$SPEC" | cut -d' ' -f1)" = "$(tr -d '[:space:]' <"$G/create/spec.sha256")" ] \
+      || die "a grain for $INSTANCE was born under a different spec ($G/create); retire that root before another create"
+    echo "install-hermes create: $INSTANCE's grain is born (task $(jq -r .task "$G/create/birth-intent.json" 2>/dev/null)); resuming the resident's phase"
+  else
+    as_op "$GRAIN" create "$SPEC" --birth-socket "$SOCKET" | as_op tee "$RECORD/grain-birth.json"
+  fi
   chown -R "$RESIDENT:$RESIDENT" "$G"
   as_res "$GRAIN" create "$SPEC" | as_op tee "$RECORD/grain-created.json"
   install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$S/room-home"
