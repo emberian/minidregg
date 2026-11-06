@@ -1,12 +1,17 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `a37e28146c77` (grain-runtime: a resident prompt lost at a controller restart gets an outcome, and the res). Round finished 2026-11-06T05:35Z.
+Tip: `a37e28146c77` (grain-runtime: a resident prompt lost at a controller restart gets an outcome, and the res). Round finished 2026-11-06T05:38Z.
 green: `f5d5df8145a6`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-a37e2814`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:composed:documents | composed documents fail | not rerun | no | infra, member-side | fail: documents:protected: no stderr; see /ci-composed/c-a37e28/composed/state/evidence/01 |
-| gate:composed:store-restart | composed store-restart blocked | not rerun | no | host-execution | blocked: prerequisite documents has not passed |
+| host | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:j14-apps | j14-apps FAIL | not rerun | no | apps-hermes | rc=1; /ci/j-a37e28/journey.log |
+| gate:composed:composed | composed composed fail | not rerun | no | infra, member-side | scratch world: jworld: exists: /ci-composed/c-a37e28/w |
 
 Suspect commits since green (`git log f5d5df8145a6..a37e28146c77`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
@@ -25,4 +30,4 @@ Suspect commits since green (`git log f5d5df8145a6..a37e28146c77`), newest first
 | flatness-submit | FAIL | propose_wall_ms | 42.641 | 169.343 | 3.971 | 1.590 | host-execution, store-retained |
 | flatness-get | PASS | get_cpu_ms | 0.587 | 0.367 | 0.625 | 1.856 | read-path |
 | flatness-get | PASS | get_wall_ms | 215.075 | 158.001 | 0.735 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-a37e2814/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-run | FAIL | no numbers: exit=2; /home/hbox/lanes/integ/gate-a37e2814/flatness.log | - | - | - | - | host-execution, store-retained |
