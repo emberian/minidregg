@@ -458,7 +458,13 @@ impl Worker {
         if record["state"].as_str() != Some("running") {
             return refused("notRunning", format!("{grain} is {}; only a running grain serves a generation to enroll against: `mini apps start --grain {grain}`", record["state"].as_str().unwrap_or("not running")));
         }
-        match self.enroll_routes(grain, &record, None) {
+        let enrolled = self.enroll_routes(grain, &record, None);
+        if enrolled.is_ok() {
+            if let Err(e) = self.publish_origin(grain, &record) {   // renew also repairs a missing front table
+                return undecided("stateUnavailable", e, &format!("mini apps renew --grain {grain}"));
+            }
+        }
+        match enrolled {
             Ok((renewed, current)) if renewed.is_empty() => performed("current", format!("{grain}: every route already names the serving generation ({current} checked); nothing was submitted"), json!({"grain":grain,"renewed":[],"current":current})),
             Ok((renewed, current)) => performed("renewed", format!("{grain}: {} route(s) enrolled against the serving generation", renewed.len()), json!({"grain":grain,"renewed":renewed.iter().map(|(m, g)| json!({"member":m,"generation":g})).collect::<Vec<_>>(),"current":current})),
             Err(error) => undecided("enrolling", format!("the enrollment did not complete: {error}; nothing is repeated blindly"), &format!("mini apps renew --grain {grain}")),
@@ -483,6 +489,12 @@ impl Worker {
                     // The restart moved the app to a new serving generation: renew each route's enrollment.
                     if let Err(error) = self.enroll_routes(grain, &record, None) {
                         return undecided("enrolling", format!("{grain} started, but its routes are not enrolled against the new generation: {error}"), &format!("mini apps renew --grain {grain}"));
+                    }
+                    // The front's table: a start that follows a genesis or a candidate switch is the first thing that
+                    // publishes it for a grain whose install happened before (demo-dry 2026-11-06: three running grains
+                    // the front answered `no such grain` for).
+                    if let Err(e) = self.publish_origin(grain, &record) {
+                        return undecided("stateUnavailable", e, &format!("mini apps start --grain {grain}"));
                     }
                 }
                 performed(record["state"].as_str().unwrap_or(verb), format!("{grain} {verb} completed through Mini"), json!({"grain":grain,"state":record["state"]}))
