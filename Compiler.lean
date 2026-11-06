@@ -77,6 +77,7 @@ import Compiler.Tower256FinalPolynomialCheck -- the raw controller's final-polyn
 import Compiler.Tower256CoordinateMerkle -- the concrete cSHAKE/Merkle layer over Coordinate 8: computable aliases (cshakeC, merkleDomainsC, codecC) equal to the noncomputable backend, cubeRoot_toField and digestTowerC proved, run natively by #guard
 import Compiler.Tower256SuccinctCheck -- succinct additive-FRI acceptance as a Bool over Coordinate 8: check_iff against SuccinctAccepts at rawPcs, pivots recomputed from the basis, fold checked multiplied out
 import Compiler.Tower256SuccinctHonestRun -- an accepting ell=2, m=1 receipt from a small Lean prover, and one consistent mutant per challenge/seed/fold clause, each failing only its own clause
+import Compiler.Tower256SuccinctReceiptCodec -- the CReceipt wire format from StreamCodec combinators (length-checked lists), checkBytes_iff, round trip and refusals on the accepting one-fold receipt
 import Compiler.Tower256AdditiveFriSuccinctController -- additive FRI over a public statement of roots, basis, degrees and query count: succinct_accepts_ideal_or_collision reaches the ideal predicate over any committed strategy consistent with the receipt, or a framed collision at a query path or the last level
 import Compiler.Tower256AdditiveFriRawDeployment  -- concrete raw PCS levels, statement codecs, and opaque-byte verifier witnesses inhabit the collision-retaining deployment path
 import Compiler.Ext6GateProofController -- descriptor-bound Ext6 gate transcript control over opaque bytes; PCS/LDT/ROM security remains explicit
