@@ -264,4 +264,195 @@ theorem adversarySteps_run (P : SrProver r s) :
 
 end Steps
 
+/-! ## Completion under one coin per query -/
+
+section Completion
+
+attribute [local instance] SampleableType.ofFintype
+
+/-- Read a restoration cache at a key in Selvage's alphabet, falling back to a coin. -/
+def resolveAt (cache : (rspec r s).QueryCache) (key : RKey r s r.k) (d : r.Chal) : r.Chal :=
+  match cache key with
+  | some v => toChal key v
+  | none => d
+
+/-- The rounds completion reads: each message with the challenge `look` resolves for the
+salted prefix ending at it. -/
+def completionRounds (look : List (r.PMsg × Minidregg.Selvage.Salt s) → r.Chal → r.Chal) :
+    List (r.PMsg × Minidregg.Selvage.Salt s) → List (r.PMsg × Minidregg.Selvage.Salt s) →
+      List r.Chal → List (r.PMsg × r.Chal)
+  | pre, x :: L, d :: ds => (x.1, look (pre ++ [x]) d) :: completionRounds look (pre ++ [x]) L ds
+  | _, _, _ => []
+
+/-- Completion reads `look` only on prefixes strictly longer than the one already completed. -/
+theorem completionRounds_congr
+    {look₁ look₂ : List (r.PMsg × Minidregg.Selvage.Salt s) → r.Chal → r.Chal} :
+    (pre L : List (r.PMsg × Minidregg.Selvage.Salt s)) → (ds : List r.Chal) →
+    (∀ p, pre.length < p.length → look₁ p = look₂ p) →
+    completionRounds look₁ pre L ds = completionRounds look₂ pre L ds
+  | _, [], _, _ => by simp [completionRounds]
+  | _, _ :: _, [], _ => by simp [completionRounds]
+  | pre, x :: L, d :: ds, h => by
+      simp only [completionRounds]
+      rw [h (pre ++ [x]) (by simp), completionRounds_congr (pre ++ [x]) L ds
+        (fun p hp => h p (by simp at hp; omega))]
+
+/-- The step-coin oracle seen through a key embedding (one round of completion per layer). -/
+def embImpl {n : ℕ} (emb : RKey r s n → RKey r s r.k)
+    (hemb : ∀ q, (emb q).Challenge = q.Challenge) :
+    QueryImpl (oracleSpec (Input r s) (Minidregg.Selvage.Salt s) (List.replicate n (round r)))
+      (StateT ((rspec r s).QueryCache × List r.Chal) ProbComp) :=
+  fun q => (cast (hemb q)) <$> stepImpl r s (emb q)
+
+theorem simulateQ_embImpl_id {α : Type} (X : OracleComp (rspec r s) α) :
+    simulateQ (embImpl (n := r.k) id (fun _ => rfl)) X = simulateQ (stepImpl r s) X := by
+  congr 1
+  funext q
+  exact id_map _
+
+theorem simulateQ_embImpl_prepend {n : ℕ} (emb : RKey r s (n + 1) → RKey r s r.k)
+    (hemb : ∀ q, (emb q).Challenge = q.Challenge) (m : r.PMsg)
+    (σ : Minidregg.Selvage.Salt s) {α : Type}
+    (X : OracleComp (oracleSpec (Input r s) (Minidregg.Selvage.Salt s)
+      (List.replicate n (round r))) α) :
+    simulateQ (embImpl emb hemb) (simulateQ (prependQuery (round := round r) m σ) X) =
+      simulateQ (embImpl (fun q => emb (Key.later (round := round r) m σ q))
+        (fun q => hemb _)) X :=
+  QueryImpl.simulateQ_simulateQ_eq_of_apply (fun t => by
+    simp [prependQuery, embImpl]) X
+
+theorem keyPrefix_length_pos : (n : ℕ) → (q : RKey r s n) → 0 < (keyPrefix n q).length
+  | 0, q => q.elim
+  | _ + 1, .inl _ => by simp [keyPrefix]
+  | _ + 1, .inr _ => by simp [keyPrefix]
+
+theorem encodePrefix_keyPrefix : (n : ℕ) → (q : RKey r s n) →
+    encodePrefix q.input n (keyPrefix n q) = some q
+  | 0, q => q.elim
+  | _ + 1, .inl _ => rfl
+  | n + 1, .inr (m, σ, q) => by
+      obtain ⟨x, rest, hx⟩ := List.exists_cons_of_length_pos (keyPrefix_length_pos n q)
+      have ih := encodePrefix_keyPrefix n q
+      show encodePrefix q.input (n + 1) ((m, σ) :: keyPrefix n q) =
+        some (Key.later (round := round r) m σ q)
+      rw [hx] at ih ⊢
+      simp only [encodePrefix, ih, Option.map_some]
+
+theorem encodeMove_keyPrefix (st : Stmt r) (q : RKey r s r.k) (hq : q.input = .inl st) :
+    encodeMove ⟨st, keyPrefix r.k q⟩ = q := by
+  unfold encodeMove
+  have h := encodePrefix_keyPrefix r.k q
+  rw [hq] at h
+  simp only [h, Option.getD_some]
+
+/-- **Completion is Selvage's final-challenge resolution.** On `n` coins, completing the salted
+messages `L` at input `.inl st` through an embedding that sends each key to the move of `pre`
+followed by the key's own prefix reads, for each round, the cached answer at that move if
+present and the round's coin otherwise; all reads use the initial cache. -/
+theorem complete_run (st : Stmt r) : (n : ℕ) → (emb : RKey r s n → RKey r s r.k) →
+    (hemb : ∀ q, (emb q).Challenge = q.Challenge) →
+    (pre : List (r.PMsg × Minidregg.Selvage.Salt s)) →
+    (∀ q : RKey r s n, q.input = .inl st → encodeMove ⟨st, pre ++ keyPrefix n q⟩ = emb q) →
+    (L : List (r.PMsg × Minidregg.Selvage.Salt s)) → L.length = n →
+    (ds rest : List r.Chal) → ds.length = n → (cache : (rspec r s).QueryCache) →
+    ∃ cache' path, (simulateQ (embImpl emb hemb)
+        (complete (List.replicate n (round r)) (Sum.inl st : Input r s) (messagesOf n L))).run
+          (cache, ds ++ rest) = pure (path, (cache', rest)) ∧
+      pathRounds n path =
+        completionRounds (fun p d => resolveAt cache (encodeMove ⟨st, p⟩) d) pre L ds
+  | 0, _, _, _, _, [], _, [], rest, _, cache =>
+      ⟨cache, PUnit.unit, rfl, by simp [pathRounds, completionRounds]⟩
+  | n + 1, emb, hemb, pre, hinv, (m, σ) :: L, hL, d :: ds, rest, hds, cache => by
+      have hk : encodeMove ⟨st, pre ++ [(m, σ)]⟩ =
+          emb (Key.here (round := round r) (Sum.inl st : Input r s) m σ) := by
+        simpa [keyPrefix] using hinv (Key.here (round := round r) (Sum.inl st : Input r s) m σ) rfl
+      have hinv' : ∀ q : RKey r s n, q.input = .inl st →
+          encodeMove ⟨st, (pre ++ [(m, σ)]) ++ keyPrefix n q⟩ =
+            emb (Key.later (round := round r) m σ q) := fun q hq => by
+        have := hinv (Key.later (round := round r) m σ q) hq
+        simpa [keyPrefix, List.append_assoc] using this
+      have hcomplete : complete (List.replicate (n + 1) (round r)) (Sum.inl st : Input r s)
+            (messagesOf (n + 1) ((m, σ) :: L)) =
+          (do
+            let challenge ← liftM ((oracleSpec (Input r s) (Minidregg.Selvage.Salt s)
+              (List.replicate (n + 1) (round r))).query
+                (Key.here (round := round r) (Sum.inl st : Input r s) m σ))
+            let path ← simulateQ (prependQuery (round := round r) m σ)
+              (complete (List.replicate n (round r)) (Sum.inl st : Input r s) (messagesOf n L))
+            pure ⟨m, ⟨challenge, path⟩⟩) := rfl
+      have hrun : (simulateQ (embImpl emb hemb)
+            (complete (List.replicate (n + 1) (round r)) (Sum.inl st : Input r s)
+              (messagesOf (n + 1) ((m, σ) :: L)))).run (cache, (d :: ds) ++ rest) =
+          ((embImpl emb hemb) (Key.here (round := round r) (Sum.inl st : Input r s) m σ)).run
+              (cache, d :: (ds ++ rest)) >>= fun p =>
+            (simulateQ (embImpl (fun q => emb (Key.later (round := round r) m σ q))
+                (fun q => hemb _))
+              (complete (List.replicate n (round r)) (Sum.inl st : Input r s) (messagesOf n L))).run p.2 >>=
+              fun z => pure (⟨m, p.1, z.1⟩, z.2) := by
+        rw [hcomplete]
+        simp only [simulateQ_bind, simulateQ_spec_query, StateT.run_bind,
+          simulateQ_embImpl_prepend, StateT.run_pure, List.cons_append]
+        rfl
+      rw [hrun]
+      have hlook : ∀ cache₁ : (rspec r s).QueryCache,
+          (∀ p, (pre ++ [(m, σ)]).length < p.length →
+            cache₁ (encodeMove ⟨st, p⟩) = cache (encodeMove ⟨st, p⟩)) →
+          completionRounds (fun p d => resolveAt cache₁ (encodeMove ⟨st, p⟩) d)
+              (pre ++ [(m, σ)]) L ds =
+            completionRounds (fun p d => resolveAt cache (encodeMove ⟨st, p⟩) d)
+              (pre ++ [(m, σ)]) L ds := fun cache₁ h =>
+        completionRounds_congr _ _ _ (fun p hp => by
+          funext d
+          simp only [resolveAt, h p hp])
+      cases hc : cache (emb (Key.here (round := round r) (Sum.inl st : Input r s) m σ)) with
+      | some v =>
+          have hstep : ((embImpl emb hemb) (Key.here (round := round r) (Sum.inl st : Input r s) m σ)).run
+              (cache, d :: (ds ++ rest)) = pure (cast (hemb _) v, (cache, ds ++ rest)) := by
+            simp [embImpl, StepCoins.stepCoinImpl_run_cons_some _ hc]
+          rw [hstep, pure_bind]
+          obtain ⟨cache', path, hres, hpath⟩ := complete_run st n _ (fun q => hemb _)
+            (pre ++ [(m, σ)]) hinv' L (by simpa using hL) ds rest (by simpa using hds) cache
+          refine ⟨cache', ⟨m, cast (hemb _) v, path⟩, by rw [hres, pure_bind]; rfl, ?_⟩
+          show (_ :: pathRounds n path) = _
+          rw [hpath]
+          simp only [completionRounds]
+          rw [hk]
+          have hres' : resolveAt cache (emb (Key.here (round := round r) (Sum.inl st : Input r s) m σ)) d =
+              toChal _ v := by simp only [resolveAt, hc]
+          rw [hres']
+          congr 2
+      | none =>
+          have hstep : ((embImpl emb hemb) (Key.here (round := round r) (Sum.inl st : Input r s) m σ)).run
+              (cache, d :: (ds ++ rest)) =
+                pure (cast (hemb _) (cast (key_challenge_eq r.k _).symm d),
+                  (cache.cacheQuery (emb (Key.here (round := round r) (Sum.inl st : Input r s) m σ))
+                    (cast (key_challenge_eq r.k _).symm d), ds ++ rest)) := by
+            simp [embImpl, StepCoins.stepCoinImpl_run_cons_none _ hc]
+          rw [hstep, pure_bind]
+          obtain ⟨cache', path, hres, hpath⟩ := complete_run st n _ (fun q => hemb _)
+            (pre ++ [(m, σ)]) hinv' L (by simpa using hL) ds rest (by simpa using hds) _
+          refine ⟨cache', ⟨m, _, path⟩, by rw [hres, pure_bind]; rfl, ?_⟩
+          show (_ :: pathRounds n path) = _
+          rw [hpath, hlook]
+          · simp only [completionRounds]
+            rw [hk]
+            have hres' : resolveAt cache (emb (Key.here (round := round r) (Sum.inl st : Input r s) m σ)) d =
+                d := by simp only [resolveAt, hc]
+            rw [hres']
+            congr 2
+            exact eq_of_heq ((cast_heq _ _).trans (cast_heq _ _))
+          · intro p hp
+            apply OracleSpec.QueryCache.cacheQuery_of_ne
+            rw [← hk]
+            intro h
+            have := congrArg (fun q => (decodeKey q).pfx.length) h
+            simp only [decodeKey_encodeMove] at this
+            omega
+  | 0, _, _, _, _, _ :: _, hL, _, _, _, _ => by simp at hL
+  | 0, _, _, _, _, [], _, _ :: _, _, hds, _ => by simp at hds
+  | _ + 1, _, _, _, _, [], hL, _, _, _, _ => by simp at hL
+  | _ + 1, _, _, _, _, _ :: _, _, [], _, hds, _ => by simp at hds
+
+end Completion
+
 end SelvageArkLib.StateRestoration
