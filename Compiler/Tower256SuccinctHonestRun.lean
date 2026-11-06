@@ -95,7 +95,7 @@ def path0 (c : AdditiveFriLevels 2 0) : List Digest :=
 def s0 : CStatement 2 1 := mkStatement root0
 
 def zeroOpening : CPairOpening :=
-  ⟨Coordinate.zero 8, Coordinate.zero 8, Coordinate.zero 8, [], []⟩
+  ⟨Coordinate.zero 8, Coordinate.zero 8, []⟩
 
 def stub (roots : Fin 2 → Digest) (chal : Fin 1 → C8) (seed : Fin 2 → PowerTwoFriLevels 2 1)
     (op : Fin 2 → CPairOpening) (coeffs : List C8) :
@@ -132,19 +132,13 @@ def prove (pins : TranscriptPins) (alphaBad : Option C8) (seedBad : Bool) (delta
   let honestSeed := fun a =>
     seedC s0 pins (stub roots (fun _ => alpha) zeroSeed (fun _ => zeroOpening) coeffs) a
   let seeds := if seedBad then fun a => flipSeed (honestSeed a) else honestSeed
-  let col1 : (Fin (2 - 1) → Bool) → C8 := fun address =>
-    evalCoeffs coeffs (domC beta2 (Coordinate.zero 8) 1
-      ((additiveFriLevelEquivPowerTwo 2 1).symm (binaryCubeIndexEquiv (2 - 1) address)))
   let op : Fin 2 → CPairOpening := fun a =>
     let k : AdditiveFriLevels 2 1 := additiveCoherentRound s0.rounds_le 0 seeds a
     let lo := liftBitC s0 0 0 k
     { left := word0 lo
       right := word0 (liftBitC s0 0 1 k)
-      next := evalCoeffs coeffs (domC beta2 (Coordinate.zero 8) 1 k)
       -- The low leaf's path without its last (leaf-level) sibling, which is the high leaf.
-      pairPath := (path0 lo).dropLast
-      nextPath := cubePath merkleDomainsC codecC col1
-          (binaryAddressBits (2 - 1) (additiveFriLevelEquivPowerTwo 2 1 k)) }
+      pairPath := (path0 lo).dropLast }
   stub roots (fun _ => alpha) seeds op coeffs
 
 /-! ## Per-clause views, for attributing each mutant's rejection -/
@@ -156,20 +150,21 @@ def seedClause (s : CStatement 2 1) (pins : TranscriptPins) (r : CReceipt 2 1 2)
   decide (∀ a, r.querySeed a = seedC s pins r a)
 
 def openedClause (s : CStatement 2 1) (r : CReceipt 2 1 2) : Bool :=
-  decide (∀ (j : Fin 1) (a : Fin 2),
-    openedC s r j (additiveCoherentRound s.rounds_le j r.querySeed a) (r.opening j a) = true)
+  decide (∀ (j : Fin 1) (a : Fin 2), openedC s r j a = true)
 
-/-- Each query's four opening checks at round 0, separately: the left leaf, the next-level leaf
-and the right leaf authenticate, and the fold equation holds. -/
+/-- Each query's four opening checks at round 0, separately: the left leaf, the derived
+next-level leaf (here the final polynomial's, `CReceipt.nextOf`) and the right leaf authenticate,
+and the fold equation holds. -/
 def openingParts (s : CStatement 2 1) (r : CReceipt 2 1 2) : List (Bool × Bool × Bool × Bool) :=
   (List.finRange 2).map fun a =>
     let j : Fin 1 := 0
     let k := additiveCoherentRound s.rounds_le j r.querySeed a
     let o := r.opening j a
+    let nx := r.nextOf s j a
     (recomputesC 0 (r.roots 0) (liftBitC s j 0 k) o.left o.leftFull,
-     recomputesC 1 (r.roots 1) k o.next o.nextPath,
+     recomputesC 1 (r.roots 1) k nx.1 nx.2,
      recomputesC 0 (r.roots 0) (liftBitC s j 1 k) o.right o.rightFull,
-     decide (mulC (addC o.next o.left) (pivotC s.beta 0) =
+     decide (mulC (addC nx.1 o.left) (pivotC s.beta 0) =
        mulC (addC (domC s.beta s.offset 0 (liftBitC s j 0 k)) (r.challenges j))
          (addC o.left o.right)))
 

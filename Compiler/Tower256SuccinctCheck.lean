@@ -5,7 +5,7 @@
 carrier has no executable representation. This file states the same verifier over
 `Coordinate 8` data and proves the two agree at the concrete deployment PCS:
 
-    check_iff : check s pins r = true ↔ SuccinctAccepts (rawPcs ell) s.denote pins r.denote
+    check_iff : check s pins r = true ↔ SuccinctAccepts (rawPcs ell) s.denote pins (r.denote s)
 
 Field side. Every tower quantity the verifier reads is recomputed from the basis coordinates:
 the quotient map after `r` folds iterates `foldMap p x = x² + p·x` with the per-round pivots,
@@ -160,15 +160,13 @@ structure CStatement (ell m : Nat) where
   independent : LinearIndependent (ZMod 2) (fun j : Fin ell => betaF beta j)
   rounds_le : m ≤ ell
 
-/-- A query's round opening with the leaf pair's Merkle path shared. The two openings at level `j`
+/-- A query's round opening: the two leaf values of its pair and the Merkle path they share. The two openings at level `j`
 are the two leaves of one pair, so their full top-down paths are `pairPath` followed by the other
 leaf's hash; only the siblings above the pair travel. The next-level path travels as digests. -/
 structure CPairOpening where
   left : C8
   right : C8
-  next : C8
   pairPath : List Digest
-  nextPath : List Digest
 
 /-- The full top-down path of the left leaf, and of the right leaf. -/
 def CPairOpening.leftFull (o : CPairOpening) : List Digest :=
@@ -209,22 +207,47 @@ theorem toField_domC (j : Nat) (hj : j ≤ ell) (c : AdditiveFriLevels ell j) :
 
 end CStatement
 
-/-- The opening a pair opening stands for: both full paths, as the proof codec's bytes. -/
-noncomputable def openingDenote (o : CPairOpening) :
+/-- The level-`n` evaluations of a coefficient list, as a Merkle column. -/
+def colC (beta : Fin ell → C8) (offset : C8) (n : Nat) (coeffs : List C8) :
+    (Fin (ell - n) → Bool) → C8 := fun address =>
+  evalCoeffs coeffs (domC beta offset n
+    ((additiveFriLevelEquivPowerTwo ell n).symm (binaryCubeIndexEquiv (ell - n) address)))
+
+/-- **Round `j`'s next-level leaf, carried by nobody.** Its value and full path are round
+`j+1`'s pair leaf on the side of the coordinate's last bit (`coherent_succ`); at the last round
+they are the final polynomial's evaluation and its path in the final column, whose root the
+checker recomputes anyway. -/
+def CReceipt.nextOf (r : CReceipt ell m queryCount) (s : CStatement ell m) (j : Fin m)
+    (a : Fin queryCount) : C8 × List Digest :=
+  let k := additiveCoherentRound s.rounds_le j r.querySeed a
+  if h : (j : Nat) + 1 < m then
+    let o := r.opening ⟨(j : Nat) + 1, h⟩ a
+    if k ⟨ell - ((j : Nat) + 1) - 1, by have := s.rounds_le; omega⟩ = 0 then (o.left, o.leftFull)
+    else (o.right, o.rightFull)
+  else
+    let address := binaryAddressBits (ell - ((j : Nat) + 1))
+      (additiveFriLevelEquivPowerTwo ell ((j : Nat) + 1) k)
+    (colC s.beta s.offset ((j : Nat) + 1) r.finalCoeffs address,
+     cubePath merkleDomainsC codecC (colC s.beta s.offset ((j : Nat) + 1) r.finalCoeffs) address)
+
+/-- The opening a pair opening stands for, with its next-level leaf: every path as the proof
+codec's bytes. -/
+noncomputable def openingDenote (o : CPairOpening) (nx : C8 × List Digest) :
     FriQueryOpening Tower256 (List UInt8) (List UInt8) where
   left := toField o.left
   right := toField o.right
-  next := toField o.next
+  next := toField nx.1
   leftPath := merkleDomainsC.proofCodec.encode o.leftFull
   rightPath := merkleDomainsC.proofCodec.encode o.rightFull
-  nextPath := merkleDomainsC.proofCodec.encode o.nextPath
+  nextPath := merkleDomainsC.proofCodec.encode nx.2
 
-noncomputable def CReceipt.denote (r : CReceipt ell m queryCount) :
+/-- The full receipt a compact one stands for, relative to its statement. -/
+noncomputable def CReceipt.denote (r : CReceipt ell m queryCount) (s : CStatement ell m) :
     SuccinctReceipt ell m queryCount where
   roots := r.roots
   challenges := fun j => toField (r.challenges j)
   querySeed := r.querySeed
-  opening := fun j a => openingDenote (r.opening j a)
+  opening := fun j a => openingDenote (r.opening j a) (r.nextOf s j a)
   finalCoeffs := r.finalCoeffs
 
 /-! ## Transcript bytes -/
@@ -258,7 +281,7 @@ def challengeInputC (s : CStatement ell m) (pins : TranscriptPins)
 
 theorem challengeInput_eq (s : CStatement ell m) (pins : TranscriptPins)
     (r : CReceipt ell m queryCount) (j : Fin m) :
-    Tower256AdditiveFriSuccinctController.challengeInput (rawPcs ell) s.denote pins r.denote j = challengeInputC s pins r j := by
+    Tower256AdditiveFriSuccinctController.challengeInput (rawPcs ell) s.denote pins (r.denote s) j = challengeInputC s pins r j := by
   unfold Tower256AdditiveFriSuccinctController.challengeInput challengeInputC
   rw [← basisPrefix_eq]
   rfl
@@ -269,7 +292,7 @@ def challengeC (s : CStatement ell m) (pins : TranscriptPins)
 
 theorem toField_challengeC (s : CStatement ell m) (pins : TranscriptPins)
     (r : CReceipt ell m queryCount) (j : Fin m) :
-    toField (challengeC s pins r j) = Tower256AdditiveFriSuccinctController.derivedChallenge (rawPcs ell) s.denote pins r.denote j := by
+    toField (challengeC s pins r j) = Tower256AdditiveFriSuccinctController.derivedChallenge (rawPcs ell) s.denote pins (r.denote s) j := by
   rw [challengeC, toField_digestTowerC, Tower256AdditiveFriSuccinctController.derivedChallenge, challengeInput_eq]
   rfl
 
@@ -296,7 +319,7 @@ theorem flatMap_map_toField (l : List C8) :
 
 theorem queryPrefix_eq (s : CStatement ell m) (pins : TranscriptPins)
     (r : CReceipt ell m queryCount) :
-    Tower256AdditiveFriSuccinctController.queryPrefix (rawPcs ell) s.denote pins r.denote = queryPrefixC s pins r := by
+    Tower256AdditiveFriSuccinctController.queryPrefix (rawPcs ell) s.denote pins (r.denote s) = queryPrefixC s pins r := by
   unfold Tower256AdditiveFriSuccinctController.queryPrefix queryPrefixC
   rw [← basisPrefix_eq, ← flatMap_map_toField, List.map_ofFn]
   rfl
@@ -309,7 +332,7 @@ def seedC (s : CStatement ell m) (pins : TranscriptPins)
 
 theorem seedC_eq (s : CStatement ell m) (pins : TranscriptPins)
     (r : CReceipt ell m queryCount) (a : Fin queryCount) :
-    seedC s pins r a = Tower256AdditiveFriSuccinctController.derivedQuerySeed (rawPcs ell) s.denote pins r.denote a := by
+    seedC s pins r a = Tower256AdditiveFriSuccinctController.derivedQuerySeed (rawPcs ell) s.denote pins (r.denote s) a := by
   have hc : (rawPcs ell).backend.cshake = cshakeC := rfl
   unfold seedC Tower256AdditiveFriSuccinctController.derivedQuerySeed
   simp only [hc, queryPrefix_eq]
@@ -408,6 +431,116 @@ theorem liftBitC_eq (s : CStatement ell m) (j : Fin m) (bit : ZMod 2)
     (c : AdditiveFriLevels ell ((j : Nat) + 1)) :
     liftBitC s j bit c = s.tower.liftBit j j.isLt bit c := rfl
 
+/-! ### The leaf pair recomputes one path
+
+The two level-`j` leaves of a query differ only in the last address bit (`liftBitC` appends the
+folded coordinate last; the address bits are the coordinates in order), and each full path ends
+with the other leaf's hash. Both therefore recompute through the same pair node, and checking
+one is checking both (`recomputesC_pair`). -/
+
+/-- Two leaves whose addresses agree except in the last bit (`false` for `a`, `true` for `b`),
+each path ending with the other's leaf digest, recompute to the same result. -/
+theorem recompute_pair {cshake : Cshake256} (domains : MerkleDomains cshake) (L R : Digest) :
+    ∀ {k : Nat} (a b : Fin k → Bool) (P : List Digest),
+      (∀ i : Fin k, i.val + 1 < k → a i = b i) →
+      (∀ i : Fin k, i.val + 1 = k → a i = false ∧ b i = true) →
+      recompute domains L a (P ++ [R]) = recompute domains R b (P ++ [L])
+  | 0, _, _, _, _, _ => by simp [recompute]
+  | k + 1, a, b, P, hsame, hlast => by
+      cases P with
+      | nil =>
+        cases k with
+        | zero =>
+          have h := hlast 0 rfl
+          simp [recompute, h.1, h.2]
+        | succ k => simp [recompute]
+      | cons x P =>
+        have ih := recompute_pair domains L R (fun i => a i.succ) (fun i => b i.succ) P
+          (fun i hi => hsame i.succ (by simp only [Fin.val_succ]; omega))
+          (fun i hi => hlast i.succ (by simp only [Fin.val_succ]; omega))
+        simp only [List.cons_append, recompute]
+        rw [ih]
+        cases k with
+        | zero => simp [recompute]
+        | succ k => rw [hsame 0 (by simp)]
+
+/-- An address bit is the coordinate. -/
+theorem addressBits_apply {n : Nat} (c : AdditiveFriLevels ell n) (i : Fin (ell - n)) :
+    binaryAddressBits (ell - n) (additiveFriLevelEquivPowerTwo ell n c) i = decide (c i = 1) := by
+  unfold binaryAddressBits binaryCubeIndexEquiv additiveFriLevelEquivPowerTwo
+  simp only [Equiv.symm_trans_apply, Equiv.trans_apply, Equiv.symm_apply_apply,
+    Equiv.piCongrRight_symm_apply, Pi.map_apply, Equiv.piCongrRight_apply, Equiv.symm_symm]
+  generalize c i = z
+  fin_cases z <;> rfl
+
+theorem liftBitC_apply (s : CStatement ell m) (j : Fin m) (bit : ZMod 2)
+    (c : AdditiveFriLevels ell ((j : Nat) + 1)) (i : Fin (ell - j)) :
+    liftBitC s j bit c i =
+      if h : i.val < ell - ((j : Nat) + 1) then c ⟨i.val, h⟩ else bit := by
+  unfold liftBitC Fin.snoc
+  simp only [Fin.val_cast]
+  split <;> rfl
+
+/-- **One recomputation decides both leaves of the pair.** -/
+theorem recomputesC_pair (s : CStatement ell m) (j : Fin m) (root : Digest)
+    (k : AdditiveFriLevels ell ((j : Nat) + 1)) (o : CPairOpening) :
+    recomputesC j root (liftBitC s j 1 k) o.right o.rightFull =
+      recomputesC j root (liftBitC s j 0 k) o.left o.leftFull := by
+  have hj : (j : Nat) < ell := lt_of_lt_of_le j.isLt s.rounds_le
+  unfold recomputesC CPairOpening.leftFull CPairOpening.rightFull
+  symm
+  rw [recompute_pair merkleDomainsC _ _ _ _ o.pairPath]
+  · intro i hi
+    rw [addressBits_apply, addressBits_apply, liftBitC_apply, liftBitC_apply,
+      dif_pos (by omega), dif_pos (by omega)]
+  · intro i hi
+    rw [addressBits_apply, addressBits_apply, liftBitC_apply, liftBitC_apply,
+      dif_neg (by omega), dif_neg (by omega)]
+    exact ⟨by decide, by decide⟩
+
+/-! ### Consecutive rounds of one query
+
+Round `j`'s next-level leaf is one leaf of round `j+1`'s pair: the coherent sampler reads the
+seed modulo a halving power of two, so round `j+1`'s coordinate is round `j`'s without its last
+coordinate (`coherent_succ`). -/
+
+theorem mod_pow_div_mod (x a i : Nat) (h : i < a) : x % 2 ^ a / 2 ^ i % 2 = x / 2 ^ i % 2 := by
+  rw [show 2 ^ a = 2 ^ i * 2 ^ (a - i) by rw [← Nat.pow_add]; congr 1; omega,
+    Nat.mod_mul_right_div_self, Nat.mod_mod_of_dvd _ (dvd_pow_self 2 (by omega))]
+
+theorem coherent_coord {qc : Nat} (s : CStatement ell m) (j : Fin m)
+    (seed : Fin qc → PowerTwoFriLevels ell 1) (a : Fin qc) (i : Fin (ell - ((j : Nat) + 1))) :
+    ((ZMod.finEquiv 2).symm (additiveCoherentRound s.rounds_le j seed a i) : Nat) =
+      (seed a : Nat) % 2 ^ (ell - ((j : Nat) + 1)) / 2 ^ (i : Nat) % 2 := by
+  simp [additiveCoherentRound, powerTwoCoherentRound, powerTwoRoundIndex,
+    additiveFriLevelEquivPowerTwo, finFunctionFinEquiv_symm_apply_val]
+
+/-- **Round `j`'s leaf is round `j+1`'s pair leaf on the side of its last coordinate.** -/
+theorem coherent_succ {qc : Nat} (s : CStatement ell m) (j : Fin m) (h : (j : Nat) + 1 < m)
+    (seed : Fin qc → PowerTwoFriLevels ell 1) (a : Fin qc) :
+    additiveCoherentRound s.rounds_le j seed a =
+      liftBitC s ⟨(j : Nat) + 1, h⟩
+        (additiveCoherentRound s.rounds_le j seed a
+          ⟨ell - ((j : Nat) + 1) - 1, by have := s.rounds_le; omega⟩)
+        (additiveCoherentRound s.rounds_le ⟨(j : Nat) + 1, h⟩ seed a) := by
+  have hm := s.rounds_le
+  funext i
+  rw [liftBitC_apply]
+  split
+  · rename_i hi
+    simp only [Fin.val_mk] at hi
+    apply (ZMod.finEquiv 2).symm.injective
+    apply Fin.ext
+    rw [coherent_coord s j, coherent_coord s ⟨(j : Nat) + 1, h⟩]
+    simp only [Fin.val_mk]
+    rw [mod_pow_div_mod _ _ _ (by omega), mod_pow_div_mod _ _ _ (by omega)]
+  · rename_i hi
+    simp only [Fin.val_mk] at hi
+    congr 1
+    apply Fin.ext
+    simp only [Fin.val_mk]
+    omega
+
 /-- The fold equation in multiplied-out form is the division form when the pivot is nonzero. -/
 theorem fold_iff (n l r d α p : C8) (hp : toField p ≠ 0) :
     mulC (addC n l) p = mulC (addC d α) (addC l r) ↔
@@ -415,49 +548,123 @@ theorem fold_iff (n l r d α p : C8) (hp : toField p ≠ 0) :
   rw [← Equiv.apply_eq_iff_eq toField, toField_mulC, toField_mulC, toField_addC, toField_addC,
     toField_addC, mul_div_assoc', ← sub_eq_iff_eq_add', eq_div_iff hp, CharTwo.sub_eq_add]
 
-def openedC (s : CStatement ell m) (r : CReceipt ell m queryCount) (j : Fin m)
-    (k : AdditiveFriLevels ell ((j : Nat) + 1)) (o : CPairOpening) : Bool :=
+/-- Every check an opening must pass, with both leaves of the pair and the next-level leaf
+`nx` recomputed. -/
+def openedFullC (s : CStatement ell m) (r : CReceipt ell m queryCount) (j : Fin m)
+    (k : AdditiveFriLevels ell ((j : Nat) + 1)) (o : CPairOpening) (nx : C8 × List Digest) :
+    Bool :=
   recomputesC j (r.roots ⟨j, by omega⟩) (liftBitC s j 0 k) o.left o.leftFull &&
-  (recomputesC ((j : Nat) + 1) (r.roots ⟨(j : Nat) + 1, by omega⟩) k o.next o.nextPath &&
+  (recomputesC ((j : Nat) + 1) (r.roots ⟨(j : Nat) + 1, by omega⟩) k nx.1 nx.2 &&
   (recomputesC j (r.roots ⟨j, by omega⟩) (liftBitC s j 1 k) o.right o.rightFull &&
-  decide (mulC (addC o.next o.left) (pivotC s.beta j) =
+  decide (mulC (addC nx.1 o.left) (pivotC s.beta j) =
     mulC (addC (domC s.beta s.offset j (liftBitC s j 0 k)) (r.challenges j))
       (addC o.left o.right))))
 
-theorem openedC_iff (s : CStatement ell m) (r : CReceipt ell m queryCount) (j : Fin m)
-    (k : AdditiveFriLevels ell ((j : Nat) + 1)) (o : CPairOpening) :
-    openedC s r j k o = true ↔ OpenedQuery (rawPcs ell) s.denote j r.denote k (openingDenote o) := by
+theorem openedFullC_iff (s : CStatement ell m) (r : CReceipt ell m queryCount) (j : Fin m)
+    (k : AdditiveFriLevels ell ((j : Nat) + 1)) (o : CPairOpening) (nx : C8 × List Digest) :
+    openedFullC s r j k o nx = true ↔
+      OpenedQuery (rawPcs ell) s.denote j (r.denote s) k (openingDenote o nx) := by
   have hj : (j : Nat) < ell := lt_of_lt_of_le j.isLt s.rounds_le
   have hp : toField (pivotC s.beta j) ≠ 0 := by
     rw [toField_pivotC]
     exact additiveTowerPivot_ne_zero ell (betaF s.beta) (toField s.offset) s.independent j
       (ell - j - 1) (by omega)
-  unfold openedC OpenedQuery
+  unfold openedFullC OpenedQuery
   simp only [← verifyOpenC_encode, Bool.and_eq_true, decide_eq_true_eq, ← verifyOpen_iff]
   rw [fold_iff _ _ _ _ _ _ hp, toField_pivotC, s.toField_domC j hj.le]
   rfl
+
+/-- The opening check the verifier runs at round `j`, query `a`: the pair's path once
+(`recomputesC_pair`) and the fold with the derived next-level value. The next-level leaf's
+authentication is round `j+1`'s pair check, or at the last round the last-root clause
+(`opened_all_iff`). -/
+def openedC (s : CStatement ell m) (r : CReceipt ell m queryCount) (j : Fin m)
+    (a : Fin queryCount) : Bool :=
+  let k := additiveCoherentRound s.rounds_le j r.querySeed a
+  let o := r.opening j a
+  recomputesC j (r.roots ⟨j, by omega⟩) (liftBitC s j 0 k) o.left o.leftFull &&
+  decide (mulC (addC (r.nextOf s j a).1 o.left) (pivotC s.beta j) =
+    mulC (addC (domC s.beta s.offset j (liftBitC s j 0 k)) (r.challenges j))
+      (addC o.left o.right))
+
+theorem zmod2_eq_one_of_ne_zero (x : ZMod 2) (h : x ≠ 0) : x = 1 := by
+  fin_cases x
+  · exact absurd rfl h
+  · rfl
 
 /-! ## The last root -/
 
 /-- The root of the final polynomial's evaluations on the last domain, over coordinates. -/
 def lastRootC (beta : Fin ell → C8) (offset : C8) (m : Nat) (coeffs : List C8) : Digest :=
-  cubeRoot merkleDomainsC codecC (k := ell - m) fun address =>
-    evalCoeffs coeffs (domC beta offset m
-      ((additiveFriLevelEquivPowerTwo ell m).symm (binaryCubeIndexEquiv (ell - m) address)))
+  cubeRoot merkleDomainsC codecC (colC beta offset m coeffs)
 
 theorem lastRoot_eq (s : CStatement ell m) (r : CReceipt ell m queryCount) :
-    ((rawPcs ell).opening m).commit (r.denote.finalWord s.denote) =
+    ((rawPcs ell).opening m).commit ((r.denote s).finalWord s.denote) =
       lastRootC s.beta s.offset m r.finalCoeffs := by
-  have hword : ∀ p, r.denote.finalWord s.denote p =
+  have hword : ∀ p, (r.denote s).finalWord s.denote p =
       toField (evalCoeffs r.finalCoeffs (domC s.beta s.offset m p)) := by
     intro p
     rw [toField_evalCoeffs, s.toField_domC m s.rounds_le]
     rfl
   change cubeRoot Tower256ConcreteBackend.merkleDomains BinaryTower256Profile.profile.valueCodec
-      (fun address => r.denote.finalWord s.denote
+      (fun address => (r.denote s).finalWord s.denote
         ((additiveFriLevelEquivPowerTwo ell m).symm (binaryCubeIndexEquiv (ell - m) address))) = _
   simp only [hword]
   exact cubeRoot_toField _
+
+/-! ## Every opening, with the next-level leaves derived -/
+
+/-- **The compact checks are the full checks.** Given the last-root clause, the per-round
+pair-and-fold checks hold for every round and query exactly when every full opening (both
+leaves, the derived next-level leaf, the fold) holds. -/
+theorem opened_all_iff (s : CStatement ell m) (r : CReceipt ell m queryCount)
+    (hlast : r.roots (Fin.last m) = lastRootC s.beta s.offset m r.finalCoeffs) :
+    (∀ (j : Fin m) (a : Fin queryCount), openedC s r j a = true) ↔
+      ∀ (j : Fin m) (a : Fin queryCount),
+        openedFullC s r j (additiveCoherentRound s.rounds_le j r.querySeed a) (r.opening j a)
+          (r.nextOf s j a) = true := by
+  constructor
+  · intro hall j a
+    have h1 := hall j a
+    unfold openedC at h1
+    unfold openedFullC
+    simp only [Bool.and_eq_true] at h1 ⊢
+    refine ⟨h1.1, ?_, by rw [recomputesC_pair]; exact h1.1, h1.2⟩
+    unfold CReceipt.nextOf
+    by_cases h : (j : Nat) + 1 < m
+    · rw [dif_pos h]
+      have hnext := hall ⟨(j : Nat) + 1, h⟩ a
+      unfold openedC at hnext
+      simp only [Bool.and_eq_true] at hnext
+      have hk := coherent_succ s j h r.querySeed a
+      by_cases hb : additiveCoherentRound s.rounds_le j r.querySeed a
+          ⟨ell - ((j : Nat) + 1) - 1, by have := s.rounds_le; omega⟩ = 0
+      · simp only [hb, if_true]
+        rw [hb] at hk
+        rw [hk]
+        exact hnext.1
+      · simp only [hb, if_false]
+        rw [zmod2_eq_one_of_ne_zero _ hb] at hk
+        rw [hk, recomputesC_pair s ⟨(j : Nat) + 1, h⟩]
+        exact hnext.1
+    · rw [dif_neg h]
+      have hjm : (j : Nat) + 1 = m := by omega
+      have hroot : r.roots ⟨(j : Nat) + 1, by omega⟩ =
+          lastRootC s.beta s.offset ((j : Nat) + 1) r.finalCoeffs := by
+        rw [show lastRootC s.beta s.offset ((j : Nat) + 1) r.finalCoeffs =
+            lastRootC s.beta s.offset m r.finalCoeffs by rw [hjm], ← hlast]
+        congr 1
+        exact Fin.ext hjm
+      unfold recomputesC
+      simp only [decide_eq_true_eq]
+      rw [hroot]
+      exact recompute_cubePath merkleDomainsC codecC _ _
+  · intro hall j a
+    have h1 := hall j a
+    unfold openedFullC at h1
+    unfold openedC
+    simp only [Bool.and_eq_true] at h1 ⊢
+    exact ⟨h1.1, h1.2.2.2⟩
 
 /-! ## The checker -/
 
@@ -468,33 +675,39 @@ def check (s : CStatement ell m) (pins : TranscriptPins) (r : CReceipt ell m que
   (decide (∀ j, r.challenges j = challengeC s pins r j) &&
   (let midstate := queryMidstate s pins r
    decide (∀ a, r.querySeed a = seedOfMidstate midstate a) &&
-  (decide (∀ (j : Fin m) (a : Fin queryCount),
-      openedC s r j (additiveCoherentRound s.rounds_le j r.querySeed a) (r.opening j a) = true) &&
+  (decide (∀ (j : Fin m) (a : Fin queryCount), openedC s r j a = true) &&
   (decide (r.finalCoeffs.length ≤ s.degree m) &&
    decide (r.roots (Fin.last m) = lastRootC s.beta s.offset m r.finalCoeffs))))))
 
 theorem check_iff (s : CStatement ell m) (pins : TranscriptPins) (r : CReceipt ell m queryCount) :
-    check s pins r = true ↔ SuccinctAccepts (rawPcs ell) s.denote pins r.denote := by
+    check s pins r = true ↔ SuccinctAccepts (rawPcs ell) s.denote pins (r.denote s) := by
   have hch : (∀ j, r.challenges j = challengeC s pins r j) ↔
-      ∀ j, r.denote.challenges j = Tower256AdditiveFriSuccinctController.derivedChallenge (rawPcs ell) s.denote pins r.denote j :=
+      ∀ j, (r.denote s).challenges j = Tower256AdditiveFriSuccinctController.derivedChallenge (rawPcs ell) s.denote pins (r.denote s) j :=
     forall_congr' fun j => by
       rw [← toField_challengeC]
       exact (Equiv.apply_eq_iff_eq toField).symm
   have hseed : (∀ a, r.querySeed a = seedOfMidstate (queryMidstate s pins r) a) ↔
-      ∀ a, r.denote.querySeed a = Tower256AdditiveFriSuccinctController.derivedQuerySeed (rawPcs ell) s.denote pins r.denote a :=
+      ∀ a, (r.denote s).querySeed a = Tower256AdditiveFriSuccinctController.derivedQuerySeed (rawPcs ell) s.denote pins (r.denote s) a :=
     forall_congr' fun a => by rw [seedOfMidstate_eq, seedC_eq]; rfl
-  have hop : (∀ (j : Fin m) (a : Fin queryCount),
-      openedC s r j (additiveCoherentRound s.rounds_le j r.querySeed a) (r.opening j a) = true) ↔
-      ∀ (j : Fin m) (a : Fin queryCount), OpenedQuery (rawPcs ell) s.denote j r.denote
-        (additiveCoherentRound s.rounds_le j r.querySeed a) (openingDenote (r.opening j a)) :=
-    forall_congr' fun j => forall_congr' fun a => openedC_iff s r j _ _
+  have hfull : (∀ (j : Fin m) (a : Fin queryCount),
+      openedFullC s r j (additiveCoherentRound s.rounds_le j r.querySeed a) (r.opening j a)
+        (r.nextOf s j a) = true) ↔
+      ∀ (j : Fin m) (a : Fin queryCount), OpenedQuery (rawPcs ell) s.denote j (r.denote s)
+        (additiveCoherentRound s.rounds_le j r.querySeed a)
+        (openingDenote (r.opening j a) (r.nextOf s j a)) :=
+    forall_congr' fun j => forall_congr' fun a => openedFullC_iff s r j _ _ _
   have hlast : r.roots (Fin.last m) = lastRootC s.beta s.offset m r.finalCoeffs ↔
-      r.denote.roots (Fin.last m) = ((rawPcs ell).opening m).commit (r.denote.finalWord s.denote) := by
+      (r.denote s).roots (Fin.last m) = ((rawPcs ell).opening m).commit ((r.denote s).finalWord s.denote) := by
     rw [lastRoot_eq]; rfl
   unfold check SuccinctAccepts
   simp only [Bool.and_eq_true, decide_eq_true_eq]
-  rw [hch, hseed, hop, hlast]
-  exact Iff.rfl
+  rw [hch, hseed]
+  constructor
+  · rintro ⟨h1, h2, h3, h4, h5, h6, h7⟩
+    exact ⟨h1, h2, h3, h4, hfull.mp ((opened_all_iff s r h7).mp h5), h6, hlast.mp h7⟩
+  · rintro ⟨h1, h2, h3, h4, h5, h6, h7⟩
+    have hG := hlast.mpr h7
+    exact ⟨h1, h2, h3, h4, (opened_all_iff s r hG).mpr (hfull.mpr h5), h6, hG⟩
 
 /-! ## Teeth -/
 
@@ -536,6 +749,10 @@ def bootReceipt (coeffs : List C8) : CReceipt 1 0 0 where
 
 /-- info: 'Minidregg.Compiler.Tower256SuccinctCheck.seedOfMidstate_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms seedOfMidstate_eq
+/-- info: 'Minidregg.Compiler.Tower256SuccinctCheck.opened_all_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms opened_all_iff
+/-- info: 'Minidregg.Compiler.Tower256SuccinctCheck.recomputesC_pair' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms recomputesC_pair
 /-- info: 'Minidregg.Compiler.Tower256SuccinctCheck.check_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms check_iff
 
