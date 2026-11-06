@@ -273,6 +273,14 @@ while :; do
   # "did not run" and skipped the gate.
   if [ -n "$want" ]; then want=$(git -C "$REPO" rev-parse --verify "$want^{commit}") || { echo "builder: --once $want is not a commit" >&2; exit 64; }; fi
   tip=${want:-$(git -C "$REPO" rev-parse origin/main)}
+  # A tip that changes only board/ (this builder's own REDS.md commits, a seat row) is not a build: it is
+  # recorded as built without a round. Every green round wrote a REDS.md commit that then cost a round of its
+  # own (hbox 2026-11-05: rounds 0c628486, 8bd7da7c, 9ac65ce9 were all REDS commits, ~8 minutes each).
+  if [ -z "$want" ] && [ -s "$ST/last-built" ] && [ "$tip" != "$(cat "$ST/last-built")" ] \
+     && [ -z "$(git -C "$REPO" diff --name-only "$(cat "$ST/last-built")" "$tip" -- . ':!board/' | head -1)" ]; then
+    say "BUILDER tip ${tip:0:12} changes only board/; not a round"; printf '%s\n' "$tip" > "$ST/last-built"
+    continue
+  fi
   # REDS.md and rerecord data commits are the builder's own: a tip whose only change since the last round is board/ or fixture data is not rebuilt
   if [ -n "$last" ] && [ -z "$want" ] && [ -z "$(git -C "$REPO" diff --name-only "$last" "$tip" -- . ':!board' ':!Fixtures/NativeAcceptedFixtureData.lean' ':!Fixtures/NativeDocWriteFixtureData.lean')" ]; then
     [ $once = 1 ] && exit 0; sleep "${BUILDER_POLL_S:-300}"; continue
