@@ -122,6 +122,12 @@ root = "Host.ClientConsentSpecializedSession"
 name = "private-backend-boundary-fixture"
 root = "Compiler.PrivateBackendBoundaryFixture"
 
+# Tower256 succinct prover, compiled: honest receipts and one mutant each at ell = 4, m = 2 and
+# ell = 8, m = 3 (Compiler/Tower256SuccinctProverRun.lean). Exits 1 on any failed observation.
+[[lean_exe]]
+name = "tower256-prover-run"
+root = "Compiler.Tower256SuccinctProverRun"
+
 [[lean_exe]]
 name = "private-circuit-plan-fixture"
 root = "Host.PrivateCircuitPlanFixture"
