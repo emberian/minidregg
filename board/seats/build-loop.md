@@ -56,7 +56,12 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   `green` -> 0264f390ecf7 (2026-11-05 19:53Z), the first move since 6ba8fe37fa18 (11-01). The loop is
   `builder-run.sh` (builder.pid); two unnamed processes of the 11-05 00:xx collided tour world
   (`mini serve` 2392553, `mini-web-spawn --dev` 2392988, root /ci/t-158ffd) have no PID file and are left
-  for ember or the sweep.
+  for ember or the sweep (ember killed them 11-05).
+  Cycle (2026-11-06): a round is 468 s (build warm ~190 s, the gate's parallel phases ~250 s; flatness runs
+  beside them and is published, the red-row rerun is BUILDER_RERUN=1, the reap is detached, poll 30 s). A green
+  reaches the demo box by the plain walk (dregg-infra edge/demo/demo-dry-walk, WALK_REGENESIS=0): preship-check,
+  stream (~5 min through the Mac), ship (17 s on the box: link flip + Store restart, world kept). Commit to
+  serving is about 14 minutes; the stream is the next cut (hbox -> box direct, or the box pulling).
 - Knobs: `scripts/pipeline/builder --once`, `--reds SHA` (rewrite REDS.md from existing logs), BUILDER_DRY=1 (print,
   never push). $I/keep lists candidate prefixes that sweep and reap never touch. integ-build stops below 25 GB free.
 
