@@ -62,6 +62,12 @@ pub(crate) fn brief(bundle:&Value)->Result<Value> {
                     row["inBrief"]=json!(false);
                 } else {budget-=text.len();row["inBrief"]=json!(true);}
             }
+            // The prompt's brief keeps a row's identity and its support pin (element, revision, state) and the
+            // text it carries; the rest of the row's provenance (parent, predecessor, payload digest, source
+            // root) stays in the durable input the fingerprint covers. A 42-line program document carried
+            // 24 KB of row provenance into a 16 KB prompt bound (demo-dry 2026-11-06, the lobby resident).
+            let keep=["element","revision","state","text","inBrief"];
+            row.as_object_mut().ok_or("context row malformed")?.retain(|k,_| keep.contains(&k.as_str()));
         }
     }
     Ok(compact)
