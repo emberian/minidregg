@@ -64,8 +64,11 @@ Mults are Tower256 multiplications. A single Fan–Paar product is 4^8 = 65,536 
 - **The verifier is path-bound.** It is about `q·Σ_j 3(ell−j)` Keccak-f, and every query
   costs three paths per round. Low and high openings are siblings at the same level, so a
   shared path would save about 1/3. That is a receipt-codec change, not a transcript change.
-- **Proof bytes are path-bound too.** They run from 1.5 to 5 MB at UD-100. Rate 1/4 beats rate
-  1/2 here on every column except prover NTT size.
+- **Proof bytes are path-bound too.** They run from 1.5 to 5 MB at UD-100. Rate is a
+  per-leaf trade. At equal message size 2^14, rate 1/2 (`ell` = 15) halves the prover's
+  Keccak-f (145k against 272k) but costs 1.48× the proof bytes (2.86 MB against 1.93 MB) and
+  1.49× the verifier Keccak-f, because UD-100 needs 241 queries against 148. This is the same
+  shape as the recursion-tower grid (zkml-research VERDICTS §9a): the leaf's size decides.
 - **Seeds:** each of the `q` seed hashes re-absorbs the whole query prefix (about 7–11 KB at
   these sizes, because lengths are unary). With the prefix's absorbed state cached, seed
   Keccak-f fall from 7,666 to 316 at ell = 14. That is a native-only optimization with
