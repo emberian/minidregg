@@ -61,7 +61,14 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   beside them and is published, the red-row rerun is BUILDER_RERUN=1, the reap is detached, poll 30 s). A green
   reaches the demo box by the plain walk (dregg-infra edge/demo/demo-dry-walk, WALK_REGENESIS=0): preship-check,
   stream (~5 min through the Mac), ship (17 s on the box: link flip + Store restart, world kept). Commit to
-  serving is about 14 minutes; the stream is the next cut (hbox -> box direct, or the box pulling).
+  serving is about 14 minutes; the stream is the next cut (hbox -> box direct, or the box pulling). A tip
+  that changes only board/ (the builder's own REDS.md commits) is recorded as built, not rounded (0d7e1a2ce).
+  2026-11-06: four plain ships landed on demo-dry; what they taught is on main (install-hermes through
+  current and resumable, apps-worker publishes front tables, broker keeps a generation's runtime pin, the
+  resident context brief bounds row provenance, the operator's refuse-unadmitted verb) and in dregg-infra
+  (grain-world refresh in the plain walk, the entrance restarted after the Store, the ship refuses over an
+  active checkpoint plan, mini-checkpoint --abandon). Open product item: a resident prompt whose reply was
+  lost at a controller restart has no typed close (see the demo-dry ops memory).
 - Knobs: `scripts/pipeline/builder --once`, `--reds SHA` (rewrite REDS.md from existing logs), BUILDER_DRY=1 (print,
   never push). $I/keep lists candidate prefixes that sweep and reap never touch. integ-build stops below 25 GB free.
 
