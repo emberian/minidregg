@@ -1,17 +1,22 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `f6e5069b2126` (builder: REDS.md for 6a8bdd25cab5 (1 red)). Round finished 2026-11-06T21:36Z.
-green: `477bf8e9eb81`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-f6e5069b`.
+Tip: `69c7afc23d4a` (builder: REDS.md for f6e5069b2126 (3 red)). Round finished 2026-11-06T21:53Z.
+green: `477bf8e9eb81`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-69c7afc2`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:composed:residents | composed residents fail | not rerun | no | member-side, infra | fail: residents: REFUSED check failed: restart drains the old exact reply and then every o |
-| gate:composed:restart | composed restart blocked | not rerun | no | host-execution | blocked: prerequisite residents has not passed |
 
-Suspect commits since green (`git log 477bf8e9eb81..f6e5069b2126`), newest first; owners are the seats whose
+Suspect commits since green (`git log 477bf8e9eb81..69c7afc23d4a`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `69c7afc2` builder: REDS.md for f6e5069b2126 (3 red) (owner: build-loop)
+- `129d828c` iter-check: a 30 GB disk floor, and memory measured as MemAvailable (+ ZFS ARC)
+- `fa1e93c6` DEVELOPING.md, Makefile, scripts/iter-check: the lane loop without cold rebuilds
+- `eceedcf5` Theory.NockCost.Summaries: forge's eleven concrete facts in one compiled evaluation
+- `f502c83c` Theory.NockCost: forge's seven concrete facts in one compiled evaluation
+- `8f77d90b` HostTeethProofs: the one cSHAKE fact is checked by compiled evaluation
+- `3fd5c0ba` Kernel.ObjectLaw: the hash-bearing sample law is checked by compiled evaluation
 - `f6e5069b` builder: REDS.md for 6a8bdd25cab5 (1 red) (owner: build-loop)
 - `dcf53d2d` Merge lane/tower256-prover-exe: ContentCert gaps closed, work 9104 native kernel, lighter Tower256 m
 - `6a8bdd25` Kernel.Job: the pole facts by `decide +kernel`, not elaborator `decide`
@@ -35,10 +40,10 @@ Suspect commits since green (`git log 477bf8e9eb81..f6e5069b2126`), newest first
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.265 | 0.265 | 1.000 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 68.672 | 153.021 | 2.228 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.265 | 0.308 | 1.163 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 48.233 | 167.237 | 3.467 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.755 | 0.432 | 0.572 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 316.742 | 209.955 | 0.663 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-f6e5069b/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.245 | 0.278 | 1.133 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 68.938 | 147.008 | 2.132 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.222 | 0.283 | 1.278 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 78.040 | 177.854 | 2.279 | 1.590 | host-execution, store-retained |
+| flatness-get | FAIL | get_cpu_ms | 0.465 | 0.867 | 1.863 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 260.549 | 260.723 | 1.001 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-69c7afc2/flatness.log | - | - | - | - | host-execution, store-retained |
