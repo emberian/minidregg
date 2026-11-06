@@ -682,10 +682,10 @@ mod tests {
         d.max_queued = 10;
         for (i, name) in ["aa", "bb", "cc", "dd"].iter().enumerate() {
             let status = d.post("/join", format!("name={name}&key={}&route=free", enc(KEY)).as_bytes(), "203.0.113.1", 200 + i as u64).0;
-            assert_eq!(status, if i < 3 { 200 } else { 429 }, "{name}");
+            assert_eq!(status, if i < 3 { 303 } else { 429 }, "{name}");
         }
         // An hour later the source may post again.
-        assert_eq!(d.post("/join", format!("name=ee&key={}&route=free", enc(KEY)).as_bytes(), "203.0.113.1", 3900).0, 200);
+        assert_eq!(d.post("/join", format!("name=ee&key={}&route=free", enc(KEY)).as_bytes(), "203.0.113.1", 3900).0, 303);
     }
 
     #[test]
