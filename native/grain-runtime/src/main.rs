@@ -17843,14 +17843,16 @@ impl Runtime {
     fn startup_recovery(&mut self) {
         let proof = prove_prior_run_stopped(&self.config.task);
         self.prior_run_stopped = proof.is_ok();
+        // Before the early return: an orphaned admitted resident prompt is not among the conditions that
+        // make a startup recovery necessary (demo-dry 2026-11-06: `recovered` with the prompt still unrecorded).
+        if let Err(error) = self.record_lost_resident_prompt() {
+            eprintln!("grain-runtime: lost resident prompt record: {error}");
+        }
         if !self.needs_startup_recovery() {
             return;
         }
         self.startup_recovery_active = true;
         let result = self.with_startup_budget(None, |rt| rt.recover().and_then(|()| rt.automatic_reconcile()));
-        if let Err(error) = self.record_lost_resident_prompt() {
-            eprintln!("grain-runtime: lost resident prompt record: {error}");
-        }
         self.startup_recovery_active = false;
         let decision = self.journal.next_operation_id;
         self.journal.reconciliation_log.push(json!({
