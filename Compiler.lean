@@ -79,6 +79,8 @@ import Compiler.Tower256SuccinctCheck -- succinct additive-FRI acceptance as a B
 import Compiler.Tower256SuccinctHonestRun -- an accepting ell=2, m=1 receipt from a small Lean prover, and one consistent mutant per challenge/seed/fold clause, each failing only its own clause
 import Compiler.Tower256SuccinctReceiptCodec -- the CReceipt wire format from StreamCodec combinators (length-checked lists), checkBytes_iff, round trip and refusals on the accepting one-fold receipt
 import Compiler.Tower256FriNativeDeployment -- work 9104: the additive-FRI prover registered in an extended artifact (catalog [9101, 9104]); acceptResponse_iff is checkBytes_iff
+import Compiler.Tower256SuccinctProver -- the honest succinct prover at any ell, m over the unit basis (unitBasis_independent); compiled by lean_exe tower256-prover-run
+import Compiler.Tower256ContentCert -- LEAF-PROVER-DECISION §6/§6.1 ContentCert on the cube-Merkle commitment: full-disclosure instance; named_or_collision pins the equivocation to frames computed from the two trees
 import Compiler.Tower256AdditiveFriSuccinctController -- additive FRI over a public statement of roots, basis, degrees and query count: succinct_accepts_ideal_or_collision reaches the ideal predicate over any committed strategy consistent with the receipt, or a framed collision at a query path or the last level
 import Compiler.Tower256AdditiveFriRawDeployment  -- concrete raw PCS levels, statement codecs, and opaque-byte verifier witnesses inhabit the collision-retaining deployment path
 import Compiler.Ext6GateProofController -- descriptor-bound Ext6 gate transcript control over opaque bytes; PCS/LDT/ROM security remains explicit
