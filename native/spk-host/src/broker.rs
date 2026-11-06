@@ -1149,7 +1149,15 @@ impl Broker {
                     0o600,
                     false,
                 )?;
-                write_operator_text(&crate::os::runtime_units().join(&unit), &text, 0o644, false)?;
+                // A unit of this same identity (the rendered-by header: store, app, generation) is replaced
+                // when its text differs: after a candidate switch the pinned runtime (ExecStart, its sha) is the
+                // new one, and the retained unit named the old (demo-dry 2026-11-06: STOP refused `exists with
+                // different text` on every grain after the plain flip). Another identity under the unit name
+                // is still refused.
+                let unit_path = crate::os::runtime_units().join(&unit);
+                let same_identity = fs::read_to_string(&unit_path).ok()
+                    .is_some_and(|current| current.lines().next() == text.lines().next());
+                write_operator_text(&unit_path, &text, 0o644, same_identity)?;
                 // No reset-failed here: a crashed generation's failed state and
                 // InvocationID are what STOP's pre-stop check identifies the
                 // dead incarnation by. `start` and `stop` reset it.
