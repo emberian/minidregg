@@ -87,7 +87,10 @@ umask 077
 OPERATOR=${OPERATOR:-mini-core}
 # The archived candidate by its real path: the registration compares the
 # controller's mini/host paths with the root-pinned image.
-CAND=${CAND:-$(readlink -f /var/lib/mini/candidate/current)}
+# Through candidate/current, not the physical directory (since 2026-11-06): the grain spec, the controller
+# and resident configurations and the units name the binaries by this path, so a same-Host candidate switch
+# (ship.sh's plain flip) changes none of them; grain-runtime accepts a path through a link.
+CAND=${CAND:-/var/lib/mini/candidate/current}
 NODE=${NODE:-/var/lib/mini/store/node}
 ROOM=${ROOM:-hermes-lab} BUDGET=${BUDGET:-1000} PRICE=${PRICE:-10} FOUNDER_FUNDING=${FOUNDER_FUNDING:-5000}
 INSTANCE=${INSTANCE:-hermes} BASE=${BASE:-9870000}
@@ -317,9 +320,23 @@ enroll() { # NAME: keygen in its home (its owner's account); the sponsor plans, 
   install -d -o "$(owner_of "$f")" -g "$(owner_of "$f")" -m 0700 "$home"
   [ -e "$home/keys/mini.key" ] || sh_line "$f" "keygen mini.key" >/dev/null
   install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$HO/sponsor" "$HO/sponsor/keys"
-  install -o "$OPERATOR" -g "$OPERATOR" -m 0600 "$home/keys/mini.key" "$HO/sponsor/keys/$INSTANCE-$f.key"
-  sh_line sponsor "enroll plan $INSTANCE-$f $INSTANCE-$f.key $(xxd -p -c 256 "$home/keys/mini.key.next.pub") $(xxd -p -c 256 "$home/keys/mini.key.next.cosign")" >/dev/null
-  sh_line sponsor "enroll seal $INSTANCE-$f" >/dev/null
+  # Resumable: an enrollment this sponsor already submitted is looked up, a planned one is sealed and
+  # submitted (the plan verb refuses a name bound to a retained attempt: demo-dry 2026-11-06, the
+  # subjects step after an earlier partial run).
+  if sh_line sponsor "enroll lookup $INSTANCE-$f" >"$RECORD/subject-$f.json.new" 2>/dev/null \
+     && jq -e '.subject | strings' "$RECORD/subject-$f.json.new" >/dev/null 2>&1; then
+    as_op mv "$RECORD/subject-$f.json.new" "$RECORD/subject-$f.json"
+    echo "install-hermes: $INSTANCE-$f is already enrolled (subject $(subject "$f"))"
+    return 0
+  fi
+  rm -f "$RECORD/subject-$f.json.new"
+  if [ ! -s "$HO/sponsor/enroll/$INSTANCE-$f/command.json" ]; then
+    install -o "$OPERATOR" -g "$OPERATOR" -m 0600 "$home/keys/mini.key" "$HO/sponsor/keys/$INSTANCE-$f.key"
+    sh_line sponsor "enroll plan $INSTANCE-$f $INSTANCE-$f.key $(xxd -p -c 256 "$home/keys/mini.key.next.pub") $(xxd -p -c 256 "$home/keys/mini.key.next.cosign")" >/dev/null
+  fi
+  [ -s "$HO/sponsor/enroll/$INSTANCE-$f/possession.bin" ] || [ -s "$HO/sponsor/enroll/$INSTANCE-$f/sealed.json" ] \
+    || { [ -s "$HO/sponsor/keys/$INSTANCE-$f.key" ] || install -o "$OPERATOR" -g "$OPERATOR" -m 0600 "$home/keys/mini.key" "$HO/sponsor/keys/$INSTANCE-$f.key"
+         sh_line sponsor "enroll seal $INSTANCE-$f" >/dev/null; }
   sh_line sponsor "enroll submit $INSTANCE-$f" | as_op tee "$RECORD/subject-$f.json" >/dev/null
   rm -f "$HO/sponsor/keys/$INSTANCE-$f.key"
   [ -n "$(subject "$f")" ] && [ "$(subject "$f")" != null ] || die "enrollment of $f returned no subject"
@@ -478,8 +495,16 @@ step_create() {
   # socket) resumes: the grain is born and recorded under $G/create; grain-runtime resumes a create whose
   # spec bytes match the recorded sha, and refuses by name when they differ (never a second birth).
   if [ -s "$G/create/birth/outcome.json" ]; then
-    [ "$(sha256sum "$SPEC" | cut -d' ' -f1)" = "$(tr -d '[:space:]' <"$G/create/spec.sha256")" ] \
-      || die "a grain for $INSTANCE was born under a different spec ($G/create); retire that root before another create"
+    if [ "$(sha256sum "$SPEC" | cut -d' ' -f1)" != "$(tr -d '[:space:]' <"$G/create/spec.sha256")" ]; then
+      # A spec that differs only in the candidate directory its binaries live in is the same create: the
+      # birth intent carries no binary path (specs recorded before 2026-11-06 named the physical directory).
+      norm() { jq -S 'walk(if type == "string" then sub("^/var/lib/mini/candidate/[^/]+/"; "/var/lib/mini/candidate/current/") else . end)' "$1"; }
+      [ "$(norm "$SPEC")" = "$(norm "$G/create/spec.json")" ] \
+        || die "a grain for $INSTANCE was born under a different spec ($G/create); retire that root before another create"
+      as_res install -m 0600 "$SPEC" "$G/create/spec.json"
+      sha256sum "$SPEC" | cut -d' ' -f1 | as_res tee "$G/create/spec.sha256" >/dev/null
+      echo "install-hermes create: $INSTANCE's recorded spec re-recorded for the serving candidate"
+    fi
     echo "install-hermes create: $INSTANCE's grain is born (task $(jq -r .task "$G/create/birth-intent.json" 2>/dev/null)); resuming the resident's phase"
   else
     as_op "$GRAIN" create "$SPEC" --birth-socket "$SOCKET" | as_op tee "$RECORD/grain-birth.json"
