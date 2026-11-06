@@ -16,9 +16,10 @@ controller and what Lean keeps. This module registers that work in an artifact, 
   `acceptResponse_iff` is `checkBytes_iff` at the request's statement: accepted bytes decode to
   a receipt that satisfies `SuccinctAccepts` at the deployed commitment scheme.
 
-No Rust kernel exists yet; `NativeGlueGen` names the dispatch function
-`tower256_additive_fri_prove_bytes`, and nothing in the v1 generated surface emits it, because
-this catalog is not the v1 catalog.
+The Rust kernel is `prover/src/tower256_fri_prove.rs`, behind the dispatch function
+`native_dispatch::tower256_additive_fri_prove_bytes` that `NativeGlueGen` names, pinned byte for
+byte to the Lean prover by `prover/tests/tower256_fri_prove_conformance.rs`. Nothing in the v1
+generated surface emits it, because this catalog is not the v1 catalog.
 -/
 import Compiler.Tower256SuccinctReceiptCodec
 import Compiler.ComposableDeploymentManifest
@@ -200,7 +201,7 @@ def honestRequest : ProveRequest where
   ell := 2
   m := 1
   queryCount := 2
-  beta := [Coordinate.one 8, Tower256SuccinctHonestRun.gen]
+  beta := [Coordinate.one 8, Tower256CoordinateMerkle.Coord.ofNat 8 2]
   offset := Coordinate.zero 8
   degree := [2, 2]
   inputWord := []

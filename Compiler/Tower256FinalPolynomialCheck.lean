@@ -145,10 +145,11 @@ example : finalCheck [] 1 [(Coordinate.one 8, Coordinate.zero 8)] = true := by d
 /-- The same shape rejects a nonzero claimed value. -/
 example : finalCheck [] 1 [(Coordinate.one 8, Coordinate.one 8)] = false := by decide
 
-/-- A degree-1 polynomial whose evaluation needs a level-8 product. -/
-example : finalCheck [Coordinate.one 8, Coordinate.topGenerator 7] 2
-    [(Coordinate.one 8, Coordinate.add 8 (Coordinate.one 8) (Coordinate.topGenerator 7))] = true := by
-  decide +kernel
+-- A degree-1 polynomial whose evaluation needs a level-8 product. Evaluated, not kernel-reduced:
+-- `decide +kernel` here made the kernel unfold a level-8 Fan--Paar product (3^8 leaf products
+-- over tree data), the module's whole memory peak.
+#guard finalCheck [Coordinate.one 8, Coordinate.topGenerator 7] 2
+    [(Coordinate.one 8, Coordinate.add 8 (Coordinate.one 8) (Coordinate.topGenerator 7))]
 
 /-- The degree bound has teeth: the same list fails at bound 1. -/
 example : finalCheck [Coordinate.one 8, Coordinate.topGenerator 7] 1 [] = false := by decide

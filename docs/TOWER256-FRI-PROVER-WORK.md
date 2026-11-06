@@ -152,3 +152,32 @@ the opening parts named in the runner.
   (19,445,332 KB).
 
 Size an umbrella seat at no less than 20 GB plus slack. A 12G lane cap cannot run it.
+
+## 7. The native kernel for work 9104 (2026-11-06)
+
+The kernel is `prover/src/tower256_fri_prove.rs`, reached through
+`native_dispatch::tower256_additive_fri_prove_bytes`, the name `NativeGlueGen` already emitted.
+Request codec 9011 goes in; receipt stream 9013 comes out.
+
+It is unverified native compute, pinned to Lean byte for byte:
+- `lake exe tower256-prover-run --vectors FILE` writes `prover/testdata/tower256_fri_vectors.json`.
+  The five request/response pairs are produced by `proveRequest`, the Lean prover, at the unit
+  basis:
+  - ell 2, m 1, q 2;
+  - ell 3, m 0, q 0;
+  - ell 4, m 2, q 3 with offset 9;
+  - ell 6, m 3, q 3;
+  - ell 8, m 3, q 4.
+- `tests/tower256_fri_prove_conformance.rs` checks the following:
+  - every native response equals Lean's;
+  - a trailing byte and a truncated request are refused;
+  - changing one statement byte changes the receipt, except at m = 0 with no queries, where the
+    transcript draws nothing.
+
+The kernel's limits:
+- It takes any basis, but a vector exists only for the unit basis: Lean's reference prover needs
+  the independence proof.
+- `MAX_ELL` is 24.
+- The final degree must not exceed the last level's size.
+
+The docstring of `Compiler/Tower256FriNativeDeployment.lean` now names this kernel.

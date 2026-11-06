@@ -20,7 +20,7 @@ bytes) come from the combinators. The teeth run the codec on the accepting one-f
 `Tower256SuccinctHonestRun`.
 -/
 
-import Compiler.Tower256SuccinctHonestRun
+import Compiler.Tower256SuccinctCheck
 
 namespace Minidregg.Compiler.Tower256SuccinctReceiptCodec
 
@@ -30,7 +30,6 @@ open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec fixedStream digestS
 open Minidregg.Compiler.Tower256CoordinateMerkle
 open Minidregg.Compiler.Tower256FinalPolynomialCheck (C8)
 open Minidregg.Compiler.Tower256SuccinctCheck
-open Minidregg.Compiler.Tower256SuccinctHonestRun
 open Minidregg.Compiler.Tower256AdditiveFriRawDeployment (bootstrapPins)
 open Minidregg.Theory.BinaryTowerFanPaarCodec (Coordinate coordinateFinEquiv capacity)
 open Minidregg.Selvage
@@ -135,40 +134,18 @@ theorem checkBytes_iff (s : CStatement ell m) (pins : Tower256AdditiveFriControl
   | none => simp
   | some r => simp [check_iff]
 
-/-! ## Teeth on the accepting one-fold receipt
+/-! ## Teeth
 
-One `#guard`, so the interpreted prover runs once. -/
+On the bootstrap receipt here (cheap); on the accepting ell = 2 receipt (round trip, refusals,
+the 375-byte pin and the per-part sizes) compiled, in `lake exe tower256-prover-run`
+(`Tower256SuccinctProverRun.shapeTwo`). -/
 
 #guard
-  let honest := prove bootstrapPins none false (Coordinate.zero 8)
-  let bytes := (receiptCodec 2 1 2).encode honest
-  -- The coordinate wire bytes are the transcript's 32-byte value encoding.
-  c8Stream.encode gen == encodeC gen &&
-  c8Stream.encode (honest.challenges 0) == encodeC (honest.challenges 0) &&
-  -- Round trip on the real receipt: it decodes, re-encodes to the same bytes, and is accepted.
-  ((receiptCodec 2 1 2).decode bytes).map (receiptCodec 2 1 2).encode == some bytes &&
-  checkBytes (queryCount := 2) s0 bootstrapPins bytes &&
-  -- A trailing byte, a truncation and a flipped byte inside the first root are each refused.
-  !checkBytes (queryCount := 2) s0 bootstrapPins (bytes ++ [0]) &&
-  !checkBytes (queryCount := 2) s0 bootstrapPins bytes.dropLast &&
-  !checkBytes (queryCount := 2) s0 bootstrapPins (bytes.modify 2 (· ^^^ 1)) &&
-  -- The size at ell = 2, m = 1, two queries, pinned: 510 bytes (724 when each query carried
-  -- two full level-0 paths as length-prefixed proof bytes, 510 with the pair path and the
-  -- next-level leaf; openings 551 -> 337 -> 202).
-  bytes.length == 375
-
-/-- The honest receipt's wire size by part: roots, challenges, seeds, openings, final
-coefficients. -/
-def honestSizes : List Nat :=
-  let r := honest
-  [(finFun 2 digestStream).encode r.roots |>.length,
-   (finFun 1 c8Stream).encode r.challenges |>.length,
-   (finFun 2 (StreamCodec.fin (2 ^ (2 - 1)))).encode r.querySeed |>.length,
-   (finFun 1 (finFun 2 openingStream)).encode r.opening |>.length,
-   (StreamCodec.list c8Stream).encode r.finalCoeffs |>.length]
-
-/-- info: [68, 34, 5, 202, 66] -/
-#guard_msgs in #eval honestSizes
+  let bytes := (receiptCodec 1 0 0).encode (bootReceipt bootCoeffs)
+  ((receiptCodec 1 0 0).decode bytes).map (receiptCodec 1 0 0).encode == some bytes &&
+  checkBytes (queryCount := 0) bootStatement bootstrapPins bytes &&
+  !checkBytes (queryCount := 0) bootStatement bootstrapPins (bytes ++ [0]) &&
+  !checkBytes (queryCount := 0) bootStatement bootstrapPins bytes.dropLast
 
 /-- info: 'Minidregg.Compiler.Tower256SuccinctReceiptCodec.checkBytes_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms checkBytes_iff
