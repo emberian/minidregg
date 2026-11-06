@@ -293,6 +293,29 @@ fn drain_preadmission_refusal(config:&Config,config_path:&Path,journal:&mut Resi
     Ok(true)
 }
 
+/// A pending prompt with no completion at all: the connection to the controller was lost while it ran
+/// (the pair restarted mid-prompt, demo-dry 2026-11-06). The controller, once it has recovered and
+/// recorded the prompt's outcome (undecided, for the audit), answers `resident lost-prompt ID SHA`; that
+/// answer becomes the retained `lost` completion frame, bound to this pending, and close_refused_pending
+/// decides it the ordinary way: the audit refuses a prompt that left no effects (pending closed), and one
+/// with effects stays for the operator with the retry the record names. Nothing is replayed.
+fn drain_lost_admitted(config:&Config,journal:&mut ResidentState,state:&Path)->Result<bool> {
+    let Some(pending)=journal.pending.as_ref() else{return Ok(false)};
+    if journal.last_completion.is_some() {return Ok(false)}
+    let id=pending["residentPromptId"].as_str().ok_or("pending resident prompt has no unique identity")?;
+    let sha=pending["promptSha256"].as_str().ok_or("pending resident prompt has no digest")?;
+    let admin_sock=config.state_dir.join("admin.sock");
+    let Ok(text)=control::admin_call(&admin_sock,&format!("resident lost-prompt {id} {sha}")) else {return Ok(false)};
+    let Ok(answer)=serde_json::from_str::<Value>(&text) else {return Ok(false)};
+    if answer["type"]!="mini-resident-prompt-lost-v1" {return Ok(false)}
+    let op=answer["promptOperationId"].as_u64().filter(|op|*op>0).ok_or("lost prompt answer names no operation")?;
+    let bound=sha256_bytes(&serde_json::to_vec(pending).map_err(|e|e.to_string())?)?;
+    journal.last_completion=Some(json!({"type":"prompt-complete","outcome":"lost","residentPendingSha256":bound,
+        "residentOrigin":{"residentPromptId":id,"promptSha256":sha,"promptOperationId":op,"sessionId":answer["sessionId"]}}));
+    atomic_json(state,journal)?;
+    Ok(true)
+}
+
 /// A prompt whose retained frame is not `completed` is decided only by the
 /// controller's typed outcome record (gr §4.3), never by the frame's label.
 /// `refused` closes it here: there is no completion receipt to wait for, the
@@ -450,6 +473,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     drain_preadmission_refusal(&config,&options.controller,&mut journal,&state)?;
     resident_completion::drain(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after completion: {e}"))?; }
+    drain_lost_admitted(&config, &mut journal, &state)?;
     close_refused_pending(&config, &mut journal, &state)?;
     if let Some(pending)=journal.pending.as_ref() {
         return Err(format!("resident has an uncertain prior prompt; its durable controller state must be reviewed, never automatically replayed: \

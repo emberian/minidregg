@@ -17848,6 +17848,9 @@ impl Runtime {
         }
         self.startup_recovery_active = true;
         let result = self.with_startup_budget(None, |rt| rt.recover().and_then(|()| rt.automatic_reconcile()));
+        if let Err(error) = self.record_lost_resident_prompt() {
+            eprintln!("grain-runtime: lost resident prompt record: {error}");
+        }
         self.startup_recovery_active = false;
         let decision = self.journal.next_operation_id;
         self.journal.reconciliation_log.push(json!({
@@ -17870,6 +17873,34 @@ impl Runtime {
     /// Settle what `recover` fenced when the identity of the held allowance
     /// is machine-provable, then derive the external-effect acknowledgement
     /// when every channel the worker had is accounted for.
+    /// An admitted resident prompt whose controller died while it ran (the pair restarted mid-prompt,
+    /// demo-dry 2026-11-06): the prior run is proven stopped, no child or Hermes session survives, and the
+    /// prompt has no outcome record, so nothing could ever audit it and the resident held it pending for
+    /// good. The outcome is recorded undecided for the audit (`reconcile prompt audited OP`, through the
+    /// resident's close): the audit, not this record, decides whether the prompt left effects.
+    fn record_lost_resident_prompt(&mut self) -> Result<()> {
+        let Some(origin) = self.journal.resident_prompt_origin.clone() else { return Ok(()) };
+        if !self.prior_run_stopped || self.journal.child.is_some() || self.journal.hermes_session.is_some()
+            || self.prompt_active || self.journal.pending.is_some() {
+            return Ok(());
+        }
+        let op = origin.prompt_operation_id;
+        if prompt_outcome::read(&self.config.state_dir, op)?.is_some() { return Ok(()); }
+        prompt_outcome::write(&self.config.state_dir, &prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(), prompt_operation_id: op,
+            resident_prompt_id: Some(origin.resident_prompt_id.clone()), prompt_sha256: Some(origin.prompt_sha256.clone()),
+            session_id: origin.session_id.clone(),
+            outcome: prompt_outcome::Outcome::Undecided {
+                retry: prompt_outcome::Retry { admin: vec!["reconcile effects".into()], operation: None },
+                detail: "controller restarted during the prompt; no completion was produced (lost reply)".into(),
+            },
+        })?;
+        let decision = self.next_id()?;
+        self.journal.reconciliation_log.push(json!({"decisionId":decision.to_string(),"action":"record-lost-resident-prompt",
+            "promptOperationId":op.to_string(),"residentPromptId":origin.resident_prompt_id,"automatic":true}));
+        self.save()
+    }
+
     fn automatic_reconcile(&mut self) -> Result<()> {
         if self.preserves_foreground_session() {
             return Err("retained session requires exact foreground recovery; reservation preserved".into());
@@ -18821,6 +18852,24 @@ fn serve(mut rt: Runtime) -> Result<()> {
                         Ok(value) => value.to_string(),
                         Err(error) => format!("error: {error}"),
                     });
+                    continue;
+                }
+                if let Some(rest)=request.command.strip_prefix("resident lost-prompt ") {
+                    // The resident's question about a prompt it holds pending without a completion: the
+                    // controller names the prompt's operation when the prompt is its retained admitted origin,
+                    // nothing of it still runs, and its outcome is recorded (record_lost_resident_prompt).
+                    let result=(|| -> Result<Value> {
+                        let (id,sha)=rest.split_once(' ').filter(|(_,s)| !s.contains(' ')).ok_or("resident lost-prompt takes ID SHA")?;
+                        if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) { return Err("invalid resident prompt identity".into()); }
+                        let origin=rt.journal.resident_prompt_origin.as_ref().ok_or("no retained resident prompt origin")?;
+                        if origin.resident_prompt_id!=id || origin.prompt_sha256!=sha { return Err("the retained resident prompt origin is another prompt".into()); }
+                        if rt.journal.child.is_some() || rt.journal.hermes_session.is_some() || rt.prompt_active { return Err("the prompt still runs; nothing is lost".into()); }
+                        let record=prompt_outcome::read(&rt.config.state_dir,origin.prompt_operation_id)?.ok_or("prompt outcome absent; the controller has not recovered this prompt")?;
+                        Ok(json!({"type":"mini-resident-prompt-lost-v1","promptOperationId":origin.prompt_operation_id,"sessionId":origin.session_id,
+                            "outcome":serde_json::to_value(&record.outcome).map_err(|e|e.to_string())?}))
+                    })();
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
                     continue;
                 }
                 if let Some(rest)=request.command.strip_prefix("resident refuse-unadmitted ") {
