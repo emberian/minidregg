@@ -2,21 +2,54 @@
 
 The member's side of the Host: the `mini` client (shell, workspace, chat), the consent provider
 and its residents, and the web body. A present-state table, rewritten whole. Lane `lane/perf-client`
-(worktree `/Users/ember/dev/minidregg-lanes/perf-client`, hbox pool tree `t8`, scratch world and
-tools under `hbox:/ci/pc`). Neighbours: the exorcist owns the Host's read ops, the fsync removal and
-the web shell-child pool; hot-path owns submit, propose, FORMAT, the consent snapshot start, the
-`Patch.run`/`setAll` chain and `DeclaredResourceController`'s guards.
+(worktree `/Users/ember/dev/minidregg-lanes/perf-client`, hbox pool tree `t4`, scratch worlds and
+tools under `hbox:/ci/pc`, the demo Store copy under `hbox:/ci/pc/demo`). Neighbours: the exorcist
+owns the Host's read ops, the fsync removal and the web shell-child pool; hot-path owns submit,
+propose, FORMAT, the consent snapshot start, the `Patch.run`/`setAll` chain and
+`DeclaredResourceController`'s guards; store-retained owns the served state's representation.
+
+**The budget is 10 ms per member operation** (ember, 2026-11-06), with a cold open under 1 s as the
+floor. Every cost below is read against it.
 
 ## How it is measured
 
-`hbox:/ci/pc/w` is a scratch world (`jworld-scratch.sh up`, five members, candidate b9450147f =
-batch 4 for the Host, the consent provider and the codec). `/ci/pc/pcm.py WORLD MEMBER MINI REPS
-LINE...` runs a shell line the way the forced ssh command does (the world's `mini-shell-ssh`, a
-chosen `mini`) and reports wall time and the CPU each role spent (client, private Host, Store
-helper, consent provider, codec, relay), summed over every thread (`/proc/PID/task/*/schedstat`;
-the first version read only the main thread and showed the Lean Host at 0). `/ci/pc/pcweb.sh`
-times the web gateway, helper and body. hbox ran at load 12 to 33 throughout: wall numbers are
-inflated, CPU numbers much less.
+`hbox:/ci/pc/wN` are scratch worlds (`/ci/pc/up9.sh CANDIDATE wN PORT`: `jworld-scratch.sh up`,
+five members). `/ci/pc/pcm.py WORLD MEMBER MINI REPS LINE...` runs a shell line the way the forced
+ssh command does (the world's `mini-shell-ssh`, a chosen `mini`) and reports wall time and the CPU
+each role spent (client, Store Host, Store helper, consent provider, codec, relay), summed over every
+thread (`/proc/PID/task/*/schedstat`). `/ci/pc/demo/meas.py SETTLE CMD...` runs a Host command,
+samples RSS every 20 ms and timestamps the `MINI_OPEN_TIMING` lap lines; `/ci/pc/demo/mc.py
+PROVIDER CONFIG` cold-starts a consent provider on a Store and times its admission (frame 237).
+`/ci/pc/demo/overlay.sh NAME` copies the base candidate and swaps in this lane's `mini` and consent
+provider. Wall numbers on hbox are inflated by its load; CPU numbers much less.
+
+## The demo Store, measured (2026-11-06, `hbox:/ci/pc/demo`, base candidate ae74dca4ec2d)
+
+A consistent copy of the demo Store: 3,544 records, 44.1 MB of record bytes (median record
+1,975 B; 534 resource births at 62 to 107 KB each are 33 MB of it: every birth carries the whole
+authority cell's post image), 0.6 MB of tags, newest checkpoint 5.9 MB, 55 checkpoints kept
+(176 MB, every one since height 64), 131,652 node rows (8.6 MB).
+
+| open | what runs it | wall (hbox, load 1 to 14) | peak RSS | held after | where it goes |
+|---|---|---|---|---|---|
+| light (`NativeHostSession.start` -> `DurableServed.openHead`: checkpoint + suffix) | every Store Host (`minidregg-host CONFIG stdio`) at start | 1.45 to 1.98 s cold | 375 MB | 376 MB RSS, 306 MB anon | read 0.25 s, checkpoint decode, root and MAC 0.76 s (0.35 s warm), records/tags/index/replay 0.45 s |
+| full (`DurableReceiverIO.loadChained`) | a Store Host the first time it serves a full-shaped op (`sessionOpened`/`sessionFull`/`sessionWalked`: grain births, dry runs, lifecycle and walk families, ~33 Host ops), every consent provider's start (`ClientConsentCore.verifyInitial`), every consent rebase (lag of 64 records) | 8.9 s | 2,226 MB | 1,215 MB | read of all 3,544 entries 3.4 s (RSS 0 -> 1.29 GB), checkpoint 1.0 s (-> 1.39 GB), gate and rebuild 4.4 s (-> 2.23 GB; decoding every record alone 3.7 s) |
+| cold consent provider (`minidregg-client-consent CONFIG stdio`, first admission) | each member's provider: a resident, or the delegated worker's own child (`serve-controller-consent` without `--resident-dir`) | 10.6 s (26.6 s at load 14) | 2,230 MB | 1,253 MB RSS, 1,181 MB anon, 1,252 MB PSS | the full open above, then the walk from the checkpoint |
+
+Where the memory is: every byte is a `List UInt8` cell (24 bytes per byte). The read turns the
+44 MB of record bytes into ~1.06 GB of lists, decoding every prefix record allocates another
+~1.06 GB (the records' `canonicalPostBytes` and event bytes), and the checkpoint (5.9 MB) is
+another ~141 MB as a list and again as its decoded cells. What a full open holds afterwards is the
+decoded records (`Loaded.image.accepted`, ~1.06 GB) plus the state's cells: 1.2 GB, about 210x the
+checkpoint. 71% of the open's samples are in the kernel (page faults zeroing that memory), 25% in
+the Host's own code. Peak = the entry lists and the decoded records alive together.
+
+What a warm member command costs, against 10 ms (scratch world on the base candidate, member-1,
+`mini-shell-ssh` with residents warm): `credit` 7 to 10 ms when nothing was written since the
+member's last command; **+~8 ms of consent CPU per record anyone else wrote meanwhile** (10 records:
+93 to 105 ms; 30 records: 228 to 256 ms), and a full open (8.9 s here, 7 s on the demo) once the
+lag reaches 64. On the demo, where the clock, Hermes and other members write between a member's
+commands, that is the 1,050 ms `credit`. Row 19 below removes it from the command path.
 
 ## Findings
 
@@ -43,6 +76,13 @@ Staging 7fee25ff's `mini` (it carries the exorcist's batches) unless said otherw
 | 17 | twin selection of a member's delegated consent and shared codec (`mini-line`, `mini-web-spawn`) | each read `consent/peer.sock`, `peer.pins` (or hashed the provider) and `/etc/mini/session-codec` itself | one member's two sessions must select alike | correctness, not cost | `native/mini-session-env` is the one reading | caa988a88 |
 | 18 | `workspace::recheck_commitment` in a resident (`line-resident`, `command-resident`, the client resident) | cached "checked" in a process static: once per resident lifetime | a rotation or revocation by another holder between commands is what the check exists to catch | a correctness bug, not a cost (batches 8 and 9 not shippable without it) | `capture::argv` forgets the checks before each resident command; composing verbs' in-process steps still share one check | d035d8250 (batch 10) |
 | 11 | world bring-up (`jworld-scratch.sh up`, dregg-infra) | 219 s for a five-member scratch world | | every measurement world and journey pays it | for whoever owns world bring-up | noted |
+| 19 | the consent provider's admission of other writers' records (`ClientConsentCore.serve` -> `refresh`/`refreshHeld`), made on the member's next frame | every record anyone appended since the member's last command was admitted inside that command | the records landed seconds or hours earlier; the member is waiting now | ~8 ms of consent CPU per foreign record on the command path (30 records: `credit` 228 to 256 ms); the demo's 1,050 ms `credit`; at a lag of 64, a full open (row 20) | frame 237 (`CONSENT_CATCH_UP`): admission alone. The member's resident (`mini_sdk::consent`) and the delegated worker's own verifier run a catch-up thread (`HeadWatch`: the Store's `STORE.head-anchor` is renamed on every append; stat'ed every 100 ms, once a second without it) that admits as records land; the first catch-up is the start admission | 82a555e85 (on main): 30 foreign records then `credit` 228 to 256 ms before, 8 to 9 ms after; idle cost ~2 ms CPU per second across six residents |
+| 20 | every full open (`DurableReceiverIO.loadChained`: `transport.read 1 true`, `openState`, `openLoaded`) | reads every entry into `List UInt8` lists, decodes every prefix record, keeps the decoded log (`Loaded.image.accepted`) | the checkpoint already holds the prefix's state; `List UInt8` is 24 bytes per byte | demo Store: 8.9 s, 2.23 GB peak, 1.22 GB held (row in the table above); a consent provider's start 10.6 s and 1.25 GB | the structural fix is an open that neither reads nor holds the prefix (the "journal read at use" unit of `DurableFastForwardSpec`; the KN2 deletion of the full shape) and bytes as `ByteArray`; a constant-factor step inside the current types: parse the read into one packed buffer and decode prefix records from it (`StreamCodec.decodeAt`, already native for `recordFrame`) without building the entry lists (peak ~-1 GB, the held 1.2 GB unchanged) | open (largest memory cost; not on the warm path since row 19) |
+| 21 | split tenancy as deployed on the demo: each hosted member's `serve-controller-consent` runs its OWN provider (no `--resident-dir`) | one 1.25 GB provider per member, each admitting every record | the providers are byte-identical work (row 8) | 1.25 GB resident and the whole admission CPU per member | render the units with `--resident-dir` (a36d8bdfa: ONE operator resident; a member's worker is a 2 MB relay); infra's | ops: ready since batch 7 |
+| 22 | consent rebase (`refreshExtended`: lag >= `checkpointEvery` -> `verifyInitial`) | a provider 64 records behind restarts from the checkpoint with a full open | the open is O(the whole log) (row 20) while the catch-up it replaces is O(lag) | 7 to 9 s at the demo's height, growing with the log | with row 19 the lag stays at the last moment's records, so it fires only after a restart or outage; the open itself is row 20 | mitigated by row 19 |
+| 23 | the Store Host's full image (`NativeHostSession.materialize`) | the first full-shaped op (grain birth prepare, dry run 130, op 5's fallback, lifecycle and walk families; 33 functions in `Host/Main.lean`) opens the whole log and keeps it | the light opening serves the rest | 375 MB -> ~1.6 GB resident, 8.9 s once per Host process | porting those families to the light opening (`scripts/ports/full-loaded-callers.txt`, the KN2 ratchet) | open (KN2) |
+| 24 | `durable_checkpoint` | every checkpoint is kept (55 on the demo, 176 MB) | the open reads only the newest; `Reader.stateAt` and `durable-checkpoint-at` want one at or below a past height | disk and backup size, not time | keep the newest few plus a sparse ladder for past-height reads; needs `checkpointAt`'s users to accept a longer replay | open |
+| 25 | the delegated worker's lock (`consent_proxy::serve_connection`) | waits for a busy verifier with `try_lock` and a 10 ms sleep | a blocking wait with the same deadline wakes at once | up to 10 ms per frame whenever a catch-up (row 19) or another connection holds the verifier | a condition variable with the REPLAY deadline | open (small) |
 
 Web pages on this world (staging binaries, member-1, warm, four GETs): `/`, `/doc`, `/story`, `/room`,
 `/apps` 2 to 7 ms; `/receipts` 11 to 13 ms; `/keys` 60 to 75 ms (two key-status Host calls);
@@ -63,6 +103,27 @@ path adds to it.
 
 Memory method: `smaps_rollup` Pss and Private over the resident processes (`consent-resident`,
 `codec-resident`, the provider, the codec Host) of this world (`/ci/pc/mem.sh`).
+
+## Row 19, before and after (hbox, base ae74dca4ec2d on /ci/pc/w9 against its overlay cand-pc1 on /ci/pc/w10)
+
+| member-1's `credit`, ms wall (consent CPU) | base | frame 237 |
+|---|---|---|
+| warm, nothing written since | 8 (2) | 7 (3) |
+| right after member-2 wrote 10 records | 93 (76) | 9 (1) |
+| right after member-2 wrote 30 records | 228 (219) | 8 (1) |
+| 1 s after member-2 wrote 30 more | 256 (246) | 9 (1) |
+
+The admission CPU is unchanged; it is spent as records land instead of inside the next command.
+Idle, the catch-up threads cost ~2 ms of CPU per second across a world's six residents (a stat
+every 100 ms each). A cold provider on the demo Store copy answers 237 in 10.6 s and then 0 ms per
+237 with nothing new: the cold start now happens when the resident starts, not when a member asks.
+
+At height ~1,560 on the overlay world (1,500 `say` records written by members 2 to 4, catch-up
+live): `credit` 12 to 13 ms (Store Host 5 ms CPU, consent 2), `say` 79 to 100 ms (Store Host
+60 ms CPU against 21 ms at height ~60; consent 147 ms CPU summed over every member's resident,
+each admitting the same record: row 21). Against 10 ms, what remains on a warm read is the Store
+Host's per-op work growing with height (2 to 5 ms for `credit`'s three ops), the client's process
+start and workspace load (~4 ms) and the wrapper; on a write, the Store Host's op 2 (hot-path's).
 
 ## A `doc new`, call by call (MINI_TRACE, batch-6 world hbox:/ci/pc/w6, load ~24)
 
@@ -127,7 +188,8 @@ Follow-up 59dd7ded4 (staging db074a736, batch 6): a resident also ends when the 
 Batch 2 (5415aecf7, staging 227451d8c, batch 7): row 9.
 Batch 3 (b34173dad, with f95edc7bf; staging 8ca47d577, batch 7): row 10.
 Batch 4 (a36d8bdfa with 394039fb1): row 8 under split tenancy (opt-in: units from infra).
-Batch 9 (997905c0b): rows 14, 15. Batch 10 (staging): rows 16, 17, 18.
+Batch 9 (997905c0b): rows 14, 15. Batch 10 (staging): rows 16, 17, 18. 82a555e85 (main): row 19 (frame 237 and the
+catch-up threads; needs the consent provider, `mini` and the protocol table from one candidate).
 
 Client syscalls per verb, for the record: a warm ssh `say` is 2,365 syscalls for the whole client tree
 (wrapper included). The explorer's 12,031 on batch 5 counted the residents that `strace -f` followed for
