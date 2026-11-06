@@ -14,7 +14,8 @@ rev = "4d9d67be64634f09a85206238df9380aa3733a93"
 name = "Selvage"
 srcDir = "../.."
 roots = ["Selvage.CorrelatedAgreement", "Selvage.ReedSolomon", "Selvage.Proximity",
-  "Selvage.ProximityGapUD", "Selvage.ProximityGapUDSharp"]
+  "Selvage.ProximityGapUD", "Selvage.ProximityGapUDSharp", "Selvage.Rbr", "Selvage.Depth",
+  "Selvage.FiatShamir"]
 
 [[lean_lib]]
 name = "SelvageArkLib"
