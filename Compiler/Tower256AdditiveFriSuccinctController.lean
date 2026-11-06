@@ -275,8 +275,10 @@ theorem succinct_accepts_ideal_or_collision (pcs : RawMerklePcs ell)
 
 /-! ## Inhabitation: every transcript is consistent with the receipt that reads its roots -/
 
-/-- Reading `T`'s roots into a receipt makes `T` consistent with it, so the soundness theorem
-quantifies over a nonempty set of strategies for every receipt shape. -/
+/-- Reading `T`'s roots into a receipt makes `T` consistent with it: for every choice of the
+non-root fields, some receipt carrying them is consistent with `T`, so `hcons` in the soundness
+theorem is satisfiable. It does not give, for a receipt whose roots are given, a strategy
+consistent with it; that is extraction, which this file does not provide. -/
 theorem consistent_of_roots {pcs : RawMerklePcs ell} (statement : SuccinctStatement ell m)
     (T : RawTranscript pcs) (challenges : Fin m → Tower256)
     (querySeed : Fin queryCount → PowerTwoFriLevels ell 1)

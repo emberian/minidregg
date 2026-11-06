@@ -9,7 +9,9 @@ list-shaped while `check` and `check_iff` keep the function-shaped receipt uncha
 * roots: `m + 1` digests (`digestStream`);
 * challenges: `m` coordinates (`c8Stream`, the 32-byte little-endian integer of the coordinate);
 * query seeds: `queryCount` values of `Fin (2^(ell-1))`;
-* openings: `m × queryCount` records of three coordinates and three path byte strings;
+* openings: `m × queryCount` pair openings: three coordinates, the Merkle siblings above the
+  leaf pair (shared by both leaves; each leaf's last sibling is the other leaf's hash), and the
+  next-level path, both as digest lists;
 * final coefficients: a list of coordinates.
 
 `decode_encode` and canonicity (`toLawful_canonical`: a decoded receipt re-encodes to the very
@@ -23,7 +25,7 @@ namespace Minidregg.Compiler.Tower256SuccinctReceiptCodec
 
 open Minidregg.Theory
 open Minidregg.Theory.IndexedProgram
-open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec fixedStream bytesStream digestStream)
+open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec fixedStream digestStream merklePathStream)
 open Minidregg.Compiler.Tower256CoordinateMerkle
 open Minidregg.Compiler.Tower256FinalPolynomialCheck (C8)
 open Minidregg.Compiler.Tower256SuccinctCheck
@@ -76,15 +78,14 @@ def c8Stream : StreamCodec C8 :=
 
 /-! ## Openings and the receipt -/
 
-abbrev OpeningWire := C8 × C8 × C8 × List UInt8 × List UInt8 × List UInt8
-
-def openingStream : StreamCodec (FriQueryOpening C8 (List UInt8) (List UInt8)) :=
+/-- A pair opening: three coordinates, the shared path above the leaf pair, and the next-level
+path, both as `merklePathStream` digest lists. -/
+def openingStream : StreamCodec CPairOpening :=
   StreamCodec.xmap
     (StreamCodec.product c8Stream (StreamCodec.product c8Stream (StreamCodec.product c8Stream
-      (StreamCodec.product bytesStream
-        (StreamCodec.product bytesStream bytesStream)))))
-    (fun o => (o.left, o.right, o.next, o.leftPath, o.rightPath, o.nextPath))
-    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2⟩)
+      (StreamCodec.product merklePathStream merklePathStream))))
+    (fun o => (o.left, o.right, o.next, o.pairPath, o.nextPath))
+    (fun w => ⟨w.1, w.2.1, w.2.2.1, w.2.2.2.1, w.2.2.2.2⟩)
     (by intro o; rfl)
     (by intro w; rfl)
 
@@ -151,8 +152,22 @@ One `#guard`, so the interpreted prover runs once. -/
   !checkBytes (queryCount := 2) s0 bootstrapPins (bytes ++ [0]) &&
   !checkBytes (queryCount := 2) s0 bootstrapPins bytes.dropLast &&
   !checkBytes (queryCount := 2) s0 bootstrapPins (bytes.modify 2 (· ^^^ 1)) &&
-  -- The size at ell = 2, m = 1, two queries, pinned.
-  bytes.length == 724
+  -- The size at ell = 2, m = 1, two queries, pinned: 510 bytes (724 when each query carried
+  -- two full level-0 paths as length-prefixed proof bytes; the openings fall from 551 to 337).
+  bytes.length == 510
+
+/-- The honest receipt's wire size by part: roots, challenges, seeds, openings, final
+coefficients. -/
+def honestSizes : List Nat :=
+  let r := honest
+  [(finFun 2 digestStream).encode r.roots |>.length,
+   (finFun 1 c8Stream).encode r.challenges |>.length,
+   (finFun 2 (StreamCodec.fin (2 ^ (2 - 1)))).encode r.querySeed |>.length,
+   (finFun 1 (finFun 2 openingStream)).encode r.opening |>.length,
+   (StreamCodec.list c8Stream).encode r.finalCoeffs |>.length]
+
+/-- info: [68, 34, 5, 337, 66] -/
+#guard_msgs in #eval honestSizes
 
 /-- info: 'Minidregg.Compiler.Tower256SuccinctReceiptCodec.checkBytes_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms checkBytes_iff

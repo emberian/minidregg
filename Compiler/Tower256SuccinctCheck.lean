@@ -160,11 +160,28 @@ structure CStatement (ell m : Nat) where
   independent : LinearIndependent (ZMod 2) (fun j : Fin ell => betaF beta j)
   rounds_le : m ≤ ell
 
+/-- A query's round opening with the leaf pair's Merkle path shared. The two openings at level `j`
+are the two leaves of one pair, so their full top-down paths are `pairPath` followed by the other
+leaf's hash; only the siblings above the pair travel. The next-level path travels as digests. -/
+structure CPairOpening where
+  left : C8
+  right : C8
+  next : C8
+  pairPath : List Digest
+  nextPath : List Digest
+
+/-- The full top-down path of the left leaf, and of the right leaf. -/
+def CPairOpening.leftFull (o : CPairOpening) : List Digest :=
+  o.pairPath ++ [merkleDomainsC.hashLeaf codecC o.right]
+
+def CPairOpening.rightFull (o : CPairOpening) : List Digest :=
+  o.pairPath ++ [merkleDomainsC.hashLeaf codecC o.left]
+
 structure CReceipt (ell m queryCount : Nat) where
   roots : Fin (m + 1) → Digest
   challenges : Fin m → C8
   querySeed : Fin queryCount → PowerTwoFriLevels ell 1
-  opening : (j : Fin m) → Fin queryCount → FriQueryOpening C8 (List UInt8) (List UInt8)
+  opening : (j : Fin m) → Fin queryCount → CPairOpening
   finalCoeffs : List C8
 
 namespace CStatement
@@ -192,14 +209,15 @@ theorem toField_domC (j : Nat) (hj : j ≤ ell) (c : AdditiveFriLevels ell j) :
 
 end CStatement
 
-noncomputable def openingDenote (o : FriQueryOpening C8 (List UInt8) (List UInt8)) :
+/-- The opening a pair opening stands for: both full paths, as the proof codec's bytes. -/
+noncomputable def openingDenote (o : CPairOpening) :
     FriQueryOpening Tower256 (List UInt8) (List UInt8) where
   left := toField o.left
   right := toField o.right
   next := toField o.next
-  leftPath := o.leftPath
-  rightPath := o.rightPath
-  nextPath := o.nextPath
+  leftPath := merkleDomainsC.proofCodec.encode o.leftFull
+  rightPath := merkleDomainsC.proofCodec.encode o.rightFull
+  nextPath := merkleDomainsC.proofCodec.encode o.nextPath
 
 noncomputable def CReceipt.denote (r : CReceipt ell m queryCount) :
     SuccinctReceipt ell m queryCount where
@@ -367,6 +385,19 @@ theorem verifyOpen_iff (n : Nat) (root : Digest) (coordinate : AdditiveFriLevels
             some root)) = true ↔ _
   rw [hleaf]
 
+/-- The opening check on a decoded path. -/
+def recomputesC (n : Nat) (root : Digest) (coordinate : AdditiveFriLevels ell n)
+    (value : C8) (path : List Digest) : Bool :=
+  decide (recompute merkleDomainsC (merkleDomainsC.hashLeaf codecC value)
+    (binaryAddressBits (ell - n) (additiveFriLevelEquivPowerTwo ell n coordinate)) path = some root)
+
+theorem verifyOpenC_encode (n : Nat) (root : Digest) (coordinate : AdditiveFriLevels ell n)
+    (value : C8) (path : List Digest) :
+    verifyOpenC n root coordinate value (merkleDomainsC.proofCodec.encode path) =
+      recomputesC n root coordinate value path := by
+  unfold verifyOpenC recomputesC
+  rw [merkleDomainsC.proofCodec.decode_encode]
+
 /-- `liftBit` over coordinates; it reads the tower only for a dimension proof. -/
 def liftBitC (s : CStatement ell m) (j : Fin m) (bit : ZMod 2)
     (c : AdditiveFriLevels ell ((j : Nat) + 1)) : AdditiveFriLevels ell j :=
@@ -385,18 +416,16 @@ theorem fold_iff (n l r d α p : C8) (hp : toField p ≠ 0) :
     toField_addC, mul_div_assoc', ← sub_eq_iff_eq_add', eq_div_iff hp, CharTwo.sub_eq_add]
 
 def openedC (s : CStatement ell m) (r : CReceipt ell m queryCount) (j : Fin m)
-    (k : AdditiveFriLevels ell ((j : Nat) + 1))
-    (o : FriQueryOpening C8 (List UInt8) (List UInt8)) : Bool :=
-  verifyOpenC j (r.roots ⟨j, by omega⟩) (liftBitC s j 0 k) o.left o.leftPath &&
-  (verifyOpenC ((j : Nat) + 1) (r.roots ⟨(j : Nat) + 1, by omega⟩) k o.next o.nextPath &&
-  (verifyOpenC j (r.roots ⟨j, by omega⟩) (liftBitC s j 1 k) o.right o.rightPath &&
+    (k : AdditiveFriLevels ell ((j : Nat) + 1)) (o : CPairOpening) : Bool :=
+  recomputesC j (r.roots ⟨j, by omega⟩) (liftBitC s j 0 k) o.left o.leftFull &&
+  (recomputesC ((j : Nat) + 1) (r.roots ⟨(j : Nat) + 1, by omega⟩) k o.next o.nextPath &&
+  (recomputesC j (r.roots ⟨j, by omega⟩) (liftBitC s j 1 k) o.right o.rightFull &&
   decide (mulC (addC o.next o.left) (pivotC s.beta j) =
     mulC (addC (domC s.beta s.offset j (liftBitC s j 0 k)) (r.challenges j))
       (addC o.left o.right))))
 
 theorem openedC_iff (s : CStatement ell m) (r : CReceipt ell m queryCount) (j : Fin m)
-    (k : AdditiveFriLevels ell ((j : Nat) + 1))
-    (o : FriQueryOpening C8 (List UInt8) (List UInt8)) :
+    (k : AdditiveFriLevels ell ((j : Nat) + 1)) (o : CPairOpening) :
     openedC s r j k o = true ↔ OpenedQuery (rawPcs ell) s.denote j r.denote k (openingDenote o) := by
   have hj : (j : Nat) < ell := lt_of_lt_of_le j.isLt s.rounds_le
   have hp : toField (pivotC s.beta j) ≠ 0 := by
@@ -404,7 +433,7 @@ theorem openedC_iff (s : CStatement ell m) (r : CReceipt ell m queryCount) (j : 
     exact additiveTowerPivot_ne_zero ell (betaF s.beta) (toField s.offset) s.independent j
       (ell - j - 1) (by omega)
   unfold openedC OpenedQuery
-  simp only [Bool.and_eq_true, decide_eq_true_eq, ← verifyOpen_iff]
+  simp only [← verifyOpenC_encode, Bool.and_eq_true, decide_eq_true_eq, ← verifyOpen_iff]
   rw [fold_iff _ _ _ _ _ _ hp, toField_pivotC, s.toField_domC j hj.le]
   rfl
 

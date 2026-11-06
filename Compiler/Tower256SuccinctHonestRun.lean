@@ -89,17 +89,16 @@ def col0 (address : Fin (2 - 0) → Bool) : C8 :=
 
 def root0 : Digest := cubeRoot merkleDomainsC codecC col0
 
-def path0 (c : AdditiveFriLevels 2 0) : List UInt8 :=
-  merkleDomainsC.proofCodec.encode
-    (cubePath merkleDomainsC codecC col0 (binaryAddressBits (2 - 0) (additiveFriLevelEquivPowerTwo 2 0 c)))
+def path0 (c : AdditiveFriLevels 2 0) : List Digest :=
+  cubePath merkleDomainsC codecC col0 (binaryAddressBits (2 - 0) (additiveFriLevelEquivPowerTwo 2 0 c))
 
 def s0 : CStatement 2 1 := mkStatement root0
 
-def zeroOpening : FriQueryOpening C8 (List UInt8) (List UInt8) :=
-  ⟨Coordinate.zero 8, Coordinate.zero 8, Coordinate.zero 8, [], [], []⟩
+def zeroOpening : CPairOpening :=
+  ⟨Coordinate.zero 8, Coordinate.zero 8, Coordinate.zero 8, [], []⟩
 
 def stub (roots : Fin 2 → Digest) (chal : Fin 1 → C8) (seed : Fin 2 → PowerTwoFriLevels 2 1)
-    (op : Fin 2 → FriQueryOpening C8 (List UInt8) (List UInt8)) (coeffs : List C8) :
+    (op : Fin 2 → CPairOpening) (coeffs : List C8) :
     CReceipt 2 1 2 :=
   ⟨roots, chal, seed, fun _ a => op a, coeffs⟩
 
@@ -136,18 +135,16 @@ def prove (pins : TranscriptPins) (alphaBad : Option C8) (seedBad : Bool) (delta
   let col1 : (Fin (2 - 1) → Bool) → C8 := fun address =>
     evalCoeffs coeffs (domC beta2 (Coordinate.zero 8) 1
       ((additiveFriLevelEquivPowerTwo 2 1).symm (binaryCubeIndexEquiv (2 - 1) address)))
-  let op : Fin 2 → FriQueryOpening C8 (List UInt8) (List UInt8) := fun a =>
+  let op : Fin 2 → CPairOpening := fun a =>
     let k : AdditiveFriLevels 2 1 := additiveCoherentRound s0.rounds_le 0 seeds a
     let lo := liftBitC s0 0 0 k
-    let hi := liftBitC s0 0 1 k
     { left := word0 lo
-      right := word0 hi
+      right := word0 (liftBitC s0 0 1 k)
       next := evalCoeffs coeffs (domC beta2 (Coordinate.zero 8) 1 k)
-      leftPath := path0 lo
-      rightPath := path0 hi
-      nextPath := merkleDomainsC.proofCodec.encode
-        (cubePath merkleDomainsC codecC col1
-          (binaryAddressBits (2 - 1) (additiveFriLevelEquivPowerTwo 2 1 k))) }
+      -- The low leaf's path without its last (leaf-level) sibling, which is the high leaf.
+      pairPath := (path0 lo).dropLast
+      nextPath := cubePath merkleDomainsC codecC col1
+          (binaryAddressBits (2 - 1) (additiveFriLevelEquivPowerTwo 2 1 k)) }
   stub roots (fun _ => alpha) seeds op coeffs
 
 /-! ## Per-clause views, for attributing each mutant's rejection -/
@@ -161,6 +158,20 @@ def seedClause (s : CStatement 2 1) (pins : TranscriptPins) (r : CReceipt 2 1 2)
 def openedClause (s : CStatement 2 1) (r : CReceipt 2 1 2) : Bool :=
   decide (∀ (j : Fin 1) (a : Fin 2),
     openedC s r j (additiveCoherentRound s.rounds_le j r.querySeed a) (r.opening j a) = true)
+
+/-- Each query's four opening checks at round 0, separately: the left leaf, the next-level leaf
+and the right leaf authenticate, and the fold equation holds. -/
+def openingParts (s : CStatement 2 1) (r : CReceipt 2 1 2) : List (Bool × Bool × Bool × Bool) :=
+  (List.finRange 2).map fun a =>
+    let j : Fin 1 := 0
+    let k := additiveCoherentRound s.rounds_le j r.querySeed a
+    let o := r.opening j a
+    (recomputesC 0 (r.roots 0) (liftBitC s j 0 k) o.left o.leftFull,
+     recomputesC 1 (r.roots 1) k o.next o.nextPath,
+     recomputesC 0 (r.roots 0) (liftBitC s j 1 k) o.right o.rightFull,
+     decide (mulC (addC o.next o.left) (pivotC s.beta 0) =
+       mulC (addC (domC s.beta s.offset 0 (liftBitC s j 0 k)) (r.challenges j))
+         (addC o.left o.right)))
 
 /-! ## Teeth -/
 
@@ -187,7 +198,36 @@ def openedClause (s : CStatement 2 1) (r : CReceipt 2 1 2) : Bool :=
 #guard
   let r := prove bootstrapPins none false (Coordinate.one 8)
   !check s0 bootstrapPins r && challengeClause s0 bootstrapPins r &&
-    seedClause s0 bootstrapPins r && !openedClause s0 r
+    seedClause s0 bootstrapPins r && !openedClause s0 r &&
+    openingParts s0 r == [(true, true, true, false), (true, true, true, false)]
+
+def honest : CReceipt 2 1 2 := prove bootstrapPins none false (Coordinate.zero 8)
+
+/-! ## The shared pair path
+
+The compact opening is complete only because the two level-`j` leaves of a query are the two
+leaves of one Merkle pair: `liftBitC` appends the folded coordinate last, and the last address
+bit is the leaf-level split. On the honest receipt both full paths a pair opening stands for are
+the leaves' own `cubePath`s, so nothing the prover could have sent was dropped. -/
+
+#guard (List.finRange 2).all fun a =>
+  let k := additiveCoherentRound s0.rounds_le 0 honest.querySeed a
+  let o := honest.opening 0 a
+  o.leftFull == path0 (liftBitC s0 0 0 k) && o.rightFull == path0 (liftBitC s0 0 1 k) &&
+    o.pairPath.length == 1
+
+-- Every part of every honest opening holds.
+#guard openingParts s0 honest == [(true, true, true, true), (true, true, true, true)]
+
+-- A corrupted shared digest: both leaves fail to authenticate, the next-level leaf and the
+-- fold still hold, so only the opened clause fails.
+#guard
+  let r : CReceipt 2 1 2 := { honest with opening := fun j a =>
+    let o := honest.opening j a
+    { o with pairPath := o.pairPath.map fun d => ⟨d.value + 1⟩ } }
+  !check s0 bootstrapPins r && challengeClause s0 bootstrapPins r &&
+    seedClause s0 bootstrapPins r && !openedClause s0 r &&
+    openingParts s0 r == [(false, true, false, true), (false, true, false, true)]
 
 /-! ## The query prefix, absorbed once
 
@@ -196,8 +236,6 @@ two seed functions equal). Here the compiled kernels are compared on the honest 
 query, the 32 bytes finished from the midstate (`mini_cshake256_absorb`, then
 `mini_cshake256_finish_32`) are the 32 bytes of the one-shot hash (`mini_cshake256_32`), not only
 the one seed bit they reduce to at `ell = 2`. -/
-
-def honest : CReceipt 2 1 2 := prove bootstrapPins none false (Coordinate.zero 8)
 
 def seedInput (a : Fin 2) : List UInt8 := envelope (encodeLength a)
 

@@ -64,6 +64,17 @@ Mults are Tower256 multiplications. A single Fan–Paar product is 4^8 = 65,536 
 - **The verifier is path-bound.** It is about `q·Σ_j 3(ell−j)` Keccak-f, and every query
   costs three paths per round. Low and high openings are siblings at the same level, so a
   shared path would save about 1/3. That is a receipt-codec change, not a transcript change.
+  **Landed (bytes only):** a round opening now carries the `k − 1` siblings above the leaf pair
+  (`CPairOpening.pairPath`, level `k = ell − j`); each leaf's full path is that list plus the
+  other leaf's hash, rebuilt in `openingDenote`. Per query and round the wire drops `k + 1`
+  digests and two length prefixes: `3k − 1` digests become `2k − 2`, so path bytes fall by
+  `(k+1)/(3k−1)`, toward 1/3. Measured at ell = 2, m = 1, two queries: openings 551 → 337
+  bytes, receipt 724 → 510. The checker still hashes both leaves' paths; hashing the shared
+  part once (the same 1/3 off verifier Keccak-f) needs the lemma that the two leaves differ
+  exactly in the last address bit, not yet written.
+  **Next, priced, not landed:** round `j`'s next-level leaf is one of round `j+1`'s pair, so for
+  `j < m − 1` its `k − 1`-digest path and its value repeat what round `j+1` carries. Dropping
+  them takes per-round path digests from `2k − 2` to `k − 1`.
 - **Proof bytes are path-bound too.** They run from 1.5 to 5 MB at UD-100. Rate is a
   per-leaf trade. At equal message size 2^14, rate 1/2 (`ell` = 15) halves the prover's
   Keccak-f (145k against 272k) but costs 1.48× the proof bytes (2.86 MB against 1.93 MB) and
