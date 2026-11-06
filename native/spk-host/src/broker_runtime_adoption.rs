@@ -365,12 +365,16 @@ impl Broker {
         )
     }
     pub(super) fn save_unit_runtime(&self, unit: &str, pin: &RuntimePin) -> io::Result<()> {
-        write_operator_text(
-            &self.broker_dir().join("unit-runtimes").join(unit),
-            &serde_json::to_string(pin)?,
-            0o600,
-            false,
-        )?;
+        // A generation's runtime pin is written once, when its unit is first rendered; a later rendering of
+        // the same unit (its STOP after a candidate switch, demo-dry 2026-11-06) keeps the retained pin: the
+        // generation runs the runtime that started it until it stops, and `require_unit_runtime` sends a START
+        // under the new runtime to a new generation. Replacing it here refused `exists with different text`
+        // and left every grain unstoppable after a flip.
+        let saved = self.broker_dir().join("unit-runtimes").join(unit);
+        if saved.exists() {
+            return Ok(());
+        }
+        write_operator_text(&saved, &serde_json::to_string(pin)?, 0o600, false)?;
         Ok(())
     }
     pub(super) fn require_unit_runtime(&self, store: &str, unit: &str) -> io::Result<()> {
