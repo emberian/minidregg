@@ -163,6 +163,22 @@ impl Runtime {
         // Called only when the source preflight fails, before entering Hermes
         // preparation, first native reserve, provider or worker dispatch.
         resident_origin::validate(id,sha,prompt)?;
+        self.record_unadmitted_refusal(id,sha,reason)
+    }
+    /// The operator's review of a prompt the resident holds pending without a completion (its connection to
+    /// the controller was lost while the prompt ran: a restart of the pair, demo-dry 2026-11-06): admin
+    /// `resident refuse-unadmitted ID SHA`. The refusal binds the controller's own preparation record of
+    /// ID/SHA; the guards below refuse a prompt that entered native preparation or was admitted, so no effect
+    /// is ever classified as unadmitted. The resident's next start finds the refusal and closes the pending.
+    pub(crate) fn refuse_unadmitted_resident_prompt(&self,id:&str,sha:&str)->Result<Value> {
+        if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident refusal identity".into());}
+        if refusal_path(&self.config,id).try_exists().map_err(|e|e.to_string())? {
+            return self.resident_admission(id,sha);
+        }
+        self.record_unadmitted_refusal(id,sha,"refused by the operator: the prompt never entered native preparation (its reply was lost)")?;
+        self.resident_admission(id,sha)
+    }
+    fn record_unadmitted_refusal(&self,id:&str,sha:&str,reason:&str)->Result<()> {
         let (_,preparation_sha256)=self.retained_preparation(id,sha)?;
         if entered_path(&self.config,id).try_exists().map_err(|e|e.to_string())? {
             return Err("entered source prompt cannot receive preadmission refusal".into());

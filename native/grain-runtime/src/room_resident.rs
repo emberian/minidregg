@@ -451,7 +451,11 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     resident_completion::drain(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after completion: {e}"))?; }
     close_refused_pending(&config, &mut journal, &state)?;
-    if journal.pending.is_some() { return Err("resident has an uncertain prior prompt; its durable controller state must be reviewed, never automatically replayed".into()); }
+    if let Some(pending)=journal.pending.as_ref() {
+        return Err(format!("resident has an uncertain prior prompt; its durable controller state must be reviewed, never automatically replayed: \
+            if the controller shows no admission for it (admin `resident admission {id} {sha}`), the operator's `resident refuse-unadmitted {id} {sha}` on {} records the pre-admission refusal this resident then closes on",
+            config.state_dir.join("admin.sock").display(), id=pending["residentPromptId"].as_str().unwrap_or("?"), sha=pending["promptSha256"].as_str().unwrap_or("?")));
+    }
     resident_requests::receive_maintenance(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
     resident_delivery::drain_completed(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?; }

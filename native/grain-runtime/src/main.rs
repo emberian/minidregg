@@ -18823,6 +18823,15 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     });
                     continue;
                 }
+                if let Some(rest)=request.command.strip_prefix("resident refuse-unadmitted ") {
+                    let result=match rest.split_once(' ') {
+                        Some((id,sha)) if !sha.contains(' ') => rt.refuse_unadmitted_resident_prompt(id,sha),
+                        _ => Err("resident refuse-unadmitted takes ID SHA".into()),
+                    };
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
                 if let Some(id)=request.command.strip_prefix("reconcile prompt audited ") {
                     let result=rt.reconcile_prompt_audited(id);
                     request.phase.store(2, Ordering::SeqCst);
