@@ -123,12 +123,26 @@ fixture_digests() {
 }
 restore_template() {  # the template's files into ROOT, its paths rewritten, the service up
   t_root=$(jq -r .root "$TEMPLATE_META"); t_socket=$(jq -r .socket "$TEMPLATE_META")
+  # The template's binaries by path: the variant is keyed by their CONTENT, so a later candidate with
+  # byte-identical binaries restores a template that names the first candidate's directory, which a
+  # sweep may have removed (hbox 2026-11-06: the restored pinned config's storageBinary named a swept
+  # candidate and every Host read died `native helper closed its reply after 0 bytes`). Each is
+  # rewritten to this caller's binary; a template recorded before the meta carried them is rebuilt.
+  t_bins=""
+  for pair in "host=$HOST" "mini=$MINI" "store=$STORE" "verifier=$VERIFIER"; do
+    was=$(jq -r --arg k "${pair%%=*}" '.binaries[$k] // empty' "$TEMPLATE_META")
+    [ -n "$was" ] || { echo "template $TEMPLATE_VARIANT predates its binary paths; rebuilding it" >&2; rm -f "$TEMPLATE_TAR" "$TEMPLATE_META"; return 1; }
+    [ "$was" = "${pair#*=}" ] || t_bins="$t_bins -e s#$was#${pair#*=}#g"
+  done
   tar -xf "$TEMPLATE_TAR" -C "$ROOT"
-  # every text file that names the template's root or socket; the Store, the anchor, keys and
+  # every text file that names the template's root, socket or binaries; the Store, the anchor, keys and
   # retained frames hold no path (grep finds none in them, and they are skipped by name anyway)
   grep -rlF -e "$t_root" -e "$t_socket" "$ROOT" 2>/dev/null | while IFS= read -r f; do
     case $f in *.sqlite3|*.sqlite3-*|*head-anchor*|*.bin|*.key|*.key.*|*.pub|*.frame) continue ;; esac
-    sed -i -e "s#$t_socket#$SOCKET#g" -e "s#$t_root#$ROOT#g" "$f"
+    sed -i -e "s#$t_socket#$SOCKET#g" -e "s#$t_root#$ROOT#g" $t_bins "$f"
+  done
+  [ -z "$t_bins" ] || grep -rlE '"(storageBinary|signatureBinary|host|mini)"' "$ROOT" --include=*.json 2>/dev/null | while IFS= read -r f; do
+    sed -i $t_bins "$f"
   done
   rm -f "$ROOT/public/serve.log" "$ROOT/public/server.pid" "$ROOT/public/mini.config"
   CONFIG="$ROOT/deployment/pinned-config.json"
@@ -146,8 +160,7 @@ if [ -n "$TEMPLATE_DIR" ]; then
   TEMPLATE_VARIANT=$(variant_digest)
   TEMPLATE_TAR=$TEMPLATE_DIR/$TEMPLATE_VARIANT.tar
   TEMPLATE_META=$TEMPLATE_DIR/$TEMPLATE_VARIANT.json
-  if [ -s "$TEMPLATE_TAR" ] && [ -s "$TEMPLATE_META" ]; then
-    restore_template
+  if [ -s "$TEMPLATE_TAR" ] && [ -s "$TEMPLATE_META" ] && restore_template; then
     exit 0
   fi
 fi
@@ -335,7 +348,9 @@ if [ -n "$TEMPLATE_TAR" ] && [ ! -s "$TEMPLATE_TAR" ]; then
   (cd "$ROOT" && tar -cf "$tmp_tar" --exclude=./public/serve.log --exclude=./public/server.pid --exclude=./public/mini.config \
      --exclude=./template-restored.txt .)
   jq -n --arg root "$ROOT" --arg socket "$SOCKET" --arg variant "$TEMPLATE_VARIANT" \
-    '{type:"minidregg-newparticipant-template-v1",root:$root,socket:$socket,variant:$variant}' >"$tmp_meta"
+    --arg host "$HOST" --arg mini "$MINI" --arg store "$STORE" --arg verifier "$VERIFIER" \
+    '{type:"minidregg-newparticipant-template-v1",root:$root,socket:$socket,variant:$variant,
+      binaries:{host:$host,mini:$mini,store:$store,verifier:$verifier}}' >"$tmp_meta"
   mv "$tmp_meta" "$TEMPLATE_META" && mv "$tmp_tar" "$TEMPLATE_TAR"
   start_serve
 fi
