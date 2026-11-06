@@ -30,6 +30,10 @@
 //! socket lives in the owner-private anchor directory (Linux uses a directory descriptor
 //! when that address is too long), and both ends check the peer is this user.
 //!
+//! A consent resident also admits on its own (full readiness, 236, [`HeadWatch`]): when the Store's head
+//! marker moves it admits the new records then, so the records other writers append are admitted
+//! as they land and a member's command pays only for what landed in the last moment.
+//!
 //! **The resident codec Host** ([`ResidentKind::Codec`]) is the same machinery holding the
 //! member's storeless codec image (`HOST SETTINGS codec`, [`crate::local`]) instead of a consent
 //! provider: ONE child per binding for every process of this user, where each process used to
@@ -500,6 +504,67 @@ pub fn daemonize() -> Result<bool> {
 /// Hold one provider for this binding and serve its frames on the binding's socket in `dir`
 /// until the provider ends, the binding is superseded, or (`Some(idle)` only) no frame arrives
 /// for `idle`. Exits at once (Ok) when another resident provider holds the binding.
+/// How often a resident looks at the Store's head marker for records it has not admitted.
+pub const CATCH_UP_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The Store's head as a file that moves on every append: the helper renames a new
+/// `STORE.head-anchor` into place after each committed entry (`hyperdocument-link-sqlite-store`
+/// `anchor.rs`), so its identity changes exactly when the head may have. `moved` answers whether
+/// a resident should admit to the head now: when the marker's identity differs from the last one
+/// seen (the first look always does), or, where the marker cannot be read (no `storageRoot`, or
+/// the directory is not traversable by this user), once a second; a catch-up with nothing new
+/// costs one Store read.
+pub struct HeadWatch {
+    marker: Option<PathBuf>,
+    seen: Option<(u64, u64, u64, i64, i64, i64, i64)>,
+    looked: Option<std::time::Instant>,
+}
+
+impl HeadWatch {
+    pub fn new(settings_bytes: &[u8]) -> Self {
+        let marker = serde_json::from_slice::<serde_json::Value>(settings_bytes).ok()
+            .and_then(|v| v.get("storageRoot").and_then(|r| r.as_str()).map(PathBuf::from))
+            .filter(|root| root.is_absolute())
+            .map(|root| { let mut name = root.into_os_string(); name.push(".head-anchor"); PathBuf::from(name) });
+        Self { marker, seen: None, looked: None }
+    }
+
+    pub fn moved(&mut self) -> bool {
+        use std::os::unix::fs::MetadataExt;
+        let now = std::time::Instant::now();
+        let identity = self.marker.as_ref().and_then(|m| fs::metadata(m).ok())
+            .map(|m| (m.dev(), m.ino(), m.size(), m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec()));
+        let moved = match identity {
+            Some(identity) => self.seen != Some(identity) && { self.seen = Some(identity); true },
+            None => self.looked.is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_secs(1)),
+        };
+        if moved {
+            self.looked = Some(now);
+        }
+        moved
+    }
+}
+
+/// Admit the Store up to its head on the resident's provider and retain the anchor. The frame is
+/// full readiness (236, empty): the provider admits to the head before answering it, and the
+/// served Host's image and protocol table stay as they are. Its first use also holds the
+/// admission in full (`ClientConsentCore.upgrade`: a walk from the Store's checkpoint, once),
+/// which a later operator plan would otherwise ask for inside a command. A refusal ends the
+/// resident exactly as a refused member frame does.
+fn catch_up(shared: &Mutex<Resident>, ended: &std::sync::atomic::AtomicBool) {
+    let Ok(mut resident) = shared.lock() else { return };
+    if resident.ended {
+        return;
+    }
+    match resident.session.exchange(crate::host_operations::CONSENT_FULL_READY, &[]) {
+        Ok((crate::host_operations::CONSENT_FULL_READY, body)) if body.is_empty() => retain_anchor(&mut resident.session),
+        _ => {
+            resident.ended = true;
+            ended.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
 pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: Option<std::time::Duration>) -> Result<()> {
     serve_resident_kind(ResidentKind::Consent, dir, executable, settings, idle)
 }
@@ -544,6 +609,7 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
         .and_then(|v| v.get("storageRoot").and_then(|r| r.as_str()).map(PathBuf::from))
         .filter(|root| root.is_absolute() && fs::symlink_metadata(root).is_ok());
     let executable_started = fs::metadata(&executable_path).map_err(|e| format!("{}: {e}", executable_path.display()))?;
+    let mut watch = HeadWatch::new(&settings_bytes);
     let session = kind.start(dir, executable, &settings, settings_bytes)?;
     let listener = std::os::unix::net::UnixListener::bind(&socket)
         .map_err(|e| format!("{} socket {}: {e}", kind.name(), socket.display()))?;
@@ -559,6 +625,28 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     let active = Arc::new(AtomicUsize::new(0));
     let ended = Arc::new(AtomicBool::new(false));
     let mut looked = std::time::Instant::now();
+    // A consent resident admits what other writers append as it lands (frame 236), so a member's
+    // next command finds nothing to admit; the first catch-up is the provider's start admission.
+    // However this loop ends (idle, superseded, its socket or world gone), the catch-up thread
+    // ends with it and lets go of the provider.
+    struct EndsWith(Arc<AtomicBool>);
+    impl Drop for EndsWith {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+    let _ends = EndsWith(ended.clone());
+    if kind == ResidentKind::Consent {
+        let (shared, ended) = (shared.clone(), ended.clone());
+        std::thread::spawn(move || {
+            while !ended.load(Ordering::Acquire) {
+                if watch.moved() {
+                    catch_up(&shared, &ended);
+                }
+                std::thread::sleep(CATCH_UP_POLL);
+            }
+        });
+    }
     loop {
         if ended.load(Ordering::Acquire) {
             return Ok(());
@@ -1249,7 +1337,20 @@ mod tests {
             let error = round_trip(&mut second, reserved, b"x").unwrap_err().to_string();
             assert!(error.contains("reserved to the resident consent provider"), "{error}");
         }
-        assert_eq!(opcodes(&dir), vec![233, 220, 229, 221, 229, 233, 222, 229]);
+        // The resident's own catch-ups (236, then its anchor 229) interleave whole between frames;
+        // its first is the start admission, before any member frame.
+        let ops = opcodes(&dir);
+        assert_eq!(ops.first(), Some(&crate::host_operations::CONSENT_FULL_READY), "{ops:?}");
+        let mut members = Vec::new();
+        let mut rest = ops.iter().copied();
+        while let Some(op) = rest.next() {
+            if op == crate::host_operations::CONSENT_FULL_READY {
+                assert_eq!(rest.next(), Some(229), "{ops:?}");
+            } else {
+                members.push(op);
+            }
+        }
+        assert_eq!(members, vec![233, 220, 229, 221, 229, 233, 222, 229]);
         let anchored = anchor_binding(b"{}").unwrap();
         assert_eq!(read_anchor(&anchor_path(&anchors, &anchored), &anchored).unwrap().as_deref(), Some(&b"ANCHOR-R"[..]));
         assert!(resident_file(ResidentKind::Consent, &anchors, &binding, "pid").exists());
