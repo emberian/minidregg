@@ -268,15 +268,19 @@ def journaled_room_write(journal, label, write, operation_record=None, lookup=No
     if operation_record is None:
         return journal.step(label, write)
     path = pathlib.Path(operation_record)
-    pins = journal.data['values'].setdefault('roomWriteBindings', {})
-    pin = {'operationRecord': str(path), 'request': binding}
-    if label in pins and pins[label] != pin:
-        raise Refused('room write binding changed for ' + label)
-    if label not in pins:
-        if path.exists() or journal.state(label) == 'started':
-            raise Unknown('unbound retained room write; keep its original evidence: ' + label)
-        pins[label] = pin
-        journal.save()
+    # Under the journal's lock: the room writers run in threads (rows()), and a binding written while
+    # another thread's save() serialised the journal crashed the residents phase with `dictionary changed
+    # size during iteration` (hbox round 2198ead7c, 2026-11-05).
+    with journal.lock:
+        pins = journal.data['values'].setdefault('roomWriteBindings', {})
+        pin = {'operationRecord': str(path), 'request': binding}
+        if label in pins and pins[label] != pin:
+            raise Refused('room write binding changed for ' + label)
+        if label not in pins:
+            if path.exists() or journal.state(label) == 'started':
+                raise Unknown('unbound retained room write; keep its original evidence: ' + label)
+            pins[label] = pin
+            journal.save()
 
     def recover():
         if not path.exists():
