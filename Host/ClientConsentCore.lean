@@ -665,7 +665,9 @@ frames (230–232, 234, 235) read no Store: they admit nothing. This process ser
 codec frames: the one pure codec implementation is the Host's storeless
 `codec` loop (`Host.Main.serveCodec`). Every other frame first admits the Store (`verifyInitial`
 once, then `refresh`); a failed admission terminates the provider, so no cached
-success survives an observed rollback, rewritten prefix, or failed suffix. -/
+success survives an observed rollback, rewritten prefix, or failed suffix. Frame 237 is that
+admission alone (no full re-admission, no answer): a resident sends it when the Store's head
+moves, so the records other writers append are admitted off any member's command path. -/
 partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
     (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor)
     (held : Option (Session config)) (owed : Bool) (input output : IO.FS.Stream) : IO Unit := do
@@ -750,6 +752,9 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
       else pure (none, admitted)
     let answer ← try
         let reply ← if operation == 236 then
+            pure []
+          else if operation == 237 then
+            -- The resident's catch-up: the admission above is the whole frame.
             pure []
           else if operation == 224 then
             specialized extraExpected settings config updated full payload

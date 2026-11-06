@@ -2736,6 +2736,11 @@
       "code": 235,
       "symbol": "CONSENT_THIN_BIRTH_PLAN",
       "purpose": "thin consent: a birth plan against the authored draft and the member's derivation of every branch (235, Kernel.NativeThinBirth)"
+    },
+    {
+      "code": 237,
+      "symbol": "CONSENT_CATCH_UP",
+      "purpose": "admit the Store up to its head and answer nothing (237): the resident's own frame, sent when the Store's head moves, so a member's next frame finds the records others wrote already admitted"
     }
   ],
   "ordinary_headers": [

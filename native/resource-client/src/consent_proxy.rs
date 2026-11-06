@@ -375,6 +375,12 @@ impl Worker {
         }
         Ok(answer)
     }
+    /// Admit the Store up to its head (frame 237) and retain what was admitted.
+    fn catch_up(&mut self) -> Result<()> {
+        self.internal(mini_sdk::host_operations::CONSENT_CATCH_UP, &[])?;
+        self.admitted = true;
+        self.retain()
+    }
     fn start(executable: &Path, config: &Path, pins: &Selection, anchors: &Path) -> Result<Self> {
         fsio::check_private_dir(anchors)?;
         let lock = OpenOptions::new()
@@ -626,6 +632,26 @@ pub(crate) fn serve(
         Some(dir) => Backend::Shared(Arc::new(SharedVerifier::start(executable, config, &pins, dir)?)),
         None => Backend::Own(Arc::new(Mutex::new(Worker::start(executable, config, &pins, anchors)?))),
     };
+    // Its own verifier admits what other writers append as it lands (frame 237,
+    // `mini_sdk::consent::HeadWatch`), so the member's next frame finds nothing to admit; the first
+    // catch-up is the verifier's start admission. A shared verifier's resident does this itself.
+    if let Backend::Own(worker) = &backend {
+        let worker = worker.clone();
+        let mut watch = mini_sdk::consent::HeadWatch::new(&transport::read_config(config)?);
+        std::thread::spawn(move || loop {
+            if watch.moved() {
+                let Ok(mut guard) = worker.lock() else { return };
+                if guard.failed {
+                    return;
+                }
+                if let Err(e) = guard.catch_up() {
+                    eprintln!("mini consent catch-up: {e}");
+                    return;
+                }
+            }
+            std::thread::sleep(mini_sdk::consent::CATCH_UP_POLL);
+        });
+    }
     // The worker keeps its warm verifier, as the member-side consent resident does: no idle exit
     // unless `--idle-seconds` asks for one (`idle` Some). Socket activation would start it again on
     // the next connection from the retained frontier, but that start is a provider launch and a

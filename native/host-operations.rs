@@ -453,7 +453,9 @@ pub const CONSENT_STORE_RECHECK: u8 = 233;
 pub const CONSENT_THIN_BIRTH_INTENT: u8 = 234;
 // thin consent: a birth plan against the authored draft and the member's derivation of every branch (235, Kernel.NativeThinBirth)
 pub const CONSENT_THIN_BIRTH_PLAN: u8 = 235;
-pub const CONSENT_FRAMES: &[u8] = &[CONSENT_FULL_READY, CONSENT_INTENT, CONSENT_OBSERVATION, CONSENT_PLAN, CONSENT_OPERATOR_PLAN, CONSENT_POSSESSION, CONSENT_OBJECTIVE, CONSENT_ANCHOR_OFFER, CONSENT_ANCHOR_ADMITTED, CONSENT_THIN_INTENT, CONSENT_THIN_OBSERVATION, CONSENT_THIN_PLAN, CONSENT_STORE_RECHECK, CONSENT_THIN_BIRTH_INTENT, CONSENT_THIN_BIRTH_PLAN];
+// admit the Store up to its head and answer nothing (237): the resident's own frame, sent when the Store's head moves, so a member's next frame finds the records others wrote already admitted
+pub const CONSENT_CATCH_UP: u8 = 237;
+pub const CONSENT_FRAMES: &[u8] = &[CONSENT_FULL_READY, CONSENT_INTENT, CONSENT_OBSERVATION, CONSENT_PLAN, CONSENT_OPERATOR_PLAN, CONSENT_POSSESSION, CONSENT_OBJECTIVE, CONSENT_ANCHOR_OFFER, CONSENT_ANCHOR_ADMITTED, CONSENT_THIN_INTENT, CONSENT_THIN_OBSERVATION, CONSENT_THIN_PLAN, CONSENT_STORE_RECHECK, CONSENT_THIN_BIRTH_INTENT, CONSENT_THIN_BIRTH_PLAN, CONSENT_CATCH_UP];
 
 // Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: the signed ordinary request headers.
 pub const ORDINARY_HEADER_NAMES: &[&str] = &["cookie", "accept", "accept-encoding", "content-type", "user-agent", "if-match", "if-none-match", "x-requested-with", "x-csrftoken", "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime", "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset", "oc-lazyops", "content-encoding", "referer"];
