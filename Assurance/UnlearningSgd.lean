@@ -18,7 +18,9 @@ at the steps whose batch held `d`, by at most `γ_t` there (one removed summand:
   bounds the state at the stop, not after it: nothing runs after an alarm (DL30's qualification).
 
 **Teeth**: `traj_gap_false_without_lip` (an expansive map, claimed `ρ = 1`, beats the bound at `T = 2`);
-`audited_fires` (the composed theorem on `AuditWitness.round`, every hypothesis satisfied).
+`audited_fires` (the composed theorem on `AuditWitness.round`, every hypothesis satisfied, zero influence);
+`audited_fires_influence` + `audited_influence_real` (nonzero influence: the deployed state is exactly 1 from the
+never-d run after one round, inside the bound 1 + 4).
 -/
 import Mathlib.Analysis.Normed.Group.Basic
 import Mathlib.Algebra.Order.BigOperators.Group.Finset
@@ -200,6 +202,36 @@ theorem audited_fires (n : ℕ) :
     (fun k => by simp [disc]) (fun _ => 1) (by norm_num) (fun _ => by simp) (fun _ => by simp [Audited.honest])
     (fun h hc => by simp [AuditWitness.round] at hc) DisplacementRefutation.detect_half n
 
+/-- The run WITH `d`: adds `1` at step `0`, the identity after. Without `d`: the identity. -/
+def fWith : ℕ → ℝ → ℝ := fun t z => z + if t = 0 then 1 else 0
+
+/-- The applied update: exactly the honest one (no host deviation). -/
+noncomputable def dWith (h : List (Fin 4)) : ℝ := if Audited.liveLen AuditWitness.round h = 0 then 1 else 0
+
+/-- **A nonzero-influence witness** (Codex round 2: `audited_fires` has zero influence). `γ = 1` at step `0`,
+`G = 1`, no injection: every hypothesis of the composed theorem holds and the bound is `1 + 4`. -/
+theorem audited_fires_influence (n : ℕ) :
+    expOver (Fin 4) n (fun h => ‖Audited.actual AuditWitness.round (0 : ℝ) dWith h
+      - Audited.comp AuditWitness.round (0 : ℝ) (fun _ z => z) h‖) [] ≤ 1 + (2 * 1) / (1 / 2) := by
+  have hhon : ∀ h, Audited.honest AuditWitness.round (0 : ℝ) fWith dWith h = dWith h := by
+    intro h; simp [Audited.honest, fWith, dWith]
+  refine Audited.sgd_delete_bound_audited AuditWitness.round 0 fWith (fun _ z => z)
+    zero_le_one (le_refl 1) (fun t => if t = 0 then 1 else 0) (fun _ x y => by simp [fWith])
+    (fun t x => by simp [fWith]; split_ifs <;> norm_num)
+    (fun k => by
+      simp only [disc, one_pow, one_mul, Finset.sum_ite_eq', Finset.mem_range]
+      split_ifs <;> norm_num)
+    dWith (by norm_num) (fun h => by simp [dWith]; split_ifs <;> norm_num)
+    (fun h => by rw [hhon]; simp [dWith]; split_ifs <;> norm_num)
+    (fun h hc => by simp [AuditWitness.round] at hc) DisplacementRefutation.detect_half n
+
+/-- …and the influence is real: after one round the deployed state is exactly `1` from the comparator. -/
+theorem audited_influence_real :
+    expOver (Fin 4) 1 (fun h => ‖Audited.actual AuditWitness.round (0 : ℝ) dWith h
+      - Audited.comp AuditWitness.round (0 : ℝ) (fun _ z => z) h‖) [] = 1 := by
+  rw [expOver.succ]
+  simp [Audited.actual, Audited.comp, Audited.liveLen, Round.stopped, dWith]
+
 end UnlearningSgdTeeth
 
 /-- info: 'Minidregg.Assurance.Unlearning.traj_gap' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -212,5 +244,9 @@ end UnlearningSgdTeeth
 #guard_msgs (whitespace := lax) in #print axioms UnlearningSgdTeeth.traj_gap_false_without_lip
 /-- info: 'Minidregg.Assurance.Unlearning.UnlearningSgdTeeth.audited_fires' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms UnlearningSgdTeeth.audited_fires
+/-- info: 'Minidregg.Assurance.Unlearning.UnlearningSgdTeeth.audited_fires_influence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms UnlearningSgdTeeth.audited_fires_influence
+/-- info: 'Minidregg.Assurance.Unlearning.UnlearningSgdTeeth.audited_influence_real' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms UnlearningSgdTeeth.audited_influence_real
 
 end Minidregg.Assurance.Unlearning

@@ -18,12 +18,12 @@ and one STATE leg, `S' = S - |P| • contrib r`, computed by the verifier itself
   learner's state on the remaining records.
 * `delete_absence` — composed with `Count = 0`: the live multiset after is `(live L).filter (· ≠ r)`, `r` is not in
   it, and the accepted state is the fold over it. `influence_gone`: the accepted state is unchanged by ANY
-  re-definition of `r`'s contribution.
+  re-definition of `r`'s contribution (a statement about the state, not about what the log discloses).
 * `history_independent` / `deleted_equals_never_trained` — the state is a function of the live multiset, so a log
   that was trained on `r` and then deleted it and a log that never held `r` (any length, any order) have EQUAL
   states. The state must not distinguish them; the log does (its tombstones).
-* `release_unique` — the release check `(λ I + A) N = δ B` with `A = Σ φ φᵀ` and `λ > 0` determines the model
-  `N / δ` uniquely, so an accepted release after deletion IS the release the learner computes from scratch on
+* `release_unique` — the release check `(λ I + A) N = δ B` with `A = Σ φ φᵀ`, `λ > 0` and `δ ≠ 0` determines the
+  model `N / δ` uniquely (`release_cross` is the cross-multiplied form, trivial at `δ = 0`), so an accepted release after deletion IS the release the learner computes from scratch on
   the remaining records (`deleted_release_is_retrained`).
 
 Binding legs are NOT re-proved here: the opened logs are the committed ones by the MMR's binding
@@ -42,6 +42,7 @@ import Mathlib.Algebra.Order.Field.Basic
 import Mathlib.Data.Rat.Defs
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.FinCases
+import Mathlib.Tactic.FieldSimp
 
 namespace Minidregg.Assurance.Unlearning
 
@@ -184,8 +185,9 @@ theorem delete_absence (contrib : R → S) {n : ℕ} {L L' : Log R n} {r : R} {P
   · rw [hlive]; simp
   · rw [hiff.mp hstate, state_eq_live, hlive]
 
-/-- **The deleted record's influence is gone.** The accepted state is the same under any contribution map that
-agrees with `contrib` away from `r`: nothing about `r` (its features, its label) is left in it. -/
+/-- **Contribution-map invariance.** The accepted state is the same under any contribution map that agrees with
+`contrib` away from `r`: the state is not a function of `r`'s contribution. (This is a statement about the
+STATE; what an observer can infer from the log, the certificates or earlier releases is outside it.) -/
 theorem influence_gone (contrib contrib' : R → S) {n : ℕ} {L L' : Log R n} {r : R} {P : Finset (Fin n)}
     {S₀ S' : S} (hinv : S₀ = state contrib L) (hlegs : DeleteLegs L L' r P)
     (hstate : S' = S₀ - P.card • contrib r) (hagree : ∀ x, x ≠ r → contrib' x = contrib x) :
@@ -239,9 +241,9 @@ theorem gram_injective (v : ι → Fin d → ℚ) {lam : ℚ} (hlam : 0 < lam) (
   have : x ⬝ᵥ x = 0 := by nlinarith
   exact dotProduct_self_eq_zero.mp this
 
-/-- **`release_unique`.** Two releases that both pass the check `(λ I + A) N = δ B` with `A = Σ v vᵀ`, `λ > 0`,
-are the same model: `δ₂ N₁ = δ₁ N₂`, i.e. `N₁ / δ₁ = N₂ / δ₂`. -/
-theorem release_unique (v : ι → Fin d → ℚ) {lam : ℚ} (hlam : 0 < lam) (B N₁ N₂ : Matrix (Fin d) (Fin c) ℚ)
+/-- Cross-multiplied form: two releases passing the check satisfy `δ₂ N₁ = δ₁ N₂`. (With `δ = 0` this is
+trivial; the quotient statement below needs nonzero denominators.) -/
+theorem release_cross (v : ι → Fin d → ℚ) {lam : ℚ} (hlam : 0 < lam) (B N₁ N₂ : Matrix (Fin d) (Fin c) ℚ)
     (δ₁ δ₂ : ℚ)
     (h₁ : (lam • (1 : Matrix (Fin d) (Fin d) ℚ) + ∑ k, vecMulVec (v k) (v k)) * N₁ = δ₁ • B)
     (h₂ : (lam • (1 : Matrix (Fin d) (Fin d) ℚ) + ∑ k, vecMulVec (v k) (v k)) * N₂ = δ₂ • B) :
@@ -257,6 +259,19 @@ theorem release_unique (v : ι → Fin d → ℚ) {lam : ℚ} (hlam : 0 < lam) (
     rw [Matrix.mul_apply] at h1
     simpa only [mulVec, dotProduct, Pi.zero_apply, Matrix.zero_apply] using h1)
   simpa using congrFun hcol i
+
+/-- **`release_unique`.** Two releases with NONZERO denominators that both pass the check
+`(λ I + A) N = δ B`, `A = Σ v vᵀ`, `λ > 0`, are the same model: `N₁ / δ₁ = N₂ / δ₂`. (The harness requires
+`δ > 0`; `(N, δ) = (0, 0)` passes the bare check and is refused there, and excluded here by `hδ`.) -/
+theorem release_unique (v : ι → Fin d → ℚ) {lam : ℚ} (hlam : 0 < lam) (B N₁ N₂ : Matrix (Fin d) (Fin c) ℚ)
+    {δ₁ δ₂ : ℚ} (hδ₁ : δ₁ ≠ 0) (hδ₂ : δ₂ ≠ 0)
+    (h₁ : (lam • (1 : Matrix (Fin d) (Fin d) ℚ) + ∑ k, vecMulVec (v k) (v k)) * N₁ = δ₁ • B)
+    (h₂ : (lam • (1 : Matrix (Fin d) (Fin d) ℚ) + ∑ k, vecMulVec (v k) (v k)) * N₂ = δ₂ • B) :
+    δ₁⁻¹ • N₁ = δ₂⁻¹ • N₂ := by
+  have hx := release_cross v hlam B N₁ N₂ δ₁ δ₂ h₁ h₂
+  have := congrArg (fun M => (δ₁⁻¹ * δ₂⁻¹) • M) hx
+  simp only [smul_smul] at this
+  rwa [show δ₁⁻¹ * δ₂⁻¹ * δ₂ = δ₁⁻¹ by field_simp, show δ₁⁻¹ * δ₂⁻¹ * δ₁ = δ₂⁻¹ by field_simp] at this
 
 /-- The C18 contribution of a record: `(φ φᵀ, φ yᵀ)`. -/
 def contribM (φ : R → Fin d → ℚ) (yv : R → Fin c → ℚ) (r : R) :
@@ -278,7 +293,7 @@ lemma gram_state (φ : R → Fin d → ℚ) (yv : R → Fin c → ℚ) {n : ℕ}
 
 /-- **The accepted release after a deletion is the retrained release.** If the deletion was accepted and a release
 `(N, δ)` passes the check against the post-deletion state, and `(N₀, δ₀)` is the learner's own release on ANY log
-`L₀` that never held `r` (same remaining records), then `N / δ = N₀ / δ₀`. -/
+`L₀` that never held `r` (same remaining records), both with nonzero denominators, then `N / δ = N₀ / δ₀`. -/
 theorem deleted_release_is_retrained (φ : R → Fin d → ℚ) (yv : R → Fin c → ℚ) {lam : ℚ} (hlam : 0 < lam)
     {n m : ℕ} {L L' : Log R n} {r : R} {P : Finset (Fin n)}
     {S₀ S' : Matrix (Fin d) (Fin d) ℚ × Matrix (Fin d) (Fin c) ℚ}
@@ -287,13 +302,13 @@ theorem deleted_release_is_retrained (φ : R → Fin d → ℚ) (yv : R → Fin 
     (N : Matrix (Fin d) (Fin c) ℚ) (δ : ℚ) (hrel : (lam • (1 : Matrix (Fin d) (Fin d) ℚ) + S'.1) * N = δ • S'.2)
     (L₀ : Log R m) (hnever : live L₀ = (live L).filter (· ≠ r)) (N₀ : Matrix (Fin d) (Fin c) ℚ) (δ₀ : ℚ)
     (hrel₀ : (lam • (1 : Matrix (Fin d) (Fin d) ℚ) + (state (contribM φ yv) L₀).1) * N₀
-      = δ₀ • (state (contribM φ yv) L₀).2) :
-    δ₀ • N = δ • N₀ := by
+      = δ₀ • (state (contribM φ yv) L₀).2) (hδ : δ ≠ 0) (hδ₀ : δ₀ ≠ 0) :
+    δ⁻¹ • N = δ₀⁻¹ • N₀ := by
   have hS : S' = state (contribM φ yv) L₀ :=
     deleted_equals_never_trained (contribM φ yv) hinv hlegs hstate L₀ hnever
   rw [hS, gram_state] at hrel
   rw [gram_state] at hrel₀
-  exact release_unique (slotVec φ L₀) hlam _ N N₀ δ δ₀ hrel hrel₀
+  exact release_unique (slotVec φ L₀) hlam _ N N₀ hδ hδ₀ hrel hrel₀
 
 end Release
 
@@ -354,17 +369,17 @@ theorem legs_inhabited :
 theorem legs_fire : (12 : ℤ) - (({0, 2} : Finset (Fin 3)).card • w 0) = state w (![none, some 1] : Log ℕ 2) := by
   decide
 
-/-- **Without `λ > 0` uniqueness is false**: with no data and `λ = 0` the check is `0 = δ B` with `B = 0`, and
-`N = 0`, `N = 1` both pass with `δ = 1`. -/
+/-- **Without `λ > 0` uniqueness is false**, even with nonzero denominators: with no data and `λ = 0` the check is
+`0 = δ B` with `B = 0`, and `N = 0`, `N = 1` both pass with `δ = 1`. -/
 theorem release_false_without_lam :
-    ¬ ∀ (B N₁ N₂ : Matrix (Fin 1) (Fin 1) ℚ) (δ₁ δ₂ : ℚ),
+    ¬ ∀ (B N₁ N₂ : Matrix (Fin 1) (Fin 1) ℚ) (δ₁ δ₂ : ℚ), δ₁ ≠ 0 → δ₂ ≠ 0 →
       ((0 : ℚ) • (1 : Matrix (Fin 1) (Fin 1) ℚ) + ∑ k : Fin 0, Matrix.vecMulVec (Fin.elim0 k) (Fin.elim0 k)) * N₁
           = δ₁ • B →
       ((0 : ℚ) • (1 : Matrix (Fin 1) (Fin 1) ℚ) + ∑ k : Fin 0, Matrix.vecMulVec (Fin.elim0 k) (Fin.elim0 k)) * N₂
           = δ₂ • B →
-      δ₂ • N₁ = δ₁ • N₂ := by
+      δ₁⁻¹ • N₁ = δ₂⁻¹ • N₂ := by
   intro h
-  have := h 0 0 1 1 1 (by simp) (by simp)
+  have := h 0 0 1 1 1 one_ne_zero one_ne_zero (by simp) (by simp)
   have h00 := congrFun (congrFun this 0) 0
   simp at h00
 
@@ -380,6 +395,8 @@ end UnlearningTeeth
 #guard_msgs (whitespace := lax) in #print axioms deleted_equals_never_trained
 /-- info: 'Minidregg.Assurance.Unlearning.release_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms release_unique
+/-- info: 'Minidregg.Assurance.Unlearning.release_cross' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms release_cross
 /-- info: 'Minidregg.Assurance.Unlearning.deleted_release_is_retrained' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms deleted_release_is_retrained
 /-- info: 'Minidregg.Assurance.Unlearning.UnlearningTeeth.false_without_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
