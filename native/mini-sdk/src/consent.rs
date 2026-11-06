@@ -627,6 +627,15 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     let mut looked = std::time::Instant::now();
     // A consent resident admits what other writers append as it lands (frame 236), so a member's
     // next command finds nothing to admit; the first catch-up is the provider's start admission.
+    // However this loop ends (idle, superseded, its socket or world gone), the catch-up thread
+    // ends with it and lets go of the provider.
+    struct EndsWith(Arc<AtomicBool>);
+    impl Drop for EndsWith {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+    let _ends = EndsWith(ended.clone());
     if kind == ResidentKind::Consent {
         let (shared, ended) = (shared.clone(), ended.clone());
         std::thread::spawn(move || {
