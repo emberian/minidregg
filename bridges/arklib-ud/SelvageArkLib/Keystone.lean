@@ -13,7 +13,8 @@ does not use `Selvage/Depth.lean`'s probability tower (`gameSlotBound_proved`,
 * the coupling `StepCoins.evalDist_run_randomOracle_eq_stepCoins`, and
 * the deterministic correspondence `adversarySteps_run` / `complete_run`.
 
-Its hypotheses are exactly `FsOfRbrSound`'s, including the nonnegativity guard `0 ≤ ε`. In this
+Its hypotheses are `FsOfRbrSound`'s, including the nonnegativity guard `0 ≤ ε`, plus
+`[Finite r.PMsg]` (ArkLib's `Round.finiteMessage`). In this
 derivation the guard is needed to read ArkLib's `ENNReal.ofReal ε` back as `ε`, the same corner
 that `OB2_depth_composition_false` exhibits.
 -/
@@ -136,20 +137,29 @@ theorem holds_cast_of_eq {A B : KnowledgeState} (h : A = B) (w : B.Witness) :
   subst h
   rfl
 
-/-- **Selvage's FS/SR keystone from ArkLib's state-restoration theorem** (finite prover-message
-alphabets). For every Selvage reduction with `Finite r.PMsg`, every RBR knowledge-soundness
-instance, statement set `Z`, and nonnegative uniform bound `εrbr` on the round errors over `Z`,
-Selvage's straightline state-restoration knowledge soundness holds at `(t + k) · εrbr δ`, with
-the extractor `srExtract rbr` (one extractor for every salt size, budget, proximity bound and
-adversary). The probability argument is ArkLib's `restored_extraction_bound`; nothing from
-`Selvage/Depth.lean`'s probability tower is used. -/
-theorem straightlineSrKnowledgeSoundness_of_arklib (rbr : RbrKnowledgeSoundness r)
+/-- **The bound for Selvage's own extractor, adversary by adversary** (finite prover-message
+alphabets). For a fixed salt size `s`, budget `t`, proximity `δ ∈ (0, δ⋆)` and deterministic
+`t`-move prover `P`, the probability that the output statement is in `Z`, `srExtract rbr s`
+fails `R_{≤δ}`, and the verifier accepts with `w'` in `R'_{≤δ}` is at most `(t + k) · εrbr δ`.
+The extractor is named, not existentially chosen, so this statement transports along a
+per-adversary restriction of the message alphabet. The probability argument is ArkLib's
+`restored_extraction_bound`; nothing from `Selvage/Depth.lean`'s probability tower is used. -/
+theorem srExtract_bound_of_arklib (rbr : RbrKnowledgeSoundness r)
     (Z : Set (Stmt r)) (εrbr : ℝ → ℝ)
     (hnn : ∀ δ ∈ Set.Ioo (0 : ℝ) r.δstar, 0 ≤ εrbr δ)
     (herr : ∀ (i : Fin r.k) (st : Stmt r), st ∈ Z →
-      ∀ δ ∈ Set.Ioo (0 : ℝ) r.δstar, rbr.err i st δ ≤ εrbr δ) :
-    StraightlineSrKnowledgeSoundness r Z (fun _s t δ => ((t : ℝ) + (r.k : ℝ)) * εrbr δ) := by
-  refine ⟨fun s => srExtract rbr s, fun s t δ hδ P => ?_⟩
+      ∀ δ ∈ Set.Ioo (0 : ℝ) r.δstar, rbr.err i st δ ≤ εrbr δ)
+    (s t : ℕ) (δ : ℝ) (hδ : δ ∈ Set.Ioo (0 : ℝ) r.δstar) (P : SrProver r s) :
+    uniformProb ((Fin t → r.Chal) × (Fin r.k → r.Chal)) (fun coins =>
+        let log := srTrace P coins.1
+        let o := P.out (log.map Prod.snd)
+        let ρs : Fin r.k → r.Chal := srFinalChal P coins.1 coins.2
+        o.stmt ∈ Z ∧
+        ¬ RelaxedMem r.R δ o.stmt.idx o.stmt.x o.stmt.y (srExtract rbr s o ρs log) ∧
+        ∃ (x' : r.X') (y' : Fin r.n' → r.A'),
+          r.verify o.stmt.idx o.stmt.x o.stmt.y o.πs ρs = some (x', y') ∧
+          RelaxedMem r.R' δ o.stmt.idx x' y' o.w')
+      ≤ ((t : ℝ) + (r.k : ℝ)) * εrbr δ := by
   let state : Input r s → KnowledgeState := fun z => kstateAt rbr δ (stmtOf z) ⟨[], none⟩
   let extractor : (z : Input r s) →
       RoundExtractor (protocol (List.replicate r.k (round r))).tree (state z) :=
@@ -285,6 +295,20 @@ theorem straightlineSrKnowledgeSoundness_of_arklib (rbr : RbrKnowledgeSoundness 
     rw [List.length_replicate, ENNReal.ofReal_mul (by positivity), ENNReal.ofReal_add
       (by positivity) (by positivity), ENNReal.ofReal_natCast, ENNReal.ofReal_natCast]
   exact (ENNReal.ofReal_le_ofReal_iff (mul_nonneg (by positivity) (hnn δ hδ))).mp hbound
+
+/-- **Selvage's FS/SR keystone from ArkLib's state-restoration theorem**, for reductions whose
+prover messages form a finite type. Same conclusion as Selvage's `OB2_depth_composition_nonneg`
+and `FsOfRbrSound` (through `fsStraightline_iff_sr`), with the same hypotheses plus
+`[Finite r.PMsg]`, which ArkLib's `Round.finiteMessage` requires. The extractor is
+`srExtract rbr`, chosen before the salt size, budget, proximity bound and adversary. -/
+theorem straightlineSrKnowledgeSoundness_of_arklib (rbr : RbrKnowledgeSoundness r)
+    (Z : Set (Stmt r)) (εrbr : ℝ → ℝ)
+    (hnn : ∀ δ ∈ Set.Ioo (0 : ℝ) r.δstar, 0 ≤ εrbr δ)
+    (herr : ∀ (i : Fin r.k) (st : Stmt r), st ∈ Z →
+      ∀ δ ∈ Set.Ioo (0 : ℝ) r.δstar, rbr.err i st δ ≤ εrbr δ) :
+    StraightlineSrKnowledgeSoundness r Z (fun _s t δ => ((t : ℝ) + (r.k : ℝ)) * εrbr δ) :=
+  ⟨fun s => srExtract rbr s, fun s t δ hδ P =>
+    srExtract_bound_of_arklib rbr Z εrbr hnn herr s t δ hδ P⟩
 
 /-- The same keystone in Selvage's Fiat–Shamir form (`FsOfRbrSound`'s conclusion), through
 Selvage's own game equivalence `fsStraightline_iff_sr`. -/
