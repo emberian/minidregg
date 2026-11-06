@@ -1,15 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `f21eb46c1527` (Merge remote-tracking branch 'origin/dark-learning/displacement-bound-rebased' into merge-). Round finished 2026-11-06T17:10Z.
-green: `8f2d63fab93f`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-f21eb46c`.
+Tip: `ec33fdd83c04` (tower256: register the additive-FRI prover as native work 9104). Round finished 2026-11-06T18:08Z.
+green: `8f2d63fab93f`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ec33fdd8`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 8f2d63fab93f..f21eb46c1527`), newest first; owners are the seats whose
+Suspect commits since green (`git log 8f2d63fab93f..ec33fdd83c04`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `ec33fdd8` tower256: register the additive-FRI prover as native work 9104
+- `f1a62ef7` tower256: one path per pair checked, and no next-level leaf on the wire (owner: read-path)
+- `f23a361f` builder: REDS.md for f21eb46c1527 (1 red) (owner: build-loop)
 - `f21eb46c` Merge remote-tracking branch 'origin/dark-learning/displacement-bound-rebased' into merge-2026-11-06
 - `87625722` Merge remote-tracking branch 'origin/lane/binding-term' into merge-2026-11-06
 - `48ab116a` Merge remote-tracking branch 'origin/lane/tower256-final-check' into merge-2026-11-06
@@ -36,10 +39,10 @@ Suspect commits since green (`git log 8f2d63fab93f..f21eb46c1527`), newest first
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.177 | 0.188 | 1.059 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 30.606 | 58.044 | 1.897 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.156 | 0.164 | 1.051 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 27.548 | 71.662 | 2.601 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.442 | 0.390 | 0.882 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 148.081 | 149.764 | 1.011 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-f21eb46c/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.196 | 0.211 | 1.074 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | submit_wall_ms | 53.383 | 82.626 | 1.548 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.182 | 0.212 | 1.164 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 35.885 | 105.964 | 2.953 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.581 | 0.313 | 0.538 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 312.974 | 204.240 | 0.653 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-ec33fdd8/flatness.log | - | - | - | - | host-execution, store-retained |
