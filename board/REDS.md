@@ -1,15 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `ec33fdd83c04` (tower256: register the additive-FRI prover as native work 9104). Round finished 2026-11-06T18:08Z.
-green: `8f2d63fab93f`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ec33fdd8`.
+Tip: `8bbfc0798d57` (door: a submission lands on the status page, which names what is queued and refreshes itse). Round finished 2026-11-06T18:42Z.
+green: `8f2d63fab93f`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-8bbfc079`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:composed:documents | composed documents fail | not rerun | no | infra, member-side | fail: documents:protected: no stderr; see /ci-composed/c-8bbfc0/composed/state/evidence/01 |
+| gate:composed:store-restart | composed store-restart blocked | not rerun | no | host-execution | blocked: prerequisite documents has not passed |
 
-Suspect commits since green (`git log 8f2d63fab93f..ec33fdd83c04`), newest first; owners are the seats whose
+Suspect commits since green (`git log 8f2d63fab93f..8bbfc0798d57`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `8bbfc079` door: a submission lands on the status page, which names what is queued and refreshes itself; the pa
+- `fae6aba9` builder: REDS.md for ec33fdd83c04 (1 red) (owner: build-loop)
 - `ec33fdd8` tower256: register the additive-FRI prover as native work 9104
 - `f1a62ef7` tower256: one path per pair checked, and no next-level leaf on the wire (owner: read-path)
 - `f23a361f` builder: REDS.md for f21eb46c1527 (1 red) (owner: build-loop)
@@ -39,10 +42,10 @@ Suspect commits since green (`git log 8f2d63fab93f..ec33fdd83c04`), newest first
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.196 | 0.211 | 1.074 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | submit_wall_ms | 53.383 | 82.626 | 1.548 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.182 | 0.212 | 1.164 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 35.885 | 105.964 | 2.953 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.581 | 0.313 | 0.538 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 312.974 | 204.240 | 0.653 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-ec33fdd8/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.188 | 0.183 | 0.972 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 38.875 | 81.587 | 2.099 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.143 | 0.186 | 1.299 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 29.278 | 104.037 | 3.553 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.328 | 0.298 | 0.906 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 409.986 | 129.522 | 0.316 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-8bbfc079/flatness.log | - | - | - | - | host-execution, store-retained |
