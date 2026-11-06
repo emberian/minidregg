@@ -73,6 +73,7 @@ import Compiler.Tower256LogupClauseDispatch -- extension-local clause-404 dispat
 import Compiler.Tower256LogupExtensionDeployment  -- nonzero versioned extension pins and concrete shared-backend inputs inhabit the two-call byte controller while base V1 stays empty
 import Compiler.Tower256AdditiveFriController -- exact cSHAKE-derived additive-FRI control over opaque proof bytes; Lean alone decodes and accepts
 import Compiler.Tower256AdditiveFriRawController -- the same additive checker with NO universal `PositionBinding`: an unequal accepted opening is retained and extracts a path-specific framed cSHAKE collision instead of vanishing
+import Compiler.Tower256FinalPolynomialCheck -- the raw controller's final-polynomial clauses decided by a Bool over Coordinate 8 coefficient lists (finalCheck_iff, finalClauses_of_finalCheck, finalCheck_of_finalClauses), kernel-evaluated at the bootstrap shape and a level-8 product
 import Compiler.Tower256AdditiveFriRawDeployment  -- concrete raw PCS levels, statement codecs, and opaque-byte verifier witnesses inhabit the collision-retaining deployment path
 import Compiler.Ext6GateProofController -- descriptor-bound Ext6 gate transcript control over opaque bytes; PCS/LDT/ROM security remains explicit
 import Compiler.Ext6GateProofDeployment  -- nonzero pinned Ext6 deployment carriers and reflected control, with all eight security reductions still explicit
