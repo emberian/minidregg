@@ -250,11 +250,20 @@
     }
     async getAccountInfo(pk) {
       const r = await this.call("getAccountInfo", [pk.toBase58(), { encoding: "base64", commitment: this.commitment }]);
-      return r && r.value ? { lamports: r.value.lamports, owner: r.value.owner } : null;
+      return r && r.value ? { lamports: r.value.lamports, owner: r.value.owner, data: r.value.data } : null;
     }
+    // The token account's amount, read from the account itself (bytes 64..72, little-endian u64: the SPL
+    // Token and Token-2022 base layout), never through getTokenAccountBalance: public RPC endpoints refuse
+    // that as an indexed request (`Indexed requests require a personal token`, publicnode 2026-11-06), and
+    // the page then told a holder of 602,181 DREGG that their wallet held no account of the token.
     async getTokenAccountBalance(pk) {
-      const r = await this.call("getTokenAccountBalance", [pk.toBase58(), { commitment: this.commitment }]);
-      return { value: r.value };
+      const info = await this.getAccountInfo(pk);
+      if (!info || !info.data || !info.data[0]) return null;
+      const bytes = Uint8Array.from(atob(info.data[0]), (c) => c.charCodeAt(0));
+      if (bytes.length < 72) return null;
+      let amount = 0n;
+      for (let i = 71; i >= 64; i--) amount = (amount << 8n) | BigInt(bytes[i]);
+      return { value: { amount: amount.toString(), owner: info.owner } };
     }
     async getLatestBlockhash(commitment) {
       const r = await this.call("getLatestBlockhash", [{ commitment: commitment || this.commitment }]);
