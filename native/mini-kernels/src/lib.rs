@@ -39,6 +39,93 @@ pub fn cshake256_32(customization: &[u8], input: &[u8]) -> [u8; OUTPUT_BYTES] {
     output
 }
 
+/// The size of a cSHAKE256 midstate's fixed part: the 25 Keccak lanes, little-endian, then the
+/// padding suffix byte (`0x1f` for SHAKE256, `0x04` for cSHAKE256). The unabsorbed tail follows.
+pub const MIDSTATE_FIXED_BYTES: usize = 201;
+/// The longest midstate `cshake256_absorb` writes: the fixed part and fewer than one rate block.
+pub const MIDSTATE_MAX_BYTES: usize = MIDSTATE_FIXED_BYTES + RATE_BYTES - 1;
+
+fn xor_block(state: &mut [u64; 25], block: &[u8]) {
+    for (lane, chunk) in state.iter_mut().zip(block.chunks(8)).take(RATE_BYTES / 8) {
+        let mut word = [0u8; 8];
+        word[..chunk.len()].copy_from_slice(chunk);
+        *lane ^= u64::from_le_bytes(word);
+    }
+}
+
+/// Absorb every full rate block of `bytes` into `state`; return the unabsorbed tail.
+fn absorb_blocks<'a>(state: &mut [u64; 25], bytes: &'a [u8]) -> &'a [u8] {
+    let full = bytes.len() / RATE_BYTES;
+    for block in bytes.chunks_exact(RATE_BYTES).take(full) {
+        xor_block(state, block);
+        keccak::f1600(state);
+    }
+    &bytes[full * RATE_BYTES..]
+}
+
+/// cSHAKE256's absorbed prefix, as bytes: `cshake256AbsorbKernel` in
+/// `Theory/Sp800185Cshake256Midstate.lean`. The framed input (the SP 800-185 customization block,
+/// absent for an empty customization, then `prefix`) is absorbed block by block; the result is
+/// the 25 lanes (200 bytes, little-endian), the padding suffix byte, and the unabsorbed tail
+/// (fewer than 136 bytes). `cshake256_finish_32(&cshake256_absorb(c, p), s)` is
+/// `cshake256_32(c, p ++ s)`.
+pub fn cshake256_absorb(customization: &[u8], prefix: &[u8]) -> Vec<u8> {
+    let mut framed = if customization.is_empty() {
+        Vec::with_capacity(prefix.len())
+    } else {
+        let mut names = encode_string(&[]);
+        names.extend_from_slice(&encode_string(customization));
+        bytepad(&names, RATE_BYTES)
+    };
+    framed.extend_from_slice(prefix);
+    let suffix: u8 = if customization.is_empty() { 0x1f } else { 0x04 };
+    let mut state = [0u64; 25];
+    let tail = absorb_blocks(&mut state, &framed);
+    let mut out = Vec::with_capacity(MIDSTATE_FIXED_BYTES + tail.len());
+    for lane in state {
+        out.extend_from_slice(&lane.to_le_bytes());
+    }
+    out.push(suffix);
+    out.extend_from_slice(tail);
+    out
+}
+
+/// Finish a midstate with `suffix`: `cshake256FinishKernel` in
+/// `Theory/Sp800185Cshake256Midstate.lean`. Total on every byte string, as the Lean body is: a
+/// midstate shorter than 201 bytes reads as zero-filled, and a tail of any length is absorbed.
+pub fn cshake256_finish_32(midstate: &[u8], suffix: &[u8]) -> [u8; OUTPUT_BYTES] {
+    let mut fixed = [0u8; MIDSTATE_FIXED_BYTES];
+    let take = midstate.len().min(MIDSTATE_FIXED_BYTES);
+    fixed[..take].copy_from_slice(&midstate[..take]);
+    let mut state = [0u64; 25];
+    for (i, lane) in state.iter_mut().enumerate() {
+        let mut word = [0u8; 8];
+        word.copy_from_slice(&fixed[8 * i..8 * i + 8]);
+        *lane = u64::from_le_bytes(word);
+    }
+    let delimiter = fixed[200];
+    let pending = if midstate.len() > MIDSTATE_FIXED_BYTES { &midstate[MIDSTATE_FIXED_BYTES..] } else { &[] };
+    let mut tail = Vec::with_capacity(pending.len() + suffix.len() + RATE_BYTES);
+    tail.extend_from_slice(pending);
+    tail.extend_from_slice(suffix);
+    // `padForRate`: the delimiter, zeros, and a final 0x80, merged when one byte is left.
+    let count = RATE_BYTES - tail.len() % RATE_BYTES;
+    if count == 1 {
+        tail.push(delimiter ^ 0x80);
+    } else {
+        tail.push(delimiter);
+        tail.resize(tail.len() + count - 2, 0);
+        tail.push(0x80);
+    }
+    let rest = absorb_blocks(&mut state, &tail);
+    debug_assert!(rest.is_empty());
+    let mut output = [0u8; OUTPUT_BYTES];
+    for (k, byte) in output.iter_mut().enumerate() {
+        *byte = (state[k / 8] >> (8 * (k % 8))) as u8;
+    }
+    output
+}
+
 /// SP 800-185 `left_encode`: the minimal big-endian bytes of `value`, preceded by their count.
 fn left_encode(value: usize) -> Vec<u8> {
     let bytes = minimal_be(value);
@@ -175,6 +262,43 @@ pub unsafe extern "C" fn mini_kernels_cshake256_32(
     output: *mut u8,
 ) {
     let digest = cshake256_32(slice(customization, customization_len), slice(input, input_len));
+    std::ptr::copy_nonoverlapping(digest.as_ptr(), output, OUTPUT_BYTES);
+}
+
+/// C ABI: `cshake256_absorb` into the caller's buffer of `MIDSTATE_MAX_BYTES`; returns the
+/// number of bytes written.
+///
+/// # Safety
+/// `customization`/`prefix` must be valid for their lengths (or the length 0); `output` must be
+/// valid for `MIDSTATE_MAX_BYTES` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn mini_kernels_cshake256_absorb(
+    customization: *const u8,
+    customization_len: usize,
+    prefix: *const u8,
+    prefix_len: usize,
+    output: *mut u8,
+) -> usize {
+    let midstate = cshake256_absorb(slice(customization, customization_len), slice(prefix, prefix_len));
+    debug_assert!(midstate.len() <= MIDSTATE_MAX_BYTES);
+    std::ptr::copy_nonoverlapping(midstate.as_ptr(), output, midstate.len());
+    midstate.len()
+}
+
+/// C ABI: `cshake256_finish_32` into the caller's 32-byte buffer.
+///
+/// # Safety
+/// `midstate`/`suffix` must be valid for their lengths (or the length 0); `output` must be valid
+/// for 32 writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn mini_kernels_cshake256_finish_32(
+    midstate: *const u8,
+    midstate_len: usize,
+    suffix: *const u8,
+    suffix_len: usize,
+    output: *mut u8,
+) {
+    let digest = cshake256_finish_32(slice(midstate, midstate_len), slice(suffix, suffix_len));
     std::ptr::copy_nonoverlapping(digest.as_ptr(), output, OUTPUT_BYTES);
 }
 

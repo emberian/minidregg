@@ -9,6 +9,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 sha3 = "0.10"
+keccak = "=0.1.6"
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }
 sha2 = { version = "=0.10.9", default-features = false }
 

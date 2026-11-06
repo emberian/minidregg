@@ -111,6 +111,7 @@ import Theory.Channel.Audit  -- CH-CELL theorems axiom pins (moved out so the ru
 -- `ObjectiveProofs` library (lakefile.toml), gated on its own.
 import Theory.HashBytes  -- big-endian bytes, byte hashes and Collision: the carrier Pred.hashEq and Core4 digest share
 import Theory.Sp800185Cshake256Native  -- HOT-PATH 2d: the kernel seam; the compiled cSHAKE256 is the Rust kernel (native/mini-kernels) behind @[extern], its Lean body the proved fast path
+import Theory.Sp800185Cshake256Midstate  -- the absorbed-prefix kernel seam (mini_cshake256_absorb / _finish_32): cshake256_cached, finishing an absorbed prefix is the one-shot hash
 import Theory.Sp800185Cshake256Core  -- the kernel's cSHAKE256 (spec + @[csimp] fast sponge), moved from Compiler so Core4 can compute it
 import Theory.Sp800185Cshake256Conformance  -- executable NIST SP 800-185 and FIPS 202 vectors on the fast path (native_decide), beside the code they check
 import Theory.ObjectiveBendDigest  -- Core4 `digest`: cSHAKE256 under DREGG.OBEND.DIGEST/v1 over len(a):8 ‖ a ‖ b; binds-or-collides generic in H, length-hash pole, Hiding ASSUMED

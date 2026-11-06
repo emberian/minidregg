@@ -15,13 +15,15 @@ multiplied-out form `(next + left)·pivot = (x + α)·(left + right)`, which is 
 division form because the pivot is nonzero for an independent basis (`fold_iff`).
 
 Byte side. Transcript bytes use `encodeC` (`basisPrefix_eq`, `challengeInput_eq`,
-`queryPrefix_eq`); openings and the last root use the coordinate Merkle layer of
+`queryPrefix_eq`); the seeds finish from the query prefix absorbed once (`seedOfMidstate_eq`);
+openings and the last root use the coordinate Merkle layer of
 `Tower256CoordinateMerkle` (`verifyOpen_iff`, `lastRoot_eq`).
 -/
 
 import Compiler.Tower256AdditiveFriSuccinctController
 import Compiler.Tower256AdditiveFriRawDeployment
 import Compiler.Tower256CoordinateMerkle
+import Theory.Sp800185Cshake256Midstate
 
 namespace Minidregg.Compiler.Tower256SuccinctCheck
 
@@ -294,6 +296,45 @@ theorem seedC_eq (s : CStatement ell m) (pins : TranscriptPins)
   unfold seedC Tower256AdditiveFriSuccinctController.derivedQuerySeed
   simp only [hc, queryPrefix_eq]
 
+/-! ### The query prefix, absorbed once
+
+Every seed hashes `queryPrefixC ++ envelope (encodeLength a)`, and the prefix is the long part
+(unary lengths). `queryMidstate` absorbs it once through `cshake256AbsorbKernel`; each seed then
+finishes from it (`seedOfMidstate`). `seedOfMidstate_eq` is `Midstate.cshake256_cached` at the
+query customization: the cached and uncached seed functions are equal, for every receipt. -/
+
+/-- The absorbed query prefix. -/
+def queryMidstate (s : CStatement ell m) (pins : TranscriptPins)
+    (r : CReceipt ell m queryCount) : ByteArray :=
+  Sp800185Cshake256.Midstate.cshake256AbsorbKernel
+    (Sp800185Cshake256.Native.bytesOfList pins.queryCustomization)
+    (Sp800185Cshake256.Native.bytesOfList (queryPrefixC s pins r))
+
+/-- The seed of query `a`, finished from an absorbed prefix. -/
+def seedOfMidstate (midstate : ByteArray) (a : Fin queryCount) : PowerTwoFriLevels ell 1 :=
+  let digest := Sp800185Cshake256.digestOfBytesLE
+    (Sp800185Cshake256.Midstate.cshake256FinishKernel midstate
+      (Sp800185Cshake256.Native.bytesOfList (envelope (encodeLength a)))).data.toList
+  ⟨digest.value % (2 ^ (ell - 1)), Nat.mod_lt _ (by positivity)⟩
+
+/-- **The cached seed is the seed.** -/
+theorem seedOfMidstate_eq (s : CStatement ell m) (pins : TranscriptPins)
+    (r : CReceipt ell m queryCount) (a : Fin queryCount) :
+    seedOfMidstate (queryMidstate s pins r) a = seedC s pins r a := by
+  have hx : ∀ c i, cshakeC.xofDigest c i =
+      Sp800185Cshake256.digestOfBytesLE (Sp800185Cshake256.cshake256Bytes c i) := fun _ _ => rfl
+  apply Fin.ext
+  show (Sp800185Cshake256.digestOfBytesLE
+      (Sp800185Cshake256.Midstate.cshake256FinishKernel
+        (Sp800185Cshake256.Midstate.cshake256AbsorbKernel
+          (Sp800185Cshake256.Native.bytesOfList pins.queryCustomization)
+          (Sp800185Cshake256.Native.bytesOfList (queryPrefixC s pins r)))
+        (Sp800185Cshake256.Native.bytesOfList (envelope (encodeLength a)))).data.toList).value %
+        2 ^ (ell - 1) =
+      (cshakeC.xofDigest pins.queryCustomization
+        (queryPrefixC s pins r ++ envelope (encodeLength a))).value % 2 ^ (ell - 1)
+  rw [Sp800185Cshake256.Midstate.cshake256_cached, hx]
+
 /-! ## Openings and the fold equation -/
 
 /-- The concrete level-`n` opening check over coordinates. -/
@@ -396,7 +437,8 @@ def check (s : CStatement ell m) (pins : TranscriptPins) (r : CReceipt ell m que
   decide (queryCount = s.queryCount) &&
   (decide (r.roots 0 = s.initialRoot) &&
   (decide (∀ j, r.challenges j = challengeC s pins r j) &&
-  (decide (∀ a, r.querySeed a = seedC s pins r a) &&
+  (let midstate := queryMidstate s pins r
+   decide (∀ a, r.querySeed a = seedOfMidstate midstate a) &&
   (decide (∀ (j : Fin m) (a : Fin queryCount),
       openedC s r j (additiveCoherentRound s.rounds_le j r.querySeed a) (r.opening j a) = true) &&
   (decide (r.finalCoeffs.length ≤ s.degree m) &&
@@ -409,9 +451,9 @@ theorem check_iff (s : CStatement ell m) (pins : TranscriptPins) (r : CReceipt e
     forall_congr' fun j => by
       rw [← toField_challengeC]
       exact (Equiv.apply_eq_iff_eq toField).symm
-  have hseed : (∀ a, r.querySeed a = seedC s pins r a) ↔
+  have hseed : (∀ a, r.querySeed a = seedOfMidstate (queryMidstate s pins r) a) ↔
       ∀ a, r.denote.querySeed a = Tower256AdditiveFriSuccinctController.derivedQuerySeed (rawPcs ell) s.denote pins r.denote a :=
-    forall_congr' fun a => by rw [seedC_eq]; rfl
+    forall_congr' fun a => by rw [seedOfMidstate_eq, seedC_eq]; rfl
   have hop : (∀ (j : Fin m) (a : Fin queryCount),
       openedC s r j (additiveCoherentRound s.rounds_le j r.querySeed a) (r.opening j a) = true) ↔
       ∀ (j : Fin m) (a : Fin queryCount), OpenedQuery (rawPcs ell) s.denote j r.denote
@@ -463,6 +505,8 @@ def bootReceipt (coeffs : List C8) : CReceipt 1 0 0 where
 -- A final polynomial over the degree bound is rejected.
 #guard !check bootStatement bootstrapPins (bootReceipt [Coordinate.one 8, Coordinate.zero 8])
 
+/-- info: 'Minidregg.Compiler.Tower256SuccinctCheck.seedOfMidstate_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms seedOfMidstate_eq
 /-- info: 'Minidregg.Compiler.Tower256SuccinctCheck.check_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms check_iff
 

@@ -1,5 +1,6 @@
 /* The Lean side of native/mini-kernels: ByteArray marshalling for the
  * `@[extern]` declarations in Theory/Sp800185Cshake256Native.lean,
+ * Theory/Sp800185Cshake256Midstate.lean,
  * Compiler/Sp800185Kmac256.lean and Compiler/CredentialSignatureKernel.lean.
  * lean.h's allocation and accessor helpers are static inline, so the Rust
  * kernels never see a lean_object. All arguments are borrowed (`@&` in Lean:
@@ -11,6 +12,10 @@
 
 void mini_kernels_cshake256_32(const uint8_t *customization, size_t customization_len,
                                const uint8_t *input, size_t input_len, uint8_t *output);
+size_t mini_kernels_cshake256_absorb(const uint8_t *customization, size_t customization_len,
+                                     const uint8_t *prefix, size_t prefix_len, uint8_t *output);
+void mini_kernels_cshake256_finish_32(const uint8_t *midstate, size_t midstate_len,
+                                      const uint8_t *suffix, size_t suffix_len, uint8_t *output);
 void mini_kernels_kmac256_32(const uint8_t *key, size_t key_len,
                              const uint8_t *customization, size_t customization_len,
                              const uint8_t *input, size_t input_len, uint8_t *output);
@@ -31,6 +36,28 @@ LEAN_EXPORT lean_obj_res mini_cshake256_32(b_lean_obj_arg customization, b_lean_
   mini_kernels_cshake256_32(lean_sarray_cptr(customization), lean_sarray_size(customization),
                             lean_sarray_cptr(input), lean_sarray_size(input),
                             lean_sarray_cptr(out));
+  return out;
+}
+
+/* The fixed part of a midstate (25 lanes and the suffix byte) and under one rate block of tail:
+ * MIDSTATE_MAX_BYTES in native/mini-kernels/src/lib.rs. */
+#define MINI_KERNELS_MIDSTATE_MAX 336
+
+LEAN_EXPORT lean_obj_res mini_cshake256_absorb(b_lean_obj_arg customization, b_lean_obj_arg prefix) {
+  uint8_t buffer[MINI_KERNELS_MIDSTATE_MAX];
+  size_t length = mini_kernels_cshake256_absorb(lean_sarray_cptr(customization), lean_sarray_size(customization),
+                                                lean_sarray_cptr(prefix), lean_sarray_size(prefix), buffer);
+  lean_obj_res out = lean_alloc_sarray(1, length, length);
+  uint8_t *target = lean_sarray_cptr(out);
+  for (size_t i = 0; i < length; i++) target[i] = buffer[i];
+  return out;
+}
+
+LEAN_EXPORT lean_obj_res mini_cshake256_finish_32(b_lean_obj_arg midstate, b_lean_obj_arg suffix) {
+  lean_obj_res out = mini_kernels_fresh_32();
+  mini_kernels_cshake256_finish_32(lean_sarray_cptr(midstate), lean_sarray_size(midstate),
+                                   lean_sarray_cptr(suffix), lean_sarray_size(suffix),
+                                   lean_sarray_cptr(out));
   return out;
 }
 

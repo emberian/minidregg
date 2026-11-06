@@ -72,8 +72,11 @@ Mults are Tower256 multiplications. A single Fan–Paar product is 4^8 = 65,536 
 - **Seeds:** each of the `q` seed hashes re-absorbs the whole query prefix (about 7–11 KB at
   these sizes, because lengths are unary). With the prefix's absorbed state cached, seed
   Keccak-f fall from 7,666 to 316 at ell = 14. That is a native-only optimization with
-  identical output, and it needs an incremental-absorb entry in `mini_cshake256_32`'s ABI if
-  the Lean verifier is to use it.
+  identical output. **Landed:** the kernel ABI has `mini_cshake256_absorb` /
+  `mini_cshake256_finish_32` (`Theory/Sp800185Cshake256Midstate.lean`; `cshake256_cached` proves
+  the split equal to the one-shot hash for every input), and `check` finishes every seed from
+  the once-absorbed prefix (`seedOfMidstate_eq`). On the ell = 2 honest receipt the framed
+  prefix is 1,069 bytes and the two seeds cost 9 Keccak-f instead of 16.
 
 ## 3. Unaccounted, stated so it is not mistaken for zero
 

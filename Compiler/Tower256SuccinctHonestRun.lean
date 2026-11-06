@@ -189,4 +189,48 @@ def openedClause (s : CStatement 2 1) (r : CReceipt 2 1 2) : Bool :=
   !check s0 bootstrapPins r && challengeClause s0 bootstrapPins r &&
     seedClause s0 bootstrapPins r && !openedClause s0 r
 
+/-! ## The query prefix, absorbed once
+
+`check` finishes every seed from the query prefix absorbed once (`seedOfMidstate_eq` proves the
+two seed functions equal). Here the compiled kernels are compared on the honest receipt: for each
+query, the 32 bytes finished from the midstate (`mini_cshake256_absorb`, then
+`mini_cshake256_finish_32`) are the 32 bytes of the one-shot hash (`mini_cshake256_32`), not only
+the one seed bit they reduce to at `ell = 2`. -/
+
+def honest : CReceipt 2 1 2 := prove bootstrapPins none false (Coordinate.zero 8)
+
+def seedInput (a : Fin 2) : List UInt8 := envelope (encodeLength a)
+
+def finishedBytes (mid : ByteArray) (a : Fin 2) : List UInt8 :=
+  (Sp800185Cshake256.Midstate.cshake256FinishKernel mid
+    (Sp800185Cshake256.Native.bytesOfList (seedInput a))).data.toList
+
+def oneShotBytes (a : Fin 2) : List UInt8 :=
+  Sp800185Cshake256.cshake256Bytes bootstrapPins.queryCustomization
+    (queryPrefixC s0 bootstrapPins honest ++ seedInput a)
+
+#guard
+  let mid := queryMidstate s0 bootstrapPins honest
+  (List.finRange 2).all fun a => finishedBytes mid a == oneShotBytes a
+
+-- The midstate is read: one flipped lane byte changes every finished digest.
+#guard
+  let mid := queryMidstate s0 bootstrapPins honest
+  let bad := mid.set! 17 (mid.get! 17 ^^^ 1)
+  (List.finRange 2).all fun a => finishedBytes bad a != oneShotBytes a
+
+/-- Counts on this receipt: the framed query prefix in bytes (the 136-byte customization block
+plus `queryPrefixC`), the Keccak-f calls of the two seeds hashed in one shot, and with the prefix
+absorbed once (its full blocks once, then each seed's carried tail and suffix). -/
+def seedCounts : Nat × Nat × Nat :=
+  let framed := 136 + (queryPrefixC s0 bootstrapPins honest).length
+  let blocks (n : Nat) : Nat := n / 136 + 1
+  let oneShot := (List.finRange 2).foldl (fun acc a => acc + blocks (framed + (seedInput a).length)) 0
+  let cached := framed / 136 +
+    (List.finRange 2).foldl (fun acc a => acc + blocks (framed % 136 + (seedInput a).length)) 0
+  (framed, oneShot, cached)
+
+/-- info: (1069, 16, 9) -/
+#guard_msgs in #eval seedCounts
+
 end Minidregg.Compiler.Tower256SuccinctHonestRun
