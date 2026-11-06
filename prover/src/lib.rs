@@ -23,6 +23,7 @@ pub mod native_dispatch;
 pub mod rank1;
 pub mod semantic_artifact_arithmetic;
 pub mod sumcheck;
+pub mod tower256_fri_fast;
 pub mod tower256_fri_prove;
 pub mod tower256_kernels;
 
