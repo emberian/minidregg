@@ -15,6 +15,7 @@ Any other outcome prints the observation and exits 1.
 -/
 
 import Compiler.Tower256SuccinctProver
+import Compiler.Tower256FriNativeDeployment
 
 namespace Minidregg.Compiler.Tower256SuccinctProverRun
 
@@ -26,6 +27,7 @@ open Minidregg.Compiler.Tower256SuccinctCheck
 open Minidregg.Compiler.Tower256SuccinctReceiptCodec (receiptCodec checkBytes)
 open Minidregg.Compiler.Tower256SuccinctProver
 open Minidregg.Theory.BinaryTowerFanPaarCodec (Coordinate)
+open Minidregg.Compiler.Tower256FriNativeDeployment (ProveRequest requestCodecLawful)
 
 set_option autoImplicit false
 
@@ -79,11 +81,11 @@ def allTrue (m queryCount : Nat) : List (Nat × Nat × (Bool × Bool × Bool × 
 
 def shapeA : IO Bool := do
   let label := "ell=4 m=2 q=3"
-  let some run := prove 4 2 3 (by norm_num) (by norm_num) 2 bootstrapPins (poly 8) none
+  let some run := prove 4 2 3 (by norm_num) (by norm_num) (Coordinate.zero 8) [8, 4, 2] bootstrapPins (poly 8) none
     | expect s!"{label}: interpolation" false
   let h ← honestChecks label run 3
-  let some bad := prove 4 2 3 (by norm_num) (by norm_num) 2 bootstrapPins (poly 8)
-      (some (1, Coordinate.one 8))
+  let some bad := prove 4 2 3 (by norm_num) (by norm_num) (Coordinate.zero 8) [8, 4, 2] bootstrapPins
+      (poly 8) (some (1, Coordinate.one 8))
     | expect s!"{label} delta: interpolation" false
   let expected := (allTrue 2 3).map fun (j, a, p) => if j = 0 then (j, a, (true, true, true, false)) else (j, a, p)
   let mu ← mutantChecks s!"{label} delta at level 1" bad bad.receipt expected
@@ -91,7 +93,8 @@ def shapeA : IO Bool := do
 
 def shapeB : IO Bool := do
   let label := "ell=8 m=3 q=4"
-  let some run := prove 8 3 4 (by norm_num) (by norm_num) 4 bootstrapPins (poly 32) none
+  let some run := prove 8 3 4 (by norm_num) (by norm_num) (Coordinate.zero 8) [32, 16, 8, 4] bootstrapPins
+      (poly 32) none
     | expect s!"{label}: interpolation" false
   let h ← honestChecks label run 8
   let r := run.receipt
@@ -107,10 +110,68 @@ def shapeB : IO Bool := do
   let mu ← mutantChecks s!"{label} path corrupted at round 1 query 0" run bad expected
   return h && mu
 
+/-! ## Work 9104 conformance vectors
+
+`tower256-prover-run --vectors FILE` writes request and response bytes for the native kernel to
+reproduce byte for byte. The reference answer is this prover; it is defined for the unit basis
+only (the statement needs its independence proof), so every vector uses the unit basis. -/
+
+/-- The reference response to a 9104 request: the honest receipt's bytes. -/
+def proveRequest (req : ProveRequest) : Option (List UInt8) :=
+  if hm : req.m ≤ req.ell then
+    if hell : req.ell ≤ 256 then
+      if req.beta = List.ofFn (unitBasis req.ell) then
+        let pins := { bootstrapPins with statementBytes := req.statementBytes }
+        (prove req.ell req.m req.queryCount hm hell req.offset req.degree pins req.inputWord
+          none).map fun run => (receiptCodec req.ell req.m req.queryCount).encode run.receipt
+      else none
+    else none
+  else none
+
+def request (ell m queryCount : Nat) (offset : C8) (degree : List Nat) (coeffs : Nat) :
+    ProveRequest where
+  statementBytes := (s!"tower256-9104-vector/{ell}/{m}/{queryCount}").toUTF8.toList
+  ell := ell
+  m := m
+  queryCount := queryCount
+  beta := List.ofFn (unitBasis ell)
+  offset := offset
+  degree := degree
+  inputWord := poly coeffs
+
+def vectorRequests : List (String × ProveRequest) :=
+  [("ell2_m1_q2", request 2 1 2 (Coordinate.zero 8) [4, 2] 4),
+   ("ell3_m0_q0", request 3 0 0 (Coordinate.zero 8) [8] 8),
+   ("ell4_m2_q3_offset9", request 4 2 3 (Coord.ofNat 8 9) [8, 4, 2] 8),
+   ("ell6_m3_q3", request 6 3 3 (Coordinate.zero 8) [16, 8, 4, 2] 16),
+   ("ell8_m3_q4", request 8 3 4 (Coordinate.zero 8) [32, 16, 8, 4] 32)]
+
+def hex (bytes : List UInt8) : String :=
+  String.join (bytes.map fun b =>
+    let d := "0123456789abcdef".toList
+    String.mk [d[(b.toNat / 16)]!, d[(b.toNat % 16)]!])
+
+def writeVectors (path : String) : IO Bool := do
+  let mut rows : Array String := #[]
+  let mut ok := true
+  for (name, req) in vectorRequests do
+    match proveRequest req with
+    | none =>
+      IO.println s!"FAIL vector {name}: no reference receipt"
+      ok := false
+    | some resp =>
+      IO.println s!"ok   vector {name}: request {(requestCodecLawful.encode req).length} bytes, response {resp.length} bytes"
+      rows := rows.push s!"    \{\"name\": \"{name}\", \"request\": \"{hex (requestCodecLawful.encode req)}\", \"response\": \"{hex resp}\"}"
+  IO.FS.writeFile path ("{\n  \"source\": \"lake exe tower256-prover-run --vectors\",\n  \"vectors\": [\n" ++
+    ",\n".intercalate rows.toList ++ "\n  ]\n}\n")
+  return ok
+
 end Minidregg.Compiler.Tower256SuccinctProverRun
 
 open Minidregg.Compiler.Tower256SuccinctProverRun in
-def main : IO UInt32 := do
+def main (args : List String) : IO UInt32 := do
+  if let ["--vectors", path] := args then
+    return if (← writeVectors path) then 0 else 1
   let a ← shapeA
   let b ← shapeB
   if a && b then

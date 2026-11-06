@@ -173,12 +173,13 @@ def stubReceipt (roots : Array Digest) (challenges : Array C8) (coeffs : List C8
   opening := fun _ _ => ⟨Coordinate.zero 8, Coordinate.zero 8, []⟩
   finalCoeffs := coeffs
 
-/-- The statement the prover answers, for the unit basis at offset zero. -/
-def statement (ell m : Nat) (hm : m ≤ ell) (hell : ell ≤ 256) (finalDegree queryCount : Nat)
-    (root0 : Digest) : CStatement ell m where
+/-- The statement the prover answers, for the unit basis (any offset; degree bound `n` is
+`degree[n]`, zero past the list). -/
+def statement (ell m : Nat) (hm : m ≤ ell) (hell : ell ≤ 256) (offset : C8) (degree : List Nat)
+    (queryCount : Nat) (root0 : Digest) : CStatement ell m where
   beta := unitBasis ell
-  offset := Coordinate.zero 8
-  degree := fun _ => finalDegree
+  offset := offset
+  degree := fun n => degree.getD n 0
   queryCount := queryCount
   initialRoot := root0
   independent := unitBasis_independent ell hell
@@ -194,14 +195,15 @@ structure Run (ell m queryCount : Nat) where
 
 /-- The honest prover over `poly` (the level-0 word's coefficients), with an optional mutant:
 `delta = some (j, d)` commits the level-`j` word plus `d` (then folds honestly from it). -/
-def prove (ell m queryCount : Nat) (hm : m ≤ ell) (hell : ell ≤ 256) (finalDegree : Nat)
-    (pins : TranscriptPins) (poly : List C8) (delta : Option (Nat × C8)) :
+def prove (ell m queryCount : Nat) (hm : m ≤ ell) (hell : ell ≤ 256) (offset : C8)
+    (degree : List Nat) (pins : TranscriptPins) (poly : List C8) (delta : Option (Nat × C8)) :
     Option (Run ell m queryCount) := Id.run do
   let beta := unitBasis ell
-  let off := Coordinate.zero 8
+  let off := offset
+  let finalDegree := degree.getD m 0
   let w0 : Array C8 := tabulate (ell := ell) 0 fun c => evalCoeffs poly (domC beta off 0 c)
   let root0 := cubeRoot merkleDomainsC codecC (columnOf (ell := ell) 0 w0)
-  let s := statement ell m hm hell finalDegree queryCount root0
+  let s := statement ell m hm hell off degree queryCount root0
   let zeroSeeds : Fin queryCount → PowerTwoFriLevels ell 1 := fun _ => ⟨0, by positivity⟩
   let mut words : Array (Array C8) := #[w0]
   let mut roots : Array Digest := #[root0]
@@ -293,8 +295,8 @@ The runner checks the large shapes compiled; here the elaborator checks `ell = 3
 def tinyPoly : List C8 := (List.range 4).map fun n => Coord.ofNat 8 (7 + 11 * n)
 
 def tiny : Option (Run 3 2 2) :=
-  prove 3 2 2 (by norm_num) (by norm_num) 1 Tower256AdditiveFriRawDeployment.bootstrapPins
-    tinyPoly none
+  prove 3 2 2 (by norm_num) (by norm_num) (Coordinate.zero 8) [4, 2, 1]
+    Tower256AdditiveFriRawDeployment.bootstrapPins tinyPoly none
 
 #guard match tiny with
   | none => false
