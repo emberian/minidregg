@@ -180,5 +180,4 @@ The kernel's limits:
 - `MAX_ELL` is 24.
 - The final degree must not exceed the last level's size.
 
-**The docstring of `Compiler/Tower256FriNativeDeployment.lean` still says "No Rust kernel exists
-yet".** It has not been edited in this commit.
+The docstring of `Compiler/Tower256FriNativeDeployment.lean` now names this kernel.

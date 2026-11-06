@@ -110,6 +110,78 @@ def shapeB : IO Bool := do
   let mu ← mutantChecks s!"{label} path corrupted at round 1 query 0" run bad expected
   return h && mu
 
+/-! ## The hand-written ell = 2 run (`Tower256SuccinctHonestRun`), compiled
+
+These were the interpreted `#guard`s of `Tower256SuccinctHonestRun` and
+`Tower256SuccinctReceiptCodec`; they run here, observation for observation. -/
+
+section ShapeTwo
+
+open Minidregg.Compiler.Tower256SuccinctHonestRun
+  (s0 prove honest challengeClause seedClause openedClause openingParts path0 seedInput
+    finishedBytes oneShotBytes seedCounts gen)
+open Minidregg.Compiler.Tower256SuccinctReceiptCodec
+  (receiptCodec checkBytes c8Stream finFun openingStream)
+open Minidregg.Compiler.Tower256ConcreteBackend (StreamCodec digestStream)
+
+def shapeTwo : IO Bool := do
+  let label := "ell=2 m=1 q=2 (hand-written)"
+  let p := bootstrapPins
+  let a1 ← expect s!"{label}: honest receipt accepted" (check s0 p honest)
+  let ra := prove p (some (Coordinate.one 8)) false (Coordinate.zero 8)
+  let a2 ← expect s!"{label} alphaBad: only the challenge clause fails"
+    (!check s0 p ra && !challengeClause s0 p ra && seedClause s0 p ra && openedClause s0 ra)
+  let rs := prove p none true (Coordinate.zero 8)
+  let a3 ← expect s!"{label} seedBad: only the seed clause fails"
+    (!check s0 p rs && challengeClause s0 p rs && !seedClause s0 p rs && openedClause s0 rs)
+  let rd := prove p none false (Coordinate.one 8)
+  let a4 ← expect s!"{label} delta: every opening authenticates, only the fold fails"
+    (!check s0 p rd && challengeClause s0 p rd && seedClause s0 p rd && !openedClause s0 rd &&
+      openingParts s0 rd == [(true, true, true, false), (true, true, true, false)])
+  let a5 ← expect s!"{label}: both full paths are the leaves' own cubePaths; pairPath has length 1"
+    ((List.finRange 2).all fun a =>
+      let k := Minidregg.Selvage.additiveCoherentRound s0.rounds_le 0 honest.querySeed a
+      let o := honest.opening 0 a
+      o.leftFull == path0 (liftBitC s0 0 0 k) && o.rightFull == path0 (liftBitC s0 0 1 k) &&
+        o.pairPath.length == 1)
+  let a6 ← expect s!"{label}: every opening part holds"
+    (openingParts s0 honest == [(true, true, true, true), (true, true, true, true)])
+  let rc : CReceipt 2 1 2 := { honest with opening := fun j a =>
+    let o := honest.opening j a
+    { o with pairPath := o.pairPath.map fun d => ⟨d.value + 1⟩ } }
+  let a7 ← expect s!"{label} corrupted pairPath: left and right fail, next and fold hold"
+    (!check s0 p rc && challengeClause s0 p rc && seedClause s0 p rc && !openedClause s0 rc &&
+      openingParts s0 rc == [(false, true, false, true), (false, true, false, true)])
+  let mid := queryMidstate s0 p honest
+  let a8 ← expect s!"{label}: seeds finished from the midstate equal the one-shot hash (32 bytes)"
+    ((List.finRange 2).all fun a => finishedBytes mid a == oneShotBytes a)
+  let bad := mid.set! 17 (mid.get! 17 ^^^ 1)
+  let a9 ← expect s!"{label}: a flipped midstate lane byte changes every finished digest"
+    ((List.finRange 2).all fun a => finishedBytes bad a != oneShotBytes a)
+  let a10 ← expect s!"{label}: seed counts (framed prefix, one-shot, cached) = (1069, 16, 9)"
+    (seedCounts == (1069, 16, 9))
+  let bytes := (receiptCodec 2 1 2).encode honest
+  let a11 ← expect s!"{label} codec: coordinate wire bytes are encodeC; round trip; accepted"
+    (c8Stream.encode gen == encodeC gen &&
+      c8Stream.encode (honest.challenges 0) == encodeC (honest.challenges 0) &&
+      ((receiptCodec 2 1 2).decode bytes).map (receiptCodec 2 1 2).encode == some bytes &&
+      checkBytes (queryCount := 2) s0 p bytes)
+  let a12 ← expect s!"{label} codec: trailing byte, truncation, flipped root byte refused"
+    (!checkBytes (queryCount := 2) s0 p (bytes ++ [0]) &&
+      !checkBytes (queryCount := 2) s0 p bytes.dropLast &&
+      !checkBytes (queryCount := 2) s0 p (bytes.modify 2 (· ^^^ 1)))
+  let sizes : List Nat :=
+    [(finFun 2 digestStream).encode honest.roots |>.length,
+     (finFun 1 c8Stream).encode honest.challenges |>.length,
+     (finFun 2 (StreamCodec.fin (2 ^ (2 - 1)))).encode honest.querySeed |>.length,
+     (finFun 1 (finFun 2 openingStream)).encode honest.opening |>.length,
+     (StreamCodec.list c8Stream).encode honest.finalCoeffs |>.length]
+  let a13 ← expect s!"{label} codec: 375 bytes, parts [68, 34, 5, 202, 66] (got {bytes.length}, {sizes})"
+    (bytes.length == 375 && sizes == [68, 34, 5, 202, 66])
+  return [a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13].all id
+
+end ShapeTwo
+
 /-! ## Work 9104 conformance vectors
 
 `tower256-prover-run --vectors FILE` writes request and response bytes for the native kernel to
@@ -172,9 +244,10 @@ open Minidregg.Compiler.Tower256SuccinctProverRun in
 def main (args : List String) : IO UInt32 := do
   if let ["--vectors", path] := args then
     return if (← writeVectors path) then 0 else 1
+  let t ← shapeTwo
   let a ← shapeA
   let b ← shapeB
-  if a && b then
+  if t && a && b then
     IO.println "tower256-prover-run: all observations hold"
     return 0
   else
