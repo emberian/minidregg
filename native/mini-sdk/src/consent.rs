@@ -30,7 +30,7 @@
 //! socket lives in the owner-private anchor directory (Linux uses a directory descriptor
 //! when that address is too long), and both ends check the peer is this user.
 //!
-//! A consent resident also admits on its own (frame 237, [`HeadWatch`]): when the Store's head
+//! A consent resident also admits on its own (full readiness, 236, [`HeadWatch`]): when the Store's head
 //! marker moves it admits the new records then, so the records other writers append are admitted
 //! as they land and a member's command pays only for what landed in the last moment.
 //!
@@ -545,15 +545,19 @@ impl HeadWatch {
     }
 }
 
-/// Admit the Store up to its head on the resident's provider (frame 237) and retain the anchor.
-/// A refusal ends the resident exactly as a refused member frame does.
+/// Admit the Store up to its head on the resident's provider and retain the anchor. The frame is
+/// full readiness (236, empty): the provider admits to the head before answering it, and the
+/// served Host's image and protocol table stay as they are. Its first use also holds the
+/// admission in full (`ClientConsentCore.upgrade`: a walk from the Store's checkpoint, once),
+/// which a later operator plan would otherwise ask for inside a command. A refusal ends the
+/// resident exactly as a refused member frame does.
 fn catch_up(shared: &Mutex<Resident>, ended: &std::sync::atomic::AtomicBool) {
     let Ok(mut resident) = shared.lock() else { return };
     if resident.ended {
         return;
     }
-    match resident.session.exchange(crate::host_operations::CONSENT_CATCH_UP, &[]) {
-        Ok((crate::host_operations::CONSENT_CATCH_UP, _)) => retain_anchor(&mut resident.session),
+    match resident.session.exchange(crate::host_operations::CONSENT_FULL_READY, &[]) {
+        Ok((crate::host_operations::CONSENT_FULL_READY, body)) if body.is_empty() => retain_anchor(&mut resident.session),
         _ => {
             resident.ended = true;
             ended.store(true, std::sync::atomic::Ordering::Release);
@@ -621,7 +625,7 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     let active = Arc::new(AtomicUsize::new(0));
     let ended = Arc::new(AtomicBool::new(false));
     let mut looked = std::time::Instant::now();
-    // A consent resident admits what other writers append as it lands (frame 237), so a member's
+    // A consent resident admits what other writers append as it lands (frame 236), so a member's
     // next command finds nothing to admit; the first catch-up is the provider's start admission.
     if kind == ResidentKind::Consent {
         let (shared, ended) = (shared.clone(), ended.clone());
@@ -753,7 +757,7 @@ fn serve_connection_from(kind: ResidentKind, stream: std::os::unix::net::UnixStr
                         return;
                     }
                     (CONSENT_REFUSAL, b"the resident consent provider ended; the next command starts a new one".to_vec())
-                } else if !codec && matches!(operation, crate::host_operations::CONSENT_ANCHOR_OFFER | crate::host_operations::CONSENT_ANCHOR_ADMITTED | crate::host_operations::CONSENT_STORE_RECHECK | crate::host_operations::CONSENT_CATCH_UP) {
+                } else if !codec && matches!(operation, crate::host_operations::CONSENT_ANCHOR_OFFER | crate::host_operations::CONSENT_ANCHOR_ADMITTED | crate::host_operations::CONSENT_STORE_RECHECK) {
                     (CONSENT_REFUSAL, format!("frame {operation} is reserved to the resident consent provider").into_bytes())
                 } else {
                     // The codec Host holds no Store: nothing to re-check, no anchor to retain.
@@ -1320,18 +1324,18 @@ mod tests {
         assert_eq!(round_trip(&mut first, crate::host_operations::CONSENT_OBSERVATION, b"observe").unwrap(), Vec::<u8>::new());
         let mut second = connect();
         assert_eq!(round_trip(&mut second, crate::host_operations::CONSENT_PLAN, b"plan").unwrap(), Vec::<u8>::new());
-        for reserved in [228u8, 229, 233, 237] {
+        for reserved in [228u8, 229, 233] {
             let error = round_trip(&mut second, reserved, b"x").unwrap_err().to_string();
             assert!(error.contains("reserved to the resident consent provider"), "{error}");
         }
-        // The resident's own catch-ups (237, then its anchor 229) interleave whole between frames;
+        // The resident's own catch-ups (236, then its anchor 229) interleave whole between frames;
         // its first is the start admission, before any member frame.
         let ops = opcodes(&dir);
-        assert_eq!(ops.first(), Some(&crate::host_operations::CONSENT_CATCH_UP), "{ops:?}");
+        assert_eq!(ops.first(), Some(&crate::host_operations::CONSENT_FULL_READY), "{ops:?}");
         let mut members = Vec::new();
         let mut rest = ops.iter().copied();
         while let Some(op) = rest.next() {
-            if op == crate::host_operations::CONSENT_CATCH_UP {
+            if op == crate::host_operations::CONSENT_FULL_READY {
                 assert_eq!(rest.next(), Some(229), "{ops:?}");
             } else {
                 members.push(op);

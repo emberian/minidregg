@@ -375,9 +375,13 @@ impl Worker {
         }
         Ok(answer)
     }
-    /// Admit the Store up to its head (frame 237) and retain what was admitted.
+    /// Admit the Store up to its head (full readiness, 236: the provider admits before it answers)
+    /// and retain what was admitted.
     fn catch_up(&mut self) -> Result<()> {
-        self.internal(mini_sdk::host_operations::CONSENT_CATCH_UP, &[])?;
+        if !self.internal(mini_sdk::host_operations::CONSENT_FULL_READY, &[])?.is_empty() {
+            self.failed = true;
+            return Err("consent verifier answered readiness with bytes".into());
+        }
         self.admitted = true;
         self.retain()
     }
@@ -632,7 +636,7 @@ pub(crate) fn serve(
         Some(dir) => Backend::Shared(Arc::new(SharedVerifier::start(executable, config, &pins, dir)?)),
         None => Backend::Own(Arc::new(Mutex::new(Worker::start(executable, config, &pins, anchors)?))),
     };
-    // Its own verifier admits what other writers append as it lands (frame 237,
+    // Its own verifier admits what other writers append as it lands (full readiness, 236,
     // `mini_sdk::consent::HeadWatch`), so the member's next frame finds nothing to admit; the first
     // catch-up is the verifier's start admission. A shared verifier's resident does this itself.
     if let Backend::Own(worker) = &backend {
