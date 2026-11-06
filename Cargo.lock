@@ -828,6 +828,7 @@ name = "mini-kernels"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "keccak",
  "serde",
  "serde_json",
  "sha2",

@@ -3,13 +3,28 @@
 //! `scripts/kernel-vectors.lean` writes from the Lean fast path) and on the C ABI the Lean shim
 //! calls. Run filtered: `cargo test --release --locked -p mini-kernels --test conformance`.
 
-use mini_kernels::{cshake256_32, kmac256_32, mini_kernels_cshake256_32, mini_kernels_kmac256_32};
+use mini_kernels::{
+    cshake256_32, cshake256_absorb, cshake256_finish_32, kmac256_32, mini_kernels_cshake256_32,
+    mini_kernels_cshake256_absorb, mini_kernels_cshake256_finish_32, mini_kernels_kmac256_32,
+    MIDSTATE_MAX_BYTES,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Vectors {
     cshake256: Vec<CshakeRow>,
     kmac256: Vec<KmacRow>,
+    cshake256_midstate: Vec<MidstateRow>,
+}
+
+#[derive(Deserialize)]
+struct MidstateRow {
+    name: String,
+    customization: String,
+    prefix: String,
+    suffix: String,
+    midstate: String,
+    output: String,
 }
 
 #[derive(Deserialize)]
@@ -111,5 +126,76 @@ fn rate_boundaries_are_consistent_with_incremental_absorption() {
         let mut incremental = [0u8; 32];
         hasher.finalize_xof().read(&mut incremental);
         assert_eq!(one_shot, incremental, "rate boundary at {len} bytes");
+    }
+}
+
+/// The absorbed-prefix kernels against the Lean bodies (`absorbFast`, `finishFast` in
+/// `Theory/Sp800185Cshake256Midstate.lean`): the midstate bytes themselves, not only the final
+/// digest, are Lean's; and finishing is the one-shot hash of `prefix ++ suffix`
+/// (`cshake256_cached`), through the Rust functions and through the C ABI.
+#[test]
+fn midstate_matches_every_lean_vector() {
+    let vectors = vectors();
+    assert!(vectors.cshake256_midstate.len() >= 20, "the seeded Lean midstate rows must be present");
+    for row in &vectors.cshake256_midstate {
+        let customization = hex(&row.customization);
+        let prefix = hex(&row.prefix);
+        let suffix = hex(&row.suffix);
+        let midstate = cshake256_absorb(&customization, &prefix);
+        assert_eq!(midstate, hex(&row.midstate), "midstate {}", row.name);
+        assert_eq!(cshake256_finish_32(&midstate, &suffix).to_vec(), hex(&row.output), "finish {}", row.name);
+        let mut whole = prefix.clone();
+        whole.extend_from_slice(&suffix);
+        assert_eq!(cshake256_32(&customization, &whole).to_vec(), hex(&row.output), "one-shot {}", row.name);
+        let mut buffer = [0u8; MIDSTATE_MAX_BYTES];
+        let cp = if customization.is_empty() { std::ptr::null() } else { customization.as_ptr() };
+        let pp = if prefix.is_empty() { std::ptr::null() } else { prefix.as_ptr() };
+        let written = unsafe { mini_kernels_cshake256_absorb(cp, customization.len(), pp, prefix.len(), buffer.as_mut_ptr()) };
+        assert_eq!(buffer[..written].to_vec(), midstate, "C ABI absorb {}", row.name);
+        let mut out = [0u8; 32];
+        let sp = if suffix.is_empty() { std::ptr::null() } else { suffix.as_ptr() };
+        unsafe { mini_kernels_cshake256_finish_32(midstate.as_ptr(), midstate.len(), sp, suffix.len(), out.as_mut_ptr()) };
+        assert_eq!(out.to_vec(), hex(&row.output), "C ABI finish {}", row.name);
+    }
+}
+
+/// Teeth: the finish reads every part of the midstate. Flipping one lane byte, the delimiter, or
+/// dropping the carried tail each changes the digest.
+#[test]
+fn midstate_finish_reads_lanes_delimiter_and_tail() {
+    let customization = b"DREGG.CELL.LIFECYCLE/v1";
+    let prefix: Vec<u8> = (0..300usize).map(|i| (i * 13 + 5) as u8).collect();
+    let midstate = cshake256_absorb(customization, &prefix);
+    assert!(midstate.len() > 201, "this prefix leaves a carried tail");
+    let honest = cshake256_finish_32(&midstate, b"q");
+    let mut lane = midstate.clone();
+    lane[17] ^= 1;
+    assert_ne!(cshake256_finish_32(&lane, b"q"), honest);
+    let mut delimiter = midstate.clone();
+    delimiter[200] ^= 0x1b;
+    assert_ne!(cshake256_finish_32(&delimiter, b"q"), honest);
+    assert_ne!(cshake256_finish_32(&midstate[..201], b"q"), honest);
+}
+
+/// Self-consistency at the rate boundaries: absorbing a prefix and finishing with a suffix is the
+/// one-shot hash of their concatenation, for empty and non-empty customizations (the latter
+/// including one longer than a rate block). The Lean rows above are the reference.
+#[test]
+fn midstate_split_is_the_one_shot_hash_at_rate_boundaries() {
+    let long: Vec<u8> = (0..200usize).map(|i| (i * 31 + 7) as u8).collect();
+    let customizations: [&[u8]; 3] = [b"", b"DREGG.CELL.LIFECYCLE/v1", &long];
+    for customization in customizations {
+        for prefix_len in [0usize, 1, 135, 136, 137, 271, 272, 273, 1000] {
+            for suffix_len in [0usize, 1, 134, 135, 136, 137, 300] {
+                let input: Vec<u8> = (0..prefix_len + suffix_len).map(|i| (i * 7 + 3) as u8).collect();
+                let midstate = cshake256_absorb(customization, &input[..prefix_len]);
+                assert_eq!(
+                    cshake256_finish_32(&midstate, &input[prefix_len..]),
+                    cshake256_32(customization, &input),
+                    "split at {prefix_len}+{suffix_len}, customization {} bytes",
+                    customization.len()
+                );
+            }
+        }
     }
 }

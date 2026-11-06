@@ -7,7 +7,7 @@
 #                              shared library (the lakefile's moreLinkArgs; build-native-host.sh appends
 #                              them to its response file; channel-lib/build.sh links them)
 #   libmini_kernels_lean.so    the shim, the kernels AND the compiled objects of the seam's module
-#                              closure (Init + Spec, Fast, Native, Core, Kmac256,
+#                              closure (Init + Spec, Fast, Native, Midstate, Core, Kmac256,
 #                              CredentialSignatureKernel), for `lean --load-dynlib`
 #                              at elaboration and `lean --run`: the interpreter resolves an
 #                              `@[extern]` declaration by its module's compiled wrapper
@@ -46,6 +46,7 @@ link_dynlib() {
 # up when lean runs under Lake's module setup (a bare `lean FILE` has no package and looks for `l_...`:
 # check these modules with `lake build`/`lake env lean`, never bare `lean`).
 seam=(Theory.Sp800185Cshake256Spec Theory.Sp800185Cshake256Fast Theory.Sp800185Cshake256Native
+  Theory.Sp800185Cshake256Midstate
   Theory.Sp800185Cshake256Core Compiler.Sp800185Kmac256 Compiler.CredentialSignatureKernel)
 targets=()
 for module in "${seam[@]}"; do targets+=("$module:o.export"); done

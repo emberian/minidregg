@@ -82,6 +82,7 @@ import Theory.BinaryTowerCodec  -- exact recursive Fan--Paar coordinates and fix
 import Theory.BinaryCubeAddress  -- the LSB-first Boolean-cube address equivalence shared by the Merkle controller and the lookups
 import Theory.CollisionFloor  -- the global collision floor is true at every fixed-width digest (cshake256Bytes, finite node digests): the teeth of the CollisionAmong restatement
 import Theory.BinaryTowerFanPaarCodec  -- concrete recursive Fan--Paar coordinate codec and canonical fixed-width byte realization; still no native representation theorem
+import Theory.BinaryTowerCoordinateArith  -- computable Fan--Paar add/mul on Coordinate k, proved to be the field operations through coordinateFieldEquiv
 import Theory.BinaryTowerFanPaar  -- [BTOWER-fanpaar] the Fan–Paar generator recursion + fast tower multiplication
 import Theory.BinaryTowerTrace  -- [BTOWER-fanpaar-basis] CLOSED (Wiedemann trace induction) — FanPaarRecursion holds
 import Theory.ExtensionBasis  -- [RS-basis] the ring-switching connector (Diamond–Posen 2024/504): the B_κ-indexed K-basis of L (cubeBasis, mathlib finBasisOfFinrankEq reindexed), Definition 2.2's packing as a K-LINEAR EQUIVALENCE (packEquiv/packCube — `.symm` IS Thm 3.5's "reversing Definition 2.2", the emulator's step 3), zero-embedding-overhead as a finrank identity + the element-wise lift's 2^κ overhead factor; tower instantiation [T_{j+d} : T_j] = 2^d so κ = d exactly (deployed Binius shape T₀ ⊂ T₇, deg 128); TEETH — wrong κ admits no cube basis, a repeated coordinate makes packing non-injective (extraction dies), and the element-wise lift is NOT surjective hence refused as a packing map
@@ -110,6 +111,7 @@ import Theory.Channel.Audit  -- CH-CELL theorems axiom pins (moved out so the ru
 -- `ObjectiveProofs` library (lakefile.toml), gated on its own.
 import Theory.HashBytes  -- big-endian bytes, byte hashes and Collision: the carrier Pred.hashEq and Core4 digest share
 import Theory.Sp800185Cshake256Native  -- HOT-PATH 2d: the kernel seam; the compiled cSHAKE256 is the Rust kernel (native/mini-kernels) behind @[extern], its Lean body the proved fast path
+import Theory.Sp800185Cshake256Midstate  -- the absorbed-prefix kernel seam (mini_cshake256_absorb / _finish_32): cshake256_cached, finishing an absorbed prefix is the one-shot hash
 import Theory.Sp800185Cshake256Core  -- the kernel's cSHAKE256 (spec + @[csimp] fast sponge), moved from Compiler so Core4 can compute it
 import Theory.Sp800185Cshake256Conformance  -- executable NIST SP 800-185 and FIPS 202 vectors on the fast path (native_decide), beside the code they check
 import Theory.ObjectiveBendDigest  -- Core4 `digest`: cSHAKE256 under DREGG.OBEND.DIGEST/v1 over len(a):8 ‖ a ‖ b; binds-or-collides generic in H, length-hash pole, Hiding ASSUMED
