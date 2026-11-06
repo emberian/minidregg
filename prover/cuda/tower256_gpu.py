@@ -138,6 +138,32 @@ def encode_nat_le32(out, digest):
     encode_nat(out, int.from_bytes(digest, "little"))
 
 
+def encode_nat_le32_rows(rows):
+    """encode_nat_le32 of many digests at once ((N, 4) uint64 rows): base-255 digits by long
+    division of all rows together on 32-bit limbs. Returns a list of byte strings."""
+    n = rows.shape[0]
+    if n == 0:
+        return []
+    limbs = np.ascontiguousarray(rows, dtype="<u8").view("<u4").reshape(n, 8).astype(np.uint64)
+    digits, alive = [], []
+    while True:
+        live = limbs.any(axis=1)
+        if not live.any():
+            break
+        rem = np.zeros(n, dtype=np.uint64)
+        for k in range(7, -1, -1):
+            cur = (rem << np.uint64(32)) | limbs[:, k]
+            limbs[:, k] = cur // np.uint64(255)
+            rem = cur % np.uint64(255)
+        digits.append(rem.astype(np.uint8))
+        alive.append(live)
+    if not digits:
+        return [b"\xff"] * n
+    d = np.stack(digits, axis=1)
+    cnt = np.stack(alive, axis=1).sum(axis=1)
+    return [d[i, :cnt[i]].tobytes() + b"\xff" for i in range(n)]
+
+
 def encode_length(out, n):
     out.extend(bytes(n))
     out.append(1)
@@ -275,7 +301,9 @@ class CupyBackend:
         else:  # NVRTC, when no nvcc is installed
             self.mod = cp.RawModule(code=open(source).read(), backend="nvrtc", options=("-std=c++17",))
         self.fns = {}
+        self.sms = cp.cuda.runtime.getDeviceProperties(0)["multiProcessorCount"]
         self.call("init_tables", 1)
+        self.call("init_prod", 65536)
         cp.cuda.runtime.deviceSynchronize()
 
     def call(self, name, n, *args):
@@ -284,8 +312,14 @@ class CupyBackend:
         f = self.fns.get(name)
         if f is None:
             f = self.fns[name] = self.mod.get_function(name)
+            if name.endswith("_full"):
+                f.max_dynamic_shared_size_bytes = 65536
         conv = tuple(a if isinstance(a, self.cp.ndarray) else np.uint64(a) for a in args) + (np.uint64(n),)
-        f(((n + 255) // 256,), (256,), conv)
+        if name.endswith("_full"):
+            # One 1024-thread block per SM (the 64 KiB table fills its shared memory), grid-stride.
+            f((min(self.sms, (n + 1023) // 1024),), (1024,), conv, shared_mem=65536)
+        else:
+            f(((n + 255) // 256,), (256,), conv)
 
     def asarray(self, x):
         return self.cp.ascontiguousarray(self.cp.asarray(x, dtype=np.uint64))
@@ -307,6 +341,7 @@ class EmuBackend:
         self.lib = ctypes.CDLL(lib)
         self.xp = np
         self.call("init_tables", 1)
+        self.call("init_prod", 65536)
 
     def call(self, name, n, *args):
         if n == 0:
@@ -345,8 +380,10 @@ def row_bytes(row):
 class Dev:
     """Field and hash operations over backend arrays of shape (n, 4)."""
 
-    def __init__(self, be):
+    def __init__(self, be, mul="logexp"):
         self.be = be
+        # Bulk multiply kernels: log/exp tables (768 B shared) or the 64 KiB product table.
+        self.k = {n: n + ("_full" if mul == "full" else "") for n in ("t256_mul", "ntt_scale", "ntt_butterfly", "fri_fold")}
         self.xp = be.xp
         self.one = be.asarray(np.array([[1, 0, 0, 0]], dtype=np.uint64))
         self.leaf_mid = be.asarray(np.array(PyCShake(LEAF_CUSTOM).midstate(), dtype=np.uint64))
@@ -363,7 +400,7 @@ class Dev:
         """a * b elementwise; b may be one row (a scalar)."""
         a, b = self.c(a), self.c(b)
         out = self.empty(a.shape[0])
-        self.be.call("t256_mul", a.shape[0], a, b, out, 0 if b.shape[0] == 1 else 1)
+        self.be.call(self.k["t256_mul"], a.shape[0], a, b, out, 0 if b.shape[0] == 1 else 1)
         self.counts["mul"] += a.shape[0]
         return out
 
@@ -448,7 +485,7 @@ class Dev:
         tmp = self.empty(L)
         for d, (powers, _) in enumerate(depths):
             bsz = l >> d
-            self.be.call("ntt_scale", L, a, powers, tmp, bsz)
+            self.be.call(self.k["ntt_scale"], L, a, powers, tmp, bsz)
             self.counts["mul"] += L
             sz = bsz
             while sz >= 4:
@@ -465,7 +502,7 @@ class Dev:
         nxt = self.empty(N)
         for d in reversed(range(d_end)):
             size = n >> d
-            self.be.call("ntt_butterfly", N // 2, cur, depths[d][1], nxt, size)
+            self.be.call(self.k["ntt_butterfly"], N // 2, cur, depths[d][1], nxt, size)
             self.counts["mul"] += N // 2
             cur, nxt = nxt, cur
         return cur
@@ -492,7 +529,7 @@ class Dev:
     def fold(self, w, c):
         half = w.shape[0] // 2
         out = self.empty(half)
-        self.be.call("fri_fold", half, self.c(w), self.c(c), out)
+        self.be.call(self.k["fri_fold"], half, self.c(w), self.c(c), out)
         self.counts["mul"] += half
         return out
 
@@ -656,16 +693,20 @@ def prove_gpu(dev, r, timings=None):
         w = words[j]
         lo = be.host(w[be.asarray(idx).astype(np.int64)]) if q else np.zeros((0, 4), np.uint64)
         hi = be.host(w[be.asarray(idx + half).astype(np.int64)]) if q else np.zeros((0, 4), np.uint64)
-        sib = []
-        for d in range(k - 1):
-            sidx = (idx & ((2 << d) - 1)) ^ (1 << d)
-            sib.append(be.host(trees[j][d + 1][be.asarray(sidx).astype(np.int64)]) if q else None)
+        # All of this round's siblings, gathered on the device, then encoded in one call.
+        rows = [trees[j][d + 1][be.asarray((idx & ((2 << d) - 1)) ^ (1 << d)).astype(np.int64)]
+                for d in range(k - 1)] if q else []
+        enc = encode_nat_le32_rows(be.host(xp.concatenate(rows, axis=0))) if rows else []
+        sib = [enc[d * q:(d + 1) * q] for d in range(k - 1)]
+        lob, hib = np.ascontiguousarray(lo, dtype="<u8"), np.ascontiguousarray(hi, dtype="<u8")
+        klen = bytearray()
+        encode_nat(klen, k - 1)
         for a in range(q):
-            out += row_bytes(lo[a])
-            out += row_bytes(hi[a])
-            encode_nat(out, k - 1)
+            out += lob[a].tobytes()
+            out += hib[a].tobytes()
+            out += klen
             for d in range(k - 1):
-                encode_nat_le32(out, row_bytes(sib[d][a]))
+                out += sib[d][a]
     t2 = tick()
     tm["openings"] += t2 - t1
     encode_nat(out, len(fcoeffs))
@@ -731,15 +772,15 @@ def check_lean(dev, path):
 def rate(be, dev, kind, threads, iters, reps=3):
     """Warm, synchronized throughput of the two primitives."""
     xp = be.xp
-    if kind == "keccak":
+    if kind.startswith("keccak"):
         out = xp.zeros((threads,), dtype=np.uint64)
         args = (dev.leaf_mid, out, iters)
-        name = "keccak_rate"
+        name = kind.replace("keccak", "keccak_rate")
     else:
         out = xp.zeros((threads, 4), dtype=np.uint64)
         seed = be.asarray(np.arange(8, dtype=np.uint64).reshape(2, 4) * np.uint64(0x9E3779B97F4A7C15))
         args = (seed, out, iters)
-        name = "t256_mul_rate"
+        name = "t256_mul_rate" + ("_full" if kind == "mul_full" else "")
     be.call(name, threads, *args)
     be.sync()
     best = None
@@ -763,6 +804,7 @@ def main():
     ap.add_argument("--rust-bench", help="tower256_fri_fast_bench binary: CPU timings on this box")
     ap.add_argument("--rust-threads", default="1,4")
     ap.add_argument("--rate-threads", type=int, default=40 * 1024)
+    ap.add_argument("--mul", default="logexp", choices=["logexp", "full"], help="bulk multiply kernels")
     ap.add_argument("--batch", type=int, default=0, help="words in the batched encode+commit measurement")
     ap.add_argument("--batch-ell", type=int, default=14)
     ap.add_argument("--source", help="compile tower256_fri.cu with NVRTC instead of loading --cubin")
@@ -788,7 +830,8 @@ def main():
         be = CupyBackend(a.cubin, a.source)
     else:
         be = EmuBackend(a.lib)
-    dev = Dev(be)
+    dev = Dev(be, a.mul)
+    res["mul_variant"] = a.mul
     print("backend", be.name, res.get("device"), flush=True)
     rng = np.random.default_rng(9104)
     res["checks"] = {}
@@ -800,18 +843,28 @@ def main():
     save()
     if a.backend == "cupy":
         it_k, it_m = 64, 16
-        kr, kt = rate(be, dev, "keccak", a.rate_threads, it_k)
-        mr, mt = rate(be, dev, "mul", a.rate_threads, it_m)
-        res["keccak_f_per_s"] = kr
-        res["keccak_rate_launch"] = {"threads": a.rate_threads, "iters": it_k, "seconds": kt}
-        res["t256_mul_per_s"] = mr
-        res["t256_mul_rate_launch"] = {"threads": a.rate_threads, "iters": it_m, "seconds": mt}
         clock = res["clock_khz"] * 1e3
-        # int32 lanes per second at the reported clock (64 per SM per cycle on sm_75).
+        # int32 lanes per second at the reported clock (64 per SM per cycle on sm_70..sm_90).
         lanes = res["sm_count"] * 64 * clock
-        res["implied_int32_ops_per_keccak_f"] = lanes / kr
-        res["implied_int32_ops_per_t256_mul"] = lanes / mr
-        print("rates", kr, mr, flush=True)
+        res["rates"] = {}
+        for kind, it in (("keccak", it_k), ("keccak_shf", it_k), ("keccak_u2", it_k),
+                         ("mul", it_m), ("mul_full", it_m)):
+            try:
+                r_, t_ = rate(be, dev, kind, a.rate_threads, it)
+            except Exception as e:  # noqa: BLE001  (a variant that cannot launch is a result too)
+                res["rates"][kind] = {"error": repr(e)[:300]}
+                print("rate", kind, "failed", repr(e)[:200], flush=True)
+                continue
+            res["rates"][kind] = {"per_s": r_, "seconds": t_, "threads": a.rate_threads, "iters": it,
+                                  "implied_int32_ops": lanes / r_}
+            print("rate", kind, r_, flush=True)
+        best_k = max((k for k in ("keccak", "keccak_shf", "keccak_u2") if "per_s" in res["rates"][k]),
+                     key=lambda k: res["rates"][k]["per_s"])
+        res["keccak_f_per_s"] = res["rates"][best_k]["per_s"]
+        res["keccak_f_per_s_source"] = "rate probe " + best_k
+        res["implied_int32_ops_per_keccak_f"] = res["rates"][best_k]["implied_int32_ops"]
+        res["t256_mul_per_s"] = res["rates"]["mul_full" if a.mul == "full" else "mul"].get("per_s")
+        res["merkle_keccak_variant"] = "keccak_shf"
         save()
     res["prove"] = []
     for ell in [int(x) for x in a.ells.split(",") if x]:
@@ -871,6 +924,13 @@ def main():
                         "per_word_ms": 1e3 * best[0] / B, "keccak_f_per_s": B * (2 * (1 << ell) - 1) / best[2],
                         "roots_match_single": same}
         print("batch", res["batch"], flush=True)
+        # The tree build is the better Keccak-f measurement: independent threads, one
+        # permutation each, warm and synchronized, every output checked through the roots.
+        if res["batch"]["keccak_f_per_s"] > res.get("keccak_f_per_s", 0):
+            res["keccak_f_per_s"] = res["batch"]["keccak_f_per_s"]
+            res["keccak_f_per_s_source"] = "batched Merkle trees (merkle_leaves + merkle_nodes, funnel-shift rotations)"
+            if "clock_khz" in res:
+                res["implied_int32_ops_per_keccak_f"] = res["sm_count"] * 64 * res["clock_khz"] * 1e3 / res["keccak_f_per_s"]
         save()
     if a.rust_bench:
         cmd = [a.rust_bench, "--ell", a.ells, "--threads", a.rust_threads, "--reps", str(a.reps)]
