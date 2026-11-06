@@ -164,6 +164,38 @@ def encode_nat_le32_rows(rows):
     return [d[i, :cnt[i]].tobytes() + b"\xff" for i in range(n)]
 
 
+# Native openings (tower256_openings.c): loaded from T256_OPENINGS_LIB, else beside this file; the Python
+# path stays as the fallback and, with --openings-check, as the bit-exact reference every round.
+OPENINGS_CHECK = False
+_OPEN_LIB = None
+
+
+def _load_openings_lib():
+    global _OPEN_LIB
+    import ctypes
+    for cand in (os.environ.get("T256_OPENINGS_LIB"),
+                 os.path.join(os.path.dirname(os.path.abspath(__file__)), "tower256_openings.so")):
+        if cand and os.path.exists(cand):
+            lib = ctypes.CDLL(cand)
+            lib.t256_openings.restype = ctypes.c_size_t
+            lib.t256_openings.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                          ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+            lib.t256_openings_bound.restype = ctypes.c_size_t
+            lib.t256_openings_bound.argtypes = [ctypes.c_int, ctypes.c_int]
+            _OPEN_LIB = lib
+            return lib
+    return None
+
+
+def _openings_native(lob, hib, sibrows, q, k):
+    if _OPEN_LIB is None:
+        return None
+    sibc = np.ascontiguousarray(sibrows, dtype="<u8")
+    buf = np.empty(_OPEN_LIB.t256_openings_bound(q, k), dtype=np.uint8)
+    n = _OPEN_LIB.t256_openings(lob.ctypes.data, hib.ctypes.data, sibc.ctypes.data, q, k, buf.ctypes.data)
+    return buf[:n].tobytes()
+
+
 def encode_length(out, n):
     out.extend(bytes(n))
     out.append(1)
@@ -700,22 +732,32 @@ def prove_gpu(dev, r, timings=None):
         half = 1 << (k - 1)
         idx = np.array([s_ % half for s_ in seeds], dtype=np.int64)
         w = words[j]
-        lo = be.host(w[be.asarray(idx).astype(np.int64)]) if q else np.zeros((0, 4), np.uint64)
-        hi = be.host(w[be.asarray(idx + half).astype(np.int64)]) if q else np.zeros((0, 4), np.uint64)
+        # One upload of the query indices per round; sibling indices are derived on the device.
+        idx_d = be.asarray(idx).astype(np.int64)
+        lo = be.host(w[idx_d]) if q else np.zeros((0, 4), np.uint64)
+        hi = be.host(w[idx_d + half]) if q else np.zeros((0, 4), np.uint64)
         # All of this round's siblings, gathered on the device, then encoded in one call.
-        rows = [trees[j][d + 1][be.asarray((idx & ((2 << d) - 1)) ^ (1 << d)).astype(np.int64)]
+        rows = [trees[j][d + 1][(idx_d & ((2 << d) - 1)) ^ (1 << d)]
                 for d in range(k - 1)] if q else []
-        enc = encode_nat_le32_rows(be.host(xp.concatenate(rows, axis=0))) if rows else []
-        sib = [enc[d * q:(d + 1) * q] for d in range(k - 1)]
+        sibrows = be.host(xp.concatenate(rows, axis=0)) if rows else np.zeros((0, 4), np.uint64)
         lob, hib = np.ascontiguousarray(lo, dtype="<u8"), np.ascontiguousarray(hi, dtype="<u8")
-        klen = bytearray()
-        encode_nat(klen, k - 1)
-        for a in range(q):
-            out += lob[a].tobytes()
-            out += hib[a].tobytes()
-            out += klen
-            for d in range(k - 1):
-                out += sib[d][a]
+        native = _openings_native(lob, hib, sibrows, q, k) if q else b""
+        if native is None or OPENINGS_CHECK:
+            enc = encode_nat_le32_rows(sibrows) if rows else []
+            sib = [enc[d * q:(d + 1) * q] for d in range(k - 1)]
+            klen = bytearray()
+            encode_nat(klen, k - 1)
+            py = bytearray()
+            for a in range(q):
+                py += lob[a].tobytes()
+                py += hib[a].tobytes()
+                py += klen
+                for d in range(k - 1):
+                    py += sib[d][a]
+            if native is not None and bytes(py) != native:
+                raise ProveError("native openings differ from the Python path at round %d" % j)
+            native = bytes(py) if native is None else native
+        out += native
     t2 = tick()
     tm["openings"] += t2 - t1
     encode_nat(out, len(fcoeffs))
@@ -882,7 +924,13 @@ def main():
     ap.add_argument("--batch-ell", type=int, default=14)
     ap.add_argument("--source", help="compile tower256_fri.cu with NVRTC instead of loading --cubin")
     ap.add_argument("--out", default=os.environ.get("ACCEL_RESULTS", "results.json"))
+    ap.add_argument("--native-openings", action="store_true", help="assemble openings with tower256_openings.so")
+    ap.add_argument("--openings-check", action="store_true", help="also run the Python openings and require equality")
     a = ap.parse_args()
+    global OPENINGS_CHECK
+    OPENINGS_CHECK = a.openings_check
+    if a.native_openings and _load_openings_lib() is None:
+        raise SystemExit("--native-openings: tower256_openings.so not found (T256_OPENINGS_LIB)")
     res = {"host": platform.platform(), "python": sys.version.split()[0], "backend": a.backend,
            "transcript_hash": "pycryptodome" if _pyc_cshake is not None else "host-python"}
 
@@ -905,6 +953,7 @@ def main():
         be = EmuBackend(a.lib)
     dev = Dev(be, a.mul)
     res["mul_variant"] = a.mul
+    res["openings"] = ("native" if _OPEN_LIB is not None else "python") + ("+check" if OPENINGS_CHECK else "")
     print("backend", be.name, res.get("device"), flush=True)
     rng = np.random.default_rng(9104)
     res["checks"] = {}
