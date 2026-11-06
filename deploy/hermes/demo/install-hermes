@@ -311,7 +311,17 @@ EOF
   printf '%s\n' "MINI_CONSENT_SOCKET=$csock" "MINI_CONSENT_PEER_UID=0" "MINI_CONSENT_SHA256=$image" \
     "MINI_CONSENT_CONFIG_SHA256=$settings" "MINI_LOCAL_HOST=$HOST" "MINI_CONSENT_HOST=$consent" \
     "MINI_CONSENT_CONFIG=$CONFIG" >"$CONSENT_ENV.new"
-  install -o root -g root -m 0644 "$CONSENT_ENV.new" "$CONSENT_ENV"; rm -f "$CONSENT_ENV.new"
+  if [ -f "$CONSENT_ENV" ] && ! cmp -s "$CONSENT_ENV.new" "$CONSENT_ENV"; then
+    # The selection changed (a new candidate: its client-consent sha, its paths): the controller and resident
+    # take it as EnvironmentFile=, so a running pair restarts on it (a 6f68 client with an f183 host died on
+    # `local native codec ... Broken pipe`, demo-dry 2026-11-06).
+    install -o root -g root -m 0644 "$CONSENT_ENV.new" "$CONSENT_ENV"
+    systemctl try-restart "mini-grain-controller@$PARENT_T.service" "mini-grain-resident@$PARENT_T.service" 2>/dev/null || true
+    echo "install-hermes: consent selection re-rendered for the serving candidate"
+  else
+    install -o root -g root -m 0644 "$CONSENT_ENV.new" "$CONSENT_ENV"
+  fi
+  rm -f "$CONSENT_ENV.new"
   mark consent
 }
 
@@ -644,7 +654,9 @@ for step in "$@"; do
     *) die "unknown step $step" ;;
   esac
   [ "$step" = preflight ] || done_step preflight || die "run preflight first"
-  if done_step "$step"; then echo "install-hermes: $step already done"; continue; fi
+  # route and consent are renders pinned to the serving candidate (unit files, the consent helper's sha):
+  # they run every time, so a candidate switch (ship.sh's plain flip) re-renders them; the rest is done once.
+  case $step in route|consent) ;; *) if done_step "$step"; then echo "install-hermes: $step already done"; continue; fi ;; esac
   [ "$step" = preflight ] || POOL_ROW=$(cat "$RECORD/pool-row")
   "step_$step"
 done
