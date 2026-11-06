@@ -1,15 +1,17 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `7977ef501b89` (builder: REDS.md for 17c137325e35 (1 red)). Round finished 2026-11-06T20:37Z.
-green: `477bf8e9eb81`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-7977ef50`.
+Tip: `6a8bdd25cab5` (Kernel.Job: the pole facts by `decide +kernel`, not elaborator `decide`). Round finished 2026-11-06T21:20Z.
+green: `477bf8e9eb81`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-6a8bdd25`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 477bf8e9eb81..7977ef501b89`), newest first; owners are the seats whose
+Suspect commits since green (`git log 477bf8e9eb81..6a8bdd25cab5`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `6a8bdd25` Kernel.Job: the pole facts by `decide +kernel`, not elaborator `decide`
+- `860388dd` builder: REDS.md for 7977ef501b89 (1 red) (owner: build-loop)
 - `7977ef50` builder: REDS.md for 17c137325e35 (1 red) (owner: build-loop)
 - `4e61731b` builder: REDS.md for dd70c487d4d0 (0 red) (owner: build-loop)
 - `ba2d1a93` newparticipant-acceptance: a restored world template takes this caller's binary paths (owner: apps-hermes)
@@ -25,10 +27,10 @@ Suspect commits since green (`git log 477bf8e9eb81..7977ef501b89`), newest first
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.179 | 0.217 | 1.211 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 34.953 | 72.503 | 2.074 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.136 | 0.192 | 1.409 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 34.441 | 95.305 | 2.767 | 1.590 | host-execution, store-retained |
-| flatness-get | FAIL | get_cpu_ms | 0.320 | 0.618 | 1.928 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 247.901 | 248.393 | 1.002 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-7977ef50/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.241 | 0.280 | 1.163 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 86.613 | 138.613 | 1.600 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.228 | 0.290 | 1.272 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 61.995 | 164.558 | 2.654 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.645 | 0.888 | 1.377 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 311.671 | 395.608 | 1.269 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-6a8bdd25/flatness.log | - | - | - | - | host-execution, store-retained |
