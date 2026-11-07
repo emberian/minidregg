@@ -34,6 +34,22 @@ pub fn production_request(ell: usize) -> ProveRequest {
     }
 }
 
+/// Leaf `b` of the end-to-end batch at `ell`: leaf 0 is `production_request(ell)`; leaf b >= 1
+/// keeps its shape, basis and offset, and draws 48 statement bytes and then the word from
+/// SplitMix seeded `0xe2e0_0000_0000 + (ell << 20) + b`.
+pub fn batch_request(ell: usize, b: usize) -> ProveRequest {
+    let mut req = production_request(ell);
+    if b == 0 {
+        return req;
+    }
+    let mut s = 0xe2e0_0000_0000u64 + ((ell as u64) << 20) + b as u64;
+    req.statement_bytes = (0..48).map(|_| splitmix(&mut s) as u8).collect();
+    for c in req.input_word.iter_mut() {
+        *c = rnd(&mut s);
+    }
+    req
+}
+
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -54,6 +70,7 @@ fn main() {
     let mut reps = 3usize;
     let mut emit: Option<std::path::PathBuf> = None;
     let mut reference_max_ell = 0usize;
+    let mut e2e: Vec<usize> = Vec::new();
     let args: Vec<String> = std::env::args().collect();
     let mut i = 1;
     while i < args.len() {
@@ -63,6 +80,9 @@ fn main() {
             "--reps" => reps = args[i + 1].parse().unwrap(),
             "--emit" => emit = Some(args[i + 1].clone().into()),
             "--reference-max-ell" => reference_max_ell = args[i + 1].parse().unwrap(),
+            // One batch size per --ell entry: B leaves each, proved one proof per worker thread
+            // (the CPU's best schedule for a batch), receipts' SHA3 written to --emit.
+            "--e2e" => e2e = list(&args[i + 1]),
             other => panic!("unknown argument {other}"),
         }
         i += 2;
@@ -124,6 +144,60 @@ fn main() {
         "{{\"kind\":\"primitives\",\"clmul\":\"{CLMUL_BACKEND}\",\"keccak_node_ns\":{node_ns:.1},\"p256_mul_ns\":{mul_ns:.2},\"fanpaar_ref_mul_ns\":{ref_mul_ns:.1},\"basis_conversion_ns\":{conv_ns:.1},\"sink\":\"{}\"}}",
         hex(&d[..2]).to_string() + &hex(&a.tower_bytes()[..1]) + &hex(&x.tower_bytes()[..1])
     );
+
+    if !e2e.is_empty() {
+        assert_eq!(e2e.len(), ells.len(), "--e2e takes one batch size per --ell");
+        for (&ell, &batch) in ells.iter().zip(&e2e) {
+            let reqs: Vec<ProveRequest> = (0..batch).map(|b| batch_request(ell, b)).collect();
+            let mut hashes: Vec<String> = Vec::new();
+            for &th in &threads {
+                let mut best = f64::MAX;
+                for _ in 0..reps {
+                    let t = Instant::now();
+                    let mut out: Vec<Option<String>> = vec![None; batch];
+                    let chunk = batch.div_ceil(th.max(1));
+                    std::thread::scope(|sc| {
+                        for (ci, slots) in out.chunks_mut(chunk).enumerate() {
+                            let reqs = &reqs;
+                            sc.spawn(move || {
+                                for (k, slot) in slots.iter_mut().enumerate() {
+                                    let p = prove_fast(&reqs[ci * chunk + k], 1).expect("prove");
+                                    *slot = Some(sha256_hex(&p.receipt));
+                                }
+                            });
+                        }
+                    });
+                    best = best.min(t.elapsed().as_secs_f64());
+                    let got: Vec<String> = out.into_iter().map(|x| x.expect("proved")).collect();
+                    if hashes.is_empty() {
+                        hashes = got;
+                    } else {
+                        assert_eq!(hashes, got, "receipts changed between runs");
+                    }
+                }
+                println!(
+                    "{{\"kind\":\"e2e_cpu\",\"ell\":{ell},\"batch\":{batch},\"threads\":{th},\"wall_ms\":{:.3},\"per_proof_ms\":{:.3}}}",
+                    best * 1e3,
+                    best * 1e3 / batch as f64
+                );
+            }
+            if let Some(dir) = &emit {
+                std::fs::create_dir_all(dir).unwrap();
+                let rh: Vec<String> = reqs.iter().map(|r| format!("\"{}\"", sha256_hex(&encode_request(r)))).collect();
+                let hh: Vec<String> = hashes.iter().map(|h| format!("\"{h}\"")).collect();
+                std::fs::write(
+                    dir.join(format!("expect_e2e_ell{ell}.json")),
+                    format!(
+                        "{{\"ell\":{ell},\"batch\":{batch},\"request_sha3_256\":[{}],\"receipt_sha3_256\":[{}]}}\n",
+                        rh.join(","),
+                        hh.join(",")
+                    ),
+                )
+                .unwrap();
+            }
+        }
+        return;
+    }
 
     for &ell in &ells {
         let req = production_request(ell);

@@ -225,7 +225,7 @@ def decode_request(b):
     if dn > len(b):
         raise RequestError("list longer than the request")
     degree = [nat() for _ in range(dn)]
-    word = c8_list()
+    word = elems_to_array(c8_list())
     if pos[0] != len(b):
         raise RequestError("trailing bytes")
     return dict(statement=st, ell=ell, m=m, q=q, beta=beta, offset=offset, degree=degree, word=word)
@@ -244,44 +244,44 @@ def encode_request(r):
     encode_nat(out, len(r["degree"]))
     for d in r["degree"]:
         encode_nat(out, d)
-    encode_nat(out, len(r["word"]))
-    for x in r["word"]:
-        out += x
+    encode_nat(out, r["word"].shape[0])
+    out += np.ascontiguousarray(r["word"], dtype="<u8").tobytes()
     return bytes(out)
 
 
-def splitmix(s):
-    s = (s + 0x9E3779B97F4A7C15) & MASK64
-    z = s
-    z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & MASK64
-    z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & MASK64
-    return s, z ^ (z >> 31)
+GAMMA = np.uint64(0x9E3779B97F4A7C15)
+
+
+def sm_draws(seed, count):
+    """SplitMix64 outputs 1..count from `seed` (the Rust `splitmix`), vectorized."""
+    z = np.uint64(seed) + np.arange(1, count + 1, dtype=np.uint64) * GAMMA
+    z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+    z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    return z ^ (z >> np.uint64(31))
 
 
 def production_request(ell):
-    """tower256_fri_fast_bench.rs production_request, from the same SplitMix stream."""
-    s = 0x70430000 + ell
-    out = []
-
-    def nxt():
-        nonlocal s
-        s, z = splitmix(s)
-        return z
-
-    def elem():
-        return b"".join(nxt().to_bytes(8, "little") for _ in range(4))
-
-    lb = 2
-    m = ell - lb - 2
-    st = bytes(nxt() & 0xFF for _ in range(48))
-    beta = [elem() for _ in range(ell)]
-    offset = elem()
-    degree = [1 << (ell - lb - j) for j in range(m + 1)]
+    """tower256_fri_fast_bench.rs production_request: lb 2, m = ell - 4, q 148, final degree 4."""
+    lb, m = 2, ell - 4
     n = 1 << (ell - lb)
-    # The word is the bulk: draw it with numpy-free Python but in one pass.
-    word = [elem() for _ in range(n)]
-    del out
-    return dict(statement=st, ell=ell, m=m, q=148, beta=beta, offset=offset, degree=degree, word=word)
+    d = sm_draws(0x70430000 + ell, 48 + 4 * ell + 4 + 4 * n)
+    st = bytes((d[:48] & np.uint64(0xFF)).astype(np.uint8))
+    el = lambda x: np.ascontiguousarray(x, dtype="<u8").tobytes()
+    beta = [el(d[48 + 4 * i:52 + 4 * i]) for i in range(ell)]
+    o = 48 + 4 * ell
+    return dict(statement=st, ell=ell, m=m, q=148, beta=beta, offset=el(d[o:o + 4]),
+                degree=[1 << (ell - lb - j) for j in range(m + 1)], word=d[o + 4:].reshape(n, 4).copy())
+
+
+def batch_request(ell, b):
+    """tower256_fri_fast_bench.rs batch_request: leaf b of the end-to-end batch."""
+    r = production_request(ell)
+    if b:
+        n = r["word"].shape[0]
+        d = sm_draws(0xE2E000000000 + (ell << 20) + b, 48 + 4 * n)
+        r["statement"] = bytes((d[:48] & np.uint64(0xFF)).astype(np.uint8))
+        r["word"] = d[48:].reshape(n, 4).copy()
+    return r
 
 
 # ------------------------------------------------------------------------------------------
@@ -330,6 +330,16 @@ class CupyBackend:
     def sync(self):
         self.cp.cuda.runtime.deviceSynchronize()
 
+    def ptr(self, x):
+        return int(x.data.ptr)
+
+    def streams(self, k):
+        if not hasattr(self, "_streams"):
+            self._streams = []
+        while len(self._streams) < k:
+            self._streams.append(self.cp.cuda.Stream(non_blocking=True))
+        return self._streams[:k]
+
 
 class EmuBackend:
     name = "emu"
@@ -365,6 +375,14 @@ class EmuBackend:
     def sync(self):
         pass
 
+    def ptr(self, x):
+        assert x.flags["C_CONTIGUOUS"]
+        return int(x.ctypes.data)
+
+    def streams(self, k):
+        import contextlib
+        return [contextlib.nullcontext()]
+
 
 def elems_to_array(elems):
     """32-byte little-endian elements -> (n, 4) uint64."""
@@ -390,6 +408,10 @@ class Dev:
         self.leaf_mid = be.asarray(np.array(PyCShake(LEAF_CUSTOM).midstate(), dtype=np.uint64))
         self.node_mid = be.asarray(np.array(PyCShake(NODE_CUSTOM).midstate(), dtype=np.uint64))
         self.counts = {"mul": 0, "keccak": 0}
+        self.setup = {}   # statement-constant device data, built once per shape
+        self.query_mid = be.asarray(np.array(PyCShake(QUERY_CUSTOM).midstate(), dtype=np.uint64))
+        pw = [255 ** k for k in range(33)]
+        self.pow255 = be.asarray(np.array([[(v >> (64 * i)) & MASK64 for i in range(4)] for v in pw], dtype=np.uint64))
 
     def bulk(self, name, items, *args):
         """A bulk multiply kernel over `items` work items: the bit-sliced fused variant (32 items
@@ -465,26 +487,34 @@ class Dev:
         else:
             used = l = coeffs.shape[0] // batch
             assert l * batch == coeffs.shape[0] and l & (l - 1) == 0 and l <= n
-        depths = []
-        s, bs, block = self.c(offset), self.c(basis), l
-        while block > 1 and bs.shape[0] > 0:
-            b0 = bs[0:1]
-            if self.is_zero_row(b0):
-                assert batch == 1
-                xs = self.span(offset, basis)
-                out = self.empty(n)
-                self.be.call("horner_points", n, self.c(coeffs[:used]), xs, out, used)
-                self.counts["mul"] += n * used
-                return out
-            inv = self.inv(b0)
-            powers = self.powers(b0, block)
-            t = self.mul(s, inv)
-            gamma = self.mul(bs[1:], inv) if bs.shape[0] > 1 else self.empty(0)
-            z = self.span(t, gamma)
-            s = self.pivot_map(t, self.one)
-            bs = self.pivot_map(gamma, self.one) if gamma.shape[0] else self.empty(0)
-            depths.append((powers, z))
-            block //= 2
+        # Per-depth parameters depend only on the domain and l: built once per shape (setup).
+        key = ("ntt", l, self.be.host(offset).tobytes(), self.be.host(basis).tobytes())
+        if key not in self.setup:
+            depths = []
+            s, bs, block = self.c(offset), self.c(basis), l
+            while block > 1 and bs.shape[0] > 0:
+                b0 = bs[0:1]
+                if self.is_zero_row(b0):
+                    depths = None
+                    break
+                inv = self.inv(b0)
+                powers = self.powers(b0, block)
+                t = self.mul(s, inv)
+                gamma = self.mul(bs[1:], inv) if bs.shape[0] > 1 else self.empty(0)
+                z = self.span(t, gamma)
+                s = self.pivot_map(t, self.one)
+                bs = self.pivot_map(gamma, self.one) if gamma.shape[0] else self.empty(0)
+                depths.append((powers, z))
+                block //= 2
+            self.setup[key] = (depths, s)
+        depths, s = self.setup[key]
+        if depths is None:
+            assert batch == 1
+            xs = self.span(offset, basis)
+            out = self.empty(n)
+            self.be.call("horner_points", n, self.c(coeffs[:used]), xs, out, used)
+            self.counts["mul"] += n * used
+            return out
         L, N = l * batch, n * batch
         if batch == 1:
             a = self.empty(l)
@@ -543,186 +573,283 @@ class Dev:
         return out
 
 
-def prove_gpu(dev, r, timings=None):
-    """The receipt bytes and roots for request dict r (tower256_fri_fast.rs prove_fast)."""
+def natlen(v):
+    c = 1
+    while v:
+        c += 1
+        v //= 255
+    return c
+
+
+def prove_steps(dev, reqs, out, sync_timing=False):
+    """Generator: proves `reqs` (one shape, basis, offset and degree schedule; statements of one
+    length) as one batch on the current stream, every proof's receipt bytes identical to the CPU
+    prover's (tower256_fri_fast.rs). It yields before each host read, so a driver can interleave
+    batches on separate streams. Fills out["receipts"], out["roots"], out["phases"]."""
     be, xp = dev.be, dev.xp
-    tm = timings if timings is not None else {}
-    for key in ("encode", "merkle", "folds", "openings", "other", "upload"):
-        tm.setdefault(key, 0.0)
-
-    def tick():
-        be.sync()
-        return time.perf_counter()
-
-    ell, m, q = r["ell"], r["m"], r["q"]
+    B, r0 = len(reqs), reqs[0]
+    ell, m, q = r0["ell"], r0["m"], r0["q"]
+    for r in reqs:
+        assert (r["ell"], r["m"], r["q"], r["beta"], r["offset"], r["degree"]) == \
+            (ell, m, q, r0["beta"], r0["offset"], r0["degree"]) and len(r["statement"]) == len(r0["statement"])
     if m > ell or ell > 24 or ell == 0:
         raise ProveError("Shape")
-    if len(r["beta"]) != ell:
+    if len(r0["beta"]) != ell:
         raise ProveError("BasisLength")
-    final_degree = r["degree"][m] if m < len(r["degree"]) else 0
+    final_degree = r0["degree"][m] if m < len(r0["degree"]) else 0
     last_size = 1 << (ell - m)
     if final_degree > last_size:
         raise ProveError("FinalDegree")
     if final_degree > 16:
         raise ProveError("final degree above the device kernel's 16")
+    tm = out.setdefault("phases", {})
+    for key in ("upload", "encode", "merkle", "folds", "final", "seeds", "openings", "host", "readback"):
+        tm.setdefault(key, 0.0)
+
+    def tick():
+        if sync_timing:
+            be.sync()
+        return time.perf_counter()
+
     t0 = tick()
-    beta = be.asarray(elems_to_array(r["beta"]))
-    offset = be.asarray(elems_to_array([r["offset"]]))
-    coeffs = be.asarray(elems_to_array(r["word"]))
+    beta = be.asarray(elems_to_array(r0["beta"]))
+    offset = be.asarray(elems_to_array([r0["offset"]]))
+    wl = max(r["word"].shape[0] for r in reqs)
+    l = 1 << max(0, (wl - 1).bit_length()) if wl else 1
+    host_coeffs = np.zeros((B * l, 4), dtype=np.uint64)
+    for b, r in enumerate(reqs):
+        host_coeffs[b * l:b * l + r["word"].shape[0]] = r["word"]
+    coeffs = be.asarray(host_coeffs)
     t1 = tick()
     tm["upload"] += t1 - t0
-    imgs, pinvs = [], []
-    cur = xp.concatenate([offset, beta], axis=0)
-    for j in range(m):
-        p = cur[1 + (ell - 1 - j):2 + (ell - 1 - j)]
-        if dev.is_zero_row(p):
-            raise ProveError("ZeroPivot(%d)" % j)
+    # Round maps, inverse pivots, the folds' shared spans and the last domain depend only on the
+    # statement's domain: built once per shape (setup), like the FFT's depth parameters.
+    skey = ("rounds", ell, m, final_degree, tuple(r0["beta"]), r0["offset"])
+    if skey not in dev.setup:
+        imgs, pinvs, spans = [], [], []
+        cur = xp.concatenate([offset, beta], axis=0)
+        for j in range(m):
+            p = cur[1 + (ell - 1 - j):2 + (ell - 1 - j)]
+            if dev.is_zero_row(p):
+                raise ProveError("ZeroPivot(%d)" % j)
+            imgs.append(cur)
+            pinvs.append(dev.inv(p))
+            k = ell - j
+            scaled = dev.mul(cur[1:k], pinvs[-1]) if k > 1 else dev.empty(0)
+            spans.append(dev.span(dev.mul(cur[0:1], pinvs[-1]), scaled))
+            cur = dev.pivot_map(cur, p)
         imgs.append(cur)
-        pinvs.append(dev.inv(p))
-        cur = dev.pivot_map(cur, p)
-    imgs.append(cur)
-    head = bytearray()
-    envelope(head, r["statement"])
-    bp = bytearray()
-    tmp = bytearray()
+        dom_m = dev.span(cur[0:1], cur[1:1 + (ell - m)])
+        dev.setup[skey] = (pinvs, spans, dom_m)
+    pinvs, spans, dom_m = dev.setup[skey]
+    bp, tmp = bytearray(), bytearray()
     encode_length(tmp, ell)
     envelope(bp, tmp)
     tmp = bytearray()
     encode_length(tmp, m)
     envelope(bp, tmp)
-    envelope(bp, r["offset"])
-    for i, b in enumerate(r["beta"]):
+    envelope(bp, r0["offset"])
+    for i, bb in enumerate(r0["beta"]):
         inner, tmp = bytearray(), bytearray()
         encode_length(tmp, i)
         envelope(inner, tmp)
-        envelope(inner, b)
+        envelope(inner, bb)
         envelope(bp, inner)
-    envelope(head, bp)
+    trans = []
+    for r in reqs:
+        h = bytearray()
+        envelope(h, r["statement"])
+        envelope(h, bp)
+        trans.append(h)
     t2 = tick()
-    tm["other"] += t2 - t1
-    w0 = dev.eval_subspace(coeffs, offset, beta)
+    tm["host"] += t2 - t1
+    if B == 1:
+        w0 = dev.eval_subspace(coeffs, offset, beta)
+    else:
+        w0 = dev.eval_subspace(coeffs, offset, beta, B)
     t3 = tick()
     tm["encode"] += t3 - t2
+    words, trees = [w0], [dev.tree(w0, m > 0, B)]
+    t4 = tick()
+    tm["merkle"] += t4 - t3
+    yield
+    roots = [[row_bytes(x)] for x in be.host(trees[0][0])]
+    challenges = [[] for _ in range(B)]
 
-    def push_root(out, n, root):
+    def push_root(buf, n, root):
         tmp = bytearray()
         encode_length(tmp, n)
-        envelope(out, tmp)
-        envelope(out, root)
+        envelope(buf, tmp)
+        envelope(buf, root)
 
-    words, trees, roots, challenges = [w0], [], [], []
-    t0 = tick()
-    tr = dev.tree(w0, m > 0)
-    trees.append(tr)
-    roots.append(row_bytes(be.host(tr[0])[0]))
-    tm["merkle"] += tick() - t0
+    for b in range(B):
+        push_root(trans[b], 0, roots[b][0])
+    t5 = tick()
+    tm["readback"] += t5 - t4
     for j in range(m):
         t0 = tick()
-        inp = bytearray(head)
-        for n_, rt in enumerate(roots[:j + 1]):
-            push_root(inp, n_, rt)
-        alpha_b = xof32(CHALLENGE_CUSTOM, bytes(inp))
-        alpha = be.asarray(elems_to_array([alpha_b]))
+        al = []
+        for b in range(B):
+            ab = xof32(CHALLENGE_CUSTOM, bytes(trans[b]))
+            challenges[b].append(ab)
+            al.append(ab)
+        alpha = be.asarray(elems_to_array(al))
         t1 = tick()
-        tm["other"] += t1 - t0
-        k = ell - j
-        im = imgs[j]
-        scaled = dev.mul(im[1:k], pinvs[j]) if k > 1 else dev.empty(0)
-        c = dev.span(dev.mul(im[0:1] ^ alpha, pinvs[j]), scaled)
-        nxt = dev.fold(words[j], c)
-        t2 = tick()
-        tm["folds"] += t2 - t1
-        challenges.append(alpha_b)
-        if j + 1 < m:
-            tr = dev.tree(nxt, True)
-            trees.append(tr)
-            roots.append(row_bytes(be.host(tr[0])[0]))
-            tm["merkle"] += tick() - t2
-        words.append(nxt)
-    t0 = tick()
-    im = imgs[m]
-    dom_m = dev.span(im[0:1], im[1:1 + (ell - m)])
-    fd = final_degree
-    fco = dev.empty(max(fd, 1))
-    vals = dev.empty(last_size)
-    status = xp.zeros((1,), dtype=np.uint64)
-    xs = dev.c(dom_m[:max(fd, 1)])
-    ys = dev.c(words[m][:max(fd, 1)])
-    be.call("fri_final", 1, xs, ys, dom_m, fco, vals, status, fd, last_size)
-    if int(be.host(status)[0]) != 0:
-        raise ProveError("SingularInterpolation")
-    fcoeffs = [row_bytes(x) for x in be.host(fco)[:fd]]
-    tm["other"] += tick() - t0
-    if m > 0:
-        t0 = tick()
-        tr = dev.tree(vals, False)
-        roots.append(row_bytes(be.host(tr[0])[0]))
-        tm["merkle"] += tick() - t0
-    t0 = tick()
-    prefix = bytearray(head)
-    for n_, rt in enumerate(roots[:m + 1]):
-        push_root(prefix, n_, rt)
-    for cb in challenges:
-        envelope(prefix, cb)
-    seed_bits = ell - 1
-    seeds = []
-    if _pyc_cshake is not None:
-        for a in range(q):
-            tmp, env = bytearray(), bytearray()
-            encode_length(tmp, a)
-            envelope(env, tmp)
-            d = xof32(QUERY_CUSTOM, bytes(prefix) + bytes(env))
-            seeds.append(int.from_bytes(d[:8], "little") & ((1 << seed_bits) - 1))
-    else:
-        base = PyCShake(QUERY_CUSTOM).absorb(bytes(prefix))
-        for a in range(q):
-            tmp, env = bytearray(), bytearray()
-            encode_length(tmp, a)
-            envelope(env, tmp)
-            d = base.clone().absorb(bytes(env)).finish32()
-            seeds.append(int.from_bytes(d[:8], "little") & ((1 << seed_bits) - 1))
-    out = bytearray()
-    encode_nat(out, m + 1)
-    for rt in roots[:m + 1]:
-        encode_nat_le32(out, rt)
-    encode_nat(out, m)
-    for cb in challenges:
-        out += cb
-    encode_nat(out, q)
-    for s_ in seeds:
-        encode_nat(out, s_)
-    t1 = tick()
-    tm["other"] += t1 - t0
-    encode_nat(out, m)
-    for j in range(m):
-        encode_nat(out, q)
+        tm["host"] += t1 - t0
         k = ell - j
         half = 1 << (k - 1)
-        idx = np.array([s_ % half for s_ in seeds], dtype=np.int64)
-        w = words[j]
-        lo = be.host(w[be.asarray(idx).astype(np.int64)]) if q else np.zeros((0, 4), np.uint64)
-        hi = be.host(w[be.asarray(idx + half).astype(np.int64)]) if q else np.zeros((0, 4), np.uint64)
-        # All of this round's siblings, gathered on the device, then encoded in one call.
-        rows = [trees[j][d + 1][be.asarray((idx & ((2 << d) - 1)) ^ (1 << d)).astype(np.int64)]
-                for d in range(k - 1)] if q else []
-        enc = encode_nat_le32_rows(be.host(xp.concatenate(rows, axis=0))) if rows else []
-        sib = [enc[d * q:(d + 1) * q] for d in range(k - 1)]
-        lob, hib = np.ascontiguousarray(lo, dtype="<u8"), np.ascontiguousarray(hi, dtype="<u8")
-        klen = bytearray()
-        encode_nat(klen, k - 1)
-        for a in range(q):
-            out += lob[a].tobytes()
-            out += hib[a].tobytes()
-            out += klen
-            for d in range(k - 1):
-                out += sib[d][a]
+        S = spans[j]
+        dv = dev.mul(alpha, pinvs[j])
+        nxt = dev.empty(B * half)
+        be.call("fri_fold_batch", B * half, dev.c(words[j]), S, dv, nxt, half)
+        dev.counts["mul"] += B * half
+        words.append(nxt)
+        t2 = tick()
+        tm["folds"] += t2 - t1
+        if j + 1 < m:
+            trees.append(dev.tree(nxt, True, B))
+            t3 = tick()
+            tm["merkle"] += t3 - t2
+            yield
+            for b, x in enumerate(be.host(trees[-1][0])):
+                roots[b].append(row_bytes(x))
+                push_root(trans[b], j + 1, roots[b][-1])
+            tm["readback"] += tick() - t3
+    t0 = tick()
+    fd = final_degree
+    fco = dev.empty(B * max(fd, 1))
+    vals = dev.empty(B * last_size)
+    status = xp.zeros((B,), dtype=np.uint64)
+    be.call("fri_final", B, dev.c(dom_m[:max(fd, 1)]), dev.c(words[m]), dom_m, fco, vals, status, fd, last_size,
+            last_size)
+    t1 = tick()
+    tm["final"] += t1 - t0
+    last_tree = dev.tree(vals, False, B) if m > 0 else None
     t2 = tick()
-    tm["openings"] += t2 - t1
-    encode_nat(out, len(fcoeffs))
-    for cb in fcoeffs:
-        out += cb
-    tm["other"] += tick() - t2
-    return bytes(out), roots
+    tm["merkle"] += t2 - t1
+    yield
+    if be.host(status).any():
+        raise ProveError("SingularInterpolation")
+    fco_h = be.host(fco).reshape(B, max(fd, 1), 4)
+    if last_tree is not None:
+        for b, x in enumerate(be.host(last_tree[0])):
+            roots[b].append(row_bytes(x))
+            push_root(trans[b], m, roots[b][-1])
+    t3 = tick()
+    tm["readback"] += t3 - t2
+    # The query prefix: roots 0..m (already in trans) and the challenges.
+    for b in range(B):
+        for cb in challenges[b]:
+            envelope(trans[b], cb)
+    seeds_dev = None
+    if q:
+        P = len(trans[0])
+        assert all(len(t) == P for t in trans)
+        nb, r_ = P // 136, P % 136
+        blocks = np.frombuffer(b"".join(bytes(t[:nb * 136]) for t in trans), dtype="<u8").astype(np.uint64)
+        rem = np.zeros((B, 17), dtype=np.uint64)
+        rem_b = np.frombuffer(b"".join(bytes(t[nb * 136:]) + bytes(136 - r_) for t in trans), dtype="<u8")
+        rem[:] = rem_b.reshape(B, 17)
+        states = xp.zeros((B, 25), dtype=np.uint64)
+        t4 = tick()
+        tm["host"] += t4 - t3
+        be.call("cshake_absorb", B, dev.query_mid, be.asarray(blocks) if nb else dev.empty(1), states, nb)
+        seeds_dev = xp.zeros((B * q,), dtype=np.uint64)
+        be.call("query_seeds", B * q, states, be.asarray(rem), seeds_dev, r_, q, ell - 1)
+        t3 = tick()
+        tm["seeds"] += t3 - t4
+    hq, hm = natlen(q), natlen(m)
+    blob = None
+    if m and q:
+        wptr = be.asarray(np.array([be.ptr(words[j]) for j in range(m)], dtype=np.uint64))
+        lp = np.zeros((m, 32), dtype=np.uint64)
+        for j in range(m):
+            for t in range(1, ell - j):
+                lp[j, t] = be.ptr(trees[j][t])
+        lptr = be.asarray(lp)
+        n_rec = B * m * q
+        lens = xp.zeros((n_rec,), dtype=np.uint64)
+        be.call("open_lengths", n_rec, seeds_dev, wptr, lptr, dev.pow255, lens, ell, m, q)
+        L = lens.reshape(B, m * q).astype(np.int64)
+        first = xp.zeros((m * q,), dtype=np.int64)
+        first[::q] = hq
+        L = L + first[None, :]
+        tot = hm + L.sum(axis=1)
+        base = xp.cumsum(tot) - tot
+        offs = (base[:, None] + hm + xp.cumsum(L, axis=1) - L + first[None, :]).astype(np.uint64).reshape(-1)
+        total = int(be.host(tot).sum())
+        buf = xp.zeros(((total + 7) // 8,), dtype=np.uint64)
+        be.call("open_write", n_rec, seeds_dev, wptr, lptr, xp.ascontiguousarray(offs), buf, ell, m, q)
+        t4 = tick()
+        tm["openings"] += t4 - t3
+        t3 = t4
+    yield
+    seeds_h = be.host(seeds_dev).reshape(B, q) if q else np.zeros((B, 0), dtype=np.uint64)
+    if m and q:
+        tot_h, base_h = be.host(tot), be.host(base)
+        blob = be.host(buf).view(np.uint8)
+    t4 = tick()
+    tm["readback"] += t4 - t3
+    receipts = []
+    for b in range(B):
+        o = bytearray()
+        encode_nat(o, m + 1)
+        for rt in roots[b][:m + 1]:
+            encode_nat_le32(o, rt)
+        encode_nat(o, m)
+        for cb in challenges[b]:
+            o += cb
+        encode_nat(o, q)
+        for s_ in seeds_h[b]:
+            encode_nat(o, int(s_))
+        if m and q:
+            o += blob[int(base_h[b]):int(base_h[b]) + int(tot_h[b])].tobytes()
+        else:
+            encode_nat(o, m)
+            for _ in range(m):
+                encode_nat(o, q)
+        encode_nat(o, fd)
+        for c in range(fd):
+            o += row_bytes(fco_h[b, c])
+        receipts.append(bytes(o))
+    tm["host"] += tick() - t4
+    out["receipts"], out["roots"] = receipts, roots
+
+
+def prove_batches(dev, reqs, streams=1, sync_timing=False, sub=None):
+    """Proves reqs in sub-batches of `sub` (default: all), interleaved over `streams` CUDA streams:
+    a sub-batch's host work (challenges, receipt assembly) overlaps another's kernels."""
+    be = dev.be
+    sub = sub or len(reqs)
+    parts = [reqs[i:i + sub] for i in range(0, len(reqs), sub)]
+    outs = [{} for _ in parts]
+    gens = [prove_steps(dev, p, o, sync_timing) for p, o in zip(parts, outs)]
+    ctx = be.streams(streams)
+    live = list(range(len(gens)))
+    slot = {g: ctx[i % len(ctx)] for i, g in enumerate(live)}
+    while live:
+        for g in list(live):
+            with slot[g]:
+                try:
+                    next(gens[g])
+                except StopIteration:
+                    live.remove(g)
+    be.sync()
+    receipts, roots, phases = [], [], {}
+    for o in outs:
+        receipts += o["receipts"]
+        roots += o["roots"]
+        for k, v in o["phases"].items():
+            phases[k] = phases.get(k, 0.0) + v
+    return receipts, roots, phases
+
+
+def prove_gpu(dev, r, timings=None):
+    """One proof (the batch path at B = 1)."""
+    rec, roots, ph = prove_batches(dev, [r], sync_timing=True)
+    if timings is not None:
+        timings.update(ph)
+    return rec[0], roots[0]
 
 
 # ------------------------------------------------------------------------------------------
@@ -878,6 +1005,9 @@ def main():
     ap.add_argument("--mul", default="logexp", choices=["logexp", "full", "bs"], help="bulk multiply kernels")
     ap.add_argument("--bitslice-bench", action="store_true", help="check and time the bit-sliced multiply")
     ap.add_argument("--bitslice-big", type=int, default=1 << 20)
+    ap.add_argument("--e2e", default="", help="ell:batch,... the whole prover on batches (expect_e2e_ell*.json)")
+    ap.add_argument("--streams", default="1,2")
+    ap.add_argument("--skip-rates", action="store_true")
     ap.add_argument("--batch", type=int, default=0, help="words in the batched encode+commit measurement")
     ap.add_argument("--batch-ell", type=int, default=14)
     ap.add_argument("--source", help="compile tower256_fri.cu with NVRTC instead of loading --cubin")
@@ -930,7 +1060,7 @@ def main():
     res["lean_vectors"] = check_lean(dev, os.path.join(a.data, "tower256_fri_vectors.json"))
     print("lean", res["lean_vectors"], flush=True)
     save()
-    if a.backend == "cupy":
+    if a.backend == "cupy" and not a.skip_rates:
         it_k, it_m = 64, 16
         clock = res["clock_khz"] * 1e3
         # int32 lanes per second at the reported clock (64 per SM per cycle on sm_70..sm_90).
@@ -981,6 +1111,48 @@ def main():
         res["prove"].append(row)
         print("prove", row, flush=True)
         save()
+    if a.e2e:
+        # The whole prover on batches of leaves: every receipt against the CPU prover's.
+        res["e2e"] = []
+        for item in a.e2e.split(","):
+            ell, B = (int(x) for x in item.split(":"))
+            exp = json.load(open(os.path.join(a.data, "expect_e2e_ell%d.json" % ell)))
+            assert exp["batch"] == B
+            t0 = time.perf_counter()
+            reqs = [batch_request(ell, b) for b in range(B)]
+            gen_s = time.perf_counter() - t0
+            req_ok = [hashlib.sha3_256(encode_request(r)).hexdigest() for r in reqs] == exp["request_sha3_256"]
+            row = {"ell": ell, "batch": B, "request_identical": req_ok, "request_gen_s": gen_s, "runs": []}
+
+            def run(label, rq, streams, sync_timing, reps):
+                best, ok, ph = None, True, None
+                for _ in range(reps):
+                    dev.counts = {"mul": 0, "keccak": 0}
+                    be.sync()
+                    t0 = time.perf_counter()
+                    sub = max(1, len(rq) // streams) if streams > 1 else None
+                    rec, _, phases = prove_batches(dev, rq, streams=streams, sync_timing=sync_timing, sub=sub)
+                    dt = time.perf_counter() - t0
+                    ok = ok and [hashlib.sha3_256(x).hexdigest() for x in rec] == exp["receipt_sha3_256"][:len(rq)]
+                    if best is None or dt < best:
+                        best, ph = dt, phases
+                r = {"label": label, "proofs": len(rq), "streams": streams, "wall_s": best,
+                     "per_proof_ms": 1e3 * best / len(rq), "receipts_identical": ok,
+                     "device_mults": dev.counts["mul"], "device_keccak_f": dev.counts["keccak"]}
+                if sync_timing:
+                    r["phases_ms_per_proof"] = {k: 1e3 * v / len(rq) for k, v in ph.items()}
+                row["runs"].append(r)
+                print("e2e", ell, r, flush=True)
+                save()
+
+            run("phases (synchronized per stage)", reqs, 1, True, 1)
+            run("single proof, latency", reqs[:1], 1, False, a.reps)
+            for st in [int(x) for x in a.streams.split(",")]:
+                run("batch, %d stream(s)" % st, reqs, st, False, a.reps)
+            row["receipts_identical"] = all(r["receipts_identical"] for r in row["runs"]) and req_ok
+            row["best_per_proof_ms"] = min(r["per_proof_ms"] for r in row["runs"] if r["proofs"] == B)
+            res["e2e"].append(row)
+            save()
     if a.batch:
         # Many words on one domain (columns, or many leaves of one shape): encode + commit,
         # which is all but a few percent of a proof. Checked against the one-word path.
@@ -1036,7 +1208,8 @@ def main():
              and res["checks"]["keccak_mismatch"] == 0 and res["checks"]["mul_mismatch"] == 0
              and res["checks"]["inv_mismatch"] == 0 and all(v["identical"] for v in res["lean_vectors"])
              and all(r["receipt_identical"] and r["request_identical"] for r in res["prove"])
-             and res.get("batch", {}).get("roots_match_single", True))
+             and res.get("batch", {}).get("roots_match_single", True)
+             and all(r["receipts_identical"] for r in res.get("e2e", [])))
     res["all_bit_exact"] = allok
     save()
     print("ALL_BIT_EXACT", allok, flush=True)

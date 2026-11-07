@@ -472,14 +472,19 @@ KERNEL void fri_fold(const u64* w, const u64* c, u64* next, u64 n) {
     KEND
 }
 
-// Final polynomial: Gauss-Jordan through (x_n, y_n), n < d <= 16, then its values at the
-// last level's domain (dom, last_size points). status[0] = 1 when singular. One thread.
+// Final polynomial of proof i (one thread each): Gauss-Jordan through (xs[r], ys[i * ys_stride + r]),
+// r < d <= 16, then its values at the last level's domain (dom, last_size points, shared).
+// status[i] = 1 when singular. Coefficients at coeffs + 4 d i, values at vals + 4 last_size i.
 #define MAXD 16
-KERNEL void fri_final(const u64* xs, const u64* ys, const u64* dom, u64* coeffs, u64* vals, u64* status,
-                      u64 d, u64 last_size, u64 n) {
+KERNEL void fri_final(const u64* xs, const u64* ys0, const u64* dom, u64* coeffs0, u64* vals0, u64* status0,
+                      u64 d, u64 last_size, u64 ys_stride, u64 n) {
     TABLES
     Tabs t = {s_log, s_exp, s_gen};
     KBEGIN(n)
+    const u64* ys = ys0 + 4 * ys_stride * i;
+    u64* coeffs = coeffs0 + 4 * d * i;
+    u64* vals = vals0 + 4 * last_size * i;
+    u64* status = status0 + i;
     uint32_t rows[MAXD][MAXD + 1][8];
     status[0] = 0;
     for (u64 r = 0; r < d; ++r) {
@@ -1012,5 +1017,168 @@ KERNEL void fri_fold_bsx(const u64* w, const u64* c, u64* next, u64 n) {
     bs_mul32(c, [&](int l) { return g0 + l; }, (const u64*)&sum[0][0], [&](int l) { return (u64)l; }, prod);
     uint32_t* nw = (uint32_t*)next;
     for (int l = 0; l < 32; ++l) UNROLL for (int k = 0; k < 8; ++k) nw[8 * (g0 + l) + k] = prod[l][k] ^ ww[8 * (g0 + l) + k];
+    KEND
+}
+
+// ------------------------------------------------------------------------------------------
+// End-to-end batch: B proofs of one shape side by side (word b of a level at b * size).
+
+// next[b half + k] = w + (S[k] + d[b]) (w + w'), with w = w[2 b half + k], w' = w[2 b half + k + half].
+// S is the span shared by the batch (dom_j / pivot); d[b] = alpha_b / pivot.
+KERNEL void fri_fold_batch(const u64* w, const u64* S, const u64* dvec, u64* next, u64 half, u64 n) {
+    TABLES
+    Tabs t = {s_log, s_exp, s_gen};
+    KBEGIN(n)
+    u64 b = i / half, k = i % half;
+    uint32_t l[8], r[8], cc[8], dd[8], p[8];
+    load8(w + 4 * (2 * b * half + k), l);
+    load8(w + 4 * (2 * b * half + k + half), r);
+    load8(S + 4 * k, cc);
+    load8(dvec + 4 * b, dd);
+    xor8(cc, dd);
+    xor8(r, l);
+    mul8(t, cc, r, p);
+    xor8(p, l);
+    store8(next + 4 * i, p);
+    KEND
+}
+
+// Query seeds. The query prefix of proof i: nb full 136-byte blocks (17 lanes each) absorbed into
+// the cSHAKE(MD-FRI-Q) midstate, then a remainder of r bytes. Seed a of proof b is the low
+// seed_bits of cSHAKE(prefix || envelope(encodeLength a)); envelope(encodeLength a) is 2a + 3
+// bytes, zero but for ones at a + 1 and 2a + 2.
+KERNEL void cshake_absorb(const u64* mid, const u64* blocks, u64* states, u64 nb, u64 n) {
+    KBEGIN(n)
+    u64 a[25];
+    for (int k = 0; k < 25; ++k) a[k] = mid[k];
+    for (u64 blk = 0; blk < nb; ++blk) {
+        for (int l = 0; l < 17; ++l) a[l] ^= blocks[(i * nb + blk) * 17 + l];
+        keccak_f_shf(a);
+    }
+    for (int k = 0; k < 25; ++k) states[25 * i + k] = a[k];
+    KEND
+}
+KERNEL void query_seeds(const u64* states, const u64* rem, u64* seeds, u64 r, u64 q, u64 seed_bits, u64 n) {
+    KBEGIN(n)
+    u64 b = i / q, aq = i % q;
+    u64 a[25];
+    for (int k = 0; k < 25; ++k) a[k] = states[25 * b + k];
+    const uint8_t* rb = (const uint8_t*)(rem + 17 * b);
+    u64 len = r + 2 * aq + 3, nblk = len / 136 + 1;
+    for (u64 blk = 0; blk < nblk; ++blk) {
+        for (int l = 0; l < 17; ++l) {
+            u64 v = 0;
+            for (int j = 0; j < 8; ++j) {
+                u64 p = blk * 136 + 8 * l + j;
+                u64 byte = 0;
+                if (p < r) byte = rb[p];
+                else if (p < len) { u64 e = p - r; byte = (e == aq + 1 || e == 2 * aq + 2) ? 1 : 0; }
+                if (p == len) byte ^= 0x04;
+                if (p == nblk * 136 - 1) byte ^= 0x80;
+                v |= byte << (8 * j);
+            }
+            a[l] ^= v;
+        }
+        keccak_f_shf(a);
+    }
+    seeds[i] = seed_bits >= 64 ? a[0] : (a[0] & ((1ull << seed_bits) - 1));
+    KEND
+}
+
+// Openings. Record (b, j, a) = w[k], w[k + half] (32 bytes each), StreamCodec.nat(k_bits - 1), then
+// k_bits - 1 sibling digests as StreamCodec.nat of their little-endian value (base-255 digits, then
+// 255). Words of round j at wptr[j]; tree level t of round j at lptr[32 j + t] (2^t digests per
+// proof); pow255[4 k ..] = 255^k, k = 0..32.
+DEV int digits255(const u64* v, const u64* pow255) {
+    if ((v[0] | v[1] | v[2] | v[3]) == 0) return 0;
+    for (int k = 32; k >= 0; --k) {
+        const u64* p = pow255 + 4 * k;
+        int ge = 1;
+        for (int l = 3; l >= 0; --l) {
+            if (v[l] != p[l]) { ge = v[l] > p[l]; break; }
+        }
+        if (ge) return k + 1;
+    }
+    return 0;
+}
+DEV int natlen(u64 v) {
+    int c = 1;
+    while (v) { ++c; v /= 255; }
+    return c;
+}
+DEV u64 nat_put(uint8_t* o, u64 v) {
+    u64 c = 0;
+    while (v) { o[c++] = (uint8_t)(v % 255); v /= 255; }
+    o[c++] = 255;
+    return c;
+}
+DEV u64 nat256_put(uint8_t* o, const u64* d) {
+    uint32_t v[8];
+    for (int k = 0; k < 4; ++k) { v[2 * k] = (uint32_t)d[k]; v[2 * k + 1] = (uint32_t)(d[k] >> 32); }
+    u64 c = 0;
+    for (;;) {
+        uint32_t any = 0;
+        for (int k = 0; k < 8; ++k) any |= v[k];
+        if (!any) break;
+        u64 rem = 0;
+        for (int k = 7; k >= 0; --k) {
+            u64 cur = (rem << 32) | v[k];
+            v[k] = (uint32_t)(cur / 255);
+            rem = cur % 255;
+        }
+        o[c++] = (uint8_t)rem;
+    }
+    o[c++] = 255;
+    return c;
+}
+KERNEL void open_lengths(const u64* seeds, const u64* wptr, const u64* lptr, const u64* pow255, u64* lens,
+                         u64 ell, u64 m, u64 q, u64 n) {
+    KBEGIN(n)
+    u64 a = i % q, j = (i / q) % m, b = i / (q * m);
+    u64 k = ell - j, half = 1ull << (k - 1);
+    u64 idx = seeds[b * q + a] % half;
+    u64 len = 64 + natlen(k - 1);
+    for (u64 d = 0; d + 1 < k; ++d) {
+        u64 tl = d + 1;
+        const u64* lvl = (const u64*)lptr[32 * j + tl];
+        u64 o = (idx & ((2ull << d) - 1)) ^ (1ull << d);
+        len += digits255(lvl + 4 * ((b << tl) + o), pow255) + 1;
+    }
+    lens[i] = len;
+    KEND
+}
+// offs[i]: where record i's content starts. Record (b, j, 0) is preceded by hq bytes of
+// StreamCodec.nat(q) and record (b, 0, 0) further by hm bytes of StreamCodec.nat(m).
+KERNEL void open_write(const u64* seeds, const u64* wptr, const u64* lptr, const u64* offs, u64* out64,
+                       u64 ell, u64 m, u64 q, u64 n) {
+    KBEGIN(n)
+    uint8_t* out = (uint8_t*)out64;
+    u64 a = i % q, j = (i / q) % m, b = i / (q * m);
+    u64 k = ell - j, half = 1ull << (k - 1);
+    u64 idx = seeds[b * q + a] % half;
+    uint8_t* o = out + offs[i];
+    if (a == 0) {
+        uint8_t hq[8];
+        u64 lq = nat_put(hq, q);
+        uint8_t* oq = o - lq;
+        for (u64 c = 0; c < lq; ++c) oq[c] = hq[c];
+        if (j == 0) {
+            uint8_t hm[8];
+            u64 lm = nat_put(hm, m);
+            uint8_t* om = oq - lm;
+            for (u64 c = 0; c < lm; ++c) om[c] = hm[c];
+        }
+    }
+    const u64* w = (const u64*)wptr[j];
+    const u64* lo = w + 4 * ((b << k) + idx);
+    const u64* hi = w + 4 * ((b << k) + idx + half);
+    for (int c = 0; c < 32; ++c) { o[c] = (uint8_t)(lo[c / 8] >> (8 * (c % 8))); o[32 + c] = (uint8_t)(hi[c / 8] >> (8 * (c % 8))); }
+    u64 p = 64 + nat_put(o + 64, k - 1);
+    for (u64 d = 0; d + 1 < k; ++d) {
+        u64 tl = d + 1;
+        const u64* lvl = (const u64*)lptr[32 * j + tl];
+        u64 oo = (idx & ((2ull << d) - 1)) ^ (1ull << d);
+        p += nat256_put(o + p, lvl + 4 * ((b << tl) + oo));
+    }
     KEND
 }
