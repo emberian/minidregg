@@ -173,8 +173,6 @@ inductive MembershipClaim where
   | capability (kind : ResourceKind) (identifier : CapabilityId)
   deriving DecidableEq, Repr
 
-export CredentialAuthorityDomain (capabilityKindTag)
-
 /-- The domain and resource kind join the COMPLETE stored head and ancestry
 in one source-owned commitment (`CredentialAuthorityDomain.capabilityDigestOf` at the
 snapshot's domain). This is not a possession proof. -/
@@ -291,16 +289,15 @@ theorem issuerCheck_eq_indexed (snapshot : Snapshot) (issuer : IssuerId) (epoch 
     (commitment : Digest) :
     issuerCheck snapshot issuer epoch commitment =
       issuerCheckIndexed snapshot issuer epoch commitment := by
-  unfold issuerCheck issuerCheckIndexed
-  congr 1
-  rw [snapshot.issuedExact, CredentialAuthorityDomain.issuedOf]
-  apply Bool.eq_iff_iff.mpr
-  simp only [decide_eq_true_eq, List.contains_iff_mem, List.mem_filterMap]
-  constructor
-  · rintro ⟨⟨plane, identifier⟩, present, issued⟩
-    refine ⟨⟨plane, identifier⟩, ?_, ?_⟩
-    · exact present
-    · cases plane with
+  have key : (∃ address ∈ snapshot.logical.support,
+        issuedAt snapshot issuer epoch commitment address = true) ↔
+      (issuer, epoch, commitment) ∈
+        CredentialAuthorityDomain.issuedOf snapshot.domain snapshot.cell := by
+    rw [CredentialAuthorityDomain.issuedOf, List.mem_filterMap]
+    constructor
+    · rintro ⟨⟨plane, identifier⟩, present, issued⟩
+      refine ⟨⟨plane, identifier⟩, present, ?_⟩
+      cases plane with
       | capability kind =>
           simp only [issuedAt] at issued
           cases read : readCapability snapshot.cell kind identifier with
@@ -308,23 +305,34 @@ theorem issuerCheck_eq_indexed (snapshot : Snapshot) (issuer : IssuerId) (epoch 
           | some stored =>
               simp only [read, decide_eq_true_eq] at issued
               obtain ⟨i, e, c⟩ := issued
-              simp only [CredentialAuthorityDomain.issuedEntry, read, Option.map_some,
-                storedCapabilityDigest] at c ⊢
-              rw [i, e, c]
+              simp only [CredentialAuthorityDomain.issuedEntry, read, Option.map_some]
+              rw [i, e, ← c]
+              rfl
       | _ => simp [issuedAt] at issued
-  · rintro ⟨⟨plane, identifier⟩, present, entry⟩
-    refine ⟨⟨plane, identifier⟩, present, ?_⟩
-    cases plane with
-    | capability kind =>
-        simp only [CredentialAuthorityDomain.issuedEntry] at entry
-        cases read : readCapability snapshot.cell kind identifier with
-        | none => simp [read] at entry
-        | some stored =>
-            simp only [read, Option.map_some, Option.some.injEq, Prod.mk.injEq] at entry
-            obtain ⟨i, e, c⟩ := entry
-            simp only [issuedAt, read, decide_eq_true_eq, storedCapabilityDigest]
-            exact ⟨i, e, c⟩
-    | _ => simp [CredentialAuthorityDomain.issuedEntry] at entry
+    · rintro ⟨⟨plane, identifier⟩, present, entry⟩
+      refine ⟨⟨plane, identifier⟩, present, ?_⟩
+      cases plane with
+      | capability kind =>
+          simp only [CredentialAuthorityDomain.issuedEntry] at entry
+          cases read : readCapability snapshot.cell kind identifier with
+          | none => simp [read] at entry
+          | some stored =>
+              simp only [read, Option.map_some, Option.some.injEq, Prod.mk.injEq] at entry
+              obtain ⟨i, e, c⟩ := entry
+              simp only [issuedAt, read, decide_eq_true_eq]
+              exact ⟨i, e, c⟩
+      | _ => simp [CredentialAuthorityDomain.issuedEntry] at entry
+  unfold issuerCheck issuerCheckIndexed
+  rw [snapshot.issuedExact]
+  cases h : decide (issuerEpochAt snapshot.cell issuer = epoch) with
+  | false => rfl
+  | true =>
+      simp only [Bool.true_and]
+      by_cases found : (issuer, epoch, commitment) ∈
+          CredentialAuthorityDomain.issuedOf snapshot.domain snapshot.cell
+      · rw [decide_eq_true (key.mpr found), List.contains_iff_mem.mpr found]
+      · rw [decide_eq_false (fun exists_ => found (key.mp exists_))]
+        exact (Bool.not_eq_true _).mp (fun contained => found (List.contains_iff_mem.mp contained))
 
 @[csimp] theorem issuerCheck_eq_issuerCheckIndexed : @issuerCheck = @issuerCheckIndexed := by
   funext snapshot issuer epoch commitment

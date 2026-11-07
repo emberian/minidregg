@@ -449,7 +449,8 @@ def loadServedAuthorityHeld {deployment : CanonicalCellRegistry.Deployment} {ear
   | some post =>
       if same : bytesBEq (served.canonicalBytes (cellIdOf deployment)) post.bytes then
         some ⟨post.cell, prior.valid, (bytesBEq_iff.mp same).trans post.exact,
-          CredentialAuthorityDomain.authStateOf post.cell, rfl⟩
+          CredentialAuthorityDomain.authStateOf post.cell, rfl,
+          Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain post.cell, rfl⟩
       else loadServedAuthorityFrom prior served
   | none => loadServedAuthorityFrom prior served
 
