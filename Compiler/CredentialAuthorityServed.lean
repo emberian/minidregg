@@ -175,6 +175,10 @@ structure ServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store
   snapshot (`snapshotOn`) carries this one, not a projection rebuilt per reference. -/
   authState : AuthState
   authStateExact : authState = CredentialAuthorityDomain.authStateOf cell
+  /-- The cell's issued index (`CredentialAuthorityDomain.issuedOf`), held beside it and
+  forced at its first issuer check: every request's snapshot shares it. -/
+  issued : Thunk (List (IssuerId × Epoch × Digest))
+  issuedExact : issued.get = CredentialAuthorityDomain.issuedOf deployment.domain cell
 
 def loadServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store : StoreIdentity}
     (served : State store) : Option (ServedAuthority deployment served) :=
@@ -182,7 +186,8 @@ def loadServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store :
     match decoded : decodeCell (served.canonicalBytes (cellIdOf deployment)) with
     | none => none
     | some cell => some ⟨cell, valid, (decodeCell_canonical decoded).symm,
-        CredentialAuthorityDomain.authStateOf cell, rfl⟩
+        CredentialAuthorityDomain.authStateOf cell, rfl,
+        Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain cell, rfl⟩
   else none
 
 /-- The authority snapshot for a request: the clock is the served height and
@@ -193,7 +198,7 @@ def ServedAuthority.snapshotOn {deployment : CanonicalCellRegistry.Deployment} {
     {served : State store} (authority : ServedAuthority deployment served) {head : Head store} {keys : Keys}
     (footprint : VerifiedFootprint head keys) : CredentialAuthorityDomain.Snapshot :=
   ⟨deployment.domain, served.height, spentOf deployment.domain (served.viewAt footprint), authority.cell,
-    authority.authState, authority.authStateExact⟩
+    authority.authState, authority.authStateExact, authority.issued, authority.issuedExact⟩
 
 /-- `snapshotOn` is the snapshot `Snapshot.ofCell` builds; only the projection is the held one. -/
 theorem ServedAuthority.snapshotOn_eq {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
@@ -202,8 +207,11 @@ theorem ServedAuthority.snapshotOn_eq {deployment : CanonicalCellRegistry.Deploy
     authority.snapshotOn footprint =
       CredentialAuthorityDomain.Snapshot.ofCell deployment.domain served.height
         (spentOf deployment.domain (served.viewAt footprint)) authority.cell := by
-  obtain ⟨cell, valid, observed, authState, exact⟩ := authority
+  obtain ⟨cell, valid, observed, authState, exact, issued, issuedExact⟩ := authority
   subst exact
+  have held : issued = Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain cell :=
+    Thunk.ext issuedExact
+  subst held
   rfl
 
 /-- The light authority over a view is the full authority load of that view,
@@ -360,10 +368,12 @@ theorem ServedAuthority.unique {deployment : CanonicalCellRegistry.Deployment} {
     have decoded := congrArg decodeCell (left.observed.symm.trans right.observed)
     rw [decodeCell_bytes, decodeCell_bytes] at decoded
     exact Option.some.inj decoded
-  obtain ⟨leftCell, _, _, leftState, leftExact⟩ := left
-  obtain ⟨rightCell, _, _, rightState, rightExact⟩ := right
+  obtain ⟨leftCell, _, _, leftState, leftExact, leftIssued, leftIssuedExact⟩ := left
+  obtain ⟨rightCell, _, _, rightState, rightExact, rightIssued, rightIssuedExact⟩ := right
   simp only at same
   subst same leftExact rightExact
+  have issued : leftIssued = rightIssued := Thunk.ext (leftIssuedExact.trans rightIssuedExact.symm)
+  subst issued
   rfl
 
 /-- Loading a state that has an authority yields that authority. -/
@@ -387,7 +397,7 @@ def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {ear
   if same : bytesBEq (served.canonicalBytes (cellIdOf deployment))
       (before.canonicalBytes (cellIdOf deployment)) then
     some ⟨held.cell, held.valid, (bytesBEq_iff.mp same).trans held.observed,
-      held.authState, held.authStateExact⟩
+      held.authState, held.authStateExact, held.issued, held.issuedExact⟩
   else
     match decoded : decodeCell (served.canonicalBytes (cellIdOf deployment)) with
     | none => none
@@ -396,7 +406,8 @@ def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {ear
         some ⟨stepped, held.valid,
           (decodeCell_canonical decoded).symm.trans
             (congrArg cellBytes (CellState.Materialized.relativeTo_eq held.cell cell).symm),
-          CredentialAuthorityDomain.authStateOf stepped, rfl⟩
+          CredentialAuthorityDomain.authStateOf stepped, rfl,
+          Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain stepped, rfl⟩
 
 theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deployment}
     {earlier store : StoreIdentity} {before : State earlier} (held : ServedAuthority deployment before)

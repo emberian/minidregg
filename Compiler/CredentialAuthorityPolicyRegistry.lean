@@ -173,20 +173,14 @@ inductive MembershipClaim where
   | capability (kind : ResourceKind) (identifier : CapabilityId)
   deriving DecidableEq, Repr
 
-def capabilityKindTag : ResourceKind → UInt8
-  | .object => 0
-  | .account => 1
-  | .program => 2
+export CredentialAuthorityDomain (capabilityKindTag)
 
 /-- The domain and resource kind join the COMPLETE stored head and ancestry
-in one source-owned commitment. This is not a possession proof. -/
+in one source-owned commitment (`CredentialAuthorityDomain.capabilityDigestOf` at the
+snapshot's domain). This is not a possession proof. -/
 def storedCapabilityDigest (snapshot : Snapshot) {kind : ResourceKind}
     (stored : StoredCapability kind) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.AUTHORITY.CAPABILITY/v4".toUTF8.toList
-    (capabilityKindTag kind ::
-      (StreamCodec.product digestStream
-        (CredentialAuthorityEntryCodec.storedCapabilityStream kind)).encode
-          (snapshot.domain, stored))).digest
+  CredentialAuthorityDomain.capabilityDigestOf snapshot.domain stored
 
 /-- Capability commitments include the historical origin data, but not the
 current signing-key plane. A fresh invocation still authenticates against
@@ -282,6 +276,59 @@ def issuerCheck (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
   decide (issuerEpochAt snapshot.cell issuer = epoch) &&
     decide (∃ address ∈ snapshot.logical.support,
       issuedAt snapshot issuer epoch commitment address = true)
+
+/-- `issuerCheck` as the Host runs it: the issuer epoch, then membership of the triple in
+the snapshot's issued index (`Snapshot.issued`, computed once per held cell), instead of
+reading and hashing every address of the support per check. -/
+def issuerCheckIndexed (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
+    (commitment : Digest) : Bool :=
+  decide (issuerEpochAt snapshot.cell issuer = epoch) &&
+    (snapshot.issued.get.contains (issuer, epoch, commitment))
+
+/-- **The index answers what the support search answers** (statement first: the issuer
+evidence a portal accepts is unchanged; only how it is decided moves). -/
+theorem issuerCheck_eq_indexed (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
+    (commitment : Digest) :
+    issuerCheck snapshot issuer epoch commitment =
+      issuerCheckIndexed snapshot issuer epoch commitment := by
+  unfold issuerCheck issuerCheckIndexed
+  congr 1
+  rw [snapshot.issuedExact, CredentialAuthorityDomain.issuedOf]
+  apply Bool.eq_iff_iff.mpr
+  simp only [decide_eq_true_eq, List.contains_iff_mem, List.mem_filterMap]
+  constructor
+  · rintro ⟨⟨plane, identifier⟩, present, issued⟩
+    refine ⟨⟨plane, identifier⟩, ?_, ?_⟩
+    · exact present
+    · cases plane with
+      | capability kind =>
+          simp only [issuedAt] at issued
+          cases read : readCapability snapshot.cell kind identifier with
+          | none => simp [read] at issued
+          | some stored =>
+              simp only [read, decide_eq_true_eq] at issued
+              obtain ⟨i, e, c⟩ := issued
+              simp only [CredentialAuthorityDomain.issuedEntry, read, Option.map_some,
+                storedCapabilityDigest] at c ⊢
+              rw [i, e, c]
+      | _ => simp [issuedAt] at issued
+  · rintro ⟨⟨plane, identifier⟩, present, entry⟩
+    refine ⟨⟨plane, identifier⟩, present, ?_⟩
+    cases plane with
+    | capability kind =>
+        simp only [CredentialAuthorityDomain.issuedEntry] at entry
+        cases read : readCapability snapshot.cell kind identifier with
+        | none => simp [read] at entry
+        | some stored =>
+            simp only [read, Option.map_some, Option.some.injEq, Prod.mk.injEq] at entry
+            obtain ⟨i, e, c⟩ := entry
+            simp only [issuedAt, read, decide_eq_true_eq, storedCapabilityDigest]
+            exact ⟨i, e, c⟩
+    | _ => simp [CredentialAuthorityDomain.issuedEntry] at entry
+
+@[csimp] theorem issuerCheck_eq_issuerCheckIndexed : @issuerCheck = @issuerCheckIndexed := by
+  funext snapshot issuer epoch commitment
+  exact issuerCheck_eq_indexed snapshot issuer epoch commitment
 
 /-- Issuer acceptance names a stored capability of that issuer and epoch. -/
 theorem issuerCheck_sound (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
