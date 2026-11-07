@@ -1049,9 +1049,11 @@ ingress of the record's own transaction, and shown only when they reproduce the
 digest the cell committed. The cell keeps the digest and the signed command
 keeps the bytes (K-STREAM); this is how a reader who may observe the stream
 gets the text. The lookup is a scan of the accepted log, like `since`. -/
-def streamPayload (accepted : List DurableReceiver.IntentRecord) (target : Nat)
+/-- The payload a stream record's append carried, from `found`, the accepted record of its
+transaction (`streamPayload` finds it in the log, `streamPayloadIn` through the log's index). -/
+def streamPayloadFrom (found : Option DurableReceiver.IntentRecord) (target : Nat)
     (record : StreamCell.StreamRecord) : Option (List UInt8) := do
-  let intent ← accepted.find? (fun intent => decide (intent.transactionId = record.transaction))
+  let intent ← found
   let (_, _, signed) ← DeclaredResourceController.decodeSignedBytes intent.event.canonicalBytes
   let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
   let written ← command.targets.find? (fun written => decide (written.target = target))
@@ -1061,6 +1063,11 @@ def streamPayload (accepted : List DurableReceiver.IntentRecord) (target : Nat)
         some request.payload
       else none
   | _ => none
+
+def streamPayload (accepted : List DurableReceiver.IntentRecord) (target : Nat)
+    (record : StreamCell.StreamRecord) : Option (List UInt8) :=
+  streamPayloadFrom (accepted.find? (fun intent => decide (intent.transactionId = record.transaction)))
+    target record
 
 /-- **A shown payload is the signed append of that record's transaction.** The
 bytes reproduce the committed digest, and they are the append payload of the
@@ -1076,7 +1083,7 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
           DeclaredResourceController.commandCodec.decode ingress.2.2.commandBytes = some command ∧
           written ∈ command.targets ∧ written.target = target ∧
           written.payload = .append request ∧ request.payload = bytes := by
-  unfold streamPayload at shown
+  unfold streamPayload streamPayloadFrom at shown
   cases found : accepted.find? (fun intent => decide (intent.transactionId = record.transaction)) with
   | none => simp [found] at shown
   | some intent =>
@@ -1114,6 +1121,58 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
                 decoded, commanded, List.mem_of_find?_eq_some writtenFound,
                 sameTarget, append, rfl⟩
             · simp [digestEq] at shown
+
+private theorem find?_eq_findIdx?_bind {α : Type} (p : α → Bool) :
+    ∀ l : List α, l.find? p = (l.findIdx? p).bind (fun i => l[i]?)
+  | [] => rfl
+  | a :: l => by
+      by_cases h : p a
+      · simp [List.findIdx?_cons, h]
+      · simp only [List.find?_cons, List.findIdx?_cons, h, Bool.false_eq_true, ↓reduceIte]
+        rw [find?_eq_findIdx?_bind p l]
+        cases l.findIdx? p <;> simp
+
+/-- The accepted record of `transaction` in the held log: its first index from the log's
+transaction index (`Loaded.txs`), read from the newest end of the log as held (`acceptedRev`),
+so a recent record costs neither a reversal of the log nor a scan from its oldest record. -/
+def intentOf (history : Durable) (transaction : DurableDataIntent.TransactionId) :
+    Option DurableReceiver.IntentRecord := do
+  let index ← history.txs[transaction]?
+  history.image.acceptedRev[history.image.acceptedRev.length - 1 - index]?
+
+private theorem find?_reverse_index {α : Type} (p : α → Bool) (rev : List α) :
+    ((rev.reverse.findIdx? p).bind fun i => rev[rev.length - 1 - i]?) = rev.reverse.find? p := by
+  rw [find?_eq_findIdx?_bind p rev.reverse]
+  cases found : rev.reverse.findIdx? p with
+  | none => rfl
+  | some i =>
+      have lt : i < rev.reverse.length := (List.findIdx?_eq_some_iff_getElem.mp found).1
+      simp only [Option.bind_some]
+      rw [List.getElem?_reverse (by simpa using lt)]
+
+/-- **The index finds what the log scan finds.** -/
+theorem intentOf_eq (history : Durable) (transaction : DurableDataIntent.TransactionId) :
+    intentOf history transaction =
+      history.image.accepted.find? (fun intent => decide (intent.transactionId = transaction)) := by
+  have exact := SessionIndex.TxIndex.lookup_eq history.txsExact transaction
+  have sameP : (fun record : DurableReceiver.IntentRecord => record.transactionId == transaction) =
+      (fun intent => decide (intent.transactionId = transaction)) := by
+    funext record; simp
+  rw [sameP] at exact
+  have reversed := find?_reverse_index (fun intent : DurableReceiver.IntentRecord =>
+    decide (intent.transactionId = transaction)) history.image.acceptedRev
+  unfold intentOf DurableReceiver.Image.accepted at *
+  rw [exact, Option.bind_eq_bind]
+  exact reversed
+
+/-- `streamPayload` over the held log, through its transaction index (`streamPayloadIn_eq`). -/
+def streamPayloadIn (history : Durable) (target : Nat) (record : StreamCell.StreamRecord) :
+    Option (List UInt8) :=
+  streamPayloadFrom (intentOf history record.transaction) target record
+
+theorem streamPayloadIn_eq (history : Durable) (target : Nat) (record : StreamCell.StreamRecord) :
+    streamPayloadIn history target record = streamPayload history.image.accepted target record := by
+  simp only [streamPayloadIn, streamPayload, intentOf_eq]
 
 /-- A stream window: the head cell's root, its next sequence position, and the
 recorded entries in the window, each read back from its own entry cell
@@ -1423,6 +1482,18 @@ theorem sinceView_eq (visible : DurableDataIntent.CellId → Bool) (after first 
   · have zero : after + 1 - first = 0 := by omega
     rw [zero]
     simp
+
+/-- `sinceView` over the held log: the records above `after` taken from the newest end of the
+log as held (`acceptedRev`), so a `since` read costs the records it covers, not a reversal of
+the whole log (`sinceViewIn_eq`). -/
+def sinceViewIn (visible : DurableDataIntent.CellId → Bool) (after first : Nat) (history : Durable) :
+    List SinceEntry :=
+  let rev := history.image.acceptedRev
+  sinceFrom visible after (first + (after + 1 - first)) ((rev.take (rev.length - (after + 1 - first))).reverse)
+
+theorem sinceViewIn_eq (visible : DurableDataIntent.CellId → Bool) (after first : Nat) (history : Durable) :
+    sinceViewIn visible after first history = sinceView visible after first history.image.accepted := by
+  simp only [sinceViewIn, sinceView, DurableReceiver.Image.accepted, List.drop_reverse]
 
 /-- `history DOC` (K-DOC-HISTORY): the `since` entries that wrote the document
 cell itself. On the host this is `since DOC 0` cut to `DOC`, so it is K-INDEX's
@@ -2016,8 +2087,8 @@ def AuthorizedIntent.queryResult
     | .since after => do
         let some stored := reader | throw .malformed
         let visible := sees state.parent stored.head query.target
-        -- `sinceView_eq`: the same entries, without decoding the records at or below `after`.
-        pure (sinceViewCodec.encode (sinceView visible after (genesisHeight + 1) history.image.accepted))
+        -- `sinceViewIn_eq`, `sinceView_eq`: the same entries, from the newest end of the held log.
+        pure (sinceViewCodec.encode (sinceViewIn visible after (genesisHeight + 1) history))
     | .atHeight height =>
         atCovered (deployment := deployment) (durable := history) kept genesisHeight height intent.subject
           grant query.target
@@ -2028,7 +2099,7 @@ def AuthorizedIntent.queryResult
             pure (tailViewCodec.encode (payload.root, head.nextSeq,
               (StreamWrite.window deployment context.directory query.target head start count).map
                 fun (sequence, entry) =>
-                  (sequence, entry.record, streamPayload history.image.accepted query.target entry.record)))
+                  (sequence, entry.record, streamPayloadIn history query.target entry.record)))
         | _ => throw .malformed
     | .backlinks =>
         let visible := readable context intent.subject (genesisHeight + context.height)
