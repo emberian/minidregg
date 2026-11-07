@@ -375,12 +375,15 @@ impl Worker {
         }
         Ok(answer)
     }
-    /// Admit the Store up to its head (full readiness, 236: the provider admits before it answers)
-    /// and retain what was admitted.
+    /// Admit the Store up to its head and retain what was admitted: an intent frame with no intent
+    /// (the provider admits before it judges, then refuses an empty intent). Not full readiness
+    /// (236), whose `upgrade` re-admits an anchored admission in full (`mini_sdk::consent`'s
+    /// catch-up says why). `retain` asks the anchor, which a provider whose admission was refused
+    /// no longer answers.
     fn catch_up(&mut self) -> Result<()> {
-        if !self.internal(mini_sdk::host_operations::CONSENT_FULL_READY, &[])?.is_empty() {
+        if self.exchange(&[mini_sdk::host_operations::CONSENT_INTENT])?.first() != Some(&mini_sdk::consent::CONSENT_REFUSAL) {
             self.failed = true;
-            return Err("consent verifier answered readiness with bytes".into());
+            return Err("consent verifier accepted an empty intent".into());
         }
         self.admitted = true;
         self.retain()
@@ -636,7 +639,7 @@ pub(crate) fn serve(
         Some(dir) => Backend::Shared(Arc::new(SharedVerifier::start(executable, config, &pins, dir)?)),
         None => Backend::Own(Arc::new(Mutex::new(Worker::start(executable, config, &pins, anchors)?))),
     };
-    // Its own verifier admits what other writers append as it lands (full readiness, 236,
+    // Its own verifier admits what other writers append as it lands (an empty intent,
     // `mini_sdk::consent::HeadWatch`), so the member's next frame finds nothing to admit; the first
     // catch-up is the verifier's start admission. A shared verifier's resident does this itself.
     if let Backend::Own(worker) = &backend {
@@ -777,12 +780,12 @@ mod tests {
         let anchors = dir.join("a");
         fs::create_dir(&anchors).unwrap();
         fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
-        // A provider stand-in: logs each start and each operation, answers 233/228 and full
-        // readiness (236, the resident's catch-up) with themselves, 229 with an anchor, and any
+        // A provider stand-in: logs each start and each operation, answers 233/228 with themselves,
+        // 229 with an anchor, an empty intent (the resident's catch-up) with a refusal, and any
         // other frame with its own byte and "ok".
         let provider = dir.join("provider");
         fs::write(&provider, format!("#!/usr/bin/python3 -I\nimport sys,struct\nopen('{d}/starts','a').write('start\\n')\n\
-i,o=sys.stdin.buffer,sys.stdout.buffer\nwhile True:\n  w=i.read(4)\n  if len(w)<4: break\n  f=i.read(struct.unpack('<I',w)[0])\n  op=f[0]\n  open('{d}/ops','a').write(str(op)+'\\n')\n  r=bytes([op])+(b'ANCHOR' if op==229 else b'' if op in (228,233,236) else b'ok')\n  o.write(struct.pack('<I',len(r))+r); o.flush()\n", d = dir.display())).unwrap();
+i,o=sys.stdin.buffer,sys.stdout.buffer\nwhile True:\n  w=i.read(4)\n  if len(w)<4: break\n  f=i.read(struct.unpack('<I',w)[0])\n  op=f[0]\n  open('{d}/ops','a').write(str(op)+'\\n')\n  r=(b'\\xffempty intent' if op==220 and len(f)==1 else bytes([op])+(b'ANCHOR' if op==229 else b'' if op in (228,233) else b'ok'))\n  o.write(struct.pack('<I',len(r))+r); o.flush()\n", d = dir.display())).unwrap();
         fs::set_permissions(&provider, fs::Permissions::from_mode(0o700)).unwrap();
         let config = dir.join("config.json");
         fs::write(&config, b"{\"x\":1}").unwrap();

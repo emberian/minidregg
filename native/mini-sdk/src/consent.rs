@@ -30,7 +30,7 @@
 //! socket lives in the owner-private anchor directory (Linux uses a directory descriptor
 //! when that address is too long), and both ends check the peer is this user.
 //!
-//! A consent resident also admits on its own (full readiness, 236, [`HeadWatch`]): when the Store's head
+//! A consent resident also admits on its own (an empty intent frame, [`HeadWatch`]): when the Store's head
 //! marker moves it admits the new records then, so the records other writers append are admitted
 //! as they land and a member's command pays only for what landed in the last moment.
 //!
@@ -545,23 +545,29 @@ impl HeadWatch {
     }
 }
 
-/// Admit the Store up to its head on the resident's provider and retain the anchor. The frame is
-/// full readiness (236, empty): the provider admits to the head before answering it, and the
-/// served Host's image and protocol table stay as they are. Its first use also holds the
-/// admission in full (`ClientConsentCore.upgrade`: a walk from the Store's checkpoint, once),
-/// which a later operator plan would otherwise ask for inside a command. A refusal ends the
-/// resident exactly as a refused member frame does.
+/// Admit the Store up to its head on the resident's provider and retain the anchor. The provider
+/// admits to the head before it judges any non-thin frame (`ClientConsentCore.serve`), so the
+/// catch-up is an intent frame with no intent: admitted, then refused (an empty intent never
+/// decodes), with no Host change and no plan work. Full readiness (236) is NOT that frame: on an
+/// anchored admission it also re-admits in full (`upgrade` -> `NativeHostReplay.verifyStart`: a
+/// second full open, then a genesis walk), which spun demo providers for minutes at height 3,544.
+/// The admission is confirmed by the provider still answering its anchor (229): a refused
+/// admission ends the provider. Anything else ends the resident exactly as a refused member frame
+/// does.
 fn catch_up(shared: &Mutex<Resident>, ended: &std::sync::atomic::AtomicBool) {
     let Ok(mut resident) = shared.lock() else { return };
     if resident.ended {
         return;
     }
-    match resident.session.exchange(crate::host_operations::CONSENT_FULL_READY, &[]) {
-        Ok((crate::host_operations::CONSENT_FULL_READY, body)) if body.is_empty() => retain_anchor(&mut resident.session),
-        _ => {
-            resident.ended = true;
-            ended.store(true, std::sync::atomic::Ordering::Release);
-        }
+    let admitted = matches!(resident.session.exchange(crate::host_operations::CONSENT_INTENT, &[]),
+            Ok((CONSENT_REFUSAL, _)))
+        && matches!(resident.session.exchange(crate::host_operations::CONSENT_ANCHOR_ADMITTED, &[]),
+            Ok((crate::host_operations::CONSENT_ANCHOR_ADMITTED, ref anchor)) if !anchor.is_empty());
+    if admitted {
+        retain_anchor(&mut resident.session);
+    } else {
+        resident.ended = true;
+        ended.store(true, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -625,7 +631,7 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     let active = Arc::new(AtomicUsize::new(0));
     let ended = Arc::new(AtomicBool::new(false));
     let mut looked = std::time::Instant::now();
-    // A consent resident admits what other writers append as it lands (frame 236), so a member's
+    // A consent resident admits what other writers append as it lands (an empty intent, 220), so a member's
     // next command finds nothing to admit; the first catch-up is the provider's start admission.
     // However this loop ends (idle, superseded, its socket or world gone), the catch-up thread
     // ends with it and lets go of the provider.
@@ -1105,6 +1111,8 @@ mod tests {
             "  if [ \"$op\" = 229 ]; then\n",
             "    m=$(( $(wc -c < '{body}') + 1 ))\n",
             "    printf \"$(printf '\\\\%03o\\\\000\\\\000\\\\000\\\\%03o' \"$m\" 229)\"; cat '{body}'\n",
+            "  elif [ \"$op\" = 220 ] && [ \"$n\" = 1 ]; then\n",
+            "    printf '\\001\\000\\000\\000\\377'\n",
             "  else\n",
             "    printf \"$(printf '\\\\001\\\\000\\\\000\\\\000\\\\%03o' \"$op\")\"\n",
             "  fi\n",
@@ -1337,19 +1345,23 @@ mod tests {
             let error = round_trip(&mut second, reserved, b"x").unwrap_err().to_string();
             assert!(error.contains("reserved to the resident consent provider"), "{error}");
         }
-        // The resident's own catch-ups (236, then its anchor 229) interleave whole between frames;
+        // The resident's own catch-ups (an empty intent 220, its anchor 229, then 229 again to
+        // retain it) interleave whole between frames;
         // its first is the start admission, before any member frame.
         let ops = opcodes(&dir);
-        assert_eq!(ops.first(), Some(&crate::host_operations::CONSENT_FULL_READY), "{ops:?}");
+        // a catch-up's intent is the only 220 the provider sees not right after a 233 or a 229.
         let mut members = Vec::new();
-        let mut rest = ops.iter().copied();
+        let mut rest = ops.iter().copied().peekable();
+        let mut catch_ups = 0;
         while let Some(op) = rest.next() {
-            if op == crate::host_operations::CONSENT_FULL_READY {
-                assert_eq!(rest.next(), Some(229), "{ops:?}");
+            if op == crate::host_operations::CONSENT_INTENT && members.last() != Some(&233) {
+                assert_eq!((rest.next(), rest.next()), (Some(229), Some(229)), "{ops:?}");
+                catch_ups += 1;
             } else {
                 members.push(op);
             }
         }
+        assert!(catch_ups >= 1, "the start admission is a catch-up: {ops:?}");
         assert_eq!(members, vec![233, 220, 229, 221, 229, 233, 222, 229]);
         let anchored = anchor_binding(b"{}").unwrap();
         assert_eq!(read_anchor(&anchor_path(&anchors, &anchored), &anchored).unwrap().as_deref(), Some(&b"ANCHOR-R"[..]));
