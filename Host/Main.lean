@@ -1311,6 +1311,30 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).isSome then
         n := n + authority.snapshot.cell.logical.support.card
     pure n
+  -- Issuer evidence (ledger row 27): the support search `issuerCheck` was, against the issued
+  -- index it now reads (`issuerCheck_eq_indexed`), for the LAST stored capability in key order.
+  let snapshot := authority.snapshot
+  let triples := CredentialAuthorityDomain.issuedOf snapshot.domain snapshot.cell
+  IO.println s!"authority stored capabilities {triples.length} of {snapshot.cell.logical.keys.length} addresses"
+  if let some (issuer, epoch, commitment) := triples.getLast? then
+    let searched (snapshot : CredentialAuthorityPolicyRegistry.Snapshot) : Bool :=
+      decide (Minidregg.Theory.CredentialAuthorityState.issuerEpochAt snapshot.cell issuer = epoch) &&
+        decide (∃ address ∈ snapshot.logical.support,
+          CredentialAuthorityPolicyRegistry.issuedAt snapshot issuer epoch commitment address = true)
+    discard <| timed "issuer evidence, support search x10" do
+      let mut n := 0
+      for _ in [0:10] do
+        if searched snapshot then n := n + 1
+      pure n
+    let fresh := CredentialAuthorityDomain.Snapshot.ofCell snapshot.domain snapshot.revision snapshot.spent
+      snapshot.cell
+    discard <| timed "issuer evidence, issued index (first, forces it)" do
+      pure (CredentialAuthorityPolicyRegistry.issuerCheck fresh issuer epoch commitment)
+    discard <| timed "issuer evidence, issued index x1000" do
+      let mut n := 0
+      for _ in [0:1000] do
+        if CredentialAuthorityPolicyRegistry.issuerCheck fresh issuer epoch commitment then n := n + 1
+      pure n
   -- The open's and the checkpoint turn's parts, each timed alone (`IO.lazyPure`
   -- defers each pure computation to inside its timer).
   let timedPure {α : Type} (label : String) (value : Unit → α) : IO α :=
