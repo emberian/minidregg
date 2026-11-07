@@ -280,7 +280,8 @@ def loadDeploymentFromAt {deployment : CanonicalCellRegistry.Deployment} {before
   if same : bytesBEq (physical.canonicalBytes (cellIdOf deployment))
       (before.canonicalBytes (cellIdOf deployment)) then
     some ⟨⟨deployment.domain, height, spentOf deployment.domain physical, held.snapshot.cell,
-        held.snapshot.authState, held.snapshot.authStateExact⟩, held.valid, rfl, heightExact, rfl,
+        held.snapshot.authState, held.snapshot.authStateExact, held.snapshot.issued,
+        held.domainExact ▸ held.snapshot.issuedExact⟩, held.valid, rfl, heightExact, rfl,
       (bytesBEq_iff.mp same).trans held.observed⟩
   else
     match decoded : decodeCell (physical.canonicalBytes (cellIdOf deployment)) with
