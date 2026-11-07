@@ -477,11 +477,39 @@ struct HostProof<'a> {
     workspace: &'a Value,
     settings: &'a Settings,
     scratch: PathBuf,
-    // One immutable executable/config pair for the entire multi-hop proof.
-    invocation: crate::transport::PinnedLocalInvocation,
+    // One immutable executable/config pair for the entire multi-hop proof, sealed at its first
+    // use: a read whose point is already known (`POINTS`) and needs no hop spawns nothing.
+    invocation: std::cell::OnceCell<crate::transport::PinnedLocalInvocation>,
     config_bytes: Vec<u8>,
 }
+
+/// Points this process's verifier derived, by everything `continuity-point` reads: the verifier
+/// image pin, the exact config bytes, and the challenge's `domain`, `semantics`, `height` and
+/// `worldRoot` (`Compiler/ReceiptContinuityIO.challengePointJson` reads those four fields and the
+/// config's domain, semantics and genesis height, nothing else; the nonce and the rest of the
+/// challenge do not enter). A member's warm resident shell reads the same head again and again
+/// while nothing is written: those reads get the point the verifier already derived instead of
+/// a 185 MB process start per read. A changed field, image or config byte is a miss and runs the
+/// verifier. A refused point is never kept.
+static POINTS: std::sync::Mutex<Vec<(Value, Point)>> = std::sync::Mutex::new(Vec::new());
+const POINTS_KEPT: usize = 16;
+
 impl HostProof<'_> {
+    fn invocation(&self) -> Result<&crate::transport::PinnedLocalInvocation> {
+        if let Some(invocation) = self.invocation.get() {
+            return Ok(invocation);
+        }
+        let config = workspace::member_path(self.workspace, "config")?;
+        let invocation = pinned_verifier(&self.settings.verifier, &self.settings.verifier_sha256,
+            &config, &self.config_bytes)?;
+        Ok(self.invocation.get_or_init(|| invocation))
+    }
+    fn point_key(&self, challenge: &Value) -> Value {
+        json!({"verifier":self.settings.verifier_sha256,
+            "config":crate::hex(&<[u8; 32]>::from(<sha2::Sha256 as sha2::Digest>::digest(&self.config_bytes))),
+            "domain":challenge.get("domain"),"semantics":challenge.get("semantics"),
+            "height":challenge.get("height"),"worldRoot":challenge.get("worldRoot")})
+    }
     fn check_launch(&self, config: &Path) -> Result<()> {
         if crate::agent_reserve::bounded(config, MAX_JSON as usize)? != self.config_bytes {
             return Err(fail("continuity verifier config changed during proof"));
@@ -489,6 +517,21 @@ impl HostProof<'_> {
         self.settings.check(config)
     }
     fn challenge_point(&self, challenge: &Value) -> Result<Point> {
+        let key = self.point_key(challenge);
+        if let Some((_, point)) = POINTS.lock().map_err(|_| fail("continuity point cache poisoned"))?
+            .iter().find(|(seen, _)| *seen == key)
+        {
+            return Ok(point.clone());
+        }
+        let point = self.derive_point(challenge)?;
+        let mut kept = POINTS.lock().map_err(|_| fail("continuity point cache poisoned"))?;
+        if kept.len() >= POINTS_KEPT {
+            kept.remove(0);
+        }
+        kept.push((key, point.clone()));
+        Ok(point)
+    }
+    fn derive_point(&self, challenge: &Value) -> Result<Point> {
         let config = workspace::member_path(self.workspace, "config")?;
         let hop = self.scratch.join(workspace::random_nonce()?);
         workspace::make_private_dir(&hop)?;
@@ -504,7 +547,7 @@ impl HostProof<'_> {
         // Challenge heights include genesisHeight. Lean converts them to receipt
         // accepted-count coordinates and binds domain/semantics to this config.
         let started = std::time::Instant::now();
-        let result = self.invocation.output(&[std::ffi::OsStr::new("continuity-point"),
+        let result = self.invocation()?.output(&[std::ffi::OsStr::new("continuity-point"),
             input.as_os_str(), output.as_os_str()]).map_err(fail)?;
         crate::trace::record("spawn", "verifier continuity-point", 0, result.stdout.len(), started);
         if !result.status.success() {
@@ -519,12 +562,11 @@ impl HostProof<'_> {
         workspace::make_private_dir(&scratch)?;
         let config = workspace::member_path(workspace, "config")?;
         let config_bytes = crate::agent_reserve::bounded(&config, MAX_JSON as usize)?;
-        let invocation = pinned_verifier(&settings.verifier, &settings.verifier_sha256, &config, &config_bytes)?;
         Ok(HostProof {
             workspace,
             settings,
             scratch,
-            invocation,
+            invocation: std::cell::OnceCell::new(),
             config_bytes,
         })
     }
@@ -573,7 +615,7 @@ impl HostProof<'_> {
         create_file(&result_path, b"")?;
         self.check_launch(&config)?;
         let started = std::time::Instant::now();
-        let result = self.invocation.output(&[std::ffi::OsStr::new("continuity-verify"),
+        let result = self.invocation()?.output(&[std::ffi::OsStr::new("continuity-verify"),
             request_path.as_os_str(), response_path.as_os_str(), result_path.as_os_str()])
             .map_err(fail)?;
         crate::trace::record("spawn", "verifier continuity-verify", 0, result.stdout.len(), started);
