@@ -68,7 +68,18 @@ def _run(user, group, env, argv, cwd="/tmp"):
     return p.returncode, p.stdout, p.stderr
 
 
-def member(name, line, check=True):
+def certified(rc, out, err):
+    """A turn the Host refused `tail-bound` (the head is more than the bound past the last certified height): run
+    the box's certifier once (mini-certify, which its timer runs every minute) and say so; the caller retries."""
+    if rc == 0 or "tail-bound" not in (out + err):
+        return False
+    p = subprocess.run(["setpriv", f"--reuid={STORE_USER}", f"--regid={STORE_USER}", "--init-groups", "--", f"{LIB}/mini-certify"],
+                       cwd=f"{VAR}/store", capture_output=True, text=True)
+    log(f"certify: tail-bound refusal, mini-certify exit {p.returncode}: {tail(p.stdout + p.stderr, 1)}")
+    return p.returncode == 0
+
+
+def member(name, line, check=True, _retry=True):
     """One shell line as member NAME, as their ssh login runs it (seed.sh `as`)."""
     if len(line) > 4000 or any(ord(c) < 32 for c in line):
         raise Refused(f"{name}: line too long or has a control character")
@@ -76,6 +87,8 @@ def member(name, line, check=True):
     rc, out, err = _run(user, MEMBER_GROUP, {"SSH_ORIGINAL_COMMAND": line},
                         [f"{LIB}/mini-shell-ssh", f"{C}/bin/mini", f"{C}/bin/minidregg-host", CONFIG, SOCKET,
                          f"{S}/{name}/workspace", f"{S}/{name}"])
+    if _retry and certified(rc, out, err):
+        return member(name, line, check, _retry=False)
     if check and rc != 0:
         raise Refused(f"{name}: `{line[:120]}` exit {rc}: {tail(err or out)}")
     return rc, out, err
@@ -91,9 +104,11 @@ def sponsor(line, check=True):
     return rc, out, err
 
 
-def client(user, argv, check=True):
+def client(user, argv, check=True, _retry=True):
     rc, out, err = _run(user, user if user == STORE_USER else MEMBER_GROUP, {"MINI_CONSENT_ANCHOR_DIR": f"{NODE}/consent-anchors"},
                         [f"{C}/bin/mini"] + argv, cwd=f"{VAR}/store")
+    if _retry and certified(rc, out, err):
+        return client(user, argv, check, _retry=False)
     if check and rc != 0:
         raise Refused(f"mini {' '.join(argv[:3])}: exit {rc}: {tail(err or out)}")
     return rc, out, err
@@ -154,7 +169,7 @@ def capture_member(name):
         m["balanceError"] = tail(err or out)
     _, out, _ = member(name, "refs")
     refs = (first(out) or {}).get("references", [])
-    m["refs"] = {r["name"]: {"kind": r.get("kind"), "created": bool((r.get("provenance") or {}).get("birthReceipt")),
+    m["refs"] = {r["name"]: {"kind": r.get("kind"), "target": r.get("target"), "created": bool((r.get("provenance") or {}).get("birthReceipt")),
                              "granted": bool((r.get("provenance") or {}).get("receipt"))} for r in refs}
     _, out, _ = member(name, "history")
     m["attempts"] = {}
@@ -216,7 +231,9 @@ def capture_member(name):
                                            for l in d["lines"]]}
             continue
         # a declared cell this member made by `create NAME` (the attempt create-NAME), not a room's or story's own cell
-        if info["created"] and f"create-{r}" in m["attempts"] and r not in m["rooms"] and r not in m["stories"]:
+        # (not a name the shell derives: a story's or app's cell `x/y`, an app's `app-*`, a room's `ROOM-*` stream)
+        derived = "/" in r or r.startswith("app-") or any(r.startswith(f"{room}-") for room in m["rooms"])
+        if info["created"] and f"create-{r}" in m["attempts"] and not derived and r not in m["rooms"] and r not in m["stories"]:
             rc, out2, err2 = member(name, f"read {r}", check=False)
             v = first(out2) if rc == 0 else None
             if v and isinstance(v.get("cell"), dict):
@@ -299,11 +316,49 @@ def names_of(world):
     return t
 
 
+SEED = set(os.environ.get("MIGRATE_SEED_ACCOUNTS", "house sage public").split())
+
+
+def rooms_of(world, names):
+    """Each room once, whoever views it: founder, members and each author's entries in order (by name)."""
+    out = {}
+    for viewer, m in sorted(world.get("members", {}).items()):
+        for r, v in m.get("rooms", {}).items():
+            if "error" in v:
+                continue
+            founder = names.get(str(v.get("founder")), f"subject:{v.get('founder')}")
+            # a room a member founded is one room whoever views it; one the sponsor or an agent founded is keyed by
+            # its viewer too (each member's `feedback` is the sponsor's feedback-NAME under one local name)
+            key = (r, founder) if not founder.startswith(("@", "subject:")) else (r, f"{founder} (as {viewer} holds it)")
+            if key in out and len(out[key]["entries"]) >= len(v["entries"]):
+                continue
+            out[key] = {"members": sorted(names.get(str(x), f"subject:{x}") for x in v["members"]),
+                        "topic": v.get("topic"), "pin": v.get("pin"), "entries": v["entries"]}
+    for k, v in out.items():
+        by = {}
+        for e in sorted(v["entries"], key=lambda e: e.get("height") or 0):
+            by.setdefault(names.get(str(e["author"]), f"subject:{e['author']}"), []).append((e["kind"], e["text"], e.get("status")))
+        v["by"] = by
+    return out
+
+
+def documents_of(world, names):
+    """Each document once, from its creator's view when a member created it (else its first viewer)."""
+    out = {}
+    for viewer, m in sorted(world.get("members", {}).items()):
+        for d, v in m.get("documents", {}).items():
+            mine = (m.get("refs", {}).get(d) or {}).get("created")
+            if d in out and not mine:
+                continue
+            out[d] = {"owner": viewer if mine else out.get(d, {}).get("owner"),
+                      "lines": [(l["text"], names.get(str(l["author"]), f"subject:{l['author']}"), l["struck"], l.get("marks")) for l in v["lines"]]}
+    return out
+
+
 def diff(a, b):
-    """Every semantic difference between captures A (before) and B (after), heights/ids/hashes aside.
-    Each item: (kind, member, key, before, after)."""
+    """Every semantic difference between captures A (before) and B (after), heights, hashes and ids aside.
+    Each item: (kind, owner, key, before, after); the owner is the member whose authorship the item is."""
     na, nb = names_of(a), names_of(b)
-    who = lambda t, s: t.get(str(s), f"subject:{s}") if s is not None else None
     out = []
     for n, ma in sorted(a["members"].items()):
         mb = b["members"].get(n)
@@ -319,72 +374,75 @@ def diff(a, b):
             out.append(("balance", n, "balance", ma.get("balance"), mb.get("balance")))
         if ma.get("workspace") != mb.get("workspace"):
             out.append(("workspace", n, "initialized", ma.get("workspace"), mb.get("workspace")))
-        if not ma.get("workspace"):
-            continue
         ra, rb = ma.get("refs", {}), mb.get("refs", {})
         for r in sorted(set(ra) - set(rb)):
             out.append(("ref", n, r, ra[r]["kind"], None))
         for r in sorted(set(rb) - set(ra)):
             out.append(("ref", n, r, None, rb[r]["kind"]))
-        for r, ra_ in sorted(ma.get("rooms", {}).items()):
-            rb_ = mb.get("rooms", {}).get(r)
-            if rb_ is None:
-                out.append(("room", n, r, "held", None)); continue
-            if "error" in ra_ or "error" in rb_:
-                if ra_.get("error") != rb_.get("error"):
-                    out.append(("room", n, r + " (read)", ra_.get("error"), rb_.get("error")))
-                continue
-            if who(na, ra_["founder"]) != who(nb, rb_["founder"]):
-                out.append(("room", n, r + " founder", who(na, ra_["founder"]), who(nb, rb_["founder"])))
-            sa = sorted(who(na, s) for s in ra_["members"]); sb = sorted(who(nb, s) for s in rb_["members"])
-            if sa != sb:
-                out.append(("room", n, r + " members", sa, sb))
-            for k in ("topic", "pin"):
-                if ra_.get(k) != rb_.get(k):
-                    out.append(("room", n, f"{r} {k}", ra_.get(k), rb_.get(k)))
-            ea = [(who(na, e["author"]), e["kind"], e["text"], e.get("status")) for e in ra_["entries"]]
-            eb = [(who(nb, e["author"]), e["kind"], e["text"], e.get("status")) for e in rb_["entries"]]
-            if ea != eb:
-                out.append(("messages", n, r, ea, eb))
-        for r in sorted(set(mb.get("rooms", {})) - set(ma.get("rooms", {}))):
-            out.append(("room", n, r, None, "held"))
-        for s, sa_ in sorted(ma.get("stories", {}).items()):
-            sb_ = mb.get("stories", {}).get(s)
-            if sb_ is None:
-                out.append(("story", n, s, sa_.get("role"), None)); continue
+        for st, sa in sorted(ma.get("stories", {}).items()):
+            sb = mb.get("stories", {}).get(st)
+            if sb is None:
+                out.append(("story", n, st, sa.get("role"), None)); continue
             for k in ("role", "look"):
-                if sa_.get(k) != sb_.get(k):
-                    out.append(("story", n, f"{s} {k}", sa_.get(k), sb_.get(k)))
-        for d, da in sorted(ma.get("documents", {}).items()):
-            db = mb.get("documents", {}).get(d)
-            la = [(l["text"], who(na, l["author"]), l["struck"], l.get("marks")) for l in da["lines"]]
-            lb = None if db is None else [(l["text"], who(nb, l["author"]), l["struck"], l.get("marks")) for l in db["lines"]]
-            if la != lb:
-                out.append(("document", n, d, la, lb))
+                if sa.get(k) != sb.get(k):
+                    out.append(("story", n, f"{st} {k}", sa.get(k), sb.get(k)))
         for c, ca in sorted(ma.get("cells", {}).items()):
             cb = mb.get("cells", {}).get(c)
             if cb is None or ca["entries"] != cb["entries"]:
                 out.append(("cell", n, c, ca["entries"], None if cb is None else cb["entries"]))
     for n in sorted(set(b["members"]) - set(a["members"])):
         out.append(("member", n, "present", False, True))
+    roa, rob = rooms_of(a, na), rooms_of(b, nb)
+    for key, va in sorted(roa.items()):
+        r, founder = key
+        vb = rob.get(key)
+        if vb is None:
+            out.append(("room", founder, r, "exists", None)); continue
+        if va["members"] != vb["members"]:
+            out.append(("room", founder, f"{r} members", va["members"], vb["members"]))
+        for k in ("topic", "pin"):
+            if va.get(k) != vb.get(k):
+                out.append(("room", founder, f"{r} {k}", va.get(k), vb.get(k)))
+        for author in sorted(set(va["by"]) | set(vb["by"])):
+            ea, eb = va["by"].get(author, []), vb["by"].get(author, [])
+            if ea != eb:
+                out.append(("messages", author, f"{r} (by {author})", ea, eb))
+    for key in sorted(set(rob) - set(roa)):
+        out.append(("room", key[1], key[0], None, "exists"))
+    da, db = documents_of(a, na), documents_of(b, nb)
+    for d, va in sorted(da.items()):
+        vb = db.get(d)
+        if vb is None or va["lines"] != vb["lines"]:
+            out.append(("document", va["owner"] or "?", d, va["lines"], None if vb is None else vb["lines"]))
     return out
 
 
 def render(items):
     lines = []
-    for kind, n, key, x, y in items:
-        if kind in ("messages", "document") and isinstance(x, list) and isinstance(y, list):
-            import difflib
-            lines.append(f"{kind}\t{n}\t{key}:")
-            for d in difflib.unified_diff([json.dumps(e, ensure_ascii=False) for e in x], [json.dumps(e, ensure_ascii=False) for e in y],
-                                          "before", "after", lineterm="", n=1):
-                lines.append("    " + d)
-        else:
-            lines.append(f"{kind}\t{n}\t{key}\tbefore={json.dumps(x, ensure_ascii=False)[:300]}\tafter={json.dumps(y, ensure_ascii=False)[:300]}")
+    bad = failing(items)
+    added = [i for i in items if i not in bad and i[3] is None and i[1] not in SEED]
+    for section, part in (("carried: the members' own, lost or changed (must not differ)", bad),
+                          ("added by the new world (nothing of the old is missing; informational)", added),
+                          (f"seed accounts' content ({' '.join(sorted(SEED))}: rebuilt by the walk's seed step, informational)",
+                           [i for i in items if i not in bad and i not in added and i[0] != "id"]),
+                          ("ids (allowed)", [i for i in items if i[0] == "id"])):
+        lines.append(f"## {section}: {len(part)} difference(s)")
+        for kind, n, key, x, y in part:
+            if kind in ("messages", "document") and isinstance(x, list) and isinstance(y, list):
+                import difflib
+                lines.append(f"{kind}\t{n}\t{key}:")
+                for d in difflib.unified_diff([json.dumps(e, ensure_ascii=False) for e in x], [json.dumps(e, ensure_ascii=False) for e in y],
+                                              "before", "after", lineterm="", n=1):
+                    lines.append("    " + d)
+            else:
+                lines.append(f"{kind}\t{n}\t{key}\tbefore={json.dumps(x, ensure_ascii=False)[:300]}\tafter={json.dumps(y, ensure_ascii=False)[:300]}")
     return "\n".join(lines)
 
 
-ALLOWED = {"id"}   # differences the migration is allowed to leave: ids (a subject the kernel had to renumber)
+def failing(items):
+    """The differences the migration must not leave: anything a non-seed member owns that the new world lost or
+    changed (an addition, `before` None, is not a loss), beyond ids; and for every member, the key and the balance."""
+    return [i for i in items if i[0] != "id" and (i[0] in ("key", "balance", "member") or (i[1] not in SEED and i[3] is not None))]
 
 
 # ── replay ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -420,8 +478,12 @@ def replay(d):
     if init_members(before, journal, problems):
         now = capture(f"{d}/pass.json"); nb = names_of(now)
 
-    # 2. rooms: memberships the old world had and the new lacks (the founder invites, the member joins)
+    # 2. rooms: memberships the old world had and the new lacks (the founder invites, the member joins). The seed
+    # accounts' own content (MIGRATE_SEED_ACCOUNTS) is the walk's seed step's, rebuilt from the new candidate's
+    # deploy/demo-seed: it is compared (verify's second section), never re-authored here.
     for n, ma in before["members"].items():
+        if n in SEED:
+            continue
         mb = now["members"].get(n, {})
         for r, ra in ma.get("rooms", {}).items():
             if r in mb.get("rooms", {}) or "error" in ra:
@@ -434,6 +496,36 @@ def replay(d):
                 problems.append(f"{n}: room {r}: its founder {founder} holds no room {r} in the new world")
                 continue
             actions.append((first_height(ra), f"chat-join:{n}:{r}", (founder, n, r), None))
+    # 1b. references a member held from its birth context (no provenance: neither made nor granted by a turn) that
+    # the new world's birth context grants again but that the new workspace names otherwise or not at all (the pay
+    # route's onboarding names the factory grant `factory`; the shell's init does not): the same grant, re-imported
+    # under the old name (`import NAME KIND TARGET CAPABILITY CAPABILITY`, local)
+    for n, ma in before["members"].items():
+        mb = now["members"].get(n, {})
+        if n in SEED or not mb.get("workspace"):
+            continue
+        try:
+            grants = json.load(open(f"{S}/{n}/workspace/birth-context.json")).get("grants", [])
+        except (OSError, ValueError):
+            grants = []
+        for r, info in ma.get("refs", {}).items():
+            if r in mb.get("refs", {}) or info.get("created") or info.get("granted") or info.get("kind") != "object":
+                continue
+            g = next((g for g in grants if g.get("kind") == "object" and str(g.get("target")) == str(info.get("target"))), None)
+            if g:
+                actions.append((0, f"import:{n}:{r}", n, [f"import {r} object {g['target']} {g['capability']} {g['capability']}"]))
+    # 2b. stories: a player the old table had and the new lacks (the story's author invites, the player joins)
+    for n, ma in before["members"].items():
+        if n in SEED:
+            continue
+        mb = now["members"].get(n, {})
+        for st, sa in ma.get("stories", {}).items():
+            if st in mb.get("stories", {}) or sa.get("role") in (None, "author"):
+                continue
+            author = next((x for x, mx in now["members"].items() if (mx.get("stories", {}).get(st) or {}).get("role") == "author"), None)
+            if not author:
+                problems.append(f"{n}: story {st}: no member is its author in the new world"); continue
+            actions.append((0, f"story-join:{n}:{st}", ("story", author, n, st), None))
     run_actions(actions, journal); actions = []
     now = capture(f"{d}/pass.json"); nb = names_of(now)
 
@@ -457,6 +549,8 @@ def replay(d):
     for (r, an, kind, text), hs in want.items():
         missing = len(hs) - len(have.get((r, an, kind, text), ()))
         for h in hs[len(hs) - missing:] if missing > 0 else []:
+            if an in SEED:
+                continue
             if not an or an.startswith("@"):
                 problems.append(f"room {r}: {kind} by {an} at old height {h} ({text[:60]!r}) cannot be re-authored: no hosted key on the box")
                 continue
@@ -469,7 +563,7 @@ def replay(d):
     # 4. cells a member created (a declared cell's entries), and 5. documents a member owns
     for n, ma in before["members"].items():
         mb = now["members"].get(n, {})
-        if not mb.get("workspace"):
+        if not mb.get("workspace") or n in SEED:
             continue
         for c, ca in ma.get("cells", {}).items():
             cb = mb.get("cells", {}).get(c)
@@ -483,7 +577,7 @@ def replay(d):
                 old = (cb or {}).get("entries", {}).get(f_)
                 if old == v:
                     continue
-                pid = f"mig-{c}-{f_}"
+                pid = re.sub(r"[^A-Za-z0-9-]", "-", f"mig-{c}-{f_}")[:64]
                 lines += [f"invoke {pid} {c} create {f_} {v}" if old is None else f"invoke {pid} {c} write {f_} {v} {old}", f"submit {pid}"]
             actions.append((h, f"cell:{n}:{c}", n, lines))
         for doc, da in ma.get("documents", {}).items():
@@ -503,7 +597,7 @@ def replay(d):
                 author = na.get(str(l["author"]), n)
                 if author != n:
                     problems.append(f"{n}: document {doc} line {i} is {author}'s: appended as {n}")
-                steps.append((f"mig-{doc}-{i}", l["text"]))
+                steps.append((re.sub(r"[^A-Za-z0-9-]", "-", f"mig-{doc}-{i}")[:64], l["text"]))
             actions.append((0, f"doc:{n}:{doc}:{len(lb)}", n, ("doc", doc, lines, steps)))
     run_actions(sorted(actions, key=lambda a: a[0]), journal); actions = []
 
@@ -551,11 +645,12 @@ def run_actions(actions, journal):
             continue
         try:
             if isinstance(who, tuple):
-                founder, n, r = who
-                _, out, _ = member(founder, f"chat invite {r} {subj_of(n)} {n}")
-                join = next((l for l in out.splitlines() if l.startswith(f"chat join {r} ")), None)
+                verb, founder, n, r = who if len(who) == 4 else ("chat",) + who
+                invite = f"chat invite {r} {subj_of(n)} {n}" if verb == "chat" else f"story invite {r} {subj_of(n)}"
+                _, out, _ = member(founder, invite)
+                join = next((l for l in out.splitlines() if l.startswith(f"{verb} join {r} ")), None)
                 if not join:
-                    raise Refused(f"{founder}: chat invite {r} printed no `chat join {r}` line")
+                    raise Refused(f"{founder}: `{invite}` printed no `{verb} join {r}` line")
                 member(n, join)
             elif isinstance(lines, tuple):
                 _, doc, pre, steps = lines
@@ -594,21 +689,30 @@ def stage(name, fname, text):
         raise Refused(f"{name}: could not stage {fname}")
 
 
+# One sponsor transfer moves at most this much: the sponsor's spend grant bounds a turn's cost (a transfer of
+# 100000 was refused `capability-rejected`, 52336 admitted, rehearsal 2026-11-07).
+SETTLE_CHUNK = int(os.environ.get("MIGRATE_SETTLE_CHUNK", "50000"))
+
+
 def settle(n, mb, delta, journal, problems):
-    """The sponsor's fleet transfer of DELTA to N's account (the sponsor pays the turn's fee)."""
+    """The sponsor's fleet transfers of DELTA to N's own `account` (the sponsor pays each turn's fee)."""
     key = f"settle:{n}:{mb['balance']}+{delta}"
     if key in journal.done:
         return
     try:
         _, out, _ = member(n, "refs")
-        acct = next((r["target"] for r in (first(out) or {}).get("references", []) if r.get("kind") == "account"), None)
+        acct = next((r["target"] for r in (first(out) or {}).get("references", []) if r.get("name") == "account"), None)
         if not acct:
-            raise Refused(f"{n} holds no account reference")
-        client(STORE_USER, ["fleet", "--action", "transfer", "--dir", SPONSOR_WS, "--account", "account", "--to", acct, "--amount", str(delta)])
+            raise Refused(f"{n} holds no `account` reference")
+        left = delta
+        while left > 0:
+            amount = min(left, SETTLE_CHUNK)
+            client(STORE_USER, ["fleet", "--action", "transfer", "--dir", SPONSOR_WS, "--account", "account", "--to", acct, "--amount", str(amount)])
+            left -= amount
         journal.record(key, amount=delta)
         log(f"replay: ok {key}")
     except Refused as e:
-        problems.append(f"{n}: balance short by {delta}: the sponsor's transfer failed: {e}")
+        problems.append(f"{n}: balance short by {left}: the sponsor's transfer failed: {e}")
 
 
 # ── main ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -619,7 +723,7 @@ def main():
     verb, d = sys.argv[1], sys.argv[2]
     if verb == "diff":
         items = diff(json.load(open(sys.argv[2])), json.load(open(sys.argv[3])))
-        print(render(items)); sys.exit(0 if all(i[0] in ALLOWED for i in items) else 1)
+        print(render(items)); sys.exit(0 if not failing(items) else 1)
     os.makedirs(d, mode=0o700, exist_ok=True)
     LOG = f"{d}/migrate.log"
     if verb == "capture":
@@ -647,8 +751,8 @@ def main():
         text = render(items)
         open(f"{d}/verify.txt", "w").write(text + "\n")
         print(text)
-        bad = [i for i in items if i[0] not in ALLOWED]
-        log(f"verify: {len(items)} difference(s), {len(bad)} beyond ids (verify.txt)")
+        bad = failing(items)
+        log(f"verify: {len(items)} difference(s); {len(bad)} the migration must not leave (verify.txt)")
         sys.exit(0 if not bad else 1)
     else:
         print(__doc__, file=sys.stderr); sys.exit(64)
