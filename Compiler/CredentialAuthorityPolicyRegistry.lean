@@ -338,6 +338,8 @@ theorem issuerCheck_eq_indexed (snapshot : Snapshot) (issuer : IssuerId) (epoch 
   funext snapshot issuer epoch commitment
   exact issuerCheck_eq_indexed snapshot issuer epoch commitment
 
+#assert_axioms issuerCheck_eq_indexed
+
 /-- Issuer acceptance names a stored capability of that issuer and epoch. -/
 theorem issuerCheck_sound (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
     (commitment : Digest) (accepted : issuerCheck snapshot issuer epoch commitment = true) :
