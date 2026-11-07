@@ -422,4 +422,31 @@ theorem gf4_lazy_check :
       xsum ((pairs 2).map fun jk => gf4T1 jk.1 jk.2 && xsum (v.map fun ab => ab.1 jk.1 && ab.2 jk.2)) := by
   decide
 
+/-! ### Measured instances (H100, initiative 17 run paid-h100-mma-03, 2026-11-07)
+
+QGMMA (wgmma e4m3 -> f32) holds integers exactly through 2^14 and not from 2^14.5, so `HoldsBelow 14` is the
+measured premise; HGMMA (f16) holds `HoldsBelow 24`.  The block lengths below are the theorems' side
+conditions at those widths, each with the first length past it. -/
+
+/-- QGMMA block lengths at the measured m = 14: GF(2) counts (with the theorem's one-product slack),
+base-16 e4m3 limbs (products <= 225), doubled-E2M1 base-13 limbs (products <= 64). -/
+theorem qgmma_m14_blocks :
+    16382 + 1 < 2 ^ 14 ∧ ¬ (16383 + 1 < 2 ^ 14) ∧
+    72 * 225 < 2 ^ 14 ∧ ¬ (73 * 225 < 2 ^ 14) ∧
+    255 * 64 < 2 ^ 14 ∧ ¬ (256 * 64 < 2 ^ 14) := by decide
+
+/-- HGMMA block lengths at the measured m = 24: GF(2) counts and u8 byte limbs (products <= 65,025). -/
+theorem hgmma_m24_blocks :
+    16777214 + 1 < 2 ^ 24 ∧ 258 * 65025 < 2 ^ 24 ∧ ¬ (259 * 65025 < 2 ^ 24) := by decide
+
+/-- The GF(2) inner product on QGMMA, given the measured premise: up to 16,382 products per block. -/
+theorem qgmma_gf2_dot (rnd : Int → Int) (hr : HoldsBelow 14 rnd) (v : List (Bool × Bool))
+    (hN : v.length ≤ 16382) : (prodTree v).hw rnd % 2 = bit (xorDot v) :=
+  gf2_dot_via_fp 14 rnd hr v (by have : (2:Nat) ^ 14 = 16384 := rfl; omega)
+
+/-- The GF(2) inner product on HGMMA, given the measured premise: up to 16,777,214 products per block. -/
+theorem hgmma_gf2_dot (rnd : Int → Int) (hr : HoldsBelow 24 rnd) (v : List (Bool × Bool))
+    (hN : v.length ≤ 16777214) : (prodTree v).hw rnd % 2 = bit (xorDot v) :=
+  gf2_dot_via_fp 24 rnd hr v (by have : (2:Nat) ^ 24 = 16777216 := rfl; omega)
+
 end MmaAccumulatorExact
