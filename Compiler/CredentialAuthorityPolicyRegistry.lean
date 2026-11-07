@@ -332,7 +332,7 @@ theorem issuerCheck_eq_indexed (snapshot : Snapshot) (issuer : IssuerId) (epoch 
           CredentialAuthorityDomain.issuedOf snapshot.domain snapshot.cell
       · rw [decide_eq_true (key.mpr found), List.contains_iff_mem.mpr found]
       · rw [decide_eq_false (fun exists_ => found (key.mp exists_))]
-        exact (Bool.not_eq_true _).mp (fun contained => found (List.contains_iff_mem.mp contained))
+        exact ((Bool.not_eq_true _).mp (fun contained => found (List.contains_iff_mem.mp contained))).symm
 
 @[csimp] theorem issuerCheck_eq_issuerCheckIndexed : @issuerCheck = @issuerCheckIndexed := by
   funext snapshot issuer epoch commitment
