@@ -43,9 +43,23 @@ event (`dag_round_bad_sub`).
   under `#guard`.
 
 **The error is per node and depth-free.** Shared predecessors are paid once (one round each),
-and nothing depends on the DAG's depth: the backward extractor is straightline from the one
+and there is no longest-path factor: the backward extractor is straightline from the one
 oracle log, so the classical PCD bounded-depth restriction (a rewinding extractor whose
-running time multiplies per level) does not arise. The extraction time is `Σᵢ etᵢ`.
+running time multiplies per level) does not arise in the error. The error still grows with
+`N` and with the query budget `t`. Extraction TIME is not claimed: `extractTime` is
+bookkeeping without cost semantics (Rbr specialization 6), and `accAt` is not memoized, so the
+executable extractor recomputes shared ancestors.
+
+**Scope, stated.** (1) The verifier is the IOR-resolution verifier: it receives every local
+statement and every round message and recomputes all accumulators. A succinct verifier that
+sees only the sinks is the BCS/decider layer above this. (2) Compliance is per node: the source
+relation is `∀ j, LocRel (x j) _`. Consistency between a node's claimed inputs and its
+predecessors' outputs is the application's to encode in `Loc`/`LocRel`; the DAG supplies the
+aggregation topology. (3) Selvage extractors are unbounded, so over a relation whose
+statements an unbounded search can witness, knowledge soundness is soundness with an
+extractor certificate. `linScheme` below is therefore stated with oracle words in the
+statement (WARP's implicit instance), where false statements exist and the bound is real
+batched-accumulation soundness.
 
 **Modelled assumption, stated.** All nodes draw their challenges from ONE random oracle, and
 the extractor reads its log. In a deployed PCD each node's verifier runs inside the next
@@ -438,12 +452,14 @@ theorem dag_pcd_fs_knowledge_sound (hN : 0 < N) (Z : Set (Stmt (dagReduction S G
 
 /-! ## A concrete scheme: the shared-functional γ-fold
 
-Claims are pairs `(σ, f)` read "`⟨φ, f⟩ = σ`" for one public functional `φ`. A node folds
-its input accumulators and its local claim, in Horner order, at the challenge `ρ`; the local
-claim's word is the node's round message. This is WHIR Construction 5.5's same-functional
-batch at exact-word resolution (`C = ⊤`). The node error at fan-in `a` is `a / |F|`: the fold
-of `a + 1` claims passes with some claim false only at a root of the nonzero defect
-polynomial, of degree at most `a` (`card_batch_satisfying_le`, reused). -/
+Claims are pairs `(σ, f)` read "`⟨φ, f⟩ = σ`" for one public functional `φ`, where `f` is the
+claim's oracle word (WARP's implicit instance). A node folds its input accumulators and its
+local claim, in Horner order, at the challenge `ρ`. This is WHIR Construction 5.5's
+same-functional batch at exact-word resolution (`C = ⊤`). Local statements can be FALSE (a
+word with the wrong target), and then no witness exists, so the bound is not vacuous
+(`diamond_bad_statement_false`). The node error at fan-in `a` is `a / |F|`: the fold of `a + 1`
+claims passes with some claim false only at a root of the nonzero defect polynomial, of degree
+at most `a` (`card_batch_satisfying_le`, reused). -/
 
 section LinScheme
 
@@ -505,30 +521,29 @@ theorem defects_violated_iff (φ : ι → F) (cs : List (F × (ι → F))) :
   · rintro ⟨c, hc, h⟩
     exact ⟨_, ⟨c, hc, rfl⟩, fun he => h (sub_eq_zero.mp (by simpa using he))⟩
 
-/-- The shared-functional γ-fold as an `AccScheme`. Accumulators are public claims
-`(σ, f)`; the knowledge sits in the local witnesses, which the node extractor reads off the
-round message. -/
+/-- The shared-functional γ-fold as an `AccScheme`. Local statements and accumulators are
+claims `(σ, f)` with their oracle words; the relation is the claim's truth. -/
 def linScheme (φ : ι → F) : AccScheme where
   Acc := F × (ι → F)
   AccW := Unit
-  Loc := F
-  LocW := ι → F
-  PMsg := ι → F
+  Loc := F × (ι → F)
+  LocW := Unit
+  PMsg := Unit
   Chal := F
   chalInh := ⟨0⟩
-  pmsgInh := ⟨0⟩
-  locWInh := ⟨0⟩
+  pmsgInh := ⟨()⟩
+  locWInh := ⟨()⟩
   accWInh := ⟨()⟩
   AccRel := fun a _ => dotWt φ a.2 = a.1
-  LocRel := fun τ g => dotWt φ g = τ
-  fold := fun ins τ g ρ => (foldT ρ (ins ++ [(τ, g)]), foldW ρ (ins ++ [(τ, g)]))
-  extLoc := fun _ _ g _ _ => g
+  LocRel := fun x _ => dotWt φ x.2 = x.1
+  fold := fun ins x _ ρ => (foldT ρ (ins ++ [x]), foldW ρ (ins ++ [x]))
+  extLoc := fun _ _ _ _ _ => ()
   extIn := fun _ _ _ _ _ _ => ()
   err := fun a => (a : ℚ) / (Fintype.card F : ℚ)
   node_sound := by
-    intro ins τ g
+    intro ins x _
     classical
-    set cs := ins ++ [(τ, g)] with hcs
+    set cs := ins ++ [x] with hcs
     by_cases hv : ∃ c ∈ cs, dotWt φ c.2 ≠ c.1
     · have hcard := card_batch_satisfying_le (f := fun _ : Unit => (1 : F))
         ((defects_violated_iff φ cs).mpr hv)
@@ -553,19 +568,20 @@ def linScheme (φ : ι → F) : AccScheme where
       · push_cast; exact div_nonneg (Nat.cast_nonneg _) (Nat.cast_nonneg _)
       · rintro ρ ⟨_, -, hfail⟩
         apply hfail
-        refine ⟨hv (τ, g) (by simp [hcs]), ?_⟩
+        refine ⟨hv x (by simp [hcs]), ?_⟩
         intro k hk
         exact hv ins[k] (by simp [hcs, List.getElem_mem])
 
 omit [DecidableEq ι] in
-/-- The fan-in-`a` node error of `linScheme` is `a / |F|`, by definition. -/
+/-- The fan-in-`a` node error of `linScheme` is `a / |F|`. -/
 theorem linScheme_err (φ : ι → F) (a : ℕ) :
     ((linScheme φ).err a : ℝ) = (a : ℝ) / (Fintype.card F : ℝ) := by
   simp [linScheme]
 
 omit [DecidableEq ι] in
-/-- **DAG PCD for the shared-functional fold.** Every DAG whose fan-ins are at most `amax`
-has straightline SR knowledge error `(t + N) · amax / |F|`. -/
+/-- **DAG accumulation soundness for the shared-functional fold.** Every DAG whose fan-ins
+are at most `amax`: a `t`-query SR prover gets every sink claim true while some node's local
+claim is false with probability at most `(t + N) · amax / |F|`. -/
 theorem lin_dag_pcd_knowledge_sound (φ : ι → F) (G : Dag N) (hN : 0 < N) (amax : ℕ)
     (hfan : ∀ i, (G.pred i).length ≤ amax)
     (Z : Set (Stmt (dagReduction (linScheme φ) G hN))) :
@@ -582,7 +598,7 @@ end LinScheme
 /-! ## Executable consumer: a diamond with a shared node, over `ZMod 7`
 
 Node 0 is a leaf feeding nodes 1 and 2 (shared); node 3 folds 1 and 2 and is the only
-sink. Local claims are `⟨φ, g⟩ = τ` with `φ = (1, 2)`. -/
+sink. Local claims are `⟨φ, y⟩ = τ` with `φ = (1, 2)`. -/
 
 section Diamond
 
@@ -597,28 +613,23 @@ def diamond : Dag 4 where
 theorem diamond_sinks (j : Fin 4) : IsSink diamond j ↔ j = 3 := by
   unfold IsSink; revert j; decide
 
-/-- Node 0 is shared: it is folded by two nodes, so it is live after round 1 and after
-round 2, and dead after round 3. -/
+/-- Node 0 is shared: folded by two nodes, it is live after round 2 and dead after round 3. -/
 theorem diamond_shared_live : Live diamond 2 0 ∧ ¬ Live diamond 3 0 := by
   unfold Live IsSink; decide
 
 /-- The public functional. -/
 def φ7 : Fin 2 → ZMod 7 := ![1, 2]
 
-/-- Honest local words and targets. -/
-def gs : Fin 4 → Fin 2 → ZMod 7 := ![![1, 1], ![2, 0], ![0, 3], ![4, 5]]
-def τs : Fin 4 → ZMod 7 := fun i => dotWt φ7 (gs i)
+/-- Oracle words, and the true local statements over them. -/
+def ys : Fin 4 → Fin 2 → ZMod 7 := ![![1, 1], ![2, 0], ![0, 3], ![4, 5]]
+def good : Fin 4 → ZMod 7 × (Fin 2 → ZMod 7) := fun i => (dotWt φ7 (ys i), ys i)
 
-/-- A cheating prover: node 1's local word misses its claim. -/
-def gsBad : Fin 4 → Fin 2 → ZMod 7 := Function.update gs 1 ![3, 0]
+/-- A false statement: node 1's word is replaced, its target kept. -/
+def bad : Fin 4 → ZMod 7 × (Fin 2 → ZMod 7) := Function.update good 1 (dotWt φ7 (ys 1), ![3, 0])
 
-/-- The transcript of the prover with words `g` under challenges `ρs`. -/
-def runT (g : Fin 4 → Fin 2 → ZMod 7) (ρs : Fin 4 → ZMod 7) : List ((Fin 2 → ZMod 7) × ZMod 7) :=
-  List.ofFn fun i => (g i, ρs i)
-
-/-- The verifier's verdict on the sink: recompute the accumulators, check the sink claim. -/
-def sinkAccepts (g : Fin 4 → Fin 2 → ZMod 7) (ρs : Fin 4 → ZMod 7) : Bool :=
-  let acc := accAt (linScheme φ7) diamond τs (runT g ρs) 3
+/-- The verifier's verdict on the sink under challenges `ρs`. -/
+def sinkAccepts (x : Fin 4 → ZMod 7 × (Fin 2 → ZMod 7)) (ρs : Fin 4 → ZMod 7) : Bool :=
+  let acc := accAt (linScheme φ7) diamond x (List.ofFn fun i => ((), ρs i)) 3
   decide (dotWt φ7 acc.2 = acc.1)
 
 /-- All `7⁴` challenge vectors. -/
@@ -627,30 +638,22 @@ def allChal : List (Fin 4 → ZMod 7) :=
     (List.finRange 7).flatMap fun c => (List.finRange 7).map fun d =>
       ![(a : ZMod 7), (b : ZMod 7), (c : ZMod 7), (d : ZMod 7)]
 
-/-- The backward extraction (Construction B.5 over `dagExtract`): from the full transcript
-down to the empty one. -/
-def backward (x : Fin 4 → ZMod 7) (rs : List ((Fin 2 → ZMod 7) × ZMod 7)) :
-    ℕ → ((Fin 4 → Fin 2 → ZMod 7) × (Fin 4 → Unit)) →
-      ((Fin 4 → Fin 2 → ZMod 7) × (Fin 4 → Unit))
-  | 0, w => w
-  | m + 1, w => backward x rs m (dagExtract (linScheme φ7) diamond x (rs.take (m + 1)) w)
-
--- Completeness: the honest prover is accepted at every one of the 2401 challenge vectors.
+-- Completeness: the true statement is accepted at every one of the 2401 challenge vectors.
 #guard allChal.length = 2401
-#guard allChal.all (sinkAccepts gs)
--- The cheating prover is accepted at exactly 343 = 2401 / 7 vectors: those with ρ₁ = 0,
--- where node 1's defect is multiplied away. That is node 1's fan-in-1 error 1/7, attained.
-#guard (allChal.filter (sinkAccepts gsBad)).length = 343
-#guard (allChal.filter (sinkAccepts gsBad)).all fun ρs => ρs 1 = 0
--- The straightline extractor recovers every node's local word from the honest transcript,
--- starting from an arbitrary candidate.
-#guard (List.finRange 4).all fun j =>
-  (List.finRange 2).all fun k =>
-    (backward τs (runT gs ![3, 1, 4, 1]) 4 (fun _ => 0, fun _ => ())).1 j k = gs j k
--- On the cheating transcript it recovers the cheating word, which fails node 1's claim:
--- the extraction failure is the event the theorem bounds.
-#guard decide ((backward τs (runT gsBad ![3, 0, 4, 1]) 4 (fun _ => 0, fun _ => ())).1 1 = ![3, 0])
-#guard decide (dotWt φ7 (gsBad 1) ≠ τs 1)
+#guard allChal.all (sinkAccepts good)
+-- The false statement is accepted at exactly 343 = 2401 / 7 vectors, those with ρ₁ = 0, where
+-- node 1's defect is multiplied away: node 1's fan-in-1 error 1/7, attained.
+#guard (allChal.filter (sinkAccepts bad)).length = 343
+#guard (allChal.filter (sinkAccepts bad)).all fun ρs => ρs 1 = 0
+
+/-- The bad statement has NO witness: the event the theorem bounds is not empty by
+construction, and no extractor can avoid it. -/
+theorem diamond_bad_statement_false (w : (Fin 4 → Unit) × (Fin 4 → Unit)) :
+    ¬ (dagReduction (linScheme φ7) diamond (by norm_num)).R () bad (fun _ => ()) w := by
+  intro h
+  have h1 : dotWt φ7 (bad 1).2 = (bad 1).1 := h 1
+  revert h1
+  decide
 
 /-- The headline, instantiated on the diamond: error `(t + 4) · 2/7`. -/
 theorem diamond_pcd_knowledge_sound (Z : Set (Stmt (dagReduction (linScheme φ7) diamond
