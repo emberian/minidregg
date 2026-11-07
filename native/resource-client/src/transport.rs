@@ -1460,6 +1460,12 @@ impl PinnedLocalInvocation {
 #[cfg(target_os = "linux")]
 const MAX_HOST_IMAGE: u64 = 4 << 30;
 
+/// Verified sealed snapshots of pinned images, one per image path (see `checked_image`).
+#[cfg(target_os = "linux")]
+#[allow(clippy::type_complexity)]
+static SEALED_IMAGES: std::sync::Mutex<Vec<((std::path::PathBuf, [u8; 32], u64, u64, u64, i64, i64, i64, i64), fs::File)>> =
+    std::sync::Mutex::new(Vec::new());
+
 /// One running Host and its two pipes. Dropping it kills and reaps the process.
 /// Replace `path` with `pid` (write beside it, then rename, so a reader never sees a torn file).
 fn write_host_pid(path: &Path, pid: u32) -> Result<(), String> {
@@ -1510,6 +1516,20 @@ impl HostProcess {
         if !before.is_file() {
             return Err("pinned host image must be a regular file".into());
         }
+        // A sealed snapshot is immutable, so one verified snapshot of a given image serves every later
+        // launch in this process: copying and hashing the 185 MB image cost ~220 ms per launch, three
+        // launches per member `credit` (demo-dry 2026-11-06, MINI_TRACE). Keyed by the pin and by the
+        // source file's identity, so a replaced or rewritten image is snapshotted and checked anew.
+        #[cfg(target_os = "linux")]
+        let key = (host.to_path_buf(), *expected, before.dev(), before.ino(), before.len(),
+            before.mtime(), before.mtime_nsec(), before.ctime(), before.ctime_nsec());
+        #[cfg(target_os = "linux")]
+        {
+            let cache = SEALED_IMAGES.lock().map_err(|_| "sealed image cache poisoned".to_owned())?;
+            if let Some((_, image)) = cache.iter().find(|(k, _)| *k == key) {
+                return image.try_clone().map_err(|e| format!("cannot reuse sealed host snapshot: {e}"));
+            }
+        }
         // Hash AFTER sealing, so an in-place writer racing the copy cannot
         // change bytes between their verification and execution.
         #[cfg(target_os = "linux")]
@@ -1537,6 +1557,12 @@ impl HostProcess {
         let actual: [u8; 32] = hash.finalize().into();
         if &actual != expected {
             return Err("host image changed; refusing launch under the socket's original pin".into());
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let mut cache = SEALED_IMAGES.lock().map_err(|_| "sealed image cache poisoned".to_owned())?;
+            cache.retain(|(k, _)| k.0 != key.0);
+            cache.push((key, image.try_clone().map_err(|e| format!("cannot keep sealed host snapshot: {e}"))?));
         }
         Ok(image)
     }

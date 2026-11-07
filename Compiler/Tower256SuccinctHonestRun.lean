@@ -12,6 +12,11 @@ other clause still holds, fails exactly its own clause:
 * `seedBad`: the prover opens at query positions other than the transcript's;
 * `delta`: the prover commits a level-1 word that is the fold plus a constant (still of degree
   below two, so the last-root and degree clauses hold, and every Merkle opening verifies).
+
+The observations on these receipts (acceptance, per-clause attribution of each mutant, the shared
+pair path, the absorbed query prefix and its Keccak-f counts) run COMPILED in
+`lake exe tower256-prover-run` (`Tower256SuccinctProverRun.shapeTwo`), not here: interpreted they
+were the umbrella's slowest module. One interpreted guard remains.
 -/
 
 import Compiler.Tower256SuccinctCheck
@@ -173,29 +178,6 @@ def openingParts (s : CStatement 2 1) (r : CReceipt 2 1 2) : List (Bool × Bool 
 -- The prover's inverse is an inverse at the round pivot.
 #guard mulC (pivotC beta2 0) (invC (pivotC beta2 0)) == Coordinate.one 8
 
--- The honest one-fold receipt is accepted, with every clause exercised.
-#guard check s0 bootstrapPins (prove bootstrapPins none false (Coordinate.zero 8))
-
--- Wrong challenge, used consistently: only the challenge clause fails.
-#guard
-  let r := prove bootstrapPins (some (Coordinate.one 8)) false (Coordinate.zero 8)
-  !check s0 bootstrapPins r && !challengeClause s0 bootstrapPins r &&
-    seedClause s0 bootstrapPins r && openedClause s0 r
-
--- Wrong query positions, opened consistently: only the seed clause fails.
-#guard
-  let r := prove bootstrapPins none true (Coordinate.zero 8)
-  !check s0 bootstrapPins r && challengeClause s0 bootstrapPins r &&
-    !seedClause s0 bootstrapPins r && openedClause s0 r
-
--- A committed level-1 word off the fold by a constant: every Merkle opening verifies, the
--- final polynomial matches its root, and only the fold equation fails.
-#guard
-  let r := prove bootstrapPins none false (Coordinate.one 8)
-  !check s0 bootstrapPins r && challengeClause s0 bootstrapPins r &&
-    seedClause s0 bootstrapPins r && !openedClause s0 r &&
-    openingParts s0 r == [(true, true, true, false), (true, true, true, false)]
-
 def honest : CReceipt 2 1 2 := prove bootstrapPins none false (Coordinate.zero 8)
 
 /-! ## The shared pair path
@@ -204,25 +186,6 @@ The compact opening is complete only because the two level-`j` leaves of a query
 leaves of one Merkle pair: `liftBitC` appends the folded coordinate last, and the last address
 bit is the leaf-level split. On the honest receipt both full paths a pair opening stands for are
 the leaves' own `cubePath`s, so nothing the prover could have sent was dropped. -/
-
-#guard (List.finRange 2).all fun a =>
-  let k := additiveCoherentRound s0.rounds_le 0 honest.querySeed a
-  let o := honest.opening 0 a
-  o.leftFull == path0 (liftBitC s0 0 0 k) && o.rightFull == path0 (liftBitC s0 0 1 k) &&
-    o.pairPath.length == 1
-
--- Every part of every honest opening holds.
-#guard openingParts s0 honest == [(true, true, true, true), (true, true, true, true)]
-
--- A corrupted shared digest: both leaves fail to authenticate, the next-level leaf and the
--- fold still hold, so only the opened clause fails.
-#guard
-  let r : CReceipt 2 1 2 := { honest with opening := fun j a =>
-    let o := honest.opening j a
-    { o with pairPath := o.pairPath.map fun d => ⟨d.value + 1⟩ } }
-  !check s0 bootstrapPins r && challengeClause s0 bootstrapPins r &&
-    seedClause s0 bootstrapPins r && !openedClause s0 r &&
-    openingParts s0 r == [(false, true, false, true), (false, true, false, true)]
 
 /-! ## The query prefix, absorbed once
 
@@ -242,16 +205,6 @@ def oneShotBytes (a : Fin 2) : List UInt8 :=
   Sp800185Cshake256.cshake256Bytes bootstrapPins.queryCustomization
     (queryPrefixC s0 bootstrapPins honest ++ seedInput a)
 
-#guard
-  let mid := queryMidstate s0 bootstrapPins honest
-  (List.finRange 2).all fun a => finishedBytes mid a == oneShotBytes a
-
--- The midstate is read: one flipped lane byte changes every finished digest.
-#guard
-  let mid := queryMidstate s0 bootstrapPins honest
-  let bad := mid.set! 17 (mid.get! 17 ^^^ 1)
-  (List.finRange 2).all fun a => finishedBytes bad a != oneShotBytes a
-
 /-- Counts on this receipt: the framed query prefix in bytes (the 136-byte customization block
 plus `queryPrefixC`), the Keccak-f calls of the two seeds hashed in one shot, and with the prefix
 absorbed once (its full blocks once, then each seed's carried tail and suffix). -/
@@ -262,8 +215,5 @@ def seedCounts : Nat × Nat × Nat :=
   let cached := framed / 136 +
     (List.finRange 2).foldl (fun acc a => acc + blocks (framed % 136 + (seedInput a).length)) 0
   (framed, oneShot, cached)
-
-/-- info: (1069, 16, 9) -/
-#guard_msgs in #eval seedCounts
 
 end Minidregg.Compiler.Tower256SuccinctHonestRun

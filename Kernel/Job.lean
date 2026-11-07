@@ -872,9 +872,9 @@ def Params.Fresh (p : Params) : Prop :=
 
 /-- Nor is the money slot. -/
 theorem money_fresh : ∀ N ∈ F.all, ∀ v ∈ ["before", "after", "delta"], moneySlot ≠ fieldName N v := by
-  decide
+  decide +kernel
 
-theorem money_not_clock : moneySlot ≠ "clock/now" := by decide
+theorem money_not_clock : moneySlot ≠ "clock/now" := by decide +kernel
 
 instance (p : Params) : Decidable p.Fresh := by unfold Params.Fresh; infer_instance
 
@@ -917,22 +917,22 @@ theorem view_delta_none (t : Turn) (pre post : Values) (N : Nat) (hpre : get pre
     (view t pre post).get (fieldName N "delta") = none := by
   open Minidregg.Kernel.LawView in
   have hw : lastc "delta" = some 'r' ∨ lastc "delta" = some 'e' ∨ lastc "delta" = some 'a' :=
-    .inr (.inr (by decide))
+    .inr (.inr (by decide +kernel))
   open Minidregg.Kernel.LawView in
   have hreq := find_none (l := request t.verb t.subject) (k := fieldName N "delta")
-    (fun q hq => request_ne_field hq N _ hw (by decide))
+    (fun q hq => request_ne_field hq N _ hw (by decide +kernel))
   open Minidregg.Kernel.LawView in
   have hbef := find_none (l := pre.map (fun p => (fieldName p.1 "before", p.2))) (k := fieldName N "delta")
     (fun q hq => by
       simp only [List.mem_map] at hq
       obtain ⟨p, -, rfl⟩ := hq
-      exact ne_of_lastc (by rw [lastc_before, lastc_delta]; decide))
+      exact ne_of_lastc (by rw [lastc_before, lastc_delta]; decide +kernel))
   open Minidregg.Kernel.LawView in
   have haft := find_none (l := post.map (fun p => (fieldName p.1 "after", p.2))) (k := fieldName N "delta")
     (fun q hq => by
       simp only [List.mem_map] at hq
       obtain ⟨p, -, rfl⟩ := hq
-      exact ne_of_lastc (by rw [lastc_delta, lastc_after]; decide))
+      exact ne_of_lastc (by rw [lastc_delta, lastc_after]; decide +kernel))
   open Minidregg.Kernel.LawView in
   have hdel := find_none (k := fieldName N "delta")
     (l := post.filterMap (fun p => (get pre p.1).map fun old => (fieldName p.1 "delta", p.2 - old)))
@@ -954,7 +954,7 @@ theorem view_delta_none (t : Turn) (pre post : Values) (N : Nat) (hpre : get pre
       rw [e]; exact pairName_ne_fieldName a b N _)
   open Minidregg.Kernel.LawView in
   have hclock := find_none (k := fieldName N "delta") (l := clockSlots t.now)
-    (fun q hq => clock_ne_field hq N _ hw (by decide))
+    (fun q hq => clock_ne_field hq N _ hw (by decide +kernel))
   open Minidregg.Kernel.LawView in
   have hjoint := find_none (k := fieldName N "delta") (l := jointSlots t.joint)
     (fun q hq => joint_ne_field hq N _)
@@ -1027,7 +1027,7 @@ theorem no_double_settle (p : Params) (fr : p.Fresh) (pre : Values) (t : JobTurn
   have w' : (jview p t pre t.post).get "request/verb" = some 2 := by rw [jget_verb, w]
   have c' : (jview p t pre t.post).get "resource/field/0/before" = some 6 := by
     rw [show "resource/field/0/before" = fieldName 0 "before" from rfl,
-      jget_before p fr t pre t.post 0 (by decide)]
+      jget_before p fr t pre t.post 0 (by decide +kernel)]
     exact closed
   intro N
   by_cases hN : N ∈ F.all
@@ -1044,19 +1044,19 @@ theorem enters_upheld_from (p : Params) (fr : p.Fresh) (pre : Values) (t : JobTu
   have c2 := job_clause adm (q := jobClause2 p) (by simp [jobClauses])
   have w' : (jview p t pre t.post).get "request/verb" = some 2 := by rw [jget_verb, w]
   have hb : (jview p t pre t.post).get "resource/field/0/before" = get pre 0 :=
-    jget_before p fr t pre t.post 0 (by decide)
+    jget_before p fr t pre t.post 0 (by decide +kernel)
   have ha : (jview p t pre t.post).get "resource/field/0/after" = get t.post 0 :=
-    jget_after p fr t pre t.post 0 (by decide)
+    jget_after p fr t pre t.post 0 (by decide +kernel)
   simp only [F.state] at into3 was ⊢
   simp [jobClause2, ev_any, ev_all, ev_not, ev_eq, ev_eqSlots, ev_memberOf, w', hb, ha, into3] at c2
   cases hp : get pre 0 with
   | none =>
     have hd : (jview p t pre t.post).get "resource/field/0/delta" = none :=
-      jget_delta_none p fr t pre t.post 0 (by decide) hp
+      jget_delta_none p fr t pre t.post 0 (by decide +kernel) hp
     simp [hd, hp] at c2
   | some s =>
     have hd : (jview p t pre t.post).get "resource/field/0/delta" = (get t.post 0).map (· - s) :=
-      jget_delta p fr t pre t.post 0 (by decide) s hp
+      jget_delta p fr t pre t.post 0 (by decide +kernel) s hp
     rw [hp] at was
     simp [hd, hp, into3] at c2
     simp only [Option.some.injEq, ne_eq] at was ⊢
@@ -1100,13 +1100,13 @@ theorem upheld_by (p : Params) (fr : p.Fresh) (fc : ranSlot p.PROGRAM ≠ "clock
   have g := fun N v (hN : N ∈ F.all) (hv : v ∈ ["before", "after", "delta"]) =>
     jget_field p fr t pre t.post N hN v hv
   have r := upheld_requires_match_or_timeout p _ _ adm w'
-  rw [show "resource/field/0/after" = fieldName 0 "after" from rfl, jget_after p fr _ _ _ 0 (by decide),
-    show "resource/field/0/before" = fieldName 0 "before" from rfl, jget_before p fr _ _ _ 0 (by decide),
+  rw [show "resource/field/0/after" = fieldName 0 "after" from rfl, jget_after p fr _ _ _ 0 (by decide +kernel),
+    show "resource/field/0/before" = fieldName 0 "before" from rfl, jget_before p fr _ _ _ 0 (by decide +kernel),
     show "resource/field/15/before" = fieldName 15 "before" from rfl,
-    jget_before p fr _ _ _ 15 (by decide),
-    show "resource/field/15/after" = fieldName 15 "after" from rfl, jget_after p fr _ _ _ 15 (by decide),
-    show "resource/field/12/after" = fieldName 12 "after" from rfl, jget_after p fr _ _ _ 12 (by decide),
-    show "resource/field/14/after" = fieldName 14 "after" from rfl, jget_after p fr _ _ _ 14 (by decide),
+    jget_before p fr _ _ _ 15 (by decide +kernel),
+    show "resource/field/15/after" = fieldName 15 "after" from rfl, jget_after p fr _ _ _ 15 (by decide +kernel),
+    show "resource/field/12/after" = fieldName 12 "after" from rfl, jget_after p fr _ _ _ 12 (by decide +kernel),
+    show "resource/field/14/after" = fieldName 14 "after" from rfl, jget_after p fr _ _ _ 14 (by decide +kernel),
     jget_clock p fc] at r
   have r := r into3 from12
   unfold UpheldBy
@@ -1167,9 +1167,9 @@ section Poles
 def demo : Params := ⟨7, 42, 600, -600⟩
 
 /-- The run slot is K-RAN's spelling. -/
-theorem demo_ranSlot : ranSlot demo.PROGRAM = "run/program/42" := by decide
-theorem demo_fresh : demo.Fresh := by decide
-theorem demo_ran_not_clock : ranSlot demo.PROGRAM ≠ "clock/now" := by decide
+theorem demo_ranSlot : ranSlot demo.PROGRAM = "run/program/42" := by decide +kernel
+theorem demo_fresh : demo.Fresh := by decide +kernel
+theorem demo_ran_not_clock : ranSlot demo.PROGRAM ≠ "clock/now" := by decide +kernel
 
 /-- A fresh declared cell, before the order: it is born holding no field, only its declaration
 (`NativeHostGenesis.declaredCell`, K-FIELD-CLOSURE), so the order creates every field it writes. -/
@@ -1208,171 +1208,171 @@ def wMoney (subject : Int) (now : Int) (post : Values) : JobTurn :=
 set_option maxRecDepth 20000
 
 -- order (birth)
-theorem order_admitted : admits demo unborn (w 7 100 ordered) = true := by decide
+theorem order_admitted : admits demo unborn (w 7 100 ordered) = true := by decide +kernel
 /-- A provider cannot order a job in the caller's name: clause 3. -/
-theorem order_by_stranger_refused : refusalPath demo unborn (w 8 100 ordered) = some [3] := by decide
+theorem order_by_stranger_refused : refusalPath demo unborn (w 8 100 ordered) = some [3] := by decide +kernel
 /-- An order without a clock is refused (clause 9 fails closed). -/
 theorem order_without_clock_refused :
-    refusalPath demo unborn ⟨2, 7, none, none, none, ordered⟩ = some [9] := by decide
+    refusalPath demo unborn ⟨2, 7, none, none, none, ordered⟩ = some [9] := by decide +kernel
 /-- An order born claiming escrow nobody deposited: clause 11 (escrow is the fund turn's). -/
 theorem order_prefunded_refused :
-    refusalPath demo unborn (w 7 100 funded) = some [11] := by decide
+    refusalPath demo unborn (w 7 100 funded) = some [11] := by decide +kernel
 
 -- fund (state 0, escrow 0 → price): the caller's money turn
-theorem fund_admitted : admits demo ordered (wMoney 7 120 funded) = true := by decide
+theorem fund_admitted : admits demo ordered (wMoney 7 120 funded) = true := by decide +kernel
 /-- **Money without the receiver.** The same fund as an ordinary write: clause 44. -/
 theorem fund_without_receiver_refused :
-    refusalPath demo ordered (w 7 120 funded) = some [44] := by decide
+    refusalPath demo ordered (w 7 120 funded) = some [44] := by decide +kernel
 /-- A fund short of the price: clause 14. -/
 theorem fund_short_refused :
-    refusalPath demo ordered (wMoney 7 120 (setField ordered 8 50)) = some [14] := by decide
+    refusalPath demo ordered (wMoney 7 120 (setField ordered 8 50)) = some [14] := by decide +kernel
 
 -- claim 0 → 1: the provider's money turn (the bond)
-theorem claim_admitted : admits demo funded (wMoney 8 150 claimed) = true := by decide
+theorem claim_admitted : admits demo funded (wMoney 8 150 claimed) = true := by decide +kernel
 /-- **A claim as an ordinary write** (a bond that no Book transfer backs): clause 44. -/
 theorem claim_without_receiver_refused :
-    refusalPath demo funded (w 8 150 claimed) = some [44] := by decide
+    refusalPath demo funded (w 8 150 claimed) = some [44] := by decide +kernel
 /-- Past `claimBy`: clause 27. -/
-theorem claim_late_refused : refusalPath demo funded (wMoney 8 200 claimed) = some [27] := by decide
+theorem claim_late_refused : refusalPath demo funded (wMoney 8 200 claimed) = some [27] := by decide +kernel
 /-- Claiming in another subject's name (subject 9 writes provider := 8): clause 28. -/
 theorem claim_for_another_refused :
-    refusalPath demo funded (wMoney 9 150 claimed) = some [28] := by decide
+    refusalPath demo funded (wMoney 9 150 claimed) = some [28] := by decide +kernel
 /-- A bond below the price: clause 30. -/
 theorem claim_underbonded_refused :
-    refusalPath demo funded (wMoney 8 150 (setField claimed 11 50)) = some [30] := by decide
+    refusalPath demo funded (wMoney 8 150 (setField claimed 11 50)) = some [30] := by decide +kernel
 
 -- answer 1 → 2
-theorem answer_admitted : admits demo claimed (w 8 300 answered) = true := by decide
+theorem answer_admitted : admits demo claimed (w 8 300 answered) = true := by decide +kernel
 /-- The caller posting the answer: clause 31. -/
-theorem answer_by_caller_refused : refusalPath demo claimed (w 7 300 answered) = some [31] := by decide
+theorem answer_by_caller_refused : refusalPath demo claimed (w 7 300 answered) = some [31] := by decide +kernel
 /-- After `answerBy`: clause 32. -/
 theorem answer_late_refused :
-    refusalPath demo claimed (w 8 800 (setField answered 14 1400)) = some [32] := by decide
+    refusalPath demo claimed (w 8 800 (setField answered 14 1400)) = some [32] := by decide +kernel
 /-- A `finalAt` that shortens the window: clause 35. -/
 theorem answer_short_window_refused :
-    refusalPath demo claimed (w 8 300 (setField answered 14 800)) = some [35] := by decide
+    refusalPath demo claimed (w 8 300 (setField answered 14 800)) = some [35] := by decide +kernel
 /-- **Counterexample pole: a second answer.** Rewriting the output in state 2: clause 18. -/
 theorem second_answer_refused :
-    refusalPath demo answered (w 8 400 (setField answered 12 78)) = some [18] := by decide
+    refusalPath demo answered (w 8 400 (setField answered 12 78)) = some [18] := by decide +kernel
 
 -- truth (state unchanged)
 /-- Anyone (subject 9) writes the truth in state 2 inside the window, with the run verdict. -/
-theorem truth_admitted : admits demo answered (wRan 9 400 (withTruth answered 77)) = true := by decide
+theorem truth_admitted : admits demo answered (wRan 9 400 (withTruth answered 77)) = true := by decide +kernel
 /-- **`caller_cannot_forge_truth`, both poles.** The caller writes a truth without the run verdict:
 clause 22. -/
 theorem forged_truth_refused :
-    refusalPath demo answered (w 7 400 (withTruth answered 77)) = some [22] := by decide
+    refusalPath demo answered (w 7 400 (withTruth answered 77)) = some [22] := by decide +kernel
 /-- After the window: clause 26. -/
 theorem truth_late_refused :
-    refusalPath demo answered (wRan 9 1000 (withTruth answered 77)) = some [26] := by decide
+    refusalPath demo answered (wRan 9 1000 (withTruth answered 77)) = some [26] := by decide +kernel
 /-- The synchronous path: the provider's own run in state 1. -/
 theorem sync_truth_admitted : admits demo claimed (wRan 8 300 (withTruth claimed 77)) = true := by
-  decide
+  decide +kernel
 /-- In state 1 only the provider runs it: clause 24. -/
 theorem sync_truth_by_stranger_refused :
-    refusalPath demo claimed (wRan 9 300 (withTruth claimed 77)) = some [24] := by decide
+    refusalPath demo claimed (wRan 9 300 (withTruth claimed 77)) = some [24] := by decide +kernel
 /-- A truth write that also moves the state (truth and decide in one turn): clause 23. -/
 theorem truth_with_decide_refused :
     refusalPath demo answered (wRan 9 400 (setState (withTruth answered 77) 3)) = some [23] := by
-  decide
+  decide +kernel
 
 -- decide → 3
 theorem upheld_match_admitted :
     admits demo (withTruth answered 77) (w 9 500 (setState (withTruth answered 77) 3)) = true := by
-  decide
+  decide +kernel
 /-- **Counterexample pole: the provider closing early.** Upheld from 2 with no truth inside the window:
 clause 38. -/
 theorem early_upheld_refused :
-    refusalPath demo answered (w 8 500 (setState answered 3)) = some [38] := by decide
+    refusalPath demo answered (w 8 500 (setState answered 3)) = some [38] := by decide +kernel
 theorem upheld_timeout_admitted : admits demo answered (w 8 901 (setState answered 3)) = true := by
-  decide
+  decide +kernel
 /-- Upheld against a mismatched truth: clause 38. -/
 theorem upheld_mismatch_refused :
     refusalPath demo (withTruth answered 78) (w 8 500 (setState (withTruth answered 78) 3)) =
-      some [38] := by decide
+      some [38] := by decide +kernel
 theorem upheld_sync_admitted :
     admits demo (withTruth claimed 77) (w 9 300 (setState (withTruth claimed 77) 3)) = true := by
-  decide
+  decide +kernel
 /-- Upheld from 1 without the provider's run: clause 37. -/
 theorem upheld_from1_without_run_refused :
-    refusalPath demo claimed (w 8 300 (setState claimed 3)) = some [37] := by decide
+    refusalPath demo claimed (w 8 300 (setState claimed 3)) = some [37] := by decide +kernel
 
 -- decide → 4
 theorem slashed_mismatch_admitted :
     admits demo (withTruth answered 78) (w 9 500 (setState (withTruth answered 78) 4)) = true := by
-  decide
+  decide +kernel
 /-- Slashing a provider whose output the truth matches: clause 39. -/
 theorem slashed_match_refused :
     refusalPath demo (withTruth answered 77) (w 7 500 (setState (withTruth answered 77) 4)) =
-      some [39] := by decide
+      some [39] := by decide +kernel
 /-- The stall: no truth, past `answerBy`. -/
-theorem stall_admitted : admits demo claimed (w 7 701 (setState claimed 4)) = true := by decide
+theorem stall_admitted : admits demo claimed (w 7 701 (setState claimed 4)) = true := by decide +kernel
 /-- Slashing before `answerBy`: clause 40. -/
 theorem stall_early_refused : refusalPath demo claimed (w 7 700 (setState claimed 4)) = some [40] := by
-  decide
+  decide +kernel
 
 -- decide → 5
-theorem void_by_caller_admitted : admits demo ordered (w 7 100 (setState ordered 5)) = true := by decide
+theorem void_by_caller_admitted : admits demo ordered (w 7 100 (setState ordered 5)) = true := by decide +kernel
 /-- A stranger voiding before `claimBy`: clause 41. -/
 theorem void_by_stranger_early_refused :
-    refusalPath demo ordered (w 9 100 (setState ordered 5)) = some [41] := by decide
+    refusalPath demo ordered (w 9 100 (setState ordered 5)) = some [41] := by decide +kernel
 theorem void_by_stranger_late_admitted : admits demo ordered (w 9 161 (setState ordered 5)) = true := by
-  decide
+  decide +kernel
 
 -- close → 6: the settle money turn
 theorem close_upheld_admitted :
     admits demo (setState (withTruth answered 77) 3)
-      (wMoney 9 600 (closedOf (withTruth answered 77))) = true := by decide
+      (wMoney 9 600 (closedOf (withTruth answered 77))) = true := by decide +kernel
 theorem close_slashed_admitted :
     admits demo (setState (withTruth answered 78) 4)
-      (wMoney 9 600 (closedOf (withTruth answered 78))) = true := by decide
+      (wMoney 9 600 (closedOf (withTruth answered 78))) = true := by decide +kernel
 theorem close_void_admitted :
-    admits demo (setState funded 5) (wMoney 9 600 (closedOf funded)) = true := by decide
+    admits demo (setState funded 5) (wMoney 9 600 (closedOf funded)) = true := by decide +kernel
 /-- **A close as an ordinary write** (escrow and bond zeroed with no payout): clause 44. -/
 theorem close_without_receiver_refused :
     refusalPath demo (setState (withTruth answered 77) 3)
-      (w 9 600 (closedOf (withTruth answered 77))) = some [44] := by decide
+      (w 9 600 (closedOf (withTruth answered 77))) = some [44] := by decide +kernel
 /-- Closing with the bond still held: clause 43. -/
 theorem close_holding_bond_refused :
     refusalPath demo (setState (withTruth answered 77) 3)
-      (wMoney 9 600 (setField (closedOf (withTruth answered 77)) 11 100)) = some [43] := by decide
+      (wMoney 9 600 (setField (closedOf (withTruth answered 77)) 11 100)) = some [43] := by decide +kernel
 /-- Closing an undecided job (2 → 6): clause 2. -/
 theorem close_undecided_refused :
-    refusalPath demo answered (w 9 600 (closedOf answered)) = some [2] := by decide
+    refusalPath demo answered (w 9 600 (closedOf answered)) = some [2] := by decide +kernel
 
 -- closed (no_double_settle, poles)
 /-- Re-opening a closed job: clause 2. -/
 theorem reopen_refused :
     refusalPath demo (closedOf (withTruth answered 77))
-      (w 9 700 (setState (closedOf (withTruth answered 77)) 3)) = some [2] := by decide
+      (w 9 700 (setState (closedOf (withTruth answered 77)) 3)) = some [2] := by decide +kernel
 /-- A truth on a closed job, even with the run verdict: clause 23. -/
 theorem truth_after_close_refused :
     refusalPath demo (closedOf answered) (wRan 9 700 (withTruth (closedOf answered) 77)) =
-      some [23] := by decide
+      some [23] := by decide +kernel
 /-- **A closed job refuses a write that creates an undeclared field, by name**: the kernel names field
 20 before the law runs (K-FIELD-CLOSURE; this replaces C1's `closed_job_admits_undeclared_field`). -/
 theorem closed_job_refuses_undeclared_field :
     undeclared (closedOf answered) (w 9 700 (closedOf answered ++ [(20, 1)])) = some 20 ∧
       kernelAdmits demo (closedOf answered) (w 9 700 (closedOf answered ++ [(20, 1)])) = false := by
-  decide
+  decide +kernel
 
 /-- The order creates only declared fields, so the kernel's verdict on it is the law's. -/
-theorem order_inside_declaration : undeclared unborn (w 7 100 ordered) = none := by decide
+theorem order_inside_declaration : undeclared unborn (w 7 100 ordered) = none := by decide +kernel
 
 -- management (clause 0)
 /-- The caller delegates (verb 3; a non-write sees no field or clock slot). -/
 theorem delegate_by_caller_admitted : admits demo ordered ⟨3, 7, none, none, none, ordered⟩ = true := by
-  decide
+  decide +kernel
 theorem delegate_by_provider_refused :
-    refusalPath demo ordered ⟨3, 8, none, none, none, ordered⟩ = some [0] := by decide
+    refusalPath demo ordered ⟨3, 8, none, none, none, ordered⟩ = some [0] := by decide +kernel
 /-- **Nobody installs a new law on a live job** — not even the caller: clause 0. -/
 theorem install_by_caller_refused :
-    refusalPath demo claimed ⟨4, 7, none, none, none, claimed⟩ = some [0] := by decide
+    refusalPath demo claimed ⟨4, 7, none, none, none, claimed⟩ = some [0] := by decide +kernel
 /-- **Nor revokes**: a revoke after claim would cut the bonded provider off and force the stall. -/
 theorem revoke_by_caller_refused :
-    refusalPath demo claimed ⟨5, 7, none, none, none, claimed⟩ = some [0] := by decide
+    refusalPath demo claimed ⟨5, 7, none, none, none, claimed⟩ = some [0] := by decide +kernel
 /-- A read by anyone is judged only by management. -/
-theorem read_admitted : admits demo claimed ⟨1, 9, none, none, none, claimed⟩ = true := by decide
+theorem read_admitted : admits demo claimed ⟨1, 9, none, none, none, claimed⟩ = true := by decide +kernel
 
 -- the counterexamples to the wrong spellings
 /-- **Counterexample: a negated deadline passes without a clock.** `not (leSlots clock/now finalAt)`
@@ -1383,14 +1383,14 @@ theorem negated_timeout_fails_open :
     eval (.not (.leSlots "clock/now" "resource/field/14/after"))
       (jview demo ⟨2, 8, none, none, none, setState answered 3⟩ answered answered)
       (jview demo ⟨2, 8, none, none, none, setState answered 3⟩ answered (setState answered 3)) = true ∧
-    refusalPath demo answered ⟨2, 8, none, none, none, setState answered 3⟩ = some [38] := by decide
+    refusalPath demo answered ⟨2, 8, none, none, none, setState answered 3⟩ = some [38] := by decide +kernel
 /-- **Counterexample: `not (price <= 0)` passes on an absent price**; clause 8's presence conjunct
 refuses the priceless order. -/
 theorem negated_price_fails_open :
     eval (.not (.le "resource/field/5/after" 0))
       (jview demo (w 7 100 (ordered.filter (·.1 ≠ 5))) unborn unborn)
       (jview demo (w 7 100 (ordered.filter (·.1 ≠ 5))) unborn (ordered.filter (·.1 ≠ 5))) = true ∧
-    refusalPath demo unborn (w 7 100 (ordered.filter (·.1 ≠ 5))) = some [8] := by decide
+    refusalPath demo unborn (w 7 100 (ordered.filter (·.1 ≠ 5))) = some [8] := by decide +kernel
 
 end Poles
 

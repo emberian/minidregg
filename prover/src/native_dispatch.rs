@@ -18,6 +18,7 @@ use crate::semantic_artifact_arithmetic::{WORK_1_FIXED_CANDIDATE_RESPONSE, WORK_
 use crate::semantic_artifact_v1::{
     WORK_0_REQUEST_COORDINATE_WIDTH, WORK_0_REQUEST_COUNT_WIDTH, WORK_0_REQUEST_VECTOR_ARITY,
 };
+use crate::tower256_fri_prove::FriProveError;
 use crate::tower256_kernels::{dot_product, Tower256KernelError};
 
 /// Local parsing or execution failures.  None is a semantic rejection verdict.
@@ -43,6 +44,8 @@ pub enum NativeDispatchError {
     RowEncoding { row: usize },
     /// A wire no row wrote; the evaluator fabricates no default for it.
     UnwrittenWire { wire: usize },
+    /// Work 9104 refused its request.
+    FriProve(FriProveError),
 }
 
 impl fmt::Display for NativeDispatchError {
@@ -55,6 +58,7 @@ impl fmt::Display for NativeDispatchError {
             ),
             Self::Coordinate(error) => error.fmt(f),
             Self::Kernel(error) => error.fmt(f),
+            Self::FriProve(error) => error.fmt(f),
             Self::FieldModulus { table, kernel } => write!(
                 f,
                 "generated row table is over modulus {table}, kernel field is {kernel}"
@@ -258,6 +262,13 @@ pub fn evaluate_descriptor_rows(
 /// words in, the 4,131-word candidate wire vector out, by evaluating the generated
 /// `WORK_2_ROWS` table in order.  No descriptor is parsed and no zero-check is evaluated;
 /// Lean decodes the reply and `descriptorHoldsCheck` judges it.
+/// Work 9104: the Tower256 additive-FRI honest prover (`crate::tower256_fri_prove`). The
+/// returned receipt bytes are a candidate for Lean's `checkBytes` only.
+pub fn tower256_additive_fri_prove_bytes(request: &[u8]) -> Result<Vec<u8>, NativeDispatchError> {
+    crate::tower256_fri_prove::tower256_additive_fri_prove_bytes(request)
+        .map_err(NativeDispatchError::FriProve)
+}
+
 pub fn evm_stage0_add_aux_bytes(request: &[u8]) -> Result<Vec<u8>, NativeDispatchError> {
     evaluate_descriptor_rows(
         WORK_2_ROWS,

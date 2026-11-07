@@ -90,6 +90,21 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   HEAD, which can differ from the round's sha when rounds overlap. Read the rerecord's `recorded fixture-regen/<sha>`
   line, not the stage's sha.
 
+## Open: the census tail is longer than the rest of the umbrella (iteration lane, 2026-11-06)
+- Measured on bb2 in a cold umbrella build of f54c4205e, LEAN_NUM_THREADS=4, under load 40-90.
+  Everything else finished by 2,550 s. The census then runs serially at the end:
+  AxiomCensusResearch took 412 s and 8.0 GB, TokenCensus.Fixtures 453 s, and TokenCensus was
+  still elaborating after 75+ minutes when the run was stopped. The 10-31 Mac measurement in
+  docs/ITER-SPEED-STATE.md has TokenCensus at 1,859 s.
+- Ruled out: TokenCensus's scans over dependency constants. A filter skipping Mathlib/core
+  constants is exact, because none of them can name a minidregg constant, but TokenCensus still
+  ran past 24 minutes with it. TokenCensus.Fixtures, whose scans are already scoped, took 643 s.
+  The time is elsewhere: the L1-witness checks (`l1WitnessFaults`, `trivialConclusion`'s
+  `whnfR`/`isDefEq`) or `#assert_axioms_tree`.
+- Next step for the census owner: time each check of `runTokenCensus` with `IO.monoMsNow` in a
+  scratch copy (one lean, bb2, the whole tree loaded), then fix the dominant one.
+- Notes: redregg-notes landscape/ITERATION-SPEED-2026-11-06.md.
+
 ## The pool and the inner loop (hbox /home/hbox/pool; Lean caps in ~/.minidregg-env)
 - ~/.minidregg-env (sourced by .profile and .bashrc) sets PATH with /home/hbox/pool/bin (lane-tree, warm-link),
   MINIDREGG_LEAN_SEAT_ROOT=/home/hbox/seats, MINIDREGG_LEAN_SEATS=12, LEAN_NUM_THREADS 4, SWARM_MEM_MAX 48G,
