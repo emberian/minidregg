@@ -315,15 +315,25 @@ theorem decodeServedRowsFrom_eq {earlier : StoreIdentity} {before : State earlie
       simp only [decodeServedRowsFrom, DirectoryImage.decodeRows, decodeServedRowFrom_eq,
         decodeServedRowsFrom_eq held rest]
 
+/-- The served directory of `input`; its identity check is one hashed pass over the row ids
+(`CompiledListOps.nodupNat`), not the pairwise `List.Nodup` decision, which compared every pair of
+big-number ids on every submit. -/
 def decodeServedFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before)
     (input : List (Nat × List UInt8)) : Option (Directory Nat registry) := do
   let rows ← decodeServedRowsFrom held input
-  if (rows.map Prod.fst).Nodup then some (DirectoryImage.ofRows registry rows) else none
+  if CompiledListOps.nodupNat (rows.map Prod.fst) then some (DirectoryImage.ofRows registry rows) else none
 
 theorem decodeServedFrom_eq {earlier : StoreIdentity} {before : State earlier}
     (held : ServedDirectory before) (input : List (Nat × List UInt8)) :
     decodeServedFrom held input = DirectoryImage.decode registry input := by
   simp only [decodeServedFrom, DirectoryImage.decode, decodeServedRowsFrom_eq]
+  cases DirectoryImage.decodeRows registry input with
+  | none => rfl
+  | some rows =>
+      simp only [Option.bind_eq_bind, Option.bind_some]
+      by_cases unique : (rows.map Prod.fst).Nodup
+      · rw [if_pos unique, if_pos ((CompiledListOps.nodupNat_iff _).mpr unique)]
+      · rw [if_neg unique, if_neg (fun fast => unique ((CompiledListOps.nodupNat_iff _).mp fast))]
 
 /-- `loadServedDirectory` of a later state, decoding only the rows whose bytes
 differ from `held`'s state (`loadServedDirectoryFrom_eq`). -/

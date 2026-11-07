@@ -288,7 +288,9 @@ pub(crate) fn my_account(root: &Path, ws: &Value, explicit: Option<&str>) -> Res
         let file = entry.file_name().to_string_lossy().into_owned();
         let Some(stem) = file.strip_suffix(".json") else { continue };
         let name = workspace::ref_name_of_file(stem);
-        if let Ok(reference) = workspace::reference(root, &name) {
+        // The address book only: a shared name (`ROOM/NAME`) is a room's binding, resolved by a
+        // signed discovery, and never the member's own account; `--account` still names one.
+        if let Ok(reference) = workspace::local_reference(root, &name) {
             if workspace::member(&reference, "kind")? == "account"
                 && !name.ends_with("-till")
                 && !name.ends_with("-runner")
