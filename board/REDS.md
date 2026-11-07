@@ -1,15 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `c9717142f088` (Merge remote-tracking branch 'origin/main' into lane/init8-flashprove-audit). Round finished 2026-11-07T02:51Z.
-green: `eb932b7c6547`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-c9717142`.
+Tip: `20c68da6f504` (Merge remote-tracking branch 'origin/main' into lane/perf-client-census). Round finished 2026-11-07T03:37Z.
+green: `eb932b7c6547`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-20c68da6`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log eb932b7c6547..c9717142f088`), newest first; owners are the seats whose
+Suspect commits since green (`git log eb932b7c6547..20c68da6f504`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `20c68da6` Merge remote-tracking branch 'origin/main' into lane/perf-client-census
+- `37a2dc2c` submit: the served directory's identity check is one hashed pass; credit picks its account from the  (owner: apps-hermes)
+- `ba9c5566` builder: REDS.md for c9717142f088 (1 red) (owner: build-loop)
 - `c9717142` Merge remote-tracking branch 'origin/main' into lane/init8-flashprove-audit
 - `3db155aa` builder: REDS.md for f2dae81d3680 (1 red) (owner: build-loop)
 - `0b5050ab` Merge remote-tracking branch 'origin/main' into lane/init8-flashprove-audit
@@ -38,10 +41,10 @@ Suspect commits since green (`git log eb932b7c6547..c9717142f088`), newest first
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.185 | 0.189 | 1.021 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 37.249 | 84.950 | 2.281 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.147 | 0.194 | 1.324 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 25.351 | 77.450 | 3.055 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.360 | 0.399 | 1.109 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 148.346 | 166.366 | 1.121 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-c9717142/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.159 | 0.168 | 1.056 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 29.324 | 70.216 | 2.394 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.131 | 0.161 | 1.228 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 27.519 | 67.307 | 2.446 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.354 | 0.323 | 0.912 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 139.391 | 152.995 | 1.098 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-20c68da6/flatness.log | - | - | - | - | host-execution, store-retained |
