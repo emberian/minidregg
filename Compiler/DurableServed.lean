@@ -1481,7 +1481,7 @@ inductive Received (rootBytes : List UInt8 → Digest) (opening : Opening rootBy
   opening after exactly this record. -/
   | appended (kind : DurableReceiverIO.Confirmation) (next : Opening rootBytes)
       (height : next.head.height = opening.head.height + 1) (entry : DurableReceiverIO.Entry)
-      (entryExact : entry.record = (DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent)).toByteArray)
+      (entryExact : entry.record.toList = DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent))
       -- `fresh`: this attempt's own append installed the entry (the Store answered `.installed`),
       -- not a readback after `.alreadyPresent` or an uncertain response; the one-shot launch power
       -- of a claim reservation goes only to such a winner.

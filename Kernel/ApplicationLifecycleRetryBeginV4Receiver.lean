@@ -70,7 +70,7 @@ theorem Confirmed.event_exact {config : Config} (confirmed : Confirmed config) :
   rfl
 
 theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
-    confirmed.readback.appended.entry.record =
+    confirmed.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent confirmed.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord confirmed.old confirmed.readback

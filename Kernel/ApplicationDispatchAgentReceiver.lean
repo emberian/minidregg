@@ -73,7 +73,7 @@ theorem Committed.receipt_in_verified {config : Config} (committed : Committed c
   NativeHostReplay.extendExact_receipts committed.reader committed.old committed.readback
 
 theorem Committed.postRecord_exact {config : Config} (permit : Committed config) :
-    permit.readback.appended.entry.record =
+    permit.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
@@ -106,7 +106,7 @@ theorem Permit.receipt_in_verified {config : Config} (permit : Permit config) :
   permit.toCommitted.receipt_in_verified
 
 theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
-    permit.readback.appended.entry.record =
+    permit.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   permit.toCommitted.postRecord_exact

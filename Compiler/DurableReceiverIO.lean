@@ -177,7 +177,7 @@ trailer), the node rows, the extended image and the index root after it. -/
 structure PreparedAppend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (intent : DataIntent rootBytes) where
   entry : Entry
-  entryExact : entry.record = (recordFrame.encode (IntentRecord.ofIntent intent)).toByteArray
+  entryExact : entry.record.toList = recordFrame.encode (IntentRecord.ofIntent intent)
   nodes : List NodeWrite
   extended : Loaded rootBytes
   extendedImage : extended.image = loaded.image.append intent

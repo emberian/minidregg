@@ -84,7 +84,7 @@ theorem Committed.receipt_in_verified {config : Config} (permit : Committed conf
 /-- The permit's retained post-image is exactly the physical CAS readback,
 not a later journal suffix or an asserted digest. -/
 theorem Committed.postRecord_exact {config : Config} (permit : Committed config) :
-    permit.readback.appended.entry.record =
+    permit.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
@@ -119,7 +119,7 @@ theorem Permit.receipt_in_verified {config : Config} (permit : Permit config) :
   permit.toCommitted.receipt_in_verified
 
 theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
-    permit.readback.appended.entry.record =
+    permit.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   permit.toCommitted.postRecord_exact

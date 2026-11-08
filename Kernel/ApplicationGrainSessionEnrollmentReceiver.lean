@@ -67,7 +67,7 @@ structure LightConfirmed (config : Config) (opening : DurableServed.Opening Reso
   next : DurableServed.Opening ResourceBirthCodec.rootBytes
   height : next.head.height = opening.head.height + 1
   entry : DurableReceiverIO.Entry
-  entryExact : entry.record = DurableCheckpointCodec.recordFrame.encode
+  entryExact : entry.record.toList = DurableCheckpointCodec.recordFrame.encode
     (DurableReceiver.IntentRecord.ofIntent (ApplicationGrainSessionEnrollmentIntent.intent checked))
 
 def LightConfirmed.intent {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
@@ -81,7 +81,7 @@ with the receipt the ingress names; the enrollment's three read guards expect th
 current roots; its transaction id was verified unrecorded on that ground. -/
 theorem LightConfirmed.exact {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
     (confirmed : LightConfirmed config opening) :
-    confirmed.entry.record = DurableCheckpointCodec.recordFrame.encode
+    confirmed.entry.record.toList = DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent confirmed.intent) ∧
       confirmed.next.head.height = opening.head.height + 1 ∧
       (∃ read : DurableHistoryReader.Record opening.head (confirmed.ingress.request.issueIndex + 1),

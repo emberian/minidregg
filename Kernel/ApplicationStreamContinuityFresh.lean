@@ -113,7 +113,7 @@ def decideWith (verifies : List UInt8 → Bool) (birthHeight : Nat) (held : Held
       else match physical with
         | none => .tipUnavailable
         | some tip =>
-            if tip.head = held.height ∧ tip.entries = [⟨record, tag⟩] then .admitted
+            if tip.head = held.height ∧ tip.entries = [⟨record.toByteArray, tag⟩] then .admitted
             else .tipChanged
 
 def verdict (birthHeight : Nat) (held : Held) (physical : Option Physical) : Verdict :=
@@ -144,7 +144,7 @@ theorem decideWith_iff (verifies : List UInt8 → Bool) (birthHeight : Nat) (hel
     decideWith verifies birthHeight held physical = .admitted ↔
       ∃ record tag, held.headRecord = some record ∧ held.candidate = some tag ∧
         verifies tag = true ∧ birthHeight ≤ held.height ∧
-        physical = some ⟨held.height, [⟨record, tag⟩]⟩ := by
+        physical = some ⟨held.height, [⟨record.toByteArray, tag⟩]⟩ := by
   unfold decideWith
   rcases hr : held.headRecord with _ | record
   · simp
@@ -162,7 +162,7 @@ theorem decideWith_iff (verifies : List UInt8 → Bool) (birthHeight : Nat) (hel
       rcases physical with _ | tip
       · simp
       · dsimp only
-        by_cases ok : tip.head = held.height ∧ tip.entries = [⟨record, tag⟩]
+        by_cases ok : tip.head = held.height ∧ tip.entries = [⟨record.toByteArray, tag⟩]
         · rw [if_pos ok]
           constructor
           · intro _
@@ -198,7 +198,7 @@ theorem hotRegistration_iff (birthHeight : Nat) (held : Held) (physical : Option
         (∃ frontier head, held.frontier = some frontier ∧
           Head.verify held.store held.height tag held.chain frontier = .ok head) ∧
         birthHeight ≤ held.height ∧
-        physical = some ⟨held.height, [⟨record, tag⟩]⟩ := by
+        physical = some ⟨held.height, [⟨record.toByteArray, tag⟩]⟩ := by
   unfold HotRegistrationAdmitted verdict
   rw [decideWith_iff]
   have cand : ∀ tag, held.candidate = some tag ↔

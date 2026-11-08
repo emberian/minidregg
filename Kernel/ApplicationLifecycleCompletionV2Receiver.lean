@@ -61,7 +61,7 @@ theorem Confirmed.event_exact {config : Config} (confirmed : Confirmed config) :
   exact ApplicationLifecycleCompletionV2Core.intent_event confirmed.admitted.conditional
 
 theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
-    confirmed.readback.appended.entry.record =
+    confirmed.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent confirmed.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord confirmed.old confirmed.readback
@@ -134,7 +134,7 @@ structure LightConfirmed (config : Config) (opening : DurableServed.Opening Reso
   next : DurableServed.Opening ResourceBirthCodec.rootBytes
   height : next.head.height = opening.head.height + 1
   entry : DurableReceiverIO.Entry
-  entryExact : entry.record = DurableCheckpointCodec.recordFrame.encode
+  entryExact : entry.record.toList = DurableCheckpointCodec.recordFrame.encode
     (DurableReceiver.IntentRecord.ofIntent (ApplicationLifecycleCompletionV2Core.intent conditional))
 
 /-- **What a light completion proves**: the appended record is the candidate's intent's, at the
@@ -142,7 +142,7 @@ opening's next height; it carries this ingress's event; its transaction id was v
 unrecorded on its ground. -/
 theorem LightConfirmed.exact {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
     (confirmed : LightConfirmed config opening) :
-    confirmed.entry.record = DurableCheckpointCodec.recordFrame.encode
+    confirmed.entry.record.toList = DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent (ApplicationLifecycleCompletionV2Core.intent confirmed.conditional)) ∧
       confirmed.next.head.height = opening.head.height + 1 ∧
       (ApplicationLifecycleCompletionV2Core.intent confirmed.conditional).event =

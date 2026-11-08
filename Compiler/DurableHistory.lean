@@ -97,6 +97,10 @@ theorem kernel_data_toList (customization : List UInt8) (input : ByteArray) :
   rw [Sp800185Cshake256.Native.bytesOfList_toList, Sp800185Cshake256.Native.bytesOfList_toList,
     Sp800185Cshake256.Fast.cshake256Fast_eq, ByteArray.toList_eq_data_toList]
 
+/-- A list packed and read back is itself. -/
+theorem toByteArray_toList (bytes : List UInt8) : bytes.toByteArray.toList = bytes := by
+  rw [ByteArray.toList_eq_data_toList, List.toList_data_toByteArray]
+
 /-- `Sp800185Cshake256.hash` over a packed input: the kernel reads the array itself. -/
 def hashBytes (customization : List UInt8) (input : ByteArray) : Sp800185Cshake256.Output :=
   ⟨(Sp800185Cshake256.Native.cshake256Kernel (Sp800185Cshake256.Native.bytesOfList customization)

@@ -52,7 +52,7 @@ def Reservation.receipt {config : Config} (reservation : Reservation config) :
 
 theorem Reservation.postRecord_exact {config : Config}
     (reservation : Reservation config) :
-    reservation.readback.appended.entry.record =
+    reservation.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent reservation.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord reservation.old reservation.readback

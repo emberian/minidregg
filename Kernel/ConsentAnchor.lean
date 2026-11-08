@@ -211,7 +211,7 @@ def recheckStore (transport : DurableReceiverIO.Transport) (anchor : Anchor) :
         return .error "durable log head does not match its entries"
       let logStart := transport.logStart seed
       return checkStored anchor logStart stored.head
-        (DurableLogTags.chainPrefixesStored logStart (stored.entries.map (·.record)))
+        (DurableLogTags.chainPrefixesStoredBytes logStart (stored.entries.map (·.record)))
 
 /-! ## The O(1) re-check (HOT-PATH 2f)
 

@@ -1674,7 +1674,7 @@ structure Appended (rootBytes : List UInt8 → Digest) (loaded : Loaded rootByte
   next : Loaded rootBytes
   image : next.image = loaded.image.append intent
   entry : Entry
-  entryExact : entry.record = (recordFrame.encode (IntentRecord.ofIntent intent)).toByteArray
+  entryExact : entry.record.toList = recordFrame.encode (IntentRecord.ofIntent intent)
   /-- The image after an append carries the tag the append wrote: its MAC is the
   one the append computed under the key, so the head's authentication is not
   lost (`Loaded.headTag`). -/

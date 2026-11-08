@@ -83,7 +83,7 @@ structure LightConfirmed (config : Config) (opening : DurableServed.Opening Reso
   next : DurableServed.Opening ResourceBirthCodec.rootBytes
   height : next.head.height = opening.head.height + 1
   entry : DurableReceiverIO.Entry
-  entryExact : entry.record = DurableCheckpointCodec.recordFrame.encode
+  entryExact : entry.record.toList = DurableCheckpointCodec.recordFrame.encode
     (DurableReceiver.IntentRecord.ofIntent (ApplicationAgentLifetimeGrantIntentTemplate.template current))
 
 /-- **What a light grant confirmation proves**: the appended record is the admitted grant's
@@ -93,7 +93,7 @@ one the grant names and whose spec the grant stays within; the grant's transacti
 verified unrecorded on the light ground it was admitted on. -/
 theorem LightConfirmed.exact {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
     (confirmed : LightConfirmed config opening) :
-    confirmed.entry.record = DurableCheckpointCodec.recordFrame.encode
+    confirmed.entry.record.toList = DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent
           (ApplicationAgentLifetimeGrantIntentTemplate.template confirmed.current)) ∧
       confirmed.next.head.height = opening.head.height + 1 ∧

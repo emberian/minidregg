@@ -72,7 +72,7 @@ def Confirmed.target {config : Config} {anchor : Opened config}
 
 theorem Confirmed.postRecord_exact {config : Config} {anchor : Opened config}
     (confirmed : Confirmed config anchor) :
-    confirmed.appended.entry.record = DurableCheckpointCodec.recordFrame.encode
+    confirmed.appended.entry.record.toList = DurableCheckpointCodec.recordFrame.encode
       (DurableReceiver.IntentRecord.ofIntent confirmed.derived.intent) :=
   confirmed.appended.entryExact
 
