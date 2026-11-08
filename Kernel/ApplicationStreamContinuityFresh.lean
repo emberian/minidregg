@@ -239,7 +239,7 @@ def untagged (store : StoreIdentity) (chain : Digest) (frontier : Option (List (
     (readTag : Option (List UInt8)) : Held :=
   ⟨5, some recordBytes, none, readTag, store, chain, frontier⟩
 
-def tipAt (tag : List UInt8) : Option Physical := some ⟨5, [⟨recordBytes, tag⟩]⟩
+def tipAt (tag : List UInt8) : Option Physical := some ⟨5, [⟨recordBytes.toByteArray, tag⟩]⟩
 
 /-- What the Host writes verifies: for every key, log start, chain, carried
 values and frontier, the trailer at a height is accepted by `Head.verify`
@@ -313,7 +313,7 @@ theorem teeth_failedVerify (s : StoreIdentity) (c : Digest) (f : List (Nat × Di
 /-- Teeth: a stale tip (the Store moved on past the session's head). -/
 theorem teeth_staleTip (v : List UInt8 → Bool) (s : StoreIdentity) (c : Digest)
     (f : Option (List (Nat × Digest))) (hv : v tagBytes = true) :
-    decideWith v 3 (untagged s c f (some tagBytes)) (some ⟨6, [⟨[9], [9]⟩]⟩) = .tipChanged := by
+    decideWith v 3 (untagged s c f (some tagBytes)) (some ⟨6, [⟨[9].toByteArray, [9]⟩]⟩) = .tipChanged := by
   simp [decideWith, untagged, Held.candidate, hv]
 
 /-- Teeth: a tip whose head entry carries another tag at the same height. -/

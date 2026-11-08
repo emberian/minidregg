@@ -214,7 +214,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   let nodes := appendNodes (DurableHistory.completedNodes frontier height leaf) indexWrites
   let entry : Entry := ⟨recordBytes.toByteArray, trailer key height
     ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩⟩
-  return .ok ⟨entry, rfl, nodes, extended, rfl, indexAfter⟩
+  return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter⟩
 
 
 /-- What the receiving loop does after the append's observation: confirm by

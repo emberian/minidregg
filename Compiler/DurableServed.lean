@@ -1570,7 +1570,8 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                     return .appended kind
                       ⟨opening.store, opening.live, head', served', fields.1.symm, fields.2.1.symm, roots.1,
                         by rw [rootsEq]; exact roots.2, sealedAt, worldAfter⟩
-                      (by rw [fields.1, ← opening.heightExact]) entry rfl fresh
+                      (by rw [fields.1, ← opening.heightExact]) entry
+                      (DurableHistory.toByteArray_toList _) fresh
       match ← transport.append height entry nodes with
       | .installed => confirm .installed true
       | .alreadyPresent => confirm .installed false
