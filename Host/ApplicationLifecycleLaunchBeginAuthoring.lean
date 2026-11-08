@@ -663,7 +663,7 @@ completion for the app via `selectRunningLight`, admit the STOP BEGIN on `light.
 commit via `DurableServed.receiveServed`. -/
 def receiveStopLight (config : Config) (transport : DurableReceiverIO.Transport)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO StopResult := do
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) : IO StopResult := do
   let some ingress := ApplicationLifecycleBeginV3Ingress.codec.decode bytes
     | return .rejected "noncanonical launch-bound lifecycle BEGIN"
   unless ingress.start == none && ingress.base.source.kind == .stop do
@@ -688,8 +688,8 @@ def receiveStopLight (config : Config) (transport : DurableReceiverIO.Transport)
   | some none =>
       match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening
           accepted.intent with
-      | .appended kind next _ _ _ _ =>
-          adopt next none
+      | .appended kind next _ _ _ _ moved =>
+          adopt next _ moved none
           return .confirmed kind accepted.intent.transactionId accepted.intent.event.eventId
       | .replayed _ => return .rejected "launch-bound BEGIN transaction identity already used"
       | .rejected _ => return .rejected "durable v3 lifecycle BEGIN refused"

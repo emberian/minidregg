@@ -656,7 +656,7 @@ pub(crate) fn serve(
                     return;
                 }
             }
-            std::thread::sleep(mini_sdk::consent::CATCH_UP_POLL);
+            watch.wait();
         });
     }
     // The worker keeps its warm verifier, as the member-side consent resident does: no idle exit

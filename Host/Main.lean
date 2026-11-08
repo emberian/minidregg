@@ -1258,7 +1258,10 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     for _ in [0:10] do
       if (NativeHost.validateLoaded config durable).toOption.isSome then n := n + 1
     pure n
-  if let .ok opened := NativeHost.validateLoaded config durable then
+  match validatedFull : NativeHost.validateLoaded config durable with
+  | .error _ => pure ()
+  | .ok opened =>
+    have sameDurable : opened.durable = durable := NativeHost.validateLoaded_durable validatedFull
     discard <| timed "loadDirectoryFrom (held, same image) x10" do
       let mut n := 0
       for _ in [0:10] do
@@ -1270,6 +1273,14 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       for _ in [0:10] do
         if (NativeHost.validateLoadedFrom config opened durable).toOption.isSome then n := n + 1
       pure n
+    -- A step over the last record's written cells (the same image: every other cell keeps its bytes).
+    let written := (lastRecord.map fun record => record.writes.map (·.cellId)).getD []
+    discard <| timed s!"validateLoadedStep (held, same image, {written.length} written) x10" do
+      let mut n := 0
+      for _ in [0:10] do
+        if (NativeHost.validateLoadedStep config opened durable written fun _ _ => by rw [sameDurable]).toOption.isSome then
+          n := n + 1
+      pure n
   -- The light (served) validation a session's refresh runs, whole and against the held state.
   match ← DurableServed.openHead config.transport ResourceBirthCodec.rootBytes with
   | .error detail => IO.println s!"light open refused: {detail}"
@@ -1279,11 +1290,21 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
         for _ in [0:10] do
           if (NativeHostServed.validateServed config opening.served).toOption.isSome then n := n + 1
         pure n
-      if let .ok held := NativeHostServed.validateServed config opening.served then
+      match validated : NativeHostServed.validateServed config opening.served with
+      | .error _ => pure ()
+      | .ok held =>
+        have same : held.served = opening.served := NativeHostServed.validateServed_served validated
         discard <| timed "validateServedFrom (held, same state) x10" do
           let mut n := 0
           for _ in [0:10] do
             if (NativeHostServed.validateServedFrom config held opening.served).toOption.isSome then n := n + 1
+          pure n
+        let written := (lastRecord.map fun record => record.writes.map (·.cellId)).getD []
+        discard <| timed s!"validateServedStep (held, same state, {written.length} written) x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            if (NativeHostServed.validateServedStep config held opening.served written ⟨fun _ _ => by rw [same]⟩).toOption.isSome then
+              n := n + 1
           pure n
   discard <| timed "root rebuild x3" do
     let mut r := 0
@@ -1550,18 +1571,18 @@ def sessionFull (config : NativeHost.Config)
 
 /-- A light receive's own readback (`DurableServed.Received.appended`: the record it appended,
 read back exactly and verified at the new head) becomes the session's light opening
-(`Light.adopt`), so the next refresh finds the head current instead of reading, verifying and
+(`Light.adoptStep`, over the cells the record wrote), so the next refresh finds the head current instead of reading, verifying and
 re-executing the entry the Host itself just wrote; the write's authority post-cell is taken as
 the served authority without a decode or a trie rebuild. Where it does not validate, the session keeps
 its opening and the next refresh reads the entry. -/
 def sessionAdopt (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (opening : Minidregg.Compiler.DurableServed.Opening ResourceBirthCodec.rootBytes)
-    (held : Option Minidregg.Compiler.CredentialAuthorityServed.HeldCell) : IO Unit := do
-  if let some current ← state.get then
-    if opening.head.height = current.light.opening.head.height + 1 then
-      if let .ok light := current.light.adopt opening held then
-        state.set (some { current with light, observed := none })
+    (light : NativeHostLight.Light config) : NativeHostLight.Adopt light.opening :=
+  fun opening written moved held => do
+    if let some current ← state.get then
+      if opening.head.height = current.light.opening.head.height + 1 then
+        if let .ok light := light.adoptStep opening written moved held then
+          state.set (some { current with light, observed := none })
 
 /-- The receipt-continuity witness of the light opening's head (`ReceiptContinuity.current` of the
 full image at the same head: its height, world root, log chain and the system slot's siblings off
@@ -1670,7 +1691,7 @@ def applicationLifecycleRetryBeginV4SubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let current ← sessionCurrent config state
   match ← ApplicationLifecycleRetryBeginV4Authoring.receiveLight config config.transport
-      current.light payload (sessionAdopt config state) with
+      current.light payload (sessionAdopt config state current.light) with
     | .confirmed kind transactionId eventId =>
         return ← sessionConfirmed config state kind transactionId eventId
     | .rejected detail =>
@@ -1692,7 +1713,7 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
         "fresh BEGIN requires canonical launch-bound v3 ingress".toUTF8.toList
   let current ← sessionCurrent config state
   match ← ApplicationLifecycleBeginV3Receiver.receiveServed config config.transport current.light payload
-      (sessionAdopt config state) with
+      (sessionAdopt config state current.light) with
   | .confirmed confirmed =>
       return ← sessionConfirmed config state confirmed.kind confirmed.accepted.intent.transactionId
         confirmed.accepted.intent.event.eventId
@@ -1705,7 +1726,7 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
   | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .stop =>
       match ← ApplicationLifecycleLaunchBeginAuthoring.receiveStopLight config config.transport
-          current.light payload (sessionAdopt config state) with
+          current.light payload (sessionAdopt config state current.light) with
       | .confirmed kind transactionId eventId =>
           return ← sessionConfirmed config state kind transactionId eventId
       | .rejected detail =>
@@ -1804,7 +1825,7 @@ def applicationFailedStartRecoverySubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let current ← sessionCurrent config state
   let outcome : NativeHostCodec.Outcome ← match ← ApplicationFailedStartEndpoint.submitLight
-      config config.transport current.light payload (sessionAdopt config state) with
+      config config.transport current.light payload (sessionAdopt config state current.light) with
     | .confirmed kind transactionId eventId =>
         sessionConfirmed config state kind transactionId eventId
     | .rejected detail => pure (.refused .operationRejected
@@ -1820,7 +1841,7 @@ def applicationLifecycleRetryCompletionV4SubmitSession (config : NativeHost.Conf
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let current ← sessionCurrent config state
   match ← ApplicationLifecycleRetryCompletionV4Authoring.receiveLight config config.transport
-      current.light payload (sessionAdopt config state) with
+      current.light payload (sessionAdopt config state current.light) with
   | .confirmed kind transactionId eventId =>
       return ← sessionConfirmed config state kind transactionId eventId
   | .rejected detail =>
@@ -1842,7 +1863,7 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
         "fresh completion requires canonical launch-bound v2 ingress".toUTF8.toList
   let current ← sessionCurrent config state
   match ← ApplicationLifecycleCompletionV2Receiver.receiveServed config config.transport current.light payload
-      (sessionAdopt config state) with
+      (sessionAdopt config state current.light) with
   | .confirmed confirmed =>
       let intent := ApplicationLifecycleCompletionV2Core.intent confirmed.conditional
       return ← sessionConfirmed config state confirmed.kind intent.transactionId intent.event.eventId
@@ -1854,7 +1875,7 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
   | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .stop =>
       match ← ApplicationLifecycleLaunchCompletionAuthoring.receiveStopLight config config.transport
-          current.light payload (sessionAdopt config state) with
+          current.light payload (sessionAdopt config state current.light) with
       | .confirmed kind transactionId eventId =>
           return ← sessionConfirmed config state kind transactionId eventId
       | .rejected detail =>
@@ -2169,7 +2190,7 @@ def applicationSessionEnrollmentSubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let light := (← sessionCurrent config state).light
   let result ← ApplicationGrainSessionEnrollmentReceiver.receiveServed config config.transport light payload
-    (sessionAdopt config state)
+    (sessionAdopt config state light)
   let outcome : NativeHostCodec.Outcome ← match result with
     | .confirmed confirmed =>
         sessionConfirmed config state confirmed.kind confirmed.intent.transactionId
@@ -2213,7 +2234,7 @@ def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let light := (← sessionCurrent config state).light
   let result ← ApplicationAgentLifetimeGrantReceiver.receiveServed config config.transport light payload
-    (sessionAdopt config state)
+    (sessionAdopt config state light)
   let outcome : NativeHostCodec.Outcome ← match result with
     | .confirmed confirmed =>
         sessionConfirmed config state confirmed.kind confirmed.intent.transactionId
@@ -3097,7 +3118,7 @@ def dispatchLifecycleRetryClaimV4SubmitSession (config : NativeHost.Config)
     (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
   let light := (← sessionCurrent config state).light
   let result ← ApplicationLifecycleRetryClaimV4Authoring.receiveLight config config.transport
-    light payload (sessionAdopt config state)
+    light payload (sessionAdopt config state light)
   match result with
   | .reserved reservation =>
       if reservation.kind == .installed && reservation.freshCasWinner then
@@ -3141,7 +3162,7 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
       return
   let light := (← sessionCurrent config state).light
   let result ← ApplicationLifecycleClaimV3Receiver.receiveServed config config.transport light payload
-    (sessionAdopt config state)
+    (sessionAdopt config state light)
   match result with
   | .reserved reservation =>
       if reservation.kind == .installed && reservation.freshCasWinner then
@@ -7475,7 +7496,7 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                     NativeHost.Disclosure.uniform)
                                 | some call =>
                                   NativeHost.submitDisclosedSession pinnedConfig session.light call
-                                    (sessionConfirmed pinnedConfig state) (sessionAdopt pinnedConfig state)
+                                    (sessionConfirmed pinnedConfig state) (sessionAdopt pinnedConfig state session.light)
                               NativeHost.logOperatorRefusal result.1
                               return (2, outcomeCodec.encode (NativeHost.disclose result))
                             else

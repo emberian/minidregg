@@ -332,8 +332,10 @@ def receiveServed {F : Type} [Field F] [DecidableEq F]
     (basisOf : DurableView.Keys →
       IO (Except String (Minidregg.Compiler.ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
-    (adopt : DurableServed.Opening rootBytes → Option Minidregg.Compiler.CredentialAuthorityServed.HeldCell → IO Unit :=
-      fun _ _ => pure ()) : IO Result := do
+    (adopt : (next : DurableServed.Opening rootBytes) → (written : List DurableDataIntent.CellId) →
+      DurableServed.Served.Moved opening.served next.served written →
+      Option Minidregg.Compiler.CredentialAuthorityServed.HeldCell → IO Unit :=
+      fun _ _ _ _ => pure ()) : IO Result := do
   match GrainResourceBirthPolicyController.decodeIngress bytes with
   | none => return .rejected .malformedIngress
   | some ingress =>
@@ -352,7 +354,7 @@ def receiveServed {F : Type} [Field F] [DecidableEq F]
               admitOn profile deployment pins tariff ambient native ground ingress
                 (fun reason => return .rejected reason) fun intent => do
                   match ← DurableServed.receiveServed transport rootBytes opening intent with
-                  | .appended kind next .. => do adopt next none; return .confirmed kind issued
+                  | .appended kind next _ _ _ _ moved => do adopt next _ moved none; return .confirmed kind issued
                   | .replayed _ => return .confirmed .replayed issued
                   | .rejected reason => return .rejected (.durable reason)
                   | .contention => return .contention

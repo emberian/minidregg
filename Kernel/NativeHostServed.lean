@@ -62,6 +62,9 @@ structure OpenedServed (config : Config) (store : StoreIdentity) where
   authority : ServedAuthority config.deployment served
   pins : FactoryPins
   lawful : cellsLawfulServed config served directory.directory = true
+  /-- Every recorded policy is sourced: a later state that wrote neither the authority cell
+  nor a policy source cell inherits this instead of walking every policy again. -/
+  sourced : policiesSourced config directory.directory authority.cell.logical = true
   seedExact : seedIdentity served.seed = config.expectedSeed
   logStartExact : served.logStart = config.logStart served.seed
 
@@ -74,7 +77,8 @@ def validateServed (config : Config) {store : StoreIdentity} (served : State sto
   | .error detail => .error detail
   | .ok parts =>
       let genesis := validateCore_genesis core
-      .ok ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, parts.2, genesis.1, genesis.2⟩
+      .ok ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, parts.2, validateCore_sourced core,
+        genesis.1, genesis.2⟩
 
 /-- Validation wraps exactly the state it was given. -/
 theorem validateServed_served {config : Config} {store : StoreIdentity} {served : State store}
@@ -197,6 +201,10 @@ def OpenedServed.restorage {config : Config} {store : StoreIdentity} (opened : O
     authority := opened.authority
     pins := opened.pins
     lawful := opened.lawful
+    sourced := by
+      have sourced := opened.sourced
+      simp only [policiesSourced, policySourced_eq_at, Config.profile_restorage] at sourced ⊢
+      exact sourced
     seedExact := by
       change seedIdentity opened.served.seed = config.expectedSeed
       exact opened.seedExact
@@ -259,16 +267,18 @@ def validateServedWith (config : Config) {store : StoreIdentity} (served : State
     (lawfulCheck : ServedDirectory served → Bool)
     (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawfulServed config served loaded.directory)
     (seedExact? : ExactEvidence (seedIdentity served.seed = config.expectedSeed) := none)
-    (logStartExact? : ExactEvidence (served.logStart = config.logStart served.seed) := none) :
+    (logStartExact? : ExactEvidence (served.logStart = config.logStart served.seed) := none)
+    (sourcedExact? : ExactEvidence
+      (CoreSourced config directory? authority? (·.directory) (·.cell.logical)) := none) :
     Except String (OpenedServed config store) :=
   match core : validateCore config served.seed served.logStart directory? authority? (·.directory)
       (·.cell.logical) lawfulCheck (PlatformCellDomain.recordAt config.deployment served.canonicalBytes)
-      seedExact? logStartExact? with
+      seedExact? logStartExact? sourcedExact? with
   | .error detail => .error detail
   | .ok parts =>
       let genesis := validateCore_genesis core
       .ok ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2,
-        genesis.1, genesis.2⟩
+        validateCore_sourced core, genesis.1, genesis.2⟩
 
 theorem validateServedWith_withExact_eq (config : Config) {store : StoreIdentity} (served : State store)
     (directory? : Option (ServedDirectory served))
@@ -278,9 +288,11 @@ theorem validateServedWith_withExact_eq (config : Config) {store : StoreIdentity
     (seedExact? : ExactEvidence (seedIdentity served.seed = config.expectedSeed))
     (logStartExact? : ExactEvidence (served.logStart = config.logStart served.seed))
     (directoryExact : directory? = loadServedDirectory served)
-    (authorityExact : authority? = loadServedAuthority config.deployment served) :
+    (authorityExact : authority? = loadServedAuthority config.deployment served)
+    (sourcedExact? : ExactEvidence
+      (CoreSourced config directory? authority? (·.directory) (·.cell.logical)) := none) :
     validateServedWith config served directory? authority? lawfulCheck lawfulExact
-      seedExact? logStartExact? = validateServed config served := by
+      seedExact? logStartExact? sourcedExact? = validateServed config served := by
   subst directoryExact
   subst authorityExact
   have same : lawfulCheck = fun loaded => cellsLawfulServed config served loaded.directory :=
@@ -290,6 +302,7 @@ theorem validateServedWith_withExact_eq (config : Config) {store : StoreIdentity
     (loadServedDirectory served) (loadServedAuthority config.deployment served)
     (·.directory) (·.cell.logical) (fun loaded => cellsLawfulServed config served loaded.directory)
     (PlatformCellDomain.recordAt config.deployment served.canonicalBytes) seedExact? logStartExact?
+    sourcedExact?
   unfold validateServed validateServedWith
   split <;> split <;> simp_all [sameCore]
 
@@ -342,6 +355,162 @@ theorem validateServedFrom_eq (config : Config) {earlier store : StoreIdentity}
     (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
     (loadServedDirectoryFrom_eq prior.directory served)
     (loadServedAuthorityHeld_eq prior.authority held served)
+
+/-! ## A step: the next served state, validated over the cells it wrote
+
+`validateServedStep` takes the record's written cells and the proof that every other cell kept
+its bytes (`Served.Moved`, from `Served.advance_moved`). The cell law runs on the written cells
+only, and the policy sourcing is inherited when the step wrote neither the authority cell nor a
+cell that held a policy source. `validateServedStep_eq`: it is `validateServed`. -/
+
+/-- Two served directories (of any two states) agree on the slot of a cell whose bytes agree. -/
+theorem servedSlots_eq_of_bytes {earlier store : StoreIdentity} {first : State earlier}
+    {second : State store} (left : ServedDirectory first) (right : ServedDirectory second)
+    (identifier : Nat)
+    (same : first.canonicalBytes ⟨identifier⟩ = second.canonicalBytes ⟨identifier⟩) :
+    left.directory.slots identifier = right.directory.slots identifier := by
+  have views : ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry left.directory identifier =
+      ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry right.directory identifier := by
+    have bytes := (left.bytes_exact identifier).trans (same.trans (right.bytes_exact identifier).symm)
+    have decoded := congrArg (ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry) bytes
+    rw [ResourceBirthCodec.LifecycleImage.rawDecode_bytes,
+      ResourceBirthCodec.LifecycleImage.rawDecode_bytes] at decoded
+    exact Option.some.inj decoded
+  rw [← ResourceBirthCodec.LifecycleImage.view_slot CanonicalCellRegistry.registry left.directory identifier,
+    views, ResourceBirthCodec.LifecycleImage.view_slot]
+
+/-- A served directory's cell law holds outside the enumeration: the bytes there are the
+absent default, so the slot is absent. -/
+theorem servedCellLawful_outside (config : Config) {store : StoreIdentity} {served : State store}
+    (loaded : ServedDirectory served) (identifier : Digest)
+    (member : (⟨identifier.value⟩ : DurableDataIntent.CellId) ∉ served.cellIds) :
+    cellLawful config loaded.directory identifier = true := by
+  have bytes := loaded.bytes_exact identifier.value
+  rw [served.canonicalBytes_outside _ member, loaded.absentDefault] at bytes
+  have slot := ResourceBirthCodec.LifecycleImage.view_slot CanonicalCellRegistry.registry
+    loaded.directory identifier.value
+  cases view : ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry
+      loaded.directory identifier.value with
+  | fresh =>
+      rw [view] at slot
+      unfold cellLawful
+      rw [← slot]
+      rfl
+  | retired =>
+      rw [view] at bytes
+      simp [ResourceBirthCodec.LifecycleImage.bytes] at bytes
+  | live cell =>
+      rw [view] at bytes
+      simp [ResourceBirthCodec.LifecycleImage.bytes] at bytes
+
+/-- The cell law over the cells a step wrote. -/
+def cellsLawfulStep (config : Config) {store : StoreIdentity} (served : State store)
+    (written : List DurableDataIntent.CellId) (loaded : ServedDirectory served) : Bool :=
+  written.all (cellLawful config loaded.directory)
+
+theorem cellsLawfulStep_eq (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store)
+    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
+    (loaded : ServedDirectory served) :
+    cellsLawfulStep config served written loaded = cellsLawfulServed config served loaded.directory := by
+  unfold cellsLawfulStep cellsLawfulServed
+  apply Bool.eq_iff_iff.mpr
+  simp only [List.all_eq_true]
+  constructor
+  · intro stepped identifier member
+    by_cases wrote : identifier ∈ written
+    · exact stepped identifier wrote
+    · have held := prior.cellLawful_all identifier
+      have slots := servedSlots_eq_of_bytes prior.directory loaded identifier.value
+        (moved.keeps identifier wrote).symm
+      unfold cellLawful at held ⊢
+      rwa [← slots]
+  · intro lawful identifier _
+    by_cases member : identifier ∈ served.cellIds
+    · exact lawful identifier member
+    · exact servedCellLawful_outside config loaded identifier member
+
+/-- A step wrote neither the authority cell nor a cell that held a policy source before it. -/
+def sourcesUnwritten (config : Config) {earlier : StoreIdentity} (prior : OpenedServed config earlier)
+    (written : List DurableDataIntent.CellId) : Bool :=
+  !(written.contains (CredentialAuthorityDomainReceiver.cellIdOf config.deployment)) &&
+    written.all fun identifier => holdsNoPolicySource (prior.directory.directory.slots identifier.value)
+
+theorem stepSourced_holds (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store)
+    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
+    (unwritten : sourcesUnwritten config prior written = true)
+    (loaded : ServedDirectory served) (authority : ServedAuthority config.deployment served) :
+    policiesSourced config loaded.directory authority.cell.logical = true := by
+  simp only [sourcesUnwritten, Bool.and_eq_true, Bool.not_eq_eq_eq_not, Bool.not_true,
+    List.all_eq_true] at unwritten
+  obtain ⟨notContained, noSource⟩ := unwritten
+  have noAuthority : CredentialAuthorityDomainReceiver.cellIdOf config.deployment ∉ written := by
+    intro member
+    rw [List.contains_iff_mem.mpr member] at notContained
+    cases notContained
+  have sameCell : authority.cell = prior.authority.cell := by
+    have bytes := authority.observed.symm.trans
+      ((moved.keeps _ noAuthority).trans prior.authority.observed)
+    have decoded := congrArg CredentialAuthorityDomainReceiver.decodeCell bytes
+    rw [CredentialAuthorityDomainReceiver.decodeCell_bytes,
+      CredentialAuthorityDomainReceiver.decodeCell_bytes] at decoded
+    exact Option.some.inj decoded
+  rw [sameCell]
+  apply policiesSourced_inherit config prior.directory.directory loaded.directory
+    prior.authority.cell.logical (written.map (·.value))
+  · intro identifier notWritten
+    exact (servedSlots_eq_of_bytes prior.directory loaded identifier
+      (moved.keeps ⟨identifier⟩ fun member => notWritten (List.mem_map.mpr ⟨_, member, rfl⟩)).symm).symm
+  · rw [List.all_eq_true]
+    intro identifier member
+    obtain ⟨cell, inWritten, same⟩ := List.mem_map.mp member
+    subst same
+    exact noSource cell inWritten
+  · exact prior.sourced
+
+/-- The sourcing evidence a step hands the checks: exact when it wrote no source. -/
+def stepSourced (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store)
+    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
+    (directory? : Option (ServedDirectory served))
+    (authority? : Option (ServedAuthority config.deployment served)) :
+    ExactEvidence (CoreSourced config directory? authority? (·.directory) (·.cell.logical)) :=
+  if unwritten : sourcesUnwritten config prior written = true then
+    some ⟨fun loaded authority _ _ =>
+      stepSourced_holds config prior served written moved unwritten loaded authority⟩
+  else none
+
+/-- **Validation of the state one step after a validated one**, over the cells the step
+wrote: the directory decodes only moved rows, the authority cell is the held post-cell or
+decoded only when moved, the cell law runs on the written cells, and the sourcing walk is
+inherited unless the step wrote the authority cell or a policy source. -/
+def validateServedStep (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store)
+    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
+    (held : Option HeldCell := none) : Except String (OpenedServed config store) :=
+  validateServedWith config served (loadServedDirectoryFrom prior.directory served)
+    (loadServedAuthorityHeld prior.authority held served) (cellsLawfulStep config served written)
+    (cellsLawfulStep_eq config prior served written moved)
+    (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
+    (stepSourced config prior served written moved _ _)
+
+theorem validateServedStep_eq (config : Config) {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store)
+    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
+    (held : Option HeldCell := none) :
+    validateServedStep config prior served written moved held = validateServed config served :=
+  validateServedWith_withExact_eq config served
+    (loadServedDirectoryFrom prior.directory served)
+    (loadServedAuthorityHeld prior.authority held served)
+    (cellsLawfulStep config served written)
+    (cellsLawfulStep_eq config prior served written moved)
+    (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
+    (loadServedDirectoryFrom_eq prior.directory served)
+    (loadServedAuthorityHeld_eq prior.authority held served)
+    (stepSourced config prior served written moved _ _)
+
+#assert_axioms validateServedStep_eq
 
 #assert_axioms validateServedFrom_eq
 

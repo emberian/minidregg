@@ -163,7 +163,7 @@ inductive LightResult (config : Config) (opening : DurableServed.Opening Resourc
 
 def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) :
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) :
     IO (LightResult config light.opening) := do
   let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes
     | return .rejected "noncanonical checked lifecycle completion ingress"
@@ -184,8 +184,8 @@ def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
   | some (some _) => return .rejected "checked lifecycle completion transaction identity already used"
   | some none =>
       match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening intent with
-      | .appended kind next height entry entryExact _ =>
-          adopt next none
+      | .appended kind next height entry entryExact _ moved =>
+          adopt next _ moved none
           return .confirmed ⟨ingress, grounded, conditional, notStop, fresh, kind, next, height, entry,
             entryExact⟩
       | .replayed _ => return .rejected "checked lifecycle completion transaction identity already used"

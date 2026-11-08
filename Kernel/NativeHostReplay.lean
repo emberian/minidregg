@@ -3333,6 +3333,25 @@ def advance {config : Config} (opened : Opened config) (derived : Derived config
   | .inr (.replayed _) => .error "duplicate accepted history entry"
   | .inr _ => .error "derived durable intent did not make one new commit"
 
+/-- An advance moves only the cells its intent writes (`LoadedMoved.extend`). -/
+theorem advance_moved {config : Config} {opened : Opened config} {derived : Derived config opened}
+    {next : Durable} (advanced : advance opened derived = .ok next) :
+    LoadedMoved opened.durable next (derived.intent.writes.map DurableDataIntent.DataWrite.cellId) := by
+  unfold advance at advanced
+  dsimp only at advanced
+  cases prepared : opened.durable.prepare derived.intent with
+  | inr outcome =>
+      rw [prepared] at advanced
+      cases outcome <;> first | cases advanced | simp at advanced
+  | inl ready =>
+      rw [prepared] at advanced
+      cases judged : derived.judge with
+      | error reason => rw [judged] at advanced; cases advanced
+      | ok _ =>
+          rw [judged] at advanced
+          cases advanced
+          exact LoadedMoved.extend _ ready
+
 /-- Every replayed record passed the deployment's tail law: the walk, a reopen
 and `audit` judge exactly what the receiving loop judged. -/
 theorem advance_judged {config : Config} {opened : Opened config} {derived : Derived config opened}
@@ -3703,16 +3722,17 @@ private def walk (config : Config) (opened : Opened config)
           | .error detail => return .error ⟨index, detail⟩
           | .ok next =>
             have advanced : advance opened derived = .ok next := advancedValue.property.symm.trans advancedResult
-            -- The prior prefix was just validated. Reuse unchanged decoded
-            -- rows and cell laws; the existing equality theorem preserves the
-            -- complete Opened value and every refusal of full validation.
+            -- The prior prefix was just validated. Reuse unchanged decoded rows; the cell law
+            -- and the policy sourcing look only at the cells the record wrote
+            -- (`validateLoadedStep_eq`: the complete Opened value and every refusal of full
+            -- validation).
             let post ← AuditTiming.value timing (fun _ => "post-validation")
-              (fun _ => validateLoadedFrom config opened next)
+              (fun _ => validateLoadedStep config opened next _ (advance_moved advanced))
             match incremental : post.val with
             | .error detail => return .error ⟨index, s!"native post image: {detail}"⟩
             | .ok after =>
               have validated : validateLoaded config next = .ok after :=
-                (validateLoadedFrom_eq config opened next).symm.trans
+                (validateLoadedStep_eq config opened next _ (advance_moved advanced)).symm.trans
                   (post.property.symm.trans incremental)
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
@@ -4567,6 +4587,25 @@ private def advanceCarriedIntent {config : Config} (opened : Opened config)
   | .inr (.replayed _) => .error "duplicate accepted suffix entry"
   | .inr _ => .error "carried intent did not make one new commit"
 
+private theorem advanceCarriedIntent_moved {config : Config} {opened : Opened config}
+    {intent : DataIntent rootBytes} {next : Durable}
+    (advanced : advanceCarriedIntent opened intent = .ok next) :
+    LoadedMoved opened.durable next (intent.writes.map DurableDataIntent.DataWrite.cellId) := by
+  unfold advanceCarriedIntent at advanced
+  dsimp only at advanced
+  cases prepared : opened.durable.prepare intent with
+  | inr outcome =>
+      rw [prepared] at advanced
+      cases outcome <;> first | cases advanced | simp at advanced
+  | inl ready =>
+      rw [prepared] at advanced
+      cases judged : opened.durable.judge config.transport (.ordinary intent) with
+      | error reason => rw [judged] at advanced; cases advanced
+      | ok _ =>
+          rw [judged] at advanced
+          cases advanced
+          exact LoadedMoved.extend _ ready
+
 /-- A carried origin never supplies a stored post snapshot. Ordinary steps
 retain exactly their existing executor; both carried cases execute their real
 admission-produced intents through the shared durable installer. -/
@@ -4576,6 +4615,15 @@ def advanceSuffix {config : Config} (opened : Opened config)
   | .ordinary ordinary => advance opened ordinary
   | .carriedEnrollment _ admitted => advanceCarriedIntent opened admitted.intent
   | .carriedDispatch _ admitted => advanceCarriedIntent opened admitted.intent
+
+theorem advanceSuffix_moved {config : Config} {opened : Opened config}
+    {derived : SuffixDerived config opened} {next : Durable}
+    (advanced : advanceSuffix opened derived = .ok next) :
+    LoadedMoved opened.durable next (derived.intent.writes.map DurableDataIntent.DataWrite.cellId) := by
+  cases derived with
+  | ordinary ordinary => exact advance_moved advanced
+  | carriedEnrollment _ admitted => exact advanceCarriedIntent_moved advanced
+  | carriedDispatch _ admitted => exact advanceCarriedIntent_moved advanced
 
 /-- Every step contains an actual typed admission, complete expected-record
 comparison, exact executor successor, target validation and original receipt. -/
@@ -4861,11 +4909,11 @@ private def walkSuffix (config : Config) (anchor : Opened config)
         match advanced : advanceSuffix opened derived with
         | .error detail => return .error ⟨index, detail⟩
         | .ok next =>
-          match incremental : validateLoadedFrom config opened next with
+          match incremental : validateLoadedStep config opened next _ (advanceSuffix_moved advanced) with
           | .error detail => return .error ⟨index, s!"suffix native post image: {detail}"⟩
           | .ok after =>
             have validated : validateLoaded config next = .ok after :=
-              (validateLoadedFrom_eq config opened next).symm.trans incremental
+              (validateLoadedStep_eq config opened next _ (advanceSuffix_moved advanced)).symm.trans incremental
             let receipt : NativeHostCodec.Receipt :=
               ⟨derived.intent.transactionId, derived.intent.event.eventId, index + 1, next.worldRoot⟩
             match suffixContextAfter config opened after context record receipt derived matched with

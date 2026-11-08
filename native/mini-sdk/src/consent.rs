@@ -504,8 +504,11 @@ pub fn daemonize() -> Result<bool> {
 /// Hold one provider for this binding and serve its frames on the binding's socket in `dir`
 /// until the provider ends, the binding is superseded, or (`Some(idle)` only) no frame arrives
 /// for `idle`. Exits at once (Ok) when another resident provider holds the binding.
-/// How often a resident looks at the Store's head marker for records it has not admitted.
+/// How often a resident looks at the Store's head marker for records it has not admitted, where
+/// it cannot be woken by the marker's directory changing ([`HeadWatch::wait`]).
 pub const CATCH_UP_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+/// The longest a woken watch waits between looks: a missed wake costs at most this.
+pub const CATCH_UP_WATCHED: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The Store's head as a file that moves on every append: the helper renames a new
 /// `STORE.head-anchor` into place after each committed entry (`hyperdocument-link-sqlite-store`
@@ -513,11 +516,15 @@ pub const CATCH_UP_POLL: std::time::Duration = std::time::Duration::from_millis(
 /// a resident should admit to the head now: when the marker's identity differs from the last one
 /// seen (the first look always does), or, where the marker cannot be read (no `storageRoot`, or
 /// the directory is not traversable by this user), once a second; a catch-up with nothing new
-/// costs one Store read.
+/// costs one Store read. `wait` returns when the marker's directory gains an entry (Linux:
+/// inotify on the rename that installs a new marker), so a resident admits a record the moment it
+/// lands, not at its next poll; elsewhere it sleeps [`CATCH_UP_POLL`].
 pub struct HeadWatch {
     marker: Option<PathBuf>,
     seen: Option<(u64, u64, u64, i64, i64, i64, i64)>,
     looked: Option<std::time::Instant>,
+    #[cfg(target_os = "linux")]
+    notify: Option<std::os::fd::OwnedFd>,
 }
 
 impl HeadWatch {
@@ -526,7 +533,30 @@ impl HeadWatch {
             .and_then(|v| v.get("storageRoot").and_then(|r| r.as_str()).map(PathBuf::from))
             .filter(|root| root.is_absolute())
             .map(|root| { let mut name = root.into_os_string(); name.push(".head-anchor"); PathBuf::from(name) });
-        Self { marker, seen: None, looked: None }
+        #[cfg(target_os = "linux")]
+        let notify = marker.as_ref().and_then(|m| m.parent()).and_then(watch_directory);
+        Self {
+            marker,
+            seen: None,
+            looked: None,
+            #[cfg(target_os = "linux")]
+            notify,
+        }
+    }
+
+    /// Wait until the head marker may have moved: at most [`CATCH_UP_WATCHED`] where its directory
+    /// is watched (woken by any entry renamed or created there), else [`CATCH_UP_POLL`].
+    pub fn wait(&mut self) {
+        #[cfg(target_os = "linux")]
+        if let Some(fd) = &self.notify {
+            use std::os::fd::AsRawFd;
+            let mut ready = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            unsafe { libc::poll(&mut ready, 1, CATCH_UP_WATCHED.as_millis() as i32) };
+            let mut events = [0u8; 4096];
+            while unsafe { libc::read(fd.as_raw_fd(), events.as_mut_ptr().cast(), events.len()) } > 0 {}
+            return;
+        }
+        std::thread::sleep(CATCH_UP_POLL);
     }
 
     pub fn moved(&mut self) -> bool {
@@ -543,6 +573,22 @@ impl HeadWatch {
         }
         moved
     }
+}
+
+/// An inotify descriptor on `directory` for entries renamed into it or created in it (the helper
+/// renames each new head marker into place), or None where it cannot be watched.
+#[cfg(target_os = "linux")]
+fn watch_directory(directory: &Path) -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(directory.as_os_str().as_bytes()).ok()?;
+    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+    if fd < 0 {
+        return None;
+    }
+    let owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+    let watch = unsafe { libc::inotify_add_watch(fd, path.as_ptr(), libc::IN_MOVED_TO | libc::IN_CREATE) };
+    (watch >= 0).then_some(owned)
 }
 
 /// Admit the Store up to its head on the resident's provider and retain the anchor. The provider
@@ -649,7 +695,7 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
                 if watch.moved() {
                     catch_up(&shared, &ended);
                 }
-                std::thread::sleep(CATCH_UP_POLL);
+                watch.wait();
             }
         });
     }
@@ -1035,6 +1081,31 @@ pub fn connect_codec_service(socket: &Path, peer_uid: u32, expected: &[u8], exec
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    /// A watched head marker wakes its waiter when the helper renames a new marker into place,
+    /// long before the fallback timeout, and the next look sees it moved.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_head_watch_wakes_on_the_marker_rename() {
+        let dir = stub_dir("headwatch");
+        let root = dir.join("node");
+        let settings = serde_json::to_vec(&json!({ "storageRoot": root })).unwrap();
+        let mut watch = HeadWatch::new(&settings);
+        assert!(watch.notify.is_some());
+        let _ = watch.moved();
+        let marker = dir.join("node.head-anchor");
+        let staged = dir.join("node.head-anchor.new");
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            fs::write(&staged, b"h1").unwrap();
+            fs::rename(&staged, &marker).unwrap();
+        });
+        let started = std::time::Instant::now();
+        watch.wait();
+        writer.join().unwrap();
+        assert!(started.elapsed() < CATCH_UP_WATCHED / 2, "woke after {:?}", started.elapsed());
+        assert!(watch.moved());
+    }
 
     /// A resident started while its caller holds an fd (a `flock` wrapper's lock, a journey's pipe)
     /// must not inherit it, or the resident keeps the caller's lock for as long as it lives.
