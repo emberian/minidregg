@@ -892,6 +892,28 @@ def advance (served : Served rootBytes store) {head : Head store} {keys : Keys}
       exact served.outsideAbsent cellId notOld,
     DurableCheckpoint.nodup_eraseDups _⟩
 
+/-- What a later served state may have changed relative to an earlier one: outside `written`
+every cell keeps its canonical bytes. A step's validation needs to look only at `written`. -/
+structure Moved {store store' : StoreIdentity} (before : Served rootBytes store)
+    (after : Served rootBytes store') (written : List CellId) : Prop where
+  keeps : ∀ cellId, cellId ∉ written → after.canonicalBytes cellId = before.canonicalBytes cellId
+
+/-- One accepted record moves only the cells it writes. -/
+theorem advance_moved (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
+    (next : DataSnapshot rootBytes)
+    (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
+    (chain worldRoot : Digest) :
+    Moved served (served.advance footprint intent next executed chain worldRoot)
+      (intent.writes.map DataWrite.cellId) where
+  keeps cellId unwritten := by
+    show (served.held.install intent).bytesOf cellId = served.held.bytesOf cellId
+    rw [← (Held.install_agrees (served.agrees_viewAt footprint) intent).bytes]
+    show (DurableDataIntent.DataSnapshot.lookupPostBytes cellId intent.writes).getD
+      ((served.viewAt footprint).canonicalBytes cellId) = _
+    rw [DurableReceiver.lookupPostBytes_missing intent.writes cellId unwritten]
+    rfl
+
 /-- **The served state after an accepted record is the executor's**: its held
 state agrees with the snapshot `execute` accepted (`Held.install_agrees`). -/
 theorem advance_agrees (served : Served rootBytes store) {head : Head store} {keys : Keys}
@@ -1486,6 +1508,9 @@ inductive Received (rootBytes : List UInt8 → Digest) (opening : Opening rootBy
       -- not a readback after `.alreadyPresent` or an uncertain response; the one-shot launch power
       -- of a claim reservation goes only to such a winner.
       (fresh : Bool)
+      -- Every cell the record did not write keeps its bytes (`Served.advance_moved`): the
+      -- session validates the next state over the written cells only.
+      (moved : Served.Moved opening.served next.served (intent.writes.map DataWrite.cellId))
   /-- The transaction was already accepted: its verified record. -/
   | replayed (recorded : Intent TransactionId CellId StableNullifier ReplayEnvelope)
   | rejected (reason : DurableDataIntent.RejectReason)
@@ -1572,6 +1597,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                         by rw [rootsEq]; exact roots.2, sealedAt, worldAfter⟩
                       (by rw [fields.1, ← opening.heightExact]) entry
                       (DurableHistory.toByteArray_toList _) fresh
+                      (served.advance_moved footprint intent next executed chain worldRoot)
       match ← transport.append height entry nodes with
       | .installed => confirm .installed true
       | .alreadyPresent => confirm .installed false
@@ -1597,6 +1623,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
 #assert_axioms Held.ofSnapshot_agrees
 #assert_axioms Served.advance_agrees
 #assert_axioms Served.advance_roots
+#assert_axioms Served.advance_moved
 #assert_axioms Served.ofLoaded_roots
 #assert_axioms Served.bare_viewAt_ofLoaded
 #assert_axioms Served.ofStateAt_canonicalBytes

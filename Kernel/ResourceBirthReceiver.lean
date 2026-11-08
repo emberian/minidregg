@@ -775,8 +775,10 @@ def receiveServed
     (basisOf : DurableView.Keys →
       IO (Except String (Minidregg.Compiler.ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
-    (adopt : DurableServed.Opening rootBytes → Option Minidregg.Compiler.CredentialAuthorityServed.HeldCell → IO Unit :=
-      fun _ _ => pure ()) : IO Result := do
+    (adopt : (next : DurableServed.Opening rootBytes) → (written : List DurableDataIntent.CellId) →
+      DurableServed.Served.Moved opening.served next.served written →
+      Option Minidregg.Compiler.CredentialAuthorityServed.HeldCell → IO Unit :=
+      fun _ _ _ _ => pure ()) : IO Result := do
   match decodeIngress bytes with
   | none => return .rejected .malformedIngress
   | some ingress =>
@@ -795,7 +797,7 @@ def receiveServed
               | .ok accepted =>
                   let issued := receipt deployment.domain ingress
                   match ← DurableServed.receiveServed transport rootBytes opening (intent accepted) with
-                  | .appended kind next .. => do adopt next (some (Minidregg.Compiler.CredentialAuthorityServed.HeldCell.ofCell accepted.prepared.grants.post)); return .confirmed kind issued
+                  | .appended kind next _ _ _ _ moved => do adopt next _ moved (some (Minidregg.Compiler.CredentialAuthorityServed.HeldCell.ofCell accepted.prepared.grants.post)); return .confirmed kind issued
                   | .replayed _ => return .confirmed .replayed issued
                   | .rejected reason => return .rejected (.durable reason)
                   | .contention => return .contention

@@ -505,7 +505,7 @@ def policiesSourced (config : Config) (directory : Directory Nat CanonicalCellRe
 /-- `policySourced` against a given semantics digest. The profile's digest is a
 hash of the runtime manifest, recomputed at every call, so `policiesSourced`
 computes it once (`policiesSourced_eq_once`) rather than once per recorded policy. -/
-def policySourcedAt (config : Config) (semantics : Digest)
+def policySourcedAt (domain semantics : Digest)
     (directory : Directory Nat CanonicalCellRegistry.registry)
     (logical : Store.Store CredentialAuthorityState.layout) :
     Store.Address CredentialAuthorityState.layout → Bool
@@ -513,7 +513,7 @@ def policySourcedAt (config : Config) (semantics : Digest)
       match CredentialAuthorityDomain.headAt logical identifier with
       | none => false
       | some head =>
-          match CanonicalCellRegistry.loadPolicySource config.deployment.domain directory head.address with
+          match CanonicalCellRegistry.loadPolicySource domain directory head.address with
           | none => false
           | some source => decide (source.record.policyId = identifier ∧
               source.record.version = head.version ∧ source.record.semantics = semantics)
@@ -522,19 +522,26 @@ def policySourcedAt (config : Config) (semantics : Digest)
 theorem policySourced_eq_at (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
     (logical : Store.Store CredentialAuthorityState.layout) :
     policySourced config directory logical =
-      policySourcedAt config config.profile.semantics directory logical := by
+      policySourcedAt config.deployment.domain config.profile.semantics directory logical := by
   funext address
   rcases address with ⟨kind, identifier⟩
-  cases kind <;> rfl
+  cases kind
+  all_goals try rfl
+  simp only [policySourced, policySourcedAt]
+  cases CredentialAuthorityDomain.headAt logical identifier with
+  | none => rfl
+  | some head =>
+      simp only
+      cases CanonicalCellRegistry.loadPolicySource config.deployment.domain directory head.address <;> rfl
 
-@[noinline] def policiesSourcedAt (config : Config) (semantics : Digest)
+@[noinline] def policiesSourcedAt (domain semantics : Digest)
     (directory : Directory Nat CanonicalCellRegistry.registry)
     (logical : Store.Store CredentialAuthorityState.layout) : Bool :=
-  decide (∀ address ∈ logical.support, policySourcedAt config semantics directory logical address = true)
+  decide (∀ address ∈ logical.support, policySourcedAt domain semantics directory logical address = true)
 
 def policiesSourcedOnce (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
     (logical : Store.Store CredentialAuthorityState.layout) : Bool :=
-  policiesSourcedAt config config.profile.semantics directory logical
+  policiesSourcedAt config.deployment.domain config.profile.semantics directory logical
 
 @[csimp] theorem policiesSourced_eq_once : @policiesSourced = @policiesSourcedOnce := by
   funext config directory logical
@@ -542,6 +549,117 @@ def policiesSourcedOnce (config : Config) (directory : Directory Nat CanonicalCe
   rw [policySourced_eq_at]
 
 #assert_axioms policiesSourced_eq_once
+
+/-- A slot that holds no policy source cell. -/
+def holdsNoPolicySource : CellSlot CanonicalCellRegistry.registry → Bool
+  | .present ⟨.policySource, _⟩ => false
+  | _ => true
+
+theorem loadPolicySource_some_present {domain : Digest}
+    {directory : Directory Nat CanonicalCellRegistry.registry} {address : Digest}
+    {source : CanonicalCellRegistry.LoadedPolicySource domain directory address}
+    (_loaded : CanonicalCellRegistry.loadPolicySource domain directory address = some source) :
+    holdsNoPolicySource (directory.slots (PolicySourceCell.physicalId domain address)) = false := by
+  rw [source.present]; rfl
+
+/-- The record a slot's policy source cell holds for `address` in `domain`, if it is one. -/
+def sourceRecordAt (domain address : Digest) :
+    CellSlot CanonicalCellRegistry.registry → Option CanonicalPolicyAdmission.PolicyRecord
+  | .present ⟨.policySource, payload⟩ =>
+      match PolicySourceCell.recordAt payload.logical with
+      | none => none
+      | some record =>
+          if record.domain = domain ∧ CanonicalCellRegistry.sourceDigestCached payload record = address then
+            some record else none
+  | _ => none
+
+theorem loadPolicySource_record (domain : Digest)
+    (directory : Directory Nat CanonicalCellRegistry.registry) (address : Digest) :
+    (CanonicalCellRegistry.loadPolicySource domain directory address).map (·.record) =
+      sourceRecordAt domain address (directory.slots (PolicySourceCell.physicalId domain address)) := by
+  unfold CanonicalCellRegistry.loadPolicySource
+  split
+  · rename_i payload heq
+    rw [show sourceRecordAt domain address (directory.slots (PolicySourceCell.physicalId domain address)) =
+        sourceRecordAt domain address (.present ⟨.policySource, payload⟩) from congrArg _ heq]
+    simp only [sourceRecordAt]
+    split
+    · rename_i found
+      simp only [found, Option.map_none]
+    · rename_i record found
+      simp only [found]
+      split <;> rfl
+  · rename_i other
+    cases slot : directory.slots (PolicySourceCell.physicalId domain address) with
+    | absent => rfl
+    | present cell =>
+        obtain ⟨kind, payload⟩ := cell
+        cases kind
+        all_goals first
+          | rfl
+          | exact absurd slot (other payload)
+
+theorem loadPolicySource_records_eq (domain : Digest)
+    (before after : Directory Nat CanonicalCellRegistry.registry) (address : Digest)
+    (same : after.slots (PolicySourceCell.physicalId domain address) =
+      before.slots (PolicySourceCell.physicalId domain address)) :
+    (CanonicalCellRegistry.loadPolicySource domain after address).map (·.record) =
+      (CanonicalCellRegistry.loadPolicySource domain before address).map (·.record) := by
+  rw [loadPolicySource_record, loadPolicySource_record, same]
+
+/-- **A policy's sourcing survives a step that wrote no policy source cell**: the verdict
+reads the directory only at the source cell its head names, which (being a source cell
+before) was not written, so it holds the same record after. -/
+theorem policySourced_inherit (config : Config)
+    (before after : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) (written : List Nat)
+    (keeps : ∀ identifier, identifier ∉ written → after.slots identifier = before.slots identifier)
+    (fresh : ∀ identifier ∈ written, holdsNoPolicySource (before.slots identifier) = true)
+    (address : Store.Address CredentialAuthorityState.layout)
+    (prior : policySourced config before logical address = true) :
+    policySourced config after logical address = true := by
+  rcases address with ⟨kind, identifier⟩
+  cases kind
+  all_goals try rfl
+  unfold policySourced at prior ⊢
+  cases found : CredentialAuthorityDomain.headAt logical identifier with
+  | none => simp only [found] at prior; cases prior
+  | some head =>
+      simp only [found] at prior ⊢
+      cases loadedBefore : CanonicalCellRegistry.loadPolicySource config.deployment.domain before head.address with
+      | none => simp only [loadedBefore] at prior; cases prior
+      | some source =>
+          simp only [loadedBefore] at prior
+          have unwritten : PolicySourceCell.physicalId config.deployment.domain head.address ∉ written := by
+            intro member
+            have none := fresh _ member
+            rw [loadPolicySource_some_present loadedBefore] at none
+            cases none
+          have records := loadPolicySource_records_eq config.deployment.domain before after head.address
+            (keeps _ unwritten)
+          cases loadedAfter : CanonicalCellRegistry.loadPolicySource config.deployment.domain after head.address with
+          | none => rw [loadedAfter, loadedBefore] at records; cases records
+          | some source' =>
+              rw [loadedAfter, loadedBefore] at records
+              simp only [Option.map_some, Option.some.injEq] at records
+              simp only
+              rw [records]
+              exact prior
+
+theorem policiesSourced_inherit (config : Config)
+    (before after : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) (written : List Nat)
+    (keeps : ∀ identifier, identifier ∉ written → after.slots identifier = before.slots identifier)
+    (fresh : (written.all fun identifier => holdsNoPolicySource (before.slots identifier)) = true)
+    (prior : policiesSourced config before logical = true) :
+    policiesSourced config after logical = true := by
+  unfold policiesSourced at prior ⊢
+  rw [decide_eq_true_iff] at prior ⊢
+  intro address member
+  exact policySourced_inherit config before after logical written keeps
+    (fun identifier inWritten => List.all_eq_true.mp fresh identifier inWritten) address (prior address member)
+
+#assert_axioms policiesSourced_inherit
 
 /-- One stored cell obeys its role and domain law (vacuous for an absent slot). -/
 def cellLawful (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
@@ -576,6 +694,9 @@ structure Opened (config : Config) where
   /-- The cell-law check this image passed; a later image of the same session
   re-checks only the cells whose bytes moved (`cellsLawfulFrom`). -/
   lawful : cellsLawful config durable directory.directory = true
+  /-- Every recorded policy is sourced: a later image that wrote neither the authority cell
+  nor a policy source cell inherits this instead of walking every policy again. -/
+  sourced : policiesSourced config directory.directory authority.snapshot.logical = true
   /-- The two whole-genesis checks this image passed. A later image with the
   same seed and log start reuses these instead of encoding and hashing it again. -/
   seedExact : seedIdentity durable.image.seed = config.expectedSeed
@@ -591,6 +712,10 @@ def Opened.restorage {config : Config} (opened : Opened config)
     authority := opened.authority
     pins := opened.pins
     lawful := opened.lawful
+    sourced := by
+      have sourced := opened.sourced
+      simp only [policiesSourced, policySourced_eq_at, Config.profile_restorage] at sourced ⊢
+      exact sourced
     seedExact := by
       change seedIdentity opened.durable.image.seed = config.expectedSeed
       exact opened.seedExact
@@ -611,6 +736,7 @@ structure Validated (config : Config) (durable : Durable) where
   authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot
   pins : FactoryPins
   lawful : cellsLawful config durable directory.directory = true
+  sourced : policiesSourced config directory.directory authority.snapshot.logical = true
   seedExact : seedIdentity durable.image.seed = config.expectedSeed
   logStartExact : durable.logStart = config.logStart durable.image.seed
 
@@ -648,6 +774,12 @@ private def validateLogChain (config : Config) (seed : DurableReceiver.Seed) (lo
   | some _ => pure ()
   | none => check (logStart == config.logStart seed) "log chain not rooted at this deployment's genesis"
 
+/-- Every recorded policy is sourced, for whichever directory and authority store decoded. -/
+def SourcedAt (config : Config) (directory? : Option (Directory Nat CanonicalCellRegistry.registry))
+    (logical? : Option (Store.Store CredentialAuthorityState.layout)) : Prop :=
+  ∀ directory logical, directory? = some directory → logical? = some logical →
+    policiesSourced config directory logical = true
+
 /-- The checks every opened state passes, over its seed, its log start, its
 decoded directory, its authority cell's logical store and its cell-law verdict
 (`none` where the directory did not decode). Shared by the full shape
@@ -659,7 +791,8 @@ def validateChecks (config : Config) (seed : DurableReceiver.Seed) (logStart : D
     (logical? : Option (Store.Store CredentialAuthorityState.layout)) (lawful? : Option Bool)
     (platform? : Option PlatformCellLayout.Platform)
     (seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed) := none)
-    (logStartExact? : ExactEvidence (logStart = config.logStart seed) := none) :
+    (logStartExact? : ExactEvidence (logStart = config.logStart seed) := none)
+    (sourcedExact? : ExactEvidence (SourcedAt config directory? logical?) := none) :
     Except String FactoryPins := do
   let _ ← validateGenesisPrefix config seed seedExact?
   let _ ← validateLogChain config seed logStart logStartExact?
@@ -667,7 +800,9 @@ def validateChecks (config : Config) (seed : DurableReceiver.Seed) (logStart : D
   let logical ← need "complete deployment authority unavailable" logical?
   let lawful ← need "noncanonical native directory" lawful?
   check lawful "native cell role or domain law refused"
-  check (policiesSourced config directory logical) "selected policy source/profile mismatch"
+  match sourcedExact? with
+  | some _ => pure ()
+  | none => check (policiesSourced config directory logical) "selected policy source/profile mismatch"
   let factoryHead ← need "factory policy head unavailable"
     (CredentialAuthorityDomain.headAt logical ⟨config.deployment.factoryId⟩)
   pure
@@ -705,6 +840,35 @@ theorem validateChecks_withExact_eq (config : Config) (seed : DurableReceiver.Se
       | some logStartExact =>
           obtain ⟨sameStart⟩ := logStartExact
           simp only [validateChecks, validateGenesisPrefix, validateLogChain, sameSeed, sameStart, beq_self_eq_true, check, if_true, pure, Except.pure]
+
+/-- Exact evidence that every recorded policy is sourced skips only the sourcing walk, which
+was guaranteed to pass; every other check and refusal is unchanged. -/
+theorem validateChecks_withSourced_eq (config : Config) (seed : DurableReceiver.Seed)
+    (logStart : Digest) (directory? : Option (Directory Nat CanonicalCellRegistry.registry))
+    (logical? : Option (Store.Store CredentialAuthorityState.layout)) (lawful? : Option Bool)
+    (platform? : Option PlatformCellLayout.Platform)
+    (seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed))
+    (logStartExact? : ExactEvidence (logStart = config.logStart seed))
+    (sourcedExact? : ExactEvidence (SourcedAt config directory? logical?)) :
+    validateChecks config seed logStart directory? logical? lawful? platform?
+        seedExact? logStartExact? sourcedExact? =
+      validateChecks config seed logStart directory? logical? lawful? platform?
+        seedExact? logStartExact? := by
+  cases sourcedExact? with
+  | none => rfl
+  | some evidence =>
+      obtain ⟨sourced⟩ := evidence
+      cases directory? with
+      | none => rfl
+      | some directory =>
+          cases logical? with
+          | none => rfl
+          | some logical =>
+              have passes := sourced directory logical rfl rfl
+              cases validateGenesisPrefix config seed seedExact? <;>
+                cases validateLogChain config seed logStart logStartExact? <;>
+                cases lawful? <;>
+                simp [validateChecks, check, need, passes, bind, Except.bind, pure, Except.pure, *]
 
 private theorem except_bind_ok {α β : Type} {value : Except String α}
     {continuation : α → Except String β} {result : β}
@@ -764,14 +928,76 @@ theorem validateChecks_genesis {config : Config} {seed : DurableReceiver.Seed}
     {logical? : Option (Store.Store CredentialAuthorityState.layout)} {lawful? : Option Bool}
     {platform? : Option PlatformCellLayout.Platform}
     {seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed)}
-    {logStartExact? : ExactEvidence (logStart = config.logStart seed)} {pins : FactoryPins}
+    {logStartExact? : ExactEvidence (logStart = config.logStart seed)}
+    {sourcedExact? : ExactEvidence (SourcedAt config directory? logical?)} {pins : FactoryPins}
     (validated : validateChecks config seed logStart directory? logical? lawful? platform?
-      seedExact? logStartExact? = .ok pins) :
+      seedExact? logStartExact? sourcedExact? = .ok pins) :
     seedIdentity seed = config.expectedSeed ∧ logStart = config.logStart seed := by
   have checked : validateChecks config seed logStart directory? logical? lawful? platform? = .ok pins :=
     (validateChecks_withExact_eq config seed logStart directory? logical? lawful? platform?
-      seedExact? logStartExact?).symm.trans validated
+      seedExact? logStartExact?).symm.trans
+      ((validateChecks_withSourced_eq config seed logStart directory? logical? lawful? platform?
+        seedExact? logStartExact? sourcedExact?).symm.trans validated)
   exact validateChecks_genesis_checked checked
+
+/-- Successful validation passed the sourcing check (or was handed it exactly). -/
+theorem validateChecks_sourced {config : Config} {seed : DurableReceiver.Seed}
+    {logStart : Digest} {directory? : Option (Directory Nat CanonicalCellRegistry.registry)}
+    {logical? : Option (Store.Store CredentialAuthorityState.layout)} {lawful? : Option Bool}
+    {platform? : Option PlatformCellLayout.Platform}
+    {seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed)}
+    {logStartExact? : ExactEvidence (logStart = config.logStart seed)}
+    {sourcedExact? : ExactEvidence (SourcedAt config directory? logical?)} {pins : FactoryPins}
+    (validated : validateChecks config seed logStart directory? logical? lawful? platform?
+      seedExact? logStartExact? sourcedExact? = .ok pins) :
+    SourcedAt config directory? logical? := by
+  have checked : validateChecks config seed logStart directory? logical? lawful? platform? = .ok pins :=
+    (validateChecks_withExact_eq config seed logStart directory? logical? lawful? platform?
+      seedExact? logStartExact?).symm.trans
+      ((validateChecks_withSourced_eq config seed logStart directory? logical? lawful? platform?
+        seedExact? logStartExact? sourcedExact?).symm.trans validated)
+  intro directory logical isDirectory isLogical
+  subst isDirectory isLogical
+  cases sourced : policiesSourced config directory logical
+  · exfalso
+    simp only [validateChecks] at checked
+    generalize validateGenesisPrefix config seed none = genesisOk at checked
+    generalize validateLogChain config seed logStart none = chainOk at checked
+    cases genesisOk <;> cases chainOk <;> rcases lawful? with _ | _ | _ <;>
+      simp [validateChecks, check, need, sourced, bind, Except.bind, pure, Except.pure] at checked
+  · rfl
+
+/-- Every recorded policy is sourced, over a typed directory and authority. -/
+def CoreSourced {D A : Type} (config : Config) (directory? : Option D) (authority? : Option A)
+    (directoryOf : D → Directory Nat CanonicalCellRegistry.registry)
+    (logicalOf : A → Store.Store CredentialAuthorityState.layout) : Prop :=
+  ∀ directory authority, directory? = some directory → authority? = some authority →
+    policiesSourced config (directoryOf directory) (logicalOf authority) = true
+
+theorem CoreSourced.sourcedAt {D A : Type} {config : Config} {directory? : Option D}
+    {authority? : Option A} {directoryOf : D → Directory Nat CanonicalCellRegistry.registry}
+    {logicalOf : A → Store.Store CredentialAuthorityState.layout}
+    (sourced : CoreSourced config directory? authority? directoryOf logicalOf) :
+    SourcedAt config (directory?.map directoryOf) (authority?.map logicalOf) := by
+  intro directory logical isDirectory isLogical
+  cases directory? with
+  | none => cases isDirectory
+  | some loaded =>
+      cases authority? with
+      | none => cases isLogical
+      | some authority =>
+          simp only [Option.map_some, Option.some.injEq] at isDirectory isLogical
+          subst isDirectory isLogical
+          exact sourced loaded authority rfl rfl
+
+def CoreSourced.lift {D A : Type} {config : Config} {directory? : Option D}
+    {authority? : Option A} {directoryOf : D → Directory Nat CanonicalCellRegistry.registry}
+    {logicalOf : A → Store.Store CredentialAuthorityState.layout}
+    (sourcedExact? : ExactEvidence (CoreSourced config directory? authority? directoryOf logicalOf)) :
+    ExactEvidence (SourcedAt config (directory?.map directoryOf) (authority?.map logicalOf)) :=
+  match sourcedExact? with
+  | some evidence => some ⟨evidence.down.sourcedAt⟩
+  | none => none
 
 /-- `validateChecks` over a typed directory and authority, keeping them and the
 cell-law proof. -/
@@ -781,10 +1007,11 @@ def validateCore {D A : Type} (config : Config) (seed : DurableReceiver.Seed) (l
     (logicalOf : A → Store.Store CredentialAuthorityState.layout)
     (lawfulCheck : D → Bool) (platform? : Option PlatformCellLayout.Platform)
     (seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed) := none)
-    (logStartExact? : ExactEvidence (logStart = config.logStart seed) := none) :
+    (logStartExact? : ExactEvidence (logStart = config.logStart seed) := none)
+    (sourcedExact? : ExactEvidence (CoreSourced config directory? authority? directoryOf logicalOf) := none) :
     Except String {parts : D × A × FactoryPins // lawfulCheck parts.1 = true} := do
   let pins ← validateChecks config seed logStart (directory?.map directoryOf) (authority?.map logicalOf)
-    (directory?.map lawfulCheck) platform? seedExact? logStartExact?
+    (directory?.map lawfulCheck) platform? seedExact? logStartExact? (CoreSourced.lift sourcedExact?)
   let directory ← need "noncanonical native directory" directory?
   let authority ← need "complete deployment authority unavailable" authority?
   if checked : lawfulCheck directory = true then pure ⟨(directory, authority, pins), checked⟩
@@ -797,15 +1024,51 @@ theorem validateCore_genesis {D A : Type} {config : Config} {seed : DurableRecei
     {platform? : Option PlatformCellLayout.Platform}
     {seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed)}
     {logStartExact? : ExactEvidence (logStart = config.logStart seed)}
+    {sourcedExact? : ExactEvidence (CoreSourced config directory? authority? directoryOf logicalOf)}
     {parts : {parts : D × A × FactoryPins // lawfulCheck parts.1 = true}}
     (validated : validateCore config seed logStart directory? authority? directoryOf logicalOf
-      lawfulCheck platform? seedExact? logStartExact? = .ok parts) :
+      lawfulCheck platform? seedExact? logStartExact? sourcedExact? = .ok parts) :
     seedIdentity seed = config.expectedSeed ∧ logStart = config.logStart seed := by
   unfold validateCore at validated
   cases checked : validateChecks config seed logStart (directory?.map directoryOf)
-      (authority?.map logicalOf) (directory?.map lawfulCheck) platform? seedExact? logStartExact? with
+      (authority?.map logicalOf) (directory?.map lawfulCheck) platform? seedExact? logStartExact?
+      (CoreSourced.lift sourcedExact?) with
   | error detail => simp [checked, bind, Except.bind] at validated
   | ok pins => exact validateChecks_genesis checked
+
+/-- A validated core's directory and authority passed the sourcing check. -/
+theorem validateCore_sourced {D A : Type} {config : Config} {seed : DurableReceiver.Seed}
+    {logStart : Digest} {directory? : Option D} {authority? : Option A}
+    {directoryOf : D → Directory Nat CanonicalCellRegistry.registry}
+    {logicalOf : A → Store.Store CredentialAuthorityState.layout} {lawfulCheck : D → Bool}
+    {platform? : Option PlatformCellLayout.Platform}
+    {seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed)}
+    {logStartExact? : ExactEvidence (logStart = config.logStart seed)}
+    {sourcedExact? : ExactEvidence (CoreSourced config directory? authority? directoryOf logicalOf)}
+    {parts : {parts : D × A × FactoryPins // lawfulCheck parts.1 = true}}
+    (validated : validateCore config seed logStart directory? authority? directoryOf logicalOf
+      lawfulCheck platform? seedExact? logStartExact? sourcedExact? = .ok parts) :
+    policiesSourced config (directoryOf parts.1.1) (logicalOf parts.1.2.1) = true := by
+  unfold validateCore at validated
+  cases checked : validateChecks config seed logStart (directory?.map directoryOf)
+      (authority?.map logicalOf) (directory?.map lawfulCheck) platform? seedExact? logStartExact?
+      (CoreSourced.lift sourcedExact?) with
+  | error detail => simp [checked, bind, Except.bind] at validated
+  | ok pins =>
+      have sourced := validateChecks_sourced checked
+      rw [checked] at validated
+      cases directory? with
+      | none => simp [bind, Except.bind, need] at validated
+      | some directory =>
+          cases authority? with
+          | none => simp [bind, Except.bind, need] at validated
+          | some authority =>
+              simp only [bind, Except.bind, need, pure, Except.pure] at validated
+              split at validated
+              · simp only [Except.ok.injEq] at validated
+                subst validated
+                exact sourced _ _ rfl rfl
+              · cases validated
 
 /-- `validateCore` as compiled: the cell-law check runs once, its verdict shared
 by `validateChecks` and the returned proof (`validateCore` maps it into the
@@ -816,32 +1079,34 @@ def validateCoreFast {D A : Type} (config : Config) (seed : DurableReceiver.Seed
     (logicalOf : A → Store.Store CredentialAuthorityState.layout)
     (lawfulCheck : D → Bool) (platform? : Option PlatformCellLayout.Platform)
     (seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed) := none)
-    (logStartExact? : ExactEvidence (logStart = config.logStart seed) := none) :
+    (logStartExact? : ExactEvidence (logStart = config.logStart seed) := none)
+    (sourcedExact? : ExactEvidence (CoreSourced config directory? authority? directoryOf logicalOf) := none) :
     Except String {parts : D × A × FactoryPins // lawfulCheck parts.1 = true} :=
-  match directory? with
-  | none => do
+  match directory?, sourcedExact? with
+  | none, _ => do
       let _ ← validateChecks config seed logStart none (authority?.map logicalOf) none platform?
         seedExact? logStartExact?
       need "noncanonical native directory" none
-  | some directory =>
+  | some directory, sourcedExact? =>
       let lawful := lawfulCheck directory
       do
         let pins ← validateChecks config seed logStart (some (directoryOf directory))
           (authority?.map logicalOf) (some lawful) platform? seedExact? logStartExact?
+          (CoreSourced.lift sourcedExact?)
         let authority ← need "complete deployment authority unavailable" authority?
         if checked : lawful = true then pure ⟨(directory, authority, pins), checked⟩
         else .error "native cell role or domain law refused"
 
 @[csimp] theorem validateCore_eq_fast : @validateCore = @validateCoreFast := by
   funext D A config seed logStart directory? authority? directoryOf logicalOf lawfulCheck platform?
-    seedExact? logStartExact?
+    seedExact? logStartExact? sourcedExact?
   cases directory? with
   | none =>
-      simp only [validateCore, validateCoreFast, Option.map_none]
+      simp only [validateCore, validateCoreFast, Option.map_none, validateChecks_withSourced_eq]
       cases validateChecks config seed logStart none (authority?.map logicalOf) none platform?
         seedExact? logStartExact? <;> rfl
   | some directory =>
-      simp only [validateCore, validateCoreFast, Option.map_some]
+      simp only [validateCore, validateCoreFast, Option.map_some, validateChecks_withSourced_eq]
       cases validateChecks config seed logStart (some (directoryOf directory)) (authority?.map logicalOf)
         (some (lawfulCheck directory)) platform? seedExact? logStartExact? <;> cases authority? <;> rfl
 
@@ -851,12 +1116,14 @@ theorem validateCore_withExact_eq {D A : Type} (config : Config) (seed : Durable
     (logicalOf : A → Store.Store CredentialAuthorityState.layout) (lawfulCheck : D → Bool)
     (platform? : Option PlatformCellLayout.Platform)
     (seedExact? : ExactEvidence (seedIdentity seed = config.expectedSeed))
-    (logStartExact? : ExactEvidence (logStart = config.logStart seed)) :
+    (logStartExact? : ExactEvidence (logStart = config.logStart seed))
+    (sourcedExact? : ExactEvidence (CoreSourced config directory? authority? directoryOf logicalOf) := none) :
     validateCore config seed logStart directory? authority? directoryOf logicalOf lawfulCheck
-        platform? seedExact? logStartExact? =
+        platform? seedExact? logStartExact? sourcedExact? =
       validateCore config seed logStart directory? authority? directoryOf logicalOf lawfulCheck platform? := by
   unfold validateCore
-  rw [validateChecks_withExact_eq]
+  rw [validateChecks_withSourced_eq, validateChecks_withExact_eq]
+  rfl
 
 /-- `validateCore` over two shapes whose inputs correspond: the same refusal,
 or the same pins. -/
@@ -875,7 +1142,7 @@ theorem validateCore_map {D A D' A' : Type} (config : Config) (seed : DurableRec
         platform?).map (·.1.2.2) =
       (validateCore config seed logStart directory? authority? directoryOf logicalOf lawfulCheck
         platform?).map (·.1.2.2) := by
-  unfold validateCore
+  simp only [validateCore, CoreSourced.lift]
   rw [directories, lawfuls, authorities]
   cases validateChecks config seed logStart (directory?.map directoryOf) (authority?.map logicalOf)
       (directory?.map lawfulCheck) platform? with
@@ -904,17 +1171,19 @@ def validatePartsVia (config : Config) (durable : Durable)
     (lawfulCheck : CredentialAuthorityDomainReceiver.LoadedDirectory durable → Bool)
     (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory)
     (seedExact? : ExactEvidence (seedIdentity durable.image.seed = config.expectedSeed) := none)
-    (logStartExact? : ExactEvidence (durable.logStart = config.logStart durable.image.seed) := none) :
+    (logStartExact? : ExactEvidence (durable.logStart = config.logStart durable.image.seed) := none)
+    (sourcedExact? : ExactEvidence
+      (CoreSourced config directory? authority? (·.directory) (·.snapshot.logical)) := none) :
     Except String (Validated config durable) :=
   match core : validateCore config durable.image.seed durable.logStart directory? authority?
       (·.directory) (·.snapshot.logical) lawfulCheck
       (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)
-      seedExact? logStartExact? with
+      seedExact? logStartExact? sourcedExact? with
   | .error detail => .error detail
   | .ok parts =>
       let genesis := validateCore_genesis core
       .ok ⟨parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2,
-        genesis.1, genesis.2⟩
+        validateCore_sourced core, genesis.1, genesis.2⟩
 
 /-- `validatePartsVia` over the image's own authority load. The caller's
 directory must be the image's (`validatePartsWith_eq`). -/
@@ -952,9 +1221,11 @@ theorem validatePartsVia_withExact_eq (config : Config) (durable : Durable)
     (seedExact? : ExactEvidence (seedIdentity durable.image.seed = config.expectedSeed))
     (logStartExact? : ExactEvidence (durable.logStart = config.logStart durable.image.seed))
     (loaded : directory? = CredentialAuthorityDomainReceiver.loadDirectory durable)
-    (authorityLoaded : authority? = CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot) :
+    (authorityLoaded : authority? = CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (sourcedExact? : ExactEvidence
+      (CoreSourced config directory? authority? (·.directory) (·.snapshot.logical)) := none) :
     validatePartsVia config durable directory? authority? lawfulCheck lawfulExact
-      seedExact? logStartExact? = validateParts config durable := by
+      seedExact? logStartExact? sourcedExact? = validateParts config durable := by
   subst authorityLoaded
   subst loaded
   have same : lawfulCheck = fun loaded => cellsLawful config durable loaded.directory :=
@@ -965,7 +1236,7 @@ theorem validatePartsVia_withExact_eq (config : Config) (durable : Durable)
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
     (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
     (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)
-    seedExact? logStartExact?
+    seedExact? logStartExact? sourcedExact?
   unfold validateParts validatePartsWith validatePartsVia
   split <;> split <;> simp_all [sameCore]
 
@@ -983,7 +1254,7 @@ theorem validatePartsVia_eq (config : Config) (durable : Durable)
 def validateLoaded (config : Config) (durable : Durable) : Except String (Opened config) :=
   (validateParts config durable).map fun parts =>
     ⟨durable, parts.directory, parts.authority, parts.pins, parts.lawful,
-      parts.seedExact, parts.logStartExact⟩
+      parts.sourced, parts.seedExact, parts.logStartExact⟩
 
 /-- The pins projected from full validation depend only on the typed core. -/
 theorem validateLoaded_pins_core (config : Config) (durable : Durable) :
@@ -1094,7 +1365,7 @@ def validateLoadedFrom (config : Config) (prior : Opened config) (durable : Dura
     (cellsLawfulFrom config prior durable) (cellsLawfulFrom_eq config prior durable)
     evidence.1 evidence.2).map
     fun parts => ⟨durable, parts.directory, parts.authority, parts.pins, parts.lawful,
-      parts.seedExact, parts.logStartExact⟩
+      parts.sourced, parts.seedExact, parts.logStartExact⟩
 
 theorem validateLoadedFrom_eq (config : Config) (prior : Opened config) (durable : Durable) :
     validateLoadedFrom config prior durable = validateLoaded config durable := by
@@ -1118,6 +1389,163 @@ theorem validateLoaded_durable {config : Config} {durable : Durable} {opened : O
       simp only [parts, Except.map, Except.ok.injEq] at validated
       subst validated
       rfl
+
+/-! ## A step: the next image, validated over the cells it wrote
+
+`validateLoadedStep` is `validateServedStep` for the full shape: it takes the record's written
+cells and the proof that every other cell kept its bytes (`LoadedMoved`, from
+`LoadedMoved.extend`), runs the cell law on the written cells only and inherits the policy
+sourcing unless the step wrote the authority cell or a cell that held a policy source.
+`validateLoadedStep_eq`: it is `validateLoaded`. -/
+
+/-- Outside `written`, every cell of the later image keeps the earlier image's bytes. -/
+def LoadedMoved (before after : Durable) (written : List DurableDataIntent.CellId) : Prop :=
+  ∀ cellId, cellId ∉ written → after.snapshot.canonicalBytes cellId = before.snapshot.canonicalBytes cellId
+
+/-- One installed record moves only the cells it writes. -/
+theorem LoadedMoved.extend (loaded : Durable) {intent : DurableDataIntent.DataIntent ResourceBirthCodec.rootBytes}
+    (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes loaded.image loaded.baseHeight loaded.base
+      loaded.snapshot intent) :
+    LoadedMoved loaded (loaded.extend ready) (intent.writes.map DurableDataIntent.DataWrite.cellId) := by
+  intro cellId unwritten
+  show ((loaded.engine.install ResourceBirthCodec.rootBytes intent).view ResourceBirthCodec.rootBytes).canonicalBytes
+    cellId = _
+  rw [DurableEngine.Engine.view_install, ← loaded.snapshotExact]
+  show (DurableDataIntent.DataSnapshot.lookupPostBytes cellId intent.writes).getD
+    (loaded.snapshot.canonicalBytes cellId) = _
+  rw [DurableReceiver.lookupPostBytes_missing intent.writes cellId unwritten]
+  rfl
+
+/-- A loaded directory's cell law holds outside the image's enumeration. -/
+theorem loadedCellLawful_outside (config : Config) {durable : Durable}
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (identifier : Digest)
+    (member : identifier ∉ durable.image.cellIds) :
+    cellLawful config loaded.directory identifier = true := by
+  have bytes := loaded.bytes_exact identifier.value
+  rw [Kernel.DurableCheckpoint.resume_outside_support ResourceBirthCodec.rootBytes
+    durable.image durable.baseHeight durable.base durable.snapshot
+    durable.resumed ⟨identifier.value⟩ member, loaded.absentDefault] at bytes
+  have slot := ResourceBirthCodec.LifecycleImage.view_slot CanonicalCellRegistry.registry
+    loaded.directory identifier.value
+  cases view : ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry
+      loaded.directory identifier.value with
+  | fresh =>
+      rw [view] at slot
+      unfold cellLawful
+      rw [← slot]
+      rfl
+  | retired =>
+      rw [view] at bytes
+      simp [ResourceBirthCodec.LifecycleImage.bytes] at bytes
+  | live cell =>
+      rw [view] at bytes
+      simp [ResourceBirthCodec.LifecycleImage.bytes] at bytes
+
+/-- The cell law over the cells a step wrote. -/
+def cellsLawfulLoadedStep (config : Config) (durable : Durable) (written : List DurableDataIntent.CellId)
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) : Bool :=
+  written.all (cellLawful config loaded.directory)
+
+theorem cellsLawfulLoadedStep_eq (config : Config) (prior : Opened config) (durable : Durable)
+    (written : List DurableDataIntent.CellId) (moved : LoadedMoved prior.durable durable written)
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) :
+    cellsLawfulLoadedStep config durable written loaded = cellsLawful config durable loaded.directory := by
+  unfold cellsLawfulLoadedStep cellsLawful
+  apply Bool.eq_iff_iff.mpr
+  simp only [List.all_eq_true]
+  constructor
+  · intro stepped identifier member
+    by_cases wrote : identifier ∈ written
+    · exact stepped identifier wrote
+    · have held := prior.cellLawful_all identifier
+      unfold cellLawful at held ⊢
+      rwa [← CredentialAuthorityDomainReceiver.LoadedDirectory.slots_eq_of_bytes
+        prior.directory loaded identifier.value (moved identifier wrote).symm]
+  · intro lawful identifier _
+    by_cases member : identifier ∈ durable.image.cellIds
+    · exact lawful identifier member
+    · exact loadedCellLawful_outside config loaded identifier member
+
+/-- A step wrote neither the authority cell nor a cell that held a policy source before it. -/
+def sourcesUnwrittenLoaded (config : Config) (prior : Opened config)
+    (written : List DurableDataIntent.CellId) : Bool :=
+  !(written.contains (CredentialAuthorityDomainReceiver.cellIdOf config.deployment)) &&
+    written.all fun identifier => holdsNoPolicySource (prior.directory.directory.slots identifier.value)
+
+theorem stepSourcedLoaded_holds (config : Config) (prior : Opened config) (durable : Durable)
+    (written : List DurableDataIntent.CellId) (moved : LoadedMoved prior.durable durable written)
+    (unwritten : sourcesUnwrittenLoaded config prior written = true)
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+    (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot) :
+    policiesSourced config loaded.directory authority.snapshot.logical = true := by
+  simp only [sourcesUnwrittenLoaded, Bool.and_eq_true, Bool.not_eq_eq_eq_not, Bool.not_true,
+    List.all_eq_true] at unwritten
+  obtain ⟨notContained, noSource⟩ := unwritten
+  have noAuthority : CredentialAuthorityDomainReceiver.cellIdOf config.deployment ∉ written := by
+    intro member
+    rw [List.contains_iff_mem.mpr member] at notContained
+    cases notContained
+  have sameCell : authority.snapshot.cell = prior.authority.snapshot.cell := by
+    have bytes := authority.observed.symm.trans
+      ((moved _ noAuthority).trans prior.authority.observed)
+    have decoded := congrArg CredentialAuthorityDomainReceiver.decodeCell bytes
+    rw [CredentialAuthorityDomainReceiver.decodeCell_bytes,
+      CredentialAuthorityDomainReceiver.decodeCell_bytes] at decoded
+    exact Option.some.inj decoded
+  have sameLogical : authority.snapshot.logical = prior.authority.snapshot.logical := by
+    simp only [CredentialAuthorityDomain.Snapshot.logical, sameCell]
+  rw [sameLogical]
+  apply policiesSourced_inherit config prior.directory.directory loaded.directory
+    prior.authority.snapshot.logical (written.map (·.value))
+  · intro identifier notWritten
+    exact (CredentialAuthorityDomainReceiver.LoadedDirectory.slots_eq_of_bytes prior.directory loaded
+      identifier (moved ⟨identifier⟩ fun member => notWritten (List.mem_map.mpr ⟨_, member, rfl⟩)).symm).symm
+  · rw [List.all_eq_true]
+    intro identifier member
+    obtain ⟨cell, inWritten, same⟩ := List.mem_map.mp member
+    subst same
+    exact noSource cell inWritten
+  · exact prior.sourced
+
+/-- The sourcing evidence a step hands the checks: exact when it wrote no source. -/
+def stepSourcedLoaded (config : Config) (prior : Opened config) (durable : Durable)
+    (written : List DurableDataIntent.CellId) (moved : LoadedMoved prior.durable durable written)
+    (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
+    (authority? : Option (CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot)) :
+    ExactEvidence (CoreSourced config directory? authority? (·.directory) (·.snapshot.logical)) :=
+  if unwritten : sourcesUnwrittenLoaded config prior written = true then
+    some ⟨fun loaded authority _ _ =>
+      stepSourcedLoaded_holds config prior durable written moved unwritten loaded authority⟩
+  else none
+
+/-- **Validation of the image one step after a validated one**, over the cells the step wrote. -/
+def validateLoadedStep (config : Config) (prior : Opened config) (durable : Durable)
+    (written : List DurableDataIntent.CellId) (moved : LoadedMoved prior.durable durable written) :
+    Except String (Opened config) :=
+  (validatePartsVia config durable
+    (CredentialAuthorityDomainReceiver.loadDirectoryFrom prior.directory durable)
+    (CredentialAuthorityDomainReceiver.loadDeploymentFromAt prior.authority durable.snapshot
+      durable.height (DurableReceiverIO.Loaded.history_length_eq_height durable).symm)
+    (cellsLawfulLoadedStep config durable written) (cellsLawfulLoadedStep_eq config prior durable written moved)
+    (priorGenesisEvidence prior durable).1 (priorGenesisEvidence prior durable).2
+    (stepSourcedLoaded config prior durable written moved _ _)).map
+    fun parts => ⟨durable, parts.directory, parts.authority, parts.pins, parts.lawful,
+      parts.sourced, parts.seedExact, parts.logStartExact⟩
+
+theorem validateLoadedStep_eq (config : Config) (prior : Opened config) (durable : Durable)
+    (written : List DurableDataIntent.CellId) (moved : LoadedMoved prior.durable durable written) :
+    validateLoadedStep config prior durable written moved = validateLoaded config durable := by
+  unfold validateLoadedStep validateLoaded
+  rw [validatePartsVia_withExact_eq config durable _ _ _ _
+    (priorGenesisEvidence prior durable).1 (priorGenesisEvidence prior durable).2
+    (CredentialAuthorityDomainReceiver.loadDirectoryFrom_eq prior.directory durable)
+    ((CredentialAuthorityDomainReceiver.loadDeploymentFromAt_eq prior.authority durable.snapshot
+      durable.height (DurableReceiverIO.Loaded.history_length_eq_height durable).symm).trans
+    (CredentialAuthorityDomainReceiver.loadDeploymentAt_eq config.deployment durable.snapshot
+      durable.height (DurableReceiverIO.Loaded.history_length_eq_height durable).symm))
+    (stepSourcedLoaded config prior durable written moved _ _)]
+
+#assert_axioms validateLoadedStep_eq
 
 /-! ## The served root and C1's specification root -/
 

@@ -31,7 +31,7 @@ inductive LightResult where
 
 def submitLight (config : Config) (transport : DurableReceiverIO.Transport)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO LightResult := do
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) : IO LightResult := do
   let some ingress := ApplicationFailedStartRecoveryIngress.codec.decode bytes
     | return .rejected "noncanonical failed-start recovery ingress"
   let grounded ← match ← light.groundedVia transport
@@ -49,8 +49,8 @@ def submitLight (config : Config) (transport : DurableReceiverIO.Transport)
   | some (some _) => return .rejected "failed-start recovery transaction identity already used"
   | some none =>
       match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening intent with
-      | .appended kind next _ _ _ _ =>
-          adopt next none
+      | .appended kind next _ _ _ _ moved =>
+          adopt next _ moved none
           return .confirmed kind intent.transactionId intent.event.eventId
       | .replayed _ => return .rejected "failed-start recovery transaction identity already used"
       | .rejected _ => return .rejected "durable failed-start recovery refused"

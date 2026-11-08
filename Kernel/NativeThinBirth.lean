@@ -836,6 +836,7 @@ theorem validateCore_pins {D A : Type} {config : NativeHost.Config} {seed : Dura
     parts.1.2.2.federation = config.federation ∧
       parts.1.2.2.policyId = ⟨config.deployment.factoryId⟩ := by
   unfold NativeHost.validateCore at validated
+  simp only [NativeHost.CoreSourced.lift] at validated
   cases checked : NativeHost.validateChecks config seed logStart (directory?.map directoryOf)
       (authority?.map logicalOf) (directory?.map lawfulCheck) platform? with
   | error detail => simp [checked, bind, Except.bind] at validated

@@ -254,7 +254,7 @@ recovery and its original v3 claim at their historical prefixes) and commit via
 `DurableServed.receiveServed`. -/
 def receiveLight (config : Config) (transport : DurableReceiverIO.Transport)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (adopt : NativeHostLight.Adopt := fun _ _ => pure ()) : IO LightResult := do
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) : IO LightResult := do
   let some ingress := ApplicationLifecycleRetryBeginV4Ingress.codec.decode bytes
     | return .rejected "noncanonical retry create BEGIN ingress"
   let grounded ← match ← light.groundedVia transport
@@ -273,8 +273,8 @@ def receiveLight (config : Config) (transport : DurableReceiverIO.Transport)
   | some (some _) => return .rejected "retry BEGIN transaction identity already used"
   | some none =>
       match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening intent with
-      | .appended kind next _ _ _ _ =>
-          adopt next none
+      | .appended kind next _ _ _ _ moved =>
+          adopt next _ moved none
           return .confirmed kind intent.transactionId intent.event.eventId
       | .replayed _ => return .rejected "retry BEGIN transaction identity already used"
       | .rejected _ => return .rejected "durable retry BEGIN refused"

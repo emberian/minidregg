@@ -86,17 +86,32 @@ def Light.restorage {config : Config} (light : Light config) (storage : DurableR
     Light { config with storage } :=
   ⟨light.opening, light.opened.restorage storage, light.same⟩
 
-/-- Adopt the opening a light receive returned (its record read back exactly), given the
-authority post-cell the write encoded where it wrote that cell: taken as the served authority
-when the stored bytes are its bytes, so the Host never decodes the cell it just encoded nor
-rebuilds its trie (`loadServedAuthorityHeld`). -/
-def Light.adopt {config : Config} (light : Light config) (opening : Opening ResourceBirthCodec.rootBytes)
+/-- Adopt the opening one record after this light's own (a light receive's `.appended`), given
+the cells that record wrote and the proof that every other cell kept its bytes
+(`Served.advance_moved`): validated over the written cells only (`validateServedStep`, which is
+`validateServed`). -/
+def Light.adoptStep {config : Config} (light : Light config) (opening : Opening ResourceBirthCodec.rootBytes)
+    (written : List DurableDataIntent.CellId)
+    (moved : DurableServed.Served.Moved light.opening.served opening.served written)
     (held : Option CredentialAuthorityServed.HeldCell := none) : Except String (Light config) :=
-  validatedFrom light opening held
+  have moved' : DurableServed.Served.Moved light.opened.served opening.served written := by
+    rw [light.same]; exact moved
+  match checked : NativeHostServed.validateServedStep config light.opened opening.served written moved' held with
+  | .error detail => .error detail
+  | .ok opened => .ok ⟨opening, opened,
+      validateServed_served ((NativeHostServed.validateServedStep_eq config light.opened opening.served
+        written moved' held).symm.trans checked)⟩
 
-/-- What a light receive hands the session: the opening it returned and the authority
-post-cell of its write, if it wrote the authority cell. -/
-abbrev Adopt := Opening ResourceBirthCodec.rootBytes → Option CredentialAuthorityServed.HeldCell → IO Unit
+/-- What a light receive on `before` hands the session: the opening it returned, the cells its
+record wrote with the proof that every other cell kept its bytes (`Received.appended`'s
+`moved`), and the authority post-cell of its write, if it wrote the authority cell. The
+authority post-cell is taken as the served authority when the stored bytes are its bytes, so
+the Host never decodes the cell it just encoded nor rebuilds its trie
+(`loadServedAuthorityHeld`). -/
+abbrev Adopt (before : Opening ResourceBirthCodec.rootBytes) :=
+  (next : Opening ResourceBirthCodec.rootBytes) → (written : List DurableDataIntent.CellId) →
+    DurableServed.Served.Moved before.served next.served written →
+    Option CredentialAuthorityServed.HeldCell → IO Unit
 
 /-- The basis of one request: the validated served state, the Store's head and
 the request's declared keys read from the authenticated history (through the
