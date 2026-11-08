@@ -67,7 +67,7 @@ def verifyAll {store : StoreIdentity} (head : Head store) (entries : List (Nat �
       let some (_, entry) := entries.find? (·.1 = height)
         | throw (.unavailable height "the Store returned no entry at this height")
       let verified ← verifyAt head.frontier head.height height
-        (RawEntry.ofStore height entry.record entry.tag) nodes
+        (RawEntry.ofStore height entry.record.toList entry.tag) nodes
       let record ← toRecord verified
       let later ← verifyAll head entries nodes rest
       return ⟨height, record⟩ :: later
@@ -158,7 +158,7 @@ def baseOf (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : S
   | .error message => return .error (.unavailable height message)
   | .ok none => return .ok ⟨0, store.logStart, State.ofSeed seed, Or.inl ⟨rfl, rfl, rfl⟩⟩
   | .ok (some checkpoint) =>
-      match opened : openSealed store.key rootBytes checkpoint.bytes with
+      match opened : openSealed store.key rootBytes checkpoint.bytes.toList with
       | .error reason =>
           return .error (.unavailable checkpoint.height s!"checkpoint refused: {repr reason}")
       | .ok body =>
@@ -169,7 +169,7 @@ def baseOf (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : S
           | .ok baseRecord =>
               if onLog : baseRecord.verified.chain = body.chain then
                 return .ok ⟨body.height, body.chain, body.state,
-                  Or.inr ⟨⟨checkpoint.bytes, body, opened, rfl, rfl, rfl⟩, baseRecord, onLog⟩⟩
+                  Or.inr ⟨⟨checkpoint.bytes.toList, body, opened, rfl, rfl, rfl⟩, baseRecord, onLog⟩⟩
               else return .error (.notIncluded body.height)
 
 /-- The authentic state after `height` records. -/

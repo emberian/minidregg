@@ -64,7 +64,7 @@ def frontierAfter : Nat → List (Nat × Digest) → List (Entry × Digest) → 
   | _, frontier, [] => frontier
   | height, frontier, (entry, chain) :: rest =>
       frontierAfter (height + 1) (DurableHistory.Frontier.push frontier
-        (leafDigest (height + 1) entry.record chain
+        (DurableHistory.leafDigestBytes (height + 1) entry.record chain
           ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩))) rest
 
 /-- **The walk's frontier is the accumulator's**, and **the last tag carries
@@ -127,7 +127,7 @@ def honestNodes (entries : List Entry) (chains : List Digest) : List ((Nat × Na
     | _, _, [] => []
     | height, frontier, (entry, chain) :: rest =>
         let root := (trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩
-        let leaf := leafDigest (height + 1) entry.record chain root
+        let leaf := DurableHistory.leafDigestBytes (height + 1) entry.record chain root
         DurableHistory.completedNodes frontier (height + 1) leaf ++
           go (height + 1) (DurableHistory.Frontier.push frontier leaf) rest
   go 0 [] (entries.zip (chains.drop 1))
@@ -165,7 +165,7 @@ def retainedCheckpoints (transport : Transport) (head : Nat) :
     | .error message => return .error message
     | .ok none => return .ok heights
     | .ok (some checkpoint) =>
-        heights := (checkpoint.height, checkpoint.bytes) :: heights
+        heights := (checkpoint.height, checkpoint.bytes.toList) :: heights
         if checkpoint.height = 0 then return .ok heights
         below := checkpoint.height - 1
   return .ok heights
@@ -184,7 +184,7 @@ def audit (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Exce
   if stored.entries.length ≠ stored.head then return refused "the head does not match its entries"
   let mut records : List IntentRecord := []
   for (height, entry) in (List.range' 1 stored.entries.length).zip stored.entries do
-    match recordFrame.decode entry.record with
+    match DurableHistory.decodeRecordBytes entry.record with
     | some record => records := records ++ [record]
     | none => return refused s!"noncanonical durable log record at height {height}"
   let logStart := transport.logStart seed

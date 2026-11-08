@@ -1143,7 +1143,7 @@ theorem Opening.not_scratch {rootBytes : List UInt8 → Digest} (opening : Openi
 private def decodeRecordsAt : Nat → List DurableReceiverIO.Entry → Except String (List IntentRecord)
   | _, [] => .ok []
   | height, entry :: rest => do
-      let some record := DurableCheckpointCodec.recordFrame.decode entry.record
+      let some record := DurableHistory.decodeRecordBytes entry.record
         | throw s!"noncanonical durable log record at height {height}"
       return record :: (← decodeRecordsAt (height + 1) rest)
 
@@ -1215,7 +1215,7 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   let records ← match decodeRecordsAt (start.height + 1) suffix with
     | .error message => return .error message
     | .ok records => pure records
-  let chains := DurableLogTags.chainPrefixesStored start.chain (suffix.map (·.record))
+  let chains := DurableLogTags.chainPrefixesStoredBytes start.chain (suffix.map (·.record))
   if let .error message := DurableLogTags.verifyTags key start.height chains (suffix.map (·.tag)) then
     return .error message
   let frontier ← match DurableReceiverIO.walkFrontier start.height start.frontier (suffix.zip (chains.drop 1)) with
@@ -1358,7 +1358,7 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
             (TurnLog.genesisOfSeed seed).toOption) stored.entries lap
       else return .error "checkpoint state is not admissible for this Store's seed"
   | some checkpoint =>
-      match DurableCheckpointCodec.openSealedWith (α := CheckpointRoots rootBytes) key rootBytes
+      match DurableHistory.openSealedWithBytes (α := CheckpointRoots rootBytes) key rootBytes
           checkpoint.bytes (fun body => WorldRootCache.RootCache.build _)
           (fun _ built => built.1.root) (fun _ => WorldRootCache.RootCache.ofEntries_root _) with
       | .error reason => return .error s!"checkpoint refused: {repr reason}"
@@ -1481,7 +1481,7 @@ inductive Received (rootBytes : List UInt8 → Digest) (opening : Opening rootBy
   opening after exactly this record. -/
   | appended (kind : DurableReceiverIO.Confirmation) (next : Opening rootBytes)
       (height : next.head.height = opening.head.height + 1) (entry : DurableReceiverIO.Entry)
-      (entryExact : entry.record = DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent))
+      (entryExact : entry.record = (DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent)).toByteArray)
       -- `fresh`: this attempt's own append installed the entry (the Store answered `.installed`),
       -- not a readback after `.alreadyPresent` or an uncertain response; the one-shot launch power
       -- of a claim reservation goes only to such a winner.
@@ -1537,7 +1537,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       let frontierAfter := DurableHistory.Frontier.push head.frontier leaf
       let nodes := DurableReceiverIO.appendNodes
         (DurableHistory.completedNodes head.frontier height leaf) indexWrites
-      let entry : DurableReceiverIO.Entry := ⟨recordBytes, DurableHistory.trailer key height
+      let entry : DurableReceiverIO.Entry := ⟨recordBytes.toByteArray, DurableHistory.trailer key height
         ⟨worldRoot, chain, DurableHistory.frontierDigest height frontierAfter, indexAfter⟩⟩
       let confirm := fun (kind : DurableReceiverIO.Confirmation) (fresh : Bool) => do
         match ← transport.read height false with

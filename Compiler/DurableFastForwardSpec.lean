@@ -232,11 +232,11 @@ def Impl.ff (impl : Impl rootBytes) : FastForward (Opened impl) :=
     | .error message => .error message
     | .ok state =>
         if below.length ≠ (impl.stateBase state).1 then .error "the prefix is not the checkpoint's height"
-        else if verifyTags key 0 (chainPrefixesStored (logStart seed) (below.map (·.record)))
+        else if verifyTags key 0 (chainPrefixesStored (logStart seed) (below.map (·.record.toList)))
             (below.map (·.tag)) ≠ .ok () then .error "a prefix tag does not verify"
-        else if (chainPrefixesStored (logStart seed) (below.map (·.record))).getLastD (logStart seed) ≠
+        else if (chainPrefixesStored (logStart seed) (below.map (·.record.toList))).getLastD (logStart seed) ≠
             (impl.stateBase state).2 then .error "the prefix's chain is not the checkpoint's"
-        else match ((below ++ suffix).map (·.record)).mapM recordFrame.decode with
+        else match ((below ++ suffix).map (·.record.toList)).mapM recordFrame.decode with
           | none => .error "a stored record does not decode"
           | some records => .ok ⟨seed, state, records, (below ++ suffix).map fun entry =>
               ((DurableHistory.trailerCarried entry.tag).map (·.root)).getD ⟨0⟩⟩
@@ -270,8 +270,8 @@ def Written.image (store : Written) : Image := Image.ofAccepted store.seed store
 /-- The stored entries of a Store's records: each record decodes from its entry and every tag
 verifies chained from the seed's chain. -/
 def OwnEntries (key : MacKey) (seed : Seed) (entries : List Entry) (records : List IntentRecord) : Prop :=
-  List.Forall₂ (fun entry record => recordFrame.decode entry.record = some record) entries records ∧
-  verifyTags key 0 (chainPrefixesStored (logStart seed) (entries.map (·.record)))
+  List.Forall₂ (fun entry record => recordFrame.decode entry.record.toList = some record) entries records ∧
+  verifyTags key 0 (chainPrefixesStored (logStart seed) (entries.map (·.record.toList)))
     (entries.map (·.tag)) = .ok ()
 
 /-- The backup rule: open from the newest checkpoint at a positive height at or below the head,
@@ -356,14 +356,14 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → Except String
     ∃ body, impl.open4 key bytes = .ok body ∧
       impl.stateBase state = (body.height, body.chain) ∧ impl.stateCheckpoint state = body.state ∧
       verifyTags key body.height
-        (chainPrefixesStored body.chain (suffix.map (·.record))) (suffix.map (·.tag)) = .ok () ∧
-      (∀ entry ∈ suffix, (recordFrame.decode entry.record).isSome) ∧
+        (chainPrefixesStored body.chain (suffix.map (·.record.toList))) (suffix.map (·.tag)) = .ok () ∧
+      (∀ entry ∈ suffix, (recordFrame.decode entry.record.toList).isSome) ∧
       body.height + suffix.length = head
   /-- From genesis the executing part starts at the seed's chain and verifies every entry's tag. -/
   genesisGate : ∀ key seed suffix head state,
     impl.ffState key seed none suffix head = .ok state →
     impl.stateBase state = (0, logStart seed) ∧ impl.stateCheckpoint state = State.ofSeed seed ∧
-      verifyTags key 0 (chainPrefixesStored (logStart seed) (suffix.map (·.record)))
+      verifyTags key 0 (chainPrefixesStored (logStart seed) (suffix.map (·.record.toList)))
         (suffix.map (·.tag)) = .ok () ∧ suffix.length = head
   -- ### 3. Exactness over the pair (executed part, non-executing rebuild), and the session shape
   /-- On a Store's own entries, a checkpoint honest for `pre` (or none, `pre = []`) yields an

@@ -177,7 +177,7 @@ trailer), the node rows, the extended image and the index root after it. -/
 structure PreparedAppend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (intent : DataIntent rootBytes) where
   entry : Entry
-  entryExact : entry.record = recordFrame.encode (IntentRecord.ofIntent intent)
+  entryExact : entry.record = (recordFrame.encode (IntentRecord.ofIntent intent)).toByteArray
   nodes : List NodeWrite
   extended : Loaded rootBytes
   extendedImage : extended.image = loaded.image.append intent
@@ -212,7 +212,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   let leaf := leafDigest height recordBytes chain extended.worldRoot
   let frontierAfter := DurableHistory.Frontier.push frontier leaf
   let nodes := appendNodes (DurableHistory.completedNodes frontier height leaf) indexWrites
-  let entry : Entry := ⟨recordBytes, trailer key height
+  let entry : Entry := ⟨recordBytes.toByteArray, trailer key height
     ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩⟩
   return .ok ⟨entry, rfl, nodes, extended, rfl, indexAfter⟩
 
