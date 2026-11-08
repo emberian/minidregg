@@ -82,6 +82,79 @@ def leafDigest (height : Nat) (record : List UInt8) (chain root : Digest) : Dige
   (Sp800185Cshake256.hash leafCustomization
     (leafInput.encode (height, recordHash record, chain, root))).digest
 
+/-! ## Packed record bodies
+
+A stored record body is a `ByteArray` (`DurableReceiverIO.Entry.record`): read off the Store's
+buffer by one slice, hashed by the cSHAKE256 kernel on the array itself and decoded on the
+codec's cursor, so no `List UInt8` of the body is ever built. Each function below equals its
+list specification at the body's octets (`_eq`), which every statement keeps reading. -/
+
+/-- The kernel seam on a packed input is the specification on its octets. -/
+theorem kernel_data_toList (customization : List UInt8) (input : ByteArray) :
+    (Sp800185Cshake256.Native.cshake256Kernel (Sp800185Cshake256.Native.bytesOfList customization)
+      input).data.toList = cshake256Bytes customization input.toList := by
+  unfold Sp800185Cshake256.Native.cshake256Kernel
+  rw [Sp800185Cshake256.Native.bytesOfList_toList, Sp800185Cshake256.Native.bytesOfList_toList,
+    Sp800185Cshake256.Fast.cshake256Fast_eq, ByteArray.toList_eq_data_toList]
+
+/-- `Sp800185Cshake256.hash` over a packed input: the kernel reads the array itself. -/
+def hashBytes (customization : List UInt8) (input : ByteArray) : Sp800185Cshake256.Output :=
+  ⟨(Sp800185Cshake256.Native.cshake256Kernel (Sp800185Cshake256.Native.bytesOfList customization)
+      input).data.toList,
+    by rw [kernel_data_toList]; exact Sp800185Cshake256.cshake256Bytes_length _ _⟩
+
+theorem hashBytes_eq (customization : List UInt8) (input : ByteArray) :
+    hashBytes customization input = Sp800185Cshake256.hash customization input.toList := by
+  simp only [hashBytes, Sp800185Cshake256.hash, kernel_data_toList]
+
+/-- `recordHash` of a packed body. -/
+def recordHashBytes (bytes : ByteArray) : Digest :=
+  (hashBytes recordCustomization bytes).digest
+
+theorem recordHashBytes_eq (bytes : ByteArray) : recordHashBytes bytes = recordHash bytes.toList := by
+  simp only [recordHashBytes, recordHash, hashBytes_eq]
+
+/-- `leafDigest` of a packed body. -/
+def leafDigestBytes (height : Nat) (record : ByteArray) (chain root : Digest) : Digest :=
+  (Sp800185Cshake256.hash leafCustomization
+    (leafInput.encode (height, recordHashBytes record, chain, root))).digest
+
+theorem leafDigestBytes_eq (height : Nat) (record : ByteArray) (chain root : Digest) :
+    leafDigestBytes height record chain root = leafDigest height record.toList chain root := by
+  simp only [leafDigestBytes, leafDigest, recordHashBytes_eq]
+
+/-- A stored record decoded on the codec's cursor over the packed body. -/
+def decodeRecordBytes (bytes : ByteArray) : Option IntentRecord :=
+  DurableCheckpointCodec.recordFrame.codec.decodeBytes bytes
+
+theorem decodeRecordBytes_eq (bytes : ByteArray) :
+    decodeRecordBytes bytes = DurableCheckpointCodec.recordFrame.decode bytes.toList :=
+  StreamCodec.decodeBytes_eq _ bytes
+
+/-- `DurableCheckpointCodec.storedRecordDigest` of a packed body: the turn digest of the bytes
+after the frame, hashed in place of a dropped list. -/
+def storedRecordDigestBytes (bytes : ByteArray) : Digest :=
+  (hashBytes Kernel.WorldRoot.turnCustomization
+    (bytes.extract (bytesStream.encode DurableCheckpointCodec.recordFrame.frame).length bytes.size)).digest
+
+theorem storedRecordDigestBytes_eq (bytes : ByteArray) :
+    storedRecordDigestBytes bytes = DurableCheckpointCodec.storedRecordDigest bytes.toList := by
+  simp only [storedRecordDigestBytes, DurableCheckpointCodec.storedRecordDigest,
+    Kernel.WorldRoot.turnDigestOfBytes, hashBytes_eq, ByteArray.toList_eq_data_toList,
+    ByteArray.data_extract, Array.toList_extract, List.extract_eq_drop_take]
+  congr 3
+  rw [List.take_of_length_le]
+  simp
+
+/-- `DurableCheckpointCodec.chainStepStored` of a packed body. -/
+def chainStepStoredBytes (previous : Digest) (bytes : ByteArray) : Digest :=
+  Kernel.WorldRoot.chainDigest previous (storedRecordDigestBytes bytes)
+
+theorem chainStepStoredBytes_eq (previous : Digest) (bytes : ByteArray) :
+    chainStepStoredBytes previous bytes =
+      DurableCheckpointCodec.chainStepStored previous bytes.toList := by
+  simp only [chainStepStoredBytes, DurableCheckpointCodec.chainStepStored, storedRecordDigestBytes_eq]
+
 /-- The accumulator's node hash (deployed cSHAKE256). -/
 def nodeDigest (left right : Digest) : Digest :=
   (Sp800185Cshake256.hash nodeCustomization
