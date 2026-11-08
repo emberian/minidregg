@@ -23,6 +23,58 @@ PROVIDER CONFIG` cold-starts a consent provider on a Store and times its first a
 `/ci/pc/demo/overlay.sh NAME` copies the base candidate and swaps in this lane's `mini` and consent
 provider. Wall numbers on hbox are inflated by its load; CPU numbers much less.
 
+The demo-scale census (`hbox:/ci/pc/census`): `/ci/pc/w13` is a scratch world of the sponsor and 7
+members on candidate f2dae81d3680, grown by `grow13.sh` (2,400 rounds: a `say` in the shared room
+each, a `doc new` on 2 of every 9) to 3,600 records with ~540 births, a story (`tale1`, sealed), a
+room (`croom1`) and documents. `spec.sh WORLD OUT REPS` runs the census: member-1, warm (call slots
+and consent resident warmed first), each line REPS times through the forced-command wrapper with ONE
+fixed `MINI_TRACE` path per member (the line resident is keyed by `MINI_*`); `census.py` records wall
+time and every traced hop (Host op, codec frame, consent frame) per run; `summ.py` makes the tables.
+`swap13.sh WORLD DIR` installs a built Host, consent provider and `mini` in place in the world's
+published candidate, rewrites their digests (SHA256SUMS, manifest, provenance, the Store's
+`state.json`, the members' live workspace pins) and restarts the Store: the same world, before and
+after. (A Store and its members pin the Host image; this rewrite is a scratch-world device, and a
+real world changes image only through the re-genesis, `docs/WORLD-MIGRATION.md`.) App grains are not
+measured: a scratch world has no apps worker or market index (`apps list`: `appsWorkerUnavailable`).
+
+## The census at demo scale (`/ci/pc/w13`, 3,600 records, ~540 births, member-1 warm, ms wall)
+
+Columns: base (f2dae81d3680: Host 994123619ffe), round 1 (37a2dc2c6: Host 81ac22c072f5), round 2
+(this lane's round 2: Host 3742acf93cd7, consent provider rebuilt). Same world, 8 runs each, p50 (p95).
+hbox load: base and round 1 ~5; round 2 ~15 (other tenants' obend jobs), so round 2's wall numbers
+are inflated; its isolated rerun is the last column.
+
+| command | base | round 1 | round 2 | round 2, isolated rerun (5 runs) | where it goes now |
+|---|---|---|---|---|---|
+| `whoami`, `inbox`, `chat rooms`, `room list`, `story list`, `history -n 20` | 1 to 4 | 1 to 7 | 1 to 3 | | local |
+| `home` | 13 (137) | 16 | 18 | | local (one op 144) |
+| `key-status` | 7 | 7 | 2 | | op 144 x2 |
+| `credit` | 164 (277) | 7 (15) | 10 (11) | 11 to 12 | op 4 + op 5; was 6 signed reads (row 29) |
+| `tariff feedback`, `read feedback`, `room status feedback`, `doc show`, `doc outline`, `doc pull`, `doc append` | 8 to 34 | 7 to 13 | 8 to 17 | | op 4 + op 5 (1.5 to 2.6), codec, consent |
+| `can feedback` | 14 (52) | 30 | 15 | | two signed reads |
+| `refs` | 48 | 49 | 24 | | resolves every name (shared names by signed discovery): intended |
+| `room members feedback` | 20 (54) | 27 | 36 | | op 5 `who` 21 to 28 (row 33) |
+| `tail -n 20` | 144 (215) | 109 (182) | 121 (206) | 160 to 175 at load 15 | roster + one `tail` window per author; the window that scanned the log 55 to 60 -> 3.3; the rest decode each entry's signed command per read (row 31) |
+| `look` (story) | 79 (91) | 21 | 42 | | three signed reads |
+| `say`, `react`, `topic` | 176 to 182 | 89 to 90 | 157 to 172 | `say` 117 to 165 | op 2 (submit) 36 (round 1, load 5) to 80 (load 15); op 1 5 to 13; the member's own provider admitting the previous record inline 10 to 30 (row 32) |
+| `doc push` | 198 (1640) | 104 | 172 | | as `say`, plus a pull |
+| `doc new` (a birth, two records) | 986 (1235) | 769 | 2092 (7921) | | op 2 x2 (the birth submit ~300 of it), op 1 x2 (91 to 167), consent 284 to 604 (row 34) |
+| `doc history cdoc1` | 176 (226) | 7,484 | 30,712 | | one past read (op 5 `at`) per write of the document: 5, then 15, then 25 as the census wrote it; 490 ms to 1.2 s each (row 30) |
+| `doc history g1503` (born ~2,300) | 1,406 to 1,532 | | | | three past reads at ~450 ms (row 30) |
+
+Host ops over the base census (all commands): op 2 (submit) 62% of Host op time, p50 153 ms; op 5
+(query) 20%, p50 6 ms, p95 35; op 4 (challenge) 7%, p50 1.2; op 1 (prepare) 7%, p50 6, p95 106 (births);
+op 144 (key status) 4%, p50 1.0; op 91 (birth context) p50 8. After round 1: op 2 p50 36.6 ms; op 5
+is 90% of Host op time, almost all of it `doc history`'s past reads. How they grow with height: op 2
+was 21 ms at height ~60 and 60 ms at ~1,560 before round 1 (quadratic in the authority's directory
+rows); op 5's stream window grew with the log (it scanned it; round 2); a past read grows with the
+checkpoint it decodes (the state's size), and `doc history` makes one per write of the document.
+The first signed read after a Store restart: 16.3 s (round 1) and 19.7 s (round 2): the cold full
+open (row 20), now paid on every restart of a Host at this height.
+
+What a migration must carry is unchanged by rounds 1 and 2: no record layout, index, cell or key
+read moves (the checks compile differently; the served bytes are the same).
+
 ## The demo Store, measured (2026-11-06, `hbox:/ci/pc/demo`, base candidate ae74dca4ec2d)
 
 A consistent copy of the demo Store: 3,544 records, 44.1 MB of record bytes (median record
@@ -86,6 +138,14 @@ Staging 7fee25ff's `mini` (it carries the exorcist's batches) unless said otherw
 | 26 | full readiness (236: `ClientConsentCore.upgrade` -> `Basis.full?` -> `NativeHostReplay.verifyStart`) on an anchored admission | a second full open, then a re-admission walk | the admission it upgrades already covers the head | demo Store copy: no answer within 200 s (199 s CPU, 2.26 GB); on the demo, three providers at 100% for 9+ minutes when 7b20a1379's catch-up sent it. `mini consent-full-ready` (an explicit readiness command) sends it too | the catch-up no longer sends it (row 19); the upgrade itself should walk only from the anchored height (hot-path's `verifyStart`/`verifyFrom`); until then nothing on a live box should run `consent-full-ready` | open (hazard) |
 | 27 | a warm read's Store Host op 5 (the signed view query) -> capability evidence -> `domainPortal.verifyIssuer` -> `issuerCheck` | decided `∃ address ∈ support, issuedAt ...`: walked the authority cell's support, encoding and hashing every stored capability until one matched, per check | the commitments change only when the cell does | 0.8 ms at height ~60, 11 to 13 ms at 350 births (scratch), 36 to 137 ms per `credit` on the demo (534 births, 230 capabilities); the search alone 3.1 ms per check on the demo Store copy (`store-bench`) | `issuerCheck_eq_indexed` (statement first, `@[csimp]`): the issued index `CredentialAuthorityDomain.issuedOf`, a `Thunk` held with the cell (`Snapshot.issued`, `ServedAuthority.issued`, shared by every request's snapshot) | on main (Host image change, next re-genesis): op 5 11 -> 1.3 to 1.5 ms and warm `credit` 16 -> 6 ms at 400 births (/ci/pc/w12 against /ci/pc/w9); 0 ms per check on the demo copy |
 | 28 | receipt continuity after every signed read (`receipt_continuity::finish` -> `HostProof`) | sealed the 185 MB verifier image and started it for `continuity-point` on every read, and again for `continuity-verify` per hop when the head moved (plus `profile` once per process) | an unmoved head's point is the one the verifier just derived | warm resident shell, continuity on (/ci/pc/w9): `credit` 56 ms (op5 11, `continuity-point` spawn 39 to 50); after the head moved 143 to 258 ms (`continuity-point` 40 to 146, op 151 19, `continuity-verify` 41 to 146) | 9b117157e (main) / 976f31067 (hotfix): points kept per process by exactly what `challengePointJson` reads (verifier pin, config digest, the challenge's domain, semantics, height, world root); the verifier sealed at first use. Warm unmoved `credit` 56 -> 16 ms. A moved head still pays two verifier processes (~80 to 290 ms): the Lean continuity functions need a long-lived loop (a Host op or the codec loop), which is a Host image change | moved-head case open |
+| 29 | `credit` without `--account` (`credit::my_account`) | resolved every workspace reference through `workspace::reference` to find the one account; a shared name (`ROOM/NAME`) resolves by a signed discovery | the member's own account is never a room's binding | 5 signed reads before the balance read: 164 ms at 3,600 records | the default account is chosen from the address book only (`local_reference`); `--account` still names any | 37a2dc2c6: 164 -> 7 ms |
+| 29b | every submit (op 2) -> `CredentialAuthorityServed.decodeServedFrom` | decided the served directory's `(rows.map Prod.fst).Nodup` with the pairwise `List.Nodup` instance: every pair of big-number row ids compared, per write | the loaded twins already compile to one hashed pass | 64% of the Store Host's CPU across `say`s; op 2 151 ms at 3,600 records (21 at ~60) | `CompiledListOps.nodupNat` (one hashed pass); `decodeServedFrom_eq` keeps its statement through `nodupNat_iff` | 37a2dc2c6: op 2 151 -> 36.5 ms; `say` 178 -> 89; `doc new` 986 -> 769 |
+| 30 | past reads (op 5 `at`: `NativeHost.keptFor` -> `Loaded.keptAt`, `atPrefixFrom`) | every past read reads, MACs and decodes a whole checkpoint (the state at or below the height, as `List UInt8`) and replays to the height; `doc history` makes one per write of the document | consecutive past reads of one document share their checkpoint; the document needs one cell's bytes and the grant standing at each height | 450 ms to 1.2 s per read at 3,600 records; `doc history` 1.4 s for a document born at ~2,300, 7.5 to 30 s for one written 15 to 25 times; and the Store Host serves one request at a time, so every member waits behind it | per-cell history from the log (the bytes a cell had at a height are its last write at or below it; the grant's standing reads the authority cell the same way), or at least the decoded kept checkpoint held per session; checkpoint pruning (row 24) must keep what this reads | open: the largest remaining cost, and an outage-shaped one |
+| 31 | `tail` (`chat::Held::stream` -> op 5 `tail` view -> `streamPayload`) | each shown entry's payload: a scan of the whole accepted log from its OLDEST record (`Image.accepted` is `acceptedRev.reverse`, rebuilt per entry), then a decode of the entry's whole signed command | the log has a transaction index (`Loaded.txs`) and the newest entries sit at the head of `acceptedRev`; the payload is fixed when the record lands | the window holding the newest entries 55 to 60 ms per read at 3,600 records; the other windows 17 to 37 ms (the command decodes) | round 2: `streamPayloadIn` reads through the index from the held end (`intentOf_eq`, `streamPayloadIn_eq`: the same payload); `sinceViewIn` takes the records above `after` from the held end (`sinceViewIn_eq`). Remaining: the payload kept by delta at append (a payload index in `Loaded`) | round 2 (Host 3742acf93cd7): that window 55 to 60 -> 3.3 ms; the rest open |
+| 32 | a member's own provider admitting the record the member just wrote | the catch-up thread (row 19) polls the head every 100 ms; a command issued sooner admits the previous write inline, at the provider's per-record cost (which carried row 29b's quadratic check until the provider is rebuilt with it) | the resident wrote that record itself a moment ago | 10 to 30 ms on the first consent frame of back-to-back writes | the provider rebuilt with 29b (round 2 ships it); the resident could catch up right after its own submit instead of at the next poll | partly (provider rebuilt); the eager catch-up open |
+| 33 | `room members` (op 5 `who`: `holders`, `grantsOf`, `members` over `Finset.biUnion` of capability ids) | rebuilds the room's holder and grant sets from the authority store per read | they change only when a grant does | 21 to 28 ms at 7 members | an index kept with the authority cell (as row 27's issued index) | open |
+| 34 | a birth (`doc new`, `room new`, `story new`) | op 1 (prepare) 90 to 170 ms and op 2 (the birth's submit) ~300 ms, plus 284 to 604 ms of consent CPU across residents | | `doc new` 769 ms after round 1 | not yet profiled at this height after 29b | open |
+| 35 | `jworld-scratch.sh down` (dregg-infra) | leaves every member's line resident running (they end only when their socket or Store goes) | `down` stops the world | 10 to 18 survivors per world, each a warm `mini` | `down` should stop the line residents by their pid files (`sessions/*/.call-slots/*.pid`) | noted (infra's) |
 
 Web pages on this world (staging binaries, member-1, warm, four GETs): `/`, `/doc`, `/story`, `/room`,
 `/apps` 2 to 7 ms; `/receipts` 11 to 13 ms; `/keys` 60 to 75 ms (two key-status Host calls);
@@ -193,6 +253,10 @@ Batch 3 (b34173dad, with f95edc7bf; staging 8ca47d577, batch 7): row 10.
 Batch 4 (a36d8bdfa with 394039fb1): row 8 under split tenancy (opt-in: units from infra).
 Batch 9 (997905c0b): rows 14, 15. Batch 10 (staging): rows 16, 17, 18. 7b20a1379 + 7d809f349 (main): row 19 (catch-up threads in `mini`'s residents
 and the delegated worker, through frame 236; no Lean or protocol change, so it ships with `mini` alone).
+37a2dc2c6 (main): rows 29 and 29b (Host image change: ships with the re-genesis). The census round 2
+commit (main): row 31's window (Host image change). 7f80be316 (main): the grain controller's typed
+close of a prompt witness its allowance outlived (`reconcile prompt-witness`, `prompt_witness_close`),
+the demo lobby controller's 40-hour checkpoint hold.
 
 Client syscalls per verb, for the record: a warm ssh `say` is 2,365 syscalls for the whole client tree
 (wrapper included). The explorer's 12,031 on batch 5 counted the residents that `strace -f` followed for
