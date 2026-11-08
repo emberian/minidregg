@@ -1475,7 +1475,8 @@ def openState (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Dig
     | some engine => pure (⟨engine, found⟩ : {engine : DurableEngine.Engine rootBytes //
         (DurableEngine.Engine.ofState rootBytes base.2.1 []).replay rootBytes records = some engine})
   return ⟨base, baseChain, records, decoded, chains,
-    (by rw [DurableLogTags.chainPrefixesStoredBytes_eq, List.map_map]; rfl), frontier, engine, replayed, start,
+    (by show DurableLogTags.chainPrefixesStoredBytes baseChain (suffix.map (·.record)) = _
+        rw [DurableLogTags.chainPrefixesStoredBytes_eq, List.map_map]; rfl), frontier, engine, replayed, start,
     start.bind fun w => foldRecords rootBytes w base.1 records⟩
 
 /-- A decided fact as a value, or the refusal naming it. -/
@@ -1538,6 +1539,7 @@ def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Di
     have suf := DurableLogTags.chainPrefixesStored_eq opened.baseChain _ _ opened.decoded
     have prefixBytes : prefixChains =
         DurableLogTags.chainPrefixesStored logStart (below.map (·.record.toList)) := by
+      show DurableLogTags.chainPrefixesStoredBytes logStart (below.map (·.record)) = _
       rw [DurableLogTags.chainPrefixesStoredBytes_eq, List.map_map]; rfl
     have baseChain : opened.baseChain = chainAfter logStart prefixRecords := by
       have last := DurableLogTags.chainPrefixes_getLast? logStart prefixRecords
@@ -1672,7 +1674,7 @@ structure Appended (rootBytes : List UInt8 → Digest) (loaded : Loaded rootByte
   next : Loaded rootBytes
   image : next.image = loaded.image.append intent
   entry : Entry
-  entryExact : entry.record = recordFrame.encode (IntentRecord.ofIntent intent)
+  entryExact : entry.record = (recordFrame.encode (IntentRecord.ofIntent intent)).toByteArray
   /-- The image after an append carries the tag the append wrote: its MAC is the
   one the append computed under the key, so the head's authentication is not
   lost (`Loaded.headTag`). -/
