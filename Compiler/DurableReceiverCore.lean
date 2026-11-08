@@ -81,15 +81,19 @@ inductive CasObservation where
   | uncertain (detail : String)
   deriving Repr, DecidableEq
 
-/-- One stored log entry: record bytes and the host's tag. -/
+/-- One stored log entry: the record body and the host's tag. The body is packed (one slice of
+the Store's read buffer): it is hashed by the cSHAKE kernel and decoded on the codec's cursor in
+place (`DurableHistory.decodeRecordBytes_eq`, `chainStepStoredBytes_eq`); a statement reads its
+octets, `entry.record.toList`. -/
 structure Entry where
-  record : List UInt8
+  record : ByteArray
   tag : List UInt8
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
+/-- A sealed checkpoint as stored: packed, decoded on the cursor. -/
 structure StoredCheckpoint where
   height : Nat
-  bytes : List UInt8
+  bytes : ByteArray
 
 /-- One accumulator / spent-map node row an append writes beside its entry
 (`durable_node`; space 1 = log accumulator, space 3 = the index trie). -/
@@ -202,7 +206,8 @@ private def u64At (bytes : ByteArray) (position : Nat) : Option Nat :=
   else none
 
 /-- A length-prefixed blob, sliced straight out of the read buffer into a list
-(`Tower256ConcreteBackend.sliceOnto`: one cell per octet, no intermediate copy). -/
+(`Tower256ConcreteBackend.sliceOnto`: one cell per octet, no intermediate copy). Only the short
+fields (tags, seed, node keys and values) are read this way; bodies are `packedAt`. -/
 private def blobAt (bytes : ByteArray) (position : Nat) : Option (List UInt8 × Nat) := do
   let length ← u64At bytes position
   let start := position + 8
@@ -210,12 +215,20 @@ private def blobAt (bytes : ByteArray) (position : Nat) : Option (List UInt8 × 
     some (Minidregg.Compiler.Tower256ConcreteBackend.sliceOnto bytes start length fits [], start + length)
   else none
 
+/-- A length-prefixed blob as its own packed array (one copy, no per-octet cell). -/
+private def packedAt (bytes : ByteArray) (position : Nat) : Option (ByteArray × Nat) := do
+  let length ← u64At bytes position
+  let start := position + 8
+  if start + length ≤ bytes.size then
+    some (bytes.extract start (start + length), start + length)
+  else none
+
 private def entriesAt (bytes : ByteArray) : Nat → Nat → Nat → List Entry → Option (List Entry)
   | 0, position, _, acc => if position = bytes.size then some acc.reverse else none
   | count + 1, position, expected, acc => do
       let height ← u64At bytes position
       if height ≠ expected then none else
-      let (record, afterRecord) ← blobAt bytes (position + 8)
+      let (record, afterRecord) ← packedAt bytes (position + 8)
       let (tag, afterTag) ← blobAt bytes afterRecord
       entriesAt bytes count afterTag (expected + 1) (⟨record, tag⟩ :: acc)
 
@@ -234,7 +247,7 @@ def parseStored (fromHeight : Nat) (withBase : Bool) (bytes : ByteArray) : Optio
       if hasCheckpoint = 0 then some (some seed, none, afterSeed + 8)
       else if hasCheckpoint = 1 then do
         let height ← u64At bytes (afterSeed + 8)
-        let (checkpoint, afterCheckpoint) ← blobAt bytes (afterSeed + 16)
+        let (checkpoint, afterCheckpoint) ← packedAt bytes (afterSeed + 16)
         some (some seed, some ⟨height, checkpoint⟩, afterCheckpoint)
       else none
     else none
@@ -280,7 +293,7 @@ def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
       | some phase => #["durable-append-crash", config.root.toString, toString height,
           "mem:record", "mem:tag", "mem:nodes", phase]
     let (output, _) ← runNativeMemory config arguments
-      [("record", entry.record.toByteArray), ("tag", entry.tag.toByteArray),
+      [("record", entry.record), ("tag", entry.tag.toByteArray),
         ("nodes", (encodeNodes nodes).toByteArray)]
     return parseCasOutput output
   catch error => pure (.uncertain s!"native append unavailable: {error}")
@@ -340,7 +353,7 @@ private def historyEntriesAt (bytes : ByteArray) : Nat → Nat → List (Nat × 
   | 0, position, acc => some (acc.reverse, position)
   | count + 1, position, acc => do
       let height ← u64At bytes position
-      let (record, afterRecord) ← blobAt bytes (position + 8)
+      let (record, afterRecord) ← packedAt bytes (position + 8)
       let (tag, afterTag) ← blobAt bytes afterRecord
       historyEntriesAt bytes count afterTag ((height, ⟨record, tag⟩) :: acc)
 
@@ -426,7 +439,7 @@ def NativeConfig.checkpointAt (config : NativeConfig) (height : Nat) :
         match u64At bytes 0 with
         | some 0 => if bytes.size = 8 then return .ok none else return .error "native checkpoint read malformed"
         | some 1 =>
-            match u64At bytes 8, blobAt bytes 16 with
+            match u64At bytes 8, packedAt bytes 16 with
             | some found, some (checkpoint, after) =>
                 if after = bytes.size then return .ok (some ⟨found, checkpoint⟩)
                 else return .error "native checkpoint read malformed"
@@ -1358,7 +1371,7 @@ def loadBytes (rootBytes : List UInt8 → Digest) (logStart : Seed → Digest) (
 def decodeRecordsFrom : Nat → List Entry → Except String (List IntentRecord)
   | _, [] => .ok []
   | height, entry :: rest => do
-      let some record := recordFrame.decode entry.record
+      let some record := DurableHistory.decodeRecordBytes entry.record
         | throw s!"noncanonical durable log record at height {height}"
       return record :: (← decodeRecordsFrom (height + 1) rest)
 
@@ -1367,13 +1380,13 @@ private theorem decodeRecordsFrom_forall₂ :
     ∀ (height : Nat) (entries : List Entry) (records : List IntentRecord),
       decodeRecordsFrom height entries = .ok records →
         List.Forall₂ (fun bytes record => recordFrame.decode bytes = some record)
-          (entries.map (·.record)) records
+          (entries.map (·.record.toList)) records
   | _, [], records, decoded => by
       simp only [decodeRecordsFrom, Except.ok.injEq] at decoded
       subst decoded; exact .nil
   | height, entry :: rest, records, decoded => by
       simp only [decodeRecordsFrom] at decoded
-      cases found : recordFrame.decode entry.record with
+      cases found : DurableHistory.decodeRecordBytes entry.record with
       | none => simp [found] at decoded
       | some record =>
           simp only [found] at decoded
@@ -1382,7 +1395,8 @@ private theorem decodeRecordsFrom_forall₂ :
           | ok more =>
               simp [tail] at decoded
               subst decoded
-              exact .cons found (decodeRecordsFrom_forall₂ (height + 1) rest more tail)
+              exact .cons (by rw [← DurableHistory.decodeRecordBytes_eq]; exact found)
+                (decodeRecordsFrom_forall₂ (height + 1) rest more tail)
 
 /-- Advance the accumulator frontier over stored entries `height + 1, …`
 (each with the chain after it), checking that every tag carries the frontier
@@ -1396,7 +1410,7 @@ def walkFrontier : Nat → List (Nat × Digest) → List (Entry × Digest) →
       | none => .error (DurableHistory.Refusal.message (.malformedTrailer (height + 1)))
       | some carried =>
           let next := DurableHistory.Frontier.push frontier
-            (leafDigest (height + 1) entry.record chain carried.root)
+            (DurableHistory.leafDigestBytes (height + 1) entry.record chain carried.root)
           if carried.frontier ≠ frontierDigest (height + 1) next then
             .error s!"durable log tag at height {height + 1} carries a frontier the accumulator does not reach"
           else walkFrontier (height + 1) next rest
@@ -1413,10 +1427,10 @@ structure OpenState (rootBytes : List UInt8 → Digest) (suffix : List Entry) wh
   baseChain : Digest
   records : List IntentRecord
   decoded : List.Forall₂ (fun bytes record => recordFrame.decode bytes = some record)
-    (suffix.map (·.record)) records
+    (suffix.map (·.record.toList)) records
   /-- The chain before and after each suffix record, from `baseChain`. -/
   chains : List Digest
-  chainsEq : chains = DurableLogTags.chainPrefixesStored baseChain (suffix.map (·.record))
+  chainsEq : chains = DurableLogTags.chainPrefixesStored baseChain (suffix.map (·.record.toList))
   frontier : List (Nat × Digest)
   /-- The suffix replayed from the checkpoint state alone. -/
   engine : DurableEngine.Engine rootBytes
@@ -1429,14 +1443,14 @@ structure OpenState (rootBytes : List UInt8 → Digest) (suffix : List Entry) wh
 /-- The executing part of the open, from the checkpoint's bytes (none: the seed at height 0), the
 stored entries after it and the Store's head height. -/
 def openState (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Digest) (seed : Seed)
-    (checkpoint : Option (List UInt8)) (suffix : List Entry) (head : Nat) :
+    (checkpoint : Option ByteArray) (suffix : List Entry) (head : Nat) :
     Except String (OpenState rootBytes suffix) := do
   let ⟨base, baseChain, start⟩ ← match checkpoint with
     | none =>
         pure (⟨⟨0, State.ofSeed seed, [], DurableIndex.emptyDigest, none⟩, logStart, genesisWorld seed⟩ :
           OpenBase rootBytes × Digest × Except String HostRefinesWorld.DWorld)
     | some bytes =>
-        match openSealedWith (α := CheckpointRoots rootBytes) key rootBytes bytes
+        match DurableHistory.openSealedWithBytes (α := CheckpointRoots rootBytes) key rootBytes bytes
             (fun _ => RootCache.build _) (fun _ built => built.1.root)
             (fun _ => RootCache.ofEntries_root _) with
         | .error reason => throw s!"checkpoint refused: {repr reason}"
@@ -1448,19 +1462,20 @@ def openState (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Dig
               | some w => .ok w⟩ : OpenBase rootBytes × Digest × Except String HostRefinesWorld.DWorld)
   if base.1 + suffix.length ≠ head then
     throw "the checkpoint and the entries after it do not reach the log head"
-  let chains := DurableLogTags.chainPrefixesStored baseChain (suffix.map (·.record))
+  let chains := DurableLogTags.chainPrefixesStoredBytes baseChain (suffix.map (·.record))
   verifyTags key base.1 chains (suffix.map (·.tag))
   let ⟨records, decoded⟩ ← match found : decodeRecordsFrom (base.1 + 1) suffix with
     | .error message => throw message
     | .ok records => pure (⟨records, decodeRecordsFrom_forall₂ _ _ _ found⟩ :
         {records : List IntentRecord // List.Forall₂
-          (fun bytes record => recordFrame.decode bytes = some record) (suffix.map (·.record)) records})
+          (fun bytes record => recordFrame.decode bytes = some record) (suffix.map (·.record.toList)) records})
   let frontier ← walkFrontier base.1 base.2.2.1 (suffix.zip chains.tail)
   let ⟨engine, replayed⟩ ← match found : (DurableEngine.Engine.ofState rootBytes base.2.1 []).replay rootBytes records with
     | none => throw "durable log suffix does not replay through the canonical executor"
     | some engine => pure (⟨engine, found⟩ : {engine : DurableEngine.Engine rootBytes //
         (DurableEngine.Engine.ofState rootBytes base.2.1 []).replay rootBytes records = some engine})
-  return ⟨base, baseChain, records, decoded, chains, rfl, frontier, engine, replayed, start,
+  return ⟨base, baseChain, records, decoded, chains,
+    (by rw [DurableLogTags.chainPrefixesStoredBytes_eq, List.map_map]; rfl), frontier, engine, replayed, start,
     start.bind fun w => foldRecords rootBytes w base.1 records⟩
 
 /-- A decided fact as a value, or the refusal naming it. -/
@@ -1482,7 +1497,7 @@ def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Di
   let base := opened.base.2.1
   let ⟨count⟩ ← require (below.length = baseHeight)
     "the entries below the checkpoint do not number its height"
-  let prefixChains := DurableLogTags.chainPrefixesStored logStart (below.map (·.record))
+  let prefixChains := DurableLogTags.chainPrefixesStoredBytes logStart (below.map (·.record))
   verifyTags key 0 prefixChains (below.map (·.tag))
   let ⟨chained⟩ ← require (prefixChains.getLastD logStart = opened.baseChain)
     "checkpoint does not match the log chain"
@@ -1499,7 +1514,7 @@ def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Di
     | .error message => throw message
     | .ok records => pure (⟨records, decodeRecordsFrom_forall₂ _ _ _ found⟩ :
         {records : List IntentRecord // List.Forall₂
-          (fun bytes record => recordFrame.decode bytes = some record) (below.map (·.record)) records})
+          (fun bytes record => recordFrame.decode bytes = some record) (below.map (·.record.toList)) records})
   let image : Image := Image.ofAccepted seed (prefixRecords ++ opened.records)
   let ⟨admissible⟩ ← require (DurableEngine.admissibleFast image base = true)
     "the checkpoint state is not admissible for the log"
@@ -1521,13 +1536,16 @@ def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Di
     simp only [image, Image.accepted_ofAccepted]
     have pre := DurableLogTags.chainPrefixesStored_eq logStart _ _ prefixDecoded
     have suf := DurableLogTags.chainPrefixesStored_eq opened.baseChain _ _ opened.decoded
+    have prefixBytes : prefixChains =
+        DurableLogTags.chainPrefixesStored logStart (below.map (·.record.toList)) := by
+      rw [DurableLogTags.chainPrefixesStoredBytes_eq, List.map_map]; rfl
     have baseChain : opened.baseChain = chainAfter logStart prefixRecords := by
       have last := DurableLogTags.chainPrefixes_getLast? logStart prefixRecords
-      rw [← pre, ← List.getLastD_eq_getLast?] at last
+      rw [← pre, ← prefixBytes, ← List.getLastD_eq_getLast?] at last
       rw [← last]; exact chained.symm
-    show DurableLogTags.chainPrefixesStored logStart (below.map (·.record)) ++ opened.chains.tail =
+    show prefixChains ++ opened.chains.tail =
       chainPrefixes logStart (prefixRecords ++ opened.records)
-    rw [opened.chainsEq, suf, pre, baseChain]
+    rw [prefixBytes, opened.chainsEq, suf, pre, baseChain]
     simp only [DurableLogTags.chainPrefixes, List.scanl_append]
     rfl
   let headChain := chains.getLast?.getD logStart
@@ -2108,7 +2126,7 @@ def checkpointDifferential (transport : Transport) (rootBytes : List UInt8 → D
       let full := checkpointFrame.encode
         (sealCheckpoint key rootBytes height current.chain frontier indexRoot state current.system)
       let atHeight := stored.checkpoint.bind fun checkpoint =>
-        if checkpoint.height = height then some checkpoint.bytes else none
+        if checkpoint.height = height then some checkpoint.bytes.toList else none
       return .ok (cached, full, atHeight)
 
 
