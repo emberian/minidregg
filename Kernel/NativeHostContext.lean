@@ -6,6 +6,7 @@ There is one profile, one world-root commitment, and one validation path.
 module
 
 public import Compiler.NativeHostCodec
+public import Compiler.DurableNodeCache
 public import Kernel.PlatformCellLayout
 public import Kernel.PlatformCellDomain
 public import Compiler.GenericSimplexSourceAnchor
@@ -425,7 +426,8 @@ theorem Config.sourceGate_physicalPostLaw_live (config : Config) {own : Option C
 protected facet before physical append. -/
 def Config.physicalTransport (config : Config) : DurableReceiverIO.Transport :=
   let storage := { config.storage with anchorIdentity := config.anchorIdentity }
-  { storage.transport config.logStart config.systemCell with sourceGate := config.sourceGate none }
+  { DurableNodeCache.cached storage.root.toString (storage.transport config.logStart config.systemCell) with
+    sourceGate := config.sourceGate none }
 
 /-- In an agreed domain the ordinary receiving loop must propose its source
 transition. It cannot secretly append an unordered local application record.

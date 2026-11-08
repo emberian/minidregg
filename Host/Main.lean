@@ -8690,6 +8690,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                     if settings.carryRegistry.isSome then
                       carriedApplicationSubmit pinnedConfig state carriedState settings routeBound payload output
                     else dispatchApplicationSubmitSession pinnedConfig state payload output routeBound
+                  -- This process appends to its Store: it holds the node rows it writes and reads
+                  -- (`DurableNodeCache`, row 37), so an append and a footprint read no row twice.
+                  Minidregg.Compiler.DurableNodeCache.enable pinnedConfig.storage.root.toString
                   serveSession pinnedConfig state meteringProfile
                     (← IO.ofExcept settings.providerRoutes) fnDispatch applicationDispatch
                     (← settings.rateGate) (← IO.getStdin) (← IO.getStdout)
