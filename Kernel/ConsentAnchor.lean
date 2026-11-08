@@ -198,7 +198,7 @@ once per client connection, so a rollback or prefix rewrite between commands is
 refused exactly as a per-process `resume` refuses it (`checkStore_eq_checkStored`). -/
 def recheckStore (transport : DurableReceiverIO.Transport) (anchor : Anchor) :
     IO (Except String Unit) := do
-  match ← transport.read 1 true with
+  match ← DurableReceiverIO.readWhole transport with
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
   | .ok (some stored) =>

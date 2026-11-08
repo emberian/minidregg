@@ -175,7 +175,7 @@ def audit (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Exce
   let key ← match ← transport.key with
     | .error message => return .error message
     | .ok key => pure key
-  let stored ← match ← transport.read 1 true with
+  let stored ← match ← DurableReceiverIO.readWhole transport with
     | .error message => return .error message
     | .ok none => return .error "durable store is not initialized"
     | .ok (some stored) => pure stored
