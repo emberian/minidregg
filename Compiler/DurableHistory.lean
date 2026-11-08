@@ -90,33 +90,36 @@ codec's cursor, so no `List UInt8` of the body is ever built. Each function belo
 list specification at the body's octets (`_eq`), which every statement keeps reading. -/
 
 /-- The kernel seam on a packed input is the specification on its octets. -/
-theorem kernel_data_toList (customization : List UInt8) (input : ByteArray) :
-    (Sp800185Cshake256.Native.cshake256Kernel (Sp800185Cshake256.Native.bytesOfList customization)
-      input).data.toList = Sp800185Cshake256.cshake256Bytes customization input.toList := by
+theorem kernel_data_toList (customization input : ByteArray) :
+    (Sp800185Cshake256.Native.cshake256Kernel customization input).data.toList =
+      Sp800185Cshake256.cshake256Bytes customization.toList input.toList := by
   unfold Sp800185Cshake256.Native.cshake256Kernel
-  rw [Sp800185Cshake256.Native.bytesOfList_toList, Sp800185Cshake256.Native.bytesOfList_toList,
-    Sp800185Cshake256.Fast.cshake256Fast_eq, ByteArray.toList_eq_data_toList]
+  rw [Sp800185Cshake256.Native.bytesOfList_toList, Sp800185Cshake256.Fast.cshake256Fast_eq,
+    ByteArray.toList_eq_data_toList, ByteArray.toList_eq_data_toList]
 
 /-- A list packed and read back is itself. -/
-theorem toByteArray_toList (bytes : List UInt8) : bytes.toByteArray.toList = bytes := by
+theorem toByteArray_toList : ∀ bytes, (List.toByteArray bytes).toList = bytes := fun bytes => by
   rw [ByteArray.toList_eq_data_toList, List.toList_data_toByteArray]
 
 /-- `Sp800185Cshake256.hash` over a packed input: the kernel reads the array itself. -/
-def hashBytes (customization : List UInt8) (input : ByteArray) : Sp800185Cshake256.Output :=
-  ⟨(Sp800185Cshake256.Native.cshake256Kernel (Sp800185Cshake256.Native.bytesOfList customization)
-      input).data.toList,
+def hashBytes (customization input : ByteArray) : Sp800185Cshake256.Output :=
+  ⟨(Sp800185Cshake256.Native.cshake256Kernel customization input).data.toList,
     by rw [kernel_data_toList]; exact Sp800185Cshake256.cshake256Bytes_length _ _⟩
 
-theorem hashBytes_eq (customization : List UInt8) (input : ByteArray) :
-    hashBytes customization input = Sp800185Cshake256.hash customization input.toList := by
+theorem hashBytes_eq (customization input : ByteArray) :
+    hashBytes customization input = Sp800185Cshake256.hash customization.toList input.toList := by
   simp only [hashBytes, Sp800185Cshake256.hash, kernel_data_toList]
+
+/-- The customizations the packed hashes use, packed once. -/
+def recordCustomizationPacked : ByteArray := recordCustomization.toByteArray
+def turnCustomizationPacked : ByteArray := Kernel.WorldRoot.turnCustomization.toByteArray
 
 /-- `recordHash` of a packed body. -/
 def recordHashBytes (bytes : ByteArray) : Digest :=
-  (hashBytes recordCustomization bytes).digest
+  (hashBytes recordCustomizationPacked bytes).digest
 
 theorem recordHashBytes_eq (bytes : ByteArray) : recordHashBytes bytes = recordHash bytes.toList := by
-  simp only [recordHashBytes, recordHash, hashBytes_eq]
+  simp only [recordHashBytes, recordHash, hashBytes_eq, recordCustomizationPacked, toByteArray_toList]
 
 /-- `leafDigest` of a packed body. -/
 def leafDigestBytes (height : Nat) (record : ByteArray) (chain root : Digest) : Digest :=
@@ -138,23 +141,26 @@ theorem decodeRecordBytes_eq (bytes : ByteArray) :
 /-- `DurableCheckpointCodec.storedRecordDigest` of a packed body: the turn digest of the bytes
 after the frame, hashed in place of a dropped list. -/
 def storedRecordDigestBytes (bytes : ByteArray) : Digest :=
-  (hashBytes Kernel.WorldRoot.turnCustomization
+  (hashBytes turnCustomizationPacked
     (bytes.extract (bytesStream.encode DurableCheckpointCodec.recordFrame.frame).length bytes.size)).digest
 
 theorem storedRecordDigestBytes_eq (bytes : ByteArray) :
     storedRecordDigestBytes bytes = DurableCheckpointCodec.storedRecordDigest bytes.toList := by
   unfold storedRecordDigestBytes DurableCheckpointCodec.storedRecordDigest Kernel.WorldRoot.turnDigestOfBytes
-  rw [hashBytes_eq]
+  rw [hashBytes_eq, turnCustomizationPacked, toByteArray_toList]
   congr 2
   rw [ByteArray.toList_eq_data_toList, ByteArray.toList_eq_data_toList, ByteArray.data_extract,
     Array.toList_extract, List.extract_eq_take_drop, List.take_of_length_le]
   simp only [List.length_drop, Array.length_toList]
   exact Nat.le_refl _
 
+/-- The deployment's cell-root function, as every open takes it. -/
+abbrev RootBytes := List UInt8 → Digest
+
 /-- `DurableCheckpointCodec.openSealedWith` over a packed checkpoint, decoded on the cursor
 (`openSealedWithBytes_eq`): the 5.9 MB demo checkpoint is never a list. -/
 def openSealedWithBytes {α : DurableCheckpointCodec.Body → Type} (key : MacKey)
-    (rootBytes : List UInt8 → Digest) (bytes : ByteArray)
+    (rootBytes : RootBytes) (bytes : ByteArray)
     (derive : (body : DurableCheckpointCodec.Body) → α body)
     (rootOf : (body : DurableCheckpointCodec.Body) → α body → Digest)
     (_exact : ∀ body, rootOf body (derive body) = DurableCheckpointCodec.worldRoot rootBytes body) :
@@ -168,7 +174,7 @@ def openSealedWithBytes {α : DurableCheckpointCodec.Body → Type} (key : MacKe
   pure ⟨sealed.body, derived⟩
 
 theorem openSealedWithBytes_eq {α : DurableCheckpointCodec.Body → Type} (key : MacKey)
-    (rootBytes : List UInt8 → Digest) (bytes : ByteArray)
+    (rootBytes : RootBytes) (bytes : ByteArray)
     (derive : (body : DurableCheckpointCodec.Body) → α body)
     (rootOf : (body : DurableCheckpointCodec.Body) → α body → Digest)
     (exact : ∀ body, rootOf body (derive body) = DurableCheckpointCodec.worldRoot rootBytes body) :
@@ -179,7 +185,7 @@ theorem openSealedWithBytes_eq {α : DurableCheckpointCodec.Body → Type} (key 
   rfl
 
 /-- `DurableCheckpointCodec.openSealed` over a packed checkpoint. -/
-def openSealedBytes (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : ByteArray) :
+def openSealedBytes (key : MacKey) (rootBytes : RootBytes) (bytes : ByteArray) :
     Except DurableCheckpointCodec.OpenError DurableCheckpointCodec.Body := do
   let some sealed := DurableCheckpointCodec.checkpointFrame.codec.decodeBytes bytes | throw .malformed
   unless sealed.body.keyId = key.id do throw .foreignKey
@@ -188,7 +194,7 @@ def openSealedBytes (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : 
   unless sealed.mac = DurableCheckpointCodec.checkpointMac key sealed.body sealed.root do throw .badMac
   pure sealed.body
 
-theorem openSealedBytes_eq (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : ByteArray) :
+theorem openSealedBytes_eq (key : MacKey) (rootBytes : RootBytes) (bytes : ByteArray) :
     openSealedBytes key rootBytes bytes = DurableCheckpointCodec.openSealed key rootBytes bytes.toList := by
   unfold openSealedBytes DurableCheckpointCodec.openSealed
   rw [StreamCodec.decodeBytes_eq]
