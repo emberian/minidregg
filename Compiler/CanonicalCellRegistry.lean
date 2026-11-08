@@ -1295,6 +1295,42 @@ theorem LoadedPolicySource.bytes_digest {domain : Digest} {directory : Directory
     {address : Digest} (loaded : LoadedPolicySource domain directory address) :
     PolicyRecordCodec.hashBytes loaded.canonicalBytes = address := loaded.addressExact
 
+/-- A policy source cell's record encoding, left as bytes: its payload stream with the record
+field read as the length-prefixed bytes `PolicySourceCell.recordStream` writes. -/
+def sourceBytesStream :=
+  Tower256ConcreteBackend.StreamCodec.product Tower256ConcreteBackend.StreamCodec.nat
+    (Tower256ConcreteBackend.StreamCodec.option Tower256ConcreteBackend.bytesStream)
+
+theorem payloadStream_encode_source (version : Nat) (record : CanonicalPolicyAdmission.PolicyRecord) :
+    PolicySourceCell.payloadStream.encode (version, some record) =
+      sourceBytesStream.encode (version, some (PolicyRecordCodec.encode record)) := rfl
+
+/-- The record digest of a policy source cell, read off the cell's cached canonical bytes: the
+record's canonical encoding sits in them as a length-prefixed field, so it is hashed there and
+never encoded again. A source cell is immutable (`PolicySourceCell.record_immutable`) and a
+directory row whose bytes did not move is the same decoded cell, so its bytes are materialized
+once (`sourceDigestCached_eq`: it is `PolicyRecordCodec.digest`). -/
+def sourceDigestCached (payload : Materialized PolicySourceCell.materializer)
+    (record : CanonicalPolicyAdmission.PolicyRecord) : Digest :=
+  match sourceBytesStream.decodePrefix (payload.bytesCache.get.drop PolicySourceCell.wireFrame.length) with
+  | some ((_, some source), _) => PolicyRecordCodec.hashBytes source
+  | _ => PolicyRecordCodec.digest record
+
+theorem sourceDigestCached_eq (payload : Materialized PolicySourceCell.materializer)
+    (record : CanonicalPolicyAdmission.PolicyRecord)
+    (found : PolicySourceCell.recordAt payload.logical = some record) :
+    sourceDigestCached payload record = PolicyRecordCodec.digest record := by
+  have bytes : payload.bytesCache.get.drop PolicySourceCell.wireFrame.length =
+      sourceBytesStream.encode (PolicySourceCell.wireVersion, some (PolicyRecordCodec.encode record)) ++ [] := by
+    rw [payload.bytesExact, List.append_nil]
+    show (PolicySourceCell.encode payload.logical).drop _ = _
+    rw [PolicySourceCell.encode, found, List.drop_left, payloadStream_encode_source]
+  unfold sourceDigestCached
+  rw [bytes, sourceBytesStream.decodePrefix_encode]
+  rfl
+
+/-- The source cell a policy head's address names: present, a policy source of this domain whose
+record digests to the address (decided by `sourceDigestCached`, which is its digest). -/
 def loadPolicySource (domain : Digest) (directory : Directory Nat registry) (address : Digest) :
     Option (LoadedPolicySource domain directory address) :=
   match present : directory.slots (PolicySourceCell.physicalId domain address) with
@@ -1302,8 +1338,9 @@ def loadPolicySource (domain : Digest) (directory : Directory Nat registry) (add
       match found : PolicySourceCell.recordAt payload.logical with
       | none => none
       | some record =>
-          if valid : record.domain = domain ∧ PolicyRecordCodec.digest record = address then
-            some ⟨payload, present, record, found, valid.1, valid.2⟩
+          if valid : record.domain = domain ∧ sourceDigestCached payload record = address then
+            some ⟨payload, present, record, found, valid.1,
+              (sourceDigestCached_eq payload record found) ▸ valid.2⟩
           else none
   | _ => none
 
@@ -1335,10 +1372,11 @@ def fetchPolicySourceFast (domain : Digest) (directory : Directory Nat registry)
     next found => simp [found]
     next record found =>
       simp only [found]
-      by_cases valid : record.domain = domain ∧ PolicyRecordCodec.digest record = address
-      · rw [dif_pos valid, if_pos (by simpa [PolicyRecordCodec.digest] using valid)]
+      have cached := sourceDigestCached_eq payload record found
+      by_cases valid : record.domain = domain ∧ sourceDigestCached payload record = address
+      · rw [dif_pos valid, if_pos (by rw [cached] at valid; simpa [PolicyRecordCodec.digest] using valid)]
         rfl
-      · rw [dif_neg valid, if_neg (by simpa [PolicyRecordCodec.digest] using valid)]
+      · rw [dif_neg valid, if_neg (by rw [cached] at valid; simpa [PolicyRecordCodec.digest] using valid)]
         rfl
   next absent =>
     split
@@ -1366,7 +1404,8 @@ theorem fetchPolicySource_exact (domain : Digest) (directory : Directory Nat reg
     next selected selectedAt =>
       have same : selected = record := Option.some.inj (selectedAt.symm.trans actual)
       subst selected
-      simp [domainExact, addressExact, LoadedPolicySource.canonicalBytes]
+      simp [domainExact, sourceDigestCached_eq _ _ selectedAt, addressExact,
+        LoadedPolicySource.canonicalBytes]
   next => simp_all [policySourceCell]
 
 set_option backward.isDefEq.respectTransparency false in
