@@ -55,6 +55,10 @@ land_regen() {
 }
 t=$(date +%s); scripts/pipeline/prime-cargo "$src" > "$I/logs/prime-cargo.log" 2>&1; rc=$?; say "stage prime-cargo rc=$rc $(( $(date +%s) - t ))s"
 [ $rc = 0 ] || exit 9
+# ratchets: the source-only gates (seconds, no build): the import tiers and runtime bytes as ByteArray. A red
+# here is reported (board/REDS.md) and never stops the build.
+t=$(date +%s); { bash scripts/check-import-boundary.sh && bash scripts/check-bytes-repr.sh; } > "$I/logs/ratchets.log" 2>&1
+say "stage ratchets rc=$? $(( $(date +%s) - t ))s"
 stage rust-check rust-check || exit 10
 stage host host || exit 11
 stage consent consent || exit 12

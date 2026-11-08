@@ -114,6 +114,7 @@ readers() {
   local kst=""; [ "$(selftests kernel-transport)" = 0 ] && kst=--no-self-test
   run kernel-transport $SB bash scripts/check-kernel-transport.sh $kst
   run import-boundary bash scripts/check-import-boundary.sh
+  run bytes-repr      bash scripts/check-bytes-repr.sh
   run platform-field-readers python3 -I scripts/check-platform-field-readers.py
   run proof-hygiene   bash scripts/check-proof-hygiene.sh
   run build-surfaces  python3 scripts/lean-build-surfaces.py check

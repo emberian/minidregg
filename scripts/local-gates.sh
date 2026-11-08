@@ -36,6 +36,7 @@
 #                  module, known-red rows that must still fail, a new test_*.py in no row is red)
 #   host-closure   the Host.Main import closure is at or under the module-count ceiling scripts/gates/host-closure.max
 #   import-tiers   every import is inside the tier table of scripts/check-import-boundary.sh
+#   bytes-repr     `List UInt8` in the deployed executables' closure is at or under scripts/gates/bytes-repr.max
 #   exports        every @[export] is called from native/ or allowlisted with a reason
 #   shell-paths    no shell-line parser confines a friend-typed path by is_absolute();
 #                  paths go through shell::session_fs (scripts/check-shell-paths.sh; self-tests)
@@ -77,7 +78,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start generic-simplex fn-wire native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey workspace)
+GATES=(host-operations hygiene lake-build cold-start generic-simplex fn-wire native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers bytes-repr exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey workspace)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -113,6 +114,7 @@ g_build-closure() { bash scripts/check-build-closure.sh && bash scripts/check-ca
 g_unit-tests()    { bash scripts/check-unit-tests.sh; }
 g_host-closure()  { bash scripts/check-host-closure.sh; }
 g_import-tiers()  { bash scripts/check-import-boundary.sh; }
+g_bytes-repr()    { bash scripts/check-bytes-repr.sh; }
 g_exports()       { bash scripts/check-exports.sh; }
 g_shell-paths()   { bash scripts/check-shell-paths.sh; }
 g_objective-frontend() { bash scripts/check-objective-frontend.sh; }

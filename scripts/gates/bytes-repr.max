@@ -1,0 +1,6 @@
+# The CEILING on `List UInt8` occurrences in the deployed executables' import closure (Theory/
+# excluded, comments stripped): scripts/check-bytes-repr.sh is red when the count RISES past it.
+# Each commit that moves a byte path to ByteArray lowers it with
+#   scripts/check-bytes-repr.sh --update REASON
+# updated 2026-11-08: 4929 (tree 6428): first ceiling (measured at b22a1a1b1)
+4929
