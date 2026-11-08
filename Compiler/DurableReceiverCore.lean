@@ -1135,14 +1135,6 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   `findIdx?` over the log on a receipt lookup. -/
   txs : SessionIndex.TxIndex
   txsExact : txs.Exact image.accepted
-  /-- Nullifier ↦ the first accepted index consuming it: a past read's consumed
-  set is this index against the read's base height (`KeyIndex.below_eq`). -/
-  spentAt : SessionIndex.KeyIndex StableNullifier
-  spentAtExact : spentAt.Exact IntentRecord.nullifiers image.accepted
-  /-- Written cell id ↦ the first accepted index writing it: a past read's
-  admissibility check (`Loaded.admissibleAt`). -/
-  writesAt : SessionIndex.KeyIndex CellId
-  writesAtExact : writesAt.Exact (fun record => record.writes.map DataWrite.cellId) image.accepted
   /-- The receipt root after each accepted record, oldest first: read from each
   entry's verified tag on open (`DurableLogTags.verifyTags_root`), pushed at
   every append (`Loaded.extend`). `none` where this image never saw the root
@@ -1324,11 +1316,6 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
         SessionIndex.TxIndex.ofRecords_exact image.accepted,
-        SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
-        SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
-        SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId) image.accepted,
-        SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
-          image.accepted,
         Array.replicate image.accepted.length none, Array.size_replicate,
         if image.accepted.isEmpty then some [] else none, none, track,
         chains.toArray, List.toList_toArray⟩
@@ -1572,11 +1559,6 @@ def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Di
     PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
     SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
     SessionIndex.TxIndex.ofRecords image.accepted, SessionIndex.TxIndex.ofRecords_exact image.accepted,
-    SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
-    SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
-    SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId) image.accepted,
-    SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
-      image.accepted,
     rootLog, sized, some opened.frontier,
     entries.getLast?.map (·.tag), trackOfWorld rootBytes image resumed opened.world,
     chains.toArray, by rw [List.toList_toArray]; exact chainsEq⟩
@@ -1767,13 +1749,6 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     loaded.txs.admitAt loaded.height record,
     by simpa only [Loaded.height_eq, Image.accepted_append] using
          SessionIndex.TxIndex.admitAt_exact loaded.txsExact record,
-    loaded.spentAt.admitAt IntentRecord.nullifiers loaded.height record,
-    by simpa only [Loaded.height_eq, Image.accepted_append] using
-         SessionIndex.KeyIndex.admitAt_exact loaded.spentAtExact record,
-    loaded.writesAt.admitAt (fun record => record.writes.map DataWrite.cellId)
-      loaded.height record,
-    by simpa only [Loaded.height_eq, Image.accepted_append] using
-         SessionIndex.KeyIndex.admitAt_exact loaded.writesAtExact record,
     loaded.rootLog.push (some served),
     by simp [Image.append, loaded.rootLogSize],
     loaded.frontier.map fun frontier => DurableHistory.Frontier.push frontier
@@ -1829,7 +1804,6 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     loaded.chain, loaded.chainExact, loaded.roots, loaded.rootsExact,
     loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,
     loaded.ids, loaded.idsExact, loaded.txs, loaded.txsExact,
-    loaded.spentAt, loaded.spentAtExact, loaded.writesAt, loaded.writesAtExact,
     loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag, loaded.track,
     loaded.chainLog, loaded.chainLogExact⟩
 
@@ -1908,11 +1882,6 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
         SessionIndex.TxIndex.ofRecords_exact image.accepted,
-        SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
-        SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
-        SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId) image.accepted,
-        SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
-          image.accepted,
         rootLog, rootLogSize, none, none,
         trackOfWorld rootBytes image (DurableEngine.resume_of_resumeEngine found) world,
         chainLog, chainLogExact⟩, rfl, rfl, rfl, rfl⟩
@@ -1959,270 +1928,54 @@ def Chained.cutAbove {rootBytes : List UInt8 → Digest} (opened : Chained rootB
     else .error s!"height {height} is below the Store's base at {loaded.baseHeight}"
   else .error "durable log is shorter than the requested height"
 
-/-- **A kept checkpoint below the open's base**, as the past-read path admits
-it. The Store keeps every checkpoint (`durable-checkpoint-at` returns the latest
-at or below a height); this one opened under the Store's key — exact decode,
-key id, recomputed world root, MAC (`openSealed`) — at a positive height inside
-the log, and its sealed world root is the root the MAC-verified log tag at its
-height carries (`rootLog`). What no check can establish is that the host sealed
-the right state; that is the honesty premise every checkpoint carries
-(`resume_sound`, `Loaded.atPrefixFrom_kept`). -/
-structure Loaded.Kept {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) where
-  /-- The Store's MAC key the checkpoint opened under. -/
-  key : MacKey
-  height : Nat
-  state : State
-  positive : 0 < height
-  within : height ≤ loaded.image.accepted.length
-  authentic : ∃ bytes body, openSealed key rootBytes bytes = .ok body ∧ body.height = height ∧
-    body.state = state ∧
-    loaded.rootLog[height - 1]? = some (some (DurableCheckpointCodec.worldRoot rootBytes body))
+/-- **A cell's bytes at log height `height`** (K-HISTORY-READ): its last write among the
+first `height` accepted records, else its seeded bytes, else the deployment's fresh image:
+`Image.currentBytes` of the prefix. No checkpoint is read and nothing is replayed; for every
+snapshot the prefix restores to (the genesis fold), these are that snapshot's bytes
+(`Loaded.pastBytes_restore`). -/
+def Loaded.pastBytes {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (height : Nat) (cellId : CellId) : List UInt8 :=
+  (loaded.prefixImage height).currentBytes cellId
 
-/-- **The state at log height `height`.** At or above the open's base: that base
-plus the records after it up to `height` (D2's resume, on the cut image). Below
-it: the kept checkpoint `kept` plus the records after it, when `kept` sits at or
-below `height`; otherwise the genesis fold of the prefix. The Store keeps every
-record since the seed and every checkpoint, so the retention floor is height 0
-and a past read replays at most the distance to the nearest kept checkpoint. -/
-def Loaded.atPrefixFrom {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (kept : Option (loaded.Kept)) (height : Nat) : Option (DataSnapshot rootBytes) :=
-  if loaded.baseHeight ≤ height then
-    resume rootBytes (loaded.prefixImage height) loaded.baseHeight loaded.base
-  else
-    match kept with
-    | some base =>
-        if base.height ≤ height then
-          resume rootBytes (loaded.prefixImage height) base.height base.state
-        else resume rootBytes (loaded.prefixImage height) 0 (State.ofSeed loaded.image.seed)
-    | none => resume rootBytes (loaded.prefixImage height) 0 (State.ofSeed loaded.image.seed)
+/-- `pastBytes` off the held newest-first journal: the records below `height` are the journal
+past its newest `height - height'` entries, searched from the newest of them. -/
+def Loaded.pastBytesFast {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (height : Nat) (cellId : CellId) : List UInt8 :=
+  ((loaded.image.acceptedRev.drop (loaded.height - height)).findSome? fun record =>
+      DataSnapshot.lookupPostBytes cellId record.writes).getD
+    ((Seed.lookup loaded.image.seed.cells cellId).getD loaded.image.seed.absentBytes)
 
-/-- The base a past read at `height` resumes from, as `atPrefixFrom` picks it:
-the open's own base, else the kept checkpoint, else the seed. -/
-def Loaded.pastBase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (kept : Option (loaded.Kept)) (height : Nat) : Nat × State :=
-  if loaded.baseHeight ≤ height then (loaded.baseHeight, loaded.base)
-  else
-    match kept with
-    | some base =>
-        if base.height ≤ height then (base.height, base.state)
-        else (0, State.ofSeed loaded.image.seed)
-    | none => (0, State.ofSeed loaded.image.seed)
+@[csimp] theorem Loaded.pastBytes_eq_pastBytesFast :
+    @Loaded.pastBytes = @Loaded.pastBytesFast := by
+  funext rootBytes loaded height cellId
+  have length : loaded.height = loaded.image.acceptedRev.length := by
+    rw [Loaded.height_eq]; simp [Image.accepted]
+  simp only [Loaded.pastBytes, Loaded.pastBytesFast, Loaded.prefixImage, Image.currentBytes,
+    Image.ofAccepted_seed, Image.accepted, List.take_reverse, List.reverse_reverse, length,
+    Image.ofAccepted]
 
-theorem Loaded.atPrefixFrom_pastBase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (kept : Option (loaded.Kept)) (height : Nat) :
-    loaded.atPrefixFrom kept height = resume rootBytes (loaded.prefixImage height)
-      (loaded.pastBase kept height).1 (loaded.pastBase kept height).2 := by
-  unfold Loaded.atPrefixFrom Loaded.pastBase
-  split
-  · rfl
-  · cases kept with
-    | none => rfl
-    | some base =>
-        simp only
-        split <;> rfl
-
-theorem Loaded.pastBase_le {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (kept : Option (loaded.Kept)) (height : Nat) :
-    (loaded.pastBase kept height).1 ≤ height ∧
-      (loaded.pastBase kept height).1 ≤ loaded.image.accepted.length := by
-  unfold Loaded.pastBase
-  split
-  · rename_i above
-    exact ⟨above, loaded.withinLog⟩
-  · cases kept with
-    | none => exact ⟨Nat.zero_le _, Nat.zero_le _⟩
-    | some base =>
-        simp only
-        split
-        · rename_i above
-          exact ⟨above, base.within⟩
-        · exact ⟨Nat.zero_le _, Nat.zero_le _⟩
-
-/-- A checkpoint state's admissibility at a past height, off the session's
-indexes: duplicate-freedom in one pass, every identifier the seed's or written
-below `height` (`writesAt`), no pass over the prefix's records. -/
-def Loaded.admissibleAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (height : Nat) (state : State) : Bool :=
-  let seeded : Std.HashSet CellId := Std.HashSet.ofList (loaded.image.seed.cells.map Prod.fst)
-  DurableEngine.nodupFast (state.cells.map Prod.fst) &&
-    decide (state.absentBytes = loaded.image.seed.absentBytes) &&
-    (state.cells.map Prod.fst).all fun cellId =>
-      seeded.contains cellId || (loaded.writesAt[cellId]?).any fun first => decide (first < height)
-
-theorem Loaded.admissibleAt_iff {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (height : Nat) (state : State) :
-    loaded.admissibleAt height state = true ↔ state.Admissible (loaded.prefixImage height) := by
-  unfold Loaded.admissibleAt State.Admissible Image.cellIds Loaded.prefixImage
-  simp only [Bool.and_eq_true, DurableEngine.nodupFast_iff, decide_eq_true_eq, List.all_eq_true,
-    Bool.or_eq_true, Std.HashSet.contains_ofList, List.contains_iff_mem,
-    SessionIndex.KeyIndex.below_eq loaded.writesAtExact, List.mem_eraseDups, List.mem_append,
-    Image.ofAccepted_seed, Image.accepted_ofAccepted, and_assoc]
-
-/-- The engine at a past base height `height`: the base state's cells, the
-prefix's nullifiers and transaction ids read off the session's first-index
-tables (`spentAt`, `txs`) against `height`. Nothing walks the prefix. -/
-def Loaded.engineAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (height : Nat)
-    (state : State) : DurableEngine.Engine rootBytes :=
-  DurableEngine.Engine.ofIndexed rootBytes state loaded.image.accepted height
-    (fun nullifier => (loaded.spentAt[nullifier]?).any fun first => decide (first < height))
-    (SessionIndex.KeyIndex.below_eq loaded.spentAtExact height)
-    (fun transactionId => (loaded.txs[transactionId]?).any fun first => decide (first < height))
-    (SessionIndex.TxIndex.below_eq loaded.txsExact height)
-
-/-- **The past read, compiled**: from the base `pastBase` picks, the indexed
-engine replays only the records between that base and `height`. -/
-def Loaded.atPrefixFast {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (kept : Option (loaded.Kept)) (height : Nat) : Option (DataSnapshot rootBytes) :=
-  let start := loaded.pastBase kept height
-  if loaded.admissibleAt height start.2 then
-    ((loaded.engineAt start.1 start.2).replay rootBytes
-      ((loaded.image.accepted.drop start.1).take (height - start.1))).map
-        (DurableEngine.Engine.view rootBytes)
-  else none
-
-/-- **Refinement, compiled**: every past read the host runs is `atPrefixFast`;
-the replacement is this theorem, not a trusted `implemented_by`. -/
-@[csimp] theorem Loaded.atPrefixFrom_eq_atPrefixFast :
-    @Loaded.atPrefixFrom = @Loaded.atPrefixFast := by
-  funext rootBytes loaded kept height
-  rw [Loaded.atPrefixFrom_pastBase]
-  unfold Loaded.atPrefixFast
-  have bounded := loaded.pastBase_le kept height
-  generalize loaded.pastBase kept height = start at bounded ⊢
-  obtain ⟨base, state⟩ := start
-  simp only at bounded ⊢
-  unfold resume
-  by_cases admissible : state.Admissible (loaded.prefixImage height)
-  · rw [if_pos admissible, if_pos ((loaded.admissibleAt_iff height state).mpr admissible)]
-    have takeEq : (loaded.prefixImage height).accepted.take base = loaded.image.accepted.take base := by
-      simp only [Loaded.prefixImage, Image.accepted_ofAccepted]
-      rw [List.take_take, Nat.min_eq_left bounded.1]
-    have dropEq : (loaded.prefixImage height).accepted.drop base =
-        (loaded.image.accepted.drop base).take (height - base) := by
-      simp only [Loaded.prefixImage, Image.accepted_ofAccepted]
-      rw [List.drop_take]
-    rw [takeEq, dropEq, ← DurableEngine.Engine.view_ofIndexed rootBytes state loaded.image.accepted base
-      _ (SessionIndex.KeyIndex.below_eq loaded.spentAtExact base)
-      _ (SessionIndex.TxIndex.below_eq loaded.txsExact base), DurableEngine.Engine.replay_view]
-    rfl
-  · rw [if_neg admissible,
-      if_neg (fun fast => admissible ((loaded.admissibleAt_iff height state).mp fast))]
-
-#assert_axioms Loaded.atPrefixFrom_eq_atPrefixFast
+/-- **The past bytes are the fold's**: whatever snapshot the prefix restores to holds them. -/
+theorem Loaded.pastBytes_restore {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    {height : Nat} {snapshot : DataSnapshot rootBytes}
+    (restored : (loaded.prefixImage height).restore rootBytes = some snapshot) (cellId : CellId) :
+    loaded.pastBytes height cellId = snapshot.canonicalBytes cellId :=
+  (Image.currentBytes_restore rootBytes _ snapshot restored cellId).symm
 
 theorem Loaded.prefixImage_current {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     loaded.prefixImage loaded.height = loaded.image := by
   unfold prefixImage
   rw [Loaded.height_eq, List.take_length, Image.ofAccepted_accepted]
 
-/-- **At the current height the past read is the current state**, whatever
-kept checkpoint was supplied: the same snapshot every current read decodes. -/
-theorem Loaded.atPrefixFrom_current {rootBytes : List UInt8 → Digest}
-    (loaded : Loaded rootBytes) (kept : Option (loaded.Kept)) :
-    loaded.atPrefixFrom kept loaded.height = some loaded.snapshot := by
-  unfold atPrefixFrom
-  rw [if_pos (show loaded.baseHeight ≤ loaded.height from loaded.withinLog), loaded.prefixImage_current]
-  exact loaded.resumed
+/-- At the head the past bytes are the held snapshot's, when the whole log folds to it. -/
+theorem Loaded.pastBytes_current {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (honest : loaded.image.restore rootBytes = some loaded.snapshot) (cellId : CellId) :
+    loaded.pastBytes loaded.height cellId = loaded.snapshot.canonicalBytes cellId := by
+  apply loaded.pastBytes_restore
+  rw [loaded.prefixImage_current]
+  exact honest
 
-/-- **Below the base with no kept checkpoint in use, the past read is the
-genesis fold of the prefix** — unconditionally. (With `kept := none` this is
-the pre-kept `atPrefix_below` statement verbatim.) -/
-theorem Loaded.atPrefixFrom_below {rootBytes : List UInt8 → Digest}
-    (loaded : Loaded rootBytes) (kept : Option (loaded.Kept)) {height : Nat}
-    (below : height < loaded.baseHeight)
-    (unused : ∀ base ∈ kept, height < base.height) :
-    loaded.atPrefixFrom kept height = (loaded.prefixImage height).restore rootBytes := by
-  unfold atPrefixFrom
-  rw [if_neg (by omega)]
-  cases kept with
-  | none => exact resume_genesis rootBytes (loaded.prefixImage height)
-  | some base =>
-      simp only
-      rw [if_neg (Nat.not_le_of_lt (unused base rfl))]
-      exact resume_genesis rootBytes (loaded.prefixImage height)
-
-/-- **Below the base, from a kept checkpoint, the past read is the genesis fold
-of the prefix** for an honest checkpoint (`resume_sound`'s premises, the same
-ones `atPrefixFrom_from_checkpoint` carries for the open's own base). -/
-theorem Loaded.atPrefixFrom_kept {rootBytes : List UInt8 → Digest}
-    (loaded : Loaded rootBytes) (base : loaded.Kept) {height : Nat}
-    (below : height < loaded.baseHeight) (above : base.height ≤ height)
-    (atBase : DataSnapshot rootBytes)
-    (seedValid : (loaded.image.seed.cells.map Prod.fst).Nodup)
-    (stateValid : base.state.Admissible (loaded.prefixImage height))
-    (prefixReplay : replay rootBytes (loaded.image.seed.snapshot rootBytes)
-      ((loaded.image.accepted.take height).take base.height) = some atBase)
-    (honest : base.state.snapshot rootBytes
-      ((loaded.image.accepted.take height).take base.height) = atBase) :
-    loaded.atPrefixFrom (some base) height = (loaded.prefixImage height).restore rootBytes := by
-  unfold atPrefixFrom
-  rw [if_neg (by omega)]
-  simp only
-  rw [if_pos above]
-  exact resume_sound rootBytes (loaded.prefixImage height) base.height base.state atBase
-    seedValid stateValid
-    (by simpa only [Loaded.prefixImage, Image.ofAccepted_seed, Image.accepted_ofAccepted] using prefixReplay)
-    (by simpa only [Loaded.prefixImage, Image.accepted_ofAccepted] using honest)
-
-/-- **At or above the base the past read is the base plus the suffix fold** —
-and, for an honest base (`resume_sound`'s premises), the genesis fold of the
-prefix. The kept checkpoint plays no part. -/
-theorem Loaded.atPrefixFrom_from_checkpoint {rootBytes : List UInt8 → Digest}
-    (loaded : Loaded rootBytes) (kept : Option (loaded.Kept)) {height : Nat}
-    (above : loaded.baseHeight ≤ height)
-    (atBase : DataSnapshot rootBytes)
-    (seedValid : (loaded.image.seed.cells.map Prod.fst).Nodup)
-    (stateValid : loaded.base.Admissible (loaded.prefixImage height))
-    (prefixReplay : replay rootBytes (loaded.image.seed.snapshot rootBytes)
-      ((loaded.image.accepted.take height).take loaded.baseHeight) = some atBase)
-    (honest : loaded.base.snapshot rootBytes
-      ((loaded.image.accepted.take height).take loaded.baseHeight) = atBase) :
-    loaded.atPrefixFrom kept height = (loaded.prefixImage height).restore rootBytes := by
-  unfold atPrefixFrom
-  rw [if_pos above]
-  exact resume_sound rootBytes (loaded.prefixImage height) loaded.baseHeight loaded.base atBase
-    seedValid stateValid
-    (by simpa only [Loaded.prefixImage, Image.ofAccepted_seed, Image.accepted_ofAccepted] using prefixReplay)
-    (by simpa only [Loaded.prefixImage, Image.accepted_ofAccepted] using honest)
-
-/-- The kept checkpoint a past read at `height` resumes from: the Store's
-latest checkpoint at or below `height`, admitted as a `Kept` (every check named
-in its doc), or `none` when the open's own base already serves `height`, when
-no checkpoint is kept at or below it, or when it is too low to beat genesis.
-A checkpoint that fails a check refuses the read by name; it is never replaced
-by a genesis fold. -/
-def Loaded.keptAt {rootBytes : List UInt8 → Digest} (transport : Transport) (key : MacKey)
-    (loaded : Loaded rootBytes) (height : Nat) : IO (Except String (Option (loaded.Kept))) := do
-  if loaded.baseHeight ≤ height ∨ height < transport.checkpointEvery then return .ok none
-  match ← transport.checkpointAt height with
-  | .error message => return .error s!"past state unavailable: the kept checkpoint read failed: {message}"
-  | .ok none => return .ok none
-  | .ok (some checkpoint) =>
-      -- the same cached open as the full open's checkpoint (loadChained): the tree evaluated once
-      match opened : openSealedWith (α := CheckpointRoots rootBytes) key rootBytes checkpoint.bytes
-          (fun _ => RootCache.build _) (fun _ built => built.1.root)
-          (fun _ => RootCache.ofEntries_root _) with
-      | .error reason =>
-          return .error s!"past state refused: the kept checkpoint at {checkpoint.height} does not open ({repr reason})"
-      | .ok ⟨body, built⟩ =>
-          let root := built.1.root
-          if body.height ≠ checkpoint.height ∨ body.height > height then
-            return .error s!"past state refused: the kept checkpoint at {checkpoint.height} names height {body.height}"
-          if positive : 0 < body.height then
-            if within : body.height ≤ loaded.height then
-              if logged : loaded.rootLog[body.height - 1]? = some (some root) then
-                have plain := openSealedWith_ok opened
-                return .ok (some ⟨key, body.height, body.state, positive, within,
-                  ⟨checkpoint.bytes, body, plain.1, rfl, rfl, by rw [← plain.2]; exact logged⟩⟩)
-              else
-                return .error s!"past state refused: the kept checkpoint at {body.height} differs from its log entry's root"
-            else return .error s!"past state refused: the kept checkpoint at {body.height} is beyond the log"
-          else return .ok none
-
-#assert_axioms Loaded.atPrefixFrom_current
-#assert_axioms Loaded.atPrefixFrom_below
-#assert_axioms Loaded.atPrefixFrom_kept
-#assert_axioms Loaded.atPrefixFrom_from_checkpoint
+#assert_axioms Loaded.pastBytes_eq_pastBytesFast
+#assert_axioms Loaded.pastBytes_restore
 
 /-- The checkpoint state's world-root entries are the served entries. -/
 theorem stateEntries_ofSnapshot {rootBytes : List UInt8 → Digest} (image : Image)

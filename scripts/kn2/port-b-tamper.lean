@@ -3,7 +3,7 @@ and `NativeHistorySelection.foldRange`.
 
 Honest: the continuity witness built from `stateAt` (ReceiptContinuityIO.pastWitness)
 equals, root, chain and siblings, the one the retired genesis-replay path
-(`Loaded.atPrefixFrom none` (the genesis fold) + `entriesOf` over the cut image) computed, at height 30 (base:
+(`(Loaded.prefixImage h).restore` (the genesis fold) + `entriesOf` over the cut image) computed, at height 30 (base:
 the checkpoint at 16 + 14 records) and 10 (base: genesis) and at the head 41; the
 windowed fold sees all 41 records.
 `NativeHistorySelection.select` (the lifecycle cores' read of an original record and its prior
@@ -101,7 +101,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
       | .ok past => pure past
       | .error refusal => throw (IO.userError s!"FAIL honest stateAt {height}: {refusal.message}")
     let witness := ReceiptContinuityIO.pastWitness past
-    let some snapshot := loaded.atPrefixFrom none height
+    let some snapshot := (loaded.prefixImage height).restore rootBytes
       | throw (IO.userError s!"FAIL genesis replay at {height}")
     let image := loaded.prefixImage height
     let chain := DurableCheckpointCodec.chainAfter loaded.logStart image.accepted

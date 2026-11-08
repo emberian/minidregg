@@ -68,8 +68,6 @@ structure Derived where
   links : LinkIndex.Index
   ids : SessionIndex.CellIds
   txs : SessionIndex.TxIndex
-  spentAt : SessionIndex.KeyIndex StableNullifier
-  writesAt : SessionIndex.KeyIndex CellId
   /-- Newest first, as `State.snapshot` builds it from the prefix. -/
   journal : List (TransactionId × Intent TransactionId CellId StableNullifier ReplayEnvelope)
   /-- Newest first, as `State.snapshot` builds it from the prefix. -/
@@ -111,8 +109,6 @@ structure Derived.Honest (image : Image) (derived : Derived) : Prop where
   links : derived.links = LinkIndex.ofRecords image.accepted
   ids : derived.ids.Exact (SessionIndex.rawIds image)
   txs : derived.txs.Exact image.accepted
-  spentAt : derived.spentAt.Exact IntentRecord.nullifiers image.accepted
-  writesAt : derived.writesAt.Exact (fun record => record.writes.map DataWrite.cellId) image.accepted
   journal : derived.journal =
     (image.accepted.map fun record => (record.transactionId, IntentRecord.erase record)).reverse
   history : derived.history = (image.accepted.map fun record => (IntentRecord.erase record).event).reverse
@@ -173,8 +169,6 @@ def rebuildDerived (seed : Seed) (records : List IntentRecord) (world : Option H
   links := LinkIndex.ofRecords records
   ids := SessionIndex.CellIds.ofImage (Image.ofAccepted seed records)
   txs := SessionIndex.TxIndex.ofRecords records
-  spentAt := SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers records
-  writesAt := SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId) records
   journal := (records.map fun record => (record.transactionId, IntentRecord.erase record)).reverse
   history := (records.map fun record => (IntentRecord.erase record).event).reverse
   world := world

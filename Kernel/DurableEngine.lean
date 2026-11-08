@@ -101,8 +101,7 @@ structure Engine (rootBytes : List UInt8 → Digest) where
   absentRootExact : absentRoot.get = rootBytes absent
   available : Charge
   /-- The nullifiers consumed below the engine's base, as an oracle: nothing
-  for a checkpoint's engine (its prefix sits in `spent`), a first-index lookup
-  against the base height for a past read (`ofIndexed`). -/
+  for a checkpoint's engine (its prefix sits in `spent`). -/
   spentBefore : StableNullifier → Bool
   spent : Std.HashSet StableNullifier
   /-- Newest first, as `Snapshot.install` conses it. Deferred: a past read
@@ -372,72 +371,6 @@ theorem view_ofState (state : State) (prefixRecords : List IntentRecord) :
          show ((Std.HashSet.ofList _).contains nullifier || false) = _
          rw [Bool.or_false, Std.HashSet.contains_ofList]
          exact List.elem_eq_mem _ _)
-      | rfl
-  · exact bytesEq
-
-/-- **The engine at a past height `height` of a log**, without a pass over its
-prefix: the checkpoint state's cells as a table, the prefix's nullifiers and
-transaction ids as oracles the caller proves exact (a first-index lookup against
-`height`, `SessionIndex.KeyIndex.below_eq`), its journal and history deferred. -/
-def ofIndexed (state : State) (records : List IntentRecord) (height : Nat)
-    (spentBefore : StableNullifier → Bool)
-    (spentExact : ∀ nullifier, spentBefore nullifier =
-      decide (nullifier ∈ (records.take height).flatMap IntentRecord.nullifiers))
-    (recordedBefore : TransactionId → Bool)
-    (recordedExact : ∀ transactionId, recordedBefore transactionId =
-      ((records.take height).map IntentRecord.transactionId).contains transactionId) :
-    Engine rootBytes :=
-  let cells := CellTable.ofList state.cells
-  { absent := state.absentBytes
-    cells := cells
-    roots := rootsOf rootBytes cells
-    rootsExact := rootsOf_exact rootBytes cells
-    absentRoot := Thunk.mk fun _ => rootBytes state.absentBytes
-    absentRootExact := rfl
-    available := state.available
-    spentBefore := spentBefore
-    spent := ∅
-    journal := Thunk.mk fun _ =>
-      ((records.take height).map fun record => (record.transactionId, IntentRecord.erase record)).reverse
-    recordedBefore := recordedBefore
-    recorded := ∅
-    recordedExact := by
-      intro transactionId
-      show ((∅ : Std.HashSet TransactionId).contains transactionId || recordedBefore transactionId) =
-        ((((records.take height).map fun record =>
-          (record.transactionId, IntentRecord.erase record)).reverse).map Prod.fst).contains transactionId
-      rw [Std.HashSet.contains_empty, Bool.false_or, recordedExact, List.map_reverse, List.map_map]
-      simp [Function.comp_def, IntentRecord.erase]
-    historyRev := Thunk.mk fun _ =>
-      ((records.take height).map fun record => (IntentRecord.erase record).event).reverse }
-
-/-- **The indexed engine is the checkpoint's snapshot at that height.** -/
-theorem view_ofIndexed (state : State) (records : List IntentRecord) (height : Nat)
-    (spentBefore : StableNullifier → Bool)
-    (spentExact : ∀ nullifier, spentBefore nullifier =
-      decide (nullifier ∈ (records.take height).flatMap IntentRecord.nullifiers))
-    (recordedBefore : TransactionId → Bool)
-    (recordedExact : ∀ transactionId, recordedBefore transactionId =
-      ((records.take height).map IntentRecord.transactionId).contains transactionId) :
-    (ofIndexed rootBytes state records height spentBefore spentExact recordedBefore recordedExact).view
-      rootBytes =
-      state.snapshot rootBytes (records.take height) := by
-  have bytesEq : (ofIndexed rootBytes state records height spentBefore spentExact recordedBefore
-      recordedExact).bytes = (state.snapshot rootBytes (records.take height)).canonicalBytes := by
-    funext cellId
-    show ((CellTable.ofList state.cells).get cellId).getD state.absentBytes = _
-    rw [CellTable.get_ofList]
-    rfl
-  apply DataSnapshot.ext' rootBytes
-  · show Snapshot.mk _ _ _ _ _ = Snapshot.mk _ _ _ _ _
-    congr 1
-    all_goals first
-      | (funext cellId
-         rw [root_eq, congrFun bytesEq cellId]
-         exact (state.snapshot rootBytes (records.take height)).coherent cellId)
-      | (funext nullifier
-         show ((∅ : Std.HashSet StableNullifier).contains nullifier || spentBefore nullifier) = _
-         rw [Std.HashSet.contains_empty, Bool.false_or, spentExact])
       | rfl
   · exact bytesEq
 
@@ -815,7 +748,6 @@ theorem resume_rebase {rootBytes : List UInt8 → Digest} {image : Image} {bh : 
 #assert_axioms resume_model
 #assert_axioms replay_history
 #assert_axioms resume_history
-#assert_axioms Engine.view_ofIndexed
 #assert_axioms nodupFast_iff
 
 end Minidregg.Kernel.DurableEngine

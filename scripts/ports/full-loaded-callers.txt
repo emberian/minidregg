@@ -38,8 +38,6 @@ scripts/kn2/neutral-birth.lean
 scripts/kn2/neutral-birth-install.lean
 # PROBE (KN2-NEUTRAL-BIRTHS cluster 5): the reserve-method birth probe; boots its Store through the full open
 scripts/kn2/neutral-birth-reserve.lean
-# PROBE (state-at d951d57a): the executed past-checkpoint plant boots a native Store through the full open, flips a kept checkpoint's MAC and requires `at h` to refuse by name
-scripts/kn2/past-checkpoint-tamper.lean
 scripts/kn2/port-b-tamper.lean
 scripts/kn2/receipt-tamper.lean
 scripts/native-accepted-fixture/replay.lean

@@ -16,13 +16,12 @@ Best of three for each (the past reads too). Not part of the umbrella gate.
 `KN2_BENCH_CREATES=1`: each record instead births a fresh cell, so N records hold
 N cells (the axis the world root's cost grows on).
 
-With `KN2_BENCH_AT=1`, also the past reads (`at h`) on the cold opening, at
-heights near a quarter, a half and three quarters of the way up, each 32 records
-past a kept checkpoint (each below the
-opening's base): `at kept` = `Loaded.keptAt` (the nearest kept checkpoint) +
-`atPrefixFrom`; `at genesis` = `atPrefixFrom none` (the genesis fold), only when
-N ≤ `KN2_BENCH_GENESIS_MAX` (default 3000). Each read is forced by summing the
-cell's bytes inside `IO.lazyPure` (a pure `let` floats out of the timed span).
+With `KN2_BENCH_AT=1`, also the past reads (`at h`) on the cold opening, at heights near
+a quarter, a half and three quarters of the way up: `at` = `Loaded.pastBytes` (the cell's
+last write at or below `h`, no checkpoint read); `at genesis` = the genesis fold of the prefix,
+only when N ≤ `KN2_BENCH_GENESIS_MAX` (default 3000), which the two must agree with. Each read
+is forced by summing the cell's bytes inside `IO.lazyPure` (a pure `let` floats out of the
+timed span).
 
 With `KN2_BENCH_STORE=DIR`, the Store for N lives in DIR/N and is kept: a later
 run reuses it (grown only by the records it lacks), so a representation change
@@ -73,38 +72,31 @@ def force (snapshot : Option (DataSnapshot rootBytes)) : Nat :=
   | some snapshot => (snapshot.canonicalBytes ⟨3⟩).foldl (fun total byte => total + byte.toNat) 0
   | none => 0
 
-/-- `at h` over a cold opening, the kept-checkpoint way and (bounded) the genesis way. -/
+def sumBytes (bytes : List UInt8) : Nat := bytes.foldl (fun total byte => total + byte.toNat) 0
+
+/-- `at h` over a cold opening, off the log (`pastBytes`) and (bounded) the genesis way. -/
 def pastReads (transport : Transport) (count : Nat) : IO Unit := do
   let genesisMax := ((← IO.getEnv "KN2_BENCH_GENESIS_MAX").bind String.toNat?).getD 3000
-  let key ← match ← transport.key with
-    | .ok key => pure key
-    | .error detail => throw (IO.userError s!"key: {detail}")
   let loaded ← match ← load transport rootBytes with
     | .ok loaded => pure loaded
     | .error detail => throw (IO.userError s!"open: {detail}")
   for quarter in [1, 2, 3] do
-    -- 32 records past a checkpoint (every 64): the replayed suffix is the same
-    -- length at every height, so the curve isolates the dependence on `h`.
     let height := (quarter * count / 4) / 64 * 64 + 32
-    let mut keptMs := 1000000000
-    let mut keptSum := 0
-    let mut kept := none
+    let mut pastMs := 1000000000
+    let mut pastSum := 0
     for _ in [0:3] do
       let t0 ← IO.monoMsNow
-      kept ← match ← loaded.keptAt transport key height with
-        | .ok found => pure found
-        | .error detail => throw (IO.userError s!"at {height}: {detail}")
-      keptSum ← IO.lazyPure fun _ => force (loaded.atPrefixFrom kept height)
-      keptMs := min keptMs (← ms t0)
-    let base := match kept with | some base => base.height | none => 0
+      pastSum ← IO.lazyPure fun _ => sumBytes (loaded.pastBytes height ⟨3⟩)
+      pastMs := min pastMs (← ms t0)
     if count ≤ genesisMax then
       let t1 ← IO.monoMsNow
-      let genesisSum ← IO.lazyPure fun _ => force (loaded.atPrefixFrom none height)
+      let genesisSum ← IO.lazyPure fun _ =>
+        force ((loaded.prefixImage height).restore rootBytes)
       let genesisMs ← ms t1
-      unless genesisSum == keptSum do throw (IO.userError s!"at {height}: kept and genesis disagree")
-      IO.println s!"records {count}: at {height} (open base {loaded.baseHeight}, kept {base}): kept {keptMs} ms, genesis {genesisMs} ms"
+      unless genesisSum == pastSum do throw (IO.userError s!"at {height}: the log and the genesis fold disagree")
+      IO.println s!"records {count}: at {height}: {pastMs} ms, genesis {genesisMs} ms"
     else
-      IO.println s!"records {count}: at {height} (open base {loaded.baseHeight}, kept {base}): kept {keptMs} ms (sum {keptSum})"
+      IO.println s!"records {count}: at {height}: {pastMs} ms (sum {pastSum})"
 
 def grow (creates : Bool) (transport : Transport) (count : Nat) : IO (Loaded rootBytes) := do
   let initial ← match ← load transport rootBytes with
