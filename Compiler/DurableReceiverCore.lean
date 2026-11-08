@@ -1598,27 +1598,20 @@ nears the coprocess bound (`NativeCoprocess.maxField`, 64 MiB) whatever the log'
 birth record is up to ~110 KB: 256 of them are ~28 MB). -/
 def readPage : Nat := 256
 
-/-- The prefix entries `heights` of the log, in order, read `readPage` heights per call at the
-head `head` (entries at or below a head never change: every page reads the same log). -/
-private def readPrefix (transport : Transport) (head : Nat) :
-    List Nat → List Entry → IO (Except String (List Entry))
-  | [], acc => pure (.ok acc)
-  | heights, acc => do
-      let page := heights.take readPage
-      match ← transport.history ⟨head, page, []⟩ with
-      | .error message => pure (.error message)
-      | .ok read =>
-          if read.entries.map (·.1) ≠ page then
-            pure (.error "the Store's history read returned other heights than the open asked for")
-          else
-            readPrefix transport head (heights.drop readPage) (acc ++ read.entries.map (·.2))
-termination_by heights => heights.length
-decreasing_by
-  simp only [List.length_drop]
-  rename_i nonempty
-  cases heights with
-  | nil => exact absurd rfl nonempty
-  | cons _ _ => simp [readPage]
+/-- The entries at heights `1 .. count` of the log, in order, read `readPage` heights per call
+at the head `head` (entries at or below a head never change: every page reads the same log). -/
+private def readPrefix (transport : Transport) (head count : Nat) : IO (Except String (List Entry)) := do
+  let mut acc : Array Entry := Array.mkEmpty count
+  for page in [0:(count + readPage - 1) / readPage] do
+    let first := 1 + page * readPage
+    let heights := List.range' first (min readPage (count + 1 - first))
+    match ← transport.history ⟨head, heights, []⟩ with
+    | .error message => return .error message
+    | .ok read =>
+        if read.entries.map (·.1) ≠ heights then
+          return .error "the Store's history read returned other heights than the open asked for"
+        for (_, entry) in read.entries do acc := acc.push entry
+  return .ok acc.toList
 
 /-- **The whole log, read in pages**: what `transport.read 1 true` answers (the head, the seed,
 the newest checkpoint and every entry from height 1), as the light open's read under the head
@@ -1632,8 +1625,8 @@ def readWhole (transport : Transport) : IO (Except String (Option Stored)) := do
   | .ok (some top) =>
       -- The entries the read from the checkpoint holds start at the checkpoint's height
       -- (inclusive), or at 1 with no checkpoint.
-      let first := ((top.checkpoint.map (·.height)).getD 1).max 1
-      match ← readPrefix transport top.head (List.range' 1 (first - 1)) [] with
+      let first := ((top.checkpoint.map fun (checkpoint : StoredCheckpoint) => checkpoint.height).getD 1).max 1
+      match ← readPrefix transport top.head (first - 1) with
       | .error message => return .error message
       | .ok below => return .ok (some { top with entries := below ++ top.entries })
 
