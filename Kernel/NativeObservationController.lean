@@ -1044,11 +1044,6 @@ def resourceViewFrame : List UInt8 := WorldExecutionContract.resourceViewFrame
 def resourceViewCodec : IndexedProgram.LawfulCodec ResourceView :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
 
-/-- The bytes a stream record's append carried, read from the accepted signed
-ingress of the record's own transaction, and shown only when they reproduce the
-digest the cell committed. The cell keeps the digest and the signed command
-keeps the bytes (K-STREAM); this is how a reader who may observe the stream
-gets the text. The lookup is a scan of the accepted log, like `since`. -/
 /-- The payload a stream record's append carried, from `found`, the accepted record of its
 transaction (`streamPayload` finds it in the log, `streamPayloadIn` through the log's index). -/
 def streamPayloadFrom (found : Option DurableReceiver.IntentRecord) (target : Nat)
@@ -1064,6 +1059,12 @@ def streamPayloadFrom (found : Option DurableReceiver.IntentRecord) (target : Na
       else none
   | _ => none
 
+/-- The bytes a stream record's append carried, read from the accepted signed
+ingress of the record's own transaction, and shown only when they reproduce the
+digest the cell committed. The cell keeps the digest and the signed command
+keeps the bytes (K-STREAM); this is how a reader who may observe the stream
+gets the text. The lookup is a scan of the accepted log (the served view reads it through the log's
+transaction index, `streamPayloadIn_eq`). -/
 def streamPayload (accepted : List DurableReceiver.IntentRecord) (target : Nat)
     (record : StreamCell.StreamRecord) : Option (List UInt8) :=
   streamPayloadFrom (accepted.find? (fun intent => decide (intent.transactionId = record.transaction)))
@@ -1157,7 +1158,7 @@ theorem intentOf_eq (history : Durable) (transaction : DurableDataIntent.Transac
   have exact := SessionIndex.TxIndex.lookup_eq history.txsExact transaction
   have sameP : (fun record : DurableReceiver.IntentRecord => record.transactionId == transaction) =
       (fun intent => decide (intent.transactionId = transaction)) := by
-    funext record; simp
+    funext record; rfl
   rw [sameP] at exact
   have reversed := find?_reverse_index (fun intent : DurableReceiver.IntentRecord =>
     decide (intent.transactionId = transaction)) history.image.acceptedRev
