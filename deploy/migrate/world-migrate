@@ -1,0 +1,762 @@
+#!/usr/bin/env python3
+"""deploy/migrate/world-migrate: carry the demo's world across a re-genesis (docs/WORLD-MIGRATION.md).
+
+ON THE BOX, as root, beside edge/mini's scripts (installed at /usr/local/lib/mini/migrate/). Everything it does
+to the world goes through the member shell (`mini-shell-ssh`, the line every member's ssh login runs) under the
+acting member's own account and key, exactly as deploy/demo-seed/seed.sh seeds the house, plus the genesis
+inputs mini-reenroll reads (carry.json). It never touches a Store file or a Host operation directly.
+
+  world-migrate capture DIR      the old world, read through each member's own signed reads: DIR/before.json
+                                 (refuses when DIR/before.json exists: a re-run after the genesis must never
+                                 overwrite the old world's capture with the new one) and DIR/carry.json, which
+                                 mini-reenroll reads (MINI_REENROLL_CARRY): each hosted member's subject, public
+                                 key and balance
+  world-migrate init DIR         after mini-reenroll: `init` for every member who had a workspace (before the seed
+                                 and the door's pass, which need one)
+  world-migrate replay DIR       after the new genesis and the walk's members/reenroll/pay/hermes/seed/door steps:
+                                 capture the new world, diff it against before.json, and re-author what is missing
+                                 as its original author, in the old world's order (room joins, messages, cells,
+                                 documents); then settle balances (the sponsor transfers each member the
+                                 difference to the old balance). Idempotent and resumable: every pass works from
+                                 a fresh diff; DIR/journal.jsonl records each action taken.
+  world-migrate verify DIR       capture the new world again (DIR/after.json) and print every difference beyond
+                                 hashes, heights and ids (DIR/verify.txt). Exit 0 iff nothing else differs.
+  world-migrate diff A.json B.json   the same comparison between two captures.
+
+Environment (the defaults are the box's):
+  MIGRATE_STORE_USER    the Store's account: the sponsor's lines and transfers run as it (mini-core)
+  MIGRATE_MEMBER_USER   one account for every member's line (default: mini-s-NAME, split tenancy)
+  MIGRATE_MEMBER_GROUP  the members' group (mini-sessions)
+  MIGRATE_SKIP          names never read or written (default: dw-* door-walk probes have no key and are skipped)
+"""
+import json, os, re, subprocess, sys, time, hashlib, pathlib
+
+VAR = "/var/lib/mini"
+NODE = f"{VAR}/store/node"
+S = f"{VAR}/sessions"
+C = f"{VAR}/candidate/current"
+LIB = "/usr/local/lib/mini"
+CONFIG = f"{NODE}/deployment/pinned-config.json"
+SOCKET = f"{NODE}/public/mini.sock"
+SPONSOR = "ember"
+SPONSOR_WS = f"{NODE}/sponsor"
+SPONSOR_HOME = f"{NODE}/sponsor-home"
+STORE_USER = os.environ.get("MIGRATE_STORE_USER", "mini-core")
+MEMBER_USER = os.environ.get("MIGRATE_MEMBER_USER", "")
+MEMBER_GROUP = os.environ.get("MIGRATE_MEMBER_GROUP", "mini-sessions")
+TIMEOUT = int(os.environ.get("MIGRATE_LINE_TIMEOUT", "600"))
+LOG = None
+
+
+def log(*a):
+    line = " ".join(str(x) for x in a)
+    print(line, flush=True)
+    if LOG:
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ ", time.gmtime()) + line + "\n")
+
+
+# ── running lines ──────────────────────────────────────────────────────────────────────────────────────────
+class Refused(Exception):
+    pass
+
+
+def _run(user, group, env, argv, cwd="/tmp"):
+    cmd = ["timeout", "--kill-after=5", str(TIMEOUT), "setpriv", f"--reuid={user}", f"--regid={group}", "--init-groups",
+           "--reset-env", "--", "env", "-i", "PATH=/usr/bin:/bin", "LANG=C.UTF-8"] + [f"{k}={v}" for k, v in env.items()] + argv
+    p = subprocess.run(cmd, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    return p.returncode, p.stdout, p.stderr
+
+
+def certified(rc, out, err):
+    """A turn the Host refused `tail-bound` (the head is more than the bound past the last certified height): run
+    the box's certifier once (mini-certify, which its timer runs every minute) and say so; the caller retries."""
+    if rc == 0 or "tail-bound" not in (out + err):
+        return False
+    p = subprocess.run(["setpriv", f"--reuid={STORE_USER}", f"--regid={STORE_USER}", "--init-groups", "--", f"{LIB}/mini-certify"],
+                       cwd=f"{VAR}/store", capture_output=True, text=True)
+    log(f"certify: tail-bound refusal, mini-certify exit {p.returncode}: {tail(p.stdout + p.stderr, 1)}")
+    return p.returncode == 0
+
+
+def member(name, line, check=True, _retry=True):
+    """One shell line as member NAME, as their ssh login runs it (seed.sh `as`)."""
+    if len(line) > 4000 or any(ord(c) < 32 for c in line):
+        raise Refused(f"{name}: line too long or has a control character")
+    user = MEMBER_USER or f"mini-s-{name}"
+    rc, out, err = _run(user, MEMBER_GROUP, {"SSH_ORIGINAL_COMMAND": line},
+                        [f"{LIB}/mini-shell-ssh", f"{C}/bin/mini", f"{C}/bin/minidregg-host", CONFIG, SOCKET,
+                         f"{S}/{name}/workspace", f"{S}/{name}"])
+    if _retry and certified(rc, out, err):
+        return member(name, line, check, _retry=False)
+    if check and rc != 0:
+        raise Refused(f"{name}: `{line[:120]}` exit {rc}: {tail(err or out)}")
+    return rc, out, err
+
+
+def sponsor(line, check=True):
+    """One shell line in the sponsor's session (mini-reenroll's `sponsor`)."""
+    rc, out, err = _run(STORE_USER, STORE_USER, {"SSH_ORIGINAL_COMMAND": line, "MINI_CONSENT_ANCHOR_DIR": f"{NODE}/consent-anchors"},
+                        [f"{LIB}/mini-shell-ssh", f"{C}/bin/mini", f"{C}/bin/minidregg-host", CONFIG, SOCKET, SPONSOR_WS, SPONSOR_HOME],
+                        cwd=f"{VAR}/store")
+    if check and rc != 0:
+        raise Refused(f"sponsor: `{line[:120]}` exit {rc}: {tail(err or out)}")
+    return rc, out, err
+
+
+def client(user, argv, check=True, _retry=True):
+    rc, out, err = _run(user, user if user == STORE_USER else MEMBER_GROUP, {"MINI_CONSENT_ANCHOR_DIR": f"{NODE}/consent-anchors"},
+                        [f"{C}/bin/mini"] + argv, cwd=f"{VAR}/store")
+    if _retry and certified(rc, out, err):
+        return client(user, argv, check, _retry=False)
+    if check and rc != 0:
+        raise Refused(f"mini {' '.join(argv[:3])}: exit {rc}: {tail(err or out)}")
+    return rc, out, err
+
+
+def tail(text, n=2):
+    lines = [l for l in text.strip().splitlines() if l.strip() and "continuity: legacy" not in l]
+    return " | ".join(lines[-n:])[:400]
+
+
+def objects(text):
+    """Every top-level JSON object in TEXT (the shell prints JSON among other lines)."""
+    dec, i, out = json.JSONDecoder(), 0, []
+    while True:
+        j = text.find("{", i)
+        if j < 0:
+            return out
+        try:
+            o, i = dec.raw_decode(text, j)
+            out.append(o)
+        except ValueError:
+            i = j + 1
+
+
+def first(text):
+    o = objects(text)
+    return o[0] if o else None
+
+
+# ── capture ────────────────────────────────────────────────────────────────────────────────────────────────
+def hexfile(path):
+    try:
+        return pathlib.Path(path).read_bytes().hex()
+    except OSError:
+        return None
+
+
+def skipped(name):
+    pats = os.environ.get("MIGRATE_SKIP", "dw-*").split()
+    import fnmatch
+    return any(fnmatch.fnmatch(name, p) for p in pats)
+
+
+def pinned_sha():
+    return hashlib.sha256(pathlib.Path(CONFIG).read_bytes()).hexdigest()
+
+
+def capture_member(name):
+    m = {"name": name, "publicKey": hexfile(f"{S}/{name}/keys/mini.key.pub"), "workspace": os.path.isfile(f"{S}/{name}/workspace/workspace.json")}
+    if not m["workspace"]:
+        return m
+    _, out, _ = member(name, "whoami")
+    m["subject"] = (first(out) or {}).get("subject")
+    rc, out, err = member(name, "credit", check=False)
+    g = re.search(r"credit (\d+)\s+\(asset (\d+), account (\d+)", out)
+    m["balance"] = int(g.group(1)) if g else None
+    if not g:
+        m["balanceError"] = tail(err or out)
+    _, out, _ = member(name, "refs")
+    refs = (first(out) or {}).get("references", [])
+    m["refs"] = {r["name"]: {"kind": r.get("kind"), "target": r.get("target"), "created": bool((r.get("provenance") or {}).get("birthReceipt")),
+                             "granted": bool((r.get("provenance") or {}).get("receipt"))} for r in refs}
+    _, out, _ = member(name, "history")
+    m["attempts"] = {}
+    for l in out.splitlines():
+        g = re.match(r"attempt\t(\S+)\t(\S+)(?: (\S+))?.*?(?:acceptedCount=(\d+))?", l)
+        a = re.search(r"acceptedCount=(\d+)", l)
+        if g:
+            m["attempts"][g.group(1)] = {"outcome": g.group(2), "acceptedCount": int(a.group(1)) if a else None}
+    # rooms: each held room's whole signed tail (header: founder, members; entries: author, kind, text)
+    _, out, _ = member(name, "chat rooms")
+    current_room = next((l[2:].split()[0] for l in out.splitlines() if l.startswith("* ")), None)
+    m["rooms"] = {}
+    for l in out.splitlines():
+        r = l[2:].split()[0] if len(l) > 2 else None
+        if not r:
+            continue
+        rc, out2, err2 = member(name, f"tail --in {r} --json -n 10000", check=False)
+        objs = objects(out2)
+        head = next((o for o in objs if o.get("type") == "mini-chat-room-v1"), None)
+        if rc != 0 or head is None:
+            m["rooms"][r] = {"error": tail(err2 or out2)}
+            continue
+        m["rooms"][r] = {"founder": head.get("founder"), "topic": head.get("topic"), "pin": head.get("pin"),
+                         "members": sorted(x["subject"] for x in head.get("members", [])),
+                         "entries": [{"author": e.get("author"), "kind": e.get("kind"), "text": e.get("text"), "to": e.get("to"),
+                                      "re": e.get("re"), "status": e.get("status"), "height": e.get("height")}
+                                     for e in objs if "author" in e and "kind" in e]}
+    m["currentRoom"] = current_room
+    # stories: role and where this member's cell stands (the scene line of `look`)
+    _, out, _ = member(name, "story list")
+    m["stories"] = {}
+    current_story = None
+    for l in out.splitlines():
+        w = l[2:].split("\t") if len(l) > 2 else []
+        if not w or not w[0]:
+            continue
+        if l.startswith("* "):
+            current_story = w[0]
+        member(name, f"story enter {w[0]}", check=False)
+        rc, out2, err2 = member(name, "look", check=False)
+        first_line = out2.strip().splitlines()[0] if out2.strip() else ""
+        m["stories"][w[0]] = {"role": w[1].strip() if len(w) > 1 else None, "where": first_line if rc == 0 else None,
+                              "look": re.sub(r"\bh\d+\b", "h*", out2.strip()) if rc == 0 else None,
+                              "error": None if rc == 0 else tail(err2 or out2)}
+    if current_story:
+        member(name, f"story enter {current_story}", check=False)
+    # documents: every reference the Host renders as a document to this key now, line by line with each line's
+    # author; cells this member created: their entries
+    m["documents"], m["cells"] = {}, {}
+    for r, info in sorted(m["refs"].items()):
+        if info["kind"] in ("account",) or r in ("factory", "parent", "tool"):
+            continue
+        rc, out2, _ = member(name, f"doc show {r} --json", check=False)
+        d = first(out2) if rc == 0 else None
+        if d and isinstance(d.get("lines"), list):
+            m["documents"][r] = {"lines": [{"text": l.get("text"), "author": (l.get("createdBy") or {}).get("subject"),
+                                            "struck": l.get("struck", False), "kind": l.get("kind"),
+                                            "marks": sorted(x.get("kind", "") for x in l.get("marks", []) if isinstance(x, dict))}
+                                           for l in d["lines"]]}
+            continue
+        # a declared cell this member made by `create NAME` (the attempt create-NAME), not a room's or story's own cell
+        # (not a name the shell derives: a story's or app's cell `x/y`, an app's `app-*`, a room's `ROOM-*` stream)
+        derived = "/" in r or r.startswith("app-") or any(r.startswith(f"{room}-") for room in m["rooms"])
+        if info["created"] and f"create-{r}" in m["attempts"] and not derived and r not in m["rooms"] and r not in m["stories"]:
+            rc, out2, err2 = member(name, f"read {r}", check=False)
+            v = first(out2) if rc == 0 else None
+            if v and isinstance(v.get("cell"), dict):
+                m["cells"][r] = {"declaration": v["cell"].get("declaration"),
+                                 "entries": {e["key"]["field"]: e["value"] for e in v["cell"].get("entries", [])
+                                             if e.get("key", {}).get("type") == "object"}}
+    if current_room:
+        member(name, f"chat enter {current_room}", check=False)
+    return m
+
+
+def capture(path):
+    world = {"type": "mini-world-capture-v1", "capturedAt": int(time.time()), "pinnedConfigSha256": pinned_sha(),
+             "hostSha256": json.load(open(f"{NODE}/state.json")).get("hostSha256"), "members": {}, "agents": {}}
+    rc, out, err = sponsor("credit", check=False)
+    g = re.search(r"credit (\d+)", out)
+    world["sponsor"] = {"subject": json.load(open(f"{SPONSOR_WS}/workspace.json")).get("subject"),
+                        "balance": int(g.group(1)) if g else None}
+    for home in sorted(pathlib.Path(S).iterdir()):
+        n = home.name
+        if not home.is_dir() or n == SPONSOR or skipped(n) or n.startswith("retired"):
+            continue
+        if not (home / "keys/mini.key.pub").is_file():
+            world["members"][n] = {"name": n, "publicKey": None, "workspace": False, "note": "no hosted key"}
+            continue
+        try:
+            world["members"][n] = capture_member(n)
+        except Refused as e:
+            world["members"][n] = {"name": n, "error": str(e)}
+        if world["members"][n].get("workspace") or world["members"][n].get("error"):
+            log(f"capture: {n}: {summary(world['members'][n])}")
+    # enrolled-only members (no workspace): the sponsor's own enrollment record and the provision's funding
+    for n, m in world["members"].items():
+        if m.get("workspace") or not m.get("publicKey"):
+            continue
+        rc, out, _ = sponsor(f"enroll lookup {n}", check=False)
+        o = first(out) or {}
+        m["subject"] = o.get("subject")
+        try:
+            prov = json.load(open(f"{SPONSOR_WS}/provisions/{n}/provision.json"))
+            m["balance"] = int(prov["account"]["funded"])
+            m["balanceIs"] = "the provision's funding: no workspace, so no turn was ever paid from it"
+        except (OSError, KeyError, ValueError):
+            m["balance"] = None
+        log(f"capture: {n}: {summary(m)}")
+    # the box's agents (enrolled by their installers, re-created by the walk): names and subjects
+    for pin in list(pathlib.Path(SPONSOR_HOME, "enroll").glob("*/pin.json")) + list(pathlib.Path(VAR).glob("*/operator/homes/sponsor/enroll/*/pin.json")):
+        n = pin.parent.name
+        if n in world["members"]:
+            continue
+        try:
+            world["agents"][n] = {"subject": str(json.load(open(pin)).get("subject") or json.load(open(pin)).get("pin", {}).get("subject"))}
+        except (OSError, ValueError):
+            pass
+    json.dump(world, open(path + ".part", "w"), indent=1, sort_keys=True)
+    os.replace(path + ".part", path)
+    return world
+
+
+def summary(m):
+    if m.get("error"):
+        return "ERROR " + m["error"]
+    if not m.get("workspace"):
+        return f"subject {m.get('subject')} balance {m.get('balance')} (no workspace)"
+    msgs = sum(len(r.get("entries", [])) for r in m.get("rooms", {}).values())
+    return (f"subject {m.get('subject')} balance {m.get('balance')} refs {len(m.get('refs', {}))} rooms {len(m.get('rooms', {}))} "
+            f"({msgs} entries) stories {len(m.get('stories', {}))} documents {len(m.get('documents', {}))} cells {len(m.get('cells', {}))}")
+
+
+# ── comparison ─────────────────────────────────────────────────────────────────────────────────────────────
+def names_of(world):
+    """subject -> name, for comparing two worlds whose ids differ."""
+    t = {str(world.get("sponsor", {}).get("subject")): "@sponsor"}
+    for n, m in world.get("members", {}).items():
+        if m.get("subject"):
+            t[str(m["subject"])] = n
+    for n, a in world.get("agents", {}).items():
+        if a.get("subject"):
+            t[str(a["subject"])] = "@" + n
+    return t
+
+
+SEED = set(os.environ.get("MIGRATE_SEED_ACCOUNTS", "house sage public").split())
+
+
+def rooms_of(world, names):
+    """Each room once, whoever views it: founder, members and each author's entries in order (by name)."""
+    out = {}
+    for viewer, m in sorted(world.get("members", {}).items()):
+        for r, v in m.get("rooms", {}).items():
+            if "error" in v:
+                continue
+            founder = names.get(str(v.get("founder")), f"subject:{v.get('founder')}")
+            # a room a member founded is one room whoever views it; one the sponsor or an agent founded is keyed by
+            # its viewer too (each member's `feedback` is the sponsor's feedback-NAME under one local name)
+            key = (r, founder) if not founder.startswith(("@", "subject:")) else (r, f"{founder} (as {viewer} holds it)")
+            if key in out and len(out[key]["entries"]) >= len(v["entries"]):
+                continue
+            out[key] = {"members": sorted(names.get(str(x), f"subject:{x}") for x in v["members"]),
+                        "topic": v.get("topic"), "pin": v.get("pin"), "entries": v["entries"]}
+    for k, v in out.items():
+        by = {}
+        for e in sorted(v["entries"], key=lambda e: e.get("height") or 0):
+            by.setdefault(names.get(str(e["author"]), f"subject:{e['author']}"), []).append((e["kind"], e["text"], e.get("status")))
+        v["by"] = by
+    return out
+
+
+def documents_of(world, names):
+    """Each document once, from its creator's view when a member created it (else its first viewer)."""
+    out = {}
+    for viewer, m in sorted(world.get("members", {}).items()):
+        for d, v in m.get("documents", {}).items():
+            mine = (m.get("refs", {}).get(d) or {}).get("created")
+            if d in out and not mine:
+                continue
+            out[d] = {"owner": viewer if mine else out.get(d, {}).get("owner"),
+                      "lines": [(l["text"], names.get(str(l["author"]), f"subject:{l['author']}"), l["struck"], l.get("marks")) for l in v["lines"]]}
+    return out
+
+
+def diff(a, b):
+    """Every semantic difference between captures A (before) and B (after), heights, hashes and ids aside.
+    Each item: (kind, owner, key, before, after); the owner is the member whose authorship the item is."""
+    na, nb = names_of(a), names_of(b)
+    out = []
+    for n, ma in sorted(a["members"].items()):
+        mb = b["members"].get(n)
+        if mb is None:
+            out.append(("member", n, "present", True, False)); continue
+        if ma.get("error") or mb.get("error"):
+            out.append(("capture", n, "error", ma.get("error"), mb.get("error"))); continue
+        if ma.get("publicKey") != mb.get("publicKey"):
+            out.append(("key", n, "publicKey", ma.get("publicKey"), mb.get("publicKey")))
+        if str(ma.get("subject")) != str(mb.get("subject")):
+            out.append(("id", n, "subject", ma.get("subject"), mb.get("subject")))
+        if ma.get("balance") != mb.get("balance"):
+            out.append(("balance", n, "balance", ma.get("balance"), mb.get("balance")))
+        if ma.get("workspace") != mb.get("workspace"):
+            out.append(("workspace", n, "initialized", ma.get("workspace"), mb.get("workspace")))
+        ra, rb = ma.get("refs", {}), mb.get("refs", {})
+        for r in sorted(set(ra) - set(rb)):
+            out.append(("ref", n, r, ra[r]["kind"], None))
+        for r in sorted(set(rb) - set(ra)):
+            out.append(("ref", n, r, None, rb[r]["kind"]))
+        for st, sa in sorted(ma.get("stories", {}).items()):
+            sb = mb.get("stories", {}).get(st)
+            if sb is None:
+                out.append(("story", n, st, sa.get("role"), None)); continue
+            for k in ("role", "look"):
+                if sa.get(k) != sb.get(k):
+                    out.append(("story", n, f"{st} {k}", sa.get(k), sb.get(k)))
+        for c, ca in sorted(ma.get("cells", {}).items()):
+            cb = mb.get("cells", {}).get(c)
+            if cb is None or ca["entries"] != cb["entries"]:
+                out.append(("cell", n, c, ca["entries"], None if cb is None else cb["entries"]))
+    for n in sorted(set(b["members"]) - set(a["members"])):
+        out.append(("member", n, "present", False, True))
+    roa, rob = rooms_of(a, na), rooms_of(b, nb)
+    for key, va in sorted(roa.items()):
+        r, founder = key
+        vb = rob.get(key)
+        if vb is None:
+            out.append(("room", founder, r, "exists", None)); continue
+        if va["members"] != vb["members"]:
+            out.append(("room", founder, f"{r} members", va["members"], vb["members"]))
+        for k in ("topic", "pin"):
+            if va.get(k) != vb.get(k):
+                out.append(("room", founder, f"{r} {k}", va.get(k), vb.get(k)))
+        for author in sorted(set(va["by"]) | set(vb["by"])):
+            ea, eb = va["by"].get(author, []), vb["by"].get(author, [])
+            if ea != eb:
+                out.append(("messages", author, f"{r} (by {author})", ea, eb))
+    for key in sorted(set(rob) - set(roa)):
+        out.append(("room", key[1], key[0], None, "exists"))
+    da, db = documents_of(a, na), documents_of(b, nb)
+    for d, va in sorted(da.items()):
+        vb = db.get(d)
+        if vb is None or va["lines"] != vb["lines"]:
+            out.append(("document", va["owner"] or "?", d, va["lines"], None if vb is None else vb["lines"]))
+    return out
+
+
+def render(items):
+    lines = []
+    bad = failing(items)
+    added = [i for i in items if i not in bad and i[3] is None and i[1] not in SEED]
+    for section, part in (("carried: the members' own, lost or changed (must not differ)", bad),
+                          ("added by the new world (nothing of the old is missing; informational)", added),
+                          (f"seed accounts' content ({' '.join(sorted(SEED))}: rebuilt by the walk's seed step, informational)",
+                           [i for i in items if i not in bad and i not in added and i[0] != "id"]),
+                          ("ids (allowed)", [i for i in items if i[0] == "id"])):
+        lines.append(f"## {section}: {len(part)} difference(s)")
+        for kind, n, key, x, y in part:
+            if kind in ("messages", "document") and isinstance(x, list) and isinstance(y, list):
+                import difflib
+                lines.append(f"{kind}\t{n}\t{key}:")
+                for d in difflib.unified_diff([json.dumps(e, ensure_ascii=False) for e in x], [json.dumps(e, ensure_ascii=False) for e in y],
+                                              "before", "after", lineterm="", n=1):
+                    lines.append("    " + d)
+            else:
+                lines.append(f"{kind}\t{n}\t{key}\tbefore={json.dumps(x, ensure_ascii=False)[:300]}\tafter={json.dumps(y, ensure_ascii=False)[:300]}")
+    return "\n".join(lines)
+
+
+def failing(items):
+    """The differences the migration must not leave: anything a non-seed member owns that the new world lost or
+    changed (an addition, `before` None, is not a loss), beyond ids; and for every member, the key and the balance."""
+    return [i for i in items if i[0] != "id" and (i[0] in ("key", "balance", "member") or (i[1] not in SEED and i[3] is not None))]
+
+
+# ── replay ─────────────────────────────────────────────────────────────────────────────────────────────────
+class Journal:
+    def __init__(self, path):
+        self.path = path
+        self.done = set()
+        if os.path.exists(path):
+            for l in open(path):
+                try:
+                    self.done.add(json.loads(l)["key"])
+                except (ValueError, KeyError):
+                    pass
+
+    def record(self, key, **kw):
+        with open(self.path, "a") as f:
+            f.write(json.dumps({"key": key, "at": int(time.time()), **kw}) + "\n")
+        self.done.add(key)
+
+
+def replay(d):
+    before = json.load(open(f"{d}/before.json"))
+    if pinned_sha() == before["pinnedConfigSha256"]:
+        raise SystemExit("replay: REFUSED: this is still the captured world (same pinned config); replay runs after the new genesis")
+    journal = Journal(f"{d}/journal.jsonl")
+    now = capture(f"{d}/pass.json")
+    nb = names_of(now)
+    subj = {n: str(m.get("subject")) for n, m in now["members"].items() if m.get("subject")}
+    na = names_of(before)
+    actions, problems = [], []
+
+    # 1. workspaces: a member who had one gets one (init with the birth context mini-reenroll delivered)
+    if init_members(before, journal, problems):
+        now = capture(f"{d}/pass.json"); nb = names_of(now)
+
+    # 2. rooms: memberships the old world had and the new lacks (the founder invites, the member joins). The seed
+    # accounts' own content (MIGRATE_SEED_ACCOUNTS) is the walk's seed step's, rebuilt from the new candidate's
+    # deploy/demo-seed: it is compared (verify's second section), never re-authored here.
+    for n, ma in before["members"].items():
+        if n in SEED:
+            continue
+        mb = now["members"].get(n, {})
+        for r, ra in ma.get("rooms", {}).items():
+            if r in mb.get("rooms", {}) or "error" in ra:
+                continue
+            founder = na.get(str(ra.get("founder")))
+            if founder == n:
+                actions.append((first_height(ra), f"chat-new:{n}:{r}", n, [f"chat new {r}"]))
+                continue
+            if not founder or founder.startswith("@") or r not in now["members"].get(founder, {}).get("rooms", {}):
+                problems.append(f"{n}: room {r}: its founder {founder} holds no room {r} in the new world")
+                continue
+            actions.append((first_height(ra), f"chat-join:{n}:{r}", (founder, n, r), None))
+    # 1b. references a member held from its birth context (no provenance: neither made nor granted by a turn) that
+    # the new world's birth context grants again but that the new workspace names otherwise or not at all (the pay
+    # route's onboarding names the factory grant `factory`; the shell's init does not): the same grant, re-imported
+    # under the old name (`import NAME KIND TARGET CAPABILITY CAPABILITY`, local)
+    for n, ma in before["members"].items():
+        mb = now["members"].get(n, {})
+        if n in SEED or not mb.get("workspace"):
+            continue
+        try:
+            grants = json.load(open(f"{S}/{n}/workspace/birth-context.json")).get("grants", [])
+        except (OSError, ValueError):
+            grants = []
+        for r, info in ma.get("refs", {}).items():
+            if r in mb.get("refs", {}) or info.get("created") or info.get("granted") or info.get("kind") != "object":
+                continue
+            g = next((g for g in grants if g.get("kind") == "object" and str(g.get("target")) == str(info.get("target"))), None)
+            if g:
+                actions.append((0, f"import:{n}:{r}", n, [f"import {r} object {g['target']} {g['capability']} {g['capability']}"]))
+    # 2b. stories: a player the old table had and the new lacks (the story's author invites, the player joins)
+    for n, ma in before["members"].items():
+        if n in SEED:
+            continue
+        mb = now["members"].get(n, {})
+        for st, sa in ma.get("stories", {}).items():
+            if st in mb.get("stories", {}) or sa.get("role") in (None, "author"):
+                continue
+            author = next((x for x, mx in now["members"].items() if (mx.get("stories", {}).get(st) or {}).get("role") == "author"), None)
+            if not author:
+                problems.append(f"{n}: story {st}: no member is its author in the new world"); continue
+            actions.append((0, f"story-join:{n}:{st}", ("story", author, n, st), None))
+    run_actions(actions, journal); actions = []
+    now = capture(f"{d}/pass.json"); nb = names_of(now)
+
+    # 3. messages: each old entry missing from the new room, as its author, in the old world's height order
+    pending = {}
+    for n, ma in before["members"].items():
+        for r, ra in ma.get("rooms", {}).items():
+            if "error" in ra:
+                continue
+            for e in ra["entries"]:
+                pending[(r, e["height"], e["author"], e["kind"], e["text"])] = e
+    have = {}
+    for n, mb in now["members"].items():
+        for r, rb in mb.get("rooms", {}).items():
+            for e in rb.get("entries", []):
+                have.setdefault((r, nb.get(str(e["author"])), e["kind"], e["text"]), set()).add(e["height"])
+    want = {}
+    for (r, h, author, kind, text), e in sorted(pending.items(), key=lambda kv: kv[0][1]):
+        an = na.get(str(author))
+        want.setdefault((r, an, kind, text), []).append(h)
+    for (r, an, kind, text), hs in want.items():
+        missing = len(hs) - len(have.get((r, an, kind, text), ()))
+        for h in hs[len(hs) - missing:] if missing > 0 else []:
+            if an in SEED:
+                continue
+            if not an or an.startswith("@"):
+                problems.append(f"room {r}: {kind} by {an} at old height {h} ({text[:60]!r}) cannot be re-authored: no hosted key on the box")
+                continue
+            if kind != "say":
+                problems.append(f"room {r}: a {kind} entry by {an} at old height {h} ({(text or '')[:60]!r}): only says are re-authored")
+                continue
+            actions.append((h, f"say:{an}:{r}:{h}", an, [f"say --in {r} {text}"]))
+    run_actions(sorted(actions, key=lambda a: a[0]), journal); actions = []
+
+    # 4. cells a member created (a declared cell's entries), and 5. documents a member owns
+    for n, ma in before["members"].items():
+        mb = now["members"].get(n, {})
+        if not mb.get("workspace") or n in SEED:
+            continue
+        for c, ca in ma.get("cells", {}).items():
+            cb = mb.get("cells", {}).get(c)
+            if cb is not None and cb["entries"] == ca["entries"]:
+                continue
+            h = (ma.get("attempts", {}).get(f"create-{c}") or {}).get("acceptedCount") or 0
+            lines = []
+            if c not in mb.get("refs", {}):
+                lines.append(f"create {c} declared open {' '.join(ca.get('declaration') or sorted(ca['entries']))}")
+            for i, (f_, v) in enumerate(sorted(ca["entries"].items())):
+                old = (cb or {}).get("entries", {}).get(f_)
+                if old == v:
+                    continue
+                pid = re.sub(r"[^A-Za-z0-9-]", "-", f"mig-{c}-{f_}")[:64]
+                lines += [f"invoke {pid} {c} create {f_} {v}" if old is None else f"invoke {pid} {c} write {f_} {v} {old}", f"submit {pid}"]
+            actions.append((h, f"cell:{n}:{c}", n, lines))
+        for doc, da in ma.get("documents", {}).items():
+            if not (ma["refs"].get(doc) or {}).get("created"):
+                continue        # a document this member reads but did not make: its owner's replay carries it
+            db = mb.get("documents", {}).get(doc)
+            la = [l for l in da["lines"] if not l["struck"]]
+            lb = [] if db is None else [l for l in db["lines"] if not l["struck"]]
+            if [l["text"] for l in lb] == [l["text"] for l in la]:
+                continue
+            if [l["text"] for l in lb] != [l["text"] for l in la[:len(lb)]]:
+                problems.append(f"{n}: document {doc} differs other than by missing trailing lines; left for its author")
+                continue
+            lines = [] if db is not None else [f"doc new {doc} draft"]
+            steps = []
+            for i, l in enumerate(la[len(lb):], start=len(lb) + 1):
+                author = na.get(str(l["author"]), n)
+                if author != n:
+                    problems.append(f"{n}: document {doc} line {i} is {author}'s: appended as {n}")
+                steps.append((re.sub(r"[^A-Za-z0-9-]", "-", f"mig-{doc}-{i}")[:64], l["text"]))
+            actions.append((0, f"doc:{n}:{doc}:{len(lb)}", n, ("doc", doc, lines, steps)))
+    run_actions(sorted(actions, key=lambda a: a[0]), journal); actions = []
+
+    # 6. balances: the sponsor transfers each member the difference to the old balance
+    now = capture(f"{d}/pass.json")
+    for n, ma in before["members"].items():
+        mb = now["members"].get(n, {})
+        if ma.get("balance") is None or mb.get("balance") is None:
+            continue
+        delta = ma["balance"] - mb["balance"]
+        if delta > 0:
+            settle(n, mb, delta, journal, problems)
+        elif delta < 0:
+            problems.append(f"{n}: balance {mb['balance']} is above the old {ma['balance']} by {-delta} (funded above the capture); left")
+    for p in problems:
+        log("replay: LEFT " + p)
+    json.dump(problems, open(f"{d}/problems.json", "w"), indent=1)
+    return problems
+
+
+def init_members(before, journal, problems):
+    """`init mini.key SUBJECT` for each member who had a workspace in the old world and has none now, with the
+    birth context mini-reenroll delivered and the subject the Store enrolled (the sponsor's lookup)."""
+    actions = []
+    for n, ma in before["members"].items():
+        if not ma.get("workspace") or os.path.isfile(f"{S}/{n}/workspace/workspace.json"):
+            continue
+        _, out, _ = sponsor(f"enroll lookup {n}", check=False)
+        s_ = (first(out) or {}).get("subject")
+        if not os.path.isfile(f"{S}/{n}/provision/birth-context.json") or not s_:
+            problems.append(f"{n}: had a workspace; no birth context or enrollment in the new world (mini-reenroll {n} first)")
+            continue
+        actions.append((0, f"init:{n}", n, [f"init mini.key {s_}"]))
+    run_actions(actions, journal)
+    return bool(actions)
+
+
+def first_height(room):
+    return min((e["height"] for e in room.get("entries", [])), default=0)
+
+
+def run_actions(actions, journal):
+    for h, key, who, lines in actions:
+        if key in journal.done:
+            continue
+        try:
+            if isinstance(who, tuple):
+                verb, founder, n, r = who if len(who) == 4 else ("chat",) + who
+                invite = f"chat invite {r} {subj_of(n)} {n}" if verb == "chat" else f"story invite {r} {subj_of(n)}"
+                _, out, _ = member(founder, invite)
+                join = next((l for l in out.splitlines() if l.startswith(f"{verb} join {r} ")), None)
+                if not join:
+                    raise Refused(f"{founder}: `{invite}` printed no `{verb} join {r}` line")
+                member(n, join)
+            elif isinstance(lines, tuple):
+                _, doc, pre, steps = lines
+                for l in pre:
+                    member(who, l)
+                for pid, text in steps:
+                    stage(who, f"{pid}.txt", text + "\n")
+                    member(who, f"doc append {pid} {doc} @{pid}.txt")
+                    member(who, f"submit {pid}")
+            else:
+                for l in lines:
+                    member(who, l)
+            journal.record(key, height=h)
+            log(f"replay: ok {key}")
+        except Refused as e:
+            log(f"replay: FAIL {key}: {e}")
+
+
+SUBJECTS = {}
+
+
+def subj_of(n):
+    if n not in SUBJECTS:
+        _, out, _ = member(n, "whoami")
+        SUBJECTS[n] = (first(out) or {}).get("subject")
+    return SUBJECTS[n]
+
+
+def stage(name, fname, text):
+    """A file under NAME's HOME/requests for an @FILE argument (seed.sh `stage`)."""
+    user = MEMBER_USER or f"mini-s-{name}"
+    d = f"{S}/{name}/requests"
+    subprocess.run(["install", "-d", "-m", "0700", "-o", user, "-g", MEMBER_GROUP, d], check=True)
+    p = subprocess.run(["install", "-m", "0600", "-o", user, "-g", MEMBER_GROUP, "/dev/stdin", f"{d}/{fname}"], input=text, text=True)
+    if p.returncode != 0:
+        raise Refused(f"{name}: could not stage {fname}")
+
+
+# One sponsor transfer moves at most this much: the sponsor's spend grant bounds a turn's cost (a transfer of
+# 100000 was refused `capability-rejected`, 52336 admitted, rehearsal 2026-11-07).
+SETTLE_CHUNK = int(os.environ.get("MIGRATE_SETTLE_CHUNK", "50000"))
+
+
+def settle(n, mb, delta, journal, problems):
+    """The sponsor's fleet transfers of DELTA to N's own `account` (the sponsor pays each turn's fee)."""
+    key = f"settle:{n}:{mb['balance']}+{delta}"
+    if key in journal.done:
+        return
+    try:
+        _, out, _ = member(n, "refs")
+        acct = next((r["target"] for r in (first(out) or {}).get("references", []) if r.get("name") == "account"), None)
+        if not acct:
+            raise Refused(f"{n} holds no `account` reference")
+        left = delta
+        while left > 0:
+            amount = min(left, SETTLE_CHUNK)
+            client(STORE_USER, ["fleet", "--action", "transfer", "--dir", SPONSOR_WS, "--account", "account", "--to", acct, "--amount", str(amount)])
+            left -= amount
+        journal.record(key, amount=delta)
+        log(f"replay: ok {key}")
+    except Refused as e:
+        problems.append(f"{n}: balance short by {left}: the sponsor's transfer failed: {e}")
+
+
+# ── main ───────────────────────────────────────────────────────────────────────────────────────────────────
+def main():
+    global LOG
+    if len(sys.argv) < 3:
+        print(__doc__, file=sys.stderr); sys.exit(64)
+    verb, d = sys.argv[1], sys.argv[2]
+    if verb == "diff":
+        items = diff(json.load(open(sys.argv[2])), json.load(open(sys.argv[3])))
+        print(render(items)); sys.exit(0 if not failing(items) else 1)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    LOG = f"{d}/migrate.log"
+    if verb == "capture":
+        if os.path.exists(f"{d}/before.json"):
+            raise SystemExit(f"capture: REFUSED: {d}/before.json exists (the old world's capture is never overwritten)")
+        w = capture(f"{d}/before.json")
+        carry = {"type": "mini-world-carry-v1", "fromPinnedConfigSha256": w["pinnedConfigSha256"], "fromHostSha256": w["hostSha256"],
+                 "members": {n: {"subject": m.get("subject"), "publicKey": m.get("publicKey"), "balance": m.get("balance")}
+                             for n, m in w["members"].items() if m.get("publicKey") and m.get("subject")}}
+        json.dump(carry, open(f"{d}/carry.json", "w"), indent=1, sort_keys=True)
+        log(f"capture: {len(w['members'])} members; carry.json names {len(carry['members'])}")
+    elif verb == "init":
+        before = json.load(open(f"{d}/before.json"))
+        problems = []
+        init_members(before, Journal(f"{d}/journal.jsonl"), problems)
+        for p in problems:
+            log("init: LEFT " + p)
+    elif verb == "replay":
+        p = replay(d)
+        log(f"replay: done, {len(p)} item(s) left (problems.json)")
+    elif verb == "verify":
+        before = json.load(open(f"{d}/before.json"))
+        after = capture(f"{d}/after.json")
+        items = diff(before, after)
+        text = render(items)
+        open(f"{d}/verify.txt", "w").write(text + "\n")
+        print(text)
+        bad = failing(items)
+        log(f"verify: {len(items)} difference(s); {len(bad)} the migration must not leave (verify.txt)")
+        sys.exit(0 if not bad else 1)
+    else:
+        print(__doc__, file=sys.stderr); sys.exit(64)
+
+
+if __name__ == "__main__":
+    main()
