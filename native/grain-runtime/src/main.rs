@@ -27,6 +27,7 @@ mod quiescence;
 mod resident_reconcile;
 mod hermes_outcome;
 mod prompt_outcome;
+mod prompt_witness_close;
 mod hermes_session_verify;
 mod resident_origin;
 mod resident_requests;
@@ -17943,6 +17944,30 @@ impl Runtime {
         ))
     }
 
+    /// `reconcile prompt-witness`: close a prompt witness its allowance outlived
+    /// (`prompt_witness_close::decide` states when), recording the decision first.
+    fn close_prompt_witness(&mut self) -> Result<()> {
+        let witness = self.journal.prompt_witness.clone().ok_or("no prompt witness is held")?;
+        let j = &self.journal;
+        let facts = prompt_witness_close::Facts {
+            allowance_held: j.parent_hold.is_some() || j.tool_hold.is_some() || j.provider_hold.is_some()
+                || j.dispatch_hold.is_some() || j.settlement_due.is_some(),
+            custody_open: self.child.is_some() || j.child.is_some() || j.pending.is_some()
+                || j.tool_pending.is_some() || j.provider_pending.is_some() || j.provider_attempt.is_some()
+                || j.dispatch_pending.is_some() || j.dispatch_attempt.is_some() || j.room_attempt.is_some()
+                || j.workspace_attempt.is_some() || j.foreground_attempt.is_some(),
+            prompt_live: self.prompt_active
+                || j.hermes_session.as_ref().is_some_and(|session| session.pending_prompt),
+        };
+        let parent = self.query()?;
+        let grain = parent.get("grain").ok_or("parent grain absent")?;
+        let mut entry = prompt_witness_close::decide(&facts, &witness, grain)?;
+        entry["decisionId"] = json!(self.next_id()?.to_string());
+        self.journal.reconciliation_log.push(entry);
+        self.journal.prompt_witness = None;
+        self.save()
+    }
+
     fn acknowledge_effects(&mut self) -> Result<()> {
         self.acknowledge_effects_with(None)
     }
@@ -18915,6 +18940,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile effects" => rt.acknowledge_effects(),
                     "reconcile worker audited" => rt.reconcile_worker_audited(),
                     "reconcile foreground audited" => rt.reconcile_foreground_audited(),
+                    "reconcile prompt-witness" => rt.close_prompt_witness(),
                     _ => Err("unknown admin reconciliation action".into()),
                 };
                 request.phase.store(2, Ordering::SeqCst);
