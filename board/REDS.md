@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `fb9577f5e099` (spk-host broker: a carried grain's mounts take the import digest its create named). Round finished 2026-11-09T04:06Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-fb9577f5`.
+Tip: `78f9119ef1af` (WORLD-MIGRATION: the grain row is walked (one grain on demo-dry, 2026-11-09)). Round finished 2026-11-09T04:21Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-78f9119e`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..fb9577f5e099`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..78f9119ef1af`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `78f9119e` WORLD-MIGRATION: the grain row is walked (one grain on demo-dry, 2026-11-09)
+- `599fa9db` builder: REDS.md for fb9577f5e099 (6 red) (owner: build-loop)
 - `fb9577f5` spk-host broker: a carried grain's mounts take the import digest its create named (owner: apps-hermes)
 - `47e648fa` builder: REDS.md for 09d3fb734ec7 (6 red) (owner: build-loop)
 - `09d3fb73` consent admission: presence index as maps, the loaded directory held and stepped, refresh off the wh (owner: apps-hermes, bytes-repr)
