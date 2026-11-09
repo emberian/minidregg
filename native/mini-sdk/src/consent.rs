@@ -386,6 +386,26 @@ fn resident_socket(kind: ResidentKind, anchors: &Path, binding: &[u8; 32]) -> Re
     }
 }
 
+/// `<r|c>.held`: the mark that a service unit holds this directory's resident of `kind`
+/// ([`serve_resident_owned`] writes it before it waits for the binding's lock or opens its
+/// provider). A client never starts a resident in a held directory: it waits for the unit's
+/// socket. Without it every short-lived unit that ran while the unit-held resident was starting
+/// or restarting began a provider of its own in its own cgroup (demo-dry 2026-11-09: the door's
+/// pass, the clock tick and the PAY watcher each held a 2-3 GB provider beside the unit's, and the
+/// unit then waited for the clock tick's to end). The box's infra removes it when it turns the
+/// unit off.
+pub fn held_mark(kind: ResidentKind, dir: &Path) -> PathBuf {
+    dir.join(format!("{}.held", kind.prefix()))
+}
+
+/// Whether `dir`'s resident of `kind` is a unit's: the mark is this user's regular file.
+fn held(kind: ResidentKind, dir: &Path) -> bool {
+    fs::symlink_metadata(held_mark(kind, dir)).is_ok_and(|meta| meta.is_file() && crate::private::owned(&meta))
+}
+
+/// How long a client waits for a resident to listen: one it started, or a unit's.
+const RESIDENT_LISTEN: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// A connection to a listening resident provider of this user, or an error.
 fn resident_stream(socket: &Path) -> Result<std::os::unix::net::UnixStream> {
     use std::os::unix::fs::FileTypeExt;
@@ -472,13 +492,29 @@ pub fn connect_resident_in(dir: &Path, kind: ResidentKind, executable: &Path, se
 }
 
 fn resident_connection_in(dir: &Path, kind: ResidentKind, executable: &Path, settings_bytes: &[u8], launch: Command) -> Result<std::os::unix::net::UnixStream> {
+    resident_connection_within(dir, kind, executable, settings_bytes, launch, RESIDENT_LISTEN)
+}
+
+fn resident_connection_within(dir: &Path, kind: ResidentKind, executable: &Path, settings_bytes: &[u8], launch: Command, within: std::time::Duration) -> Result<std::os::unix::net::UnixStream> {
     use std::os::unix::fs::OpenOptionsExt;
-    use std::os::unix::process::CommandExt;
     let dir = dir.to_path_buf();
     let binding = binding(executable, settings_bytes)?;
     let (socket, _socket_directory) = resident_socket(kind, &dir, &binding)?;
     let stream = match resident_stream(&socket) {
         Ok(stream) => stream,
+        Err(_) if held(kind, &dir) => {
+            let began = std::time::Instant::now();
+            loop {
+                if let Ok(stream) = resident_stream(&socket) {
+                    break stream;
+                }
+                if began.elapsed() > within {
+                    return Err(format!("the {} in {} is its service unit's ({}) and did not listen within {} s; a client never starts one there",
+                        kind.name(), dir.display(), held_mark(kind, &dir).display(), within.as_secs()).into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
         Err(_) => {
             let log = resident_file(kind, &dir, &binding, "log");
             let errors = OpenOptions::new().create(true).append(true).mode(0o600).custom_flags(libc::O_NOFOLLOW)
@@ -499,8 +535,8 @@ fn resident_connection_in(dir: &Path, kind: ResidentKind, executable: &Path, set
                         return Err(format!("{} failed to start ({status}); see {}", kind.name(), log.display()).into());
                     }
                 }
-                if began.elapsed() > std::time::Duration::from_secs(300) {
-                    return Err(format!("{} did not listen within 300 s; see {}", kind.name(), log.display()).into());
+                if began.elapsed() > within {
+                    return Err(format!("{} did not listen within {} s; see {}", kind.name(), within.as_secs(), log.display()).into());
                 }
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
@@ -735,6 +771,10 @@ fn serve_resident_held(kind: ResidentKind, dir: &Path, executable: PathBuf, sett
     }
     let settings_bytes = settings_bytes(&settings)?;
     let binding = binding(&executable, &settings_bytes)?;
+    if wait {
+        let mark = held_mark(kind, dir);
+        crate::durable::replace(&mark, b"unit-held\n", crate::durable::Perm::Private).map_err(|e| format!("{}: {e}", mark.display()))?;
+    }
     let lock_path = resident_file(kind, dir, &binding, "lock");
     let lock = OpenOptions::new().create(true).read(true).write(true).mode(0o600).custom_flags(libc::O_NOFOLLOW)
         .open(&lock_path).map_err(|e| format!("{}: {e}", lock_path.display()))?;
@@ -1770,6 +1810,51 @@ mod tests {
             if owned.is_finished() {
                 break;
             }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        owned.join().unwrap().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A client never starts a resident in a directory a unit holds (`r.held`/`c.held`): it waits
+    /// for the unit's socket, and is refused when none listens in time. Its launch never runs.
+    #[test]
+    fn a_held_directory_is_waited_on_and_never_launched_into() {
+        let dir = PathBuf::from(format!("/tmp/mch-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let host = crate::local::fake::codec_stub(&dir);
+        fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
+        let settings = dir.join("settings.json");
+        fs::write(&settings, b"{}").unwrap();
+        let anchors = dir.join("anchors");
+        fs::create_dir(&anchors).unwrap();
+        fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
+        let launched = dir.join("launched");
+        let launch = || { let mut c = Command::new("/usr/bin/touch"); c.arg(&launched); c };
+        fs::write(held_mark(ResidentKind::Codec, &anchors), b"unit-held\n").unwrap();
+        let refused = resident_connection_within(&anchors, ResidentKind::Codec, &host, b"{}", launch(), std::time::Duration::from_millis(200))
+            .expect_err("no unit listens");
+        assert!(refused.to_string().contains("service unit"), "{refused}");
+        assert!(!launched.exists(), "a client never launches into a held directory");
+        // The unit's resident (it marks the directory itself) comes up while a client waits.
+        fs::remove_file(held_mark(ResidentKind::Codec, &anchors)).unwrap();
+        let (a, h, s) = (anchors.clone(), host.clone(), settings.clone());
+        let owned = std::thread::spawn(move || serve_resident_owned(ResidentKind::Codec, &a, h, s, None));
+        for _ in 0..400 {
+            if held(ResidentKind::Codec, &anchors) { break; }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(held(ResidentKind::Codec, &anchors), "the unit's resident marks its directory");
+        let stream = resident_connection_within(&anchors, ResidentKind::Codec, &host, b"{}", launch(), std::time::Duration::from_secs(10)).unwrap();
+        assert!(!launched.exists());
+        let input = stream.try_clone().unwrap();
+        let mut session = Session::over(Box::new(input), Box::new(stream), host.clone(), b"{}".to_vec());
+        assert_eq!(round_trip(&mut session, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
+        drop(session);
+        fs::write(&settings, b"{\"moved\":1}").unwrap();
+        for _ in 0..60 {
+            if owned.is_finished() { break; }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         owned.join().unwrap().unwrap();

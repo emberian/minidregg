@@ -417,8 +417,12 @@ impl BoxOps for RealBox {
     fn sponsor_credit(&self) -> Ran {
         let node = self.p.node();
         let mut cmd = Command::new("/usr/sbin/runuser");
+        // The operator's consent goes to its unit-held resident (NODE/consent-anchors, as every operator
+        // `mini` process selects it: infra lib.sh), never to one started in the sponsor's home inside this
+        // pass's cgroup (demo-dry 2026-11-09: a 2.9 GB provider beside the unit's).
         cmd.env_clear()
             .args(["-u", "mini-core", "--", "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "SSH_ORIGINAL_COMMAND=credit"])
+            .arg(format!("MINI_CONSENT_ANCHOR_DIR={}", node.join("consent-anchors").display()))
             .arg(self.p.lib().join("mini-shell-ssh"))
             .arg(self.p.candidate().join("bin/mini"))
             .arg(self.p.candidate().join("bin/minidregg-host"))
