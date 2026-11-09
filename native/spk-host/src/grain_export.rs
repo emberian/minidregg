@@ -124,12 +124,14 @@ pub(crate) struct Imported {
 }
 
 /// Every refusal names what failed; nothing reaches Mini or the broker first.
+/// `imports` is where the image is staged for the broker; `None` once the import was released
+/// into its volume (`release_import`): the signed manifest and the export's bytes are still checked.
 pub(crate) fn verify_import(
     dir: &Path,
     exporter_key: &str,
     raw_sha256: &str,
     class: &str,
-    imports: &Path,
+    imports: Option<&Path>,
 ) -> io::Result<Imported> {
     let bytes = bounded(&dir.join("manifest.json"), MAX_MANIFEST)?;
     let signature = Signature::from_bytes(&unhex::<64>(&String::from_utf8_lossy(&bounded(
@@ -171,20 +173,22 @@ pub(crate) fn verify_import(
             "import refused: image bytes differ from the signed manifest",
         ));
     }
-    match DirBuilder::new().mode(0o700).create(imports) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(error),
-    }
-    let staged = imports.join(format!("{image_sha}.ext4"));
-    if !staged.exists() {
-        let temp = imports.join(format!(".{image_sha}.tmp"));
-        let _ = fs::remove_file(&temp).ctx("remove", &temp);
-        fs::copy(dir.join("var.ext4"), &temp).ctx("copy", &(dir.join("var.ext4")))?;
-        fs::rename(&temp, &staged).ctx("rename", &temp)?;
-    }
-    if sha256_file(&staged)? != image_sha {
-        return Err(invalid("staged import differs from the signed manifest"));
+    if let Some(imports) = imports {
+        match DirBuilder::new().mode(0o700).create(imports) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        let staged = imports.join(format!("{image_sha}.ext4"));
+        if !staged.exists() {
+            let temp = imports.join(format!(".{image_sha}.tmp"));
+            let _ = fs::remove_file(&temp).ctx("remove", &temp);
+            fs::copy(dir.join("var.ext4"), &temp).ctx("copy", &(dir.join("var.ext4")))?;
+            fs::rename(&temp, &staged).ctx("rename", &temp)?;
+        }
+        if sha256_file(&staged)? != image_sha {
+            return Err(invalid("staged import differs from the signed manifest"));
+        }
     }
     Ok(Imported {
         record: json!({"protocol":"mini-spk-grain-import-v1","exporterKey":exporter_key,
@@ -192,6 +196,23 @@ pub(crate) fn verify_import(
             "signature":"verified"}),
         image_sha256: image_sha,
     })
+}
+
+/// After the broker created the grain's volume from the staged import (its helper copies the image
+/// and refuses a digest other than `image_sha256` before the create), the staged copy is removed and
+/// `released` records it, so a resumed install neither stages the image again nor leaves it behind.
+/// The file goes first: a crash between the two stages it again on the retry and removes it again.
+pub(crate) fn release_import(imports: &Path, image_sha256: &str, released: &Path) -> io::Result<()> {
+    if released.exists() {
+        return Ok(());
+    }
+    let staged = imports.join(format!("{image_sha256}.ext4"));
+    match fs::remove_file(&staged) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    write_new(released, &serde_json::to_vec_pretty(&json!({"protocol":"mini-spk-grain-import-released-v1","imageSha256":image_sha256}))?)
 }
 
 /// Fixed source-owned operator routes. These are supplied by the shared Host
@@ -933,20 +954,20 @@ pub(crate) mod tests {
         let public = hex(key.verifying_key().as_bytes());
         let dir = export_fixture(&key);
         let imports = scratch("imports").join("imports");
-        let ok = verify_import(&dir, &public, &"a".repeat(64), "S", &imports).unwrap();
+        let ok = verify_import(&dir, &public, &"a".repeat(64), "S", Some(&imports)).unwrap();
         assert_eq!(ok.record["signature"], "verified");
         // a different package, a different class, another exporter
-        assert!(verify_import(&dir, &public, &"b".repeat(64), "S", &imports).is_err());
-        assert!(verify_import(&dir, &public, &"a".repeat(64), "M", &imports).is_err());
+        assert!(verify_import(&dir, &public, &"b".repeat(64), "S", Some(&imports)).is_err());
+        assert!(verify_import(&dir, &public, &"a".repeat(64), "M", Some(&imports)).is_err());
         let other = hex(SigningKey::from_bytes(&[6u8; 32])
             .verifying_key()
             .as_bytes());
-        assert!(verify_import(&dir, &other, &"a".repeat(64), "S", &imports).is_err());
+        assert!(verify_import(&dir, &other, &"a".repeat(64), "S", Some(&imports)).is_err());
         // one flipped image byte
         let mut image = fs::read(dir.join("var.ext4")).unwrap();
         image[100] ^= 1;
         fs::write(dir.join("var.ext4"), &image).unwrap();
-        let error = verify_import(&dir, &public, &"a".repeat(64), "S", &imports)
+        let error = verify_import(&dir, &public, &"a".repeat(64), "S", Some(&imports))
             .err()
             .unwrap()
             .to_string();
@@ -957,10 +978,37 @@ pub(crate) mod tests {
         let at = manifest.iter().position(|b| *b == b'7').unwrap();
         manifest[at] = b'8';
         fs::write(dir.join("manifest.json"), &manifest).unwrap();
-        let error = verify_import(&dir, &public, &"a".repeat(64), "S", &imports)
+        let error = verify_import(&dir, &public, &"a".repeat(64), "S", Some(&imports))
             .err()
             .unwrap()
             .to_string();
         assert!(error.contains("signature"), "{error}");
+    }
+
+    #[test]
+    fn a_released_import_is_removed_once_and_never_staged_again() {
+        let key = SigningKey::from_bytes(&[5u8; 32]);
+        let public = hex(key.verifying_key().as_bytes());
+        let dir = export_fixture(&key);
+        let root = scratch("import-release");
+        let imports = root.join("imports");
+        let released = root.join("import-released.json");
+        let ok = verify_import(&dir, &public, &"a".repeat(64), "S", Some(&imports)).unwrap();
+        let staged = imports.join(format!("{}.ext4", ok.image_sha256));
+        assert!(staged.is_file());
+        release_import(&imports, &ok.image_sha256, &released).unwrap();
+        assert!(!staged.exists());
+        let record: Value = serde_json::from_slice(&fs::read(&released).unwrap()).unwrap();
+        assert_eq!(record["imageSha256"], ok.image_sha256.as_str());
+        // Idempotent; and a resumed install verifies the export without staging it again.
+        release_import(&imports, &ok.image_sha256, &released).unwrap();
+        let again = verify_import(&dir, &public, &"a".repeat(64), "S", None).unwrap();
+        assert_eq!(again.image_sha256, ok.image_sha256);
+        assert!(!staged.exists());
+        // Released or not, a tampered export is still refused.
+        let mut image = fs::read(dir.join("var.ext4")).unwrap();
+        image[100] ^= 1;
+        fs::write(dir.join("var.ext4"), &image).unwrap();
+        assert!(verify_import(&dir, &public, &"a".repeat(64), "S", None).is_err());
     }
 }
