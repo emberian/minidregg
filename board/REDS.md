@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `eb3aa769c844` (apps: `apps unshare GRAIN MEMBER` withdraws a member's route; an undecided delete is never). Round finished 2026-11-09T06:09Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-eb3aa769`.
+Tip: `3ce5cfe6716f` (spk-host STOP: a held absent-replan probe's active marker moves aside, so the next probe i). Round finished 2026-11-09T08:18Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3ce5cfe6`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..eb3aa769c844`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..3ce5cfe6716f`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `3ce5cfe6` spk-host STOP: a held absent-replan probe's active marker moves aside, so the next probe is not refu (owner: apps-hermes)
+- `86686d86` builder: REDS.md for eb3aa769c844 (6 red) (owner: build-loop)
 - `eb3aa769` apps: `apps unshare GRAIN MEMBER` withdraws a member's route; an undecided delete is never raced by  (owner: apps-hermes)
 - `8b54c006` spk-host STOP: a sent completion Mini holds no receipt for is replaced once its signatures' window h (owner: apps-hermes)
 - `bc2b3bd2` builder: REDS.md for a0ca6d00234a (6 red) (owner: build-loop)
@@ -53,5 +55,3 @@ Suspect commits since green (`git log 980d80c5dba8..eb3aa769c844`), newest first
 - `5f6cc3ef` seal encodes its body once; the light open holds the whole index trie (PERF-CLIENT rows 37, 38) (owner: read-path)
 - `fd1f1b33` builder: REDS.md for 980d80c5dba8 (0 red) (owner: build-loop)
 - `760fdf33` held directory, held index rows, seal off the member's path (PERF-CLIENT rows 36, 37, 38) (owner: bytes-repr)
-- `23f7df18` world-migrate verify: a seed account whose balance only grew lost nothing
-- `4e7a094f` seed: house-rules' link and note go on its last line, whatever the text's length
