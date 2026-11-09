@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `0a73bd93734b` (consent residents: a unit-held directory is never launched into; door sponsor and lobby re). Round finished 2026-11-09T09:00Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-0a73bd93`.
+Tip: `5caf465e9c0c` (install-hermes: the consent render removes the box drop-in that carried --resident-dir). Round finished 2026-11-09T09:47Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-5caf465e`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..0a73bd93734b`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..5caf465e9c0c`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `5caf465e` install-hermes: the consent render removes the box drop-in that carried --resident-dir (owner: apps-hermes)
+- `9f02df8f` builder: REDS.md for 0a73bd93734b (6 red) (owner: build-loop)
 - `0a73bd93` consent residents: a unit-held directory is never launched into; door sponsor and lobby relay use th (owner: apps-hermes)
 - `0a4255b5` builder: REDS.md for 1e6a8e907ae2 (6 red) (owner: build-loop)
 - `1e6a8e90` render test: the seed's house-rules link and note resolve `$HR_LAST` from the text, as seed.sh does (owner: apps-hermes)
@@ -53,5 +55,3 @@ Suspect commits since green (`git log 980d80c5dba8..0a73bd93734b`), newest first
 - `088e03cc` builder: REDS.md for 892f8f95f101 (6 red) (owner: build-loop)
 - `892f8f95` world-migrate carries app grains: export at capture, install --carry, re-share, digest verify (owner: apps-hermes)
 - `3574f404` builder: REDS.md for 2e48af863c8e (6 red) (owner: build-loop)
-- `2e48af86` builder: REDS.md for 55d0721c587e (1 red) (owner: build-loop)
-- `78307b6d` WORLD-MIGRATION: app grains and their data are a carry gap, written as a row
