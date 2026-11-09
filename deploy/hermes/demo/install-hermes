@@ -11,8 +11,9 @@
 #   preflight  the Store pins Hermes's purse tariff; the provider table has the
 #              pool row for the model; broker client; operator socket; launcher
 #   consent    the resident's delegated full consent: a socket-activated `mini
-#              serve-controller-consent` runs as the operator (it replays the Store,
-#              whose checkpoint key the resident must never read) and answers only the
+#              serve-controller-consent` runs as the operator and relays to the operator's
+#              unit-held consent resident (NODE/consent-anchors: the Store's replay, whose
+#              checkpoint key the resident must never read, stays there) and answers only the
 #              resident uid; its listener is the resident's RUN/consent.sock. The
 #              selection the resident's processes need is V/consent.env (root 0644),
 #              which every as-resident command here exports and the controller and
@@ -290,6 +291,9 @@ Service=$CONSENT_UNIT.service
 [Install]
 WantedBy=sockets.target
 EOF
+  # A thin relay to the operator's ONE unit-held consent resident (--resident-dir NODE/consent-anchors,
+  # infra mini-consent-resident@operator), never a provider of its own: the lobby relay held a 3 GB one
+  # beside the operator's and the members' (demo-dry 2026-11-09 08:16Z, the box thrashed).
   cat >"/etc/systemd/system/$CONSENT_UNIT.service" <<EOF
 [Unit]
 Description=Mini full consent for the $INSTANCE resident ($RESIDENT): answers only uid $ruid
@@ -298,7 +302,7 @@ After=$CONSENT_UNIT.socket
 [Service]
 User=$OPERATOR
 Group=$OPERATOR
-ExecStart=$MINI serve-controller-consent --socket $csock --consent $consent --config $CONFIG --consent-sha256 $image --config-sha256 $settings --controller-uid $ruid --anchors $OPV/consent-anchors
+ExecStart=$MINI serve-controller-consent --socket $csock --consent $consent --config $CONFIG --consent-sha256 $image --config-sha256 $settings --controller-uid $ruid --anchors $OPV/consent-anchors --resident-dir $NODE/consent-anchors
 Environment=HOME=$OPV
 UMask=0077
 NoNewPrivileges=yes
