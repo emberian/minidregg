@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `892f8f95f101` (world-migrate carries app grains: export at capture, install --carry, re-share, digest ver). Round finished 2026-11-09T03:08Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-892f8f95`.
+Tip: `3503d5d2e1a0` (retained seal: checkpoint body held encoded, sealed by concatenation off the serving threa). Round finished 2026-11-09T03:22Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3503d5d2`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..892f8f95f101`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..3503d5d2e1a0`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `3503d5d2` retained seal: checkpoint body held encoded, sealed by concatenation off the serving thread (PERF-CL (owner: read-path)
+- `088e03cc` builder: REDS.md for 892f8f95f101 (6 red) (owner: build-loop)
 - `892f8f95` world-migrate carries app grains: export at capture, install --carry, re-share, digest verify (owner: apps-hermes)
 - `3574f404` builder: REDS.md for 2e48af863c8e (6 red) (owner: build-loop)
 - `2e48af86` builder: REDS.md for 55d0721c587e (1 red) (owner: build-loop)
