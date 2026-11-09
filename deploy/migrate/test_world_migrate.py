@@ -74,3 +74,87 @@ def test_an_addition_is_reported_but_is_no_loss():
     items = wm.diff(a, b)
     assert kinds(items) == [("ref", "ember3", "feedback")] and wm.failing(items) == []
     assert "added by the new world" in wm.render(items)
+
+
+class FakeShell:
+    """The member lines carry_grains sends, answered as the worker would: an install is undecided until its
+    exact retry; the carried grain is listed from its route phase on and runs only once START completes."""
+
+    def __init__(self, start_after=1):
+        self.lines, self.listed, self.running, self.shares = [], False, False, []
+        self.start_after, self.retries = start_after, 0
+
+    def __call__(self, name, line, check=True):
+        import json
+        self.lines.append((name, line))
+        req = "ab" * 16
+        if line.startswith("apps install"):
+            self.listed = True
+            return 1, "", f"undecided: install request {req} was accepted"
+        if line.startswith("apps retry"):
+            self.retries += 1
+            self.running = self.retries >= self.start_after
+            return (0, f"request {req}: installed", "") if self.running else (1, "", f"undecided: request {req} starting")
+        if line.startswith("apps list"):
+            grains = [{"grain": "a2", "owner": "house", "appId": "app", "class": "S", "state": "running",
+                       "routes": ["house"] + self.shares, "carriedFrom": "a1", "carriedImageSha256": "e" * 64}] if self.listed else []
+            return 0, json.dumps({"receipt": {"grains": grains}}), ""
+        if line.startswith("apps status"):
+            return 0, json.dumps({"state": "running" if self.running else "never-begun"}), ""
+        if line.startswith("apps share"):
+            self.shares.append(line.split()[3])
+            return 0, "{}", ""
+        raise AssertionError(line)
+
+
+def carry_dir(tmp_path, claimed=None):
+    import json
+    d = tmp_path / "migrate"
+    d.mkdir()
+    before = {"members": {"house": {"grains": {"a1": {"appId": "app", "class": "S", "shares": ["sage"], "imageSha256": "e" * 64}}}}}
+    (d / "before.json").write_text(json.dumps(before))
+    staged = tmp_path / "apps" / "carried" / "a1"
+    staged.mkdir(parents=True)
+    (staged / "carry.json").write_text("{}")
+    if claimed:
+        (staged / "claimed").write_text(claimed)
+    wm.APPS_STATE = str(tmp_path / "apps")
+    return d
+
+
+def test_a_carry_counts_once_it_runs_and_is_shared_again(tmp_path, monkeypatch):
+    d = carry_dir(tmp_path)
+    shell = FakeShell(start_after=2)
+    monkeypatch.setattr(wm, "member", shell)
+    monkeypatch.setattr(wm.time, "sleep", lambda _: None)
+    assert wm.carry_grains(str(d)) == []
+    assert [l for _, l in shell.lines if l.startswith("apps install")] == ["apps install app --class S --carry a1"]
+    assert shell.shares == ["sage"]
+
+
+def test_a_grain_that_does_not_start_is_left_and_a_rerun_resumes_its_claim(tmp_path, monkeypatch):
+    d = carry_dir(tmp_path)
+    shell = FakeShell(start_after=10 ** 6)
+    monkeypatch.setattr(wm, "member", shell)
+    monkeypatch.setattr(wm.time, "sleep", lambda _: None)
+    problems = wm.carry_grains(str(d))
+    assert len(problems) == 1 and "carried as a2 but not running" in problems[0], problems
+    assert shell.shares == []
+    # The worker claimed the carry for the first request: the re-run retries that request, never a second install.
+    (tmp_path / "apps" / "carried" / "a1" / "claimed").write_text("cd" * 16)
+    shell.start_after, shell.lines = shell.retries + 1, []
+    assert wm.carry_grains(str(d)) == []
+    assert not [l for _, l in shell.lines if l.startswith("apps install")]
+    assert ("house", "apps retry " + "cd" * 16) in shell.lines
+    assert shell.shares == ["sage"]
+
+
+def test_a_grain_no_capture_lists_is_named_not_lost(tmp_path):
+    import json
+    grains = tmp_path / "apps" / "grains"
+    grains.mkdir(parents=True)
+    for g, owner, state in [("a1", "house", "running"), ("a7", "nobody", "stopped"), ("a8", "nobody", "deleted")]:
+        (grains / f"{g}.json").write_text(json.dumps({"grain": g, "owner": owner, "state": state, "appId": "app"}))
+    wm.APPS_STATE = str(tmp_path / "apps")
+    world = {"members": {"house": {"grains": {"a1": {}}}, "sage": {"workspace": False}}}
+    assert [x["grain"] for x in wm.uncaptured_grains(world)] == ["a7"]

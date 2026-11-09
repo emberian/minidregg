@@ -306,20 +306,66 @@ def export_grains(d, world):
                           open(dst / "carry.json", "w"), indent=1, sort_keys=True)
             info["imageSha256"] = json.load(open(dst / "export/manifest.json"))["image"]["sha256"]
             log(f"capture: grain {g} ({n}, {info.get('indexName')}): exported, image {info['imageSha256'][:16]}")
+    world["grainsNotCaptured"] = uncaptured_grains(world)
+    for x in world["grainsNotCaptured"]:
+        log(f"capture: LEFT grain {x['grain']} ({x['owner']}): the worker holds it but no capture of its owner lists it")
+
+
+def uncaptured_grains(world):
+    """The worker's own grain records (APPS_STATE/grains) whose grain no member's capture lists: an owner with no
+    workspace, a skipped name or a failed capture would otherwise lose the grain without a word."""
+    listed = {g for m in world["members"].values() for g in (m.get("grains") or {}) if g != "error"}
+    out = []
+    for f in sorted(pathlib.Path(APPS_STATE, "grains").glob("*.json")):
+        try:
+            r = json.load(open(f))
+        except (OSError, ValueError):
+            continue
+        if r.get("state") != "deleted" and r.get("grain") and r["grain"] not in listed:
+            out.append({"grain": r["grain"], "owner": r.get("owner"), "appId": r.get("appId"), "indexName": r.get("indexName")})
+    return out
+
+
+def carried_as(grains, g):
+    """The grain of GRAINS (capture_grains) carried from G, or None."""
+    return next((h for h, x in grains.items() if h != "error" and x.get("carriedFrom") == g), None)
+
+
+def grain_running(n, g):
+    """(running?, detail) from the grain's live runs (`apps status`): the worker's record names a carried grain
+    from the install's route phase on, before its START has completed."""
+    rc, out, err = member(n, f"apps status {g} --json", check=False)
+    o = next((x for x in objects(out) if x.get("state")), None)
+    return (o or {}).get("state") == "running", tail(err or out)
+
+
+def until_decided(n, line, req=None):
+    """LINE as N, then the exact retry of its request while the worker answers undecided."""
+    rc, out, err = member(n, line, check=False)
+    m = re.search(r"request ([0-9a-f]{32})", out + err)
+    req = m.group(1) if m else req
+    tries = 0
+    while rc != 0 and req and "undecided" in (out + err) and tries < 120:
+        time.sleep(3); tries += 1
+        rc, out, err = member(n, f"apps retry {req}", check=False)
+    return rc, out, err
 
 
 def carry_grains(d):
-    """The new world: each captured grain installed again by its owner from its export, then shared again."""
+    """The new world: each captured grain installed again by its owner from its export, then shared again.
+    Re-runnable: a carry already claimed by a request is resumed by that request's exact retry (the worker
+    refuses a second install of one carry), and a grain counts as carried only once it runs."""
     before = json.load(open(f"{d}/before.json"))
-    journal, problems = Journal(f"{d}/journal.jsonl"), []
+    journal = Journal(f"{d}/journal.jsonl")
+    problems = [f"grain {x['grain']} ({x['owner']}): never captured, so not carried" for x in before.get("grainsNotCaptured", [])]
     for n, m in sorted(before["members"].items()):
         for g, info in sorted((m.get("grains") or {}).items()):
             if g == "error" or not info.get("imageSha256"):
                 problems.append(f"grain {g} ({n}): no export to carry ({info.get('exportError') if isinstance(info, dict) else info})")
                 continue
             now = capture_grains(n)
-            new = next((h for h, x in now.items() if h != "error" and x.get("carriedFrom") == g), None)
-            if new is None:
+            new = carried_as(now, g)
+            if new is None or not grain_running(n, new)[0]:
                 staged = pathlib.Path(APPS_STATE, "carried", g)
                 if not (staged / "carry.json").is_file():
                     tmp = pathlib.Path(APPS_STATE, "carried", f".{g}.part")
@@ -329,17 +375,21 @@ def carry_grains(d):
                     subprocess.run(["chown", "-R", f"{STORE_USER}:{STORE_USER}", str(tmp.parent)], check=True)
                     subprocess.run(["chmod", "-R", "go-rwx", str(tmp)], check=True)
                     os.replace(tmp, staged)
-                rc, out, err = member(n, f"apps install {info['appId']} --class {info['class']} --carry {g}", check=False)
-                req = re.search(r"request ([0-9a-f]{32})", out + err)
-                tries = 0
-                while rc != 0 and req and "undecided" in (out + err) and tries < 120:
-                    time.sleep(3); tries += 1
-                    rc, out, err = member(n, f"apps retry {req.group(1)}", check=False)
+                claim = staged / "claimed"
+                req = claim.read_text().strip() if claim.is_file() else ""
+                if re.fullmatch(r"[0-9a-f]{32}", req):
+                    rc, out, err = until_decided(n, f"apps retry {req}", req)
+                else:
+                    rc, out, err = until_decided(n, f"apps install {info['appId']} --class {info['class']} --carry {g}")
                 journal.record(f"grain-install {g}", member=n, rc=rc, detail=tail(err or out, 1))
                 now = capture_grains(n)
-                new = next((h for h, x in now.items() if h != "error" and x.get("carriedFrom") == g), None)
+                new = carried_as(now, g)
                 if new is None:
                     problems.append(f"grain {g} ({n}): install --carry left no carried grain: {tail(err or out)}")
+                    continue
+                running, detail = grain_running(n, new)
+                if not running:
+                    problems.append(f"grain {g} ({n}): carried as {new} but not running (a re-run resumes its START): {detail}")
                     continue
                 log(f"grains: {g} ({n}) carried as {new}")
             for s in info.get("shares", []):
