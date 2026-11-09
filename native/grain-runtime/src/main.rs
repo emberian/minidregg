@@ -30,6 +30,7 @@ mod prompt_outcome;
 mod prompt_witness_close;
 mod unsent_reserve_close;
 mod entered_unsent_refusal;
+mod quiescence_preflight;
 mod hermes_session_verify;
 mod resident_origin;
 mod resident_requests;
@@ -18933,6 +18934,12 @@ fn serve(mut rt: Runtime) -> Result<()> {
                 }
                 if let Some(path) = request.command.strip_prefix("resident deliver-final ") {
                     let result = rt.deliver_resident_final(Path::new(path));
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
+                    continue;
+                }
+                if let Some(path) = request.command.strip_prefix("quiescence preflight ") {
+                    let result = rt.quiescence_preflight(if path == "none" { None } else { Some(Path::new(path)) });
                     request.phase.store(2, Ordering::SeqCst);
                     let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
                     continue;
