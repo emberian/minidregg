@@ -158,3 +158,26 @@ def test_a_grain_no_capture_lists_is_named_not_lost(tmp_path):
     wm.APPS_STATE = str(tmp_path / "apps")
     world = {"members": {"house": {"grains": {"a1": {}}}, "sage": {"workspace": False}}}
     assert [x["grain"] for x in wm.uncaptured_grains(world)] == ["a7"]
+
+
+def test_verify_releases_the_staging_copies_and_keeps_the_rollback_export(tmp_path):
+    import json
+    apps = tmp_path / "apps"
+    for p in ["carried/a1/export", "exports/a1", "retired-1794/exports/a1", "exports/a2", "carried/a2"]:
+        (apps / p).mkdir(parents=True)
+    d = tmp_path / "migrate"
+    (d / "grains" / "a1" / "export").mkdir(parents=True)
+    wm.APPS_STATE = str(apps)
+    before = {"members": {"house": {"grains": {"a1": {"imageSha256": "e" * 64}, "a2": {"exportError": "refused"}}}}}
+    assert wm.release_carried(str(d), before) == ["a1"]
+    assert not (apps / "carried/a1").exists() and not (apps / "exports/a1").exists()
+    assert not (apps / "retired-1794/exports/a1").exists()
+    # an uncarried grain's copies and the walk's own export (the rollback copy) stay
+    assert (apps / "exports/a2").is_dir() and (apps / "carried/a2").is_dir()
+    assert (d / "grains/a1/export").is_dir()
+    record = json.loads((d / "grains/a1/released.json").read_text())
+    assert len(record["removed"]) == 3
+    # released once: a re-run removes nothing, even a copy that reappeared
+    (apps / "exports/a1").mkdir()
+    assert wm.release_carried(str(d), before) == []
+    assert (apps / "exports/a1").is_dir()
