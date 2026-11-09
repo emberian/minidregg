@@ -83,6 +83,15 @@ STOPped it (generation 6) and exported it. world-migrate's own `export_grains` c
   `diff` found no grain differences. The carried grain runs generation 2, and its public page is byte-identical
   to the source deck's (both answer 200). sage's copy was then deleted; its 5 MB volume is retained.
 
+A second walk the same night carried the deck (generation 8, image `cbda581dc969…`) into ember3, who held no
+grain of it. Its share was made again for sage: `apps share` bound sage's route, and one `apps renew` enrolled
+it. sage opened the carried deck through that route: the bootstrap answered 303, and the page and `deck.md`
+answered 200 with the house's slides. Without the cookie the page answered 403. The grain diff was empty, and
+`release_carried` removed `carried/` and the worker's `exports/` copy while keeping the walk's own export. The
+house's original was not shared, because v1 has no read-only share and no verb that drops a share. The cleanup
+delete of ember3's copy is stuck: its STOP completion was marked submitted (op38), but the lookup still answers
+`absent`, so g2 stays uncertain and the routes stay in place.
+
 The house's deck was started and renewed again afterwards, and its public page answers 200. Three faults
 were fixed along the way:
 
