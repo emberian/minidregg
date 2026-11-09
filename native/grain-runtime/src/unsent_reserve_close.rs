@@ -15,9 +15,12 @@
 //! releases its hold exactly when
 //! 1. the attempt is a reserve whose hold names it and is neither confirmed nor refused: closing
 //!    it releases only an allowance that was never reserved;
-//! 2. no process can still send under it: this controller holds no child, its custody gate is
-//!    idle, and its unit's cgroup holds no process but the controller (`prove_prior_run_stopped`,
-//!    observed now);
+//! 2. no process can still send under it: this controller holds no child and its custody gate is
+//!    idle, and either an earlier controller process started the attempt and this process proved
+//!    at its start that its unit's cgroup held no process of that run, or the cgroup holds no
+//!    process but the controller now (`prove_prior_run_stopped`). A running controller keeps its
+//!    own `command-resident` and codec resident in its cgroup, started after any earlier run's
+//!    attempt, so the observation now refuses while the start proof decides;
 //! 3. no call bytes exist: every entry of the attempt directory is a regular file named in
 //!    [`BEFORE_SEAL`], so neither `call.bin`, its staging file, the transaction signatures it is
 //!    assembled from, nor any retry or outcome is present;

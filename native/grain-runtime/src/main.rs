@@ -17980,6 +17980,10 @@ impl Runtime {
             Err("this controller holds a child".to_owned())
         } else if !self.custody_gate.is_idle() {
             Err("the custody gate is not idle".to_owned())
+        } else if id < self.process_first_operation_id && self.prior_run_stopped {
+            // An earlier controller process started the attempt, and this one proved at start
+            // that its cgroup held no process of that run (the custody child among them).
+            Ok(())
         } else {
             prove_prior_run_stopped(&self.config.task)
         };
