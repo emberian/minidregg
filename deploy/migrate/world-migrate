@@ -396,6 +396,12 @@ def carry_grains(d):
                 if s in now[new].get("shares", []):
                     continue
                 rc, out, err = member(n, f"apps share {new} {s} --json", check=False)
+                # A share that bound the route but could not yet enroll it answers undecided; its exact retry
+                # is `apps renew` (demo-dry 2026-11-09: the route lock was held for a moment after START).
+                tries = 0
+                while rc != 0 and "undecided" in (out + err) and tries < 40:
+                    time.sleep(3); tries += 1
+                    rc, out, err = member(n, f"apps renew {new} --json", check=False)
                 journal.record(f"grain-share {new} {s}", member=n, rc=rc, detail=tail(err or out, 1))
                 if rc != 0:
                     problems.append(f"grain {new} ({n}): share with {s}: {tail(err or out)}")
