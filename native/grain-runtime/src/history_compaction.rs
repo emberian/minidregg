@@ -24,7 +24,7 @@ const PER_OPERATION: &[&str] = &[
     "policy-check-", "current-author-", "provider-", "attempt-", "source-", "query-",
 ];
 
-fn operation_of(name: &str) -> Option<u64> {
+pub(crate) fn operation_of(name: &str) -> Option<u64> {
     let prefix = PER_OPERATION.iter().find(|p| name.starts_with(**p))?;
     let digits = name.get(prefix.len()..prefix.len() + 16)?;
     if !digits.bytes().all(|b| b.is_ascii_digit()) { return None; }

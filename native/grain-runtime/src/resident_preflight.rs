@@ -170,19 +170,93 @@ impl Runtime {
     /// `resident refuse-unadmitted ID SHA`. The refusal binds the controller's own preparation record of
     /// ID/SHA; the guards below refuse a prompt that entered native preparation or was admitted, so no effect
     /// is ever classified as unadmitted. The resident's next start finds the refusal and closes the pending.
-    pub(crate) fn refuse_unadmitted_resident_prompt(&self,id:&str,sha:&str)->Result<Value> {
+    pub(crate) fn refuse_unadmitted_resident_prompt(&mut self,id:&str,sha:&str)->Result<Value> {
         if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident refusal identity".into());}
         if refusal_path(&self.config,id).try_exists().map_err(|e|e.to_string())? {
+            return self.resident_admission(id,sha);
+        }
+        if entered_path(&self.config,id).try_exists().map_err(|e|e.to_string())? {
+            // An entered prompt is refused only through `entered_unsent_refusal::decide`, its decision
+            // saved before the refusal record is written.
+            self.retained_preparation(id,sha)?;
+            let facts=self.entered_unsent_facts(id)?;
+            let mut entry=entered_unsent_refusal::decide(id,&facts)?;
+            entry["decisionId"]=json!(self.next_id()?.to_string());
+            entry["promptSha256"]=json!(sha);
+            self.journal.reconciliation_log.push(entry);
+            self.save()?;
+            self.write_unadmitted_refusal(id,sha,"refused by the operator: entered, never admitted; its work reserve was closed as never sent")?;
             return self.resident_admission(id,sha);
         }
         self.record_unadmitted_refusal(id,sha,"refused by the operator: the prompt never entered native preparation (its reply was lost)")?;
         self.resident_admission(id,sha)
     }
+    /// What `entered_unsent_refusal::decide` reads: the prompt's entry, the controller's holds, its
+    /// binding, every surviving operation's files, the compacted history and the reconciliation log.
+    fn entered_unsent_facts(&self,id:&str)->Result<entered_unsent_refusal::Facts> {
+        let state=&self.config.state_dir;
+        let nanos=|path:&Path|->Result<i128> {
+            let m=fs::symlink_metadata(path).map_err(|e|format!("{}: {e}",path.display()))?;
+            Ok(m.mtime() as i128*1_000_000_000+m.mtime_nsec() as i128)
+        };
+        let j=&self.journal;
+        let held=[(j.pending.is_some(),"a parent send is pending"),(j.parent_hold.is_some(),"a parent hold is retained"),
+            (j.settlement_due.is_some(),"a settlement is due"),(self.child.is_some()||j.child.is_some(),"a child is live"),
+            (self.prompt_active||j.hermes_session.as_ref().is_some_and(|s|s.pending_prompt),"a prompt is live")]
+            .into_iter().find(|(held,_)|*held).map(|(_,what)|what.to_owned());
+        let bound_reserve=match fs::read(state.join(format!("resident-reserve-{id}.json"))) {
+            Ok(bytes)=>{
+                let value:Value=serde_json::from_slice(&bytes).map_err(|e|format!("resident reserve binding: {e}"))?;
+                if value["type"]!="mini-resident-reserve-binding-v1" || value["residentPromptId"]!=id {
+                    return Err("resident reserve binding names another prompt".into());
+                }
+                Some(value["operationId"].as_str().and_then(|v|v.parse::<u64>().ok()).ok_or("resident reserve binding has no operation id")?)
+            }
+            Err(e) if e.kind()==io::ErrorKind::NotFound=>None,
+            Err(e)=>return Err(format!("resident reserve binding: {e}")),
+        };
+        let mut operations=std::collections::BTreeMap::<u64,entered_unsent_refusal::Operation>::new();
+        for entry in fs::read_dir(state).map_err(|e|e.to_string())? {
+            let entry=entry.map_err(|e|e.to_string())?;
+            let name=entry.file_name().to_string_lossy().into_owned();
+            let Some(op)=history_compaction::operation_of(&name) else {continue};
+            let time=nanos(&entry.path())?;
+            let reserve=name.starts_with("source-") && {
+                let value:Value=serde_json::from_slice(&bounded_regular_file(&entry.path(),1_048_576)?).map_err(|e|format!("{name}: {e}"))?;
+                value.pointer("/grain/operation/type").and_then(Value::as_str)==Some("reserve")
+            };
+            let slot=operations.entry(op).or_insert(entered_unsent_refusal::Operation{time_ns:time,reserve:false});
+            slot.time_ns=slot.time_ns.min(time);
+            slot.reserve|=reserve;
+        }
+        let mut compacted_max=None;
+        match fs::read_to_string(state.join("history.jsonl")) {
+            Ok(text)=>for line in text.lines().filter(|l|!l.trim().is_empty()) {
+                let value:Value=serde_json::from_str(line).map_err(|e|format!("history.jsonl: {e}"))?;
+                if let Some(op)=value["id"].as_str().and_then(|v|v.parse::<u64>().ok()) {
+                    compacted_max=Some(compacted_max.map_or(op,|max:u64|max.max(op)));
+                }
+            },
+            Err(e) if e.kind()==io::ErrorKind::NotFound=>{}
+            Err(e)=>return Err(format!("history.jsonl: {e}")),
+        }
+        let log=&j.reconciliation_log;
+        let decisions=log.iter().filter_map(|e|e["decisionId"].as_str().and_then(|v|v.parse::<u64>().ok())).collect();
+        let closed_unsent=log.iter().filter(|e|e["action"]=="close-unsent-reserve")
+            .filter_map(|e|e["operationId"].as_str().and_then(|v|v.parse::<u64>().ok())).collect();
+        let admitted=state.join(format!("resident-origin-id-{id}.json")).try_exists().map_err(|e|e.to_string())?
+            || j.resident_prompt_origin.as_ref().is_some_and(|o|o.resident_prompt_id==id);
+        Ok(entered_unsent_refusal::Facts{entered_ns:nanos(&entered_path(&self.config,id))?,admitted,held,bound_reserve,
+            operations,compacted_max,decisions,next_operation_id:j.next_operation_id,closed_unsent})
+    }
     fn record_unadmitted_refusal(&self,id:&str,sha:&str,reason:&str)->Result<()> {
-        let (_,preparation_sha256)=self.retained_preparation(id,sha)?;
         if entered_path(&self.config,id).try_exists().map_err(|e|e.to_string())? {
             return Err("entered source prompt cannot receive preadmission refusal".into());
         }
+        self.write_unadmitted_refusal(id,sha,reason)
+    }
+    fn write_unadmitted_refusal(&self,id:&str,sha:&str,reason:&str)->Result<()> {
+        let (_,preparation_sha256)=self.retained_preparation(id,sha)?;
         if self.config.state_dir.join(format!("resident-origin-id-{id}.json")).try_exists().map_err(|e|e.to_string())? {
             return Err("admitted prompt cannot receive preadmission refusal".into());
         }
@@ -204,7 +278,10 @@ impl Runtime {
             return Err("resident refusal conflicts with retained admitted origin".into());
         }
         let (_,hash)=self.retained_preparation(id,sha)?;
-        if entered_path(&self.config,id).try_exists().map_err(|e|e.to_string())? {return Err("refusal conflicts with entered prompt; exact native recovery required".into());}
+        if entered_path(&self.config,id).try_exists().map_err(|e|e.to_string())?
+            && !self.journal.reconciliation_log.iter().any(|e|e["action"]=="refuse-entered-unsent-prompt" && e["residentPromptId"]==id) {
+            return Err("refusal conflicts with entered prompt; exact native recovery required".into());
+        }
         let value:Value=serde_json::from_slice(&bounded_regular_file(&file,65_536)?).map_err(|e|e.to_string())?;
         if value["preparationSha256"]!=hash {return Err("refusal changed its exact source preparation".into());}
         check_refusal(&self.config,&self.config_path,id,sha,value)

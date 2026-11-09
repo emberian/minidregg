@@ -215,12 +215,28 @@ struct FilePin {
 }
 
 fn file_pin(path: &Path) -> Result<FilePin> {
+    pinned_file(path, true)
+}
+
+/// The Store's pinned settings: owned by the operator account, not root (dregg-infra lib.sh
+/// `tenant_access`: an app grain's resident reads it inside its user namespace, where outside root
+/// is unmapped). Its bytes are what the proof pins (hashed at admission and again at the end), so
+/// any owner is accepted; group- and other-writable is still refused.
+fn settings_pin(path: &Path) -> Result<FilePin> {
+    pinned_file(path, false)
+}
+
+fn pinned_file(path: &Path, owned: bool) -> Result<FilePin> {
     let metadata = fs::symlink_metadata(path).map_err(|e| format!("codec file pin: {e}"))?;
     if !metadata.is_file()
-        || ![0, unsafe { libc::geteuid() }].contains(&metadata.uid())
+        || (owned && ![0, unsafe { libc::geteuid() }].contains(&metadata.uid()))
         || metadata.mode() & 0o022 != 0
     {
-        return Err("codec pin is not an owned, non-shared-writable regular file".into());
+        return Err(if owned {
+            format!("codec pin {} is not an owned, non-shared-writable regular file", path.display())
+        } else {
+            format!("settings pin {} is not a non-shared-writable regular file", path.display())
+        });
     }
     Ok(FilePin {
         identity: Identity {
@@ -447,7 +463,7 @@ pub(super) fn prove_quiescent_controller(config: &Config) -> Result<()> {
     let mini = file_pin(&config.mini)?;
     let local_host_environment = std::env::var_os("MINI_LOCAL_HOST");
     let host = codec_host_pin(config, local_host_environment.as_deref())?;
-    let settings = file_pin(&config.host_config)?;
+    let settings = settings_pin(&config.host_config)?;
     let settings_hash = sha256_bytes(&bounded_regular_file(&config.host_config, 1_048_576)?)?;
     let observe = || -> Result<Vec<CodecProcess>> {
         ids.iter()
@@ -470,7 +486,7 @@ pub(super) fn prove_quiescent_controller(config: &Config) -> Result<()> {
             || file_pin(&config.mini)? != mini
             || std::env::var_os("MINI_LOCAL_HOST") != local_host_environment
             || !codec_host_unchanged(config, local_host_environment.as_deref(), &host)?
-            || file_pin(&config.host_config)? != settings
+            || settings_pin(&config.host_config)? != settings
             || sha256_bytes(&bounded_regular_file(&config.host_config, 1_048_576)?)?
                 != settings_hash
             || observe()? != original
@@ -846,8 +862,11 @@ mod tests {
         assert_ne!(file_pin(&path).unwrap(), old);
         symlink(&path, root.join("alias")).unwrap();
         assert!(file_pin(&root.join("alias")).is_err());
+        assert_eq!(settings_pin(&path).unwrap(), file_pin(&path).unwrap());
+        assert!(settings_pin(&root.join("alias")).is_err());
         fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
         assert!(file_pin(&path).is_err());
+        assert!(settings_pin(&path).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
