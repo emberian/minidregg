@@ -28,6 +28,7 @@ mod resident_reconcile;
 mod hermes_outcome;
 mod prompt_outcome;
 mod prompt_witness_close;
+mod unsent_reserve_close;
 mod hermes_session_verify;
 mod resident_origin;
 mod resident_requests;
@@ -17968,6 +17969,70 @@ impl Runtime {
         self.save()
     }
 
+    /// `reconcile parent|tool unsent`: close a reserve whose custody attempt never wrote its call
+    /// and release its hold (`unsent_reserve_close::decide` states when), saving the decision first.
+    fn close_unsent_reserve(&mut self, slot: AuthoritySlot) -> Result<()> {
+        let pending = self.journal.pending_for(slot).clone().ok_or("no pending attempt for this authority")?;
+        let hold = self.journal.hold_for(slot).clone().ok_or("no hold for this authority")?;
+        let id = pending.operation_id;
+        let own = self.config.state_dir.join(format!("attempt-{id:016}"));
+        let sender_stopped = if self.child.is_some() || self.journal.child.is_some() {
+            Err("this controller holds a child".to_owned())
+        } else if !self.custody_gate.is_idle() {
+            Err("the custody gate is not idle".to_owned())
+        } else {
+            prove_prior_run_stopped(&self.config.task)
+        };
+        let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
+        let source_bytes = bounded_regular_file(&source_path, 1_048_576)?;
+        let source: Value = serde_json::from_slice(&source_bytes).map_err(|e| format!("source-{id:016}.json: {e}"))?;
+        let source_written_epoch = fs::symlink_metadata(&source_path)
+            .and_then(|m| m.modified())
+            .map_err(|e| format!("source mtime: {e}"))?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("source mtime: {e}"))?
+            .as_secs();
+        let stat = fs::read_to_string("/proc/stat").map_err(|e| format!("/proc/stat: {e}"))?;
+        let boot_epoch = stat
+            .lines()
+            .find_map(|line| line.strip_prefix("btime "))
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .ok_or("/proc/stat has no btime")?;
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&pending.attempt).map_err(|e| format!("attempt directory: {e}"))? {
+            let entry = entry.map_err(|e| format!("attempt directory: {e}"))?;
+            let regular = fs::symlink_metadata(entry.path()).map_err(|e| format!("attempt entry: {e}"))?.file_type().is_file();
+            entries.push((entry.file_name().to_string_lossy().into_owned(), regular));
+        }
+        entries.sort();
+        let retained = pending.attempt.join("intent.json");
+        let intent_matches_source = match fs::symlink_metadata(&retained) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            _ => Some(bounded_regular_file(&retained, 1_048_576)? == source_bytes),
+        };
+        let attempt = unsent_reserve_close::Attempt {
+            operation_id: id,
+            operation: pending.operation.clone(),
+            hold_names_attempt: pending.attempt == own && hold.reserve_attempt.as_ref() == Some(&pending.attempt),
+            hold_confirmed: hold.reserve_confirmed,
+            hold_refused: hold.reserve_refused,
+            entries,
+            intent_matches_source,
+        };
+        let facts = unsent_reserve_close::Facts { sender_stopped, boot_epoch, source_written_epoch };
+        let authority = if slot == AuthoritySlot::Tool { self.tool()? } else { self.parent() };
+        let parent = self.query_as(&authority)?;
+        let mut entry = unsent_reserve_close::decide(&facts, &attempt, &source, &parent)?;
+        entry["decisionId"] = json!(self.next_id()?.to_string());
+        entry["authority"] = json!(if slot == AuthoritySlot::Tool { "tool" } else { "parent" });
+        entry["attempt"] = json!(pending.attempt);
+        self.journal.reconciliation_log.push(entry);
+        self.save()?;
+        *self.journal.pending_for_mut(slot) = None;
+        *self.journal.hold_for_mut(slot) = None;
+        self.save()
+    }
+
     fn acknowledge_effects(&mut self) -> Result<()> {
         self.acknowledge_effects_with(None)
     }
@@ -18133,7 +18198,17 @@ impl Runtime {
                     return self.retry_pending_slot(slot);
                 }
                 // A crashed custody subprocess may still assemble the call and
-                // dispatch later. Absence right now is not a negative receipt.
+                // dispatch later. Absence right now is not a negative receipt;
+                // the typed close decides from the sender, the attempt and the parent.
+                if self.startup_recovery_active
+                    && matches!(slot, AuthoritySlot::Parent | AuthoritySlot::Tool)
+                    && matches!(p.operation.as_str(), "reserve" | "tool reserve")
+                {
+                    return match self.close_unsent_reserve(slot) {
+                        Ok(()) => Ok(()),
+                        Err(why) => Err(format!("pending custody attempt has no call.bin; {why}; manual reconciliation required")),
+                    };
+                }
                 return Err("pending custody attempt has no call.bin; child lifetime is uncertain; manual reconciliation required".into());
             }
             let resolution = if slot == AuthoritySlot::Provider {
@@ -18941,6 +19016,8 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile worker audited" => rt.reconcile_worker_audited(),
                     "reconcile foreground audited" => rt.reconcile_foreground_audited(),
                     "reconcile prompt-witness" => rt.close_prompt_witness(),
+                    "reconcile parent unsent" => rt.close_unsent_reserve(AuthoritySlot::Parent),
+                    "reconcile tool unsent" => rt.close_unsent_reserve(AuthoritySlot::Tool),
                     _ => Err("unknown admin reconciliation action".into()),
                 };
                 request.phase.store(2, Ordering::SeqCst);
