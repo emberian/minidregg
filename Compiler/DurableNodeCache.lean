@@ -115,10 +115,22 @@ decoded) and the rows its reads decoded. An index answer at that height walks th
 cannot verify falls back to the Store read. The same height discipline as the node rows: an
 append at `h + 1` writes exactly the rows that change, so every other row held at `h` stands. -/
 
-/-- Decoded index rows at `height`. -/
+/-- Bit paths in lexicographic order (a shorter path first where one is a prefix of the other). -/
+def pathCmp : List Bool → List Bool → Ordering
+  | [], [] => .eq
+  | [], _ :: _ => .lt
+  | _ :: _, [] => .gt
+  | a :: as, b :: bs => match compare a b with
+    | .eq => pathCmp as bs
+    | other => other
+
+/-- Decoded index rows at `height`, in a persistent tree: a request's lookup function
+(`heldIndexRows`) still holds the rows when its own append hands over the rows it wrote, so an
+insert must not copy the set. A hash map shared that way was copied whole on every `op 2` (the
+preloaded trie: ~20 ms at ~6,000 records, until an append from elsewhere reset it to a small set). -/
 structure Decoded where
   height : Nat
-  rows : Std.HashMap (List Bool) DurableIndex.Row
+  rows : Std.TreeMap (List Bool) DurableIndex.Row pathCmp
 
 initialize decoded : IO.Ref (Option (String × Decoded)) ← IO.mkRef none
 
@@ -134,7 +146,7 @@ def heldIndexRows (root : String) (height : Nat) : IO (Option (List Bool → Opt
 when they were not there); rows read join the set at their height, or start one above it. -/
 def holdIndexRows (root : String) (height : Nat) (appended : Bool)
     (rows : List (List Bool × DurableIndex.Row)) : IO Unit :=
-  let onto (base : Std.HashMap (List Bool) DurableIndex.Row) : Option (String × Decoded) :=
+  let onto (base : Std.TreeMap (List Bool) DurableIndex.Row pathCmp) : Option (String × Decoded) :=
     some (root, ⟨height, rows.foldl (init := base) fun map row => map.insert row.1 row.2⟩)
   -- One match that moves the held map, so an insert updates it in place.
   decoded.modify fun current =>

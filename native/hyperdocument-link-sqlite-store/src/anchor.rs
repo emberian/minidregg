@@ -171,6 +171,11 @@ impl Guard {
         }
         custody(Some(&lock.metadata()?), &directory_of(&path)?, store_uid())?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // The holder is another helper's read or append of this Store, held for about a
+        // millisecond. A wait sleeps from 50 us, doubling to at most 1 ms, so it ends within
+        // about a millisecond of the release. A fixed 10 ms sleep put a 10 ms step on the serving
+        // Host's every write a provider's catch-up overlapped: op 2 at 12 + 10k ms (w13, k up to 3).
+        let mut pause = std::time::Duration::from_micros(50);
         loop {
             // SAFETY: this owned file descriptor remains open throughout the guard.
             if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
@@ -180,7 +185,8 @@ impl Guard {
             if error.kind() == std::io::ErrorKind::WouldBlock
                 && std::time::Instant::now() < deadline
             {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(std::time::Duration::from_millis(1));
                 continue;
             }
             if error.kind() != std::io::ErrorKind::Interrupted {
