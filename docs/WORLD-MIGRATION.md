@@ -68,6 +68,7 @@ What the members made:
 | documents a member owns | by re-authoring | `doc new`, then each missing line by `doc append` and `submit` (current text; line authors are checked) |
 | the seed accounts' content | rebuilt | the walk's seed step (house, sage, public: `MIGRATE_SEED_ACCOUNTS`); compared, never re-authored |
 | door requests and status pages | kept | ship.sh keeps every enrolled request whose account exists |
+| app grains and the data inside them | **no: a gap** | the house's grains are re-installed by the seed with the seed's own writes only. A member-installed grain is not re-installed. What anyone wrote inside any grain after it was made stays in the retired world's volume (`/var/lib/mini-spk-worlds/OLDSTORE/vars/OLDSTORE-GRAIN`, its grain stopped by ship.sh) and the new world cannot reach it. `world-migrate capture` records no grain. Carrying it would take: capture listing each grain (owner, app id, package, class, shares); replay re-installing it as its owner (`apps install`), then importing the old volume through the broker's volume custody, which already round-trips a tree (`broker_volume_dir` import/export) but has no member verb; then re-granting the shares; and verify comparing a content digest of each volume |
 
 What cannot carry, and why:
 
@@ -86,9 +87,9 @@ What cannot carry, and why:
   replay. The old world's history stays readable in the retired Store.
 - **Pay claims.** The memo of a mainnet payment pins the old Host and config. The new world can neither
   claim it nor credit it again. Its effect (the enrollment, the subject, the balance) carries.
-- **App grain data written inside a grain.** No member verb imports a grain's data. The seed re-creates
-  the house's grains and its own writes. The world held only the house's grains on 2026-11-07, so no
-  member data was in one.
+- **App grains.** No row carries them yet (the carry table's gap row). On 2026-11-07 the world held only
+  the house's three, which the seed re-creates, so only writes made inside them after seeding were left
+  behind.
 - **ember3's `factory` reference.** It is an observe grant on the factory that the pay route's birth
   context carries and the sponsor's provision does not. Nothing ember3 did needed it: the
   `research-consent` cell is re-created without it.
