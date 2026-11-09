@@ -309,6 +309,8 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 LockPersonality=yes
 EOF
+  # demo-dry 2026-11-09 carried --resident-dir as a box drop-in until this render had it; its pins would go stale.
+  rm -f "/etc/systemd/system/$CONSENT_UNIT.service.d/50-relay.conf"
   systemctl daemon-reload
   systemctl enable "$CONSENT_UNIT.socket" >/dev/null; systemctl restart "$CONSENT_UNIT.socket"   # a rewritten unit: --now alone leaves the old listener
   # The selection (deploy/shell/README.md: the hosted member's variables).
