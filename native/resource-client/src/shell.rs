@@ -1876,10 +1876,10 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 "retry" => flags.push(flag("retry", p.arg(0))),
                 "list" => {}
-                "share" | "export" | "revoke-identity" | "snapshot" => {
+                "share" | "unshare" | "export" | "revoke-identity" | "snapshot" => {
                     if !crate::apps::valid_grain(p.arg(0)) { return Err(u.to_owned()); }
                     flags.push(flag("grain", p.arg(0)));
-                    flags.push(flag(match action { "share" => "to", "export" => "out", "snapshot" => "doc", _ => "token" }, p.arg(1)));
+                    flags.push(flag(match action { "share" | "unshare" => "to", "export" => "out", "snapshot" => "doc", _ => "token" }, p.arg(1)));
                 }
                 _ => {
                     if !crate::apps::valid_grain(p.arg(0)) { return Err(u.to_owned()); }
