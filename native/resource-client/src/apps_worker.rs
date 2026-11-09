@@ -929,6 +929,11 @@ impl Worker {
                             "unverifiedSignature"
                         } else if non_timing.contains("UNRESOLVED") || non_timing.contains("uncertain") || non_timing.contains("currentWorldRoot") || non_timing.contains("pinned executable refused") {
                             return undecided("installing", error, &retry);
+                        } else if non_timing.contains("derived file differs from retained instance record") {
+                            // This member's birth of the application already names an instance (an install of
+                            // an application it holds): a fault of the request, never of the package, so the
+                            // package's verdict is left as it is.
+                            return refused("instanceHeld", format!("{member} already holds an instance of this application's birth; nothing was installed: {error}"));
                         } else {
                             "installRefused"
                         };
@@ -2301,6 +2306,8 @@ mod tests {
         carried: StdMutex<Option<(PathBuf, String)>>,
         /// The latest run's state as `status` reports it: START makes it running, a decided STOP stopped.
         run_state: StdMutex<&'static str>,
+        /// What spk-host's install answers instead of installing, when set.
+        install_error: StdMutex<Option<String>>,
     }
 
     impl World for FakeWorld {
@@ -2313,6 +2320,7 @@ mod tests {
         fn install(&self, _: &Path, source: &Path, receipt: &Path, _: &Path, class: &str, delegation: &Path, carry: Option<(&Path, &str)>) -> Result<Installed> {
             *self.installs.lock().unwrap() += 1;
             *self.carried.lock().unwrap() = carry.map(|(e, k)| (e.to_path_buf(), k.to_owned()));
+            if let Some(error) = self.install_error.lock().unwrap().clone() { return Err(error); }
             self.installing.store(true, std::sync::atomic::Ordering::SeqCst);
             std::thread::sleep(*self.install_delay.lock().unwrap());
             self.installing.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -2391,7 +2399,7 @@ mod tests {
         let root = scratch(name);
         let quarantine = root.join("quarantine");
         fs::create_dir_all(&quarantine).unwrap();
-        let world = FakeWorld { quarantine: quarantine.clone(), wanted: StdMutex::new(vec![]), installs: StdMutex::new(0), stops: StdMutex::new(0), routes: StdMutex::new(vec![]), stop_undecided: StdMutex::new(false), identities: StdMutex::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: StdMutex::new(vec![]), route_dir: root.join("routes"), enrolled: StdMutex::new(vec![]), generation: StdMutex::new(2), install_delay: StdMutex::new(install_delay), installing: Default::default(), carried: StdMutex::new(None), run_state: StdMutex::new("running") };
+        let world = FakeWorld { quarantine: quarantine.clone(), wanted: StdMutex::new(vec![]), installs: StdMutex::new(0), stops: StdMutex::new(0), routes: StdMutex::new(vec![]), stop_undecided: StdMutex::new(false), identities: StdMutex::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: StdMutex::new(vec![]), route_dir: root.join("routes"), enrolled: StdMutex::new(vec![]), generation: StdMutex::new(2), install_delay: StdMutex::new(install_delay), installing: Default::default(), carried: StdMutex::new(None), run_state: StdMutex::new("running"), install_error: StdMutex::new(None) };
         let mut w = Worker::open(root.join("state"), Box::new(world)).unwrap();
         w.install_grace = grace;
         (Arc::new(w), root)
@@ -2550,6 +2558,23 @@ mod tests {
         assert_eq!(delete["receipt"]["volumeRetained"], true);
         assert!(!w.state.join("origins").join("a4501.json").exists());
         assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"open","grain":"a4501"}))["refused"], "noRoute");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apps_worker_an_instance_conflict_refuses_the_request_not_the_package() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker("instance-held");
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        *fake(&w).install_error.lock().unwrap() = Some("spk-host: grain refused: derived file differs from retained instance record: /h/apps/4501/install/install.json".into());
+        let held = w.handle("alice", &install_request(&"7".repeat(32)));
+        assert_eq!(held["refused"], "instanceHeld", "{held}");
+        assert!(fake(&w).verdicts.lock().unwrap().is_empty(), "an instance conflict wrote a package verdict");
+        // A refusal of the package itself still records the package's verdict.
+        *fake(&w).install_error.lock().unwrap() = Some("spk-host: ingest refused: malformed archive".into());
+        let bad = w.handle("alice", &install_request(&"8".repeat(32)));
+        assert_eq!(bad["refused"], "installRefused", "{bad}");
+        assert_eq!(fake(&w).verdicts.lock().unwrap().last().map(|(_, v)| v["verdict"].clone()), Some(json!("refused")));
         let _ = fs::remove_dir_all(&root);
     }
 
