@@ -5,4 +5,5 @@
 # updated 2026-11-08: 4929 (tree 6428): first ceiling (measured at b22a1a1b1)
 # updated 2026-11-08: 4923 (tree 6421): past reads off the log: the kept-checkpoint path deleted
 # updated 2026-11-08: 4921 (tree 6419): packed record bodies and checkpoints on the open (bytes-repr)
-4921
+# updated 2026-11-08: 4918 (tree 6416): held served directory: the directory decode no longer lists every row
+4918

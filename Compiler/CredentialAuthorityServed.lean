@@ -6,8 +6,10 @@ KN2 stage 2b-1. The light counterparts of `CredentialAuthorityDomainReceiver`'s
 instead of the full verified materialization:
 
 * `ServedDirectory served`: the complete physical directory of the served
-  state (every enumerable cell, tombstones included), decoded once;
-  `bytes_exact` holds at every identifier, inside or outside the enumeration.
+  state (every enumerable cell, tombstones included), held as lifecycle images by
+  identifier (`HeldImages`) and moved by a step at the cells it wrote
+  (`loadServedDirectoryStep`); `bytes_exact` holds at every identifier, inside or
+  outside the enumeration.
 * `ServedAuthority deployment served`: the deployment's authority cell decoded
   from the served bytes. It carries NO spent function: the authority clock is
   the served height (`snapshotOn`'s revision) and a spent marker is read only
@@ -59,57 +61,285 @@ abbrev State (store : StoreIdentity) := Served ResourceBirthCodec.rootBytes stor
 def servedRows {store : StoreIdentity} (served : State store) : List (Nat × List UInt8) :=
   served.cells.map fun row => (row.1.value, row.2)
 
-/-- The complete physical directory of a served state, decoded once. -/
+/-! ## The directory held as data
+
+A served state's directory is held as one lifecycle image per identifier (a persistent map, no
+entry for a fresh image) and the used set beside it, which is exactly the identifiers whose
+image was ever used. A step writes the images of the cells it wrote (`HeldImages.write`): one
+map update per written cell, and the used set moves by a cons at an identifier's first use. -/
+
+/-- The stored form of an image: a fresh image is no entry, so the map is determined by its images. -/
+def storedImage : LifecycleImage registry → Option (LifecycleImage registry)
+  | .fresh => none
+  | image => some image
+
+theorem storedImage_getD (image : LifecycleImage registry) : (storedImage image).getD .fresh = image := by
+  cases image <;> rfl
+
+theorem storedImage_ne_fresh (image : LifecycleImage registry) : storedImage image ≠ some .fresh := by
+  cases image <;> simp [storedImage]
+
+/-- Lifecycle images by identifier with the used set: `used` is exactly the identifiers whose
+image was ever used, so a first use is a cons, decided by the image, never by a scan of the set. -/
+structure HeldImages where
+  images : SparseMap Nat (fun _ => LifecycleImage registry)
+  used : Finset Nat
+  noFresh : ∀ identifier, images.get? identifier ≠ some .fresh
+  usedExact : ∀ identifier,
+    identifier ∈ used ↔ LifecycleImage.everUsed registry ((images.get? identifier).getD .fresh) = true
+
+namespace HeldImages
+
+/-- The image at an identifier; fresh where none is held. -/
+@[inline] def image (held : HeldImages) (identifier : Nat) : LifecycleImage registry :=
+  (held.images.get? identifier).getD .fresh
+
+theorem images_eq (held : HeldImages) (identifier : Nat) :
+    held.images.get? identifier = storedImage (held.image identifier) := by
+  unfold image
+  have noFresh := held.noFresh identifier
+  cases found : held.images.get? identifier with
+  | none => rfl
+  | some image =>
+      rw [found] at noFresh
+      cases image with
+      | fresh => exact absurd rfl noFresh
+      | retired => rfl
+      | live cell => rfl
+
+theorem mem_used (held : HeldImages) (identifier : Nat) :
+    identifier ∈ held.used ↔ LifecycleImage.everUsed registry (held.image identifier) = true :=
+  held.usedExact identifier
+
+/-- Held images are equal when their images are. -/
+theorem ext {left right : HeldImages} (same : ∀ identifier, left.image identifier = right.image identifier) :
+    left = right := by
+  have images : left.images = right.images := SparseMap.ext fun identifier => by
+    show left.images.get? identifier = right.images.get? identifier
+    rw [left.images_eq, right.images_eq, same]
+  have used : left.used = right.used := Finset.ext fun identifier => by
+    rw [left.mem_used, right.mem_used, same]
+  cases left
+  cases right
+  simp only at images used
+  subst images
+  subst used
+  rfl
+
+def empty : HeldImages where
+  images := SparseMap.empty
+  used := ∅
+  noFresh := by simp
+  usedExact := by simp [LifecycleImage.everUsed]
+
+theorem image_empty (identifier : Nat) : empty.image identifier = .fresh := by
+  simp [image, empty]
+
+/-- Write one identifier's image. The used set conses the identifier at its first use and drops
+it only when a used image is overwritten by a fresh one. -/
+def set (held : HeldImages) (identifier : Nat) (next : LifecycleImage registry) : HeldImages where
+  images := held.images.set identifier (storedImage next)
+  used :=
+    if LifecycleImage.everUsed registry next then
+      if was : LifecycleImage.everUsed registry (held.image identifier) = true then held.used
+      else Finset.cons identifier held.used fun member => was ((held.mem_used identifier).mp member)
+    else if LifecycleImage.everUsed registry (held.image identifier) then held.used.erase identifier
+    else held.used
+  noFresh := by
+    intro other
+    by_cases same : other = identifier
+    · subst same
+      rw [SparseMap.set_eq]
+      exact storedImage_ne_fresh next
+    · rw [SparseMap.set_ne _ _ _ _ same]
+      exact held.noFresh other
+  usedExact := by
+    intro other
+    by_cases same : other = identifier
+    · subst same
+      rw [SparseMap.set_eq, storedImage_getD]
+      have was := held.mem_used other
+      by_cases nextUsed : LifecycleImage.everUsed registry next = true
+      · rw [if_pos nextUsed]
+        split
+        · rename_i old
+          exact ⟨fun _ => nextUsed, fun _ => was.mpr old⟩
+        · simp [nextUsed]
+      · rw [if_neg nextUsed]
+        split
+        · simp [nextUsed]
+        · rename_i old
+          exact ⟨fun member => absurd (was.mp member) old, fun used => absurd used nextUsed⟩
+    · rw [SparseMap.set_ne _ _ _ _ same]
+      have was := held.usedExact other
+      split
+      · split
+        · exact was
+        · simp [same, was]
+      · split
+        · simp [same, was]
+        · exact was
+
+theorem image_set (held : HeldImages) (identifier : Nat) (next : LifecycleImage registry) (other : Nat) :
+    (held.set identifier next).image other = if other = identifier then next else held.image other := by
+  by_cases same : other = identifier
+  · subst same
+    rw [if_pos rfl]
+    show ((held.images.set other (storedImage next)).get? other).getD .fresh = next
+    rw [SparseMap.set_eq, storedImage_getD]
+  · rw [if_neg same]
+    show ((held.images.set identifier (storedImage next)).get? other).getD .fresh = held.image other
+    rw [SparseMap.set_ne _ _ _ _ same]
+    rfl
+
+/-- Decode and write the image of each listed identifier from `bytesAt`; `none` when one does
+not decode. -/
+def write (bytesAt : Nat → List UInt8) : HeldImages → List Nat → Option HeldImages
+  | held, [] => some held
+  | held, identifier :: rest =>
+      match (LifecycleImage.codec registry).decode (bytesAt identifier) with
+      | none => none
+      | some next => write bytesAt (held.set identifier next) rest
+
+theorem write_some {bytesAt : Nat → List UInt8} :
+    ∀ {held after : HeldImages} {identifiers : List Nat}, write bytesAt held identifiers = some after →
+      ∀ other, LifecycleImage.bytes registry (after.image other) =
+        if other ∈ identifiers then bytesAt other else LifecycleImage.bytes registry (held.image other)
+  | held, after, [], written, other => by
+      simp only [write, Option.some.injEq] at written
+      subst written
+      simp
+  | held, after, identifier :: rest, written, other => by
+      simp only [write] at written
+      split at written
+      · cases written
+      · rename_i next decoded
+        rw [write_some written other, image_set]
+        by_cases inRest : other ∈ rest
+        · simp [inRest]
+        · by_cases same : other = identifier
+          · subst same
+            simp [inRest, LifecycleImage.decode_canonical registry decoded]
+          · simp [inRest, same]
+
+theorem write_none {bytesAt : Nat → List UInt8} :
+    ∀ {held : HeldImages} {identifiers : List Nat}, write bytesAt held identifiers = none →
+      ∃ identifier ∈ identifiers, (LifecycleImage.codec registry).decode (bytesAt identifier) = none
+  | held, [], written => by simp [write] at written
+  | held, identifier :: rest, written => by
+      simp only [write] at written
+      split at written
+      · rename_i decoded
+        exact ⟨identifier, List.mem_cons_self, decoded⟩
+      · obtain ⟨other, member, decoded⟩ := write_none written
+        exact ⟨other, List.mem_cons_of_mem _ member, decoded⟩
+
+/-- The directory the held images are: a slot from each image, the held used set. -/
+def directory (held : HeldImages) : Directory Nat registry where
+  slots identifier := LifecycleImage.slot registry (held.image identifier)
+  used := held.used
+  present_used := by
+    intro identifier cell present
+    apply (held.mem_used identifier).mpr
+    cases image : held.image identifier <;>
+      simp_all [LifecycleImage.slot, LifecycleImage.everUsed]
+
+theorem view_directory (held : HeldImages) (identifier : Nat) :
+    LifecycleImage.view registry held.directory identifier = held.image identifier := by
+  have used := held.mem_used identifier
+  unfold LifecycleImage.view
+  simp only [directory]
+  cases image : held.image identifier <;>
+    simp_all [LifecycleImage.slot, LifecycleImage.everUsed]
+
+end HeldImages
+
+/-- Two directories with the same view at every identifier are equal. -/
+theorem directory_eq_of_view {left right : Directory Nat registry}
+    (same : ∀ identifier, LifecycleImage.view registry left identifier =
+      LifecycleImage.view registry right identifier) : left = right := by
+  have slots : left.slots = right.slots := funext fun identifier => by
+    rw [← LifecycleImage.view_slot registry left identifier, same, LifecycleImage.view_slot]
+  have used : left.used = right.used := Finset.ext fun identifier => by
+    rw [← LifecycleImage.view_used registry left identifier, same, LifecycleImage.view_used]
+  cases left
+  cases right
+  simp only at slots used
+  subst slots
+  subst used
+  rfl
+
+/-- The complete physical directory of a served state, held as images by identifier
+(`HeldImages`): every identifier's image encodes to the served bytes there. -/
 structure ServedDirectory {store : StoreIdentity} (served : State store) where
   private mk ::
-  directory : Directory Nat registry
-  decoded : DirectoryImage.decode registry (servedRows served) = some directory
+  held : HeldImages
+  exact : ∀ identifier, LifecycleImage.bytes registry (held.image identifier) = served.canonicalBytes ⟨identifier⟩
   absentDefault : served.absentBytes = []
 
+/-- The held directory. -/
+@[inline] def ServedDirectory.directory {store : StoreIdentity} {served : State store}
+    (loaded : ServedDirectory served) : Directory Nat registry :=
+  loaded.held.directory
+
+/-- Every enumerable cell decoded once into the held images (the store open). -/
 def loadServedDirectory {store : StoreIdentity} (served : State store) : Option (ServedDirectory served) :=
   if absentDefault : served.absentBytes = [] then
-    match decoded : DirectoryImage.decode registry (servedRows served) with
+    match written : HeldImages.write (fun identifier => served.canonicalBytes ⟨identifier⟩) HeldImages.empty
+        (served.cellIds.map (·.value)) with
     | none => none
-    | some directory => some ⟨directory, decoded, absentDefault⟩
+    | some held => some ⟨held, fun identifier => by
+        rw [HeldImages.write_some written identifier, HeldImages.image_empty]
+        split
+        · rfl
+        · rename_i outside
+          have notMember : (⟨identifier⟩ : CellId) ∉ served.cellIds := fun member =>
+            outside (List.mem_map.mpr ⟨_, member, rfl⟩)
+          exact ((served.canonicalBytes_outside ⟨identifier⟩ notMember).trans absentDefault).symm,
+        absentDefault⟩
   else none
-
-private theorem lookup_enumeration (identifiers : List CellId)
-    (bytes : CellId → List UInt8) (identifier : Nat) :
-    ((identifiers.map fun selected => (selected.value, bytes selected)).lookup identifier).getD [] =
-      if (⟨identifier⟩ : CellId) ∈ identifiers then bytes ⟨identifier⟩ else [] := by
-  induction identifiers with
-  | nil => simp
-  | cons head rest induction =>
-      cases head with
-      | mk value =>
-          by_cases equal : identifier = value
-          · subst value
-            simp
-          · have differentBool : (identifier == value) = false := by simp [equal]
-            simpa [List.lookup_cons, differentBool, equal, Ne.symm equal] using induction
 
 /-- Global exactness, including identities outside the finite support. -/
 theorem ServedDirectory.bytes_exact {store : StoreIdentity} {served : State store}
     (loaded : ServedDirectory served) (identifier : Nat) :
     LifecycleImage.bytes registry (LifecycleImage.view registry loaded.directory identifier) =
       served.canonicalBytes ⟨identifier⟩ := by
-  rw [DirectoryImage.decode_exact registry loaded.decoded identifier]
-  simp only [servedRows, Served.cells, List.map_map, Function.comp_def]
-  rw [lookup_enumeration]
-  split
-  next => rfl
-  next outside => exact ((served.canonicalBytes_outside ⟨identifier⟩ outside).trans loaded.absentDefault).symm
+  rw [ServedDirectory.directory, HeldImages.view_directory]
+  exact loaded.exact identifier
 
 /-- Two directories of one served state are equal. -/
 theorem ServedDirectory.unique {store : StoreIdentity} {served : State store}
     (left right : ServedDirectory served) : left = right := by
-  have same : left.directory = right.directory :=
-    Option.some.inj (left.decoded.symm.trans right.decoded)
+  have same : left.held = right.held := HeldImages.ext fun identifier => by
+    have bytes := (left.exact identifier).trans (right.exact identifier).symm
+    have decoded := congrArg (LifecycleImage.rawDecode registry) bytes
+    rw [LifecycleImage.rawDecode_bytes, LifecycleImage.rawDecode_bytes] at decoded
+    exact Option.some.inj decoded
   cases left
   cases right
   simp only at same
   subst same
   rfl
+
+/-- A served state with a directory decodes at every identifier. -/
+theorem ServedDirectory.decodes {store : StoreIdentity} {served : State store}
+    (loaded : ServedDirectory served) (identifier : Nat) :
+    (LifecycleImage.codec registry).decode (served.canonicalBytes ⟨identifier⟩) =
+      some (loaded.held.image identifier) := by
+  rw [← loaded.exact identifier]
+  exact LifecycleImage.decode_encode registry _
+
+/-- Loading a state that has a directory yields that directory. -/
+theorem ServedDirectory.load_eq {store : StoreIdentity} {served : State store}
+    (loaded : ServedDirectory served) : loadServedDirectory served = some loaded := by
+  unfold loadServedDirectory
+  rw [dif_pos loaded.absentDefault]
+  split
+  · rename_i missing
+    obtain ⟨identifier, _, decoded⟩ := HeldImages.write_none missing
+    rw [loaded.decodes identifier] at decoded
+    cases decoded
+  · exact congrArg some (ServedDirectory.unique _ loaded)
 
 /-- Two served states whose bytes agree at an identifier load the same slot there. -/
 theorem ServedDirectory.slots_eq_of_bytes {store : StoreIdentity} {first second : State store}
@@ -134,33 +364,86 @@ theorem servedRows_ofLoaded {store : StoreIdentity} (loaded : DurableReceiverIO.
     Function.comp_def]
   rfl
 
+private theorem decodeRows_isSome : ∀ (rows : List (Nat × List UInt8)),
+    (∀ row ∈ rows, ((LifecycleImage.codec registry).decode row.2).isSome) →
+      (DirectoryImage.decodeRows registry rows).isSome
+  | [], _ => rfl
+  | (identifier, bytes) :: rest, decodes => by
+      have head := decodes (identifier, bytes) (by simp)
+      have tail := decodeRows_isSome rest fun row member => decodes row (by simp [member])
+      obtain ⟨image, imageDecoded⟩ := Option.isSome_iff_exists.mp head
+      obtain ⟨images, imagesDecoded⟩ := Option.isSome_iff_exists.mp tail
+      simp [DirectoryImage.decodeRows, imageDecoded, imagesDecoded]
+
+/-- A served state with a directory decodes as the full shape decodes its rows. -/
+private theorem decode_servedRows_isSome {store : StoreIdentity} {served : State store}
+    (loaded : ServedDirectory served) :
+    (DirectoryImage.decode registry (servedRows served)).isSome := by
+  have rowsDecode := decodeRows_isSome (servedRows served) fun row member => by
+    simp only [servedRows, Served.cells, List.map_map, List.mem_map, Function.comp_def] at member
+    obtain ⟨cellId, _, same⟩ := member
+    subst same
+    rw [loaded.decodes cellId.value]
+    rfl
+  obtain ⟨rows, decoded⟩ := Option.isSome_iff_exists.mp rowsDecode
+  have keys := DirectoryImage.decodeRows_keys registry decoded
+  have unique : (rows.map Prod.fst).Nodup := by
+    rw [keys]
+    simp only [servedRows, Served.cells, List.map_map, Function.comp_def]
+    exact served.cellIds_nodup.map fun left right same => by
+      cases left
+      cases right
+      simp only at same
+      rw [same]
+  simp [DirectoryImage.decode, decoded, unique]
+
 theorem loadServedDirectory_ofLoaded {store : StoreIdentity}
     (loaded : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) (sameStart : store.logStart = loaded.logStart) :
     (loadServedDirectory (Served.ofLoaded loaded sameStart)).map (·.directory) =
       (loadDirectory loaded).map (·.directory) := by
-  unfold loadServedDirectory loadDirectory
   have absent : (Served.ofLoaded loaded sameStart).absentBytes = loaded.image.seed.absentBytes := rfl
-  by_cases fresh : loaded.image.seed.absentBytes = []
-  · rw [dif_pos (absent.trans fresh), dif_pos fresh]
-    have rows := servedRows_ofLoaded loaded sameStart
-    split
-    · rename_i servedNone
-      split
-      · rfl
-      · rename_i _ fullSome
-        rw [rows, fullSome] at servedNone
-        cases servedNone
-    · rename_i _ servedSome
-      split
-      · rename_i fullNone
-        rw [rows, fullNone] at servedSome
-        cases servedSome
-      · rename_i _ fullSome
-        rw [rows, fullSome] at servedSome
-        cases servedSome
-        rfl
-  · rw [dif_neg (fun h => fresh (absent.symm.trans h)), dif_neg fresh]
-    rfl
+  cases full : loadDirectory loaded with
+  | some fullLoaded =>
+      cases light : loadServedDirectory (Served.ofLoaded loaded sameStart) with
+      | none =>
+          exfalso
+          unfold loadServedDirectory at light
+          rw [dif_pos (absent.trans fullLoaded.absentDefault)] at light
+          split at light
+          · rename_i missing
+            obtain ⟨identifier, _, decoded⟩ := HeldImages.write_none missing
+            rw [Served.ofLoaded_canonicalBytes, ← fullLoaded.bytes_exact identifier] at decoded
+            have roundTrip := LifecycleImage.decode_encode registry
+              (LifecycleImage.view registry fullLoaded.directory identifier)
+            change (LifecycleImage.codec registry).decode (LifecycleImage.bytes registry _) = _ at roundTrip
+            rw [roundTrip] at decoded
+            cases decoded
+          · cases light
+      | some lightLoaded =>
+          simp only [Option.map_some]
+          congr 1
+          apply directory_eq_of_view
+          intro identifier
+          have bytes := (lightLoaded.bytes_exact identifier).trans
+            ((congrFun (Served.ofLoaded_canonicalBytes loaded sameStart) ⟨identifier⟩).trans
+              (fullLoaded.bytes_exact identifier).symm)
+          have decoded := congrArg (LifecycleImage.rawDecode registry) bytes
+          rw [LifecycleImage.rawDecode_bytes, LifecycleImage.rawDecode_bytes] at decoded
+          exact Option.some.inj decoded
+  | none =>
+      cases light : loadServedDirectory (Served.ofLoaded loaded sameStart) with
+      | none => rfl
+      | some lightLoaded =>
+          exfalso
+          unfold loadDirectory at full
+          rw [dif_pos (absent.symm.trans lightLoaded.absentDefault)] at full
+          have decodes := decode_servedRows_isSome lightLoaded
+          rw [servedRows_ofLoaded loaded sameStart] at decodes
+          split at full
+          · rename_i missing
+            rw [missing] at decodes
+            cases decodes
+          · cases full
 
 /-- The deployment's authority cell, decoded from the served bytes. No spent
 function and no clock are carried: `snapshotOn` takes the clock from the
@@ -258,118 +541,87 @@ theorem loadServedAuthority_ofLoaded (deployment : CanonicalCellRegistry.Deploym
 
 A session's next served state differs from the one it validated in the cells its
 records wrote. These loads reuse the earlier decode wherever a cell's canonical
-bytes are unchanged; each is the plain load (`loadServedDirectoryFrom_eq`,
-`loadServedAuthorityFrom_eq`). -/
+bytes are unchanged; each is the plain load (`loadServedDirectoryStep_eq`,
+`loadServedDirectoryFrom_eq`, `loadServedAuthorityFrom_eq`). -/
 
-/-- Loading a state that has a directory yields that directory. -/
-theorem ServedDirectory.load_eq {store : StoreIdentity} {served : State store}
-    (loaded : ServedDirectory served) : loadServedDirectory served = some loaded := by
-  unfold loadServedDirectory
-  rw [dif_pos loaded.absentDefault]
-  split
-  · rename_i missing
-    rw [loaded.decoded] at missing
-    cases missing
-  · exact congrArg some (ServedDirectory.unique _ loaded)
+/-- `loadServedDirectory` of a state one step after a held one, decoding only the cells the
+step wrote (`Served.Moved`: every other cell kept its bytes, so its held image stands). -/
+def loadServedDirectoryStep {earlier store : StoreIdentity} {before : State earlier}
+    (held : ServedDirectory before) (served : State store) (written : List CellId)
+    (moved : Served.Moved before served written) : Option (ServedDirectory served) :=
+  if absentDefault : served.absentBytes = [] then
+    match stepped : HeldImages.write (fun identifier => served.canonicalBytes ⟨identifier⟩) held.held
+        (written.map (·.value)) with
+    | none => none
+    | some after => some ⟨after, fun identifier => by
+        rw [HeldImages.write_some stepped identifier]
+        split
+        · rfl
+        · rename_i unwritten
+          rw [held.exact identifier]
+          exact (moved.keeps ⟨identifier⟩ fun member =>
+            unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)).symm,
+        absentDefault⟩
+  else none
 
-/-- One directory row of a later state: the held view when the identifier's
-bytes equal the held state's, otherwise the bytes decoded and stepped relative
-to the held view. -/
-def decodeServedRowFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before)
-    (identifier : Nat) (bytes : List UInt8) : Option (LifecycleImage registry) :=
-  let priorView := LifecycleImage.view registry held.directory identifier
-  if bytesBEq (before.canonicalBytes ⟨identifier⟩) bytes then
-    some priorView
-  else
-    ((LifecycleImage.codec registry).decode bytes).map
-      (LifecycleImage.relativeTo registry priorView)
+/-- **The step load is the load**: same refusal, same directory. -/
+theorem loadServedDirectoryStep_eq {earlier store : StoreIdentity} {before : State earlier}
+    (held : ServedDirectory before) (served : State store) (written : List CellId)
+    (moved : Served.Moved before served written) :
+    loadServedDirectoryStep held served written moved = loadServedDirectory served := by
+  cases stepped : loadServedDirectoryStep held served written moved with
+  | some loaded => exact (ServedDirectory.load_eq loaded).symm
+  | none =>
+      cases computed : loadServedDirectory served with
+      | none => rfl
+      | some loaded =>
+          exfalso
+          unfold loadServedDirectoryStep at stepped
+          rw [dif_pos loaded.absentDefault] at stepped
+          split at stepped
+          · rename_i missing
+            obtain ⟨identifier, _, decoded⟩ := HeldImages.write_none missing
+            rw [loaded.decodes identifier] at decoded
+            cases decoded
+          · cases stepped
 
-theorem decodeServedRowFrom_eq {earlier : StoreIdentity} {before : State earlier}
-    (held : ServedDirectory before) (identifier : Nat) (bytes : List UInt8) :
-    decodeServedRowFrom held identifier bytes = (LifecycleImage.codec registry).decode bytes := by
-  unfold decodeServedRowFrom
-  split
-  next same =>
-    have exact : LifecycleImage.bytes registry
-        (LifecycleImage.view registry held.directory identifier) = bytes :=
-      (held.bytes_exact identifier).trans (bytesBEq_iff.mp same)
-    rw [← exact]
-    exact (LifecycleImage.decode_encode registry _).symm
-  next =>
-    cases (LifecycleImage.codec registry).decode bytes <;> simp [LifecycleImage.relativeTo_eq]
+/-- The cells whose bytes differ between two states, over both enumerations. -/
+def changedCells {earlier store : StoreIdentity} (before : State earlier) (served : State store) :
+    List CellId :=
+  (served.cellIds ++ before.cellIds).filter fun cellId =>
+    !bytesBEq (before.canonicalBytes cellId) (served.canonicalBytes cellId)
 
-def decodeServedRowsFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before) :
-    List (Nat × List UInt8) → Option (DirectoryImage.Rows registry)
-  | [] => some []
-  | (identifier, bytes) :: rest => do
-      let image ← decodeServedRowFrom held identifier bytes
-      let tail ← decodeServedRowsFrom held rest
-      some ((identifier, image) :: tail)
+theorem changedCells_moved {earlier store : StoreIdentity} {before : State earlier}
+    (held : ServedDirectory before) (served : State store) (absent : served.absentBytes = []) :
+    Served.Moved before served (changedCells before served) where
+  keeps cellId unchanged := by
+    by_cases enumerated : cellId ∈ served.cellIds ++ before.cellIds
+    · have same : bytesBEq (before.canonicalBytes cellId) (served.canonicalBytes cellId) = true := by
+        by_contra different
+        exact unchanged (List.mem_filter.mpr ⟨enumerated, by simpa using different⟩)
+      exact (bytesBEq_iff.mp same).symm
+    · simp only [List.mem_append, not_or] at enumerated
+      rw [served.canonicalBytes_outside cellId enumerated.1, before.canonicalBytes_outside cellId enumerated.2,
+        absent, held.absentDefault]
 
-theorem decodeServedRowsFrom_eq {earlier : StoreIdentity} {before : State earlier}
-    (held : ServedDirectory before) :
-    ∀ input : List (Nat × List UInt8),
-      decodeServedRowsFrom held input = DirectoryImage.decodeRows registry input
-  | [] => rfl
-  | (identifier, bytes) :: rest => by
-      simp only [decodeServedRowsFrom, DirectoryImage.decodeRows, decodeServedRowFrom_eq,
-        decodeServedRowsFrom_eq held rest]
-
-/-- The served directory of `input`; its identity check is one hashed pass over the row ids
-(`CompiledListOps.nodupNat`), not the pairwise `List.Nodup` decision, which compared every pair of
-big-number ids on every submit. -/
-def decodeServedFrom {earlier : StoreIdentity} {before : State earlier} (held : ServedDirectory before)
-    (input : List (Nat × List UInt8)) : Option (Directory Nat registry) := do
-  let rows ← decodeServedRowsFrom held input
-  if CompiledListOps.nodupNat (rows.map Prod.fst) then some (DirectoryImage.ofRows registry rows) else none
-
-theorem decodeServedFrom_eq {earlier : StoreIdentity} {before : State earlier}
-    (held : ServedDirectory before) (input : List (Nat × List UInt8)) :
-    decodeServedFrom held input = DirectoryImage.decode registry input := by
-  simp only [decodeServedFrom, DirectoryImage.decode, decodeServedRowsFrom_eq]
-  cases DirectoryImage.decodeRows registry input with
-  | none => rfl
-  | some rows =>
-      simp only [Option.bind_eq_bind, Option.bind_some]
-      by_cases unique : (rows.map Prod.fst).Nodup
-      · rw [if_pos unique, if_pos ((CompiledListOps.nodupNat_iff _).mpr unique)]
-      · rw [if_neg unique, if_neg (fun fast => unique ((CompiledListOps.nodupNat_iff _).mp fast))]
-
-/-- `loadServedDirectory` of a later state, decoding only the rows whose bytes
-differ from `held`'s state (`loadServedDirectoryFrom_eq`). -/
+/-- `loadServedDirectory` of a later state, decoding only the cells whose bytes differ from
+`held`'s state (`loadServedDirectoryFrom_eq`). -/
 def loadServedDirectoryFrom {earlier store : StoreIdentity} {before : State earlier}
     (held : ServedDirectory before) (served : State store) : Option (ServedDirectory served) :=
-  if absentDefault : served.absentBytes = [] then
-    match decoded : decodeServedFrom held (servedRows served) with
-    | none => none
-    | some directory =>
-        some ⟨directory, (decodeServedFrom_eq held (servedRows served)).symm.trans decoded, absentDefault⟩
+  if absent : served.absentBytes = [] then
+    loadServedDirectoryStep held served (changedCells before served) (changedCells_moved held served absent)
   else none
 
 /-- **The incremental served load is the served load**: same refusal, same directory. -/
 theorem loadServedDirectoryFrom_eq {earlier store : StoreIdentity} {before : State earlier}
     (held : ServedDirectory before) (served : State store) :
     loadServedDirectoryFrom held served = loadServedDirectory served := by
-  cases computed : loadServedDirectory served with
-  | some loaded =>
-      cases incremental : loadServedDirectoryFrom held served with
-      | some other => exact congrArg some (ServedDirectory.unique other loaded)
-      | none =>
-          exfalso
-          unfold loadServedDirectoryFrom at incremental
-          rw [dif_pos loaded.absentDefault] at incremental
-          split at incremental
-          · rename_i missing
-            rw [decodeServedFrom_eq, loaded.decoded] at missing
-            cases missing
-          · cases incremental
-  | none =>
-      cases incremental : loadServedDirectoryFrom held served with
-      | none => rfl
-      | some other =>
-          exfalso
-          rw [ServedDirectory.load_eq other] at computed
-          cases computed
+  unfold loadServedDirectoryFrom
+  split
+  · exact loadServedDirectoryStep_eq _ _ _ _
+  · rename_i absent
+    unfold loadServedDirectory
+    rw [dif_neg absent]
 
 /-- Two authorities of one served state are equal. -/
 theorem ServedAuthority.unique {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
@@ -504,6 +756,8 @@ theorem loadServedAuthorityHeld_taken {deployment : CanonicalCellRegistry.Deploy
 #assert_axioms loadServedDirectory_ofLoaded
 #assert_axioms loadServedAuthority_ofLoaded
 #assert_axioms loadServedDirectoryFrom_eq
+#assert_axioms loadServedDirectoryStep_eq
+#assert_axioms ServedDirectory.unique
 #assert_axioms loadServedAuthorityFrom_eq
 
 end Minidregg.Compiler.CredentialAuthorityServed

@@ -79,6 +79,9 @@ def dryTransport (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool) :
   history := t.history
   checkpointAt := t.checkpointAt
   readFromCheckpoint := t.readFromCheckpoint
+  -- Held index rows are reads (untrusted, verified per use): they pass through too.
+  heldIndexRows := t.heldIndexRows
+  holdIndexRows := t.holdIndexRows
 
 /-- The dry run's writer does not depend on the Store's writers at all: any two
 transports that read alike give the same dry transport. -/
@@ -220,7 +223,7 @@ theorem dryTransport_prepareAppend (t : DurableReceiverIO.Transport) (reached : 
     DurableReceiverIO.prepareAppend (dryTransport t reached) loaded ready key =
       DurableReceiverIO.prepareAppend t loaded ready key := by
   unfold DurableReceiverIO.prepareAppend DurableReceiverIO.Loaded.headIndexRoot
-    DurableReceiverIO.withIndexRows DurableReceiverIO.indexRows dryTransport
+    DurableReceiverIO.withIndexRows DurableReceiverIO.indexRowsRead dryTransport
   rfl
 
 /-- **At the Store writer, the dry run agrees with submission on a tail-bound

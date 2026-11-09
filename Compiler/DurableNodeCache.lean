@@ -52,26 +52,39 @@ private def unpack (version : Version) :=
 /-- `history`, answered at the cache's height from the rows it holds. -/
 def history (root : String) (inner : HistoryRequest → IO (Except String HistoryRead))
     (request : HistoryRequest) : IO (Except String HistoryRead) := do
-  let some (served', some cache) ← served.get | inner request
-  if served' ≠ root ∨ cache.height ≠ request.atHeight ∨ !request.heights.isEmpty then
-    return ← inner request
-  let misses := request.nodes.filter fun (space, key) => !cache.rows.contains (space, key.toByteArray)
+  if !request.heights.isEmpty then return ← inner request
+  -- The misses are listed inside `modifyGet`, so no reference to the held map outlives it (a
+  -- `get` kept one alive across the fetch, and the learning inserts below then copied the map).
+  let misses? ← served.modifyGet fun current =>
+    match current with
+    | some (root', some cache) =>
+        if root' = root ∧ cache.height = request.atHeight then
+          (some (request.nodes.filter fun (space, key) => !cache.rows.contains (space, key.toByteArray)),
+            some (root', some cache))
+        else (none, some (root', some cache))
+    | other => (none, other)
+  let some misses := misses? | inner request
   let fetched ← if misses.isEmpty then pure (.ok ⟨request.atHeight, [], []⟩)
     else inner { request with nodes := misses }
   match fetched with
   | .error message => return .error message
   | .ok read =>
-      let learned := read.nodes.foldl (init := cache.rows) fun rows (space, key, version) =>
-        rows.insert (space, key.toByteArray) (version.map fun (height, value) => (height, value.toByteArray))
-      served.modify fun current =>
+      -- Learn the fetched rows and answer inside one `modifyGet`, where the held map is not
+      -- shared, so the inserts update it in place rather than copying it per request.
+      let answered ← served.modifyGet fun current =>
         match current with
         | some (root', some held) =>
-            if root' = root ∧ held.height = request.atHeight then some (root', some ⟨held.height, learned⟩)
-            else current
-        | _ => current
-      let nodes := request.nodes.map fun (space, key) =>
-        (space, key, unpack ((learned.get? (space, key.toByteArray)).getD none))
-      return .ok ⟨max read.head request.atHeight, read.entries, nodes⟩
+            if root' = root ∧ held.height = request.atHeight then
+              let learned := read.nodes.foldl (init := held.rows) fun rows (space, key, version) =>
+                rows.insert (space, key.toByteArray) (version.map fun (height, value) => (height, value.toByteArray))
+              let nodes := request.nodes.map fun (space, key) =>
+                (space, key, unpack ((learned.get? (space, key.toByteArray)).getD none))
+              (some nodes, some (root', some ⟨held.height, learned⟩))
+            else (none, some (root', some held))
+        | other => (none, other)
+      match answered with
+      | some nodes => return .ok ⟨max read.head request.atHeight, read.entries, nodes⟩
+      | none => inner request
 
 /-- `append`; an append the Store installed moves the cache to its height by the rows it wrote
 (a fresh cache when the cache was not at the height below). Any other outcome drops the cache. -/
@@ -93,10 +106,54 @@ def append (root : String) (inner : Nat → Entry → List NodeWrite → IO CasO
     | none => none
   return observed
 
-/-- `transport` with its node rows held for `root` (`history`, `append`). -/
+/-! ## The decoded index rows
+
+Above the node rows, the serving Host holds the index trie's rows decoded, by bit prefix, at one
+height: the rows its appends wrote (handed over by `DurableServed.receiveServed`, which has them
+decoded) and the rows its reads decoded. An index answer at that height walks them directly
+(`DurableReceiverIO.withIndexRows`), with no prefix list, no row key and no decode; a walk they
+cannot verify falls back to the Store read. The same height discipline as the node rows: an
+append at `h + 1` writes exactly the rows that change, so every other row held at `h` stands. -/
+
+/-- Decoded index rows at `height`. -/
+structure Decoded where
+  height : Nat
+  rows : Std.HashMap (List Bool) DurableIndex.Row
+
+initialize decoded : IO.Ref (Option (String × Decoded)) ← IO.mkRef none
+
+/-- The decoded rows held for `root` at `height`. -/
+def heldIndexRows (root : String) (height : Nat) : IO (Option (List Bool → Option DurableIndex.Row)) := do
+  let some (root', held) ← decoded.get | return none
+  if root' = root ∧ held.height = height then
+    let rows := held.rows
+    return some fun path => rows.get? path
+  else return none
+
+/-- Hold rows for `root`: an append's writes move the held rows from `height - 1` (a fresh set
+when they were not there); rows read join the set at their height, or start one above it. -/
+def holdIndexRows (root : String) (height : Nat) (appended : Bool)
+    (rows : List (List Bool × DurableIndex.Row)) : IO Unit :=
+  let onto (base : Std.HashMap (List Bool) DurableIndex.Row) : Option (String × Decoded) :=
+    some (root, ⟨height, rows.foldl (init := base) fun map row => map.insert row.1 row.2⟩)
+  -- One match that moves the held map, so an insert updates it in place.
+  decoded.modify fun current =>
+    match current with
+    | some (root', held) =>
+        if root' ≠ root then onto {}
+        else if appended then onto (if held.height + 1 = height then held.rows else {})
+        else if held.height = height then onto held.rows
+        else if held.height > height then some (root', held)
+        else onto {}
+    | none => onto {}
+
+/-- `transport` with its node rows held for `root` (`history`, `append`), and its decoded index
+rows (`heldIndexRows`, `holdIndexRows`). -/
 def cached (root : String) (transport : Transport) : Transport :=
   { transport with
     history := history root transport.history
-    append := append root transport.append }
+    append := append root transport.append
+    heldIndexRows := heldIndexRows root
+    holdIndexRows := holdIndexRows root }
 
 end Minidregg.Compiler.DurableNodeCache

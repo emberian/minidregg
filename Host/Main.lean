@@ -3329,6 +3329,8 @@ partial def serveSession (config : NativeHost.Config)
     | .ok () =>
       let payload ← readExactly input (length - 1)
       serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch gate operation payload.toList output
+      -- The reply is written: now the work a write deferred past it (its due checkpoint).
+      Minidregg.Compiler.DurableServed.runAfterReply
   serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch gate input output
 
 /-- The storeless codec loop (`minidregg-host CONFIG codec`): answers only the

@@ -1522,9 +1522,21 @@ inductive Received (rootBytes : List UInt8 → Digest) (opening : Opening rootBy
 def Served.checkpointState {store : StoreIdentity} (served : Served rootBytes store) : State :=
   ⟨served.absentBytes, served.cells, served.available⟩
 
+/-- Work deferred until the serving loop has written its reply: the due checkpoint's seal
+(`receiveServed`). At most one item is pending: a caller with no serving loop runs it at its
+next `receiveServed`. -/
+initialize afterReply : IO.Ref (Option (IO Unit)) ← IO.mkRef none
+
+/-- Run the deferred work, if any (the Host's serving loop, after each reply). A failure loses
+nothing: the deferred work is a checkpoint, and the log is complete. -/
+def runAfterReply : IO Unit := do
+  if let some work ← afterReply.modifyGet fun pending => (pending, none) then
+    try work catch _ => pure ()
+
 def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
     (opening : Opening rootBytes) (intent : DurableDataIntent.DataIntent rootBytes) :
     IO (Received rootBytes opening intent) := do
+  runAfterReply
   let served := opening.served
   let head := opening.head
   let reader := opening.reader transport rootBytes
@@ -1577,18 +1589,27 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                 | .error refusal => return .unavailable refusal.message
                 | .ok head' =>
                     have fields := Head.verify_fields verified
+                    -- The index rows this append wrote, decoded, to the transport's holder.
+                    transport.holdIndexRows height true indexWrites
                     let served' := served.advance footprint intent next executed chain worldRoot
                     let worldAfter := opening.world.bind fun w =>
                       (DurableReceiverIO.advanceWorldIntent view.model.roots w served.height intent).toOption
-                    -- A due checkpoint (a function of the height alone); a failed seal loses nothing.
+                    -- A due checkpoint (a function of the height alone), sealed after the reply:
+                    -- its encoding and MAC are deferred to the serving loop (`runAfterReply`), so
+                    -- the member's write no longer pays them. Not a task: a task would mark the
+                    -- whole served state and World multi-threaded (measured: a 1 s first mark).
+                    -- A failed or unrun seal loses nothing (the log is complete); `baseHeight`
+                    -- keeps the cadence.
                     let sealedAt ←
                       if transport.checkpointEvery > 0 && height % transport.checkpointEvery == 0 then do
-                        let sealed := DurableCheckpointCodec.sealAt key height chain frontierAfter indexAfter
-                          served'.checkpointState (worldAfter.map (·.system)) worldRoot
-                        match ← transport.putCheckpoint height
-                            (DurableCheckpointCodec.checkpointFrame.encode sealed) with
-                        | .ok () => pure height
-                        | .error _ => pure opening.baseHeight
+                        -- `lazyPure`: a plain `let` at the head of the action would be evaluated
+                        -- when the action is built, here, on the member's path.
+                        afterReply.set (some do
+                          let sealed ← IO.lazyPure fun _ => DurableCheckpointCodec.checkpointFrame.encode
+                            (DurableCheckpointCodec.sealAt key height chain frontierAfter indexAfter
+                              served'.checkpointState (worldAfter.map (·.system)) worldRoot)
+                          discard <| transport.putCheckpoint height sealed)
+                        pure height
                       else pure opening.baseHeight
                     have rootsEq : served'.roots = next.model.roots :=
                       served.advance_roots footprint intent next executed chain worldRoot

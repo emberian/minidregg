@@ -482,14 +482,14 @@ def stepSourced (config : Config) {earlier store : StoreIdentity}
   else none
 
 /-- **Validation of the state one step after a validated one**, over the cells the step
-wrote: the directory decodes only moved rows, the authority cell is the held post-cell or
+wrote: the directory decodes only the written cells (`loadServedDirectoryStep`), the authority cell is the held post-cell or
 decoded only when moved, the cell law runs on the written cells, and the sourcing walk is
 inherited unless the step wrote the authority cell or a policy source. -/
 def validateServedStep (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store)
     (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
     (held : Option HeldCell := none) : Except String (OpenedServed config store) :=
-  validateServedWith config served (loadServedDirectoryFrom prior.directory served)
+  validateServedWith config served (loadServedDirectoryStep prior.directory served written moved)
     (loadServedAuthorityHeld prior.authority held served) (cellsLawfulStep config served written)
     (cellsLawfulStep_eq config prior served written moved)
     (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
@@ -501,12 +501,12 @@ theorem validateServedStep_eq (config : Config) {earlier store : StoreIdentity}
     (held : Option HeldCell := none) :
     validateServedStep config prior served written moved held = validateServed config served :=
   validateServedWith_withExact_eq config served
-    (loadServedDirectoryFrom prior.directory served)
+    (loadServedDirectoryStep prior.directory served written moved)
     (loadServedAuthorityHeld prior.authority held served)
     (cellsLawfulStep config served written)
     (cellsLawfulStep_eq config prior served written moved)
     (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
-    (loadServedDirectoryFrom_eq prior.directory served)
+    (loadServedDirectoryStep_eq prior.directory served written moved)
     (loadServedAuthorityHeld_eq prior.authority held served)
     (stepSourced config prior served written moved _ _)
 

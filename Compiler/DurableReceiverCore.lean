@@ -162,6 +162,13 @@ structure Transport where
   when there is none) to the head. -/
   readFromCheckpoint : IO (Except String (Option Stored)) :=
     pure (.error "this transport serves no read from the checkpoint")
+  /-- The decoded index rows this process holds at a height, if any (`withIndexRows` tries them
+  first). Untrusted: every use verifies its answer against the authenticated index root. Only the
+  serving Host's transport holds them (`DurableNodeCache.cached`). -/
+  heldIndexRows : Nat → IO (Option (List Bool → Option DurableIndex.Row)) := fun _ => pure none
+  /-- Hand rows to the holder: `true`, the rows an append installed at the height wrote (the held
+  rows move up from the height below); `false`, rows read at the height. -/
+  holdIndexRows : Nat → Bool → List (List Bool × DurableIndex.Row) → IO Unit := fun _ _ _ => pure ()
 
 structure NativeConfig where
   binary : System.FilePath
@@ -452,7 +459,8 @@ def NativeConfig.transport (config : NativeConfig) (logStart : Seed → Digest)
     (systemCell : CellId) : Transport :=
   ⟨config.read, fun height entry nodes => config.append height entry nodes, config.putCheckpoint,
     config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell, fun _ _ => .ok (),
-    config.peekSeed, config.history, config.checkpointAt, config.readFromCheckpoint⟩
+    config.peekSeed, config.history, config.checkpointAt, config.readFromCheckpoint, fun _ => pure none,
+    fun _ _ _ => pure ()⟩
 
 /-- ByteArray's derived equality compares every byte, with no digest premise. -/
 theorem byteArray_beq_exact (left right : List UInt8) :
@@ -2227,8 +2235,8 @@ sibling, which a delete's collapse reads), at or below `height`, down to `depth`
 bits (520: every prefix). Untrusted: every opening or reveal built from them is
 verified against the authenticated index root, so a path cut short opens to
 nothing and refuses (`withIndexRows` then reads every prefix). -/
-def indexRows (transport : Transport) (height : Nat) (keys : List DurableIndex.IndexKey)
-    (depth : Nat := 520) : IO (Except String (List Bool → Option DurableIndex.Row)) := do
+def indexRowsRead (transport : Transport) (height : Nat) (keys : List DurableIndex.IndexKey)
+    (depth : Nat := 520) : IO (Except String (Std.HashMap (List Bool) DurableIndex.Row)) := do
   let mut seen : Std.HashSet (List UInt8) := {}
   let mut requested : Array (Nat × List UInt8) := #[]
   let mut paths : Std.HashMap (List UInt8) (List Bool) := {}
@@ -2255,24 +2263,39 @@ def indexRows (transport : Transport) (height : Nat) (keys : List DurableIndex.I
                   match DurableIndex.rowStream.toLawful.decode value with
                   | some row => map.insert path row
                   | none => map
-  let rows := found
-  return .ok fun path => rows.get? path
+  return .ok found
+
+/-- `indexRowsRead` as a row function. -/
+def indexRows (transport : Transport) (height : Nat) (keys : List DurableIndex.IndexKey)
+    (depth : Nat := 520) : IO (Except String (List Bool → Option DurableIndex.Row)) := do
+  match ← indexRowsRead transport height keys depth with
+  | .error message => return .error message
+  | .ok rows => return .ok fun path => rows.get? path
 
 /-- Use the index rows of `keys`: first down to 48 bits (the family byte, then a
 compressed trie over far fewer than 2^40 keys of a family rarely reaches
 deeper), and when what they give does not verify, every prefix. Every answer is
-verified by `use`. -/
+verified by `use`. The rows this process holds at `height` are tried first
+(`Transport.heldIndexRows`: the index trie the serving Host maintains, decoded, untrusted); rows it
+reads are handed to the holder. -/
 def withIndexRows {α : Type} (transport : Transport) (height : Nat) (keys : List DurableIndex.IndexKey)
     (use : (List Bool → Option DurableIndex.Row) → Except String α) : IO (Except String α) := do
-  match ← indexRows transport height keys 48 with
+  if let some held ← transport.heldIndexRows height then
+    if let .ok value := use held then return .ok value
+  match ← indexRowsRead transport height keys 48 with
   | .error message => return .error message
   | .ok rows =>
-      match use rows with
-      | .ok value => return .ok value
+      match use fun path => rows.get? path with
+      | .ok value =>
+          transport.holdIndexRows height false rows.toList
+          return .ok value
       | .error _ =>
-          match ← indexRows transport height keys with
+          match ← indexRowsRead transport height keys with
           | .error message => return .error message
-          | .ok rows => return use rows
+          | .ok rows =>
+              let answer := use fun path => rows.get? path
+              if answer matches .ok _ then transport.holdIndexRows height false rows.toList
+              return answer
 
 
 /-- The node rows an append writes: the accumulator nodes it completes
