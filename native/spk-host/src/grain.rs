@@ -738,6 +738,8 @@ fn install(
         .unwrap_or(Value::Null);
     // An import is checked completely before any Mini effect: the exporter's
     // signature, the image bytes, the package and the class all bind.
+    let imports = host.profile.grains_root.join(&host.store).join("imports");
+    let import_released = host.app_dir(&selector.app).join("import-released.json");
     let imported = match import {
         None => None,
         Some((dir, key)) => Some(crate::grain_export::verify_import(
@@ -745,7 +747,7 @@ fn install(
             key,
             &raw_sha256,
             class,
-            &host.profile.grains_root.join(&host.store).join("imports"),
+            (!exists(&import_released)?).then_some(imports.as_path()),
         )?),
     };
     let placement = place(host, &selector, &raw_sha256, class)?;
@@ -822,6 +824,10 @@ fn install(
         &volume_id,
         imported.as_ref().map(|i| i.image_sha256.clone()),
     )?;
+    if let Some(imported) = &imported {
+        // The volume exists, created from the digest-checked import: the staged copy has done its work.
+        crate::grain_export::release_import(&imports, &imported.image_sha256, &import_released)?;
+    }
     let completed = read_json(&journal.join("install-completed-v2.json"))?;
     Ok(json!({
         "protocol":"mini-spk-grain-install-v2",
