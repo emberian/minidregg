@@ -4208,7 +4208,7 @@ theorem extendExact_receipts {config : Config} {store : DurableHistory.StoreIden
 /-- The physically read-back entry is exactly this admitted intent's record. -/
 theorem extendExact_physicalRecord {config : Config} {oldTarget : Durable}
     (old : Verified config oldTarget) (readback : ExactReadback config old) :
-    readback.appended.entry.record =
+    readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent readback.derived.intent) :=
   readback.appended.entryExact

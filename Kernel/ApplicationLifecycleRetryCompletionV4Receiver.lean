@@ -54,7 +54,7 @@ theorem Confirmed.event_exact {config : Config} (confirmed : Confirmed config) :
   exact ApplicationLifecycleRetryCompletionV4Core.intent_event confirmed.admitted.conditional
 
 theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
-    confirmed.readback.appended.entry.record =
+    confirmed.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent confirmed.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord confirmed.old confirmed.readback

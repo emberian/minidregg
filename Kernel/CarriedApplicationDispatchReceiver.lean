@@ -158,7 +158,7 @@ def Committed.target {config : Config} {anchor : Opened config}
 
 theorem Committed.postRecord_exact {config : Config} {anchor : Opened config}
     (committed : Committed config anchor) :
-    committed.appended.entry.record = DurableCheckpointCodec.recordFrame.encode
+    committed.appended.entry.record.toList = DurableCheckpointCodec.recordFrame.encode
       (DurableReceiver.IntentRecord.ofIntent committed.admitted.intent) :=
   committed.appended.entryExact
 

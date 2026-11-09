@@ -53,7 +53,7 @@ def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
     candidate.worldRoot⟩
 
 theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
-    confirmed.readback.appended.entry.record =
+    confirmed.readback.appended.entry.record.toList =
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent confirmed.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord confirmed.old confirmed.readback
@@ -137,7 +137,7 @@ structure LightConfirmed (config : Config) (opening : DurableServed.Opening Reso
   next : DurableServed.Opening ResourceBirthCodec.rootBytes
   height : next.head.height = opening.head.height + 1
   entry : DurableReceiverIO.Entry
-  entryExact : entry.record =
+  entryExact : entry.record.toList =
     DurableCheckpointCodec.recordFrame.encode (DurableReceiver.IntentRecord.ofIntent accepted.intent)
 
 /-- **What a light confirmation proves**: the appended record is the admitted intent's,
@@ -146,7 +146,7 @@ transaction id was verified unrecorded on the basis it was admitted on; and a co
 completed create is the one its binding names, re-admitted at that create's own prefix. -/
 theorem LightConfirmed.exact {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
     (confirmed : LightConfirmed config opening) :
-    confirmed.entry.record = DurableCheckpointCodec.recordFrame.encode
+    confirmed.entry.record.toList = DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent confirmed.accepted.intent) ∧
       confirmed.next.head.height = opening.head.height + 1 ∧
       confirmed.accepted.intent.event = ApplicationLifecycleBeginV3Ingress.event confirmed.ingress ∧

@@ -198,7 +198,7 @@ once per client connection, so a rollback or prefix rewrite between commands is
 refused exactly as a per-process `resume` refuses it (`checkStore_eq_checkStored`). -/
 def recheckStore (transport : DurableReceiverIO.Transport) (anchor : Anchor) :
     IO (Except String Unit) := do
-  match ← transport.read 1 true with
+  match ← DurableReceiverIO.readWhole transport with
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
   | .ok (some stored) =>
@@ -211,7 +211,7 @@ def recheckStore (transport : DurableReceiverIO.Transport) (anchor : Anchor) :
         return .error "durable log head does not match its entries"
       let logStart := transport.logStart seed
       return checkStored anchor logStart stored.head
-        (DurableLogTags.chainPrefixesStored logStart (stored.entries.map (·.record)))
+        (DurableLogTags.chainPrefixesStoredBytes logStart (stored.entries.map (·.record)))
 
 /-! ## The O(1) re-check (HOT-PATH 2f)
 

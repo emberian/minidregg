@@ -242,7 +242,7 @@ structure LightReservation (config : Config) (opening : DurableServed.Opening Re
   next : DurableServed.Opening ResourceBirthCodec.rootBytes
   height : next.head.height = opening.head.height + 1
   entry : DurableReceiverIO.Entry
-  entryExact : entry.record =
+  entryExact : entry.record.toList =
     DurableCheckpointCodec.recordFrame.encode (DurableReceiver.IntentRecord.ofIntent conditional.intent)
   freshCasWinner : Bool
 

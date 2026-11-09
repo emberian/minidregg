@@ -1363,18 +1363,18 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   let key ← IO.ofExcept (← config.transport.key)
   let height := durable.height
   let stored ← timed "open: read the Store" do
-    match ← config.transport.read 1 true with
+    match ← Minidregg.Compiler.DurableReceiverIO.readWhole config.transport with
     | .ok (some stored) => pure stored
     | _ => throw (IO.userError "store read failed")
   let records ← timedPure "open: decode every record" fun _ =>
-    stored.entries.filterMap fun entry => DurableCheckpointCodec.recordFrame.decode entry.record
+    stored.entries.filterMap fun entry => Minidregg.Compiler.DurableHistory.decodeRecordBytes entry.record
   IO.println s!"  decoded {records.length} records"
   discard <| timedPure "open: the log chain over every record" fun _ =>
     (DurableCheckpointCodec.chainAfter durable.logStart records).value % 7
   if let some checkpoint := stored.checkpoint then
-    IO.println s!"  stored checkpoint at {checkpoint.height}, {checkpoint.bytes.length} bytes"
+    IO.println s!"  stored checkpoint at {checkpoint.height}, {checkpoint.bytes.size} bytes"
     let body ← timedPure "open: openSealed (decode + full world root + MAC)" fun _ =>
-      DurableCheckpointCodec.openSealed key ResourceBirthCodec.rootBytes checkpoint.bytes
+      Minidregg.Compiler.DurableHistory.openSealedBytes key ResourceBirthCodec.rootBytes checkpoint.bytes
     if let .ok body := body then
       discard <| timedPure "open: resume (materialize + replay the suffix)" fun _ =>
         (DurableCheckpoint.resume ResourceBirthCodec.rootBytes durable.image body.height body.state).isSome

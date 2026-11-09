@@ -37,7 +37,7 @@ structure Reservation (config : Config) (opening : DurableServed.Opening Resourc
   next : DurableServed.Opening ResourceBirthCodec.rootBytes
   height : next.head.height = opening.head.height + 1
   entry : DurableReceiverIO.Entry
-  entryExact : entry.record =
+  entryExact : entry.record.toList =
     DurableCheckpointCodec.recordFrame.encode (DurableReceiver.IntentRecord.ofIntent conditional.intent)
   /-- This attempt's own append installed the entry (`Received.appended`'s `fresh`). -/
   freshCasWinner : Bool
@@ -47,7 +47,7 @@ written as the opening's next record; the original BEGIN record it reserves is t
 re-admitted original BEGIN wrote; its transaction id was verified unrecorded on its ground. -/
 theorem Reservation.exact {config : Config} {opening : DurableServed.Opening ResourceBirthCodec.rootBytes}
     (reservation : Reservation config opening) :
-    reservation.entry.record = DurableCheckpointCodec.recordFrame.encode
+    reservation.entry.record.toList = DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent reservation.conditional.intent) ∧
       reservation.next.head.height = opening.head.height + 1 ∧
       reservation.conditional.original.record =

@@ -203,6 +203,19 @@ theorem chainPrefixesStored_eq (start : Digest) :
 
 #assert_axioms chainPrefixesStored_eq
 
+/-- `chainPrefixesStored` over packed bodies (`chainPrefixesStoredBytes_eq`). -/
+def chainPrefixesStoredBytes (start : Digest) (stored : List ByteArray) : List Digest :=
+  stored.scanl DurableHistory.chainStepStoredBytes start
+
+theorem chainPrefixesStoredBytes_eq (start : Digest) (stored : List ByteArray) :
+    chainPrefixesStoredBytes start stored = chainPrefixesStored start (stored.map ByteArray.toList) := by
+  induction stored generalizing start with
+  | nil => rfl
+  | cons bytes rest ih =>
+      simp only [chainPrefixesStoredBytes, chainPrefixesStored, List.map_cons, List.scanl_cons,
+        DurableHistory.chainStepStoredBytes_eq] at ih ⊢
+      rw [ih]
+
 /-- The last prefix is the head chain, so `load` hashes the log once, not twice. -/
 theorem chainPrefixes_getLast? (start : Digest) (records : List IntentRecord) :
     (chainPrefixes start records).getLast?.getD start = chainAfter start records := by

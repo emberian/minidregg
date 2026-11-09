@@ -4,4 +4,5 @@
 #   scripts/check-bytes-repr.sh --update REASON
 # updated 2026-11-08: 4929 (tree 6428): first ceiling (measured at b22a1a1b1)
 # updated 2026-11-08: 4923 (tree 6421): past reads off the log: the kept-checkpoint path deleted
-4923
+# updated 2026-11-08: 4921 (tree 6419): packed record bodies and checkpoints on the open (bytes-repr)
+4921
