@@ -373,6 +373,35 @@ pub(crate) struct ResidentGuard {
     config_sha256: String,
 }
 
+/// The resident's durable custody read WITHOUT its lock, for `quiescence preflight` only: the same
+/// path, ownership and schema checks as [`ResidentGuard::acquire`], and the same fields, read from
+/// files the resident replaces atomically. It certifies nothing a lock-held inspection does.
+pub(crate) fn durable_resident_evidence(config: &Config, path: Option<&Path>) -> Result<ResidentEvidence> {
+    let Some(path) = path else {
+        if config.tool_task.as_ref().and_then(|t| t.room.as_ref()).is_some() {
+            return Err("room-enabled controller requires explicit resident state directory".into());
+        }
+        return Ok(ResidentEvidence::NotConfigured);
+    };
+    if path.parent() != Some(config.state_dir.as_path()) {
+        return Err("resident state must be a direct child of controller stateDir".into());
+    }
+    let meta = fs::symlink_metadata(path).map_err(|e| format!("resident state: {e}"))?;
+    if !meta.is_dir() || meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o077 != 0 {
+        return Err("resident state must be an owned private real directory".into());
+    }
+    let state: ResidentJournal = serde_json::from_slice(&bounded_regular_file(&path.join("resident.json"), 65_536)?)
+        .map_err(|e| format!("resident state schema: {e}"))?;
+    let requests = crate::resident_requests::custody_snapshot(path)?;
+    Ok(ResidentEvidence::Stopped {
+        prompt_pending: state.pending.is_some(),
+        return_pending: state.return_pending,
+        queued_requests: requests.queued,
+        started_request: requests.started,
+        maintenance_pending: requests.maintenance_pending,
+    })
+}
+
 impl Drop for ResidentGuard {
     fn drop(&mut self) {
         if let Some(lock) = &self._lock {
@@ -385,9 +414,13 @@ impl Drop for ResidentGuard {
 
 /// Operator socket client; neither attaches a worker nor changes connection mode.
 pub(crate) fn client(args: &[std::ffi::OsString]) -> Result<()> {
-    let usage="usage: grain-runtime quiescence status ADMIN_SOCKET | quiescence inspect ADMIN_SOCKET RESIDENT_STATE_DIR|none";
+    let usage="usage: grain-runtime quiescence status ADMIN_SOCKET | quiescence inspect ADMIN_SOCKET RESIDENT_STATE_DIR|none | quiescence preflight ADMIN_SOCKET RESIDENT_STATE_DIR|none";
     let command = match args {
         [mode, _] if mode == "status" => "quiescence status".to_owned(),
+        [mode, _, resident] if mode == "preflight" => format!(
+            "quiescence preflight {}",
+            resident.to_str().ok_or("resident state path must be UTF-8")?
+        ),
         [mode, _, resident] if mode == "inspect" => format!(
             "quiescence inspect {}",
             resident
@@ -398,7 +431,7 @@ pub(crate) fn client(args: &[std::ffi::OsString]) -> Result<()> {
     };
     let response = control::admin_call(Path::new(&args[1]), &command)?;
     let value: Value = serde_json::from_str(&response).map_err(|_| response.clone())?;
-    if value["type"] != "mini-grain-quiescence-v1" {
+    if value["type"] != "mini-grain-quiescence-v1" && value["type"] != quiescence_preflight::TYPE {
         return Err("unexpected quiescence response".into());
     }
     println!("{value}");
@@ -510,7 +543,7 @@ impl ResidentGuard {
 }
 
 impl Runtime {
-    fn quiescence_active(&self) -> Vec<&'static str> {
+    pub(crate) fn quiescence_active(&self) -> Vec<&'static str> {
         let mut out = Vec::new();
         if self.child.is_some() {
             out.push("owned_worker");
