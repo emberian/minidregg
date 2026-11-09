@@ -284,6 +284,7 @@ impl Worker {
             "stop" => self.with_grain(member, request, false, |w, g, r| w.lifecycle(g, r, false)),
             "start" => self.with_grain(member, request, false, |w, g, r| w.lifecycle(g, r, true)),
             "share" => self.with_grain(member, request, false, |w, g, r| w.share(g, r, request)),
+            "unshare" => self.with_grain(member, request, false, |w, g, r| w.unshare(g, r, request)),
             "export" => self.with_grain(member, request, false, |w, g, r| w.export(g, r)),
             "delete" => self.with_grain(member, request, false, |w, g, r| w.delete(g, r)),
             "identities" => self.with_grain(member, request, true, |w, g, r| w.identities(g, &r)),
@@ -369,6 +370,9 @@ impl Worker {
             s.get("runs")?.as_array()?.last()?.get("state")?.as_str().map(|st| st == "running")
         });
         let needs_start = record["state"].as_str() != Some("running") || live_running == Some(false);
+        if needs_start && record.get("deleting").is_some() {
+            return refused("grainDeleting", format!("{grain} is being deleted by its owner; it is not started again (the owner's `mini apps delete --grain {grain}` finishes it)"));
+        }
         if needs_start && record["state"].as_str() != Some("deleted") {
             let start_res = {
                 let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
@@ -488,6 +492,9 @@ impl Worker {
     fn lifecycle(&self, grain: &str, mut record: Value, start: bool) -> Value {
         let app = record["app"].as_str().unwrap_or("").to_owned();
         let verb = if start { "start" } else { "stop" };
+        if start && record.get("deleting").is_some() {
+            return refused("grainDeleting", format!("{grain} has an undecided delete; it is not started again (`mini apps delete --grain {grain}` finishes it)"));
+        }
         let outcome = {
             let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
             if start { self.world.start(&app) } else { self.world.stop(&app) }
@@ -586,7 +593,18 @@ impl Worker {
     fn delete(&self, grain: &str, mut record: Value) -> Value {
         let app = record["app"].as_str().unwrap_or("").to_owned();
         if record["state"] != "stopped" {
-            match self.world.stop(&app) {
+            // From here until the delete completes, no member's open and no START races its STOP.
+            if record.get("deleting").is_none() {
+                record["deleting"] = json!(now());
+                if let Err(e) = write_json(&grain_file(&self.state, grain), &record) {
+                    return undecided("stateUnavailable", e, &format!("mini apps delete --grain {grain}"));
+                }
+            }
+            let outcome = {
+                let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
+                self.world.stop(&app)
+            };
+            match outcome {
                 Ok(Lifecycle::Done) => {}
                 Ok(Lifecycle::Undecided(detail)) => return undecided("stopping", format!("{detail}; delete continues after the STOP completes"), &format!("mini apps delete --grain {grain}")),
                 Err(error) => return undecided("stopping", error, &format!("mini apps delete --grain {grain}")),
@@ -600,6 +618,28 @@ impl Worker {
         }
         let _ = fs::remove_file(self.origin_path(grain));
         performed("deleted", format!("{grain} stopped and its routes withdrawn; its /var volume is retained by the broker (volumeRetained: the broker has no destroy verb yet)"), json!({"grain":grain,"volumeRetained":true}))
+    }
+
+    /// Withdraw `to`'s route on the grain, as delete withdraws every route: the record and the
+    /// front's origin table no longer name it, so the front refuses that member's connections.
+    fn unshare(&self, grain: &str, mut record: Value, request: &Value) -> Value {
+        let to = request.get("to").and_then(Value::as_str).unwrap_or("");
+        if !valid_member(to) {
+            return refused("memberRefused", format!("{to:?} is not a member name"));
+        }
+        if record["owner"].as_str() == Some(to) {
+            return refused("ownerRoute", format!("{to} owns {grain}; the owner's route is withdrawn only by `mini apps delete --grain {grain}`"));
+        }
+        let Some(routes) = record.get_mut("routes").and_then(Value::as_object_mut) else {
+            return performed("unshared", format!("{grain} is not shared with {to}"), json!({"grain":grain,"member":to}));
+        };
+        if routes.remove(to).is_none() {
+            return performed("unshared", format!("{grain} is not shared with {to}"), json!({"grain":grain,"member":to}));
+        }
+        if let Err(e) = write_json(&grain_file(&self.state, grain), &record).and_then(|_| self.publish_origin(grain, &record)) {
+            return undecided("stateUnavailable", e, &format!("mini apps unshare --grain {grain} --to {to}"));
+        }
+        performed("unshared", format!("{grain} is no longer shared with {to}: its route is withdrawn"), json!({"grain":grain,"member":to}))
     }
 
     fn identities(&self, grain: &str, record: &Value) -> Value {
@@ -2558,6 +2598,42 @@ mod tests {
         assert_eq!(delete["receipt"]["volumeRetained"], true);
         assert!(!w.state.join("origins").join("a4501.json").exists());
         assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"open","grain":"a4501"}))["refused"], "noRoute");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apps_worker_unshare_withdraws_a_route_and_an_undecided_delete_is_never_raced() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker("unshare");
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        assert_eq!(w.handle("alice", &install_request(&"9".repeat(32)))["state"], "running");
+        let verb = |who: &str, verb: &str, extra: Value| {
+            let mut r = json!({"protocol":WORKER_PROTOCOL,"verb":verb,"grain":"a4501"});
+            for (k, v) in extra.as_object().unwrap() { r[k] = v.clone(); }
+            w.handle(who, &r)
+        };
+        assert_eq!(verb("alice", "share", json!({"to":"bob"}))["state"], "shared");
+        assert_eq!(verb("bob", "open", json!({}))["state"], "open");
+        // Only the owner unshares, never its own route; unsharing withdraws bob's route from the record and the front.
+        assert_eq!(verb("bob", "unshare", json!({"to":"bob"}))["refused"], "notOwner");
+        assert_eq!(verb("alice", "unshare", json!({"to":"alice"}))["refused"], "ownerRoute");
+        assert_eq!(verb("alice", "unshare", json!({"to":"bob"}))["state"], "unshared");
+        let origin = read_json(&w.state.join("origins").join("a4501.json")).unwrap();
+        assert_eq!(origin["routes"].as_array().unwrap().len(), 1, "{origin}");
+        assert_eq!(verb("bob", "open", json!({}))["refused"], "notOwner");
+        assert!(verb("alice", "unshare", json!({"to":"bob"}))["detail"].as_str().unwrap().contains("not shared"));
+        // A delete whose STOP is undecided: neither a member's open nor a START races it.
+        assert_eq!(verb("alice", "share", json!({"to":"carol"}))["state"], "shared");
+        *fake(&w).stop_undecided.lock().unwrap() = true;
+        assert_eq!(verb("alice", "delete", json!({}))["state"], "stopping");
+        *fake(&w).run_state.lock().unwrap() = "stopped";
+        let starts = *fake(&w).installs.lock().unwrap();
+        assert_eq!(verb("carol", "open", json!({}))["refused"], "grainDeleting");
+        assert_eq!(verb("alice", "start", json!({}))["refused"], "grainDeleting");
+        assert_eq!(*fake(&w).run_state.lock().unwrap(), "stopped", "nothing started it");
+        assert_eq!(*fake(&w).installs.lock().unwrap(), starts);
+        *fake(&w).stop_undecided.lock().unwrap() = false;
+        assert_eq!(verb("alice", "delete", json!({}))["state"], "deleted");
         let _ = fs::remove_dir_all(&root);
     }
 

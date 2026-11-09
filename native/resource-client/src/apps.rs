@@ -47,7 +47,7 @@ const MAX_REPLY: usize = 64 * 1024;
 pub(crate) const STANDARD_RAW_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TEXT: usize = 512;
 const WORKER_VERBS: &[&str] = &[
-    "list", "status", "install", "retry", "open", "stop", "start", "share", "export", "delete", "renew",
+    "list", "status", "install", "retry", "open", "stop", "start", "share", "unshare", "export", "delete", "renew",
     "identities", "revoke-identity",
 ];
 
@@ -946,14 +946,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 }
             }
             args.finish()?;
-            if matches!(verb, "open" | "stop" | "start" | "share" | "export" | "delete" | "status" | "renew" | "identities" | "revoke-identity") && !request.contains_key("grain") {
+            if matches!(verb, "open" | "stop" | "start" | "share" | "unshare" | "export" | "delete" | "status" | "renew" | "identities" | "revoke-identity") && !request.contains_key("grain") {
                 return Err(format!("{verb} requires --grain a<app>"));
             }
             if verb == "revoke-identity" && !request.contains_key("token") {
                 return Err("revoke-identity requires --token TOKEN".into());
             }
-            if verb == "share" && !request.contains_key("to") {
-                return Err("share requires --to MEMBER".into());
+            if matches!(verb, "share" | "unshare") && !request.contains_key("to") {
+                return Err(format!("{verb} requires --to MEMBER"));
             }
             let reply = worker_call(&paths.socket, &Value::Object(request))?;
             report(&reply, as_json)
