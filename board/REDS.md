@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `4c305fbd9e31` (spk-host install --import: the staged image is removed once the volume is made from it). Round finished 2026-11-09T04:26Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-4c305fbd`.
+Tip: `842fa347267b` (world-migrate grains: a carry counts once it runs, a re-run resumes the claimed request, a). Round finished 2026-11-09T04:29Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-842fa347`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..4c305fbd9e31`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..842fa347267b`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `842fa347` world-migrate grains: a carry counts once it runs, a re-run resumes the claimed request, and an unca
+- `e0c00047` builder: REDS.md for 4c305fbd9e31 (6 red) (owner: build-loop)
 - `4c305fbd` spk-host install --import: the staged image is removed once the volume is made from it (owner: apps-hermes)
 - `22973155` builder: REDS.md for 2ecb9ee18fbc (6 red) (owner: build-loop)
 - `2ecb9ee1` op 2's 10 ms steps: the Store helper's anchor lock waits by doubling sleeps; held index rows in a pe
