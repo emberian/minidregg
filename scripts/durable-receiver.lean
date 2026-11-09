@@ -315,19 +315,19 @@ def run (binary fixtures : System.FilePath) (directory : System.FilePath) : IO U
   let honest := sealCheckpoint key rootBytes 1 loadedSecond.chain secondFrontier secondSpent
     (DurableCheckpoint.State.ofSnapshot loadedSecond.image loadedSecond.snapshot)
   let forgedMac := { honest with mac := List.replicate 32 7 }
-  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode forgedMac)
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode forgedMac).toByteArray
     | throw (IO.userError "FAIL store forged checkpoint")
   expectOpenRefused "checkpoint with a forged MAC" secondTransport
   let rolledBack := sealCheckpoint key rootBytes 1 loadedSecond.chain secondFrontier secondSpent
     (DurableCheckpoint.State.ofSeed seed)
-  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode rolledBack)
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode rolledBack).toByteArray
     | throw (IO.userError "FAIL store")
   -- A key-holder's dishonest checkpoint AT THE HEAD no longer resumes silently:
   -- the head entry's MAC'd tag carries the root after the head, and the open
   -- refuses a replayed root that differs from it.
   expectOpenRefused "a dishonest checkpoint at the head (its root differs from the head tag's)"
     secondTransport
-  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode honest)
+  let .ok () ← secondTransport.putCheckpoint 1 (checkpointFrame.encode honest).toByteArray
     | throw (IO.userError "FAIL store")
   require "the honest checkpoint resumes the committed cell"
     ((← loadExact secondTransport).snapshot.canonicalBytes ⟨1⟩ == [11])

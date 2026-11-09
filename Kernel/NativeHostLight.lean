@@ -56,16 +56,6 @@ private def validated (config : Config) (opening : Opening ResourceBirthCodec.ro
   | .error detail => .error detail
   | .ok opened => .ok ⟨opening, opened, validateServed_served checked⟩
 
-/-- `validated` for a later opening of a session: validated against the light
-opening it held (`validateServedFrom`, which is `validateServed`). -/
-private def validatedFrom {config : Config} (prior : Light config)
-    (opening : Opening ResourceBirthCodec.rootBytes)
-    (held : Option CredentialAuthorityServed.HeldCell := none) : Except String (Light config) :=
-  match checked : validateServedFrom config prior.opened opening.served held with
-  | .error detail => .error detail
-  | .ok opened => .ok ⟨opening, opened,
-      validateServed_served ((validateServedFrom_eq config prior.opened opening.served held).symm.trans checked)⟩
-
 /-- The light opening of the Store's head, validated for this deployment. -/
 def start (config : Config) : IO (Except String (Light config)) := do
   match ← DurableServed.openHead config.transport ResourceBirthCodec.rootBytes with
@@ -74,15 +64,6 @@ def start (config : Config) : IO (Except String (Light config)) := do
       -- The serving Host holds the whole index trie from here (row 37): no footprint read misses.
       DurableReceiverIO.preloadIndex config.transport opening.head.height opening.head.indexRoot
       return validated config opening
-
-/-- The entries another writer appended, verified as the open verifies them; the
-advanced state validated again, against the held one (`validatedFrom`). Nothing new: the same light opening. -/
-def Light.refresh {config : Config} (light : Light config) : IO (Except String (Light config)) := do
-  match ← light.opening.extend config.transport ResourceBirthCodec.rootBytes with
-  | .error detail => return .error detail
-  | .ok opening =>
-      if opening.head.height = light.opening.head.height then return .ok light
-      return validatedFrom light opening
 
 /-- The same light opening under a config that differs only in its Store paths. -/
 def Light.restorage {config : Config} (light : Light config) (storage : DurableReceiverIO.NativeConfig) :
@@ -104,6 +85,16 @@ def Light.adoptStep {config : Config} (light : Light config) (opening : Opening 
   | .ok opened => .ok ⟨opening, opened,
       validateServed_served ((NativeHostServed.validateServedStep_eq config light.opened opening.served
         written moved' held).symm.trans checked)⟩
+
+/-- The entries another writer appended, verified as the open verifies them; the
+advanced state validated over the cells the new records wrote (`adoptStep`, `validateServedStep`,
+which is `validateServed`). Nothing new: the same light opening. -/
+def Light.refresh {config : Config} (light : Light config) : IO (Except String (Light config)) := do
+  match ← light.opening.extendMoved config.transport ResourceBirthCodec.rootBytes with
+  | .error detail => return .error detail
+  | .ok extension =>
+      if extension.next.head.height = light.opening.head.height then return .ok light
+      return light.adoptStep extension.next extension.written ⟨extension.keeps⟩
 
 /-- What a light receive on `before` hands the session: the opening it returned, the cells its
 record wrote with the proof that every other cell kept its bytes (`Received.appended`'s

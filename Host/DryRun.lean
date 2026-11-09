@@ -89,7 +89,7 @@ transports that read alike give the same dry transport. -/
 theorem dryTransport_writers_irrelevant (t : DurableReceiverIO.Transport)
     (append : Nat → DurableReceiverIO.Entry → List DurableReceiverIO.NodeWrite →
       IO DurableReceiverIO.CasObservation)
-    (putCheckpoint : Nat → List UInt8 → IO (Except String Unit))
+    (putCheckpoint : Nat → ByteArray → IO (Except String Unit))
     (initializeSeed : List UInt8 → IO DurableReceiverIO.CasObservation) :
     dryTransport { t with append, putCheckpoint, initializeSeed } = dryTransport t := rfl
 
@@ -148,7 +148,7 @@ log after a dry run are the ones before it. -/
 theorem dryRun_commits_nothing (t : DurableReceiverIO.Transport)
     (append : Nat → DurableReceiverIO.Entry → List DurableReceiverIO.NodeWrite →
       IO DurableReceiverIO.CasObservation)
-    (putCheckpoint : Nat → List UInt8 → IO (Except String Unit))
+    (putCheckpoint : Nat → ByteArray → IO (Except String Unit))
     (initializeSeed : List UInt8 → IO DurableReceiverIO.CasObservation)
     (config : NativeHost.Config) (opened : NativeHost.Opened config) (light : NativeHostLight.Light config)
     (observation : List UInt8) (signatures : List (List UInt8)) :

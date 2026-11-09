@@ -3285,9 +3285,9 @@ def sealSession (config : NativeHost.Config) (session : NativeHostSession.Sessio
       let opening := current.light.opening
       let height := opening.served.height
       if height = 0 ∨ height = opening.baseHeight then return
-      let sealed := DurableCheckpointCodec.sealedBytesAt opening.store.key height opening.served.chain
-        opening.head.frontier opening.head.indexRoot opening.served.checkpointState
-        (opening.world.map (·.system)) opening.served.worldRoot
+      let sealed := DurableReceiverIO.sealArray opening.store.key height opening.served.chain
+        opening.head.frontier opening.head.indexRoot opening.served.absentBytes opening.cells.payload
+        opening.served.available (opening.world.map (·.system.payload)) opening.served.worldRoot
       discard <| config.transport.putCheckpoint height sealed
 
 partial def serveSession (config : NativeHost.Config)

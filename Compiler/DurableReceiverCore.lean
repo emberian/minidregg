@@ -130,7 +130,7 @@ structure Transport where
   /-- Append at the given height iff the head is one below it, with the node
   rows the append completes, in one transaction. -/
   append : Nat → Entry → List NodeWrite → IO CasObservation
-  putCheckpoint : Nat → List UInt8 → IO (Except String Unit)
+  putCheckpoint : Nat → ByteArray → IO (Except String Unit)
   initializeSeed : List UInt8 → IO CasObservation
   key : IO (Except String MacKey)
   checkpointEvery : Nat
@@ -307,11 +307,11 @@ def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
     return parseCasOutput output
   catch error => pure (.uncertain s!"native append unavailable: {error}")
 
-def NativeConfig.putCheckpoint (config : NativeConfig) (height : Nat) (bytes : List UInt8) :
+def NativeConfig.putCheckpoint (config : NativeConfig) (height : Nat) (bytes : ByteArray) :
     IO (Except String Unit) :=
   try
     let (output, _) ← runNativeMemory config #["durable-checkpoint", config.root.toString,
-      toString height, "mem:checkpoint"] [("checkpoint", bytes.toByteArray)]
+      toString height, "mem:checkpoint"] [("checkpoint", bytes)]
     if output.exitCode == 0 && output.stderr == "" then return .ok ()
     else return .error s!"native checkpoint write failed (exit {output.exitCode}): {output.stderr}"
   catch error => pure (.error s!"native checkpoint unavailable: {error}")
@@ -2101,7 +2101,7 @@ def storeCheckpoint (transport : Transport) (rootBytes : List UInt8 → Digest)
   let some frontier := loaded.frontier | return false
   let sealed := sealedBytesAt key loaded.height loaded.chain frontier indexRoot
     (State.ofSnapshot loaded.image loaded.snapshot) loaded.system loaded.worldRoot
-  match ← transport.putCheckpoint loaded.height sealed with
+  match ← transport.putCheckpoint loaded.height sealed.toByteArray with
   | .error _ => return false
   | .ok () => return true
 

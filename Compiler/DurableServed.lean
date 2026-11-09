@@ -32,6 +32,7 @@ from a head of the same Store.
 module
 
 public import Compiler.DurableHistoryStoreCore
+public import Compiler.DurableSealHeld
 public import Std.Data.HashMap
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -459,6 +460,31 @@ def extendIdsFast (ids : List CellId) (records : List IntentRecord) : List CellI
   funext ids records
   rw [extendIdsFast, SessionIndex.dedup_eq, extendIds]
 
+private theorem eraseDups_of_nodup : ∀ {ids : List CellId}, ids.Nodup → ids.eraseDups = ids
+  | [], _ => rfl
+  | head :: rest, nodup => by
+      rw [List.eraseDups_cons]
+      have kept : rest.filter (fun other => !other == head) = rest :=
+        List.filter_eq_self.mpr fun other member => by
+          have : other ≠ head := fun same => (List.nodup_cons.mp nodup).1 (same ▸ member)
+          simpa using this
+      rw [kept, eraseDups_of_nodup (List.nodup_cons.mp nodup).2]
+
+/-- `extendIds` of a duplicate-free enumeration (`extendIdsStep_eq`): only the written ids not
+already enumerated are deduplicated and appended, so a step that births nothing returns the
+enumeration itself. An append writes a handful of cells; the enumeration is every cell. -/
+def extendIdsStep (ids : List CellId) (_nodup : ids.Nodup) (records : List IntentRecord) : List CellId :=
+  let fresh := ((records.flatMap fun record => record.writes.map DataWrite.cellId).removeAll ids).eraseDups
+  if fresh.isEmpty then ids else ids ++ fresh
+
+theorem extendIdsStep_eq (ids : List CellId) (nodup : ids.Nodup) (records : List IntentRecord) :
+    extendIdsStep ids nodup records = extendIds ids records := by
+  simp only [extendIdsStep, extendIds, List.eraseDups_append, eraseDups_of_nodup nodup]
+  split
+  · rename_i empty
+    rw [List.isEmpty_iff.mp empty, List.append_nil]
+  · rfl
+
 theorem not_mem_extendIds {ids : List CellId} {records : List IntentRecord} {cellId : CellId}
     (missing : cellId ∉ extendIds ids records) :
     cellId ∉ ids ∧ cellId ∉ records.flatMap fun record => record.writes.map DataWrite.cellId := by
@@ -802,6 +828,19 @@ private theorem ofReplay_canonicalBytes (seed : Seed) (absentBytes : List UInt8)
       chain worldRoot).canonicalBytes = snapshot.canonicalBytes :=
   (Held.replayed_agrees records held before snapshot agrees replayed _).bytes.symm
 
+/-- A replay keeps every cell its records do not write. -/
+private theorem ofReplay_keeps (seed : Seed) (absentBytes : List UInt8) (ids : List CellId)
+    (held : Held rootBytes) (before : DataSnapshot rootBytes) (agrees : Held.Agrees held before)
+    (outside : ∀ cellId, cellId ∉ ids → held.bytesOf cellId = absentBytes)
+    (records : List IntentRecord) (snapshot : DataSnapshot rootBytes)
+    (replayed : replay rootBytes before records = some snapshot)
+    (height : Nat) (chain worldRoot : Digest) (cellId : CellId)
+    (missing : cellId ∉ records.flatMap fun record => record.writes.map DataWrite.cellId) :
+    (ofReplay (store := store) seed absentBytes ids held before agrees outside records snapshot replayed height
+      chain worldRoot).canonicalBytes cellId = held.bytesOf cellId := by
+  rw [ofReplay_canonicalBytes, DurableReceiver.replay_outside_support rootBytes _ _ cellId missing snapshot replayed,
+    agrees.bytes]
+
 theorem state_snapshot_outside (base : State) (cellId : CellId) (missing : cellId ∉ base.cells.map Prod.fst) :
     (base.snapshot rootBytes []).canonicalBytes cellId = base.absentBytes := by
   simp [State.snapshot, DurableReceiver.Seed.lookup_missing base.cells cellId missing]
@@ -881,8 +920,9 @@ def advance (served : Served rootBytes store) {head : Head store} {keys : Keys}
     (next : DataSnapshot rootBytes)
     (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
     (chain worldRoot : Digest) : Served rootBytes store :=
-  ⟨served.held.install intent, served.seed, extendIds served.cellIds [IntentRecord.ofIntent intent],
+  ⟨served.held.install intent, served.seed, extendIdsStep served.cellIds served.cellIdsNodup [IntentRecord.ofIntent intent],
     served.absentBytes, served.height + 1, chain, worldRoot, fun cellId missing => by
+      rw [extendIdsStep_eq] at missing
       obtain ⟨notOld, notWritten⟩ := not_mem_extendIds missing
       rw [← (Held.install_agrees (served.agrees_viewAt footprint) intent).bytes]
       show (DurableDataIntent.DataSnapshot.lookupPostBytes cellId intent.writes).getD
@@ -890,7 +930,16 @@ def advance (served : Served rootBytes store) {head : Head store} {keys : Keys}
       rw [DurableReceiver.lookupPostBytes_missing intent.writes cellId
         (by simpa [IntentRecord.ofIntent] using notWritten)]
       exact served.outsideAbsent cellId notOld,
-    DurableCheckpoint.nodup_eraseDups _⟩
+    by rw [extendIdsStep_eq]; exact DurableCheckpoint.nodup_eraseDups _⟩
+
+theorem advance_cellIds (served : Served rootBytes store) {head : Head store} {keys : Keys}
+    (footprint : VerifiedFootprint head keys) (intent : DurableDataIntent.DataIntent rootBytes)
+    (next : DataSnapshot rootBytes)
+    (executed : DurableDataIntent.execute .complete (served.viewAt footprint) intent = .accepted next)
+    (chain worldRoot : Digest) :
+    (served.advance footprint intent next executed chain worldRoot).cellIds =
+      extendIds served.cellIds [IntentRecord.ofIntent intent] :=
+  extendIdsStep_eq _ served.cellIds_nodup _
 
 /-- What a later served state may have changed relative to an earlier one: outside `written`
 every cell keeps its canonical bytes. A step's validation needs to look only at `written`. -/
@@ -1151,9 +1200,13 @@ structure Opening (rootBytes : List UInt8 → Digest) where
   /-- The height of the checkpoint the opening resumed from (the cadence). -/
   baseHeight : Nat
   /-- The fold's World at the head, advanced per append as the full session's track is
-  (`DurableReceiverIO.foldRecords`), so a light seal is a v4 body byte-identical to
-  `storeCheckpoint`'s. `none` when the opening started without one. -/
-  world : Option HostRefinesWorld.DWorld
+  (`DurableReceiverIO.foldHeld`, `foldHeld_world`), so a light seal is a v4 body byte-identical
+  to `storeCheckpoint`'s; its system store's entries held encoded. `none` when the opening
+  started without one. -/
+  world : Option DurableReceiverIO.HeldWorld
+  /-- Every enumerable cell's checkpoint entry, encoded when the cell was last written: a due
+  seal concatenates them (`DurableReceiverIO.sealArray_eq`). -/
+  cells : DurableReceiverIO.HeldCells served.cellIds served.canonicalBytes
 
 /-- **An opening is never of a scratch Store** (`StoreIdentity.ofScratch`): the
 light write path commits only into the deployment's own Store. -/
@@ -1199,6 +1252,13 @@ private theorem CachedRoots.sound {ids : List CellId} {entries : List (WorldRoot
     ids.Nodup ∧ WorldRootCache.RootsExact cached.cache entries :=
   ⟨cached.nodup, cached.exact⟩
 
+/-- An opening extended from a held state, with the cells its records wrote: outside them every
+cell keeps the held bytes (`Served.Moved` for a refresh). -/
+structure Extension (rootBytes : List UInt8 → Digest) (bytesOf : CellId → List UInt8) where
+  next : Opening rootBytes
+  written : List CellId
+  keeps : ∀ cellId, cellId ∉ written → next.served.canonicalBytes cellId = bytesOf cellId
+
 /-- What an extension starts from: a verified state (bare snapshot, its
 enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
 frontier and index root there, and the head tag there when it is not 0. -/
@@ -1218,7 +1278,9 @@ structure Start (rootBytes : List UInt8 → Digest) where
   refresh) or the checkpoint's, evaluated by its open (`openSealedWith`). -/
   roots : Option (CachedRoots ids (Served.entriesOf held.rootOf ids height chain)) := none
   /-- The fold's World at `height` (the checkpoint's, the seed's genesis World, or the head's). -/
-  world : Option HostRefinesWorld.DWorld := none
+  world : Option DurableReceiverIO.HeldWorld := none
+  /-- The held cell entries at `height`, when the start is an opening's head (a refresh). -/
+  cells : Option (DurableReceiverIO.HeldCells ids held.bytesOf) := none
 
 /-- **The one verification of new entries**, used by the open (from its
 checkpoint) and by a session's refresh (from its head): every entry after
@@ -1231,7 +1293,7 @@ world root. -/
 private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
     (store : StoreIdentity) (live : store.origin = .deployment) (start : Start rootBytes)
     (suffix : List DurableReceiverIO.Entry)
-    (lap : String → IO Unit) : IO (Except String (Opening rootBytes)) := do
+    (lap : String → IO Unit) : IO (Except String (Extension rootBytes start.held.bytesOf)) := do
   let key := store.key
   let headHeight := start.height + suffix.length
   let records ← match decodeRecordsAt (start.height + 1) suffix with
@@ -1265,7 +1327,7 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   | none => return .error "durable log suffix does not replay through the canonical executor"
   | some snapshot =>
       let world := start.world.bind fun w =>
-        (DurableReceiverIO.foldRecords rootBytes w start.height records).toOption
+        (DurableReceiverIO.foldHeld rootBytes w start.height records).toOption
       let cellIds := extendIds start.ids records
       let entries := Served.entriesOf snapshot.model.roots cellIds headHeight headChain
       let rooted : (cache : WorldRootCache.RootCache) ×' WorldRootCache.RootsExact cache entries :=
@@ -1283,15 +1345,28 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
         Served.ofReplay start.seed start.absentBytes start.ids start.held start.held.toSnapshot
           (Held.agrees_toSnapshot start.held) start.outside records snapshot replayed headHeight headChain worldRoot
       have rootsEq : served.roots = snapshot.model.roots := Served.ofReplay_roots _ _ _ _ _ _ _ _ _ _ _ _ _
+      -- The held cell entries: the start's moved by the cells the records wrote, or built once.
+      let written := records.flatMap fun record => record.writes.map DataWrite.cellId
+      have keeps : ∀ cellId, cellId ∉ written → served.canonicalBytes cellId = start.held.bytesOf cellId :=
+        fun cellId wrote => Served.ofReplay_keeps _ _ _ _ _ _ _ _ _ replayed _ _ _ cellId wrote
+      let cells : DurableReceiverIO.HeldCells served.cellIds served.canonicalBytes :=
+        match start.cells with
+        | some held => held.step served.cellIds served.canonicalBytes written
+            (fun cellId member wrote => by
+              rcases List.mem_append.mp (List.mem_eraseDups.mp member) with old | new
+              · exact old
+              · exact absurd new wrote)
+            (keeps)
+        | none => DurableReceiverIO.HeldCells.build served.cellIds served.canonicalBytes
       let rootsExact : WorldRootCache.RootsExact roots
           (Served.entriesOf served.roots served.cellIds headHeight headChain) := rootsEq ▸ rootsExact
       lap "replay and root"
       if zero : headHeight = 0 then
         if genesisChain : headChain = store.logStart then
           let head := Head.genesis store worldRoot
-          return .ok ⟨store, live, head, served, zero.trans (Head.genesis_fields store worldRoot).1.symm,
+          return .ok ⟨⟨store, live, head, served, zero.trans (Head.genesis_fields store worldRoot).1.symm,
             genesisChain.trans (Head.genesis_fields store worldRoot).2.1.symm, roots, rootsExact,
-            start.checkpoint, world⟩
+            start.checkpoint, world, cells⟩, written, keeps⟩
         else return .error "an empty durable log's chain is not its genesis log start"
       else
         let some headTag := (suffix.getLast?.map (·.tag)).or start.tag
@@ -1302,8 +1377,8 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
             if head.root ≠ worldRoot then
               return .error "durable log head root differs from the replayed root"
             have fields := Head.verify_fields verified
-            return .ok ⟨store, live, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact,
-              start.checkpoint, world⟩
+            return .ok ⟨⟨store, live, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact,
+              start.checkpoint, world, cells⟩, written, keeps⟩
 
 /-- A checkpoint state's served entries are its world-root entries (`stateEntries`). -/
 theorem state_entries (base : State) (nodup : (base.cells.map Prod.fst).Nodup) (height : Nat)
@@ -1332,10 +1407,11 @@ private def startOf (seed : Seed) (base : State) (height : Nat) (chain : Digest)
     (nodup : (base.cells.map Prod.fst).Nodup)
     (roots : Option ((cache : WorldRootCache.RootCache) ×' WorldRootCache.RootsExact cache
       (DurableCheckpointCodec.stateEntries rootBytes height chain base)))
-    (world : Option HostRefinesWorld.DWorld) : Start rootBytes :=
+    (world : Option DurableReceiverIO.HeldWorld) : Start rootBytes :=
   ⟨seed, base.absentBytes, base.cells.map Prod.fst, Held.ofState rootBytes base, Served.held_state_outside base,
     height, chain, frontier, indexRoot, tag, height,
-    roots.map fun built => ⟨nodup, built.1, (held_state_entries base nodup height chain).symm ▸ built.2⟩, world⟩
+    roots.map fun built => ⟨nodup, built.1, (held_state_entries base nodup height chain).symm ▸ built.2⟩, world,
+    none⟩
 
 /-- The light opening of an opened Store's head: its checkpoint (or the seed),
 then `extendVerified` over the entries after it. -/
@@ -1375,9 +1451,9 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
       lap "checkpoint"
       if admissible : SessionIndex.nodupFast (base.cells.map Prod.fst) = true ∧
             base.absentBytes = seed.absentBytes then
-        extendVerified transport rootBytes store rfl
+        (·.map (·.next)) <$> extendVerified transport rootBytes store rfl
           (startOf seed base 0 logStart [] DurableIndex.emptyDigest none ((SessionIndex.nodupFast_iff _).mp admissible.1) none
-            (TurnLog.genesisOfSeed seed).toOption) stored.entries lap
+            ((TurnLog.genesisOfSeed seed).toOption.map DurableReceiverIO.HeldWorld.ofWorld)) stored.entries lap
       else return .error "checkpoint state is not admissible for this Store's seed"
   | some checkpoint =>
       match DurableHistory.openSealedWithBytes (α := CheckpointRoots rootBytes) key rootBytes
@@ -1398,17 +1474,19 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
               let base := body.state
               if admissible : SessionIndex.nodupFast (base.cells.map Prod.fst) = true ∧
             base.absentBytes = seed.absentBytes then
-                extendVerified transport rootBytes store rfl
+                (·.map (·.next)) <$> extendVerified transport rootBytes store rfl
                   (startOf seed base body.height body.chain body.frontier body.indexRoot
                     (some atCheckpoint.tag) ((SessionIndex.nodupFast_iff _).mp admissible.1) (some built)
-                    (body.system.bind (DurableReceiverIO.worldOfCheckpoint body.state))) (stored.entries.drop 1) lap
+                    ((body.system.bind (DurableReceiverIO.worldOfCheckpoint body.state)).map
+                      DurableReceiverIO.HeldWorld.ofWorld)) (stored.entries.drop 1) lap
               else return .error "checkpoint state is not admissible for this Store's seed"
 
 /-- **A session's refresh**: the entries another writer appended after this
 opening's head, verified exactly as the open verifies the entries after its
-checkpoint (`extendVerified`, the same function). Nothing new: the same opening. -/
-def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
-    (opening : Opening rootBytes) : IO (Except String (Opening rootBytes)) := do
+checkpoint (`extendVerified`, the same function), with the cells the new records wrote
+(`Extension.keeps`: every other cell keeps its served bytes). Nothing new: the same opening. -/
+def Opening.extendMoved (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
+    (opening : Opening rootBytes) : IO (Except String (Extension rootBytes opening.served.canonicalBytes)) := do
   let height := opening.head.height
   match ← transport.read (height + 1) false with
   | .error message => return .error message
@@ -1416,7 +1494,7 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
   | .ok (some stored) =>
       if stored.head < height then
         return .error "the Store's head is below this opening's authenticated head"
-      if stored.entries.isEmpty then return .ok opening
+      if stored.entries.isEmpty then return .ok ⟨opening, [], fun _ _ => rfl⟩
       if stored.entries.length ≠ stored.head - height then
         return .error "durable log head does not match its entries"
       let served := opening.served
@@ -1426,8 +1504,13 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
           opening.head.frontier, opening.head.indexRoot, none, opening.baseHeight,
           some ⟨served.cellIds_nodup, opening.roots, by
             simpa [served, Served.roots, Served.state, Held.toSnapshot, opening.heightExact, opening.chainExact] using opening.rootsExact⟩,
-          opening.world⟩
+          opening.world, some opening.cells⟩
         stored.entries (fun _ => pure ())
+
+/-- `extendMoved`'s opening. -/
+def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 → Digest)
+    (opening : Opening rootBytes) : IO (Except String (Opening rootBytes)) :=
+  (·.map (·.next)) <$> opening.extendMoved transport rootBytes
 
 /-! ## The light receive (KN2 2b-1, step 4)
 
@@ -1522,6 +1605,23 @@ inductive Received (rootBytes : List UInt8 → Digest) (opening : Opening rootBy
 def Served.checkpointState {store : StoreIdentity} (served : Served rootBytes store) : State :=
   ⟨served.absentBytes, served.cells, served.available⟩
 
+/-- **The held seal of a served state is its checkpoint frame**: the held cell entries and the
+held World's system entries concatenated (`DurableReceiverIO.sealArray`) are `sealedBytesAt` of
+the served state's checkpoint state and the World's system store, byte for byte. -/
+theorem Served.heldSeal_eq {store : StoreIdentity} (served : Served rootBytes store)
+    (cells : DurableReceiverIO.HeldCells served.cellIds served.canonicalBytes)
+    (world : Option DurableReceiverIO.HeldWorld) (key : DurableCheckpointCodec.MacKey) (height : Nat) (chain : Digest)
+    (frontier : List (Nat × Digest)) (indexRoot root : Digest) :
+    (DurableReceiverIO.sealArray key height chain frontier indexRoot served.absentBytes cells.payload
+        served.available (world.map (·.system.payload)) root).data.toList =
+      DurableCheckpointCodec.sealedBytesAt key height chain frontier indexRoot served.checkpointState
+        (world.map (·.world.system)) root := by
+  refine DurableReceiverIO.sealArray_eq key height chain frontier indexRoot served.checkpointState
+    cells.payload cells.payload_eq _ _ ?_ root
+  cases world with
+  | none => rfl
+  | some held => simp only [Option.map_some]; rw [held.system.payload_eq]; rfl
+
 /-- Work deferred until the serving loop has written its reply: the due checkpoint's seal
 (`receiveServed`). At most one item is pending: a caller with no serving loop runs it at its
 next `receiveServed`. -/
@@ -1593,7 +1693,17 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                     transport.holdIndexRows height true indexWrites
                     let served' := served.advance footprint intent next executed chain worldRoot
                     let worldAfter := opening.world.bind fun w =>
-                      (DurableReceiverIO.advanceWorldIntent view.model.roots w served.height intent).toOption
+                      (DurableReceiverIO.advanceHeld view.model.roots w served.height intent).toOption
+                    -- The written cells' checkpoint entries, encoded once here (the seal concatenates).
+                    have moved := served.advance_moved footprint intent next executed chain worldRoot
+                    let cellsAfter := opening.cells.step served'.cellIds served'.canonicalBytes
+                      (intent.writes.map DataWrite.cellId)
+                      (fun cellId member wrote => by
+                        rw [Served.advance_cellIds] at member
+                        rcases List.mem_append.mp (List.mem_eraseDups.mp member) with old | new
+                        · exact old
+                        · exact absurd (by simpa [IntentRecord.ofIntent] using new) wrote)
+                      moved.keeps
                     -- A due checkpoint (a function of the height alone), sealed after the reply:
                     -- its encoding and MAC are deferred to the serving loop (`runAfterReply`), so
                     -- the member's write no longer pays them. Not a task: a task would mark the
@@ -1604,21 +1714,27 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                       if transport.checkpointEvery > 0 && height % transport.checkpointEvery == 0 then do
                         -- `lazyPure`: a plain `let` at the head of the action would be evaluated
                         -- when the action is built, here, on the member's path.
+                        -- The body is the held parts concatenated (`sealArray_eq`); its hash, MAC
+                        -- and Store write run on a dedicated thread that holds only byte arrays
+                        -- and the write closure, so nothing of the served state is marked shared.
+                        let put := transport.putCheckpoint
                         afterReply.set (some do
-                          let sealed ← IO.lazyPure fun _ => DurableCheckpointCodec.sealedBytesAt key height
-                            chain frontierAfter indexAfter served'.checkpointState (worldAfter.map (·.system))
-                            worldRoot
-                          discard <| transport.putCheckpoint height sealed)
+                          let body ← IO.lazyPure fun _ => DurableReceiverIO.sealBody key height chain
+                            frontierAfter indexAfter served'.absentBytes cellsAfter.payload served'.available
+                            (worldAfter.map (·.system.payload))
+                          discard <| IO.asTask (prio := .dedicated) do
+                            let sealed ← IO.lazyPure fun _ => DurableReceiverIO.sealFrame key height worldRoot body
+                            discard <| put height sealed)
                         pure height
                       else pure opening.baseHeight
                     have rootsEq : served'.roots = next.model.roots :=
                       served.advance_roots footprint intent next executed chain worldRoot
                     return .appended kind
                       ⟨opening.store, opening.live, head', served', fields.1.symm, fields.2.1.symm, roots.1,
-                        by rw [rootsEq]; exact roots.2, sealedAt, worldAfter⟩
+                        by rw [rootsEq, Served.advance_cellIds]; exact roots.2, sealedAt, worldAfter, cellsAfter⟩
                       (by rw [fields.1, ← opening.heightExact]) entry
                       (DurableHistory.toByteArray_toList _) fresh
-                      (served.advance_moved footprint intent next executed chain worldRoot)
+                      moved
       match ← transport.append height entry nodes with
       | .installed => confirm .installed true
       | .alreadyPresent => confirm .installed false
