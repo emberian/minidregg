@@ -1047,9 +1047,11 @@ impl Broker {
                 Self::check_coordinates(&store,&app)?;
                 let placement=self.placement(&store,&app)?;
                 let class=class(placement.class.as_deref().ok_or_else(||invalid("set-cgroup must precede mount-volume"))?)?;
+                let record=self.broker_dir().join(format!("volume-{app}.json"));
+                let import_sha256=mount_import(read_private_operator(&record,MAX_CONFIG).ok().as_deref(),import_sha256);
                 let request=self.volume_request(&store,&app,&placement,&volume_id,class.volume_mib,crate::volume_helper::Verb::Create,import_sha256)?;
                 crate::volume_helper::call(&self.config.volume_helper,&request)?;
-                write_operator_text(&self.broker_dir().join(format!("volume-{app}.json")),&serde_json::to_string(&request)?,0o600,false)?;
+                write_operator_text(&record,&serde_json::to_string(&request)?,0o600,false)?;
                 Ok(json!({"name":volume_name(&store,&app),"mount":request.volume_path,
                     "witness":self.root().join("attest").join(format!("{}-{}.witness",store,app)),"appUid":placement.app_uid,"sizeMib":class.volume_mib}))
             }
@@ -1350,6 +1352,18 @@ pub fn serve(config_path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// A carried grain's volume record names its import; START's mount names none and must not differ.
+    #[test]
+    fn mount_import_follows_the_create() {
+        let record = br#"{"verb":"create","store":"8c4a37cef763e92f","deploymentId":"1f","grain":"12530561198587150331","volumePath":"/v","appUid":10259,"sizeMib":512,"volumeId":"ce","importSha256":"ab95"}"#;
+        assert_eq!(super::mount_import(Some(record), None).as_deref(), Some("ab95"));
+        assert_eq!(super::mount_import(Some(record), Some("ff".into())).as_deref(), Some("ff"));
+        let plain = br#"{"verb":"create","store":"8c","deploymentId":"1f","grain":"1","volumePath":"/v","appUid":1,"sizeMib":512,"volumeId":"ce","importSha256":null}"#;
+        assert_eq!(super::mount_import(Some(plain), None), None);
+        assert_eq!(super::mount_import(None, None), None);
+        assert_eq!(super::mount_import(None, Some("ab95".into())).as_deref(), Some("ab95"));
+    }
+
     /// HOT-PATH 2g: one hash per image identity; a rewritten image is a new identity and is hashed
     /// (and refused against the old pin); a wrong pin against cached bytes is refused.
     #[test]
@@ -1616,6 +1630,17 @@ pub(crate) fn volume_pause_bytes(root:&Path,store:&str,app:&str,parts:&[&str],ui
 pub(crate) fn volume_recover(root: &Path) -> io::Result<()> { volume_custody::recover(root) }
 pub(crate) fn volume_export(root: &Path, store: &str, app: &str, uid: u32, gid: u32) -> io::Result<Value> {
     volume_custody::export(root, store, app, uid, gid)
+}
+
+/// The import digest of a mount: the one its create named. A volume is created from an import once
+/// (`grain install --import`); every later mount (START, STOP) names none and is the same volume, so
+/// it takes the retained record's digest rather than differing from it. A mount that names a digest
+/// keeps it, and a different one is still refused against the record.
+fn mount_import(retained: Option<&[u8]>, requested: Option<String>) -> Option<String> {
+    requested.or_else(|| {
+        let record: crate::volume_helper::Request = serde_json::from_slice(retained?).ok()?;
+        record.import_sha256
+    })
 }
 
 fn validate_subids(user: &str, ids: &[u32]) -> io::Result<()> {
