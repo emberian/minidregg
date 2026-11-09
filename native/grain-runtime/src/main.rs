@@ -29,6 +29,7 @@ mod hermes_outcome;
 mod prompt_outcome;
 mod prompt_witness_close;
 mod unsent_reserve_close;
+mod entered_unsent_refusal;
 mod hermes_session_verify;
 mod resident_origin;
 mod resident_requests;
@@ -3822,6 +3823,9 @@ struct Runtime {
     process_first_operation_id: u64,
     /// True while `serve` runs its own recovery before accepting input.
     startup_recovery_active: bool,
+    /// The entered resident prompt whose parent work reserve the next transition makes; that
+    /// transition binds the prompt to its operation id (`resident-reserve-ID.json`) before its source.
+    reserve_prompt: Option<(String, String)>,
     /// Set only by the startup proof that this controller is the active
     /// MainPID of its unit and its cgroup holds no other process, so no
     /// custody child of an earlier controller run can still send a call.
@@ -7013,6 +7017,7 @@ impl Runtime {
             process_first_operation_id,
             startup_recovery_active: false,
             prior_run_stopped: false,
+            reserve_prompt: None,
         };
         // We have no live Child handle after a controller crash. A recycled
         // PID/PGID must never be killed. Fence the task and refuse new work.
@@ -8445,6 +8450,18 @@ impl Runtime {
         };
         let attempt = self.config.state_dir.join(format!("attempt-{id:016}"));
         let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
+        if reserving && slot == AuthoritySlot::Parent {
+            if let Some((prompt, digest)) = self.reserve_prompt.take() {
+                // Before the source: an entered prompt's only native act before admission is this
+                // reserve, and `entered_unsent_refusal` binds on the operation id named here.
+                write_new(
+                    &self.config.state_dir.join(format!("resident-reserve-{prompt}.json")),
+                    &serde_json::to_vec_pretty(&json!({"type":"mini-resident-reserve-binding-v1",
+                        "residentPromptId":prompt,"promptSha256":digest,"operationId":id.to_string()}))
+                        .map_err(|e| e.to_string())?,
+                )?;
+            }
+        }
         write_new(
             &source_path,
             serde_json::to_string_pretty(&source).unwrap().as_bytes(),
@@ -15423,7 +15440,11 @@ impl Runtime {
             Self::prove_launcher_gate(&spec.program)?;
             systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
         }
-        self.reserve_parent_work_lease(&spec.reserve, invocation.charge(&spec.charge), invocation.label())?;
+        self.reserve_prompt = invocation.is_prompt().then(|| invocation.resident_identity())
+            .flatten().map(|(id, digest)| (id.to_owned(), digest.to_owned()));
+        let reserved = self.reserve_parent_work_lease(&spec.reserve, invocation.charge(&spec.charge), invocation.label());
+        self.reserve_prompt = None;
+        reserved?;
         if self.journal.connection == Connection::Hard {
             match input.try_recv() {
                 Ok(Input::Disconnect) => {
