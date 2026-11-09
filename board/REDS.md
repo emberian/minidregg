@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `3ce5cfe6716f` (spk-host STOP: a held absent-replan probe's active marker moves aside, so the next probe i). Round finished 2026-11-09T08:18Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3ce5cfe6`.
+Tip: `1e6a8e907ae2` (render test: the seed's house-rules link and note resolve `$HR_LAST` from the text, as see). Round finished 2026-11-09T08:38Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-1e6a8e90`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,12 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..3ce5cfe6716f`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..1e6a8e907ae2`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `1e6a8e90` render test: the seed's house-rules link and note resolve `$HR_LAST` from the text, as seed.sh does (owner: apps-hermes)
+- `649ffd18` grain-runtime: a reserve whose custody attempt never wrote its call closes as never sent (`reconcile (owner: apps-hermes, bytes-repr)
+- `15db4406` builder: REDS.md for 3ce5cfe6716f (6 red) (owner: build-loop)
 - `3ce5cfe6` spk-host STOP: a held absent-replan probe's active marker moves aside, so the next probe is not refu (owner: apps-hermes)
 - `86686d86` builder: REDS.md for eb3aa769c844 (6 red) (owner: build-loop)
 - `eb3aa769` apps: `apps unshare GRAIN MEMBER` withdraws a member's route; an undecided delete is never raced by  (owner: apps-hermes)
@@ -52,6 +55,3 @@ Suspect commits since green (`git log 980d80c5dba8..3ce5cfe6716f`), newest first
 - `78307b6d` WORLD-MIGRATION: app grains and their data are a carry gap, written as a row
 - `df78d18e` spk-host STOP: a committed claim arms its fence from Running; a dead drifted unit is fenceable (owner: apps-hermes)
 - `55d0721c` builder: REDS.md for fd1f1b33a35f (1 red) (owner: build-loop)
-- `5f6cc3ef` seal encodes its body once; the light open holds the whole index trie (PERF-CLIENT rows 37, 38) (owner: read-path)
-- `fd1f1b33` builder: REDS.md for 980d80c5dba8 (0 red) (owner: build-loop)
-- `760fdf33` held directory, held index rows, seal off the member's path (PERF-CLIENT rows 36, 37, 38) (owner: bytes-repr)
