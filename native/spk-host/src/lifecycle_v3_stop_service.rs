@@ -1153,6 +1153,20 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         .ok_or_else(|| invalid("STOP prior running journal absent"))?
         .phase;
     let audit = match phase {
+        // Mini recorded this attempt's STOP claim and its committed permit is
+        // retained, but the fence never entered Fenced: arm that same fence.
+        Phase::Running
+            if !absent(&config.claim_attempt_dir.join("op26-requested.json"))?
+                && !absent(&config.claim_attempt_dir.join("committed-v3.bin"))? =>
+        {
+            lifecycle_v3_stop_native::resume_committed_exact(
+                &operator,
+                &config.claim_attempt_dir,
+                &fresh_probe(&pins.journal_dir, "stop-committed-reinspect")?,
+                &journal,
+                &volume,
+            )?
+        }
         Phase::Running => {
             set_aside_pure_begin(&config, &pins.journal_dir)?;
             // A lost op22/op26 reply is reconciled by Lean's op23/op27

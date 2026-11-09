@@ -154,10 +154,11 @@ pub(crate) fn reconcile_running(
     let journal_dir = attempts.journal_dir;
     if present(&attempts.claim.join("op26-requested.json"))? {
         if present(&attempts.claim.join("committed-v3.bin"))? {
-            // The committed permit was retained: that is the physical
-            // fence's audit (resume_fenced_exact), not a lost reply.
+            // The committed permit was retained: STOP arms its fence
+            // (`resume_committed_exact`) before any reconcile; it is never a
+            // lost reply to look up.
             return Err(invalid(
-                "STOP claim committed on a Running journal requires the fence audit",
+                "STOP claim committed on a Running journal resumes its fence, never a lookup",
             ));
         }
         let ingress = retained_claim_ingress(attempts)?;
