@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `3ab616e02c8d` (grain-runtime: an entered resident prompt whose work reserve was closed as never sent rece). Round finished 2026-11-09T10:26Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3ab616e0`.
+Tip: `3a98e24518a1` (grain-runtime: `quiescence preflight`, the checkpoint's first question answered from durab). Round finished 2026-11-09T10:44Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3a98e245`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..3ab616e02c8d`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..3a98e24518a1`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `3a98e245` grain-runtime: `quiescence preflight`, the checkpoint's first question answered from durable state (owner: apps-hermes, bytes-repr)
+- `d15b824f` builder: REDS.md for 3ab616e02c8d (6 red) (owner: build-loop)
 - `3ab616e0` grain-runtime: an entered resident prompt whose work reserve was closed as never sent receives its p (owner: apps-hermes, bytes-repr)
 - `8f32e2ac` builder: REDS.md for a49760895ada (6 red) (owner: build-loop)
 - `a4976089` grain-runtime unsent close: an earlier run's attempt is decided by this process's start proof (owner: apps-hermes, bytes-repr)
@@ -53,5 +55,3 @@ Suspect commits since green (`git log 980d80c5dba8..3ab616e02c8d`), newest first
 - `2cf2942c` builder: REDS.md for 3649e4e58574 (6 red) (owner: build-loop)
 - `3649e4e5` apps worker: an export answers only for the STOP that fenced it; a carry into an owner who holds the (owner: apps-hermes)
 - `242b5823` builder: REDS.md for a8fb1630ec91 (6 red) (owner: build-loop)
-- `a8fb1630` shell: `apps install APP --carry GRAIN` forwards --carry to the client (owner: apps-hermes)
-- `2db20e66` builder: REDS.md for 3503d5d2e1a0 (6 red) (owner: build-loop)
