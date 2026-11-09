@@ -638,6 +638,20 @@ pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: 
 /// account and their settings are the box's pinned config) runs ONE consent provider and ONE codec
 /// Host for all of them.
 pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, settings: PathBuf, idle: Option<std::time::Duration>) -> Result<()> {
+    serve_resident_held(kind, dir, executable, settings, idle, false)
+}
+
+/// [`serve_resident_kind`] for a resident its own service unit holds (`mini consent-resident
+/// --foreground`, `mini codec-resident --foreground`): while another resident holds the binding it
+/// waits for that one to end and then serves, instead of leaving at once. A resident a client
+/// starts lives in its starter's cgroup and ends with it (a `oneshot` unit's end kills every
+/// process left in its cgroup, mid-frame for every other client: demo-dry 2026-11-09, the clock
+/// tick's end broke the door's `enroll plan`); the box's unit outlives every starter.
+pub fn serve_resident_owned(kind: ResidentKind, dir: &Path, executable: PathBuf, settings: PathBuf, idle: Option<std::time::Duration>) -> Result<()> {
+    serve_resident_held(kind, dir, executable, settings, idle, true)
+}
+
+fn serve_resident_held(kind: ResidentKind, dir: &Path, executable: PathBuf, settings: PathBuf, idle: Option<std::time::Duration>, wait: bool) -> Result<()> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::os::unix::io::AsRawFd;
     use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc};
@@ -649,7 +663,11 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     let lock_path = resident_file(kind, dir, &binding, "lock");
     let lock = OpenOptions::new().create(true).read(true).write(true).mode(0o600).custom_flags(libc::O_NOFOLLOW)
         .open(&lock_path).map_err(|e| format!("{}: {e}", lock_path.display()))?;
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    let mode = if wait { libc::LOCK_EX } else { libc::LOCK_EX | libc::LOCK_NB };
+    if unsafe { libc::flock(lock.as_raw_fd(), mode) } != 0 {
+        if wait {
+            return Err(format!("{}: {}: {}", kind.name(), lock_path.display(), io::Error::last_os_error()).into());
+        }
         return Ok(()); // another resident of this kind holds this binding
     }
     let (socket, _socket_directory) = resident_socket(kind, dir, &binding)?;

@@ -934,8 +934,9 @@ usage:
   mini story-law --table TABLE.txt [--player SUBJECT]   (the story law a table of rooms and ways compiles to, printed; installs nothing)
   mini mix --action registrar-key|native-key|key|seal|batch|scan --state DIR [action options]   (the post-quantum mailbox mix)
   mini mix-live --action cover|registrar|relay|mailbox|scan|send|receive --state DIR --generation HEX --origin-ms MS --records DIR [action options]
-  mini consent-resident --consent PATH --settings PATH     the resident consent component for this user's `mini` processes
-  mini codec-resident --host HOST --settings PATH          the storeless resident codec Host for this user's `mini` processes
+  mini consent-resident --consent PATH --settings PATH [--foreground true]   the resident consent component for this user's `mini` processes
+  mini codec-resident --host HOST --settings PATH [--foreground true]        the storeless resident codec Host for this user's `mini` processes
+                         --foreground: held by a service unit (no fork; waits out another holder of the binding)
   mini client-resident                                     run the parent's client commands in this one process (the apps worker's channel on stdin)
   mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
@@ -3054,8 +3055,13 @@ fn run(mut args: Args) -> Result<()> {
         "consent-resident" => {
             let consent = path(args.required("consent")?);
             let settings = path(args.required("settings")?);
+            let foreground = match args.optional("foreground").as_deref().map(OsStr::to_str) {
+                None | Some(Some("false")) => false,
+                Some(Some("true")) => true,
+                _ => return Err("--foreground must be true or false".into()),
+            };
             args.finish()?;
-            client_consent::resident(consent, settings)
+            client_consent::resident(consent, settings, foreground)
         }
         #[cfg(unix)]
         "client-resident" => {
@@ -3068,8 +3074,13 @@ fn run(mut args: Args) -> Result<()> {
             // process of this user, started by the first `local_frame` that finds none listening.
             let host = path(args.required("host")?);
             let settings = path(args.required("settings")?);
+            let foreground = match args.optional("foreground").as_deref().map(OsStr::to_str) {
+                None | Some(Some("false")) => false,
+                Some(Some("true")) => true,
+                _ => return Err("--foreground must be true or false".into()),
+            };
             args.finish()?;
-            client_consent::codec_resident(host, settings)
+            client_consent::codec_resident(host, settings, foreground)
         }
         #[cfg(unix)]
         "serve-operator" => {

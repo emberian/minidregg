@@ -25,6 +25,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod publications;
+
 use mini_web_spawn::spawn::{self, BoxLayout, DevConfig, Layout, Member, Spawner};
 use mini_web_spawn::store::{Session, Store};
 use mini_web_spawn::{parse_request, read_line, send_with_fd, Request, MAX_SHELLS_PER_SESSION};
@@ -124,6 +126,9 @@ fn run() -> Result<(), String> {
     helper.warm_public();
     eprintln!("mini-web-spawn: serving (gateway uid {gateway_uid}{})", if helper.dev { ", dev" } else { "" });
     let mut last_sweep = std::time::Instant::now();
+    // The hand-off wakes on a publication landing (`publications::Watch`), not only on the sweep.
+    let mut published = publications::Watch::new();
+    published.cover(&helper.spawner.homes());
     loop {
         match listener.accept() {
             // BSD sockets inherit the listener's O_NONBLOCK; the request is read blocking, bounded by its timeouts.
@@ -132,17 +137,22 @@ fn run() -> Result<(), String> {
                 helper.serve(stream)
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                let mut pfd = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-                unsafe { libc::poll(&mut pfd, 1, 1000) };
+                let mut pfds = [libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+                    libc::pollfd { fd: published.raw_fd().unwrap_or(-1), events: libc::POLLIN, revents: 0 }];
+                unsafe { libc::poll(pfds.as_mut_ptr(), pfds.len() as libc::nfds_t, 1000) };
             }
             Err(e) => eprintln!("mini-web-spawn: accept: {e}"),
         }
         helper.reap();
         if last_sweep.elapsed() > Duration::from_secs(60) {
             helper.sweep();
+            published.changed();
+            published.cover(&helper.spawner.homes());
             helper.collect();
             helper.warm_public();
             last_sweep = std::time::Instant::now();
+        } else if published.changed() {
+            helper.collect();
         }
     }
 }

@@ -391,10 +391,19 @@ if install_app "$DECK_APP"; then
     if [ "$c" = 204 ] || [ "$c" = 200 ]; then
       c=$(web "$G" GET /deck.md)
       if [ "$c" = 200 ] && grep -Fq '# Mini, in four slides' "$T/body"; then
+        # Every world's vars/ is the one shared volume, so the grain's directory shows under each world, and
+        # a re-genesis leaves the retired worlds' package trees beside the serving one: the grain's own store
+        # (its directory's STORE-GRAIN name) names the one world whose package it runs (demo-dry 2026-11-09:
+        # a glob over every world matched three packages and the page was never made).
         for vdir in /var/lib/mini-spk-worlds/*/vars/*-"${G#a}"; do
           [ -d "$vdir" ] || continue
-          adir=$(echo /var/lib/mini-spk-worlds/*/spk/packages/sha256-667f3752d4a28a084a26eb09ac55e9ea*/root/opt/app)
-          if [ -d "$adir" ] && [ -f "$vdir/deck.md" ]; then
+          store=${vdir##*/}; store=${store%-*}
+          [ "${vdir%/vars/*}" = "/var/lib/mini-spk-worlds/$store" ] || continue
+          adir=""
+          for a in "/var/lib/mini-spk-worlds/$store"/spk/packages/sha256-667f3752d4a28a084a26eb09ac55e9ea*/root/opt/app; do
+            [ -d "$a" ] && adir=$a
+          done
+          if [ -n "$adir" ] && [ -f "$vdir/deck.md" ]; then
             ug=$(stat -c '%u:%g' "$vdir")
             mkdir -p "$vdir/www" && cp -r "$adir/index.html" "$adir/dist" "$vdir/www/" && cp "$vdir/deck.md" "$vdir/www/deck.md" && chown -R "$ug" "$vdir/www"
           fi

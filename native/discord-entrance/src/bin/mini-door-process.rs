@@ -1427,8 +1427,11 @@ impl<O: BoxOps> Processor<O> {
             if r["phase"] != "enrolled" || (r[key]["world"] == world.as_str() && r[key]["joined"] == true) {
                 continue;
             }
-            done += 1;
             let name = r["name"].as_str().unwrap_or("").to_owned();
+            if !self.has_workspace(&name, &world, &mut r)? {
+                continue;
+            }
+            done += 1;
             if let Err(e) = self.join_place(key, &place, &world, &name, &mut r) {
                 self.say(format!("request {}: {key} {}: {e}", r["id"].as_str().unwrap_or(""), place.name));
                 r[key]["error"] = json!(e);
@@ -1436,6 +1439,59 @@ impl<O: BoxOps> Processor<O> {
             self.save(&mut r)?;
         }
         Ok(())
+    }
+
+    /// Whether an enrolled member has a workspace in this world to join and import with, making it
+    /// when it can. A request kept across a re-genesis (ship.sh keeps every enrolled one) names a
+    /// member whose workspace the old world took with it, or who never had one (an account whose
+    /// door `init` never ran): the door makes it as its free route does, `init mini.key SUBJECT`
+    /// with the member's subject in THIS world (`mini-reenroll NAME`, which only looks it up for
+    /// an enrolled member). A member with no key cannot have one made: the request records why
+    /// once (`workspace` on the request and its status) and is passed over quietly until the key
+    /// exists. A failed `init` is an error the caller records like any other; false means skip.
+    fn has_workspace(&mut self, name: &str, world: &str, r: &mut Value) -> Result<bool, String> {
+        let home = self.p.home(name);
+        if name.is_empty() || home.join("workspace/workspace.json").exists() {
+            return Ok(true);
+        }
+        if !home.join("keys/mini.key").exists() {
+            let why = format!("no workspace and no keys/mini.key in {}: the member runs `keygen mini.key`", home.display());
+            if r["workspace"]["waiting"] != why.as_str() || r["workspace"]["world"] != world {
+                self.say(format!("request {}: {why}; passed over until then", r["id"].as_str().unwrap_or("")));
+                r["workspace"] = json!({"world": world, "waiting": why});
+                self.save(r)?;
+            }
+            return Ok(false);
+        }
+        let made = (|| {
+            let ran = self.ops.reenroll(name, self.cfg.funding);
+            let subject = ran.stdout.lines().find_map(|l| {
+                let mut w = l.split_whitespace();
+                (w.next() == Some(name)).then(|| w.next().map(str::to_owned)).flatten()
+            }).filter(|s| ran.ok && !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                .ok_or_else(|| format!("mini-reenroll: {}", ran.why()))?;
+            let ran = self.ops.tenant_line(name, &format!("init mini.key {subject}"));
+            if !ran.ok {
+                return Err(format!("init: {}", ran.why()));
+            }
+            Ok(subject)
+        })();
+        match made {
+            Ok(subject) => {
+                self.sponsor = None;
+                self.say(format!("request {}: workspace made for {name} (subject {subject})", r["id"].as_str().unwrap_or("")));
+                r["subject"] = json!(subject);
+                r["workspace"] = json!({"world": world, "made": true});
+                self.save(r)?;
+                Ok(true)
+            }
+            Err(e) => {
+                self.say(format!("request {}: workspace: {e}", r["id"].as_str().unwrap_or("")));
+                r["workspace"] = json!({"world": world, "error": e});
+                self.save(r)?;
+                Ok(false)
+            }
+        }
     }
 
     /// The member's subject: retained on the request, else the member's own `whoami`.
@@ -1499,7 +1555,7 @@ impl<O: BoxOps> Processor<O> {
             let owed: Vec<(String, String)> = publications.iter()
                 .filter(|(doc, author)| *author != name && !(r["publications"][doc.as_str()]["world"] == world.as_str() && r["publications"][doc.as_str()]["joined"] == true))
                 .cloned().collect();
-            if r["phase"] != "enrolled" || owed.is_empty() {
+            if r["phase"] != "enrolled" || owed.is_empty() || !self.has_workspace(&name, &world, &mut r)? {
                 continue;
             }
             done += 1;
@@ -1921,6 +1977,38 @@ mod tests {
         run(&mut w);
         assert_eq!((count(&w, "box: story invite"), count(&w, "alice: story join")), (2, 3));
         assert_eq!(status(&w, r.id())["story"]["joined"], true);
+    }
+
+    #[test]
+    fn a_kept_member_without_a_workspace_gets_one_made_or_is_passed_over_quietly() {
+        let mut w = world("noworkspace", false);
+        w.cfg.story = Some(StoryConfig { author: "box".into(), name: "tale".into() });
+        std::fs::create_dir_all(w.p.config().parent().unwrap()).unwrap();
+        std::fs::write(w.p.config(), b"world one").unwrap();
+        let (a, b) = (join("alice", KEY, Route::Free, false), join("bob", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIENDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0ND", Route::Free, false));
+        submit(&w, &a);
+        submit(&w, &b);
+        run(&mut w);
+        let count = |w: &Processor<Fake>, prefix: &str| w.ops.calls.borrow().iter().filter(|c| c.starts_with(prefix)).count();
+        assert_eq!(count(&w, "alice: story join"), 1);
+        // A re-genesis took alice's workspace and bob's key with his (a kept request names both).
+        std::fs::remove_dir_all(w.p.home("alice").join("workspace")).unwrap();
+        std::fs::remove_dir_all(w.p.home("bob").join("workspace")).unwrap();
+        std::fs::remove_dir_all(w.p.home("bob").join("keys")).unwrap();
+        std::fs::write(w.p.config(), b"world two").unwrap();
+        let before = (count(&w, "reenroll alice"), count(&w, "alice: init mini.key"));
+        run(&mut w);
+        assert_eq!((count(&w, "reenroll alice") - before.0, count(&w, "alice: init mini.key 4100") - before.1), (1, 1),
+            "the door makes the workspace with the member's subject in this world: {:?}", w.ops.calls.borrow());
+        assert_eq!(count(&w, "alice: story join"), 2, "and the member joins in the new world");
+        assert_eq!(count(&w, "bob: story join"), 1, "a member with no key joins nothing");
+        let waits = |w: &Processor<Fake>| w.log.iter().filter(|l| l.contains("no workspace and no keys/mini.key")).count();
+        assert_eq!(waits(&w), 1, "{:?}", w.log);
+        run(&mut w);
+        run(&mut w);
+        assert_eq!(waits(&w), 1, "said once, not every pass: {:?}", w.log);
+        assert_eq!(count(&w, "bob: story join"), 1);
+        assert!(!w.log.iter().any(|l| l.contains("init first")), "{:?}", w.log);
     }
 
     #[test]

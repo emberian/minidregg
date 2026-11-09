@@ -148,8 +148,13 @@ pub(crate) fn drop_dead_session(slot:&mut Option<Consent>,lifeline:&mut Option<c
 /// `mini consent-resident --consent EXECUTABLE --settings SETTINGS`: hold one provider for this
 /// binding and serve its frames until the provider ends, its world is torn down or its binding is
 /// superseded (with `MINI_CONSENT_IDLE_S` set, also after that many idle seconds).
-pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
+/// With `foreground` (the box's own unit holds it: `mini-resident@.service`) it neither forks nor
+/// leaves when another resident holds the binding: it waits for that one to end, then serves.
+pub(crate) fn resident(executable:PathBuf,settings:PathBuf,foreground:bool)->Result<()> {
     let idle=resident_idle("MINI_CONSENT_IDLE_S");
+    if foreground {
+        return Ok(mini_sdk::consent::serve_resident_owned(ResidentKind::Consent,&mini_sdk::consent::private_anchor_dir()?,executable,settings,idle)?);
+    }
     if !mini_sdk::consent::daemonize()? { return Ok(()); }
     Ok(mini_sdk::consent::serve_resident(&mini_sdk::consent::private_anchor_dir()?,executable,settings,idle)?)
 }
@@ -161,8 +166,11 @@ pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
 /// holds no state between frames, so sharing one across processes changes no reply; it removes
 /// one 159 MB Lean image start per `mini` process. The image is the client's own selected
 /// semantic Host (`pure_host`), never the serving Store's.
-pub(crate) fn codec_resident(executable:PathBuf,settings:PathBuf)->Result<()> {
+pub(crate) fn codec_resident(executable:PathBuf,settings:PathBuf,foreground:bool)->Result<()> {
     let idle=resident_idle("MINI_CODEC_IDLE_S");
+    if foreground {
+        return Ok(mini_sdk::consent::serve_resident_owned(ResidentKind::Codec,&mini_sdk::consent::private_anchor_dir()?,executable,settings,idle)?);
+    }
     if !mini_sdk::consent::daemonize()? { return Ok(()); }
     Ok(mini_sdk::consent::serve_resident_kind(ResidentKind::Codec,&mini_sdk::consent::private_anchor_dir()?,executable,settings,idle)?)
 }
