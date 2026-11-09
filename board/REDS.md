@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `842fa347267b` (world-migrate grains: a carry counts once it runs, a re-run resumes the claimed request, a). Round finished 2026-11-09T04:29Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-842fa347`.
+Tip: `b39706c4bc64` (world-migrate verify: a green verify releases each carried grain's staging copies). Round finished 2026-11-09T04:32Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-b39706c4`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..842fa347267b`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..b39706c4bc64`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `b39706c4` world-migrate verify: a green verify releases each carried grain's staging copies
+- `4a32bc17` builder: REDS.md for 842fa347267b (6 red) (owner: build-loop)
 - `842fa347` world-migrate grains: a carry counts once it runs, a re-run resumes the claimed request, and an unca
 - `e0c00047` builder: REDS.md for 4c305fbd9e31 (6 red) (owner: build-loop)
 - `4c305fbd` spk-host install --import: the staged image is removed once the volume is made from it (owner: apps-hermes)
