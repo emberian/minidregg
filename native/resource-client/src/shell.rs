@@ -1872,6 +1872,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     flags.push(flag("app", p.arg(0)));
                     flags.push(flag("home", session.home.clone()));
                     if let Some(class) = p.flag("--class").flatten() { flags.push(flag("class", class)); }
+                    if let Some(carry) = p.flag("--carry").flatten() { flags.push(flag("carry", carry)); }
                 }
                 "retry" => flags.push(flag("retry", p.arg(0))),
                 "list" => {}
