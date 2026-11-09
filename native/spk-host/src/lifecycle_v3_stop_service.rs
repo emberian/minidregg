@@ -1004,6 +1004,17 @@ enum Completion {
     Absent,
 }
 
+/// The op70 active marker a held absent-replan probe left in the sent attempt's directory moves
+/// aside (kept, renamed), so the next probe's own marker is not refused as existing.
+fn set_aside_probe_marker(sent: &Path) -> io::Result<()> {
+    let marker = sent.join("lifecycle-stop-completion-v2-active.json");
+    if absent(&marker)? {
+        return Ok(());
+    }
+    let aside = fresh_probe(sent, "absent-replan-held-marker")?;
+    fs::rename(&marker, &aside).ctx("rename", &marker)
+}
+
 /// A sent completion that Mini answers `absent` for is replaced only once it can never land: a
 /// fresh plan's height is past every signature's `validUntil` in the sent plan, so Mini refuses the
 /// sent bytes however late they arrive, and a fresh completion is the only one that can complete
@@ -1379,6 +1390,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     }
     // Sent, and Mini holds no receipt for it. A fresh plan (pure op70/71 work, in a probe) gives the
     // height; the sent completion is abandoned only past its signatures' window.
+    // A probe writes its op70 active marker beside itself, in this sent attempt's directory, where
+    // nothing else writes one; a marker found here is a held probe's (pure op70 work) and is set aside.
+    set_aside_probe_marker(&completion_dir)?;
     let probe = fresh_probe(&completion_dir, "absent-replan")?;
     let fresh_ingress = assemble_completion(&operator, &completion_signers, pins.app_uid, &evidence, &launch, &signed_report, &probe)?;
     let plan = |dir: &Path| -> io::Result<Value> { Ok(serde_json::from_slice(&read_private(&dir.join("plan.json"), MAX_CONFIG * 64)?)?) };
@@ -1386,6 +1400,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         Ok(abandoned) => abandoned,
         Err(hold) => {
             fs::remove_dir_all(&probe).ctx("remove", &probe)?;
+            set_aside_probe_marker(&completion_dir)?;
             return Err(io::Error::other(hold));
         }
     };
@@ -1521,6 +1536,22 @@ mod tests {
         // A fresh plan that does not follow the sent one, and a sent plan without slots, are refused.
         assert!(absent_disposition(&sent, &json!({"height":"1249"})).is_err());
         assert!(absent_disposition(&json!({"height":"1249","slots":[]}), &json!({"height":"1600"})).is_err());
+    }
+
+    #[test]
+    fn a_held_probe_marker_is_set_aside_and_kept() {
+        let root = scratch();
+        let sent = root.join("completion");
+        DirBuilder::new().mode(0o700).create(&sent).unwrap();
+        set_aside_probe_marker(&sent).unwrap();
+        write_new(&sent, "lifecycle-stop-completion-v2-active.json", b"held probe").unwrap();
+        set_aside_probe_marker(&sent).unwrap();
+        assert!(absent(&sent.join("lifecycle-stop-completion-v2-active.json")).unwrap());
+        let kept: Vec<_> = fs::read_dir(&sent).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("absent-replan-held-marker-")).collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(fs::read(kept[0].path()).unwrap(), b"held probe");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
