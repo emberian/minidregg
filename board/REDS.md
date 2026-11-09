@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `5caf465e9c0c` (install-hermes: the consent render removes the box drop-in that carried --resident-dir). Round finished 2026-11-09T09:47Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-5caf465e`.
+Tip: `a49760895ada` (grain-runtime unsent close: an earlier run's attempt is decided by this process's start pr). Round finished 2026-11-09T10:06Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-a4976089`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..5caf465e9c0c`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..a49760895ada`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `a4976089` grain-runtime unsent close: an earlier run's attempt is decided by this process's start proof (owner: apps-hermes, bytes-repr)
+- `6b2d08f8` builder: REDS.md for 5caf465e9c0c (6 red) (owner: build-loop)
 - `5caf465e` install-hermes: the consent render removes the box drop-in that carried --resident-dir (owner: apps-hermes)
 - `9f02df8f` builder: REDS.md for 0a73bd93734b (6 red) (owner: build-loop)
 - `0a73bd93` consent residents: a unit-held directory is never launched into; door sponsor and lobby relay use th (owner: apps-hermes)
@@ -53,5 +55,3 @@ Suspect commits since green (`git log 980d80c5dba8..5caf465e9c0c`), newest first
 - `2db20e66` builder: REDS.md for 3503d5d2e1a0 (6 red) (owner: build-loop)
 - `3503d5d2` retained seal: checkpoint body held encoded, sealed by concatenation off the serving thread (PERF-CL (owner: read-path)
 - `088e03cc` builder: REDS.md for 892f8f95f101 (6 red) (owner: build-loop)
-- `892f8f95` world-migrate carries app grains: export at capture, install --carry, re-share, digest verify (owner: apps-hermes)
-- `3574f404` builder: REDS.md for 2e48af863c8e (6 red) (owner: build-loop)
