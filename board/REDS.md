@@ -1,20 +1,22 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `2e48af863c8e` (builder: REDS.md for 55d0721c587e (1 red)). Round finished 2026-11-09T02:44Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-2e48af86`.
+Tip: `892f8f95f101` (world-migrate carries app grains: export at capture, install --carry, re-share, digest ver). Round finished 2026-11-09T03:08Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-892f8f95`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| rust-check | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| host | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
+| rust-check | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| host | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..2e48af863c8e`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..892f8f95f101`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `892f8f95` world-migrate carries app grains: export at capture, install --carry, re-share, digest verify (owner: apps-hermes)
+- `3574f404` builder: REDS.md for 2e48af863c8e (6 red) (owner: build-loop)
 - `2e48af86` builder: REDS.md for 55d0721c587e (1 red) (owner: build-loop)
 - `78307b6d` WORLD-MIGRATION: app grains and their data are a carry gap, written as a row
 - `df78d18e` spk-host STOP: a committed claim arms its fence from Running; a dead drifted unit is fenceable (owner: apps-hermes)
