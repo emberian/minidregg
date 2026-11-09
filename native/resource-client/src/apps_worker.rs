@@ -111,7 +111,9 @@ pub(crate) enum Lifecycle {
 pub(crate) trait World {
     fn package(&self, package_id: &str) -> Result<Option<(PathBuf, String, u64)>>;
     fn want(&self, package_id: &str) -> Result<()>;
-    fn install(&self, work: &Path, source: &Path, receipt: &Path, spk: &Path, class: &str, delegation: &Path) -> Result<Installed>;
+    /// `carry`: a previous world's grain export and the exporting Store's completion key: the new
+    /// grain's /var starts as those exact bytes (`spk-host grain install --import`).
+    fn install(&self, work: &Path, source: &Path, receipt: &Path, spk: &Path, class: &str, delegation: &Path, carry: Option<(&Path, &str)>) -> Result<Installed>;
     fn start(&self, app: &str) -> Result<Lifecycle>;
     fn stop(&self, app: &str) -> Result<Lifecycle>;
     fn status(&self, app: &str) -> Result<Value>;
@@ -314,6 +316,8 @@ impl Worker {
                     grains.push(json!({
                         "grain":record["grain"],"owner":owner,"shared":owner != member,"appId":record["appId"],
                         "indexName":record["indexName"],"class":record["class"],"state":record["state"],
+                        "carriedFrom":record.get("carriedFrom").cloned().unwrap_or(Value::Null),
+                        "carriedImageSha256":record.get("carriedImageSha256").cloned().unwrap_or(Value::Null),
                         "origin":record["origin"],"routes":record.get("routes").and_then(Value::as_object).map(|r| r.keys().cloned().collect::<Vec<_>>()).unwrap_or_default(),
                     }));
                 }
@@ -736,13 +740,60 @@ impl Worker {
         if docs["birthReceipt"].get("type").and_then(Value::as_str) != Some("confirmed") {
             return Err(refused("birthRequired", "the application birth receipt is not confirmed"));
         }
+        let carry = match request.get("carry").filter(|c| !c.is_null()) {
+            None => Value::Null,
+            Some(grain) => self.carried(member, app_id, grain.as_str().unwrap_or(""), text(request, "requestId").unwrap_or(""))?,
+        };
+        let class = carry.get("class").and_then(Value::as_str).unwrap_or(class);
         Ok(json!({
             "protocol":WORKER_PROTOCOL,"requestId":text(request,"requestId").unwrap_or(""),"member":member,
             "appId":app_id,"packageId":package_id,"class":class,
             "indexName":request.get("indexName").cloned().unwrap_or(Value::Null),
             "indexVersion":request.get("indexVersion").cloned().unwrap_or(Value::Null),
-            "documents":docs,"phases":{},"receivedAt":now(),
+            "documents":docs,"phases":{},"receivedAt":now(),"carry":carry,
         }))
+    }
+
+    /// The carried grain `grain` (`carried/<grain>/`, placed by the operator's migration:
+    /// `carry.json` and the export it names) for `member`'s install of `app_id`. Only its owner
+    /// carries it, only into the same application, at its own class, and into one new grain: the
+    /// first request claims it (`claimed`) and any other request is refused.
+    fn carried(&self, member: &str, app_id: &str, grain: &str, request_id: &str) -> std::result::Result<Value, Value> {
+        if !crate::apps::valid_grain(grain) {
+            return Err(refused("carryRefused", format!("{grain:?} is not a grain id of the form a<app>")));
+        }
+        let dir = self.state.join("carried").join(grain);
+        let record = read_json(&dir.join("carry.json"))
+            .map_err(|_| refused("carryRefused", format!("no grain {grain} was carried from the previous world")))?;
+        let field = |k: &str| record.get(k).and_then(Value::as_str).unwrap_or("");
+        if field("protocol") != "mini-apps-carried-grain-v1" || field("grain") != grain {
+            return Err(refused("carryRefused", format!("the carry record of {grain} is not mini-apps-carried-grain-v1")));
+        }
+        if field("owner") != member {
+            return Err(refused("notOwner", format!("{grain} was carried for its owner, not for {member}")));
+        }
+        if field("appId") != app_id {
+            return Err(refused("carryRefused", format!("{grain} is a grain of {}, not of {app_id}", field("appId"))));
+        }
+        if !valid_class(field("class")) || field("class") == "auto" || !mini_sdk::hex::is_canonical_len(field("exporterKey"), 32) {
+            return Err(refused("carryRefused", format!("the carry record of {grain} names no class or exporter key")));
+        }
+        let manifest = read_json(&dir.join("export").join("manifest.json"))
+            .map_err(|_| refused("carryRefused", format!("the export of {grain} is missing")))?;
+        let image = manifest.pointer("/image/sha256").and_then(Value::as_str).unwrap_or("");
+        if !mini_sdk::hex::is_canonical_len(image, 32) {
+            return Err(refused("carryRefused", format!("the export of {grain} names no image digest")));
+        }
+        let claimed = dir.join("claimed");
+        match fs::read_to_string(&claimed) {
+            Ok(by) if by.trim() != request_id => {
+                return Err(refused("carryClaimed", format!("{grain} is already carried by request {}", by.trim())));
+            }
+            Ok(_) => {}
+            Err(_) => fs::write(&claimed, request_id).map_err(|e| undecided("stateUnavailable", e.to_string(), &format!("mini apps install --carry {grain}")))?,
+        }
+        Ok(json!({"grain":grain,"class":field("class"),"exporterKey":field("exporterKey"),"imageSha256":image,
+            "export":dir.join("export")}))
     }
 
     /// Run the next phases of a retained request; each retains its result
@@ -795,6 +846,7 @@ impl Worker {
                         }
                     }
                 }
+                let carry = retained["carry"].clone();
                 let class: String = match retained["class"].as_str().unwrap_or("auto") {
                     "auto" => {
                         let bytes = retained["phases"]["package"]["bytes"].as_u64().unwrap_or(0);
@@ -806,7 +858,9 @@ impl Worker {
                 let _ = write_json(&request_file(&self.state, &id), retained);
                 let install_res = {
                     let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
-                    self.world.install(&work, &source, &receipt, &spk, &class, &delegation)
+                    let export = carry.get("export").and_then(Value::as_str).map(PathBuf::from);
+                    let key = carry.get("exporterKey").and_then(Value::as_str).unwrap_or("");
+                    self.world.install(&work, &source, &receipt, &spk, &class, &delegation, export.as_deref().map(|e| (e, key)))
                 };
                 match install_res {
                     Ok(installed) => {
@@ -852,6 +906,8 @@ impl Worker {
             "packageId":package_id,"rawSha256":installed.raw_sha256,"appVersion":installed.app_version,
             "indexName":retained["indexName"],"class":retained["class"],"origin":origin,"requestId":id,
             "state":"running","routes":{},"createdAt":now(),
+            "carriedFrom":retained["carry"].get("grain").cloned().unwrap_or(Value::Null),
+            "carriedImageSha256":retained["carry"].get("imageSha256").cloned().unwrap_or(Value::Null),
         }));
         if record.pointer(&format!("/routes/{member}")).is_none() {
             if let Err(e) = prepare_route_work(&self.state, &grain, &record, &work) {
@@ -1816,9 +1872,13 @@ impl World for ProcessWorld {
     fn want(&self, package_id: &str) -> Result<()> {
         fs::write(self.wanted.join(package_id), b"").map_err(|e| format!("cannot flag {package_id} as wanted: {e}"))
     }
-    fn install(&self, work: &Path, source: &Path, receipt: &Path, spk: &Path, class: &str, delegation: &Path) -> Result<Installed> {
+    fn install(&self, work: &Path, source: &Path, receipt: &Path, spk: &Path, class: &str, delegation: &Path, carry: Option<(&Path, &str)>) -> Result<Installed> {
         let [p, s, r, k, d] = [self.profile.to_str().unwrap_or(""), source.to_str().unwrap_or(""), receipt.to_str().unwrap_or(""), spk.to_str().unwrap_or(""), delegation.to_str().unwrap_or("")];
-        let out = self.run(&self.spk_host, &["grain", "install", p, s, r, k, "--class", class, "--management-selector", d], &work.join("install.stdout"))?;
+        let mut args = vec!["grain", "install", p, s, r, k, "--class", class, "--management-selector", d];
+        if let Some((export, key)) = carry {
+            args.extend(["--import", export.to_str().unwrap_or(""), "--exporter-key", key]);
+        }
+        let out = self.run(&self.spk_host, &args, &work.join("install.stdout"))?;
         let delegation_doc = read_json(delegation)?;
         let app = delegation_doc.pointer("/selector/app").and_then(Value::as_str).ok_or("delegation lacks selector.app")?.to_owned();
         Ok(Installed {
@@ -2192,6 +2252,8 @@ mod tests {
         /// How long `install` takes, and whether one is running now.
         install_delay: StdMutex<Duration>,
         installing: std::sync::atomic::AtomicBool,
+        /// The export and exporter key the last install carried.
+        carried: StdMutex<Option<(PathBuf, String)>>,
     }
 
     impl World for FakeWorld {
@@ -2201,8 +2263,9 @@ mod tests {
             Ok(Some((path, format!("{package_id}{}", "0".repeat(32)), 1000)))
         }
         fn want(&self, package_id: &str) -> Result<()> { self.wanted.lock().unwrap().push(package_id.into()); Ok(()) }
-        fn install(&self, _: &Path, source: &Path, receipt: &Path, _: &Path, class: &str, delegation: &Path) -> Result<Installed> {
+        fn install(&self, _: &Path, source: &Path, receipt: &Path, _: &Path, class: &str, delegation: &Path, carry: Option<(&Path, &str)>) -> Result<Installed> {
             *self.installs.lock().unwrap() += 1;
+            *self.carried.lock().unwrap() = carry.map(|(e, k)| (e.to_path_buf(), k.to_owned()));
             self.installing.store(true, std::sync::atomic::Ordering::SeqCst);
             std::thread::sleep(*self.install_delay.lock().unwrap());
             self.installing.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -2271,7 +2334,7 @@ mod tests {
         let root = scratch(name);
         let quarantine = root.join("quarantine");
         fs::create_dir_all(&quarantine).unwrap();
-        let world = FakeWorld { quarantine: quarantine.clone(), wanted: StdMutex::new(vec![]), installs: StdMutex::new(0), stops: StdMutex::new(0), routes: StdMutex::new(vec![]), stop_undecided: StdMutex::new(false), identities: StdMutex::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: StdMutex::new(vec![]), route_dir: root.join("routes"), enrolled: StdMutex::new(vec![]), generation: StdMutex::new(2), install_delay: StdMutex::new(install_delay), installing: Default::default() };
+        let world = FakeWorld { quarantine: quarantine.clone(), wanted: StdMutex::new(vec![]), installs: StdMutex::new(0), stops: StdMutex::new(0), routes: StdMutex::new(vec![]), stop_undecided: StdMutex::new(false), identities: StdMutex::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: StdMutex::new(vec![]), route_dir: root.join("routes"), enrolled: StdMutex::new(vec![]), generation: StdMutex::new(2), install_delay: StdMutex::new(install_delay), installing: Default::default(), carried: StdMutex::new(None) };
         let mut w = Worker::open(root.join("state"), Box::new(world)).unwrap();
         w.install_grace = grace;
         (Arc::new(w), root)
@@ -2313,6 +2376,39 @@ mod tests {
         assert_eq!(renew(&w)["refused"], "notRunning");
         // Another member cannot renew the owner's grain.
         assert_eq!(w.handle("bob", &json!({"protocol":WORKER_PROTOCOL,"verb":"renew","grain":"a4501"}))["refused"], "notOwner");
+    }
+
+    /// A grain carried from the previous world (world-migrate) is installed only by its owner,
+    /// only as the same app, at its own class, once, and from its export; the new grain's
+    /// record names what it carried (world-migrate verify compares the image digest).
+    #[test]
+    fn apps_worker_install_carries_a_previous_worlds_grain_for_its_owner_once() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker("carry");
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        let carried = root.join("state").join("carried").join("a9001");
+        fs::create_dir_all(carried.join("export")).unwrap();
+        let image = "e".repeat(64);
+        fs::write(carried.join("export").join("manifest.json"), json!({"protocol":"mini-spk-grain-export-v1","image":{"file":"var.ext4","sha256":image}}).to_string()).unwrap();
+        let key = "d".repeat(64);
+        fs::write(carried.join("carry.json"), json!({"protocol":"mini-apps-carried-grain-v1","grain":"a9001","owner":"alice","appId":APP,"class":"S","exporterKey":key}).to_string()).unwrap();
+        let with_carry = |id: &str, grain: &str| { let mut r = install_request(id); r["carry"] = json!(grain); r };
+        // Not the owner, an unknown grain: refused by name, nothing installed.
+        assert_eq!(w.handle("bob", &with_carry(&"1".repeat(32), "a9001"))["refused"], "notOwner");
+        assert_eq!(w.handle("alice", &with_carry(&"2".repeat(32), "a9002"))["refused"], "carryRefused");
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 0);
+        let first = "3".repeat(32);
+        let done = w.handle("alice", &with_carry(&first, "a9001"));
+        assert_eq!(done["state"], "running", "{done}");
+        assert_eq!(fake(&w).carried.lock().unwrap().clone(), Some((carried.join("export"), key)));
+        let listed = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"list"}));
+        assert_eq!(listed["receipt"]["grains"][0]["carriedFrom"], "a9001", "{listed}");
+        assert_eq!(listed["receipt"]["grains"][0]["carriedImageSha256"], image);
+        // One carry, one grain: another request is refused, the first one's retry is not.
+        assert_eq!(w.handle("alice", &with_carry(&"4".repeat(32), "a9001"))["refused"], "carryClaimed");
+        // A plain install carries nothing.
+        let _ = w.handle("alice", &install_request(&"5".repeat(32)));
+        assert_eq!(fake(&w).carried.lock().unwrap().clone(), None);
     }
 
     #[test]

@@ -11,8 +11,16 @@ inputs mini-reenroll reads (carry.json). It never touches a Store file or a Host
                                  overwrite the old world's capture with the new one) and DIR/carry.json, which
                                  mini-reenroll reads (MINI_REENROLL_CARRY): each hosted member's subject, public
                                  key and balance
+                                 It then STOPs and exports every grain a member owns (`apps stop`, `apps export`
+                                 as its owner: the stopped /var, bound to its STOP receipt and signed by the old
+                                 Store's completion custodian) into DIR/grains/GRAIN/ (export/ and carry.json),
+                                 and names each export's image digest in before.json
   world-migrate init DIR         after mini-reenroll: `init` for every member who had a workspace (before the seed
                                  and the door's pass, which need one)
+  world-migrate grains DIR       after the new world's grain-world, BEFORE the seed: each captured grain installed
+                                 again by its owner from its export (`apps install APP --carry GRAIN`: the worker
+                                 finds it in /var/lib/mini-apps/carried/GRAIN/, placed here), then shared again with
+                                 every member it was shared with. The seed leaves a carried grain's /var alone.
   world-migrate replay DIR       after the new genesis and the walk's members/reenroll/pay/hermes/seed/door steps:
                                  capture the new world, diff it against before.json, and re-author what is missing
                                  as its original author, in the old world's order (room joins, messages, cells,
@@ -20,7 +28,9 @@ inputs mini-reenroll reads (carry.json). It never touches a Store file or a Host
                                  difference to the old balance). Idempotent and resumable: every pass works from
                                  a fresh diff; DIR/journal.jsonl records each action taken.
   world-migrate verify DIR       capture the new world again (DIR/after.json) and print every difference beyond
-                                 hashes, heights and ids (DIR/verify.txt). Exit 0 iff nothing else differs.
+                                 hashes, heights and ids (DIR/verify.txt). Exit 0 iff nothing else differs. A grain
+                                 carries when the new world has one carried from it, of the same owner, app and
+                                 class, shared with the same members, whose imported image is the export's digest.
   world-migrate diff A.json B.json   the same comparison between two captures.
 
 Environment (the defaults are the box's):
@@ -45,6 +55,7 @@ STORE_USER = os.environ.get("MIGRATE_STORE_USER", "mini-core")
 MEMBER_USER = os.environ.get("MIGRATE_MEMBER_USER", "")
 MEMBER_GROUP = os.environ.get("MIGRATE_MEMBER_GROUP", "mini-sessions")
 TIMEOUT = int(os.environ.get("MIGRATE_LINE_TIMEOUT", "600"))
+APPS_STATE = os.environ.get("MIGRATE_APPS_STATE", "/var/lib/mini-apps")
 LOG = None
 
 
@@ -242,7 +253,106 @@ def capture_member(name):
                                              if e.get("key", {}).get("type") == "object"}}
     if current_room:
         member(name, f"chat enter {current_room}", check=False)
+    m["grains"] = capture_grains(name)
     return m
+
+
+def capture_grains(name):
+    """The grains NAME owns, from the worker's own list (`apps list`): app, class, the members it is shared with,
+    and what it was carried from."""
+    rc, out, err = member(name, "apps list --json", check=False)
+    listed = next((o for o in objects(out) if isinstance(o.get("receipt"), dict) and "grains" in o["receipt"]), None)
+    if listed is None:
+        return {"error": tail(err or out)} if rc != 0 else {}
+    grains = {}
+    for g in listed["receipt"]["grains"]:
+        if g.get("owner") != name or g.get("state") == "deleted":
+            continue
+        grains[g["grain"]] = {"appId": g.get("appId"), "indexName": g.get("indexName"), "class": g.get("class"),
+                              "shares": sorted(r for r in g.get("routes", []) if r != name),
+                              "carriedFrom": g.get("carriedFrom"), "carriedImageSha256": g.get("carriedImageSha256")}
+    return grains
+
+
+def export_grains(d, world):
+    """At capture, while the old world serves: each owned grain STOPped and exported by its owner, the export copied
+    into DIR/grains/GRAIN/ with carry.json (owner, app, class, the old Store's completion key). Re-runnable: an export
+    already copied is kept; the worker keeps its own export too."""
+    key = json.load(open(CONFIG)).get("completionCustodianKey")
+    if not (isinstance(key, str) and re.fullmatch(r"[0-9a-f]{64}", key)):
+        raise SystemExit("capture: REFUSED: the pinned config names no completionCustodianKey (the exports' signer)")
+    for n, m in sorted(world["members"].items()):
+        for g, info in sorted((m.get("grains") or {}).items()):
+            if g == "error":
+                continue
+            dst = pathlib.Path(d, "grains", g)
+            if not (dst / "export/manifest.sig").is_file():
+                member(n, f"apps stop {g} --json", check=False)
+                rc, out, err = member(n, f"apps export {g} carried-{g} --json", check=False)  # FILE: the worker keeps its own copy (exports/GRAIN)
+                o = next((x for x in objects(out) if isinstance(x.get("receipt"), dict) and x["receipt"].get("export")), None)
+                if o is None:
+                    info["exportError"] = tail(err or out)
+                    log(f"capture: grain {g} ({n}): export refused: {info['exportError']}")
+                    continue
+                src = pathlib.Path(o["receipt"]["export"])
+                os.makedirs(dst, mode=0o700, exist_ok=True)
+                tmp = dst / "export.part"
+                subprocess.run(["rm", "-rf", "--", str(tmp)], check=True)
+                subprocess.run(["cp", "-a", "--", str(src), str(tmp)], check=True)
+                os.replace(tmp, dst / "export")
+                json.dump({"protocol": "mini-apps-carried-grain-v1", "grain": g, "owner": n, "appId": info["appId"],
+                           "indexName": info.get("indexName"), "class": info["class"], "exporterKey": key,
+                           "fromPinnedConfigSha256": world["pinnedConfigSha256"]},
+                          open(dst / "carry.json", "w"), indent=1, sort_keys=True)
+            info["imageSha256"] = json.load(open(dst / "export/manifest.json"))["image"]["sha256"]
+            log(f"capture: grain {g} ({n}, {info.get('indexName')}): exported, image {info['imageSha256'][:16]}")
+
+
+def carry_grains(d):
+    """The new world: each captured grain installed again by its owner from its export, then shared again."""
+    before = json.load(open(f"{d}/before.json"))
+    journal, problems = Journal(f"{d}/journal.jsonl"), []
+    for n, m in sorted(before["members"].items()):
+        for g, info in sorted((m.get("grains") or {}).items()):
+            if g == "error" or not info.get("imageSha256"):
+                problems.append(f"grain {g} ({n}): no export to carry ({info.get('exportError') if isinstance(info, dict) else info})")
+                continue
+            now = capture_grains(n)
+            new = next((h for h, x in now.items() if h != "error" and x.get("carriedFrom") == g), None)
+            if new is None:
+                staged = pathlib.Path(APPS_STATE, "carried", g)
+                if not (staged / "carry.json").is_file():
+                    tmp = pathlib.Path(APPS_STATE, "carried", f".{g}.part")
+                    os.makedirs(tmp.parent, mode=0o700, exist_ok=True)
+                    subprocess.run(["rm", "-rf", "--", str(tmp)], check=True)
+                    subprocess.run(["cp", "-a", "--", f"{d}/grains/{g}", str(tmp)], check=True)
+                    subprocess.run(["chown", "-R", f"{STORE_USER}:{STORE_USER}", str(tmp.parent)], check=True)
+                    subprocess.run(["chmod", "-R", "go-rwx", str(tmp)], check=True)
+                    os.replace(tmp, staged)
+                rc, out, err = member(n, f"apps install {info['appId']} --class {info['class']} --carry {g}", check=False)
+                req = re.search(r"request ([0-9a-f]{32})", out + err)
+                tries = 0
+                while rc != 0 and req and "undecided" in (out + err) and tries < 120:
+                    time.sleep(3); tries += 1
+                    rc, out, err = member(n, f"apps retry {req.group(1)}", check=False)
+                journal.record(f"grain-install {g}", member=n, rc=rc, detail=tail(err or out, 1))
+                now = capture_grains(n)
+                new = next((h for h, x in now.items() if h != "error" and x.get("carriedFrom") == g), None)
+                if new is None:
+                    problems.append(f"grain {g} ({n}): install --carry left no carried grain: {tail(err or out)}")
+                    continue
+                log(f"grains: {g} ({n}) carried as {new}")
+            for s in info.get("shares", []):
+                if s in now[new].get("shares", []):
+                    continue
+                rc, out, err = member(n, f"apps share {new} {s} --json", check=False)
+                journal.record(f"grain-share {new} {s}", member=n, rc=rc, detail=tail(err or out, 1))
+                if rc != 0:
+                    problems.append(f"grain {new} ({n}): share with {s}: {tail(err or out)}")
+    json.dump(problems, open(f"{d}/grain-problems.json", "w"), indent=1)
+    for p in problems:
+        log("grains: LEFT " + p)
+    return problems
 
 
 def capture(path):
@@ -392,6 +502,18 @@ def diff(a, b):
             cb = mb.get("cells", {}).get(c)
             if cb is None or ca["entries"] != cb["entries"]:
                 out.append(("cell", n, c, ca["entries"], None if cb is None else cb["entries"]))
+        # a grain carries as the new world's grain carried from it: same app, class and shares, and the image it
+        # imported is the export's (before.json imageSha256). A grain made in the new world is not a carry.
+        ga, gb = ma.get("grains") or {}, mb.get("grains") or {}
+        for g, x in sorted(ga.items()):
+            if g == "error":
+                continue
+            want = {"appId": x.get("appId"), "class": x.get("class"), "shares": x.get("shares"), "image": x.get("imageSha256")}
+            y = next((v for h, v in gb.items() if h != "error" and v.get("carriedFrom") == g), None)
+            got = None if y is None else {"appId": y.get("appId"), "class": y.get("class"), "shares": y.get("shares"),
+                                          "image": y.get("carriedImageSha256")}
+            if got != want:
+                out.append(("grain", n, f"{x.get('indexName')} {g}", want, got))
     for n in sorted(set(b["members"]) - set(a["members"])):
         out.append(("member", n, "present", False, True))
     roa, rob = rooms_of(a, na), rooms_of(b, nb)
@@ -445,7 +567,7 @@ def failing(items):
     """The differences the migration must not leave: anything a non-seed member owns that the new world lost or
     changed (an addition, `before` None, is not a loss), beyond ids; and for every member, the key and the balance."""
     return [i for i in items if i[0] != "id" and not seed_gain(i)
-            and (i[0] in ("key", "balance", "member") or (i[1] not in SEED and i[3] is not None))]
+            and (i[0] in ("key", "balance", "member", "grain") or (i[1] not in SEED and i[3] is not None))]
 
 
 def seed_gain(i):
@@ -743,6 +865,9 @@ def main():
         if os.path.exists(f"{d}/before.json"):
             raise SystemExit(f"capture: REFUSED: {d}/before.json exists (the old world's capture is never overwritten)")
         w = capture(f"{d}/before.json")
+        export_grains(d, w)
+        json.dump(w, open(f"{d}/before.json.part", "w"), indent=1, sort_keys=True)
+        os.replace(f"{d}/before.json.part", f"{d}/before.json")
         carry = {"type": "mini-world-carry-v1", "fromPinnedConfigSha256": w["pinnedConfigSha256"], "fromHostSha256": w["hostSha256"],
                  "members": {n: {"subject": m.get("subject"), "publicKey": m.get("publicKey"), "balance": m.get("balance")}
                              for n, m in w["members"].items() if m.get("publicKey") and m.get("subject")}}
@@ -754,6 +879,10 @@ def main():
         init_members(before, Journal(f"{d}/journal.jsonl"), problems)
         for p in problems:
             log("init: LEFT " + p)
+    elif verb == "grains":
+        p = carry_grains(d)
+        log(f"grains: done, {len(p)} item(s) left (grain-problems.json)")
+        sys.exit(0 if not p else 1)
     elif verb == "replay":
         p = replay(d)
         log(f"replay: done, {len(p)} item(s) left (problems.json)")

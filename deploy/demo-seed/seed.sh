@@ -347,6 +347,13 @@ web() { # GRAIN METHOD PATH [curl args]
   local g=$1 mth=$2 p=$3 host=${ORIGIN#https://}; host=${host#http://}; shift 3
   curl -sS --max-time 900 -H "Host: $host" -H "Origin: $ORIGIN" -H "Cookie: $(cat "/var/tmp/mini-seed-cookie-$g" 2>/dev/null)" -X "$mth" -o "$T/body" -w '%{http_code}' "$@" "$APPS_FRONT$p"
 }
+# carried_ GRAIN: the grain world-migrate carried from the previous world (apps list: carriedFrom); its
+# /var is the old world's, members' writes included, so the seed never writes over it. Sets CARRIED.
+carried_() {
+  as "$BOX" "apps list --json" || return 1
+  CARRIED=$(jq -r --arg g "$1" '[.. | objects | select(.grain? == $g)][0].carriedFrom // empty' <<<"$OUT")
+  [ -n "$CARRIED" ]
+}
 install_app() { # NAME -> GRAIN in $G
   G=$(grain_of "$1")
   if [ -n "$G" ]; then skip_ "app $1 already installed as $G"; return 0; fi
@@ -365,6 +372,8 @@ DECK_URL=
 if install_app EtherCalc; then
   if [ -f "/var/tmp/mini-seed-app-done-$G" ]; then
     skip_ "EtherCalc sheet lobby-tally already written"
+  elif carried_ "$G"; then
+    skip_ "EtherCalc sheet lobby-tally: $G is carried from $CARRIED (the old world's /var), not re-seeded"
   elif open_grain "$G"; then
     c=$(web "$G" PUT /_/lobby-tally -H 'Content-Type: text/csv' --data-binary @"$D/apps/calc.csv")
     case $c in 20*) touch "/var/tmp/mini-seed-app-done-$G"; ok_ "EtherCalc sheet lobby-tally written ($c)";; *) fail_ "EtherCalc write: HTTP $c";; esac
@@ -373,6 +382,8 @@ fi
 if install_app Etherpad; then
   if [ -f "/var/tmp/mini-seed-app-done-$G" ]; then
     skip_ "Etherpad pad welcome already imported"
+  elif carried_ "$G"; then
+    skip_ "Etherpad pad welcome: $G is carried from $CARRIED (the old world's /var), not re-seeded"
   elif open_grain "$G"; then
     c=$(web "$G" POST /p/welcome/import -F "file=@$D/apps/pad-welcome.txt;filename=welcome.txt;type=text/plain")
     if [ "$c" = 200 ] && jq -e '.code == 0' "$T/body" >/dev/null 2>&1; then
@@ -387,6 +398,8 @@ if install_app "$DECK_APP"; then
   if [ -f "/var/tmp/mini-seed-app-done-$G" ] && compgen -G "/var/lib/mini-spk-worlds/*/vars/*-${G#a}/www/deck.md" >/dev/null; then
     DECK_URL=$(cat "/var/tmp/mini-seed-app-done-$G")
     skip_ "reveal.js deck already published at $DECK_URL"
+  elif carried_ "$G"; then
+    skip_ "reveal.js deck: $G is carried from $CARRIED (the old world's /var), not re-seeded"
   elif open_grain "$G"; then
     www=$(sed -E 's#^(https?://[^./]+)\.#\1-www.#' <<<"$ORIGIN")
     c=$(web "$G" PUT /deck.md -H 'Content-Type: text/markdown' --data-binary @"$D/apps/slides/slides.md")
