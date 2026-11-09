@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `a0ca6d00234a` (WORLD-MIGRATION: the grain carry with a share made again, walked on demo-dry). Round finished 2026-11-09T05:36Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-a0ca6d00`.
+Tip: `eb3aa769c844` (apps: `apps unshare GRAIN MEMBER` withdraws a member's route; an undecided delete is never). Round finished 2026-11-09T06:09Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-eb3aa769`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,12 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..a0ca6d00234a`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..eb3aa769c844`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `eb3aa769` apps: `apps unshare GRAIN MEMBER` withdraws a member's route; an undecided delete is never raced by  (owner: apps-hermes)
+- `8b54c006` spk-host STOP: a sent completion Mini holds no receipt for is replaced once its signatures' window h (owner: apps-hermes)
+- `bc2b3bd2` builder: REDS.md for a0ca6d00234a (6 red) (owner: build-loop)
 - `a0ca6d00` WORLD-MIGRATION: the grain carry with a share made again, walked on demo-dry
 - `92131ca3` builder: REDS.md for 0fd9d0d920c5 (6 red) (owner: build-loop)
 - `0fd9d0d9` world-migrate grains: a share that bound its route but could not yet enroll is settled by its exact 
