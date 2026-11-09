@@ -1051,27 +1051,52 @@ pub fn codec_service_hello(image_sha256: &[u8; 32], settings_bytes: &[u8]) -> Ve
 /// who may connect. Runs until the child ends.
 pub fn serve_codec_service(listener: std::os::unix::net::UnixListener, executable: PathBuf, settings: PathBuf,
     image_sha256: [u8; 32]) -> Result<()> {
-    use std::sync::{atomic::AtomicBool, Arc};
+    use std::os::unix::io::AsRawFd;
+    use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc};
     let settings_bytes = settings_bytes(&settings)?;
     let hello = codec_service_hello(&image_sha256, &settings_bytes);
+    let serving = binding(&executable, &settings_bytes)?;
+    let started = fs::metadata(&executable).map_err(|e| format!("{}: {e}", executable.display()))?;
+    let (executable_path, settings_path) = (executable.clone(), settings.clone());
     let session = Session::spawn(executable, &settings, settings_bytes, "codec", "shared codec Host")?;
     let shared = Arc::new(Mutex::new(Resident { session, ended: false }));
     let last = Arc::new(Mutex::new(std::time::Instant::now()));
     let ended = Arc::new(AtomicBool::new(false));
-    listener.set_nonblocking(false).map_err(|e| e.to_string())?;
-    for stream in listener.incoming() {
-        if ended.load(std::sync::atomic::Ordering::Acquire) {
+    let active = Arc::new(AtomicUsize::new(0));
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let mut looked = std::time::Instant::now();
+    loop {
+        if ended.load(Ordering::Acquire) {
             return Err("the shared codec Host ended".into());
         }
-        let Ok(mut stream) = stream else { continue };
-        let (shared, last, ended, hello) = (shared.clone(), last.clone(), ended.clone(), hello.clone());
-        std::thread::spawn(move || {
-            if stream.write_all(&hello).is_ok() {
-                serve_connection_from(ResidentKind::Codec, stream, &shared, &last, &ended, true);
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_nonblocking(false);
+                active.fetch_add(1, Ordering::AcqRel);
+                let (shared, last, ended, hello, active) = (shared.clone(), last.clone(), ended.clone(), hello.clone(), active.clone());
+                std::thread::spawn(move || {
+                    if stream.write_all(&hello).is_ok() {
+                        serve_connection_from(ResidentKind::Codec, stream, &shared, &last, &ended, true);
+                    }
+                    active.fetch_sub(1, Ordering::AcqRel);
+                });
             }
-        });
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                // A ship repoints the Host path, a re-genesis rewrites the settings: this greeting
+                // would then refuse every client, so the service ends between frames and its unit
+                // starts it again under the new pins (Restart=always), as a resident does.
+                if looked.elapsed() >= std::time::Duration::from_secs(1) {
+                    looked = std::time::Instant::now();
+                    if active.load(Ordering::Acquire) == 0 && superseded(&executable_path, &started, &settings_path, &serving) {
+                        return Ok(());
+                    }
+                }
+                let mut pfd = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+                unsafe { libc::poll(&mut pfd, 1, 250) };
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
     }
-    Ok(())
 }
 
 /// A session with the box's shared codec Host at `socket`: the listener must be `peer_uid`'s (the
@@ -1588,6 +1613,90 @@ mod tests {
         let settings_other = codec_service_hello(&image, b"{\"x\":1}");
         assert!(connect_codec_service(&socket, me, &settings_other, host.clone(), b"{}".to_vec()).is_err(), "other settings refuse");
         assert!(connect_codec_service(&socket, me + 1, &expected, host.clone(), b"{}".to_vec()).is_err(), "another listener owner refuses");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The shared codec Host ends between frames once its pins are superseded (a re-genesis rewrote
+    /// the settings), so its unit starts it again under the new ones instead of greeting every client
+    /// with pins they refuse.
+    #[test]
+    fn shared_codec_service_ends_when_its_settings_are_superseded() {
+        let dir = PathBuf::from(format!("/tmp/mcy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let host = crate::local::fake::codec_stub(&dir);
+        fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
+        let settings = dir.join("settings.json");
+        fs::write(&settings, b"{}").unwrap();
+        let socket = dir.join("codec.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let image = [7u8; 32];
+        let (h, s) = (host.clone(), settings.clone());
+        let service = std::thread::spawn(move || serve_codec_service(listener, h, s, image));
+        let me = unsafe { libc::geteuid() };
+        let mut session = connect_codec_service(&socket, me, &codec_service_hello(&image, b"{}"), host.clone(), b"{}".to_vec()).unwrap();
+        assert_eq!(round_trip(&mut session, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
+        drop(session);
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        assert!(!service.is_finished(), "current pins: it keeps serving");
+        fs::write(&settings, b"{\"genesis\":2}").unwrap();
+        for _ in 0..60 {
+            if service.is_finished() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(service.is_finished(), "superseded settings end the service");
+        service.join().unwrap().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A resident the box's unit holds waits out a resident some client started for the same
+    /// binding, then serves the binding itself; a client-started one leaves at once instead.
+    #[test]
+    fn an_owned_resident_waits_for_the_holder_and_then_serves() {
+        let dir = PathBuf::from(format!("/tmp/mco-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let host = crate::local::fake::codec_stub(&dir);
+        fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
+        let settings = dir.join("settings.json");
+        fs::write(&settings, b"{}").unwrap();
+        let anchors = dir.join("anchors");
+        fs::create_dir(&anchors).unwrap();
+        fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
+        let binding = binding(&host, b"{}").unwrap();
+        let (socket, _socket_directory) = resident_socket(ResidentKind::Codec, &anchors, &binding).unwrap();
+        // The stray holder: a client-started resident's lock.
+        let lock_path = resident_file(ResidentKind::Codec, &anchors, &binding, "lock");
+        let lock = fs::OpenOptions::new().create(true).read(true).write(true).open(&lock_path).unwrap();
+        assert_eq!(unsafe { libc::flock(std::os::unix::io::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        let (a, h, s) = (anchors.clone(), host.clone(), settings.clone());
+        assert!(serve_resident_kind(ResidentKind::Codec, &a, h.clone(), s.clone(), None).is_ok(), "a client-started one leaves at once");
+        let owned = std::thread::spawn(move || serve_resident_owned(ResidentKind::Codec, &a, h, s, None));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(!owned.is_finished() && !socket.exists(), "it waits while the binding is held");
+        drop(lock);
+        let mut session = (|| {
+            for _ in 0..2000 {
+                if let Ok(stream) = resident_stream(&socket) {
+                    let input = stream.try_clone().unwrap();
+                    return Session::over(Box::new(input), Box::new(stream), host.clone(), b"{}".to_vec());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("the owned resident never listened");
+        })();
+        assert_eq!(round_trip(&mut session, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
+        drop(session);
+        fs::write(&settings, b"{\"moved\":1}").unwrap();
+        for _ in 0..60 {
+            if owned.is_finished() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        owned.join().unwrap().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
