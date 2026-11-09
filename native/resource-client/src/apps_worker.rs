@@ -167,6 +167,16 @@ fn grain_file(state: &Path, grain: &str) -> PathBuf {
     state.join("grains").join(format!("{grain}.json"))
 }
 
+/// The generation of the latest begun run when that run is stopped (spk-host `grain status`'s
+/// `runs[]`, the run `grain export` exports); `None` while it runs or is uncertain.
+fn latest_stopped_generation(status: &Value) -> Option<String> {
+    let runs = status.get("runs")?.as_array()?;
+    let latest = runs.iter()
+        .filter(|run| run.get("state").and_then(Value::as_str) != Some("never-begun"))
+        .max_by_key(|run| run.get("generation").and_then(Value::as_str).and_then(|g| g.parse::<u64>().ok()).unwrap_or(0))?;
+    (latest.get("state")?.as_str()? == "stopped").then(|| latest.get("generation")?.as_str().map(str::to_owned)).flatten()
+}
+
 fn refused(name: &str, detail: impl Into<String>) -> Value {
     json!({"protocol":WORKER_PROTOCOL,"decided":true,"refused":name,"state":"refused","detail":detail.into()})
 }
@@ -546,8 +556,26 @@ impl Worker {
     fn export(&self, grain: &str, record: Value) -> Value {
         let app = record["app"].as_str().unwrap_or("").to_owned();
         let out = self.state.join("exports").join(grain);
+        // A retained export answers only for the STOP that fenced it: the latest begun run must be
+        // stopped at the generation its manifest names. Otherwise it is moved aside and exported afresh.
+        let latest_stopped = match self.world.status(&app) {
+            Ok(status) => latest_stopped_generation(&status),
+            Err(error) => return undecided("statusUnavailable", error, &format!("mini apps export --grain {grain}")),
+        };
         if out.join("manifest.sig").exists() {
-            return performed("exported", format!("{grain} export retained"), json!({"grain":grain,"export":out,"files":["var.ext4","manifest.json","manifest.sig"]}));
+            let retained = read_json(&out.join("manifest.json")).ok()
+                .and_then(|m| m.get("stopGeneration").and_then(Value::as_str).map(str::to_owned));
+            if retained.is_some() && retained == latest_stopped {
+                return performed("exported", format!("{grain} export retained (generation {})", retained.unwrap_or_default()),
+                    json!({"grain":grain,"export":out,"files":["var.ext4","manifest.json","manifest.sig"]}));
+            }
+            let aside = self.state.join("exports").join(format!("{grain}.stale-{}", retained.as_deref().unwrap_or("unknown")));
+            if aside.exists() {
+                return refused("exportRefused", format!("the stale export {} must move to {}, which already exists", out.display(), aside.display()));
+            }
+            if let Err(e) = fs::rename(&out, &aside) {
+                return undecided("stateUnavailable", format!("move the stale export aside to {}: {e}", aside.display()), &format!("mini apps export --grain {grain}"));
+            }
         }
         match self.world.export(&app, &out) {
             Ok(()) => performed("exported", format!("{grain} exported (the stopped app's /var, its manifest and the Store's completion signature)"), json!({"grain":grain,"export":out,"files":["var.ext4","manifest.json","manifest.sig"]})),
@@ -790,10 +818,27 @@ impl Worker {
                 return Err(refused("carryClaimed", format!("{grain} is already carried by request {}", by.trim())));
             }
             Ok(_) => {}
-            Err(_) => fs::write(&claimed, request_id).map_err(|e| undecided("stateUnavailable", e.to_string(), &format!("mini apps install --carry {grain}")))?,
+            Err(_) => {
+                // A member's install of an application it already holds reuses that application's birth,
+                // which spk-host refuses as a changed instance record: a carry lands only in a new grain,
+                // so it is refused here, before the claim, rather than by an install that cannot complete.
+                if let Some(held) = self.held_grain(member, app_id) {
+                    return Err(refused("carryRefused", format!("{member} already holds {held}, a grain of {app_id}; {grain} carries only into an owner who holds none of that application")));
+                }
+                fs::write(&claimed, request_id).map_err(|e| undecided("stateUnavailable", e.to_string(), &format!("mini apps install --carry {grain}")))?
+            }
         }
         Ok(json!({"grain":grain,"class":field("class"),"exporterKey":field("exporterKey"),"imageSha256":image,
             "export":dir.join("export")}))
+    }
+
+    /// A grain of `app_id` that `member` owns (in any state: a deleted grain keeps its instance record).
+    fn held_grain(&self, member: &str, app_id: &str) -> Option<String> {
+        let entries = fs::read_dir(self.state.join("grains")).ok()?;
+        entries.flatten().filter_map(|entry| read_json(&entry.path()).ok()).find_map(|record| {
+            (record.get("owner").and_then(Value::as_str) == Some(member) && record.get("appId").and_then(Value::as_str) == Some(app_id))
+                .then(|| record.get("grain").and_then(Value::as_str).unwrap_or("?").to_owned())
+        })
     }
 
     /// Run the next phases of a retained request; each retains its result
@@ -2254,6 +2299,8 @@ mod tests {
         installing: std::sync::atomic::AtomicBool,
         /// The export and exporter key the last install carried.
         carried: StdMutex<Option<(PathBuf, String)>>,
+        /// The latest run's state as `status` reports it: START makes it running, a decided STOP stopped.
+        run_state: StdMutex<&'static str>,
     }
 
     impl World for FakeWorld {
@@ -2273,12 +2320,16 @@ mod tests {
             assert_eq!(class, "S");
             Ok(Installed { app: "4501".into(), raw_sha256: "ab".repeat(32), signed_app_id: "7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh".into(), app_version: "5".into() })
         }
-        fn start(&self, _: &str) -> Result<Lifecycle> { Ok(Lifecycle::Done) }
+        fn start(&self, _: &str) -> Result<Lifecycle> { *self.run_state.lock().unwrap() = "running"; Ok(Lifecycle::Done) }
         fn stop(&self, _: &str) -> Result<Lifecycle> {
             *self.stops.lock().unwrap() += 1;
-            if *self.stop_undecided.lock().unwrap() { Ok(Lifecycle::Undecided("STOP in progress".into())) } else { Ok(Lifecycle::Done) }
+            if *self.stop_undecided.lock().unwrap() { return Ok(Lifecycle::Undecided("STOP in progress".into())); }
+            *self.run_state.lock().unwrap() = "stopped";
+            Ok(Lifecycle::Done)
         }
-        fn status(&self, _: &str) -> Result<Value> { Ok(json!({"runs":[{"generation":"2","state":"running"}]})) }
+        fn status(&self, _: &str) -> Result<Value> {
+            Ok(json!({"runs":[{"generation":"1","state":"stopped"},{"generation":self.generation.lock().unwrap().to_string(),"state":*self.run_state.lock().unwrap()}]}))
+        }
         fn route(&self, _: &Path, _: &str, member: &str, host: &str) -> Result<RouteBound> {
             self.routes.lock().unwrap().push(format!("{member}@{host}"));
             let dir = self.route_dir.join(member);
@@ -2294,7 +2345,13 @@ mod tests {
             done.push((member.to_owned(), generation.clone()));
             Ok(Enrolled::Renewed(generation))
         }
-        fn export(&self, _: &str, out: &Path) -> Result<()> { fs::create_dir_all(out).unwrap(); fs::write(out.join("manifest.sig"), b"sig").unwrap(); Ok(()) }
+        fn export(&self, _: &str, out: &Path) -> Result<()> {
+            if *self.run_state.lock().unwrap() != "stopped" { return Err("export refused: the latest generation is not stopped by a completed STOP".into()); }
+            fs::create_dir(out).map_err(|e| e.to_string())?;
+            fs::write(out.join("manifest.json"), json!({"stopGeneration":self.generation.lock().unwrap().to_string()}).to_string()).unwrap();
+            fs::write(out.join("manifest.sig"), b"sig").unwrap();
+            Ok(())
+        }
         fn identities(&self, _: &str) -> Result<Vec<Value>> { Ok(self.identities.lock().unwrap().clone()) }
         fn revoke_identity(&self, _: &str, token: &str) -> Result<()> {
             let mut list = self.identities.lock().unwrap();
@@ -2334,7 +2391,7 @@ mod tests {
         let root = scratch(name);
         let quarantine = root.join("quarantine");
         fs::create_dir_all(&quarantine).unwrap();
-        let world = FakeWorld { quarantine: quarantine.clone(), wanted: StdMutex::new(vec![]), installs: StdMutex::new(0), stops: StdMutex::new(0), routes: StdMutex::new(vec![]), stop_undecided: StdMutex::new(false), identities: StdMutex::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: StdMutex::new(vec![]), route_dir: root.join("routes"), enrolled: StdMutex::new(vec![]), generation: StdMutex::new(2), install_delay: StdMutex::new(install_delay), installing: Default::default(), carried: StdMutex::new(None) };
+        let world = FakeWorld { quarantine: quarantine.clone(), wanted: StdMutex::new(vec![]), installs: StdMutex::new(0), stops: StdMutex::new(0), routes: StdMutex::new(vec![]), stop_undecided: StdMutex::new(false), identities: StdMutex::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: StdMutex::new(vec![]), route_dir: root.join("routes"), enrolled: StdMutex::new(vec![]), generation: StdMutex::new(2), install_delay: StdMutex::new(install_delay), installing: Default::default(), carried: StdMutex::new(None), run_state: StdMutex::new("running") };
         let mut w = Worker::open(root.join("state"), Box::new(world)).unwrap();
         w.install_grace = grace;
         (Arc::new(w), root)
@@ -2406,6 +2463,18 @@ mod tests {
         assert_eq!(listed["receipt"]["grains"][0]["carriedImageSha256"], image);
         // One carry, one grain: another request is refused, the first one's retry is not.
         assert_eq!(w.handle("alice", &with_carry(&"4".repeat(32), "a9001"))["refused"], "carryClaimed");
+        // A second carried grain of the same application: alice now holds a4501, so it is refused before
+        // any claim or install.
+        let second = root.join("state").join("carried").join("a9003");
+        fs::create_dir_all(second.join("export")).unwrap();
+        fs::copy(carried.join("export").join("manifest.json"), second.join("export").join("manifest.json")).unwrap();
+        fs::write(second.join("carry.json"), json!({"protocol":"mini-apps-carried-grain-v1","grain":"a9003","owner":"alice","appId":APP,"class":"S","exporterKey":"d".repeat(64)}).to_string()).unwrap();
+        let installs = *fake(&w).installs.lock().unwrap();
+        let held = w.handle("alice", &with_carry(&"6".repeat(32), "a9003"));
+        assert_eq!(held["refused"], "carryRefused", "{held}");
+        assert!(held["detail"].as_str().unwrap_or("").contains("already holds a4501"), "{held}");
+        assert!(!second.join("claimed").exists());
+        assert_eq!(*fake(&w).installs.lock().unwrap(), installs);
         // A plain install carries nothing.
         let _ = w.handle("alice", &install_request(&"5".repeat(32)));
         assert_eq!(fake(&w).carried.lock().unwrap().clone(), None);
@@ -2481,6 +2550,38 @@ mod tests {
         assert_eq!(delete["receipt"]["volumeRetained"], true);
         assert!(!w.state.join("origins").join("a4501.json").exists());
         assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"open","grain":"a4501"}))["refused"], "noRoute");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apps_worker_export_answers_only_for_the_stop_that_fenced_it() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker("export-stale");
+        let id = "6".repeat(32);
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        assert_eq!(w.handle("alice", &install_request(&id))["state"], "running");
+        let export = |w: &Arc<Worker>| w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"export","grain":"a4501"}));
+        let manifest_generation = |w: &Arc<Worker>| read_json(&w.state.join("exports/a4501/manifest.json")).unwrap()["stopGeneration"].clone();
+        // While generation 2 runs there is nothing to export.
+        assert_eq!(export(&w)["refused"], "exportRefused");
+        assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"stop","grain":"a4501"}))["state"], "stopped");
+        let first = export(&w);
+        assert_eq!(first["state"], "exported", "{first}");
+        assert_eq!(manifest_generation(&w), "2");
+        // The same STOP: the export is retained.
+        let again = export(&w);
+        assert!(again["detail"].as_str().unwrap_or("").contains("retained"), "{again}");
+        // A later run and its STOP: the generation-2 export moves aside (kept) and generation 3 is exported.
+        assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"start","grain":"a4501"}))["state"], "running");
+        *fake(&w).generation.lock().unwrap() = 3;
+        // Running again: the retained generation-2 export no longer answers.
+        assert_eq!(export(&w)["refused"], "exportRefused");
+        assert!(w.state.join("exports/a4501.stale-2/manifest.sig").exists());
+        assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"stop","grain":"a4501"}))["state"], "stopped");
+        let fresh = export(&w);
+        assert_eq!(fresh["state"], "exported", "{fresh}");
+        assert!(!fresh["detail"].as_str().unwrap_or("").contains("retained"), "{fresh}");
+        assert_eq!(manifest_generation(&w), "3");
         let _ = fs::remove_dir_all(&root);
     }
 
