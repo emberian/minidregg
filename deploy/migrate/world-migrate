@@ -444,7 +444,18 @@ def render(items):
 def failing(items):
     """The differences the migration must not leave: anything a non-seed member owns that the new world lost or
     changed (an addition, `before` None, is not a loss), beyond ids; and for every member, the key and the balance."""
-    return [i for i in items if i[0] != "id" and (i[0] in ("key", "balance", "member") or (i[1] not in SEED and i[3] is not None))]
+    return [i for i in items if i[0] != "id" and not seed_gain(i)
+            and (i[0] in ("key", "balance", "member") or (i[1] not in SEED and i[3] is not None))]
+
+
+def seed_gain(i):
+    """A seed account whose balance only grew: the house earns from the new world's turns (members' fees, the
+    seed's own re-made content) while the migration runs; it lost nothing. A smaller balance still fails."""
+    kind, n, _, before, after = i
+    try:
+        return kind == "balance" and n in SEED and int(after) >= int(before)
+    except (TypeError, ValueError):
+        return False
 
 
 # ── replay ─────────────────────────────────────────────────────────────────────────────────────────────────
