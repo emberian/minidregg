@@ -154,6 +154,7 @@ def cached (root : String) (transport : Transport) : Transport :=
     history := history root transport.history
     append := append root transport.append
     heldIndexRows := heldIndexRows root
-    holdIndexRows := holdIndexRows root }
+    holdIndexRows := holdIndexRows root
+    preloadsIndex := true }
 
 end Minidregg.Compiler.DurableNodeCache

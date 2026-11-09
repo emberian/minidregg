@@ -70,7 +70,10 @@ private def validatedFrom {config : Config} (prior : Light config)
 def start (config : Config) : IO (Except String (Light config)) := do
   match ← DurableServed.openHead config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
-  | .ok opening => return validated config opening
+  | .ok opening =>
+      -- The serving Host holds the whole index trie from here (row 37): no footprint read misses.
+      DurableReceiverIO.preloadIndex config.transport opening.head.height opening.head.indexRoot
+      return validated config opening
 
 /-- The entries another writer appended, verified as the open verifies them; the
 advanced state validated again, against the held one (`validatedFrom`). Nothing new: the same light opening. -/

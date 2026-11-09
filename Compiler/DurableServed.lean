@@ -1605,9 +1605,9 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                         -- `lazyPure`: a plain `let` at the head of the action would be evaluated
                         -- when the action is built, here, on the member's path.
                         afterReply.set (some do
-                          let sealed ← IO.lazyPure fun _ => DurableCheckpointCodec.checkpointFrame.encode
-                            (DurableCheckpointCodec.sealAt key height chain frontierAfter indexAfter
-                              served'.checkpointState (worldAfter.map (·.system)) worldRoot)
+                          let sealed ← IO.lazyPure fun _ => DurableCheckpointCodec.sealedBytesAt key height
+                            chain frontierAfter indexAfter served'.checkpointState (worldAfter.map (·.system))
+                            worldRoot
                           discard <| transport.putCheckpoint height sealed)
                         pure height
                       else pure opening.baseHeight

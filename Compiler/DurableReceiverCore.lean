@@ -169,6 +169,8 @@ structure Transport where
   /-- Hand rows to the holder: `true`, the rows an append installed at the height wrote (the held
   rows move up from the height below); `false`, rows read at the height. -/
   holdIndexRows : Nat → Bool → List (List Bool × DurableIndex.Row) → IO Unit := fun _ _ _ => pure ()
+  /-- Whether the holder wants the whole index trie at an open (`preloadIndex`). -/
+  preloadsIndex : Bool := false
 
 structure NativeConfig where
   binary : System.FilePath
@@ -460,7 +462,7 @@ def NativeConfig.transport (config : NativeConfig) (logStart : Seed → Digest)
   ⟨config.read, fun height entry nodes => config.append height entry nodes, config.putCheckpoint,
     config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell, fun _ _ => .ok (),
     config.peekSeed, config.history, config.checkpointAt, config.readFromCheckpoint, fun _ => pure none,
-    fun _ _ _ => pure ()⟩
+    fun _ _ _ => pure (), false⟩
 
 /-- ByteArray's derived equality compares every byte, with no digest premise. -/
 theorem byteArray_beq_exact (left right : List UInt8) :
@@ -2097,9 +2099,9 @@ def storeCheckpoint (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) (indexRoot : Digest) : IO Bool := do
   let .ok key ← transport.key | return false
   let some frontier := loaded.frontier | return false
-  let sealed := sealAt key loaded.height loaded.chain frontier indexRoot
+  let sealed := sealedBytesAt key loaded.height loaded.chain frontier indexRoot
     (State.ofSnapshot loaded.image loaded.snapshot) loaded.system loaded.worldRoot
-  match ← transport.putCheckpoint loaded.height (checkpointFrame.encode sealed) with
+  match ← transport.putCheckpoint loaded.height sealed with
   | .error _ => return false
   | .ok () => return true
 
@@ -2297,6 +2299,35 @@ def withIndexRows {α : Type} (transport : Transport) (height : Nat) (keys : Lis
               if answer matches .ok _ then transport.holdIndexRows height false rows.toList
               return answer
 
+
+/-- Hand the holder the whole index trie at `height` (the serving Host's open, row 37 of
+docs/PERF-CLIENT.md): a breadth-first walk from the root, one Store read per level, following each
+branch row to its non-empty children. Untrusted like every read: each later use verifies against
+the authenticated root. Without a holder that asks for it (`preloadsIndex`), nothing is read. -/
+def preloadIndex (transport : Transport) (height : Nat) (root : Digest) : IO Unit := do
+  if !transport.preloadsIndex || root = DurableIndex.emptyDigest then return
+  let mut level : List (List Bool) := [[]]
+  let mut rows : List (List Bool × DurableIndex.Row) := []
+  for _ in [0:521] do
+    if level.isEmpty then break
+    let mut paths : Std.HashMap (List UInt8) (List Bool) := {}
+    for path in level do
+      paths := paths.insert (DurableIndex.rowKey path) path
+    let mut next : List (List Bool) := []
+    for chunk in level.toChunks 60000 do
+      match ← transport.history ⟨height, [], chunk.map fun path => (DurableIndex.indexSpace, DurableIndex.rowKey path)⟩ with
+      | .error _ => return
+      | .ok read =>
+          for node in read.nodes do
+            let some path := paths.get? node.2.1 | continue
+            let some (_, value) := node.2.2 | continue
+            let some row := DurableIndex.rowStream.toLawful.decode value | continue
+            rows := (path, row) :: rows
+            if let .branch left right := row then
+              if left ≠ DurableIndex.emptyDigest then next := (path ++ [false]) :: next
+              if right ≠ DurableIndex.emptyDigest then next := (path ++ [true]) :: next
+    level := next
+  transport.holdIndexRows height false rows
 
 /-- The node rows an append writes: the accumulator nodes it completes
 (space 1) and the index rows its changes write (space 3). -/

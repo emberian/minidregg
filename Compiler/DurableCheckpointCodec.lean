@@ -787,6 +787,26 @@ def sealAt (key : MacKey) (height : Nat) (chain : Digest) (frontier : List (Nat 
   let body : Body := ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩
   ⟨body, root, checkpointMac key body root⟩
 
+/-- `checkpointFrame.encode (sealAt …)` with the body encoded ONCE: its bytes are both the MAC's
+hashed input and the frame's body (`sealedBytesAt_eq`). The seal encoded the whole body twice. -/
+def sealedBytesAt (key : MacKey) (height : Nat) (chain : Digest) (frontier : List (Nat × Digest))
+    (indexRoot : Digest) (state : State) (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys))
+    (root : Digest) : List UInt8 :=
+  let body : Body := ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩
+  let bodyBytes := bodyStream.encode body
+  let mac := kmac256Bytes key.bytes "DREGG/NATIVE-HOST/CHECKPOINT-MAC/v1".toUTF8.toList
+    (macInputStream.encode (body.keyId, body.height, root,
+      cshake256Bytes "DREGG/NATIVE-HOST/CHECKPOINT-BODY/v1".toUTF8.toList bodyBytes))
+  bytesStream.encode checkpointFrame.frame ++ (bodyBytes ++ (digestStream.encode root ++ bytesStream.encode mac))
+
+theorem sealedBytesAt_eq (key : MacKey) (height : Nat) (chain : Digest) (frontier : List (Nat × Digest))
+    (indexRoot : Digest) (state : State) (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys))
+    (root : Digest) :
+    sealedBytesAt key height chain frontier indexRoot state system root =
+      checkpointFrame.encode (sealAt key height chain frontier indexRoot state system root) := rfl
+
+#assert_axioms sealedBytesAt_eq
+
 /-- The specification seal: the root evaluated in full from the body. -/
 def sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat) (chain : Digest)
     (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State)

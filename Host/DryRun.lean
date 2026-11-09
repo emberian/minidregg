@@ -82,6 +82,7 @@ def dryTransport (t : DurableReceiverIO.Transport) (reached : IO.Ref Bool) :
   -- Held index rows are reads (untrusted, verified per use): they pass through too.
   heldIndexRows := t.heldIndexRows
   holdIndexRows := t.holdIndexRows
+  preloadsIndex := t.preloadsIndex
 
 /-- The dry run's writer does not depend on the Store's writers at all: any two
 transports that read alike give the same dry transport. -/
