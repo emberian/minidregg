@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `1e6a8e907ae2` (render test: the seed's house-rules link and note resolve `$HR_LAST` from the text, as see). Round finished 2026-11-09T08:38Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-1e6a8e90`.
+Tip: `0a73bd93734b` (consent residents: a unit-held directory is never launched into; door sponsor and lobby re). Round finished 2026-11-09T09:00Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-0a73bd93`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..1e6a8e907ae2`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..0a73bd93734b`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `0a73bd93` consent residents: a unit-held directory is never launched into; door sponsor and lobby relay use th (owner: apps-hermes)
+- `0a4255b5` builder: REDS.md for 1e6a8e907ae2 (6 red) (owner: build-loop)
 - `1e6a8e90` render test: the seed's house-rules link and note resolve `$HR_LAST` from the text, as seed.sh does (owner: apps-hermes)
 - `649ffd18` grain-runtime: a reserve whose custody attempt never wrote its call closes as never sent (`reconcile (owner: apps-hermes, bytes-repr)
 - `15db4406` builder: REDS.md for 3ce5cfe6716f (6 red) (owner: build-loop)
@@ -53,5 +55,3 @@ Suspect commits since green (`git log 980d80c5dba8..1e6a8e907ae2`), newest first
 - `3574f404` builder: REDS.md for 2e48af863c8e (6 red) (owner: build-loop)
 - `2e48af86` builder: REDS.md for 55d0721c587e (1 red) (owner: build-loop)
 - `78307b6d` WORLD-MIGRATION: app grains and their data are a carry gap, written as a row
-- `df78d18e` spk-host STOP: a committed claim arms its fence from Running; a dead drifted unit is fenceable (owner: apps-hermes)
-- `55d0721c` builder: REDS.md for fd1f1b33a35f (1 red) (owner: build-loop)
