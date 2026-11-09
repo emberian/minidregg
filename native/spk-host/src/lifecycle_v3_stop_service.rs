@@ -896,10 +896,16 @@ fn completion_dir(base: &Path) -> io::Result<(PathBuf, bool)> {
             return Ok((current, false));
         }
         private_dir(&current)?;
-        if !absent(&current.join("op38-requested.json"))? {
-            return Ok((current, true));
-        }
         let next = current.join("replan");
+        if !absent(&current.join("op38-requested.json"))? {
+            // A sent completion is final unless `abandoned.json` proves it can never land
+            // (`absent_disposition`): then its successor is the replan beneath it.
+            if absent(&current.join("abandoned.json"))? {
+                return Ok((current, true));
+            }
+            current = next;
+            continue;
+        }
         if !absent(&next)? {
             current = next;
             continue;
@@ -990,6 +996,42 @@ fn retained_completion_anchor(
     Ok(Some(recovered))
 }
 
+/// What an op39 lookup of a sent completion decided.
+#[derive(Debug, PartialEq)]
+enum Completion {
+    Confirmed,
+    /// Mini holds no receipt for the sent bytes.
+    Absent,
+}
+
+/// A sent completion that Mini answers `absent` for is replaced only once it can never land: a
+/// fresh plan's height is past every signature's `validUntil` in the sent plan, so Mini refuses the
+/// sent bytes however late they arrive, and a fresh completion is the only one that can complete
+/// the claim. Before that the sent bytes stay admissible and nothing replaces them.
+fn absent_disposition(sent_plan: &Value, fresh_plan: &Value) -> io::Result<Result<Value, String>> {
+    let number = |v: &Value| -> io::Result<u128> {
+        v.as_str().filter(|t| decimal(t)).and_then(|t| t.parse().ok()).ok_or_else(|| invalid("STOP completion plan height refused"))
+    };
+    let slots = sent_plan.get("slots").and_then(Value::as_array).filter(|s| !s.is_empty())
+        .ok_or_else(|| invalid("STOP sent completion plan names no signing slots"))?;
+    let mut valid_until = 0u128;
+    for slot in slots {
+        valid_until = valid_until.max(number(slot.pointer("/signing/validUntil").unwrap_or(&Value::Null))?);
+    }
+    let sent_height = number(sent_plan.get("height").unwrap_or(&Value::Null))?;
+    let height = number(fresh_plan.get("height").unwrap_or(&Value::Null))?;
+    if height <= sent_height {
+        return Err(invalid("STOP fresh completion plan does not follow the sent one"));
+    }
+    if height <= valid_until {
+        return Ok(Err(format!(
+            "UNRESOLVED: the STOP completion was sent but Mini holds no receipt for it; its signatures stay admissible until height {valid_until} (now {height}), so it is neither repeated nor replaced before then"
+        )));
+    }
+    Ok(Ok(json!({"protocol":"mini-spk-stop-completion-abandoned-v1","lookup":"absent",
+        "sentPlanHeight":sent_height.to_string(),"validUntil":valid_until.to_string(),"freshPlanHeight":height.to_string()})))
+}
+
 fn complete_once_or_lookup(
     operator: &PrivateOperator,
     dir: &Path,
@@ -997,7 +1039,7 @@ fn complete_once_or_lookup(
     ingress: &[u8],
     journal: &Journal,
     volume: &VolumeWitness,
-) -> io::Result<()> {
+) -> io::Result<Completion> {
     private_dir(dir)?;
     let marker_path = dir.join("op38-requested.json");
     if absent(&marker_path)? {
@@ -1023,7 +1065,7 @@ fn complete_once_or_lookup(
             "receipt-anchor.json",
             &serde_json::to_vec(&receipt_json(&receipt))?,
         )?;
-        return Ok(());
+        return Ok(Completion::Confirmed);
     }
     let marker: Value = serde_json::from_slice(&read_private(&marker_path, MAX_CONFIG)?)?;
     if text(&marker, "protocol")? != "mini-spk-stop-completion-submit-requested-v1"
@@ -1040,6 +1082,9 @@ fn complete_once_or_lookup(
     let input = write_new(&probe, "outcome.bin", payload)?;
     let inspected = operator.tool("inspect", "outcome", &input, &probe.join("outcome.json"))?;
     let view: Value = serde_json::from_slice(&inspected)?;
+    if anchor.is_none() && view.get("type").and_then(Value::as_str) == Some("absent") {
+        return Ok(Completion::Absent);
+    }
     let historical = outcome_receipt(&view, "replayed", &evidence.claim_receipt)?;
     if let Some(anchor) = anchor {
         if !same_receipt(&anchor, &historical) {
@@ -1052,7 +1097,7 @@ fn complete_once_or_lookup(
             &serde_json::to_vec(&receipt_json(&historical))?,
         )?;
     }
-    Ok(())
+    Ok(Completion::Confirmed)
 }
 
 /// Callable operator entry for one resident STOP. The supervisor intentionally
@@ -1329,14 +1374,31 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             &completion_dir,
         )?
     };
-    complete_once_or_lookup(
-        &operator,
-        &completion_dir,
-        &evidence,
-        &ingress,
-        &journal,
-        &volume,
-    )
+    if complete_once_or_lookup(&operator, &completion_dir, &evidence, &ingress, &journal, &volume)? == Completion::Confirmed {
+        return Ok(());
+    }
+    // Sent, and Mini holds no receipt for it. A fresh plan (pure op70/71 work, in a probe) gives the
+    // height; the sent completion is abandoned only past its signatures' window.
+    let probe = fresh_probe(&completion_dir, "absent-replan")?;
+    let fresh_ingress = assemble_completion(&operator, &completion_signers, pins.app_uid, &evidence, &launch, &signed_report, &probe)?;
+    let plan = |dir: &Path| -> io::Result<Value> { Ok(serde_json::from_slice(&read_private(&dir.join("plan.json"), MAX_CONFIG * 64)?)?) };
+    let abandoned = match absent_disposition(&plan(&completion_dir)?, &plan(&probe)?)? {
+        Ok(abandoned) => abandoned,
+        Err(hold) => {
+            fs::remove_dir_all(&probe).ctx("remove", &probe)?;
+            return Err(io::Error::other(hold));
+        }
+    };
+    write_new(&completion_dir, "abandoned.json", &serde_json::to_vec(&abandoned)?)?;
+    let (successor, sent) = self::completion_dir(&config.completion_attempt_dir)?;
+    if sent || !absent(&successor)? {
+        return Err(invalid("STOP completion successor is not fresh"));
+    }
+    fs::rename(&probe, &successor).ctx("rename", &probe)?;
+    match complete_once_or_lookup(&operator, &successor, &evidence, &fresh_ingress, &journal, &volume)? {
+        Completion::Confirmed => Ok(()),
+        Completion::Absent => Err(invalid("STOP replacement completion absent right after its send")),
+    }
 }
 
 #[cfg(test)]
@@ -1444,6 +1506,36 @@ mod tests {
         );
         ensure_artifact(&report, "report.bin", b"derived report", MAX_FRAME).unwrap();
         assert!(ensure_artifact(&report, "report.bin", b"changed report", MAX_FRAME).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_absent_sent_completion_is_replaced_only_past_its_signatures_window() {
+        let sent = json!({"height":"1249","slots":[{"signing":{"validUntil":"1505"}},{"signing":{"validUntil":"1500"}}]});
+        let hold = absent_disposition(&sent, &json!({"height":"1297"})).unwrap().unwrap_err();
+        assert!(hold.starts_with("UNRESOLVED") && hold.contains("until height 1505 (now 1297)"), "{hold}");
+        assert!(absent_disposition(&sent, &json!({"height":"1505"})).unwrap().is_err(), "the last admissible height holds");
+        let abandoned = absent_disposition(&sent, &json!({"height":"1506"})).unwrap().unwrap();
+        assert_eq!(abandoned["validUntil"], "1505");
+        assert_eq!(abandoned["freshPlanHeight"], "1506");
+        // A fresh plan that does not follow the sent one, and a sent plan without slots, are refused.
+        assert!(absent_disposition(&sent, &json!({"height":"1249"})).is_err());
+        assert!(absent_disposition(&json!({"height":"1249","slots":[]}), &json!({"height":"1600"})).is_err());
+    }
+
+    #[test]
+    fn an_abandoned_sent_completion_yields_to_its_replan() {
+        let root = scratch();
+        let base = root.join("completion");
+        DirBuilder::new().mode(0o700).create(&base).unwrap();
+        write_new(&base, "op38-requested.json", b"sent once").unwrap();
+        assert_eq!(completion_dir(&base).unwrap(), (base.clone(), true));
+        write_new(&base, "abandoned.json", b"past its window").unwrap();
+        let replan = base.join("replan");
+        assert_eq!(completion_dir(&base).unwrap(), (replan.clone(), false));
+        DirBuilder::new().mode(0o700).create(&replan).unwrap();
+        write_new(&replan, "op38-requested.json", b"the replacement, sent once").unwrap();
+        assert_eq!(completion_dir(&base).unwrap(), (replan.clone(), true));
         fs::remove_dir_all(root).unwrap();
     }
 
