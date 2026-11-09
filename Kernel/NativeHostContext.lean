@@ -1396,7 +1396,8 @@ theorem validateLoaded_durable {config : Config} {durable : Durable} {opened : O
 
 `validateLoadedStep` is `validateServedStep` for the full shape: it takes the record's written
 cells and the proof that every other cell kept its bytes (`LoadedMoved`, from
-`LoadedMoved.extend`), runs the cell law on the written cells only and inherits the policy
+`LoadedMoved.extend`), decodes the directory at the written cells only (`loadDirectoryStep`), runs
+the cell law on the written cells only and inherits the policy
 sourcing unless the step wrote the authority cell or a cell that held a policy source.
 `validateLoadedStep_eq`: it is `validateLoaded`. -/
 
@@ -1525,7 +1526,7 @@ def validateLoadedStep (config : Config) (prior : Opened config) (durable : Dura
     (written : List DurableDataIntent.CellId) (moved : LoadedMoved prior.durable durable written) :
     Except String (Opened config) :=
   (validatePartsVia config durable
-    (CredentialAuthorityDomainReceiver.loadDirectoryFrom prior.directory durable)
+    (CredentialAuthorityDomainReceiver.loadDirectoryStep prior.directory durable written moved)
     (CredentialAuthorityDomainReceiver.loadDeploymentFromAt prior.authority durable.snapshot
       durable.height (DurableReceiverIO.Loaded.history_length_eq_height durable).symm)
     (cellsLawfulLoadedStep config durable written) (cellsLawfulLoadedStep_eq config prior durable written moved)
@@ -1540,7 +1541,7 @@ theorem validateLoadedStep_eq (config : Config) (prior : Opened config) (durable
   unfold validateLoadedStep validateLoaded
   rw [validatePartsVia_withExact_eq config durable _ _ _ _
     (priorGenesisEvidence prior durable).1 (priorGenesisEvidence prior durable).2
-    (CredentialAuthorityDomainReceiver.loadDirectoryFrom_eq prior.directory durable)
+    (CredentialAuthorityDomainReceiver.loadDirectoryStep_eq prior.directory durable written moved)
     ((CredentialAuthorityDomainReceiver.loadDeploymentFromAt_eq prior.authority durable.snapshot
       durable.height (DurableReceiverIO.Loaded.history_length_eq_height durable).symm).trans
     (CredentialAuthorityDomainReceiver.loadDeploymentAt_eq config.deployment durable.snapshot

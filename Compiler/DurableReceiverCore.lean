@@ -1220,6 +1220,19 @@ height's defining semantics. -/
     loaded.height = loaded.image.accepted.length :=
   rfl
 
+/-- The records above height `count`, taken from the newest end of the held journal
+(`acceptedRev`) without reversing the whole of it: a provider's admission of a few new records
+reads only those (`suffixFrom_eq`). -/
+def Loaded.suffixFrom {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (count : Nat) :
+    List IntentRecord :=
+  (loaded.image.acceptedRev.take (loaded.height - count)).reverse
+
+theorem Loaded.suffixFrom_eq {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (count : Nat) :
+    loaded.suffixFrom count = loaded.image.accepted.drop count := by
+  unfold Loaded.suffixFrom
+  rw [Loaded.height_eq]
+  simp only [Image.accepted, List.length_reverse, List.drop_reverse]
+
 /-- The snapshot's history has one event per accepted record. -/
 theorem Loaded.history_length_eq_height {rootBytes : List UInt8 → Digest}
     (loaded : Loaded rootBytes) : loaded.snapshot.model.history.length = loaded.height := by

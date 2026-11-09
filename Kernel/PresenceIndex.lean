@@ -49,59 +49,44 @@ import all Init.Data.List.Scan.Basic
 
 namespace Minidregg.Kernel.PresenceIndex
 
+open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DurableReceiver
 
 set_option autoImplicit false
 
-/-! ## Finite maps with unique keys -/
+/-! ## Persistent maps written at a list of keys
+
+Both maps are `SparseMap`s (a balanced persistent tree): admitting a record costs one tree step
+per cell it wrote, not a scan of every cell ever written (the association lists this replaced
+cost a consent provider ~5 ms per record at ~4,500 records, and an open was quadratic in them). -/
 
 section Map
 
-variable {κ : Type} [DecidableEq κ]
-
-/-- Look a key up in an association list (first match). -/
-def get : List (κ × Nat) → κ → Option Nat
-  | [], _ => none
-  | entry :: rest, key => if entry.1 = key then some entry.2 else get rest key
-
-/-- Overwrite a key in place, or append it. Keys stay unique. -/
-def put : List (κ × Nat) → κ → Nat → List (κ × Nat)
-  | [], key, value => [(key, value)]
-  | entry :: rest, key, value =>
-      if entry.1 = key then (key, value) :: rest else entry :: put rest key value
-
-theorem get_put (map : List (κ × Nat)) (key key' : κ) (value : Nat) :
-    get (put map key value) key' = if key = key' then some value else get map key' := by
-  induction map with
-  | nil => simp [put, get]
-  | cons entry rest ih =>
-      by_cases here : entry.1 = key
-      · by_cases same : key = key'
-        · simp [put, get, here, same]
-        · simp [put, get, here, same]
-      · by_cases same : key = key'
-        · subst same
-          simp [put, get, here, ih]
-        · simp [put, get, here, same, ih]
+variable {κ : Type} [StoreKey κ]
 
 /-- Write one value at every key of a list. -/
-def putAll (map : List (κ × Nat)) (keys : List κ) (value : Nat) : List (κ × Nat) :=
-  keys.foldl (fun acc key => put acc key value) map
+def putAll (map : SparseMap κ (fun _ => Nat)) (keys : List κ) (value : Nat) :
+    SparseMap κ (fun _ => Nat) :=
+  keys.foldl (fun acc key => acc.set key (some value)) map
 
-theorem get_putAll (map : List (κ × Nat)) (keys : List κ) (value : Nat) (key' : κ) :
-    get (putAll map keys value) key' = if key' ∈ keys then some value else get map key' := by
+theorem get_putAll [DecidableEq κ] (map : SparseMap κ (fun _ => Nat)) (keys : List κ) (value : Nat)
+    (key' : κ) :
+    (putAll map keys value).get? key' = if key' ∈ keys then some value else map.get? key' := by
   induction keys generalizing map with
   | nil => simp [putAll]
   | cons key rest ih =>
-      have step : putAll map (key :: rest) value = putAll (put map key value) rest value := rfl
-      rw [step, ih, get_put]
+      have step : putAll map (key :: rest) value = putAll (map.set key (some value)) rest value := rfl
+      rw [step, ih]
       by_cases inRest : key' ∈ rest
       · simp [inRest]
-      · by_cases same : key = key'
-        · subst same; simp
-        · simp [inRest, same, Ne.symm same]
+      · by_cases same : key' = key
+        · subst same
+          simp only [inRest, if_false, List.mem_cons, true_or, if_true]
+          exact SparseMap.set_eq map key' (some value)
+        · simp only [inRest, if_false, List.mem_cons, same, false_or]
+          exact SparseMap.set_ne map key (some value) key' same
 
 end Map
 
@@ -109,11 +94,10 @@ end Map
 
 /-- The presence index: `lastSeen (cell, subject)` and `touched cell`. -/
 structure Index where
-  lastSeen : List ((CellId × SubjectId) × Nat)
-  touched : List (CellId × Nat)
-  deriving DecidableEq, Repr
+  lastSeen : SparseMap (CellId × SubjectId) (fun _ => Nat)
+  touched : SparseMap CellId (fun _ => Nat)
 
-def Index.empty : Index := ⟨[], []⟩
+def Index.empty : Index := ⟨SparseMap.empty, SparseMap.empty⟩
 
 /-- The cells a record writes. -/
 def cellsOf (record : IntentRecord) : List CellId := record.writes.map DataWrite.cellId
@@ -135,10 +119,10 @@ def Index.extend : Index → Nat → List IntentRecord → Index
 def ofRecords (records : List IntentRecord) : Index := Index.empty.extend 0 records
 
 def Index.lastSeenAt (index : Index) (cell : CellId) (subject : SubjectId) : Option Nat :=
-  get index.lastSeen (cell, subject)
+  index.lastSeen.get? (cell, subject)
 
 def Index.touchedAt (index : Index) (cell : CellId) : Option Nat :=
-  get index.touched cell
+  index.touched.get? cell
 
 theorem Index.extend_append (index : Index) (start : Nat) (left right : List IntentRecord) :
     index.extend start (left ++ right) = (index.extend start left).extend (start + left.length) right := by
@@ -369,11 +353,24 @@ def turn (tx cell : Nat) (subject : Option Nat) : IntentRecord :=
 /-- A writes the room at 1, B writes it at 2, an unsigned settlement at 3. -/
 def log : List IntentRecord := [turn 1 7 (some 1), turn 2 7 (some 2), turn 3 7 none]
 
-theorem a_seen_at_one : (ofRecords log).lastSeenAt ⟨7⟩ ⟨1⟩ = some 1 := by decide
-theorem b_seen_at_two : (ofRecords log).lastSeenAt ⟨7⟩ ⟨2⟩ = some 2 := by decide
-theorem third_never_seen : (ofRecords log).lastSeenAt ⟨7⟩ ⟨3⟩ = none := by decide
-theorem room_touched_at_three : (ofRecords log).touchedAt ⟨7⟩ = some 3 := by decide
-theorem other_cell_untouched : (ofRecords log).touchedAt ⟨8⟩ = none := by decide
+/-- The log as three snocs, so each lookup unfolds by `lastSeen_snoc`/`touched_snoc`. -/
+theorem log_snocs : log = (([] ++ [turn 1 7 (some 1)]) ++ [turn 2 7 (some 2)]) ++ [turn 3 7 none] := rfl
+
+theorem a_seen_at_one : (ofRecords log).lastSeenAt ⟨7⟩ ⟨1⟩ = some 1 := by
+  rw [log_snocs, lastSeen_snoc, lastSeen_snoc, lastSeen_snoc]
+  decide
+theorem b_seen_at_two : (ofRecords log).lastSeenAt ⟨7⟩ ⟨2⟩ = some 2 := by
+  rw [log_snocs, lastSeen_snoc, lastSeen_snoc]
+  decide
+theorem third_never_seen : (ofRecords log).lastSeenAt ⟨7⟩ ⟨3⟩ = none := by
+  rw [log_snocs, lastSeen_snoc, lastSeen_snoc, lastSeen_snoc]
+  simp [SignedWrite, turn, cellsOf, write, ofRecords, Index.extend, Index.empty, Index.lastSeenAt]
+theorem room_touched_at_three : (ofRecords log).touchedAt ⟨7⟩ = some 3 := by
+  rw [log_snocs, touched_snoc]
+  decide
+theorem other_cell_untouched : (ofRecords log).touchedAt ⟨8⟩ = none := by
+  rw [log_snocs, touched_snoc, touched_snoc, touched_snoc]
+  simp [Wrote, turn, cellsOf, write, ofRecords, Index.extend, Index.empty, Index.touchedAt]
 
 end Example
 
@@ -389,7 +386,7 @@ end Minidregg.Kernel.PresenceIndex
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.PresenceIndex.index_monotone
 /-- info: 'Minidregg.Kernel.PresenceIndex.touched_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.PresenceIndex.touched_monotone
-/-- info: 'Minidregg.Kernel.PresenceIndex.ofRecords_append' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.PresenceIndex.ofRecords_append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.PresenceIndex.ofRecords_append
-/-- info: 'Minidregg.Kernel.PresenceIndex.Example.b_seen_at_two' does not depend on any axioms -/
+/-- info: 'Minidregg.Kernel.PresenceIndex.Example.b_seen_at_two' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.PresenceIndex.Example.b_seen_at_two

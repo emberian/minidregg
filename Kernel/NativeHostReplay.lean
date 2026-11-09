@@ -3407,28 +3407,12 @@ theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : 
       (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag }).map
           (·.directory) =
         (CredentialAuthorityDomainReceiver.loadDirectory durable).map (·.directory) := by
-    unfold CredentialAuthorityDomainReceiver.loadDirectory
-    dsimp only
     by_cases absent : durable.image.seed.absentBytes = []
-    · rw [dif_pos absent, dif_pos absent]
-      split
-      · split
-        · rfl
-        · rename_i left _ right
-          rw [rows] at left
-          rw [left] at right
-          cases right
-      · split
-        · rename_i _ left right
-          rw [rows] at left
-          rw [left] at right
-          cases right
-        · rename_i _ left _ right
-          rw [rows] at left
-          rw [left] at right
-          cases right
-          rfl
-    · rw [dif_neg absent, dif_neg absent]
+    · rw [CredentialAuthorityDomainReceiver.loadDirectory_directory { durable with headTag := headTag } absent,
+        CredentialAuthorityDomainReceiver.loadDirectory_directory durable absent, rows]
+    · unfold CredentialAuthorityDomainReceiver.loadDirectory
+      dsimp only
+      rw [dif_neg absent, dif_neg absent]
       rfl
   have lawfulSame : ∀ directory,
       cellsLawful config { durable with headTag := headTag } directory = cellsLawful config durable directory :=
@@ -5127,7 +5111,8 @@ def extendSuffixAppended (config : Config) {store : DurableHistory.StoreIdentity
     (sameLogStart : target.logStart = oldTarget.logStart) :
     IO (Except Failure (SuffixVerified config anchor target)) := do
   let count := oldTarget.height
-  let suffix := target.image.accepted.drop count
+  -- Read from the newest end of the held journal (`suffixFrom_eq`: the same records).
+  let suffix := DurableReceiverIO.Loaded.suffixFrom target count
   match ← walkSuffix config anchor old.origin old.opened reader old.context suffix with
   | .error failure => return .error failure
   | .ok walked =>
@@ -5137,9 +5122,10 @@ def extendSuffixAppended (config : Config) {store : DurableHistory.StoreIdentity
             target.image.accepted.drop count :=
           (List.take_append_drop count target.image.accepted).symm
         _ = oldTarget.image.accepted ++ suffix := by
-          rw [show count = oldTarget.image.accepted.length from DurableReceiverIO.Loaded.height_eq oldTarget,
+          show _ = _ ++ DurableReceiverIO.Loaded.suffixFrom target count
+          rw [DurableReceiverIO.Loaded.suffixFrom_eq,
+            show count = oldTarget.image.accepted.length from DurableReceiverIO.Loaded.height_eq oldTarget,
             prefixExact]
-          rfl
     have exactImage : walked.final.durable.image = target.image :=
       appendedSuffixWalk_image old.exactImage sameSeed acceptedExact walked.trace
     if openedLogStartExact : walked.final.durable.logStart = target.logStart then

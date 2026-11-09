@@ -72,6 +72,46 @@ pub(crate) struct AnchorCustody {
     path: PathBuf,
     binding: [u8; 32],
     retained: Option<Vec<u8>>,
+    /// A resident's admitted anchor not yet on disk, and when it last wrote one
+    /// ([`ANCHOR_RETAIN_EVERY`]).
+    pending: Option<Vec<u8>>,
+    written: Option<std::time::Instant>,
+}
+
+/// A resident writes its admitted anchor at most this often, and never while it holds the
+/// provider: the anchor is a resume point (a crash leaves an older one, from which the next
+/// provider admits a longer suffix), so a write per admitted record, made under the lock every
+/// member frame waits on, bought nothing and put the file system's latency on the command path.
+pub const ANCHOR_RETAIN_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
+
+impl AnchorCustody {
+    /// Note the provider's anchor; Some((path, file bytes, anchor)) when a write is due now.
+    fn note(&mut self, anchor: Vec<u8>, now: std::time::Instant) -> Option<(PathBuf, Vec<u8>, Vec<u8>)> {
+        if self.retained.as_deref() == Some(anchor.as_slice()) {
+            self.pending = None;
+            return None;
+        }
+        self.pending = Some(anchor);
+        self.due(now)
+    }
+    /// The pending anchor's write, when one is pending and the last write is old enough.
+    fn due(&self, now: std::time::Instant) -> Option<(PathBuf, Vec<u8>, Vec<u8>)> {
+        let anchor = self.pending.as_ref()?;
+        if self.written.is_some_and(|at| now.duration_since(at) < ANCHOR_RETAIN_EVERY) {
+            return None;
+        }
+        Some((self.path.clone(), anchor_file(&self.binding, anchor), anchor.clone()))
+    }
+    /// A write of `anchor` finished (`ok`) or failed; either way the next one waits its interval.
+    fn wrote(&mut self, anchor: Vec<u8>, ok: bool, now: std::time::Instant) {
+        self.written = Some(now);
+        if ok {
+            if self.pending.as_deref() == Some(anchor.as_slice()) {
+                self.pending = None;
+            }
+            self.retained = Some(anchor);
+        }
+    }
 }
 
 /// How a consent frame failed.
@@ -245,7 +285,7 @@ pub fn start(anchors: &Path, executable: PathBuf, settings: &Path, settings_byte
     let retained = read_anchor(&path, &binding)?;
     let what = format!("local consent provider {}", executable.display());
     let mut session = Session::spawn(executable, settings, settings_bytes, "stdio", &what)?;
-    session.anchor = Some(AnchorCustody { path: path.clone(), binding, retained: retained.clone() });
+    session.anchor = Some(AnchorCustody { path: path.clone(), binding, retained: retained.clone(), pending: None, written: None });
     if let Some(anchor) = retained {
         round_trip(&mut session, crate::host_operations::CONSENT_ANCHOR_OFFER, &anchor).map_err(|e| format!("retained consent anchor {}: {e}", path.display()))?;
     }
@@ -601,19 +641,54 @@ fn watch_directory(directory: &Path) -> Option<std::os::fd::OwnedFd> {
 /// admission ends the provider. Anything else ends the resident exactly as a refused member frame
 /// does.
 fn catch_up(shared: &Mutex<Resident>, ended: &std::sync::atomic::AtomicBool) {
-    let Ok(mut resident) = shared.lock() else { return };
-    if resident.ended {
-        return;
+    let write = {
+        let Ok(mut resident) = shared.lock() else { return };
+        if resident.ended {
+            return;
+        }
+        let admitted = matches!(resident.session.exchange(crate::host_operations::CONSENT_INTENT, &[]),
+                Ok((CONSENT_REFUSAL, _)));
+        let anchor = match resident.session.exchange(crate::host_operations::CONSENT_ANCHOR_ADMITTED, &[]) {
+            Ok((crate::host_operations::CONSENT_ANCHOR_ADMITTED, anchor)) if admitted && !anchor.is_empty() => anchor,
+            _ => {
+                resident.ended = true;
+                ended.store(true, std::sync::atomic::Ordering::Release);
+                return;
+            }
+        };
+        let now = std::time::Instant::now();
+        resident.session.anchor.as_mut().and_then(|custody| custody.note(anchor, now))
+    };
+    write_anchor(shared, write);
+}
+
+/// The catch-up thread's idle turn: write an anchor that was noted while a write was not yet due.
+fn retain_pending(shared: &Mutex<Resident>) {
+    let write = match shared.lock() {
+        Ok(resident) => resident.session.anchor.as_ref().and_then(|custody| custody.due(std::time::Instant::now())),
+        Err(_) => None,
+    };
+    write_anchor(shared, write);
+}
+
+/// Write a due anchor with the provider released, then record it.
+fn write_anchor(shared: &Mutex<Resident>, write: Option<(PathBuf, Vec<u8>, Vec<u8>)>) {
+    let Some((path, bytes, anchor)) = write else { return };
+    if let Some(parent) = path.parent() {
+        use std::os::unix::fs::DirBuilderExt;
+        let _ = fs::DirBuilder::new().recursive(true).mode(0o700).create(parent);
     }
-    let admitted = matches!(resident.session.exchange(crate::host_operations::CONSENT_INTENT, &[]),
-            Ok((CONSENT_REFUSAL, _)))
-        && matches!(resident.session.exchange(crate::host_operations::CONSENT_ANCHOR_ADMITTED, &[]),
-            Ok((crate::host_operations::CONSENT_ANCHOR_ADMITTED, ref anchor)) if !anchor.is_empty());
-    if admitted {
-        retain_anchor(&mut resident.session);
-    } else {
-        resident.ended = true;
-        ended.store(true, std::sync::atomic::Ordering::Release);
+    let ok = match crate::durable::replace(&path, &bytes, crate::durable::Perm::Private) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("mini: warning: cannot retain the consent anchor {}: {e}", path.display());
+            false
+        }
+    };
+    if let Ok(mut resident) = shared.lock() {
+        if let Some(custody) = resident.session.anchor.as_mut() {
+            custody.wrote(anchor, ok, std::time::Instant::now());
+        }
     }
 }
 
@@ -712,6 +787,8 @@ fn serve_resident_held(kind: ResidentKind, dir: &Path, executable: PathBuf, sett
             while !ended.load(Ordering::Acquire) {
                 if watch.moved() {
                     catch_up(&shared, &ended);
+                } else {
+                    retain_pending(&shared);
                 }
                 watch.wait();
             }
@@ -851,12 +928,9 @@ fn serve_connection_from(kind: ResidentKind, stream: std::os::unix::net::UnixStr
                     };
                     rechecked = true;
                     match checked.and_then(|_| resident.session.exchange(operation, &frame[1..]).map_err(|e| e.0)) {
-                        Ok(reply) => {
-                            if !codec {
-                                retain_anchor(&mut resident.session);
-                            }
-                            reply
-                        }
+                        // The catch-up thread retains the anchor (`catch_up`): a member frame
+                        // admits only what moved the head marker, which wakes it too.
+                        Ok(reply) => reply,
                         Err(e) => {
                             resident.ended = true;
                             ended.store(true, std::sync::atomic::Ordering::Release);
@@ -1263,8 +1337,10 @@ mod tests {
         assert!(!error.is_stale_observation());
         let stale = "stale observation: the remote challenge answers this intent at source height 36";
         assert!(round_trip(&mut answering(255, stale), crate::host_operations::CONSENT_OBSERVATION, b"retained").unwrap_err().is_stale_observation());
-        // The tag counts only on an observation frame, and only as a refusal.
-        assert!(!round_trip(&mut answering(255, stale), crate::host_operations::CONSENT_PLAN, b"retained").unwrap_err().is_stale_observation());
+        // The tag counts on an observation or plan frame (a plan the Host made below the provider's
+        // admitted height, `ClientConsentCore.consent` 222), and only as a refusal.
+        assert!(round_trip(&mut answering(255, stale), crate::host_operations::CONSENT_PLAN, b"retained").unwrap_err().is_stale_observation());
+        assert!(!round_trip(&mut answering(255, stale), crate::host_operations::CONSENT_INTENT, b"retained").unwrap_err().is_stale_observation());
         assert!(!round_trip(&mut answering(254, stale), crate::host_operations::CONSENT_OBSERVATION, b"retained").unwrap_err().is_stale_observation());
     }
 
@@ -1459,24 +1535,24 @@ mod tests {
             let error = round_trip(&mut second, reserved, b"x").unwrap_err().to_string();
             assert!(error.contains("reserved to the resident consent provider"), "{error}");
         }
-        // The resident's own catch-ups (an empty intent 220, its anchor 229, then 229 again to
-        // retain it) interleave whole between frames;
+        // The resident's own catch-ups (an empty intent 220, then its anchor 229, retained off the
+        // provider's lock) interleave whole between frames; a member frame asks for no anchor;
         // its first is the start admission, before any member frame.
         let ops = opcodes(&dir);
-        // a catch-up's intent is the only 220 the provider sees not right after a 233 or a 229.
+        // a catch-up's intent is the only 220 the provider sees not right after a 233.
         let mut members = Vec::new();
         let mut rest = ops.iter().copied().peekable();
         let mut catch_ups = 0;
         while let Some(op) = rest.next() {
             if op == crate::host_operations::CONSENT_INTENT && members.last() != Some(&233) {
-                assert_eq!((rest.next(), rest.next()), (Some(229), Some(229)), "{ops:?}");
+                assert_eq!(rest.next(), Some(229), "{ops:?}");
                 catch_ups += 1;
             } else {
                 members.push(op);
             }
         }
         assert!(catch_ups >= 1, "the start admission is a catch-up: {ops:?}");
-        assert_eq!(members, vec![233, 220, 229, 221, 229, 233, 222, 229]);
+        assert_eq!(members, vec![233, 220, 221, 233, 222]);
         let anchored = anchor_binding(b"{}").unwrap();
         assert_eq!(read_anchor(&anchor_path(&anchors, &anchored), &anchored).unwrap().as_deref(), Some(&b"ANCHOR-R"[..]));
         assert!(resident_file(ResidentKind::Consent, &anchors, &binding, "pid").exists());
@@ -1739,6 +1815,26 @@ mod tests {
         assert!(daemon.is_finished(), "a torn-down world ends its resident");
         daemon.join().unwrap().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_resident_writes_its_anchor_at_most_once_per_interval() {
+        let start = std::time::Instant::now();
+        let mut custody = AnchorCustody { path: PathBuf::from("/x/a"), binding: [7; 32], retained: None, pending: None, written: None };
+        let (_, bytes, first) = custody.note(b"one".to_vec(), start).expect("the first anchor is written at once");
+        assert_eq!(bytes, anchor_file(&[7; 32], b"one"));
+        custody.wrote(first, true, start);
+        assert!(custody.note(b"one".to_vec(), start).is_none(), "an unchanged anchor is not written");
+        assert!(custody.note(b"two".to_vec(), start).is_none(), "a moved anchor waits out the interval");
+        assert!(custody.due(start + ANCHOR_RETAIN_EVERY / 2).is_none());
+        let (_, _, second) = custody.due(start + ANCHOR_RETAIN_EVERY).expect("then the pending anchor is due");
+        assert_eq!(second, b"two");
+        custody.wrote(second, true, start + ANCHOR_RETAIN_EVERY);
+        assert!(custody.pending.is_none() && custody.retained.as_deref() == Some(&b"two"[..]));
+        // A failed write keeps the anchor pending for the next turn.
+        assert!(custody.note(b"three".to_vec(), start + ANCHOR_RETAIN_EVERY * 2).is_some());
+        custody.wrote(b"three".to_vec(), false, start + ANCHOR_RETAIN_EVERY * 2);
+        assert_eq!(custody.pending.as_deref(), Some(&b"three"[..]));
     }
 
     #[test]

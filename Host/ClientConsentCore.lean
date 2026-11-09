@@ -327,9 +327,9 @@ def refreshExtended (config : NativeHost.Config) (old : Session config)
           next.image.accepted.drop old.1.image.accepted.length ∧
         next.logStart = old.1.logStart}) : IO (Session config) := do
   let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept extended
-  if target.height = old.1.image.accepted.length then return old
+  if target.height = old.1.height then return old
   if 0 < config.transport.checkpointEvery &&
-      old.1.image.accepted.length + config.transport.checkpointEvery ≤ target.height then
+      old.1.height + config.transport.checkpointEvery ≤ target.height then
     return ← verifyInitial config none
   let ⟨_, reader⟩ ← storeReader config target
   match ← old.2.extendAppended config reader target seedExact acceptedExact logStartExact with
@@ -421,17 +421,31 @@ def consent (services : ProviderRouteConsent.Services) (config : NativeHost.Conf
         NativeClientConsent.ObservationRefusal.message)
       selectedHeaders config session wanted checked.headers
   | 222 =>
-      let headers ← IO.ofExcept ((NativeClientConsent.checkIntentPlan config session.2 wanted rest).mapError
-        (fun detail =>
-          match NativeHostCodec.signingPlanCodec.decode rest with
-          | some remote =>
-              if remote.domain == config.deployment.domain
-                  && remote.semantics == config.profile.semantics
-                  && remote.height != NativeHost.logicalHeight config session.2.opened.durable then
-                s!"{NativeClientConsent.staleObservationTag}: {detail}"
-              else detail
-          | none => detail))
-      selectedHeaders config session wanted headers
+      -- A refusal is stale (the client re-plans) only when the Host planned below the height this
+      -- provider admitted. A plan above it means this provider is behind: it admits to the Store's
+      -- head once and judges again, and that verdict is final. At equal heights nothing is stale.
+      let remoteHeight : Option Nat := match NativeHostCodec.signingPlanCodec.decode rest with
+        | some remote =>
+            if remote.domain == config.deployment.domain && remote.semantics == config.profile.semantics
+            then some remote.height else none
+        | none => none
+      let localHeight (held : Session config) := NativeHost.logicalHeight config held.2.opened.durable
+      let judged (held : Session config) : IO (List UInt8) := do
+        match NativeClientConsent.checkIntentPlan config held.2 wanted rest with
+        | .ok headers => selectedHeaders config held wanted headers
+        | .error detail =>
+            match remoteHeight with
+            | some remote =>
+                if remote < localHeight held then
+                  throw (IO.userError s!"{NativeClientConsent.staleObservationTag}: {detail}")
+                else throw (IO.userError detail)
+            | none => throw (IO.userError detail)
+      match NativeClientConsent.checkIntentPlan config session.2 wanted rest, remoteHeight with
+      | .ok headers, _ => selectedHeaders config session wanted headers
+      | .error _, some remote =>
+          if localHeight session < remote then judged (← refresh config session)
+          else judged session
+      | .error _, none => judged session
   | _ => throw (IO.userError "unsupported consent operation")
 
 /-- Thin consent frames (230 intent, 231 observation, 232 plan; 234 birth intent and
@@ -667,7 +681,7 @@ codec frames: the one pure codec implementation is the Host's storeless
 once, then `refresh`); a failed admission terminates the provider, so no cached
 success survives an observed rollback, rewritten prefix, or failed suffix. -/
 partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
-    (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor)
+    (routes : ProviderRouteConsent.Services) (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor)
     (held : Option (Session config)) (owed : Bool) (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
@@ -686,29 +700,29 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   if isThin then
     let answer ← try
         let reply ← if operation == 226 then possession config payload
-          else do thin (← IO.ofExcept settings.providerRoutes) config operation payload
+          else do thin routes config operation payload
         pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained held owed input output
+    serve extraExpected extraObjective settings routes config retained held owed input output
   else if operation == 236 && !payload.isEmpty then
     writeSessionFrame output 255 "full consent readiness requires empty input".toUTF8.toList
-    serve extraExpected extraObjective settings config retained held owed input output
+    serve extraExpected extraObjective settings routes config retained held owed input output
   else if operation == 228 then
     if held.isSome then
       writeSessionFrame output 255
         "a retained consent anchor is offered only before the first admission".toUTF8.toList
-      serve extraExpected extraObjective settings config retained held owed input output
+      serve extraExpected extraObjective settings routes config retained held owed input output
     else
       match ConsentAnchor.decode payload with
       | .error detail =>
           writeSessionFrame output 255 detail.toUTF8.toList
-          serve extraExpected extraObjective settings config retained held owed input output
+          serve extraExpected extraObjective settings routes config retained held owed input output
       | .ok anchor =>
           -- `none`: a record of another consent epoch, set aside (`ConsentAnchor.decode_other_epoch`);
           -- the first admission then starts from the Store's snapshot.
           writeSessionFrame output 228 []
-          serve extraExpected extraObjective settings config anchor held owed input output
+          serve extraExpected extraObjective settings routes config anchor held owed input output
   else if operation == 233 then
     -- A resident provider's per-connection re-check: the Store still carries
     -- the prefix this provider admitted. Before any admission there is nothing to
@@ -716,22 +730,22 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
     match held with
     | none =>
         writeSessionFrame output 233 []
-        serve extraExpected extraObjective settings config retained held false input output
+        serve extraExpected extraObjective settings routes config retained held false input output
     | some session =>
         if session.1.headTag.isSome then
           writeSessionFrame output 233 []
-          serve extraExpected extraObjective settings config retained held true input output
+          serve extraExpected extraObjective settings routes config retained held true input output
         else
           recheckOrEnd config session output
           writeSessionFrame output 233 []
-          serve extraExpected extraObjective settings config retained held false input output
+          serve extraExpected extraObjective settings routes config retained held false input output
   else if operation == 229 then
     match held with
     | none =>
         writeSessionFrame output 255 "no admitted prefix to anchor yet".toUTF8.toList
     | some session =>
         writeSessionFrame output 229 (ConsentAnchor.encode session.2.anchor)
-    serve extraExpected extraObjective settings config retained held owed input output
+    serve extraExpected extraObjective settings routes config retained held owed input output
   else
     let admitted ← match held with
       | none => verifyInitial config retained
@@ -754,11 +768,11 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
           else if operation == 224 then
             specialized extraExpected settings config updated full payload
           else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
-          else do consent (← IO.ofExcept settings.providerRoutes) config updated operation payload
+          else do consent routes config updated operation payload
         pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained (some updated) false input output
+    serve extraExpected extraObjective settings routes config retained (some updated) false input output
 
 def run (extraExpected : ExtraExpected) (arguments : List String)
     (extraObjective : ExtraObjective := refuseObjective) : IO UInt32 := do
@@ -768,8 +782,10 @@ def run (extraExpected : ExtraExpected) (arguments : List String)
       pure 0
   | [path, "stdio"] =>
       let settings ← loadSettings path
+      -- The routes are parsed once (`loadSettings` already checked they parse), not per frame.
+      let routes ← IO.ofExcept settings.providerRoutes
       withPinnedSignature settings.config fun config => do
-        serve extraExpected extraObjective settings config none none false (← IO.getStdin) (← IO.getStdout)
+        serve extraExpected extraObjective settings routes config none none false (← IO.getStdin) (← IO.getStdout)
         pure 0
   | _ => throw (IO.userError "usage: minidregg-client-consent CONFIG stdio")
 end Minidregg.Host.ClientConsentCore

@@ -1491,9 +1491,9 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
 
 /-- The whole presence index, log heights (operator output only). -/
 def presenceIndexJson (index : PresenceIndex.Index) : Lean.Json :=
-  .mkObj [("lastSeen", .arr <| index.lastSeen.toArray.map fun entry =>
+  .mkObj [("lastSeen", .arr <| index.lastSeen.toList.toArray.map fun entry =>
       .arr #[.str (toString entry.1.1.value), .str (toString entry.1.2.value), .str (toString entry.2)]),
-    ("touched", .arr <| index.touched.toArray.map fun entry =>
+    ("touched", .arr <| index.touched.toList.toArray.map fun entry =>
       .arr #[.str (toString entry.1.value), .str (toString entry.2)])]
 
 /-- The whole link index, log heights (operator output only): per source

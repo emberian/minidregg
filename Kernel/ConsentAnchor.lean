@@ -105,7 +105,7 @@ theorem decode_other_epoch (bytes : List UInt8) (other : bytes.take epochTag.len
 
 /-- The anchor of a validated opening. -/
 def Anchor.ofOpened {config : Config} (opened : Opened config) : Anchor :=
-  ⟨opened.durable.image.accepted.length, opened.durable.logStart, opened.durable.chain,
+  ⟨opened.durable.height, opened.durable.logStart, opened.durable.chain,
     opened.durable.worldRoot⟩
 
 /-- The physical comparisons an anchor makes against a full open of the

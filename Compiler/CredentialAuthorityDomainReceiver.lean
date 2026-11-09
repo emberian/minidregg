@@ -416,22 +416,346 @@ def directoryRows (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootByt
     List (Nat × List UInt8) :=
   durable.cells.map fun row => (row.1.value, row.2)
 
+/-! ## The directory held as data
+
+A served state's directory is held as one lifecycle image per identifier (a persistent map, no
+entry for a fresh image) and the used set beside it, which is exactly the identifiers whose
+image was ever used. A step writes the images of the cells it wrote (`HeldImages.write`): one
+map update per written cell, and the used set moves by a cons at an identifier's first use. -/
+
+/-- The stored form of an image: a fresh image is no entry, so the map is determined by its images. -/
+def storedImage : LifecycleImage registry → Option (LifecycleImage registry)
+  | .fresh => none
+  | image => some image
+
+theorem storedImage_getD (image : LifecycleImage registry) : (storedImage image).getD .fresh = image := by
+  cases image <;> rfl
+
+theorem storedImage_ne_fresh (image : LifecycleImage registry) : storedImage image ≠ some .fresh := by
+  cases image <;> simp [storedImage]
+
+/-- Lifecycle images by identifier with the used set: `used` is exactly the identifiers whose
+image was ever used, so a first use is a cons, decided by the image, never by a scan of the set. -/
+structure HeldImages where
+  images : SparseMap Nat (fun _ => LifecycleImage registry)
+  used : Finset Nat
+  noFresh : ∀ identifier, images.get? identifier ≠ some .fresh
+  usedExact : ∀ identifier,
+    identifier ∈ used ↔ LifecycleImage.everUsed registry ((images.get? identifier).getD .fresh) = true
+
+namespace HeldImages
+
+/-- The image at an identifier; fresh where none is held. -/
+@[inline] def image (held : HeldImages) (identifier : Nat) : LifecycleImage registry :=
+  (held.images.get? identifier).getD .fresh
+
+theorem images_eq (held : HeldImages) (identifier : Nat) :
+    held.images.get? identifier = storedImage (held.image identifier) := by
+  unfold image
+  have noFresh := held.noFresh identifier
+  cases found : held.images.get? identifier with
+  | none => rfl
+  | some image =>
+      rw [found] at noFresh
+      cases image with
+      | fresh => exact absurd rfl noFresh
+      | retired => rfl
+      | live cell => rfl
+
+theorem mem_used (held : HeldImages) (identifier : Nat) :
+    identifier ∈ held.used ↔ LifecycleImage.everUsed registry (held.image identifier) = true :=
+  held.usedExact identifier
+
+/-- Held images are equal when their images are. -/
+theorem ext {left right : HeldImages} (same : ∀ identifier, left.image identifier = right.image identifier) :
+    left = right := by
+  have images : left.images = right.images := SparseMap.ext fun identifier => by
+    show left.images.get? identifier = right.images.get? identifier
+    rw [left.images_eq, right.images_eq, same]
+  have used : left.used = right.used := Finset.ext fun identifier => by
+    rw [left.mem_used, right.mem_used, same]
+  cases left
+  cases right
+  simp only at images used
+  subst images
+  subst used
+  rfl
+
+def empty : HeldImages where
+  images := SparseMap.empty
+  used := ∅
+  noFresh := by simp
+  usedExact := by simp [LifecycleImage.everUsed]
+
+theorem image_empty (identifier : Nat) : empty.image identifier = .fresh := by
+  simp [image, empty]
+
+/-- Write one identifier's image. The used set conses the identifier at its first use and drops
+it only when a used image is overwritten by a fresh one. -/
+def set (held : HeldImages) (identifier : Nat) (next : LifecycleImage registry) : HeldImages where
+  images := held.images.set identifier (storedImage next)
+  used :=
+    if LifecycleImage.everUsed registry next then
+      if was : LifecycleImage.everUsed registry (held.image identifier) = true then held.used
+      else Finset.cons identifier held.used fun member => was ((held.mem_used identifier).mp member)
+    else if LifecycleImage.everUsed registry (held.image identifier) then held.used.erase identifier
+    else held.used
+  noFresh := by
+    intro other
+    by_cases same : other = identifier
+    · subst same
+      rw [SparseMap.set_eq]
+      exact storedImage_ne_fresh next
+    · rw [SparseMap.set_ne _ _ _ _ same]
+      exact held.noFresh other
+  usedExact := by
+    intro other
+    by_cases same : other = identifier
+    · subst same
+      rw [SparseMap.set_eq, storedImage_getD]
+      have was := held.mem_used other
+      by_cases nextUsed : LifecycleImage.everUsed registry next = true
+      · rw [if_pos nextUsed]
+        split
+        · rename_i old
+          exact ⟨fun _ => nextUsed, fun _ => was.mpr old⟩
+        · simp [nextUsed]
+      · rw [if_neg nextUsed]
+        split
+        · simp [nextUsed]
+        · rename_i old
+          exact ⟨fun member => absurd (was.mp member) old, fun used => absurd used nextUsed⟩
+    · rw [SparseMap.set_ne _ _ _ _ same]
+      have was := held.usedExact other
+      split
+      · split
+        · exact was
+        · simp [same, was]
+      · split
+        · simp [same, was]
+        · exact was
+
+theorem image_set (held : HeldImages) (identifier : Nat) (next : LifecycleImage registry) (other : Nat) :
+    (held.set identifier next).image other = if other = identifier then next else held.image other := by
+  by_cases same : other = identifier
+  · subst same
+    rw [if_pos rfl]
+    show ((held.images.set other (storedImage next)).get? other).getD .fresh = next
+    rw [SparseMap.set_eq, storedImage_getD]
+  · rw [if_neg same]
+    show ((held.images.set identifier (storedImage next)).get? other).getD .fresh = held.image other
+    rw [SparseMap.set_ne _ _ _ _ same]
+    rfl
+
+/-- Decode and write the image of each listed identifier from `bytesAt`; `none` when one does
+not decode. -/
+def write (bytesAt : Nat → List UInt8) : HeldImages → List Nat → Option HeldImages
+  | held, [] => some held
+  | held, identifier :: rest =>
+      match (LifecycleImage.codec registry).decode (bytesAt identifier) with
+      | none => none
+      | some next => write bytesAt (held.set identifier next) rest
+
+theorem write_some {bytesAt : Nat → List UInt8} :
+    ∀ {held after : HeldImages} {identifiers : List Nat}, write bytesAt held identifiers = some after →
+      ∀ other, LifecycleImage.bytes registry (after.image other) =
+        if other ∈ identifiers then bytesAt other else LifecycleImage.bytes registry (held.image other)
+  | held, after, [], written, other => by
+      simp only [write, Option.some.injEq] at written
+      subst written
+      simp
+  | held, after, identifier :: rest, written, other => by
+      simp only [write] at written
+      split at written
+      · cases written
+      · rename_i next decoded
+        rw [write_some written other, image_set]
+        by_cases inRest : other ∈ rest
+        · simp [inRest]
+        · by_cases same : other = identifier
+          · subst same
+            simp [inRest, LifecycleImage.decode_canonical registry decoded]
+          · simp [inRest, same]
+
+theorem write_none {bytesAt : Nat → List UInt8} :
+    ∀ {held : HeldImages} {identifiers : List Nat}, write bytesAt held identifiers = none →
+      ∃ identifier ∈ identifiers, (LifecycleImage.codec registry).decode (bytesAt identifier) = none
+  | held, [], written => by simp [write] at written
+  | held, identifier :: rest, written => by
+      simp only [write] at written
+      split at written
+      · rename_i decoded
+        exact ⟨identifier, List.mem_cons_self, decoded⟩
+      · obtain ⟨other, member, decoded⟩ := write_none written
+        exact ⟨other, List.mem_cons_of_mem _ member, decoded⟩
+
+/-- The directory the held images are: a slot from each image, the held used set. -/
+def directory (held : HeldImages) : Directory Nat registry where
+  slots identifier := LifecycleImage.slot registry (held.image identifier)
+  used := held.used
+  present_used := by
+    intro identifier cell present
+    apply (held.mem_used identifier).mpr
+    cases image : held.image identifier <;>
+      simp_all [LifecycleImage.slot, LifecycleImage.everUsed]
+
+theorem view_directory (held : HeldImages) (identifier : Nat) :
+    LifecycleImage.view registry held.directory identifier = held.image identifier := by
+  have used := held.mem_used identifier
+  unfold LifecycleImage.view
+  simp only [directory]
+  cases image : held.image identifier <;>
+    simp_all [LifecycleImage.slot, LifecycleImage.everUsed]
+
+end HeldImages
+
+/-- Two directories with the same view at every identifier are equal. -/
+theorem directory_eq_of_view {left right : Directory Nat registry}
+    (same : ∀ identifier, LifecycleImage.view registry left identifier =
+      LifecycleImage.view registry right identifier) : left = right := by
+  have slots : left.slots = right.slots := funext fun identifier => by
+    rw [← LifecycleImage.view_slot registry left identifier, same, LifecycleImage.view_slot]
+  have used : left.used = right.used := Finset.ext fun identifier => by
+    rw [← LifecycleImage.view_used registry left identifier, same, LifecycleImage.view_used]
+  cases left
+  cases right
+  simp only at slots used
+  subst slots
+  subst used
+  rfl
+
 /-- The finite support comes from the complete replayed durable image. A
 request cannot supply a reduced directory or discard tombstones. The only
-absent lifecycle representation is `[]`. -/
+absent lifecycle representation is `[]`. The directory is held as data
+(`HeldImages`): every identifier's image encodes to the image's canonical bytes there, so a later
+image is loaded by writing only the cells whose bytes moved (`loadDirectoryStep`,
+`loadDirectoryFrom`). -/
 structure LoadedDirectory (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) where
   private mk ::
-  directory : Directory Nat registry
-  decoded : DirectoryImage.decode registry (directoryRows durable) = some directory
+  held : HeldImages
+  exact : ∀ identifier, LifecycleImage.bytes registry (held.image identifier) =
+    durable.snapshot.canonicalBytes ⟨identifier⟩
   absentDefault : durable.image.seed.absentBytes = []
 
+/-- The held directory. -/
+@[inline] def LoadedDirectory.directory {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : LoadedDirectory durable) : Directory Nat registry :=
+  loaded.held.directory
+
+/-- The directory of `durable` from images that agree with it outside `identifiers`: decode and
+write those (`HeldImages.write`). `none` exactly when one of them does not decode. -/
+def loadDirectoryWriting (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (absentDefault : durable.image.seed.absentBytes = []) (base : HeldImages) (identifiers : List Nat)
+    (agrees : ∀ identifier, identifier ∉ identifiers →
+      LifecycleImage.bytes registry (base.image identifier) = durable.snapshot.canonicalBytes ⟨identifier⟩) :
+    Option (LoadedDirectory durable) :=
+  match written : HeldImages.write (fun identifier => durable.snapshot.canonicalBytes ⟨identifier⟩) base
+      identifiers with
+  | none => none
+  | some held => some ⟨held, fun identifier => by
+      rw [HeldImages.write_some written identifier]
+      split
+      · rfl
+      · rename_i outside
+        exact agrees identifier outside, absentDefault⟩
+
+theorem loadDirectoryWriting_none {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {absentDefault : durable.image.seed.absentBytes = []} {base : HeldImages} {identifiers : List Nat}
+    {agrees : ∀ identifier, identifier ∉ identifiers →
+      LifecycleImage.bytes registry (base.image identifier) = durable.snapshot.canonicalBytes ⟨identifier⟩}
+    (refused : loadDirectoryWriting durable absentDefault base identifiers agrees = none) :
+    ∃ identifier ∈ identifiers,
+      (LifecycleImage.codec registry).decode (durable.snapshot.canonicalBytes ⟨identifier⟩) = none := by
+  unfold loadDirectoryWriting at refused
+  split at refused
+  · rename_i missing
+    exact HeldImages.write_none missing
+  · cases refused
+
+/-- Every enumerable cell decoded once into the held images (an open). Outside the enumeration
+the bytes are the absent default `[]`, which is the fresh image's. -/
 def loadDirectory (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) :
     Option (LoadedDirectory durable) :=
   if absentDefault : durable.image.seed.absentBytes = [] then
-    match decoded : DirectoryImage.decode registry (directoryRows durable) with
-    | none => none
-    | some directory => some ⟨directory, decoded, absentDefault⟩
+    loadDirectoryWriting durable absentDefault HeldImages.empty (durable.cellIds.map (·.value))
+      fun identifier outside => by
+        rw [HeldImages.image_empty]
+        have notMember : (⟨identifier⟩ : Digest) ∉ durable.image.cellIds := fun member =>
+          outside (List.mem_map.mpr ⟨_, (DurableReceiverIO.Loaded.cellIds_eq durable).symm ▸ member, rfl⟩)
+        exact ((Kernel.DurableCheckpoint.resume_outside_support ResourceBirthCodec.rootBytes
+          durable.image durable.baseHeight durable.base durable.snapshot durable.resumed
+          ⟨identifier⟩ notMember).trans absentDefault).symm
   else none
+
+/-- Global exactness, including identities outside the finite support. -/
+theorem LoadedDirectory.bytes_exact
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : LoadedDirectory durable) (identifier : Nat) :
+    LifecycleImage.bytes registry (LifecycleImage.view registry loaded.directory identifier) =
+      durable.snapshot.canonicalBytes ⟨identifier⟩ := by
+  rw [LoadedDirectory.directory, HeldImages.view_directory]
+  exact loaded.exact identifier
+
+/-- An image with a directory decodes at every identifier. -/
+theorem LoadedDirectory.decodes {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : LoadedDirectory durable) (identifier : Nat) :
+    (LifecycleImage.codec registry).decode (durable.snapshot.canonicalBytes ⟨identifier⟩) =
+      some (loaded.held.image identifier) := by
+  rw [← loaded.exact identifier]
+  exact LifecycleImage.decode_encode registry _
+
+/-! ## A held directory is the recomputation; an unchanged row is not decoded again
+
+The Host holds one `LoadedDirectory` per served image (`NativeHost.Opened`).
+These facts let every request read it instead of decoding every stored cell
+again, and let a session advanced by new records decode only the cells whose
+bytes moved. -/
+
+/-- Two loaded directories of one image are equal: the bytes fix every image. -/
+theorem LoadedDirectory.unique {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (left right : LoadedDirectory durable) : left = right := by
+  have same : left.held = right.held := HeldImages.ext fun identifier => by
+    have bytes := (left.exact identifier).trans (right.exact identifier).symm
+    have decoded := congrArg (LifecycleImage.rawDecode registry) bytes
+    rw [LifecycleImage.rawDecode_bytes, LifecycleImage.rawDecode_bytes] at decoded
+    exact Option.some.inj decoded
+  cases left
+  cases right
+  simp only at same
+  subst same
+  rfl
+
+/-- **A held directory is what `loadDirectory` would recompute** on the same image. -/
+theorem LoadedDirectory.load_eq {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : LoadedDirectory durable) : loadDirectory durable = some loaded := by
+  unfold loadDirectory
+  rw [dif_pos loaded.absentDefault]
+  cases computed : loadDirectoryWriting durable loaded.absentDefault HeldImages.empty
+      (durable.cellIds.map (·.value)) _ with
+  | some other => exact congrArg some (LoadedDirectory.unique other loaded)
+  | none =>
+      exfalso
+      obtain ⟨identifier, _, decoded⟩ := loadDirectoryWriting_none computed
+      rw [loaded.decodes identifier] at decoded
+      cases decoded
+
+/-- Any load that yields a directory whenever every listed cell decodes, and refuses only when a
+cell of `durable` does not decode, is `loadDirectory`. -/
+theorem loadDirectory_of_refusal {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (other : Option (LoadedDirectory durable))
+    (refusal : other = none → (durable.image.seed.absentBytes = [] →
+      ∃ identifier, (LifecycleImage.codec registry).decode (durable.snapshot.canonicalBytes ⟨identifier⟩) = none)) :
+    other = loadDirectory durable := by
+  cases other with
+  | some loaded => exact (LoadedDirectory.load_eq loaded).symm
+  | none =>
+      cases computed : loadDirectory durable with
+      | none => rfl
+      | some loaded =>
+          exfalso
+          obtain ⟨identifier, decoded⟩ := refusal rfl loaded.absentDefault
+          rw [loaded.decodes identifier] at decoded
+          cases decoded
 
 private theorem lookup_enumeration (identifiers : List Digest)
     (bytes : Digest → List UInt8) (identifier : Nat) :
@@ -448,56 +772,79 @@ private theorem lookup_enumeration (identifiers : List Digest)
           · have differentBool : (identifier == value) = false := by simp [equal]
             simpa [List.lookup_cons, differentBool, equal, Ne.symm equal] using induction
 
-/-- Global exactness, including identities outside the finite support. -/
-theorem LoadedDirectory.bytes_exact
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : LoadedDirectory durable) (identifier : Nat) :
-    LifecycleImage.bytes registry (LifecycleImage.view registry loaded.directory identifier) =
+private theorem decodeRows_isSome : ∀ (rows : List (Nat × List UInt8)),
+    (∀ row ∈ rows, ((LifecycleImage.codec registry).decode row.2).isSome) →
+      (DirectoryImage.decodeRows registry rows).isSome
+  | [], _ => rfl
+  | (identifier, bytes) :: rest, decodes => by
+      have head := decodes (identifier, bytes) (by simp)
+      have tail := decodeRows_isSome rest fun row member => decodes row (by simp [member])
+      obtain ⟨image, imageDecoded⟩ := Option.isSome_iff_exists.mp head
+      obtain ⟨images, imagesDecoded⟩ := Option.isSome_iff_exists.mp tail
+      simp [DirectoryImage.decodeRows, imageDecoded, imagesDecoded]
+
+/-- **The held directory is the full decode** of every enumerable row (`DirectoryImage.decode`,
+the directory's specification): the same directory, and the same refusal. -/
+theorem loadDirectory_directory (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (absentDefault : durable.image.seed.absentBytes = []) :
+    (loadDirectory durable).map (·.directory) = DirectoryImage.decode registry (directoryRows durable) := by
+  have rowsAt : ∀ identifier, ((directoryRows durable).lookup identifier).getD [] =
       durable.snapshot.canonicalBytes ⟨identifier⟩ := by
-  rw [DirectoryImage.decode_exact registry loaded.decoded identifier]
-  simp only [directoryRows, DurableReceiverIO.Loaded.cells, List.map_map, Function.comp_def]
-  rw [lookup_enumeration]
-  split
-  next => rfl
-  next outside =>
-    exact (Kernel.DurableCheckpoint.resume_outside_support ResourceBirthCodec.rootBytes
-      durable.image durable.baseHeight durable.base durable.snapshot durable.resumed
-      ⟨identifier⟩ outside).trans loaded.absentDefault |>.symm
-
-/-! ## A held directory is the recomputation; an unchanged row is not decoded again
-
-The Host holds one `LoadedDirectory` per served image (`NativeHost.Opened`).
-These facts let every request read it instead of decoding every stored cell
-again, and let a session advanced by new records decode only the rows whose
-bytes moved. -/
-
-/-- Two loaded directories of one image are equal: `decoded` fixes the
-directory, so the one computed at open or at commit is the one any
-recomputation returns. -/
-theorem LoadedDirectory.unique {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (left right : LoadedDirectory durable) : left = right := by
-  have same : left.directory = right.directory :=
-    Option.some.inj (left.decoded.symm.trans right.decoded)
-  cases left
-  cases right
-  simp only at same
-  subst same
-  rfl
-
-/-- **A held directory is what `loadDirectory` would recompute** on the same image. -/
-theorem LoadedDirectory.load_eq {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : LoadedDirectory durable) : loadDirectory durable = some loaded := by
-  cases computed : loadDirectory durable with
-  | some other => exact congrArg some (LoadedDirectory.unique other loaded)
+    intro identifier
+    simp only [directoryRows, DurableReceiverIO.Loaded.cells, List.map_map, Function.comp_def]
+    rw [lookup_enumeration]
+    split
+    · rfl
+    · rename_i outside
+      exact ((Kernel.DurableCheckpoint.resume_outside_support ResourceBirthCodec.rootBytes
+        durable.image durable.baseHeight durable.base durable.snapshot durable.resumed
+        ⟨identifier⟩ outside).trans absentDefault).symm
+  cases decoded : DirectoryImage.decode registry (directoryRows durable) with
+  | some directory =>
+      cases computed : loadDirectory durable with
+      | some loaded =>
+          simp only [Option.map_some, Option.some.injEq]
+          apply directory_eq_of_view
+          intro identifier
+          have bytes := (loaded.bytes_exact identifier).trans ((rowsAt identifier).symm.trans
+            (DirectoryImage.decode_exact registry decoded identifier).symm)
+          have same := congrArg (LifecycleImage.rawDecode registry) bytes
+          rw [LifecycleImage.rawDecode_bytes, LifecycleImage.rawDecode_bytes] at same
+          exact Option.some.inj same
+      | none =>
+          exfalso
+          unfold loadDirectory at computed
+          rw [dif_pos absentDefault] at computed
+          obtain ⟨identifier, _, refused⟩ := loadDirectoryWriting_none computed
+          rw [← rowsAt identifier, ← DirectoryImage.decode_exact registry decoded identifier] at refused
+          have roundTrip := LifecycleImage.decode_encode registry
+            (LifecycleImage.view registry directory identifier)
+          change (LifecycleImage.codec registry).decode (LifecycleImage.bytes registry _) = _ at roundTrip
+          rw [roundTrip] at refused
+          cases refused
   | none =>
-      exfalso
-      unfold loadDirectory at computed
-      rw [dif_pos loaded.absentDefault] at computed
-      split at computed
-      · rename_i missing
-        rw [loaded.decoded] at missing
-        cases missing
-      · cases computed
+      cases computed : loadDirectory durable with
+      | none => rfl
+      | some loaded =>
+          exfalso
+          have rowsDecode := decodeRows_isSome (directoryRows durable) fun row member => by
+            simp only [directoryRows, DurableReceiverIO.Loaded.cells, List.map_map, List.mem_map,
+              Function.comp_def] at member
+            obtain ⟨cellId, _, same⟩ := member
+            subst same
+            rw [loaded.decodes cellId.value]
+            rfl
+          obtain ⟨rows, rowsDecoded⟩ := Option.isSome_iff_exists.mp rowsDecode
+          have keys := DirectoryImage.decodeRows_keys registry rowsDecoded
+          have unique : (rows.map Prod.fst).Nodup := by
+            rw [keys]
+            simp only [directoryRows, DurableReceiverIO.Loaded.cells, List.map_map, Function.comp_def]
+            exact (Kernel.DurableCheckpoint.nodup_eraseDups _).map fun left right same => by
+              cases left
+              cases right
+              simp only at same
+              rw [same]
+          simp [DirectoryImage.decode, rowsDecoded, unique] at decoded
 
 /-- Two images whose canonical bytes agree at an identifier load the same slot there. -/
 theorem LoadedDirectory.slots_eq_of_bytes
@@ -516,118 +863,74 @@ theorem LoadedDirectory.slots_eq_of_bytes
   rw [← LifecycleImage.view_slot registry left.directory identifier, views,
     LifecycleImage.view_slot]
 
-/-- One directory row of a later image. When the identifier's canonical bytes
-equal the held image's, the held directory's view of it is reused; otherwise the
-bytes are decoded and stepped relative to the held view. `decodeRowFrom_eq`:
-both are what decoding the bytes returns. -/
-def decodeRowFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (held : LoadedDirectory prior) (identifier : Nat) (bytes : List UInt8) :
-    Option (LifecycleImage registry) :=
-  let priorView := LifecycleImage.view registry held.directory identifier
-  if bytesBEq (prior.snapshot.canonicalBytes ⟨identifier⟩) bytes then
-    some priorView
-  else
-    ((LifecycleImage.codec registry).decode bytes).map
-      (LifecycleImage.relativeTo registry priorView)
+/-- The identifiers whose canonical bytes differ between two images (over both enumerations). -/
+def changedCells (prior durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) : List Nat :=
+  ((durable.cellIds ++ prior.cellIds).filter fun cellId =>
+    !bytesBEq (prior.snapshot.canonicalBytes cellId) (durable.snapshot.canonicalBytes cellId)).map (·.value)
 
-theorem decodeRowFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (held : LoadedDirectory prior) (identifier : Nat) (bytes : List UInt8) :
-    decodeRowFrom held identifier bytes = (LifecycleImage.codec registry).decode bytes := by
-  unfold decodeRowFrom
-  split
-  next same =>
-    have exact : LifecycleImage.bytes registry
-        (LifecycleImage.view registry held.directory identifier) = bytes :=
-      (held.bytes_exact identifier).trans (bytesBEq_iff.mp same)
-    rw [← exact]
-    exact (LifecycleImage.decode_encode registry _).symm
-  next =>
-    cases (LifecycleImage.codec registry).decode bytes <;> simp [LifecycleImage.relativeTo_eq]
-
-def decodeRowsFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (held : LoadedDirectory prior) :
-    List (Nat × List UInt8) → Option (DirectoryImage.Rows registry)
-  | [] => some []
-  | (identifier, bytes) :: rest => do
-      let image ← decodeRowFrom held identifier bytes
-      let tail ← decodeRowsFrom held rest
-      some ((identifier, image) :: tail)
-
-theorem decodeRowsFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (held : LoadedDirectory prior) :
-    ∀ input : List (Nat × List UInt8),
-      decodeRowsFrom held input = DirectoryImage.decodeRows registry input
-  | [] => rfl
-  | (identifier, bytes) :: rest => by
-      simp only [decodeRowsFrom, DirectoryImage.decodeRows, decodeRowFrom_eq,
-        decodeRowsFrom_eq held rest]
-
-def decodeFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
-    Option (Directory Nat registry) := do
-  let rows ← decodeRowsFrom held input
-  if (rows.map Prod.fst).Nodup then some (DirectoryImage.ofRows registry rows) else none
-
-/-- `decodeFrom` as compiled: the identity check is one hashed pass. -/
-def decodeFromFast {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
-    Option (Directory Nat registry) := do
-  let rows ← decodeRowsFrom held input
-  if CompiledListOps.nodupNat (rows.map Prod.fst) then some (DirectoryImage.ofRows registry rows) else none
-
-@[csimp] theorem decodeFrom_eq_fast : @decodeFrom = @decodeFromFast := by
-  funext prior held input
-  unfold decodeFrom decodeFromFast
-  cases decodeRowsFrom held input with
-  | none => rfl
-  | some rows =>
-      simp only [Option.bind_eq_bind, Option.bind_some]
-      by_cases unique : (rows.map Prod.fst).Nodup
-      · rw [if_pos unique, if_pos ((CompiledListOps.nodupNat_iff _).mpr unique)]
-      · rw [if_neg unique, if_neg (fun fast => unique ((CompiledListOps.nodupNat_iff _).mp fast))]
-
-theorem decodeFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
-    decodeFrom held input = DirectoryImage.decode registry input := by
-  simp only [decodeFrom, DirectoryImage.decode, decodeRowsFrom_eq]
-
-/-- `loadDirectory` of a later image, decoding only the rows whose bytes differ
-from `held`'s image (`loadDirectoryFrom_eq`). -/
+/-- `loadDirectory` of a later image, decoding only the cells whose bytes differ from `held`'s
+image (`loadDirectoryFrom_eq`). It still compares every cell; a step that knows the cells it
+wrote uses `loadDirectoryStep`. -/
 def loadDirectoryFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (held : LoadedDirectory prior) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) :
     Option (LoadedDirectory durable) :=
   if absentDefault : durable.image.seed.absentBytes = [] then
-    match decoded : decodeFrom held (directoryRows durable) with
-    | none => none
-    | some directory =>
-        some ⟨directory, (decodeFrom_eq held (directoryRows durable)).symm.trans decoded,
-          absentDefault⟩
+    loadDirectoryWriting durable absentDefault held.held (changedCells prior durable)
+      fun identifier unchanged => by
+        rw [held.exact identifier]
+        by_cases same : bytesBEq (prior.snapshot.canonicalBytes ⟨identifier⟩)
+            (durable.snapshot.canonicalBytes ⟨identifier⟩) = true
+        · exact bytesBEq_iff.mp same
+        · by_cases listed : (⟨identifier⟩ : Digest) ∈ durable.cellIds ++ prior.cellIds
+          · have changed : identifier ∈ changedCells prior durable :=
+              List.mem_map.mpr ⟨(⟨identifier⟩ : Digest), List.mem_filter.mpr ⟨listed, by simpa using same⟩, rfl⟩
+            exact absurd changed unchanged
+          · have outside := fun (image : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+                (member : (⟨identifier⟩ : Digest) ∉ image.image.cellIds) =>
+              Kernel.DurableCheckpoint.resume_outside_support ResourceBirthCodec.rootBytes
+                image.image image.baseHeight image.base image.snapshot image.resumed ⟨identifier⟩ member
+            rw [List.mem_append, not_or, DurableReceiverIO.Loaded.cellIds_eq,
+              DurableReceiverIO.Loaded.cellIds_eq] at listed
+            rw [outside prior listed.2, outside durable listed.1, absentDefault, held.absentDefault]
   else none
 
 /-- **The incremental load is the full load**: same refusal, same directory. -/
 theorem loadDirectoryFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (held : LoadedDirectory prior) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) :
     loadDirectoryFrom held durable = loadDirectory durable := by
-  cases computed : loadDirectory durable with
-  | some loaded =>
-      cases incremental : loadDirectoryFrom held durable with
-      | some other => exact congrArg some (LoadedDirectory.unique other loaded)
-      | none =>
-          exfalso
-          unfold loadDirectoryFrom at incremental
-          rw [dif_pos loaded.absentDefault] at incremental
-          split at incremental
-          · rename_i missing
-            rw [decodeFrom_eq, loaded.decoded] at missing
-            cases missing
-          · cases incremental
-  | none =>
-      cases incremental : loadDirectoryFrom held durable with
-      | none => rfl
-      | some other =>
-          exfalso
-          rw [LoadedDirectory.load_eq other] at computed
-          cases computed
+  apply loadDirectory_of_refusal
+  intro refused absentDefault
+  unfold loadDirectoryFrom at refused
+  rw [dif_pos absentDefault] at refused
+  obtain ⟨identifier, _, decoded⟩ := loadDirectoryWriting_none refused
+  exact ⟨identifier, decoded⟩
+
+/-- `loadDirectory` of an image one step after a held one, decoding only the cells the step wrote
+(`moved`: every other cell kept its bytes, so its held image stands). -/
+def loadDirectoryStep {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (written : List CellId)
+    (moved : ∀ cellId, cellId ∉ written → durable.snapshot.canonicalBytes cellId = prior.snapshot.canonicalBytes cellId) :
+    Option (LoadedDirectory durable) :=
+  if absentDefault : durable.image.seed.absentBytes = [] then
+    loadDirectoryWriting durable absentDefault held.held (written.map (·.value))
+      fun identifier unwritten => by
+        rw [held.exact identifier, moved ⟨identifier⟩ fun member =>
+          unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)]
+  else none
+
+/-- **The step load is the full load**: same refusal, same directory. -/
+theorem loadDirectoryStep_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (written : List CellId)
+    (moved : ∀ cellId, cellId ∉ written → durable.snapshot.canonicalBytes cellId = prior.snapshot.canonicalBytes cellId) :
+    loadDirectoryStep held durable written moved = loadDirectory durable := by
+  apply loadDirectory_of_refusal
+  intro refused absentDefault
+  unfold loadDirectoryStep at refused
+  rw [dif_pos absentDefault] at refused
+  obtain ⟨identifier, _, decoded⟩ := loadDirectoryWriting_none refused
+  exact ⟨identifier, decoded⟩
 
 /-! ## Concrete preparation of the root-issuance batch -/
 

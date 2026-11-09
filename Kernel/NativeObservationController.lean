@@ -1346,18 +1346,18 @@ theorem mem_of_maxOf : ∀ {heights : List Nat} {top : Nat}, maxOf heights = som
 /-- The greatest log height at which `subject` wrote a cell the reader sees. -/
 def whoSeen (index : PresenceIndex.Index) (visible : DurableDataIntent.CellId → Bool)
     (subject : SubjectId) : Option Nat :=
-  maxOf (index.touched.filterMap fun entry =>
-    if visible entry.1 then index.lastSeenAt entry.1 subject else none)
+  maxOf (index.touched.keys.filterMap fun cell =>
+    if visible cell then index.lastSeenAt cell subject else none)
 
 /-- **`who` reveals only visible cells**: a reported height is the index's
 `lastSeen` of a cell the reader sees. -/
 theorem whoSeen_sound {index : PresenceIndex.Index} {visible : DurableDataIntent.CellId → Bool}
     {subject : SubjectId} {height : Nat} (seen : whoSeen index visible subject = some height) :
     ∃ cell, visible cell = true ∧ index.lastSeenAt cell subject = some height := by
-  obtain ⟨entry, _, found⟩ := List.mem_filterMap.mp (mem_of_maxOf seen)
-  by_cases shown : visible entry.1 = true
+  obtain ⟨cell, _, found⟩ := List.mem_filterMap.mp (mem_of_maxOf seen)
+  by_cases shown : visible cell = true
   · rw [if_pos shown] at found
-    exact ⟨entry.1, shown, found⟩
+    exact ⟨cell, shown, found⟩
   · rw [if_neg shown] at found
     cases found
 
@@ -2146,7 +2146,7 @@ def AuthorizedIntent.queryResult
           (history.links.links ⟨grant.target⟩).map fun entry => linkRow genesisHeight (⟨grant.target⟩, entry)))
   else throw .malformed
 
-/-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_sound' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.whoSeen_sound
 /-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.whoSeen_exact
