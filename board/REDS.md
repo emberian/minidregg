@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `b39706c4bc64` (world-migrate verify: a green verify releases each carried grain's staging copies). Round finished 2026-11-09T04:32Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-b39706c4`.
+Tip: `0fd9d0d920c5` (world-migrate grains: a share that bound its route but could not yet enroll is settled by ). Round finished 2026-11-09T04:48Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-0fd9d0d9`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..b39706c4bc64`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..0fd9d0d920c5`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `0fd9d0d9` world-migrate grains: a share that bound its route but could not yet enroll is settled by its exact 
+- `8af1c7f7` builder: REDS.md for b39706c4bc64 (6 red) (owner: build-loop)
 - `b39706c4` world-migrate verify: a green verify releases each carried grain's staging copies
 - `4a32bc17` builder: REDS.md for 842fa347267b (6 red) (owner: build-loop)
 - `842fa347` world-migrate grains: a carry counts once it runs, a re-run resumes the claimed request, and an unca
