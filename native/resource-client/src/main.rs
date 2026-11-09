@@ -901,7 +901,7 @@ usage:
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
   mini apps search [--term TEXT] [--category C] [--qualification FILE] [--json]   the Sandstorm app market and recorded lifecycle verdicts
   mini apps show --app APP-ID|PACKAGE-ID [--qualification FILE] [--json]
-  mini apps install --app APP-ID|PACKAGE-ID --dir WORKSPACE [--class S|M|L] [--retry REQUEST-ID]   a member turn: birth + delegation, then the worker
+  mini apps install --app APP-ID|PACKAGE-ID --dir WORKSPACE [--class S|M|L] [--carry GRAIN] [--retry REQUEST-ID]   a member turn: birth + delegation, then the worker (--carry: from your previous world's grain)
   mini apps list|status|open|stop|start|share|export|delete [--grain a<APP>] [--to MEMBER] [--out FILE]   decoded outcomes over the worker socket
   mini apps index-check --in RAW.json --out INDEX.json              the fetcher's validation of the downloaded index
   mini apps bootstrap --dir OPERATOR-WORKSPACE [--budget N] [--tool-ref tool] [--parent-ref parent]   operator, once per world: the metered tasks

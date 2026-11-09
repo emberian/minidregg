@@ -68,6 +68,7 @@ What the members made:
 | documents a member owns | by re-authoring | `doc new`, then each missing line by `doc append` and `submit` (current text; line authors are checked) |
 | the seed accounts' content | rebuilt | the walk's seed step (house, sage, public: `MIGRATE_SEED_ACCOUNTS`); compared, never re-authored |
 | door requests and status pages | kept | ship.sh keeps every enrolled request whose account exists |
+| app grains and the data inside them | exactly (the /var bytes), wired, not yet walked | `world-migrate capture` STOPs and exports each grain a member owns, as its owner (`apps stop`, `apps export`: the stopped /var bound to its STOP receipt, signed by the old Store's completion custodian), into `DIR/grains/GRAIN/` with `carry.json` (owner, app, class, the old pinned `completionCustodianKey`), and puts each export's image digest in `before.json`. `world-migrate grains` (after grain-world, before the seed) places it in `/var/lib/mini-apps/carried/GRAIN/`. The owner then runs `apps install APP --carry GRAIN`: the worker admits only the owner, the same app and class, and one install per carry, and it runs `spk-host grain install --import`. Then `apps share` for each member. The seed writes nothing into a carried grain. Verify needs a grain carried from each old one, with the same owner, app, class and shares, whose imported image is the export's digest. House grains count too (a member may write into them) |
 
 What cannot carry, and why:
 
@@ -86,9 +87,10 @@ What cannot carry, and why:
   replay. The old world's history stays readable in the retired Store.
 - **Pay claims.** The memo of a mainnet payment pins the old Host and config. The new world can neither
   claim it nor credit it again. Its effect (the enrollment, the subject, the balance) carries.
-- **App grain data written inside a grain.** No member verb imports a grain's data. The seed re-creates
-  the house's grains and its own writes. The world held only the house's grains on 2026-11-07, so no
-  member data was in one.
+- **Grains in the worlds already retired.** Before 2026-11-09 nothing was exported, and ship.sh stopped those
+  grains by unit, without a STOP through Mini. So they have no STOP receipt and cannot be exported. Their
+  volumes stay on disk. The 2026-11-09 audit compared both of that night's retired worlds against a fresh
+  seed and found nothing beyond the seed's own writes.
 - **ember3's `factory` reference.** It is an observe grant on the factory that the pay route's birth
   context carries and the sponsor's provision does not. Nothing ember3 did needed it: the
   `research-consent` cell is re-created without it.

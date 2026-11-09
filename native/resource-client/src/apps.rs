@@ -640,6 +640,14 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
     if !matches!(class.as_str(), "S" | "M" | "L" | "auto") {
         return Err("classRefused: --class takes S, M or L".into());
     }
+    // A grain of the previous world this install carries: the operator's migration placed its
+    // export with the worker (world-migrate), and the new grain starts from that /var.
+    let carry = text_flag(&mut args, "carry")?;
+    if let Some(grain) = &carry {
+        if !valid_grain(grain) {
+            return Err(format!("grainRefused: --carry {grain:?} is not a grain id of the form a<app>"));
+        }
+    }
     let root = absolute(&path(dir.ok_or("missing --dir")?))?;
     // The member's session home (the shell passes it): HOME/inbox holds the delegated
     // references the frame leaves at enrolment.
@@ -752,7 +760,8 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
                 "appId":entry.app_id,"packageId":entry.package_id,"class":class,
                 "birthSource":document(&source)?,"birthReceipt":document(&receipt)?,"delegation":delegation_doc,
                 "shareDelegation":document(&delegation.with_file_name("share-delegation.json"))?,
-                "requestCell":cell,"indexName":entry.name,"indexVersion":entry.version
+                "requestCell":cell,"indexName":entry.name,"indexVersion":entry.version,
+                "carry":carry
             });
             let file = requests.join(format!("{id}.json"));
             crate::workspace::atomic_json(&file, &retained, None)?;
