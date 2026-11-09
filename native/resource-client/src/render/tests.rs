@@ -482,10 +482,18 @@ fn demo_seed_docs_and_script_decorations_match_shell_grammar_and_line_counts() {
     *max_lines.get_mut("field-notes").unwrap() += 1;
 
     let script = std::fs::read_to_string(seed_dir.join("seed.sh")).expect("seed.sh");
+    // The script places house-rules' link and note on its last line, `HR_LAST=$(grep -c '' …)`.
+    let house_rules_last = std::fs::read_to_string(docs_dir.join("house-rules.txt"))
+        .expect("house-rules")
+        .lines()
+        .count()
+        .to_string();
+    assert!(script.contains("HR_LAST=$(grep -c '' \"$D/docs/house-rules.txt\")"), "seed.sh no longer derives HR_LAST from the text");
     let mut mark_count = 0usize;
     let mut annotate_count = 0usize;
     for raw in script.lines() {
-        let line = raw.trim();
+        let resolved = raw.trim().replace("\"$HR_LAST\"", &house_rules_last);
+        let line = resolved.as_str();
         let words: Vec<&str> = line.split_whitespace().collect();
         match words.as_slice() {
             ["doc_mark", _, doc, ln, kind] | ["doc_mark", _, doc, ln, kind, _] => {
