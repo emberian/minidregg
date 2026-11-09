@@ -396,6 +396,25 @@ fn bounded_systemctl(args: &[&str], deadline: Duration) -> io::Result<Output> {
     }
 }
 
+/// Whether the record's exact cgroup holds no process (an absent cgroup is
+/// empty). A record without one has nothing recorded to be populated.
+fn recorded_cgroup_empty(record: &Record) -> io::Result<bool> {
+    let Some(group) = record.control_group.as_deref() else {
+        return Ok(true);
+    };
+    match crate::os::cgroup_events(group) {
+        Ok(events) => {
+            let populated = events
+                .lines()
+                .find_map(|line| line.strip_prefix("populated "))
+                .ok_or_else(|| invalid("missing cgroup populated field"))?;
+            Ok(populated == "0")
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
 fn property<'a>(output: &'a str, name: &str) -> io::Result<&'a str> {
     let prefix = format!("{name}=");
     let mut matches = output.lines().filter_map(|line| line.strip_prefix(&prefix));
@@ -593,23 +612,42 @@ impl UnitStopAudit {
 
     fn before_stop(record: &Record) -> io::Result<()> {
         let output = systemd_show(record.unit())?;
-        if property(&output, "Id")? != record.unit() || property(&output, "LoadState")? != "loaded"
+        Self::before_stop_observed(record, &output, || recorded_cgroup_empty(record))
+    }
+
+    /// The pre-stop check on one manager answer: the manager stop that follows
+    /// reaches only the recorded incarnation, or a unit that holds no process.
+    fn before_stop_observed(
+        record: &Record,
+        output: &str,
+        recorded_cgroup_empty: impl FnOnce() -> io::Result<bool>,
+    ) -> io::Result<()> {
+        if property(output, "Id")? != record.unit() || property(output, "LoadState")? != "loaded"
         {
             return Err(invalid("exact unit absent before stop"));
         }
         if let Some(expected) = record.invocation_id.as_deref() {
-            if property(&output, "InvocationID")? != expected {
-                return Err(invalid("unit invocation drift before stop"));
-            }
-            let group = property(&output, "ControlGroup")?;
-            if group != record.control_group.as_deref().unwrap_or("") {
+            let group = property(output, "ControlGroup")?;
+            let dead = group.is_empty()
+                && matches!(property(output, "ActiveState")?, "failed" | "inactive")
+                && property(output, "MainPID")? == "0"
+                && matches!(property(output, "Job")?, "0" | "");
+            if property(output, "InvocationID")? != expected {
+                // systemd never reuses an InvocationID, so the recorded
+                // incarnation has ended. A later incarnation of the same unit,
+                // started outside the lifecycle (a restart by unit name,
+                // demo-dry 2026-11-09), that has ended too leaves no process to
+                // fence: the manager stop only clears its failed state. Admitted
+                // only when the manager holds no process, job or cgroup and the
+                // recorded cgroup is unpopulated; a live later incarnation is
+                // never stopped under this claim.
+                if !(dead && recorded_cgroup_empty()?) {
+                    return Err(invalid("unit invocation drift before stop"));
+                }
+            } else if group != record.control_group.as_deref().unwrap_or("") {
                 // The recorded incarnation died (a crash): systemd keeps its
                 // InvocationID on the failed unit and has released its cgroup.
                 // Stopping it is fencing a dead incarnation, never another one.
-                let dead = group.is_empty()
-                    && matches!(property(&output, "ActiveState")?, "failed" | "inactive")
-                    && property(&output, "MainPID")? == "0"
-                    && matches!(property(&output, "Job")?, "0" | "");
                 if !dead {
                     return Err(invalid("unit invocation/cgroup drift before stop"));
                 }
@@ -627,18 +665,8 @@ impl UnitStopAudit {
         if !manager_group.is_empty() && Some(manager_group) != recorded_group {
             return Err(invalid("systemd cgroup differs from durable unit instance"));
         }
-        let exact_cgroup_empty = if let Some(group) = recorded_group {
-            match crate::os::cgroup_events(group) {
-                Ok(events) => {
-                    let populated = events
-                        .lines()
-                        .find_map(|line| line.strip_prefix("populated "))
-                        .ok_or_else(|| invalid("missing cgroup populated field"))?;
-                    populated == "0"
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => true,
-                Err(error) => return Err(error),
-            }
+        let exact_cgroup_empty = if recorded_group.is_some() {
+            recorded_cgroup_empty(record)?
         } else {
             manager_group.is_empty()
         };
@@ -3297,6 +3325,50 @@ mod tests {
         fs::remove_dir_all(path).unwrap();
     }
 
+    /// A later incarnation of the recorded unit, started outside the lifecycle
+    /// (demo-dry 2026-11-09: a restart by unit name, then a failed bootstrap),
+    /// leaves the claimed STOP fenceable only while nothing runs in the unit.
+    #[test]
+    fn stop_fences_a_drifted_unit_only_when_it_holds_no_process() {
+        let path = scratch();
+        let journal = Journal::open(&path).unwrap();
+        let identity = begin();
+        journal.arm(identity.clone()).unwrap();
+        journal.request_launch(&identity).unwrap();
+        journal
+            .enter_and_spawn_with(&identity, &instance(), || Ok(child(460)), Journal::write_unlocked)
+            .unwrap();
+        let record = journal.read().unwrap().unwrap();
+        assert_eq!(record.phase, Phase::Running);
+        let group = instance().control_group;
+        let show = |state: &str, pid: &str, job: &str, invocation: &str, cgroup: &str| {
+            format!("Id={}\nLoadState=loaded\nActiveState={state}\nMainPID={pid}\nJob={job}\nInvocationID={invocation}\nControlGroup={cgroup}\n",
+                record.unit())
+        };
+        let later = "e".repeat(32);
+        let recorded = "f".repeat(32);
+        let check = |output: String, empty: bool| UnitStopAudit::before_stop_observed(&record, &output, || Ok(empty));
+        // The recorded incarnation, live or crashed: the claim's own process.
+        check(show("active", "460", "", &recorded, &group), false).unwrap();
+        check(show("failed", "0", "", &recorded, ""), true).unwrap();
+        // A later incarnation that ended (failed or reset), or a cleared one: nothing to reach.
+        check(show("failed", "0", "", &later, ""), true).unwrap();
+        check(show("inactive", "0", "", "", ""), true).unwrap();
+        // A later incarnation that runs, is starting, has a job or a populated cgroup is never stopped.
+        for (output, empty) in [
+            (show("active", "461", "", &later, &group), true),
+            (show("activating", "0", "", &later, &group), true),
+            (show("failed", "0", "", &later, &group), true),
+            (show("failed", "461", "", &later, ""), true),
+            (show("inactive", "0", "17", &later, ""), true),
+            (show("failed", "0", "", &later, ""), false),
+        ] {
+            let error = check(output, empty).unwrap_err().to_string();
+            assert!(error.contains("unit invocation drift before stop"), "{error}");
+        }
+        fs::remove_dir_all(path).unwrap();
+    }
+
     #[test]
     fn mismatched_or_missing_unit_audit_retains_fence() {
         let path = scratch();
@@ -3377,7 +3449,9 @@ mod tests {
         let inactive = systemd_show(unit).unwrap();
         assert_eq!(property(&inactive, "InvocationID").unwrap(), "");
         assert_eq!(property(&inactive, "MainPID").unwrap(), "0");
-        assert!(UnitStopAudit::before_stop(&original).unwrap_err().to_string().contains("invocation drift"));
+        // The manager cleared the recorded InvocationID and holds no process: the
+        // incarnation ended, so the pre-stop check admits the (no-op) fence.
+        UnitStopAudit::before_stop(&original).unwrap();
         UnitStopAudit::inspect(&original).unwrap().prove(&original).unwrap();
         let path = scratch();
         let journal = Journal::open(&path).unwrap();

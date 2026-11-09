@@ -10,7 +10,7 @@ use crate::lifecycle_v3_stop_claim_native::{ExactReceipt, FreshStopClaim};
 use crate::volume_custody::VolumeWitness;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{DirBuilder, OpenOptions};
+use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -426,18 +426,15 @@ fn receipt_fields(receipt: &ExactReceipt) -> ReceiptFields<'_> {
     }
 }
 
-/// Resume only a STOP that already crossed the fresh fence's durable Fenced
-/// boundary. Historical ingress or an op27 receipt cannot call `fence_exact`.
-/// The current pinned Host reselects the exact retained plan, committed op26
-/// frame and prior running event25; the private marker must match those bytes.
-/// The hostd recovery method independently requires Fenced under its lock.
-pub(crate) fn resume_fenced_exact(
+/// The STOP target of this attempt's own retained committed op26 permit. The
+/// current pinned Host reselects the exact retained plan, committed op26 frame
+/// and prior running event25. Historical ingress or an op27 receipt never
+/// yields one: only the committed frame the one op26 returned.
+fn retained_committed_target(
     operator: &PrivateOperator,
     attempt_dir: &Path,
     fresh_probe_dir: &Path,
-    journal: &Journal,
-    volume: &VolumeWitness,
-) -> io::Result<UnitStopAudit> {
+) -> io::Result<StopTarget> {
     private_dir(attempt_dir)?;
     let retained_plan = read_private_artifact(&attempt_dir.join("stop-plan-v2.bin"), MAX_FRAME)?;
     let original_begin =
@@ -494,14 +491,27 @@ pub(crate) fn resume_fenced_exact(
     let inspection = crate::lifecycle_v3_stop_claim_native::inspect_current(
         operator, &retained_plan, &retained_committed, &output,
     )?;
-    let target = StopTarget::from_verified_inspection(
+    StopTarget::from_verified_inspection(
         &retained_plan,
         &retained_committed,
         &original_begin,
         &inspection,
         receipt_fields(&begin_receipt),
         receipt_fields(&claim_receipt),
-    )?;
+    )
+}
+
+/// Resume only a STOP that already crossed the fresh fence's durable Fenced
+/// boundary. The private marker must match the reselected bytes; the hostd
+/// recovery method independently requires Fenced under its lock.
+pub(crate) fn resume_fenced_exact(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+    fresh_probe_dir: &Path,
+    journal: &Journal,
+    volume: &VolumeWitness,
+) -> io::Result<UnitStopAudit> {
+    let target = retained_committed_target(operator, attempt_dir, fresh_probe_dir)?;
     target.check_marker(attempt_dir)?;
     let record = journal
         .read()?
@@ -524,6 +534,37 @@ pub(crate) fn resume_fenced_exact(
     journal.resume_fenced_stop_manager_checked(&target.stop_identity(), || {
         target.recheck_volume(volume)
     })
+}
+
+/// Arm the fence of a committed STOP claim whose journal is still Running: the
+/// first fence refused before entering Fenced (its pre-stop check; demo-dry
+/// 2026-11-09, the unit had been restarted by name) or the process ended
+/// between op26's committed reply and the durable fence. Mini
+/// recorded this exact claim, so the claim is never authored or submitted again;
+/// the retained permit arms the same fence `fence_exact` would have, against the
+/// same Running incarnation, under the same marker.
+pub(crate) fn resume_committed_exact(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+    fresh_probe_dir: &Path,
+    journal: &Journal,
+    volume: &VolumeWitness,
+) -> io::Result<UnitStopAudit> {
+    let target = retained_committed_target(operator, attempt_dir, fresh_probe_dir)?;
+    let record = journal
+        .read()?
+        .ok_or_else(|| invalid("STOP committed recovery journal absent"))?;
+    target.compare_retained(&record, volume)?;
+    target.recheck_volume(volume)?;
+    match fs::symlink_metadata(attempt_dir.join(MARKER_NAME)) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            target.persist_marker(attempt_dir)?;
+        }
+        _ => {}
+    }
+    target.check_marker(attempt_dir)?;
+    journal
+        .fence_and_stop_manager_checked(&target.stop_identity(), || target.recheck_volume(volume))
 }
 
 #[cfg(test)]

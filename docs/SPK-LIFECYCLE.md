@@ -99,6 +99,39 @@ the exact-ingress lookup (`Kernel/ApplicationLifecycleRetryV4Lookup.lean`;
 op 23 / 27 / 39 with the retained ingress bytes); the claim lookup also requires
 the retry token in the record.
 
+## STOP and its reconcile
+
+A STOP is BEGIN (op 22), CLAIM (op 26) and COMPLETION (op 38), driven by
+`lifecycle_v3_stop_service::run` against the generation's hostd journal
+(`Running` → `Fenced` → `Stopped`). A rerun of `spk-host grain stop` resumes from
+what the attempt directories retain; nothing is resubmitted.
+
+- **A definite refusal did not happen.** An op 26 the Host answered with a refusal
+  (`effect: no-record`) is looked up by op 27 on its exact ingress. Absent after an
+  answered submit, the attempt is set aside whole (`stop-claim-absent-<nonce>`,
+  decision `absent-set-aside`) and STOP authors a fresh claim
+  (`lifecycle_v3_stop_recovery::reconcile_running`). Only an absence after a *lost*
+  reply stays undecided. `claim image boundary differs from loaded image` is such
+  a refusal: the claim's world root is no longer the current one, as when several
+  grains STOP at once.
+- **A committed claim arms its fence.** When op 26 committed, the permit
+  (`stop-claim/committed-v3.bin`) and the fence marker (`stop-fence-requested.json`)
+  are retained. If the fence never entered `Fenced` (its pre-stop check refused, or
+  the process ended first), the next run reselects the same committed claim from
+  the current Host and arms that same fence (`resume_committed_exact`); a `Fenced`
+  journal resumes with `resume_fenced_exact`.
+- **The pre-stop check admits a dead unit, never a live stranger.** The manager
+  stop may reach only the claimed incarnation. A crashed claimed incarnation (same
+  InvocationID, failed) is admitted. So is a unit whose InvocationID moved on to a
+  later incarnation that has also ended (`failed` or `inactive`, MainPID 0, no job,
+  no manager cgroup, the recorded cgroup unpopulated): systemd never reuses an
+  InvocationID, so nothing of either incarnation runs and the stop only resets the
+  failed state. A later incarnation that runs is refused (`unit invocation drift
+  before stop`; `hostd::UnitStopAudit::before_stop_observed`). On demo-dry,
+  2026-11-09, three grain units restarted by name started later incarnations that
+  failed at bootstrap; the STOPs their supervisors began committed their claims
+  and then refused at this check.
+
 ## Checks that exist
 
 - Rust unit tests named `retry_v4_*` in `native/spk-host/src/lifecycle_v4_retry*_native.rs`
