@@ -373,7 +373,9 @@ def diff(a, b):
         if ma.get("balance") != mb.get("balance"):
             out.append(("balance", n, "balance", ma.get("balance"), mb.get("balance")))
         if ma.get("workspace") != mb.get("workspace"):
-            out.append(("workspace", n, "initialized", ma.get("workspace"), mb.get("workspace")))
+            # A workspace the new world made for a member who had none (the door makes a kept member's,
+            # mini-door-process has_workspace) is an addition, like a ref the old world did not hold.
+            out.append(("workspace", n, "initialized", ma.get("workspace") or None, mb.get("workspace")))
         ra, rb = ma.get("refs", {}), mb.get("refs", {})
         for r in sorted(set(ra) - set(rb)):
             out.append(("ref", n, r, ra[r]["kind"], None))

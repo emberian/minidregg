@@ -1571,6 +1571,7 @@ impl<O: BoxOps> Processor<O> {
     }
 
     fn hand_publication(&mut self, doc: &str, author: &str, world: &str, name: &str, r: &mut Value) -> Result<(), String> {
+        const REAUTHORED: u64 = 5;
         if !r["publications"].is_object() {
             r["publications"] = json!({});
         }
@@ -1581,8 +1582,24 @@ impl<O: BoxOps> Processor<O> {
             r["publications"][doc] = json!({"world": world, "id": id, "from": author});
             self.save(r)?;
         }
-        let id = r["publications"][doc]["id"].as_str().ok_or("no publication id")?.to_owned();
+        let mut id = r["publications"][doc]["id"].as_str().ok_or("no publication id")?.to_owned();
         let house = self.p.home(author).join("workspace");
+        // The Host refused this delegation at prepare, before a call existed (the attempt holds
+        // `pre-submit-refusal.json` and no `call.bin`: demo-dry 2026-11-09, `targetUnavailable` while the
+        // seed was still re-making the house's documents). Nothing was signed or admitted, and `retry` has
+        // no call to resend: the delegation is made again under the next id, at most REAUTHORED times.
+        let attempt = house.join("attempts").join(&id);
+        if attempt.join("pre-submit-refusal.json").is_file() && !attempt.join("call.bin").exists() {
+            let again = r["publications"][doc]["reauthored"].as_u64().unwrap_or(0) + 1;
+            if again > REAUTHORED {
+                return Err(format!("the Host refused the delegation {id} before a call existed {REAUTHORED} times; see {}", attempt.display()));
+            }
+            let base = id.split("-r").next().unwrap_or(&id).to_owned();
+            id = format!("{base}-r{again}");
+            r["publications"][doc]["id"] = json!(id);
+            r["publications"][doc]["reauthored"] = json!(again);
+            self.save(r)?;
+        }
         if !house.join("proposals").join(&id).exists() {
             let ran = self.ops.tenant_line(author, &format!("delegate {id} {doc} {subject} observe {}", PUBLIC_READ_MAX_COST.trim()));
             if !ran.ok {
@@ -1791,6 +1808,10 @@ mod tests {
                 std::fs::create_dir_all(home.join("workspace/proposals").join(id)).unwrap();
             } else if let Some(id) = line.strip_prefix("submit ") {
                 std::fs::create_dir_all(home.join("workspace/attempts").join(id)).unwrap();
+                if id.starts_with("hp-") && std::fs::remove_file(self.p.root.join("refuse-prepare-once")).is_ok() {
+                    std::fs::write(home.join("workspace/attempts").join(id).join("pre-submit-refusal.json"), "{}").unwrap();
+                    return Ran { ok: false, stdout: String::new(), stderr: "refused: delegation preparation: targetUnavailable".into() };
+                }
             } else if let Some(id) = line.strip_prefix("publish ") {
                 if self.p.root.join("fail-publish").exists() {
                     return Ran { ok: false, stdout: String::new(), stderr: "undecided: the Host did not answer".into() };
@@ -2085,6 +2106,29 @@ mod tests {
         let s = read_json(&w.request_path(r.id())).unwrap();
         assert_ne!(s["publications"]["welcome"]["id"].as_str().unwrap(), id);
         assert_eq!(count(&w, "alice: import welcome"), 2);
+    }
+
+    /// A delegation the Host refused at prepare has no call to retry: the next pass makes it again
+    /// under the next id, and the member then holds the publication.
+    #[test]
+    fn a_publication_refused_before_a_call_existed_is_made_again_under_a_new_id() {
+        let mut w = world("pubprep", false);
+        std::fs::create_dir_all(w.p.config().parent().unwrap()).unwrap();
+        std::fs::write(w.p.config(), b"world one").unwrap();
+        std::fs::write(w.p.etc().join("house-publications"), "welcome box\n").unwrap();
+        std::fs::write(w.p.root.join("refuse-prepare-once"), b"").unwrap();
+        let r = join("alice", KEY, Route::Free, false);
+        submit(&w, &r);
+        run(&mut w);
+        let first = read_json(&w.request_path(r.id())).unwrap()["publications"]["welcome"]["id"].as_str().unwrap().to_owned();
+        run(&mut w);
+        let count = |w: &Processor<Fake>, prefix: &str| w.ops.calls.borrow().iter().filter(|c| c.starts_with(prefix)).count();
+        let s = read_json(&w.request_path(r.id())).unwrap();
+        assert_eq!(s["publications"]["welcome"]["joined"], true, "{s}");
+        let again = s["publications"]["welcome"]["id"].as_str().unwrap();
+        assert_eq!(again, format!("{first}-r1"));
+        assert_eq!(count(&w, &format!("box: retry {first}")), 0, "no call to retry");
+        assert_eq!((count(&w, &format!("box: delegate {again} ")), count(&w, &format!("box: submit {again}"))), (1, 1));
     }
 
     /// The live box's `lobby house` publication and `lobby` room: the member already holds `lobby`

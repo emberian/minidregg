@@ -22,6 +22,9 @@ const ASSEMBLE_OPERATION: u8 = mini_sdk::host_operations::PARTICIPANT_PROVISIONI
 const SUBMIT_OPERATION: u8 = mini_sdk::host_operations::PARTICIPANT_PROVISIONING_SUBMIT;
 const LOOKUP_OPERATION: u8 = mini_sdk::host_operations::PARTICIPANT_PROVISIONING_LOOKUP;
 const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
+/// The consent provider's refusal of an operator Plan that differs from its own re-derivation at its
+/// source (`Kernel.NativeSpecializedConsent`): before signing, so the Plan may be made again.
+const CONSENT_PREPARATION_REFUSED: &str = "local consent refused before signing: local authenticated specialized preparation refused";
 
 /// Everything the sponsor's workspace pins; `holder` is data the Host checks.
 pub(crate) struct ObserveGrant<'a> {
@@ -454,32 +457,43 @@ fn observe_once(grant: &ObserveGrant<'_>) -> Result<Attempt> {
     };
     // A Plan retained from an earlier call is stale by age, not by a race.
     let earlier = std::cell::Cell::new(latest()?.join("plan.frame").exists());
-    let generation = crate::replan::replan(
+    // The consent provider re-derives the Plan at ITS source before the sponsor signs: a write that
+    // lands between the plan and the seal (a clock tick, a friend's turn, the seed on a busy box)
+    // makes the operator's Plan differ from the re-derivation, and the provider refuses before
+    // anything is signed (`local authenticated specialized preparation refused`, demo-dry
+    // 2026-11-09: a door stranger's provision under the seed's load). Nothing was signed or sent, so
+    // the same request is planned anew at the current source, at most CONSENT_REPLANS times in a row:
+    // a Plan the provider keeps refusing at a fresh source is no race.
+    const CONSENT_REPLANS: u32 = 3;
+    let refused = std::cell::Cell::new(0u32);
+    let (generation, ingress) = crate::replan::replan(
         "provision plan",
         || {
             let current = latest()?;
             crate::fsio::ensure_private_dir(&current)?;
-            if !current.join("seal.json").exists() {
-                plan(grant, &request, &capability, &current)?;
+            if current.join("seal.json").exists() {
+                return Ok((current.clone(), sealed(&current)?.2));
             }
-            Ok(current)
+            plan(grant, &request, &capability, &current)?;
+            let command = private_bytes(&current.join("command.bin"), LIMIT)?;
+            let plan = private_bytes(&current.join("plan.bin"), LIMIT)?;
+            let ingress = seal(grant, &current, &command, &plan)?;
+            Ok((current, ingress))
         },
         |error, decision| {
             if earlier.replace(false) {
                 eprintln!("provisioning generation is stale ({error}); authoring the same request anew");
                 return true;
             }
+            if error.starts_with(CONSENT_PREPARATION_REFUSED) && refused.get() < CONSENT_REPLANS {
+                refused.set(refused.get() + 1);
+                eprintln!("mini: provision: the consent provider refused the Plan before signing ({error}); planned anew at the current source");
+                return true;
+            }
             crate::participant_enrollment::stale_refusal(grant.host, grant.socket, grant.config, decision)
         },
         |_| new_generation(grant.directory, generations(grant.directory)?.len()).map(|_| ()),
     )?;
-    let ingress = if generation.join("seal.json").exists() {
-        sealed(&generation)?.2
-    } else {
-        let command = private_bytes(&generation.join("command.bin"), LIMIT)?;
-        let plan = private_bytes(&generation.join("plan.bin"), LIMIT)?;
-        seal(grant, &generation, &command, &plan)?
-    };
     save_json(
         &marker,
         &json!({"format":FORMAT,"operation":SUBMIT_OPERATION,"generation":generation,
