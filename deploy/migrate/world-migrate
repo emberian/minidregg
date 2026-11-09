@@ -39,7 +39,7 @@ Environment (the defaults are the box's):
   MIGRATE_MEMBER_GROUP  the members' group (mini-sessions)
   MIGRATE_SKIP          names never read or written (default: dw-* door-walk probes have no key and are skipped)
 """
-import json, os, re, subprocess, sys, time, hashlib, pathlib
+import json, os, re, shutil, subprocess, sys, time, hashlib, pathlib
 
 VAR = "/var/lib/mini"
 NODE = f"{VAR}/store/node"
@@ -403,6 +403,32 @@ def carry_grains(d):
     for p in problems:
         log("grains: LEFT " + p)
     return problems
+
+
+def release_carried(d, before):
+    """After verify passes: every carried grain's staging copies are released: the placed carry
+    (APPS_STATE/carried/GRAIN) and the old worker's export (APPS_STATE/exports/GRAIN, or where the re-genesis
+    ship moved it, APPS_STATE/retired-*/exports/GRAIN). DIR/grains/GRAIN stays: it is the rollback copy until
+    the retired Store is cleared. DIR/grains/GRAIN/released.json records what went; a re-run does nothing more."""
+    released = []
+    for n, m in sorted(before["members"].items()):
+        for g, info in sorted((m.get("grains") or {}).items()):
+            if g == "error" or not isinstance(info, dict) or not info.get("imageSha256"):
+                continue
+            marker = pathlib.Path(d, "grains", g, "released.json")
+            if marker.is_file() or not marker.parent.is_dir():
+                continue
+            gone = []
+            for p in [pathlib.Path(APPS_STATE, "carried", g), pathlib.Path(APPS_STATE, "exports", g),
+                      *sorted(pathlib.Path(APPS_STATE).glob(f"retired-*/exports/{g}"))]:
+                if p.is_dir() and not p.is_symlink():
+                    shutil.rmtree(p)
+                    gone.append(str(p))
+            json.dump({"protocol": "mini-world-carry-released-v1", "grain": g, "owner": n, "removed": gone,
+                       "kept": str(marker.parent / "export"), "at": int(time.time())}, open(marker, "w"), indent=1)
+            log(f"verify: grain {g} ({n}): released {len(gone)} staging cop{'y' if len(gone) == 1 else 'ies'}; kept {marker.parent / 'export'}")
+            released.append(g)
+    return released
 
 
 def capture(path):
@@ -945,6 +971,8 @@ def main():
         print(text)
         bad = failing(items)
         log(f"verify: {len(items)} difference(s); {len(bad)} the migration must not leave (verify.txt)")
+        if not bad:
+            release_carried(d, before)
         sys.exit(0 if not bad else 1)
     else:
         print(__doc__, file=sys.stderr); sys.exit(64)
