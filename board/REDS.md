@@ -1,7 +1,7 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `a8fb1630ec91` (shell: `apps install APP --carry GRAIN` forwards --carry to the client). Round finished 2026-11-09T03:31Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-a8fb1630`.
+Tip: `3649e4e58574` (apps worker: an export answers only for the STOP that fenced it; a carry into an owner who). Round finished 2026-11-09T03:38Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3649e4e5`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
@@ -12,9 +12,11 @@ green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/
 | pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
 | umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 980d80c5dba8..a8fb1630ec91`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..3649e4e58574`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `3649e4e5` apps worker: an export answers only for the STOP that fenced it; a carry into an owner who holds the (owner: apps-hermes)
+- `242b5823` builder: REDS.md for a8fb1630ec91 (6 red) (owner: build-loop)
 - `a8fb1630` shell: `apps install APP --carry GRAIN` forwards --carry to the client (owner: apps-hermes)
 - `2db20e66` builder: REDS.md for 3503d5d2e1a0 (6 red) (owner: build-loop)
 - `3503d5d2` retained seal: checkpoint body held encoded, sealed by concatenation off the serving thread (PERF-CL (owner: read-path)
