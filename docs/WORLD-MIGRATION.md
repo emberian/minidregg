@@ -68,7 +68,28 @@ What the members made:
 | documents a member owns | by re-authoring | `doc new`, then each missing line by `doc append` and `submit` (current text; line authors are checked) |
 | the seed accounts' content | rebuilt | the walk's seed step (house, sage, public: `MIGRATE_SEED_ACCOUNTS`); compared, never re-authored |
 | door requests and status pages | kept | ship.sh keeps every enrolled request whose account exists |
-| app grains and the data inside them | exactly (the /var bytes), wired, not yet walked | `world-migrate capture` STOPs and exports each grain a member owns, as its owner (`apps stop`, `apps export`: the stopped /var bound to its STOP receipt, signed by the old Store's completion custodian), into `DIR/grains/GRAIN/` with `carry.json` (owner, app, class, the old pinned `completionCustodianKey`), and puts each export's image digest in `before.json`. `world-migrate grains` (after grain-world, before the seed) places it in `/var/lib/mini-apps/carried/GRAIN/`. The owner then runs `apps install APP --carry GRAIN`: the worker admits only the owner, the same app and class, and one install per carry, and it runs `spk-host grain install --import`. Then `apps share` for each member. The seed writes nothing into a carried grain. Verify needs a grain carried from each old one, with the same owner, app, class and shares, whose imported image is the export's digest. House grains count too (a member may write into them) |
+| app grains and the data inside them | exactly (the /var bytes), walked once on demo-dry for one grain (2026-11-09, below) | `world-migrate capture` STOPs and exports each grain a member owns, as its owner (`apps stop`, `apps export`: the stopped /var bound to its STOP receipt, signed by the old Store's completion custodian), into `DIR/grains/GRAIN/` with `carry.json` (owner, app, class, the old pinned `completionCustodianKey`), and puts each export's image digest in `before.json`. `world-migrate grains` (after grain-world, before the seed) places it in `/var/lib/mini-apps/carried/GRAIN/`. The owner then runs `apps install APP --carry GRAIN`: the worker admits only the owner, the same app and class, and one install per carry, and it runs `spk-host grain install --import`. Then `apps share` for each member. The seed writes nothing into a carried grain. Verify needs a grain carried from each old one, with the same owner, app, class and shares, whose imported image is the export's digest. House grains count too (a member may write into them) |
+
+The grain row was walked on demo-dry on 2026-11-09, at overlay `33b20ce9d8c9` (hotfix/stop-fence-on-980d
+7c486537c on candidate 980d80c5), for one grain: the house's reveal.js deck `a15221083032525807762`. The house
+STOPped it (generation 6) and exported it. world-migrate's own `export_grains` copied the export and its
+`carry.json`, and its `carry_grains` installed it with `--carry`. Two owners were tried:
+
+- **The house, which already holds the deck.** The carry is refused as `carryRefused` ("house already holds
+  a15221083032525807762") before the claim and before any install. A re-genesis never meets this case, because
+  the new world holds no grains yet.
+- **sage, who held no grain of it.** The deck was carried as `a12530561198587150331`. The grain record's
+  `carriedImageSha256` and the broker's volume `importSha256` both equal the export image `ab959a9a39be9c0e…`.
+  `diff` found no grain differences. The carried grain runs generation 2, and its public page is byte-identical
+  to the source deck's (both answer 200). sage's copy was then deleted; its 5 MB volume is retained.
+
+The house's deck was started and renewed again afterwards, and its public page answers 200. Three faults
+were fixed along the way:
+
+- a retained export answered for an older STOP;
+- an instance conflict marked the package refused for every member;
+- every START of a carried grain was refused, because its mount differed from the volume record its import
+  created.
 
 What cannot carry, and why:
 
