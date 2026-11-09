@@ -83,6 +83,7 @@ class FakeShell:
     def __init__(self, start_after=1):
         self.lines, self.listed, self.running, self.shares = [], False, False, []
         self.start_after, self.retries = start_after, 0
+        self.share_undecided, self.renewed = False, 0
 
     def __call__(self, name, line, check=True):
         import json
@@ -103,6 +104,11 @@ class FakeShell:
             return 0, json.dumps({"state": "running" if self.running else "never-begun"}), ""
         if line.startswith("apps share"):
             self.shares.append(line.split()[3])
+            if self.share_undecided:
+                return 1, "", "undecided: the route is bound but not enrolled; exact retry: mini apps renew"
+            return 0, "{}", ""
+        if line.startswith("apps renew"):
+            self.renewed += 1
             return 0, "{}", ""
         raise AssertionError(line)
 
@@ -181,3 +187,13 @@ def test_verify_releases_the_staging_copies_and_keeps_the_rollback_export(tmp_pa
     (apps / "exports/a1").mkdir()
     assert wm.release_carried(str(d), before) == []
     assert (apps / "exports/a1").is_dir()
+
+
+def test_an_undecided_share_is_settled_by_its_exact_retry(tmp_path, monkeypatch):
+    d = carry_dir(tmp_path)
+    shell = FakeShell(start_after=1)
+    shell.share_undecided = True
+    monkeypatch.setattr(wm, "member", shell)
+    monkeypatch.setattr(wm.time, "sleep", lambda _: None)
+    assert wm.carry_grains(str(d)) == []
+    assert shell.renewed == 1 and shell.shares == ["sage"]
