@@ -161,10 +161,12 @@ doc_mark "$BOX" the-lamplighters-note 5 code
 doc_load_json "$BOX" house-rules
 doc_mark "$BOX" house-rules 1 heading
 doc_mark "$BOX" house-rules 2 bold
-doc_mark "$BOX" house-rules 3 code
-doc_mark "$BOX" house-rules 4 code
-doc_mark "$BOX" house-rules 5 link a-refusal-explains-itself
-doc_annotate "$BOX" house-rules-ann-1 house-rules 5 "Observation grants never imply mutation rights."
+# The closing line (sage's reading grant) carries the link and the note, whatever the text's length: a walk's
+# seed overlay keeps its own, four-line, house rules (demo-dry 2026-11-09: `there is no line 5`).
+HR_LAST=$(grep -c '' "$D/docs/house-rules.txt")
+for l in $(seq 3 $((HR_LAST - 1))); do doc_mark "$BOX" house-rules "$l" code; done
+doc_mark "$BOX" house-rules "$HR_LAST" link a-refusal-explains-itself
+doc_annotate "$BOX" house-rules-ann-1 house-rules "$HR_LAST" "Observation grants never imply mutation rights."
 
 doc_load_json "$BOX" field-notes
 doc_mark "$BOX" field-notes 1 heading
