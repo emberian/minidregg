@@ -335,6 +335,8 @@ RETIRE_SPEC = {"idle_ms": (_int(1), "bad-idle")}
 
 def check_habit_record(rec):
     """An owner-signed rule, not a claim that any model follows the rule."""
+    if not isinstance(rec, dict):
+        return Refused("not-object")
     bad = _need(rec, {
         "kind": (lambda v: v == "fleet.habit-record", "wrong-kind"),
         "v": (lambda v: type(v) is int and v == 1, "wrong-version"),
@@ -399,6 +401,8 @@ def check_fire_record(rec, habits, admitted_facts, completed_acts):
     like the fact index's, must be supplied by a trusted adapter; no clock proof here.
     Retirement/budget affect planning, not acceptance of truthful post-act receipts.
     """
+    if not isinstance(rec, dict):
+        return Refused("not-object")
     bad = _need(rec, {
         "kind": (lambda v: v == "fleet.fire-record", "wrong-kind"),
         "v": (lambda v: type(v) is int and v == 1, "wrong-version"),

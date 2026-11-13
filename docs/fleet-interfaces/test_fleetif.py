@@ -183,7 +183,8 @@ def habit_controls():
     return [
         ("signature-ignored", "sig_ok", lambda rec, key: True),
         ("trigger-ignored", "habit_matches", lambda *args: True),
-        ("act-binding-ignored", "check_fire_record", lambda rec, *args: f.Ok(f.record_digest(rec))),
+        ("act-binding-ignored", "check_fire_record", lambda rec, *args:
+         f.Ok(f.record_digest(rec) if isinstance(rec, dict) else "accepted")),
         ("retirement-resurrected", "habit_status", resurrect),
         ("per-fire-batches", "fire_batches", lambda rows: [{"fire": f.record_digest(r)} for r in rows]),
         ("budget-ignored", "habit_budget", lambda *args: True),
@@ -223,7 +224,8 @@ class HabitFire(unittest.TestCase):
     def test_candidate_cannot_ignore_completed_act(self):
         def weak(name, vector):
             if name == "fire-record.json":
-                return {"ok": f.record_digest(vector["input"]["record"])}
+                rec = vector["input"]["record"]
+                return {"ok": f.record_digest(rec) if isinstance(rec, dict) else "accepted"}
             return answer(name, vector)
         self.assertEqual(run_habit_suite(weak)["reading"], "red")
 

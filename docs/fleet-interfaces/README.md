@@ -216,7 +216,7 @@ of a direct child. `fleetif.hits` and `FleetLaws.hits` are the same function.
   planted weakenings. Its result uses S6 `verdict_reading`: missing, incomplete or surviving
   planted controls give `unread` (UNREAD), never a qualified green. A signed rule or a delivered
   checklist is not itself evidence that its trigger/rule was tested or followed.
-- VECTORS: `habit-record.json` (11), `habit-fold.json` (7). Existing S0-S9 vectors are unchanged.
+- VECTORS: `habit-record.json` (12), `habit-fold.json` (7). Existing S0-S9 vectors are unchanged.
 
 ## S11. FireRecord (a local receipt AFTER an act, never its gate)
 
@@ -251,7 +251,7 @@ of a direct child. `fleetif.hits` and `FleetLaws.hits` are the same function.
 - SCALE: order `10^4` fires/day is a synthetic design workload, not a measured runtime result.
   The test feeds 1000 distinct fires to one seat-hour and checks that its S0 adapter admits one
   row, including retry. Store-height cost, latency, durability and deployment cost are UNKNOWN.
-- VECTORS: `fire-record.json` (18), `fire-batch.json` (5), plus ledger conflict/retry tests,
+- VECTORS: `fire-record.json` (19), `fire-batch.json` (5), plus ledger conflict/retry tests,
   exact budget-boundary probes and fail-closed control probes.
 
 ### Use case: a synthetic review checklist

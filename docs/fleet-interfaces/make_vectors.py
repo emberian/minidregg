@@ -223,6 +223,7 @@ def fire_answer(case):
 
 def habit_vectors():
     cases = [
+        ("not-object", []),
         ("event-trigger", habit()),
         ("fact-trigger", habit(trigger={"kind": "fact", "value": FACT})),
         ("not-a-fact-digest", habit(trigger={"kind": "fact", "value": "example.ready"})),
@@ -273,6 +274,9 @@ def fire_vectors():
     c["admitted_facts"][FACT]["ts_ms"] = T0 - 100
     cases.append(("historical-admitted-trigger", c))
     cases.append(("habit-after-act", fire_case(habit(ts_ms=T0 + 200))))
+    c = fire_case()
+    c["record"] = []
+    cases.append(("not-object", c))
     return [{"name": n, "why": "S11 exact post-act binding; no obedience assertion", "input": c,
              "expect": expect(fire_answer(c))} for n, c in cases]
 

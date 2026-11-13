@@ -257,7 +257,7 @@ inductive HabitLife where
 The final observation uses the same idle test but does not add a fire to history. -/
 def habitStep (idle : Nat) : HabitLife → Nat → HabitLife
   | .stale, _ => .stale
-  | .current last, at => if last + idle ≤ at then .stale else .current at
+  | .current last, tick => if last + idle ≤ tick then .stale else .current tick
 
 def habitFold (idle : Nat) (state : HabitLife) (times : List Nat) : HabitLife :=
   times.foldl (habitStep idle) state
@@ -266,7 +266,7 @@ theorem habit_stale_persists (idle : Nat) (more : List Nat) :
     habitFold idle .stale more = .stale := by
   induction more with
   | nil => rfl
-  | cons at rest ih => exact ih
+  | cons tick rest ih => exact ih
 
 structure Delivery where
   delivered : Bool
