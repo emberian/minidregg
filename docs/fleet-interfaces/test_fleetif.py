@@ -176,11 +176,15 @@ def habit_controls():
         receipt = record("not-completed")
         return act(), receipt
 
+    def resurrect(habit, times, now):
+        last = max([habit["ts_ms"]] + [t for t in times if t <= now])
+        return "retired" if now - last >= habit["retirement"]["idle_ms"] else "current"
+
     return [
         ("signature-ignored", "sig_ok", lambda rec, key: True),
         ("trigger-ignored", "habit_matches", lambda *args: True),
         ("act-binding-ignored", "check_fire_record", lambda rec, *args: f.Ok(f.record_digest(rec))),
-        ("retirement-resurrected", "habit_status", lambda *args: "current"),
+        ("retirement-resurrected", "habit_status", resurrect),
         ("per-fire-batches", "fire_batches", lambda rows: [{"fire": f.record_digest(r)} for r in rows]),
         ("budget-ignored", "habit_budget", lambda *args: True),
         ("record-gates-act", "act_then_record", gate_on_record),

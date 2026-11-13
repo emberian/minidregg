@@ -228,7 +228,8 @@ of a direct child. `fleetif.hits` and `FleetLaws.hits` are the same function.
 - INTERFACE: `check_fire_record(rec, habits, admitted_facts, completed_acts)`;
   `FireLedger.append(rec) -> appended|replayed|refused`; `fire_batches(verified_records)`.
 - INVARIANTS: a validated record binds the exact admitted habit, trigger and completed act,
-  including seat, turn, lane, content and delivery outcome; fact time <= act time < receipt time.
+  including seat, turn, lane, content and delivery outcome; both fact time and habit creation
+  time <= act time < receipt time. Historical admitted facts may trigger a newer habit.
   The completed-act index must come from a verified external adapter, not from the prospective
   receipt. The local ledger is append-only: identity is `(habit, trigger_fact, turn, lane, member)`;
   exact retry is `replayed`, different bytes under that identity are `conflict`. Input mutation
@@ -250,7 +251,7 @@ of a direct child. `fleetif.hits` and `FleetLaws.hits` are the same function.
 - SCALE: order `10^4` fires/day is a synthetic design workload, not a measured runtime result.
   The test feeds 1000 distinct fires to one seat-hour and checks that its S0 adapter admits one
   row, including retry. Store-height cost, latency, durability and deployment cost are UNKNOWN.
-- VECTORS: `fire-record.json` (16), `fire-batch.json` (5), plus ledger conflict/retry tests,
+- VECTORS: `fire-record.json` (18), `fire-batch.json` (5), plus ledger conflict/retry tests,
   exact budget-boundary probes and fail-closed control probes.
 
 ### Use case: a synthetic review checklist

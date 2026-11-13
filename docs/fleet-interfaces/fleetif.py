@@ -363,7 +363,7 @@ def habit_matches(habit, fact_digest, admitted_facts):
     Membership is an explicit trust boundary, NOT established by this JSON checker.
     """
     fact = admitted_facts.get(fact_digest)
-    if fact is None or fact["ts_ms"] < habit["ts_ms"]:
+    if fact is None:
         return False
     trigger = habit["trigger"]
     return trigger["value"] == (fact_digest if trigger["kind"] == "fact" else fact["event"])
@@ -430,7 +430,8 @@ def check_fire_record(rec, habits, admitted_facts, completed_acts):
     if any(act.get(k) != rec[k] for k in
            ("habit", "trigger_fact", "turn", "lane", "bytes", "member", "delivery")):
         return Refused("act-mismatch")
-    if not admitted_facts[rec["trigger_fact"]]["ts_ms"] <= act["ts_ms"] < rec["ts_ms"]:
+    earliest = max(habit["ts_ms"], admitted_facts[rec["trigger_fact"]]["ts_ms"])
+    if not earliest <= act["ts_ms"] < rec["ts_ms"]:
         return Refused("not-after-act")
     return Ok(record_digest(rec))
 

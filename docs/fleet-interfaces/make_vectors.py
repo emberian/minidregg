@@ -269,6 +269,10 @@ def fire_vectors():
     c = fire_case()
     c["admitted_facts"][FACT]["ts_ms"] = T0 + 200
     cases.append(("fact-after-act", c))
+    c = fire_case()
+    c["admitted_facts"][FACT]["ts_ms"] = T0 - 100
+    cases.append(("historical-admitted-trigger", c))
+    cases.append(("habit-after-act", fire_case(habit(ts_ms=T0 + 200))))
     return [{"name": n, "why": "S11 exact post-act binding; no obedience assertion", "input": c,
              "expect": expect(fire_answer(c))} for n, c in cases]
 
