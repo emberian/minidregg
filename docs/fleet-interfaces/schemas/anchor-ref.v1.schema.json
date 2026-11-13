@@ -1,0 +1,124 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "fleet-interfaces/anchor-ref.v1",
+ "title": "AnchorRef v1 (S0)",
+ "description": "A backend's receipt for a batch of signed rows. Attached beside rows, never inside them, so changing backend never changes a row's bytes. `state` is admission; `proof_state` is any later proof or audit, which never gates a land or a post.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "at_height",
+  "backend",
+  "covers",
+  "kind",
+  "proof_state",
+  "reason",
+  "ref",
+  "state",
+  "v"
+ ],
+ "properties": {
+  "kind": {
+   "const": "fleet.anchor-ref"
+  },
+  "v": {
+   "const": 1
+  },
+  "backend": {
+   "enum": [
+    "mini",
+    "dregg",
+    "test"
+   ]
+  },
+  "ref": {
+   "type": "string",
+   "minLength": 1,
+   "maxLength": 200
+  },
+  "covers": {
+   "type": "array",
+   "items": {
+    "type": "string",
+    "pattern": "^sha256:[0-9a-f]{64}$"
+   },
+   "minItems": 1,
+   "maxItems": 256,
+   "uniqueItems": true
+  },
+  "at_height": {
+   "oneOf": [
+    {
+     "type": "integer",
+     "minimum": 0
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "state": {
+   "enum": [
+    "pending",
+    "final"
+   ]
+  },
+  "proof_state": {
+   "enum": [
+    "n/a",
+    "pending",
+    "ready",
+    "failed"
+   ]
+  },
+  "reason": {
+   "oneOf": [
+    {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    {
+     "type": "null"
+    }
+   ]
+  }
+ },
+ "allOf": [
+  {
+   "if": {
+    "properties": {
+     "state": {
+      "const": "final"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "at_height": {
+      "type": "integer",
+      "minimum": 0
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "proof_state": {
+      "const": "failed"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "state": {
+      "const": "pending"
+     },
+     "reason": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,99 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "fleet-interfaces/verdict.v1",
+ "title": "Verdict v1 (S7)",
+ "description": "One check's reading of one tree. A result other than `unread` needs a known-red control that read red (nanodregg gates/runs.py:11-18). read_set is the digest of the traced read set (README: Read sets). Never edited or deleted; staleness is computed against later trees.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "control",
+  "kind",
+  "producer",
+  "read_set",
+  "read_set_size",
+  "result",
+  "role",
+  "sig",
+  "subject",
+  "ts_ms",
+  "unit",
+  "v"
+ ],
+ "properties": {
+  "kind": {
+   "const": "fleet.verdict"
+  },
+  "v": {
+   "const": 1
+  },
+  "unit": {
+   "type": "string",
+   "minLength": 1,
+   "maxLength": 200
+  },
+  "subject": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{40}$"
+  },
+  "result": {
+   "enum": [
+    "green",
+    "red",
+    "incomplete",
+    "unread"
+   ]
+  },
+  "control": {
+   "enum": [
+    "red",
+    "green",
+    "absent"
+   ]
+  },
+  "read_set": {
+   "type": "string",
+   "pattern": "^sha256:[0-9a-f]{64}$"
+  },
+  "read_set_size": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "producer": {
+   "type": "string",
+   "pattern": "^ed25519:[0-9a-f]{64}$"
+  },
+  "role": {
+   "enum": [
+    "runner",
+    "reviewer"
+   ]
+  },
+  "ts_ms": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "sig": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{128}$",
+   "description": "Ed25519 over the 32 bytes of the record digest (README: Canonical bytes)."
+  }
+ },
+ "if": {
+  "properties": {
+   "result": {
+    "enum": [
+     "green",
+     "red",
+     "incomplete"
+    ]
+   }
+  }
+ },
+ "then": {
+  "properties": {
+   "control": {
+    "const": "red"
+   }
+  }
+ }
+}

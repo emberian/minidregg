@@ -1,0 +1,182 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": [
+    {
+     "name": "first",
+     "ok": {
+      "appended": "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72"
+     }
+    },
+    {
+     "name": "exact-retry",
+     "ok": {
+      "replayed": "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72"
+     }
+    },
+    {
+     "name": "same-id-other-bytes",
+     "names": [
+      "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4"
+     ],
+     "refused": "conflict"
+    },
+    {
+     "name": "second-land",
+     "ok": {
+      "appended": "sha256:87da552da49bee3e9b985b285a41871f16d2edc9894cd7241e24bf8f0b0290df"
+     }
+    },
+    {
+     "name": "expired-grant",
+     "names": [
+      "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197"
+     ],
+     "refused": "not-lander"
+    },
+    {
+     "name": "reviewer-cannot-land",
+     "names": [
+      "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328"
+     ],
+     "refused": "not-lander"
+    }
+   ],
+   "input": {
+    "roles": [
+     {
+      "from_ms": 1794556800000,
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "role": "lander",
+      "until_ms": 1794643200000
+     },
+     {
+      "from_ms": 1794556800000,
+      "member": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "role": "reviewer",
+      "until_ms": 1794643200000
+     }
+    ],
+    "steps": [
+     {
+      "name": "first",
+      "record": {
+       "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+       "kind": "fleet.land-record",
+       "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+       "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+       "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+       "repo": "example.org/fleet",
+       "sig": "e03bcbc6f7e9251c243ca83bf06aecfc5d97056afc1f9a7479003a486fc4d709de377048b81d561b4f10a261c54bcac9dbc871c023c578c8d940b68300699202",
+       "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+       "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+       "ts_ms": 1794556860000,
+       "v": 1,
+       "verdicts": [
+        "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+       ]
+      }
+     },
+     {
+      "name": "exact-retry",
+      "record": {
+       "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+       "kind": "fleet.land-record",
+       "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+       "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+       "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+       "repo": "example.org/fleet",
+       "sig": "e03bcbc6f7e9251c243ca83bf06aecfc5d97056afc1f9a7479003a486fc4d709de377048b81d561b4f10a261c54bcac9dbc871c023c578c8d940b68300699202",
+       "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+       "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+       "ts_ms": 1794556860000,
+       "v": 1,
+       "verdicts": [
+        "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+       ]
+      }
+     },
+     {
+      "name": "same-id-other-bytes",
+      "record": {
+       "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+       "kind": "fleet.land-record",
+       "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+       "landed_sha": "f0900b0af89726a9410ee1040bba3ce0c3977e0f",
+       "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+       "repo": "example.org/fleet",
+       "sig": "aaefa4c5764d4bf1339d4d5952111afb41ab8701d6541436a0a29115f733196229fa13c3d4cb043ffa6e67b62a6f3a6eb33a22c061bde21eeb94172bc1d5f20b",
+       "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+       "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+       "ts_ms": 1794556860000,
+       "v": 1,
+       "verdicts": [
+        "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+       ]
+      }
+     },
+     {
+      "name": "second-land",
+      "record": {
+       "base_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+       "kind": "fleet.land-record",
+       "land_id": "15395d99fcd2c88f8352e151b884e75643790396",
+       "landed_sha": "7ad835efa531b57d04d956c9bb65e69505687f66",
+       "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+       "repo": "example.org/fleet",
+       "sig": "a91cc3c46574d0e8ea8037636159a143ef8ba25da0c6c7e320dbc2b4f4289b2920d16a4a1748dfb40711f7ce607e9036f5f239d7a7dc60b91d7cdae3ca9e8306",
+       "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+       "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+       "ts_ms": 1794556860000,
+       "v": 1,
+       "verdicts": [
+        "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+       ]
+      }
+     },
+     {
+      "name": "expired-grant",
+      "record": {
+       "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+       "kind": "fleet.land-record",
+       "land_id": "ac47d1fcaeca4cc8d241318406b9333da8b2be5f",
+       "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+       "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+       "repo": "example.org/fleet",
+       "sig": "052c41c4bdbce2e55955b564ad84f29e83bd352fe70fa04f512e38b1bcf18d9fb33ff20c7f5cfceb938da5df588867b5d144645827405281d7c3153fdd8e4202",
+       "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+       "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+       "ts_ms": 1794643200000,
+       "v": 1,
+       "verdicts": [
+        "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+       ]
+      }
+     },
+     {
+      "name": "reviewer-cannot-land",
+      "record": {
+       "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+       "kind": "fleet.land-record",
+       "land_id": "b7ecd90fb8aa8cf15d8e2c465eb57342e6178a49",
+       "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+       "member": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+       "repo": "example.org/fleet",
+       "sig": "7415562d8332dd344f5dfa7b48369b17679287c3e404a963b072aa81420547431612c108484c5445d2e7b131c70222df9044983034092c52e67004e4a80e5202",
+       "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+       "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+       "ts_ms": 1794556860000,
+       "v": 1,
+       "verdicts": [
+        "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+       ]
+      }
+     }
+    ]
+   },
+   "name": "land-ledger",
+   "why": "S1 invariants 1, 4, 5 over one sequence"
+  }
+ ]
+}

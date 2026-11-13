@@ -1,0 +1,226 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": {
+    "ok": "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72"
+   },
+   "input": {
+    "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+    "kind": "fleet.land-record",
+    "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+    "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+    "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+    "repo": "example.org/fleet",
+    "sig": "e03bcbc6f7e9251c243ca83bf06aecfc5d97056afc1f9a7479003a486fc4d709de377048b81d561b4f10a261c54bcac9dbc871c023c578c8d940b68300699202",
+    "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+    "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556860000,
+    "v": 1,
+    "verdicts": [
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ]
+   },
+   "name": "ok",
+   "why": "a well-formed, signed record"
+  },
+  {
+   "expect": {
+    "names": [
+     "member"
+    ],
+    "refused": "bad-signature"
+   },
+   "input": {
+    "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+    "kind": "fleet.land-record",
+    "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+    "landed_sha": "7ad835efa531b57d04d956c9bb65e69505687f66",
+    "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+    "repo": "example.org/fleet",
+    "sig": "e03bcbc6f7e9251c243ca83bf06aecfc5d97056afc1f9a7479003a486fc4d709de377048b81d561b4f10a261c54bcac9dbc871c023c578c8d940b68300699202",
+    "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+    "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556860000,
+    "v": 1,
+    "verdicts": [
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ]
+   },
+   "name": "tampered-after-signing",
+   "why": "any byte change breaks the signature"
+  },
+  {
+   "expect": {
+    "names": [
+     "member"
+    ],
+    "refused": "bad-signature"
+   },
+   "input": {
+    "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+    "kind": "fleet.land-record",
+    "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+    "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+    "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+    "repo": "example.org/fleet",
+    "sig": "3389b78c2e05e1bb7f5c2e7b51ae404b92414c8e93804966af58ca00b77c7acfc5473481e7268adcf5175702e659f7afb088a8f0928a2570f0329747ff1f5805",
+    "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+    "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556860000,
+    "v": 1,
+    "verdicts": [
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ]
+   },
+   "name": "signed-by-other-key",
+   "why": "member names the lander but a stranger signed"
+  },
+  {
+   "expect": {
+    "names": [
+     "kind"
+    ],
+    "refused": "wrong-kind"
+   },
+   "input": {
+    "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+    "kind": "fleet.verdict",
+    "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+    "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+    "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+    "repo": "example.org/fleet",
+    "sig": "e03bcbc6f7e9251c243ca83bf06aecfc5d97056afc1f9a7479003a486fc4d709de377048b81d561b4f10a261c54bcac9dbc871c023c578c8d940b68300699202",
+    "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+    "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556860000,
+    "v": 1,
+    "verdicts": [
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ]
+   },
+   "name": "domain-swap",
+   "why": "the same bytes under another kind are another digest and do not verify"
+  },
+  {
+   "expect": {
+    "names": [
+     "verdicts"
+    ],
+    "refused": "bad-verdict-list"
+   },
+   "input": {
+    "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+    "kind": "fleet.land-record",
+    "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+    "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+    "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+    "repo": "example.org/fleet",
+    "sig": "54db7aca18e5f87edcc6e9d3834785bbe6ad155cb61d65bbe5b235bb1865dd8bf155f8c284e989656dbd37765359309a021dfa4df988ae9c66c1a64ffe51ca0d",
+    "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+    "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556860000,
+    "v": 1,
+    "verdicts": [
+     "sha256:ccea8b2c8ea4036fa333e9b10934f1cd89f452872e46daf8ecbd1f9d82b562ed",
+     "sha256:5d028f86298cfeae2995e473d6a70a7560eab1e447a6c35bbfba8f2897a8e9ec"
+    ]
+   },
+   "name": "unsorted-verdicts",
+   "why": "cited verdicts are a sorted set"
+  },
+  {
+   "expect": {
+    "names": [
+     "base_sha"
+    ],
+    "refused": "bad-hex40"
+   },
+   "input": {
+    "base_sha": "abc123",
+    "kind": "fleet.land-record",
+    "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+    "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+    "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+    "repo": "example.org/fleet",
+    "sig": "3f650f38f6a976588b03c030466bf0257f2939bc31eff7596edd42a0655e8c1b928718dc85f2b1197240a72683a6839eedf4c473d89ae10f5821a064a6d0820b",
+    "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+    "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556860000,
+    "v": 1,
+    "verdicts": [
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ]
+   },
+   "name": "short-sha",
+   "why": "shas are full 40-hex"
+  },
+  {
+   "expect": {
+    "names": [
+     "1697"
+    ],
+    "refused": "too-large"
+   },
+   "input": {
+    "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+    "kind": "fleet.land-record",
+    "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+    "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+    "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+    "repo": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "sig": "ce7913e2e4d8e437974430dcf4a1f9c3a83a136953e5043dd4e71d2ef33a553532b0d691a20713327a2db4d4f17e32d08ad384e9b2a345b0421d2d682575980c",
+    "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+    "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556860000,
+    "v": 1,
+    "verdicts": [
+     "sha256:1991ce212a02343992ba19f605046210c457f1622c0ff7b9d1149c3eb7e06cfb",
+     "sha256:4ca8951a2bd8be514c407f1edb8034d63a56afe7d8733feb5174274843725f8c",
+     "sha256:5a56e1af7734a0a2cce42b02cb8e242718496f7fb330b475c3670c220076c427",
+     "sha256:904feaeeea05e6fad787591298b40060ad26bbdd6cf833608cc3a1fc14374181",
+     "sha256:c40cfd1d6f6236553c4c1d7681ae4a06ca843b3ef04cea2e9533ee501a92bb43",
+     "sha256:c4435cc1666c98bc497ec3545245a720dd1f1c94605bc49142e4cc009ae69e17",
+     "sha256:ca02ebe25e16ab1bd98fccb44fdefb1197bd197049ef1f5961299cf5695dfa89",
+     "sha256:cb2684c314a6d5a3fa087ba9907488894cd9406cebd1306e8701670619fb7035",
+     "sha256:cb4cdb2653ddaea356fdb3bf5e9a71d75db091ceeddcf7719413e9b57f3b30f1",
+     "sha256:f397688376667b4f40ac8db9183cbf45dbede26e1fbe3847243044a8dc0ecbfb",
+     "sha256:f5748149a4c3b515e1c231713e8556b2249a0fadd4e8471dd6debe03ad8a85ac",
+     "sha256:fdb415a53da2f4371e6a4aea95dad62cfff1d09c24d98d7544f13af7273ec487"
+    ]
+   },
+   "name": "too-large",
+   "why": "the canonical record must fit in 1024 bytes (store module lists by digest)"
+  },
+  {
+   "expect": {
+    "names": [
+     "modules"
+    ],
+    "refused": "unknown-field"
+   },
+   "input": {
+    "base_sha": "a609f801856383fecea1cef3d00342e3b0e4297f",
+    "kind": "fleet.land-record",
+    "land_id": "ad15142ee230cf2fe22c3b35e4ab83783f3fa6f4",
+    "landed_sha": "a13b6a456bb5abac92c45ed284f9553bb1960848",
+    "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+    "modules": [
+     "a",
+     "b"
+    ],
+    "repo": "example.org/fleet",
+    "sig": "e03bcbc6f7e9251c243ca83bf06aecfc5d97056afc1f9a7479003a486fc4d709de377048b81d561b4f10a261c54bcac9dbc871c023c578c8d940b68300699202",
+    "test_receipt": "sha256:ef559e5833ee6c03517f0ba703c80fbd1302b1b40b63d04dd71f50a2789ed258",
+    "tested_tree": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556860000,
+    "v": 1,
+    "verdicts": [
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ]
+   },
+   "name": "unknown-field",
+   "why": "no field outside the schema; the module list goes behind test_receipt"
+  }
+ ]
+}

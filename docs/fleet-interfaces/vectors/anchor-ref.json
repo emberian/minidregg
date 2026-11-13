@@ -1,0 +1,133 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": {
+    "ok": "sha256:7c8d96ed22394255370aca5cc321a86a7ffbbbe76119c6e708c9a27afbea121d"
+   },
+   "input": {
+    "at_height": null,
+    "backend": "mini",
+    "covers": [
+     "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ],
+    "kind": "fleet.anchor-ref",
+    "proof_state": "n/a",
+    "reason": null,
+    "ref": "0xabababababababababababababababababababababababababababababababab",
+    "state": "pending",
+    "v": 1
+   },
+   "name": "ok-pending",
+   "why": "admitted, no height yet"
+  },
+  {
+   "expect": {
+    "ok": "sha256:b85a52df8ba7596d0f6cc625b37792d790163c30885650225955f26468f16079"
+   },
+   "input": {
+    "at_height": 812,
+    "backend": "mini",
+    "covers": [
+     "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ],
+    "kind": "fleet.anchor-ref",
+    "proof_state": "n/a",
+    "reason": null,
+    "ref": "0xabababababababababababababababababababababababababababababababab",
+    "state": "final",
+    "v": 1
+   },
+   "name": "ok-final",
+   "why": "final carries the admission height"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "final-needs-height"
+   },
+   "input": {
+    "at_height": null,
+    "backend": "mini",
+    "covers": [
+     "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ],
+    "kind": "fleet.anchor-ref",
+    "proof_state": "n/a",
+    "reason": null,
+    "ref": "0xabababababababababababababababababababababababababababababababab",
+    "state": "final",
+    "v": 1
+   },
+   "name": "final-without-height",
+   "why": "final must name where"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "failed-proof-must-stay-pending-with-reason"
+   },
+   "input": {
+    "at_height": 9,
+    "backend": "mini",
+    "covers": [
+     "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ],
+    "kind": "fleet.anchor-ref",
+    "proof_state": "failed",
+    "reason": "prover",
+    "ref": "0xabababababababababababababababababababababababababababababababab",
+    "state": "final",
+    "v": 1
+   },
+   "name": "failed-proof-final",
+   "why": "a failed proof cannot be final"
+  },
+  {
+   "expect": {
+    "ok": "sha256:193ceb434cefb8ed87d244b4b263107b841f70bc20844127ac86451e75278671"
+   },
+   "input": {
+    "at_height": null,
+    "backend": "mini",
+    "covers": [
+     "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+     "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+    ],
+    "kind": "fleet.anchor-ref",
+    "proof_state": "failed",
+    "reason": "prover exited 137",
+    "ref": "0xabababababababababababababababababababababababababababababababab",
+    "state": "pending",
+    "v": 1
+   },
+   "name": "failed-proof-pending",
+   "why": "a failed proof leaves the rows valid and the anchor pending, named"
+  },
+  {
+   "expect": {
+    "names": [
+     "covers"
+    ],
+    "refused": "bad-covers"
+   },
+   "input": {
+    "at_height": null,
+    "backend": "mini",
+    "covers": [],
+    "kind": "fleet.anchor-ref",
+    "proof_state": "n/a",
+    "reason": null,
+    "ref": "0xabababababababababababababababababababababababababababababababab",
+    "state": "pending",
+    "v": 1
+   },
+   "name": "empty-covers",
+   "why": "an anchor covers at least one row"
+  }
+ ]
+}

@@ -1,0 +1,78 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "fleet-interfaces/land-record.v1",
+ "title": "LandRecord v1 (S1)",
+ "description": "One land: a patch (land_id = `git patch-id --stable`) advanced repo main from base_sha to landed_sha after the tree tested_tree was tested. Canonical form at most 1024 bytes; the module list and logs live behind test_receipt. Digest and signature exclude `sig`.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "base_sha",
+  "kind",
+  "land_id",
+  "landed_sha",
+  "member",
+  "repo",
+  "sig",
+  "test_receipt",
+  "tested_tree",
+  "ts_ms",
+  "v",
+  "verdicts"
+ ],
+ "properties": {
+  "kind": {
+   "const": "fleet.land-record"
+  },
+  "v": {
+   "const": 1
+  },
+  "land_id": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{40}$"
+  },
+  "repo": {
+   "type": "string",
+   "minLength": 1,
+   "maxLength": 200
+  },
+  "base_sha": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{40}$"
+  },
+  "landed_sha": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{40}$"
+  },
+  "tested_tree": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{40}$"
+  },
+  "test_receipt": {
+   "type": "string",
+   "pattern": "^sha256:[0-9a-f]{64}$"
+  },
+  "verdicts": {
+   "type": "array",
+   "items": {
+    "type": "string",
+    "pattern": "^sha256:[0-9a-f]{64}$"
+   },
+   "maxItems": 32,
+   "uniqueItems": true,
+   "description": "Digests of the Verdict records this land cites, sorted ascending."
+  },
+  "member": {
+   "type": "string",
+   "pattern": "^ed25519:[0-9a-f]{64}$"
+  },
+  "ts_ms": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "sig": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{128}$",
+   "description": "Ed25519 over the 32 bytes of the record digest (README: Canonical bytes)."
+  }
+ }
+}

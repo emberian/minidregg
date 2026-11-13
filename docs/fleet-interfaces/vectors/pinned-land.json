@@ -1,0 +1,225 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": {
+    "ok": "landed"
+   },
+   "input": {
+    "changes": [
+     {
+      "op": "modify",
+      "path": "docs/readme.md"
+     }
+    ],
+    "read_set": [
+     {
+      "how": "read",
+      "path": "fleetd/land.py"
+     },
+     {
+      "how": "absent",
+      "path": "fleetd/land_rules.toml"
+     },
+     {
+      "how": "list",
+      "path": "tests"
+     },
+     {
+      "how": "read",
+      "path": "tests/test_land.py"
+     }
+    ]
+   },
+   "name": "unrelated-change",
+   "why": "a change outside the read set does not stale the land"
+  },
+  {
+   "expect": {
+    "names": [
+     "read:fleetd/land.py"
+    ],
+    "refused": "stale"
+   },
+   "input": {
+    "changes": [
+     {
+      "op": "modify",
+      "path": "fleetd/land.py"
+     }
+    ],
+    "read_set": [
+     {
+      "how": "read",
+      "path": "fleetd/land.py"
+     },
+     {
+      "how": "absent",
+      "path": "fleetd/land_rules.toml"
+     },
+     {
+      "how": "list",
+      "path": "tests"
+     },
+     {
+      "how": "read",
+      "path": "tests/test_land.py"
+     }
+    ]
+   },
+   "name": "read-path-modified",
+   "why": "a read file changed"
+  },
+  {
+   "expect": {
+    "names": [
+     "absent:fleetd/land_rules.toml"
+    ],
+    "refused": "stale"
+   },
+   "input": {
+    "changes": [
+     {
+      "op": "add",
+      "path": "fleetd/land_rules.toml"
+     }
+    ],
+    "read_set": [
+     {
+      "how": "read",
+      "path": "fleetd/land.py"
+     },
+     {
+      "how": "absent",
+      "path": "fleetd/land_rules.toml"
+     },
+     {
+      "how": "list",
+      "path": "tests"
+     },
+     {
+      "how": "read",
+      "path": "tests/test_land.py"
+     }
+    ]
+   },
+   "name": "absent-path-added",
+   "why": "a file the check looked for and missed now exists"
+  },
+  {
+   "expect": {
+    "names": [
+     "list:tests"
+    ],
+    "refused": "stale"
+   },
+   "input": {
+    "changes": [
+     {
+      "op": "add",
+      "path": "tests/test_new.py"
+     }
+    ],
+    "read_set": [
+     {
+      "how": "read",
+      "path": "fleetd/land.py"
+     },
+     {
+      "how": "absent",
+      "path": "fleetd/land_rules.toml"
+     },
+     {
+      "how": "list",
+      "path": "tests"
+     },
+     {
+      "how": "read",
+      "path": "tests/test_land.py"
+     }
+    ]
+   },
+   "name": "listed-dir-grew",
+   "why": "a new test in a listed directory moves the listing"
+  },
+  {
+   "expect": {
+    "ok": "landed"
+   },
+   "input": {
+    "changes": [
+     {
+      "op": "add",
+      "path": "tests/data/x.json"
+     }
+    ],
+    "read_set": [
+     {
+      "how": "read",
+      "path": "fleetd/land.py"
+     },
+     {
+      "how": "absent",
+      "path": "fleetd/land_rules.toml"
+     },
+     {
+      "how": "list",
+      "path": "tests"
+     },
+     {
+      "how": "read",
+      "path": "tests/test_land.py"
+     }
+    ]
+   },
+   "name": "nested-add-not-listed",
+   "why": "a grandchild does not move a one-level listing"
+  },
+  {
+   "expect": {
+    "names": [
+     "read:fleetd/land.py",
+     "absent:fleetd/land_rules.toml",
+     "read:tests/test_land.py"
+    ],
+    "refused": "stale"
+   },
+   "input": {
+    "changes": [
+     {
+      "op": "modify",
+      "path": "tests/test_land.py"
+     },
+     {
+      "op": "delete",
+      "path": "fleetd/land.py"
+     },
+     {
+      "op": "add",
+      "path": "fleetd/land_rules.toml"
+     }
+    ],
+    "read_set": [
+     {
+      "how": "read",
+      "path": "fleetd/land.py"
+     },
+     {
+      "how": "absent",
+      "path": "fleetd/land_rules.toml"
+     },
+     {
+      "how": "list",
+      "path": "tests"
+     },
+     {
+      "how": "read",
+      "path": "tests/test_land.py"
+     }
+    ]
+   },
+   "name": "every-moved-named",
+   "why": "the refusal names every moved entry, not the first"
+  }
+ ]
+}

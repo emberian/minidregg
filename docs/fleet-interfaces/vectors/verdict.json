@@ -1,0 +1,140 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": {
+    "ok": "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+   },
+   "input": {
+    "control": "red",
+    "kind": "fleet.verdict",
+    "producer": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "read_set": "sha256:b745a8e810cad2e8ff4c9da103a8b02e7fe0a847b3a838c6bb7fdeaa8da6e034",
+    "read_set_size": 4,
+    "result": "green",
+    "role": "reviewer",
+    "sig": "7b2329012437233906914efb732f85e9374da291255d4dd4d8d2b03cf12f3c38345e0db292d6c1daa55167c0e9d9fd7488e516cb36c24c7dcc839fa04b2a4f09",
+    "subject": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556800000,
+    "unit": "suite:tests.test_land",
+    "v": 1
+   },
+   "name": "ok-green",
+   "why": "green with a control that read red"
+  },
+  {
+   "expect": {
+    "ok": "sha256:929648703fb017fe242a723149447cb7d829a629b2375ba363bea365bcddf499"
+   },
+   "input": {
+    "control": "red",
+    "kind": "fleet.verdict",
+    "producer": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "read_set": "sha256:b745a8e810cad2e8ff4c9da103a8b02e7fe0a847b3a838c6bb7fdeaa8da6e034",
+    "read_set_size": 4,
+    "result": "red",
+    "role": "reviewer",
+    "sig": "ac0df6b60341a31ef2d0fa023bbcb94b6217d87237dec9fcdc71ab8e98ee86c21207bfb404aa07673c72608637b603a0054226d6a1ab250f76709c0618a5020b",
+    "subject": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556800000,
+    "unit": "suite:tests.test_land",
+    "v": 1
+   },
+   "name": "ok-red",
+   "why": "a red verdict is a verdict"
+  },
+  {
+   "expect": {
+    "names": [
+     "green"
+    ],
+    "refused": "control-not-red"
+   },
+   "input": {
+    "control": "green",
+    "kind": "fleet.verdict",
+    "producer": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "read_set": "sha256:b745a8e810cad2e8ff4c9da103a8b02e7fe0a847b3a838c6bb7fdeaa8da6e034",
+    "read_set_size": 4,
+    "result": "green",
+    "role": "reviewer",
+    "sig": "7cfe74b1f0fe2d0a34c1530191f98b941e6e406d473ffd7e8d53bbe3da0a80dd43efe94ea56730559aeaac3f8b75656caab0e5a609e245ef81c478bc542fb009",
+    "subject": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556800000,
+    "unit": "suite:tests.test_land",
+    "v": 1
+   },
+   "name": "green-without-red-control",
+   "why": "control did not read red: the run has no verdict (must read unread)"
+  },
+  {
+   "expect": {
+    "names": [
+     "absent"
+    ],
+    "refused": "control-not-red"
+   },
+   "input": {
+    "control": "absent",
+    "kind": "fleet.verdict",
+    "producer": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "read_set": "sha256:b745a8e810cad2e8ff4c9da103a8b02e7fe0a847b3a838c6bb7fdeaa8da6e034",
+    "read_set_size": 4,
+    "result": "green",
+    "role": "reviewer",
+    "sig": "05007e7ebba0ccef443c4bd3c25c267102a85023d3699458a0e0778ba980af005c3baa944f314bf13228a547cdffa68fbcb21fe4c93ffcae7235e2abf555e50f",
+    "subject": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556800000,
+    "unit": "suite:tests.test_land",
+    "v": 1
+   },
+   "name": "green-no-control",
+   "why": "a unit with no known-red control cannot say green"
+  },
+  {
+   "expect": {
+    "ok": "sha256:bf520c67375b832c3c90660ad0913531f8e94d3536bcfe0a039f8cecf73f453c"
+   },
+   "input": {
+    "control": "absent",
+    "kind": "fleet.verdict",
+    "producer": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "read_set": "sha256:b745a8e810cad2e8ff4c9da103a8b02e7fe0a847b3a838c6bb7fdeaa8da6e034",
+    "read_set_size": 4,
+    "result": "unread",
+    "role": "reviewer",
+    "sig": "6cb479d894b6a7d3c8981d12d1597b6f4689ea492fe90bdd3f66b72f422c23a71fd0ca5453d9dca49365fc4565766ce190a55bd4f4be22c25967a95626fc7403",
+    "subject": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556800000,
+    "unit": "suite:tests.test_land",
+    "v": 1
+   },
+   "name": "unread-no-control",
+   "why": "unread is the honest reading when the control is missing"
+  },
+  {
+   "expect": {
+    "names": [
+     "producer"
+    ],
+    "refused": "bad-signature"
+   },
+   "input": {
+    "control": "red",
+    "kind": "fleet.verdict",
+    "producer": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "read_set": "sha256:b745a8e810cad2e8ff4c9da103a8b02e7fe0a847b3a838c6bb7fdeaa8da6e034",
+    "read_set_size": 4,
+    "result": "green",
+    "role": "reviewer",
+    "sig": "253be1f983306f0b8221fa93cb476b1ff63d00269fbbd05bdafb0d3e0e7c5f52dc02ea9456d177c7692055cf2e12a9c642bb26c91ccaa16304995013d2107107",
+    "subject": "ed6943172cbca1a76031511bef0b5d3c6ba9bdca",
+    "ts_ms": 1794556800000,
+    "unit": "suite:tests.test_land",
+    "v": 1
+   },
+   "name": "forged-producer",
+   "why": "producer names the reviewer, the lander signed"
+  }
+ ]
+}

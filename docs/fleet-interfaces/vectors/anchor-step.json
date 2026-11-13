@@ -1,0 +1,267 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": {
+    "ok": "strengthens"
+   },
+   "input": {
+    "next": {
+     "at_height": 812,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "final",
+     "v": 1
+    },
+    "prev": {
+     "at_height": null,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "pending",
+     "v": 1
+    }
+   },
+   "name": "pending-to-final",
+   "why": "strengthening is allowed"
+  },
+  {
+   "expect": {
+    "ok": "strengthens"
+   },
+   "input": {
+    "next": {
+     "at_height": 812,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "ready",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "final",
+     "v": 1
+    },
+    "prev": {
+     "at_height": 812,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "final",
+     "v": 1
+    }
+   },
+   "name": "final-to-ready",
+   "why": "a proof completing later"
+  },
+  {
+   "expect": {
+    "ok": "same"
+   },
+   "input": {
+    "next": {
+     "at_height": null,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "pending",
+     "v": 1
+    },
+    "prev": {
+     "at_height": null,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "pending",
+     "v": 1
+    }
+   },
+   "name": "exact-retry",
+   "why": "the same rows anchored again answer the same ref"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "final-to-pending"
+   },
+   "input": {
+    "next": {
+     "at_height": null,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "pending",
+     "v": 1
+    },
+    "prev": {
+     "at_height": 812,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "final",
+     "v": 1
+    }
+   },
+   "name": "final-to-pending",
+   "why": "never weakens"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "ready-regressed"
+   },
+   "input": {
+    "next": {
+     "at_height": 812,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "final",
+     "v": 1
+    },
+    "prev": {
+     "at_height": 812,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "ready",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "final",
+     "v": 1
+    }
+   },
+   "name": "ready-to-pending",
+   "why": "a ready proof never regresses"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "covers-changed"
+   },
+   "input": {
+    "next": {
+     "at_height": null,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "pending",
+     "v": 1
+    },
+    "prev": {
+     "at_height": null,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "pending",
+     "v": 1
+    }
+   },
+   "name": "covers-changed",
+   "why": "a ref covers exactly the rows it was given"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "height-changed"
+   },
+   "input": {
+    "next": {
+     "at_height": 813,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "final",
+     "v": 1
+    },
+    "prev": {
+     "at_height": 812,
+     "backend": "mini",
+     "covers": [
+      "sha256:222a3cd9714f8f845997d0ebe993d8d8461118c5e9f025e212b44b087a529e72",
+      "sha256:ff9e8c5835a7a3cbff36eba2949970769268677744d555cbcbaf6fed8a59a9b8"
+     ],
+     "kind": "fleet.anchor-ref",
+     "proof_state": "n/a",
+     "reason": null,
+     "ref": "0xabababababababababababababababababababababababababababababababab",
+     "state": "final",
+     "v": 1
+    }
+   },
+   "name": "height-moved",
+   "why": "a final height is fixed"
+  }
+ ]
+}
