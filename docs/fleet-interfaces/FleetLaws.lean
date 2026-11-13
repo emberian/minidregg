@@ -1,5 +1,5 @@
 /-
-# FleetLaws: the S5, S6, S7 and S8 laws of docs/fleet-interfaces, as statements a receiver can meet
+# FleetLaws: the S5-S8 and S10-S11 reference laws, as statements a receiver can meet
 
 A standalone program in the docs/evidence sense (not a `lean_lib` module): Lean core only, no
 Mathlib, no project imports, so it checks with `lean docs/fleet-interfaces/FleetLaws.lean` on the
@@ -19,6 +19,8 @@ What is stated (each with its teeth below):
   compensation touches only paths the target land wrote, and a refusal names every outside path.
 * `inverse_inverse`, `apply_inverse_restores` (S8.5): undoing an undo is the original diff, and
   applying a well-formed diff then its inverse restores every path.
+* S10/S11: recording preserves act execution; retirement is absorbing; absent controls
+  read unread; delivery has an inhabited counterexample to obedience.
 
 What is NOT stated: signatures, roles, time, git's merge, or how a read set is traced. These
 model the decision once the inputs exist; fleetif.py is the same decision over JSON.

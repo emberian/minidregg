@@ -1,0 +1,205 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": [],
+   "input": [],
+   "name": "empty",
+   "why": "One digest payload per seat-hour; verified records are the input"
+  },
+  {
+   "expect": [
+    {
+     "batch": "sha256:0640e6f2d1f69a0a5a8c382d6aea70c936b01fa15dd694ddf754c1112f5c184b",
+     "count": 2,
+     "hour": 498488,
+     "seat": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197"
+    }
+   ],
+   "input": [
+    {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    },
+    {
+     "act": "sha256:c7dbe609ff08658e3e8dddb0522d082338677ff97302222a3cb998e906ef1798",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "2e20b620922ffd1de178eac6cd97db01d04e0eb7131028f1f4102b2ccee24b588ed946a5fd0a38d5b171af06d509f1bb883b24de7b60f3e7c405015389acc903",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 8,
+     "v": 1
+    }
+   ],
+   "name": "one-seat-hour",
+   "why": "One digest payload per seat-hour; verified records are the input"
+  },
+  {
+   "expect": [
+    {
+     "batch": "sha256:0640e6f2d1f69a0a5a8c382d6aea70c936b01fa15dd694ddf754c1112f5c184b",
+     "count": 2,
+     "hour": 498488,
+     "seat": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197"
+    }
+   ],
+   "input": [
+    {
+     "act": "sha256:c7dbe609ff08658e3e8dddb0522d082338677ff97302222a3cb998e906ef1798",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "2e20b620922ffd1de178eac6cd97db01d04e0eb7131028f1f4102b2ccee24b588ed946a5fd0a38d5b171af06d509f1bb883b24de7b60f3e7c405015389acc903",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 8,
+     "v": 1
+    },
+    {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    },
+    {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   ],
+   "name": "retry-and-order",
+   "why": "One digest payload per seat-hour; verified records are the input"
+  },
+  {
+   "expect": [
+    {
+     "batch": "sha256:85e06239cf35a0e650a91c184f92a58666e50ba6fda8c18ff815d10ef0685e2a",
+     "count": 1,
+     "hour": 498488,
+     "seat": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197"
+    },
+    {
+     "batch": "sha256:847bbc24a75263207ed0304a480f2382b454b9487cc59a1e6d9b18fa2fa7872a",
+     "count": 1,
+     "hour": 498489,
+     "seat": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197"
+    }
+   ],
+   "input": [
+    {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    },
+    {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0aa690614655fdc54654d5a51642855824a9faf875761ab62b2d10ab34f6599739238809a1285f02a1fe9a3f885bfe734189949a1a4db5bcfa188f47c4b9bc04",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794560400000,
+     "turn": 7,
+     "v": 1
+    }
+   ],
+   "name": "hour-boundary",
+   "why": "One digest payload per seat-hour; verified records are the input"
+  },
+  {
+   "expect": [
+    {
+     "batch": "sha256:c90570bcdd68fdf8ca1a1d1a1fdac4838de143369e9178fdce43da5e270aa335",
+     "count": 1,
+     "hour": 498488,
+     "seat": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328"
+    },
+    {
+     "batch": "sha256:85e06239cf35a0e650a91c184f92a58666e50ba6fda8c18ff815d10ef0685e2a",
+     "count": 1,
+     "hour": 498488,
+     "seat": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197"
+    }
+   ],
+   "input": [
+    {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    },
+    {
+     "act": "sha256:aa4cd69eb15fd0e2925cfac8c0fd3922a6e133edd96f910cc1963723ad39dd3b",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+     "sig": "d075ae9a4871601e98bc5f0f43537d51fff4b2b5a1872304c8f1b410f2b4d00a150381c77a16aae0df833d92dcb92329fc386e33cafdff94a6fe8bb9e0aa940a",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   ],
+   "name": "separate-seats",
+   "why": "One digest payload per seat-hour; verified records are the input"
+  }
+ ]
+}

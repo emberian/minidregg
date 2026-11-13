@@ -1,0 +1,231 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": "not-started",
+   "input": {
+    "fire_times": [],
+    "habit": {
+     "budget": {
+      "max_fires": 2,
+      "window_ms": 1000
+     },
+     "kind": "fleet.habit-record",
+     "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+     "retirement": {
+      "idle_ms": 5000
+     },
+     "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+     "steer": {
+      "rule": "example.show-review-checklist",
+      "scope": "example/lane"
+     },
+     "trigger": {
+      "kind": "event",
+      "value": "example.review.ready"
+     },
+     "ts_ms": 1794556800000,
+     "v": 1
+    },
+    "now_ms": 1794556799999
+   },
+   "name": "not-started",
+   "why": "Complete synthetic history, monotone retirement after an idle gap"
+  },
+  {
+   "expect": "current",
+   "input": {
+    "fire_times": [],
+    "habit": {
+     "budget": {
+      "max_fires": 2,
+      "window_ms": 1000
+     },
+     "kind": "fleet.habit-record",
+     "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+     "retirement": {
+      "idle_ms": 5000
+     },
+     "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+     "steer": {
+      "rule": "example.show-review-checklist",
+      "scope": "example/lane"
+     },
+     "trigger": {
+      "kind": "event",
+      "value": "example.review.ready"
+     },
+     "ts_ms": 1794556800000,
+     "v": 1
+    },
+    "now_ms": 1794556804999
+   },
+   "name": "current",
+   "why": "Complete synthetic history, monotone retirement after an idle gap"
+  },
+  {
+   "expect": "retired",
+   "input": {
+    "fire_times": [],
+    "habit": {
+     "budget": {
+      "max_fires": 2,
+      "window_ms": 1000
+     },
+     "kind": "fleet.habit-record",
+     "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+     "retirement": {
+      "idle_ms": 5000
+     },
+     "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+     "steer": {
+      "rule": "example.show-review-checklist",
+      "scope": "example/lane"
+     },
+     "trigger": {
+      "kind": "event",
+      "value": "example.review.ready"
+     },
+     "ts_ms": 1794556800000,
+     "v": 1
+    },
+    "now_ms": 1794556805000
+   },
+   "name": "idle-boundary",
+   "why": "Complete synthetic history, monotone retirement after an idle gap"
+  },
+  {
+   "expect": "current",
+   "input": {
+    "fire_times": [
+     1794556804000
+    ],
+    "habit": {
+     "budget": {
+      "max_fires": 2,
+      "window_ms": 1000
+     },
+     "kind": "fleet.habit-record",
+     "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+     "retirement": {
+      "idle_ms": 5000
+     },
+     "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+     "steer": {
+      "rule": "example.show-review-checklist",
+      "scope": "example/lane"
+     },
+     "trigger": {
+      "kind": "event",
+      "value": "example.review.ready"
+     },
+     "ts_ms": 1794556800000,
+     "v": 1
+    },
+    "now_ms": 1794556805000
+   },
+   "name": "fire-renews",
+   "why": "Complete synthetic history, monotone retirement after an idle gap"
+  },
+  {
+   "expect": "retired",
+   "input": {
+    "fire_times": [
+     1794556804000
+    ],
+    "habit": {
+     "budget": {
+      "max_fires": 2,
+      "window_ms": 1000
+     },
+     "kind": "fleet.habit-record",
+     "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+     "retirement": {
+      "idle_ms": 5000
+     },
+     "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+     "steer": {
+      "rule": "example.show-review-checklist",
+      "scope": "example/lane"
+     },
+     "trigger": {
+      "kind": "event",
+      "value": "example.review.ready"
+     },
+     "ts_ms": 1794556800000,
+     "v": 1
+    },
+    "now_ms": 1794556809000
+   },
+   "name": "renewed-boundary",
+   "why": "Complete synthetic history, monotone retirement after an idle gap"
+  },
+  {
+   "expect": "retired",
+   "input": {
+    "fire_times": [
+     1794556805000,
+     1794556806000
+    ],
+    "habit": {
+     "budget": {
+      "max_fires": 2,
+      "window_ms": 1000
+     },
+     "kind": "fleet.habit-record",
+     "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+     "retirement": {
+      "idle_ms": 5000
+     },
+     "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+     "steer": {
+      "rule": "example.show-review-checklist",
+      "scope": "example/lane"
+     },
+     "trigger": {
+      "kind": "event",
+      "value": "example.review.ready"
+     },
+     "ts_ms": 1794556800000,
+     "v": 1
+    },
+    "now_ms": 1794556806001
+   },
+   "name": "late-fire-cannot-resurrect",
+   "why": "Complete synthetic history, monotone retirement after an idle gap"
+  },
+  {
+   "expect": "retired",
+   "input": {
+    "fire_times": [
+     1794556807000
+    ],
+    "habit": {
+     "budget": {
+      "max_fires": 2,
+      "window_ms": 1000
+     },
+     "kind": "fleet.habit-record",
+     "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+     "retirement": {
+      "idle_ms": 5000
+     },
+     "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+     "steer": {
+      "rule": "example.show-review-checklist",
+      "scope": "example/lane"
+     },
+     "trigger": {
+      "kind": "event",
+      "value": "example.review.ready"
+     },
+     "ts_ms": 1794556800000,
+     "v": 1
+    },
+    "now_ms": 1794556805000
+   },
+   "name": "future-fire-ignored",
+   "why": "Complete synthetic history, monotone retirement after an idle gap"
+  }
+ ]
+}

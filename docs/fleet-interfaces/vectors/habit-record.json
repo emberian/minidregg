@@ -1,0 +1,360 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": {
+    "names": [],
+    "refused": "not-object"
+   },
+   "input": [],
+   "name": "not-object",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "ok": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "value": "example.review.ready"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "event-trigger",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "ok": "sha256:d2f21997074d6beeea922b92556ee752140d88667dc9b07a0945ecc11fd70dcb"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "74854b4e9ba44ea2a0caa7867ad6fa4b41f0a0a0d4203061d551480cc79b9612823fd76fefe8703e41afb34f5b9af4d5e618faf20b5454273c003ee237f86c02",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "fact",
+     "value": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "fact-trigger",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "trigger"
+    ],
+    "refused": "bad-trigger"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "60a714bdb3b3552b59de85cce91b0d926fe70117775b399429578ed3682ea5bc9e24a02ea3d90fca409f573fa20510764bd786296cc5c938b87555e2e93e8409",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "fact",
+     "value": "example.ready"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "not-a-fact-digest",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "trigger"
+    ],
+    "refused": "bad-trigger"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "a60911466a6ef0e1864c35f80a93f488af6c536661a9b22005edfd1633d9eac8efed8ce62c1a3d02168f21cfbdc27cf245fb33ff8056b49f7b600297f587610e",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "value": ""
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "empty-event",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "trigger"
+    ],
+    "refused": "bad-trigger"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "49ee645db7fede4b9c7afb086cee92667cd90be0871a8b553eb92ea7bed4b70dd7ecd8baa1751d912184c396dc126199a74810207b84b9768579121247ba7102",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "regex": ".*",
+     "value": "x"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "unknown-trigger-field",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "steer"
+    ],
+    "refused": "bad-steer"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "bc317a1cf2dd11dc3736ef61943a475bcdbd90d13429119f3cab70f17b723c78bf88e0903ce413be81e77785cba21870bbd1976bf96512332f0e2dffe7020e0f",
+    "steer": {
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "value": "example.review.ready"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "no-rule",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "budget"
+    ],
+    "refused": "bad-budget"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 0,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "f7fae66bc4f207fbc6a8bff74824d0e5321eb3a663d9cc85f990ee950bd1eb346d573a9e7d2ede80fc5937757b36e887ff2f97dc50b9b4cd78861eeef9b76a0c",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "value": "example.review.ready"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "zero-budget",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "budget"
+    ],
+    "refused": "bad-budget"
+   },
+   "input": {
+    "budget": {
+     "max_fires": true,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "13600ee741f49be23859dcacef25e04590efc0ed7f2e4ba424f8ce9f25863deb62526efe9c8771328d255dfa1944b091d38b7776a0eb98aa34fe5cc3b3dda409",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "value": "example.review.ready"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "boolean-budget",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "retirement"
+    ],
+    "refused": "bad-retirement"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 0
+    },
+    "sig": "76ccdc8ed821f983922d140d97ab0ab1d9d7b1582490e850ca1977269ab2709ac898eae429eee68cfcebd83033557b8a0173eab88fd46ccbbb79814a0fbdb505",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "value": "example.review.ready"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "zero-retirement",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "owner"
+    ],
+    "refused": "bad-signature"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "ab49c42ef890f0f71da0f62336b1df7f7919672343becdfec58895a5400b2f81ae2270aa7407c9245ce7547d7b52850ef9eb3cca24d7a1abf2bf3be1d36d2602",
+    "steer": {
+     "rule": "example.show-review-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "value": "example.review.ready"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "forged-owner",
+   "why": "S10 owner, trigger and rule structure"
+  },
+  {
+   "expect": {
+    "names": [
+     "owner"
+    ],
+    "refused": "bad-signature"
+   },
+   "input": {
+    "budget": {
+     "max_fires": 2,
+     "window_ms": 1000
+    },
+    "kind": "fleet.habit-record",
+    "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+    "retirement": {
+     "idle_ms": 5000
+    },
+    "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+    "steer": {
+     "rule": "example.skip-checklist",
+     "scope": "example/lane"
+    },
+    "trigger": {
+     "kind": "event",
+     "value": "example.review.ready"
+    },
+    "ts_ms": 1794556800000,
+    "v": 1
+   },
+   "name": "tampered-rule",
+   "why": "S10 owner, trigger and rule structure"
+  }
+ ]
+}

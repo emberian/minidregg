@@ -1,4 +1,4 @@
-"""fleetif.py: the reference reading of the fleet interface records (README.md, S0, S1, S5, S7).
+"""fleetif.py: reference records and laws (README.md, S0, S1, S5, S7, S10, S11).
 
 Python 3.10+, standard library plus `cryptography` for Ed25519. This is fleet's reading, offered
 so a Mini receiver can be checked against the same vectors; it decides nothing for Mini.

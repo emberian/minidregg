@@ -143,8 +143,17 @@ class KnownRedControls(unittest.TestCase):
 def habit_observations(answerer=answer):
     """Receiver entry point: run real fixtures, plus post-act failure and budget probes."""
     import make_vectors as g
-    bad = [f"{name}:{v['name']}" for name in FILES if name.startswith(("habit-", "fire-"))
-           for v in load(name) if answerer(name, v) != v["expect"]]
+    bad = []
+    for name in FILES:
+        if not name.startswith(("habit-", "fire-")):
+            continue
+        for v in load(name):
+            key = f"{name}:{v['name']}"
+            try:
+                if answerer(name, v) != v["expect"]:
+                    bad.append(key)
+            except Exception as error:
+                bad.append(f"{key}:raised:{type(error).__name__}")
     effects = []
 
     def act():

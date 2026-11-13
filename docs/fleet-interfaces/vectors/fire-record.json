@@ -1,0 +1,1210 @@
+{
+ "generated_by": "make_vectors.py",
+ "vectors": [
+  {
+   "expect": {
+    "ok": "sha256:6634a83cfcebcb2896ba18c986e73bc8ca632f2941b222ab719ee6c3d36719d5"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "after-act",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "ok": "sha256:0b55df5a488b1319a629cfbe57b29b18fe1a31fac6ae09cd09ae47cf64bcb9c0"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:d39aca894a2bc205a42f8d01e4965b5634aa773d2c13f56e35943765fa2d6982": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:d2f21997074d6beeea922b92556ee752140d88667dc9b07a0945ecc11fd70dcb",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:d2f21997074d6beeea922b92556ee752140d88667dc9b07a0945ecc11fd70dcb": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "74854b4e9ba44ea2a0caa7867ad6fa4b41f0a0a0d4203061d551480cc79b9612823fd76fefe8703e41afb34f5b9af4d5e618faf20b5454273c003ee237f86c02",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "fact",
+       "value": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:d39aca894a2bc205a42f8d01e4965b5634aa773d2c13f56e35943765fa2d6982",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:d2f21997074d6beeea922b92556ee752140d88667dc9b07a0945ecc11fd70dcb",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "672b2cabef05b9aa87538089718623b5f4e240cdb9d0dbcd36e1f6354bd55023ee9dcf41400ea4fe5d89f226b1dd319f0fecddb68e6c62dfb1bb5007ba0e860c",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "exact-fact-trigger",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "not-after-act"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "d16844c70ed251aa63b072849852e8e340c12a58e16bda83ebd706fa3efeba8494f006293496c534978097abd4f443ff84248955766245e708727348ec2b7307",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800100,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "same-time-is-not-after",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "not-after-act"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "350c848c711d8a37474ef9f93c05fb27db664aecd732a02862d82a99078715ebed2ecc3fb5392b1c95f540ed31c1bec0b240b4137d5ad04871945d705b3d620c",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800099,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "pre-act",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "act-mismatch"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "376b1fc65610b47fae0d7bd60f184699bfaea9759c18b62bf8c9d08536d0d480faba57df7b3347004e201bb1447de6d3ab1c68a893b5e7baaf4ab0068f703703",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 8,
+     "v": 1
+    }
+   },
+   "name": "wrong-act-turn",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "act-mismatch"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:c3bb14910359fffc31e29745df663199107d49d74316aeedc88a0c5d443f82f4",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "de4121d531becc3659cad039c6c7b257cf26259adc1697eec3d7d0d7ef1158752e76f87b8e563b37e010f9ed6f6185fb232df0d3accf6b0d987ab464e5370707",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "wrong-act-bytes",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "trigger-not-admitted-or-mismatched"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:b69b0be2475f2ff74d74e850e9c29d898f22c589949d2f55c63b61e8ed7e91cb": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:083c435aac3c0cd650ca1f8bdd234231765819662f4cccbe22eca8d5d2959252",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:083c435aac3c0cd650ca1f8bdd234231765819662f4cccbe22eca8d5d2959252": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "4294e4ff2b2152a6793943fa9fbe42c3d370ee25eee133baf4dfc80a2f941fa52f82eca7eb9ee309053d87de0820c0bd8b930849f00307fc3c181dc11d3d5205",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.other"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:b69b0be2475f2ff74d74e850e9c29d898f22c589949d2f55c63b61e8ed7e91cb",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:083c435aac3c0cd650ca1f8bdd234231765819662f4cccbe22eca8d5d2959252",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "712f9b80b0165e608fe74e420808eed7910a178ffe4dc520b3e35168285847c2ba0b6cc299c13a2a4299a39c0a95461a3a7b5e1c07cd088092be5d235af5d901",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "unmatched-event",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "trigger-not-admitted-or-mismatched"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:5d813f45a1c730584bee04a159e94b587aa8736ddccd17f641bb4ae63d2c2816": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:573915c177dfcd571dfd6099195730c2c3a6d5a07674be841ddad44c7fce5719",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:573915c177dfcd571dfd6099195730c2c3a6d5a07674be841ddad44c7fce5719": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "8170f3b16905edb1397adcca0ec3b141ff30a00a413f119b6e7ab69b69f6cc405b46da31ed45087c125b6df200e445ca44b61a055e58314d9041fe7e90f7ca08",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "fact",
+       "value": "sha256:7f49b19122fdaa983d8c70c88d82cae3e03c6d6dd2ac307137a5b73d77a4a0ba"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:5d813f45a1c730584bee04a159e94b587aa8736ddccd17f641bb4ae63d2c2816",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:573915c177dfcd571dfd6099195730c2c3a6d5a07674be841ddad44c7fce5719",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "302d4a99592aa3fcf9c5fd7cd59b9156009d4ab6a10410343c794740d7af13133a27609f0085af50b74d2d55cb16245be0e86d297d0032a4c77a7dcdf31c610e",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "unmatched-fact",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "ok": "sha256:4e90c6fbccf4a00aa6a14b9968eb5224054541e3285c134a9ecd19db12a944f1"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "c595fd2a1737a4cf1bad4dc35afb6782d0cc74bcadfc9ea629e1c361ccb72f346049f8fbe893936adcb9d1f3359aa3793a5d21105a87386761289741a9d11a03",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556806000,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "late-truthful-receipt",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "trigger-not-admitted-or-mismatched"
+   },
+   "input": {
+    "admitted_facts": {},
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "no-admitted-trigger",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "act-not-completed"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {},
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "no-completed-act",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "unknown-habit"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {},
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "unknown-habit",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [
+     "member"
+    ],
+    "refused": "bad-signature"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "attempted",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "tampered-fire",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [
+     "member"
+    ],
+    "refused": "bad-signature"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "5cea13bc02f4bfdfd726d77fb73cc3a7c773129b4a7dde56da3d613a4c976563fe76bc45f2a51821df2e2bf04203af6f5e9e5c133d920eec4e77a44877bf1100",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "forged-member",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [
+     "obeyed"
+    ],
+    "refused": "unknown-field"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "obeyed": true,
+     "sig": "b7475826aed6607407cda346281435705e1bb3d205cfaf389382c4bc509a831208fa5b00360868c911adc1a9086de95cba92d0e2c4bea96153ca814e057a9a06",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "delivery-is-not-obedience",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "not-after-act"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800200
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "fact-after-act",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "ok": "sha256:6634a83cfcebcb2896ba18c986e73bc8ca632f2941b222ab719ee6c3d36719d5"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556799900
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "0e416cbea0caa346420bc8c83b79a501ba101f00eb8c190a4c6e9792ece907976bc08cebc931d2d9c7b46289be6da9f085bd340a11140d2b3e86b71ad4cb0401",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "historical-admitted-trigger",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "not-after-act"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:f36850ea97f7fb9d713fae8af249d58cd7d51b9f7bc9a51eba5b4e28cbf6b7c4": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:33babd2a1b652ff22cc606e72ad70e7cb0554f01b1044270f06658d9343408ae",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:33babd2a1b652ff22cc606e72ad70e7cb0554f01b1044270f06658d9343408ae": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "3c9bca90a4eafc41bd38d4ffbeb88a4b0dae24bf0abab4a93cfcdf41250ebe9bea1df0d417ea15efd5a3f781cc79f305b90289a4f123a9f5a7d4ec22c0b1950c",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800200,
+      "v": 1
+     }
+    },
+    "record": {
+     "act": "sha256:f36850ea97f7fb9d713fae8af249d58cd7d51b9f7bc9a51eba5b4e28cbf6b7c4",
+     "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+     "delivery": "delivered",
+     "habit": "sha256:33babd2a1b652ff22cc606e72ad70e7cb0554f01b1044270f06658d9343408ae",
+     "kind": "fleet.fire-record",
+     "lane": "example/lane",
+     "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+     "sig": "1b01afa51b03f5225ac3dd41c4116af4587d50df9ef06602be19639fd8dba977a99550b8a311c37560239ee5602f98d052baadca5671d0be77e83be07fd9a70c",
+     "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+     "ts_ms": 1794556800101,
+     "turn": 7,
+     "v": 1
+    }
+   },
+   "name": "habit-after-act",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  },
+  {
+   "expect": {
+    "names": [],
+    "refused": "not-object"
+   },
+   "input": {
+    "admitted_facts": {
+     "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0": {
+      "event": "example.review.ready",
+      "ts_ms": 1794556800010
+     }
+    },
+    "completed_acts": {
+     "sha256:a66566d117459bdafc6c5c8a3f1e38871315052adac9f2508b0ee5c04597dfa5": {
+      "bytes": "sha256:4ef30653f0035931a10eab2eccc036de6382db650ca3e1b8a49ab9f8d52cbfdf",
+      "delivery": "delivered",
+      "habit": "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5",
+      "lane": "example/lane",
+      "member": "ed25519:9a7382f1d306def06e87565a4273afbdeb1ba188a8cdad742921c1fcedbcc197",
+      "trigger_fact": "sha256:ac0a0ff0fd16dceb9ceb63dc6415088751088836e0ba91d76d7c5d206e52a0a0",
+      "ts_ms": 1794556800100,
+      "turn": 7
+     }
+    },
+    "habits": {
+     "sha256:7786610e33ebc3191304683d1e9b8f71899404e33a78ba7e0f3fbcae020556f5": {
+      "budget": {
+       "max_fires": 2,
+       "window_ms": 1000
+      },
+      "kind": "fleet.habit-record",
+      "owner": "ed25519:944b572a7c3dff1c114cfb7b337252c77b1e12c1b29c7d7f55f9ad4cd32a7328",
+      "retirement": {
+       "idle_ms": 5000
+      },
+      "sig": "a7b00f77d418d79cd7b593405bfd29c5f8c0a0ef3de936cdd5d41ad65b2cc4a186cda66acf021f28e4a15c1047caa8878c039e088d131edfbdf38e06da6bf90a",
+      "steer": {
+       "rule": "example.show-review-checklist",
+       "scope": "example/lane"
+      },
+      "trigger": {
+       "kind": "event",
+       "value": "example.review.ready"
+      },
+      "ts_ms": 1794556800000,
+      "v": 1
+     }
+    },
+    "record": []
+   },
+   "name": "not-object",
+   "why": "S11 exact post-act binding; no obedience assertion"
+  }
+ ]
+}
