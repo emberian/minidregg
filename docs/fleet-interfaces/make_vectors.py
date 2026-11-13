@@ -187,7 +187,118 @@ def ledger_vectors():
              "expect": [{"name": n, **led.append(r).as_json()} for n, r in steps]}]
 
 
+# Synthetic admitted inputs: these are NOT fabricated runtime admission proofs.
+FACT = f.digest("fleet.chat-row", {"event": "example.review.ready", "n": 1})
+
+
+def habit(seed_=REVIEWER, **over):
+    body = {"kind": "fleet.habit-record", "v": 1,
+            "trigger": {"kind": "event", "value": "example.review.ready"},
+            "steer": {"rule": "example.show-review-checklist", "scope": "example/lane"},
+            "budget": {"max_fires": 2, "window_ms": 1000}, "owner": K_REVIEWER,
+            "retirement": {"idle_ms": 5000}, "ts_ms": T0}
+    body.update(over)
+    return f.sign(body, seed_)
+
+
+def fire_case(habit_=None, act_over=None, seed_=LANDER, **over):
+    h = habit_ if habit_ is not None else habit()
+    hd = f.record_digest(h)
+    act = {"habit": hd, "trigger_fact": FACT, "turn": 7, "lane": "example/lane",
+           "bytes": f.digest("fleet.chat-row", {"text": "Synthetic checklist"}),
+           "member": K_LANDER, "delivery": "delivered", "ts_ms": T0 + 100}
+    act.update(act_over or {})
+    ad = f.digest("fleet.chat-row", {"completed_act": act})
+    rec = {"kind": "fleet.fire-record", "v": 1,
+           **{k: v for k, v in act.items() if k != "ts_ms"}, "act": ad, "ts_ms": T0 + 101}
+    rec.update(over)
+    return {"record": f.sign(rec, seed_), "habits": {hd: h},
+            "admitted_facts": {FACT: {"event": "example.review.ready", "ts_ms": T0 + 10}},
+            "completed_acts": {ad: act}}
+
+
+def fire_answer(case):
+    return f.check_fire_record(case["record"], case["habits"], case["admitted_facts"], case["completed_acts"])
+
+
+def habit_vectors():
+    cases = [
+        ("event-trigger", habit()),
+        ("fact-trigger", habit(trigger={"kind": "fact", "value": FACT})),
+        ("not-a-fact-digest", habit(trigger={"kind": "fact", "value": "example.ready"})),
+        ("empty-event", habit(trigger={"kind": "event", "value": ""})),
+        ("unknown-trigger-field", habit(trigger={"kind": "event", "value": "x", "regex": ".*"})),
+        ("no-rule", habit(steer={"scope": "example/lane"})),
+        ("zero-budget", habit(budget={"max_fires": 0, "window_ms": 1000})),
+        ("boolean-budget", habit(budget={"max_fires": True, "window_ms": 1000})),
+        ("zero-retirement", habit(retirement={"idle_ms": 0})),
+        ("forged-owner", habit(seed_=STRANGER)),
+    ]
+    tampered = habit()
+    tampered["steer"]["rule"] = "example.skip-checklist"
+    cases.append(("tampered-rule", tampered))
+    return [{"name": n, "why": "S10 owner, trigger and rule structure", "input": r,
+             "expect": expect(f.check_habit_record(r))} for n, r in cases]
+
+
+def fire_vectors():
+    cases = [("after-act", fire_case()),
+             ("exact-fact-trigger", fire_case(habit(trigger={"kind": "fact", "value": FACT}))),
+             ("same-time-is-not-after", fire_case(ts_ms=T0 + 100)),
+             ("pre-act", fire_case(ts_ms=T0 + 99)),
+             ("wrong-act-turn", fire_case(turn=8)),
+             ("wrong-act-bytes", fire_case(bytes=f.digest("fleet.chat-row", {"other": 1}))),
+             ("unmatched-event", fire_case(habit(trigger={"kind": "event", "value": "example.other"}))),
+             ("unmatched-fact", fire_case(habit(trigger={"kind": "fact", "value": f.digest("fleet.chat-row", {})}))),
+             ("late-truthful-receipt", fire_case(ts_ms=T0 + 6000))]
+    for name, field in (("no-admitted-trigger", "admitted_facts"),
+                        ("no-completed-act", "completed_acts"), ("unknown-habit", "habits")):
+        c = fire_case()
+        c[field] = {}
+        cases.append((name, c))
+    c = fire_case()
+    c["record"]["delivery"] = "attempted"
+    cases.append(("tampered-fire", c))
+    c = fire_case()
+    c["record"] = f.sign(c["record"], STRANGER)
+    cases.append(("forged-member", c))
+    c = fire_case()
+    c["record"]["obeyed"] = True
+    c["record"] = f.sign(c["record"], LANDER)
+    cases.append(("delivery-is-not-obedience", c))
+    c = fire_case()
+    c["admitted_facts"][FACT]["ts_ms"] = T0 + 200
+    cases.append(("fact-after-act", c))
+    return [{"name": n, "why": "S11 exact post-act binding; no obedience assertion", "input": c,
+             "expect": expect(fire_answer(c))} for n, c in cases]
+
+
+def habit_fold_vectors():
+    cases = [("not-started", [], -1), ("current", [], 4999), ("idle-boundary", [], 5000),
+             ("fire-renews", [4000], 5000), ("renewed-boundary", [4000], 9000),
+             ("late-fire-cannot-resurrect", [5000, 6000], 6001),
+             ("future-fire-ignored", [7000], 5000)]
+    return [{"name": n, "why": "Complete synthetic history, monotone retirement after an idle gap",
+             "input": {"habit": habit(), "fire_times": [T0 + t for t in ts], "now_ms": T0 + now},
+             "expect": f.habit_status(habit(), [T0 + t for t in ts], T0 + now)} for n, ts, now in cases]
+
+
+def fire_batch_vectors():
+    a = fire_case()["record"]
+    b = fire_case(act_over={"turn": 8})["record"]
+    c = fire_case(ts_ms=T0 + 3600000)["record"]
+    d = fire_case(act_over={"member": K_REVIEWER}, seed_=REVIEWER)["record"]
+    return [{"name": n, "why": "One digest payload per seat-hour; verified records are the input",
+             "input": rs, "expect": f.fire_batches(rs)} for n, rs in
+            [("empty", []), ("one-seat-hour", [a, b]), ("retry-and-order", [b, a, a]),
+             ("hour-boundary", [a, c]), ("separate-seats", [a, d])]]
+
+
 FILES = {
+    "habit-record.json": habit_vectors,
+    "fire-record.json": fire_vectors,
+    "habit-fold.json": habit_fold_vectors,
+    "fire-batch.json": fire_batch_vectors,
     "land-record.json": land_vectors,
     "verdict.json": verdict_vectors,
     "anchor-ref.json": anchor_vectors,

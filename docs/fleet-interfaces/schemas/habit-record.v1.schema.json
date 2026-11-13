@@ -1,0 +1,44 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "fleet-interfaces/habit-record.v1",
+ "title": "HabitRecord v1 (S10)",
+ "description": "Owner-signed rule. Admission, authority, complete history and trusted time are external inputs, not established by this schema. Canonical signed bytes at most 1024.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": ["kind", "v", "trigger", "steer", "budget", "owner", "retirement", "ts_ms", "sig"],
+ "properties": {
+  "kind": {"const": "fleet.habit-record"},
+  "v": {"const": 1},
+  "trigger": {
+   "type": "object", "additionalProperties": false,
+   "required": ["kind", "value"],
+   "properties": {
+    "kind": {"enum": ["fact", "event"]},
+    "value": {"type": "string", "minLength": 1, "maxLength": 200}
+   },
+   "if": {"properties": {"kind": {"const": "fact"}}},
+   "then": {"properties": {"value": {"pattern": "^sha256:[0-9a-f]{64}$"}}}
+  },
+  "steer": {
+   "type": "object", "additionalProperties": false, "required": ["rule", "scope"],
+   "properties": {
+    "rule": {"type": "string", "minLength": 1, "maxLength": 200},
+    "scope": {"type": "string", "minLength": 1, "maxLength": 200}
+   }
+  },
+  "budget": {
+   "type": "object", "additionalProperties": false, "required": ["max_fires", "window_ms"],
+   "properties": {
+    "max_fires": {"type": "integer", "minimum": 1},
+    "window_ms": {"type": "integer", "minimum": 1}
+   }
+  },
+  "owner": {"type": "string", "pattern": "^ed25519:[0-9a-f]{64}$"},
+  "retirement": {
+   "type": "object", "additionalProperties": false, "required": ["idle_ms"],
+   "properties": {"idle_ms": {"type": "integer", "minimum": 1}}
+  },
+  "ts_ms": {"type": "integer", "minimum": 0},
+  "sig": {"type": "string", "pattern": "^[0-9a-f]{128}$"}
+ }
+}

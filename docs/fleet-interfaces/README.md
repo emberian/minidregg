@@ -12,11 +12,11 @@ Nothing here changes Mini. It is fleet's reading, offered as data:
 
 | file | what |
 |---|---|
-| `schemas/*.v1.schema.json` | JSON Schema 2020-12 for LandRecord (S1), Verdict (S7), AnchorRef (S0) |
+| `schemas/*.v1.schema.json` | JSON Schema 2020-12 for LandRecord (S1), Verdict (S7), AnchorRef (S0), HabitRecord (S10), FireRecord (S11) |
 | `vectors/*.json` | conformance vectors, each `{name, why, input, expect}`; derived by `make_vectors.py`, never hand-edited |
 | `fleetif.py` | the reference reading: canonical bytes, digests, Ed25519, staleness, ledgers |
 | `chat_backend.py` | the S0 ChatBackend contract as a suite any backend can be run under, with known-red controls |
-| `FleetLaws.lean` | S5-S8 laws as Lean statements with proofs and teeth (Lean core only, no `sorry`) |
+| `FleetLaws.lean` | S5-S8 and S10-S11 reference laws with proofs and concrete teeth (Lean core only, no `sorry`) |
 | `evidence/` | nanodregg's GATES-30 reverts gate run over this repo's `main` (S6) |
 
 ## Why (fleet's numbers)
@@ -39,7 +39,8 @@ October (measured 2026-10-16), from about 10 concurrent lanes.
 - Canonical JSON: keys sorted, no whitespace, UTF-8, integers only (a float is refused).
 - `digest(kind, body) = "sha256:" + hex(SHA-256(DOMAIN[kind] || 0x00 || canonical(body)))`, with
   `DOMAIN` = `FLEET.LAND-RECORD/v1`, `FLEET.VERDICT/v1`, `FLEET.READ-SET/v1`, `FLEET.ANCHOR-REF/v1`,
-  `FLEET.CHAT-ROW/v1`. The record digest excludes `sig`. SHA-256 because git and fleet already use
+  `FLEET.CHAT-ROW/v1`, `FLEET.HABIT-RECORD/v1`, `FLEET.FIRE-RECORD/v1`, `FLEET.FIRE-BATCH/v1`.
+  The record digest excludes `sig`. SHA-256 because git and fleet already use
   it; a Mini receiver would re-hash under cSHAKE256 for its own roots (board/RULINGS.md "Hashes"),
   and these digests stay outside identities, the way `MINI.FLEET-SIGN.RECEIPT-HASH/v1` does
   (FLEET-SURFACE.md:120-126).
@@ -189,6 +190,87 @@ of a direct child. `fleetif.hits` and `FleetLaws.hits` are the same function.
 - MAPS TO: nanodregg Protocol/Certified.lean (a stranger checks a head from genesis and a
   certificate) and Protocol/Thin.lean (start from a pinned base). Mini's carry already keeps a
   lineage across a re-genesis (docs/RECEIPT-CARRY.md:118-140), so fleet asks nothing new there.
+
+## S10. HabitRecord (an owner-signed trigger and rule)
+
+- RECORD (`schemas/habit-record.v1.schema.json`): `trigger = {kind: fact|event, value}`,
+  `steer = {rule, scope}`, `budget = {max_fires, window_ms}`, `owner` (Ed25519 key id),
+  `retirement = {idle_ms}`, `ts_ms`, `sig`, plus `kind` and `v`. Identity is the domain-separated
+  digest of the unsigned record, not an editable name. Canonical signed bytes at most 1024.
+  Rule and scope are identifiers for a receiver's rule table, not executable natural language.
+- INTERFACE: `check_habit_record(rec)`; `habit_matches(habit, fact_digest, admitted_facts)`;
+  `habit_budget(habit, fire_times, at_ms)`; `habit_status(habit, fire_times, now_ms)`.
+- INVARIANTS: a fact trigger names an admitted fact digest; an event trigger matches the event
+  kind of an admitted fact, never an unadmitted string. Only the named owner's signature verifies.
+  The budget is a pure planning rule over distinct validated fire identities in the open-left,
+  closed-right window `(at_ms-window_ms, at_ms]`. It never blocks an already completed act's receipt.
+  Retirement folds the complete local history: an idle gap **at least** `idle_ms` is absorbing;
+  a later fire cannot resurrect the same habit. Changing a rule or reviving a retired one means
+  a new signed record/digest. Out-of-order inputs are sorted; future fires are ignored.
+- TRUST BOUNDARY: the admission index, owner authority to install a rule (S3), rule table,
+  verified complete fire history and trustworthy time are supplied by the receiver. An owner
+  signature alone does not grant authority. Missing/partial history means UNKNOWN, not proof
+  of no fires. The fold is a reference law over supplied timestamps, not a Mini exclusion/time
+  proof. Neither this schema nor the Lean statements implement those external admissions.
+- CONTROL: `test_fleetif.run_habit_suite(answerer)` executes the synthetic inputs and seven
+  planted weakenings. Its result uses S6 `verdict_reading`: missing, incomplete or surviving
+  planted controls give `unread` (UNREAD), never a qualified green. A signed rule or a delivered
+  checklist is not itself evidence that its trigger/rule was tested or followed.
+- VECTORS: `habit-record.json` (11), `habit-fold.json` (7). Existing S0-S9 vectors are unchanged.
+
+## S11. FireRecord (a local receipt AFTER an act, never its gate)
+
+- RECORD (`schemas/fire-record.v1.schema.json`): habit digest, admitted `trigger_fact` digest,
+  completed `act` digest, `turn`, `lane`, delivered `bytes` digest, `member` (seat key id),
+  `delivery = attempted|delivered`, `ts_ms`, `sig`, plus `kind` and `v`. Canonical bytes at most
+  1024. `bytes` references the exact content; it does not inline private text. `obeyed` is not
+  a field: a delivery receipt cannot certify comprehension, in-context presence or obedience.
+- INTERFACE: `check_fire_record(rec, habits, admitted_facts, completed_acts)`;
+  `FireLedger.append(rec) -> appended|replayed|refused`; `fire_batches(verified_records)`.
+- INVARIANTS: a validated record binds the exact admitted habit, trigger and completed act,
+  including seat, turn, lane, content and delivery outcome; fact time <= act time < receipt time.
+  The completed-act index must come from a verified external adapter, not from the prospective
+  receipt. The local ledger is append-only: identity is `(habit, trigger_fact, turn, lane, member)`;
+  exact retry is `replayed`, different bytes under that identity are `conflict`. Input mutation
+  cannot edit the stored snapshot. Late truthful receipts remain valid even after retirement.
+- ORDERING: the act happens first. Missing keys, recording refusal, unavailable logging/anchoring
+  or failed proofs cannot prevent or undo it. `act_then_record` demonstrates this causal order
+  with a real callable and a failing recorder; it is **not** a production scheduler and does
+  not promise asynchronous completion. A runtime integration must move recording off the act's
+  critical path. Nothing here changes a hook, action route, running fleet or Mini runtime.
+- BATCHING: keep signed FireRecords in a durable local per-seat log. For a closed UTC hour,
+  `fire_batches` sorts/deduplicates fire digests, hashes
+  `{kind: fleet.fire-batch, v: 1, seat, hour, fires: sorted_digests}` under its own domain, and
+  returns `{batch, seat, hour, count}`. Sign that small payload using S0
+  `sign("fleet.fire-batch", payload)` and `anchor(rows)`: **one row per seat-hour, never one
+  Store admission per fire**. AnchorRefs cover those S0 rows; the retained local manifest
+  provides the individual fire digests. Retry/order produce identical batches. Do not finalize
+  an incomplete hour: late-arriving records require a new explicit batch, never silent rewriting
+  of an existing anchor. Completeness/retention/recovery remain adapter obligations.
+- SCALE: order `10^4` fires/day is a synthetic design workload, not a measured runtime result.
+  The test feeds 1000 distinct fires to one seat-hour and checks that its S0 adapter admits one
+  row, including retry. Store-height cost, latency, durability and deployment cost are UNKNOWN.
+- VECTORS: `fire-record.json` (16), `fire-batch.json` (5), plus ledger conflict/retry tests,
+  exact budget-boundary probes and fail-closed control probes.
+
+### Use case: a synthetic review checklist
+
+An admitted `example.review.ready` fact selects the owner-signed
+`example.show-review-checklist` rule for `example/lane`. The budget allows at most two plans
+per 1000 ms; an idle gap of 5000 ms retires that record. A seat completes the checklist delivery
+at `T+100`, then signs its FireRecord at `T+101`. The same-time `T+100` receipt, an unknown
+trigger, a changed turn/content or a claimed `obeyed` field is refused. A real recorder
+exception occurs only after the example act's visible side effect and is returned as a named
+record failure. At `T+5000` with no earlier fire the habit retires; a fire at `T+6000` cannot
+resurrect it. A delivered checklist with `obeyed = false` is an explicit counterexample in the
+tests and Lean examples, not a claim to measure a model's mind.
+
+`FleetLaws.lean` proves `fire_never_gates`, `habit_stale_persists`,
+`absent_control_reads_unread`, and `delivered_does_not_imply_obeyed`, with concrete evaluated
+inputs and guarded axiom footprints. S7 `stale_persists` is preserved. These are reference /
+conformance laws over this directory's types, **not proofs of Mini receiving-path behavior,
+external-clock truth, admission completeness, or model obedience**. A receiving implementation
+must restate/bind them to its actual inputs; passing this suite alone is not deployment evidence.
 
 ## Where each part lives (proposal)
 

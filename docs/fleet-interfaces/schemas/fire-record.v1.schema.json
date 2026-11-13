@@ -1,0 +1,22 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "fleet-interfaces/fire-record.v1",
+ "title": "FireRecord v1 (S11)",
+ "description": "Local post-act receipt, never a gate. Signature, admitted trigger and completed-act binding are checked by the reference, not by JSON Schema. Delivery is not obedience. Canonical signed bytes at most 1024.",
+ "type": "object", "additionalProperties": false,
+ "required": ["kind", "v", "habit", "trigger_fact", "act", "turn", "lane", "bytes", "member", "delivery", "ts_ms", "sig"],
+ "properties": {
+  "kind": {"const": "fleet.fire-record"},
+  "v": {"const": 1},
+  "habit": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+  "trigger_fact": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+  "act": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+  "turn": {"type": "integer", "minimum": 0},
+  "lane": {"type": "string", "minLength": 1, "maxLength": 200},
+  "bytes": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+  "member": {"type": "string", "pattern": "^ed25519:[0-9a-f]{64}$"},
+  "delivery": {"enum": ["attempted", "delivered"]},
+  "ts_ms": {"type": "integer", "minimum": 0},
+  "sig": {"type": "string", "pattern": "^[0-9a-f]{128}$"}
+ }
+}

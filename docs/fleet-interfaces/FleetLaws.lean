@@ -223,6 +223,81 @@ theorem apply_inverse_restores (s : P → V) (d : List (Edit P V)) (hw : WellFor
     have hq : e.path = q := by simpa using List.find?_some h
     simp [← hq, hw e he]
 
+/-! ## Habits and post-act receipts (S10/S11)
+
+Reference laws only: caller-supplied admission/time and completed acts are premises,
+not Mini kernel facts. `execute` has no receipt input. Recording can fail after an
+act, but cannot undo or authorize it. Delivery and obedience are independent facts.
+-/
+
+structure ActTrace where
+  executed : Bool
+  fire : Reading
+  deriving DecidableEq, Repr
+
+def execute (allowed : Bool) : ActTrace := ⟨allowed, .unread⟩
+
+def recordFire (trace : ActTrace) (result : Reading) : ActTrace :=
+  if trace.executed then { trace with fire := result } else trace
+
+theorem fire_never_gates (trace : ActTrace) (result : Reading) :
+    (recordFire trace result).executed = trace.executed := by
+  unfold recordFire
+  split <;> rfl
+
+theorem absent_control_reads_unread (result : Reading) : reads .unread result = .unread := by
+  rfl
+
+inductive HabitLife where
+  | current (lastFire : Nat)
+  | stale
+  deriving DecidableEq, Repr
+
+/-- A sorted complete fire history folds an idle gap to an absorbing stale state.
+The final observation uses the same idle test but does not add a fire to history. -/
+def habitStep (idle : Nat) : HabitLife → Nat → HabitLife
+  | .stale, _ => .stale
+  | .current last, at => if last + idle ≤ at then .stale else .current at
+
+def habitFold (idle : Nat) (state : HabitLife) (times : List Nat) : HabitLife :=
+  times.foldl (habitStep idle) state
+
+theorem habit_stale_persists (idle : Nat) (more : List Nat) :
+    habitFold idle .stale more = .stale := by
+  induction more with
+  | nil => rfl
+  | cons at rest ih => exact ih
+
+structure Delivery where
+  delivered : Bool
+  obeyed : Bool
+  deriving DecidableEq, Repr
+
+theorem delivered_does_not_imply_obeyed :
+    ∃ d : Delivery, d.delivered = true ∧ d.obeyed = false := by
+  exact ⟨⟨true, false⟩, rfl, rfl⟩
+
+-- Real inhabited inputs: failed/absent recording never stops an allowed act;
+-- recording cannot turn a refused act into an executed act either.
+example : recordFire (execute true) .red = ⟨true, .red⟩ := by decide
+example : recordFire (execute true) .unread = ⟨true, .unread⟩ := by decide
+example : recordFire (execute false) .green = ⟨false, .unread⟩ := by decide
+example : reads .unread .green = .unread := by decide
+example : habitFold 5000 (.current 0) [4000, 8999] = .current 8999 := by decide
+example : habitFold 5000 (.current 0) [5000, 6000] = .stale := by decide
+example : habitFold 5000 (.current 0) [4000, 9000, 9001] = .stale := by decide
+example : (Delivery.mk true false).delivered = true ∧
+    (Delivery.mk true false).obeyed = false := by decide
+
+/-- info: 'FleetLaws.fire_never_gates' does not depend on any axioms -/
+#guard_msgs in #print axioms fire_never_gates
+/-- info: 'FleetLaws.absent_control_reads_unread' does not depend on any axioms -/
+#guard_msgs in #print axioms absent_control_reads_unread
+/-- info: 'FleetLaws.habit_stale_persists' does not depend on any axioms -/
+#guard_msgs in #print axioms habit_stale_persists
+/-- info: 'FleetLaws.delivered_does_not_imply_obeyed' does not depend on any axioms -/
+#guard_msgs in #print axioms delivered_does_not_imply_obeyed
+
 /-! ## Teeth: each law refuses something, and each premise is inhabited -/
 
 def up (n : Nat) : Nat := n / 10  -- path 52 lives in directory 5

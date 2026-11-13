@@ -3,8 +3,9 @@
 Python 3.10+, standard library plus `cryptography` for Ed25519. This is fleet's reading, offered
 so a Mini receiver can be checked against the same vectors; it decides nothing for Mini.
 
-Every function here is pure over its arguments. A refusal is a `Refused(reason, names)` value,
-never an exception, so a vector can state the exact refusal it expects.
+Record decisions are pure over their arguments; ledgers retain local state, and the explicit
+`act_then_record` ordering example invokes callbacks. Record refusals are `Refused(reason, names)`
+values, so a vector can state the exact refusal it expects.
 """
 import hashlib
 import json
@@ -22,6 +23,9 @@ DOMAIN = {
     "fleet.read-set": b"FLEET.READ-SET/v1",
     "fleet.anchor-ref": b"FLEET.ANCHOR-REF/v1",
     "fleet.chat-row": b"FLEET.CHAT-ROW/v1",
+    "fleet.habit-record": b"FLEET.HABIT-RECORD/v1",
+    "fleet.fire-record": b"FLEET.FIRE-RECORD/v1",
+    "fleet.fire-batch": b"FLEET.FIRE-BATCH/v1",
 }
 MAX_RECORD_BYTES = 1024
 MAX_CITED = 32
@@ -304,3 +308,184 @@ def anchor_step(prev, nxt):
     if prev["at_height"] is not None and nxt["at_height"] != prev["at_height"]:
         return Refused("height-changed")
     return Ok("strengthens" if nxt != prev else "same")
+
+
+# ---------------------------------------------------------------- habits and post-act receipts (S10, S11)
+
+def _text(v):
+    return isinstance(v, str) and 0 < len(v) <= 200
+
+
+def _matches(pattern, v):
+    return isinstance(v, str) and pattern.fullmatch(v) is not None
+
+
+def _shape(v, spec):
+    return isinstance(v, dict) and _need(v, spec) is None
+
+
+TRIGGER_SPEC = {
+    "kind": (lambda v: v in ("fact", "event"), "bad-trigger-kind"),
+    "value": (_text, "bad-trigger-value"),
+}
+STEER_SPEC = {"rule": (_text, "bad-rule"), "scope": (_text, "bad-scope")}
+BUDGET_SPEC = {"max_fires": (_int(1), "bad-limit"), "window_ms": (_int(1), "bad-window")}
+RETIRE_SPEC = {"idle_ms": (_int(1), "bad-idle")}
+
+
+def check_habit_record(rec):
+    """An owner-signed rule, not a claim that any model follows the rule."""
+    bad = _need(rec, {
+        "kind": (lambda v: v == "fleet.habit-record", "wrong-kind"),
+        "v": (lambda v: type(v) is int and v == 1, "wrong-version"),
+        "trigger": (lambda v: _shape(v, TRIGGER_SPEC) and
+                    (v["kind"] != "fact" or _matches(DIGEST, v["value"])), "bad-trigger"),
+        "steer": (lambda v: _shape(v, STEER_SPEC), "bad-steer"),
+        "budget": (lambda v: _shape(v, BUDGET_SPEC), "bad-budget"),
+        "owner": (lambda v: _matches(KEYID, v), "bad-keyid"),
+        "retirement": (lambda v: _shape(v, RETIRE_SPEC), "bad-retirement"),
+        "ts_ms": (_int(), "bad-ts"),
+        "sig": (lambda v: _matches(SIG, v), "bad-sig-shape"),
+    })
+    if bad:
+        return bad
+    if len(canonical(rec)) > MAX_RECORD_BYTES:
+        return Refused("too-large")
+    if not sig_ok(rec, rec["owner"]):
+        return Refused("bad-signature", ("owner",))
+    return Ok(record_digest(rec))
+
+
+def habit_matches(habit, fact_digest, admitted_facts):
+    """Only an admitted fact can trigger, including an event-kind trigger.
+
+    The caller supplies the verified admission index: digest -> {event, ts_ms}.
+    Membership is an explicit trust boundary, NOT established by this JSON checker.
+    """
+    fact = admitted_facts.get(fact_digest)
+    if fact is None or fact["ts_ms"] < habit["ts_ms"]:
+        return False
+    trigger = habit["trigger"]
+    return trigger["value"] == (fact_digest if trigger["kind"] == "fact" else fact["event"])
+
+
+def habit_status(habit, fire_times, now_ms):
+    """Fold a COMPLETE, verified local history up to now. A gap >= idle_ms retires
+    permanently: a later receipt cannot resurrect it. Missing history is UNKNOWN at
+    the caller, not evidence of absence. Time here is supplied data, not kernel time.
+    """
+    last = habit["ts_ms"]
+    if now_ms < last:
+        return "not-started"
+    for at in sorted(set(t for t in fire_times if last <= t <= now_ms)):
+        if at - last >= habit["retirement"]["idle_ms"]:
+            return "retired"
+        last = at
+    return "retired" if now_ms - last >= habit["retirement"]["idle_ms"] else "current"
+
+
+def habit_budget(habit, fire_times, at_ms):
+    """A pure planning rule; NEVER an admission gate for an already completed act.
+    Windows are (at-window_ms, at], and timestamps count distinct fire identities.
+    """
+    used = sum(at_ms - habit["budget"]["window_ms"] < t <= at_ms for t in fire_times)
+    return used < habit["budget"]["max_fires"]
+
+
+def check_fire_record(rec, habits, admitted_facts, completed_acts):
+    """Validate a post-act receipt against verified external inputs, not obedience.
+
+    completed_acts is an admitted digest -> exact act identity map. Its timestamps,
+    like the fact index's, must be supplied by a trusted adapter; no clock proof here.
+    Retirement/budget affect planning, not acceptance of truthful post-act receipts.
+    """
+    bad = _need(rec, {
+        "kind": (lambda v: v == "fleet.fire-record", "wrong-kind"),
+        "v": (lambda v: type(v) is int and v == 1, "wrong-version"),
+        "habit": (lambda v: _matches(DIGEST, v), "bad-digest"),
+        "trigger_fact": (lambda v: _matches(DIGEST, v), "bad-digest"),
+        "act": (lambda v: _matches(DIGEST, v), "bad-digest"),
+        "turn": (_int(), "bad-turn"),
+        "lane": (_text, "bad-lane"),
+        "bytes": (lambda v: _matches(DIGEST, v), "bad-digest"),
+        "member": (lambda v: _matches(KEYID, v), "bad-keyid"),
+        "delivery": (lambda v: v in ("delivered", "attempted"), "bad-delivery"),
+        "ts_ms": (_int(), "bad-ts"),
+        "sig": (lambda v: _matches(SIG, v), "bad-sig-shape"),
+    })
+    if bad:
+        return bad
+    if len(canonical(rec)) > MAX_RECORD_BYTES:
+        return Refused("too-large")
+    if not sig_ok(rec, rec["member"]):
+        return Refused("bad-signature", ("member",))
+    habit = habits.get(rec["habit"])
+    if habit is None or not isinstance(check_habit_record(habit), Ok) or record_digest(habit) != rec["habit"]:
+        return Refused("unknown-habit")
+    if not habit_matches(habit, rec["trigger_fact"], admitted_facts):
+        return Refused("trigger-not-admitted-or-mismatched")
+    act = completed_acts.get(rec["act"])
+    if act is None:
+        return Refused("act-not-completed")
+    if any(act.get(k) != rec[k] for k in
+           ("habit", "trigger_fact", "turn", "lane", "bytes", "member", "delivery")):
+        return Refused("act-mismatch")
+    if not admitted_facts[rec["trigger_fact"]]["ts_ms"] <= act["ts_ms"] < rec["ts_ms"]:
+        return Refused("not-after-act")
+    return Ok(record_digest(rec))
+
+
+@dataclass
+class FireLedger:
+    """Local append-only log. No Store calls, and NEVER consulted to permit an act."""
+    habits: dict = field(default_factory=dict)
+    admitted_facts: dict = field(default_factory=dict)
+    completed_acts: dict = field(default_factory=dict)
+    by_id: dict = field(default_factory=dict)
+    log: list = field(default_factory=list)
+
+    def append(self, rec):
+        import copy
+        checked = check_fire_record(rec, self.habits, self.admitted_facts, self.completed_acts)
+        if isinstance(checked, Refused):
+            return checked
+        identity = tuple(rec[k] for k in ("habit", "trigger_fact", "turn", "lane", "member"))
+        prior = self.by_id.get(identity)
+        if prior is not None:
+            return (Ok({"replayed": record_digest(prior)}) if canonical(prior) == canonical(rec)
+                    else Refused("conflict"))
+        stored = copy.deepcopy(rec)
+        self.by_id[identity] = stored
+        self.log.append(stored)
+        return Ok({"appended": checked.value})
+
+
+def act_then_record(act, record):
+    """Reference ordering example, not a runtime scheduler. Act exceptions propagate;
+    receipt exceptions become named failures AFTER the act completed. Production must
+    schedule recording off-path; this example makes no latency or durability claim.
+    """
+    result = act()
+    try:
+        receipt = record(result)
+    except Exception as error:
+        receipt = Refused("record-failed", (type(error).__name__,))
+    return result, receipt
+
+
+def fire_batches(records):
+    """Already verified local receipts -> one digest payload per (seat, UTC hour).
+    Sign each payload as an S0 chat row; anchor THOSE rows, never each fire. Batch
+    only closed hours with a complete local log. Exact retries/order are stable.
+    """
+    groups = {}
+    for rec in records:
+        key = rec["member"], rec["ts_ms"] // 3600000
+        groups.setdefault(key, set()).add(record_digest(rec))
+    out = []
+    for (seat, hour), fires in sorted(groups.items()):
+        body = {"kind": "fleet.fire-batch", "v": 1, "seat": seat, "hour": hour,
+                "fires": sorted(fires)}
+        out.append({"batch": digest("fleet.fire-batch", body), "seat": seat,
+                    "hour": hour, "count": len(fires)})
+    return out
