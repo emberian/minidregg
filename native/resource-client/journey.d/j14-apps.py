@@ -161,10 +161,18 @@ Do not call mini_say or perform unrelated index, digest, or document maintenance
             'maxRequestBytes':1048576,'maxResponseBytes':8388608,'timeoutSeconds':600,'localFixtureHostNetwork':False}
 
     def set_provider_keys(self,keyclient):
-        source=Path(os.environ['J14_APPS_POOL_KEY'])
-        info=source.stat()
-        if info.st_mode&0o077 or source.is_symlink():raise ValueError('pool key file must be private')
-        secret=self.root/'pool-key.secret';secret.write_bytes(source.read_bytes());secret.chmod(0o600)
+        # A qualify run makes no model call: without J14_APPS_POOL_KEY the pool row holds a placeholder, and no
+        # provider key is read. The live probe refuses to start without the key.
+        secret=self.root/'pool-key.secret'
+        if 'J14_APPS_POOL_KEY' not in os.environ:
+            if os.environ.get('J14_APPS_UNTIL','probe')!='qualify':raise ValueError('the live probe needs J14_APPS_POOL_KEY')
+            secret.write_bytes(b'no-provider-key-qualify-run\n')
+        else:
+            source=Path(os.environ['J14_APPS_POOL_KEY'])
+            info=source.stat()
+            if info.st_mode&0o077 or source.is_symlink():raise ValueError('pool key file must be private')
+            secret.write_bytes(source.read_bytes())
+        secret.chmod(0o600)
         try:
             self.run('pool-key',[self.mini,'key','--action','set','--pool','true','--provider',POOL,'--secret',secret,'--broker',keyclient])
         finally:secret.unlink()
