@@ -7,7 +7,7 @@ controller, participant, serve and native modules build through the executables 
 `generic-simplex-log-reopen`, `generic-simplex-load` and `minidregg-four-source-fixture`
 (`lakefile.toml`). The transferable COMMIT witness (`Compiler/GenericSimplexTransferability`)
 and reconfiguration (`Kernel/GenericSimplexReconfig`) build only in the opt-in `ResearchWip`
-library; `Verify/GenericSimplexNativeHarness.lean` is in no library.
+library.
 
 The model is a fixed committee of n = 3f + 1 with at most f cumulatively Byzantine
 members, authenticated reliable delivery and partial synchrony. The configured
@@ -17,25 +17,25 @@ membership, mobile faults and perpetual storage compaction are separate work.
 
 ## Durable decisions
 
-GenericSimplex retains old views and ordered audit events. The native journal
-replays exact inputs and releases newly enabled messages only after compare-and-
-append plus exact readback. A peer cannot supply a source checked event.
+The native journal is the running replica's (`Replica.step`, blocks relative to its
+committed height). It replays exact entries and releases newly enabled messages only after
+compare-and-append plus exact readback. A peer cannot supply a source checked event.
 
-A certificate contains distinct ML-DSA-65 signatures on durable COMMIT sends.
-It does not require each signer to have locally output a commitment. A Byzantine
-sender can supply the final COMMIT only to one honest replica. That replica must
-transfer the original quorum evidence without obtaining a new quorum of local
-output attestations.
+A certificate is a quorum of distinct ML-DSA-65 signatures on one COMMIT statement. It does
+not require each signer to have locally output a commitment. A Byzantine sender can supply
+the final COMMIT only to one honest replica; that replica passes the original signed COMMITs
+on to a member that asks (`Replica.owed`), without obtaining a new quorum of local output
+attestations.
 
-The native COMMIT packet carries a transferable signature covered by its pairwise
-MAC. The recipient verifies both, then retains the signature and the counted
-delivery in one journal transaction. A recovered certificate imports those same
-original COMMIT messages. The statement binds the exact committee context, view
-and the chain as its length and running digest, with the COMMIT-SEND v3 domain separator.
+A COMMIT packet carries its signer's transferable signature, covered by the pairwise MAC of
+whoever sends it. The recipient verifies both, then retains the signature and the counted
+delivery in one journal transaction. The statement binds the exact committee context, the
+view, and the chain as its length and running digest, with the COMMIT-SEND v4 domain
+separator.
 
-The changed journal and wire schema are not an implicit migration path from the
-old local-output profile. Reconfiguration must preserve existing liabilities; a
-fresh file or epoch number is not proof that old certificates cannot complete.
+The journal and wire schema are not an implicit migration path from an older profile.
+Reconfiguration must preserve existing liabilities; a fresh file or epoch number is not
+proof that old certificates cannot complete.
 
 ## Departure from the paper: the view timer (fix C)
 
@@ -356,82 +356,159 @@ and catches up; one twelve behind stays behind until the COMMITs are replayed in
 rules (`2f+1` CANDIDATEs, `f+1` READYs) is enabled first; it used to send it once per
 rule. The F1 schedule did not depend on the duplicate: its facts hold unchanged.
 
-**The signed statement (version 3).** A COMMIT signature is over
+**The signed statement (version 4).** A COMMIT signature is over
 
     commitStatementBytes context view length digest =
-      "MINI-SIMPLEX-COMMIT-SEND" ‖ 3 ‖ contextStream context ‖ nat view ‖ nat length ‖ bytesStream digest
+      "MINI-SIMPLEX-COMMIT-SEND" ‖ 4 ‖ contextStream context ‖ nat view ‖ nat length ‖ bytesStream digest
 
 (`Compiler/GenericSimplexCodec.lean`). Version 2 signed the whole chain, so two correct
-signers at different heights could not write one chain the same way.
+signers at different heights could not write one chain the same way; version 3 signed the
+32-byte chain half of the digest alone.
 
 - `length`: the number of payloads of the chain the COMMIT is for, empty protocol payloads
   included (consensus ancestry, not the application height).
-- `digest`: 32 bytes, the running digest of that chain (`chainDigest context`):
-  the empty chain's is `cSHAKE256(contextStream context, S = "minidregg/simplex/chain")`,
-  and a payload extends `d` to `cSHAKE256(d ‖ bytesStream payload, S)`. `bytesStream` is the
-  length-prefixed encoding the journal uses, so the chain's split into payloads is bound;
-  the origin binds the context, so one domain's digest is not another's.
-- `commitmentBytes context view block` is that statement for a whole chain. The
-  certificate and the COMMIT witness still carry the whole chain, and their verifiers
-  recompute the digest from the origin: linear in the chain until the native layer adopts
-  the running replica.
+- `digest`: 64 bytes, two running cSHAKE256 digests of that chain side by side
+  (`chainDigest context`). The chain half, over every payload: the empty chain's is
+  `cSHAKE256(contextStream context, S = "minidregg/simplex/chain")`, and a payload extends
+  `d` to `cSHAKE256(d ‖ bytesStream payload, S)`. The history half, over the nonempty
+  payloads only (`historyDigest context`, `S = "minidregg/simplex/history"`): an empty
+  protocol payload leaves it unchanged. `bytesStream` is the length-prefixed encoding the
+  journal uses, so the chain's split into payloads is bound; both origins bind the context,
+  so one domain's digest is not another's.
+- Proved: `chainDigest_history` (the history half of a chain's digest is `historyDigest` of
+  its application history). A holder of the source records alone can therefore check which
+  records a signed statement orders, with no knowledge of where the empty payloads fell.
+- `commitmentBytes context view block` is that statement for a whole chain: a specification
+  function. Nothing that runs calls it.
 - In the running replica (`Kernel/GenericSimplexRelative.lean`): a `Replica` keeps the
   digest of its committed chain and `rebase` extends it over the payloads it commits. A
   wire COMMIT carries its statement `(length, digest)` beside the relative block; `encode`
   computes it from the writer's digest and the block, so a peer that passes a COMMIT on
   from another height writes the same statement, and `decode` reads a COMMIT only when the
   block it reads has the stated length and digest. Cost is the block, never the chain.
-- Proved: `commit_reads_signed_chain` (for a digest with no collisions, the block a
-  replica reads under a statement is the signed chain, wherever it was written from);
-  `commitmentBytes_binds_config` (equal signed bytes have equal context, view, length and
-  digest) and `commitmentBytes_binds_block` (equal chains, for a digest with no
-  collisions). `ChainDigest.CollisionFree` is a named premise, inhabited by
-  `Verify.GenericSimplexRelative.plain_collisionFree`; cSHAKE256 meets it only as an
-  assumption about the chains that occur.
+- Proved: `commit_reads_signed_chain` (the block a replica reads under a statement is the
+  signed chain, wherever it was written from, when the digest has no collision between those
+  two chains); `commitmentBytes_binds_config` (equal signed bytes have equal context, view,
+  length and digest) and `commitmentBytes_binds_block` (equal chains, under the same premise).
+- The collision premise is `ChainDigest.CollisionFreeOn h occurs`: no two chains among those
+  that occur have one digest. In `RelativeAgreement` and `RelativeFaithful` the set is
+  `Occurs` of the network: the chains its correct members signed a COMMIT for, and the
+  chains a correct replica reads from a COMMIT delivered to it at any committed height it
+  has had. That is a finite set fixed by the run, so the premise says the run exhibits no
+  collision, which is what cSHAKE256 can be assumed to give. Before, the premise was
+  `∀ a b, h.of a = h.of b → a = b`, which no function into 64 bytes satisfies, so every
+  theorem taking it was about the plain digest only. `ChainDigest.CollisionFree` keeps that
+  strong form as the inhabitation witness (`plain_collisionFree`,
+  `ChainDigest.collisionFree_on`). Teeth: `collision_breaks_agreement` (on a digest that is
+  the same for every chain, two correct replicas commit `[[7]]` and `[[8]]` in a reachable
+  network).
 - `RelAuthentic` no longer has a clause for a relayed COMMIT: a COMMIT is authentic as its
   sender, view and statement, and its height and block are whatever the forwarder wrote.
 - Executed: `forged_statement_refused` (three COMMITs with another chain's statement
   commit nothing). Gate plant `forged-digest`: on a digest that is the same for every
   chain the same three COMMITs are read, and the harness goes red.
 
-**Not adopted by the native layer.** `Compiler/GenericSimplexIO.lean` still replays with
-`step` on whole chains and checkpoints the whole state; `exportable` and
-`certificateCandidates` read old views and the audit; the participant reads `outbox` by a
-cursor into a list that only grows and never drains it; nothing forwards `relay`;
-`receivedBefore` answers a repeated CANDIDATE(⊥) as a duplicate without giving it to the
-kernel, so neither floor evidence nor `serveViews` can be triggered natively. The wire and
-the journal therefore still carry whole chains. The kernel harness and the witnesses run
-the new rules.
+**The native layer runs the running replica** (`Compiler/GenericSimplexIO.lean` and the
+modules above it).
 
-The adoption is one change across `GenericSimplexIO`, `GenericSimplexNative`,
-`GenericSimplexParticipant`, `GenericSimplexServe`, `GenericSimplexController`,
-`GenericSimplexTransferability` and the harnesses; the three gaps above cannot be closed
-one at a time on `step` (letting a repeated CANDIDATE(⊥) through without a driver that
-forwards and drains `relay` only grows `relay`). Its parts, in dependency order:
-1. Codecs for `WireMessage`, `WireInput` and `Replica` (`stateStream` already encodes the
-   core). An event is an encoded `WireInput`; the snapshot is a `Replica`.
-2. `replayEvents` runs `Replica.step c (chainDigest context)`; `Journal.snapshot` is the
-   replica, so a checkpoint is bounded by live state. `replayEvents_self` needs
-   `Replica.step` to keep `core.self` (through `finish`, `rebase`, `release`).
-3. The driver takes `Replica.drain` after every acknowledged input: `sends` to every peer,
-   `owed` to the named peer, `committed` to the application. The output of an input is
-   durable before it is sent, as today; the outbox cursors go away.
-4. `receiveAuthenticated` keeps its duplicate test for everything but CANDIDATE(⊥).
-5. A COMMIT witness is `(view, height, run, length, digest, attestation)`: the signature is
-   checked against `commitStatementBytes` before the block is read, and the kernel's
-   `decode` checks the block against the statement. `exportable` and the certificate answer
-   from the kept evidence (`Replica.evidence`) and the durable witnesses: a certificate is
-   `(context, view, length, digest, signers)` and its verifier needs the chain only above a
-   height it already holds.
-6. `logMagic` and the packet format move once, with this change.
+- Journal. An event is an encoded `Entry`: an input of `Replica.step` (`WireInput`, blocks
+  relative to the replica's committed height), `flush sends owed` (the driver handed that
+  many broadcasts and owed messages to its transport) or `consume count` (the application
+  took that many committed payloads). `replayEvents` applies them with the domain's
+  `chainDigest`; the snapshot of a checkpoint is the `Replica`, so a checkpoint is bounded
+  by live state. A replay result must still carry the journal's own member index (checked
+  at the end of every replay and of every append). The check cannot fail:
+  `GenericSimplexRelativeSelf.step_self` and `start_self` (proved) say `Replica.step` and
+  `Replica.start` keep `core.self`, and the two drains do not touch the core.
+- Outputs. An acknowledged entry leaves the replica's outputs in the journalled state
+  (`sends`, `owed`, `committed`): durable before anything is sent. The participant seals and
+  returns them, and acknowledges exactly what it returned at its next slice (`flush` with the
+  counts), so a crash between the two sends them again. There is no outbox cursor and no
+  retry round: a member that missed a message repeats its CANDIDATE(⊥) and is answered by
+  the kernel (`serveFloor`, `serveViews`, the kept commit evidence).
+- Duplicates. `settled` skips a delivery the replica already accounts for (received, a
+  proposal for a view that has one, at or below the floor, unreadable from a sender that is
+  not ahead, a COMMIT already held). CANDIDATE(⊥) is never settled
+  (`candidate_bottom_never_settled`): the repeat is what the kernel answers.
+- The tick. The participant journals a tick whenever the view's deadline is due, also after
+  the replica asked to leave the view: that is the input on which the kernel repeats its
+  CANDIDATE(⊥). An idle replica moves its deadline one timeout ahead per tick.
+- COMMIT witnesses. A kept witness is `(view, length, digest, attestation)`: the statement
+  and its signer's signature, no payload. The signature is checked against
+  `commitStatementBytes` before the block is read; the kernel's `decode` then checks the
+  block the delivery carries against the same statement. A packet names the member whose MAC
+  covers it (`origin`); a COMMIT may be passed on by any member with its signer's signature,
+  every other kind must be its origin's own. This replica signs a COMMIT only when the
+  message is in its own undrained output (`ownCommit`), which replaces `exportable`'s read of
+  old views and the audit. A checkpoint keeps the witnesses the replica can still use
+  (`retains`: a view above the floor, or a commit whose evidence it still serves).
+- Certificates. A `Certificate` is `(context, view, length, digest, signers)`; verifying it
+  costs the signatures and nothing else. `recoverCommitment` builds the certificate of the
+  newest commit from `Replica.evidence` and the kept witnesses. It is not shipped between
+  replicas any more: peers get the COMMITs themselves, relayed.
+- The application. `VerifiedCommit.Reads history` says a history's `historyDigest` is the
+  history half of the signed digest. `JointReceiver.order` builds its token from the source
+  prefix, the record and the committed records after it (the replica's `committed` queue),
+  checked against the newest certificate; the token carries that history instead of a chain.
+  `applyNext` hands the application one committed payload per slice and journals `consume`
+  only after the source holds the record, so a restart hands it over again.
+- Validation. Work is `(height, records)`: source records from an application height. The
+  validator is told the committed source history below it and replays the whole prefix.
+- Bytes. Packets are `ByteArray` from the transport to the codec and back (`encodeBytes`,
+  `decodeBytes`); a journal append is a `ByteArray` frame. Kernel values (`Bytes`, `Block`)
+  are still lists, as are the in-memory `Log` and the image read at open.
 
-**BREAKS: log magic version 10; signed COMMIT statement version 3.** Version 7: the step
+Executed (`Verify/GenericSimplexNativeRun.lean`, run by `generic-simplex-harness`): four
+native replicas over in-memory journals and a stand-in helper session (signatures and MACs
+are cSHAKE256 of the signer or pair and the bytes: not cryptography) commit one operation
+through `sealPacket`, `authenticate`, `receiveCommit`, `receiveDelivery` and `flush`. A
+COMMIT with another member's signature on the same statement is refused, a packet with a
+broken MAC is refused, a VOTE passed on by a member that is not its sender is refused; a
+COMMIT passed on with its signer's kept signature is counted; a counted COMMIT is journalled
+with its signature; every journal and every checkpoint reopens to the same replica; the
+certificate of the commit is a quorum on the statement and reads `[[7]]` and not `[[8]]`.
+Not executed anywhere in the gate: the participant's source side (`applyNext`,
+`JointReceiver.order` under a real certificate, validation, the request spool) and the Rust
+helper session. Both need four native source stores (`minidregg-four-source-fixture run`).
+
+Measured (`generic-simplex-load 640 10`, compiled, hbox, four replicas, instant delivery,
+each input journalled through `appendRestored` under the deployed digest, outputs flushed,
+committed payloads consumed, a checkpoint every 1024 deltas; no signatures, MACs or disk):
+584 µs per operation at 10 operations, 923 at 160, 807 at 640, about 54 inputs and 2.4 to
+2.5 KB of journal per operation; a checkpoint is 8,951 bytes at height 10 and 8,992 at
+height 640. The per-window series is a sawtooth between about 470 and 1,240 µs whose period
+is the checkpoint interval: the harness and `serveLoop` count the deltas since the last
+checkpoint by walking them (`log.recent.length`, at most 1024). Nothing grows with the
+committed height. For scale, the kernel alone on whole chains (`liveStep`, no journal, the
+harness before this change) took 420 µs per operation at 10, 1,731 at 160 and 7,660 at 640.
+
+Still linear in the history, all on the application's side and none per protocol message:
+`JointReceiver.order` hashes the whole history from its origin (the source keeps no running
+`historyDigest`), `sourcePrefix` re-encodes every record, and
+`JointSourcePrefixValidation.validate` replays a proposed prefix from genesis. The next step
+is a running `historyDigest` in the source store, extended by the append.
+
+In `GenericSimplexReceiverSafety` the two consumer theorems name the chain each
+certificate's honest signers sent (`leftBlock`, `rightBlock`) and take as a premise that
+each token's history is that chain's application history (for the native digest:
+`chainDigest_history` plus collision-freedom of the history digest between the two). Before,
+the certificate carried the chain and the premise was implicit in its shape.
+`exportable_has_durable_send` and `reachable_exportable_sent` are gone with `exportable`;
+that a COMMIT in a replica's own output is a send of the model's trace is part of
+`RelativeFaithful`.
+
+**BREAKS: log magic version 11; signed COMMIT statement version 4; packet format.** Version 7: the step
 changed (`validBlock`, `checked`, `offers`, the tick guard, the `ingest` horizon and repeat
 answer) and the snapshot carries `ahead`. Version 8: `ingest` takes a COMMIT above the
 horizon and READY is sent once. Version 9: `ingest` caps a member's share of a view
 record. Version 10: the COMMIT witnesses a journal keeps are signed over the version-3
-statement. Each changes what a journal replays to or exports. Older logs refuse
-(`GenericSimplexIO.v9_log_refused`); a version-2 signature does not verify. A mesh moves
+statement. Version 11: the journal is the running replica's (entries of `Replica.step`,
+relative blocks, drains as entries, a `Replica` snapshot, witnesses as statements); the
+signed statement is version 4 (64-byte digest); a packet is `(origin, recipient, WireMessage,
+signature)` under a one-octet frame tag (0 protocol, 2 application candidate; the
+certificate frame 1 is gone) and the candidate MAC frame is version 2 (it carries an
+application height). Each changes what a journal replays to or exports. Older logs refuse
+(`GenericSimplexIO.v10_log_refused`); an older signature does not verify. A mesh moves
 by re-genesis.
 
 ## Native source consumer
@@ -483,10 +560,10 @@ truncated block.
 
 ## Service and remaining joins
 
-Fresh traffic, retries, validation and certificate work have separate finite
-service opportunities. A retry round fixes its end so a growing outbox cannot
-starve older messages. Scheduling cursors may reset after restart because the
-journal retains obligations. This physical service API does not create source
+A service slice makes a bounded number of validation attempts, sends the replica's
+whole undrained output and hands the application at most one committed payload.
+Scheduling state may reset after restart because the journal retains the undrained
+output and the payloads the application has not taken. This physical service API does not create source
 funding, private custody qualification or permission to release a reservation.
 
 The optional streaming CAS helper separates journal-file capacity from the

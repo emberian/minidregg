@@ -22,13 +22,10 @@ open Minidregg.Compiler.GenericSimplexParticipant
 open Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
 
-/-- Finite reserved capacity for one iteration. The fresh budget is large enough
-to drain every newly emitted message; retry rounds resend the whole retained
-outbox over successive iterations. -/
+/-- Finite reserved capacity for one iteration. Every iteration sends the replica's whole
+undrained output; nothing is resent on a timer. -/
 structure Budget where
   validation : Nat := 1
-  fresh : Nat := 4096
-  retry : Nat := 64
   inbound : Nat := 512
   deriving Repr, Inhabited
 
@@ -44,8 +41,8 @@ four-replica harness: authenticate and journal each delivered packet, then one
 finite service slice. A packet that fails authentication is dropped (a Byzantine
 peer can send anything); a journal conflict or uncertain append stops the
 replica, which recovers only by reopening its durable image. -/
-def iteration {config : SourceConfig} (p : Participant config) (inbound : List Bytes)
-    (budget : Budget) : IO (Participant config × List (Nat × Bytes) × IterationReport) := do
+def iteration {config : SourceConfig} (p : Participant config) (inbound : List ByteArray)
+    (budget : Budget) : IO (Participant config × List (Nat × ByteArray) × IterationReport) := do
   let mut p := p
   let mut refused := 0
   for packet in inbound do
@@ -56,7 +53,7 @@ def iteration {config : SourceConfig} (p : Participant config) (inbound : List B
     | .invalid => refused := refused + 1
     | .conflict => throw (IO.userError "agreement journal conflict: reopen the replica")
     | .uncertain => throw (IO.userError "agreement journal append uncertain: reopen the replica")
-  let (serviced,packets,_,status) ← service p budget.validation budget.fresh budget.retry
+  let (serviced,packets,_,status) ← service p budget.validation
   return (serviced,packets,{received := inbound.length,refused := refused,sent := packets.length,status := status})
 
 /-! ## Request spool -/
@@ -78,7 +75,7 @@ def prefixThrough {config : SourceConfig} (p : Participant config) (ingress : By
 replica's durable engine state: pending work, never a receipt. -/
 def retainedOffer {config : SourceConfig} (p : Participant config) (ingress : Bytes) : IO Bool := do
   let some prior ← p.runtime.current | return false
-  return prior.state.offers.any fun payload =>
+  return prior.state.core.offers.any fun payload =>
     match Minidregg.Compiler.DurableCheckpointCodec.recordFrame.decode payload with
     | some record => Minidregg.Compiler.DurableCheckpointCodec.recordFrame.encode record == payload &&
         record.event.canonicalBytes == ingress
@@ -172,7 +169,7 @@ partial def serveLoop {config : SourceConfig} (p : Participant config) (spool : 
   let helper := p.runtime.native.helper
   let t0 ← IO.monoMsNow
   let stats := if stats.since == 0 then {stats with since := t0} else stats
-  let inbound ← helper.receive budget.inbound
+  let inbound := (← helper.receive budget.inbound).toList
   let (p,packets,report) ← iteration p inbound budget
   let t1 ← IO.monoMsNow
   if let some prior ← p.runtime.current then
@@ -199,7 +196,7 @@ partial def serveLoop {config : SourceConfig} (p : Participant config) (spool : 
   let stats ← if t3 - stats.since < statsWindowMs then pure stats else do
     if let some prior ← p.runtime.current then
       let perPacket := if stats.packets == 0 then 0 else stats.busyMs * 1000 / stats.packets
-      IO.eprintln s!"stats: {t3} ms window {(t3 - stats.since) / 1000} s: {stats.packets} packets in {stats.iterations} iterations, receive+service {stats.busyMs} ms ({perPacket} us/packet); view {prior.state.current}, views {prior.state.views.length}, deltas since checkpoint {prior.log.recent.length}, journal {prior.length} B"
+      IO.eprintln s!"stats: {t3} ms window {(t3 - stats.since) / 1000} s: {stats.packets} packets in {stats.iterations} iterations, receive+service {stats.busyMs} ms ({perPacket} us/packet); view {prior.state.core.current}, views {prior.state.core.views.length}, height {prior.state.height}, deltas since checkpoint {prior.log.recent.length}, journal {prior.length} B"
     pure ({since := t3} : ServeStats)
   if inbound.isEmpty then IO.sleep tickMs.toUInt32
   serveLoop p spool budget tickMs retryMs entries stats

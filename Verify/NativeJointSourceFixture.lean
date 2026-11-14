@@ -307,7 +307,7 @@ def auditJournal (root : System.FilePath) (index : Nat) : IO Unit := do
   let mut images := []
   for path in ordered do images := images ++ [(← IO.FS.readBinFile path).toList]
   match auditSegments context images with
-  | .ok s => IO.println s!"AUDITED replica {index}: {ordered.length} segments from genesis, view {s.current}, committed tip of {s.committedTip.length} blocks"
+  | .ok s => IO.println s!"AUDITED replica {index}: {ordered.length} segments from genesis, view {s.core.current}, committed height {s.height}"
   | .error detail => throw (IO.userError s!"audit of replica {index} failed: {detail}")
 
 /-- `write-audit-fixture`: build a deterministic 2-segment replica-0 journal
@@ -327,7 +327,7 @@ def writeAuditFixture (root : System.FilePath) (corrupt : Bool) : IO Unit := do
   let empty : Journal := ⟨context,0,0,[],[],none⟩
   let some r0 := openRestored context (Log.encode ⟨empty,[]⟩)
     | throw (IO.userError "audit fixture base journal refused")
-  let some (r1,frame1) := appendRestored r0 [encodeInput (.offer [1,2,3]), encodeInput (.tick 1)] []
+  let some (r1,frame1) := appendRestored r0 [encodeEntry (.input (.offer [1,2,3])), encodeEntry (.input (.tick 1))] []
     | throw (IO.userError "audit fixture segment 0 append refused")
   writePrivate (dir / "agreement.log.upto-1") (Log.encode ⟨empty,[]⟩ ++ frame1).toByteArray
   let (cp,cpBytes) := checkpointRestored r1
@@ -335,7 +335,7 @@ def writeAuditFixture (root : System.FilePath) (corrupt : Bool) : IO Unit := do
       let (_,badBytes) := checkpointRestored r0
       pure badBytes
     else
-      let some (_,frame2) := appendRestored cp [encodeInput (.tick 2)] []
+      let some (_,frame2) := appendRestored cp [encodeEntry (.input (.tick 2))] []
         | throw (IO.userError "audit fixture segment 1 append refused")
       pure (cpBytes ++ frame2)
   writePrivate (journalPath root 0) liveBytes.toByteArray

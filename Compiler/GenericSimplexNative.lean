@@ -26,6 +26,7 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.GenericSimplexCodec
 open Minidregg.Compiler.GenericSimplexIO
 open Minidregg.Kernel.GenericSimplex
+open Minidregg.Kernel.GenericSimplexRelative
 set_option autoImplicit false
 /-- Callers use fresh names inside an owner-private directory. Complete file
 permissions before passing a descriptor to the independent storage helper. -/
@@ -57,6 +58,7 @@ def beBytes (width value : Nat) : ByteArray :=
 def u32 (value : Nat) : ByteArray := beBytes 4 value
 def u64 (value : Nat) : ByteArray := beBytes 8 value
 def blob (bytes : Bytes) : ByteArray := u32 bytes.length ++ bytes.toByteArray
+def frame (bytes : ByteArray) : ByteArray := u32 bytes.size ++ bytes
 def readBE (bytes : ByteArray) (start width : Nat) : Nat :=
   (List.range width).foldl (fun acc i => acc * 256 + (bytes.get! (start + i)).toNat) 0
 
@@ -113,27 +115,27 @@ def Helper.positive (h : Helper) (op : UInt8) (body : ByteArray) : IO Bool := do
   let (status,_) ← h.call op body
   return status == 0
 
-def Helper.mac (h : Helper) (peer : Nat) (frame : Bytes) : IO Bytes := do
-  let (status,tag) ← h.call opMac (u32 peer ++ blob frame)
+def Helper.mac (h : Helper) (peer : Nat) (body : ByteArray) : IO ByteArray := do
+  let (status,tag) ← h.call opMac (u32 peer ++ frame body)
   if status != 0 || tag.size != 32 then throw (IO.userError "agreement MAC helper failed")
-  return tag.toList
+  return tag
 
-def Helper.verifyMac (h : Helper) (peer : Nat) (frame tag : Bytes) : IO Bool :=
-  h.positive opVerifyMac (u32 peer ++ blob frame ++ blob tag)
+def Helper.verifyMac (h : Helper) (peer : Nat) (body tag : ByteArray) : IO Bool :=
+  h.positive opVerifyMac (u32 peer ++ frame body ++ frame tag)
 
-def Helper.send (h : Helper) (peer : Nat) (packet : Bytes) : IO Unit := do
-  let (status,_) ← h.call opSend (u32 peer ++ blob packet)
+def Helper.send (h : Helper) (peer : Nat) (packet : ByteArray) : IO Unit := do
+  let (status,_) ← h.call opSend (u32 peer ++ frame packet)
   if status != 0 then throw (IO.userError "agreement transport refused a send")
 
 /-- Drain at most `max` verbatim inbound frames. Nothing here is authenticated. -/
-def Helper.receive (h : Helper) (max : Nat) : IO (List Bytes) := do
+def Helper.receive (h : Helper) (max : Nat) : IO (Array ByteArray) := do
   let (_,reply) ← h.call opRecv (u32 max)
   let count := readBE reply 0 4
   let mut offset := 4
-  let mut frames := []
+  let mut frames := #[]
   for _ in List.range count do
     let size := readBE reply offset 4
-    frames := frames ++ [(reply.extract (offset + 4) (offset + 4 + size)).toList]
+    frames := frames.push (reply.extract (offset + 4) (offset + 4 + size))
     offset := offset + 4 + size
   return frames
 
@@ -165,16 +167,16 @@ def journalStorage (helper : Helper) (writable : Bool) (initial : Sigma Restored
   return {
     current := image.get
     install := image.set
-    append := fun expected frame => do
+    append := fun expected appended => do
       if !writable then return .conflict
       try
-        let (status,_) ← helper.call opAppend (u64 expected ++ blob frame)
+        let (status,_) ← helper.call opAppend (u64 expected ++ frame appended)
         return if status == 0 then .durable else .conflict
       catch _ => return .uncertain
     replace := fun expected image => do
       if !writable then return .conflict
       try
-        let (status,_) ← helper.call opReplace (u64 expected ++ image.toByteArray)
+        let (status,_) ← helper.call opReplace (u64 expected ++ image)
         return if status == 0 then .durable else .conflict
       catch _ => return .uncertain }
 
@@ -207,66 +209,65 @@ def openNative (spec : HelperSpec) (journal : System.FilePath) (context : Contex
       throw (IO.userError "agreement journal writer open refused")
   return ⟨journal,helper,← journalStorage helper writable ⟨context,restored⟩,spec,writable⟩
 
+/-- One packet: the member whose pairwise MAC covers it (`origin`), the recipient, and a
+message as the replica wrote it. `origin` is the message's sender except for a COMMIT, which
+any member may pass on: its authority is its signer's ML-DSA signature, not the MAC. -/
 structure Envelope where
   context : Context
+  origin : Nat
   recipient : Nat
-  sequence : Nat
-  message : Message
+  message : WireMessage
   deriving DecidableEq, BEq, Repr
 def envelopeStream : StreamCodec Envelope :=
   StreamCodec.xmap
     (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat messageStream)))
-    (fun e => (e.context,e.recipient,e.sequence,e.message))
-    (fun (c,r,s,m) => ⟨c,r,s,m⟩) (by intro e; cases e; rfl)
+      (StreamCodec.product StreamCodec.nat wireMessageStream)))
+    (fun e => (e.context,e.origin,e.recipient,e.message))
+    (fun (c,o,r,m) => ⟨c,o,r,m⟩) (by intro e; cases e; rfl)
 /-- Exact configured context is authenticated but need not repeat its complete
 public-key roster on the wire. Both peers reconstruct the SAME canonical prefix,
 so this optimization does not identify configurations by an unproved digest. -/
-def wireBodyStream : StreamCodec (Nat × Nat × Message × Bytes) :=
+def wireBodyStream : StreamCodec (Nat × Nat × WireMessage × Bytes) :=
   StreamCodec.product StreamCodec.nat
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product messageStream bytesStream))
-def wireBody (e : Envelope) (signature : Bytes) : Bytes :=
-  wireBodyStream.encode (e.recipient,e.sequence,e.message,signature)
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product wireMessageStream bytesStream))
 def packetStream : StreamCodec (Bytes × Bytes) := StreamCodec.product bytesStream bytesStream
 /-- The pairwise MAC covers the exact transferable signature too. Empty signature
 is canonical for other protocol kinds; COMMIT always carries real ML-DSA proof. -/
-def authenticatedFrame (e : Envelope) (signature : Bytes) : Bytes :=
-  (StreamCodec.product envelopeStream bytesStream).encode (e,signature)
-def sealPacket (n : Native) (e : Envelope) : IO Bytes := do
-  let signature ← if e.message.kind == .commit then do
-      let some block := e.message.value
-        | throw (IO.userError "COMMIT without block")
-      let some attestation ← exportCommitment (storage n) (crypto n) e.context e.message.view block
-        | throw (IO.userError "COMMIT lacks durable send cause")
-      if attestation.signer != e.message.sender then
-        throw (IO.userError "COMMIT sender differs from durable signer")
-      pure attestation.signature
-    else pure []
+def authenticatedFrame (e : Envelope) (signature : Bytes) : ByteArray :=
+  (StreamCodec.product envelopeStream bytesStream).encodeBytes (e,signature)
+/-- The transferable proof a message of this replica's durable output leaves with: none for
+anything but a COMMIT, its signer's signature for a COMMIT (`commitProof`). A COMMIT that has
+no signature is not sent. Made once per message, whatever the number of recipients. -/
+def messageProof (n : Native) (context : Context) (message : WireMessage) : IO (Option Bytes) :=
+  if message.kind == .commit then commitProof (storage n) (crypto n) context message
+  else pure (some [])
+/-- Seal one message for one recipient. -/
+def sealPacket (n : Native) (e : Envelope) (signature : Bytes) : IO ByteArray := do
   let tag ← n.helper.mac e.recipient (authenticatedFrame e signature)
-  return packetStream.encode (wireBody e signature,tag)
-/-- An authenticated COMMIT includes transferable evidence. Its witness is
-returned with the message so the caller persists both in the same source-neutral
-engine journal transaction. No wire decoder constructs source-validation input. -/
+  return packetStream.encodeBytes
+    (wireBodyStream.encode (e.origin,e.recipient,e.message,signature),tag.toList)
+/-- Authenticate one packet: the MAC is its origin's, over the exact envelope and signature.
+A message that is not a COMMIT must be its origin's own. A COMMIT is returned with the
+signature it carries, which `receiveCommit` verifies against the statement before the
+message is counted. No wire decoder constructs source-validation input. -/
 def authenticate (n : Native) (context : Context) (self : Nat)
-    (packet : Bytes) : IO (Option (Message × Option CommitWitness)) := do
-  let some (body,tag) := packetStream.toLawful.decode packet | return none
+    (packet : ByteArray) : IO (Option (WireMessage × Bytes)) := do
+  let some (body,tag) := packetStream.decodeBytes packet | return none
   if tag.length != 32 then return none
-  let some (recipient,sequence,message,signature) := wireBodyStream.toLawful.decode body
+  let some (origin,recipient,message,signature) := wireBodyStream.toLawful.decode body
     | return none
-  if recipient != self ||
-      message.sender ≥ context.config.parties || message.sender == self then return none
-  let e : Envelope := ⟨context,recipient,sequence,message⟩
-  let macValid ← try n.helper.verifyMac message.sender (authenticatedFrame e signature) tag
+  if recipient != self || origin ≥ context.config.parties || origin == self ||
+      message.sender ≥ context.config.parties then return none
+  let e : Envelope := ⟨context,origin,recipient,message⟩
+  let macValid ← try n.helper.verifyMac origin (authenticatedFrame e signature) tag.toByteArray
     catch _ => pure false
   if !macValid then return none
   if message.kind == .commit then
-    let some block := message.value | return none
-    let witness : CommitWitness := ⟨message.view,block,⟨message.sender,signature⟩⟩
-    if !(← verifyCommitWitness (crypto n) context witness) then return none
-    return some (message,some witness)
+    if message.statement.isNone then return none
+    return some (message,signature)
   else
-    if !signature.isEmpty then return none
-    return some (message,none)
+    if !signature.isEmpty || message.sender != origin || message.statement.isSome then return none
+    return some (message,signature)
 /-- A reboot resets the OS monotonic clock. Rebase it at the persisted logical
 clock instead of waiting for the new uptime to catch the old machine's uptime. -/
 structure Runtime where
@@ -286,7 +287,7 @@ def openRuntime (spec : HelperSpec) (journal : System.FilePath) (context : Conte
     match ← checkpoint (storage n) context with
     | .durable => pure ()
     | _ => throw (IO.userError "agreement journal checkpoint at open refused")
-  return ⟨n,context,prior.state.now,(← IO.monoMsNow)⟩
+  return ⟨n,context,prior.state.core.now,(← IO.monoMsNow)⟩
 def Runtime.now (r : Runtime) : IO Nat := do
   return r.logicalBase + ((← IO.monoMsNow) - r.monotonicBase)
 def Runtime.close (r : Runtime) : IO Unit := r.native.helper.close
@@ -300,57 +301,54 @@ def Runtime.current (r : Runtime) : IO (Option (Restored r.context)) :=
   GenericSimplexIO.current (storage r.native) r.context
 /-- Network ingress admits ONLY authenticated protocol delivery, never checked,
 offer, tick or arbitrary serialized controller inputs. -/
-def receive (runtime : Runtime) (packet : Bytes) : IO Result := do
+def receive (runtime : Runtime) (packet : ByteArray) : IO Result := do
   let n := runtime.native
   let some prior ← runtime.current | return .invalid
-  let some (m,witness) ← authenticate n runtime.context prior.self packet | return .invalid
-  match witness with
-  | some w => receiveCommitWitness (storage n) (crypto n) runtime.context (← runtime.now) w
-  | none => receiveAuthenticated (storage n) runtime.context (← runtime.now) m
-/-- A recovered certificate relays original transferable COMMIT sends. Pairwise
-MAC authority is not promoted to another member's signature authority. -/
-def receiveFinality (runtime : Runtime) (certificateBytes : Bytes) : IO Result := do
-  receiveCommitment (storage runtime.native) (crypto runtime.native) runtime.context
-    (← runtime.now) certificateBytes
+  let some (m,signature) ← authenticate n runtime.context prior.self packet | return .invalid
+  if m.kind == .commit then
+    receiveCommit (storage n) (crypto n) runtime.context (← runtime.now) m signature
+  else receiveDelivery (storage n) runtime.context (← runtime.now) m none
 /-- Driver drains currently due authenticated arrivals and fair continuation
 slices before firing a timer at the same timestamp. -/
 def tick (runtime : Runtime) : IO Result := do
-  persist (storage runtime.native) runtime.context (.tick (← runtime.now))
+  persist (storage runtime.native) runtime.context (.input (.tick (← runtime.now)))
 def poll (runtime : Runtime) : IO Result :=
-  persist (storage runtime.native) runtime.context .poll
+  persist (storage runtime.native) runtime.context (.input .poll)
 /-- Application-candidate traffic is separate from 1/3VA candidate messages.
 The MAC commits the exact configured context and complete source prefix. It is
 availability/discovery input only; neither sender nor receiver grants checked. -/
-def candidateBodyStream : StreamCodec (Nat × Nat × Block) :=
-  StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat blockStream)
+def candidateBodyStream : StreamCodec (Nat × Nat × Nat × Block) :=
+  StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat blockStream))
 
-def candidateMACFrame (context : Context) (body : Bytes) : Bytes :=
-  [77,73,78,73,45,65,80,80,45,67,65,78,68,73,68,65,84,69,1] ++
-    contextStream.encode context ++ body
+def candidateMACFrame (context : Context) (body : Bytes) : ByteArray :=
+  ([77,73,78,73,45,65,80,80,45,67,65,78,68,73,68,65,84,69,2] ++
+    contextStream.encode context ++ body).toByteArray
 
-def sealCandidate (runtime : Runtime) (recipient : Nat) (block : Block) : IO Bytes := do
+/-- `records` are checked source records from application height `height`. -/
+def sealCandidate (runtime : Runtime) (recipient height : Nat) (records : Block) : IO ByteArray := do
   let some prior ← runtime.current | throw (IO.userError "candidate sender journal refused")
-  let body := candidateBodyStream.encode (prior.self,recipient,block)
+  let body := candidateBodyStream.encode (prior.self,recipient,height,records)
   let tag ← runtime.native.helper.mac recipient (candidateMACFrame runtime.context body)
-  return packetStream.encode (body,tag)
+  return packetStream.encodeBytes (body,tag.toList)
 
 def authenticateCandidate (n : Native) (context : Context) (self : Nat)
-    (bytes : Bytes) : IO (Option Block) := do
-  let some (body,tag) := packetStream.toLawful.decode bytes | return none
+    (bytes : ByteArray) : IO (Option (Nat × Block)) := do
+  let some (body,tag) := packetStream.decodeBytes bytes | return none
   if tag.length != 32 then return none
-  let some (sender,recipient,block) := candidateBodyStream.toLawful.decode body | return none
+  let some (sender,recipient,height,records) := candidateBodyStream.toLawful.decode body | return none
   if recipient != self ||
-      sender ≥ context.config.parties || sender == self || block.isEmpty then return none
-  let valid ← try n.helper.verifyMac sender (candidateMACFrame context body) tag
+      sender ≥ context.config.parties || sender == self || records.isEmpty then return none
+  let valid ← try n.helper.verifyMac sender (candidateMACFrame context body) tag.toByteArray
     catch _ => pure false
-  return if valid then some block else none
+  return if valid then some (height,records) else none
 
-def receiveCandidate (runtime : Runtime) (bytes : Bytes) : IO (Result × Option Block) := do
+def receiveCandidate (runtime : Runtime) (bytes : ByteArray) : IO (Result × Option (Nat × Block)) := do
   let some prior ← runtime.current | return (.invalid,none)
-  let some block ← authenticateCandidate runtime.native runtime.context prior.self bytes
+  let some (height,records) ← authenticateCandidate runtime.native runtime.context prior.self bytes
     | return (.invalid,none)
-  let result ← retainCandidateOffers (storage runtime.native) runtime.context block
+  let result ← retainCandidateOffers (storage runtime.native) runtime.context height records
   match result with
-  | .durable _ => return (result,some block)
+  | .durable _ => return (result,some (height,records))
   | _ => return (result,none)
 end Minidregg.Compiler.GenericSimplexNative

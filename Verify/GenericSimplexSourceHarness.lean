@@ -24,7 +24,7 @@ def require (condition : Bool) (detail : String) : IO Unit :=
 standing service runs. Packets are delivered directly between participants in
 this process; the standing service carries them over persistent TCP instead. -/
 def drive (fuel : Nat) (replicas : Array Replica) (payload : Bytes)
-    (packets : List (Nat × Bytes)) : IO (Array Replica) := do
+    (packets : List (Nat × ByteArray)) : IO (Array Replica) := do
   match fuel with
   | 0 => throw (IO.userError "native source agreement exhausted finite harness service")
   | fuel+1 =>
@@ -75,7 +75,7 @@ def run (fuel : Nat) (replicas : Array Replica) (signedIngress : Bytes) : IO (Ar
     let some replica := replicas[index]? | throw (IO.userError "replica identity index")
     let some prior ← replica.participant.runtime.current
       | throw (IO.userError "replica identity journal refused")
-    require (prior.self == index && prior.state.self == index)
+    require (prior.self == index && prior.state.core.self == index)
       "source harness replica array differs from durable signer identity"
   for replica in replicas do
     require (replica.participant.runtime.context == first.participant.runtime.context)

@@ -38,8 +38,7 @@ def retainedOfferedPayload (replicas : Array Replica) (ingress : Bytes) :
     let p := replica.participant
     let some prior ← p.runtime.current
       | throw (IO.userError "pending recovery journal refused")
-    let state := prior.state
-    for payload in state.offers do
+    for payload in prior.state.core.offers do
       if let some record := DurableCheckpointCodec.recordFrame.decode payload then
         if record.event.canonicalBytes == ingress then
           return some payload

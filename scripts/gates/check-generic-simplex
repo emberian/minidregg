@@ -4,7 +4,8 @@
 #
 #   scripts/gates/check-generic-simplex [BIN_DIR]     (default .lake/build/bin)
 #
-#   generic-simplex-harness          the recorded 00f711 stall, backoff recovery, idle quiescence, normal
+#   generic-simplex-harness          the native layer (four replicas over in-memory journals: sealed packets,
+#                                    COMMIT signatures, relay, drain, checkpoint, certificate), the recorded 00f711 stall, backoff recovery, idle quiescence, normal
 #                                    progress, silent-leader fallback, equivocation, crash replay, roster
 #   generic-simplex-log-reopen       100 000-frame journals reopened in constant stack; torn tail; checkpoint
 #   generic-simplex-load             every operation of a short busy run commits (its timings are printed,
@@ -17,6 +18,8 @@
 #   harness --plant split-tip                    replica 1's committed tip is not a prefix of the others'
 #   harness --plant forged-digest                the chain digest is the same for every chain, so a COMMIT
 #                                                signed for one chain is read with the payloads of another
+#   harness --plant undrained-relay              a driver that never forwards what a replica owes a peer
+#                                                (`Replica.owed`): a replica four commits behind stays behind
 #   log-reopen --plant flip-byte                 one bit flipped in the middle of the delta-frame image
 #   four-source-fixture --plant corrupt-segment  live segment snapshot disagrees with previous replayed state
 set -uo pipefail
@@ -49,6 +52,7 @@ pass four-source-audit 'AUDITED replica 0: 2 segments from genesis' \
 plant fixed-timer 'backoff: pending block never committed' "$bin/generic-simplex-harness" --plant fixed-timer
 plant split-tip 'normal safety/replay' "$bin/generic-simplex-harness" --plant split-tip
 plant forged-digest 'forged running digest: a COMMIT for another chain was read' "$bin/generic-simplex-harness" --plant forged-digest
+plant undrained-relay 'relayed evidence: a replica four commits behind was not served' "$bin/generic-simplex-harness" --plant undrained-relay
 plant flip-byte 'delta-frames: ' "$bin/generic-simplex-log-reopen" --plant flip-byte
 plant corrupt-segment 'segment 1: its snapshot is not the state the previous segment replays to' \
   bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/bad" --plant corrupt-segment && "$1/minidregg-four-source-fixture" audit-journal "$2/bad" 0' _ "$bin" "$tmp"

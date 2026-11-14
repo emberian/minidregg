@@ -57,60 +57,103 @@ def eventStream : StreamCodec Event :=
   StreamCodec.xmap (StreamCodec.product StreamCodec.nat bytesStream)
     (fun e => (e.tag,e.payload)) (fun (t,p) => ⟨t,p⟩)
     (by intro e; cases e; rfl)
-def encodeInput : Input → Event
-  | .delivery m => ⟨0,messageStream.encode m⟩
-  | .tick t => ⟨1,StreamCodec.nat.encode t⟩
-  | .deliveryAt t m => ⟨5,(StreamCodec.product StreamCodec.nat messageStream).encode (t,m)⟩
-  | .checked b => ⟨2,blockStream.encode b⟩
-  | .offer b => ⟨3,b⟩
-  | .poll => ⟨4,[]⟩
-/-- Each arm decodes its payload canonically and the tag selects the arm, so a
-decoded input is the input of exactly that event (`decodeInput_canonical`). -/
-def decodeInput (e : Event) : Option Input :=
+open Minidregg.Kernel.GenericSimplexRelative in
+/-- A message as it travels and as the journal keeps it: the sender's height, the block as
+the payloads above it, and for a COMMIT the signed statement. -/
+def wireMessageStream : StreamCodec WireMessage :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product kindStream (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product argumentStream
+          (StreamCodec.option (StreamCodec.product StreamCodec.nat bytesStream)))))))
+    (fun m => (m.sender, m.view, m.kind, m.height, m.value, m.statement))
+    (fun (s,v,k,h,a,t) => ⟨s,v,k,h,a,t⟩)
+    (by intro m; cases m; rfl)
+open Minidregg.Kernel.GenericSimplexRelative in
+/-- What a journal records: an input of the running replica, the driver's acknowledgement
+that it handed outputs to its transport, or the application's that it took committed
+payloads. Replay applies each in order (`GenericSimplexIO.applyEntry`). -/
+inductive Entry where
+  | input (input : WireInput)
+  | flush (sends owed : Nat)
+  | consume (count : Nat)
+  deriving DecidableEq, BEq, Repr, Inhabited
+open Minidregg.Kernel.GenericSimplexRelative in
+def encodeEntry : Entry → Event
+  | .input (.delivery m) => ⟨0,wireMessageStream.encode m⟩
+  | .input (.tick t) => ⟨1,StreamCodec.nat.encode t⟩
+  | .input (.checked h b) => ⟨2,(StreamCodec.product StreamCodec.nat blockStream).encode (h,b)⟩
+  | .input (.offer b) => ⟨3,b⟩
+  | .input .poll => ⟨4,[]⟩
+  | .input (.deliveryAt t m) => ⟨5,(StreamCodec.product StreamCodec.nat wireMessageStream).encode (t,m)⟩
+  | .flush s o => ⟨6,(StreamCodec.product StreamCodec.nat StreamCodec.nat).encode (s,o)⟩
+  | .consume n => ⟨7,StreamCodec.nat.encode n⟩
+open Minidregg.Kernel.GenericSimplexRelative in
+/-- Each arm decodes its payload canonically and the tag selects the arm, so a decoded entry
+is the entry of exactly that event (`decodeEntry_canonical`). -/
+def decodeEntry (e : Event) : Option Entry :=
   match e.tag with
-  | 0 => return .delivery (← decodeMessage e.payload)
-  | 1 => return .tick (← StreamCodec.nat.toLawful.decode e.payload)
-  | 2 => return .checked (← blockStream.toLawful.decode e.payload)
-  | 3 => some (.offer e.payload)
-  | 4 => if e.payload.isEmpty then some .poll else none
+  | 0 => return .input (.delivery (← wireMessageStream.toLawful.decode e.payload))
+  | 1 => return .input (.tick (← StreamCodec.nat.toLawful.decode e.payload))
+  | 2 => do
+      let (h,b) ← (StreamCodec.product StreamCodec.nat blockStream).toLawful.decode e.payload
+      return .input (.checked h b)
+  | 3 => some (.input (.offer e.payload))
+  | 4 => if e.payload.isEmpty then some (.input .poll) else none
   | 5 => do
-      let (t,m) ← (StreamCodec.product StreamCodec.nat messageStream).toLawful.decode e.payload
-      return .deliveryAt t m
+      let (t,m) ← (StreamCodec.product StreamCodec.nat wireMessageStream).toLawful.decode e.payload
+      return .input (.deliveryAt t m)
+  | 6 => do
+      let (s,o) ← (StreamCodec.product StreamCodec.nat StreamCodec.nat).toLawful.decode e.payload
+      return .flush s o
+  | 7 => return .consume (← StreamCodec.nat.toLawful.decode e.payload)
   | _ => none
-theorem decodeInput_canonical {e : Event} {input : Input}
-    (decoded : decodeInput e = some input) : encodeInput input = e := by
+theorem decodeEntry_canonical {e : Event} {entry : Entry}
+    (decoded : decodeEntry e = some entry) : encodeEntry entry = e := by
   obtain ⟨tag, payload⟩ := e
-  rcases tag with _ | _ | _ | _ | _ | _ | tag <;>
-    simp only [decodeInput, bind, Option.bind] at decoded
-  · cases m : decodeMessage payload with
+  rcases tag with _ | _ | _ | _ | _ | _ | _ | _ | tag <;>
+    simp only [decodeEntry, bind, Option.bind] at decoded
+  · cases m : wireMessageStream.toLawful.decode payload with
     | none => simp [m] at decoded
     | some message =>
       simp [m, pure] at decoded; subst decoded
-      simp [encodeInput, decodeMessage_canonical m]
+      simp [encodeEntry, StreamCodec.toLawful_canonical _ _ _ m]
   · cases t : StreamCodec.nat.toLawful.decode payload with
     | none => simp [t] at decoded
     | some tick =>
       simp [t, pure] at decoded; subst decoded
-      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ t]
-  · cases b : blockStream.toLawful.decode payload with
-    | none => simp [b] at decoded
-    | some block =>
-      simp [b, pure] at decoded; subst decoded
-      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ b]
+      simp [encodeEntry, StreamCodec.toLawful_canonical _ _ _ t]
+  · cases d : (StreamCodec.product StreamCodec.nat blockStream).toLawful.decode payload with
+    | none => simp [d] at decoded
+    | some pair =>
+      obtain ⟨h, b⟩ := pair
+      simp [d, pure] at decoded; subst decoded
+      simp [encodeEntry, StreamCodec.toLawful_canonical _ _ _ d]
   · simp at decoded; subst decoded; rfl
   · by_cases empty : payload.isEmpty
     · simp [empty] at decoded; subst decoded
-      simp [encodeInput, List.isEmpty_iff.mp empty]
+      simp [encodeEntry, List.isEmpty_iff.mp empty]
     · simp [empty] at decoded
-  · cases d : (StreamCodec.product StreamCodec.nat messageStream).toLawful.decode payload with
+  · cases d : (StreamCodec.product StreamCodec.nat wireMessageStream).toLawful.decode payload with
     | none => simp [d] at decoded
     | some pair =>
       obtain ⟨t, m⟩ := pair
       simp [d, pure] at decoded; subst decoded
-      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ d]
+      simp [encodeEntry, StreamCodec.toLawful_canonical _ _ _ d]
+  · cases d : (StreamCodec.product StreamCodec.nat StreamCodec.nat).toLawful.decode payload with
+    | none => simp [d] at decoded
+    | some pair =>
+      obtain ⟨s, o⟩ := pair
+      simp [d, pure] at decoded; subst decoded
+      simp [encodeEntry, StreamCodec.toLawful_canonical _ _ _ d]
+  · cases n : StreamCodec.nat.toLawful.decode payload with
+    | none => simp [n] at decoded
+    | some count =>
+      simp [n, pure] at decoded; subst decoded
+      simp [encodeEntry, StreamCodec.toLawful_canonical _ _ _ n]
   · cases decoded
 #assert_axioms decodeMessage_canonical
-#assert_axioms decodeInput_canonical
+#assert_axioms decodeEntry_canonical
 /-- Five fields since the timeout-backoff epoch. A four-field pre-epoch
 Context does not decode: such journals and contexts refuse to load. -/
 def configStream : StreamCodec Config :=
@@ -141,10 +184,14 @@ structure Attestation where
   signer : Nat
   signature : Bytes
   deriving DecidableEq, BEq, Repr, Inhabited
+/-- A quorum of COMMIT signatures on one statement: the view, and the chain as its length
+and running digest. It carries no payload: a holder reads the chain it is for from what it
+already holds (`GenericSimplexIO.VerifiedCommit.Reads`). -/
 structure Certificate where
   context : Context
   view : Nat
-  block : Block
+  length : Nat
+  digest : Bytes
   signers : List Attestation
   deriving DecidableEq, BEq, Repr, Inhabited
 def attestationStream : StreamCodec Attestation :=
@@ -153,26 +200,71 @@ def attestationStream : StreamCodec Attestation :=
 def certificateStream : StreamCodec Certificate :=
   StreamCodec.xmap
     (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product blockStream (StreamCodec.list attestationStream))))
-    (fun c => (c.context,c.view,c.block,c.signers))
-    (fun (c,v,b,s) => ⟨c,v,b,s⟩) (by intro c; cases c; rfl)
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product bytesStream (StreamCodec.list attestationStream)))))
+    (fun c => (c.context,c.view,c.length,c.digest,c.signers))
+    (fun (c,v,l,d,s) => ⟨c,v,l,d,s⟩) (by intro c; cases c; rfl)
 /-- cSHAKE256 customization of the chain digest: "minidregg/simplex/chain". -/
 def chainSeparator : Bytes :=
   [109,105,110,105,100,114,101,103,103,47,115,105,109,112,108,101,120,47,99,104,97,105,110]
-/-- The running digest of a domain's chain (`GenericSimplexRelative.ChainDigest`). The
-digest of the empty chain binds the context, so one domain's digest is not another's; each
-payload enters length-prefixed, so the chain's split into payloads is bound. Extending it is
-one cSHAKE256 call over 32 bytes and the payload. -/
+/-- cSHAKE256 customization of the application half of the digest: "minidregg/simplex/history". -/
+def historySeparator : Bytes :=
+  [109,105,110,105,100,114,101,103,103,47,115,105,109,112,108,101,120,47,104,105,115,116,111,114,121]
+/-- The running digest of an application history: the nonempty payloads of a chain, in
+order. A holder of the source records alone computes it, with no knowledge of where the
+protocol's empty payloads fell. -/
+def historyExtend (digest payload : Bytes) : Bytes :=
+  (Minidregg.Compiler.Sp800185Cshake256.hash historySeparator (digest ++ bytesStream.encode payload)).bytes
+def historyDigest (context : Context) : Minidregg.Kernel.GenericSimplexRelative.ChainDigest where
+  origin := (Minidregg.Compiler.Sp800185Cshake256.hash historySeparator (contextStream.encode context)).bytes
+  extend := historyExtend
+/-- The running digest of a domain's chain (`GenericSimplexRelative.ChainDigest`): 64 bytes,
+two running cSHAKE256 digests side by side. The first 32 are over every payload (the exact
+consensus ancestry, empty protocol payloads included); the last 32 are `historyDigest` of
+the nonempty payloads (`chainDigest_history`). Both origins bind the context, so one
+domain's digest is not another's; each payload enters length-prefixed, so the chain's split
+into payloads is bound. Extending it is at most two cSHAKE256 calls over 32 bytes and the
+payload. -/
 def chainDigest (context : Context) : Minidregg.Kernel.GenericSimplexRelative.ChainDigest where
-  origin := (Minidregg.Compiler.Sp800185Cshake256.hash chainSeparator (contextStream.encode context)).bytes
+  origin := (Minidregg.Compiler.Sp800185Cshake256.hash chainSeparator (contextStream.encode context)).bytes ++
+    (historyDigest context).origin
   extend := fun digest payload =>
-    (Minidregg.Compiler.Sp800185Cshake256.hash chainSeparator (digest ++ bytesStream.encode payload)).bytes
+    (Minidregg.Compiler.Sp800185Cshake256.hash chainSeparator (digest.take 32 ++ bytesStream.encode payload)).bytes ++
+      (if payload.isEmpty then digest.drop 32 else historyExtend (digest.drop 32) payload)
+/-- The application half of a chain digest. -/
+def historyHalf (digest : Bytes) : Bytes := digest.drop 32
+theorem chainDigest_over_history (context : Context) (run : Block) (digest : Bytes) :
+    historyHalf ((chainDigest context).over digest run) =
+      (historyDigest context).over (historyHalf digest) (applicationHistory run) := by
+  induction run generalizing digest with
+  | nil => rfl
+  | cons payload rest ih =>
+    have step : historyHalf ((chainDigest context).extend digest payload) =
+        if payload.isEmpty then historyHalf digest else historyExtend (historyHalf digest) payload := by
+      simp only [chainDigest, historyHalf]
+      rw [List.drop_left' (Minidregg.Compiler.Sp800185Cshake256.Output.length_exact _)]
+    show historyHalf ((chainDigest context).over ((chainDigest context).extend digest payload) rest) = _
+    rw [ih, step]
+    by_cases empty : payload.isEmpty
+    · simp [applicationHistory, empty]
+    · simp [applicationHistory, empty, Minidregg.Kernel.GenericSimplexRelative.ChainDigest.over, historyDigest]
+/-- **The application half of a chain's digest is the digest of its application history.**
+A COMMIT statement therefore binds the source records a chain orders, to a reader who holds
+only those records. -/
+theorem chainDigest_history (context : Context) (chain : Block) :
+    historyHalf ((chainDigest context).of chain) =
+      (historyDigest context).of (applicationHistory chain) := by
+  unfold Minidregg.Kernel.GenericSimplexRelative.ChainDigest.of
+  rw [chainDigest_over_history]
+  congr 1
+#assert_axioms chainDigest_history
 /-- What a COMMIT signature is over: the context, the view, and the chain the COMMIT is for
 as its length (every payload, empty protocol payloads included) and its running digest.
 Nothing in it depends on the height a block is written from, so members at different
-heights sign the same bytes for the same chain. Version 3; version 2 signed the whole chain. -/
+heights sign the same bytes for the same chain. Version 4: the digest is `chainDigest`'s 64
+bytes (version 3 signed the 32-byte chain half alone; version 2 the whole chain). -/
 def commitStatementBytes (context : Context) (view length : Nat) (digest : Bytes) : Bytes :=
-  [77,73,78,73,45,83,73,77,80,76,69,88,45,67,79,77,77,73,84,45,83,69,78,68,3] ++
+  [77,73,78,73,45,83,73,77,80,76,69,88,45,67,79,77,77,73,84,45,83,69,78,68,4] ++
     (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat bytesStream))).encode (context,view,length,digest)
 /-- A transferable signature witnesses a durable COMMIT protocol send. It does
@@ -181,27 +273,29 @@ chain: a holder of the chain up to any height computes the same bytes from its o
 and the payloads above it (`ChainDigest.over`). -/
 def commitmentBytes (context : Context) (view : Nat) (block : Block) : Bytes :=
   commitStatementBytes context view block.length ((chainDigest context).of block)
-def exportable (s : State) (view : Nat) (block : Block) : Bool :=
-  !s.failed && view > 0 && !block.isEmpty &&
-    (viewAt s view).sentCommit == some block &&
-    s.audit.contains (.send ⟨s.self,view,.commit,some block⟩)
-/-- Transferable COMMIT evidence is retained with the actual delivery event. -/
+/-- A transferable COMMIT signature, kept by the statement it signs. The block a COMMIT
+carries travels with its delivery (`WireMessage`); the signature is over the statement alone,
+so one kept signature serves the COMMIT written from any height. -/
 structure CommitWitness where
   view : Nat
-  block : Block
+  length : Nat
+  digest : Bytes
   attestation : Attestation
   deriving DecidableEq, BEq, Repr
 def commitWitnessStream : StreamCodec CommitWitness :=
   StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product blockStream attestationStream))
-    (fun w => (w.view,w.block,w.attestation))
-    (fun (v,b,a) => ⟨v,b,a⟩) (by intro w; cases w; rfl)
-def CommitWitness.message (w : CommitWitness) : Message :=
-  ⟨w.attestation.signer,w.view,.commit,some w.block⟩
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product bytesStream attestationStream)))
+    (fun w => (w.view,w.length,w.digest,w.attestation))
+    (fun (v,l,d,a) => ⟨v,l,d,a⟩) (by intro w; cases w; rfl)
+/-- The witness signs this COMMIT: same signer, view and statement. -/
+def CommitWitness.signs (w : CommitWitness) (m : Minidregg.Kernel.GenericSimplexRelative.WireMessage) : Bool :=
+  m.kind == .commit && m.sender == w.attestation.signer && m.view == w.view &&
+    m.statement == some (w.length,w.digest)
 
 /-! ## Engine state image (journal checkpoints)
 
-A checkpoint stores the replayed `State` itself, field by field, so a reopen
+A checkpoint stores the replayed `Replica` itself, field by field, so a reopen
 decodes it instead of replaying every input since genesis. -/
 
 def viewStream : StreamCodec View :=
@@ -276,4 +370,20 @@ def stateStream : StreamCodec State :=
     (fun s => (s.self,s.current,s.deadline,s.now,s.views,s.checked,s.offers,s.outbox,s.audit,
       s.delivered,s.committedTip,s.needsPoll,s.failed,s.lastCommitted,s.floorEvidence,s.served,s.relay,s.ahead))
     (fun (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r) => ⟨a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r⟩) (by intro s; cases s; rfl)
+open Minidregg.Kernel.GenericSimplexRelative in
+/-- The running replica: the engine's state above its committed height, and what it keeps
+beside it. Its size does not depend on the committed height. -/
+def replicaStream : StreamCodec Replica :=
+  StreamCodec.xmap
+    (StreamCodec.product stateStream (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product
+        (StreamCodec.list (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product bytesStream (StreamCodec.list messageStream))))
+      (StreamCodec.product (StreamCodec.list wireMessageStream)
+      (StreamCodec.product (StreamCodec.list wireMessageStream)
+      (StreamCodec.product (StreamCodec.list (StreamCodec.product StreamCodec.nat wireMessageStream))
+        blockStream))))))))
+    (fun r => (r.core,r.height,r.digest,r.records,r.evidence,r.far,r.sends,r.owed,r.committed))
+    (fun (a,b,c,d,e,f,g,h,i) => ⟨a,b,c,d,e,f,g,h,i⟩) (by intro r; cases r; rfl)
 end Minidregg.Compiler.GenericSimplexCodec

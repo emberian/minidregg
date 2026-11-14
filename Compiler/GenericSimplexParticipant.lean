@@ -29,6 +29,7 @@ open Minidregg.Compiler.GenericSimplexCodec
 open Minidregg.Compiler.GenericSimplexIO
 open Minidregg.Compiler.GenericSimplexNative
 open Minidregg.Kernel.GenericSimplex
+open Minidregg.Kernel.GenericSimplexRelative
 set_option autoImplicit false
 
 abbrev SourceConfig := Minidregg.Kernel.NativeHost.Config
@@ -41,31 +42,21 @@ structure Source (config : SourceConfig) where
   target : Durable
   verified : Verified config target
 
-/-- These cursors are transport scheduling hints, not acknowledged-delivery
-claims. Restart may reset every cursor: the exact journal retains all messages.
-A retry round freezes its end, so a growing fresh outbox cannot starve old sends. -/
+/-- Volatile scheduling state. Restart may reset all of it: the journal keeps the replica's
+undrained output and its committed payloads the application has not taken. -/
 structure Schedule where
-  fresh : Nat := 0
-  retry : Nat := 0
-  retryEnd : Nat := 0
-  certificates : List (Nat × Block) := []
+  /-- How many of the replica's broadcasts and owed messages the last slice handed to its
+  caller for sending. The next slice acknowledges exactly these in the journal
+  (`Entry.flush`), so an output is durable before it is sent and is sent again after a
+  crash that lost the acknowledgement. -/
+  sent : Nat := 0
+  owed : Nat := 0
   /-- Last application-candidate relay per recipient: (recipient, height, ms). -/
   candidateSent : List (Nat × Nat × Nat) := []
-  /-- Earliest monotonic ms for the next certificate repair slice. -/
-  certificateDue : Nat := 0
-  /-- Earliest monotonic ms for the next retry slice. -/
-  retryDue : Nat := 0
 
-/-- Resend interval for the same unvalidated candidate to the same peer, and the
-pace of certificate repair. A changed candidate height is relayed at once. -/
+/-- Resend interval for the same unvalidated candidate to the same peer. A changed
+candidate height is relayed at once. -/
 def candidateResendMs : Nat := 5000
-def certificateEveryMs : Nat := 1000
-/-- Pace of the retry round over the retained outbox. Retry is availability
-repair for a connection that dropped frames, not first delivery (fresh sends
-go out at once); unpaced, every peer resent its whole retained outbox
-continuously and each replica spent most of its time authenticating and
-discarding duplicates. -/
-def retryEveryMs : Nat := 1000
 
 structure Participant (config : SourceConfig) where
   runtime : Runtime
@@ -73,17 +64,16 @@ structure Participant (config : SourceConfig) where
   pending : Pending := {}
   schedule : Schedule := {}
 
-/-- The envelope distinguishes authenticated protocol traffic from a transferable
-quorum. Canonical decoding rejects aliases and trailing bytes. -/
-def frameStream : StreamCodec (Nat × Bytes) :=
-  StreamCodec.product StreamCodec.nat bytesStream
-def protocolFrame (bytes : Bytes) : Bytes := frameStream.encode (0,bytes)
-def certificateFrame (bytes : Bytes) : Bytes := frameStream.encode (1,bytes)
-def candidateFrame (bytes : Bytes) : Bytes := frameStream.encode (2,bytes)
+/-- The first octet of a frame distinguishes authenticated protocol traffic from
+application-candidate dissemination. -/
+def protocolFrame (bytes : ByteArray) : ByteArray := ByteArray.mk #[0] ++ bytes
+def candidateFrame (bytes : ByteArray) : ByteArray := ByteArray.mk #[2] ++ bytes
 
 /-- Opening checks the exact configured source genesis against the consensus
 anchor through the real historical validator. A journal alone cannot select the
-source seed or committee. -/
+source seed or committee. Whatever output the replica had not acknowledged as sent is sent
+by the first slice; nothing else is resent, and a peer that missed a message asks by
+repeating its CANDIDATE(⊥). -/
 def openParticipant (config : SourceConfig) (runtime : Runtime)
     (source : Source config) : IO (Except String (Participant config)) := do
   let expected := runtime.context
@@ -92,61 +82,43 @@ def openParticipant (config : SourceConfig) (runtime : Runtime)
   | .accepted _ =>
     let some prior ← runtime.current
       | return .error "invalid durable agreement journal"
-    let state := prior.state
-    -- After a restart, resend as fresh every message of every view this
-    -- replica has not locally decided: a COMMIT or READY for an older
-    -- undecided view (the stalled view 17/18 sends) is exactly what peers may
-    -- still need. Decided views are covered by certificate repair, and the
-    -- independent retry round still covers the entire retained outbox. This is
-    -- a scheduling hint, never an acknowledgement.
-    let decided := lastCommittedView state
-    let firstUndecided := (state.outbox.findIdx? (fun message =>
-      decide (decided < message.view))).getD state.outbox.length
-    let schedule : Schedule :=
-      { fresh := firstUndecided * expected.config.parties
-        retryEnd := state.outbox.length * expected.config.parties }
     return .ok ⟨runtime,source,
-      Minidregg.Compiler.GenericSimplexPending.discover state {},schedule⟩
+      Minidregg.Compiler.GenericSimplexPending.discover prior.state {},{}⟩
   | .rejected detail => return .error detail
   | .retry failure => return .error failure.detail
 
-/-- The blocks carried by the newest journal delta's inputs: exactly what the
-just-acknowledged packet added to this replica's observed set. -/
+/-- The blocks carried by the newest journal delta's deliveries, as this replica reads them
+now (the payloads above its committed height): exactly what the just-acknowledged packet
+added to its observed set. -/
 def latestObserved {context : Context} (r : Restored context) : List Block :=
   match r.log.recent with
   | d :: _ => d.events.filterMap fun e =>
-      match decodeInput e with
-      | some (.delivery m) => m.value
-      | some (.deliveryAt _ m) => m.value
+      match decodeEntry e with
+      | some (.input (.delivery m)) => m.value.bind (above m.height r.state.height)
+      | some (.input (.deliveryAt _ m)) => m.value.bind (above m.height r.state.height)
       | _ => none
   | [] => []
 
-/-- Every ingress is durably authenticated before it enters the engine. A
-certificate imports its original COMMIT signatures atomically, and discovery
-then schedules source validation; neither path grants Input.checked itself. -/
-def receive {config : SourceConfig} (p : Participant config) (bytes : Bytes) :
+/-- Every ingress is durably authenticated before it enters the engine, and discovery
+then schedules source validation; no path here grants a checked input itself. -/
+def receive {config : SourceConfig} (p : Participant config) (bytes : ByteArray) :
     IO (Participant config × GenericSimplexIO.Result) := do
-  let some (tag,payload) := frameStream.toLawful.decode bytes | return (p,.invalid)
-  if tag == 2 then
-    let (result,block) ← GenericSimplexNative.receiveCandidate p.runtime payload
-    match result,block with
-    | .durable state,some candidate =>
-      let pending := Minidregg.Compiler.GenericSimplexPending.retry p.pending
-        (applicationHistory candidate)
+  if bytes.size == 0 then return (p,.invalid)
+  let payload := bytes.extract 1 bytes.size
+  if bytes.get! 0 == 2 then
+    let (result,candidate) ← GenericSimplexNative.receiveCandidate p.runtime payload
+    match result,candidate with
+    | .durable state,some (height,records) =>
       return ({p with pending :=
-        Minidregg.Compiler.GenericSimplexPending.discoverFrom state [candidate] pending},result)
+        Minidregg.Compiler.GenericSimplexPending.discoverFrom state [] p.pending [⟨height,records⟩]},result)
     | _,_ => return (p,result)
+  if bytes.get! 0 != 0 then return (p,.invalid)
   let before := (← p.runtime.current).map (·.length)
-  let result ← match tag with
-    | 0 => GenericSimplexNative.receive p.runtime payload
-    | 1 => GenericSimplexNative.receiveFinality p.runtime payload
-    | _ => pure .invalid
+  let result ← GenericSimplexNative.receive p.runtime payload
   match result with
   | .durable state =>
-    -- A retransmission already represented in the durable image appends
-    -- nothing (the journal length is unchanged) and leaves the engine state as
-    -- it was, so there is nothing new to discover. Peers resend their retained
-    -- outboxes continuously, so this is most packets.
+    -- A settled delivery appends nothing (the journal length is unchanged) and leaves the
+    -- replica as it was, so there is nothing new to discover.
     let some now ← p.runtime.current | return (p,result)
     if some now.length == before then return (p,result)
     return ({p with pending :=
@@ -193,7 +165,7 @@ def propose {config : SourceConfig} (p : Participant config) (signedIngress : By
   | .ok derived =>
     let payload := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.encode
       (Minidregg.Kernel.DurableReceiver.IntentRecord.ofIntent derived.intent)
-    match ← persist (storage p.runtime.native) p.runtime.context (.offer payload) with
+    match ← persist (storage p.runtime.native) p.runtime.context (.input (.offer payload)) with
     | .durable state =>
       return ({p with pending :=
         Minidregg.Compiler.GenericSimplexPending.discoverFrom state [] p.pending},.ok payload)
@@ -251,52 +223,36 @@ def completedCall {config : SourceConfig} (p : Participant config) (callBytes : 
   let ingress ← (sourceIngressOfCall config callBytes).toOption
   completedIngress p ingress
 
-/-- One flat fanout slot. Skipping self also consumes a slot, keeping service
-finite independently of committee size. -/
-def packetAt {config : SourceConfig} (p : Participant config) (state : State)
-    (slot : Nat) : IO (Option (Nat × Bytes)) := do
-  let parties := p.runtime.context.config.parties
-  if parties == 0 then return none
-  let recipient := slot % parties
-  if recipient == state.self then return none
-  let index := slot / parties
-  let some message := state.outbox[index]? | return none
-  let packet ← sealPacket p.runtime.native ⟨p.runtime.context,recipient,index,message⟩
-  return some (recipient,protocolFrame packet)
-
-/-- Fresh and retry work have independent positive service budgets. A retry
-round finishes its old snapshot before including later messages; one retry slice
-runs at most once per `retryEveryMs`. No send removes a durable obligation or
-treats a lost reply as semantic failure. -/
-def outgoing {config : SourceConfig} (p : Participant config) (freshBudget retryBudget : Nat) :
-    IO (Participant config × List (Nat × Bytes)) := do
+/-- The replica's output since the last acknowledged drain, sealed: every broadcast to every
+other member, every owed message to the member it is owed to. The previous slice's packets
+are acknowledged first (`Entry.flush` with their counts), so the journal never drops an
+output this participant has not handed to its transport. Nothing is resent on a timer: the
+kernel answers a member that repeats its CANDIDATE(⊥) with what it is owed. -/
+def outgoing {config : SourceConfig} (p : Participant config) :
+    IO (Participant config × List (Nat × ByteArray)) := do
+  let context := p.runtime.context
+  if p.schedule.sent > 0 || p.schedule.owed > 0 then
+    match ← persist (storage p.runtime.native) context (.flush p.schedule.sent p.schedule.owed) with
+    | .durable _ => pure ()
+    | _ => return (p,[])
+  let p := {p with schedule := {p.schedule with sent := 0, owed := 0}}
   let some prior ← p.runtime.current | return (p,[])
-  let state := prior.state
-  let total := state.outbox.length * p.runtime.context.config.parties
-  let mut schedule := p.schedule
+  let replica := prior.state
+  let self := prior.self
   let mut packets := []
-  for _ in List.range freshBudget do
-    if schedule.fresh < total then
-      if let some packet ← packetAt p state schedule.fresh then
-        packets := packets ++ [packet]
-      schedule := {schedule with fresh := schedule.fresh + 1}
-  let now ← IO.monoMsNow
-  if now < schedule.retryDue then return ({p with schedule := schedule},packets)
-  schedule := {schedule with retryDue := now + retryEveryMs}
-  if schedule.retry ≥ schedule.retryEnd then
-    schedule := {schedule with retry := 0,retryEnd := total}
-  for _ in List.range retryBudget do
-    if schedule.retry < schedule.retryEnd then
-      if let some packet ← packetAt p state schedule.retry then
-        packets := packets ++ [packet]
-      schedule := {schedule with retry := schedule.retry + 1}
-  return ({p with schedule := schedule},packets)
-
-/-- A certificate scan round also freezes its finite candidates. Received
-witnesses are durable; a crash only restarts the scan. -/
-def certificateCandidates {context : Context} (prior : Restored context) : List (Nat × Block) :=
-  ((prior.state.views.filterMap fun view => view.sentCommit.map (fun block => (view.number,block))) ++
-    prior.witnesses.map (fun w => (w.view,w.block))).eraseDups
+  for message in replica.sends do
+    if let some proof ← messageProof p.runtime.native context message then
+      for recipient in List.range context.config.parties do
+        if recipient != self then
+          packets := (recipient,protocolFrame
+            (← sealPacket p.runtime.native ⟨context,self,recipient,message⟩ proof)) :: packets
+  for (recipient,message) in replica.owed do
+    if recipient != self && recipient < context.config.parties then
+      if let some proof ← messageProof p.runtime.native context message then
+        packets := (recipient,protocolFrame
+          (← sealPacket p.runtime.native ⟨context,self,recipient,message⟩ proof)) :: packets
+  return ({p with schedule := {p.schedule with sent := replica.sends.length, owed := replica.owed.length}},
+    packets.reverse)
 
 /-- Recover the actual authoritative source after a lost append reply or CAS
 conflict. The retained source is a `Verified` minted by native replay; the
@@ -326,106 +282,114 @@ def reloadSource {config : SourceConfig} (p : Participant config) :
     | .error failure => return (p,"source replay: " ++ failure.detail)
     | .ok verified => return ({p with source := ⟨target,verified⟩},"source reloaded and verified")
 
-/-- A descendant certificate installs only the next actual record, by fresh
-native derivation and the existing ordered physical CAS/readback receiver. The
-same full certificate can then catch up another record in a later service slice.
-Return "applied" only after the receiver's opaque Applied token exists. -/
-def applyNext {config : SourceConfig} (p : Participant config)
-    (certificate : VerifiedCommit p.runtime.context) : IO (Participant config × String) := do
-  let records := applicationHistory certificate.block
-  let index := p.source.verified.opened.durable.height
-  let some bytes := records[index]? | return (p,"source already caught up")
-  let some record := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.decode bytes
-    | return (p,"certificate payload is not a source record")
+/-- Hand the application the next committed payload the replica keeps for it. An empty
+protocol payload is taken at once. A source record is installed by fresh native derivation
+and the existing ordered physical CAS/readback receiver, under the certificate of the
+replica's newest commit: its signed digest must be that of the source prefix, this record
+and the committed records after it (`JointReceiver.order`). Only then is the payload
+acknowledged (`Entry.consume`), so a crash in between hands it over again and the record
+already in the source is recognised by its position. Return "applied" only after the
+receiver's opaque Applied token exists. -/
+def applyNext {config : SourceConfig} (p : Participant config) : IO (Participant config × String) := do
+  let context := p.runtime.context
+  let some prior ← p.runtime.current | return (p,"invalid engine journal")
+  let replica := prior.state
+  let payload :: later := replica.committed | return (p,"no committed work")
+  let taken (p : Participant config) (status : String) : IO (Participant config × String) := do
+    match ← persist (storage p.runtime.native) context (.consume 1) with
+    | .durable _ => return (p,status)
+    | _ => return (p,"engine journal refused the application's acknowledgement")
+  if payload.isEmpty then return ← taken p "protocol payload"
+  let index := replica.records - (applicationHistory replica.committed).length
+  let height := p.source.verified.opened.durable.height
+  if index < height then
+    let held := p.source.verified.opened.durable.image.accepted[index]?.map
+      Minidregg.Compiler.DurableCheckpointCodec.recordFrame.encode
+    if held == some payload then return ← taken p "source already holds the record"
+    return (p,"the source's record at this height is not the committed one")
+  if height < index then return (p,"the source is behind the committed records")
+  let some record := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.decode payload
+    | return (p,"committed payload is not a source record")
+  let some certificate ← recoverCommitment (storage p.runtime.native) (crypto p.runtime.native) context
+    | return (p,"waiting for COMMIT witnesses")
   match ← Minidregg.Kernel.JointOrderedSourceReceiver.apply
-      p.source.verified p.runtime.context certificate record.event.canonicalBytes with
+      p.source.verified context certificate (applicationHistory later) record.event.canonicalBytes with
   | .applied receipt =>
     let verified := receipt.verified
-    return ({p with source := ⟨_,verified⟩},"applied")
+    taken {p with source := ⟨_,verified⟩} "applied"
   | .refused detail => return (p,detail)
   | .ordinary _ => reloadSource p
   | .uncertain _ => reloadSource p
 
-def certificateSlice {config : SourceConfig} (p : Participant config) :
-    IO (Participant config × List (Nat × Bytes) × String) := do
-  let now ← IO.monoMsNow
-  if now < p.schedule.certificateDue then return (p,[],"certificate repair paced")
-  let p := {p with schedule := {p.schedule with certificateDue := now + certificateEveryMs}}
-  let some prior ← p.runtime.current | return (p,[],"invalid engine journal")
-  let queue := if p.schedule.certificates.isEmpty then certificateCandidates prior
-    else p.schedule.certificates
-  let (view,block)::rest := queue | return (p,[],"no certificate work")
-  let p := {p with schedule := {p.schedule with certificates := rest}}
-  let some certificate ← recoverCommitment (storage p.runtime.native) (crypto p.runtime.native)
-      p.runtime.context view block | return (p,[],"waiting for COMMIT witnesses")
-  let packets := ((List.range p.runtime.context.config.parties).filter (· != prior.self)).map
-    (fun recipient => (recipient,certificateFrame certificate.bytes))
-  let (next,status) ← applyNext p certificate
-  return (next,packets,status)
-
-/-- Disseminate a complete checked source candidate before its owner's next
-leader turn. Each peer independently rechecks it; a MAC never transfers source
-authority. Already installed local prefixes need no offer relay: their original
-COMMIT certificates continue through the separate positive repair budget. The
-same candidate goes to the same peer at most once per `candidateResendMs`; a
-longer candidate is relayed at once. The relay is availability, not delivery:
-a peer that lost it is served again after the interval. -/
+/-- Disseminate a checked source history before its owner's next leader turn: the records
+this replica has checked above its committed ones. Each peer independently rechecks it; a
+MAC never transfers source authority. The same candidate goes to the same peer at most once
+per `candidateResendMs`; a longer candidate is relayed at once. The relay is availability,
+not delivery: a peer that lost it is served again after the interval. -/
 def candidateSlice {config : SourceConfig} (p : Participant config) :
-    IO (Participant config × List (Nat × Bytes)) := do
+    IO (Participant config × List (Nat × ByteArray)) := do
   let some prior ← p.runtime.current | return (p,[])
-  let state := prior.state
-  let height := p.source.verified.opened.durable.height
-  let some block := state.checked.find? (fun block => height < (applicationHistory block).length)
-    | return (p,[])
-  let length := (applicationHistory block).length
+  let replica := prior.state
+  let some records := replica.core.checked.head? | return (p,[])
+  let length := replica.records + records.length
   let now ← IO.monoMsNow
   let mut packets := []
   let mut sent := p.schedule.candidateSent
   for recipient in List.range p.runtime.context.config.parties do
-    if recipient != state.self then
+    if recipient != prior.self then
       let due := match sent.find? (fun (r,_,_) => r == recipient) with
         | none => true
         | some (_,h,last) => h != length || now ≥ last + candidateResendMs
       if due then
-        packets := packets ++ [(recipient,candidateFrame (← sealCandidate p.runtime recipient block))]
+        packets := packets ++ [(recipient,candidateFrame
+          (← sealCandidate p.runtime recipient replica.records records))]
         sent := (sent.filter (fun (r,_,_) => r != recipient)) ++ [(recipient,length,now)]
   return ({p with schedule := {p.schedule with candidateSent := sent}},packets)
 
 /-- A finite host service call. The host supplies due arrivals before this call.
-It consumes reserved validation, continuation, fresh, retry and certificate
-opportunities separately. Fair repeated positive slices plus available native
-historical validation are progress premises; this API does not invent funding.
-Ordinary callers await exact source receipt, never an engine-local flag. -/
-def service {config : SourceConfig} (p : Participant config)
-    (validationBudget freshBudget retryBudget : Nat) :
-    IO (Participant config × List (Nat × Bytes) × List GenericSimplexController.Outcome × String) := do
+It consumes reserved validation and continuation opportunities, sends the replica's whole
+undrained output, and hands the application at most one committed payload. Fair repeated
+positive slices plus available native historical validation are progress premises; this API
+does not invent funding. Ordinary callers await exact source receipt, never an engine-local
+flag. -/
+def service {config : SourceConfig} (p : Participant config) (validationBudget : Nat) :
+    IO (Participant config × List (Nat × ByteArray) × List GenericSimplexController.Outcome × String) := do
   let t0 ← IO.monoMsNow
+  -- The committed source history, for the validator: the source's records, then the
+  -- committed records the application has not taken yet. Built only when work is attempted.
+  let committed : Unit → Block := fun _ =>
+    Minidregg.Kernel.JointReceiver.sourcePrefix p.source.verified.opened.durable
+  let committedRecords ← do
+    match ← p.runtime.current with
+    | some prior => pure (applicationHistory prior.state.committed)
+    | none => pure []
   let (pending,checks) ← GenericSimplexController.service p.runtime config p.source.verified.origin
-    validationBudget p.pending
+    (fun unit => committed unit ++ committedRecords) validationBudget p.pending
   let p := {p with pending := pending}
   let t1 ← IO.monoMsNow
-  -- A standing replica serves on a fixed tick. Journal a poll or tick only when
-  -- step can act on it: an exhausted pump (needsPoll), or a due timer not yet
-  -- fired. Otherwise a tick changes only the logical clock, which every
-  -- deliveryAt input already advances. Omitting an input is always a lawful
-  -- schedule; the retained journal stays the exact input sequence replayed.
+  -- A standing replica serves on a fixed tick. Journal a poll only for an exhausted pump
+  -- (needsPoll), and a tick only when the view's deadline is due: the kernel then asks to
+  -- leave the view, or asks again a whole timeout later (the repeat a peer answers with
+  -- what this replica is owed), or, with no reason to leave, moves the deadline one
+  -- timeout ahead. Omitting an input is always a lawful schedule; the retained journal
+  -- stays the exact input sequence replayed.
   if let some prior ← p.runtime.current then
-    let state := prior.state
-    if state.needsPoll then
+    let core := prior.state.core
+    if core.needsPoll then
       let _ ← GenericSimplexNative.poll p.runtime
     let now ← p.runtime.now
-    if state.needsPoll || (now ≥ state.deadline && !(viewAt state state.current).disableRequested) then
+    if core.needsPoll || now ≥ core.deadline then
       let _ ← GenericSimplexNative.tick p.runtime
   let t2 ← IO.monoMsNow
-  let (p,packets) ← outgoing p freshBudget retryBudget
+  let (p,packets) ← outgoing p
   let t3 ← IO.monoMsNow
   let (p,candidates) ← candidateSlice p
   let t4 ← IO.monoMsNow
-  let (p,certificates,status) ← certificateSlice p
+  let (p,status) ← applyNext p
   let t5 ← IO.monoMsNow
   if t5 - t0 ≥ 1000 then
-    IO.eprintln s!"service ms: validation {t1-t0} ({checks.length} checks, {p.pending.pending.length} pending) clock {t2-t1} outgoing {t3-t2} ({packets.length}) candidate {t4-t3} certificate {t5-t4} [{status}]"
-  return (p,packets ++ candidates ++ certificates,checks,status)
+    IO.eprintln s!"service ms: validation {t1-t0} ({checks.length} checks, {p.pending.pending.length} pending) clock {t2-t1} outgoing {t3-t2} ({packets.length}) candidate {t4-t3} apply {t5-t4} [{status}]"
+  return (p,packets ++ candidates,checks,status)
 
 theorem invocation_call_preserves_signed (config : SourceConfig)
     (signed : Minidregg.Kernel.DeclaredResourceController.SignedCommand) :

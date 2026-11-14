@@ -2,6 +2,7 @@ import Assurance.Deployed
 import Kernel.GenericSimplex
 import Compiler.GenericSimplexPending
 import Verify.GenericSimplexRelative
+import Verify.GenericSimplexNativeRun
 namespace Minidregg.Verify.GenericSimplexHarness
 open Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
@@ -62,6 +63,11 @@ def erased (n : Network) : Bool :=
 def ensure (condition : Bool) (message : String) : IO Unit :=
   if condition then pure () else throw (IO.userError message)
 
+/-- A specification state as a running replica that has committed nothing: its blocks are
+whole chains, which is what a replica at height 0 holds. Validation discovery
+(`GenericSimplexPending`) reads a replica. -/
+def atOrigin (s : State) : Minidregg.Kernel.GenericSimplexRelative.Replica := { core := s, digest := [] }
+
 /-- Incremental validation discovery misses nothing: replaying a node's inputs
 and discovering only the blocks each input carries (as the participant does)
 requests every prefix the full rescan of the final state requests. -/
@@ -73,9 +79,9 @@ def incrementalCovers (n : Network) : Bool :=
         let carried := match input with
           | .delivery m | .deliveryAt _ m => m.value.toList
           | _ => []
-        (next,Minidregg.Compiler.GenericSimplexPending.discoverFrom next carried q))
-      (initial,Minidregg.Compiler.GenericSimplexPending.discover initial {})
-    (Minidregg.Compiler.GenericSimplexPending.discover final {}).pending.all queue.pending.contains
+        (next,Minidregg.Compiler.GenericSimplexPending.discoverFrom (atOrigin next) carried q))
+      (initial,Minidregg.Compiler.GenericSimplexPending.discover (atOrigin initial) {})
+    (Minidregg.Compiler.GenericSimplexPending.discover (atOrigin final) {}).pending.all queue.pending.contains
 def honestSafe (n : Network) : Bool :=
   let honest := n.nodes.toList.take 3
   honest.all (fun s => !s.failed) &&
@@ -225,17 +231,23 @@ def forgedCommits (h : Minidregg.Kernel.GenericSimplexRelative.ChainDigest) (for
 "forged running digest: a COMMIT for another chain was read".
 `fixed-timer` removes the backoff from the recovery run (`backoffCap := 0`, the paper's fixed
 timer): "backoff: pending block never committed". `split-tip` gives replica 1 a committed tip
-that is not a prefix of the others' after the normal run: "normal safety/replay". -/
+that is not a prefix of the others' after the normal run: "normal safety/replay".
+`undrained-relay` runs the recovery of a replica four commits behind on a driver that never
+forwards what a replica owes a peer (`Replica.owed`): "relayed evidence: ...". -/
 def plantOf (args : List String) : IO (Option String) :=
   match args with
   | [] => pure none
   | ["--plant", name] =>
-      if name == "fixed-timer" || name == "split-tip" || name == "forged-digest" then pure (some name)
-      else throw (IO.userError s!"unknown plant {name}: fixed-timer | split-tip | forged-digest")
-  | _ => throw (IO.userError "usage: generic-simplex-harness [--plant fixed-timer|split-tip|forged-digest]")
+      if name == "fixed-timer" || name == "split-tip" || name == "forged-digest" ||
+          name == "undrained-relay" then pure (some name)
+      else throw (IO.userError s!"unknown plant {name}: fixed-timer | split-tip | forged-digest | undrained-relay")
+  | _ => throw (IO.userError "usage: generic-simplex-harness [--plant fixed-timer|split-tip|forged-digest|undrained-relay]")
 
 def main (args : List String) : IO Unit := do
   let plant ← plantOf args
+  -- The native layer over in-memory journals and a stand-in helper session.
+  Minidregg.Verify.GenericSimplexNativeRun.run
+  (← IO.getStdout).flush
   -- (0) The signed statement: a running replica reads a COMMIT only if the block it reads is
   -- the chain the statement names.
   let digest : Minidregg.Kernel.GenericSimplexRelative.ChainDigest :=
@@ -243,6 +255,12 @@ def main (args : List String) : IO Unit := do
     else Minidregg.Verify.GenericSimplexRelative.plain
   ensure (forgedCommits digest false == [payload]) "signed statement: three true COMMITs did not commit"
   ensure (forgedCommits digest true == []) "forged running digest: a COMMIT for another chain was read"
+  -- (0b) Relayed evidence: a replica four commits behind repeats its CANDIDATE(⊥) and commits
+  -- everything, from what its peers owe it. A driver that does not forward `owed` strands it.
+  let served := Minidregg.Verify.GenericSimplexRelative.lagged 4 6
+    { Minidregg.Verify.GenericSimplexRelative.initial with dropOwed := plant == some "undrained-relay" }
+  ensure (Minidregg.Verify.GenericSimplexRelative.heights served == [6,6,6,6])
+    "relayed evidence: a replica four commits behind was not served what its peers owe it"
   -- (1) The recorded stall, under the paper's fixed timer and under backoff.
   for cap in [0,3] do
     let cfgT : Config := {cfg with timeout := 100, backoffCap := cap}
@@ -318,7 +336,7 @@ def main (args : List String) : IO Unit := do
   -- for views above each replica's commit floor: a view at or below it takes no message, so
   -- the same messages for views 1 and 2 (committed long ago) must request nothing.
   let pendingAt (n : Network) (i : Nat) :=
-    (Minidregg.Compiler.GenericSimplexPending.discover n.nodes[i]! {}).pending.length
+    (Minidregg.Compiler.GenericSimplexPending.discover (atOrigin n.nodes[i]!) {}).pending.length
   let stale := (List.range 3).foldl (fun n i =>
       act (act n i (.delivery ⟨3,1,.vote,some [[77],[78]]⟩)) i (.delivery ⟨3,2,.commit,some [[79]]⟩))
     delayedComplete
@@ -331,7 +349,7 @@ def main (args : List String) : IO Unit := do
         (.delivery ⟨3,floor+2,.commit,some [[79]]⟩))
     delayedComplete
   ensure ((List.range 3).all fun i =>
-      (Minidregg.Compiler.GenericSimplexPending.discover unvalidated.nodes[i]! {}).pending.length ≥ 3)
+      (Minidregg.Compiler.GenericSimplexPending.discover (atOrigin unvalidated.nodes[i]!) {}).pending.length ≥ 3)
     "probe: the full scan requests no unvalidated prefix"
   ensure (incrementalCovers unvalidated) "incremental discovery missed a prefix the full scan requests"
   ensure (!(validBlock delayedComplete.nodes[0]! [[99],[44]]))

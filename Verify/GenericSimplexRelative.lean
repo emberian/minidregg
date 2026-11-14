@@ -91,6 +91,8 @@ structure Net where
   commits : List WireMessage := []
   /-- The mutant: never move the origin. -/
   fixedOrigin : Bool := false
+  /-- The mutant: a driver that never forwards what a replica owes a peer (`Replica.owed`). -/
+  dropOwed : Bool := false
   sent : Nat := 0
 
 def stepOf (n : Net) (r : Replica) (input : WireInput) : Replica :=
@@ -110,7 +112,8 @@ def stepOf (n : Net) (r : Replica) (input : WireInput) : Replica :=
 
 def act (n : Net) (i : Nat) (input : WireInput) : Net :=
   let (out, next) := (stepOf n n.nodes[i]! input).drain
-  let all := (out.sends.flatMap fun m => ((List.range 4).filter (· != i)).map fun r => (r, m)) ++ out.owed
+  let all := (out.sends.flatMap fun m => ((List.range 4).filter (· != i)).map fun r => (r, m)) ++
+    (if n.dropOwed then [] else out.owed)
   { n with nodes := n.nodes.set! i next, chains := n.chains.set! i (n.chains[i]! ++ out.committed),
            queue := n.queue ++ all.filter (fun (r, _) => !n.cut.contains r),
            commits := n.commits ++ out.sends.filter (·.kind == .commit),
@@ -182,8 +185,8 @@ theorem same_run_both_engines :
 /-- Node 0 is cut off while the other three commit `missed` operations (each followed by
 three rounds of their timeouts, which end the views node 0 leads). Then it is reconnected,
 one more operation is checked everywhere, and everyone runs `rounds` rounds of timeouts. -/
-def lagged (missed rounds : Nat) : Net :=
-  let n := ops all initial 1 1
+def lagged (missed rounds : Nat) (base : Net := initial) : Net :=
+  let n := ops all base 1 1
   let n := (List.range missed).foldl (fun n i =>
     (List.range 3).foldl (fun n k => tickAll [1, 2, 3] n ((i + 1) * 1000 + k * 100))
       (checkedAll [1, 2, 3] n (2 + i))) { n with cut := [0] }

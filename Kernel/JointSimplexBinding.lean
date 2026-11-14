@@ -85,7 +85,7 @@ def sourceCertificateStream : StreamCodec SourceCertificate :=
 def sourceAppliedBytes (context : Context) (decision : List UInt8) : List UInt8 :=
   [77,73,78,73,45,83,79,85,82,67,69,45,65,80,80,76,73,69,68,1] ++
     (StreamCodec.product contextStream bytesStream).encode (context,decision)
-/-- GenericSimplexIO.exportCommitment cannot manufacture this certificate:
+/-- GenericSimplexIO.commitProof cannot manufacture this certificate:
 its signed domain separator differs. Source-applied exporter is intentionally
 owned by the native atomic reservation controller, still an integration join. -/
 def importDecision (crypto : Crypto) {plan : PrivatePlan}

@@ -151,7 +151,7 @@ structure Synchronous (e : Execution c faulty checked) (gst delta : Nat) : Prop 
 
 /-- Commit-evidence transfer: when an honest replica commits a view, every COMMIT message
 it counted for that block reaches every other honest replica within `delta` (after `gst`).
-Natively this is the recovered certificate (`GenericSimplexNative.receiveFinality`). -/
+Natively these are the COMMITs a peer owes a member that asks (`Replica.owed`), each with its signer's signature. -/
 def CommitTransfer (e : Execution c faulty checked) (gst delta : Nat) : Prop :=
   ∀ i p q v b m, Honest c faulty p → Honest c faulty q → q ≠ p →
     (viewAt (e.state i p) v).committed = some b →

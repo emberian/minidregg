@@ -33,6 +33,8 @@ structure RelNetwork where
   chain : Nat → Block
   /-- Every message the replica has sent, with its committed chain after the step that sent it. -/
   sent : Nat → List (Block × WireMessage)
+  /-- Every COMMIT delivered to the replica, as it arrived. -/
+  seen : Nat → List WireMessage
 
 /-- The whole-chain message a wire message denotes at a replica that has committed `chain`. -/
 def denote (chain : Block) (w : WireMessage) : Message :=
@@ -62,7 +64,8 @@ def RelAllowed (c : Config) (faulty : Finset Nat) (checked : Nat → Block → P
 def relInitial (c : Config) (h : ChainDigest) (time : Nat) : RelNetwork :=
   { replica := fun party => (Replica.start c h party time).drain.2
     chain := fun _ => []
-    sent := fun party => (Replica.start c h party time).drain.1.sends.map fun m => ([], m) }
+    sent := fun party => (Replica.start c h party time).drain.1.sends.map fun m => ([], m)
+    seen := fun _ => [] }
 
 def relAdvance (c : Config) (h : ChainDigest) (net : RelNetwork) (party : Nat) (input : WireInput) : RelNetwork :=
   let result := ((net.replica party).step c h input).drain
@@ -74,7 +77,13 @@ def relAdvance (c : Config) (h : ChainDigest) (net : RelNetwork) (party : Nat) (
         -- relative to the new height, and `denote` takes the chain up to the message's own.
         net.sent party ++ (result.1.sends ++ (result.1.owed.map (·.2)).filter (·.sender == party)).map
           fun m => (net.chain party ++ result.1.committed, m)
-      else net.sent other }
+      else net.sent other
+    seen := fun other =>
+      if other = party then
+        net.seen party ++ (match input with
+          | .delivery w | .deliveryAt _ w => if w.kind = .commit then [w] else []
+          | _ => [])
+      else net.seen other }
 
 inductive RelReachable (c : Config) (h : ChainDigest) (faulty : Finset Nat) (checked : Nat → Block → Prop)
     (time : Nat) : RelNetwork → Prop where
@@ -88,10 +97,30 @@ def Agrees (c : Config) (faulty : Finset Nat) (net : RelNetwork) : Prop :=
   ∀ p q, p < c.parties → q < c.parties → p ∉ faulty → q ∉ faulty →
     net.chain p <+: net.chain q ∨ net.chain q <+: net.chain p
 
-/-- Agreement of the running replicas, for a digest with no collisions. -/
+/-- `read` is a chain a replica that has committed `chain` reads from the COMMIT `w`: the
+payloads of `w` above its height, accepted by `decode`'s check against the statement. -/
+def Reads (h : ChainDigest) (chain : Block) (w : WireMessage) (read : Block) : Prop :=
+  ∃ run block, w.value = some run ∧ above w.height chain.length run = some block ∧
+    read = chain ++ block ∧ w.statement = some (read.length, h.of read)
+
+/-- The chains that occur in a run, for the digest: the chains its correct members signed a
+COMMIT for, and the chains a correct replica reads from a COMMIT delivered to it, at any
+committed height it has had. A finite set, fixed by the run. -/
+def Occurs (c : Config) (h : ChainDigest) (faulty : Finset Nat) (net : RelNetwork) (chain : Block) : Prop :=
+  (∃ p, p < c.parties ∧ p ∉ faulty ∧ ∃ entry ∈ net.sent p, entry.2.sender = p ∧ entry.2.kind = .commit ∧
+    (denote entry.1 entry.2).value = some chain) ∨
+  (∃ p, p < c.parties ∧ p ∉ faulty ∧ ∃ w ∈ net.seen p, ∃ held, held <+: net.chain p ∧ Reads h held w chain)
+
+/-- Agreement of the running replicas, in a run whose occurring chains have no digest
+collision (`ChainDigest.CollisionFreeOn`, `Occurs`). The premise is about the run: a
+cSHAKE256 digest meets it unless the run itself exhibits a collision. It is inhabited for
+every run by a digest with no collisions at all (`plain_collisionFree`,
+`ChainDigest.collisionFree_on`); a digest with a collision among the occurring chains breaks
+the conclusion (`collision_breaks_agreement`). -/
 def RelativeAgreement : Prop :=
   ∀ {c : Config} {h : ChainDigest} {faulty : Finset Nat} {checked : Nat → Block → Prop} {time : Nat}
-    {net : RelNetwork}, h.CollisionFree → RelReachable c h faulty checked time net →
+    {net : RelNetwork}, RelReachable c h faulty checked time net →
+    h.CollisionFreeOn (Occurs c h faulty net) →
     c.parties = 3 * c.faults + 1 → faulty.card ≤ c.faults → Agrees c faulty net
 
 /-- What it is for a trace of the abstract model to be this network's. `rules`: the trace
@@ -124,22 +153,26 @@ by `above_denotes` and `rebase` drops nothing a correct member sent by `strip_co
 What remains is the local half: each event of one `liveStep` on relative blocks, read
 through `denote`, meets its `LocalFaithful` obligation from the messages the replica holds.
 
-The digest must have no collisions (`ChainDigest.CollisionFree`, inhabited by
+The digest must have no collision among the chains that occur in the run
+(`ChainDigest.CollisionFreeOn`, `Occurs`; inhabited for every run by
 `GenericSimplexRelative.plain_collisionFree`): a COMMIT is authentic as its statement, and
-the block a replica reads under it is the signed chain only then (`commit_reads_signed_chain`).
+the block a replica reads under it is the signed chain only then (`commit_reads_signed_chain`,
+whose two chains are a read one and a signed one). `Occurs` only grows along a run, so the
+premise for a network holds for every network before it.
 
 satisfiable / premise-inhabitation: `relNet_faithful` (a reachable network whose correct
 replicas have committed, with its trace). teeth: `conflict_not_agreement` through
 `relative_agreement_of_faithful`. -/
 def RelativeFaithful : Prop :=
   ∀ {c : Config} {h : ChainDigest} {faulty : Finset Nat} {checked : Nat → Block → Prop} {time : Nat}
-    {net : RelNetwork}, h.CollisionFree → RelReachable c h faulty checked time net →
+    {net : RelNetwork}, RelReachable c h faulty checked time net →
+    h.CollisionFreeOn (Occurs c h faulty net) →
     c.parties = 3 * c.faults + 1 → faulty.card ≤ c.faults → ∃ tr, Faithful c faulty net tr
 
 /-- The abstract model's agreement theorem is the running replicas'. -/
 theorem relative_agreement_of_faithful (faithful : RelativeFaithful) : RelativeAgreement := by
-  intro c h faulty checked time net free reachable size faultBound p q pm qm ph qh
-  obtain ⟨tr, own⟩ := faithful free reachable size faultBound
+  intro c h faulty checked time net reachable free size faultBound p q pm qm ph qh
+  obtain ⟨tr, own⟩ := faithful reachable free size faultBound
   obtain ⟨v, left⟩ := own.commits p pm ph
   obtain ⟨w, right⟩ := own.commits q qm qh
   exact committed_prefix_consistency own.rules (by simpa using size) faultBound left right
@@ -182,15 +215,15 @@ theorem relAllowedB_sound {net : RelNetwork} {receiver : Nat} {input : WireInput
   | checked height records => exact ⟨of_decide_eq_true rest, trivial⟩
   | tick _ | offer _ | poll => trivial
 
-def relRun : RelNetwork → List (Nat × WireInput) → Option RelNetwork
+def relRun (h : ChainDigest) : RelNetwork → List (Nat × WireInput) → Option RelNetwork
   | net, [] => some net
   | net, (party, input) :: rest =>
-      if relAllowedB net party input then relRun (relAdvance poleConfig plain net party input) rest else none
+      if relAllowedB net party input then relRun h (relAdvance poleConfig h net party input) rest else none
 
-theorem relRun_reachable {time : Nat} (net result : RelNetwork) (inputs : List (Nat × WireInput))
-    (reachable : RelReachable poleConfig plain poleFaulty (fun _ _ => True) time net)
-    (run : relRun net inputs = some result) :
-    RelReachable poleConfig plain poleFaulty (fun _ _ => True) time result := by
+theorem relRun_reachable {h : ChainDigest} {time : Nat} (net result : RelNetwork) (inputs : List (Nat × WireInput))
+    (reachable : RelReachable poleConfig h poleFaulty (fun _ _ => True) time net)
+    (run : relRun h net inputs = some result) :
+    RelReachable poleConfig h poleFaulty (fun _ _ => True) time result := by
   induction inputs generalizing net with
   | nil => cases run; exact reachable
   | cons head rest ih =>
@@ -203,27 +236,28 @@ theorem relRun_reachable {time : Nat} (net result : RelNetwork) (inputs : List (
 
 /-- One operation: the three correct replicas' checkers report record `[7]`, then every
 message a correct replica has sent is delivered to the other two, round after round. -/
-def poleSchedule : Nat → RelNetwork → List (Nat × WireInput) → List (Nat × WireInput) × RelNetwork
+def poleSchedule (h : ChainDigest := plain) (members : List Nat := [0, 1, 2]) :
+    Nat → RelNetwork → List (Nat × WireInput) → List (Nat × WireInput) × RelNetwork
   | 0, net, done => (done, net)
   | fuel + 1, net, done =>
-      let pending := [0, 1, 2].flatMap fun receiver => [0, 1, 2].flatMap fun sender =>
+      let pending := members.flatMap fun receiver => members.flatMap fun sender =>
         if sender == receiver then [] else (net.sent sender).filterMap fun entry =>
           if done.contains (receiver, .delivery entry.2) then none
           else some (receiver, WireInput.delivery entry.2)
       if pending.isEmpty then (done, net) else
-      poleSchedule fuel (pending.foldl (fun net step => relAdvance poleConfig plain net step.1 step.2) net)
+      poleSchedule h members fuel (pending.foldl (fun net step => relAdvance poleConfig h net step.1 step.2) net)
         (done ++ pending)
 
 def poleInputs : List (Nat × WireInput) :=
   let checks : List (Nat × WireInput) := [0, 1, 2].map fun party => (party, .checked 0 [[7]])
-  (poleSchedule 16
+  (poleSchedule plain [0, 1, 2] 16
     (checks.foldl (fun net step => relAdvance poleConfig plain net step.1 step.2) (relInitial poleConfig plain 0))
     checks).1
 
 /-- Premise inhabitation: the schedule is admitted from the real start, and the three
 correct replicas have each committed `[[7]]` and moved their origin to height 1. -/
 theorem relNet_run :
-    ((relRun (relInitial poleConfig plain 0) poleInputs).map fun net =>
+    ((relRun plain (relInitial poleConfig plain 0) poleInputs).map fun net =>
       [0, 1, 2].map fun party => (net.chain party, (net.replica party).height,
         (net.replica party).core.committedTip)) =
       some [([[7]], 1, []), ([[7]], 1, []), ([[7]], 1, [])] := by
@@ -253,7 +287,7 @@ def specInputs : List (Nat × Input) :=
 def specNet : Network :=
   (runChecked poleConfig poleFaulty (initial poleConfig 0) specInputs).getD (initial poleConfig 0)
 
-def relNet : RelNetwork := (relRun (relInitial poleConfig plain 0) poleInputs).getD (relInitial poleConfig plain 0)
+def relNet : RelNetwork := (relRun plain (relInitial poleConfig plain 0) poleInputs).getD (relInitial poleConfig plain 0)
 
 /-- Executed: the specification admits its schedule and commits `[[7]]` in view 1; the
 running replicas' durable record of their own sends, read as whole chains, is exactly the
@@ -281,7 +315,7 @@ theorem specNet_reachable : Reachable poleConfig poleFaulty poleChecked 0 specNe
 theorem relNet_reachable : RelReachable poleConfig plain poleFaulty (fun _ _ => True) 0 relNet ∧
     ∀ party, party < 3 → relNet.chain party = [[7]] := by
   unfold relNet
-  rcases run : relRun (relInitial poleConfig plain 0) poleInputs with _ | net
+  rcases run : relRun plain (relInitial poleConfig plain 0) poleInputs with _ | net
   · have executed := relNet_run
     rw [run] at executed
     simp at executed
@@ -421,7 +455,8 @@ theorem conflict_not_agreement :
     ¬ Agrees poleConfig poleFaulty
       { replica := fun party => (Replica.start poleConfig plain party 0).drain.2
         chain := fun party => if party = 0 then [[1]] else [[2]]
-        sent := fun _ => [] } := by
+        sent := fun _ => []
+        seen := fun _ => [] } := by
   intro agrees
   have conflict := agrees 0 1 (by decide) (by decide) (by decide) (by decide)
   simp at conflict
@@ -448,5 +483,55 @@ theorem conflict_not_agreement :
 #assert_axioms Minidregg.Kernel.GenericSimplexSupportExtends.reachable_support_extends
 #assert_axioms Minidregg.Kernel.GenericSimplexSupportExtends.reachable_counted_extends
 #assert_axioms Minidregg.Kernel.GenericSimplexSupportExtends.conflicting_count_small
+
+/-! ## Teeth of the collision premise
+
+On a digest that is the same for every chain, a COMMIT signed for one chain is read with the
+payloads of another: two correct replicas commit conflicting chains in a reachable network.
+Here `[[7]]` (signed by replicas 0 and 1) and `[[8]]` (read by replica 2 from their COMMITs,
+passed on with another block) are both chains that occur, with one digest. -/
+
+/-- The digest with every collision. -/
+def flat : ChainDigest := { origin := [], extend := fun _ _ => [] }
+
+def splitInputs : List (Nat × WireInput) :=
+  let checks : List (Nat × WireInput) :=
+    [(0, .checked 0 [[7]]), (1, .checked 0 [[7]]), (2, .checked 0 [[8]])]
+  -- The faulty member votes and commits `[[7]]` towards replicas 0 and 1.
+  let byzantine : List (Nat × WireInput) := [0, 1].flatMap fun receiver =>
+    [(receiver, .delivery ⟨3, 1, .vote, 0, some [[7]], none⟩),
+     (receiver, .delivery ⟨3, 1, .commit, 0, some [[7]], some (1, [])⟩)]
+  let first := checks ++ byzantine
+  let (flooded, _) := poleSchedule flat [0, 1] 16
+    (first.foldl (fun net step => relAdvance poleConfig flat net step.1 step.2) (relInitial poleConfig flat 0))
+    first
+  -- Replica 2 gets the three COMMITs with their signed statements and another block.
+  flooded ++ [0, 1, 3].map fun sender =>
+    (2, WireInput.delivery ⟨sender, 1, .commit, 0, some [[8]], some (1, [])⟩)
+
+theorem split_run :
+    ((relRun flat (relInitial poleConfig flat 0) splitInputs).map fun net => [0, 1, 2].map net.chain) =
+      some [[[7]], [[7]], [[8]]] := by
+  native_decide
+
+/-- **A digest with a collision among the chains that occur breaks agreement.** -/
+theorem collision_breaks_agreement :
+    ∃ net, RelReachable poleConfig flat poleFaulty (fun _ _ => True) 0 net ∧
+      ¬ Agrees poleConfig poleFaulty net := by
+  have ran := split_run
+  cases run : relRun flat (relInitial poleConfig flat 0) splitInputs with
+  | none => rw [run] at ran; cases ran
+  | some net =>
+    rw [run] at ran
+    simp only [Option.map_some, Option.some.injEq, List.map_cons, List.map_nil, List.cons.injEq,
+      and_true] at ran
+    obtain ⟨zero, _, two⟩ := ran
+    refine ⟨net, relRun_reachable _ _ _ .initial run, ?_⟩
+    intro agrees
+    have comparable := agrees 0 2 (by decide) (by decide) (by decide) (by decide)
+    rw [zero, two] at comparable
+    rcases comparable with left | right
+    · exact absurd left (by decide)
+    · exact absurd right (by decide)
 
 end Minidregg.Verify.GenericSimplexRelativeReach

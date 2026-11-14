@@ -55,10 +55,12 @@ inductive Result (config : Config) {target : Durable}
 
 /-- Typed ingress from the fixed deployment-native certificate verifier. The
 request supplies only source bytes; expected/context/helper are controller
-configuration. A quorum certificate authorizes order, not source permission.
+configuration. `later` are the committed records after this one that the caller holds, up
+to the certified chain. A quorum certificate authorizes order, not source permission.
 This call obtains both independently before one existing source-record CAS. -/
 def apply {config : Config} {target : Durable} (old : Verified config target)
-    (expected : Context) (commitment : VerifiedCommit expected) (sourceBytes : List UInt8) :
+    (expected : Context) (commitment : VerifiedCommit expected) (later : Minidregg.Kernel.GenericSimplex.Block)
+    (sourceBytes : List UInt8) :
     IO (Result config old expected) := do
   if contextPinned : config.jointConsensus = some expected then
     if expected.scope != digestStream.encode config.deployment.domain then
@@ -68,8 +70,8 @@ def apply {config : Config} {target : Durable} (old : Verified config target)
     match ← deriveVerified old sourceBytes with
     | .error detail => return .refused detail
     | .ok derived =>
-      let some ordered := JointReceiver.order expected old.opened.durable derived.intent commitment
-        | return .refused "committed block is not exact source prefix plus derived record"
+      let some ordered := JointReceiver.order expected old.opened.durable derived.intent commitment later
+        | return .refused "the commitment's digest is not that of the source prefix, the derived record and the later committed records"
       match ← DurableReceiverIO.receiveLoadedDetailed (orderedTransport derived)
           ResourceBirthCodec.rootBytes old.opened.durable derived.intent with
       | .ordinary result => return .ordinary result

@@ -78,9 +78,20 @@ def ChainDigest.of (h : ChainDigest) (chain : Block) : Bytes := h.over h.origin 
 theorem ChainDigest.over_append (h : ChainDigest) (digest : Bytes) (a b : Block) :
     h.over digest (a ++ b) = h.over (h.over digest a) b := List.foldl_append
 
-/-- No two chains have one digest. A hash function meets this only as an assumption about
-the chains that occur; it is a named premise wherever it is used. -/
+/-- No two chains among those that `occur` have one digest. This is the premise a hash
+function can meet: `occurs` is the finite set of chains a run has signed or read
+(`Verify/GenericSimplexRelativeReach.lean`, `Occurs`), and the premise says that run exhibits
+no collision. It is an assumption about the digest and the run, named wherever it is used. -/
+def ChainDigest.CollisionFreeOn (h : ChainDigest) (occurs : Block → Prop) : Prop :=
+  ∀ a b : Block, occurs a → occurs b → h.of a = h.of b → a = b
+
+/-- No two chains at all have one digest. No function into a bounded set meets this: it is
+what the plain digest of the executed controls meets (`plain_collisionFree`), and it is the
+inhabitation witness of `CollisionFreeOn` for every `occurs` (`ChainDigest.collisionFree_on`). -/
 def ChainDigest.CollisionFree (h : ChainDigest) : Prop := ∀ a b : Block, h.of a = h.of b → a = b
+
+theorem ChainDigest.collisionFree_on {h : ChainDigest} (free : h.CollisionFree) (occurs : Block → Prop) :
+    h.CollisionFreeOn occurs := fun a b _ _ same => free a b same
 
 /-- A message as it travels: the sender's committed height, and the block as the payloads
 above that height. A COMMIT also carries what its sender signed: the length and the
@@ -312,6 +323,20 @@ structure Output where
 def Replica.drain (r : Replica) : Output × Replica :=
   (⟨r.sends, r.owed, r.committed⟩, { r with sends := [], owed := [], committed := [] })
 
+/-- The driver has handed the first `sends` broadcasts and the first `owed` relayed messages
+to its transport. The counts let it acknowledge exactly what it sent: outputs of inputs taken
+in between stay queued. -/
+def Replica.flush (r : Replica) (sends owed : Nat) : Replica :=
+  { r with sends := r.sends.drop sends, owed := r.owed.drop owed }
+
+/-- The application has taken the first `count` committed payloads. What it has not taken
+stays queued, so a restart hands it the same payloads again. -/
+def Replica.consume (r : Replica) (count : Nat) : Replica :=
+  { r with committed := r.committed.drop count }
+
+/-- The length of the chain the first undelivered committed payload extends. -/
+def Replica.consumed (r : Replica) : Nat := r.height - r.committed.length
+
 /-! ## The codec's transport
 
 `chain ++ block` is the whole chain a replica's block denotes, `chain` being what it has
@@ -402,12 +427,16 @@ theorem decode_ahead (h : ChainDigest) (r : Replica) (w : WireMessage) (run : Bl
 
 /-- **A COMMIT that is read is for the chain that was signed.** `chain` is what the replica
 has committed and `signed` the chain the statement was made for, at whatever height its
-block was written from, by its sender or by a peer passing it on. -/
-theorem commit_reads_signed_chain (h : ChainDigest) (free : h.CollisionFree) (r : Replica)
+block was written from, by its sender or by a peer passing it on. The digest need only be
+free of collisions between the two chains concerned: the one the replica reads and the one
+that was signed. -/
+theorem commit_reads_signed_chain (h : ChainDigest) (occurs : Block → Prop)
+    (free : h.CollisionFreeOn occurs) (r : Replica)
     (chain signed block : Block) (w : WireMessage) (m : Message)
     (tracks : r.digest = h.of chain) (commit : w.kind = .commit)
     (statement : w.statement = some (signed.length, h.of signed))
-    (decoded : decode h r w = some m) (valued : m.value = some block) : chain ++ block = signed := by
+    (decoded : decode h r w = some m) (valued : m.value = some block)
+    (read : occurs (chain ++ block)) (wasSigned : occurs signed) : chain ++ block = signed := by
   cases value : w.value with
   | none =>
     simp only [decode, value, Option.some.injEq] at decoded
@@ -420,7 +449,7 @@ theorem commit_reads_signed_chain (h : ChainDigest) (free : h.CollisionFree) (r 
     have stated := checked commit
     rw [statement, valued, tracks] at stated
     simp only [Option.some.injEq, Prod.mk.injEq] at stated
-    apply free
+    apply free _ _ read wasSigned
     rw [ChainDigest.of, ChainDigest.over_append]
     exact stated.2.symm
 

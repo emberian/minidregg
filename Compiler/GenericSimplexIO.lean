@@ -27,65 +27,55 @@ namespace Minidregg.Compiler.GenericSimplexIO
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.GenericSimplexCodec
 open Minidregg.Kernel.GenericSimplex
+open Minidregg.Kernel.GenericSimplexRelative
 set_option autoImplicit false
 /-- Persisted inputs include source-validation grants, so replay never rechecks
 them against a different present snapshot. This log is private trusted storage.
 A source check can be appended only by the native controller, not peer ingress.
-Replay starts at `snapshot` when present (a checkpoint), else at `start`. -/
+An event is an encoded `Entry`: an input of the running replica (`Replica.step`, blocks
+relative to its committed height), or an acknowledgement that drains its outputs. Replay
+starts at `snapshot` when present (a checkpoint), else at `Replica.start`. -/
 structure Journal where
   context : Context
   self : Nat
   initialTime : Nat
   events : List Event := []
   commitWitnesses : List CommitWitness := []
-  snapshot : Option State := none
+  snapshot : Option Replica := none
   deriving DecidableEq, BEq, Repr
 def journalStream : StreamCodec Journal :=
   StreamCodec.xmap
     (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product (StreamCodec.list eventStream)
-          (StreamCodec.product (StreamCodec.list commitWitnessStream) (StreamCodec.option stateStream))))))
+          (StreamCodec.product (StreamCodec.list commitWitnessStream) (StreamCodec.option replicaStream))))))
     (fun j => (j.context,j.self,j.initialTime,j.events,j.commitWitnesses,j.snapshot))
     (fun (c,s,t,e,w,n) => ⟨c,s,t,e,w,n⟩) (by intro j; cases j; rfl)
-def replayEvents (c : Config) : State → List Event → Option State
-  | s, [] => some s
-  | s, e :: es => do
-      let input ← decodeInput e
-      let next := step c s input
-      if next.failed then none else replayEvents c next es
-theorem replay_append (config : Config) (state : State) (events more : List Event) :
-    replayEvents config state (events ++ more) =
-      (replayEvents config state events).bind (fun next => replayEvents config next more) := by
+/-- One journal entry applied to the running replica. -/
+def applyEntry (c : Config) (h : ChainDigest) (r : Replica) : Entry → Replica
+  | .input input => r.step c h input
+  | .flush sends owed => r.flush sends owed
+  | .consume count => r.consume count
+def replayEvents (c : Config) (h : ChainDigest) : Replica → List Event → Option Replica
+  | r, [] => some r
+  | r, e :: es => do
+      let entry ← decodeEntry e
+      let next := applyEntry c h r entry
+      if next.core.failed then none else replayEvents c h next es
+theorem replay_append (config : Config) (h : ChainDigest) (state : Replica) (events more : List Event) :
+    replayEvents config h state (events ++ more) =
+      (replayEvents config h state events).bind (fun next => replayEvents config h next more) := by
   induction events generalizing state with
   | nil => rfl
   | cons event events ih =>
     simp only [List.cons_append,replayEvents]
-    cases decoded : decodeInput event with
+    cases decoded : decodeEntry event with
     | none => simp [decoded]
     | some input =>
       dsimp only [Bind.bind, Option.bind]
       split <;> simp_all <;> rfl
 
 #assert_axioms replay_append
-
-/-- Replay never changes whose state it is. -/
-theorem replayEvents_self (c : Config) (s t : State) (events : List Event)
-    (h : replayEvents c s events = some t) : t.self = s.self := by
-  induction events generalizing s with
-  | nil => simp only [replayEvents, Option.some.injEq] at h; rw [h]
-  | cons e es ih =>
-    simp only [replayEvents] at h
-    cases decoded : decodeInput e with
-    | none => simp [decoded] at h
-    | some input =>
-      rw [decoded] at h
-      change (if (step c s input).failed = true then none else replayEvents c (step c s input) es) = some t at h
-      split at h
-      · simp at h
-      · exact (ih _ h).trans ((Minidregg.Kernel.GenericSimplexStructure.structuralAuditLaws c).stepExtension s input).sameSelf
-
-#assert_axioms replayEvents_self
 
 /-! ## Append-only physical journal
 
@@ -118,14 +108,17 @@ the floor), and READY for one argument is sent once;
 version 9 = `ingest` keeps at most `Config.cap` messages of one member and kind in a view
 record;
 version 10 = the COMMIT witnesses a journal keeps are signed over the chain's length and
-running digest (`commitStatementBytes`, tag 3), not over the whole chain: a witness kept
-under version 9 does not verify. An older log refuses at this magic rather than being
-replayed under a different `step` or exported under a different statement
-(`v9_log_refused`). -/
-def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,10]
+running digest, not over the whole chain;
+version 11 = the journal is the running replica's (`Replica.step`): an event is an encoded
+`Entry` whose blocks are relative to the replica's committed height, the snapshot is a
+`Replica`, the driver's drains are entries, a kept COMMIT witness is the statement and its
+signature, and the digest is `chainDigest`'s 64 bytes (statement tag 4). An older log refuses
+at this magic rather than being replayed under a different step or exported under a
+different statement (`v10_log_refused`). -/
+def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,11]
 
-/-- The magic of the previous format (COMMIT witnesses signed over the whole chain). -/
-def logMagicV9 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,9]
+/-- The magic of the previous format (inputs of `step` on whole chains). -/
+def logMagicV10 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,10]
 
 /-- The format version byte of an image that carries the "MINI-SIMPLEX-LOG"
 magic, whatever its version; `none` for anything else. Lets an open refuse an
@@ -134,7 +127,7 @@ def logFormatVersion (bytes : Bytes) : Option UInt8 :=
   if bytes.take logMagic.dropLast.length == logMagic.dropLast then
     bytes[logMagic.dropLast.length]? else none
 
-/-- One acknowledged append: the exact inputs replayed through `step`, and the
+/-- One acknowledged append: the exact entries replayed through `applyEntry`, and the
 transferable COMMIT witnesses verified in the same transaction. -/
 structure Delta where
   events : List Event := []
@@ -240,34 +233,35 @@ def decodeLog (bytes : Bytes) : Option Log := do
   let deltas ← decodeDeltas rest.length rest
   some ⟨base,deltas.reverse⟩
 
-/-- A version-9 log never decodes, whatever follows its magic: its COMMIT witnesses were
-signed over a different statement. -/
-theorem v9_log_refused (rest : Bytes) : decodeLog (logMagicV9 ++ rest) = none := by
-  have taken : (logMagicV9 ++ rest).take logMagic.length = logMagicV9 := rfl
-  have differs : (logMagicV9 != logMagic) = true := by decide
+/-- A version-10 log never decodes, whatever follows its magic: its inputs are whole-chain
+inputs of `step` and its witnesses carry chains. -/
+theorem v10_log_refused (rest : Bytes) : decodeLog (logMagicV10 ++ rest) = none := by
+  have taken : (logMagicV10 ++ rest).take logMagic.length = logMagicV10 := rfl
+  have differs : (logMagicV10 != logMagic) = true := by decide
   simp [decodeLog, taken, differs]
 
-/-- It is still recognised as an agreement log of version 9, so an open names it. -/
-theorem v9_log_named (rest : Bytes) : logFormatVersion (logMagicV9 ++ rest) = some 9 := by
+/-- It is still recognised as an agreement log of version 10, so an open names it. -/
+theorem v10_log_named (rest : Bytes) : logFormatVersion (logMagicV10 ++ rest) = some 10 := by
   rfl
 
-#assert_axioms v9_log_refused
+#assert_axioms v10_log_refused
 
-/-- Replay of a decoded log over the merged journal: from its checkpoint
-snapshot if it has one (which must be this replica's, and not failed), else
-from `start`. -/
-def replayLog (expected : Context) (l : Log) : Option State :=
+/-- Replay of a decoded log over the merged journal: from its checkpoint snapshot if it has
+one (which must be this replica's, and not failed), else from `Replica.start`. The result
+must still be this replica's and not failed. -/
+def replayLog (expected : Context) (l : Log) : Option Replica :=
   let j := l.merged
   if (j.context != expected || !expected.wellFormed || decide (j.self ≥ expected.config.parties) ||
-      !(j.snapshot.map fun n => n.self == j.self && !n.failed).getD true) = true
+      !(j.snapshot.map fun n => n.core.self == j.self && !n.core.failed).getD true) = true
   then none
   else do
-    let s ← replayEvents expected.config (j.snapshot.getD (start expected.config j.self j.initialTime)) j.events
-    if s.failed then none else pure s
+    let s ← replayEvents expected.config (chainDigest expected)
+      (j.snapshot.getD (Replica.start expected.config (chainDigest expected) j.self j.initialTime)) j.events
+    if (s.core.failed || s.core.self != j.self) = true then none else pure s
 
 /-- Whole canonical replay of the physical log bytes: `decodeLog` accepts only
 encodings (`decodeLog_canonical`). -/
-def restoreLog (expected : Context) (bytes : Bytes) : Option (Log × State) := do
+def restoreLog (expected : Context) (bytes : Bytes) : Option (Log × Replica) := do
   let l ← decodeLog bytes
   let s ← replayLog expected l
   some (l,s)
@@ -382,7 +376,7 @@ theorem decodeLog_canonical {bytes : Bytes} {l : Log}
           rw [exact]
 
 /-- A restored log re-encodes to exactly the physical image it was read from. -/
-theorem restoreLog_encode_eq {expected : Context} {bytes : Bytes} {l : Log} {s : State}
+theorem restoreLog_encode_eq {expected : Context} {bytes : Bytes} {l : Log} {s : Replica}
     (h : restoreLog expected bytes = some (l,s)) : l.encode = bytes := by
   unfold restoreLog at h
   cases decoded : decodeLog bytes with
@@ -412,7 +406,7 @@ theorem restoreLog_encode (context : Context) (l : Log) :
   rw [decodeLog_encode]
   cases h : replayLog context l <;> simp [h]
 
-theorem replayLog_of_restoreLog {context : Context} {l : Log} {state : State}
+theorem replayLog_of_restoreLog {context : Context} {l : Log} {state : Replica}
     (h : restoreLog context l.encode = some (l,state)) : replayLog context l = some state := by
   rw [restoreLog_encode] at h
   cases r : replayLog context l with
@@ -420,22 +414,22 @@ theorem replayLog_of_restoreLog {context : Context} {l : Log} {state : State}
   | some s => simp [r] at h; simp [h]
 
 /-- The fast append is exactly the original whole-log replay of the extended
-image: replay of the old log, then only the appended inputs. -/
-theorem replayLog_push (context : Context) (l : Log) (state next : State) (d : Delta)
+image: replay of the old log, then only the appended entries. -/
+theorem replayLog_push (context : Context) (l : Log) (state next : Replica) (d : Delta)
     (old : replayLog context l = some state)
-    (continued : replayEvents context.config state d.events = some next)
-    (notFailed : next.failed = false) :
+    (continued : replayEvents context.config (chainDigest context) state d.events = some next)
+    (notFailed : next.core.failed = false) (sameSelf : next.core.self = l.merged.self) :
     replayLog context (l.push d) = some next := by
   unfold replayLog at old ⊢
   rw [Log.merged_push]
   dsimp only
   by_cases guard : (l.merged.context != context || !context.wellFormed ||
       decide (l.merged.self ≥ context.config.parties) ||
-      !(l.merged.snapshot.map fun n => n.self == l.merged.self && !n.failed).getD true) = true
+      !(l.merged.snapshot.map fun n => n.core.self == l.merged.self && !n.core.failed).getD true) = true
   · simp [guard] at old
   · simp only [guard, Bool.false_eq_true, ↓reduceIte] at old ⊢
-    cases replayed : replayEvents context.config
-        (l.merged.snapshot.getD (start context.config l.merged.self l.merged.initialTime))
+    cases replayed : replayEvents context.config (chainDigest context)
+        (l.merged.snapshot.getD (Replica.start context.config (chainDigest context) l.merged.self l.merged.initialTime))
         l.merged.events with
     | none => simp [replayed] at old
     | some s =>
@@ -443,66 +437,69 @@ theorem replayLog_push (context : Context) (l : Log) (state next : State) (d : D
       simp at old
       obtain ⟨_, rfl⟩ := old
       rw [replay_append, replayed]
-      simp [continued, notFailed]
+      simp [continued, notFailed, sameSelf]
 
-theorem restoreLog_push (context : Context) (l : Log) (state next : State) (d : Delta)
+theorem restoreLog_push (context : Context) (l : Log) (state next : Replica) (d : Delta)
     (old : restoreLog context l.encode = some (l,state))
-    (continued : replayEvents context.config state d.events = some next)
-    (notFailed : next.failed = false) :
+    (continued : replayEvents context.config (chainDigest context) state d.events = some next)
+    (notFailed : next.core.failed = false) (sameSelf : next.core.self = l.merged.self) :
     restoreLog context (l.push d).encode = some (l.push d,next) := by
   rw [restoreLog_encode, replayLog_push context l state next d
-    (replayLog_of_restoreLog old) continued notFailed]
+    (replayLog_of_restoreLog old) continued notFailed sameSelf]
   rfl
 
 /-! ## Checkpoints
 
-A checkpoint replaces a log by one base frame whose snapshot is the log's
-replayed state, carrying every retained COMMIT witness, with no events and no
-deltas. Reopening it decodes the state instead of replaying the history. The
-replaced image is kept by the writer as the previous segment (`*.log.upto-N`),
-so the whole input history stays auditable as a chain of segments. -/
+A checkpoint replaces a log by one base frame whose snapshot is the log's replayed replica,
+with no events and no deltas, carrying the COMMIT witnesses the replica can still use
+(`retains`). Reopening it decodes the replica instead of replaying the history, and its size
+is bounded by the replica's live state. The replaced image is kept by the writer as the
+previous segment (`*.log.upto-N`), so the whole input history stays auditable as a chain of
+segments. -/
 
-def Log.checkpoint (l : Log) (s : State) : Log :=
-  ⟨{ l.merged with events := [], snapshot := some s }, []⟩
+/-- A kept signature the replica can still use: for a view above its floor (a COMMIT not
+yet counted, or held), or for a commit whose evidence it still serves. -/
+def retains (r : Replica) (w : CommitWitness) : Bool :=
+  r.core.lastCommitted < w.view ||
+    r.evidence.any fun entry => entry.2.2.any fun m => m.view == w.view && m.sender == w.attestation.signer
 
-theorem Log.checkpoint_merged (l : Log) (s : State) :
-    (l.checkpoint s).merged = { l.merged with events := [], snapshot := some s } := by
-  simp [Log.checkpoint, Log.merged, Log.deltas]
+/-- The base journal of a checkpoint. -/
+def Log.checkpointBase (l : Log) (s : Replica) : Journal :=
+  { l.merged with
+    events := []
+    snapshot := some s
+    commitWitnesses := l.merged.commitWitnesses.filter (retains s) }
 
-/-- A checkpoint of a log replays to the same state. -/
-theorem replayLog_checkpoint {context : Context} {l : Log} {s : State}
+def Log.checkpoint (l : Log) (s : Replica) : Log := ⟨l.checkpointBase s, []⟩
+
+theorem Log.checkpoint_merged (l : Log) (s : Replica) :
+    (l.checkpoint s).merged = l.checkpointBase s := by
+  simp [Log.checkpoint, Log.checkpointBase, Log.merged, Log.deltas]
+
+/-- A checkpoint of a log replays to the same replica. -/
+theorem replayLog_checkpoint {context : Context} {l : Log} {s : Replica}
     (h : replayLog context l = some s) : replayLog context (l.checkpoint s) = some s := by
   unfold replayLog at h ⊢
   dsimp only at h ⊢
   split at h
   · simp at h
   · rename_i guardFalse
-    cases replayed : replayEvents context.config
-        (l.merged.snapshot.getD (start context.config l.merged.self l.merged.initialTime))
+    cases replayed : replayEvents context.config (chainDigest context)
+        (l.merged.snapshot.getD (Replica.start context.config (chainDigest context) l.merged.self l.merged.initialTime))
         l.merged.events with
     | none => simp [replayed] at h
     | some t =>
       rw [replayed] at h
-      change (if t.failed = true then none else pure t) = some s at h
+      change (if (t.core.failed || t.core.self != l.merged.self) = true then none else pure t) = some s at h
       split at h
       · simp at h
-      · rename_i notFailed
+      · rename_i passed
         have ts : t = s := by simpa [pure] using h
         subst ts
-        have sameSelf := replayEvents_self _ _ _ _ replayed
-        have originSelf : (l.merged.snapshot.getD
-            (start context.config l.merged.self l.merged.initialTime)).self = l.merged.self := by
-          cases snap : l.merged.snapshot with
-          | none =>
-            simpa using (Minidregg.Kernel.GenericSimplexStructure.structuralAuditLaws context.config).startSelf l.merged.self l.merged.initialTime
-          | some n =>
-            simp only [snap] at guardFalse
-            simp only [Option.getD_some]
-            simp_all
         rw [Log.checkpoint_merged]
-        simp_all [replayEvents]
+        simp_all [replayEvents, Log.checkpointBase]
 
-theorem restoreLog_checkpoint (context : Context) (l : Log) (s : State)
+theorem restoreLog_checkpoint (context : Context) (l : Log) (s : Replica)
     (h : restoreLog context l.encode = some (l,s)) :
     restoreLog context (l.checkpoint s).encode = some (l.checkpoint s,s) := by
   rw [restoreLog_encode, replayLog_checkpoint (replayLog_of_restoreLog h)]
@@ -512,15 +509,18 @@ theorem restoreLog_checkpoint (context : Context) (l : Log) (s : State)
 #assert_axioms restoreLog_checkpoint
 
 /-- In-process authoritative image of this replica's journal. `length` is the
-exact physical byte length the single writer compares before appending. -/
+exact physical byte length the single writer compares before appending. `chain` is the
+domain's digest, built once (its origin hashes the whole context). -/
 structure Restored (context : Context) where
   log : Log
-  state : State
+  state : Replica
   length : Nat
   witnesses : List CommitWitness
+  chain : ChainDigest
   exact : restoreLog context log.encode = some (log,state)
   sized : log.encode.length = length
   witnessed : witnesses = log.merged.commitWitnesses
+  chained : chain = chainDigest context
 
 def Restored.self {context : Context} (r : Restored context) : Nat := r.log.base.self
 
@@ -531,22 +531,26 @@ def openRestored (context : Context) (bytes : Bytes) : Option (Restored context)
   | none => none
   | some (l,s) =>
     have same : l.encode = bytes := restoreLog_encode_eq h
-    some ⟨l,s,bytes.length,l.merged.commitWitnesses,same ▸ h,by rw [same],rfl⟩
+    some ⟨l,s,bytes.length,l.merged.commitWitnesses,chainDigest context,same ▸ h,by rw [same],rfl,rfl⟩
 
-/-- Execute only the appended inputs; the result carries the whole-replay
+theorem Log.merged_self (l : Log) : l.merged.self = l.base.self := rfl
+
+/-- Execute only the appended entries; the result carries the whole-replay
 equation for the extended physical image. Returns the exact frame to append. -/
 def appendRestored {context : Context} (old : Restored context)
     (events : List Event) (witnesses : List CommitWitness) : Option (Restored context × Bytes) :=
-  match continued : replayEvents context.config old.state events with
+  match continued : replayEvents context.config old.chain old.state events with
   | none => none
   | some next =>
-    if notFailed : next.failed = false then
+    -- `old.log.base.self` is `old.log.merged.self` by definition; `merged` itself is linear
+    -- in the deltas since the last checkpoint and is never built on this path.
+    if kept : next.core.failed = false ∧ next.core.self = old.log.base.self then
       let d : Delta := ⟨events,witnesses⟩
       some (⟨old.log.push d,next,old.length + (deltaFrame d).length,
-        old.witnesses ++ witnesses,
-        restoreLog_push context old.log old.state next d old.exact continued notFailed,
+        old.witnesses ++ witnesses,old.chain,
+        restoreLog_push context old.log old.state next d old.exact (old.chained ▸ continued) kept.1 kept.2,
         by rw [Log.encode_push, List.length_append, old.sized],
-        by rw [Log.merged_push, old.witnessed]⟩,deltaFrame d)
+        by rw [Log.merged_push, old.witnessed],old.chained⟩,deltaFrame d)
     else none
 
 theorem appendRestored_exact {context : Context} (next : Restored context) :
@@ -603,6 +607,7 @@ def scanLog (bytes : Bytes) : Option Nat :=
     let rest := afterBase.length
     scanFrames (rest + 1) afterBase (total - rest)
 
+
 structure Crypto where
   /-- Concrete ML-DSA-65 implementation, context MiniJointAgreementV1. -/
   verify : Bytes → Bytes → Bytes → IO Bool
@@ -617,14 +622,18 @@ def verifyAttestations (crypto : Crypto) (expected : Context) (bytes : Bytes)
     let some pk := expected.publicKeys[a.signer]? | return false
     if !(← crypto.verify pk bytes a.signature) then return false
   return true
+/-- A certificate is checked against its statement alone: the cost is the signatures, and
+does not depend on the chain. -/
 def verifyCertificate (crypto : Crypto) (expected : Context) (cert : Certificate) : IO Bool := do
-  if cert.context != expected || cert.view == 0 || cert.block.isEmpty then return false
-  verifyAttestations crypto expected (commitmentBytes expected cert.view cert.block) cert.signers
+  if cert.context != expected || cert.view == 0 || cert.length == 0 then return false
+  verifyAttestations crypto expected
+    (commitStatementBytes expected cert.view cert.length cert.digest) cert.signers
 
 /-- A checked network commitment, never deserialized directly. Its constructor
 is private to this module, whose sole public producer pins the expected Context
 and verifies a quorum of real signatures. This is an IO verification boundary,
-not a proof of ML-DSA unforgeability or the whole distributed algorithm. -/
+not a proof of ML-DSA unforgeability or the whole distributed algorithm. It names a chain
+by its length and digest and carries none of it. -/
 structure VerifiedCommit (expected : Context) where
   private mk ::
   private certificate : Certificate
@@ -634,10 +643,20 @@ structure VerifiedCommit (expected : Context) where
   private members : ∀ a ∈ certificate.signers, a.signer < expected.config.parties
 def VerifiedCommit.context {expected : Context} (_v : VerifiedCommit expected) : Context := expected
 def VerifiedCommit.view {expected : Context} (v : VerifiedCommit expected) : Nat := v.certificate.view
-def VerifiedCommit.block {expected : Context} (v : VerifiedCommit expected) : Block := v.certificate.block
+def VerifiedCommit.length {expected : Context} (v : VerifiedCommit expected) : Nat := v.certificate.length
+def VerifiedCommit.digest {expected : Context} (v : VerifiedCommit expected) : Bytes := v.certificate.digest
 def VerifiedCommit.bytes {expected : Context} (v : VerifiedCommit expected) : Bytes := certificateStream.encode v.certificate
 def VerifiedCommit.signerIds {expected : Context} (v : VerifiedCommit expected) : List Nat :=
   v.certificate.signers.map Attestation.signer
+/-- `history` is the application history of the chain the commit is for, as far as the
+signed digest says: its running digest is the application half of the statement
+(`chainDigest_history` is why a correct signer's chain has that history). A reader that
+holds the source records checks this with no part of the chain; that two histories with one
+digest are equal is the digest's collision-freedom, an assumption wherever it is used. -/
+def VerifiedCommit.Reads {expected : Context} (v : VerifiedCommit expected) (history : Block) : Prop :=
+  (historyDigest expected).of history = historyHalf v.digest
+instance {expected : Context} (v : VerifiedCommit expected) (history : Block) : Decidable (v.Reads history) :=
+  inferInstanceAs (Decidable ((historyDigest expected).of history = historyHalf v.digest))
 theorem VerifiedCommit.signers_distinct {expected : Context} (v : VerifiedCommit expected) :
     v.signerIds.Nodup := v.distinct
 theorem VerifiedCommit.quorum_size {expected : Context} (v : VerifiedCommit expected) :
@@ -661,23 +680,21 @@ def verifyCommitted (crypto : Crypto) (expected : Context)
       else return none
     else return none
   else return none
-def verifyCommittedBytes (crypto : Crypto) (expected : Context)
-    (bytes : Bytes) : IO (Option (VerifiedCommit expected)) := do
-  let some certificate := certificateStream.toLawful.decode bytes | return none
-  verifyCommitted crypto expected certificate
 
+/-- The signature is checked against the statement before any block is read; the kernel's
+`decode` then checks the block a delivery carries against the same statement. -/
 def verifyCommitWitness (crypto : Crypto) (expected : Context)
     (witness : CommitWitness) : IO Bool := do
-  if !expected.wellFormed || witness.view == 0 || witness.block.isEmpty ||
+  if !expected.wellFormed || witness.view == 0 || witness.length == 0 ||
       witness.attestation.signer ≥ expected.config.parties ||
       witness.attestation.signature.length != 3309 then return false
   let some pk := expected.publicKeys[witness.attestation.signer]? | return false
-  crypto.verify pk (commitmentBytes expected witness.view witness.block)
+  crypto.verify pk (commitStatementBytes expected witness.view witness.length witness.digest)
     witness.attestation.signature
 
 inductive Result where
   | invalid | conflict | uncertain
-  | durable (state : State)
+  | durable (state : Replica)
   deriving Repr
 
 inductive PersistResult where
@@ -690,10 +707,10 @@ append. A read-only storage has no writer and refuses appends. -/
 structure Storage where
   current : IO (Option (Sigma Restored))
   install : Option (Sigma Restored) → IO Unit
-  append : Nat → Bytes → IO PersistResult
+  append : Nat → ByteArray → IO PersistResult
   /-- Atomically replace the whole image if its length is still the given one
   (a checkpoint); the writer keeps the replaced image as the previous segment. -/
-  replace : Nat → Bytes → IO PersistResult
+  replace : Nat → ByteArray → IO PersistResult
   deriving Inhabited
 
 def current (storage : Storage) (context : Context) : IO (Option (Restored context)) := do
@@ -711,21 +728,21 @@ the expected length. Conflict or uncertainty drops the image: the owner must
 reopen from disk; nothing proceeds on a guessed state. -/
 def commitRestored {context : Context} (storage : Storage) (prior next : Restored context)
     (frame : Bytes) : IO Result := do
-  match ← storage.append prior.length frame with
+  match ← storage.append prior.length frame.toByteArray with
   | .conflict => storage.install none; return .conflict
   | .uncertain => storage.install none; return .uncertain
   | .durable =>
     storage.install (some ⟨context,next⟩)
     return .durable next.state
 
-/-- The checkpoint of a restored image: the same state from one base frame,
-with every retained witness. Its replay equation is `restoreLog_checkpoint`;
+/-- The checkpoint of a restored image: the same replica from one base frame, with the
+witnesses it can still use. Its replay equation is `restoreLog_checkpoint`;
 nothing is replayed to build it. -/
 def checkpointRestored {context : Context} (prior : Restored context) : Restored context × Bytes :=
   let l := prior.log.checkpoint prior.state
-  (⟨l,prior.state,l.encode.length,prior.witnesses,
+  (⟨l,prior.state,l.encode.length,prior.witnesses.filter (retains prior.state),prior.chain,
     restoreLog_checkpoint context prior.log prior.state prior.exact,rfl,
-    by rw [Log.checkpoint_merged]; exact prior.witnessed⟩,l.encode)
+    by rw [Log.checkpoint_merged, prior.witnessed]; rfl,prior.chained⟩,l.encode)
 
 /-- Deltas after which a standing replica checkpoints its journal, bounding the
 replay a reopen performs. -/
@@ -736,17 +753,17 @@ the in-memory image, exactly as for an append: the owner reopens from disk. -/
 def checkpoint (storage : Storage) (context : Context) : IO PersistResult := do
   let some prior ← current storage context | return .conflict
   let (next,bytes) := checkpointRestored prior
-  match ← storage.replace prior.length bytes with
+  match ← storage.replace prior.length bytes.toByteArray with
   | .durable => storage.install (some ⟨context,next⟩); return .durable
   | .conflict => storage.install none; return .conflict
   | .uncertain => storage.install none; return .uncertain
 
 /-- Audit of a replica's whole retained input history: its checkpoint segments
 in order, then the live image. The first must be a genesis journal (no
-snapshot), replayed from `start`; every later one must open with exactly the
-state the previous one replays to. Returns the final replayed state. -/
-def auditSegments (context : Context) (images : List Bytes) : Except String State := do
-  let mut origin : Option State := none
+snapshot), replayed from `Replica.start`; every later one must open with exactly the
+replica the previous one replays to. Returns the final replayed replica. -/
+def auditSegments (context : Context) (images : List Bytes) : Except String Replica := do
+  let mut origin : Option Replica := none
   let mut index := 0
   for bytes in images do
     let some valid := scanLog bytes | throw s!"segment {index}: not a journal image"
@@ -763,126 +780,125 @@ def auditSegments (context : Context) (images : List Bytes) : Except String Stat
   | none => throw "no journal segments"
   | some s => return s
 
-/-- A peer retransmission can be acknowledged without another protocol input
-only when its exact message is already represented by canonical durable replay.
-This is transport duplicate suppression, not an idempotence claim about step:
-deliveryAt would also update logical time and run the pump. Explicit tick/poll
-service remains responsible for clocks and enabled continuation work. -/
-def receivedBefore {context : Context} (prior : Restored context) (message : Message) : Prop :=
-  ∃ old ∈ (viewAt prior.state message.view).received, old = message
+/-- A delivery the replica's state already accounts for: journaling it again would change
+nothing a later input reads. A message it has received, a proposal for a view that has one,
+a message for a view at or below its floor, a block it cannot read from a sender that is not
+ahead, a COMMIT it already holds. Skipping a delivery is a schedule the network may always
+choose, so this needs no argument about `step`.
 
-instance {context : Context} (prior : Restored context) (message : Message) :
-    Decidable (receivedBefore prior message) := inferInstanceAs
-      (Decidable (∃ old ∈ (viewAt prior.state message.view).received, old = message))
+CANDIDATE(⊥) is never settled. A member repeats it while it is stuck in a view, once per
+timeout, and each repeat is what the kernel answers with the evidence or the messages the
+member is owed (`serveFloor`, `serveViews`, `deliver`): swallowing it as a duplicate would
+leave a stranded member stranded. -/
+def settled (h : ChainDigest) (r : Replica) (w : WireMessage) : Bool :=
+  if w.kind == .candidate && w.value.isNone then false else
+  match decode h r w with
+  | some m =>
+      m.view ≤ r.core.lastCommitted || (viewAt r.core m.view).received.contains m ||
+        (m.kind == .propose && (viewAt r.core m.view).proposal.isSome)
+  | none => r.far.contains w || w.height ≤ r.height
 
-def witnessBefore {context : Context} (prior : Restored context) (witness : CommitWitness) : Prop :=
-  (∃ old ∈ prior.witnesses, old.view = witness.view ∧
-    old.block = witness.block ∧ old.attestation.signer = witness.attestation.signer) ∧
-      receivedBefore prior witness.message
+theorem candidate_bottom_never_settled (h : ChainDigest) (r : Replica) (w : WireMessage)
+    (candidate : w.kind = .candidate) (bottom : w.value = none) : settled h r w = false := by
+  simp [settled, candidate, bottom]
 
-instance {context : Context} (prior : Restored context) (witness : CommitWitness) :
-    Decidable (witnessBefore prior witness) := inferInstanceAs
-      (Decidable ((∃ old ∈ prior.witnesses, old.view = witness.view ∧
-    old.block = witness.block ∧ old.attestation.signer = witness.attestation.signer) ∧
-      receivedBefore prior witness.message))
+#assert_axioms candidate_bottom_never_settled
 
-/-- Randomized valid signatures may differ for the same exact signed statement.
-Retaining an existing verified signature for that same member/view/full block is
-sufficient; the incoming signature is independently verified before this test. -/
-theorem retained_witness_has_message {context : Context} (prior : Restored context)
-    (witness : CommitWitness) (retained : witnessBefore prior witness) :
-    (∃ old ∈ prior.witnesses, old.view = witness.view ∧
-      old.block = witness.block ∧ old.attestation.signer = witness.attestation.signer) ∧
-      witness.message ∈ (viewAt prior.state witness.view).received := by
-  obtain ⟨stored,previous,messageInside,messageSame⟩ := retained
-  subst previous
-  exact ⟨stored,messageInside⟩
+def CommitWitness.same (a b : CommitWitness) : Bool :=
+  a.view == b.view && a.length == b.length && a.digest == b.digest &&
+    a.attestation.signer == b.attestation.signer
 
-#assert_axioms retained_witness_has_message
-
-/-- Authenticated ordinary peer delivery. A duplicate leaves the durable image
-unchanged and writes nothing. COMMIT uses the witness path. -/
-def receiveAuthenticated (storage : Storage) (context : Context)
-    (time : Nat) (message : Message) : IO Result := do
+/-- Authenticated peer delivery. A settled message leaves the durable image unchanged and
+writes nothing. A COMMIT's verified signature is retained in the same append as its counted
+delivery: a crash cannot keep one without the other. -/
+def receiveDelivery (storage : Storage) (context : Context)
+    (time : Nat) (message : WireMessage) (witness : Option CommitWitness) : IO Result := do
   let some prior ← current storage context | return .invalid
-  if receivedBefore prior message then return .durable prior.state
-  let some (next,frame) := appendRestored prior [encodeInput (.deliveryAt time message)] []
+  if settled prior.chain prior.state message then return .durable prior.state
+  let added := witness.toList.filter fun w => !prior.witnesses.any (CommitWitness.same w)
+  let some (next,frame) := appendRestored prior [encodeEntry (.input (.deliveryAt time message))] added
     | return .invalid
   commitRestored storage prior next frame
 
-/-- Append one exact input using the proved continuation of the prior replay. -/
-def persist (storage : Storage) (context : Context) (input : Input) : IO Result := do
+/-- Append one exact entry using the proved continuation of the prior replay. -/
+def persist (storage : Storage) (context : Context) (entry : Entry) : IO Result := do
   let some prior ← current storage context | return .invalid
-  let some (next,frame) := appendRestored prior [encodeInput input] [] | return .invalid
+  let some (next,frame) := appendRestored prior [encodeEntry entry] [] | return .invalid
   commitRestored storage prior next frame
 
 /-- Candidate dissemination persists only unvalidated offers. Every complete
 source record remains subject to the native historical checker before checked.
-Every nonempty record not yet committed is kept, so restart/catchup rediscovers the work;
-a committed one is no longer work (`addOffer` would refuse it) and costs no append. -/
-def retainCandidateOffers (storage : Storage) (context : Context) (block : Block) : IO Result := do
+`records` are source records from application height `height`; every one above this
+replica's committed records that it neither offers nor has committed is kept, so
+restart and catch-up rediscover the work. -/
+def retainCandidateOffers (storage : Storage) (context : Context) (height : Nat) (records : Block) :
+    IO Result := do
   let some prior ← current storage context | return .invalid
-  let fresh := (applicationHistory block).filter (fun payload =>
-    !prior.state.offers.contains payload && !prior.state.committedTip.contains payload)
+  let run := (above height prior.state.records records).getD []
+  let fresh := run.filter (fun payload => !payload.isEmpty &&
+    !prior.state.core.offers.contains payload && !prior.state.committed.contains payload)
   if fresh.isEmpty then return .durable prior.state
   let some (next,frame) := appendRestored prior
-      (fresh.map (fun payload => encodeInput (.offer payload))) [] | return .invalid
+      (fresh.map (fun payload => encodeEntry (.input (.offer payload)))) [] | return .invalid
   commitRestored storage prior next frame
 
 /-- Verification, protocol delivery and retained transferable evidence share one
-journal append. A crash cannot preserve the counted COMMIT while dropping the
-witness needed to recover its decision. Only this producer accepts peer proofs. -/
-def receiveCommitWitness (storage : Storage) (crypto : Crypto) (context : Context)
-    (time : Nat) (witness : CommitWitness) : IO Result := do
+journal append. Only this producer accepts peer signatures. The COMMIT may have been
+written by its signer or passed on by any member: the signature is the signer's, over the
+statement the message carries. -/
+def receiveCommit (storage : Storage) (crypto : Crypto) (context : Context)
+    (time : Nat) (message : WireMessage) (signature : Bytes) : IO Result := do
+  let some (length,digest) := message.statement | return .invalid
+  if message.kind != .commit then return .invalid
+  let witness : CommitWitness := ⟨message.view,length,digest,⟨message.sender,signature⟩⟩
+  -- A COMMIT the replica already accounts for was verified when it was first taken.
+  let some prior ← current storage context | return .invalid
+  if settled prior.chain prior.state message then return .durable prior.state
   if !(← verifyCommitWitness crypto context witness) then return .invalid
-  let some prior ← current storage context | return .invalid
-  if witnessBefore prior witness then return .durable prior.state
-  let added := if prior.witnesses.any (fun w =>
-      w.view == witness.view && w.block == witness.block &&
-      w.attestation.signer == witness.attestation.signer) then [] else [witness]
-  let some (next,frame) := appendRestored prior [encodeInput (.deliveryAt time witness.message)] added
-    | return .invalid
-  commitRestored storage prior next frame
+  receiveDelivery storage context time message (some witness)
 
-/-- Sign only a durable actual COMMIT send, with its retained audit cause.
-Requiring local doCommit here would destroy liveness: prepare totality does not
-imply a quorum of local doCommit outputs. -/
-def exportCommitment (storage : Storage) (crypto : Crypto) (context : Context)
-    (view : Nat) (block : Block) : IO (Option Attestation) := do
+/-- The durable send cause of a COMMIT this replica signs: the message is in its own
+undrained output, as a broadcast or as evidence it owes a peer. Both are written by an
+acknowledged journal entry before anything is signed. -/
+def ownCommit {context : Context} (prior : Restored context) (message : WireMessage) : Bool :=
+  message.kind == .commit && message.sender == prior.self && message.statement.isSome &&
+    (prior.state.sends.contains message || prior.state.owed.any fun entry => entry.2 == message)
+
+/-- The transferable signature a COMMIT leaves with: this replica's own, made now for a
+COMMIT in its durable output, or the signer's, kept since it was received. A COMMIT with
+neither is not sent. -/
+def commitProof (storage : Storage) (crypto : Crypto) (context : Context)
+    (message : WireMessage) : IO (Option Bytes) := do
   let some prior ← current storage context | return none
-  if !exportable prior.state view block then return none
-  let signature ← crypto.sign (commitmentBytes context view block)
-  if signature.length != 3309 then return none
-  return some ⟨prior.self,signature⟩
-/-- Any replica may reconstruct a certificate from received COMMIT evidence,
-including a replica which never locally doCommitted. Its own durable COMMIT send
-can contribute without a loopback packet. The result is reverified, not cast. -/
-def recoverCommitment (storage : Storage) (crypto : Crypto) (context : Context)
-    (view : Nat) (block : Block) : IO (Option (VerifiedCommit context)) := do
+  let some (length,digest) := message.statement | return none
+  if message.sender == prior.self then
+    if !ownCommit prior message then return none
+    let signature ← crypto.sign (commitStatementBytes context message.view length digest)
+    if signature.length != 3309 then return none
+    return some signature
+  else
+    return (prior.witnesses.find? fun w => w.signs message).map (·.attestation.signature)
+
+/-- The certificate of the newest commit this replica keeps evidence for: the signatures
+kept with the COMMITs that committed it, and its own if it sent one. Any replica that
+committed can produce it; the result is reverified, not cast. The statement is read off
+the evidence: every message of an entry is for one block, written from the entry's height. -/
+def recoverCommitment (storage : Storage) (crypto : Crypto) (context : Context) :
+    IO (Option (VerifiedCommit context)) := do
   let some prior ← current storage context | return none
-  let mut signers := (prior.witnesses.filter (fun w =>
-    w.view == view && w.block == block)).map CommitWitness.attestation
-  if !(signers.any (fun a => a.signer == prior.self)) then
-    if let some own ← exportCommitment storage crypto context view block then
-      signers := signers ++ [own]
-  verifyCommitted crypto context ⟨context,view,block,signers⟩
-/-- Import a transferable quorum using one durable append. Signatures are
-checked before any contained COMMIT is counted; all proofs survive restart.
-This does not produce Input.checked or source application authority. -/
-def receiveCommitment (storage : Storage) (crypto : Crypto) (context : Context)
-    (time : Nat) (certificateBytes : Bytes) : IO Result := do
-  let some verified ← verifyCommittedBytes crypto context certificateBytes | return .invalid
-  let certificate := verified.certificate
-  let some prior ← current storage context | return .invalid
-  let incoming := certificate.signers.map (fun a =>
-    CommitWitness.mk certificate.view certificate.block a)
-  if ∀ witness ∈ incoming, witnessBefore prior witness then
-    return .durable prior.state
-  let added := incoming.foldl (fun ws w =>
-    if (prior.witnesses ++ ws).any (fun old => old.view == w.view && old.block == w.block &&
-        old.attestation.signer == w.attestation.signer) then ws else ws ++ [w]) []
-  let some (next,frame) := appendRestored prior
-      (incoming.map (fun w => encodeInput (.deliveryAt time w.message))) added
-    | return .invalid
-  commitRestored storage prior next frame
+  let some (height,digest,messages) := prior.state.evidence.getLast? | return none
+  let some first := messages.head? | return none
+  let some run := first.value | return none
+  let length := height + run.length
+  let stated := prior.chain.over digest run
+  let mut signers : List Attestation := []
+  for m in messages do
+    if m.kind == .commit && m.value == some run && !signers.any (fun a => a.signer == m.sender) then
+      if m.sender == prior.self then
+        let signature ← crypto.sign (commitStatementBytes context first.view length stated)
+        if signature.length == 3309 then signers := signers ++ [⟨m.sender,signature⟩]
+      else if let some w := prior.witnesses.find? (fun w => w.view == first.view && w.length == length &&
+          w.digest == stated && w.attestation.signer == m.sender) then
+        signers := signers ++ [w.attestation]
+  verifyCommitted crypto context ⟨context,first.view,length,stated,signers⟩
 end Minidregg.Compiler.GenericSimplexIO

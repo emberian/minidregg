@@ -32,19 +32,31 @@ def sourcePayload (intent : DataIntent ResourceBirthCodec.rootBytes) : List UInt
   DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent)
 
 /-- Source-private application capability. The caller cannot decode one from
-bytes or replace expected context with the roster advertised by a packet. -/
+bytes or replace expected context with the roster advertised by a packet.
+
+A commitment names its chain by a digest and carries no payload. `history` is the
+application history this reader takes it to order: the loaded source prefix, the record,
+and the committed records after it that the reader already holds. `reads` is the check that
+makes it so: the running digest of `history` is the application half of the signed digest.
+That no other history has that digest is the digest's collision-freedom, an assumption
+wherever two such tokens are compared (`GenericSimplexReceiverSafety`). -/
 structure Ordered (expected : Context) (loaded : Durable)
     (intent : DataIntent ResourceBirthCodec.rootBytes) where
   private mk ::
   commitment : VerifiedCommit expected
-  sourceOrdered : (sourcePrefix loaded ++ [sourcePayload intent]).IsPrefix
-    (commitment.block.filter (fun b => !b.isEmpty))
+  history : Minidregg.Kernel.GenericSimplex.Block
+  reads : commitment.Reads history
+  sourceOrdered : (sourcePrefix loaded ++ [sourcePayload intent]).IsPrefix history
 
+/-- `later` are the committed records after this one, in order, up to the commitment's
+chain. The digest is computed over the whole history from its origin: linear in the source
+history, as `sourcePrefix` already is. -/
 def order (expected : Context) (loaded : Durable)
-    (intent : DataIntent ResourceBirthCodec.rootBytes) (commitment : VerifiedCommit expected) :
+    (intent : DataIntent ResourceBirthCodec.rootBytes) (commitment : VerifiedCommit expected)
+    (later : Minidregg.Kernel.GenericSimplex.Block) :
     Option (Ordered expected loaded intent) :=
-  if sourceOrdered : (sourcePrefix loaded ++ [sourcePayload intent]).IsPrefix
-      (commitment.block.filter (fun b => !b.isEmpty)) then some ⟨commitment,sourceOrdered⟩ else none
+  if reads : commitment.Reads (sourcePrefix loaded ++ [sourcePayload intent] ++ later) then
+    some ⟨commitment,_,reads,⟨later,rfl⟩⟩ else none
 
 /-- The ordinary deployment gate cannot exempt controller writes. This transport
 is minted from the exact current source-admitted reservation token and accepts
@@ -115,6 +127,6 @@ theorem pending_preserves_order {config : Config} {opened : Opened config}
       ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground}
     (receipt : Pending config opened expected r) :
     (sourcePrefix opened.durable ++ [sourcePayload r.intent]).IsPrefix
-      (receipt.ordered.commitment.block.filter (fun b => !b.isEmpty)) := receipt.ordered.sourceOrdered
+      receipt.ordered.history := receipt.ordered.sourceOrdered
 
 end Minidregg.Kernel.JointReceiver

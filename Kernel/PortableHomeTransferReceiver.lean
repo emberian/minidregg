@@ -33,13 +33,18 @@ structure Ordered (config : Config) (opened : Opened config) (consent : Consent 
   expected : Context
   contextPinned : config.jointConsensus = some expected
   commit : VerifiedCommit expected
-  sourcePrefix : (history opened ++ [payload consent]).IsPrefix (commit.block.filter (fun b => !b.isEmpty))
+  /-- The application history the reader takes the commit to order (`VerifiedCommit.Reads`):
+  the source history, the consent's record and the committed records after it. -/
+  ordered : Minidregg.Kernel.GenericSimplex.Block
+  reads : commit.Reads ordered
+  sourcePrefix : (history opened ++ [payload consent]).IsPrefix ordered
 
 def order (config : Config) (opened : Opened config) (consent : Consent config opened)
-    (expected : Context) (commit : VerifiedCommit expected) : Option (Ordered config opened consent) :=
+    (expected : Context) (commit : VerifiedCommit expected) (later : Minidregg.Kernel.GenericSimplex.Block) :
+    Option (Ordered config opened consent) :=
   if pinned : config.jointConsensus = some expected then
-    if exact : (history opened ++ [payload consent]).IsPrefix (commit.block.filter (fun b => !b.isEmpty)) then
-      some ⟨expected,pinned,commit,exact⟩ else none
+    if reads : commit.Reads (history opened ++ [payload consent] ++ later) then
+      some ⟨expected,pinned,commit,_,reads,⟨later,rfl⟩⟩ else none
   else none
 
 /-- Existing source facet laws remain load-bearing. Captain registration adds
