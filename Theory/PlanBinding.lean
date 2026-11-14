@@ -40,6 +40,13 @@ current store.
 * `independent_both_orders`, `independent_commute` — two plans that write
   nothing the other read are both admitted in either order and reach the same
   store.  `Example` runs it on `Store.Example.layout`, with the overlapping pole.
+* Cited reads (a turn's reads of cells it does not write): `staleAll` and `admitAll` refuse with
+  every stale address and no value (`mem_staleAll`, `admitAll_refusal_exact`); currency is by
+  value (`admitAll_ok_iff_unmoved`, `moved_back_admits`); a law over the cited addresses gives
+  at admission the verdict it gave at authoring (`no_toctou_cited`); a turn's own install leaves
+  its cited reads current, so the nullifier and not the footprint refuses an exact retry
+  (`cited_survive_install`). `Example.cited_lands_commute`: disjoint writes with a shared
+  cited read commute.
 * `Opened.verifyAll_openAll` / `verifyAll_sound` / `twoLevel_sound` — openings
   at the cell root under the world root.  `IdToy.stale_opening_refused` is why
   the *signed* binding is values, not openings: an opening authored at the
@@ -263,6 +270,137 @@ theorem refusal_names_moved {s₀ s : Store L} {fp : Footprint L} (h₀ : Holds 
     a ∈ fp.addresses ∧ s a ≠ s₀ a := by
   obtain ⟨r, hr, rfl, stale⟩ := admit_refusal_names_stale refused
   exact ⟨mem_addresses.2 ⟨r, hr, rfl⟩, by rw [h₀ r hr]; exact stale⟩
+
+/-! ### Every stale address
+
+`firstStale?` names one address, which is enough for a signer that re-reads and re-signs. A turn
+that cites other cells is repaired by whoever owns each moved address, so its refusal names
+them all. The refusal is a list of addresses: it carries no value, current or observed, because
+a guard is a read and the refused requester may not hold the cell. -/
+
+/-- Every read whose value the store no longer holds, in footprint order. -/
+def staleAll (store : Store L) (fp : Footprint L) : List (Address L) :=
+  (fp.filter fun r => !decide (store r.address = r.observed)).map Read.address
+
+/-- **`staleAll` is exactly the stale set.** -/
+theorem mem_staleAll {store : Store L} {fp : Footprint L} {a : Address L} :
+    a ∈ staleAll store fp ↔ ∃ r ∈ fp, r.address = a ∧ store r.address ≠ r.observed := by
+  unfold staleAll
+  constructor
+  · intro mem
+    obtain ⟨r, kept, rfl⟩ := List.mem_map.1 mem
+    obtain ⟨member, stale⟩ := List.mem_filter.1 kept
+    exact ⟨r, member, rfl, by simpa using stale⟩
+  · rintro ⟨r, member, rfl, stale⟩
+    exact List.mem_map.2 ⟨r, List.mem_filter.2 ⟨member, by simpa using stale⟩, rfl⟩
+
+theorem staleAll_eq_nil_iff (store : Store L) (fp : Footprint L) :
+    staleAll store fp = [] ↔ Holds store fp := by
+  constructor
+  · intro empty r member
+    by_contra stale
+    have named : r.address ∈ staleAll store fp := mem_staleAll.2 ⟨r, member, rfl, stale⟩
+    rw [empty] at named
+    simp at named
+  · intro holds
+    apply List.eq_nil_iff_forall_not_mem.2
+    intro a mem
+    obtain ⟨r, member, _, stale⟩ := mem_staleAll.1 mem
+    exact stale (holds r member)
+
+/-- The one address `firstStale?` names is the first of `staleAll`. -/
+theorem firstStale?_eq_head (store : Store L) (fp : Footprint L) :
+    firstStale? store fp = (staleAll store fp).head? := by
+  induction fp with
+  | nil => rfl
+  | cons r rest ih =>
+      unfold firstStale?
+      by_cases h : store r.address = r.observed
+      · rw [if_pos h, ih]
+        simp [staleAll, List.filter_cons, h]
+      · rw [if_neg h]
+        simp [staleAll, List.filter_cons, h]
+
+/-- **Admission of a cited footprint.** Its only refusal is the whole stale list. -/
+def admitAll (store : Store L) (fp : Footprint L) : Except (List (Address L)) Unit :=
+  if (staleAll store fp).isEmpty then .ok () else .error (staleAll store fp)
+
+theorem admitAll_ok_iff (store : Store L) (fp : Footprint L) :
+    admitAll store fp = .ok () ↔ Holds store fp := by
+  rw [← staleAll_eq_nil_iff]
+  unfold admitAll
+  by_cases h : staleAll store fp = []
+  · simp [h]
+  · have nonempty : (staleAll store fp).isEmpty = false := by simpa using h
+    simp [nonempty, h]
+
+/-- `admitAll` admits exactly what `admit` admits: it differs only in what a refusal names. -/
+theorem admitAll_ok_iff_admit (store : Store L) (fp : Footprint L) :
+    admitAll store fp = .ok () ↔ admit store fp = .ok () := by
+  rw [admitAll_ok_iff, admit_ok_iff]
+
+theorem admitAll_refusal {store : Store L} {fp : Footprint L} {stale : List (Address L)}
+    (refused : admitAll store fp = .error stale) :
+    stale = staleAll store fp ∧ stale ≠ [] := by
+  unfold admitAll at refused
+  by_cases h : staleAll store fp = []
+  · simp [h] at refused
+  · have nonempty : (staleAll store fp).isEmpty = false := by simpa using h
+    rw [nonempty] at refused
+    simp at refused
+    subst refused
+    exact ⟨rfl, h⟩
+
+/-- **The refusal names every moved read address and nothing else.** Relative to the store the
+footprint was authored on, an address is in the refusal iff the footprint read it and its
+value moved. Premise inhabitation and teeth: `Example.cited_refusal_names_both`. -/
+theorem admitAll_refusal_exact {s₀ s : Store L} {fp : Footprint L} (h₀ : Holds s₀ fp)
+    {stale : List (Address L)} (refused : admitAll s fp = .error stale) (a : Address L) :
+    a ∈ stale ↔ a ∈ fp.addresses ∧ s a ≠ s₀ a := by
+  obtain ⟨rfl, _⟩ := admitAll_refusal refused
+  rw [mem_staleAll]
+  constructor
+  · rintro ⟨r, member, rfl, moved⟩
+    exact ⟨mem_addresses.2 ⟨r, member, rfl⟩, by rw [h₀ r member]; exact moved⟩
+  · rintro ⟨read, moved⟩
+    obtain ⟨r, member, rfl⟩ := mem_addresses.1 read
+    exact ⟨r, member, rfl, by rw [← h₀ r member]; exact moved⟩
+
+/-- **Currency is by value.** Admission is a function of the present values at the read
+addresses and of nothing that happened in between. -/
+theorem admitAll_ok_iff_unmoved {s₀ s : Store L} {fp : Footprint L} (h₀ : Holds s₀ fp) :
+    admitAll s fp = .ok () ↔ ∀ a ∈ fp.addresses, s a = s₀ a := by
+  rw [admitAll_ok_iff_admit, admit_ok_iff_unmoved h₀]
+
+/-- **Moved and moved back is current again.** While a cited value is away (`s₁`) the footprint
+is refused, naming that address; once every cited value is back (`s₂`) it is admitted, whatever
+the history between. A revert makes the verdicts that cited the reverted state current without
+re-running anything. -/
+theorem moved_back_admits {s₀ s₁ s₂ : Store L} {fp : Footprint L} (h₀ : Holds s₀ fp)
+    {a : Address L} (read : a ∈ fp.addresses) (moved : s₁ a ≠ s₀ a)
+    (back : ∀ b ∈ fp.addresses, s₂ b = s₀ b) :
+    (∃ stale, admitAll s₁ fp = .error stale ∧ a ∈ stale) ∧ admitAll s₂ fp = .ok () := by
+  refine ⟨?_, (admitAll_ok_iff_unmoved h₀).2 back⟩
+  cases h : admitAll s₁ fp with
+  | ok u => exact absurd ((admitAll_ok_iff_unmoved h₀).1 h a read) moved
+  | error stale => exact ⟨stale, rfl, (admitAll_refusal_exact h₀ h a).2 ⟨read, moved⟩⟩
+
+/-- **No TOCTOU for cited reads.** A judgement that reads the store only at the footprint's
+addresses (a law over the cells a turn cites) returns at admission what it returned where the
+turn was authored, whenever the footprint is admitted. -/
+theorem no_toctou_cited {β : Type y} {s₀ s : Store L} {fp : Footprint L} (judge : Store L → β)
+    (reads : ∀ t t' : Store L, (∀ a ∈ fp.addresses, t a = t' a) → judge t = judge t')
+    (h₀ : Holds s₀ fp) (admitted : admitAll s fp = .ok ()) : judge s = judge s₀ :=
+  reads s s₀ ((admitAll_ok_iff_unmoved h₀).1 admitted)
+
+/-- **A turn's own install leaves its cited reads current** when it writes none of them. So
+value currency never refuses an exact retry: the footprint of a replayed command still holds
+after its first admission, and what refuses the replay is the operation's nullifier
+(`ResourceTransaction.Reject.nullifierUsed`), never the footprint. -/
+theorem cited_survive_install {s : Store L} {cited : Footprint L} (holds : Holds s cited)
+    (patch : Patch L) (unwritten : Disjoint (Patch.writeFootprint patch) cited.addresses) :
+    admitAll (Patch.run s patch) cited = .ok () :=
+  (admitAll_ok_iff _ _).2 (holds_run_disjoint holds patch unwritten)
 
 end Footprint
 
@@ -530,6 +668,55 @@ theorem two_agents_disjoint_computed :
       admit (Patch.run start planB.patch) planA.footprint = .ok () := by
   exact ⟨rfl, rfl⟩
 
+/-! ### Cited reads: two turns that read one address and write different ones -/
+
+/-- The address both turns cite and neither writes (a verdict cell's result). -/
+def cited : Read layout := ⟨at_ .heap 3, some (7 : Nat)⟩
+
+def citedStart : Store layout := start.set (at_ .heap 3) (some (7 : Nat))
+
+def landA : Plan layout :=
+  ⟨[cited, ⟨at_ .heap 1, some (10 : Nat)⟩], [read .heap 3 (some 7), write .heap 1 10 11], by decide⟩
+def landB : Plan layout :=
+  ⟨[cited, ⟨at_ .heap 2, some (20 : Nat)⟩], [read .heap 3 (some 7), write .heap 2 20 21], by decide⟩
+
+/-- The two turns share a read (so their footprints are NOT disjoint) and are independent. -/
+theorem lands_share_a_read_and_are_independent :
+    cited.address ∈ landA.footprint.addresses ∧ cited.address ∈ landB.footprint.addresses ∧
+      Independent landA landB := by decide
+
+/-- **Disjoint writes with a shared cited read commute**: both orders are admitted and reach
+one store. -/
+theorem cited_lands_commute :
+    landB.Admits (Patch.run citedStart landA.patch) ∧ landA.Admits (Patch.run citedStart landB.patch) ∧
+      Patch.run (Patch.run citedStart landA.patch) landB.patch =
+        Patch.run (Patch.run citedStart landB.patch) landA.patch :=
+  have independent : Independent landA landB := lands_share_a_read_and_are_independent.2.2
+  have a : landA.Admits citedStart := by decide
+  have b : landB.Admits citedStart := by decide
+  ⟨(independent_both_orders independent a b).1, (independent_both_orders independent a b).2,
+    independent_commute independent a b⟩
+
+/-- A footprint of three reads; two of them move. -/
+def fpCited : Footprint layout :=
+  [cited, ⟨at_ .heap 1, some (10 : Nat)⟩, ⟨at_ .heap 2, some (20 : Nat)⟩]
+
+/-- **The refusal names every moved address** (teeth for `firstStale?`, which names one): after
+the cited value and `heap[1]` both move, `admitAll` names both, in footprint order, and
+`heap[2]`, which did not move, is not named. -/
+theorem cited_refusal_names_both :
+    admitAll (Patch.run citedStart [write .heap 3 7 8, write .heap 1 10 11]) fpCited =
+        .error [at_ .heap 3, at_ .heap 1] ∧
+      admit (Patch.run citedStart [write .heap 3 7 8, write .heap 1 10 11]) fpCited =
+        .error (.footprintStale (at_ .heap 3)) := by
+  exact ⟨rfl, rfl⟩
+
+/-- **Moved and moved back**: refused while the cited value is away, admitted once it is back. -/
+theorem cited_moved_back :
+    admitAll (Patch.run citedStart [write .heap 3 7 8]) fpCited = .error [at_ .heap 3] ∧
+      admitAll (Patch.run citedStart [write .heap 3 7 8, write .heap 3 8 7]) fpCited = .ok () := by
+  exact ⟨rfl, rfl⟩
+
 /-- Overlapping: after A commits, C (which read `heap[1] = 10`) is refused
 `footprintStale heap[1]`. -/
 theorem overlap_refused_computed :
@@ -694,6 +881,16 @@ end Opened
 #guard_msgs (whitespace := lax) in #print axioms root_admits_footprint
 /-- info: 'Minidregg.Theory.PlanBinding.footprint_extra_only_disjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms footprint_extra_only_disjoint
+/-- info: 'Minidregg.Theory.PlanBinding.Footprint.mem_staleAll' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Footprint.mem_staleAll
+/-- info: 'Minidregg.Theory.PlanBinding.Footprint.admitAll_refusal_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Footprint.admitAll_refusal_exact
+/-- info: 'Minidregg.Theory.PlanBinding.Footprint.moved_back_admits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Footprint.moved_back_admits
+/-- info: 'Minidregg.Theory.PlanBinding.Footprint.no_toctou_cited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Footprint.no_toctou_cited
+/-- info: 'Minidregg.Theory.PlanBinding.Footprint.cited_survive_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Footprint.cited_survive_install
 /-- info: 'Minidregg.Theory.PlanBinding.no_toctou' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_toctou
 /-- info: 'Minidregg.Theory.PlanBinding.independent_both_orders' depends on axioms: [propext, Classical.choice, Quot.sound] -/
