@@ -503,22 +503,27 @@ modules above it).
   newest commit from `Replica.evidence` and the kept witnesses. It is not shipped between
   replicas any more: peers get the COMMITs themselves, relayed.
 - The application. `VerifiedCommit.Reads history` says a history's `historyDigest` is the
-  history half of the signed digest. The participant keeps the running digest of its source's
-  records beside the source (`JointReceiver.History`: computed once when the source is
-  opened or reread, extended by each append through `Applied.history`).
+  history half of the signed digest. The participant keeps two derived values beside its
+  source, each computed once when the source is opened or reread and extended by each append:
+  the running digest of its records (`JointReceiver.History`, through `Applied.history`) and
+  their index by original ingress (`JointReceiver.Ingress`, through `Applied.ingress`; proved:
+  a hit names a record carrying exactly that ingress, `Ingress.find_sound`).
   `JointReceiver.order` extends it by the record and the committed records after it (the
   replica's `committed` queue) and compares with the newest certificate: it hashes nothing
   below the record, and its token names the history without building it. `applyNext` hands
   the application one committed payload per slice and journals `consume` only after the
   source holds the record, so a restart hands it over again.
-- Validation. Work is `(height, records)`: source records from an application height. One
-  record directly on the verified source tip (every proposal while the application keeps up
-  with the commits) is admitted there once (`JointSourcePrefixValidation.validateNext`, the
-  same fresh derivation the ordered receiver runs before its append); its cost does not
-  depend on the height. Any other work (records above committed ones the source has not
-  taken yet, or a record the tip does not grant) is replayed as a whole prefix from the
-  genesis in a scratch Store (`validate`), linear in the history; that path alone tells an
-  invalid prefix from an unavailable dependency.
+- Validation (`GenericSimplexController.attempt`). Work is `(height, records)`: source
+  records from an application height. While the application has not taken every record the
+  replica has committed, work waits (no cost) for `applyNext` to bring the source tip level.
+  One record above the tip (every proposal on a committed parent) is admitted there once
+  (`JointSourcePrefixValidation.validateNext`, the same fresh derivation the ordered receiver
+  runs before its append); its cost does not depend on the height. A record that can never be
+  this source's on this tip is rejected for good; one the tip's admission does not grant now
+  is retried later at that same cost. Two or more records above the tip (a proposal
+  that extends a prepared parent this replica has not committed with another record) are
+  replayed as a whole prefix from the genesis in a scratch Store (`validate`), linear in the
+  history: the second record has to be admitted at a source state no Store holds.
 - Discovery. Each acknowledged delivery contributes the blocks it carries. A held COMMIT
   the replica reads later (`release`) enters its views under an input that carried no
   block, so whenever the held set (`Replica.far`) has changed the participant rediscovers
@@ -526,10 +531,32 @@ modules above it).
   never validated the block of the commits it had held, and stayed behind until restarted.
 - The request spool. A client places `ID.call` or `ID.watch` in a replica's `requests`
   directory and reads `ID.receipt` from `receipts`. A served request is removed, so a slice
-  reads only pending requests; a pending request is read once and searches only the source
-  records appended since its last search. The receipt file holds the native receipt (which
+  reads only pending requests; a pending request is read once and looks its ingress up in
+  the source's index (one lookup, only when the source has grown). The receipt file holds the native receipt (which
   carries the accepted count and world root at the call's height) and no longer the source
   prefix through the call.
+- Height announcements (`GenericSimplexNative`, frame tag 3). An idle domain sends nothing,
+  so a replica that restarts into one cannot learn from traffic that its peers committed
+  while it was stopped. Its first slice after an open therefore sends each peer its
+  committed height under the pair MAC and asks for theirs. A peer that is asked answers with
+  its own height and, when it has committed more and still keeps the evidence from the
+  asker's height on, with the COMMITs of those commits (`keptCommits`: the messages the
+  kernel owes a member that repeats CANDIDATE(⊥) from that height), each under its signer's
+  signature; its own old COMMITs it signs again, which `ownCommit` permits for a COMMIT in
+  the evidence it keeps. The asker takes them through `receiveCommit` like any COMMIT, so an
+  announcement carries no authority and changes no replica state on either side; nothing of
+  it is journalled. A replica that knows a peer is ahead asks again as soon as it has
+  committed something since it last asked, and otherwise every 5 s, until it is level; a peer
+  answers one member from one height with COMMITs at most once a second. A replica further
+  behind than its peers keep evidence for (`Config.window` commits) is still not served:
+  that transfer needs the earlier certificates from a durable record.
+- The client. `await-call` is answered by a quorum of identical receipts (three of four),
+  and every receipt present must be the same one. A replica writes a receipt only for a
+  record its source holds and its source takes a record only under a verified certificate,
+  so one correct replica's receipt already means the call is ordered for good; a quorum
+  holds `faults + 1` correct ones whatever the faulty wrote. A stopped replica no longer
+  leaves the client uncertain; its watch stays in its spool and it writes its receipt when it
+  returns. `await-call --all` asks the other question, whether every replica holds the call.
 - Bytes. Packets are `ByteArray` from the transport to the codec and back (`encodeBytes`,
   `decodeBytes`); a journal append is a `ByteArray` frame. Kernel values (`Bytes`, `Block`)
   are still lists, as are the in-memory `Log` and the image read at open.
@@ -556,17 +583,21 @@ Store and signed by the test signer (`sign-probe`, a public seed).
   and Store reread, and the original receipt is there with exactly one append.
 - `lookup-all-call`: fresh processes read the same receipt and prefix from the four Stores.
 - `serve-replica` ×4 and `await-call`: a second birth through four standing processes over
-  TCP and the request spool.
+  TCP and the request spool. Then replica 3 is stopped: a third birth is confirmed to its
+  client by the three other receipts (after the view the stopped replica leads times out),
+  replica 3 is restarted with no further call, and `await-call --all` and a reread of the
+  four Stores find the record on all four. Plant `all-receipts`: a client that waits for
+  all four while replica 3 is stopped is left uncertain.
+- `rejoin`: the same scenario in process on the real Stores with no timer (the views the
+  stopped replica leads end by jumps of the live replicas' logical clocks): stopped at source
+  height 1, restarted into an idle domain at 3, level after the first exchange of height
+  announcements. Plant `silent-rejoin`: without the announcement it stays at 1.
+- `append-flatness`: 48 births in process; the gate fails if the median application
+  hand-off per KB of appended record over the last 8 heights exceeds twice that over the
+  first 8 (the record itself grows with the height, below). Plant `revalidate-prefix`: every
+  replica replays its whole prefix after each append.
 - Plant `foreign-history`: every participant's running digest is another domain's, and the
   certified record is never ordered or appended.
-
-Run by hand and not a gate row (20 s and more, timing dependent): six to forty calls on
-standing replicas with a 2 s view timeout; one replica stopped for two calls and restarted.
-The three live replicas commit after one view timeout (the stopped replica's leader turn);
-the restarted one catches up through the kept commit evidence, one timeout per step.
-`await-call` waits for all four receipts, so a call made while a replica is down is
-uncertain to its client until that replica returns. A replica that restarts into an idle
-domain is not told it is behind until the next operation.
 
 Measured (`generic-simplex-load 640 10`, compiled, hbox, four replicas, instant delivery,
 each input journalled through `appendRestored` under the deployed digest, outputs flushed,
@@ -587,13 +618,56 @@ prefix from genesis (68 ms at height 0, about 2 s at height 23), each receipt wr
 whole prefix, and each slice reread every request ever placed. A slice now spends about
 22 ms in validation and 22 ms in a proposal at every height.
 
-Still growing with the history: the ordered append (`JointOrderedSourceReceiver.apply`:
-derivation, the Store's compare-and-append, readback, the verified extension) took 48 ms at
-height 1 and 75 to 95 ms at height 40, about 0.7 ms per record; it is on the source side
-and was not profiled. The first search of a request for its ingress walks the accepted
-records once (there is no index by ingress). `validate` (the whole-prefix replay) remains
-for work that is not one record on the tip. `PortableHomeTransferReceiver.order` still
-builds and hashes its whole history.
+Still growing with the history, measured (`append-flatness`, 200 births in process on four
+real Stores, hbox, one run; median application hand-off of the four replicas):
+
+| height | appended record | hand-off | derive | Store append | readback and successor |
+|---|---|---|---|---|---|
+| 1 | 5,123 B | 57 ms | 24 ms | 11 ms | 10 ms |
+| 40 | 11,369 B | 100 ms | 30 ms | 25 ms | 20 ms |
+| 200 | about 37 KB | 531 ms | 95 ms | 133 ms | 125 ms |
+
+- The cause is the record, not the walk over history. A birth rewrites a cell that
+  accumulates with every birth (the record is 5,123 bytes at height 1 and grows by about
+  160 bytes per birth), and a record carries the whole written cell. By reading, not yet by
+  measurement: it is the credential authority cell, one cell that holds every stored
+  capability (`CredentialAuthorityDomain.Cell`); a birth adds two capabilities to it, and
+  `issuedOf` hashes every stored capability again whenever the cell changes. The row prints
+  each record's largest write and its cell, which settles it.
+  Every pass over the record's bytes (derivation, canonical encoding as a list of octets,
+  chain and leaf digests, the Store's append and exact readback, the second `extend` in
+  `ExactReadback.ofAppended`) grows with it. Per KB of record the hand-off is 11 ms at
+  height 1, 9 ms at 40 and 14 ms at 200. The cure is on the source side and is not done: a
+  birth must write only what it adds (the authority cell split into one cell per capability,
+  or a record that carries a write as a delta); either moves record bytes and world roots. Until then the ordered append is linear in
+  the number of births, at about 2.4 ms per birth on this box.
+- Removed: `ExactReadback.ofAppended` validated the appended image against every cell of the
+  image (`validateLoadedFrom`: a comparison of each cell's bytes with the prior image's). It
+  now validates over the cells the record wrote (`validateLoadedStep`, the equality
+  `validateLoadedStep_eq` is the existing theorem), as the verification walk already did.
+  Found by reading; its share of the old cost was below the run-to-run variation at height
+  40 (75 to 95 ms before, 100 ms in the run above).
+- Remaining and linear with a small constant, by reading: `Loaded.extend` pushes onto two
+  arrays (`rootLog`, `chainLog`) that the prior image still holds, so each append copies
+  them (8 bytes per record each); `Image.accepted` reverses the record list wherever it is
+  read; every `checkpointEvery` appends (8 in the fixture, 64 by default) the Store seals the
+  whole state.
+- Source open: `DurableReceiverIO.load` reads, authenticates and chain-hashes every entry and
+  rebuilds its indexes; the participant then computes its running digest and its index by
+  ingress, one pass each. The running digest is still only in memory. Persisting it beside
+  the source cannot be done without weakening `History.exact` (a stored digest is a claim,
+  and `Ordered.reads` is proved from it) and would not make the open sublinear while `load`
+  is linear. What removes both: the history half of the signed digest becomes the Store's
+  own log chain (`Loaded.chain`, already kept by delta, MAC-bound in every tag and proved
+  `chainAfter logStart accepted`), so there is no second digest to keep or to persist. That
+  moves the signed COMMIT statement (version 5: history origin the Store's log start, step
+  `chainStepStored`) and the context (it must name the log start); not done.
+- `validate` (the whole-prefix replay) remains for work of two or more records above the tip.
+- `PortableHomeTransferReceiver.order` takes the same running digest (`JointReceiver.History`)
+  and hashes only the consent's record and the committed records after it. It has no caller.
+
+The record sizes at heights 1 and 40 were read from a Store of the same workload; the size at
+200 is extrapolated from them (the row prints each record's size from now on).
 
 In `GenericSimplexReceiverSafety` the two consumer theorems name the chain each
 certificate's honest signers sent (`leftBlock`, `rightBlock`) and take as a premise that
@@ -612,8 +686,9 @@ record. Version 10: the COMMIT witnesses a journal keeps are signed over the ver
 statement. Version 11: the journal is the running replica's (entries of `Replica.step`,
 relative blocks, drains as entries, a `Replica` snapshot, witnesses as statements); the
 signed statement is version 4 (64-byte digest); a packet is `(origin, recipient, WireMessage,
-signature)` under a one-octet frame tag (0 protocol, 2 application candidate; the
-certificate frame 1 is gone) and the candidate MAC frame is version 2 (it carries an
+signature)` under a one-octet frame tag (0 protocol, 2 application candidate, 3 height
+announcement, added without a format version since it is not journalled; the certificate
+frame 1 is gone) and the candidate MAC frame is version 2 (it carries an
 application height). Each changes what a journal replays to or exports. Older logs refuse
 (`GenericSimplexIO.v10_log_refused`); an older signature does not verify. A mesh moves
 by re-genesis.

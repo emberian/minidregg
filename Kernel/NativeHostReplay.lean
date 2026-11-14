@@ -4101,11 +4101,18 @@ def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
       match judged : derived.judge with
       | .error reason => .error s!"appended intent fails the tail law: {repr reason}"
       | .ok certificate =>
-        match incremental : validateLoadedFrom config old.opened (exactCandidate old derived ready appended.entry.tag) with
+        -- The successor is one `extend` of the verified image (its head tag aside), so it is
+        -- validated over the cells this record wrote (`validateLoadedStep`), as the walk does:
+        -- the cost of an append does not depend on how many cells the image holds.
+        have moved : LoadedMoved old.opened.durable (exactCandidate old derived ready appended.entry.tag)
+            (derived.intent.writes.map DurableDataIntent.DataWrite.cellId) :=
+          fun cellId unwritten => LoadedMoved.extend old.opened.durable ready cellId unwritten
+        match incremental : validateLoadedStep config old.opened
+            (exactCandidate old derived ready appended.entry.tag) _ moved with
         | .error detail => .error s!"post-image validation: {detail}"
         | .ok after =>
           have validated : validateLoaded config (exactCandidate old derived ready appended.entry.tag) = .ok after :=
-            (validateLoadedFrom_eq config old.opened (exactCandidate old derived ready appended.entry.tag)).symm.trans incremental
+            (validateLoadedStep_eq config old.opened (exactCandidate old derived ready appended.entry.tag) _ moved).symm.trans incremental
           .ok ⟨⟨derived, ready, prepared, certificate, judged, appended, after, validated⟩, rfl⟩
 
 /-- The verifier-minted old trace plus the same admitted command's exact

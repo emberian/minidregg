@@ -6,6 +6,7 @@ currently exports preparation only and cannot activate from a callback/flag.
 -/
 import Kernel.PortableHomeTransferAdmission
 import Kernel.NativeHostContext
+import Kernel.JointReceiver
 import Compiler.GenericSimplexIO
 import Compiler.PortableHomeSourceCutIO
 import Compiler.PortableParticipantPinIO
@@ -39,12 +40,29 @@ structure Ordered (config : Config) (opened : Opened config) (consent : Consent 
   reads : commit.Reads ordered
   sourcePrefix : (history opened ++ [payload consent]).IsPrefix ordered
 
+/-- `running` is the running digest of the opened source's records
+(`JointReceiver.History`: computed where the source is opened, extended by each append). The
+check extends it by the consent's record and `later`, the committed records after it, and
+compares with the commit's signed digest: it hashes nothing of the source history and never
+builds it. -/
 def order (config : Config) (opened : Opened config) (consent : Consent config opened)
-    (expected : Context) (commit : VerifiedCommit expected) (later : Minidregg.Kernel.GenericSimplex.Block) :
+    (expected : Context) (commit : VerifiedCommit expected)
+    (running : JointReceiver.History opened.durable) (later : Minidregg.Kernel.GenericSimplex.Block) :
     Option (Ordered config opened consent) :=
   if pinned : config.jointConsensus = some expected then
-    if reads : commit.Reads (history opened ++ [payload consent] ++ later) then
-      some ⟨expected,pinned,commit,_,reads,⟨later,rfl⟩⟩ else none
+    if same : running.expected = expected then
+      if reads : (historyDigest expected).over running.digest (payload consent :: later) =
+          historyHalf commit.digest then
+        some ⟨expected,pinned,commit,history opened ++ [payload consent] ++ later,by
+          have exact := running.exact
+          rw [same] at exact
+          show (historyDigest expected).over (historyDigest expected).origin
+            (history opened ++ [payload consent] ++ later) = historyHalf commit.digest
+          rw [List.append_assoc, Minidregg.Kernel.GenericSimplexRelative.ChainDigest.over_append,
+            ← reads, exact]
+          rfl,⟨later,rfl⟩⟩
+      else none
+    else none
   else none
 
 /-- Existing source facet laws remain load-bearing. Captain registration adds

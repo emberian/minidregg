@@ -9,6 +9,7 @@ public import Kernel.JointReceiverAdmission
 public import Kernel.NativeHostContext
 public import Compiler.GenericSimplexIO
 public import Kernel.NativeHostServed
+public import Std.Data.HashMap
 
 @[expose] public section
 
@@ -49,6 +50,93 @@ def History.extend {loaded next : Durable} (h : History loaded)
   ⟨h.expected,(historyDigest h.expected).over h.digest records, by
     rw [appended, h.exact]
     exact (Minidregg.Kernel.GenericSimplexRelative.ChainDigest.over_append _ _ _ _).symm⟩
+
+/-! ## The index of a source's records by their original ingress
+
+A request asks whether an original signed ingress has been installed. The answer is kept
+beside the source like its running digest: built once where the source is opened or reread,
+extended by each append, so no request walks the accepted records. -/
+
+/-- Original ingress bytes (a record's `event.canonicalBytes`) to the position of the first
+record that carries them. -/
+abbrev IngressTable := Std.HashMap Minidregg.Kernel.GenericSimplex.Bytes Nat
+
+/-- Every entry of the table names a record that carries its key as the original ingress. -/
+def IngressSound (table : IngressTable) (records : List IntentRecord) : Prop :=
+  ∀ ingress index, table[ingress]? = some index →
+    (records[index]?).map (fun (record : IntentRecord) => record.event.canonicalBytes) = some ingress
+
+theorem IngressSound.empty (records : List IntentRecord) : IngressSound {} records := by
+  intro ingress index found
+  simp at found
+
+/-- One appended record: its ingress enters at the old length unless an earlier record
+already carries it (the first installation is the one a receipt is for). -/
+theorem IngressSound.snoc {table : IngressTable} {records : List IntentRecord}
+    (h : IngressSound table records) (record : IntentRecord) :
+    IngressSound (table.insertIfNew record.event.canonicalBytes records.length)
+      (records ++ [record]) := by
+  intro ingress index found
+  rw [Std.HashMap.getElem?_insertIfNew] at found
+  split at found
+  · rename_i hit
+    cases found
+    have same : record.event.canonicalBytes = ingress := by simpa using hit.1
+    simp [same]
+  · have old := h ingress index found
+    cases held : records[index]? with
+    | none => simp [held] at old
+    | some value =>
+      have within : index < records.length := (List.getElem?_eq_some_iff.mp held).1
+      rw [List.getElem?_append_left within, held]
+      simpa [held] using old
+
+/-- The table of a whole record list, in one pass. -/
+def ingressTable (records : List IntentRecord) : IngressTable :=
+  (records.foldl (fun (acc : IngressTable × Nat) record =>
+    (acc.1.insertIfNew record.event.canonicalBytes acc.2, acc.2 + 1)) ({}, 0)).1
+
+theorem ingressTable_sound (records : List IntentRecord) :
+    IngressSound (ingressTable records) records := by
+  have general : ∀ (todo done : List IntentRecord) (table : IngressTable),
+      IngressSound table done →
+      IngressSound (todo.foldl (fun (acc : IngressTable × Nat) record =>
+        (acc.1.insertIfNew record.event.canonicalBytes acc.2, acc.2 + 1)) (table, done.length)).1
+        (done ++ todo) := by
+    intro todo
+    induction todo with
+    | nil => intro done table h; simpa using h
+    | cons record rest ih =>
+      intro done table h
+      have step := ih (done ++ [record]) _ (h.snoc record)
+      simpa [List.foldl_cons, List.length_append, List.append_assoc] using step
+  simpa [ingressTable] using general records [] {} (IngressSound.empty [])
+
+/-- The index by ingress of a loaded source's records, kept beside the source. A hit is the
+position of a record carrying exactly that ingress (`sound`); the first installation wins. -/
+structure Ingress (loaded : Durable) where
+  table : IngressTable
+  sound : IngressSound table loaded.image.accepted
+
+/-- Linear in the source history: once, where the source is opened or reread. -/
+def Ingress.start (loaded : Durable) : Ingress loaded :=
+  ⟨ingressTable loaded.image.accepted, ingressTable_sound _⟩
+
+/-- The index after one record was appended: one insertion. -/
+def Ingress.extend {loaded next : Durable} (i : Ingress loaded) (record : IntentRecord)
+    (appended : next.image.accepted = loaded.image.accepted ++ [record]) : Ingress next :=
+  ⟨i.table.insertIfNew record.event.canonicalBytes loaded.height, by
+    rw [appended]
+    exact i.sound.snoc record⟩
+
+/-- Where this ingress was installed, if it was: one table lookup. -/
+def Ingress.find {loaded : Durable} (i : Ingress loaded) (ingress : Minidregg.Kernel.GenericSimplex.Bytes) : Option Nat :=
+  i.table[ingress]?
+
+theorem Ingress.find_sound {loaded : Durable} (i : Ingress loaded) {ingress : Minidregg.Kernel.GenericSimplex.Bytes} {index : Nat}
+    (found : i.find ingress = some index) :
+    (loaded.image.accepted[index]?).map (fun (record : IntentRecord) => record.event.canonicalBytes) = some ingress :=
+  i.sound ingress index found
 
 /-- Source-private application capability. The caller cannot decode one from
 bytes or replace expected context with the roster advertised by a packet.

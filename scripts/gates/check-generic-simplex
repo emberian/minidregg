@@ -24,7 +24,17 @@
 #                                    append, then every helper stopped and every journal and Store reread),
 #                                    read back by fresh processes (`lookup-all-call`), then a second birth
 #                                    through four standing `serve-replica` processes over TCP and the
-#                                    request spool (`await-call`)
+#                                    request spool (`await-call`); then replica 3 is stopped, a third birth
+#                                    is confirmed to its client by the other three receipts, and replica 3,
+#                                    restarted with no further call, asks its peers and holds the record too.
+#                                    `append-flatness`: ${GENERIC_SIMPLEX_FLAT_HEIGHTS:-48} births in process;
+#                                    the median application hand-off (the ordered append) per KB of appended
+#                                    record over the last 8 heights may be at most 2 times that over the first
+#                                    8 (a birth's record itself grows with the height; the row bounds what the
+#                                    append adds to that). A ratio of medians on one box in one run: a bound
+#                                    on growth, not a published timing.
+#                                    `rejoin`: one replica stopped for two calls and restarted into an idle
+#                                    domain catches up, in process, logical clock, no timer
 #
 # Plants, each red with its recorded message (a plant that passes, or fails another way, is red):
 #   harness --plant fixed-timer                  the recovery run without backoff (the paper's fixed timer)
@@ -37,6 +47,11 @@
 #   four-source-fixture --plant corrupt-segment  live segment snapshot disagrees with previous replayed state
 #   four-source-fixture run --plant foreign-history  every participant's running history digest is another
 #                                                domain's: the certified record is never ordered or appended
+#   four-source-fixture append-flatness --plant revalidate-prefix  every replica replays its whole source
+#                                                prefix after each append: the hand-off grows with the height
+#   four-source-fixture rejoin --plant silent-rejoin  the restarted replica never tells its peers its height
+#   all-receipts                                 a client that waits for all four receipts (`await-call --all`)
+#                                                while replica 3 is stopped is left uncertain
 set -uo pipefail
 bin=${1:-.lake/build/bin}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -64,7 +79,7 @@ done
 fixture=$bin/minidregg-four-source-fixture
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/generic-simplex-audit.XXXXXX")
 serving=()
-stop_serving() { for pid in ${serving[@]+"${serving[@]}"}; do kill "$pid" 2>/dev/null; done; serving=(); }
+stop_serving() { for pid in ${serving[@]+"${serving[@]}"}; do kill "$pid" 2>/dev/null; done; serving=(); }  # the pids this script started
 trap 'stop_serving; rm -rf "$tmp"' EXIT
 # A fresh four-Store world in $tmp/NAME with a 2 s view timeout, and one birth call authored on it.
 world() {  # NAME
@@ -77,17 +92,43 @@ run_world() {  # NAME ARGS...
   world "$1" && "$fixture" run "$tmp/$1" "$store" "$verifier" "$agreement" "$tmp/$1-call.bin" "${@:2}"
 }
 # Four standing replica processes over TCP on the world NAME, one client awaiting a second birth.
+peers_of() { local base=$((21000 + $$ % 20000)); echo "127.0.0.1:$base,127.0.0.1:$((base+1)),127.0.0.1:$((base+2)),127.0.0.1:$((base+3))"; }
+stand() {  # NAME INDEX: start one standing replica; its pid is serving[INDEX]
+  "$fixture" serve-replica "$tmp/$1/replica-$2" "$(peers_of)" "$store" "$verifier" "$agreement" 20 >> "$tmp/$1-serve-$2.log" 2>&1 &
+  serving[$2]=$!
+}
 serve() {  # NAME
-  local base=$((21000 + $$ % 20000)) i peers
-  peers=127.0.0.1:$base,127.0.0.1:$((base+1)),127.0.0.1:$((base+2)),127.0.0.1:$((base+3))
+  local i
   "$fixture" author-birth "$tmp/$1" "$store" "$verifier" "$agreement" "$signer" 7002 72 "$tmp/$1-call2.bin" || return 1
-  for i in 0 1 2 3; do
-    "$fixture" serve-replica "$tmp/$1/replica-$i" "$peers" "$store" "$verifier" "$agreement" 20 > "$tmp/$1-serve-$i.log" 2>&1 &
-    serving+=($!)
-  done
+  for i in 0 1 2 3; do stand "$1" $i; done
   "$fixture" await-call "$tmp/$1" "$tmp/$1-call2.bin" "$tmp/$1-outcome2.bin" 30 second 1; local rc=$?
   stop_serving; sleep 1
   [[ $rc == 0 ]] && "$fixture" lookup-all-call "$tmp/$1" "$store" "$verifier" "$agreement" "$tmp/$1-call2.bin" "$tmp/$1-look2.bin"
+}
+# Replica 3 stopped: a third birth is answered by the other three receipts. With `all`, the client instead
+# waits for all four (the plant) and is left uncertain. Otherwise replica 3 is then restarted and, with no
+# further call, must hold the record too (`await-call --all` on the same request).
+serve_down() {  # NAME [all]
+  local i n=3; [[ ${2:-} == all ]] && n=4
+  "$fixture" author-birth "$tmp/$1" "$store" "$verifier" "$agreement" "$signer" $((7000+n)) $((70+n)) "$tmp/$1-call$n.bin" || return 1
+  for i in 0 1 2; do stand "$1" $i; done
+  if [[ ${2:-} == all ]]; then
+    "$fixture" await-call "$tmp/$1" "$tmp/$1-call$n.bin" "$tmp/$1-outcome$n.bin" 15 down$n 0 --all; local rc=$?
+    stop_serving; sleep 1; return $rc
+  fi
+  "$fixture" await-call "$tmp/$1" "$tmp/$1-call$n.bin" "$tmp/$1-outcome$n.bin" 30 down$n 0 || { stop_serving; return 1; }
+  stand "$1" 3
+  "$fixture" await-call "$tmp/$1" "$tmp/$1-call$n.bin" "$tmp/$1-outcome$n.bin" 30 down$n 0 --all; local rc=$?
+  stop_serving; sleep 1
+  [[ $rc == 0 ]] && "$fixture" lookup-all-call "$tmp/$1" "$store" "$verifier" "$agreement" "$tmp/$1-call$n.bin" "$tmp/$1-look$n.bin"
+}
+# COUNT births in process on a fresh world; the ordered append must stay flat. ARGS: COUNT WINDOW FACTOR [--plant NAME]
+flat() {  # NAME ARGS...
+  world "$1" && "$fixture" append-flatness "$tmp/$1" "$store" "$verifier" "$agreement" "$signer" "${@:2}"
+}
+# One replica stopped for two calls and restarted into an idle domain, in process. ARGS: [--plant NAME]
+rejoin() {  # NAME ARGS...
+  world "$1" && "$fixture" rejoin "$tmp/$1" "$store" "$verifier" "$agreement" "$signer" "${@:2}"
 }
 status=0
 start=$(date +%s)
@@ -115,6 +156,12 @@ pass four-source-lookup 'LOOKUP-ALL exact original receipt and complete prefix o
   "$fixture" lookup-all-call "$tmp/ok-run" "$store" "$verifier" "$agreement" "$tmp/ok-run-call.bin" "$tmp/ok-run-look.bin"
 pass four-source-serve 'LOOKUP-ALL exact original receipt and complete prefix on four reopened stores; accepted records per store \[2, 2, 2, 2\]' \
   serve ok-run
+pass four-source-down 'LOOKUP-ALL exact original receipt and complete prefix on four reopened stores; accepted records per store \[3, 3, 3, 3\]' \
+  serve_down ok-run
+pass four-source-flat 'FLAT ordered append' \
+  flat flat-run "${GENERIC_SIMPLEX_FLAT_HEIGHTS:-48}" 8 2
+pass four-source-rejoin 'PASS rejoin' \
+  rejoin rejoin-run
 plant fixed-timer 'backoff: pending block never committed' "$bin/generic-simplex-harness" --plant fixed-timer
 plant split-tip 'normal safety/replay' "$bin/generic-simplex-harness" --plant split-tip
 plant forged-digest 'forged running digest: a COMMIT for another chain was read' "$bin/generic-simplex-harness" --plant forged-digest
@@ -124,5 +171,11 @@ plant corrupt-segment 'segment 1: its snapshot is not the state the previous seg
   bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/bad" --plant corrupt-segment && "$1/minidregg-four-source-fixture" audit-journal "$2/bad" 0' _ "$bin" "$tmp"
 plant foreign-history "the commitment's digest is not that of the source prefix" \
   run_world bad-run 40 --plant foreign-history
+plant revalidate-prefix 'append flatness: the median application hand-off per KB' \
+  flat flat-bad 12 3 2 --plant revalidate-prefix
+plant silent-rejoin 'rejoin: the restarted replica stayed behind' \
+  rejoin rejoin-bad --plant silent-rejoin
+plant all-receipts 'AWAIT down4 uncertain' \
+  serve_down ok-run all
 echo "GENERIC-SIMPLEX wall=$(( $(date +%s) - start ))s status=$status"
 exit $status

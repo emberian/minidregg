@@ -128,28 +128,42 @@ structure ValidatedNext (config : NativeHost.Config) (expected : Context) {targe
   derived : NativeHostReplay.Derived config tip.opened
   recordExact : DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent derived.intent) = record
 
+/-- What the verified tip says of one proposed record. -/
+inductive NextResult (config : NativeHost.Config) (expected : Context) {target : Durable}
+    (tip : NativeHostReplay.Verified config target) (record : Bytes) where
+  | granted (validated : ValidatedNext config expected tip record)
+  /-- Never a record of this source on this tip: the consensus context is not this
+  deployment's, the bytes are not a canonical record, or the tip's own derivation from the
+  record's ingress is another record. The derivation is a function of the tip, so no retry on
+  the same tip changes it. -/
+  | invalid (detail : String)
+  /-- The tip's admission did not grant the record's ingress now. A refusal and an
+  unavailable dependency (the signature verifier, the history Reader) are not told apart:
+  the caller may ask again. -/
+  | refused (detail : String)
+
 /-- Admit one proposed record at the verified tip: the same fresh native derivation the
 ordered receiver runs before its append (`JointOrderedSourceReceiver.apply`), compared with
-the proposed bytes. One admission, whatever the height of the tip. `none` is no verdict: a
-record this cannot grant goes to `validate`, which alone tells an invalid prefix from an
-unavailable dependency. -/
+the proposed bytes. One admission, whatever the height of the tip. -/
 def validateNext (config : NativeHost.Config) {target : Durable}
     (tip : NativeHostReplay.Verified config target) (expected : Context) (record : Bytes) :
-    IO (Option (ValidatedNext config expected tip record)) := do
+    IO (NextResult config expected tip record) := do
   if contextPinned : config.jointConsensus = some expected then
-    if expected.scope != digestStream.encode config.deployment.domain then return none
+    if expected.scope != digestStream.encode config.deployment.domain then
+      return .invalid "source consensus scope mismatch"
     if anchorExact : expected.instanceBytes =
         anchorBytes config.genesisHeight tip.opened.durable.image.seed then
-      let some decoded := DurableCheckpointCodec.recordFrame.decode record | return none
+      let some decoded := DurableCheckpointCodec.recordFrame.decode record
+        | return .invalid "noncanonical source record"
       match ← NativeHostReplay.deriveVerified tip decoded.event.canonicalBytes with
-      | .error _ => return none
+      | .error detail => return .refused detail
       | .ok derived =>
         if recordExact : DurableCheckpointCodec.recordFrame.encode
             (IntentRecord.ofIntent derived.intent) = record then
-          return some ⟨contextPinned,anchorExact,derived,recordExact⟩
-        else return none
-    else return none
-  else return none
+          return .granted ⟨contextPinned,anchorExact,derived,recordExact⟩
+        else return .invalid "the tip derives another record from this ingress"
+    else return .invalid "exact source genesis anchor mismatch"
+  else return .invalid "consensus context is not deployment pinned"
 
 /-- The engine prefix granted by native validation is exactly the source
 history admitted by the real replay walk. It is not merely physically valid

@@ -351,4 +351,59 @@ def receiveCandidate (runtime : Runtime) (bytes : ByteArray) : IO (Result × Opt
   match result with
   | .durable _ => return (result,some (height,records))
   | _ => return (result,none)
+/-! ## Height announcements
+
+A replica that restarts into an idle domain hears nothing: its peers have no work, so they
+send nothing, and it cannot know that they committed while it was stopped. On start it
+therefore tells each peer its committed height and asks for theirs. A peer that is asked
+answers with its own height, and, when it has committed more and still keeps the evidence
+from the asker's height on, with the COMMITs of those commits (`keptCommits`): the same
+messages the kernel owes a member that asks to leave a view from that height, each under its
+signer's signature. The asker takes them by the ordinary COMMIT path (`receiveCommit`), so an
+announcement carries no authority: a false height costs its sender or its reader at most
+the kept COMMITs once more. Nothing of this is journalled and no replica state changes on
+either side except through those COMMITs. -/
+
+structure HeightNote where
+  sender : Nat
+  height : Nat
+  ask : Bool
+  deriving DecidableEq, BEq, Repr, Inhabited
+
+def heightBodyStream : StreamCodec (Nat × Nat × Nat × Bool) :=
+  StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+    (StreamCodec.product StreamCodec.nat StreamCodec.bool))
+
+/-- "MINI-SIMPLEX-HEIGHT", version 1, the exact context, the body. -/
+def heightMACFrame (context : Context) (body : Bytes) : ByteArray :=
+  ([77,73,78,73,45,83,73,77,80,76,69,88,45,72,69,73,71,72,84,1] ++
+    contextStream.encode context ++ body).toByteArray
+
+def sealHeight (runtime : Runtime) (recipient : Nat) (ask : Bool) : IO ByteArray := do
+  let some prior ← runtime.current | throw (IO.userError "height announcement: journal refused")
+  let body := heightBodyStream.encode (prior.self,recipient,prior.state.height,ask)
+  let tag ← runtime.native.helper.mac recipient (heightMACFrame runtime.context body)
+  return packetStream.encodeBytes (body,tag.toList)
+
+def authenticateHeight (runtime : Runtime) (bytes : ByteArray) : IO (Option HeightNote) := do
+  let some prior ← runtime.current | return none
+  let some (body,tag) := packetStream.decodeBytes bytes | return none
+  if tag.length != 32 then return none
+  let some (sender,recipient,height,ask) := heightBodyStream.toLawful.decode body | return none
+  if recipient != prior.self || sender ≥ runtime.context.config.parties || sender == prior.self then
+    return none
+  let valid ← try runtime.native.helper.verifyMac sender (heightMACFrame runtime.context body) tag.toByteArray
+    catch _ => pure false
+  return if valid then some ⟨sender,height,ask⟩ else none
+
+/-- The kept COMMITs a member at `height` is behind by, sealed for it (`keptCommits`). A
+COMMIT without a signature to leave with is not sent. -/
+def answerHeight (runtime : Runtime) (peer height : Nat) : IO (List ByteArray) := do
+  let some prior ← runtime.current | return []
+  let mut packets := []
+  for message in keptCommits prior.chain prior.state height do
+    if let some proof ← messageProof runtime.native runtime.context message then
+      packets := (← sealPacket runtime.native ⟨runtime.context,prior.self,peer,message⟩ proof) :: packets
+  return packets.reverse
+
 end Minidregg.Compiler.GenericSimplexNative

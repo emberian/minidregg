@@ -10,7 +10,7 @@ receives authenticated packets over persistent connections, journals them,
 runs one finite service slice on a fixed tick, and sends over persistent
 connections. Engines never depend on a client being connected: a client only
 places a request (propose, or watch) in a replica's owner-private spool and
-awaits every replica's exact source receipt. A client deadline is uncertainty
+awaits a quorum of the replicas' exact source receipts. A client deadline is uncertainty
 for that client; it never stops, signals or resets an engine.
 -/
 namespace Minidregg.Compiler.GenericSimplexServe
@@ -34,6 +34,8 @@ structure IterationReport where
   refused : Nat := 0
   sent : Nat := 0
   status : String := ""
+  /-- Nanoseconds the slice's application hand-off took (`applyNext`). -/
+  applyNanos : Nat := 0
   deriving Repr, Inhabited
 
 /-- One replica iteration, shared by the standing loop and the in-process
@@ -54,8 +56,11 @@ def iteration {config : SourceConfig} (p : Participant config) (inbound : List B
     | .invalid => refused := refused + 1
     | .conflict => throw (IO.userError "agreement journal conflict: reopen the replica")
     | .uncertain => throw (IO.userError "agreement journal append uncertain: reopen the replica")
-  let (serviced,packets,_,status) ← service p budget.validation
-  return (serviced,packets,{received := inbound.length,refused := refused,sent := packets.length,status := status})
+  let (serviced,packets,_,status,applyNanos) ← service p budget.validation
+  let report : IterationReport :=
+    { received := inbound.length, refused := refused, sent := packets.length,
+      status := status, applyNanos := applyNanos }
+  return (serviced,packets,report)
 
 /-! ## Request spool
 
@@ -90,9 +95,8 @@ def writeAtomic (path : System.FilePath) (bytes : ByteArray) : IO Unit := do
   writePrivate temporary bytes
   IO.FS.rename temporary path
 
-/-- A pending request, read from its file once. `searched` counts the source records
-already searched for its ingress: a slice searches only the records appended since, and
-nothing while the source has not grown. -/
+/-- A pending request, read from its file once. `searched` is the source height at which its
+ingress was last looked up: a slice looks again only when the source has grown. -/
 structure SpoolEntry where
   id : String
   path : System.FilePath
@@ -104,15 +108,6 @@ structure SpoolEntry where
   searched : Nat := 0
   deriving Inhabited
 
-/-- The receipt of this ingress among the source records from `searched` on. The first
-search of a request walks the whole history once (there is no index by ingress); a receipt
-is read along one tree path (`Verified.receiptAt`). -/
-def completedFrom {config : SourceConfig} (p : Participant config) (ingress : Bytes) (searched : Nat) :
-    Option Minidregg.Compiler.NativeHostCodec.Receipt := do
-  let index ← (p.source.verified.opened.durable.image.accepted.drop searched).findIdx?
-    (fun record => record.event.canonicalBytes == ingress)
-  p.source.verified.receiptAt (searched + index)
-
 /-- Serve one pending request; `none` when it is served and removed. A `.call` request may
 propose (once per `retryMs` while not installed and not already offered); a `.watch`
 request only reports. Proposal is ordinary source admission at this replica's verified tip. -/
@@ -120,7 +115,7 @@ def serveRequest {config : SourceConfig} (p : Participant config) (receipts : Sy
     (entry : SpoolEntry) (retryMs : Nat) : IO (Participant config × Option SpoolEntry) := do
   let height := p.source.verified.opened.durable.height
   let found := if entry.installedBefore.isSome && entry.searched == height then none
-    else completedFrom p entry.ingress entry.searched
+    else completedIngress p entry.ingress
   match found with
   | some receipt =>
     IO.FS.createDirAll receipts
@@ -236,8 +231,9 @@ partial def serveLoop {config : SourceConfig} (p : Participant config) (replica 
 /-! ## Client: propose and await -/
 
 inductive Awaited where
+  /-- `receipts` replicas hold this one receipt (a quorum or more). -/
   | confirmed (kind : Minidregg.Compiler.DurableReceiverIO.Confirmation)
-      (receipt : Minidregg.Compiler.NativeHostCodec.Receipt)
+      (receipt : Minidregg.Compiler.NativeHostCodec.Receipt) (receipts : Nat)
   | uncertain
 
 def placeRequest (directory : System.FilePath) (name : String) (call : Bytes) : IO Unit := do
@@ -249,14 +245,27 @@ def placeRequest (directory : System.FilePath) (name : String) (call : Bytes) : 
     return
   writeAtomic path call.toByteArray
 
-/-- Place the exact original call at the proposer and a watch at every other
-replica, then wait for every replica's receipt and for them to be one receipt. The deadline
-returns `uncertain`; requests remain and engines keep serving them. -/
+/-- Place the exact original call at the proposer and a watch at every other replica, then
+wait for a quorum of the replicas' receipts (all but `faults` of `3 * faults + 1`) and for
+every receipt present to be one receipt.
+
+A replica writes a receipt only for a record its source holds, and its source takes a record
+only under a verified certificate of the committee (`JointReceiver.order`), so a single
+correct replica's receipt already means the call is ordered for good. The client cannot tell
+which replica is correct: a quorum of equal receipts contains `faults + 1` correct ones
+whatever the faulty members wrote. A replica that is down therefore does not keep the client
+uncertain; its watch stays in its spool and it writes its receipt when it returns.
+
+The call is `replayed` when every replica that answered found it installed already, else
+`installed`. The deadline returns `uncertain`; requests remain and engines keep serving
+them. `quorum := false` waits for every replica: the question "has every replica caught
+up", which a stopped replica leaves open (the gate's `all-receipts` plant). -/
 def awaitCall (replicas : List System.FilePath) (proposer : Nat) (id : String) (call : Bytes)
-    (deadlineMs : Nat) : IO Awaited := do
+    (deadlineMs : Nat) (quorum : Bool := true) : IO Awaited := do
   for (replica,index) in replicas.zipIdx do
     IO.FS.createDirAll (receiptDirectory replica)
     placeRequest (requestDirectory replica) (id ++ if index == proposer then ".call" else ".watch") call
+  let needed := if quorum then replicas.length - (replicas.length - 1) / 3 else replicas.length
   let stop := (← IO.monoMsNow) + deadlineMs
   repeat
     let mut found := []
@@ -265,14 +274,13 @@ def awaitCall (replicas : List System.FilePath) (proposer : Nat) (id : String) (
       if ← path.pathExists then
         if let some decoded := receiptFileStream.decodeBytes (← IO.FS.readBinFile path) then
           found := found ++ [decoded]
-    if found.length == replicas.length then
-      let some (receiptBytes,_) := found.head? | return .uncertain
+    if let some (receiptBytes,_) := found.head? then
       unless found.all (fun (r,_) => r == receiptBytes) do
         throw (IO.userError "replicas disagree on the exact receipt")
-      let some (_,before) := found[proposer]? | return .uncertain
-      let some receipt := Minidregg.Compiler.NativeHostCodec.receiptStream.toLawful.decode receiptBytes
-        | throw (IO.userError "noncanonical replica receipt")
-      return .confirmed (if before then .replayed else .installed) receipt
+      if found.length ≥ needed then
+        let some receipt := Minidregg.Compiler.NativeHostCodec.receiptStream.toLawful.decode receiptBytes
+          | throw (IO.userError "noncanonical replica receipt")
+        return .confirmed (if found.all (·.2) then .replayed else .installed) receipt found.length
     if (← IO.monoMsNow) ≥ stop then return .uncertain
     IO.sleep 200
   return .uncertain
