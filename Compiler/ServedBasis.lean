@@ -288,6 +288,16 @@ theorem physicalCurrent (ground : Ground deployment) (target : Nat)
       congrArg ResourceBirthCodec.rootBytes (ground.bytes_exact target)
     _ = ground.view.model.roots ⟨target⟩ := ground.view.coherent _
 
+/-- A live cell of the ground's directory is what the ground's state holds at its identifier. -/
+theorem bytes_of_present (ground : Ground deployment) (target : Nat)
+    (packed : Minidregg.Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry)
+    (present : ground.directory.slots target = .present packed) :
+    ground.view.canonicalBytes ⟨target⟩ =
+      ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry (.live packed) := by
+  rw [← ground.bytes_exact target,
+    (ResourceBirthCodec.LifecycleImage.view_live_iff
+      CanonicalCellRegistry.registry ground.directory target packed).mpr present]
+
 theorem valid (ground : Ground deployment) : deployment.Valid := by
   cases ground with
   | light basis => exact basis.authority.valid

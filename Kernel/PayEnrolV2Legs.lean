@@ -340,6 +340,15 @@ def EnrolLegs.authorityPost {directory : LoadedDirectory durable}
     (legs : EnrolLegs deployment profile ambient directory authority pay book tariff input) :
     CredentialAuthorityDomain.Cell := legs.authorityValidated.apply
 
+/-- The update the lowering takes: the post cell with the patch's write footprint and its frame. -/
+def EnrolLegs.authorityUpdate {directory : LoadedDirectory durable}
+    {authority : Loaded deployment durable.snapshot}
+    {pay : PayCellDomain.Loaded deployment durable.snapshot}
+    {book : BookCell deployment directory.directory} {tariff : Tariff} {input : EnrolInput}
+    (legs : EnrolLegs deployment profile ambient directory authority pay book tariff input) :
+    Minidregg.Compiler.CredentialAuthorityLayout.Update authority.snapshot.cell :=
+  Minidregg.Compiler.CredentialAuthorityLayout.Update.ofValidated legs.authorityValidated
+
 structure RenewLegs (directory : LoadedDirectory durable)
     (pay : PayCellDomain.Loaded deployment durable.snapshot)
     (book : BookCell deployment directory.directory) (tariff : Tariff) (input : RenewInput) : Type where
@@ -410,7 +419,7 @@ def Legs.writes (factory : FactoryCell deployment directory.directory) : {input 
     Legs deployment profile ambient directory authority pay book tariff input → List DataWrite
   | _, .enrol _ legs =>
       ResourceBirthController.Concrete.planWrites deployment legs.descriptor factory.payload
-        book.payload legs.resources.post (authority.writes legs.authorityPost)
+        book.payload legs.resources.post (authority.writes legs.authorityUpdate)
   | _, .renew _ legs =>
       [ResourceBirthController.Concrete.packedWrite deployment.resourceBookId
         ⟨.resourceBook, book.payload⟩ ⟨.resourceBook, legs.resources.post⟩]

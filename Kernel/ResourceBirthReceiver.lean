@@ -273,8 +273,9 @@ omit [DecidableEq F] in
 set_option backward.isDefEq.respectTransparency false in
 /-- **No birth writes the platform cell.** Every write a birth commits is a fresh allocation
 (its identifier unused in the loaded directory), the factory cell, the resource book or the
-credential-authority cell; the platform cell is live in the same directory with kind
-`.platform`, which none of them has. No identifier arithmetic or digest premise is used. -/
+authority head, or an authority entry; the platform cell is live in the same directory with
+kind `.platform`, which none of the first four has, and an authority entry is in the authority
+space (at or above `2^257`) where the platform cell's identifier, a 256-bit digest, is not. -/
 theorem platform_unwritten
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
       pins ground descriptor)
@@ -308,15 +309,35 @@ theorem platform_unwritten
     rw [← ids] at platform
     rw [platform] at present
     simp [PlatformCellDomain.packedCell] at present
-  · simp only [Minidregg.Compiler.ServedBasis.Ground.authorityWrites, List.mem_singleton] at authority
-    subst authority
-    have present := slot_of_live ground deployment.authorityCellId
-      (CredentialAuthorityDomainReceiver.packedCell ground.authority.cell)
-      ground.authorityObserved
-    change deployment.authorityCellId = (PlatformCellDomain.cellIdOf deployment).value at ids
-    rw [← ids] at platform
-    rw [platform] at present
-    simp [PlatformCellDomain.packedCell, CredentialAuthorityDomainReceiver.packedCell] at present
+  · have written := List.mem_map_of_mem (f := DataWrite.cellId) authority
+    rw [show (ground.authorityWrites prepared.grants.update).map DataWrite.cellId = _ from
+      CredentialAuthorityLayout.lowerAuthority_cellIds _ _ _ _ _] at written
+    rcases List.mem_cons.mp written with head | entry
+    · -- the head: the loaded directory holds a live authority cell there, not the platform cell
+      have headHeld := ground.authorityObserved.head
+      unfold CredentialAuthorityLayout.headAt at headHeld
+      cases opened : CredentialAuthorityLayout.decodeCell
+          (ground.view.canonicalBytes ⟨deployment.authorityCellId⟩) with
+      | none => rw [opened] at headHeld; cases headHeld
+      | some cell =>
+          have present := slot_of_live ground deployment.authorityCellId
+            (CredentialAuthorityLayout.packedCell cell)
+            (CredentialAuthorityLayout.decodeCell_canonical opened).symm
+          have sameId : deployment.authorityCellId = (PlatformCellDomain.cellIdOf deployment).value :=
+            (congrArg Digest.value head).symm.trans ids
+          rw [← sameId] at platform
+          rw [platform] at present
+          simp [PlatformCellDomain.packedCell, CredentialAuthorityLayout.packedCell] at present
+    · -- an entry: it is in the authority space, the platform cell's id is a 256-bit digest
+      obtain ⟨address, _, same⟩ := List.mem_map.mp entry
+      have sameId : CredentialAuthorityEntry.entryCellId address =
+          (PlatformCellDomain.cellIdOf deployment).value := (congrArg Digest.value same).trans ids
+      have large := CredentialAuthorityEntry.entryCellId_authority address
+      have small := Sp800185Cshake256.hash_digest_lt_two_pow_256 PlatformCellLayout.idCustomization
+        (digestStream.encode deployment.domain)
+      change (PlatformCellDomain.cellIdOf deployment).value < 2 ^ 256 at small
+      unfold ProtectedCell.authorityBase at large
+      omega
 
 /-- **The platform cell guards every ordinary birth**: a birth committed against an image
 holding the platform cell carries that cell's exact root as a read guard. No birth writes
@@ -550,15 +571,74 @@ theorem installed_initial_policy_source {height : Height}
 
 /-! ## The authority cell in the installed image -/
 
-/-- The installed image holds exactly the grant batch's post authority cell at
-the pinned identifier. There is one authority write; no page, shard or catalogue
-correspondence remains to be established. -/
-theorem installed_authority_cell {height : Height}
+/-- **The lowering is the birth's own.** The installed image of an admitted birth realises
+exactly the grant batch's post authority store: the head holds its logical root and each address's
+entry cell holds its value. The intent's writes are the allocations, the factory, the Book and the
+lowering of the batch's update (`PreparedGrantBatch.update`, `Ground.authorityWrites`); the first
+three are outside the authority kind, each newborn at an identifier never used and of a user,
+sourced or policy-source kind. -/
+theorem installed_authority {height : Height}
     (accepted : AcceptedBirth profile deployment pins ground height) :
-    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes
-        (CredentialAuthorityDomainReceiver.cellIdOf deployment) =
-      CredentialAuthorityDomainReceiver.cellBytes accepted.prepared.grants.post :=
-  installed_write_bytes accepted _ accepted.prepared.authority_write_member
+    CredentialAuthorityLayout.RealizesAuthority
+      (DataSnapshot.install ground.view (intent accepted)).canonicalBytes deployment.authorityCellId
+      accepted.prepared.grants.post.logical := by
+  apply ground.authorityWrites_installed accepted.prepared.grants.update (intent accepted)
+    (ResourceBirthController.allocationWrites accepted.descriptor ++
+      [ResourceBirthController.Concrete.packedWrite deployment.factoryId
+          ⟨.declaredObject, accepted.prepared.factory.payload⟩
+          ⟨.declaredObject, accepted.prepared.factory.payload⟩,
+        ResourceBirthController.Concrete.packedWrite deployment.resourceBookId
+          ⟨.resourceBook, accepted.prepared.book.payload⟩
+          ⟨.resourceBook, accepted.prepared.resources.post⟩]) rfl accepted.prepared.writesUnique
+  intro write member
+  rcases List.mem_append.mp member with born | native
+  · obtain ⟨request, inRequests, rfl⟩ := List.mem_map.mp born
+    refine ⟨?_, ?_⟩
+    · show CredentialAuthorityLayout.decodeCell (ground.view.canonicalBytes ⟨request.cellId⟩) = none
+      rw [accepted.prepared.fresh_before request inRequests]
+      rfl
+    · apply CredentialAuthorityLayout.decodeCell_live_other
+      rcases List.mem_append.mp inRequests with birth | auxiliary
+      · obtain ⟨item, inBirths, rfl⟩ := List.mem_map.mp birth
+        rcases accepted.prepared.initials item inBirths with user | sourced
+        · exact CanonicalCellRegistry.userInitial_not_authority user
+        · rw [sourced.2.1]; decide
+      · rw [accepted.prepared.auxiliaryExact] at auxiliary
+        obtain ⟨record, _, rfl⟩ := List.mem_map.mp auxiliary
+        intro same
+        cases same
+  · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
+    rcases native with rfl | rfl
+    · exact ⟨by
+        rw [show (ResourceBirthController.Concrete.packedWrite deployment.factoryId _ _).cellId =
+          ⟨deployment.factoryId⟩ from rfl, ground.bytes_of_present _ _ accepted.prepared.factory.present]
+        exact CredentialAuthorityLayout.decodeCell_live_other _ (by decide),
+        CredentialAuthorityLayout.decodeCell_live_other _ (by decide)⟩
+    · exact ⟨by
+        rw [show (ResourceBirthController.Concrete.packedWrite deployment.resourceBookId _ _).cellId =
+          ⟨deployment.resourceBookId⟩ from rfl, ground.bytes_of_present _ _ accepted.prepared.book.present]
+        exact CredentialAuthorityLayout.decodeCell_live_other _ (by decide),
+        CredentialAuthorityLayout.decodeCell_live_other _ (by decide)⟩
+
+/-- **`BirthAuthorityWritesBounded` holds of the receiver's own writes.** The authority writes
+of an admitted birth's intent are `lowerBirth` at the batch's post, so their count and encoded
+bytes are within the budget of the signed descriptor (`authorityBirthBudget`), a function of its
+initial policies, grants and parent rows and of no store size. -/
+theorem authority_writes_bounded {height : Height}
+    (accepted : AcceptedBirth profile deployment pins ground height) :
+    (ground.authorityWrites accepted.prepared.grants.update).length ≤
+        (CredentialAuthorityLayout.authorityBirthBudget deployment.authorityCellId
+          accepted.descriptor).maxWrites ∧
+      CredentialAuthorityLayout.encodedLength (ground.authorityWrites accepted.prepared.grants.update) ≤
+        (CredentialAuthorityLayout.authorityBirthBudget deployment.authorityCellId
+          accepted.descriptor).maxEncodedBytes :=
+  ⟨CredentialAuthorityLayout.birthAuthorityWriteCount ground.view deployment.authorityCellId
+      accepted.descriptor accepted.prepared.grants.post,
+    CredentialAuthorityLayout.birthAuthorityWriteBytes ground.view deployment.authorityCellId
+      ground.authority.cell accepted.descriptor accepted.prepared.grants.mode⟩
+
+#assert_axioms installed_authority
+#assert_axioms authority_writes_bounded
 
 theorem refusal_no_mutation {height : Height}
     (accepted : AcceptedBirth profile deployment pins ground height)
@@ -776,9 +856,8 @@ def receiveServed
       IO (Except String (Minidregg.Compiler.ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (adopt : (next : DurableServed.Opening rootBytes) → (written : List DurableDataIntent.CellId) →
-      DurableServed.Served.Moved opening.served next.served written →
-      Option Minidregg.Compiler.CredentialAuthorityServed.HeldCell → IO Unit :=
-      fun _ _ _ _ => pure ()) : IO Result := do
+      DurableServed.Served.Moved opening.served next.served written → IO Unit :=
+      fun _ _ _ => pure ()) : IO Result := do
   match decodeIngress bytes with
   | none => return .rejected .malformedIngress
   | some ingress =>
@@ -797,7 +876,7 @@ def receiveServed
               | .ok accepted =>
                   let issued := receipt deployment.domain ingress
                   match ← DurableServed.receiveServed transport rootBytes opening (intent accepted) with
-                  | .appended kind next _ _ _ _ moved => do adopt next _ moved (some (Minidregg.Compiler.CredentialAuthorityServed.HeldCell.ofCell accepted.prepared.grants.post)); return .confirmed kind issued
+                  | .appended kind next _ _ _ _ moved => do adopt next _ moved; return .confirmed kind issued
                   | .replayed _ => return .confirmed .replayed issued
                   | .rejected reason => return .rejected (.durable reason)
                   | .contention => return .contention

@@ -232,13 +232,13 @@ abbrev Protected := ObjectiveActivityGate.Protected
 def Agree (P Q : Payloads) : Prop := ∀ cell, Protected cell → P cell = Q cell
 
 theorem recordCell_protected (config : Config) (object : CellId) (activity : Digest) :
-    Protected (recordCell config.domain object activity) := ObjectiveActivityCell.coordinate_reserved _ _ _
+    Protected (recordCell config.domain object activity) := ObjectiveActivityGate.coordinate_protected ObjectiveActivityCell.spec _ _ _
 theorem objectCell_protected (config : Config) (object : CellId) : Protected (objectCell config.domain object) :=
-  ObjectiveActivityCell.coordinate_reserved _ _ _
+  ObjectiveActivityGate.coordinate_protected ObjectiveActivityCell.spec _ _ _
 theorem stateCell_protected (config : Config) (object : CellId) : Protected (stateCell config.domain object) :=
-  ObjectiveActivityCell.coordinate_reserved _ _ _
+  ObjectiveActivityGate.coordinate_protected ObjectiveActivityCell.spec _ _ _
 theorem packageCell_protected (config : Config) (pin : Digest) : Protected (packageCell config.domain pin) :=
-  ObjectiveActivityCell.coordinate_reserved _ _ _
+  ObjectiveActivityGate.coordinate_protected ObjectiveActivityCell.spec _ _ _
 
 theorem awaiting_protected {config : Config} {P : Payloads} {cell : CellId} {record : Record}
     (found : awaitingView config P cell = some record) : Protected cell := by
@@ -3350,7 +3350,7 @@ theorem genesisClean_of_empty {rootBytes : Bytes → Digest} {config : Config} {
 theorem bookUnprotected_of_lt {config : Config}
     (below : config.deployment.resourceBookId < ObjectiveActivityCell.reservedBase) : BookUnprotected config := by
   intro reserved
-  exact Nat.not_le.mpr below reserved
+  exact Nat.not_le.mpr below reserved.1
 
 theorem genesis_upgradable {rootBytes : Bytes → Digest} {config : Config} {genesis : Snapshot rootBytes}
     (clean : GenesisClean config genesis) : Upgradable config (payloads genesis.canonicalBytes) := by

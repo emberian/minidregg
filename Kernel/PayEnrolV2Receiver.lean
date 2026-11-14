@@ -190,7 +190,7 @@ structure Planned (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
   directory : LoadedDirectory durable
   directoryExact : loadDirectory durable = some directory
   authority : Loaded deployment durable.snapshot
-  authorityExact : loadDeployment deployment durable.snapshot = some authority
+  authorityExact : loadDeployment deployment durable = some authority
   pay : PayCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
   factory : FactoryCell deployment directory.directory
@@ -250,7 +250,7 @@ def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
   match directoryExact : loadDirectory durable with
   | none => throw .directoryUnavailable
   | some directory =>
-  match authorityExact : loadDeployment deployment durable.snapshot with
+  match authorityExact : loadDeployment deployment durable with
   | none => throw .authorityUnavailable
   | some authority =>
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
@@ -429,7 +429,11 @@ theorem legs_writes_bound {directory : LoadedDirectory durable}
         ResourceBirthController.Concrete.planWrites, ResourceBirthController.allocationWrites,
         CredentialAuthorityDomainReceiver.Loaded.writes,
         List.mem_append, List.mem_map, List.mem_cons, List.mem_nil_iff, or_false] at member
-      rcases member with ((⟨request, -, rfl⟩ | rfl | rfl) | rfl) <;> rfl
+      rcases member with (⟨request, -, rfl⟩ | rfl | rfl) | lowered
+      · rfl
+      · rfl
+      · rfl
+      · exact CredentialAuthorityLayout.lowerAuthority_root_bound _ _ _ _ _ write lowered
   | _, .renew _ _, write, member => by
       simp only [PayEnrolV2Legs.Legs.writes, factoryExtra, List.cons_append, List.nil_append,
         List.mem_cons, List.mem_nil_iff, or_false] at member

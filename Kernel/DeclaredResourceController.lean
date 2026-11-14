@@ -1406,7 +1406,7 @@ def closedPortal : Portal where
   verifyCapabilityCommitment := fun _ _ _ => false
   verifyCapabilityUse := fun _ _ _ _ => false
   verifyMembership := fun _ _ _ => false
-  verifyIssuer := fun _ _ _ _ => false
+  verifyIssuer := fun _ _ _ => false
   verifyNonRevocation := fun _ _ _ => false
   verifyCommittedPolicy := fun _ _ _ _ => false
 

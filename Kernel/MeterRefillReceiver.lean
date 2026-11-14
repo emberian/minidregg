@@ -226,7 +226,7 @@ structure Prepared (deployment : Deployment) (semantics : Digest) (durable : Dur
 
 def prepare (deployment : Deployment) (semantics : Digest) (durable : Durable) (command : Command) :
     Except Reject (Prepared deployment semantics durable command) := do
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
   let platform ← requireSome .platformUnavailable (PlatformCellDomain.load deployment durable.snapshot)
   if controller : controllerOf platform.cell.logical = some command.sponsor then
     if authorityCurrent : command.expectedAuthorityRoot = authority.snapshot.cell.root then
@@ -285,7 +285,7 @@ def admitNative (native : CredentialSignatureIO.NativeConfig)
 def signingHeader (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
     (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := loadDeployment deployment durable
     | .error "authority unavailable"
   (CredentialSignatureAdmission.signingHeader authority.snapshot
     (MeterRefillReceiver.marker deployment.domain semantics command)

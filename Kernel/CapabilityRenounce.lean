@@ -372,6 +372,12 @@ def Accepted.authorityPost {prepared : Prepared deployment semantics ambient gro
     {envelope : List UInt8} (accepted : Accepted prepared envelope) : CredentialAuthorityDomain.Cell :=
   accepted.validated.apply
 
+/-- The update the lowering takes: the post cell with the patch's write footprint and its frame. -/
+def Accepted.authorityUpdate {prepared : Prepared deployment semantics ambient ground command}
+    {envelope : List UInt8} (accepted : Accepted prepared envelope) :
+    Minidregg.Compiler.CredentialAuthorityLayout.Update ground.authority.cell :=
+  Minidregg.Compiler.CredentialAuthorityLayout.Update.ofValidated accepted.validated
+
 /-! ## Durable intent -/
 
 def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Digest :=
@@ -392,7 +398,7 @@ variable {envelope : List UInt8}
 
 def writes {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) : List DataWrite :=
-  ground.authorityWrites accepted.authorityPost
+  ground.authorityWrites accepted.authorityUpdate
 
 def readGuards {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) : List ReadGuard :=
@@ -415,9 +421,7 @@ instance physicalShapeDecidable {prepared : Prepared deployment semantics ambien
 theorem writes_roots_bound {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) (write : DataWrite) (member : write ∈ writes accepted) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  simp only [writes, ServedBasis.Ground.authorityWrites, List.mem_singleton] at member
-  subst write
-  exact ground.authorityWrite_root_bound _
+  exact ground.authorityWrites_root_bound _ write member
 
 theorem readGuards_readonly {prepared : Prepared deployment semantics ambient ground command}
     (accepted : Accepted prepared envelope) (guard : ReadGuard) (member : guard ∈ readGuards accepted) :

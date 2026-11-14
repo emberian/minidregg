@@ -88,7 +88,7 @@ def run (alice bob : List UInt8) : IO Unit := do
     | .ok loaded => pure loaded
     | .error message => throw (IO.userError s!"FAIL reopen: {message}")
   require "reopened complete authority"
-    (CredentialAuthorityDomainReceiver.loadDeployment cfg.deployment reopened.snapshot).isSome
+    (CredentialAuthorityDomainReceiver.loadDeployment cfg.deployment reopened).isSome
   require "reopened full physical directory"
     (CredentialAuthorityDomainReceiver.loadDirectory reopened).isSome
   let [first, second] := cfg.enrollments

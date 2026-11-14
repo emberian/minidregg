@@ -209,7 +209,7 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
     (checked : Checked deployment.domain profile.semantics ingress) :
     Except Reject (Prepared deployment profile ambient durable ingress checked) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
   let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
   let book ← requireSome .bookUnavailable

@@ -120,13 +120,11 @@ structure Loaded (deployment : CanonicalCellRegistry.Deployment) (physical : Phy
   spentExact : snapshot.spent = spentOf deployment.domain physical
   observed : RealizesAuthority physical.canonicalBytes deployment.authorityCellId snapshot.cell.logical
 
-abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
-
 /-- The enumerable cells of a durable image, as identifiers. -/
-def enumerated (durable : Durable) : List Nat := durable.cellIds.map (·.value)
+def enumerated (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) : List Nat := durable.cellIds.map (·.value)
 
 /-- Outside its enumeration a durable image whose absent default is `[]` holds no bytes. -/
-theorem enumerated_support (durable : Durable) (absentDefault : durable.image.seed.absentBytes = [])
+theorem enumerated_support (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) (absentDefault : durable.image.seed.absentBytes = [])
     (cellId : Nat) (outside : cellId ∉ enumerated durable) :
     durable.snapshot.canonicalBytes ⟨cellId⟩ = [] := by
   have notMember : (⟨cellId⟩ : Digest) ∉ durable.image.cellIds := fun member =>
@@ -135,29 +133,55 @@ theorem enumerated_support (durable : Durable) (absentDefault : durable.image.se
     durable.image durable.baseHeight durable.base durable.snapshot durable.resumed
     ⟨cellId⟩ notMember).trans absentDefault
 
-/-- Load at an already established clock: every enumerable cell is read once and the head is
-checked against the store they hold (`loadCell`). The exactness argument makes the supplied
-height the snapshot's history length; a loaded durable image supplies it in O(1). -/
-def loadDeploymentAt (deployment : CanonicalCellRegistry.Deployment) (durable : Durable)
-    (height : Nat) (heightExact : height = clockOf durable.snapshot) :
-    Option (Loaded deployment durable.snapshot) :=
+/-- Load from a physical snapshot whose used cells are all among `cellIds`: every listed cell of
+the authority space is read once and the head is checked against the store they hold
+(`loadCell`). The exactness argument makes the supplied height the snapshot's history length. -/
+def loadAt (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+    (cellIds : List Nat) (support : ∀ cellId, cellId ∉ cellIds → physical.canonicalBytes ⟨cellId⟩ = [])
+    (height : Nat) (heightExact : height = clockOf physical) : Option (Loaded deployment physical) :=
   if valid : deployment.Valid then
-    if absentDefault : durable.image.seed.absentBytes = [] then
-      match loaded : loadCell durable.snapshot.canonicalBytes deployment.authorityCellId
-          (enumerated durable) with
-      | none => none
-      | some cell =>
-          some ⟨Snapshot.ofCell deployment.domain height
-              (spentOf deployment.domain durable.snapshot) cell, valid, rfl, heightExact, rfl,
-            loadCell_realizes (enumerated_support durable absentDefault) loaded⟩
-    else none
+    match loaded : loadCell physical.canonicalBytes deployment.authorityCellId cellIds with
+    | none => none
+    | some cell =>
+        some ⟨Snapshot.ofCell deployment.domain height (spentOf deployment.domain physical) cell,
+          valid, rfl, heightExact, rfl, loadCell_realizes support loaded⟩
   else none
 
-def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (durable : Durable) :
+/-- `loadAt` loads every store the snapshot's cells realise. -/
+theorem loadAt_exact (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+    (cellIds : List Nat) (support : ∀ cellId, cellId ∉ cellIds → physical.canonicalBytes ⟨cellId⟩ = [])
+    (height : Nat) (heightExact : height = clockOf physical) (valid : deployment.Valid)
+    (logical : Theory.Store.Store CredentialAuthorityState.layout)
+    (holds : RealizesAuthority physical.canonicalBytes deployment.authorityCellId logical) :
+    ∃ loaded, loadAt deployment physical cellIds support height heightExact = some loaded ∧
+      loaded.snapshot.cell.logical = logical := by
+  obtain ⟨cell, found, same⟩ := loadCell_of_realizes support holds
+  unfold loadAt
+  rw [dif_pos valid]
+  split
+  · rename_i missing
+    rw [found] at missing
+    cases missing
+  · rename_i other loaded
+    rw [found] at loaded
+    cases loaded
+    exact ⟨_, rfl, same⟩
+
+/-- Load a durable image at an already established clock: its enumerable cells are the support
+(`enumerated_support`); a loaded durable image supplies the height in O(1). -/
+def loadDeploymentAt (deployment : CanonicalCellRegistry.Deployment) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
+    (height : Nat) (heightExact : height = clockOf durable.snapshot) :
+    Option (Loaded deployment durable.snapshot) :=
+  if absentDefault : durable.image.seed.absentBytes = [] then
+    loadAt deployment durable.snapshot (enumerated durable) (enumerated_support durable absentDefault)
+      height heightExact
+  else none
+
+def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) :
     Option (Loaded deployment durable.snapshot) :=
   loadDeploymentAt deployment durable (clockOf durable.snapshot) rfl
 
-theorem loadDeploymentAt_eq (deployment : CanonicalCellRegistry.Deployment) (durable : Durable)
+theorem loadDeploymentAt_eq (deployment : CanonicalCellRegistry.Deployment) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
     (height : Nat) (heightExact : height = clockOf durable.snapshot) :
     loadDeploymentAt deployment durable height heightExact = loadDeployment deployment durable := by
   cases heightExact
@@ -189,7 +213,7 @@ theorem Loaded.unique {deployment : CanonicalCellRegistry.Deployment}
 
 /-- Refuting pole: cells that realise no store (no head, a head holding another root, an entry
 the head's root does not cover) load nothing. -/
-theorem loadDeployment_refuses (deployment : CanonicalCellRegistry.Deployment) (durable : Durable)
+theorem loadDeployment_refuses (deployment : CanonicalCellRegistry.Deployment) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
     (unrealized : ∀ logical, ¬ RealizesAuthority durable.snapshot.canonicalBytes
       deployment.authorityCellId logical) :
     loadDeployment deployment durable = none := by
@@ -199,26 +223,18 @@ theorem loadDeployment_refuses (deployment : CanonicalCellRegistry.Deployment) (
 
 /-- Satisfiable pole at a supplied clock: the store the cells realise is loaded exactly. -/
 theorem loadDeploymentAt_exact (deployment : CanonicalCellRegistry.Deployment)
-    (durable : Durable) (height : Nat) (heightExact : height = clockOf durable.snapshot)
+    (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) (height : Nat) (heightExact : height = clockOf durable.snapshot)
     (valid : deployment.Valid) (absentDefault : durable.image.seed.absentBytes = [])
     (logical : Theory.Store.Store CredentialAuthorityState.layout)
     (holds : RealizesAuthority durable.snapshot.canonicalBytes deployment.authorityCellId logical) :
     ∃ loaded, loadDeploymentAt deployment durable height heightExact = some loaded ∧
       loaded.snapshot.cell.logical = logical := by
-  obtain ⟨cell, found, same⟩ := loadCell_of_realizes (enumerated_support durable absentDefault) holds
   unfold loadDeploymentAt
-  rw [dif_pos valid, dif_pos absentDefault]
-  split
-  · rename_i missing
-    rw [found] at missing
-    cases missing
-  · rename_i other loaded
-    rw [found] at loaded
-    cases loaded
-    exact ⟨_, rfl, same⟩
+  rw [dif_pos absentDefault]
+  exact loadAt_exact deployment durable.snapshot _ _ height heightExact valid logical holds
 
 /-- Satisfiable pole: the store the cells realise is loaded exactly. -/
-theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (durable : Durable)
+theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes)
     (valid : deployment.Valid) (absentDefault : durable.image.seed.absentBytes = [])
     (logical : Theory.Store.Store CredentialAuthorityState.layout)
     (holds : RealizesAuthority durable.snapshot.canonicalBytes deployment.authorityCellId logical) :
@@ -227,7 +243,7 @@ theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (du
   loadDeploymentAt_exact deployment durable (clockOf durable.snapshot) rfl valid absentDefault logical holds
 
 /-- **A held authority is what `loadDeployment` would recompute** on the same image. -/
-theorem Loaded.load_eq {deployment : CanonicalCellRegistry.Deployment} {durable : Durable}
+theorem Loaded.load_eq {deployment : CanonicalCellRegistry.Deployment} {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (loaded : Loaded deployment durable.snapshot)
     (absentDefault : durable.image.seed.absentBytes = []) :
     loadDeployment deployment durable = some loaded := by
@@ -255,8 +271,8 @@ theorem bytesBEq_iff {left right : List UInt8} : bytesBEq left right = true ↔ 
 cells the step wrote (`stepCell`: one decode and one path of the kept structure per written
 entry, never a read of the rest of the store), then the head is checked against it.
 `loadDeploymentStepAt_eq`: it is `loadDeploymentAt`. -/
-def loadDeploymentStepAt {deployment : CanonicalCellRegistry.Deployment} {prior : Durable}
-    (held : Loaded deployment prior.snapshot) (durable : Durable) (written : List CellId)
+def loadDeploymentStepAt {deployment : CanonicalCellRegistry.Deployment} {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : Loaded deployment prior.snapshot) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) (written : List CellId)
     (moved : ∀ cellId, cellId ∉ written →
       durable.snapshot.canonicalBytes cellId = prior.snapshot.canonicalBytes cellId)
     (height : Nat) (heightExact : height = clockOf durable.snapshot) :
@@ -272,8 +288,8 @@ def loadDeploymentStepAt {deployment : CanonicalCellRegistry.Deployment} {prior 
             unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)) stepped⟩
   else none
 
-theorem loadDeploymentStepAt_eq {deployment : CanonicalCellRegistry.Deployment} {prior : Durable}
-    (held : Loaded deployment prior.snapshot) (durable : Durable) (written : List CellId)
+theorem loadDeploymentStepAt_eq {deployment : CanonicalCellRegistry.Deployment} {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : Loaded deployment prior.snapshot) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) (written : List CellId)
     (moved : ∀ cellId, cellId ∉ written →
       durable.snapshot.canonicalBytes cellId = prior.snapshot.canonicalBytes cellId)
     (height : Nat) (heightExact : height = clockOf durable.snapshot) :
@@ -299,7 +315,6 @@ theorem loadDeploymentStepAt_eq {deployment : CanonicalCellRegistry.Deployment} 
       | some other =>
           exfalso
           unfold loadDeploymentAt at full
-          rw [dif_pos held.valid] at full
           split at full
           · rename_i absentDefault
             obtain ⟨cell, found, _⟩ := stepCell_of_realizes (written := written.map (·.value))
@@ -946,8 +961,7 @@ theorem loadDeploymentFromAt_eq {deployment : CanonicalCellRegistry.Deployment}
   · exact loadDeploymentStepAt_eq held durable _ _ height heightExact
   · rename_i absent
     unfold loadDeploymentAt
-    split
-    all_goals first | rfl | simp [absent]
+    rw [dif_neg absent]
 
 /-! ## Concrete preparation of the root-issuance batch -/
 

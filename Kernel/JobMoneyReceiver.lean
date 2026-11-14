@@ -488,7 +488,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
   let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
   let book ← requireSome .bookUnavailable
@@ -784,7 +784,7 @@ loaded job (and submission then refuses with the named reason). -/
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := loadDeployment deployment durable
     | .error "authority unavailable"
   let some pay := PayCellDomain.load deployment durable.snapshot
     | .error "pay cell unavailable"

@@ -225,10 +225,6 @@ structure ServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store
   snapshot (`snapshotOn`) carries this one, not a projection rebuilt per reference. -/
   authState : AuthState
   authStateExact : authState = CredentialAuthorityDomain.authStateOf cell
-  /-- The cell's issued index (`CredentialAuthorityDomain.issuedOf`), held beside it and
-  forced at its first issuer check: every request's snapshot shares it. -/
-  issued : Thunk (List (IssuerId × Epoch × Digest))
-  issuedExact : issued.get = CredentialAuthorityDomain.issuedOf deployment.domain cell
 
 /-- The served authority over a cell the served cells realise. -/
 private def ServedAuthority.ofCell (deployment : CanonicalCellRegistry.Deployment) {store : StoreIdentity}
@@ -236,8 +232,7 @@ private def ServedAuthority.ofCell (deployment : CanonicalCellRegistry.Deploymen
     (absentDefault : served.absentBytes = [])
     (observed : RealizesAuthority served.canonicalBytes deployment.authorityCellId cell.logical) :
     ServedAuthority deployment served :=
-  ⟨cell, valid, absentDefault, observed, CredentialAuthorityDomain.authStateOf cell, rfl,
-    Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain cell, rfl⟩
+  ⟨cell, valid, absentDefault, observed, CredentialAuthorityDomain.authStateOf cell, rfl⟩
 
 /-- An open: every enumerable cell read once, the head checked against the store they hold
 (`CredentialAuthorityLayout.loadCell`). -/
@@ -260,7 +255,7 @@ def ServedAuthority.snapshotOn {deployment : CanonicalCellRegistry.Deployment} {
     {served : State store} (authority : ServedAuthority deployment served) {head : Head store} {keys : Keys}
     (footprint : VerifiedFootprint head keys) : CredentialAuthorityDomain.Snapshot :=
   ⟨deployment.domain, served.height, spentOf deployment.domain (served.viewAt footprint), authority.cell,
-    authority.authState, authority.authStateExact, authority.issued, authority.issuedExact⟩
+    authority.authState, authority.authStateExact⟩
 
 /-- `snapshotOn` is the snapshot `Snapshot.ofCell` builds; only the projection is the held one. -/
 theorem ServedAuthority.snapshotOn_eq {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
@@ -269,11 +264,8 @@ theorem ServedAuthority.snapshotOn_eq {deployment : CanonicalCellRegistry.Deploy
     authority.snapshotOn footprint =
       CredentialAuthorityDomain.Snapshot.ofCell deployment.domain served.height
         (spentOf deployment.domain (served.viewAt footprint)) authority.cell := by
-  obtain ⟨cell, valid, absentDefault, observed, authState, exact, issued, issuedExact⟩ := authority
+  obtain ⟨cell, valid, absentDefault, observed, authState, exact⟩ := authority
   subst exact
-  have held : issued = Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain cell :=
-    Thunk.ext issuedExact
-  subst held
   rfl
 
 /-- The light authority over a view is the full authority load of that view,
@@ -290,12 +282,10 @@ theorem ServedAuthority.unique {deployment : CanonicalCellRegistry.Deployment} {
     {served : State store} (left right : ServedAuthority deployment served) : left = right := by
   have same : left.cell = right.cell :=
     CellState.Materialized.ext (left.observed.unique right.observed)
-  obtain ⟨leftCell, _, _, _, leftState, leftExact, leftIssued, leftIssuedExact⟩ := left
-  obtain ⟨rightCell, _, _, _, rightState, rightExact, rightIssued, rightIssuedExact⟩ := right
+  obtain ⟨leftCell, _, _, _, leftState, leftExact⟩ := left
+  obtain ⟨rightCell, _, _, _, rightState, rightExact⟩ := right
   simp only at same
   subst same leftExact rightExact
-  have issued : leftIssued = rightIssued := Thunk.ext (leftIssuedExact.trans rightIssuedExact.symm)
-  subst issued
   rfl
 
 /-- The open loads every store the served cells realise. -/
@@ -350,9 +340,7 @@ theorem loadServedAuthority_ofLoaded (deployment : CanonicalCellRegistry.Deploym
           have absentDefault : loaded.image.seed.absentBytes = [] := by
             unfold loadDeployment loadDeploymentAt at full
             split at full
-            · split at full
-              · assumption
-              · cases full
+            · assumption
             · cases full
           have realized : RealizesAuthority (Served.ofLoaded loaded sameStart).canonicalBytes
               deployment.authorityCellId fullLoaded.snapshot.cell.logical := bytes ▸ fullLoaded.observed

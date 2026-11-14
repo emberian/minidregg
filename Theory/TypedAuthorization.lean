@@ -1224,7 +1224,9 @@ structure Portal where
     {kind : ResourceKind} → Request kind → Capability kind → Digest →
       CapabilityUseWitness → Bool
   verifyMembership : Digest → Digest → MembershipWitness → Bool
-  verifyIssuer : IssuerId → Epoch → Digest → IssuerWitness → Bool
+  /-- Issuer evidence of one capability: the verifier is handed the capability itself (its kind
+  and identifier locate it, its issuer and issuer epoch are what is checked) and its commitment. -/
+  verifyIssuer : {kind : ResourceKind} → Capability kind → Digest → IssuerWitness → Bool
   verifyNonRevocation : Digest → RevocationKey → NonRevocationWitness → Bool
   /-- Verify the policy witness only for the exact committed address supplied
   by authorization state.  Legacy address-free `verifyPolicy` no longer
@@ -1262,7 +1264,7 @@ inductive Evidence (portal : Portal) (state : AuthState)
       (membershipVerified :
         portal.verifyMembership state.capabilityRoot commitment membershipWitness = true)
       (issuerVerified :
-        portal.verifyIssuer cap.issuer cap.issuerEpoch commitment issuerWitness = true)
+        portal.verifyIssuer cap commitment issuerWitness = true)
       (selfRevocationVerified :
         portal.verifyNonRevocation state.revocationRoot
           (.capability cap.id) selfRevocationWitness = true)
@@ -1555,7 +1557,7 @@ def demoPortal : Portal where
   verifyCapabilityCommitment := fun _ _ _ => true
   verifyCapabilityUse := fun _ _ _ _ => true
   verifyMembership := fun _ _ _ => true
-  verifyIssuer := fun _ _ _ _ => true
+  verifyIssuer := fun _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true
   verifyCommittedPolicy := fun _ _ _ _ => true
 

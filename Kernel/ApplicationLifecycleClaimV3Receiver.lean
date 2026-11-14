@@ -107,7 +107,7 @@ inductive Result (config : Config) (opening : DurableServed.Opening ResourceBirt
 by `receiveServed`, the readback handed to `adopt`. -/
 def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) :
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) :
     IO (Result config light.opening) := do
   let some ingress := ApplicationLifecycleClaimV3Ingress.codec.decode bytes
     | return .rejected "noncanonical launch-bound lifecycle claim ingress"
@@ -125,7 +125,7 @@ def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
       match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening
           conditional.intent with
       | .appended kind next height entry entryExact freshCasWinner moved =>
-          adopt next _ moved none
+          adopt next _ moved
           return .reserved ⟨ingress, grounded, conditional, fresh, kind, next, height, entry, entryExact,
             freshCasWinner⟩
       | .replayed _ => return .rejected "launch-bound claim transaction identity already used"

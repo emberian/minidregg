@@ -222,9 +222,8 @@ def receiveServed (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
       IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (adopt : (next : DurableServed.Opening rootBytes) → (written : List DurableDataIntent.CellId) →
-      DurableServed.Served.Moved opening.served next.served written →
-      Option CredentialAuthorityServed.HeldCell → IO Unit :=
-      fun _ _ _ _ => pure ()) : IO Result := do
+      DurableServed.Served.Moved opening.served next.served written → IO Unit :=
+      fun _ _ _ => pure ()) : IO Result := do
   let some ingress := decodeIngress bytes
     | return .rejected .malformedIngress
   match ← basisOf (turnKeys deployment.domain profile.semantics ingress) with
@@ -242,7 +241,7 @@ def receiveServed (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
           | .ok accepted =>
               let issued := receipt deployment.domain profile.semantics ingress
               match ← DurableServed.receiveServed transport rootBytes opening (intent accepted) with
-              | .appended kind next _ _ _ _ moved => do adopt next _ moved none; return .confirmed kind issued
+              | .appended kind next _ _ _ _ moved => do adopt next _ moved; return .confirmed kind issued
               | .replayed _ => return .confirmed .replayed issued
               | .rejected reason => return .durableRejected reason
               | .contention => return .contention

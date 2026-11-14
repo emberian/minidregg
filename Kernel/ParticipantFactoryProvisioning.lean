@@ -317,7 +317,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
   let factory ← requireSome .factoryUnavailable
     (ResourceTargetAdmission.observe deployment directory.directory .object
       deployment.factoryId command.expectedFactoryRoot)
@@ -379,6 +379,11 @@ intent's durable nullifier. -/
 def Prepared.authorityPost (prepared : Prepared deployment profile ambient durable command) :
     CredentialAuthorityDomain.Cell :=
   prepared.candidate.validated.apply
+
+/-- The update the lowering takes: the post cell with the patch's write footprint and its frame. -/
+def Prepared.authorityUpdate (prepared : Prepared deployment profile ambient durable command) :
+    Minidregg.Compiler.CredentialAuthorityLayout.Update prepared.authority.snapshot.cell :=
+  Minidregg.Compiler.CredentialAuthorityLayout.Update.ofValidated prepared.candidate.validated
 
 /-- The factory law sees the operation label, the exact command, the factory
 cell it will govern and the presented control grant. Unrelated authority

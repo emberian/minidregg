@@ -80,7 +80,7 @@ named reason. -/
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := loadDeployment deployment durable
     | .error "authority unavailable"
   let outcome := match configOf deployment profile ambient with
     | .ok config => match decideTurn config durable.snapshot ambient.height command.request with

@@ -205,7 +205,7 @@ def planVerdict (deployment : Deployment) (profile : CanonicalRuntimeProfile.Pro
 def signingHeaderFor (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) (outcome : Digest) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := loadDeployment deployment durable
     | .error "authority unavailable"
   let preRoot := durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   (CredentialSignatureAdmission.signingHeader authority.snapshot

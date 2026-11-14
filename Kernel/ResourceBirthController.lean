@@ -420,22 +420,22 @@ instance physicalPostLawDecidable (deployment : Deployment) (write : DataWrite) 
   unfold PhysicalPostLaw
   split <;> infer_instance
 
-/-- The authority write of any post cell satisfies its physical law: its bytes are the
-canonical live image of that cell, and the authority role's law is only its identifier.
-Preparation therefore decides the law on the other writes and never decodes the authority
-cell's bytes back. -/
+/-- The authority writes of any update satisfy their physical law: each is the canonical live
+image of an authority cell lawful at its identifier (the head at the pinned identifier, an entry
+at its own coordinate). Preparation therefore decides the law on the other writes and never
+decodes an authority cell's bytes back. -/
 theorem authorityWrites_postLaw {deployment : Deployment} (valid : deployment.Valid)
-    (ground : Ground deployment) (post : Compiler.CredentialAuthorityDomain.Cell) :
-    ∀ write ∈ ground.authorityWrites post, PhysicalPostLaw deployment write := by
+    (ground : Ground deployment)
+    (update : Compiler.CredentialAuthorityLayout.Update ground.authority.cell) :
+    ∀ write ∈ ground.authorityWrites update, PhysicalPostLaw deployment write := by
   intro write member
-  simp only [Ground.authorityWrites, List.mem_singleton] at member
-  subst write
+  obtain ⟨cell, bytes, law⟩ := ground.authorityWrites_decodes update write member
   unfold PhysicalPostLaw
-  rw [show (ground.authorityWrite post).canonicalPostBytes =
+  rw [bytes, show Compiler.CredentialAuthorityLayout.encodeCell cell =
       (LifecycleImage.codec Registry).encode
-        (.live (Compiler.CredentialAuthorityDomainReceiver.packedCell post)) from rfl,
+        (.live (Compiler.CredentialAuthorityLayout.packedCell cell)) from rfl,
     LifecycleImage.decode_encode]
-  exact ⟨valid, rfl⟩
+  exact ⟨valid, law⟩
 
 theorem birthWrite_postLaw (deployment : Deployment)
     (request : CreateRequest (CellId := Nat) Registry) :
@@ -724,12 +724,12 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
   allocated : Allocated Registry ground.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload descriptor.resourceBatch
   writesUnique : ((planWrites deployment descriptor factory.payload book.payload
-    resources.post (ground.authorityWrites grants.post)).map DataWrite.cellId).Nodup
+    resources.post (ground.authorityWrites grants.update)).map DataWrite.cellId).Nodup
   writePreExact : ∀ write ∈ planWrites deployment descriptor factory.payload book.payload
-      resources.post (ground.authorityWrites grants.post),
+      resources.post (ground.authorityWrites grants.update),
     write.expectedPre = ground.view.model.roots write.cellId
   finalCells : ∀ write ∈ planWrites deployment descriptor factory.payload book.payload
-      resources.post (ground.authorityWrites grants.post), PhysicalPostLaw deployment write
+      resources.post (ground.authorityWrites grants.update), PhysicalPostLaw deployment write
   /-- The height the room birth gate was decided at: the admission height. -/
   gateHeight : Height
   /-- Every room birth passed the gate (`RoomBirthGate.Admitted`). -/
@@ -914,8 +914,8 @@ def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled :
   let candidates ← fromOption
     (BirthCandidateAdmission.check profile deployment ground
       grants.post grants.initialSources.records) .candidateLaw
-  let post ← preparePostAuthority pre (ground.authorityWrites grants.post)
-    (authorityWrites_postLaw pre.deploymentValid ground grants.post)
+  let post ← preparePostAuthority pre (ground.authorityWrites grants.update)
+    (authorityWrites_postLaw pre.deploymentValid ground grants.update)
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
     pre.markerDeclared, pre.parentsPresent, pre.kindsPresent, pre.sourced, pre.initials, pre.policiesBound, pre.factory, pre.book,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
@@ -935,7 +935,7 @@ structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
   authorityCombined : GrainResourceBirthAuthority.Prepared profile deployment
     ground.authority descriptor operationMarker
   auxiliaryExact : descriptor.auxiliaryCreates = authorityCombined.auxiliaryCreates
-  post : PreparedPostAuthority pre (ground.authorityWrites authorityCombined.post)
+  post : PreparedPostAuthority pre (ground.authorityWrites authorityCombined.update)
   candidates : BirthCandidateAdmission.Checked profile deployment ground
     authorityCombined.post authorityCombined.initialSources.records
 
@@ -956,8 +956,8 @@ def prepareGrainBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disab
   let candidates ← fromOption
     (BirthCandidateAdmission.check profile deployment ground
       combined.post combined.initialSources.records) .candidateLaw
-  let post ← preparePostAuthority pre (ground.authorityWrites combined.post)
-    (authorityWrites_postLaw pre.deploymentValid ground combined.post)
+  let post ← preparePostAuthority pre (ground.authorityWrites combined.update)
+    (authorityWrites_postLaw pre.deploymentValid ground combined.update)
   .ok ⟨pre, operation.down, combined, (sameCreates_iff _ _).mp aux.down, post, candidates⟩
 
 def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
@@ -966,7 +966,7 @@ def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
     (prepared : PreparedGrainBirth profile deployment pins ground descriptor operationMarker) :
     List DataWrite :=
   planWrites deployment descriptor prepared.pre.factory.payload prepared.pre.book.payload
-    prepared.post.resources.post (ground.authorityWrites prepared.authorityCombined.post)
+    prepared.post.resources.post (ground.authorityWrites prepared.authorityCombined.update)
 
 def PreparedGrainBirth.readGuards {profile : PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {ground : Ground deployment}
@@ -1015,7 +1015,7 @@ def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
     {ground : Ground deployment} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins ground descriptor) : List DataWrite :=
   planWrites deployment descriptor prepared.factory.payload prepared.book.payload
-    prepared.resources.post (ground.authorityWrites prepared.grants.post)
+    prepared.resources.post (ground.authorityWrites prepared.grants.update)
 
 def PreparedBirth.readGuards {deployment : Deployment} {pins : FactoryPins}
     {ground : Ground deployment} {descriptor : Descriptor Registry}
@@ -1113,9 +1113,7 @@ theorem PreparedBirth.write_roots_bound {deployment : Deployment} {pins : Factor
       exact birthWrite_root_bound request
     · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
       rcases native with rfl | rfl <;> rfl
-  · simp only [Ground.authorityWrites, List.mem_singleton] at authority
-    subst write
-    exact ground.authorityWrite_root_bound _
+  · exact ground.authorityWrites_root_bound _ write authority
 
 theorem PreparedBirth.readGuards_readonly {deployment : Deployment} {pins : FactoryPins}
     {ground : Ground deployment} {descriptor : Descriptor Registry}
@@ -1316,13 +1314,14 @@ theorem PreparedBirth.authority_post_exact {deployment : Deployment} {pins : Fac
       ResourceBirthAuthority.post ground.authority.cell descriptor
         prepared.grants.mode := rfl
 
-/-- The authority cell's one write carries exactly the batch's post, guarded at
-the loaded root of that cell. -/
-theorem PreparedBirth.authority_write_member {deployment : Deployment} {pins : FactoryPins}
+/-- The authority writes of the birth are the lowering of the batch's update: the head and one
+entry per address the batch touches. -/
+theorem PreparedBirth.authority_writes_member {deployment : Deployment} {pins : FactoryPins}
     {ground : Ground deployment} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins ground descriptor) :
-    ground.authorityWrite prepared.grants.post ∈ prepared.writes := by
-  simp [PreparedBirth.writes, planWrites, Ground.authorityWrites]
+    ∀ write ∈ ground.authorityWrites prepared.grants.update, write ∈ prepared.writes := by
+  intro write member
+  exact List.mem_append_right _ member
 
 /-- Checked source records are actual allocator participants, not staging
 receipts or entries in an unrelated in-memory payload store. -/

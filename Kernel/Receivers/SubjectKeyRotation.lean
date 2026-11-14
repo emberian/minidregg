@@ -219,7 +219,7 @@ structure Checked (env : Env) (durable : Durable) (command : Command) where
 /-- The gate's checks given the new key's signature. -/
 def check (env : Env) (durable : Durable) (command : Command) :
     Except Reject (Checked env durable command) := do
-  let authority ← need .authorityUnavailable (loadDeployment env.deployment durable.snapshot)
+  let authority ← need .authorityUnavailable (loadDeployment env.deployment durable)
   let snapshot := authority.snapshot
   match gated : KeyPreRotation.gate nextKeyDigest snapshot.logical command.rotation
       (presented command true) with
@@ -340,6 +340,11 @@ def Prepared.authorityPost (prepared : Prepared env durable command) :
     CredentialAuthorityDomain.Cell :=
   prepared.validated.apply
 
+/-- The update the lowering takes: the post cell with the patch's write footprint and its frame. -/
+def Prepared.authorityUpdate (prepared : Prepared env durable command) :
+    Minidregg.Compiler.CredentialAuthorityLayout.Update prepared.authority.snapshot.cell :=
+  Minidregg.Compiler.CredentialAuthorityLayout.Update.ofValidated prepared.validated
+
 /-- A prepared rotation opens the commitment: the new key's digest is the
 current record's `nextKeyDigest`. -/
 theorem Prepared.precommitted (prepared : Prepared env durable command) :
@@ -349,14 +354,12 @@ theorem Prepared.precommitted (prepared : Prepared env durable command) :
 /-! ## The patch and the journal identity -/
 
 def writes (prepared : Prepared env durable command) : List DataWrite :=
-  prepared.authority.writes prepared.authorityPost
+  prepared.authority.writes prepared.authorityUpdate
 
 theorem writes_roots_bound (prepared : Prepared env durable command)
     (write : DataWrite) (member : write ∈ writes prepared) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  simp only [writes, Loaded.writes, List.mem_singleton] at member
-  subst write
-  exact prepared.authority.write_root_bound _
+  exact prepared.authority.writes_root_bound _ write member
 
 def physicalPostLaw (prepared : Prepared env durable command) : Bool :=
   (writes prepared).all fun write =>

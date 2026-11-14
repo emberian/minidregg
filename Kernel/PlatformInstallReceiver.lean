@@ -457,7 +457,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (command : Command) (cosign : Option (List UInt8)) :
     Except Reject (Prepared deployment profile ambient durable command cosign) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
   let factory ← requireSome .factoryUnavailable
     (ResourceTargetAdmission.observe deployment directory.directory .object
       deployment.factoryId command.expectedFactoryRoot)
@@ -630,7 +630,7 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := loadDeployment deployment durable
     | .error "authority unavailable"
   let some platform := PlatformCellDomain.load deployment durable.snapshot
     | .error "platform cell unavailable"

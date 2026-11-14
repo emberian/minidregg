@@ -144,7 +144,7 @@ structure Prepared (deployment : Deployment) (semantics : Digest) (durable : Dur
 
 def prepare (deployment : Deployment) (semantics : Digest) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment semantics durable command) := do
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
   let snapshot := authority.snapshot
   if eligible : KeyCommitmentAdoption.Eligible snapshot.logical snapshot.revision command.adoption then
     if fresh : ParticipantKeyEnrollment.allKeys snapshot.logical
@@ -162,6 +162,11 @@ variable {deployment : Deployment} {semantics : Digest} {durable : Durable} {com
 
 def Prepared.authorityPost (prepared : Prepared deployment semantics durable command) :
     CredentialAuthorityDomain.Cell := prepared.validated.apply
+
+/-- The update the lowering takes: the post cell with the patch's write footprint and its frame. -/
+def Prepared.authorityUpdate (prepared : Prepared deployment semantics durable command) :
+    Minidregg.Compiler.CredentialAuthorityLayout.Update prepared.authority.snapshot.cell :=
+  Minidregg.Compiler.CredentialAuthorityLayout.Update.ofValidated prepared.validated
 
 structure Accepted (prepared : Prepared deployment semantics durable command) (ingress : DecodedIngress) where
   private mk ::
@@ -218,7 +223,7 @@ def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNul
   CredentialAuthorityReplay.nullifier domain (marker domain semantics ingress.command)
 
 def writes (prepared : Prepared deployment semantics durable command) : List DataWrite :=
-  prepared.authority.writes prepared.authorityPost
+  prepared.authority.writes prepared.authorityUpdate
 
 def readGuards (prepared : Prepared deployment semantics durable command) : List ReadGuard :=
   let written := (writes prepared).map DataWrite.cellId
@@ -239,9 +244,7 @@ instance physicalShapeDecidable (prepared : Prepared deployment semantics durabl
 theorem writes_roots_bound (prepared : Prepared deployment semantics durable command)
     (write : DataWrite) (member : write ∈ writes prepared) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  simp only [writes, Loaded.writes, List.mem_singleton] at member
-  subst write
-  exact prepared.authority.write_root_bound _
+  exact prepared.authority.writes_root_bound _ write member
 
 theorem readGuards_readonly (prepared : Prepared deployment semantics durable command)
     (guard : ReadGuard) (member : guard ∈ readGuards prepared) :

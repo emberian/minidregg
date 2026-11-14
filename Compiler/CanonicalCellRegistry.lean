@@ -1202,6 +1202,13 @@ theorem no_user_authority_birth (deployment : Deployment) (cellId : Nat)
     (payload : CredentialAuthorityEntry.PhysicalCell) :
     ¬UserInitial deployment cellId ⟨.authority, payload⟩ := fun admitted => admitted.1.2
 
+/-- A user birth is never of the authority kind. -/
+theorem userInitial_not_authority {deployment : Deployment} {cellId : Nat} {cell : PackedCell registry}
+    (admitted : UserInitial deployment cellId cell) : cell.kind ≠ .authority := by
+  obtain ⟨kind, payload⟩ := cell
+  rintro (rfl : kind = Kind.authority)
+  exact admitted.1.2
+
 theorem no_user_event_birth (deployment : Deployment) (cellId : Nat)
     (payload : Materialized HyperdocumentCell.eventMaterializer) :
     ¬UserInitial deployment cellId ⟨.eventHistory, payload⟩ := fun admitted => admitted.1.2

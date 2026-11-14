@@ -374,7 +374,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
   let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot = snapshot.cell.root then
@@ -570,7 +570,7 @@ authority.  It discloses no decision beyond the current clock value. -/
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := loadDeployment deployment durable
     | .error "authority unavailable"
   let some clock := ClockCellDomain.load deployment durable.snapshot
     | .error "clock cell unavailable"

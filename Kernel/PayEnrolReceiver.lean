@@ -731,6 +731,14 @@ def EnrolLegs.authorityPost {directory : LoadedDirectory durable}
     CredentialAuthorityDomain.Cell :=
   legs.authorityValidated.apply
 
+/-- The update the lowering takes: the post cell with the patch's write footprint and its frame. -/
+def EnrolLegs.authorityUpdate {directory : LoadedDirectory durable}
+    {authority : Loaded deployment durable.snapshot} {book : BookCell deployment directory.directory}
+    {tariff : Tariff} {price : Price} {plan : EnrolPlan}
+    (legs : EnrolLegs deployment profile ambient directory authority book tariff price plan) :
+    Minidregg.Compiler.CredentialAuthorityLayout.Update authority.snapshot.cell :=
+  Minidregg.Compiler.CredentialAuthorityLayout.Update.ofValidated legs.authorityValidated
+
 /-- The legs of each decision. -/
 inductive Legs (directory : LoadedDirectory durable) (authority : Loaded deployment durable.snapshot)
     (pay : PayCellDomain.Loaded deployment durable.snapshot)
@@ -799,7 +807,7 @@ def Legs.writes (factory : FactoryCell deployment directory.directory) : {decisi
       List DataWrite
   | _, .enrol _ legs =>
       ResourceBirthController.Concrete.planWrites deployment legs.descriptor factory.payload
-        book.payload legs.resources.post (authority.writes legs.authorityPost)
+        book.payload legs.resources.post (authority.writes legs.authorityUpdate)
   | _, .renew _ _ _ resources =>
       [ResourceBirthController.Concrete.packedWrite deployment.factoryId
         ⟨.declaredObject, factory.payload⟩ ⟨.declaredObject, factory.payload⟩,
@@ -890,7 +898,7 @@ structure Planned (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
   directory : LoadedDirectory durable
   directoryExact : loadDirectory durable = some directory
   authority : Loaded deployment durable.snapshot
-  authorityExact : loadDeployment deployment durable.snapshot = some authority
+  authorityExact : loadDeployment deployment durable = some authority
   pay : PayCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
   factory : FactoryCell deployment directory.directory
@@ -941,7 +949,7 @@ def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
   match directoryExact : loadDirectory durable with
   | none => throw .directoryUnavailable
   | some directory =>
-  match authorityExact : loadDeployment deployment durable.snapshot with
+  match authorityExact : loadDeployment deployment durable with
   | none => throw .authorityUnavailable
   | some authority =>
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
@@ -1140,7 +1148,11 @@ theorem Legs.writes_bound {directory : LoadedDirectory durable}
       simp only [Legs.writes, ResourceBirthController.Concrete.planWrites,
         ResourceBirthController.allocationWrites, CredentialAuthorityDomainReceiver.Loaded.writes,
         List.mem_append, List.mem_map, List.mem_cons, List.mem_nil_iff, or_false] at member
-      rcases member with ((⟨request, -, rfl⟩ | rfl | rfl) | rfl) <;> rfl
+      rcases member with (⟨request, -, rfl⟩ | rfl | rfl) | lowered
+      · rfl
+      · rfl
+      · rfl
+      · exact CredentialAuthorityLayout.lowerAuthority_root_bound _ _ _ _ _ write lowered
   | _, .renew _ _ _ _, write, member => by
       simp only [Legs.writes, List.mem_cons, List.mem_nil_iff, or_false] at member
       rcases member with rfl | rfl <;> rfl
@@ -1334,7 +1346,7 @@ enrollment family's refusal type. -/
 def envelopeClaims {R : Type} (unavailable : R) (signature : CredentialSignatureAdmission.Reject → R)
     (deployment : Deployment) (durable : Durable) (ingress : DecodedIngress) :
     Except R (List SigQuery) :=
-  match loadDeployment deployment durable.snapshot with
+  match loadDeployment deployment durable with
   | none => .error unavailable
   | some authority =>
       match CredentialSignatureAdmission.envelopeClaim authority.snapshot ingress.command.observer
@@ -1716,7 +1728,7 @@ def signingHeader {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (native : CredentialSignatureIO.NativeConfig) (command : Command) :
     IO (Except String CredentialSignedEnvelopeController.SignedHeader) := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := loadDeployment deployment durable
     | return .error "authority unavailable"
   let some pay := PayCellDomain.load deployment durable.snapshot
     | return .error "pay cell unavailable"

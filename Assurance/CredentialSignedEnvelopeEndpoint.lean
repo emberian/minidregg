@@ -262,7 +262,7 @@ def signaturePortal (verify : OpaqueVerifier Nat) : Portal where
   verifyCapabilityCommitment := fun _ _ _ => true
   verifyCapabilityUse := fun _ _ _ witness => PEmpty.elim witness
   verifyMembership := fun _ _ _ => true
-  verifyIssuer := fun _ _ _ _ => true
+  verifyIssuer := fun _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true
   verifyCommittedPolicy := fun _ _ _ _ => true
 

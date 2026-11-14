@@ -1251,7 +1251,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   discard <| timed "loadDeployment x10" do
     let mut n := 0
     for _ in [0:10] do
-      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).isSome then
+      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable).isSome then
         n := n + 1
     pure n
   discard <| timed "validateLoaded x10" do
@@ -1313,7 +1313,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       r := r + (Minidregg.Kernel.WorldRootCache.RootCache.ofEntries
         (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
     pure r
-  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
+  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable
     | throw (IO.userError "no authority")
   let authorityBytes := durable.snapshot.canonicalBytes ⟨config.deployment.authorityCellId⟩
   IO.println s!"authority cell bytes {authorityBytes.length}"
@@ -1330,33 +1330,9 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   discard <| timed "authority decode+load x10" do
     let mut n := 0
     for _ in [0:10] do
-      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).isSome then
+      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable).isSome then
         n := n + authority.snapshot.cell.logical.support.card
     pure n
-  -- Issuer evidence (ledger row 27): the support search `issuerCheck` was, against the issued
-  -- index it now reads (`issuerCheck_eq_indexed`), for the LAST stored capability in key order.
-  let snapshot := authority.snapshot
-  let triples := CredentialAuthorityDomain.issuedOf snapshot.domain snapshot.cell
-  IO.println s!"authority stored capabilities {triples.length} of {snapshot.cell.logical.keys.length} addresses"
-  if let some (issuer, epoch, commitment) := triples.getLast? then
-    let searched (snapshot : CredentialAuthorityPolicyRegistry.Snapshot) : Bool :=
-      decide (Minidregg.Theory.CredentialAuthorityState.issuerEpochAt snapshot.cell issuer = epoch) &&
-        decide (∃ address ∈ snapshot.logical.support,
-          CredentialAuthorityPolicyRegistry.issuedAt snapshot issuer epoch commitment address = true)
-    discard <| timed "issuer evidence, support search x10" do
-      let mut n := 0
-      for _ in [0:10] do
-        if searched snapshot then n := n + 1
-      pure n
-    let fresh := CredentialAuthorityDomain.Snapshot.ofCell snapshot.domain snapshot.revision snapshot.spent
-      snapshot.cell
-    discard <| timed "issuer evidence, issued index (first, forces it)" do
-      pure (CredentialAuthorityPolicyRegistry.issuerCheck fresh issuer epoch commitment)
-    discard <| timed "issuer evidence, issued index x1000" do
-      let mut n := 0
-      for _ in [0:1000] do
-        if CredentialAuthorityPolicyRegistry.issuerCheck fresh issuer epoch commitment then n := n + 1
-      pure n
   -- The open's and the checkpoint turn's parts, each timed alone (`IO.lazyPure`
   -- defers each pure computation to inside its timer).
   let timedPure {α : Type} (label : String) (value : Unit → α) : IO α :=
@@ -1573,16 +1549,16 @@ def sessionFull (config : NativeHost.Config)
 /-- A light receive's own readback (`DurableServed.Received.appended`: the record it appended,
 read back exactly and verified at the new head) becomes the session's light opening
 (`Light.adoptStep`, over the cells the record wrote), so the next refresh finds the head current instead of reading, verifying and
-re-executing the entry the Host itself just wrote; the write's authority post-cell is taken as
-the served authority without a decode or a trie rebuild. Where it does not validate, the session keeps
+re-executing the entry the Host itself just wrote; the served authority is the held one followed
+along the written cells. Where it does not validate, the session keeps
 its opening and the next refresh reads the entry. -/
 def sessionAdopt (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (light : NativeHostLight.Light config) : NativeHostLight.Adopt light.opening :=
-  fun opening written moved held => do
+  fun opening written moved => do
     if let some current ← state.get then
       if opening.head.height = current.light.opening.head.height + 1 then
-        if let .ok light := light.adoptStep opening written moved held then
+        if let .ok light := light.adoptStep opening written moved then
           state.set (some { current with light, observed := none })
 
 /-- The receipt-continuity witness of the light opening's head (`ReceiptContinuity.current` of the

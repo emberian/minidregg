@@ -134,7 +134,7 @@ theorem validateServed_ofLoaded (config : Config) {store : StoreIdentity} (durab
       (validateLoaded config durable).map (·.pins) := by
   have served := validateCore_map config durable.image.seed durable.logStart
     (CredentialAuthorityDomainReceiver.loadDirectory durable)
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable)
     (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
     (loadServedDirectory (Served.ofLoaded durable sameStart))
     (loadServedAuthority config.deployment (Served.ofLoaded durable sameStart))
@@ -337,24 +337,24 @@ and the cell law runs only on cells whose bytes moved (`cellsLawfulServedFrom`).
 The genesis checks are inherited when the seed and log start are unchanged.
 `validateServedFrom_eq`: it is `validateServed` -- the same result, the same refusal. -/
 def validateServedFrom (config : Config) {earlier store : StoreIdentity}
-    (prior : OpenedServed config earlier) (served : State store) (held : Option HeldCell := none) :
+    (prior : OpenedServed config earlier) (served : State store) :
     Except String (OpenedServed config store) :=
   let evidence := priorServedGenesisEvidence prior served
   validateServedWith config served (loadServedDirectoryFrom prior.directory served)
-    (loadServedAuthorityHeld prior.authority held served) (cellsLawfulServedFrom config prior served)
+    (loadServedAuthorityFrom prior.authority served) (cellsLawfulServedFrom config prior served)
     (cellsLawfulServedFrom_eq config prior served) evidence.1 evidence.2
 
 theorem validateServedFrom_eq (config : Config) {earlier store : StoreIdentity}
-    (prior : OpenedServed config earlier) (served : State store) (held : Option HeldCell := none) :
-    validateServedFrom config prior served held = validateServed config served :=
+    (prior : OpenedServed config earlier) (served : State store) :
+    validateServedFrom config prior served = validateServed config served :=
   validateServedWith_withExact_eq config served
     (loadServedDirectoryFrom prior.directory served)
-    (loadServedAuthorityHeld prior.authority held served)
+    (loadServedAuthorityFrom prior.authority served)
     (cellsLawfulServedFrom config prior served)
     (cellsLawfulServedFrom_eq config prior served)
     (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
     (loadServedDirectoryFrom_eq prior.directory served)
-    (loadServedAuthorityHeld_eq prior.authority held served)
+    (loadServedAuthorityFrom_eq prior.authority served)
 
 /-! ## A step: the next served state, validated over the cells it wrote
 
@@ -430,10 +430,11 @@ theorem cellsLawfulStep_eq (config : Config) {earlier store : StoreIdentity}
     · exact lawful identifier member
     · exact servedCellLawful_outside config loaded identifier member
 
-/-- A step wrote neither the authority cell nor a cell that held a policy source before it. -/
+/-- A step wrote no authority cell (neither the head nor any cell of the authority space:
+`CredentialAuthorityLayout.authorityUnwritten`) and no cell that held a policy source before it. -/
 def sourcesUnwritten (config : Config) {earlier : StoreIdentity} (prior : OpenedServed config earlier)
     (written : List DurableDataIntent.CellId) : Bool :=
-  !(written.contains (CredentialAuthorityDomainReceiver.cellIdOf config.deployment)) &&
+  CredentialAuthorityLayout.authorityUnwritten config.deployment.authorityCellId written &&
     written.all fun identifier => holdsNoPolicySource (prior.directory.directory.slots identifier.value)
 
 theorem stepSourced_holds (config : Config) {earlier store : StoreIdentity}
@@ -442,20 +443,11 @@ theorem stepSourced_holds (config : Config) {earlier store : StoreIdentity}
     (unwritten : sourcesUnwritten config prior written = true)
     (loaded : ServedDirectory served) (authority : ServedAuthority config.deployment served) :
     policiesSourced config loaded.directory authority.cell.logical = true := by
-  simp only [sourcesUnwritten, Bool.and_eq_true, Bool.not_eq_eq_eq_not, Bool.not_true,
-    List.all_eq_true] at unwritten
-  obtain ⟨notContained, noSource⟩ := unwritten
-  have noAuthority : CredentialAuthorityDomainReceiver.cellIdOf config.deployment ∉ written := by
-    intro member
-    rw [List.contains_iff_mem.mpr member] at notContained
-    cases notContained
-  have sameCell : authority.cell = prior.authority.cell := by
-    have bytes := authority.observed.symm.trans
-      ((moved.keeps _ noAuthority).trans prior.authority.observed)
-    have decoded := congrArg CredentialAuthorityDomainReceiver.decodeCell bytes
-    rw [CredentialAuthorityDomainReceiver.decodeCell_bytes,
-      CredentialAuthorityDomainReceiver.decodeCell_bytes] at decoded
-    exact Option.some.inj decoded
+  simp only [sourcesUnwritten, Bool.and_eq_true, List.all_eq_true] at unwritten
+  obtain ⟨noAuthority, noSource⟩ := unwritten
+  have sameCell : authority.cell = prior.authority.cell :=
+    CellState.Materialized.ext (authority.observed.unique
+      (prior.authority.observed.of_unwritten moved.keeps noAuthority))
   rw [sameCell]
   apply policiesSourced_inherit config prior.directory.directory loaded.directory
     prior.authority.cell.logical (written.map (·.value))
@@ -487,27 +479,26 @@ decoded only when moved, the cell law runs on the written cells, and the sourcin
 inherited unless the step wrote the authority cell or a policy source. -/
 def validateServedStep (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store)
-    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
-    (held : Option HeldCell := none) : Except String (OpenedServed config store) :=
+    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written) :
+    Except String (OpenedServed config store) :=
   validateServedWith config served (loadServedDirectoryStep prior.directory served written moved)
-    (loadServedAuthorityHeld prior.authority held served) (cellsLawfulStep config served written)
+    (loadServedAuthorityStep prior.authority served written moved) (cellsLawfulStep config served written)
     (cellsLawfulStep_eq config prior served written moved)
     (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
     (stepSourced config prior served written moved _ _)
 
 theorem validateServedStep_eq (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store)
-    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
-    (held : Option HeldCell := none) :
-    validateServedStep config prior served written moved held = validateServed config served :=
+    (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written) :
+    validateServedStep config prior served written moved = validateServed config served :=
   validateServedWith_withExact_eq config served
     (loadServedDirectoryStep prior.directory served written moved)
-    (loadServedAuthorityHeld prior.authority held served)
+    (loadServedAuthorityStep prior.authority served written moved)
     (cellsLawfulStep config served written)
     (cellsLawfulStep_eq config prior served written moved)
     (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
     (loadServedDirectoryStep_eq prior.directory served written moved)
-    (loadServedAuthorityHeld_eq prior.authority held served)
+    (loadServedAuthorityStep_eq prior.authority served written moved)
     (stepSourced config prior served written moved _ _)
 
 #assert_axioms validateServedStep_eq

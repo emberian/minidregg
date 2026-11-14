@@ -98,7 +98,7 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {kind : ResourceKind} {command : Command kind}
 
 def writes (prepared : Prepared deployment profile ambient ground command) : List DataWrite :=
-  ground.authorityWrites prepared.authorityPost
+  ground.authorityWrites prepared.authorityUpdate
 
 def resourceGuard (prepared : Prepared deployment profile ambient ground command) : ReadGuard :=
   ⟨⟨command.target.value⟩,
@@ -131,9 +131,7 @@ instance physicalShapeDecidable (prepared : Prepared deployment profile ambient 
 theorem writes_roots_bound (prepared : Prepared deployment profile ambient ground command)
     (write : DataWrite) (member : write ∈ writes prepared) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  simp only [writes, ServedBasis.Ground.authorityWrites, List.mem_singleton] at member
-  subst write
-  exact ground.authorityWrite_root_bound _
+  exact ground.authorityWrites_root_bound _ write member
 
 theorem readGuards_readonly (prepared : Prepared deployment profile ambient ground command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
@@ -209,13 +207,15 @@ theorem installed_write_bytes (accepted : AcceptedRevocation deployment profile 
   DataSnapshot.install_canonicalBytes_of_member ground.view (intent accepted)
     accepted.physical.1 write member
 
-/-- The installed image holds exactly the post authority cell at the pinned
-identifier. There is one authority write and no shard or catalogue. -/
+/-- The installed image realises exactly the post authority store: the head holds its logical
+root and each address's own entry cell holds its value. The writes are the update's lowering and
+nothing else. -/
 theorem installed_authority_cell (accepted : AcceptedRevocation deployment profile ambient ground ingress) :
-    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes (cellIdOf deployment) =
-      cellBytes accepted.prepared.authorityPost :=
-  installed_write_bytes accepted (ground.authorityWrite accepted.prepared.authorityPost)
-    (List.mem_singleton.mpr rfl)
+    Compiler.CredentialAuthorityLayout.RealizesAuthority
+      (DataSnapshot.install ground.view (intent accepted)).canonicalBytes deployment.authorityCellId
+      accepted.prepared.authorityPost.logical :=
+  ground.authorityWrites_installed accepted.prepared.authorityUpdate (intent accepted) [] rfl
+    accepted.physical.1 (fun _ member => nomatch member)
 
 /-- Revocation publishes authority only; the resource whose policy authorized
 it retains its exact complete old payload, not merely an equal root. -/

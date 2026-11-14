@@ -432,9 +432,7 @@ theorem writes_roots_bound {F : Type} [Field F]
         exact ResourceBirthController.birthWrite_root_bound request
       · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
         rcases native with rfl | rfl <;> rfl
-    · simp only [Minidregg.Compiler.ServedBasis.Ground.authorityWrites, List.mem_singleton] at authority
-      subst write
-      exact ground.authorityWrite_root_bound _
+    · exact ground.authorityWrites_root_bound _ write authority
   · obtain ⟨index, _, rfl⟩ := List.mem_map.mp target
     rfl
 

@@ -664,21 +664,54 @@ theorem physicalBirth_false_of_present {durable : Durable} (directory : LoadedDi
       (LifecycleImage.codec registry).encode (.live cell) from rfl,
     LifecycleImage.decode_encode]
 
-/-- **A newborn's birth parent**: the room `patch` places it in, its entry in the
-append-only `parent` plane of the authority cell the patch writes. -/
-def birthRoom (deployment : Deployment) (patch : List DataWrite) (newborn : Nat) : Option Nat := do
-  let authorityWrite ← patch.find? fun write => write.cellId.value == deployment.authorityCellId
-  match (LifecycleImage.codec registry).decode authorityWrite.canonicalPostBytes with
-  | some (.live ⟨.authority, payload⟩) => payload.logical ⟨.parent, newborn⟩
-  | _ => none
+/-- **A newborn's birth parent**: the room `patch` places it in. It is the value of the newborn's
+own address in the append-only `parent` plane, read from the post image the patch writes at that
+address's entry cell (`CredentialAuthorityEntry.entryCellId`): the one authority write that
+carries it, found by its identifier, never by decoding a whole store. A patch that writes no such
+entry places the newborn in no room. -/
+def birthRoom (patch : List DataWrite) (newborn : Nat) : Option Nat := do
+  let write ← patch.find? fun write =>
+    write.cellId.value == CredentialAuthorityEntry.entryCellId ⟨.parent, newborn⟩
+  let cell ← CredentialAuthorityLayout.decodeCell write.canonicalPostBytes
+  CredentialAuthorityEntry.cellValue ⟨.parent, newborn⟩ cell
+
+/-- The birth room is the parent entry the patch writes: a write of the patch at the newborn's
+parent address whose post cell holds that room for it. -/
+theorem birthRoom_some (patch : List DataWrite) (newborn : Nat) (room : Nat)
+    (found : birthRoom patch newborn = some room) :
+    ∃ write ∈ patch,
+      write.cellId.value = CredentialAuthorityEntry.entryCellId ⟨.parent, newborn⟩ ∧
+      (CredentialAuthorityLayout.decodeCell write.canonicalPostBytes).bind
+        (CredentialAuthorityEntry.cellValue ⟨.parent, newborn⟩) = some room := by
+  unfold birthRoom at found
+  cases located : patch.find? fun write =>
+      write.cellId.value == CredentialAuthorityEntry.entryCellId ⟨.parent, newborn⟩ with
+  | none => simp [located] at found
+  | some write =>
+      refine ⟨write, List.mem_of_find?_eq_some located, ?_, ?_⟩
+      · simpa using List.find?_some located
+      · simpa [located] using found
+
+/-- Refuting pole: a patch that writes nothing at the newborn's parent address places it in no
+room, whatever else it writes (the head, other entries). -/
+theorem birthRoom_none_of_unwritten (patch : List DataWrite) (newborn : Nat)
+    (unwritten : ∀ write ∈ patch,
+      write.cellId.value ≠ CredentialAuthorityEntry.entryCellId ⟨.parent, newborn⟩) :
+    birthRoom patch newborn = none := by
+  unfold birthRoom
+  have missing : (patch.find? fun write =>
+      write.cellId.value == CredentialAuthorityEntry.entryCellId ⟨.parent, newborn⟩) = none :=
+    List.find?_eq_none.mpr fun write member => by simpa using unwritten write member
+  rw [missing]
+  rfl
 
 /-- **The export law's roots**: the birth room's descendants law, then the
 structural restrictions the newborn's kind carries (a world instance's world kind)
 -- the same composition as `BirthExportAdmission.roots` over a birth item whose
 parent is the room. -/
-def exportRoots (deployment : Deployment) (patch : List DataWrite) (newborn : Nat)
+def exportRoots (_deployment : Deployment) (patch : List DataWrite) (newborn : Nat)
     (structural : WorldKindLawDependencies.Dependencies) : List PolicyRef :=
-  ((birthRoom deployment patch newborn).toList.map fun room => ⟨⟨room⟩, .descendants, .head⟩) ++
+  ((birthRoom patch newborn).toList.map fun room => ⟨⟨room⟩, .descendants, .head⟩) ++
     structural.additional
 
 /-- **The export law of a birth on `step`**, before the Receiver's guards: the
@@ -736,7 +769,7 @@ def Laws.physical {Fld : Type} [Field Fld] [DecidableEq Fld]
   birth := physicalBirth
   resolveBirth durable patch write step := do
     let directory ← loadDirectory durable
-    let authority ← loadDeployment deployment durable.snapshot
+    let authority ← loadDeployment deployment durable
     let newborn ← livePost write
     let structural ← WorldKindLawDependencies.loadNewborn deployment directory.directory
       write.cellId.value newborn
@@ -746,7 +779,7 @@ def Laws.physical {Fld : Type} [Field Fld] [DecidableEq Fld]
       structural.readGuards.map fun (cell, root) => (⟨⟨cell⟩, root⟩ : ReadGuard) }
   resolve durable target step := do
     let directory ← loadDirectory durable
-    let authority ← loadDeployment deployment durable.snapshot
+    let authority ← loadDeployment deployment durable
     let structural ← WorldKindLawDependencies.loadTarget deployment directory.directory target
     let sources ← PhysicalLawResolution.readGuards authority.snapshot directory.directory
       profile.semantics target structural.additional
@@ -768,7 +801,7 @@ theorem physical_resolve_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld]
     (Laws.physical profile deployment).resolve durable target step = some law ↔
       ∃ directory authority structural sources judged,
         loadDirectory durable = some directory ∧
-        loadDeployment deployment durable.snapshot = some authority ∧
+        loadDeployment deployment durable = some authority ∧
         WorldKindLawDependencies.loadTarget deployment directory.directory target = some structural ∧
         PhysicalLawResolution.readGuards authority.snapshot directory.directory profile.semantics
           target structural.additional = some sources ∧
@@ -800,7 +833,7 @@ theorem physical_resolveBirth_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld
     (Laws.physical profile deployment).resolveBirth durable patch write step = some law ↔
       ∃ directory authority newborn structural exported,
         loadDirectory durable = some directory ∧
-        loadDeployment deployment durable.snapshot = some authority ∧
+        loadDeployment deployment durable = some authority ∧
         livePost write = some newborn ∧
         WorldKindLawDependencies.loadNewborn deployment directory.directory write.cellId.value
           newborn = some structural ∧
@@ -827,6 +860,8 @@ theorem physical_resolveBirth_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld
 #assert_axioms physical_resolveBirth_some_iff
 #assert_axioms exportLaw_cons_some_iff
 #assert_axioms livePost_live
+#assert_axioms birthRoom_some
+#assert_axioms birthRoom_none_of_unwritten
 #assert_axioms physicalBirth_false_of_present
 
 end Minidregg.Kernel.ReceivingLaw

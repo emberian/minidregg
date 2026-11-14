@@ -278,7 +278,6 @@ def convertPayload (kind : Kind) (height : Nat) (bytes : List UInt8) :
     Except String (Store (CanonicalCellRegistry.layout kind)) :=
   match kind with
   | .eventHistory => decodePinned HyperdocumentCell.eventWire eventDescriptor bytes
-  | .authority => decodeAuthority bytes
   | .declaredObject => decodeDeclared height bytes
   | .accountMetadata => decodeDeclared height bytes
   | .declaredProgram => decodeDeclared height bytes
@@ -295,6 +294,10 @@ def convertPayload (kind : Kind) (height : Nat) (bytes : List UInt8) :
       match NockProgramCodec.materializer.codec.decode bytes with
       | some store => .ok store
       | none => .error "carry source Nock program is not canonical"
+  | .authority =>
+      -- The source's one authority cell becomes a head and one entry cell per address: it is
+      -- converted whole by `decodeAuthority` and lowered by the carry plan, not cell for cell.
+      .error "carry converts the source authority cell through its own closed converter"
   | .content | .policySource | .worldKind | .worldInstance | .objectiveActivity | .seat
   | .platform =>
       .error "carry role requires a separate closed semantic converter"

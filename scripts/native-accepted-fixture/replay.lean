@@ -72,7 +72,7 @@ def main (args : List String) : IO UInt32 := do
   let ambient : Ambient := ⟨config.federation, NativeHost.logicalHeight config durable⟩
   let some directory := CredentialAuthorityDomainReceiver.loadDirectory durable
     | IO.eprintln "image: the directory does not load"; return 4
-  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
+  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable
     | IO.eprintln "image: the deployment authority does not load"; return 4
   let ground : Minidregg.Compiler.ServedBasis.Ground config.deployment := .full durable directory authority
   match prepare config.deployment config.profile ambient ground command with

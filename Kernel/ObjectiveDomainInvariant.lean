@@ -357,7 +357,7 @@ end Judged
 /-! ## Every step, every reachable world -/
 
 theorem domainCell_protected (config : Config) (id : Digest) : Protected (domainCell config.domain id) :=
-  ObjectiveActivityCell.coordinate_reserved _ _ _
+  ObjectiveActivityGate.coordinate_protected ObjectiveActivityCell.spec _ _ _
 
 /-- Agreement on protected cells carries the invariant. -/
 theorem domainsHold_transfer {config : Config} {P Q : Payloads} (agree : Agree P Q)

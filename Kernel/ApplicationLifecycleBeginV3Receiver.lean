@@ -186,7 +186,7 @@ opening's head, admitted on that basis's ground, committed by `receiveServed` an
 readback handed to `adopt`. -/
 def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) :
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) :
     IO (LightResult config light.opening) := do
   let some ingress := ApplicationLifecycleBeginV3Ingress.codec.decode bytes
     | return .rejected "noncanonical launch-bound lifecycle BEGIN"
@@ -210,7 +210,7 @@ def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
         match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening
             accepted.intent with
         | .appended kind next height entry entryExact _ moved =>
-            adopt next _ moved none
+            adopt next _ moved
             return .confirmed ⟨ingress, basis, accepted, history, fresh, eventExact, kind, next, height,
               entry, entryExact⟩
         | .replayed _ => return .rejected "launch-bound BEGIN transaction identity already used"

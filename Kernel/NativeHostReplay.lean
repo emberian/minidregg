@@ -3426,10 +3426,10 @@ theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : 
     simpa only [Option.map_map, Function.comp_def, lawfulSame] using mapped
   have core := validateCore_map config durable.image.seed durable.logStart
     (CredentialAuthorityDomainReceiver.loadDirectory durable)
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable)
     (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
     (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable)
     (·.directory) (·.snapshot.logical)
     (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
     (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)
