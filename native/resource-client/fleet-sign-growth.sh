@@ -28,6 +28,15 @@
 # is logged to certify.log; a certify that fails ends the run. A confirmed certify is a record
 # of its own, so chain_index runs ahead of the turn number.
 #
+# A certify must not make the session's later turns slower (the Host holds its index trie across
+# a record it wrote through any path). certify-cost.tsv has one row per confirmed certify with 8
+# turns on each side: the median submit time of the 8 turns before it and of the 8 after. The
+# run exits 3 when an after-median exceeds CERTIFY_COST_FACTOR (default 2) times its
+# before-median plus 0.03 s; the evidence is complete either way.
+#
+# A reopened Host runs with its open and phase traces on (serve-LEVEL.log), so a slow first
+# receipt names its phase.
+#
 # usage: fleet-sign-growth.sh HOST MINI STORE VERIFIER NEW_PRIVATE_DIRECTORY [TURNS] [LEVELS]
 set -eu
 umask 077
@@ -78,6 +87,7 @@ certify() {
     --min-tail "${CERTIFY_MIN_TAIL:-64}" >>"$OUT/certify.log" 2>&1 \
     || { echo "certify failed after turn $1 (see $OUT/certify.log)" >&2; exit 1; }
   printf '\n' >>"$OUT/certify.log"
+  if tail -n 2 "$OUT/certify.log" | grep -q '"certified":{'; then printf '%s\n' "$1" >>"$OUT/certified-turns"; fi
 }
 
 T="$OUT/turns.tsv"; R="$OUT/reopen.tsv"
@@ -133,7 +143,7 @@ while [ "$n" -le "$TURNS" ]; do
         fi
       done
       t0=$(now)
-      serve "$FIX/public/serve-$level.log"
+      MINI_OPEN_TIMING=1 MINIDREGG_HOST_TRACE=1 serve "$FIX/public/serve-$level.log"
       t1=$(now)
       "$MINI" fleet-sign receipt --profile alpha --turn-hash "$TX" >"$OUT/reopen-$level.json" 2>"$OUT/reopen-$level.stderr"
       t2=$(now)
@@ -149,4 +159,27 @@ printf 'control-fresh-topic\tsend\t%s\t%s\t%s\n' "$(elapsed "$t0" "$(now)")" \
   "$(jq -r .replans "$OUT/control-fresh-topic.json")" "$(jq -r .chain_index "$OUT/control-fresh-topic.json")" >>"$T"
 stop_server
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$CONFIG" >"$OUT/binaries.sha256"
+touch "$OUT/certified-turns"
+awk -F'\t' -v factor="${CERTIFY_COST_FACTOR:-2}" '
+  function median(from, to,   k, m, i, j, t, v) {
+    m = 0
+    for (k = from; k <= to; k++) if (k in submit) v[++m] = submit[k]
+    if (m < 8) return -1
+    for (i = 2; i <= m; i++) { t = v[i]; for (j = i - 1; j >= 1 && v[j] > t; j--) v[j + 1] = v[j]; v[j + 1] = t }
+    return (v[4] + v[5]) / 2
+  }
+  FNR == NR { certified[++count] = $1; next }
+  FNR > 1 && $1 ~ /^[0-9]+$/ && $6 != "NA" { submit[$1 + 0] = $6 + 0 }
+  END {
+    printf "certify_turn\tbefore_median_s\tafter_median_s\tverdict\n"
+    for (c = 1; c <= count; c++) {
+      turn = certified[c]; before = median(turn - 7, turn); after = median(turn + 1, turn + 8)
+      if (before < 0 || after < 0) continue
+      verdict = (after > factor * before + 0.03) ? "slower" : "ok"
+      if (verdict == "slower") bad = 1
+      printf "%s\t%.3f\t%.3f\t%s\n", turn, before, after, verdict
+    }
+    exit bad ? 3 : 0
+  }' "$OUT/certified-turns" "$T" >"$OUT/certify-cost.tsv" || {
+    echo "a certify made later turns slower (see $OUT/certify-cost.tsv)" >&2; printf '%s\n' "$OUT"; exit 3; }
 printf '%s\n' "$OUT"
