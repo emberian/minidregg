@@ -1,17 +1,20 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `1edbeb747d44` (builder: REDS.md for 355ee3c73d2c (2 red)). Round finished 2026-11-14T17:44Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-1edbeb74`.
+Tip: `26be70adf141` (scalar: `prepareStore`, the root-free core; `prepareCell` is its header and then that core). Round finished 2026-11-14T18:01Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-26be70ad`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | ratchets | rc=1 see /home/hbox/lanes/integ/logs/ratchets.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/ratchets.log |
-| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-1edbeb/journey.log |
+| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-26be70/journey.log |
+| gate:composed:composed | composed composed fail | not rerun | no | infra, member-side | scratch world: jworld FAIL start the relay did not answer a pinned enrollment-view within 30 s |
 
-Suspect commits since green (`git log 788dfb51fb5a..1edbeb747d44`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..26be70adf141`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `26be70ad` scalar: `prepareStore`, the root-free core; `prepareCell` is its header and then that core
+- `c7560674` builder: REDS.md for 1edbeb747d44 (3 red) (owner: build-loop)
 - `1edbeb74` builder: REDS.md for 355ee3c73d2c (2 red) (owner: build-loop)
 - `cf053068` effects: `ComputeTargetWorldArm` is proved (owner: bytes-repr)
 - `992b545f` journeys: the delivered provision folder is owner-private in the inspect, affordances and law-leaf j (owner: apps-hermes)
@@ -50,17 +53,15 @@ Suspect commits since green (`git log 788dfb51fb5a..1edbeb747d44`), newest first
 - `1936e8c1` builder: REDS.md for a64bbd6e9e09 (3 red) (owner: build-loop)
 - `a64bbd6e` effects: the hand-written content handler is deleted; its poles are over the derived one
 - `af2112b1` effects: `PrepareFactors` is one statement for every bound code, and proved
-- `fb6c706d` kernel: `prepareTarget_packed`, what one target's preparation answers; `CommutingPrepare` is proved 
-- `9ed4c1bd` builder: REDS.md for 45e65f2adcb8 (3 red) (owner: build-loop)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.186 | 0.204 | 1.096 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 29.887 | 60.803 | 2.034 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.137 | 0.190 | 1.381 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 19.222 | 52.176 | 2.714 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.419 | 0.414 | 0.990 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 484.873 | 156.598 | 0.323 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-1edbeb74/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.181 | 0.205 | 1.133 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 31.945 | 83.213 | 2.605 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_cpu_ms | 0.123 | 0.198 | 1.601 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 17.564 | 58.928 | 3.355 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.386 | 0.357 | 0.924 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 159.398 | 141.272 | 0.886 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-26be70ad/flatness.log | - | - | - | - | host-execution, store-retained |
