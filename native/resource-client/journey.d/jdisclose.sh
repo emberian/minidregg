@@ -135,10 +135,11 @@ row narrow-owner "the owner is told the clause and the value" "$R" "$([[ $R == *
 # Law 10: every refusal a requester can see names its clause, in words. A write whose expected
 # value is wrong is refused by the cell's controller at prepare (operation-rejected); the line and
 # `why` carry the clause path (`guard-rejected N`), never the constructor's source spelling.
-q alice "invoke v-wg vault write 1 1 7"; q alice "submit v-wg"; RC=$(refused); q alice "why"; WC=$(tr '\n' ' ' <"$LAST")
+# (`RC` is `q`'s return code, rewritten by every line: the refusal line has its own name.)
+q alice "invoke v-wg vault write 1 1 7"; q alice "submit v-wg"; RG=$(refused); q alice "why"; WC=$(tr '\n' ' ' <"$LAST")
 row refusal-names-clause "operation-rejected line and why name guard-rejected; law-denied names its clause; no raw constructor" \
-  "${RC:0:140} | ${WC:0:140} | ${R:0:80}" \
-  "$([[ $RC == *"operation-rejected"* && $RC == *"guard-rejected"* && $RC != *guardRejected* && $RC != *"Reject."* \
+  "${RG:0:140} | ${WC:0:140} | ${R:0:80}" \
+  "$([[ $RG == *"operation-rejected"* && $RG == *"guard-rejected"* && $RG != *guardRejected* && $RG != *"Reject."* \
       && $WC == *"clause: "*"guard-rejected"* && $R == *"field 2 <= 3"* ]] && echo 1 || echo 0)"
 
 # ------------------------------------------------ B. authentication before any target is read
