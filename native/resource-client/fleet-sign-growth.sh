@@ -15,7 +15,10 @@
 # AUDIT_LEVELS (default none): at each of these levels, while the Host is
 # stopped for the reopen, a cold `mini audit` (the genesis re-admission of every
 # record) runs first and is timed into audit.tsv (AUDIT_TIMEOUT seconds, default
-# 3600; rc 124 is a timeout), with the box load when it started.
+# 3600; rc 124 is a timeout), with the box load when it started. It leaves its anchor
+# (`--anchor-out`); from the second audit level on, `mini audit --from` the level before's
+# anchor runs on the same closed Store and is timed beside it (kind `from-LEVEL`; rc 90 = it
+# accepted but did not end on the genesis audit's anchor).
 #
 # The Store has a tail bound (the fixture's L, MINI_TAIL_BOUND, default 256): writes more than L
 # records past the certified head are refused. Every CERTIFY_EVERY turns (default 32) the
@@ -81,7 +84,8 @@ T="$OUT/turns.tsv"; R="$OUT/reopen.tsv"
 printf 'n\tverb\tseconds\treplans\tchain_index\tsubmit_s\tload1\tstore_bytes\n' >"$T"
 printf 'level\tchain_index\tserve_ready_s\tfirst_receipt_s\tstore_bytes\n' >"$R"
 A="$OUT/audit.tsv"
-printf 'level\tchain_index\trc\taudit_s\tload1\n' >"$A"
+printf 'level\tkind\tchain_index\trc\taudit_s\tload1\n' >"$A"
+AUDIT_ANCHOR= AUDIT_ANCHOR_LEVEL=
 n=1
 while [ "$n" -le "$TURNS" ]; do
   f="$OUT/turns/$n.json"
@@ -111,9 +115,21 @@ while [ "$n" -le "$TURNS" ]; do
           t0=$(now)
           rc=0
           timeout "${AUDIT_TIMEOUT:-3600}" "$MINI" audit --host "$HOST" --config "$CONFIG" \
-            >"$OUT/audit-$level.out" 2>"$OUT/audit-$level.err" || rc=$?
-          printf '%s\t%s\t%s\t%s\t%s\n' "$level" "$(jq -r .chain_index "$f")" "$rc" \
+            --anchor-out "$OUT/audit-$level.anchor" >"$OUT/audit-$level.out" 2>"$OUT/audit-$level.err" || rc=$?
+          printf '%s\tgenesis\t%s\t%s\t%s\t%s\n' "$level" "$(jq -r .chain_index "$f")" "$rc" \
             "$(elapsed "$t0" "$(now)")" "$load" >>"$A"
+          if [ -n "$AUDIT_ANCHOR" ]; then
+            load=$(cut -d' ' -f1 /proc/loadavg)
+            t0=$(now)
+            rc=0
+            timeout "${AUDIT_TIMEOUT:-3600}" "$MINI" audit --host "$HOST" --config "$CONFIG" \
+              --from "$AUDIT_ANCHOR" --anchor-out "$OUT/audit-$level.from.anchor" \
+              >"$OUT/audit-$level.from.out" 2>"$OUT/audit-$level.from.err" || rc=$?
+            [ "$rc" -ne 0 ] || cmp -s "$OUT/audit-$level.anchor" "$OUT/audit-$level.from.anchor" || rc=90
+            printf '%s\tfrom-%s\t%s\t%s\t%s\t%s\n' "$level" "$AUDIT_ANCHOR_LEVEL" "$(jq -r .chain_index "$f")" "$rc" \
+              "$(elapsed "$t0" "$(now)")" "$load" >>"$A"
+          fi
+          AUDIT_ANCHOR="$OUT/audit-$level.anchor"; AUDIT_ANCHOR_LEVEL=$level
         fi
       done
       t0=$(now)

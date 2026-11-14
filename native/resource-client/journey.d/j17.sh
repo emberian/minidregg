@@ -295,8 +295,28 @@ restart() {
   kill -TERM "$pid"
   for i in $(seq 1 300); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
   kill -0 "$pid" 2>/dev/null && { echo "server $pid alive after TERM" >&2; return 1; }
-  "$MINI" audit --host "$HOST" --config "$CONFIG" >"$SD/audit-$1.out" 2>"$SD/audit-$1.err"
+  local t0; t0=$(date +%s%N)
+  "$MINI" audit --host "$HOST" --config "$CONFIG" --anchor-out "$SD/audit-$1.anchor" >"$SD/audit-$1.out" 2>"$SD/audit-$1.err"
   echo $? >"$SD/audit-$1.rc"
+  echo $(( ($(date +%s%N) - t0) / 1000000 )) >"$SD/audit-$1.ms"
+  # The audit resumed at the anchor the restart before left (`audit --from`), on the same closed
+  # Store: it must end on the anchor the genesis audit just wrote; an anchor with another world
+  # root, and a cut-off anchor file, refuse.
+  if [ -n "${2:-}" ] && [ -s "$SD/audit-$2.anchor" ]; then
+    t0=$(date +%s%N)
+    "$MINI" audit --host "$HOST" --config "$CONFIG" --from "$SD/audit-$2.anchor" --anchor-out "$SD/audit-$1.from.anchor" \
+      >"$SD/audit-$1.from.out" 2>"$SD/audit-$1.from.err"
+    echo $? >"$SD/audit-$1.from.rc"
+    echo $(( ($(date +%s%N) - t0) / 1000000 )) >"$SD/audit-$1.from.ms"
+    local size; size=$(stat -c %s "$SD/audit-$2.anchor")
+    { head -c $((size - 1)) "$SD/audit-$2.anchor"; printf '%b' "\\$(printf '%03o' $(( ($(tail -c 1 "$SD/audit-$2.anchor" | od -An -tu1) + 1) % 256 )))"; } >"$SD/audit-$1.forged.anchor"
+    "$MINI" audit --host "$HOST" --config "$CONFIG" --from "$SD/audit-$1.forged.anchor" --anchor-out "$SD/audit-$1.forged.out.anchor" \
+      >"$SD/audit-$1.forged.out" 2>"$SD/audit-$1.forged.err"
+    echo $? >"$SD/audit-$1.forged.rc"
+    head -c $((size - 9)) "$SD/audit-$2.anchor" >"$SD/audit-$1.cut.anchor"
+    "$MINI" audit --host "$HOST" --config "$CONFIG" --from "$SD/audit-$1.cut.anchor" >"$SD/audit-$1.cut.out" 2>"$SD/audit-$1.cut.err"
+    echo $? >"$SD/audit-$1.cut.rc"
+  fi
   setsid nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     >"$W/public/serve-j17-$1.log" 2>&1 </dev/null &
   echo $! >"$pidfile"
@@ -472,8 +492,16 @@ checkp balances "room status after: the week-2 window (to $((H2 + PERIOD))) has 
   grep -q "my window: ENDED at height $((H2 + PERIOD))" "$OUT"
 
 # ------------------------------------------------ cold audit
-operator audit "stop the Host, cold audit re-admits every record, serve again" restart r2
+operator audit "stop the Host, cold audit re-admits every record, audit again from the first restart's anchor, serve again" restart r2 r1
 check audit "cold audit exit 0" 0 "$(cat "$SD/audit-r2.rc")"
+check audit "audit --from the first restart's anchor exit 0 (genesis $(cat "$SD/audit-r2.ms" 2>/dev/null) ms: $(head -1 "$SD/audit-r2.out" 2>/dev/null | cut -c1-40); from $(cat "$SD/audit-r2.from.ms" 2>/dev/null) ms: $(head -1 "$SD/audit-r2.from.out" 2>/dev/null | cut -c1-70))" 0 "$(cat "$SD/audit-r2.from.rc" 2>/dev/null)"
+checkp audit "audit --from ends on the anchor the genesis audit wrote, byte for byte" cmp -s "$SD/audit-r2.anchor" "$SD/audit-r2.from.anchor"
+checkp audit "audit --from admitted records: the first restart's anchor is below the head" \
+  grep -Eq '^audited [1-9][0-9]* accepted records after the anchor at height [0-9]+, to height [0-9]+' "$SD/audit-r2.from.out"
+checkp audit "an anchor with another world root refuses and leaves no anchor (rc $(cat "$SD/audit-r2.forged.rc" 2>/dev/null): $(tail -1 "$SD/audit-r2.forged.err" 2>/dev/null | cut -c1-110))" \
+  sh -c '[ "$(cat "$1.rc")" != 0 ] && grep -q "does not reproduce the anchor" "$1.err" && [ ! -e "$1.out.anchor" ]' sh "$SD/audit-r2.forged"
+checkp audit "a cut-off anchor file refuses (rc $(cat "$SD/audit-r2.cut.rc" 2>/dev/null): $(tail -1 "$SD/audit-r2.cut.err" 2>/dev/null | cut -c1-90))" \
+  sh -c '[ "$(cat "$1.rc")" != 0 ] && grep -q "audit --from" "$1.err"' sh "$SD/audit-r2.cut"
 named audit bob "read lab" "refused: outside-validity"
 ok audit bob "read lab-guest"
 concierge audit lab "after the cold audit"

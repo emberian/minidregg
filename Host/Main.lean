@@ -94,6 +94,7 @@ module
 
 public import Kernel.NativeHost
 public import Kernel.NativeHostHeld
+public import Kernel.ConsentAnchor
 public import Host.ObjectiveActivityJson
 public import Host.SeatJson
 public import Compiler.GenericSimplexSourceAnchor
@@ -6931,34 +6932,86 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
       return ((71 : UInt8), ingress)
   | _ => throw (IO.userError s!"operation {op} is not a launch lifecycle operation")
 
-/-- `audit [--receipts FILE]` / `store-audit [--receipts FILE]` options. -/
-def auditOptions : List String → Option (Option String)
-  | [] => some none
-  | ["--receipts", path] => some (some path)
+/-- What `audit` and `store-audit` take: `--receipts FILE` (the recomputed receipts),
+`--from FILE` (resume at the anchor an accepting audit left), `--anchor-out FILE` (leave
+this audit's anchor). -/
+structure AuditOptions where
+  receipts : Option String := none
+  resumeFrom : Option String := none
+  anchorOut : Option String := none
+
+/-- `[--receipts FILE] [--from FILE] [--anchor-out FILE]`, each at most once, in any order. -/
+def auditOptions : List String → Option AuditOptions
+  | [] => some {}
+  | "--receipts" :: path :: rest => do
+      let options ← auditOptions rest
+      if options.receipts.isSome then none else some { options with receipts := some path }
+  | "--from" :: path :: rest => do
+      let options ← auditOptions rest
+      if options.resumeFrom.isSome then none else some { options with resumeFrom := some path }
+  | "--anchor-out" :: path :: rest => do
+      let options ← auditOptions rest
+      if options.anchorOut.isSome then none else some { options with anchorOut := some path }
   | _ => none
 
-/-- The body of the `audit` arm, shared with `store-audit`: `--receipts FILE` writes
-every receipt the re-admission recomputed, in order, each in the canonical receipt
-codec: the control that an audit-path change left every original-ingress receipt
-byte-identical. -/
+def auditUsage (verb : String) : String :=
+  s!"usage: {verb} [--receipts FILE] [--from ANCHOR] [--anchor-out ANCHOR]"
+
+/-- The body of the `audit` arm, shared with `store-audit`.
+
+Without `--from` it is the genesis re-admission of every accepted record. With `--from
+ANCHOR` it resumes at the anchor an earlier accepting audit left (`--anchor-out`): the
+Store must reproduce the anchor at its height (genesis log, chain and world root), then
+every record after it is re-admitted (`ConsentAnchor.auditFrom`, `Audited.sound`). An
+anchor the Store contradicts is the refusal. A later record the resumed walk does not admit
+is not: its admission may read history from before the anchor, so the audit runs again from
+genesis and that verdict stands (`ConsentAnchor.AuditFromSound`). The anchor file is the
+operator's custody: the audit checks it against the Store, never where it came from.
+
+`--receipts FILE` (genesis only) writes every receipt the re-admission recomputed, in order,
+each in the canonical receipt codec: the control that an audit-path change left every
+original-ingress receipt byte-identical. `--anchor-out FILE` writes the anchor of the
+audited head, only when the audit accepts. -/
 def auditBody (settings : Settings) (pinnedConfig : NativeHost.Config)
-    (receiptsOut : Option String) : IO UInt32 := do
-  if settings.carryRegistry.isSome && receiptsOut.isSome then
-    throw (IO.userError "audit --receipts is not available for a carried registry")
-  let (count, index, links) ← if settings.carryRegistry.isSome then do
+    (options : AuditOptions) : IO UInt32 := do
+  if settings.carryRegistry.isSome
+      && (options.receipts.isSome || options.resumeFrom.isSome || options.anchorOut.isSome) then
+    throw (IO.userError "audit --receipts, --from and --anchor-out are not available for a carried registry")
+  if options.receipts.isSome && options.resumeFrom.isSome then
+    throw (IO.userError "audit --from recomputes only the receipts after its anchor; --receipts is the genesis audit's")
+  let leave (anchor : ConsentAnchor.Anchor) : IO Unit := do
+    if let some path := options.anchorOut then
+      writeBytes path (ConsentAnchor.encode anchor)
+  let genesis : IO (String × PresenceIndex.Index × LinkIndex.Index) := do
+    let (receipts, opened) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+    if let some path := options.receipts then
+      writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
+    leave (ConsentAnchor.Anchor.ofOpened opened)
+    pure (s!"audited {receipts.length} accepted records: every signed ingress re-admitted at its original prefix",
+      opened.durable.index, opened.durable.links)
+  let (line, index, links) ← if settings.carryRegistry.isSome then do
     let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
     let registry ← loadCarryRegistry settings
     let custody ← IO.ofExcept (← RetainedSegmentInspection.validate pinnedConfig
       opened.durable registry)
     let walked ← IO.ofExcept (← CarriedNativeHostSession.start pinnedConfig opened.durable custody)
-    pure (walked.verified.opened.durable.height, walked.verified.opened.durable.index,
-       walked.verified.opened.durable.links)
-  else do
-    let (receipts, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
-    if let some path := receiptsOut then
-      writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
-    pure (receipts.length, index, links)
-  IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
+    pure (s!"audited {walked.verified.opened.durable.height} accepted records: every signed ingress re-admitted at its original prefix",
+      walked.verified.opened.durable.index, walked.verified.opened.durable.links)
+  else if let some path := options.resumeFrom then do
+    let anchor ← match ConsentAnchor.decode (← readBoundedBytes path 4096) with
+      | .ok (some anchor) => pure anchor
+      | .ok none => throw (IO.userError "audit --from: the file is an anchor of another epoch; audit from genesis")
+      | .error detail => throw (IO.userError s!"audit --from: {detail}")
+    match ← IO.ofExcept (← ConsentAnchor.auditStoreFrom pinnedConfig anchor) with
+    | .ok (next, count, opened) =>
+        leave next
+        pure (s!"audited {count} accepted records after the anchor at height {anchor.height}, to height {next.height}: the Store reproduces the anchor and every later signed ingress is re-admitted at its original prefix",
+          opened.durable.index, opened.durable.links)
+    | .error failure =>
+        IO.eprintln s!"audit --from: entry {failure.index} is not admitted from the anchor at height {anchor.height} ({failure.detail}); auditing from genesis, whose verdict stands"
+        genesis
+  else genesis
+  IO.println line
   IO.println s!"index {(presenceIndexJson index).compress}"
   IO.println s!"links {(linkIndexJson links).compress}"
   pure 0
@@ -8860,10 +8913,10 @@ def runCommandAudit (_arguments : List String) (_configPath _command : String) (
   match rest with
   | options =>
           match auditOptions options with
-          | none => throw (IO.userError "usage: audit [--receipts FILE]")
-          | some receiptsOut =>
+          | none => throw (IO.userError (auditUsage "audit"))
+          | some auditOptions =>
               withPinnedSignature config fun pinnedConfig =>
-                auditBody settings pinnedConfig receiptsOut
+                auditBody settings pinnedConfig auditOptions
 
 /-- `store-audit` (dispatched by `run`). -/
 def runCommandStoreAudit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
@@ -8873,12 +8926,13 @@ def runCommandStoreAudit (_arguments : List String) (_configPath _command : Stri
           -- The Store re-derived from genesis (`Compiler.DurableStoreAudit`), then
           -- exactly the `audit` body: every signed ingress re-admitted at its
           -- original prefix. A failure of the first is the verdict; the second
-          -- never runs behind a refused store.
+          -- never runs behind a refused store. `--from` resumes the second only:
+          -- the Store's own derivation is from genesis whatever the anchor.
           match auditOptions options with
           | none =>
-              (← IO.getStderr).putStrLn "usage: store-audit [--receipts FILE]"
+              (← IO.getStderr).putStrLn (auditUsage "store-audit")
               pure 2
-          | some receiptsOut =>
+          | some auditOptions =>
               withPinnedSignature config fun pinnedConfig => do
                 match ← DurableStoreAudit.audit pinnedConfig.transport ResourceBirthCodec.rootBytes with
                 | .error message =>
@@ -8886,7 +8940,7 @@ def runCommandStoreAudit (_arguments : List String) (_configPath _command : Stri
                     pure 1
                 | .ok report =>
                     IO.println report.line
-                    auditBody settings pinnedConfig receiptsOut
+                    auditBody settings pinnedConfig auditOptions
 
 /-- `checkpoint-differential` (dispatched by `run`). -/
 def runCommandCheckpointDifferential (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
