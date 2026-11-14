@@ -42,8 +42,9 @@ theorems cite. The appended files continue the numbering.
 | 31 | ward | a raised ward blocks paralysis | — |
 | 32 | defend | a ward is raised only on my own defend intent | — |
 | 33 | death-needs-hp | alive 1→0 only with hp/after ≤ 0 (the converse of 6) | — |
-| 34 | witnessed (`law.sheet-witnessed`) | a referee write is the resolver's run | K-RAN |
-| 35 | cure-burns (`law.sheet-cure-lawful`) | an affliction falls only in a turn that burns its herb | K-BOOK-SLOTS |
+| 34 | rooms-born | the rooms a move cites (joint 1, joint 2) were born under the realm cell `{REALM_ROOM}` | K-JOINT-INDEX, K2 identity slots |
+| 35 | witnessed (`law.sheet-witnessed`) | a referee write is the resolver's run | K-RAN |
+| 36 | cure-burns (`law.sheet-cure-lawful`) | an affliction falls only in a turn that burns its herb | K-BOOK-SLOTS |
 
 ## Corrections from SHEET-ITEM-LAW (`planning/mud/sheet-item-law.md`)
 

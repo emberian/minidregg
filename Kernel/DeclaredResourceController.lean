@@ -1048,6 +1048,52 @@ theorem step_eval_exact [DecidableEq F]
 
 #assert_axioms step_eval_exact
 
+/-- A slot present in a cut state is the uncut state's slot: cutting drops slots, it never
+invents or changes one. -/
+theorem restrict_get_some {keys : List Minidregg.Pred.Slot} {k : Minidregg.Pred.Slot} {v : Int}
+    (s : Minidregg.Pred.State) (present : (s.restrict keys).get k = some v) : s.get k = some v := by
+  by_cases member : k ∈ keys
+  · rwa [Minidregg.Pred.State.get_restrict member] at present
+  · exfalso
+    unfold Minidregg.Pred.State.restrict Minidregg.Pred.State.get at present
+    cases found : (s.slots.filter fun slot => keys.contains slot.1).find? (fun p => p.1 == k) with
+    | none => rw [found] at present; cases present
+    | some slot =>
+        have named := List.find?_some found
+        have kept := (List.mem_filter.mp (List.mem_of_find?_eq_some found)).2
+        have same : slot.1 = k := by simpa using named
+        exact member (by simpa [same] using kept)
+
+/-- **A slot the leg's step carries is the full projection's slot.** The step a leg's law is
+judged on is the full projection cut to the law's reads (`step_prepared_exact`), so any value
+a law reads there is the value `project` assigns. -/
+theorem step_new_get (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (k : String) (v : Int)
+    (present : (step prepared tuple incidence).newState.get k = some v) :
+    (PolicyStepContext.ofPreparedTuple (project prepared incidence) profile.semantics
+      { tuple with primary := incidence }).newState.get k = some v := by
+  rw [step_prepared_exact] at present
+  exact restrict_get_some _ present
+
+/-- **K2 on an admitted leg: the parent a law read at a position is the authority's record.**
+If the step a leg's law was judged on carries `joint/index/{i}/cell/parent = room`, then the
+authority cell records `room` as the birth room of the cell at position `i` (`-1`: none). The
+cell's own fields do not enter. -/
+theorem step_identity_parent (prepared : PreparedInvocation deployment profile ambient ground command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (i : TargetIndex command)
+    (room : Int)
+    (cited : (step prepared tuple incidence).newState.get (jointIndexKey i.val "cell/parent") =
+      some room) :
+    (match ground.authority.authState.parent.parentOf command.targets[i].target with
+      | some born => Int.ofNat born
+      | none => -1) = room := by
+  have full := step_new_get prepared tuple incidence _ _ cited
+  simp only [PolicyStepContext.ofPreparedTuple] at full
+  rw [(joint_identity_exact prepared incidence _ _ i).2.2] at full
+  exact Option.some.inj full
+
+#assert_axioms step_identity_parent
+
 /-- The portal of an ordinary leg: its target's committed law on the joint step. -/
 def legPortal [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command)

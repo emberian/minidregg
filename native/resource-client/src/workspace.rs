@@ -2828,6 +2828,67 @@ fn delegation_bounds(bounds: &Value) -> Result<Value> {
     Ok(Value::Array(out))
 }
 
+/// A cited read of a declared cell (`Kernel/ResourceTransaction` `Payload.fieldRead`): the fields
+/// this turn read and the value it read at each (`null`: the field was absent). The Host compares
+/// them by value with the loaded cell and refuses naming every field that moved; nothing about the
+/// cell's root is bound, so writes to its other fields do not stale the citation. The author states
+/// the observed values (a land cites what its verdict recorded); they are signed with the command.
+fn field_reads(payload: &Value, target: &str) -> Result<Value> {
+    let obj = payload.as_object().ok_or("target payload must be an object")?;
+    if obj.len() != 2 || !obj.contains_key("reads") {
+        return Err("a fieldRead payload may contain only type and reads".into());
+    }
+    let reads = payload["reads"].as_array().ok_or("fieldRead reads must be an array")?;
+    if reads.is_empty() || reads.len() > 64 {
+        return Err("a fieldRead cites 1..64 fields".into());
+    }
+    let mut lowered = Vec::new();
+    for read in reads {
+        let fields = read.as_object().ok_or("a cited read must be an object")?;
+        let key = read.get("key").and_then(Value::as_object).ok_or("a cited read needs a local key")?;
+        if fields.len() != 2 || !fields.contains_key("observed")
+            || key.len() != 2 || key.get("type").and_then(Value::as_str) != Some("object") {
+            return Err("a cited read may contain only key (type=object, field) and observed".into());
+        }
+        let field = key.get("field").and_then(Value::as_str).ok_or("a cited key lacks field")?;
+        decimal(field, "cited field")?;
+        let observed = &read["observed"];
+        if !observed.is_null() {
+            signed_decimal(observed.as_str().ok_or("observed must be null or a decimal string")?, "observed value")?;
+        }
+        lowered.push(json!({"key":{"type":"object","resource":target,"field":field},"observed":observed}));
+    }
+    Ok(json!({"type":"fieldRead","reads":lowered}))
+}
+
+#[cfg(test)]
+mod field_read_tests {
+    use super::*;
+
+    #[test]
+    fn field_read_lowers_keys_to_the_target_and_keeps_observed() {
+        let payload = json!({"type":"fieldRead","reads":[
+            {"key":{"type":"object","field":"1"},"observed":"2"},
+            {"key":{"type":"object","field":"4"},"observed":null}]});
+        assert_eq!(field_reads(&payload, "9").unwrap(), json!({"type":"fieldRead","reads":[
+            {"key":{"type":"object","resource":"9","field":"1"},"observed":"2"},
+            {"key":{"type":"object","resource":"9","field":"4"},"observed":null}]}));
+        assert_eq!(invocation_schema_version(&payload), SCALAR_COMMAND_VERSION);
+    }
+
+    #[test]
+    fn field_read_refuses_an_empty_footprint_a_foreign_key_and_a_bare_number() {
+        for bad in [
+            json!({"type":"fieldRead","reads":[]}),
+            json!({"type":"fieldRead","reads":[{"key":{"type":"object","resource":"7","field":"1"},"observed":"2"}]}),
+            json!({"type":"fieldRead","reads":[{"key":{"type":"object","field":"1"},"observed":2}]}),
+            json!({"type":"fieldRead","reads":[{"key":{"type":"object","field":"1"}}]}),
+        ] {
+            assert!(field_reads(&bad, "9").is_err(), "{bad}");
+        }
+    }
+}
+
 fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
     let actions = actions
         .as_array()
@@ -3237,7 +3298,7 @@ fn propose_summary_once(
                 let payload_obj = payload
                     .as_object()
                     .ok_or("target payload must be an object")?;
-                let read_only = matches!(payload.get("type").and_then(Value::as_str), Some("read" | "kindRead"));
+                let read_only = matches!(payload.get("type").and_then(Value::as_str), Some("read" | "kindRead" | "fieldRead"));
                 let sealing = match if protected || read_only { None } else { sealing_room(private_room_name, root, &reference)? } {
                     // A cell that already holds sealed lines is a private room's,
                     // whatever this reference is called: refuse to write plaintext
@@ -3286,6 +3347,11 @@ fn propose_summary_once(
                     payload.clone()
                 } else if member(payload, "type")? == "kindDefinition" && sealing.is_none() {
                     world_kind::revise(payload, &view, target)?
+                } else if read_only && member(payload, "type")? == "fieldRead" {
+                    if sealing.is_some() || protected {
+                        return Err("a fieldRead cites an ordinary declared cell".into());
+                    }
+                    field_reads(payload, target)?
                 } else if read_only {
                     // An observe-only read of a content cell (K-TRANSCLUDE): the
                     // source a `transclude` of another target names.

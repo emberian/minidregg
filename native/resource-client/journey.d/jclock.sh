@@ -367,11 +367,12 @@ row "signed read of field 1 = 2^125 + 2^40 under any[verb 2, field 1 <= clock/no
 
 # A MUD sheet (native/resource-client/templates/mud/sheet): the sponsor is the sheet's subject {S} and the
 # founder; the newcomer is the referee {REF}. Every timestamp field (bal 3, eq 4, respawn 9) starts at 0.
+# This journey births no realm cell and its sheet never moves, so clause 34's {REALM_ROOM} is bound to 0.
 MUD=$(CDPATH='' cd -- "$(dirname -- "$0")/../templates/mud" && pwd)
 S=$(jq -r .subject "$SPONSOR_WS/workspace.json"); REF=$(jq -r .subject "$NEWCOMER_WS/workspace.json")
 SHEET=tidewrack-sheet-$S
 subst() {
-  sed -e "s/{S}/$S/g" -e "s/{REF}/$REF/g" -e "s/{W_FOUNDER}/$S/g" -e "s/{REALM}/tidewrack/g" -e "s/{HOME}/$(jq -r .shrine "$MUD/tidewrack/realm.json")/g" \
+  sed -e "s/{S}/$S/g" -e "s/{REF}/$REF/g" -e "s/{W_FOUNDER}/$S/g" -e "s/{REALM}/tidewrack/g" -e "s/{REALM_ROOM}/0/g" -e "s/{HOME}/$(jq -r .shrine "$MUD/tidewrack/realm.json")/g" \
     $(jq -r '.constants | to_entries[] | select(.key != "derivation") | "-e s/{\(.key)}/\(.value)/g"' "$MUD/tidewrack/realm.json")
 }
 subst <"$MUD/law.management.json" >"$REQ/sheet-mgmt.json"
