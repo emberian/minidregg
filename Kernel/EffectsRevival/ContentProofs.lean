@@ -351,6 +351,24 @@ theorem blindedCell_law :
   rw [blindedStore_support left inLeft, blindedStore_support right inRight]
   exact Or.inr (Or.inr rfl)
 
+/-- Code 1 is bound, so the deployed dispatch there is the controller's arms. -/
+theorem liveTargetDispatch_content (bytes : List UInt8) (ctx : HostCtx) (cell : HostCell) :
+    liveTargetDispatch 1 bytes ctx cell = hostTargetDispatch 1 bytes ctx cell := by
+  unfold liveTargetDispatch
+  exact if_neg fun both => by
+    have bound : DeclaredResourceController.registeredCode 1 = true := rfl
+    rw [bound] at both
+    exact Bool.noConfusion both.1
+
+/-- The content declaration selects the blinded sample cell under the object role. -/
+theorem sample_selected :
+    DeclaredResourceController.Effect.select DeclaredResourceController.contentEffect
+        sampleDeployment sampleCtx.target sampleCtx.kind
+        (⟨.content, cellOf blindedStore⟩ : HostCell) = some (cellOf blindedStore) := by
+  unfold DeclaredResourceController.Effect.select
+  rw [if_pos blindedCell_law]
+  rfl
+
 /-- The host context of the sample target at the blinded cell. -/
 def sampleHostCtx : HostCtx :=
   hostCtxOf sampleCtx sampleDeployment contentSpec.version (cellOf blindedStore).root none none none
@@ -397,7 +415,8 @@ theorem hostDispatch_blinded : ∃ post,
 command is admitted at the blinded content cell. -/
 theorem hostAccepted : HostAccepted := by
   obtain ⟨post, -, dispatched⟩ := hostDispatch_blinded
-  exact ⟨sampleLinkCommand, sampleHostCtx, ⟨.content, cellOf blindedStore⟩, _, dispatched⟩
+  exact ⟨sampleLinkCommand, sampleHostCtx, ⟨.content, cellOf blindedStore⟩, _,
+    (liveTargetDispatch_content _ _ _).trans dispatched⟩
 
 #assert_axioms contentComplete
 #assert_axioms contentNarrowed_incomplete

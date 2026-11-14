@@ -132,9 +132,11 @@ everything else), with `sampleWrongRole` and `sampleRole_teeth` on the sample ce
    `receive` of the slot, the selection, the computation and `afterTarget`, and of those only the
    computation reads the planned root. Any statement about the receiver at two targets, or
    against a dispatcher, is to be proved over that reading, not by walking `prepareTarget`.
-3. The hand-written `contentHandler`/`contentHeader`/`contentFresh` in `Statements.lean` §7 are a
-   spec-side twin of `contentEffect.handler 1`: `HostTeeth` and the poles are still stated over
-   them. Restate those over `hostRegistry` and delete the three.
+3. The hand-written `contentHandler`/`contentHeader`/`contentFresh` (a spec-side twin of
+   `contentEffect.handler 1`) are deleted, with `hostLegacy` and `HostPremise`. `HostTeeth`,
+   `HostAccepted` and `HostMovedRootAccepted` are stated over `liveTargetDispatch` and the
+   derived handler (`contentHostHandler`); the ghost is `Handler.unrotated` of it, not a handler
+   written out. `RegistryPremise` is the premise for every bound code.
 4. Thin consent refuses a content write (`unsupportedPayload`; the text is now the registered
    one, "content: a registered write is not displayed from a served view").
 
@@ -292,7 +294,7 @@ so it belongs to the controller once:
 |---|---|---|---|---|
 | `EngineKeystone` | over sound handlers, `Dispatches R [] (dispatch R)` | `EngineSatisfiable`: the two-entry `toyPole` dispatches through itself, admits entry A's `5`, refuses entry B's out-of-frame `false` with `outOfFrame 1` | `EngineTeeth`: refutes the ghost reading (`toyGhostPole`), the fail-open dispatcher (`toyFailOpen`), the unframed dispatcher (`dispatchUnframed`), and a twin (`legacy = [1]`) | `EnginePremise`: every pole handler is sound |
 | `CompletenessKeystone` | through a `LawfulRegistry`, every refusal is a declared name | `CompletenessSatisfiable`: entry A lawful, its `tooLarge` surfaces as `refused 0 "tooLarge"` | `CompletenessTeeth`: entry B is not lawful | `CompletenessPremise`: a lawful registry exists |
-| `HostKeystone` = `Dispatches [(1, contentHandler)] hostLegacy hostTargetDispatch` | today's target dispatch (payload decode, `selectTarget`, `computeTarget`, patch validation, `packTarget`) dispatches through the one-entry registry, every other payload code in `hostLegacy`; `noTwin` puts code 1 out of the hand arms | `HostAccepted` (the doc-write fixture, owed) | `HostTeeth`: refutes the registry with the seal-less content handler, and code 1 kept as a hand arm too | `HostPremise`: `contentHandler.Lawful` |
+| `HostKeystone` = `RegistryKeystone` (`Dispatches hostRegistry liveLegacy liveTargetDispatch`), the registry's entry at code 1 the handler derived from `contentEffect`, and 1 not a hand arm | today's target dispatch (payload decode, `selectTarget`, `computeTarget`, patch validation, `packTarget`) dispatches through the one-entry registry, every other payload code in `hostLegacy`; `noTwin` puts code 1 out of the hand arms | `HostAccepted` (the doc-write fixture, owed) | `HostTeeth`: refutes the registry with the seal-less content handler, and code 1 kept as a hand arm too | `HostPremise`: `contentHandler.Lawful` |
 | `LiveKeystone` = `ContentAgreement contentSpec ∧ ContentComplete` | the deployed content arm (`computeTarget`, `targetPatch`, `targetField`, `targetRatchet`, `targetAmount`, `payloadVerb`, `targetProjection`) agrees with `contentSpec`; `contentSpec` keeps its declared frame (`contentActionFrame`, per action) | `ContentAccepted`: the live arm admits some content command (intended inhabitant: `Fixtures/NativeDocWriteFixture*`) | `ContentTeeth`: refutes the declaration without the blinding seal (`contentGhost`) and the frame without `annotations` (`contentNarrowed`, `annotate` writes there) | `ContentAccepted` |
 
 `Dispatches R [] (dispatch R)` is the engine's generic theorem, in the same role as the old

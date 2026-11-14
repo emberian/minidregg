@@ -16,6 +16,7 @@ kernel-checked.
 module
 
 public import Kernel.EffectsRevival.ContentProofs
+public import Kernel.EffectsRevival.RegistryProofs
 public import Theory.AssertAxioms
 -- `ratchet_moves` is evaluated by compiled code (native_decide): its definitions must be available at
 -- compile time, and `#assert_compiled` re-runs it.
@@ -126,44 +127,73 @@ theorem ghost_exec_blinded :
       inFrame loc (footprint_append_left _ _ loc (by exact member)) unrotated)
       outside
 
-theorem sample_header : contentHeader sampleHostCtx (⟨.content, cellOf blindedStore⟩ : HostCell) = .ok () := by
-  have law := blindedCell_law
-  simpa [contentHeader, sampleHostCtx, hostCtxOf, sampleCtx] using law
-
-/-- The sample's planned root is the blinded cell's own root, so the handler's gate admits. -/
-theorem sample_admits (E : ContentSpec) :
-    (contentHandlerOf E).admits 1 sampleHostCtx sampleLinkCommand
-      (⟨.content, cellOf blindedStore⟩ : HostCell) = .ok () := by
-  unfold Handler.admits
-  rw [show (contentHandlerOf E).header = contentHeader from rfl, sample_header]
-  dsimp only
-  rw [if_pos (by
-    rw [Bool.or_eq_true]
-    exact Or.inr (decide_eq_true (rfl : sampleHostCtx.root = (cellOf blindedStore).root)))]
+set_option backward.isDefEq.respectTransparency false in
+/-- **A handler without its rotate fires as the handler does up to the executor**: where the
+handler admits and selects, its unrotated twin runs its own executor on the same store and packs
+the same way. -/
+theorem Handler.unrotated_fire {Ctx Cell : Type} (h : Handler Ctx Cell) {code : Nat} {ctx : Ctx}
+    {op : h.O} {cell cell' : Cell} (fired : h.fire code ctx op cell = .ok cell') :
+    ∃ s, h.select ctx cell = some s ∧
+      h.unrotated.fire code ctx op cell =
+        (h.unrotated.spec.exec code ctx op s).map (h.pack ctx) := by
+  rw [Handler.fire_eq] at fired
+  have ghost := Handler.fire_eq h.unrotated code ctx op cell
+  have sameHeader : h.unrotated.header = h.header := rfl
+  have sameFresh : h.unrotated.fresh = h.fresh := rfl
+  have sameSelect : h.unrotated.select = h.select := rfl
+  have samePack : h.unrotated.pack = h.pack := rfl
+  have sameCommutes : h.unrotated.spec.commutes op = h.spec.commutes op := rfl
+  rw [sameHeader, sameFresh, sameSelect, samePack, sameCommutes] at ghost
+  cases header : h.header ctx cell with
+  | error r => rw [header] at fired; cases fired
+  | ok u =>
+    cases u
+    rw [header] at fired ghost
+    dsimp only at fired ghost
+    by_cases gate : (h.spec.commutes op || h.fresh ctx cell) = true
+    · rw [if_pos gate] at fired ghost
+      cases selected : h.select ctx cell with
+      | none => rw [selected] at fired; cases fired
+      | some s =>
+        rw [selected] at ghost
+        exact ⟨s, rfl, ghost⟩
+    · rw [if_neg gate] at fired
+      cases fired
 
 /-- A packed content cell's blinding key. -/
 def contentKey : Except DispatchRefusal HostCell → Option (List UInt8)
   | .ok ⟨.content, cell⟩ => StoreCodec.blindingKey HyperdocumentCell.contentWire cell.logical
   | _ => none
 
+set_option backward.isDefEq.respectTransparency false in
 theorem hostGhost_disagrees :
-    ¬ Dispatches [(1, contentHandlerOf contentGhost)] hostLegacy hostTargetDispatch := by
+    ¬ Dispatches [(1, contentHostHandler.unrotated)] liveLegacy liveTargetDispatch := by
   intro dispatches
   obtain ⟨post, executed, dispatched⟩ := hostDispatch_blinded
-  have agree := dispatches.agreement 1 (contentHandlerOf contentGhost) (by simp [List.lookup])
+  have agree := dispatches.agreement 1 contentHostHandler.unrotated (by simp [List.lookup])
     sampleLinkCommand sampleHostCtx ⟨.content, cellOf blindedStore⟩
-  have fired : (contentHandlerOf contentGhost).fire 1 sampleHostCtx sampleLinkCommand
+  have real := registryKeystone.agreement 1 contentHostHandler rfl
+    sampleLinkCommand sampleHostCtx ⟨.content, cellOf blindedStore⟩
+  change liveTargetDispatch 1 (ContentResource.commandStream.encode sampleLinkCommand) sampleHostCtx _ = _
+    at real
+  rw [liveTargetDispatch_content, dispatched] at real
+  obtain ⟨s, selected, ghost⟩ := Handler.unrotated_fire contentHostHandler real.symm
+  have store : s = blindedStore :=
+    Option.some.inj (selected.symm.trans
+      (rfl : contentHostHandler.select sampleHostCtx
+        (⟨.content, cellOf blindedStore⟩ : HostCell) = some blindedStore))
+  subst store
+  have fired : contentHostHandler.unrotated.fire 1 sampleHostCtx sampleLinkCommand
       (⟨.content, cellOf blindedStore⟩ : HostCell) =
         .ok ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer
           (Patch.run blindedStore sampleLinkOps)⟩ := by
-    unfold Handler.fire
-    rw [sample_admits]
+    rw [ghost]
     show (EffectSpec.exec contentGhost 1 sampleCtx sampleLinkCommand blindedStore).map _ = _
     rw [ghost_exec_blinded]
     rfl
-  change hostTargetDispatch 1 (ContentResource.commandStream.encode sampleLinkCommand) sampleHostCtx _ = _
+  change liveTargetDispatch 1 (ContentResource.commandStream.encode sampleLinkCommand) sampleHostCtx _ = _
     at agree
-  rw [dispatched, fired] at agree
+  rw [liveTargetDispatch_content, dispatched, fired] at agree
   have keys := congrArg contentKey agree
   -- the dispatch's post: the descriptor, then the rotation
   have postRun : post = Patch.run blindedStore
@@ -192,9 +222,10 @@ theorem hostGhost_disagrees :
   simp at moved
 
 theorem hostTwin_refuted :
-    ¬ Dispatches [(1, contentHandler)] (1 :: hostLegacy) hostTargetDispatch := fun dispatches => by
-  have := dispatches.noTwin 1 (by simp)
-  simp [List.lookup] at this
+    ¬ Dispatches hostRegistry (1 :: liveLegacy) liveTargetDispatch := fun dispatches => by
+  have unbound := dispatches.noTwin 1 (by simp)
+  rw [hostKeystone.2.1] at unbound
+  cases unbound
 
 theorem hostTeeth : HostTeeth := ⟨hostGhost_disagrees, hostTwin_refuted⟩
 

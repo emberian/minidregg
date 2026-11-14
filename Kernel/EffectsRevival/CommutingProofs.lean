@@ -133,9 +133,14 @@ theorem hostMovedRootAccepted : HostMovedRootAccepted := by
   obtain ⟨post, executed⟩ := exec_ok_of_complete (code := 1) contentComplete emitted
   refine ⟨sampleAtomCommand, hostCtxOf sampleCtx sampleDeployment contentSpec.version movedRoot
     none none none, ⟨.content, cellOf blindedStore⟩, _, sampleAtom_commutes, ?_,
-    hostDispatch_blinded_of sampleAtomCommand movedRoot (Or.inr sampleAtom_commutes) post executed⟩
-  simp only [contentFresh, hostCtxOf, decide_eq_false_iff_not]
-  exact movedRoot_moved
+    (liveTargetDispatch_content _ _ _).trans
+      (hostDispatch_blinded_of sampleAtomCommand movedRoot (Or.inr sampleAtom_commutes) post executed)⟩
+  show (match DeclaredResourceController.Effect.select DeclaredResourceController.contentEffect
+      sampleDeployment sampleCtx.target sampleCtx.kind (⟨.content, cellOf blindedStore⟩ : HostCell) with
+    | none => true
+    | some pre => decide (movedRoot = pre.root)) = false
+  rw [sample_selected]
+  exact decide_eq_false movedRoot_moved
 
 /-- The live arm admits the line at the blinded cell over the moved root. -/
 theorem sampleAtom_moved_computed : ∃ post,

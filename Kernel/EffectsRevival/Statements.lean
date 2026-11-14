@@ -267,10 +267,9 @@ validation and `packTarget` the controller runs per target) dispatches through t
 declaration, and code 1 is not a hand arm. `Payload` has no content constructor, so there is
 no arm for a twin to be.
 
-`hostTargetDispatch`, `contentHandler` and the statements over them below (`HostTeeth`,
-`PrepareFactors`, the accepted poles) are the content dispatch written out by hand: the header
-in the live order, the content cell selected and packed. They are what the derived handler is
-checked against, pole by pole.
+`hostTargetDispatch` is the controller's own arms composed per target. The poles below
+(`HostTeeth`, `HostAccepted`, `HostMovedRootAccepted`) are stated over the deployed dispatch and
+the handler the registry derives from `contentEffect`; no handler is written here.
 
 Scope: the target dispatch, not the whole of `prepareTarget` (the post law, the policy
 source, the audience freshness and the authority legs stay the controller's). -/
@@ -325,71 +324,6 @@ def hostTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell :
             (CellState.materialize (hostTarget ctx payload).materializer post))
         else .error (.guardFailed code)
 
-/-- The content cell's header, in the live order: role and cell law and shape
-(`wrongRole`), then the schema version.  The expected root is not the header's: the
-dispatcher's gate refuses a stale plan from `contentFresh` and the declaration's
-`commutes` (`Handler.admits`). -/
-def contentHeader (ctx : HostCtx) (cell : HostCell) : Except DispatchRefusal Unit :=
-  if contentSpec.accepts ctx.kind = false ∨
-      ¬ CanonicalCellRegistry.CellLaw ctx.deployment ctx.target cell then .error (.wrongRole 1)
-  else match cell with
-    | ⟨.content, value⟩ =>
-      if ctx.version ≠ contentSpec.version then .error (.unsupportedVersion 1)
-      else .ok ()
-    | _ => .error (.wrongRole 1)
-
-/-- Whether the plan's expected root is the content cell's loaded root (a cell of another
-role is refused by the header before freshness is asked). -/
-def contentFresh (ctx : HostCtx) (cell : HostCell) : Bool :=
-  match cell with
-  | ⟨.content, value⟩ => decide (ctx.root = value.root)
-  | _ => true
-
-/-- **The content handler**: `contentSpec` over the host context, the content header, the
-content cell selected and packed. -/
-def contentHandlerOf (E : ContentSpec) : Handler HostCtx HostCell where
-  S := ContentSubstrate
-  O := ContentResource.Command
-  R := ContentResource.Reject
-  spec := E.comap HostCtx.toLiveCtx
-  header := contentHeader
-  fresh := contentFresh
-  select _ cell := match cell with
-    | ⟨.content, value⟩ => some value.logical
-    | _ => none
-  pack _ s := ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer s⟩
-
-def contentHandler : Handler HostCtx HostCell := contentHandlerOf contentSpec
-
-/-- Every payload code but content's and the cited read's is still a hand arm. -/
-def hostLegacy : List Nat := [0, 2, 3, 4, 5, 6, 7, 8]
-
-/-- **Teeth.**  The host dispatch does not dispatch through a registry whose content
-handler drops the rotate, nor through one that also keeps code 1 as a hand arm. -/
-def HostTeeth : Prop :=
-  ¬ Dispatches [(1, contentHandlerOf contentGhost)] hostLegacy hostTargetDispatch ∧
-  ¬ Dispatches [(1, contentHandler)] (1 :: hostLegacy) hostTargetDispatch
-
-/-- **Premise inhabitation.**  The content handler is sound (its `select`/`pack` are
-inverse both ways, the store substrate is framed) and lawful. -/
-def HostPremise : Prop := contentHandler.Lawful
-
-/-- **Satisfiable (the accepted branch).**  Some content cell and well-encoded content
-command are admitted by the host dispatch (the doc-write fixture is the intended
-inhabitant, owed). -/
-def HostAccepted : Prop :=
-  ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
-    hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
-
-/-- **Satisfiable (a moved root).**  A commuting content command whose plan names a root that
-is NOT the cell's (`contentFresh` false) is admitted by the host dispatch: the accepting pole
-of `Kernel.ContentCommutingAppend.CommutingPrepare` (through `PrepareFactors`), over the blinded
-sample cell. -/
-def HostMovedRootAccepted : Prop :=
-  ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
-    op.commutes = true ∧ contentFresh ctx cell = false ∧
-    hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
-
 /-! ## §7b. The REGISTRY keystone: the deployed target dispatch dispatches code 9 through the registry.
 
 `Payload` has an open constructor, `registered code op`, whose every arm reads the declaration
@@ -442,6 +376,37 @@ def HostKeystone : Prop :=
   hostRegistry.lookup 1 =
     some ((DeclaredResourceController.contentEffect.handler 1).comap dispatchCtxOf) ∧
   1 ∉ liveLegacy
+
+/-- A handler with its declaration's rotate dropped: the same header, freshness, selection and
+packing, an executor that never ratchets. -/
+def Handler.unrotated {Ctx Cell : Type} (h : Handler Ctx Cell) : Handler Ctx Cell :=
+  { h with spec := { h.spec with rotate := fun _ _ => [] } }
+
+/-- The content handler the registry derives, under the Host's context. -/
+abbrev contentHostHandler : Handler HostCtx HostCell :=
+  (DeclaredResourceController.contentEffect.handler 1).comap dispatchCtxOf
+
+/-- **Teeth, for content.** The deployed dispatch does not dispatch through a registry whose
+content handler drops the rotate, nor through the registry with code 1 also kept as a hand
+arm. -/
+def HostTeeth : Prop :=
+  ¬ Dispatches [(1, contentHostHandler.unrotated)] liveLegacy liveTargetDispatch ∧
+  ¬ Dispatches hostRegistry (1 :: liveLegacy) liveTargetDispatch
+
+/-- **Satisfiable (the accepted branch).** Some content cell and well-encoded content command
+are admitted by the deployed dispatch. -/
+def HostAccepted : Prop :=
+  ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
+    liveTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
+
+/-- **Satisfiable (a moved root).** A commuting content command whose plan names a root that is
+NOT the cell's (the derived handler's `fresh` is false) is admitted by the deployed dispatch: the
+accepting pole of `Kernel.ContentCommutingAppend.CommutingPrepare`, over the blinded sample
+cell. -/
+def HostMovedRootAccepted : Prop :=
+  ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
+    op.commutes = true ∧ contentHostHandler.fresh ctx cell = false ∧
+    liveTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
 
 /-- **Premise inhabitation.** Every bound handler is lawful: sound (its `select` and `pack`
 are inverse both ways under every context, the store substrate is framed) and complete. -/
