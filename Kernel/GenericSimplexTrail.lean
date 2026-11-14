@@ -432,6 +432,48 @@ theorem step_live (c : Config) (s : State) (input : Input) (live : s.lastCommitt
 
 /-! ## One correct replica against the trail -/
 
+/-- What a delivery must be for the trail to cover it: a message `ingest` can put in a view
+record (not a PROPOSE, for a view above the floor, a VOTE or COMMIT for a block) is one the
+trail has. `ingest` reads nothing else of a delivered message into a record a rule counts. -/
+def Readable (external : Message → Prop) (floor : Nat) : Input → Prop
+  | .delivery m | .deliveryAt _ m =>
+      m.kind ≠ .propose → floor < m.view → (m.kind = .vote ∨ m.kind = .commit → m.value ≠ none) →
+        external m
+  | _ => True
+
+theorem ingest_readable (c : Config) (external : Message → Prop) (s : State)
+    (message : Message) (old : EmissionInvariant c external s)
+    (available : message.kind ≠ .propose → s.lastCommitted < message.view →
+      (message.kind = .vote ∨ message.kind = .commit → message.value ≠ none) → external message) :
+    EmissionInvariant c external (ingest c s message) := by
+  unfold ingest serveFloor noteAhead serveViews
+  dsimp only
+  repeat' first
+    | (with_reducible refine register_invariant message old ?_ (available ?_ ?_ ?_) <;> simp_all)
+    | emission_basic_step
+
+theorem step_readable (c : Config) (external : Message → Prop) (s : State) (input : Input)
+    (size : c.parties = 3 * c.faults + 1) (old : EmissionInvariant c external s)
+    (available : Readable external s.lastCommitted input) :
+    EmissionInvariant c external (step c s input) := by
+  cases input with
+  | delivery message =>
+    unfold step
+    dsimp only
+    split
+    · emission_basic_chain
+    · exact pump_invariant c external _ _ size (ingest_readable c external s message old available)
+  | deliveryAt now message =>
+    unfold step
+    dsimp only
+    split
+    · emission_basic_chain
+    · apply pump_invariant c external _ _ size
+      apply ingest_readable
+      · simpa only [emission_record] using old
+      · exact available
+  | _ => exact step_invariant c external s _ size old True.intro
+
 /-- `G` is a specification state with its audit retained, read through `chain`; the
 replica's own state is `forget G`. `base` is the view in which `chain` was committed.
 `embed`, `received`: its events and the messages it holds are in the trail. `complete`: a
@@ -484,7 +526,7 @@ theorem ghost_step {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Bl
     {trail : List Event} {G : State} (input : Input)
     (ghost : Ghost c faulty p base chain trail G) (good : Good c faulty trail)
     (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
-    (available : InputAvailable (fun m => (.send (liftMessage chain m) : Event) ∈ trail) input) :
+    (available : Readable (fun m => (.send (liftMessage chain m) : Event) ∈ trail) G.lastCommitted input) :
     ∃ fresh : List Event, (step c G input).audit = G.audit ++ fresh ∧
       Ghost c faulty p base chain (trail ++ fresh.map (liftEvent chain)) (step c G input) ∧
       Good c faulty (trail ++ fresh.map (liftEvent chain)) ∧
@@ -516,7 +558,7 @@ theorem ghost_step {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Bl
     rcases sent party member with impossible | inside
     · exact impossible.elim
     · exact Or.inl (List.mem_of_mem_take inside)
-  have emission := step_invariant c _ G input size ⟨ghost.scope, backed, oldEmission⟩ available
+  have emission := step_readable c _ G input size ⟨ghost.scope, backed, oldEmission⟩ available
   have causal1 := step_causal c G input ghost.causal
   have origin1 := step_origin c G input ⟨ghost.history, ghost.origins⟩
   have positive1 := step_positive c G input ghost.positive
