@@ -433,7 +433,7 @@ theorem cellsLawfulStep_eq (config : Config) {earlier store : StoreIdentity}
 /-- The policies the step from `prior` to `served` can have unsourced (`affectedPolicies`), read
 off the cells it wrote. -/
 def stepAffected (config : Config) {earlier store : StoreIdentity} (prior : OpenedServed config earlier)
-    (served : State store) (written : List DurableDataIntent.CellId) : List PolicyId :=
+    (served : State store) (written : List DurableDataIntent.CellId) : List TypedAuthorization.PolicyId :=
   affectedPolicies
     (CredentialAuthorityLayout.changedAddresses prior.served.canonicalBytes served.canonicalBytes
       (written.map (·.value)))
