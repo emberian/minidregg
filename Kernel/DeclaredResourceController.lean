@@ -1629,8 +1629,8 @@ def monetaryDebitFootprint? (prepared : PreparedInvocation deployment profile am
   match incidence with
   | none => none
   | some i => match prepared.money, command.targets[i].payload with
-      | some money, .moneyConsent consent =>
-          some (money.grossDebitFootprint ⟨command.targets[i].target, consent⟩)
+      | some money, .moneyConsent _ =>
+          some (money.grossDebitFootprint command.targets[i].target)
       | _, _ => none
 
 def monetaryVerbs? (prepared : PreparedInvocation deployment profile ambient ground command)

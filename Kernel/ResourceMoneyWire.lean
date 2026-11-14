@@ -113,19 +113,6 @@ instance (entries : List Entry) (batch : ApplicationBatch) : Decidable (Covered 
   unfold Covered
   infer_instance
 
-/-- Gross consented debits, not final net balance differences. Incoming
-credits in the same batch cannot hide outgoing value from a capability bound. -/
-def debit (batch : ApplicationBatch) (entry : Entry) (asset : AssetId) : Nat :=
-  entry.consent.positions.foldl (fun amount position =>
-    match batch.operations[position]? with
-    | some operation =>
-      if operation.posting.asset = asset then amount + operation.posting.amount else amount
-    | none => amount) 0
-
-def assets (batch : ApplicationBatch) (entry : Entry) : List AssetId :=
-  entry.consent.positions.filterMap fun position =>
-    (batch.operations[position]?).map fun operation => operation.posting.asset
-
 /-- Reuse the production verb distinctions; ordinary payment authority does
 not issue an asset, extend credit in it (a floor is set from the issuer well,
 under the same `mintAsset` verb as a mint), or destroy it. These are required from the SAME admitted

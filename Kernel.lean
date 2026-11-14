@@ -208,5 +208,4 @@ import Kernel.PrivateCellMaterializer  -- the private kinds' persistent structur
 import Kernel.PrivateCellOpening  -- the selective opening's relation: exact against the committed store's view, cell and version, or a fixed collision
 import Kernel.BranchAdmission  -- one branch of a birth: evidence (capability or signature, by mode) then the law's judgement; the plain and grain-backed births both call it
 import Kernel.AccountGrant  -- the two facts asked of a presented account capability: `Held` (a grant on the account itself; a delegated child passes) and `RootOwner` (parentless; a child never passes)
-import Kernel.ResourceMoneyValueBound  -- the resource-transaction gross-debit footprint against `Theory.CapabilityValueBound`'s: they agree under `Covered` (stated, with witnesses; proof owed), and differ without it
 import Kernel.ObjectiveActivityPayerBound  -- per spending activity turn: the declared amount against the account's gross debit; an invocation's debit exceeds its declared envelope price by the run's postage
