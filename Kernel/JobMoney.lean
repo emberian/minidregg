@@ -273,7 +273,26 @@ inductive Reject where
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The grant a fund or claim presents on its account does not bound the deposit
+  (`Theory.CapabilityValueBound.check`): its scope does not name the credit balance, or
+  bounds it below the deposited amount. -/
+  | valueBound (reason : Theory.CapabilityValueBound.Refusal)
   deriving Repr
+
+/-- A fund's Book leg debits the paying account by exactly the deposit. -/
+theorem fund_grossDebit (asset job : Nat) (j : Job) (account amount : Nat) :
+    Theory.CapabilityValueBound.grossDebit (Plan.batch ⟨asset, job, j, .fund account amount⟩).operations
+      account asset = amount := by
+  simp [Theory.CapabilityValueBound.grossDebit, Theory.CapabilityValueBound.debits, Plan.batch,
+    Operation.posting]
+
+/-- A claim's Book leg debits the bonding account by exactly the bond. -/
+theorem claim_grossDebit (asset job : Nat) (j : Job) (provider account amount : Nat) :
+    Theory.CapabilityValueBound.grossDebit
+      (Plan.batch ⟨asset, job, j, .claim provider account amount⟩).operations
+      account asset = amount := by
+  simp [Theory.CapabilityValueBound.grossDebit, Theory.CapabilityValueBound.debits, Plan.batch,
+    Operation.posting]
 
 /-! ## The pure decisions -/
 

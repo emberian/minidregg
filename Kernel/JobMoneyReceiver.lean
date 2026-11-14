@@ -724,6 +724,27 @@ structure Accepted [DecidableEq F]
     (request prepared.authority.snapshot prepared.job profile.semantics ambient command
       prepared.plan) receipt = true
   semantic : prepared.SemanticAccepted
+  /-- A fund or claim's grant on the paying account bounds the deposit. A settle debits no
+  member account: its payouts leave the job's held account under the job's law. -/
+  bounded : command.action = settleAction ∨
+    CapabilityValueBound.Presented semantic.authorization.evidence.capabilityValue
+      prepared.plan.batch.operations command.account
+
+/-- **Every admitted fund or claim's deposit is within its grant's value bound**: every
+balance the Book leg debits from the paying account is named by the grant's scope, and the
+gross debit is within every `maxDelta` bound the scope sets on it (`fund_grossDebit`,
+`claim_grossDebit`: that debit is the deposit). -/
+theorem Accepted.value_bounded [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) (deposit : command.action ≠ settleAction) :
+    ∃ cap commitment,
+      accepted.semantic.authorization.evidence.capabilityValue = some (cap, commitment) ∧
+        ∀ asset ∈ CapabilityValueBound.debitAssets prepared.plan.batch.operations command.account,
+          CellField.NamedBy cap.scope.fields (.balance asset) ∧
+            ∀ bound, (CellField.balance asset, bound) ∈ cap.scope.maxDelta →
+              CapabilityValueBound.grossDebit prepared.plan.batch.operations command.account
+                asset ≤ bound :=
+  (accepted.bounded.resolve_left deposit).gross
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -742,7 +763,18 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
               prepared.plan) receipt = true then
           match authorize prepared receipt with
           | .error reason => return .error reason
-          | .ok semantic => return .ok ⟨receipt, same, bound, semantic⟩
+          | .ok semantic =>
+              if settle : command.action = settleAction then
+                return .ok ⟨receipt, same, bound, semantic, .inl settle⟩
+              else
+                match bounded : CapabilityValueBound.presentedCheck
+                    semantic.authorization.evidence.capabilityValue
+                    prepared.plan.batch.operations command.account with
+                | .error none => return .error .capabilityRejected
+                | .error (some reason) => return .error (.valueBound reason)
+                | .ok () =>
+                    return .ok ⟨receipt, same, bound, semantic,
+                      .inr ((CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp bounded)⟩
         else return .error .capabilityRejected
       else return .error .capabilityRejected
 

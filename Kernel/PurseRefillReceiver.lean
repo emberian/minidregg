@@ -582,6 +582,36 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   semantic : prepared.SemanticAccepted
+  /-- The grant the refill was authorized under bounds the burn of the paying account. -/
+  bounded : CapabilityValueBound.Presented semantic.authorization.evidence.capabilityValue
+    prepared.plan.batch.operations command.account
+
+/-- **Every admitted refill's burn is within its grant's value bound**, in plain terms: the
+credit balance is named by the grant's scope and the burned amount is within every `maxDelta`
+bound the scope sets on it. -/
+theorem Accepted.value_bounded [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    ∃ cap commitment,
+      accepted.semantic.authorization.evidence.capabilityValue = some (cap, commitment) ∧
+        CellField.NamedBy cap.scope.fields (.balance prepared.plan.asset) ∧
+          ∀ bound, (CellField.balance prepared.plan.asset, bound) ∈ cap.scope.maxDelta →
+            command.amount ≤ bound := by
+  obtain ⟨cap, commitment, named, covered⟩ := accepted.bounded.gross
+  have account : prepared.plan.account = command.account :=
+    (decideRefill_ok prepared.decided).2.2.2.2.2.1
+  have amount : prepared.plan.amount = command.amount :=
+    (decideRefill_ok prepared.decided).2.2.2.2.2.2.1
+  have member : prepared.plan.asset ∈
+      CapabilityValueBound.debitAssets prepared.plan.batch.operations command.account := by
+    simp [CapabilityValueBound.debitAssets, CapabilityValueBound.debitAssetList,
+      CapabilityValueBound.debits, Plan.batch, CanonicalResourceKernel.Operation.posting, account]
+  obtain ⟨fieldNamed, within⟩ := covered _ member
+  refine ⟨cap, commitment, named, fieldNamed, fun bound listed => ?_⟩
+  have limit := within bound listed
+  simpa [CapabilityValueBound.grossDebit, CapabilityValueBound.debits, Plan.batch,
+    CanonicalResourceKernel.Operation.posting, account, amount] using limit
+
 theorem Accepted.bound [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
     (accepted : Accepted prepared ingress) :
@@ -601,7 +631,15 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
       if same : receipt.envelopeBytes = ingress.ingress.envelope then
         match authorize prepared receipt with
         | .error reason => return .error reason
-        | .ok semantic => return .ok ⟨receipt, same, semantic⟩
+        | .ok semantic =>
+            match bounded : CapabilityValueBound.presentedCheck
+                semantic.authorization.evidence.capabilityValue
+                prepared.plan.batch.operations command.account with
+            | .error none => return .error .capabilityRejected
+            | .error (some reason) => return .error (.valueBound reason)
+            | .ok () =>
+                return .ok ⟨receipt, same, semantic,
+                  (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp bounded⟩
       else return .error .capabilityRejected
 
 /-- The exact header the owner signs.  It discloses no decision: when the

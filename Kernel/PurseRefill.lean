@@ -36,6 +36,7 @@ module
 public import Kernel.AgentGrain
 public import Kernel.PayAssignmentReceiver
 public import Kernel.PayObservationProofs
+public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -79,6 +80,9 @@ inductive Reject where
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The presented grant does not bound the burn (`Theory.CapabilityValueBound.check`): its
+  scope does not name the credit balance, or bounds it below the burned amount. -/
+  | valueBound (reason : Theory.CapabilityValueBound.Refusal)
   deriving Repr
 
 /-! ## The decided plan and the two legs -/

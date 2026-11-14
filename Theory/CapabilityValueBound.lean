@@ -289,6 +289,72 @@ theorem batchBounded_gross {kind : ResourceKind} {presented : AccountId → Opti
     (valueBound_iff scope operations operation.posting.source).mp covered _
       (mem_debitAssets_of_mem member)⟩
 
+/-! ## The receiver's form: the capability a debit was authorized under -/
+
+/-- **The presented capability bounds the debit.** `capability` is what the receiver's
+authorization evidence holds for the debit of `account` (the capability and its commitment;
+`none`: the debit was authorized under no capability). -/
+def Presented {kind : ResourceKind} {D : Type} (capability : Option (Capability kind × D))
+    (operations : List Operation) (account : AccountId) : Prop :=
+  ∃ cap commitment, capability = some (cap, commitment) ∧
+    ValueBound cap.scope operations account
+
+/-- The decision of `Presented`. `error none`: no capability; `error (some refusal)`: the
+scope does not bound the debit, by name. -/
+def presentedCheck {kind : ResourceKind} {D : Type} (capability : Option (Capability kind × D))
+    (operations : List Operation) (account : AccountId) : Except (Option Refusal) Unit :=
+  match capability with
+  | none => .error none
+  | some (cap, _) =>
+      match check cap.scope operations account with
+      | .ok () => .ok ()
+      | .error refusal => .error (some refusal)
+
+theorem presentedCheck_ok_iff {kind : ResourceKind} {D : Type}
+    (capability : Option (Capability kind × D)) (operations : List Operation)
+    (account : AccountId) :
+    presentedCheck capability operations account = .ok () ↔
+      Presented capability operations account := by
+  unfold presentedCheck Presented
+  rcases capability with _ | ⟨cap, commitment⟩
+  · simp
+  · simp only [Option.some.injEq, Prod.mk.injEq]
+    constructor
+    · intro ok
+      refine ⟨cap, commitment, ⟨rfl, rfl⟩, ?_⟩
+      split at ok
+      next checked => exact (check_ok_iff _ _ _).mp checked
+      next => cases ok
+    · rintro ⟨_, _, ⟨rfl, rfl⟩, bounded⟩
+      rw [(check_ok_iff _ _ _).mpr bounded]
+
+instance {kind : ResourceKind} {D : Type} (capability : Option (Capability kind × D))
+    (operations : List Operation) (account : AccountId) :
+    Decidable (Presented capability operations account) :=
+  decidable_of_iff _ (presentedCheck_ok_iff capability operations account)
+
+/-- Teeth: a presented capability whose scope fails the bound is refused, by name. -/
+theorem presentedCheck_refuses {kind : ResourceKind} {D : Type} (cap : Capability kind)
+    (commitment : D) (operations : List Operation) (account : AccountId)
+    (unbounded : ¬ ValueBound cap.scope operations account) :
+    ∃ refusal, presentedCheck (some (cap, commitment)) operations account =
+      .error (some refusal) := by
+  obtain ⟨refusal, refused⟩ := (check_error_iff _ _ _).mpr unbounded
+  exact ⟨refusal, by simp only [presentedCheck, refused]⟩
+
+/-- In plain terms: under `Presented`, every balance the operations debit from the account is
+named, and its gross debit is within every bound the capability sets on it. -/
+theorem Presented.gross {kind : ResourceKind} {D : Type}
+    {capability : Option (Capability kind × D)} {operations : List Operation}
+    {account : AccountId} (presented : Presented capability operations account) :
+    ∃ cap commitment, capability = some (cap, commitment) ∧
+      ∀ asset ∈ debitAssets operations account,
+        CellField.NamedBy cap.scope.fields (.balance asset) ∧
+          ∀ bound, (CellField.balance asset, bound) ∈ cap.scope.maxDelta →
+            grossDebit operations account asset ≤ bound := by
+  obtain ⟨cap, commitment, named, bounded⟩ := presented
+  exact ⟨cap, commitment, named, (valueBound_iff cap.scope operations account).mp bounded⟩
+
 /-! ## Witnesses -/
 
 namespace Witness
