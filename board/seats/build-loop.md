@@ -16,8 +16,11 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
      `candidates/<sha>/READY`. It then syncs the umbrella tree and frees `src`, so the next round can start. The
      umbrellas (Fixtures, ObjectiveProofs, CensusChecks, Minidregg) and the fixture rerecord finish beside it.
   2. `gate`: the tour (J0-J8 and JWF dry), composed (keep-going), enrol-resume and j14-apps in parallel, with the
-     flatness run beside them. The edge is dregg-infra cf0b94f on hbox (builder-run.sh's EDGE_REV; the script's
-     own default is 3ddd90f). A red phase is rerun once, alone (`-r1`), only with BUILDER_RERUN=1.
+     flatness run beside them. The edge is dregg-infra 97fc590 on hbox (builder-run.sh's EDGE_REV; the script's
+     own default is 3ddd90f): cf0b94f plus one file, jworld-scratch.sh reading the client's usage whole before it
+     searches it (branch `gate/cf0b94f-help-grep`; dregg-infra main carries the same fix as 697b8ff). Under
+     pipefail `mini --help | grep -q` lost a race, dropped the Host pin and reported a serving world as `the relay
+     did not answer a pinned enrollment-view within 30 s` (composed red for five rounds, 11-14 12:58-15:16 EST). A red phase is rerun once, alone (`-r1`), only with BUILDER_RERUN=1.
   3. It rewrites board/REDS.md whole and commits it by path straight onto main. It moves `green` when nothing is
      red. Flatness is a published table and never gates (9317f32fc).
   4. `world-reap` tears down the processes of every builder gate world except those behind this round's reds.
@@ -37,14 +40,14 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   missing the builder may still be alive: see step 1 of the rebuild below.
 - **Start it**: `cd /home/hbox/lanes/integ && setsid nohup bash builder-run.sh >> builder.out 2>&1 < /dev/null &`.
   builder-run.sh sources ~/.minidregg-env, sets BUILDER_ROOT, GATE_RUNS=/ci, WORLD_UP_LOCK=/tank/lanes/world-up.lock,
-  SEATS=12, MEM=64G, BUILDER_POLL_S=30, EDGE_REV=cf0b94f, PLAYWRIGHT_DIR=$I/pw/node_modules and
+  SEATS=12, MEM=64G, BUILDER_POLL_S=30, EDGE_REV=97fc590, PLAYWRIGHT_DIR=$I/pw/node_modules and
   PLAYWRIGHT_BROWSERS_PATH=$I/pw/browsers, fetches main's scripts/pipeline/builder into builder-main.sh, writes
   builder.pid and execs it.
   A new builder script on main takes effect only on restart. integ-build, gate, sweep and world-reap are taken
   from the tip each round. A second builder refuses (builder/builder.lock). A build lock held by another build
   defers the round (`deferred: build.lock held`, retried every 120 s) and publishes nothing.
 - Live now (2026-11-14 10:10Z): running, pid in builder.pid, started 2026-11-14 04:29 EST after ember's 03:37 EST
-  cleanup of hbox's home removed the whole root (the second time; 11-04 was the first). EDGE_REV=cf0b94f.
+  cleanup of hbox's home removed the whole root (the second time; 11-04 was the first). EDGE_REV=97fc590 since 11-14 15:52 EST.
   Rounds since: a4472f3f65b2 (1,371 s, cold Rust and native; REDS.md published as 120e113e9) and 120e113e9c73
   (919 s). Both: build stages green, tour 73 PASS, composed PASS on all eight phases, enrol-resume PASS, flatness
   published. Reds: `ratchets` (bytes-repr: 5,001 `List UInt8` over the ceiling 4,931), the umbrella's
@@ -72,7 +75,8 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
      runtime directory custody refused`, round a4472f3f). If bb2's copy is gone, `deploy/hermes/build-runtime-root`
      builds a root from a hermes-agent checkout at 6d8a8beb with uv.
   4. `j14-secrets/openrouter.key` (0600 in a 0700 directory): scp of the Mac's ~/.openrouter-key.
-  5. `dregg-infra-cf0b94f/edge`: `git archive cf0b94f edge` from the Mac's ~/dev/dregg-infra.
+  5. `dregg-infra-97fc590/edge`: `git archive 97fc590 edge` from the Mac's ~/dev/dregg-infra (branch
+     `gate/cf0b94f-help-grep`, on both of its remotes).
   6. `builder-run.sh` as under Start. Everything else (builder/, logs/, candidates/, umbrella-src, the Rust target
      directories) the first round makes itself. The moved-aside `src.stub-20261114` is the 11-06 builder's debris.
 - Cycle: warm, a round is about 470 s alone on the box (build ~190 s, the gate's parallel phases ~250 s) and
