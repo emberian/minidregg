@@ -1,20 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `3a98e24518a1` (grain-runtime: `quiescence preflight`, the checkpoint's first question answered from durab). Round finished 2026-11-09T10:44Z.
-green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3a98e245`.
+Tip: `31d01a02e22a` (FLEET-SURFACE: `maxCost` caps a fleet turn only). Round finished 2026-11-14T02:35Z.
+green: `980d80c5dba8`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-31d01a02`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| rust-check | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| host | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
+| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 980d80c5dba8..3a98e24518a1`), newest first; owners are the seats whose
+Suspect commits since green (`git log 980d80c5dba8..31d01a02e22a`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `31d01a02` FLEET-SURFACE: `maxCost` caps a fleet turn only
+- `bd7b6a01` fleet surface: operator duties, what confines a seat to publishing, and two stale cost notes
+- `c492c4dd` builder: REDS.md for 3a98e24518a1 (6 red) (owner: build-loop)
 - `3a98e245` grain-runtime: `quiescence preflight`, the checkpoint's first question answered from durable state (owner: apps-hermes, bytes-repr)
 - `d15b824f` builder: REDS.md for 3ab616e02c8d (6 red) (owner: build-loop)
 - `3ab616e0` grain-runtime: an entered resident prompt whose work reserve was closed as never sent receives its p (owner: apps-hermes, bytes-repr)
@@ -52,6 +50,15 @@ Suspect commits since green (`git log 980d80c5dba8..3a98e24518a1`), newest first
 - `09d3fb73` consent admission: presence index as maps, the loaded directory held and stepped, refresh off the wh (owner: apps-hermes, bytes-repr)
 - `8f9f3883` builder: REDS.md for cf73141aca4b (6 red) (owner: build-loop)
 - `cf73141a` apps worker: an install that meets an instance its member already holds refuses the request, never t (owner: apps-hermes)
-- `2cf2942c` builder: REDS.md for 3649e4e58574 (6 red) (owner: build-loop)
-- `3649e4e5` apps worker: an export answers only for the STOP that fenced it; a carry into an owner who holds the (owner: apps-hermes)
-- `242b5823` builder: REDS.md for a8fb1630ec91 (6 red) (owner: build-loop)
+
+## Flatness (published, does not gate `green`)
+
+| row | verdict | metric | early | late | ratio | bound | owner |
+|---|---|---|---|---|---|---|---|
+| flatness-submit | PASS | submit_cpu_ms | 0.153 | 0.223 | 1.457 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 30.002 | 69.572 | 2.319 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.110 | 0.174 | 1.573 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 13.770 | 61.464 | 4.464 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.436 | 0.450 | 1.032 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 166.282 | 179.538 | 1.080 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-31d01a02/flatness.log | - | - | - | - | host-execution, store-retained |
