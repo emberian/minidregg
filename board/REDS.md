@@ -1,15 +1,17 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `e97b99da1fa7` (builder: REDS.md for aac9eba601a1 (1 red)). Round finished 2026-11-14T07:12Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-e97b99da`.
+Tip: `7db8a63a850e` (builder: REDS.md for e97b99da1fa7 (1 red)). Round finished 2026-11-14T08:00Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-7db8a63a`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 788dfb51fb5a..e97b99da1fa7`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..7db8a63a850e`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `7db8a63a` builder: REDS.md for e97b99da1fa7 (1 red) (owner: build-loop)
+- `9be139da` kernel: `Payload.registered`, the open payload constructor; the cited read is one declaration and it (owner: apps-hermes)
 - `e97b99da` builder: REDS.md for aac9eba601a1 (1 red) (owner: build-loop)
 - `787333fc` laws: the sheet law requires its cited rooms' birth; a verdict law and a land that cites it; the hea (owner: apps-hermes, read-path)
 - `9b711740` kernel: `fieldRead`, an observe-only read of a declared cell bound by value; a joint participant's i (owner: apps-hermes)
@@ -41,10 +43,10 @@ Suspect commits since green (`git log 788dfb51fb5a..e97b99da1fa7`), newest first
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.249 | 0.249 | 0.998 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 50.972 | 116.653 | 2.289 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.239 | 0.327 | 1.369 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 27.300 | 105.587 | 3.868 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.913 | 0.660 | 0.724 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 360.573 | 341.321 | 0.947 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-e97b99da/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.208 | 0.219 | 1.056 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 40.321 | 101.145 | 2.509 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.218 | 0.251 | 1.150 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 21.619 | 81.342 | 3.763 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.723 | 0.736 | 1.018 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 213.607 | 271.111 | 1.269 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-7db8a63a/flatness.log | - | - | - | - | host-execution, store-retained |
