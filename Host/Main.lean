@@ -1307,6 +1307,45 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
             if (NativeHostServed.validateServedStep config held opening.served written ⟨fun _ _ => by rw [same]⟩).toOption.isSome then
               n := n + 1
           pure n
+        -- The step's parts, each alone (the same state as both sides: an entry is freed and set again).
+        let moved : DurableServed.Served.Moved held.served opening.served written := ⟨fun _ _ => by rw [same]⟩
+        let ids := written.map (·.value)
+        discard <| timed "step part: directory x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            if (CredentialAuthorityServed.loadServedDirectoryStep held.directory opening.served written moved).isSome then
+              n := n + 1
+          pure n
+        discard <| timed "step part: decode written cells (stepPatch) x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            n := n + (CredentialAuthorityLayout.stepPatch held.served.canonicalBytes
+              opening.served.canonicalBytes ids).length
+          pure n
+        discard <| timed "step part: authority (stepCell) x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            if (CredentialAuthorityServed.loadServedAuthorityStep held.authority opening.served written moved).isSome then
+              n := n + 1
+          pure n
+        discard <| timed "step part: affected policies x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            n := n + (NativeHostServed.stepAffected config held opening.served written).length
+          pure n
+        if let some directory := CredentialAuthorityServed.loadServedDirectoryStep held.directory opening.served written moved then
+          discard <| timed "step part: cell law x10" do
+            let mut n := 0
+            for _ in [0:10] do
+              if NativeHostServed.cellsLawfulStep config opening.served written directory then n := n + 1
+            pure n
+          let affected := NativeHostServed.stepAffected config held opening.served written
+          discard <| timed s!"step part: sourcing check ({affected.length} policies) x10" do
+            let mut n := 0
+            for _ in [0:10] do
+              if NativeHost.sourcedStepCheck config directory.directory held.authority.cell.logical affected then
+                n := n + 1
+            pure n
   discard <| timed "root rebuild x3" do
     let mut r := 0
     for _ in [0:3] do
