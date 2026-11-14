@@ -1,16 +1,19 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `ab8af8e598aa` (builder: REDS.md for 26be70adf141 (4 red)). Round finished 2026-11-14T18:10Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-ab8af8e5`.
+Tip: `23f9aac22833` (effects: scalar actions are bound at code 0; their hand arms are deleted). Round finished 2026-11-14T19:11Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-23f9aac2`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-ab8af8/journey.log |
-| gate:composed:composed | composed composed fail | not rerun | yes | infra, member-side | scratch world: jworld FAIL start the relay did not answer a pinned enrollment-view within 30 s |
+| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-23f9aa/journey.log |
+| gate:composed:store-restart | composed store-restart fail | not rerun | no | host-execution | fail: store-restart:world: the relay did not answer a pinned enrollment-view within 30 s; |
 
-Suspect commits since green (`git log 788dfb51fb5a..ab8af8e598aa`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..23f9aac22833`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `23f9aac2` effects: scalar actions are bound at code 0; their hand arms are deleted (owner: apps-hermes, bytes-repr)
+- `e3026acf` builder: REDS.md for ab8af8e598aa (2 red) (owner: build-loop)
 - `ab8af8e5` builder: REDS.md for 26be70adf141 (4 red) (owner: build-loop)
 - `60323ede` ratchet(bytes-repr): the ceiling is the measured 4961 (owner: bytes-repr)
 - `26be70ad` scalar: `prepareStore`, the root-free core; `prepareCell` is its header and then that core
@@ -49,17 +52,15 @@ Suspect commits since green (`git log 788dfb51fb5a..ab8af8e598aa`), newest first
 - `5c29e9be` gates(generic-simplex): the gate builds its own Rust helpers, so every caller passes one argument
 - `e9dc4c0b` builder: REDS.md for 1b5666369348 (3 red) (owner: build-loop)
 - `83d19700` effects: the content read and the kind read are bound at codes 3 and 7; their hand arms are deleted (owner: apps-hermes)
-- `1b566636` agreement(native): four participants run end to end in the gate; tip validation, a running history d (owner: apps-hermes)
-- `1936e8c1` builder: REDS.md for a64bbd6e9e09 (3 red) (owner: build-loop)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.206 | 0.221 | 1.074 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 40.240 | 78.271 | 1.945 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.165 | 0.199 | 1.203 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 21.358 | 73.353 | 3.434 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.399 | 0.283 | 0.709 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 162.090 | 128.595 | 0.793 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-ab8af8e5/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.184 | 0.226 | 1.226 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 35.114 | 79.478 | 2.263 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.193 | 0.248 | 1.285 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 30.213 | 98.112 | 3.247 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.601 | 0.565 | 0.940 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 335.497 | 318.891 | 0.951 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-23f9aac2/flatness.log | - | - | - | - | host-execution, store-retained |
