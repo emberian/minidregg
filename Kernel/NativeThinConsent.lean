@@ -1463,7 +1463,7 @@ def legValues (domain semantics : Digest) (federation : FederationId) (command :
   policyId := ⟨target.target⟩
   policyEpoch := 0
   policyRevision := 0
-  cost := requestCost (commandCodec.encode command) target
+  cost := (commandCodec.encode command).length
 
 /-- A participant's observation leg (`readRequest`). -/
 def observeValues (domain semantics : Digest) (federation : FederationId) (command : Command)
