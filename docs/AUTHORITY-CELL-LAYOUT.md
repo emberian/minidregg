@@ -193,7 +193,10 @@ codec encodes an identifier as a variable-length natural.
 
 ## Validation
 
-What ran, all on hbox in the pooled tree `t2`, base `origin/main` at `23f9aac22` unless said:
+What ran, all on hbox in the pooled tree `t2`. The whole build and the static checks ran on
+the lane rebased onto `origin/main` at `a2a03e8e4`; the native Host, the tour, the fixtures and
+the Simplex gate ran one rebase earlier, on base `23f9aac22` (nine commits of main, none in the
+authority files, lie between; the re-recorded fixtures still build on the newer base):
 
 - **Whole build**: `swarm-build lake build Minidregg` rc 0, together with the modules outside the
   umbrella that import the layout (`Host.ClientConsentSession`,
