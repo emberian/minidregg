@@ -108,8 +108,13 @@ mini> doc show paper
   refusal you hold with the clause and slot values (`WHY` in `shell_grammar.rs`); `inspect law REF` shows
   the installed law (`INSPECT`); `law check "CLAUSE; …"` asks whether a law could ever pass before
   you install it (`LAW`). a verb you hold no grant for is not listed by `can`.
-- **delegate, bounded**: `delegate ID REF RECIPIENT VERBS MAX-COST [--until H]` proposes a grant that
-  ends at height H (`DELEGATE`); `submit ID`, `publish ID`, then `export ID` and the recipient's
+- **delegate, bounded**: `delegate ID REF RECIPIENT VERBS MAX-COST [--until H] [--fields F,...]
+  [--max-delta F=N,...]` proposes a grant that ends at height H (`DELEGATE`). `MAX-COST` caps one
+  request's size or fee, never the value it moves. to bound what a `transfer` grant on an account
+  can spend, add `--max-delta balance:ASSET=N` (at most N of that asset leaves the account in one
+  turn, gross: a credit in the same turn does not offset it) and `--fields balance:ASSET` (the only
+  balances the grant may touch). the bound is per turn, not a running total, and a grant with
+  neither flag is unbounded in value; `submit ID`, `publish ID`, then `export ID` and the recipient's
   `import NAME <json>` hand it over; `revoke ID REF RECIPIENT` takes it back; `renounce` gives up a
   grant you hold, and `room leave` gives up your grant under a room.
 - **an agent in a room**: `summon ROOM as librarian --budget N`, `ask ROOM text`, `tail`, `dismiss ROOM`
