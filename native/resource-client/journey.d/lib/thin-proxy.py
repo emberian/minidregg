@@ -15,6 +15,11 @@ supplied, as THIN_PROXY_MODE says:
   capture=PATH         save the proposed plan and intent as PATH.plan and
                        PATH.intent and refuse the frame itself: nothing is signed
 
+THIN_PROXY_SAVE_VIEW=PATH, in any mode, writes the first view the Host served for
+a thin plan consent to PATH before any rewrite (the client keeps no copy of a
+view it reads for consent, so this is where a journey gets one). No file is
+written when no view reached the provider.
+
 Each rewrite is appended to THIN_PROXY_LOG as one line, so a journey can assert
 that the planted change happened before it reads the provider's verdict.
 """
@@ -119,6 +124,11 @@ def rewrite(payload, mode):
     signer, rest = split_pair(rest)
     plan, views_bytes = split_pair(rest)
     views = decode_byte_list(views_bytes)
+    save = os.environ.get("THIN_PROXY_SAVE_VIEW")
+    if save and views:
+        with open(save, "wb") as handle:
+            handle.write(views[0])
+        log(f"views: saved the first of {len(views)} served view(s) as {save}")
     if mode == "pass":
         return payload
     if mode.startswith("view="):

@@ -63,7 +63,7 @@ say() {
     # (pass) would then serve every later line and no capture or plant would ever happen.
     if env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
         THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE="$mode" THIN_PROXY_LOG="$D/proxy.log" \
-        THIN_PROXY_OTHER_INTENT="${OTHER_INTENT:-}" \
+        THIN_PROXY_OTHER_INTENT="${OTHER_INTENT:-}" THIN_PROXY_SAVE_VIEW="${SAVE_VIEW:-}" \
         "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
         --workspace "$SPONSOR_WS" --home "$D/$who" --line "$line" >"$OUT" 2>"$ERR"; then RC=0; else RC=$?; fi
   else
@@ -74,7 +74,6 @@ say() {
 ok() { local step=$1; shift; say "$@"; [ "$RC" = 0 ] || fail "$step" 0 "$RC" x "$(tail -3 "$ERR")"; row "$step" 0 0 PASS; }
 check() { local step=$1; shift; if "$@"; then row "$step" true 0 PASS; else fail "$step" true 1 x "check failed: $*"; fi; }
 attempt_of() { sed -n 's/^workspace attempt: //p' "$1" | tail -1; }
-reads_of() { sed -n 's/^workspace read attempt: //p' "$1"; }
 proposal_root() { jq -r '.purpose.draft.command.targets[0].expectedTargetRoot' "$SPONSOR_WS/proposals/$1/intent.json"; }
 shown_root() { jq -r '.[0].postRoot' "$1/thin-display.json"; }
 proxy_saw() { grep -q "$1" "$D/proxy.log"; }
@@ -93,13 +92,15 @@ ok instance-create alice 'create tc-one --from tc-poll open'
 # ---- T1: honest thin consent; what it shows is what commits
 ok t1-propose-show alice 'instance show tc-one'
 ok t1-propose alice 'instance set t1 tc-one open 0 0'
-say alice 'submit t1' pass
+# The view the Host serves for this consent is saved by the proxy: the client reads it for the
+# consent alone and keeps no copy (a signed read keeps one journal line, not an attempt tree).
+SAVE_VIEW=$D/view-pre-t1.bin say alice 'submit t1' pass
 [ "$RC" = 0 ] || fail t1-submit 0 "$RC" x "$(tail -3 "$ERR")"
 row t1-submit 0 0 PASS
-T1=$(attempt_of "$ERR"); PRE_T1=$(reads_of "$ERR" | tail -1)/view.bin
+T1=$(attempt_of "$ERR")
 check t1-thin-frames proxy_saw 'frame 232'
 check t1-shown test -s "$T1/thin-display.json"
-cp "$PRE_T1" "$D/view-pre-t1.bin"
+check t1-view-served test -s "$D/view-pre-t1.bin"
 ok t1b-propose-show alice 'instance show tc-one'
 ok t1b-propose alice 'instance set t1b tc-one open 0 1'
 check t1-shown-is-committed test "$(shown_root "$T1")" = "$(proposal_root t1b)"
@@ -203,14 +204,13 @@ jq --arg t "$(jq -r .target "$SPONSOR_WS/refs/tc-one.json")" '.purpose.draft.com
 : >"$D/proxy-n2.log"
 rc=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
   THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-n2.log" \
+  THIN_PROXY_SAVE_VIEW="$D/view-n2.bin" \
   "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$D/req/n2-intent.json" \
   --attempt "$NEWCOMER_WS/attempts/n2" >"$D/log/n2-submit.out" 2>"$D/log/n2-submit.err" || rc=$?
 [ "$rc" != 0 ] || fail n2-refused refused 0 x "a member without a grant signed and submitted"
 grep -q '^refused: ' "$D/log/n2-submit.err" || fail n2-refused "host refusal" "$rc" x "$(tail -3 "$D/log/n2-submit.err")"
 check n2-no-plan-consent sh -c "! grep -q 'frame 232' '$D/proxy-n2.log'"
-for read in $(reads_of "$D/log/n2-submit.err"); do
-  check n2-no-bytes-served test ! -e "$read/view.bin"
-done
+check n2-no-bytes-served test ! -e "$D/view-n2.bin"
 check n2-nothing-signed test ! -e "$NEWCOMER_WS/attempts/n2/transaction-signatures.json"
 row n2-refused "$(grep -m1 '^refused: ' "$D/log/n2-submit.err" | cut -c1-60)" "$rc" PASS
 # S2: the newcomer signs its own write over N1's post with full consent (it
