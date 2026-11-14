@@ -293,6 +293,32 @@ def participantSlots (prepared : PreparedInvocation deployment profile ambient g
     (targetProjection command.subject command.targets[i] (prepared.targets i).pre.logical (logical (some i)) ++
       moneyPolicySlots prepared i)
 
+/-! ### Who a participant is (K2)
+
+A law names another participant by position (`joint/index/{i}/…`), and a position holds whatever
+cell the command's signer put there. Its fields say what the cell holds and not which cell it
+is: a look-alike with the same fields can be born and cited. These slots are the kernel's own
+facts about the cell at position `i`: its id, the storage kind the directory holds it under,
+the address of the law it is committed to at its current revision, and the room it was born
+in (`-1` for none). They come from the command, the directory and the authority cell, never
+from the cell's own state, and they are the FIRST slots of a participant's joint block, so no
+slot a cell's projection names can shadow them (`joint_identity_exact`). -/
+def identitySlots (prepared : PreparedInvocation deployment profile ambient ground command)
+    (i : TargetIndex command) : List (String × Int) :=
+  [("cell/id", Int.ofNat command.targets[i].target),
+   ("cell/kind", Int.ofNat (storageKind prepared (some i))),
+   ("cell/law", Int.ofNat (ground.authority.authState.policyAddress ⟨command.targets[i].target⟩
+      (ground.authority.authState.policyRevision ⟨command.targets[i].target⟩)).value),
+   ("cell/parent", match ground.authority.authState.parent.parentOf command.targets[i].target with
+      | some room => Int.ofNat room
+      | none => -1)]
+
+/-- Participant `i` as the joint block exposes it: who it is, then what it holds. -/
+def jointParticipantSlots (prepared : PreparedInvocation deployment profile ambient ground command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (i : TargetIndex command) : List (String × Int) :=
+  identitySlots prepared i ++ participantSlots prepared logical i
+
 /-! ### Demanded projection
 
 A step carries only the slots its committed law reads (`legKeys`, `step`): the projection is
@@ -386,7 +412,7 @@ def projectWithCommon (prepared : PreparedInvocation deployment profile ambient 
     Minidregg.Pred.State :=
   let localIndex := primary.getD (firstIndex prepared)
   ⟨common ++ participantSlots prepared logical localIndex ++
-    jointSlots command.targets (participantSlots prepared logical)⟩
+    jointSlots command.targets (jointParticipantSlots prepared logical)⟩
 
 /-- Materialize each finite participant projection once for this logical state,
 then reuse it for the local and both joint names. This array exists only while
@@ -399,7 +425,8 @@ def projectWithCommonShared (prepared : PreparedInvocation deployment profile am
   let projected := Array.ofFn (participantSlots prepared logical)
   let slots := fun i : TargetIndex command => projected[i.val]'(by
     simpa only [projected, Array.size_ofFn] using i.isLt)
-  ⟨common ++ slots localIndex ++ jointSlots command.targets slots⟩
+  ⟨common ++ slots localIndex ++
+    jointSlots command.targets (fun i => identitySlots prepared i ++ slots i)⟩
 
 theorem projectWithCommonShared_exact
     (prepared : PreparedInvocation deployment profile ambient ground command)
@@ -407,7 +434,8 @@ theorem projectWithCommonShared_exact
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
     projectWithCommonShared prepared primary common logical =
       projectWithCommon prepared primary common logical := by
-  simp only [projectWithCommonShared, projectWithCommon, Array.getElem_ofFn]
+  simp only [projectWithCommonShared, projectWithCommon, jointParticipantSlots, Array.getElem_ofFn]
+  try rfl
 
 @[csimp] theorem projectWithCommon_eq_shared :
     @projectWithCommon = @projectWithCommonShared := by
@@ -443,7 +471,9 @@ def projectWithCommonDemand (keys : List Minidregg.Pred.Slot)
     participantSlotsGated gate (participantWant keys command i) (pairLeads keys) prepared logical i
   let slots := fun i : TargetIndex command => projected[i.val]'(by
     simpa only [projected, Array.size_ofFn] using i.isLt)
-  (⟨common ++ slots localIndex ++ jointSlots command.targets slots⟩ : Minidregg.Pred.State).restrict keys
+  (⟨common ++ slots localIndex ++
+    jointSlots command.targets (fun i => identitySlots prepared i ++ slots i)⟩ :
+      Minidregg.Pred.State).restrict keys
 
 theorem projectWithCommonDemand_exact (keys : List Minidregg.Pred.Slot)
     (prepared : PreparedInvocation deployment profile ambient ground command)
@@ -480,9 +510,9 @@ theorem projectWithCommonDemand_exact (keys : List Minidregg.Pred.Slot)
       (pairLeads keys)
       (fun name h => by simp only [participantWant, jointIndexKey, h, Bool.or_true, Bool.true_or])
       (participantWant_leads keys command i) i
-  simp only [projectWithCommonDemand, projectWithCommonFor, projectWithCommon, Minidregg.Pred.State.restrict,
-    Array.getElem_ofFn, jointSlots, List.filter_append, List.filter_flatMap, List.filter_map,
-    Function.comp_def, local_, target, index]
+  simp only [projectWithCommonDemand, projectWithCommonFor, projectWithCommon, jointParticipantSlots,
+    Minidregg.Pred.State.restrict, Array.getElem_ofFn, jointSlots, List.map_append, List.filter_append,
+    List.filter_flatMap, List.filter_map, Function.comp_def, local_, target, index]
 
 @[csimp] theorem projectWithCommonFor_eq_demand :
     @projectWithCommonFor = @projectWithCommonDemand := by
@@ -550,6 +580,13 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
     | kindDefinition _ => exact WorldKindProjection.definitionProject_unjoint _ _
     | kindRead => exact WorldPrototypeConstruction.observeProject_unjoint _
     | read => exact contentProject_unjoint _ _ _
+    | fieldRead reads =>
+        show Unjoint (citedProject id reads before)
+        unfold citedProject
+        refine unjoint_append _ _ (scalarSlots_unjoint _ _) ?_
+        intro p hp
+        simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+        rcases hp with rfl | rfl <;> dsimp only <;> decide
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
 `run/fuel`) are not joint keys. -/
@@ -620,18 +657,18 @@ theorem project_joint_get (prepared : PreparedInvocation deployment profile ambi
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (k : String) (hk : k.toList.head? = some 'j') :
     (project prepared primary source logical).get k =
-      Minidregg.Pred.State.get ⟨jointSlots command.targets (participantSlots prepared logical)⟩ k := by
+      Minidregg.Pred.State.get ⟨jointSlots command.targets (jointParticipantSlots prepared logical)⟩ k := by
   unfold project projectWithCommon
   rw [get_append, get_unjoint _ (unjoint_append _ _ (projectCommonSlots_unjoint prepared primary source)
     (participantSlots_unjoint prepared logical _)) k hk, Option.none_or]
 
-/-- Position `i` of the command reads participant `i`'s own slots. -/
+/-- Position `i` of the command reads participant `i`'s own slots, behind its identity. -/
 theorem joint_index_exact (prepared : PreparedInvocation deployment profile ambient ground command)
     (primary : Incidence command) (source : Source command)
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (i : TargetIndex command) (slot : String) :
     (project prepared primary source logical).get (jointIndexKey i.val slot) =
-      Minidregg.Pred.State.get ⟨participantSlots prepared logical i⟩ slot := by
+      Minidregg.Pred.State.get ⟨jointParticipantSlots prepared logical i⟩ slot := by
   rw [project_joint_get _ _ _ _ _ (jointIndexKey_head _ _), jointSlots_index]
 
 /-- The id key names the same participant, since a prepared command's target ids are distinct. -/
@@ -640,7 +677,7 @@ theorem joint_target_exact (prepared : PreparedInvocation deployment profile amb
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (i : TargetIndex command) (slot : String) :
     (project prepared primary source logical).get (jointTargetKey command.targets[i].target slot) =
-      Minidregg.Pred.State.get ⟨participantSlots prepared logical i⟩ slot := by
+      Minidregg.Pred.State.get ⟨jointParticipantSlots prepared logical i⟩ slot := by
   rw [project_joint_get _ _ _ _ _ (jointTargetKey_head _ _), jointSlots_target _ _ prepared.distinct]
 
 /-- The two keyings agree: `joint/index/{i}/s` and `joint/target/{id of target i}/s`
@@ -664,6 +701,69 @@ theorem joint_index_absent (prepared : PreparedInvocation deployment profile amb
     (n : Nat) (h : command.targets.length ≤ n) (slot : String) :
     (project prepared primary source logical).get (jointIndexKey n slot) = none := by
   rw [project_joint_get _ _ _ _ _ (jointIndexKey_head _ _), jointSlots_index_absent _ _ n h]
+
+/-- **K2: the identity a law reads at a position is the kernel's.** Whatever cell the signer
+put at position `i`, and whatever that cell holds, `joint/index/{i}/cell/id` is its id,
+`…/cell/law` is the address of the law it is committed to at its current revision, and
+`…/cell/parent` is the room the authority cell records it was born in (`-1` for none). -/
+theorem joint_identity_exact (prepared : PreparedInvocation deployment profile ambient ground command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (i : TargetIndex command) :
+    (project prepared primary source logical).get (jointIndexKey i.val "cell/id") =
+        some (Int.ofNat command.targets[i].target) ∧
+      (project prepared primary source logical).get (jointIndexKey i.val "cell/law") =
+        some (Int.ofNat (ground.authority.authState.policyAddress ⟨command.targets[i].target⟩
+          (ground.authority.authState.policyRevision ⟨command.targets[i].target⟩)).value) ∧
+      (project prepared primary source logical).get (jointIndexKey i.val "cell/parent") =
+        some (match ground.authority.authState.parent.parentOf command.targets[i].target with
+          | some room => Int.ofNat room
+          | none => -1) := by
+  simp only [joint_index_exact]
+  simp [jointParticipantSlots, identitySlots, Minidregg.Pred.State.get]
+
+/-- **K2 keystone: a law that requires the cited cell's identity admits exactly that identity.**
+The clause "the cell at position `i` was born in room `room` under the law at `law`" holds on
+the projected state iff the authority cell records that room as the cell's parent and that
+address as its current law. The cell's own fields do not enter: no cell can satisfy the clause
+by what it holds. -/
+theorem joint_identity_clause (prepared : PreparedInvocation deployment profile ambient ground command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (old : Minidregg.Pred.State) (i : TargetIndex command) (room law : Nat) :
+    Minidregg.Pred.eval
+        (.allL (.cons (.eq (jointIndexKey i.val "cell/parent") (Int.ofNat room))
+          (.cons (.eq (jointIndexKey i.val "cell/law") (Int.ofNat law)) .nil)))
+        old (project prepared primary source logical) = true ↔
+      ground.authority.authState.parent.parentOf command.targets[i].target = some room ∧
+        (ground.authority.authState.policyAddress ⟨command.targets[i].target⟩
+          (ground.authority.authState.policyRevision ⟨command.targets[i].target⟩)).value = law := by
+  obtain ⟨-, lawSlot, parentSlot⟩ := joint_identity_exact prepared primary source logical i
+  simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, Minidregg.Pred.evalWithAll, lawSlot,
+    parentSlot, Bool.and_true, Bool.and_eq_true, decide_eq_true_eq, Option.some.injEq]
+  constructor
+  · rintro ⟨parent, address⟩
+    refine ⟨?_, Int.ofNat.inj address⟩
+    cases recorded : ground.authority.authState.parent.parentOf command.targets[i].target with
+    | none => rw [recorded] at parent; exact Int.noConfusion parent
+    | some born => rw [recorded] at parent; exact congrArg some (Int.ofNat.inj parent)
+  · rintro ⟨recorded, rfl⟩
+    exact ⟨by rw [recorded], rfl⟩
+
+/-- **Teeth: the look-alike is refused.** A cell that was not born in `room` fails the identity
+clause whatever its fields are, including fields equal to those of a cell that was. -/
+theorem lookalike_refused (prepared : PreparedInvocation deployment profile ambient ground command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (old : Minidregg.Pred.State) (i : TargetIndex command) (room law : Nat)
+    (elsewhere : ground.authority.authState.parent.parentOf command.targets[i].target ≠ some room) :
+    Minidregg.Pred.eval
+        (.allL (.cons (.eq (jointIndexKey i.val "cell/parent") (Int.ofNat room))
+          (.cons (.eq (jointIndexKey i.val "cell/law") (Int.ofNat law)) .nil)))
+        old (project prepared primary source logical) = false := by
+  rw [Bool.eq_false_iff]
+  intro holds
+  exact elsewhere ((joint_identity_clause prepared primary source logical old i room law).1 holds).1
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.targetProjection_unjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms targetProjection_unjoint
@@ -1376,6 +1476,8 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | moneyConsent _ => exact fun _ => .body
     -- An observe-only read writes nothing; its addresses are content addresses.
     | read => exact fun address => ResourceObservationAdmission.contentFieldAt address
+    -- A cited read writes nothing; its addresses are declared state keys.
+    | fieldRead _ => exact fun address => ResourceObservationAdmission.declaredField address.2
 
 def targetAmount (target : Target) :
     (address : Address target.layout) → target.layout.Value address.1 → Int := by
@@ -1385,7 +1487,8 @@ def targetAmount (target : Target) :
     | scalar _ => exact fun _ value => value
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
-    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | read => exact fun _ _ => 0
+    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | read | fieldRead _ =>
+        exact fun _ _ => 0
 
 /-- The address the kernel's blinding ratchet writes on every leg of a
 blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
@@ -1399,7 +1502,8 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
     | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
     | read => exact fun _ => false
-    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ => exact fun _ => false
+    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | fieldRead _ =>
+        exact fun _ => false
 
 /-- What one write changed, but the ratchet's address. -/
 def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
@@ -1442,6 +1546,11 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) pre post
+    | fieldRead reads =>
+      exact ResourceObservationAdmission.footprintOf
+        (changedEffect ⟨kind, id, capability, version, root, .fieldRead reads, observe, audienceEpoch, audienceRoster⟩ pre post)
+        (targetField ⟨kind, id, capability, version, root, .fieldRead reads, observe, audienceEpoch, audienceRoster⟩)
+        (targetAmount ⟨kind, id, capability, version, root, .fieldRead reads, observe, audienceEpoch, audienceRoster⟩) pre post
 
 /-- Dynamic inner stores share the footprint engine. Existing roles scan their
 actual patch writes and exclude the hiding ratchet. -/
@@ -1790,7 +1899,7 @@ def entryWrites (prepared : PreparedInvocation deployment profile ambient ground
 /-- An observe-only read target is read, not written. -/
 def Target.isRead (target : Target) : Bool :=
   match target.payload with
-  | .read | .kindRead | .computeFunding _ | .moneyConsent _ => true
+  | .read | .kindRead | .fieldRead _ | .computeFunding _ | .moneyConsent _ => true
   | _ => false
 
 /-- A read target enters as a read guard on its cell's current root, as the
@@ -2652,12 +2761,7 @@ theorem transclude_requires_source_coverage [DecidableEq F]
     cases isRead
   have many : command.requiresObservation = true :=
     requiresObservation_of_observeOnly j (by
-      simp only [Target.observeOnly]
-      split
-      · rfl
-      · rfl
-      · rename_i other notRead notKind
-        exact absurd isRead notRead)
+      simp only [Target.observeOnly, isRead])
   refine ⟨j, sameTarget, isRead, ⟨accepted.observations many j⟩, ?_⟩
   have checked : (match command.targets[j].contentStore? (prepared.targets j).pre with
       | some store => ContentResource.openingHolds store request

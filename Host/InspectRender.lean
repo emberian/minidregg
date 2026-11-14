@@ -456,11 +456,12 @@ private def draftLines : Draft → List String
     | none => ["  invoke: noncanonical command"]
     | some command => s!"  invoke by subject {command.subject.value}, nonce {command.nonce}" ::
         command.targets.flatMap fun target =>
-          let access := match target.payload with | .read | .kindRead => "reads" | _ => "writes"
+          let access := match target.payload with | .read | .kindRead | .fieldRead _ => "reads" | _ => "writes"
           s!"  {access} cell {kindName target.kind} {target.target} (via capability {target.capability.value}; read at root {target.expectedTargetRoot.value})" ::
             match target.payload with
             | .read => ["    authenticated read; no resource write"]
             | .kindRead => ["    authenticated whole kind definition read; no resource write"]
+            | .fieldRead reads => [s!"    cited read of {reads.length} field(s), bound by value; no resource write"]
             | .scalar actions => actions.map (fun a => "    " ++ actionText a)
             | .content command => [s!"    content command ({(ContentResource.commandCodec.encode command).length} bytes)"]
             | .append _ => ["    stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]

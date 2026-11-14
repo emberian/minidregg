@@ -1425,7 +1425,24 @@ private def targetPayload (path : String) (json : Lean.Json) :
   | "kindRead" =>
       let _ ← exactObject path ["type"] json
       pure .kindRead
-  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, kindRead, world, kindDefinition, moneyConsent or computeFunding"
+  | "fieldRead" =>
+      let obj ← exactObject path ["type", "reads"] json
+      let reads ← list (path ++ ".reads") (fun path json => do
+        let read ← exactObject path ["key", "observed"] json
+        let keyObj ← exactObject (path ++ ".key") ["type", "resource", "field"]
+          (← field path "key" read)
+        let keyType ← string (path ++ ".key.type") (← field (path ++ ".key") "type" keyObj)
+        let resource ← nat (path ++ ".key.resource") (← field (path ++ ".key") "resource" keyObj)
+        let fieldId ← nat (path ++ ".key.field") (← field (path ++ ".key") "field" keyObj)
+        unless keyType = "object" ∨ keyType = "program" do
+          throw s!"{path}.key.type: expected object or program"
+        let key := if keyType = "program"
+          then Minidregg.Theory.EffectDeclaration.StateKey.programCode ⟨resource⟩
+          else Minidregg.Theory.EffectDeclaration.StateKey.objectField ⟨resource⟩ ⟨fieldId⟩
+        let observed ← optional (path ++ ".observed") int (← field path "observed" read)
+        pure (key, observed)) (← field path "reads" obj)
+      pure (.fieldRead reads)
+  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, kindRead, fieldRead, world, kindDefinition, moneyConsent or computeFunding"
 
 private def audienceRosterEntry (path : String) (json : Lean.Json) :
     Result Minidregg.Theory.ObjectAudienceRoster.Entry := do
