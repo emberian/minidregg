@@ -992,6 +992,32 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   /-- Every birth write of the composite patch is named by the admitted factory step. -/
   named : ResourceBirthController.Concrete.Named (pending.branchStep (.inl .factory))
     (GrainResourceBirthTransaction.writes birth grain)
+  /-- Every source branch's capability bounds the birth's gross debit (fee and funding) of
+  that branch's account (`ResourceBirthPolicyController.valueBoundCheck`). -/
+  sourcesBounded : ∀ index : Fin source.birth.resourceBatch.operations.length,
+    ResourceBirthPolicyController.valueBoundCheck
+      (checked (.inl (.source index))).authorization.evidence.capabilityValue
+      source.birth.resourceBatch.operations
+      (source.birth.resourceBatch.operations.get index).posting.source = .ok ()
+
+/-- The first source branch whose capability does not bound the birth's gross debit of its
+account, with the refusal `valueBoundCheck` gave it. -/
+def firstUnbounded {operations : List Minidregg.Theory.CanonicalResourceKernel.Operation}
+    (verdict : Fin operations.length → Except ResourceBirthPolicyController.Reject Unit) :
+    Option ResourceBirthPolicyController.Reject :=
+  (List.finRange operations.length).findSome? fun index =>
+    match verdict index with
+    | .ok () => none
+    | .error reason => some reason
+
+theorem firstUnbounded_none {operations : List Minidregg.Theory.CanonicalResourceKernel.Operation}
+    {verdict : Fin operations.length → Except ResourceBirthPolicyController.Reject Unit}
+    (none : firstUnbounded verdict = none) (index : Fin operations.length) :
+    verdict index = .ok () := by
+  have clear := List.findSome?_eq_none_iff.mp none index (List.mem_finRange index)
+  cases found : verdict index with
+  | ok done => cases done; rfl
+  | error reason => rw [found] at clear; cases clear
 
 def admitDecodedNative {F : Type} [Field F] [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
@@ -1046,16 +1072,46 @@ def admitDecodedNative {F : Type} [Field F] [DecidableEq F]
                                     | .inl (.allocation index) => allocations index
                                     | .inl (.source index) => sources index
                                     | .inr index => targets index
-                                if guards : PolicyGuardShape signed checked observations then
-                                  match ResourceBirthController.Concrete.checkNamed
-                                      (pending.branchStep (.inl .factory))
-                                      (GrainResourceBirthTransaction.writes birth grain) with
-                                  | .error cell => return .error (.neutralBirthUnjudged cell)
-                                  | .ok named =>
-                                      return .ok ⟨signed, pending, observations, checked, guards,
-                                        named.down⟩
-                                else return .error .policySourceConflict
+                                -- The capability admitted for each debit bounds the value the
+                                -- whole birth batch takes from its account.
+                                match bounded : firstUnbounded (fun index =>
+                                    ResourceBirthPolicyController.valueBoundCheck
+                                      (checked (.inl (.source index))).authorization.evidence.capabilityValue
+                                      source.birth.resourceBatch.operations
+                                      (source.birth.resourceBatch.operations.get index).posting.source) with
+                                | some reason => return .error (.metadata reason)
+                                | none =>
+                                    if guards : PolicyGuardShape signed checked observations then
+                                      match ResourceBirthController.Concrete.checkNamed
+                                          (pending.branchStep (.inl .factory))
+                                          (GrainResourceBirthTransaction.writes birth grain) with
+                                      | .error cell => return .error (.neutralBirthUnjudged cell)
+                                      | .ok named =>
+                                          return .ok ⟨signed, pending, observations, checked, guards,
+                                            named.down, firstUnbounded_none bounded⟩
+                                    else return .error .policySourceConflict
   else return .error .credentialShape
+
+/-- **Every debit of an admitted grain-backed birth is within its capability's value bound.** -/
+theorem Accepted.source_value_bounded {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins ground profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      ground.directory ground.authority
+      profile.semantics ambient (source.grainCommand tariff)}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (accepted : Accepted profile deployment pins ground ambient tariff source birth grain ingress)
+    (index : Fin source.birth.resourceBatch.operations.length) :
+    ∃ cap digest,
+      (accepted.checked (.inl (.source index))).authorization.evidence.capabilityValue =
+          some (cap, digest) ∧
+        Minidregg.Theory.CapabilityValueBound.ValueBound cap.scope
+          source.birth.resourceBatch.operations
+          (source.birth.resourceBatch.operations.get index).posting.source :=
+  ResourceBirthPolicyController.valueBoundCheck_ok (accepted.sourcesBounded index)
 
 def Accepted.portals {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
