@@ -25,6 +25,7 @@ public import Kernel.ResourceMoneyReceiver
 public import Kernel.ResourceObservationAdmission
 public import Kernel.ObjectiveWorkAccount
 public import Kernel.ResourceEffectRegistry
+public import Kernel.ContentEffect
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -792,12 +793,11 @@ def streamRecord (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : 
     (command : Command) (request : StreamCell.Append) : StreamCell.StreamRecord :=
   ⟨command.subject, ambient.height, ⟨operationMarker snapshot.domain semantics command⟩, request.entry⟩
 
-/-- The source policy identity a transclusion records: the policy id, epoch and
-revision the source cell's read leg is checked against at this height. -/
-def sourcePolicy (snapshot : AuthoritySnapshot) (source : Nat) : Digest :=
-  ContentResource.contentDigest "DREGG/CONTENT/DISCLOSURE-POLICY"
-    ((StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)).encode
-      (source, snapshot.authState.policyEpoch ⟨source⟩, snapshot.authState.policyRevision ⟨source⟩))
+/-- The observe capability of the cell a transaction reads observe-only at `source`. -/
+def sourceReadOf (command : Command) (source : Nat) : Option CapabilityId :=
+  (command.targets.find? fun target =>
+      decide (target.target = source) && decide (target.payload = .read)).bind
+    fun target => target.observeCapability
 
 /-- What a content target's actions consume of their transaction: the height,
 and for each cell the transaction reads observe-only, the observe capability
@@ -805,10 +805,7 @@ that read carries and the source's policy. -/
 def contentContext (snapshot : AuthoritySnapshot) (ambient : Ambient) (command : Command) :
     ContentResource.Context :=
   ⟨ambient.height, fun source =>
-    (command.targets.find? fun target =>
-        decide (target.target = source) && decide (target.payload = .read)).bind
-      fun target => target.observeCapability.map fun capability =>
-        ⟨capability, sourcePolicy snapshot source⟩⟩
+    (sourceReadOf command source).map fun capability => ⟨capability, sourcePolicy snapshot source⟩⟩
 
 /-- The state keys an action's guards read: `Action.ops` is one guarded set per key, and its
 guard is the key's exact expected value (`guardedSet_enabled_iff`). -/
@@ -850,7 +847,8 @@ def targetCtx (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Amb
     (observe : Option CapabilityId) (audienceEpoch : Option Nat)
     (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster) : EffectCtx :=
   ⟨snapshot, semantics, ambient, command.subject, command.nonce, kind, id, capability, observe,
-    audienceEpoch, audienceRoster⟩
+    audienceEpoch, audienceRoster, fun _ => effectsDigest snapshot.domain semantics command,
+    sourceReadOf command⟩
 
 /-- The only target computation. It invokes source-owned typed operations,
 never a host supplied post. Every branch returns the post store the source

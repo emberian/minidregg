@@ -8,7 +8,7 @@ proof, no migration, no change under `Kernel/` in this lane.
 The owner's ruling this answers: hand-written kernel effects are not acceptable.  A new kernel
 effect comes out of a declaration, and the hand arm it replaces is deleted in the same commit.
 
-## 0. Present state (lane `registry-effects-2`, 2026-11-13)
+## 0. Present state (lane `registry-effects-2`, 2026-11-14)
 
 The open constructor exists and one effect lives on it. §1 to §8 below are the October design
 and its continuation; where they disagree with this section, this section is the tree.
@@ -65,45 +65,82 @@ and its continuation; where they disagree with this section, this section is the
   the signed operation's canonical bytes and `Effect.display`'s lines. A registered WRITE is still
   refused `unsupportedPayload` there.
 
-**Next: content (code 1).** Not started. What it takes, from reading the tree:
+* **`Effect.run` pays no frame check** (`Kernel/ResourceEffect.lean`): what the controller runs
+  is the semantics and the guarded replay; `Effect.run_eq_exec` proves it is the engine's checked
+  executor, from the declaration's `complete`.
+* **Content's declaration is upstream of the registry and over the registry's context**
+  (`Kernel/ContentEffect.lean`): `DeclaredResourceController.contentSpec : EffectSpec EffectCtx …`,
+  with `contentSpec_complete` (frame and replay, the 450 lines that were in `ContentProofs.lean`),
+  `contentSpec_writes` and `JointSlots.contentProject_unjoint` proved there. `EffectCtx` gained
+  the two facts of the whole command a content write reads: `operation : Unit → Digest` (the
+  operation id, computed when asked) and `sourceRead` (the observe capability of a cell the
+  transaction reads observe-only). `Statements.lean`'s `contentSpec` is that declaration under
+  `liveEffectCtx` (`comap`), so `ContentAgreement`, `PrepareFactors` and the teeth are now about
+  the declaration the registry will bind. The hand arm still runs: code 1 is not bound.
 
-1. `Kernel/ContentEffect.lean`, upstream of `Kernel/ResourceEffectRegistry.lean`: `contentEffect :
-   Effect` from today's `contentSpec` (`Statements.lean` §6), re-indexed from `LiveCtx` to
-   `EffectCtx`. `EffectCtx` needs two more fields, both lazy: the operation id
-   (`contentOperation`, a hash of the whole command: a `Thunk Digest`) and the source reads
-   (`contentContext`'s lookup: `Nat → Option CapabilityId`, the observe capability of the
-   command's read target at a cell). `complete` is `ContentComplete`: move its proof
-   (`ContentProofs.lean` up to `contentComplete`, about 450 lines that are about
-   `ContentResource.run` and not about `LiveCtx`) upstream with it. `view_unjoint` is
-   `JointSlots.contentProject_unjoint`. `pack`/`unpack` ignore the role (`⟨.content, cell⟩`); the
-   header's `accepts` refuses a role that is not an object.
-2. `Effect.run` should stop calling `EffectSpec.exec` at run time: under `complete` the frame check
-   and the guarded replay cannot refuse, so `run` can be the semantics then `Patch.run`, with
-   `run_eq_exec` proved from `complete` (`RegistryProofs.effect_compute_agrees` then rewrites by
-   it). Without this a content write pays a `Finset` footprint check per command.
-3. Bind `(1, contentEffect)` in `liveEffects`; delete `Payload.content`, `Reject.content`, the
-   content arm of `legacyPayloadDecode`/`payloadEncode` and the 32 constructor arms and 2 string
-   arms the census lists (12 files). Keep construction sites compiling with
-   `abbrev contentPayload (command) : Payload := .registered 1 command` (as `citedPayload`).
-   `liveLegacy` becomes `[0, 2, …, 8]`; `registryKeystone` needs no new proof.
-4. The JSON face: `contentAction`/`contentCommand` (`Host/Json.lean`, about 80 lines plus the id
-   and selector decoders they call) move to the declaration's `ofJson`; `FnInboxView`'s
-   `contentActionJson` to `toJson`.
-5. Statements: `ContentAgreement` is consumed (it compared the hand arm with the declaration;
-   delete it with the arm). `HostKeystone` becomes `RegistryKeystone` with code 1 bound; delete
-   `contentHandler`, `contentHeader`, `contentFresh` (twins of `Effect.handler`). `HostTeeth`'s
-   ghost goes as `registryTeeth_ghost` does. `PrepareFactors` should be restated for every bound
-   code over `Effect.handler` and re-proved (the present proof, 300 lines, leans on
-   `ContentAgreement`).
-6. Refusal text moves from `Reject.content (ContentResource.Reject.x)` to
-   `Reject.effect (Effect.Content.x)`: check the journeys that match content refusals. Wire bytes
-   of code 1 do not move, so the recorded fixtures should not either; re-record only if they hold
-   refusal text.
+**Next: bind content (code 1) and delete its arms.** What it takes, from reading the tree:
+
+1. `contentEffect : Effect` in `Kernel/ContentEffect.lean` from `contentSpec`: `L :=
+   Hyperdocument.layout`, `wire := HyperdocumentCell.contentWire`, `pack _ cell := ⟨.content,
+   cell⟩`, `unpack` the matching arm (any role; the spec's `accepts` refuses a role that is not an
+   object), `complete := contentSpec_complete`, `observes_silent` from `contentSpec_writes`,
+   `view_unjoint` from `contentProject_unjoint`. Its faces move in from the Host:
+   `contentAction`/`contentCommand` (`Host/Json.lean`, 80 lines, calling about fifteen private
+   decoders there: `identifier`, `elementOp`, `atomKind`, `atomRecord`, `stableRange`,
+   `linkTarget`, `annotationBody`, `annotationBefore`, `markTarget`, `markSpec`, `stablePoint`,
+   `transcludeRequest`, `decodeHex`, `bool`, `tagged`; they move with it) become `ofJson`; `FnInboxView.contentActionJson` becomes `toJson`;
+   `InspectRender`'s content line becomes `display`.
+2. Bind `(1, contentEffect)` in `liveEffects`; delete the `Payload.content` constructor,
+   `Reject.content`, the content arm of `legacyPayloadDecode`/`payloadEncode` and the hand arms
+   the census lists (`scripts/effect-arm-census.py --sites`: 32 constructor arms and 2 string
+   arms in 12 files). `liveLegacy` becomes `[0, 2, …, 8]`; `registryKeystone` needs no new proof.
+3. Two things in `ResourceTransaction.lean` read a content payload from OUTSIDE its own target and
+   need a place on the declaration: `openingsCheck` (every `transclude` of every content target
+   names a cell the transaction reads; its refusal is `.content .staleOpening`) and
+   `Target.contentStore?`. A field `openings : O → List ContentResource.TranscludeRequest` on
+   `Effect` (empty for the cited read) covers the first; the refusal becomes
+   `.effect (.refused 1 "…staleOpening" [])`.
+4. Readers of a signed content command that are not arms (`let .content content :=
+   target.payload | none` in `Kernel/FnReplyConsumption.lean`, `FnConsumerProgressHistory.lean`,
+   `FnConsumerOperation.lean`, `ObjectiveBendNativeAdmission.lean`,
+   `Compiler/ObjectiveBendGenericResult.lean`, `ObjectiveBendResultAdapter.lean`,
+   `Host/GrainOriginSource.lean`, and `decide (target.payload = .content …)` in
+   `JointControlBootstrap.lean`) need `Payload.content? : Payload → Option
+   ContentResource.Command` (a registered payload at code 1, its operation cast by
+   `effectAt 1 = contentEffect`). The census does not count the `let` form. About thirty more
+   files only CONSTRUCT `.content command`; `abbrev Payload.content (command) : Payload :=
+   .registered 1 command` keeps them compiling (as `citedPayload`). Probed on the cited read
+   (2026-11-14, a scratch file against the built tree): with `@[match_pattern]` on such an abbrev,
+   `match p with | .cited reads => … | _ => …` elaborates and reduces by `rfl`, so the `match`
+   readers can stand as written and `Payload.content?` may not be needed. The `let … | none` form
+   was not settled by the probe.
+5. Proofs over the hand arm. `Kernel/ContentCommutingAppendProofs.lean` (439 lines),
+   `Kernel/EffectsRevival/CommutingProofs.lean`, `PrepareProofs.lean`, `HostTeethProofs.lean` and
+   `PreparedTarget.content_ratchets` unfold `computeTarget`/`targetPatch`/`prepareTarget` at a
+   content target. The cheap repair is ONE bridge, proved once from `Effect.run_eq_exec`,
+   `contentSpec_complete` and `store_run_iff`: `computeTarget … ⟨…, .content c, …⟩ pre =` the
+   deleted arm's expression (as a theorem, no longer code), with `targetPatch`, `selectTarget` and
+   `packTarget` alike; each old `simp only [computeTarget, …]` then rewrites by it. It is
+   `ContentAgreement` read right to left, which is why that proof (`ContentProofs.lean`) is the
+   text to start from.
+6. Statements: `ContentAgreement`, `HostKeystone`, `contentHandler`/`contentHeader`/
+   `contentFresh`, `HostLegacyCensus` and `ContentPrefix*` compared the hand arm with the
+   declaration and go with it. Keep, restated over `liveTargetDispatch`: the accepted pole
+   (`hostDispatch_blinded`), the moved-root pole (`HostMovedRootAccepted`), the ghost tooth, the
+   narrowed-frame tooth (`contentNarrowed_incomplete`, which is about the spec alone and stands).
+   `PrepareFactors` should be restated for every bound code over `hostRegistry` (its
+   `genericChecks` names code 1 today) and proved from `effect_dispatch_fire`.
+7. Refusal text moves from `Reject.content (ContentResource.Reject.x)` to `Effect.Content.x`:
+   check the journeys that match content refusals. Wire bytes of code 1 do not move, so the
+   recorded fixtures should not either; re-record only if they hold refusal text.
+8. Thin consent refuses a content write today (`unsupportedPayload`, "reads policy coordinates
+   and the height"), so binding it changes nothing there.
 
 Then the remaining codes, cheapest first: `read` (3), `kindRead` (7), `scalar` (0),
 `computeFunding` (6), `moneyConsent` (8), `world` (4), `kindDefinition` (5), `append` (2, needs a
 fresh-cell output). `read` and `kindRead` pin a root (`commutes` false), so their thin-consent
-display must keep the served-opening check the hand arm has, not the view-less one.
+display must keep the served-opening check the hand arm has, not the view-less one. `read` shares
+the content cell and `contentContext` finds it by `payload = .read`: move it after content.
 
 ## 1. What one effect costs by hand today (counted from the tree at `02ee34e8a`)
 

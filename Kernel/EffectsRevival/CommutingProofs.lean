@@ -60,7 +60,7 @@ def sampleAtomOps : Patch Hyperdocument.layout :=
 
 theorem sampleAtom_emits_blinded_eq :
     contentSpec.sem sampleCtx sampleAtomCommand blindedStore = .ok sampleAtomOps := by
-  simp [contentSpec, contentSem, sampleAtomCommand, ContentResource.run,
+  simp [contentSpec_sem, sampleAtomCommand, ContentResource.run,
     ContentResource.step, ContentResource.allocate, ContentResource.appendLeaf,
     ContentResource.rootOf, Hyperdocument.lookup, Except.map, bind, Except.bind, pure,
     Except.pure, blindedStore, Store.set, sampleAtomOps]

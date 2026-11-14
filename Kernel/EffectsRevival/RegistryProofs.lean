@@ -416,7 +416,8 @@ theorem effect_compute_agrees (e : DeclaredResourceController.Effect) (code : Na
       else if e.spec.commutes op = false ∧ d.root ≠ pre.root then .error (.staleTarget code)
       else (e.spec.exec code d.toEffectCtx op pre.logical).map fun s =>
         e.pack d.kind (CellState.materialize e.materializer s) := by
-  unfold DeclaredResourceController.Effect.compute DeclaredResourceController.Effect.run
+  unfold DeclaredResourceController.Effect.compute
+  rw [DeclaredResourceController.Effect.run_eq_exec]
   by_cases refusedRole : e.spec.accepts d.kind = false
   · rw [if_pos refusedRole, if_pos refusedRole] <;> rfl
   · rw [if_neg refusedRole, if_neg refusedRole]

@@ -86,7 +86,7 @@ theorem header_of_select_none {deployment : DeclaredResourceController.Deploymen
   by_cases object : ctx.kind = .object
   · by_cases law : CanonicalCellRegistry.CellLaw deployment ctx.target ⟨kind, cell⟩
     · rw [if_pos object, if_pos law] at refused
-      have accepts : contentSpec.accepts ctx.kind = true := by simp [contentSpec, object]
+      have accepts : contentSpec.accepts ctx.kind = true := by simp [object]
       rw [if_neg (by simp only [hostCtxOf]; rintro (h | h) <;> simp_all)]
       split
       · rename_i value same
@@ -94,7 +94,7 @@ theorem header_of_select_none {deployment : DeclaredResourceController.Deploymen
         simp at refused
       · rfl
     · rw [if_pos (Or.inr (by simpa [hostCtxOf] using law))]
-  · rw [if_pos (Or.inl (by simp [contentSpec, hostCtxOf, object]))]
+  · rw [if_pos (Or.inl (by simp [hostCtxOf, object]))]
 
 theorem exec_comap {C C' : Type} {S : Substrate} {O R : Type} (f : C' → C) (E : EffectSpec C S O R)
     (code : Nat) (c : C') (op : O) (s : S.State) :
@@ -123,7 +123,7 @@ theorem prepareFactors : PrepareFactors contentSpec := by
       rfl
     · rename_i pre selected
       obtain ⟨object, law, rfl⟩ := select_some selected
-      have accepts : contentSpec.accepts ctx.kind = true := by simp [contentSpec, object]
+      have accepts : contentSpec.accepts ctx.kind = true := by simp [object]
       obtain ⟨-, wrongVersion, stale, live, -⟩ :=
         contentAgreement ctx command pre observe epoch roster
       by_cases sameVersion : version = contentSpec.version
@@ -143,7 +143,8 @@ theorem prepareFactors : PrepareFactors contentSpec := by
             · subst same
               dsimp only [contentFresh, hostCtxOf]
               rw [if_pos (by simp)]
-            · simp [EffectSpec.comap, commuting]
+            · rw [contentSpec_commutes] at commuting
+              simp [EffectSpec.comap, commuting]
           obtain ⟨accept, refuse, descriptor⟩ := live root accepts fresh
           unfold Handler.fire
           rw [admitted]
@@ -160,7 +161,7 @@ theorem prepareFactors : PrepareFactors contentSpec := by
               · rename_i prepared _
                 exfalso
                 have emitted : contentSpec.sem ctx command pre.logical = .ok prepared.progress.2 := by
-                  simp [contentSpec, contentSem, prepared.nonempty, prepared.computed, Except.map]
+                  simp [contentSpec_sem, prepared.nonempty, prepared.computed, Except.map]
                 obtain ⟨s', admitted⟩ := exec_ok_of_complete (code := 1) contentComplete emitted
                 rw [admitted] at executed
                 cases executed
@@ -287,7 +288,8 @@ theorem prepareFactors : PrepareFactors contentSpec := by
             (⟨.content, pre⟩ : HostCell) = .error (.unsupportedVersion 1) := by
           unfold contentHeader
           rw [if_neg (by simp only [hostCtxOf]; rintro (h | h) <;> simp_all)]
-          simp [hostCtxOf, sameVersion]
+          simp [hostCtxOf]
+          exact sameVersion
         have computedVersion := wrongVersion version root accepts sameVersion
         split
         · rename_i reason computed

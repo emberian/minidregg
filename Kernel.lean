@@ -115,6 +115,7 @@ import Kernel.CapabilityRevocationReceiver
 import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability it holds (signature first, then Theory.Renounce.gateAt)
 import Kernel.ResourceEffect  -- a declared-resource effect as ONE declaration (Effect): typed cell, EffectSpec, JSON face and display; the derived computation, patch and engine handler
 import Kernel.CitedRead  -- the cited read DECLARED (registry code 9): citedRead, citedProject, its refusals with their detail, its faces, citedEffect
+import Kernel.ContentEffect  -- the content write DECLARED over the registry's context: contentSpec, contentSpec_complete (frame and replay), its view unjoint
 import Kernel.ResourceEffectRegistry  -- liveEffects: wire code ↦ declaration; effectAt; the engine registry
 import Kernel.ResourcePayloadTag  -- a command whose payload tag nothing reads is refused by name
 import Kernel.ResourceTransactionAudit

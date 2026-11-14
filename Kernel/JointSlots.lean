@@ -253,14 +253,5 @@ theorem requestSlots_unjoint {kind : ResourceKind} (request : Request kind) :
   simp only [CanonicalRuntimeProfile.requestSlots, List.mem_cons, List.not_mem_nil, or_false] at hp
   rcases hp with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> dsimp only <;> decide
 
-theorem contentProject_unjoint (before after : ContentResource.ContentStore) (command : ContentResource.Command) :
-    Unjoint (ContentResource.project before after command) := by
-  intro p hp
-  simp only [ContentResource.project, List.mem_cons, List.not_mem_nil, or_false] at hp
-  -- One case per content slot, however many the projection has (K-CONTENT
-  -- added five); every key starts with `content/`.
-  repeat' (first | (rcases hp with rfl | hp) | subst hp)
-  all_goals (dsimp only; decide)
-
 end JointSlots
 end Minidregg.Kernel.DeclaredResourceController

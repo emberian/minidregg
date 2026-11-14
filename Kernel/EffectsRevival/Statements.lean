@@ -47,6 +47,7 @@ module
 
 public import Effects.Revival.Engine
 public import Kernel.DeclaredResourceController
+public import Kernel.ContentEffect
 
 @[expose] public section
 
@@ -76,65 +77,59 @@ structure LiveCtx where
   target : Nat
   capability : CapabilityId
 
-abbrev ContentSubstrate := storeSubstrate Hyperdocument.layout
+/-- The registry's context of a target under a live context (`targetCtx`), its observe and
+audience fields absent: what the content declaration reads. -/
+def liveEffectCtx (ctx : LiveCtx) : DeclaredResourceController.EffectCtx :=
+  DeclaredResourceController.targetCtx ctx.snapshot ctx.semantics ctx.ambient ctx.command
+    ctx.kind ctx.target ctx.capability none none none
 
 abbrev ContentSpec :=
   EffectSpec LiveCtx ContentSubstrate ContentResource.Command ContentResource.Reject
 
-/-- The fields one content action may write (`ResourceObservationAdmission.contentField`:
-links, marks and annotations are `annotations`, every other namespace `body`; an atom is
-also named by `atomsOf` of its low half). -/
-def contentActionFrame : ContentResource.Action → Finset CellField
-  | .createDocument _ _ => {.body}
-  | .createAtom atom _ _ => {ResourceObservationAdmission.atomField atom.digest.value, .body}
-  | .editAtom edit => {ResourceObservationAdmission.atomField edit.atomId.digest.value}
-  | .rewrapAtom atom _ _ => {ResourceObservationAdmission.atomField atom.digest.value}
-  | .link .. => {.annotations}
-  | .createRun .. => {.body}
-  | .annotate .. => {.annotations}
-  | .rewrapAnnotation .. => {.annotations}
-  | .transclude .. => {.body, .annotations}
-  | .editElement _ => {.body}
-  | .createContainer _ => {.body}
-  | .unlink _ => {.annotations}
-  | .mark .. => {.annotations}
-  | .unmark _ => {.annotations}
-  | .insertRun .. => {.body}
+/-- **The first live declaration: the content-cell write** (`Kernel/ContentEffect.lean`,
+`DeclaredResourceController.contentSpec`), read under a live context. -/
+def contentSpec : ContentSpec := DeclaredResourceController.contentSpec.comap liveEffectCtx
 
-/-- The declared frame of a content command: the union of its actions' frames. -/
-def contentFrame (command : ContentResource.Command) : Finset CellField :=
-  command.actions.foldr (fun action acc => contentActionFrame action ∪ acc) ∅
+/-! What the declaration is under a live context, field by field (each `rfl`): the hand arm's own
+expressions, for the agreement proofs to simplify by. -/
 
-/-- The content semantics: the source-owned lowering `ContentResource.run` (REUSED), its
-patch the descriptor; an empty command refuses `emptyActions` as `prepareCell` does. -/
-def contentSem (ctx : LiveCtx) (command : ContentResource.Command)
-    (s : Store Hyperdocument.layout) : Except ContentResource.Reject (Patch Hyperdocument.layout) :=
-  if command.actions.isEmpty then .error .emptyActions
-  else (ContentResource.run ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
-      (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
-      (ContentResource.documentOf ctx.target)
-      (DeclaredResourceController.contentContext ctx.snapshot ctx.ambient ctx.command)
-      s command).map Prod.snd
+theorem contentSpec_sem (ctx : LiveCtx) (command : ContentResource.Command)
+    (s : Store Hyperdocument.layout) :
+    contentSpec.sem ctx command s =
+      if command.actions.isEmpty then .error .emptyActions
+      else (ContentResource.run ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
+          (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
+          (ContentResource.documentOf ctx.target)
+          (DeclaredResourceController.contentContext ctx.snapshot ctx.ambient ctx.command)
+          s command).map Prod.snd := rfl
 
-/-- **The first live declaration: the content-cell write.**  Wire code 1 of the target
-payload (`payloadStream`'s tag for `Payload.content`), the action grammar's codec
-(`ContentResource.commandStream`), version `ContentResource.commandVersion`. -/
-def contentSpec : ContentSpec where
-  opStream := ContentResource.commandStream
-  refusalName r := reprStr r
-  accepts kind := kind == .object
-  version := ContentResource.commandVersion
-  sem := contentSem
-  rotate ctx s := HyperdocumentCell.contentBlinding.patch s ctx.ambient.height
-  rotated := fun (loc : Address Hyperdocument.layout) => match loc.1 with
-    | .blinding => true
-    | _ => false
-  field := ResourceObservationAdmission.contentFieldAt
-  amount := fun _ _ => 0
-  frame := contentFrame
-  verb := fun kind _ => DeclaredResourceScalar.ordinaryVerb kind
-  view _ command before after := ContentResource.project before after command
-  commutes := ContentResource.Command.commutes
+@[simp] theorem contentSpec_accepts (kind : ResourceKind) : contentSpec.accepts kind = (kind == .object) := rfl
+
+@[simp] theorem contentSpec_version : contentSpec.version = ContentResource.commandVersion := rfl
+
+@[simp] theorem contentSpec_commutes (command : ContentResource.Command) : contentSpec.commutes command = command.commutes := rfl
+
+@[simp] theorem contentSpec_rotate (ctx : LiveCtx) (s : Store Hyperdocument.layout) :
+    contentSpec.rotate ctx s = HyperdocumentCell.contentBlinding.patch s ctx.ambient.height := rfl
+
+@[simp] theorem contentSpec_frame (command : ContentResource.Command) : contentSpec.frame command = contentFrame command := rfl
+
+@[simp] theorem contentSpec_field : contentSpec.field = ResourceObservationAdmission.contentFieldAt := rfl
+
+@[simp] theorem contentSpec_amount (a : Address Hyperdocument.layout) (v : Option (Hyperdocument.layout.Value a.1)) : contentSpec.amount a v = 0 := rfl
+
+@[simp] theorem contentSpec_verb (kind : ResourceKind) (command : ContentResource.Command) : contentSpec.verb kind command = DeclaredResourceScalar.ordinaryVerb kind := rfl
+
+@[simp] theorem contentSpec_opStream : contentSpec.opStream = ContentResource.commandStream := rfl
+
+@[simp] theorem contentSpec_refusalName (r : ContentResource.Reject) : contentSpec.refusalName r = reprStr r := rfl
+
+@[simp] theorem contentSpec_rotated (loc : Address Hyperdocument.layout) :
+    contentSpec.rotated loc = (match loc.1 with | .blinding => true | _ => false) := rfl
+
+@[simp] theorem contentSpec_view (site : Site) (command : ContentResource.Command)
+    (before after : Store Hyperdocument.layout) :
+    contentSpec.view site command before after = ContentResource.project before after command := rfl
 
 /-- A content target with the given header. -/
 abbrev contentTarget (ctx : LiveCtx) (version : Nat) (root : Digest)

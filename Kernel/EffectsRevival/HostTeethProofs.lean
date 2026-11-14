@@ -128,7 +128,7 @@ theorem ghost_exec_blinded :
 
 theorem sample_header : contentHeader sampleHostCtx (⟨.content, cellOf blindedStore⟩ : HostCell) = .ok () := by
   have law := blindedCell_law
-  simpa [contentHeader, sampleHostCtx, hostCtxOf, contentSpec, sampleCtx] using law
+  simpa [contentHeader, sampleHostCtx, hostCtxOf, sampleCtx] using law
 
 /-- The sample's planned root is the blinded cell's own root, so the handler's gate admits. -/
 theorem sample_admits (E : ContentSpec) :

@@ -19,7 +19,7 @@ record from which every one of those arms is read.
 
 Derived here, with nothing authored per effect: the computation (`compute`: the header the
 declaration's `accepts`/`version`/`commutes` determine, then the engine's checked executor
-`EffectSpec.exec`), the patch (`patch`: the emitted descriptor), whether it is observe-only
+`Effect.run`, which is `EffectSpec.exec`), the patch (`patch`: the emitted descriptor), whether it is observe-only
 (`observeOnly`: its verb is the kind's observe verb), and the engine handler (`handler`) that
 `Effects.Revival.Dispatches` is stated over.
 
@@ -134,8 +134,9 @@ theorem scalarSlots_unjoint (before after : DeclaredResourceProjection.Values) :
 end JointSlots
 
 /-- What a registered effect's semantics consumes of its transaction: the authority snapshot,
-the profile and the height, the signer and nonce, and the target's header but its schema version
-and expected root (the dispatcher's, `Effect.compute`). -/
+the profile and the height, the signer and nonce, the target's header but its schema version
+and expected root (the dispatcher's, `Effect.compute`), and two facts of the whole command: its
+operation id and the cells it reads observe-only. -/
 structure EffectCtx where
   snapshot : AuthoritySnapshot
   semantics : Digest
@@ -148,6 +149,12 @@ structure EffectCtx where
   observe : Option CapabilityId
   audienceEpoch : Option Nat
   audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster
+  /-- The transaction's operation id: a digest of the whole command under the domain and the
+  profile, computed when a semantics asks for it. -/
+  operation : Unit → Digest
+  /-- The observe capability of the cell this transaction reads observe-only at an id, if it
+  reads one there: what a write that cites that cell's content is checked against. -/
+  sourceRead : Nat → Option CapabilityId
 
 /-- **One declared-resource effect.** Every arm the controller, the compilers and the Host run
 for a registered payload is read from this record (`Payload.registered`). -/
@@ -241,10 +248,27 @@ theorem observeOnly_at {op : e.O} (read : e.observeOnly op = true) (kind : Resou
   · exact read.2.1
   · exact read.2.2
 
-/-- The engine's checked executor, at the store's own types. -/
+/-- What the controller runs: the declaration's semantics, then the guarded replay of its
+descriptor and the rotate. It is the engine's checked executor (`run_eq_exec`) without the
+frame check, which `complete` proves cannot refuse: a write pays no footprint computation. -/
 def run (code : Nat) (ctx : EffectCtx) (op : e.O) (s : Store e.L) :
     Except Revival.DispatchRefusal (Store e.L) :=
-  e.spec.exec code ctx op s
+  match e.spec.sem ctx op s with
+  | .error r => .error (.refused code (e.spec.refusalName r) (e.spec.refusalDetail r))
+  | .ok ps =>
+    match (Revival.storeSubstrate e.L).run s (ps ++ e.spec.rotate ctx s) with
+    | none => .error (.guardFailed code)
+    | some s' => .ok s'
+
+theorem run_eq_exec (code : Nat) (ctx : EffectCtx) (op : e.O) (s : Store e.L) :
+    e.run code ctx op s = e.spec.exec code ctx op s := by
+  unfold run Revival.EffectSpec.exec
+  cases sem : e.spec.sem ctx op s with
+  | error r => rfl
+  | ok ps =>
+    dsimp only
+    rw [if_pos (e.complete ctx op s ps sem).1]
+    cases (Revival.storeSubstrate e.L).run s (ps ++ e.spec.rotate ctx s) <;> rfl
 
 /-- **The derived computation.** The header (role, schema version, and the expected root unless
 the operation commutes), then the engine's checked executor: the declaration's semantics, the
@@ -287,7 +311,7 @@ theorem compute_ok {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Digest
   rw [if_neg versioned] at ok
   by_cases moved : e.spec.commutes op = false ∧ root ≠ pre.root
   · rw [if_pos moved] at ok; cases ok
-  rw [if_neg moved] at ok
+  rw [if_neg moved, e.run_eq_exec] at ok
   obtain ⟨ps, sem, _, ran⟩ := Revival.EffectSpec.exec_ok (E := e.spec) ok
   exact ⟨by simpa using accepted, Decidable.not_not.mp versioned, ps, sem, ran⟩
 
