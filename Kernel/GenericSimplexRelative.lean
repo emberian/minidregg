@@ -27,7 +27,8 @@ engine: every rule that acts is `GenericSimplex.step`'s.
 
 Kernel-only. Proved here: the codec's transport (`above_denotes`, `decode_encode`,
 `decode_ahead`), the rebase's (`strip_denotes`, `strip_conflict`), one held message per
-member (`holdFar_unique`). Stated, not proved: `RelativeAgreement`, `RelativeRefines`. -/
+member (`holdFar_unique`). Stated, not proved: `RelativeAgreement`, `RelativeFaithful`
+(`Verify/GenericSimplexRelativeReach.lean`). -/
 import Kernel.GenericSimplex
 
 namespace Minidregg.Kernel.GenericSimplexRelative

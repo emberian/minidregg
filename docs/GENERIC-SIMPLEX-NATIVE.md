@@ -300,33 +300,52 @@ histories, p pending offers, n held COMMITs. None depends on the committed heigh
 Interpreter, four replicas, 640 operations: 13 ms per operation at 10, 15 ms at 160,
 10 ms at 640; every kept block is empty between operations.
 
-**Agreement.** Proved: the codec reads the chain the sender meant when the receiver's
-committed chain is a strict prefix of it (`above_denotes`); moving the origin keeps what a
-block denotes and drops exactly the blocks that do not strictly extend the commit
-(`strip_denotes`, `strip_conflict`); and the specification's agreement theorem is the
-running replicas' given the refinement (`relative_agreement_of_refines`). Stated, not
-proved: `RelativeRefines` (`Verify/GenericSimplexRelativeReach.lean`), the refinement
-itself. Until it is proved, agreement of the running replicas rests on that statement.
+**Agreement.** The safety theorem of this engine is proved on an abstract model: a trace
+of sends, prepares, disables and commits that meets the local obligations `LocalFaithful`
+(`Kernel/GenericSimplexVAInvariant.lean`) has prefix-comparable commits. The model reads
+no proposal, timer, offer, cap or validity check. The statement for the running replicas
+is therefore `RelativeFaithful` (`Verify/GenericSimplexRelativeReach.lean`): every
+reachable network of running replicas has a trace of that model which is its own
+(`Faithful`: the trace's sends by correct members are exactly the durable record read as
+whole chains, and each correct replica's chain is a commit of it).
 
-What its proof needs, and what was found looking for it:
-- It is not a step-for-step simulation of one specification run. `rebase` drops received
-  messages whose blocks do not extend the commit, and the specification never forgets a
-  received message. The one rule that reads a view's messages across values is
-  `voteEquivocator`: as first written, a replica that dropped a member's conflicting VOTE
-  began to count that member's other VOTE, which the specification's replica never does.
-  `rebase` now leaves a `tombstone` for a dropped VOTE (executed:
-  `equivocation_survives_commit`), so the dropped messages are ones no rule can act on
-  below a count of f + 1, and their senders are all faulty.
-- The relation to prove invariant is therefore: the replica's state is the specification
-  state's image under `strip` at the committed chain, up to received messages whose block
-  conflicts with the committed chain, each from a faulty member. The step lemma needs
-  (i) the safety invariant that a block a correct member supports in a view above a
-  committed view strictly extends the committed chain (then `above_denotes` reads what
-  the sender meant, and `strip` never fails on the replica's own sends), and (ii) that
-  rules are insensitive to at most f conflicting messages per value.
-- `RelativeRefines` also promises the same `current` and `lastCommitted`. That holds for
-  the specification run in which every delivery the policy holds or drops is delayed or
-  never made; it is part of the statement and stays.
+- Proved: `relative_agreement_of_faithful` (with it, agreement of the running replicas);
+  the codec reads the chain the sender meant when the receiver's committed chain is a
+  strict prefix of it (`above_denotes`); moving the origin keeps what a block denotes and
+  drops exactly the blocks that do not strictly extend the commit (`strip_denotes`,
+  `strip_conflict`).
+- Proved, the two facts the induction rests on (`Kernel/GenericSimplexSupportExtends.lean`,
+  on the model and on the specification's reachable networks):
+  `support_extends_commit` / `reachable_support_extends` (a VOTE, CANDIDATE, READY or
+  COMMIT a correct member sends for a block in a view above a committed view is for a
+  strict extension of the committed block) and `reachable_counted_extends` /
+  `conflicting_count_small` (a block that does not strictly extend the commit is counted
+  for at most `faults` members above it, below every threshold a rule reads). PROPOSE is
+  not covered and need not be: no obligation of the model reads a proposal.
+- Stated, not proved: `RelativeFaithful`. Until it is proved, agreement of the running
+  replicas rests on that statement. What remains is the local half, one `liveStep` at a
+  time: each event the step emits on relative blocks, read through `denote`, meets its
+  `LocalFaithful` obligation from the messages the replica holds. The specification's own
+  proof of this (`step_emission` and the invariants under it) is about whole chains and a
+  retained audit; it has to be transported across `forget` and `rebase`, or redone.
+- Executed: `relNet_faithful` (the conclusion on a reachable network whose correct
+  replicas have committed; the trace is the specification's run of the same operation and
+  the two engines' sends coincide exactly), `twoNet_run` and the witnesses on it for the
+  two facts (`support_extends_needs_above`: the view must be above the commit;
+  `conflicting_count_tight`: the bound `faults` is met).
+
+`RelativeRefines` is withdrawn. It asked for a reachable network of the specification's
+`step` in which each correct replica stands in the same view at the same floor. The
+running replica is not an image of `step`, in three places, none of which the model reads:
+- A message whose block it cannot read (its sender has committed more) leaves a note that
+  the sender is ahead (`deliver`). `step` notes a member ahead only for a view above the
+  horizon. The note feeds `wantsOut`, so the replica can ask to leave a view where `step`
+  on the same messages would not.
+- `rebase` drops received messages that do not extend the commit (a VOTE leaves one
+  `tombstone` per member). The member then has room under `Config.cap` again; in `step`
+  its share of the record would still be full.
+- After `rebase` the committed payloads are gone from the engine's state, so `addOffer`
+  takes an offer of a payload the replica has already committed; `step` refuses it.
 
 Executed (`Verify/GenericSimplexRelative.lean`): the same eight operations through both
 engines end in the same views, floors and chains; a replica four commits behind is served

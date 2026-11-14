@@ -11,4 +11,5 @@ import Kernel.GenericSimplexErasure
 import Kernel.GenericSimplexChecked
 import Kernel.GenericSimplexWindow
 import Kernel.GenericSimplexRelative
+import Kernel.GenericSimplexSupportExtends
 import Kernel.GenericSimplexReceiverSafety
