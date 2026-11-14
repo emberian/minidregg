@@ -1652,11 +1652,6 @@ theorem private_root_recomputes (packed : PackedCell CanonicalCellRegistry.regis
           by simp [CanonicalCellRegistry.isBlinding, CanonicalCellRegistry.wire?, HyperdocumentCell.eventWire]⟩,
       CanonicalCellRegistry.privateWire_rootOf (kind := .eventHistory) (wire := HyperdocumentCell.eventWire) rfl
         payload.logical, rfl⟩
-  · refine ⟨whole .authority payload.logical fun a =>
-        ⟨by simp [ResourceObservationAdmission.Kept, ResourceObservationAdmission.fieldOf],
-          by simp [CanonicalCellRegistry.isBlinding, CanonicalCellRegistry.wire?, CredentialAuthorityCell.wire]⟩,
-      CanonicalCellRegistry.privateWire_rootOf (kind := .authority) (wire := CredentialAuthorityCell.wire) rfl
-        payload.logical, rfl⟩
 
 /-- `(height, root, lifecycle bytes, opening)`: the cell's root at that height
 (none when it was not live), its lifecycle bytes, a live cell narrowed to the

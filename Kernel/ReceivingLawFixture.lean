@@ -118,6 +118,7 @@ def laws : Laws Durable where
     | 6 => some .policySource
     | 7 => some .policySource
     | 8 => some .declaredObject
+    | 10 => some .authority
     | _ => none
   birth _ write := write.cellId.value == 5 || write.cellId.value == 6 || write.cellId.value == 8
   resolve _ target _ := if target = 1 then some ⟨law, true, true, true, true, []⟩ else none
@@ -453,6 +454,23 @@ theorem unclassified_refused :
   simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
     ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws]
   rfl
+
+set_option backward.isDefEq.respectTransparency false in
+/-- **A family outside `authorityWriters` writing a cell of the authority kind is refused**, by
+name: the half of the authority space's protection the Receiver enforces (the gate
+`AuthoritySpaceGate.gate` enforces the other half: only authority-kind cells there). -/
+theorem foreign_authority_writer_refused :
+    ((bypass .clockTick [10, 2] (fun _ => none)).receiver laws oracle).receive
+        append () durable [] =
+      pure (.refused (.law (.kernelOnlyForeignWriter 10 .authority .clockTick))) := by
+  refine receive_faulted _ rfl (bypass_fresh' .clockTick (fun _ => none) 10 2) rfl rfl
+    (shape_ok .clockTick (fun _ => none) 10 2) ?_
+  change Family.lawFault (F := bypass .clockTick [10, 2] (fun _ => none))
+    (env := ()) (durable := durable) (command := ()) laws () = _
+  rw [fault_eq _ _ 10 2]
+  simp [ReceivingLaw.judgeWrite, ReceivingLaw.judgeKernel, ReceivingLaw.judgeBearing,
+    ReceivingLaw.judgeLaw, ReceivingLaw.lawOf, write, laws, CanonicalCellRegistry.Kind.lawClass]
+  decide
 
 /-- A newborn's step: only the birth (cell 5, or `born`) gets one, under `artifact`. -/
 noncomputable def bornStep (artifact : Int) (born : Nat := 5) : Nat → Option PolicyStepContext :=

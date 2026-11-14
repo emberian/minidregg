@@ -745,11 +745,12 @@ theorem policiesSourced_step (config : Config)
       exact Minidregg.Theory.SparseMap.mem_support_iff.mp member
     have sourcedBefore := prior _ recordedBefore
     unfold policySourced at sourcedBefore ⊢
-    rw [heads]
     cases found : CredentialAuthorityDomain.headAt old identifier with
     | none => simp only [found] at sourcedBefore; cases sourcedBefore
     | some head =>
-        simp only [found] at sourcedBefore ⊢
+        have foundNew : CredentialAuthorityDomain.headAt new identifier = some head := heads.trans found
+        simp only [found] at sourcedBefore
+        simp only [foundNew]
         cases loadedBefore : CanonicalCellRegistry.loadPolicySource config.deployment.domain before head.address with
         | none => simp only [loadedBefore] at sourcedBefore; cases sourcedBefore
         | some source =>
@@ -1601,13 +1602,15 @@ theorem stepSourcedLoaded_holds (config : Config) (prior : Opened config) (durab
   have kept : ∀ cellId, cellId ∉ written.map (·.value) →
       durable.snapshot.canonicalBytes ⟨cellId⟩ = prior.durable.snapshot.canonicalBytes ⟨cellId⟩ :=
     fun cellId unwritten => moved ⟨cellId⟩ fun member => unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)
-  apply policiesSourced_step config prior.directory.directory loaded.directory
-    prior.authority.snapshot.logical authority.snapshot.logical (written.map (·.value)) _ ?_ ?_
+  exact policiesSourced_step config prior.directory.directory loaded.directory
+    prior.authority.snapshot.logical authority.snapshot.logical (written.map (·.value))
+    (CredentialAuthorityLayout.changedAddresses prior.durable.snapshot.canonicalBytes
+      durable.snapshot.canonicalBytes (written.map (·.value)))
+    (fun identifier notWritten =>
+      (CredentialAuthorityDomainReceiver.LoadedDirectory.slots_eq_of_bytes prior.directory loaded
+        identifier (kept identifier notWritten).symm).symm)
+    (prior.authority.observed.framed authority.observed kept)
     prior.sourced checked
-  · intro identifier notWritten
-    exact (CredentialAuthorityDomainReceiver.LoadedDirectory.slots_eq_of_bytes prior.directory loaded
-      identifier (kept identifier notWritten).symm).symm
-  · exact prior.authority.observed.framed authority.observed kept
 
 /-- The sourcing evidence a step hands the checks: exact when each policy the step can have
 unsourced is sourced after it. No policy outside those is read. -/

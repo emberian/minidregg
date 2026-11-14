@@ -450,13 +450,14 @@ theorem stepSourced_holds (config : Config) {earlier store : StoreIdentity}
       served.canonicalBytes ⟨cellId⟩ = prior.served.canonicalBytes ⟨cellId⟩ :=
     fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
       unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)
-  apply policiesSourced_step config prior.directory.directory loaded.directory
-    prior.authority.cell.logical authority.cell.logical (written.map (·.value)) _ ?_ ?_
+  exact policiesSourced_step config prior.directory.directory loaded.directory
+    prior.authority.cell.logical authority.cell.logical (written.map (·.value))
+    (CredentialAuthorityLayout.changedAddresses prior.served.canonicalBytes served.canonicalBytes
+      (written.map (·.value)))
+    (fun identifier notWritten =>
+      (servedSlots_eq_of_bytes prior.directory loaded identifier (kept identifier notWritten).symm).symm)
+    (prior.authority.observed.holds.framed authority.observed.holds kept)
     prior.sourced checked
-  · intro identifier notWritten
-    exact (servedSlots_eq_of_bytes prior.directory loaded identifier
-      (kept identifier notWritten).symm).symm
-  · exact prior.authority.observed.holds.framed authority.observed.holds kept
 
 /-- The sourcing evidence a step hands the checks: exact when each policy the step can have
 unsourced (a head coordinate among the moved authority addresses, or a written source cell) is
