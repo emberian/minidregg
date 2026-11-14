@@ -64,14 +64,23 @@ inductive Outcome where
 authenticated arrivals, including proposals not yet locally valid. Every
 transient refusal rotates to the end of the FIFO; unrelated new proposals do
 not jump ahead of already pending work. The trusted origin fixes the genesis;
-`committed` is the caller's committed source history, and the history checked is its first
-`work.height` records followed by the work's own.
+`committed` is the caller's committed source history.
 
-One record directly on the verified source tip `tip` (every proposal while the application
-keeps up with the commits) is admitted there once (`validateNext`): no history is rebuilt
-and the cost does not depend on the height. Any other work (records above committed ones
-the source has not taken yet, or a record the tip does not grant) is replayed as a complete
-prefix from the genesis (`validate`), which is linear in the history.
+What an attempt costs, by the shape of the work:
+
+* While the application has not taken every record this replica has committed (the verified
+  source tip `tip` is below `Replica.records`), nothing is validated: the work waits, at no
+  cost, for `applyNext` to bring the tip level. It used to be replayed from the genesis.
+* One record above the tip (every proposal on a committed parent) is admitted there once
+  (`validateNext`): the same fresh native derivation the ordered receiver runs before its
+  append. No history is rebuilt and the cost does not depend on the height. A record that
+  can never be this source's on this tip (`NextResult.invalid`) is rejected for good; one the
+  tip's admission does not grant now is retried later at the same constant cost (the old
+  replay retried those too, from the genesis each time).
+* Two or more records above the tip (a proposal that extends a prepared parent this replica
+  has not committed with another record) are replayed as a complete prefix from the genesis
+  in a scratch Store (`validate`), linear in the history. This is the one remaining use: the
+  second record has to be admitted at a source state that exists in no Store.
 
 This function performs read-only checking and the local protocol journal CAS.
 It does not allocate private custody, issue semantic repair requests, charge a
@@ -91,20 +100,25 @@ def attempt (runtime : Runtime) (config : Minidregg.Kernel.NativeHost.Config) (o
     | .conflict => return (Minidregg.Compiler.GenericSimplexPending.retry rest work,.conflict)
     | .uncertain => return (Minidregg.Compiler.GenericSimplexPending.retry rest work,.uncertain)
     | .invalid => return (Minidregg.Compiler.GenericSimplexPending.retry rest work,.invalidJournal)
-  if let [record] := work.records then
-    if work.height == tip.opened.durable.height then
-      if let some validated ← Minidregg.Kernel.JointSourcePrefixValidation.validateNext
-          config tip runtime.context record then
-        return ← recorded (checkedNext validated)
-  let history := committed ()
-  if history.length < work.height then
-    return (Minidregg.Compiler.GenericSimplexPending.retry rest work,
-      .retry work.records "the committed source history does not reach this work's height yet")
-  let block := history.take work.height ++ work.records
-  match ← Minidregg.Kernel.JointSourcePrefixValidation.validate config origin runtime.context block with
-  | .accepted validated => recorded (checkedInput validated work.height)
-  | .rejected detail => return (Minidregg.Compiler.GenericSimplexPending.reject rest work,.rejected work.records detail)
-  | .retry failure => return (Minidregg.Compiler.GenericSimplexPending.retry rest work,.retry work.records failure.detail)
+  let later (detail : String) : IO (Minidregg.Compiler.GenericSimplexPending.Queue × Outcome) :=
+    return (Minidregg.Compiler.GenericSimplexPending.retry rest work,.retry work.records detail)
+  let height := tip.opened.durable.height
+  if height < replica.records then
+    return ← later "the application has not taken every committed record yet"
+  match Minidregg.Kernel.GenericSimplexRelative.above work.height height work.records with
+  | none => later "this work does not reach above the committed records"
+  | some [record] =>
+    match ← Minidregg.Kernel.JointSourcePrefixValidation.validateNext config tip runtime.context record with
+    | .granted validated => recorded (checkedNext validated)
+    | .invalid detail =>
+      return (Minidregg.Compiler.GenericSimplexPending.reject rest work,.rejected work.records detail)
+    | .refused detail => later detail
+  | some run =>
+    let block := (committed ()).take height ++ run
+    match ← Minidregg.Kernel.JointSourcePrefixValidation.validate config origin runtime.context block with
+    | .accepted validated => recorded (checkedInput validated height)
+    | .rejected detail => return (Minidregg.Compiler.GenericSimplexPending.reject rest work,.rejected work.records detail)
+    | .retry failure => later failure.detail
 
 /-- A scheduler supplies a finite service slice from its reserved control
 capacity. Zero attempts provide no progress; fair repeated positive slices and

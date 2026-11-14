@@ -38,16 +38,20 @@ abbrev Verified := Minidregg.Kernel.NativeHostReplay.Verified
 abbrev Pending := Minidregg.Compiler.GenericSimplexPending.Queue
 
 /-- Only native replay can construct the verified source component. `history` is the
-running application digest of its records, extended by each append (`applyNext`). -/
+running application digest of its records and `ingress` their index by original ingress;
+each append extends both (`applyNext`). -/
 structure Source (config : SourceConfig) where
   target : Durable
   verified : Verified config target
   history : Minidregg.Kernel.JointReceiver.History verified.opened.durable
+  ingress : Minidregg.Kernel.JointReceiver.Ingress verified.opened.durable
 
-/-- A verified source as it was read: its running digest is computed here, once. -/
+/-- A verified source as it was read: its running digest and its index by ingress are
+computed here, once. -/
 def Source.read {config : SourceConfig} (context : Context) {target : Durable}
     (verified : Verified config target) : Source config :=
-  ⟨target,verified,Minidregg.Kernel.JointReceiver.History.start context verified.opened.durable⟩
+  ⟨target,verified,Minidregg.Kernel.JointReceiver.History.start context verified.opened.durable,
+    Minidregg.Kernel.JointReceiver.Ingress.start verified.opened.durable⟩
 
 /-- Volatile scheduling state. Restart may reset all of it: the journal keeps the replica's
 undrained output and its committed payloads the application has not taken. -/
@@ -62,10 +66,31 @@ structure Schedule where
   candidateSent : List (Nat × Nat × Nat) := []
   /-- The COMMITs the replica held (`Replica.far`) when discovery last looked. -/
   far : List WireMessage := []
+  /-- Whether this participant has told its peers its committed height since it opened. -/
+  announced : Bool := false
+  /-- The committed height each peer last announced: (peer, height). -/
+  peerHeights : List (Nat × Nat) := []
+  /-- When each peer was last asked for its height, and this replica's committed height
+  then: (peer, ms, height). -/
+  asked : List (Nat × Nat × Nat) := []
+  /-- When each peer was last sent the kept COMMITs it is behind by, and from which height:
+  (peer, ms, height). -/
+  answered : List (Nat × Nat × Nat) := []
+  /-- Height announcements and answers the next slice sends. -/
+  replies : List (Nat × ByteArray) := []
 
 /-- Resend interval for the same unvalidated candidate to the same peer. A changed
 candidate height is relayed at once. -/
 def candidateResendMs : Nat := 5000
+
+/-- A peer known to be ahead is asked again after this long while this replica is still
+behind it and has committed nothing since it last asked. A replica that has committed since
+asks again at once: catching up over several exchanges waits on no timer. -/
+def askResendMs : Nat := 5000
+
+/-- One peer is sent the kept COMMITs from one height at most once per this interval, however
+often it asks from that height. -/
+def answerIntervalMs : Nat := 1000
 
 structure Participant (config : SourceConfig) where
   runtime : Runtime
@@ -73,10 +98,11 @@ structure Participant (config : SourceConfig) where
   pending : Pending := {}
   schedule : Schedule := {}
 
-/-- The first octet of a frame distinguishes authenticated protocol traffic from
-application-candidate dissemination. -/
+/-- The first octet of a frame distinguishes authenticated protocol traffic (0),
+application-candidate dissemination (2) and height announcements (3). -/
 def protocolFrame (bytes : ByteArray) : ByteArray := ByteArray.mk #[0] ++ bytes
 def candidateFrame (bytes : ByteArray) : ByteArray := ByteArray.mk #[2] ++ bytes
+def heightFrame (bytes : ByteArray) : ByteArray := ByteArray.mk #[3] ++ bytes
 
 /-- Opening checks the exact configured source genesis against the consensus
 anchor through the real historical validator. A journal alone cannot select the
@@ -131,6 +157,28 @@ def receive {config : SourceConfig} (p : Participant config) (bytes : ByteArray)
       return ({p with pending :=
         Minidregg.Compiler.GenericSimplexPending.discoverFrom state [] p.pending [⟨height,records⟩]},result)
     | _,_ => return (p,result)
+  if bytes.get! 0 == 3 then
+    -- A height announcement changes no replica state. A peer that asks is told this
+    -- replica's height and, when it is behind and the evidence is still kept, sent the
+    -- COMMITs it is behind by (`answerHeight`), at most once per `answerIntervalMs`.
+    let some note ← GenericSimplexNative.authenticateHeight p.runtime payload | return (p,.invalid)
+    let some prior ← p.runtime.current | return (p,.invalid)
+    let now ← IO.monoMsNow
+    let heights := p.schedule.peerHeights.filter (·.1 != note.sender) ++ [(note.sender,note.height)]
+    let mut schedule := {p.schedule with peerHeights := heights}
+    if note.ask then
+      let mut replies := [(note.sender,heightFrame (← sealHeight p.runtime note.sender false))]
+      let due := match schedule.answered.find? (·.1 == note.sender) with
+        | none => true
+        | some (_,last,height) => height != note.height || now ≥ last + answerIntervalMs
+      if due then
+        let answer ← answerHeight p.runtime note.sender note.height
+        unless answer.isEmpty do
+          replies := replies ++ answer.map fun packet => (note.sender,protocolFrame packet)
+          let answered := schedule.answered.filter (·.1 != note.sender) ++ [(note.sender,now,note.height)]
+          schedule := {schedule with answered := answered}
+      schedule := {schedule with replies := schedule.replies ++ replies}
+    return ({p with schedule := schedule},.durable prior.state)
   if bytes.get! 0 != 0 then return (p,.invalid)
   let before := (← p.runtime.current).map (·.length)
   let result ← GenericSimplexNative.receive p.runtime payload
@@ -220,23 +268,22 @@ def proposeCall {config : SourceConfig} (p : Participant config) (callBytes : By
   | .error detail => return (p,.error detail)
   | .ok ingress => propose p ingress
 
-/-- Ordinary propose/await consumer: return only the receipt recomputed by the
-native verified source history for the exact complete proposal bytes. A protocol
-commit, send, pending offer or local transport acknowledgement yields nothing. -/
-def completedReceipt {config : SourceConfig} (p : Participant config) (payload : Bytes) :
-    Option Minidregg.Compiler.NativeHostCodec.Receipt := do
-  let index ← (Minidregg.Kernel.JointReceiver.sourcePrefix
-    p.source.verified.opened.durable).zipIdx.findSome? (fun (record,index) =>
-      if record == payload then some index else none)
-  p.source.verified.receiptAt index
-
 /-- Lost submit responses can be recovered from the exact original signed
-ingress, even when the caller never received the derived proposal bytes. -/
+ingress, even when the caller never received the derived proposal bytes. The record is
+found through the source's index by ingress (one lookup, `Ingress.find_sound`) and its
+receipt read along one tree path: nothing walks the accepted records. -/
 def completedIngress {config : SourceConfig} (p : Participant config) (signedIngress : Bytes) :
     Option Minidregg.Compiler.NativeHostCodec.Receipt := do
-  let index ← p.source.verified.opened.durable.image.accepted.zipIdx.findSome?
-    (fun (record,index) => if record.event.canonicalBytes == signedIngress then some index else none)
+  let index ← p.source.ingress.find signedIngress
   p.source.verified.receiptAt index
+
+/-- Ordinary propose/await consumer: return only the receipt recomputed by the
+native verified source history for the record this proposal's original ingress installed.
+A protocol commit, send, pending offer or local transport acknowledgement yields nothing. -/
+def completedReceipt {config : SourceConfig} (p : Participant config) (payload : Bytes) :
+    Option Minidregg.Compiler.NativeHostCodec.Receipt := do
+  let record ← Minidregg.Compiler.DurableCheckpointCodec.recordFrame.decode payload
+  completedIngress p record.event.canonicalBytes
 
 def completedCall {config : SourceConfig} (p : Participant config) (callBytes : Bytes) :
     Option Minidregg.Compiler.NativeHostCodec.Receipt := do
@@ -280,8 +327,8 @@ physical readback must extend it (`extendFrom`: the log chain continues from the
 retained one and every new tag verifies, so a rollback or a rewritten record
 refuses), and every new
 retained ingress is re-admitted at its original prefix. No engine flag or stale
-in-memory Source is promoted into a readback receipt. The running digest of the reread
-source is computed afresh (linear, on this recovery path only). A genesis re-admission of
+in-memory Source is promoted into a readback receipt. The running digest and the index by
+ingress of the reread source are computed afresh (linear, on this recovery path only). A genesis re-admission of
 the whole history is the operator `audit`, not a per-certificate cost. -/
 def reloadSource {config : SourceConfig} (p : Participant config) :
     IO (Participant config × String) := do
@@ -338,7 +385,8 @@ def applyNext {config : SourceConfig} (p : Participant config) : IO (Participant
       p.source.verified context certificate p.source.history (applicationHistory later)
       record.event.canonicalBytes with
   | .applied receipt =>
-    taken {p with source := ⟨_,receipt.verified,receipt.history p.source.history⟩} "applied"
+    taken {p with source := ⟨_,receipt.verified,receipt.history p.source.history,
+      receipt.ingress p.source.ingress⟩} "applied"
   | .refused detail => return (p,detail)
   | .ordinary _ => reloadSource p
   | .uncertain _ => reloadSource p
@@ -368,6 +416,29 @@ def candidateSlice {config : SourceConfig} (p : Participant config) :
         sent := (sent.filter (fun (r,_,_) => r != recipient)) ++ [(recipient,length,now)]
   return ({p with schedule := {p.schedule with candidateSent := sent}},packets)
 
+/-- Height announcements of one slice. The first slice after an open tells every peer this
+replica's committed height and asks for theirs. After that a peer is asked again
+only while it is known to be ahead, once per `askResendMs`: a replica level with its peers
+sends nothing. The replies queued by `receive` leave here too. -/
+def heightSlice {config : SourceConfig} (p : Participant config) :
+    IO (Participant config × List (Nat × ByteArray)) := do
+  let some prior ← p.runtime.current | return (p,[])
+  let now ← IO.monoMsNow
+  let mut schedule := {p.schedule with replies := []}
+  let mut packets := p.schedule.replies
+  for peer in List.range p.runtime.context.config.parties do
+    if peer != prior.self then
+      let ahead := schedule.peerHeights.any fun (member,height) =>
+        member == peer && prior.state.height < height
+      let due := match schedule.asked.find? (·.1 == peer) with
+        | none => true
+        | some (_,last,height) => height != prior.state.height || now ≥ last + askResendMs
+      if !schedule.announced || (ahead && due) then
+        packets := packets ++ [(peer,heightFrame (← sealHeight p.runtime peer true))]
+        let asked := schedule.asked.filter (·.1 != peer) ++ [(peer,now,prior.state.height)]
+        schedule := {schedule with asked := asked}
+  return ({p with schedule := {schedule with announced := true}},packets)
+
 /-- A slice at least this long prints where its time went. Operator measurement control:
 `MINI_SERVE_TIMING_MS` lowers it from one second. -/
 def slowSliceMs : IO Nat := do
@@ -377,10 +448,11 @@ def slowSliceMs : IO Nat := do
 It consumes reserved validation and continuation opportunities, sends the replica's whole
 undrained output, and hands the application at most one committed payload. Fair repeated
 positive slices plus available native historical validation are progress premises; this API
-does not invent funding. Ordinary callers await exact source receipt, never an engine-local
+does not invent funding. The last component is the time the application hand-off took, in
+nanoseconds (published by the flatness row of the fixture). Ordinary callers await exact source receipt, never an engine-local
 flag. -/
 def service {config : SourceConfig} (p : Participant config) (validationBudget : Nat) :
-    IO (Participant config × List (Nat × ByteArray) × List GenericSimplexController.Outcome × String) := do
+    IO (Participant config × List (Nat × ByteArray) × List GenericSimplexController.Outcome × String × Nat) := do
   let t0 ← IO.monoMsNow
   -- A held COMMIT the replica has since read (`GenericSimplexRelative.release`) entered its
   -- views under an input that carried no block, so the per-input discovery (`receive`) never
@@ -394,16 +466,13 @@ def service {config : SourceConfig} (p : Participant config) (validationBudget :
         pending := Minidregg.Compiler.GenericSimplexPending.discover prior.state p.pending
         schedule := {p.schedule with far := prior.state.far}}
     | none => pure p
-  -- The committed source history, for the validator: the source's records, then the
-  -- committed records the application has not taken yet. Built only when work is attempted.
+  -- The committed source history, for the validator's whole-prefix replay: the source's
+  -- records. Built only when that replay runs (work of two or more records above a tip that
+  -- holds every committed record, `GenericSimplexController.attempt`).
   let committed : Unit → Block := fun _ =>
     Minidregg.Kernel.JointReceiver.sourcePrefix p.source.verified.opened.durable
-  let committedRecords ← do
-    match ← p.runtime.current with
-    | some prior => pure (applicationHistory prior.state.committed)
-    | none => pure []
   let (pending,checks) ← GenericSimplexController.service p.runtime config p.source.verified.origin
-    p.source.verified (fun unit => committed unit ++ committedRecords) validationBudget p.pending
+    p.source.verified committed validationBudget p.pending
   let p := {p with pending := pending}
   let t1 ← IO.monoMsNow
   -- A standing replica serves on a fixed tick. Journal a poll only for an exhausted pump
@@ -423,12 +492,15 @@ def service {config : SourceConfig} (p : Participant config) (validationBudget :
   let (p,packets) ← outgoing p
   let t3 ← IO.monoMsNow
   let (p,candidates) ← candidateSlice p
+  let (p,heights) ← heightSlice p
   let t4 ← IO.monoMsNow
+  let applyStart ← IO.monoNanosNow
   let (p,status) ← applyNext p
+  let applyNanos := (← IO.monoNanosNow) - applyStart
   let t5 ← IO.monoMsNow
   if t5 - t0 ≥ (← slowSliceMs) then
     IO.eprintln s!"service ms: validation {t1-t0} ({checks.length} checks, {p.pending.pending.length} pending) clock {t2-t1} outgoing {t3-t2} ({packets.length}) candidate {t4-t3} apply {t5-t4} [{status}]"
-  return (p,packets ++ candidates,checks,status)
+  return (p,packets ++ candidates ++ heights,checks,status,applyNanos)
 
 theorem invocation_call_preserves_signed (config : SourceConfig)
     (signed : Minidregg.Kernel.DeclaredResourceController.SignedCommand) :

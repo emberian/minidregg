@@ -930,12 +930,26 @@ def receiveCommit (storage : Storage) (crypto : Crypto) (context : Context)
   if !(← verifyCommitWitness crypto context witness) then return .invalid
   receiveDelivery storage context time message (some witness)
 
+/-- The COMMITs of the commits a replica keeps evidence for, from committed height `height`
+on, in order, as a member at that height reads them: exactly what the kernel owes a member
+that asks to leave a view from that height (`GenericSimplexRelative.deliver`). Empty unless
+`height` is below the replica's own and is the origin of a kept commit. -/
+def keptCommits (h : ChainDigest) (r : Replica) (height : Nat) : List WireMessage :=
+  if height < r.height && r.evidence.any (fun entry => entry.1 == height) then
+    (r.evidence.filter fun entry => height ≤ entry.1).flatMap fun entry =>
+      entry.2.2.map (encode h entry.1 entry.2.1)
+  else []
+
 /-- The durable send cause of a COMMIT this replica signs: the message is in its own
-undrained output, as a broadcast or as evidence it owes a peer. Both are written by an
-acknowledged journal entry before anything is signed. -/
+undrained output, as a broadcast or as evidence it owes a peer, or it is one of the COMMITs
+of a commit it keeps evidence for (its own COMMIT that committed that block, which it sent
+when it was made). Each is written by an acknowledged journal entry before anything is
+signed, and signing the same statement again says nothing new. -/
 def ownCommit {context : Context} (prior : Restored context) (message : WireMessage) : Bool :=
   message.kind == .commit && message.sender == prior.self && message.statement.isSome &&
-    (prior.state.sends.contains message || prior.state.owed.any fun entry => entry.2 == message)
+    (prior.state.sends.contains message || (prior.state.owed.any fun entry => entry.2 == message) ||
+      prior.state.evidence.any fun entry =>
+        entry.2.2.any fun m => encode prior.chain entry.1 entry.2.1 m == message)
 
 /-- The transferable signature a COMMIT leaves with: this replica's own, made now for a
 COMMIT in its durable output, or the signer's, kept since it was received. A COMMIT with
