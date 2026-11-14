@@ -2042,8 +2042,8 @@ structure FleetPollView where
 /-- The signed ingress of an accepted fleet turn, read by transaction id through
 the Reader (`byTx`: the spent map's opening, then the record at that height,
 each verified at use). -/
-def fleetJournalTurn {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store) (transactionId : Digest) :
+def fleetJournalTurn {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (transactionId : Digest) :
     IO (Except Refusal (Option FleetTurn.DecodedIngress)) := do
   match ← reader.byTx transactionId with
   | .error refusal => return .error (historyRefusal refusal)
@@ -2051,8 +2051,8 @@ def fleetJournalTurn {rootBytes : List UInt8 → Digest} {store : DurableHistory
   | .ok (.present found) =>
       return .ok (FleetTurn.decodeIngress found.read.record.event.canonicalBytes)
 
-def fleetPolledEvent {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store)
+def fleetPolledEvent {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     (item : Nat × StreamCell.Entry) : IO (Except Refusal FleetPolledEvent) := do
   let (sequence, entry) := item
   let record := entry.record
@@ -2107,8 +2107,8 @@ def journalIndexRefusal (detail : String) : Refusal :=
 
 /-- The record at a height a sequence row names, required to carry the sequence's name: an
 index that lists a record which does not belong is refused by name. -/
-def sequenceMember {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store) (name : JournalIndex.Name) (height : Nat) :
+def sequenceMember {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (name : JournalIndex.Name) (height : Nat) :
     IO (Except Refusal (DurableHistoryReader.Record reader.head height)) := do
   match ← reader.atHeight height with
   | .error refusal => return .error (historyRefusal refusal)
@@ -2318,8 +2318,8 @@ a checkpoint alone names its horizon here, and the page read (`sequencePage`) th
 def journalRetired : Nat := 0
 
 /-- A sequence's count and position rows as effectful reads of the Store's index. -/
-def sequenceRows {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store) (seq : Digest256) :
+def sequenceRows {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (seq : Digest256) :
     ExceptT Refusal IO Nat × (Nat → ExceptT Refusal IO (Option Nat)) :=
   (ExceptT.mk do
       match ← reader.seqCount seq with
@@ -2332,8 +2332,8 @@ def sequenceRows {rootBytes : List UInt8 → Digest} {store : DurableHistory.Sto
 
 /-- The position of a height cursor: how many members are at or below `height`, by the
 bisection `Theory.JournalSequences.belowM` (`belowM_pure`, `below_spec`). -/
-def sequencePosition {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store) (seq : Digest256) (height : Nat) :
+def sequencePosition {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (seq : Digest256) (height : Nat) :
     IO (Except Refusal Nat) :=
   let (count, rows) := sequenceRows reader seq
   ExceptT.run do
@@ -2345,8 +2345,8 @@ Store's rows, each member's size given by `size`. Over rows that answer as the j
 recomputation does it is `Theory.JournalSequences.page` (`pageM_pure`): rows in order within
 both limits, the tip, a named gap, or an oversize member (`page_rows`, `page_tip`,
 `page_gap`, `page_oversize`). A row missing inside the count refuses. -/
-def sequencePage {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store) (seq : Digest256)
+def sequencePage {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (seq : Digest256)
     (size : Nat → ExceptT Refusal IO Nat) (retired after limit budget : Nat) :
     IO (Except Refusal Theory.JournalSequences.Page) := do
   let (count, rows) := sequenceRows reader seq

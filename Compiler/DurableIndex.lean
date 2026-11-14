@@ -30,6 +30,7 @@ module
 
 public import Theory.AuthTrieRange
 public import Theory.JournalSequences
+public import Theory.KeyedModel
 public import Compiler.Sp800185Cshake256
 public import Kernel.WorldRoot
 public import Compiler.DurableReceiverCodec
@@ -62,6 +63,7 @@ namespace Minidregg.Compiler.DurableIndex
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory.AuthTrie (NodeIn Collision CollisionAmong TreeNode ClimbNode WF entries tree)
+open Minidregg.Theory.KeyedModel (Model)
 
 set_option autoImplicit false
 
@@ -192,12 +194,12 @@ theorem collisionAmong_is_cshake {S : NodeIn IndexKey (List UInt8) Digest → Pr
 /-! ## Soundness at the deployed shape -/
 
 /-- The canonical root of a logical map (key ↦ value bytes). -/
-def rootOf (kvs : List (IndexKey × List UInt8)) : Digest := tree dig 520 (entries bitsOf kvs)
+def rootOf (kvs : Model IndexKey) : Digest := tree dig 520 (entries bitsOf kvs)
 
 /-- **A verified single answer is the map's** (presence with its value, or verified
 absence), or a cSHAKE256 collision between the node bytes of two nodes the
 canonical tree or this opening's climb hashed. -/
-theorem lookup_sound (kvs : List (IndexKey × List UInt8)) (wf : WF 520 (entries bitsOf kvs))
+theorem lookup_sound (kvs : Model IndexKey) (wf : WF 520 (entries bitsOf kvs))
     (k : IndexKey) (answer : Option (List UInt8))
     (opening : Theory.AuthTrie.Opening IndexKey (List UInt8) Digest)
     (accepted : Theory.AuthTrie.verify dig bitsOf (rootOf kvs) k answer opening = true) :
@@ -217,7 +219,7 @@ omitted (so an empty answer is a verified absence of the whole family member
 set), none forged — or a cSHAKE256 collision between the node bytes of two
 nodes of this comparison's finite scope (the walk's path and the selected subtree,
 the reveal's climb, the revealed members' tree: `Theory.AuthTrie.revealNodes`). -/
-theorem reveal_sound (kvs : List (IndexKey × List UInt8)) (wf : WF 520 (entries bitsOf kvs))
+theorem reveal_sound (kvs : Model IndexKey) (wf : WF 520 (entries bitsOf kvs))
     (p : List Bool) (reveal : Theory.AuthTrie.Reveal IndexKey (List UInt8) Digest)
     (accepted : Theory.AuthTrie.revealVerify dig bitsOf 520 (rootOf kvs) p reveal = true) :
     (∀ k v, (k, v) ∈ reveal.answer bitsOf p ↔ (k, v) ∈ kvs ∧ (bitsOf k).take p.length = p) ∨
@@ -362,7 +364,7 @@ def Answer.height {root : Digest} {k : IndexKey} (answer : Answer root k) : Opti
 /-- **The verified answer is the map's** (at the deployed shape): whatever opening
 was accepted, its value is the logical map's lookup, or that accepted opening's
 climb and the canonical tree hashed two nodes whose bytes collide under cSHAKE256. -/
-theorem Answer.sound {kvs : List (IndexKey × List UInt8)} {k : IndexKey}
+theorem Answer.sound {kvs : Model IndexKey} {k : IndexKey}
     (wf : WF 520 (entries bitsOf kvs)) (answer : Answer (rootOf kvs) k) :
     answer.value = Theory.AuthTrie.lookup (entries bitsOf kvs) k ∨
       ∃ opening : Opening, verify (rootOf kvs) k answer.value opening = true ∧
@@ -674,17 +676,17 @@ the map after the append is the map before updated by the record's changes, wher
 first record that carries it (`IndexRows.declared`). -/
 
 /-- The logical map after setting `k` (`none` deletes). -/
-def modelSet (m : List (IndexKey × List UInt8)) (k : IndexKey) (value : Option (List UInt8)) :
-    List (IndexKey × List UInt8) :=
+def modelSet (m : Model IndexKey) (k : IndexKey) (value : Option (List UInt8)) :
+    Model IndexKey :=
   m.filter (·.1 ≠ k) ++ (value.map (k, ·)).toList
 
 /-- A key's value in a logical map. -/
-def mapLookup (m : List (IndexKey × List UInt8)) (k : IndexKey) : Option (List UInt8) :=
+def mapLookup (m : Model IndexKey) (k : IndexKey) : Option (List UInt8) :=
   (m.find? (·.1 = k)).map (·.2)
 
 /-- A list of changes applied to a logical map, in order. -/
-def modelApply (m : List (IndexKey × List UInt8)) (changes : List (IndexKey × Option (List UInt8))) :
-    List (IndexKey × List UInt8) :=
+def modelApply (m : Model IndexKey) (changes : List (IndexKey × Option (List UInt8))) :
+    Model IndexKey :=
   changes.foldl (fun acc change => modelSet acc change.1 change.2) m
 
 namespace IndexRows
@@ -809,7 +811,7 @@ theorem lastWrite_later_write (records : List Kernel.DurableReceiver.IntentRecor
     lastWrite records (cellKey cell) ≠ some (heightValue (r + 1)) :=
   fun last => lastWrite_untouched records r cell last record later written
 
-theorem mapLookup_modelSet_some (m : List (IndexKey × List UInt8)) (k k' : IndexKey) (v : List UInt8) :
+theorem mapLookup_modelSet_some (m : Model IndexKey) (k k' : IndexKey) (v : List UInt8) :
     mapLookup (modelSet m k' (some v)) k = if k = k' then some v else mapLookup m k := by
   unfold mapLookup modelSet
   induction m with
@@ -825,7 +827,7 @@ theorem mapLookup_modelSet_some (m : List (IndexKey × List UInt8)) (k k' : Inde
         · by_cases he' : e.1 = k' <;> simp [h, h', he, he', List.filter_cons, List.find?_cons] at ih ⊢ <;> exact ih
 
 theorem mapLookup_modelApply_same (v : List UInt8) :
-    ∀ (ks : List IndexKey) (m : List (IndexKey × List UInt8)) (k : IndexKey),
+    ∀ (ks : List IndexKey) (m : Model IndexKey) (k : IndexKey),
       mapLookup (modelApply m (ks.map fun k => (k, some v))) k =
         if k ∈ ks then some v else mapLookup m k
   | [], m, k => by simp [modelApply]
@@ -845,13 +847,13 @@ def seqChanges (height : Nat) (counts : List (Digest256 × Nat)) : List (IndexKe
       (seqItemKey entry.1 (entry.2 + 1), some (heightValue height))]
 
 /-- A sequence's count as a logical map holds it: an absent row is zero. -/
-def seqCountOf (m : List (IndexKey × List UInt8)) (seq : Digest256) : Nat :=
+def seqCountOf (m : Model IndexKey) (seq : Digest256) : Nat :=
   ((mapLookup m (seqCountKey seq)).bind heightOf).getD 0
 
 /-- **What the sequence rows do to a lookup**: a member's count row holds its count plus one,
 its new last position holds the height, every other key is untouched. -/
 theorem mapLookup_seqChanges (height : Nat) (count : Digest256 → Nat) :
-    ∀ (seqs : List Digest256) (m : List (IndexKey × List UInt8)) (k : IndexKey),
+    ∀ (seqs : List Digest256) (m : Model IndexKey) (k : IndexKey),
       mapLookup (modelApply m (seqChanges height (seqs.map fun seq => (seq, count seq)))) k =
         if k.family = Family.seqCount ∧ k.secondary = noSecondary ∧ k.primary ∈ seqs then
           some (heightValue (count k.primary + 1))
@@ -902,7 +904,7 @@ def seqLogical (journal : List (List Digest256)) (k : IndexKey) : Option (List U
     else none
   else (Theory.JournalSequences.item journal k.primary k.secondary.val).map heightValue
 
-theorem seqCountOf_of_logical (journal : List (List Digest256)) (m : List (IndexKey × List UInt8))
+theorem seqCountOf_of_logical (journal : List (List Digest256)) (m : Model IndexKey)
     (seq : Digest256) (before : mapLookup m (seqCountKey seq) = seqLogical journal (seqCountKey seq)) :
     seqCountOf m seq = Theory.JournalSequences.count journal seq := by
   unfold seqCountOf
@@ -914,7 +916,7 @@ theorem seqCountOf_of_logical (journal : List (List Digest256)) (m : List (Index
 journal's sequence rows, then after the record's sequence rows (counts read from that map) it
 holds the rows of the journal with the record appended. -/
 theorem seq_changes_exact (journal : List (List Digest256)) (members : List Digest256)
-    (m : List (IndexKey × List UInt8))
+    (m : Model IndexKey)
     (before : ∀ k, k.family = Family.seqCount ∨ k.family = Family.seqItem → mapLookup m k = seqLogical journal k)
     (bound : journal.length + 1 < 256 ^ 32) (seqs : List Digest256) (same : ∀ seq, seq ∈ seqs ↔ seq ∈ members)
     (k : IndexKey) (family : k.family = Family.seqCount ∨ k.family = Family.seqItem) :
@@ -945,7 +947,7 @@ and the record's keys are fresh in it (the executor's guarantee, and what
 `apply` refuses otherwise), then the map before updated by the record's rows is
 the map of the history with the record appended. -/
 theorem changes_exact (records : List Kernel.DurableReceiver.IntentRecord)
-    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8)) (k : IndexKey)
+    (record : Kernel.DurableReceiver.IntentRecord) (m : Model IndexKey) (k : IndexKey)
     (before : mapLookup m k = declared records k)
     (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, declared records k = none) :
     mapLookup (modelApply m (changes (records.length + 1) record.transactionId record.nullifiers)) k =
@@ -1027,7 +1029,7 @@ history's logical map and the record's family-0/1 keys are fresh in it, the map 
 its inserts and then its cell overwrites is the logical map of the history with the
 record appended: each cell it writes now maps to its own height. -/
 theorem logical_changes_exact (records : List Kernel.DurableReceiver.IntentRecord)
-    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8)) (k : IndexKey)
+    (record : Kernel.DurableReceiver.IntentRecord) (m : Model IndexKey) (k : IndexKey)
     (before : mapLookup m k = logical records k)
     (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, logical records k = none) :
     mapLookup (modelApply (modelApply m (changes (records.length + 1) record.transactionId record.nullifiers))
@@ -1090,7 +1092,7 @@ theorem indexed_nil (sequences : Kernel.DurableReceiver.IntentRecord → List Di
 
 /-- The first two phases of an append leave every sequence row as it was. -/
 theorem mapLookup_phases_seq (record : Kernel.DurableReceiver.IntentRecord) (height : Nat)
-    (m : List (IndexKey × List UInt8)) (k : IndexKey)
+    (m : Model IndexKey) (k : IndexKey)
     (family : k.family = Family.seqCount ∨ k.family = Family.seqItem) :
     mapLookup (modelApply (modelApply m (changes height record.transactionId record.nullifiers))
         (cellChanges height (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId))) k =
@@ -1109,7 +1111,7 @@ sequence rows are written from the counts the map holds, then the map after the 
 three phases is the logical map of the history with the record appended. -/
 theorem indexed_changes_exact (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256)
     (records : List Kernel.DurableReceiver.IntentRecord)
-    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8))
+    (record : Kernel.DurableReceiver.IntentRecord) (m : Model IndexKey)
     (before : ∀ k, mapLookup m k = indexed sequences records k)
     (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, indexed sequences records k = none)
     (bound : records.length + 1 < 256 ^ 32) (seqs : List Digest256)
@@ -1171,7 +1173,7 @@ def RowsRepresent (rows : List Bool → Option Row) :
 
 /-- Both the root and its reachable Store rows represent a well-formed map. -/
 def Represents (rows : List Bool → Option Row) (root : Digest)
-    (m : List (IndexKey × List UInt8)) : Prop :=
+    (m : Model IndexKey) : Prop :=
   root = rootOf m ∧ WF 520 (entries bitsOf m) ∧ RowsRepresent rows [] 520 (entries bitsOf m)
 
 /-- The node encoded by a durable row. -/
@@ -1207,7 +1209,7 @@ def SetPreserves
     (setFn : (List Bool → Option Row) → Digest → IndexKey → Option (List UInt8) →
       Except String (Digest × List (List Bool × Row)))
     (rows : List Bool → Option Row) (root : Digest)
-    (m : List (IndexKey × List UInt8)) (k : IndexKey) (value : Option (List UInt8)) : Prop :=
+    (m : Model IndexKey) (k : IndexKey) (value : Option (List UInt8)) : Prop :=
   Represents rows root m →
   ∀ (next : Digest) (written : List (List Bool × Row)),
     setFn rows root k value = .ok (next, written) →
@@ -1372,7 +1374,7 @@ theorem dropWriteSet_not_preserves :
 
 #assert_axioms dropWriteSet_not_preserves
 
-theorem lookup_entries (m : List (IndexKey × List UInt8)) (k : IndexKey) :
+theorem lookup_entries (m : Model IndexKey) (k : IndexKey) :
     Theory.AuthTrie.lookup (entries bitsOf m) k = mapLookup m k := by
   simp [Theory.AuthTrie.lookup, entries, mapLookup, List.find?_map, Option.map_map, Function.comp_def]
 
@@ -1390,10 +1392,10 @@ theorem maintained_init (sequences : Kernel.DurableReceiver.IntentRecord → Lis
 
 /-- A verified count answer that is not the map's. By `Answer.sound` it exhibits a cSHAKE256
 collision (`countCollision_is_cshake`). -/
-def CountCollision (m : List (IndexKey × List UInt8)) (seq : Digest256) : Prop :=
+def CountCollision (m : Model IndexKey) (seq : Digest256) : Prop :=
   ∃ answer : Answer (rootOf m) (seqCountKey seq), answer.value ≠ mapLookup m (seqCountKey seq)
 
-theorem countCollision_is_cshake {m : List (IndexKey × List UInt8)} {seq : Digest256}
+theorem countCollision_is_cshake {m : Model IndexKey} {seq : Digest256}
     (wf : WF 520 (entries bitsOf m)) (collision : CountCollision m seq) :
     ∃ x y : List UInt8, x ≠ y ∧
       Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
@@ -1406,7 +1408,7 @@ namespace IndexRows
 
 /-- A count read from rows that represent a map is the map's count, or the verified answer
 differs from the map's (a collision). -/
-theorem seqCount_model {rows : List Bool → Option Row} {root : Digest} {m : List (IndexKey × List UInt8)}
+theorem seqCount_model {rows : List Bool → Option Row} {root : Digest} {m : Model IndexKey}
     (rep : Represents rows root m) (seq : Digest256) (count : Nat)
     (ok : seqCount rows root seq = .ok count) : count = seqCountOf m seq ∨ CountCollision m seq := by
   obtain ⟨rfl, _, _⟩ := rep
@@ -1432,7 +1434,7 @@ theorem seqCount_model {rows : List Bool → Option Row} {root : Digest} {m : Li
                 simp [looked, value, unheld] at ok
       · exact Or.inr ⟨answer, same⟩
 
-theorem seqCounts_model {rows : List Bool → Option Row} {root : Digest} {m : List (IndexKey × List UInt8)}
+theorem seqCounts_model {rows : List Bool → Option Row} {root : Digest} {m : Model IndexKey}
     (rep : Represents rows root m) : ∀ (seqs : List Digest256) (counts : List (Digest256 × Nat)),
       seqCounts rows root seqs = .ok counts →
       counts = seqs.map (fun seq => (seq, seqCountOf m seq)) ∨ ∃ seq, CountCollision m seq
@@ -1543,7 +1545,7 @@ UNDER the explicit single-set contract. This is induction over deployed `setAll`
 theorem setAll_preserves
     (step : ∀ rows root m k value, SetPreserves set rows root m k value)
     (changes : List (IndexKey × Option (List UInt8)))
-    (rows : List Bool → Option Row) (root : Digest) (m : List (IndexKey × List UInt8))
+    (rows : List Bool → Option Row) (root : Digest) (m : Model IndexKey)
     (before : Represents rows root m) (next : Digest) (written : List (List Bool × Row))
     (ok : setAll rows root changes = .ok (next, written)) :
     Represents (overlay rows written) next (modelApply m changes) ∨
