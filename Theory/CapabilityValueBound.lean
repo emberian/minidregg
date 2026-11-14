@@ -31,6 +31,9 @@ account under a presented capability checks the same thing.
   `missingBalanceBound asset`.
 * `Presented capability operations account` -- the receiver's form over its authorization
   evidence, decided by `presentedCheck`.
+* `DebitsBounded cap footprint` -- the missing-bound condition for a receiver that judges a leg
+  by its `Footprint` (the resource-transaction path): a delegated capability sets a bound on
+  every balance the footprint lowers. `BoundsSet.debitsBounded` relates it to the operation form.
 
 ## What an absent bound means
 
@@ -445,6 +448,58 @@ theorem StrictBound.delegated_gross {kind : ResourceKind} {cap : Capability kind
   exact ⟨bound, listed,
     ((valueBound_iff cap.scope operations account).mp strict.1 asset member).2 bound listed⟩
 
+/-! ## The footprint form: a receiver that judges a leg by its `Footprint` -/
+
+/-- A scope sets a bound on `field` when it is a balance; other fields owe none. -/
+def BalanceBounded {kind : ResourceKind} (scope : Scope kind) : CellField → Prop
+  | .balance asset => HasBound scope asset
+  | _ => True
+
+instance {kind : ResourceKind} (scope : Scope kind) (field : CellField) :
+    Decidable (BalanceBounded scope field) := by
+  cases field <;> unfold BalanceBounded <;> infer_instance
+
+/-- **The missing-bound half of the strict bound, on a footprint.** A delegated capability
+sets a bound on every balance the footprint lowers. A root capability owes none; a balance the
+footprint raises or leaves owes none. -/
+def DebitsBounded {kind : ResourceKind} (cap : Capability kind) (footprint : Footprint) : Prop :=
+  cap.parent ≠ none → ∀ field ∈ footprint.touched, footprint.delta field < 0 →
+    BalanceBounded cap.scope field
+
+instance {kind : ResourceKind} (cap : Capability kind) (footprint : Footprint) :
+    Decidable (DebitsBounded cap footprint) := by
+  unfold DebitsBounded
+  infer_instance
+
+theorem debitsBounded_root {kind : ResourceKind} (cap : Capability kind) (footprint : Footprint)
+    (root : cap.parent = none) : DebitsBounded cap footprint :=
+  fun delegated => absurd root delegated
+
+/-- The operation form implies the footprint form on the gross-debit footprint. -/
+theorem BoundsSet.debitsBounded {kind : ResourceKind} {cap : Capability kind}
+    {operations : List Operation} {account : AccountId}
+    (set : BoundsSet cap operations account) :
+    DebitsBounded cap (debitFootprint operations account) := by
+  intro delegated field touched _
+  obtain ⟨asset, member, rfl⟩ := Finset.mem_image.mp touched
+  exact (hasBound_iff _ _).mpr (set delegated asset member)
+
+/-- They agree when every debited balance is debited a positive amount. -/
+theorem debitsBounded_iff_boundsSet {kind : ResourceKind} (cap : Capability kind)
+    (operations : List Operation) (account : AccountId)
+    (positive : ∀ asset ∈ debitAssets operations account,
+      0 < grossDebit operations account asset) :
+    DebitsBounded cap (debitFootprint operations account) ↔
+      BoundsSet cap operations account := by
+  refine ⟨fun bounded delegated asset member => ?_, BoundsSet.debitsBounded⟩
+  have lowered : (debitFootprint operations account).delta (.balance asset) < 0 := by
+    have pos := positive asset member
+    change -(Int.ofNat (grossDebit operations account asset)) < 0
+    simp only [Int.ofNat_eq_coe]
+    omega
+  exact (hasBound_iff _ _).mp
+    (bounded delegated (.balance asset) (Finset.mem_image_of_mem _ member) lowered)
+
 /-! ## The receiver's form: the capability a debit was authorized under -/
 
 /-- **The presented capability bounds the debit.** `capability` is what the receiver's
@@ -633,6 +688,18 @@ however small, naming the balance. -/
 theorem delegated_unbounded_refused :
     strictCheck (capability (some ⟨20⟩) root) feeOnly payer =
       .error (.missingBalanceBound credit) := by decide
+
+/-- Footprint form, satisfiable: a delegated capability that bounds the lowered balance. -/
+theorem footprint_bounded :
+    DebitsBounded (capability (some ⟨20⟩) bounded) (debitFootprint within payer) := by decide
+
+/-- Footprint form, teeth: a delegated capability with no bound on a lowered balance. -/
+theorem footprint_unbounded_refused :
+    ¬ DebitsBounded (capability (some ⟨20⟩) root) (debitFootprint feeOnly payer) := by decide
+
+/-- Footprint form: the same footprint under a root capability owes no bound. -/
+theorem footprint_root :
+    DebitsBounded (capability none root) (debitFootprint feeOnly payer) := by decide
 
 /-- Strict, teeth: a delegated capability bounded at zero cannot pay a positive fee. -/
 theorem delegated_zero_cannot_pay_fee :

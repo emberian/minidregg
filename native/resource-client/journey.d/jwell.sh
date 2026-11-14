@@ -6,7 +6,7 @@
 # R = the third key (the referee). A creates the realm `tidewrack`, then births
 # two wells in it, `gold` and `kelp` (`mini well new`, an account born --in the
 # realm whose law is the predicate below), and opens a root account `purse`
-# whose owner grant B holds (`workspace create --kind account --owner B`). A delegates `mintAsset` on gold to R, and on kelp to B; the well law
+# whose owner grant B holds (`workspace create --kind account --owner B`). A delegates `mintAsset` on gold to R, and on kelp to B, each bounded at 30 of the well's balance a turn; the well law
 # names only A and R as minters, so B's kelp grant is refused by the LAW.
 #
 # The well law (both wells): any [ request/verb in {observe, transfer,
@@ -25,6 +25,7 @@
 #   b-burns-5-gold           B burns from its own purse                    -> admitted
 #   b-overburns-gold         B burns 100 holding 15                        -> refused bookRefused
 #   r-mints-past-cap-gold    15 outstanding of gold's cap 100; 86 more     -> refused bookRefused
+#   r-mints-past-grant-gold  31 more is within the cap, past R's bound 30  -> refused maxDeltaExceeded
 #   r-burns-b-gold           R presents its gold grant to debit B's purse  -> refused noGrant
 #   mint-credit-asset        a mint naming the credit asset's well         -> refused creditWell
 #   mint-root-account        a mint naming a root account (no realm)       -> refused notRealmWell
@@ -126,9 +127,12 @@ jq -e --arg r "$realm" '.birth.resources[0].room == $r and .birth.resources[0].k
   "$SPONSOR_WS/sources/create-gold.json" >/dev/null || { echo "gold's birth source is not an account in the realm" >&2; exit 1; }
 
 # A delegates mintAsset on gold to R and on kelp to B.
+# A delegated grant must bound the balance it debits (missingBalanceBound): a mint debits
+# the well's own balance, so each grant carries balance:WELL = 30 a turn.
 delegate() { # ID WELL RECIPIENT-SUBJECT RECIPIENT-WS
-  jq -n --arg n "$2" --arg r "$3" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,
-    recipient:$r,verbs:["observe","mintAsset"],maxCost:"50000"}' >"$D/req/$1.json"
+  jq -n --arg n "$2" --arg r "$3" --arg f "balance:$(jq -r .target "$SPONSOR_WS/refs/$2.json")" \
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,
+    recipient:$r,verbs:["observe","mintAsset"],maxCost:"50000",maxDelta:[{field:$f,max:"30"}]}' >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$1.json" \
     --proposal-id "$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
@@ -171,6 +175,8 @@ run b-overburns-gold "$MINI" well --action burn --dir "$NEWCOMER_WS" --well "$go
 row b-overburns-gold refused bookRefused
 run r-mints-past-cap-gold "$MINI" well --action mint --dir "$TW" --well gold --account "$purse" --amount 86
 row r-mints-past-cap-gold refused bookRefused
+run r-mints-past-grant-gold "$MINI" well --action mint --dir "$TW" --well gold --account "$purse" --amount 31
+row r-mints-past-grant-gold refused maxDeltaExceeded
 run r-burns-b-gold "$MINI" well --action burn --dir "$TW" --well "$gold" --account "$purse" --amount 1 \
   --capability "$rgold"
 row r-burns-b-gold refused noGrant

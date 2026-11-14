@@ -18,6 +18,7 @@ public import Compiler.ResourceAuthorityProjection
 public import Kernel.JointSlots
 public import Kernel.StreamWrite
 public import Kernel.ConfidentialAudienceAdmission
+public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -1537,6 +1538,40 @@ theorem fieldsCheck_unnamed {kind : ResourceKind} (cap : Capability kind) (diges
   simp only
   rw [if_neg (fun all => unnamed (all field touched))]
 
+/-- The strict half of the value bound on a leg's footprint: a delegated capability sets a
+`maxDelta` bound on every balance the footprint lowers (`CapabilityValueBound.DebitsBounded`).
+`fieldsCheck` judges the scope; this judges the capability's lineage. -/
+def debitBoundCheck {kind : ResourceKind} (capability : Option (Capability kind × Digest)) :
+    Option Footprint → Except Reject Unit
+  | none => .ok ()
+  | some footprint =>
+    match capability with
+    | none => .error .capabilityRejected
+    | some (cap, _) =>
+      if CapabilityValueBound.DebitsBounded cap footprint then .ok ()
+      else .error .missingBalanceBound
+
+theorem debitBoundCheck_ok {kind : ResourceKind} {capability : Option (Capability kind × Digest)}
+    {footprint : Footprint} (ok : debitBoundCheck capability (some footprint) = .ok ()) :
+    ∃ cap digest, capability = some (cap, digest) ∧
+      CapabilityValueBound.DebitsBounded cap footprint := by
+  unfold debitBoundCheck at ok
+  rcases capability with _ | ⟨cap, digest⟩
+  · cases ok
+  · refine ⟨cap, digest, rfl, ?_⟩
+    simp only at ok
+    split at ok
+    · assumption
+    · cases ok
+
+/-- Pole: a delegated capability with no bound on a lowered balance refuses by name. -/
+theorem debitBoundCheck_missing {kind : ResourceKind} (cap : Capability kind) (digest : Digest)
+    (footprint : Footprint) (unbounded : ¬ CapabilityValueBound.DebitsBounded cap footprint) :
+    debitBoundCheck (some (cap, digest)) (some footprint) = .error .missingBalanceBound := by
+  unfold debitBoundCheck
+  simp only
+  rw [if_neg unbounded]
+
 structure CheckedLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (envelope : List UInt8) where
@@ -1552,6 +1587,12 @@ structure CheckedLeg [DecidableEq F]
     (monetaryDebitFootprint? prepared incidence) = .ok ()
   moneyVerbs : moneyVerbsCheck authorization.evidence.capabilityValue
     (monetaryVerbs? prepared incidence) = .ok ()
+  /-- A delegated authorizing capability sets a bound on every balance the leg lowers, net
+  and gross (`CapabilityValueBound.DebitsBounded`). -/
+  fieldBounds : debitBoundCheck authorization.evidence.capabilityValue
+    (legFootprint prepared incidence) = .ok ()
+  moneyBounds : debitBoundCheck authorization.evidence.capabilityValue
+    (monetaryDebitFootprint? prepared incidence) = .ok ()
 
 def verifyAndAuthorizeLeg [DecidableEq F] {m : Type → Type} [Monad m] (native : CredentialSignatureIO.Oracle m)
     (prepared : PreparedInvocation deployment profile ambient ground command)
@@ -1577,8 +1618,17 @@ def verifyAndAuthorizeLeg [DecidableEq F] {m : Type → Type} [Monad m] (native 
                     match verbsCovered : moneyVerbsCheck authorization.evidence.capabilityValue
                         (monetaryVerbs? prepared incidence) with
                     | .error reason => return .error reason
-                    | .ok () => return .ok ⟨signature, exactWire, authorization, admitted,
-                        covered, grossCovered, verbsCovered⟩
+                    | .ok () =>
+                        match fieldBounds : debitBoundCheck authorization.evidence.capabilityValue
+                            (legFootprint prepared incidence) with
+                        | .error reason => return .error reason
+                        | .ok () =>
+                            match moneyBounds : debitBoundCheck
+                                authorization.evidence.capabilityValue
+                                (monetaryDebitFootprint? prepared incidence) with
+                            | .error reason => return .error reason
+                            | .ok () => return .ok ⟨signature, exactWire, authorization, admitted,
+                                covered, grossCovered, verbsCovered, fieldBounds, moneyBounds⟩
       else return .error (.legSignature .sourceBinding)
 
 /-- **An accepted write leg's capability covers its fields.** The capability
@@ -1593,6 +1643,36 @@ theorem CheckedLeg.fields_covered [DecidableEq F]
   have fields := leg.fields
   rw [legFootprint_exact] at fields
   exact fieldsCheck_ok fields
+
+/-- **An accepted write leg's delegated capability bounds every balance it lowers.** The
+capability that authorized target `i`, if delegated, sets a `maxDelta` bound on every balance
+the leg's footprint lowers; with `fields_covered`, the change is within that bound. -/
+theorem CheckedLeg.debits_bounded [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {tuple : PreparedTuple (plan prepared)} {i : TargetIndex command} {envelope : List UInt8}
+    (leg : CheckedLeg prepared tuple (some i) envelope) :
+    ∃ cap digest, leg.authorization.evidence.capabilityValue = some (cap, digest) ∧
+      CapabilityValueBound.DebitsBounded cap (legFullFootprint prepared i) := by
+  have bounds := leg.fieldBounds
+  rw [legFootprint_exact] at bounds
+  exact debitBoundCheck_ok bounds
+
+/-- **A money consent's delegated capability bounds every balance its gross debit lowers.** -/
+theorem CheckedLeg.money_debits_bounded [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {tuple : PreparedTuple (plan prepared)} {incidence : Incidence command}
+    {envelope : List UInt8} (leg : CheckedLeg prepared tuple incidence envelope)
+    {footprint : Footprint} (gross : monetaryDebitFootprint? prepared incidence = some footprint) :
+    ∃ cap digest, leg.authorization.evidence.capabilityValue = some (cap, digest) ∧
+      cap.scope.FieldsCover footprint ∧ CapabilityValueBound.DebitsBounded cap footprint := by
+  have covered := leg.moneyDebits
+  have bounds := leg.moneyBounds
+  rw [gross] at covered bounds
+  obtain ⟨cap, digest, named, cover⟩ := fieldsCheck_ok covered
+  obtain ⟨cap', digest', named', bound⟩ := debitBoundCheck_ok bounds
+  rw [named] at named'
+  cases named'
+  exact ⟨cap, digest, named, cover, bound⟩
 
 theorem tuple_source_exact
     (prepared : PreparedInvocation deployment profile ambient ground command)

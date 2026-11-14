@@ -2763,11 +2763,13 @@ fn delegation_fields(fields: &Value) -> Result<Value> {
 
 /// The kernel refuses a delegated capability's debit of a balance it sets no
 /// `maxDelta` bound on (`Theory.CapabilityValueBound.StrictBound`,
-/// `missingBalanceBound`). A delegated account grant that carries `transfer`
-/// and bounds no balance could never spend, so it is refused here, before it
-/// is authored. The bound limits one turn; it is not a running total.
+/// `missingBalanceBound`). A delegated account grant that carries a debiting
+/// verb (`transfer`, `mintAsset` on a well, `burnAsset`) and bounds no balance
+/// could never use it, so it is refused here, before it is authored. The bound
+/// limits one turn; it is not a running total.
 pub(crate) fn transfer_grant_bounded(kind: &str, verbs: &[Value], bounds: Option<&Value>) -> Result<()> {
-    if kind != "account" || !verbs.iter().any(|verb| verb.as_str() == Some("transfer")) {
+    let debits = |verb: &Value| matches!(verb.as_str(), Some("transfer" | "mintAsset" | "burnAsset"));
+    if kind != "account" || !verbs.iter().any(debits) {
         return Ok(());
     }
     let bounded = bounds.and_then(Value::as_array).is_some_and(|bounds| {
@@ -2778,10 +2780,29 @@ pub(crate) fn transfer_grant_bounded(kind: &str, verbs: &[Value], bounds: Option
     if bounded {
         return Ok(());
     }
-    Err("a delegated `transfer` grant on an account must bound a balance: add maxDelta \
+    Err("a delegated `transfer`, `mintAsset` or `burnAsset` grant on an account must bound a balance: add maxDelta \
          [{\"field\":\"balance:ASSET\",\"max\":\"N\"}] (shell: --max-delta balance:ASSET=N), the most one turn \
          may take from the account, fees included; the Host refuses an unbounded delegated debit (missingBalanceBound)"
         .into())
+}
+
+#[cfg(test)]
+mod grant_bound_tests {
+    use super::transfer_grant_bounded;
+    use serde_json::json;
+
+    #[test]
+    fn a_delegated_debiting_grant_needs_a_balance_bound() {
+        let bound = json!([{"field":"balance:7","max":"30"}]);
+        for verb in ["transfer", "mintAsset", "burnAsset"] {
+            let verbs = [json!("observe"), json!(verb)];
+            assert!(transfer_grant_bounded("account", &verbs, None).is_err(), "{verb} unbounded");
+            assert!(transfer_grant_bounded("account", &verbs, Some(&json!([{"field":"3","max":"1"}]))).is_err());
+            assert!(transfer_grant_bounded("account", &verbs, Some(&bound)).is_ok(), "{verb} bounded");
+        }
+        assert!(transfer_grant_bounded("account", &[json!("observe")], None).is_ok());
+        assert!(transfer_grant_bounded("object", &[json!("transfer")], None).is_ok());
+    }
 }
 
 fn delegation_bounds(bounds: &Value) -> Result<Value> {

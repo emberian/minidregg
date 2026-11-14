@@ -625,6 +625,9 @@ inductive Reject where
   | fieldNotNamed
   /-- K-FIELDS: a named field moved past a per-field bound (`maxDelta`). -/
   | maxDeltaExceeded
+  /-- A delegated capability lowered a balance on which its scope sets no `maxDelta` bound
+  (`Theory.CapabilityValueBound.DebitsBounded`). -/
+  | missingBalanceBound
   | run (reason : Run.Refusal)
   /-- The signer authenticated, but its refusal lane (`Kernel.RefusalLane`) is
   empty: its recent refused commands already cost the Host their budget. The

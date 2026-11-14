@@ -125,9 +125,9 @@ inductive Reject where
   | replayedMarker | physicalPreparation
   | policyUnavailable | noGrant | lawRefused | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
-  /-- The `burnAsset` grant a burn presents on the debited account does not bound the burn
+  /-- The grant presented on the command's target does not bound the posting's source
   (`Theory.CapabilityValueBound.strictCheck`): the balance is not named, a bound on it is
-  below the burned amount, or the grant is delegated and sets no bound on it. -/
+  below the amount, or the grant is delegated and sets no bound on it. -/
   | valueBound (reason : CapabilityValueBound.Refusal)
   deriving DecidableEq, Repr
 
@@ -764,21 +764,22 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.envelope
   semantic : prepared.SemanticAccepted
-  /-- A burn's grant on the debited account bounds the burn. A mint or a floor is authorized
-  on the well under the well's law and debits no member account. -/
-  bounded : command.op ≠ .burn ∨
-    CapabilityValueBound.Presented semantic.authorization.evidence.capabilityValue
-      prepared.plan.batch.operations command.target
+  /-- The grant on the command's target bounds the posting's source: the debited account for
+  a burn, the well for a mint or a floor (`Command.target`). A floor posts amount zero, so a
+  delegated grant sets it only if it names and bounds the well's balance. -/
+  bounded : CapabilityValueBound.Presented semantic.authorization.evidence.capabilityValue
+    prepared.plan.batch.operations command.target
 
-/-- **Every admitted burn is within its grant's value bound**: each balance the burn debits
-from the account is named by the grant's scope and within every bound it sets, and a
-delegated grant set that bound itself. -/
-theorem Accepted.burn_value_bounded [DecidableEq F]
+/-- **Every admitted well command is within its grant's value bound**: the balance the
+posting takes from its source (the account a burn debits, the well a mint issues from) is named
+by the grant's scope and within every bound it sets, and a delegated grant set that bound
+itself. -/
+theorem Accepted.value_bounded [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {ingress : Ingress}
-    (accepted : Accepted prepared ingress) (burn : command.op = .burn) :
+    (accepted : Accepted prepared ingress) :
     CapabilityValueBound.Presented accepted.semantic.authorization.evidence.capabilityValue
       prepared.plan.batch.operations command.target :=
-  accepted.bounded.resolve_left (fun other => other burn)
+  accepted.bounded
 
 theorem Accepted.bound [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {ingress : Ingress}
@@ -829,16 +830,14 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
         match authorize prepared receipt with
         | .error reason => return .error reason
         | .ok semantic =>
-            if burn : command.op = .burn then
-              match bounded : CapabilityValueBound.presentedCheck
-                  semantic.authorization.evidence.capabilityValue
-                  prepared.plan.batch.operations command.target with
-              | .error none => return .error .noGrant
-              | .error (some reason) => return .error (.valueBound reason)
-              | .ok () =>
-                  return .ok ⟨receipt, same, semantic,
-                    .inr ((CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp bounded)⟩
-            else return .ok ⟨receipt, same, semantic, .inl burn⟩
+            match bounded : CapabilityValueBound.presentedCheck
+                semantic.authorization.evidence.capabilityValue
+                prepared.plan.batch.operations command.target with
+            | .error none => return .error .noGrant
+            | .error (some reason) => return .error (.valueBound reason)
+            | .ok () =>
+                return .ok ⟨receipt, same, semantic,
+                  (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp bounded⟩
       else return .error .noGrant
 
 /-- The exact header the subject signs over the current image. It discloses no
