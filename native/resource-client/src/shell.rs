@@ -611,19 +611,7 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
             let max_cost = p.flag("--max-cost").flatten().unwrap_or("50000");
             let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
                 "name":name,"recipient":invitee,"verbs":verbs,"maxCost":max_cost,"room":true});
-            if let Some(fields) = p.flag("--fields").flatten() {
-                let fields: Vec<&str> = fields.split(',').collect();
-                request["fields"] = json!(fields);
-            }
-            if let Some(bounds) = p.flag("--max-delta").flatten() {
-                let mut out = Vec::new();
-                for bound in bounds.split(',') {
-                    let (field, max) = bound.split_once('=').ok_or_else(|| "--max-delta is FIELD=N[,FIELD=N...]".to_owned())?;
-                    decimal(max, "max delta")?;
-                    out.push(json!({"field":field,"max":max}));
-                }
-                request["maxDelta"] = json!(out);
-            }
+            scope_narrowing(&mut request, p.flag("--fields").flatten(), p.flag("--max-delta").flatten())?;
             match enc {
                 None => proposal(session, id, &request),
                 Some(enc) => {
@@ -1107,6 +1095,27 @@ fn request_file(path: PathBuf, value: &Value) -> (PathBuf, Vec<u8>) {
 
 fn flag(name: &str, value: impl Into<OsString>) -> (String, OsString) {
     (name.to_owned(), value.into())
+}
+
+/// The K-FIELDS narrowing of a delegation, as the proposal carries it: `--fields F,...` names
+/// the fields the child may touch, `--max-delta F=N,...` bounds the change one turn makes to
+/// each (`balance:ASSET=N` bounds the gross debit of that asset). Absent flags leave the
+/// parent's fields and bounds.
+fn scope_narrowing(request: &mut Value, fields: Option<&str>, bounds: Option<&str>) -> std::result::Result<(), String> {
+    if let Some(fields) = fields {
+        let fields: Vec<&str> = fields.split(',').collect();
+        request["fields"] = json!(fields);
+    }
+    if let Some(bounds) = bounds {
+        let mut out = Vec::new();
+        for bound in bounds.split(',') {
+            let (field, max) = bound.split_once('=').ok_or_else(|| "--max-delta is FIELD=N[,FIELD=N...]".to_owned())?;
+            decimal(max, "max delta")?;
+            out.push(json!({"field":field,"max":max}));
+        }
+        request["maxDelta"] = json!(out);
+    }
+    Ok(())
 }
 
 fn proposal(session: &Session, id: &str, request: &Value) -> Plan {
@@ -1845,6 +1854,11 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             if let Some(Some(height)) = p.flag("--until") {
                 request["notAfter"] = json!(height);
             }
+            // MAX-COST is a ceiling on a request's cost (its encoded size, or a fee), never on
+            // the value a transfer moves. The value bound of a spend grant is
+            // `--max-delta balance:ASSET=N` (the gross debit of one turn), with `--fields`
+            // naming which balances it may move at all.
+            scope_narrowing(&mut request, p.flag("--fields").flatten(), p.flag("--max-delta").flatten())?;
             proposal(session, p.arg(0), &request)
         }
         "market" => {
@@ -4190,6 +4204,17 @@ mod tests {
         assert!(plan(&s, "delegate d0 lab 12 observe,mutate 000").is_err());
         assert!(plan(&s, "delegate d1 lab 12 observe 50000").is_ok());
         assert!(plan(&s, "delegate d2 lab 12 mutate 0").is_ok());
+        // A spend grant's value bound is `--max-delta balance:ASSET=N`, not MAX-COST.
+        let (_, request) = request_of(plan(&s,
+            "delegate d3 lab 12 transfer 3 --fields balance:0 --max-delta balance:0=5").unwrap());
+        assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
+            "name":"lab","recipient":"12","verbs":["transfer"],"maxCost":"3",
+            "fields":["balance:0"],"maxDelta":[{"field":"balance:0","max":"5"}]}));
+        let refused = plan(&s, "delegate d4 lab 12 transfer 3 --max-delta balance:0").err().unwrap();
+        assert!(refused.contains("--max-delta is FIELD=N"), "{refused}");
+        assert!(plan(&s, "delegate d5 lab 12 transfer 3 --max-delta balance:0=x").is_err());
+        let (_, request) = request_of(plan(&s, "delegate d6 lab 12 transfer 3").unwrap());
+        assert!(request.get("maxDelta").is_none() && request.get("fields").is_none());
         let (_, request) = request_of(plan(&s, "room invite i1 lab 12").unwrap());
         assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
             "name":"lab","recipient":"12","verbs":["observe","place"],"maxCost":"50000","room":true}));

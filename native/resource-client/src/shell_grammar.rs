@@ -194,7 +194,7 @@ const PROPOSAL: &str = "minidregg-workspace-proposal-v1";
 const _: &str = PROPOSAL;
 
 pub static DELEGATE: Grammar = Grammar { verb: "delegate", leaves: &[
-    Leaf { path: &["delegate"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("RECIPIENT", Kind::Subject), arg("VERB[,VERB...]", Kind::Word), arg("MAX-COST", Kind::Number)], flags: &[valued("--until", "H", Kind::Number)], effect: Effect::Propose, about: "mini workspace --action propose (action delegate; --until H: the grant's notAfter height)" },
+    Leaf { path: &["delegate"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("RECIPIENT", Kind::Subject), arg("VERB[,VERB...]", Kind::Word), arg("MAX-COST", Kind::Number)], flags: &[valued("--until", "H", Kind::Number), valued("--fields", "F,...", Kind::Word), valued("--max-delta", "F=N,...", Kind::Word)], effect: Effect::Propose, about: "mini workspace --action propose (action delegate; --until H: the grant's notAfter height; MAX-COST caps a request's size or fee, never the value moved: bound a spend grant with --max-delta balance:ASSET=N, the gross debit of one turn, and name its balances with --fields balance:ASSET)" },
 ] };
 pub static REVOKE: Grammar = Grammar { verb: "revoke", leaves: &[
     Leaf { path: &["revoke"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("RECIPIENT", Kind::Subject)], flags: &[valued("--capability", "CAPABILITY", Kind::Number)], effect: Effect::Propose, about: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT, or --capability CAPABILITY)" },
