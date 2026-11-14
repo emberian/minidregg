@@ -1212,6 +1212,44 @@ def description (config : NativeHost.Config) : IO Lean.Json := do
   let light ← IO.ofExcept (← NativeHostLight.start config)
   return descriptionAt config light.opening.served.canonicalBytes
 
+/-- Measurement: one `set` of the authority cell's kept private index on a store of `size`
+entries, and the parts of that `set` each alone. -/
+def trieBench (size : Nat) : IO Unit := do
+  let aux := CredentialAuthorityCell.materializer.aux
+  let address (i : Nat) : Minidregg.Theory.Store.Address CredentialAuthorityCell.layout :=
+    ⟨.revoked, .channel ⟨i⟩⟩
+  let per (label : String) (count : Nat) (t0 : Nat) : IO Unit := do
+    let nanos := (← IO.monoNanosNow) - t0
+    IO.println s!"{label}: {nanos / count / 1000}.{(nanos / count % 1000) / 100} us each over {count}"
+  let t0 ← IO.monoNanosNow
+  let mut kept := (aux.build (Minidregg.Theory.Store.fromEntries [])).1
+  for i in [0:size] do kept := aux.set kept (address i) (some ())
+  IO.println s!"built {size} entries by set in {((← IO.monoNanosNow) - t0) / 1000000} ms, root {(aux.root? kept).map (·.value)}"
+  let rounds := 200
+  let t0 ← IO.monoNanosNow
+  let mut next := kept
+  for i in [0:rounds] do next := aux.set next (address (size + i)) (some ())
+  IO.println s!"root after {(aux.root? next).map (·.value)}"
+  per s!"set (new entry, store of {size})" rounds t0
+  let tag := PrivateCellRoot.untagged CredentialAuthorityCell.layout
+  let t0 ← IO.monoNanosNow
+  let mut bits := 0
+  for i in [0:rounds] do
+    bits := bits + ((PrivateCellRoot.paths CredentialAuthorityCell.wire tag (address (size + i))).filter id).length
+  IO.println s!"path bits set {bits}"
+  per "paths (address hash and tag)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut sum := 0
+  for i in [0:rounds] do
+    sum := sum + (PrivateCellRoot.contentDigest CredentialAuthorityCell.wire (address (size + i)) []).bytes.headD 0 |>.toNat
+  IO.println s!"content digests {sum}"
+  per "contentDigest" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut inner := Compiler.Sp800185Cshake256.hash PrivateCellRoot.nodeCustomization [2]
+  for _ in [0:20000] do inner := PrivateCellRoot.pathDig (.branch inner inner)
+  IO.println s!"chained branch digest {inner.bytes.headD 0}"
+  per "pathDig of a branch" 20000 t0
+
 /-- Measurement: time the per-state costs a request pays on this Store. -/
 def storeBench (config : NativeHost.Config) : IO Unit := do
   let timed {α : Type} (label : String) (action : IO α) : IO α := do
@@ -8785,6 +8823,10 @@ def runCommandStoreBench (_arguments : List String) (_configPath _command : Stri
   | [] =>
           storeBench config
           pure 0
+  | ["trie", size] =>
+          match size.toNat? with
+          | some size => trieBench size; pure 0
+          | none => throw (IO.userError usage)
   | _ => throw (IO.userError usage)
 
 /-- `well-ledger` (dispatched by `run`). -/
