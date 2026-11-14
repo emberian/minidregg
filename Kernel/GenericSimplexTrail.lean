@@ -711,7 +711,96 @@ theorem ghost_step {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Bl
   · intro m member
     exact (freshOutbox m member).imp id (fun sent => embed1 (.send m) sent)
 
+/-! ## The start: the premises are inhabited -/
+
+theorem liftArgument_nil (value : Argument) : liftArgument [] value = value := by
+  cases value <;> rfl
+
+theorem liftEvent_nil (event : Event) : liftEvent [] event = event := by
+  cases event with
+  | send m => obtain ⟨sender, view, kind, value⟩ := m; cases value <;> rfl
+  | _ => rfl
+
+theorem start_facts (c : Config) (p time : Nat) :
+    Backed (fun _ => False) (start c p time) ∧
+      (start c p time).lastCommitted < (start c p time).current ∧
+      Evident 0 [] (start c p time) := by
+  unfold start
+  split
+  · exact ⟨fun view member => by simp at member, (show (0 : Nat) < 1 from Nat.zero_lt_one),
+      Or.inl ⟨rfl, rfl⟩⟩
+  · rename_i admitted
+    have configOK : c.wellFormed = true := by
+      cases formed : c.wellFormed <;> simp_all
+    have formed := configOK
+    simp only [Config.wellFormed, Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq] at formed
+    have enrolled : p < c.parties := by simpa [configOK] using admitted
+    refine ⟨(pump_invariant c (fun _ => False) _ _ formed.1.1
+      (enterView_invariant c (fun _ => False) _ 1
+        (initial_invariant c (fun _ => False) p time (time + c.timeout) [] [] enrolled))).backed,
+      Minidregg.Kernel.GenericSimplexErasure.pump_above c c.pumpBudget _ (Or.inl formed.2),
+      pump_evident c c.pumpBudget _ (enterView_evident c _ 1 (Or.inl ⟨rfl, rfl⟩))⟩
+
+/-- **Premise inhabitation, and the base case.** A correct member's `start`, with its own
+audit as the trail and nothing committed, is a `Ghost` over a `Good` trail: the premises of
+`ghost_step` hold at every replica's start, for every configuration. -/
+theorem ghost_start (c : Config) (faulty : Finset Nat) (p time : Nat)
+    (member : p < c.parties) :
+    Ghost c faulty p 0 [] (start c p time).audit (start c p time) ∧
+      Good c faulty (start c p time).audit := by
+  obtain ⟨self, owned⟩ := start_structure c p time
+  have causal := start_causal c p time [] []
+  have origin := start_origin c p time [] []
+  have positive := start_positive c p time [] []
+  have scope := start_scoped c p time member
+  obtain ⟨backed, live, evident⟩ := start_facts c p time
+  have owner : ∀ {q v kind value}, (.send ⟨q, v, kind, value⟩ : Event) ∈ (start c p time).audit →
+      q = (start c p time).self := by
+    intro q v kind value stored
+    have named := owned _ stored
+    simpa [eventOwner] using named
+  refine ⟨?_, ?_⟩
+  · exact
+      { self := self
+        causal := causal
+        history := origin.1
+        origins := origin.2
+        positive := positive
+        scope := scope
+        output := start_output c p time [] []
+        owned := owned
+        live := live
+        baseLe := Nat.zero_le _
+        committed := Or.inl ⟨rfl, rfl⟩
+        embed := fun event stored => by rw [liftEvent_nil]; exact stored
+        received := fun view stored m received => by
+          rcases backed view stored m received with impossible | sent
+          · exact impossible.elim
+          · have same : liftMessage [] m = m := by
+              obtain ⟨sender, number, kind, value⟩ := m
+              cases value <;> rfl
+            rw [same]; exact sent
+        complete := fun v kind value _ _ stored => ⟨value, stored, liftArgument_nil value⟩
+        evidenceViews := fun m stored => by
+          rcases evident with ⟨_, same⟩ | ⟨_, inside⟩
+          · rw [same] at stored; cases stored
+          · exact Nat.le_of_eq (viewAt_scoped scope _ m (inside m stored)).2 }
+  · refine ⟨?_, ?_, ?_⟩
+    · intro index within owner_ _ _
+      exact ⟨start_emission c p time [] [] index within, origin.2 index within,
+        positive.2.2 _ (List.getElem_mem within)⟩
+    · intro q v x y _ first second
+      have named := owner first
+      subst named
+      exact causal.voteOnce v x y first second
+    · intro q v x a _ first second
+      have named := owner first
+      subst named
+      exact recorded_commit_candidate _ causal.commitLock causal.commitRecorded
+        causal.candidateRecorded v x a first second
+
 #assert_axioms good_faithful
 #assert_axioms ghost_step
+#assert_axioms ghost_start
 
 end Minidregg.Kernel.GenericSimplexTrail

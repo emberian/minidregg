@@ -322,12 +322,52 @@ whole chains, and each correct replica's chain is a commit of it).
   `conflicting_count_small` (a block that does not strictly extend the commit is counted
   for at most `faults` members above it, below every threshold a rule reads). PROPOSE is
   not covered and need not be: no obligation of the model reads a proposal.
+- Proved, the local half. The trace is the run's own and lives on the proof side: no
+  replica field and no byte moves.
+  - `Kernel/GenericSimplexTrail.lean`. `Good` is what a list of whole-chain events must
+    meet, each event against the strict prefix before it, to be a trace of the model
+    (`good_faithful`: it gives `LocalFaithful`). `Ghost` is one correct replica's side: a
+    specification state `G` with its audit retained whose `forget` is the replica's state;
+    every event of its audit and every message it holds is in the trail read as
+    `chain ++ block`, and every VOTE, CANDIDATE and COMMIT of the member in the trail above
+    its floor is one of its audit. `ghost_step`: one `step` on `G` appends its new events to
+    the trail, and `Good` and `Ghost` hold again; each event meets its obligation from the
+    specification's own lemmas applied to `G` (`step_invariant`, `step_causal`,
+    `step_origin`, `step_positive`). It also gives what the durable record needs: every new
+    SEND is in the outbox, every outbox message is a SEND of the trail.
+  - `Kernel/GenericSimplexFresh.lean`, three facts about `step` on any state that the above
+    needs because the replica forgets views below its floor: `step_fresh` (a step's new
+    events are for views above the floor it started from; new SENDs and the outbox
+    coincide), `step_relay` (what it adds to `relay` is floor evidence or its own received
+    messages above the floor), `step_evident` (the floor evidence changes only when the
+    floor rises, to received messages of the new floor view).
+  - `Kernel/GenericSimplexRebaseGhost.lean`. `ghost_rebase`: when the origin moves, the
+    `Ghost` over `chain` becomes one over `chain ++ tip`. Its audit is the old one with every
+    event above the floor read from the new origin (`rebaseEvent`). The trail gains the
+    floor view's parent and one SEND per `tombstone`, each a faulty member's. `Rebased`
+    states what `rebase` did to the views, by view number, and is a premise.
 - Stated, not proved: `RelativeFaithful`. Until it is proved, agreement of the running
-  replicas rests on that statement. What remains is the local half, one `liveStep` at a
-  time: each event the step emits on relative blocks, read through `denote`, meets its
-  `LocalFaithful` obligation from the messages the replica holds. The specification's own
-  proof of this (`step_emission` and the invariants under it) is about whole chains and a
-  retained audit; it has to be transported across `forget` and `rebase`, or redone.
+  replicas rests on that statement. What remains is the composition, in three parts:
+  1. `rebase` meets `Rebased`. `rebase` checks the floor view's commit only if that view is
+     in the list, so this needs one more fact about `step`: a state with a nonempty
+     committed tip has its floor view (`(viewAt s s.lastCommitted).committed.isSome`).
+  2. Reading. A message of a correct member that a replica decodes is, read as
+     `chain ++ block` with the reader's chain, a SEND of the trail: a VOTE, CANDIDATE or
+     READY by `support_extends_commit` and `above_denotes` (its view is above the reader's
+     floor, or `ingest` drops it); a COMMIT by `commit_reads_signed_chain` under
+     `CollisionFreeOn (Occurs …)`; a PROPOSE from the wire is never counted.
+  3. The induction over `RelReachable`, with `Ghost` for each correct replica at its
+     chain, the replica's height and digest tracking the chain, the `sent` record equal to
+     the member's SENDs of the trail through `denote`, the kept evidence and the held
+     COMMITs. `finish`, `deliver` and `release` are `ghost_step` (several in `release`) then
+     `ghost_rebase`; the other replicas keep their side by `ghost_extend`. `Ghost` at
+     `Replica.start` is the base case.
+  Premises: `ghost_start` shows a correct member's `start`, with its own audit as the trail,
+  is a `Ghost` over a `Good` trail for every configuration (the premises of `ghost_step`
+  are inhabited; it is also the single-replica base case). `Rebased`, the premise of
+  `ghost_rebase`, has no inhabitation witness yet: part 1 is that witness. What `Good`
+  refuses is what `LocalFaithful` refuses (`not_localFaithful_equivocation`,
+  `not_localFaithful_unsupported_commit`).
 - Executed: `relNet_faithful` (the conclusion on a reachable network whose correct
   replicas have committed; the trace is the specification's run of the same operation and
   the two engines' sends coincide exactly), `twoNet_run` and the witnesses on it for the
