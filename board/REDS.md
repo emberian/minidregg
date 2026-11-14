@@ -1,17 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `e9dc4c0be201` (builder: REDS.md for 1b5666369348 (3 red)). Round finished 2026-11-14T14:26Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-e9dc4c0b`.
+Tip: `f0ed42e2752a` (builder: REDS.md for e9dc4c0be201 (3 red)). Round finished 2026-11-14T14:34Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-f0ed42e2`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | ratchets | rc=1 see /home/hbox/lanes/integ/logs/ratchets.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/ratchets.log |
-| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-e9dc4c/journey.log |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-f0ed42/journey.log |
 
-Suspect commits since green (`git log 788dfb51fb5a..e9dc4c0be201`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..f0ed42e2752a`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `f0ed42e2` builder: REDS.md for e9dc4c0be201 (3 red) (owner: build-loop)
+- `5c29e9be` gates(generic-simplex): the gate builds its own Rust helpers, so every caller passes one argument
 - `e9dc4c0b` builder: REDS.md for 1b5666369348 (3 red) (owner: build-loop)
 - `83d19700` effects: the content read and the kind read are bound at codes 3 and 7; their hand arms are deleted (owner: apps-hermes)
 - `1b566636` agreement(native): four participants run end to end in the gate; tip validation, a running history d (owner: apps-hermes)
@@ -50,17 +51,15 @@ Suspect commits since green (`git log 788dfb51fb5a..e9dc4c0be201`), newest first
 - `a4472f3f` docs: the effects revival's present state, and what the content migration takes
 - `04fe80dd` laws: every joint participant the MUD laws trust is bound to its birth; `LawView.Turn` carries ident (owner: apps-hermes)
 - `10b3ed1c` thin consent: a registered observation is displayed without a served view
-- `4a8e4524` kernel: an unread payload tag is refused by name at the receiver; a registered refusal prints its de (owner: apps-hermes)
-- `93f35b64` effects: `RegistryKeystone`, `RegistryAccepted` and `RegistryTeeth` are proved
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.172 | 0.213 | 1.236 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 24.404 | 60.624 | 2.484 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.132 | 0.189 | 1.433 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 13.057 | 51.354 | 3.933 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.623 | 0.373 | 0.599 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 176.907 | 136.405 | 0.771 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-e9dc4c0b/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.161 | 0.204 | 1.264 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 35.498 | 56.951 | 1.604 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.106 | 0.151 | 1.427 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 18.584 | 53.328 | 2.870 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.327 | 0.298 | 0.910 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 439.610 | 133.934 | 0.305 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-f0ed42e2/flatness.log | - | - | - | - | host-execution, store-retained |
