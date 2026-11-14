@@ -275,7 +275,8 @@ kr() { # ID ACTION-JSON MODE: a scalar write of tc-note beside a kindRead of tc-
   "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$id.json" --proposal-id "$id" \
     >"$D/log/$id-propose.out" 2>"$D/log/$id-propose.err" || fail "$id-propose" 0 1 x "$(tail -3 "$D/log/$id-propose.err")"
   : >"$D/proxy-$id.log"
-  RC=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+  # MINI_CONSENT_RESIDENT=0: this line's own provider, so this line's proxy mode and log apply (`say`).
+  RC=0; env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
     THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE="$mode" THIN_PROXY_LOG="$D/proxy-$id.log" \
     "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/$id/intent.json" \
     --attempt "$SPONSOR_WS/attempts/$id" >"$D/log/$id-submit.out" 2>"$D/log/$id-submit.err" || RC=$?
