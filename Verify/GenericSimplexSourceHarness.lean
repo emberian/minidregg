@@ -24,14 +24,16 @@ def require (condition : Bool) (detail : String) : IO Unit :=
 standing service runs. Packets are delivered directly between participants in
 this process; the standing service carries them over persistent TCP instead. -/
 def drive (fuel : Nat) (replicas : Array Replica) (payload : Bytes)
-    (packets : List (Nat × ByteArray)) : IO (Array Replica) := do
+    (packets : List (Nat × ByteArray)) (last : String := "none") : IO (Array Replica) := do
   match fuel with
-  | 0 => throw (IO.userError "native source agreement exhausted finite harness service")
+  | 0 => throw (IO.userError
+      s!"native source agreement exhausted finite harness service; last application status: {last}")
   | fuel+1 =>
     if replicas.toList.all (fun r => (completedReceipt r.participant payload).isSome) then
       return replicas
     let mut replicas := replicas
     let mut later := []
+    let mut last := last
     for index in List.range replicas.size do
       let some replica := replicas[index]? | throw (IO.userError "replica index")
       let inbound := (packets.filter (·.1 == index)).map (·.2)
@@ -39,11 +41,12 @@ def drive (fuel : Nat) (replicas : Array Replica) (payload : Bytes)
         replica.participant inbound {}
       if report.refused != 0 then
         throw (IO.userError "honest in-process packet failed authentication")
+      if report.status != "no committed work" then last := report.status
       replicas := replicas.set! index ⟨replica.config,participant⟩
       if replicas.toList.all (fun r => (completedReceipt r.participant payload).isSome) then
         return replicas
       later := later ++ sent
-    drive fuel replicas payload later
+    drive fuel replicas payload later last
 
 /-- The per-mutation replica comparison: tip height and served world root.
 The root is `deployedRoot (entriesOf image snapshot chain)` (`Loaded.worldRoot_eq`)

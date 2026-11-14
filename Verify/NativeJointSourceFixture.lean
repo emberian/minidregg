@@ -13,6 +13,7 @@ public import Kernel.NativeHostGenesis
 public import Kernel.NativeHostContext
 public import Compiler.GenericSimplexSourceAnchor
 public import Verify.GenericSimplexOperatorBridge
+public import Verify.ResourceReserveBirthFixture
 public import Lean.Data.Json
 
 @[expose] public section
@@ -137,7 +138,7 @@ def bootstrapFresh (config : NativeHost.Config) (canonicalImage : List UInt8) :
           return ← DurableReceiverIO.bootstrap config.transport ResourceBirthCodec.rootBytes durable.image.seed
 
 def initializeStores (root : System.FilePath) (helpers : Helpers)
-    (alicePath bobPath : System.FilePath) : IO Unit := do
+    (alicePath bobPath : System.FilePath) (timeoutMs : Nat := 100000) : IO Unit := do
   require (!(← root.pathExists)) "fixture root exists; use a fresh owner-private directory"
   privateDirectory root
   let alice := (← IO.FS.readBinFile alicePath).toList
@@ -159,7 +160,7 @@ def initializeStores (root : System.FilePath) (helpers : Helpers)
       if left ≤ right then
         helper helpers.agreement #["mac-keygen", (pairPath root left right).toString]
   let context : Context :=
-    ⟨digestStream.encode ⟨8500⟩, 0, [], ⟨4,1,100000,8,3⟩, publicKeys⟩
+    ⟨digestStream.encode ⟨8500⟩, 0, [], ⟨4,1,timeoutMs,8,3⟩, publicKeys⟩
   require context.wellFormed "real committee context is malformed"
   let built ← derive root helpers context alice bob
   require built.image.accepted.isEmpty "genesis unexpectedly contains accepted history"
@@ -185,9 +186,13 @@ def initializeStores (root : System.FilePath) (helpers : Helpers)
   IO.println "INITIALIZED four actual source stores; no source transition accepted yet"
 
 /-- Open one replica: verified source store, exact committee context bound to
-this source genesis, and its engine journal (writer lock when `writable`). -/
+this source genesis, and its engine journal (writer lock when `writable`). With
+`foreignHistory` (the `foreign-history` plant) the running digest of its source records is
+that of another domain's history (the next epoch's): a certified record is then never
+ordered, because the digest its certificate signs is not the one this source extends. -/
 def openReplica (root : System.FilePath) (helpers : Helpers) (index : Nat) (writable : Bool)
-    (listen : Option String := none) (peers : List (Nat × String) := []) :
+    (listen : Option String := none) (peers : List (Nat × String) := [])
+    (foreignHistory : Bool := false) :
     IO GenericSimplexSourceHarness.Replica := do
   let encoded := (← IO.FS.readBinFile (root / "context.bin")).toList
   let some context := contextStream.toLawful.decode encoded
@@ -207,15 +212,64 @@ def openReplica (root : System.FilePath) (helpers : Helpers) (index : Nat) (writ
     (fun failure => s!"source fixture replay refused: {failure.detail}"))
   let runtime ← openRuntime (replicaSpec root helpers index listen peers)
     (journalPath root index) context writable
-  let participant ← IO.ofExcept (← openParticipant config runtime ⟨loaded,verified⟩)
+  let participant ← IO.ofExcept (← openParticipant config runtime
+    (Source.read (if foreignHistory then {context with epoch := context.epoch + 1} else context) verified))
   return ⟨config,participant⟩
 
-def openReplicas (root : System.FilePath) (helpers : Helpers) (writable : Bool) :
-    IO (Array GenericSimplexSourceHarness.Replica) := do
+def openReplicas (root : System.FilePath) (helpers : Helpers) (writable : Bool)
+    (foreignHistory : Bool := false) : IO (Array GenericSimplexSourceHarness.Replica) := do
   let mut replicas := #[]
   for index in List.range 4 do
-    replicas := replicas.push (← openReplica root helpers index writable)
+    replicas := replicas.push (← openReplica root helpers index writable none [] foreignHistory)
   return replicas
+
+/-- The test signer (`credential-signature-verifier`'s `sign-probe` example): the Ed25519
+key of a seed octet signs one frame. Test fixture only. -/
+def probeSign (signer : System.FilePath) (seed : Nat) (frame : ByteArray) :
+    IO (ByteArray × ByteArray) :=
+  IO.FS.withTempDir fun directory => do
+    IO.FS.writeBinFile (directory / "frame.bin") frame
+    -- the signer announces on stderr that its key is public; only its exit code is read
+    let result ← IO.Process.output {cmd := signer.toString, args := #[toString seed,
+      (directory / "frame.bin").toString, (directory / "public.bin").toString,
+      (directory / "signature.bin").toString]}
+    require (result.exitCode == 0) s!"test signer refused: {result.stderr}"
+    pure (← IO.FS.readBinFile (directory / "public.bin"),
+      ← IO.FS.readBinFile (directory / "signature.bin"))
+
+/-- `probe-key`: write the test signer's public key for a seed octet. -/
+def probeKey (signer : System.FilePath) (seed : Nat) (output : System.FilePath) : IO Unit := do
+  writePrivate output (← probeSign signer seed ByteArray.empty).1
+
+/-- `author-birth`: the canonical `SignedCall` of one ordinary content birth by subject 7
+at cell TARGET, planned by `NativeHost.prepareLoaded` on replica 0's opened source store
+and signed slot by slot by the test signer (seed 7 is subject 7's enrolled key when `init`
+was given `probe-key 7`). Reads only; the call is what a client would hand to `run`,
+`await-call` or the operator bridge. -/
+def authorBirth (root : System.FilePath) (helpers : Helpers) (signer : System.FilePath)
+    (target nonce : Nat) (output : System.FilePath) : IO Unit := do
+  let encoded := (← IO.FS.readBinFile (root / "context.bin")).toList
+  let some context := contextStream.toLawful.decode encoded
+    | throw (IO.userError "invalid source fixture context")
+  let alice := (← IO.FS.readBinFile (root / "subject-7.pub")).toList
+  let bob := (← IO.FS.readBinFile (root / "subject-8.pub")).toList
+  let built ← derive root helpers context alice bob
+  let config := baseConfig root helpers context 0 (NativeHost.seedIdentity built.image.seed)
+  let source := genesis (baseConfig root helpers context 0) alice bob
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  let born := ResourceReserveBirthFixture.content target ⟨7⟩ ⟨target + 1000⟩ ⟨target + 2000⟩
+  let descriptor := ResourceReserveBirthFixture.ordinaryDescriptor config source opened ⟨7⟩ nonce 7 [born]
+  let plan ← IO.ofExcept ((NativeHost.prepareLoaded config opened
+    (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode descriptor)
+      (List.replicate descriptor.resourceBatch.operations.length ⟨41⟩))).mapError
+        (fun detail => s!"birth plan refused: {detail}"))
+  let mut signatures := []
+  for slot in plan.slots do
+    signatures := signatures ++ [(← probeSign signer 7 slot.header.toByteArray).2.toList]
+  let call ← IO.ofExcept ((NativeHost.assemble plan signatures).mapError
+    (fun detail => s!"birth assembly refused: {detail}"))
+  writePrivate output (NativeHostCodec.callCodec.encode call).toByteArray
+  IO.println s!"AUTHORED ordinary birth of cell {target} by subject 7: {plan.slots.length} signed slots"
 
 /-- `run`: one call through in-process agreement among the four actual
 replicas (the same per-replica `iteration` the standing service runs, packets
@@ -224,8 +278,8 @@ session is stopped, every journal reopened from disk, every source store
 reloaded, and the exact original receipt must be there with exactly one
 append. Test fixture only: it holds all four writer locks. -/
 def runCall (root : System.FilePath) (helpers : Helpers) (callFile : System.FilePath)
-    (fuel : Nat) : IO Unit := do
-  let replicas ← openReplicas root helpers true
+    (fuel : Nat) (foreignHistory : Bool := false) : IO Unit := do
+  let replicas ← openReplicas root helpers true foreignHistory
   let _ ← GenericSimplexSourceHarness.runCallChecked fuel replicas (← IO.FS.readBinFile callFile).toList
 
 /-- Independent process readback: no drive, proposal, or admission is called. -/
@@ -269,8 +323,7 @@ def serveReplica (replica : System.FilePath) (peers : String) (helpers : Helpers
   let peerList := ((List.range 4).filter (· != index)).map fun peer => (peer,addresses[peer]!)
   let replicaState ← openReplica root helpers index true (some addresses[index]!) peerList
   IO.eprintln s!"SERVE replica {index} listening on {addresses[index]!}"
-  GenericSimplexServe.serveLoop replicaState.participant
-    (GenericSimplexServe.requestDirectory replica) {} tickMs 30000 []
+  GenericSimplexServe.serveLoop replicaState.participant replica {} tickMs 30000 []
 
 /-- `await-call`: place the exact original call at the proposer and watches at
 the others, then wait for four identical receipts and prefixes. On the deadline
@@ -348,6 +401,9 @@ def main (args : List String) : IO Unit := do
   match args with
   | ["init", root, store, signature, agreement, alice, bob] =>
       initializeStores root ⟨store,signature,agreement⟩ alice bob
+  | ["init", root, store, signature, agreement, alice, bob, timeout] =>
+      let some timeout := timeout.toNat? | throw (IO.userError "invalid view timeout milliseconds")
+      initializeStores root ⟨store,signature,agreement⟩ alice bob timeout
   | ["serve-replica", replica, peers, store, signature, agreement, tick] =>
       let some tick := tick.toNat? | throw (IO.userError "invalid tick milliseconds")
       serveReplica replica peers ⟨store,signature,agreement⟩ tick
@@ -355,9 +411,19 @@ def main (args : List String) : IO Unit := do
       let some seconds := seconds.toNat? | throw (IO.userError "invalid deadline seconds")
       let some proposer := proposer.toNat? | throw (IO.userError "invalid proposer index")
       awaitCall root callFile outputFile seconds id proposer
+  | ["probe-key", signer, seed, output] =>
+      let some seed := seed.toNat? | throw (IO.userError "invalid seed octet")
+      probeKey signer seed output
+  | ["author-birth", root, store, signature, agreement, signer, target, nonce, output] =>
+      let some target := target.toNat? | throw (IO.userError "invalid target cell")
+      let some nonce := nonce.toNat? | throw (IO.userError "invalid nonce")
+      authorBirth root ⟨store,signature,agreement⟩ signer target nonce output
   | ["run", root, store, signature, agreement, callFile, fuel] =>
       let some fuel := fuel.toNat? | throw (IO.userError "invalid fuel")
       runCall root ⟨store,signature,agreement⟩ callFile fuel
+  | ["run", root, store, signature, agreement, callFile, fuel, "--plant", "foreign-history"] =>
+      let some fuel := fuel.toNat? | throw (IO.userError "invalid fuel")
+      runCall root ⟨store,signature,agreement⟩ callFile fuel true
   | ["lookup-all-call", root, store, signature, agreement, callFile, outputFile] =>
       lookupAllCall root ⟨store,signature,agreement⟩ callFile outputFile
   | ["audit-journal", root, index] =>
@@ -367,4 +433,4 @@ def main (args : List String) : IO Unit := do
       writeAuditFixture root false
   | ["write-audit-fixture", root, "--plant", "corrupt-segment"] =>
       writeAuditFixture root true
-  | _ => throw (IO.userError "usage: NativeJointSourceFixture audit-journal ROOT INDEX | write-audit-fixture ROOT [--plant corrupt-segment] | init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | run ROOT STORE SIGNATURE AGREEMENT CALL FUEL | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME")
+  | _ => throw (IO.userError "usage: NativeJointSourceFixture audit-journal ROOT INDEX | write-audit-fixture ROOT [--plant corrupt-segment] | init ROOT STORE SIGNATURE AGREEMENT ALICE_PUB BOB_PUB [VIEW_TIMEOUT_MS] | serve-replica REPLICA_DIR PEERS STORE SIGNATURE AGREEMENT TICK_MS | await-call ROOT CALL OUTCOME SECONDS ID PROPOSER | probe-key SIGN_PROBE SEED PUBLIC_OUT | author-birth ROOT STORE SIGNATURE AGREEMENT SIGN_PROBE TARGET NONCE CALL_OUT | run ROOT STORE SIGNATURE AGREEMENT CALL FUEL [--plant foreign-history] | lookup-all-call ROOT STORE SIGNATURE AGREEMENT CALL OUTCOME")

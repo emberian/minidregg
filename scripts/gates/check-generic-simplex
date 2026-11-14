@@ -2,7 +2,11 @@
 # Generic Simplex gate: runs the four Verify agreement programs the merge gate builds
 # (exe-roots) and proves each can go red.
 #
-#   scripts/gates/check-generic-simplex [BIN_DIR]     (default .lake/build/bin)
+#   scripts/gates/check-generic-simplex [BIN_DIR [HELPER_DIR]]
+#     BIN_DIR     the Lean executables (default .lake/build/bin)
+#     HELPER_DIR  the Rust helpers, a cargo profile directory (default ${CARGO_TARGET_DIR:-target}/release):
+#                 minidregg-link-sqlite-store (the source Store), minidregg-credential-signature-verifier,
+#                 mini-joint-agreement-crypto (the agreement helper session), examples/sign-probe (test signer)
 #
 #   generic-simplex-harness          the native layer (four replicas over in-memory journals: sealed packets,
 #                                    COMMIT signatures, relay, drain, checkpoint, certificate), the recorded 00f711 stall, backoff recovery, idle quiescence, normal
@@ -11,7 +15,14 @@
 #   generic-simplex-load             every operation of a short busy run commits (its timings are printed,
 #                                    published, never judged: performance is not a gate)
 #   minidregg-four-source-fixture    2-segment checkpointed agreement journal audit (`write-audit-fixture` +
-#                                    `audit-journal`)
+#                                    `audit-journal`); and four participants end to end over four native
+#                                    source Stores with the real helpers: one signed birth authored on the
+#                                    opened Store, agreed in process (`run`: admission, validation at the
+#                                    verified tip, a certificate of three ML-DSA signatures, the ordered
+#                                    append, then every helper stopped and every journal and Store reread),
+#                                    read back by fresh processes (`lookup-all-call`), then a second birth
+#                                    through four standing `serve-replica` processes over TCP and the
+#                                    request spool (`await-call`)
 #
 # Plants, each red with its recorded message (a plant that passes, or fails another way, is red):
 #   harness --plant fixed-timer                  the recovery run without backoff (the paper's fixed timer)
@@ -22,13 +33,47 @@
 #                                                (`Replica.owed`): a replica four commits behind stays behind
 #   log-reopen --plant flip-byte                 one bit flipped in the middle of the delta-frame image
 #   four-source-fixture --plant corrupt-segment  live segment snapshot disagrees with previous replayed state
+#   four-source-fixture run --plant foreign-history  every participant's running history digest is another
+#                                                domain's: the certified record is never ordered or appended
 set -uo pipefail
 bin=${1:-.lake/build/bin}
+helpers=${2:-${CARGO_TARGET_DIR:-target}/release}
 for e in generic-simplex-harness generic-simplex-log-reopen generic-simplex-load minidregg-four-source-fixture; do
   [[ -x $bin/$e ]] || { echo "check-generic-simplex: $bin/$e is not executable" >&2; exit 2; }
 done
+store=$helpers/minidregg-link-sqlite-store; verifier=$helpers/minidregg-credential-signature-verifier
+agreement=$helpers/mini-joint-agreement-crypto; signer=$helpers/examples/sign-probe
+for e in "$store" "$verifier" "$agreement" "$signer"; do
+  [[ -x $e ]] || { echo "check-generic-simplex: helper $e is not executable (see HELPER_DIR above)" >&2; exit 2; }
+done
+fixture=$bin/minidregg-four-source-fixture
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/generic-simplex-audit.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
+serving=()
+stop_serving() { for pid in "${serving[@]}"; do kill "$pid" 2>/dev/null; done; serving=(); }
+trap 'stop_serving; rm -rf "$tmp"' EXIT
+# A fresh four-Store world in $tmp/NAME with a 2 s view timeout, and one birth call authored on it.
+world() {  # NAME
+  "$fixture" probe-key "$signer" 7 "$tmp/$1-alice.pub" && "$fixture" probe-key "$signer" 8 "$tmp/$1-bob.pub" &&
+  "$fixture" init "$tmp/$1" "$store" "$verifier" "$agreement" "$tmp/$1-alice.pub" "$tmp/$1-bob.pub" 2000 &&
+  "$fixture" author-birth "$tmp/$1" "$store" "$verifier" "$agreement" "$signer" 7001 71 "$tmp/$1-call.bin"
+}
+# One call through in-process agreement among the world's four participants. ARGS: FUEL [--plant NAME]
+run_world() {  # NAME ARGS...
+  world "$1" && "$fixture" run "$tmp/$1" "$store" "$verifier" "$agreement" "$tmp/$1-call.bin" "${@:2}"
+}
+# Four standing replica processes over TCP on the world NAME, one client awaiting a second birth.
+serve() {  # NAME
+  local base=$((21000 + $$ % 20000)) i peers
+  peers=127.0.0.1:$base,127.0.0.1:$((base+1)),127.0.0.1:$((base+2)),127.0.0.1:$((base+3))
+  "$fixture" author-birth "$tmp/$1" "$store" "$verifier" "$agreement" "$signer" 7002 72 "$tmp/$1-call2.bin" || return 1
+  for i in 0 1 2 3; do
+    "$fixture" serve-replica "$tmp/$1/replica-$i" "$peers" "$store" "$verifier" "$agreement" 20 > "$tmp/$1-serve-$i.log" 2>&1 &
+    serving+=($!)
+  done
+  "$fixture" await-call "$tmp/$1" "$tmp/$1-call2.bin" "$tmp/$1-outcome2.bin" 30 second 1; local rc=$?
+  stop_serving; sleep 1
+  [[ $rc == 0 ]] && "$fixture" lookup-all-call "$tmp/$1" "$store" "$verifier" "$agreement" "$tmp/$1-call2.bin" "$tmp/$1-look2.bin"
+}
 status=0
 start=$(date +%s)
 pass() {  # NAME EXPECTED-LAST-LINE-PREFIX CMD...
@@ -49,6 +94,12 @@ pass log-reopen 'PASS checkpoint-then-append' "$bin/generic-simplex-log-reopen"
 pass load "${GENERIC_SIMPLEX_LOAD_OPS:-20}"$'\t' "$bin/generic-simplex-load" "${GENERIC_SIMPLEX_LOAD_OPS:-20}" 10
 pass four-source-audit 'AUDITED replica 0: 2 segments from genesis' \
   bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/ok" && "$1/minidregg-four-source-fixture" audit-journal "$2/ok" 0' _ "$bin" "$tmp"
+pass four-source-run 'PASS source lost-response/restart' \
+  run_world ok-run 400
+pass four-source-lookup 'LOOKUP-ALL exact original receipt and complete prefix on four reopened stores; accepted records per store \[1, 1, 1, 1\]' \
+  "$fixture" lookup-all-call "$tmp/ok-run" "$store" "$verifier" "$agreement" "$tmp/ok-run-call.bin" "$tmp/ok-run-look.bin"
+pass four-source-serve 'LOOKUP-ALL exact original receipt and complete prefix on four reopened stores; accepted records per store \[2, 2, 2, 2\]' \
+  serve ok-run
 plant fixed-timer 'backoff: pending block never committed' "$bin/generic-simplex-harness" --plant fixed-timer
 plant split-tip 'normal safety/replay' "$bin/generic-simplex-harness" --plant split-tip
 plant forged-digest 'forged running digest: a COMMIT for another chain was read' "$bin/generic-simplex-harness" --plant forged-digest
@@ -56,5 +107,7 @@ plant undrained-relay 'relayed evidence: a replica four commits behind was not s
 plant flip-byte 'delta-frames: ' "$bin/generic-simplex-log-reopen" --plant flip-byte
 plant corrupt-segment 'segment 1: its snapshot is not the state the previous segment replays to' \
   bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/bad" --plant corrupt-segment && "$1/minidregg-four-source-fixture" audit-journal "$2/bad" 0' _ "$bin" "$tmp"
+plant foreign-history "the commitment's digest is not that of the source prefix" \
+  run_world bad-run 40 --plant foreign-history
 echo "GENERIC-SIMPLEX wall=$(( $(date +%s) - start ))s status=$status"
 exit $status

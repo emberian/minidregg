@@ -1,7 +1,11 @@
 /- Transport fixture construction for the actual native reserve-birth receiver.
    These functions issue no capability or success token; native source admission
    and physical CAS/readback must qualify their outputs. -/
-import Kernel.NativeHostReserveBirth
+module
+
+public import Kernel.NativeHostReserveBirth
+
+@[expose] public section
 
 namespace Minidregg.Verify.ResourceReserveBirthFixture
 

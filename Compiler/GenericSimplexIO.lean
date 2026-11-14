@@ -2,6 +2,7 @@ module
 
 public import Compiler.GenericSimplexCodec
 public import Kernel.GenericSimplexStructure
+public import Kernel.GenericSimplexRelativeSelf
 public import Theory.AssertAxioms
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -62,6 +63,40 @@ def replayEvents (c : Config) (h : ChainDigest) : Replica → List Event → Opt
       let entry ← decodeEntry e
       let next := applyEntry c h r entry
       if next.core.failed then none else replayEvents c h next es
+/-- An entry never changes whose replica it is (`GenericSimplexRelativeSelf.step_self`). -/
+theorem applyEntry_self (c : Config) (h : ChainDigest) (r : Replica) (entry : Entry) :
+    (applyEntry c h r entry).core.self = r.core.self := by
+  cases entry with
+  | input input => exact Minidregg.Kernel.GenericSimplexRelativeSelf.step_self c h r input
+  | flush sends owed => rfl
+  | consume count => rfl
+/-- **A replay is of one replica**: whatever the events, the replayed replica is the member
+the replay started from, and it has not failed if that one had not. No identity is compared
+while a journal is replayed or appended to. -/
+theorem replayEvents_kept (c : Config) (h : ChainDigest) :
+    ∀ (events : List Event) (r s : Replica), replayEvents c h r events = some s →
+      s.core.self = r.core.self ∧ (r.core.failed = false → s.core.failed = false)
+  | [], r, s, done => by
+    have same : r = s := by simpa [replayEvents] using done
+    subst same
+    exact ⟨rfl,id⟩
+  | e :: es, r, s, done => by
+    cases decoded : decodeEntry e with
+    | none => simp [replayEvents, decoded] at done
+    | some entry =>
+      have step : replayEvents c h r (e :: es) =
+          if (applyEntry c h r entry).core.failed then none
+          else replayEvents c h (applyEntry c h r entry) es := by
+        simp [replayEvents, decoded]
+      rw [step] at done
+      split at done
+      · simp at done
+      · rename_i alive
+        obtain ⟨sameSelf,keeps⟩ := replayEvents_kept c h es _ s done
+        exact ⟨sameSelf.trans (applyEntry_self c h r entry),fun _ => keeps (by simpa using alive)⟩
+theorem replayEvents_self {c : Config} {h : ChainDigest} {events : List Event} {r s : Replica}
+    (done : replayEvents c h r events = some s) : s.core.self = r.core.self :=
+  (replayEvents_kept c h events r s done).1
 theorem replay_append (config : Config) (h : ChainDigest) (state : Replica) (events more : List Event) :
     replayEvents config h state (events ++ more) =
       (replayEvents config h state events).bind (fun next => replayEvents config h next more) := by
@@ -248,7 +283,7 @@ theorem v10_log_named (rest : Bytes) : logFormatVersion (logMagicV10 ++ rest) = 
 
 /-- Replay of a decoded log over the merged journal: from its checkpoint snapshot if it has
 one (which must be this replica's, and not failed), else from `Replica.start`. The result
-must still be this replica's and not failed. -/
+must not have failed; that it is still this replica's is `replayLog_kept`, not a check. -/
 def replayLog (expected : Context) (l : Log) : Option Replica :=
   let j := l.merged
   if (j.context != expected || !expected.wellFormed || decide (j.self ≥ expected.config.parties) ||
@@ -257,7 +292,37 @@ def replayLog (expected : Context) (l : Log) : Option Replica :=
   else do
     let s ← replayEvents expected.config (chainDigest expected)
       (j.snapshot.getD (Replica.start expected.config (chainDigest expected) j.self j.initialTime)) j.events
-    if (s.core.failed || s.core.self != j.self) = true then none else pure s
+    if s.core.failed then none else pure s
+
+/-- **A replayed log is its own replica's, and has not failed.** The snapshot guard and
+`start_self` fix whose replica the replay starts from; `replayEvents_kept` carries it. -/
+theorem replayLog_kept {expected : Context} {l : Log} {s : Replica}
+    (h : replayLog expected l = some s) : s.core.self = l.merged.self ∧ s.core.failed = false := by
+  unfold replayLog at h
+  dsimp only at h
+  split at h
+  · simp at h
+  · rename_i guard
+    cases replayed : replayEvents expected.config (chainDigest expected)
+        (l.merged.snapshot.getD (Replica.start expected.config (chainDigest expected) l.merged.self l.merged.initialTime))
+        l.merged.events with
+    | none => simp [replayed] at h
+    | some t =>
+      rw [replayed] at h
+      change (if t.core.failed = true then none else pure t) = some s at h
+      split at h
+      · simp at h
+      · rename_i alive
+        have ts : t = s := by simpa [pure] using h
+        subst ts
+        refine ⟨?_,by simpa using alive⟩
+        rw [replayEvents_self replayed]
+        cases snap : l.merged.snapshot with
+        | none =>
+          exact Minidregg.Kernel.GenericSimplexRelativeSelf.start_self _ _ _ _
+        | some n =>
+          show n.core.self = l.merged.self
+          exact Classical.byContradiction fun differs => guard (by simp [snap, differs])
 
 /-- Whole canonical replay of the physical log bytes: `decodeLog` accepts only
 encodings (`decodeLog_canonical`). -/
@@ -418,7 +483,7 @@ image: replay of the old log, then only the appended entries. -/
 theorem replayLog_push (context : Context) (l : Log) (state next : Replica) (d : Delta)
     (old : replayLog context l = some state)
     (continued : replayEvents context.config (chainDigest context) state d.events = some next)
-    (notFailed : next.core.failed = false) (sameSelf : next.core.self = l.merged.self) :
+    (notFailed : next.core.failed = false) :
     replayLog context (l.push d) = some next := by
   unfold replayLog at old ⊢
   rw [Log.merged_push]
@@ -437,15 +502,15 @@ theorem replayLog_push (context : Context) (l : Log) (state next : Replica) (d :
       simp at old
       obtain ⟨_, rfl⟩ := old
       rw [replay_append, replayed]
-      simp [continued, notFailed, sameSelf]
+      simp [continued, notFailed]
 
 theorem restoreLog_push (context : Context) (l : Log) (state next : Replica) (d : Delta)
     (old : restoreLog context l.encode = some (l,state))
     (continued : replayEvents context.config (chainDigest context) state d.events = some next)
-    (notFailed : next.core.failed = false) (sameSelf : next.core.self = l.merged.self) :
+    (notFailed : next.core.failed = false) :
     restoreLog context (l.push d).encode = some (l.push d,next) := by
   rw [restoreLog_encode, replayLog_push context l state next d
-    (replayLog_of_restoreLog old) continued notFailed sameSelf]
+    (replayLog_of_restoreLog old) continued notFailed]
   rfl
 
 /-! ## Checkpoints
@@ -479,6 +544,7 @@ theorem Log.checkpoint_merged (l : Log) (s : Replica) :
 /-- A checkpoint of a log replays to the same replica. -/
 theorem replayLog_checkpoint {context : Context} {l : Log} {s : Replica}
     (h : replayLog context l = some s) : replayLog context (l.checkpoint s) = some s := by
+  have kept := replayLog_kept h
   unfold replayLog at h ⊢
   dsimp only at h ⊢
   split at h
@@ -490,7 +556,7 @@ theorem replayLog_checkpoint {context : Context} {l : Log} {s : Replica}
     | none => simp [replayed] at h
     | some t =>
       rw [replayed] at h
-      change (if (t.core.failed || t.core.self != l.merged.self) = true then none else pure t) = some s at h
+      change (if t.core.failed = true then none else pure t) = some s at h
       split at h
       · simp at h
       · rename_i passed
@@ -510,17 +576,20 @@ theorem restoreLog_checkpoint (context : Context) (l : Log) (s : Replica)
 
 /-- In-process authoritative image of this replica's journal. `length` is the
 exact physical byte length the single writer compares before appending. `chain` is the
-domain's digest, built once (its origin hashes the whole context). -/
+domain's digest, built once (its origin hashes the whole context). `deltas` counts the delta
+frames since the last checkpoint, kept by the append: no caller walks `log.recent`. -/
 structure Restored (context : Context) where
   log : Log
   state : Replica
   length : Nat
   witnesses : List CommitWitness
   chain : ChainDigest
+  deltas : Nat
   exact : restoreLog context log.encode = some (log,state)
   sized : log.encode.length = length
   witnessed : witnesses = log.merged.commitWitnesses
   chained : chain = chainDigest context
+  counted : deltas = log.recent.length
 
 def Restored.self {context : Context} (r : Restored context) : Nat := r.log.base.self
 
@@ -531,7 +600,8 @@ def openRestored (context : Context) (bytes : Bytes) : Option (Restored context)
   | none => none
   | some (l,s) =>
     have same : l.encode = bytes := restoreLog_encode_eq h
-    some ⟨l,s,bytes.length,l.merged.commitWitnesses,chainDigest context,same ▸ h,by rw [same],rfl,rfl⟩
+    some ⟨l,s,bytes.length,l.merged.commitWitnesses,chainDigest context,l.recent.length,
+      same ▸ h,by rw [same],rfl,rfl,rfl⟩
 
 theorem Log.merged_self (l : Log) : l.merged.self = l.base.self := rfl
 
@@ -542,22 +612,25 @@ def appendRestored {context : Context} (old : Restored context)
   match continued : replayEvents context.config old.chain old.state events with
   | none => none
   | some next =>
-    -- `old.log.base.self` is `old.log.merged.self` by definition; `merged` itself is linear
-    -- in the deltas since the last checkpoint and is never built on this path.
-    if kept : next.core.failed = false ∧ next.core.self = old.log.base.self then
-      let d : Delta := ⟨events,witnesses⟩
-      some (⟨old.log.push d,next,old.length + (deltaFrame d).length,
-        old.witnesses ++ witnesses,old.chain,
-        restoreLog_push context old.log old.state next d old.exact (old.chained ▸ continued) kept.1 kept.2,
-        by rw [Log.encode_push, List.length_append, old.sized],
-        by rw [Log.merged_push, old.witnessed],old.chained⟩,deltaFrame d)
-    else none
+    -- Nothing is checked here: the replayed replica has not failed and is still this
+    -- journal's (`replayEvents_kept` from `replayLog_kept` of the image it extends).
+    let d : Delta := ⟨events,witnesses⟩
+    some (⟨old.log.push d,next,old.length + (deltaFrame d).length,
+      old.witnesses ++ witnesses,old.chain,old.deltas + 1,
+      restoreLog_push context old.log old.state next d old.exact (old.chained ▸ continued)
+        ((replayEvents_kept context.config old.chain events old.state next continued).2
+          (replayLog_kept (replayLog_of_restoreLog old.exact)).2),
+      by rw [Log.encode_push, List.length_append, old.sized],
+      by rw [Log.merged_push, old.witnessed],old.chained,
+      by rw [old.counted]; rfl⟩,deltaFrame d)
 
 theorem appendRestored_exact {context : Context} (next : Restored context) :
     restoreLog context next.log.encode = some (next.log,next.state) := next.exact
 
 #assert_axioms decodeLog_encode
 #assert_axioms restoreLog_push
+#assert_axioms replayEvents_kept
+#assert_axioms replayLog_kept
 #assert_axioms restoreLog_encode_eq
 #assert_axioms decodeLog_canonical
 #assert_axioms encodeDeltas_eq_encodeDeltasTR
@@ -740,9 +813,9 @@ witnesses it can still use. Its replay equation is `restoreLog_checkpoint`;
 nothing is replayed to build it. -/
 def checkpointRestored {context : Context} (prior : Restored context) : Restored context × Bytes :=
   let l := prior.log.checkpoint prior.state
-  (⟨l,prior.state,l.encode.length,prior.witnesses.filter (retains prior.state),prior.chain,
+  (⟨l,prior.state,l.encode.length,prior.witnesses.filter (retains prior.state),prior.chain,0,
     restoreLog_checkpoint context prior.log prior.state prior.exact,rfl,
-    by rw [Log.checkpoint_merged, prior.witnessed]; rfl,prior.chained⟩,l.encode)
+    by rw [Log.checkpoint_merged, prior.witnessed]; rfl,prior.chained,rfl⟩,l.encode)
 
 /-- Deltas after which a standing replica checkpoints its journal, bounding the
 replay a reopen performs. -/

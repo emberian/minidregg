@@ -283,7 +283,7 @@ def openRuntime (spec : HelperSpec) (journal : System.FilePath) (context : Conte
     | throw (IO.userError "invalid agreement journal")
   -- A writer that had to replay many deltas checkpoints at once, so the next
   -- reopen decodes the state instead of replaying them again.
-  if writable && prior.log.recent.length ≥ checkpointEvery then
+  if writable && prior.deltas ≥ checkpointEvery then
     match ← checkpoint (storage n) context with
     | .durable => pure ()
     | _ => throw (IO.userError "agreement journal checkpoint at open refused")

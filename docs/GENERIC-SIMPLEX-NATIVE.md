@@ -416,10 +416,12 @@ modules above it).
   many broadcasts and owed messages to its transport) or `consume count` (the application
   took that many committed payloads). `replayEvents` applies them with the domain's
   `chainDigest`; the snapshot of a checkpoint is the `Replica`, so a checkpoint is bounded
-  by live state. A replay result must still carry the journal's own member index (checked
-  at the end of every replay and of every append). The check cannot fail:
-  `GenericSimplexRelativeSelf.step_self` and `start_self` (proved) say `Replica.step` and
-  `Replica.start` keep `core.self`, and the two drains do not touch the core.
+  by live state. A replayed replica is the journal's own member and has not failed:
+  `replayEvents_kept` and `replayLog_kept` (proved, from
+  `GenericSimplexRelativeSelf.step_self` and `start_self`). Neither a replay nor an append
+  compares an identity while it runs; the one check left is on a decoded checkpoint
+  snapshot, which is input. `Restored.deltas` counts the delta frames since the last
+  checkpoint and is kept by the append, so no caller walks them.
 - Outputs. An acknowledged entry leaves the replica's outputs in the journalled state
   (`sends`, `owed`, `committed`): durable before anything is sent. The participant seals and
   returns them, and acknowledges exactly what it returned at its next slice (`flush` with the
@@ -432,7 +434,13 @@ modules above it).
   (`candidate_bottom_never_settled`): the repeat is what the kernel answers.
 - The tick. The participant journals a tick whenever the view's deadline is due, also after
   the replica asked to leave the view: that is the input on which the kernel repeats its
-  CANDIDATE(⊥). An idle replica moves its deadline one timeout ahead per tick.
+  CANDIDATE(⊥). An idle replica moves its deadline one timeout ahead per tick, and is
+  ticked only when that deadline is due, so the deadline it holds may be about to pass. The
+  participant therefore ticks an idle replica before handing it a packet or an offer
+  (`wake`): work that arrives gets the whole timeout before the replica asks to leave. Without
+  it a proposal arriving just before a stale deadline loses its view (with the fixture's
+  100 s timeout, a 100 s stall). This is argued from the kernel's `tick`, not shown by a
+  before-and-after run.
 - COMMIT witnesses. A kept witness is `(view, length, digest, attestation)`: the statement
   and its signer's signature, no payload. The signature is checked against
   `commitStatementBytes` before the block is read; the kernel's `decode` then checks the
@@ -447,13 +455,33 @@ modules above it).
   newest commit from `Replica.evidence` and the kept witnesses. It is not shipped between
   replicas any more: peers get the COMMITs themselves, relayed.
 - The application. `VerifiedCommit.Reads history` says a history's `historyDigest` is the
-  history half of the signed digest. `JointReceiver.order` builds its token from the source
-  prefix, the record and the committed records after it (the replica's `committed` queue),
-  checked against the newest certificate; the token carries that history instead of a chain.
-  `applyNext` hands the application one committed payload per slice and journals `consume`
-  only after the source holds the record, so a restart hands it over again.
-- Validation. Work is `(height, records)`: source records from an application height. The
-  validator is told the committed source history below it and replays the whole prefix.
+  history half of the signed digest. The participant keeps the running digest of its source's
+  records beside the source (`JointReceiver.History`: computed once when the source is
+  opened or reread, extended by each append through `Applied.history`).
+  `JointReceiver.order` extends it by the record and the committed records after it (the
+  replica's `committed` queue) and compares with the newest certificate: it hashes nothing
+  below the record, and its token names the history without building it. `applyNext` hands
+  the application one committed payload per slice and journals `consume` only after the
+  source holds the record, so a restart hands it over again.
+- Validation. Work is `(height, records)`: source records from an application height. One
+  record directly on the verified source tip (every proposal while the application keeps up
+  with the commits) is admitted there once (`JointSourcePrefixValidation.validateNext`, the
+  same fresh derivation the ordered receiver runs before its append); its cost does not
+  depend on the height. Any other work (records above committed ones the source has not
+  taken yet, or a record the tip does not grant) is replayed as a whole prefix from the
+  genesis in a scratch Store (`validate`), linear in the history; that path alone tells an
+  invalid prefix from an unavailable dependency.
+- Discovery. Each acknowledged delivery contributes the blocks it carries. A held COMMIT
+  the replica reads later (`release`) enters its views under an input that carried no
+  block, so whenever the held set (`Replica.far`) has changed the participant rediscovers
+  over everything the replica holds. Without this a replica that rejoined behind the others
+  never validated the block of the commits it had held, and stayed behind until restarted.
+- The request spool. A client places `ID.call` or `ID.watch` in a replica's `requests`
+  directory and reads `ID.receipt` from `receipts`. A served request is removed, so a slice
+  reads only pending requests; a pending request is read once and searches only the source
+  records appended since its last search. The receipt file holds the native receipt (which
+  carries the accepted count and world root at the call's height) and no longer the source
+  prefix through the call.
 - Bytes. Packets are `ByteArray` from the transport to the codec and back (`encodeBytes`,
   `decodeBytes`); a journal append is a `ByteArray` frame. Kernel values (`Bytes`, `Block`)
   are still lists, as are the in-memory `Log` and the image read at open.
@@ -467,26 +495,57 @@ broken MAC is refused, a VOTE passed on by a member that is not its sender is re
 COMMIT passed on with its signer's kept signature is counted; a counted COMMIT is journalled
 with its signature; every journal and every checkpoint reopens to the same replica; the
 certificate of the commit is a quorum on the statement and reads `[[7]]` and not `[[8]]`.
-Not executed anywhere in the gate: the participant's source side (`applyNext`,
-`JointReceiver.order` under a real certificate, validation, the request spool) and the Rust
-helper session. Both need four native source stores (`minidregg-four-source-fixture run`).
+Executed end to end (`minidregg-four-source-fixture`, rows of
+`scripts/gates/check-generic-simplex`): four participants over four native source Stores
+with the Rust agreement helper (ML-DSA-65 signatures, pair MACs, the journal file), the
+signature verifier and the Store helper. `probe-key` and `author-birth` make the call: one
+ordinary content birth by subject 7, planned by `NativeHost.prepareLoaded` on the opened
+Store and signed by the test signer (`sign-probe`, a public seed).
+
+- `run`: admission at the proposer, validation at each verified tip, a certificate of three
+  signatures on the statement, `JointReceiver.order` against the running history digest,
+  the ordered append and readback on all four; then every helper is stopped, every journal
+  and Store reread, and the original receipt is there with exactly one append.
+- `lookup-all-call`: fresh processes read the same receipt and prefix from the four Stores.
+- `serve-replica` ×4 and `await-call`: a second birth through four standing processes over
+  TCP and the request spool.
+- Plant `foreign-history`: every participant's running digest is another domain's, and the
+  certified record is never ordered or appended.
+
+Run by hand and not a gate row (20 s and more, timing dependent): six to forty calls on
+standing replicas with a 2 s view timeout; one replica stopped for two calls and restarted.
+The three live replicas commit after one view timeout (the stopped replica's leader turn);
+the restarted one catches up through the kept commit evidence, one timeout per step.
+`await-call` waits for all four receipts, so a call made while a replica is down is
+uncertain to its client until that replica returns. A replica that restarts into an idle
+domain is not told it is behind until the next operation.
 
 Measured (`generic-simplex-load 640 10`, compiled, hbox, four replicas, instant delivery,
 each input journalled through `appendRestored` under the deployed digest, outputs flushed,
-committed payloads consumed, a checkpoint every 1024 deltas; no signatures, MACs or disk):
-584 µs per operation at 10 operations, 923 at 160, 807 at 640, about 54 inputs and 2.4 to
-2.5 KB of journal per operation; a checkpoint is 8,951 bytes at height 10 and 8,992 at
-height 640. The per-window series is a sawtooth between about 470 and 1,240 µs whose period
-is the checkpoint interval: the harness and `serveLoop` count the deltas since the last
-checkpoint by walking them (`log.recent.length`, at most 1024). Nothing grows with the
-committed height. For scale, the kernel alone on whole chains (`liveStep`, no journal, the
-harness before this change) took 420 µs per operation at 10, 1,731 at 160 and 7,660 at 640.
+committed payloads consumed, a checkpoint every 1024 deltas; no signatures, MACs or disk),
+µs per operation at 10, 160 and 640 operations, three runs: 359 / 473 / 491, 577 / 890 / 904 and 571 / 813 / 634. Between checkpoints the
+per-window series is flat (360 to 500 µs in the first run); a window that holds a
+checkpoint is 650 to 800 µs. About 54 inputs and
+2.4 to 2.5 KB of journal per operation; a checkpoint is 8,951 bytes at height 10 and 8,992
+at height 640. The box is shared and the runs differ by more than the heights do. For
+scale, the kernel alone on whole chains (`liveStep`, no journal, the harness before the
+native adoption) took 420 µs per operation at 10, 1,731 at 160 and 7,660 at 640.
 
-Still linear in the history, all on the application's side and none per protocol message:
-`JointReceiver.order` hashes the whole history from its origin (the source keeps no running
-`historyDigest`), `sourcePrefix` re-encodes every record, and
-`JointSourcePrefixValidation.validate` replays a proposed prefix from genesis. The next step
-is a running `historyDigest` in the source store, extended by the append.
+Measured end to end (forty sequential births on four standing replicas, 20 ms service
+tick, hbox; client wall time includes starting the client and its 200 ms poll): 440 to
+600 ms per call at every height. Before tip validation and the pending-only spool the same
+run took 0.5 s at the first call and 4.8 s at the fortieth: each validation replayed the
+prefix from genesis (68 ms at height 0, about 2 s at height 23), each receipt wrote the
+whole prefix, and each slice reread every request ever placed. A slice now spends about
+22 ms in validation and 22 ms in a proposal at every height.
+
+Still growing with the history: the ordered append (`JointOrderedSourceReceiver.apply`:
+derivation, the Store's compare-and-append, readback, the verified extension) took 48 ms at
+height 1 and 75 to 95 ms at height 40, about 0.7 ms per record; it is on the source side
+and was not profiled. The first search of a request for its ingress walks the accepted
+records once (there is no index by ingress). `validate` (the whole-prefix replay) remains
+for work that is not one record on the tip. `PortableHomeTransferReceiver.order` still
+builds and hashes its whole history.
 
 In `GenericSimplexReceiverSafety` the two consumer theorems name the chain each
 certificate's honest signers sent (`leftBlock`, `rightBlock`) and take as a premise that
@@ -573,8 +632,8 @@ exceeds a single protocol frame. No pruning or finite-lifetime guarantee follows
 from the storage adapter.
 
 Current source consumer compilation passed against the frozen receiver cohort.
-Still required for integrated qualification: the actual four-node signed source
-action, shared Host propose/await hook, the final native-consumer binding to the
+The four-node signed source action is executed by the gate (above). Still required for
+integrated qualification: the shared Host propose/await hook, the final native-consumer binding to the
 reachable-engine proof, source funding and private recovery joins, and justified
 checkpoint/reconfiguration liability retention. VerifiedCommit verifies real signatures at an IO boundary;
 it is not itself a proof of cryptographic unforgeability or executable refinement.

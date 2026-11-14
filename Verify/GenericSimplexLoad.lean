@@ -49,7 +49,7 @@ def act (n : Net) (i : Nat) (input : WireInput) : Net :=
     match r with
     | none => { n with failed := true }
     | some (r,more) =>
-      let r := if r.log.recent.length ≥ checkpointEvery then (checkpointRestored r).1 else r
+      let r := if r.deltas ≥ checkpointEvery then (checkpointRestored r).1 else r
       { n with nodes := n.nodes.set! i r, queue := queue, inputs := n.inputs + 1, bytes := n.bytes + size + more }
 
 partial def drain (n : Net) (done : Net → Bool) (fuel : Nat) : Net :=

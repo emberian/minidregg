@@ -116,6 +116,41 @@ def validate (config : NativeHost.Config) (origin : Opened config) (expected : C
     else return .rejected "exact source genesis anchor mismatch"
   else return .rejected "consensus context is not deployment pinned"
 
+/-- Opaque source-private capability for the common case: one record, freshly admitted by
+the native source at a verified tip. The history it stands for is the tip's records followed
+by `record`; the tip's own records were admitted when it was verified, so nothing below the
+tip is executed again. -/
+structure ValidatedNext (config : NativeHost.Config) (expected : Context) {target : Durable}
+    (tip : NativeHostReplay.Verified config target) (record : Bytes) where
+  private mk ::
+  contextPinned : config.jointConsensus = some expected
+  anchorExact : expected.instanceBytes = anchorBytes config.genesisHeight tip.opened.durable.image.seed
+  derived : NativeHostReplay.Derived config tip.opened
+  recordExact : DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent derived.intent) = record
+
+/-- Admit one proposed record at the verified tip: the same fresh native derivation the
+ordered receiver runs before its append (`JointOrderedSourceReceiver.apply`), compared with
+the proposed bytes. One admission, whatever the height of the tip. `none` is no verdict: a
+record this cannot grant goes to `validate`, which alone tells an invalid prefix from an
+unavailable dependency. -/
+def validateNext (config : NativeHost.Config) {target : Durable}
+    (tip : NativeHostReplay.Verified config target) (expected : Context) (record : Bytes) :
+    IO (Option (ValidatedNext config expected tip record)) := do
+  if contextPinned : config.jointConsensus = some expected then
+    if expected.scope != digestStream.encode config.deployment.domain then return none
+    if anchorExact : expected.instanceBytes =
+        anchorBytes config.genesisHeight tip.opened.durable.image.seed then
+      let some decoded := DurableCheckpointCodec.recordFrame.decode record | return none
+      match ← NativeHostReplay.deriveVerified tip decoded.event.canonicalBytes with
+      | .error _ => return none
+      | .ok derived =>
+        if recordExact : DurableCheckpointCodec.recordFrame.encode
+            (IntentRecord.ofIntent derived.intent) = record then
+          return some ⟨contextPinned,anchorExact,derived,recordExact⟩
+        else return none
+    else return none
+  else return none
+
 /-- The engine prefix granted by native validation is exactly the source
 history admitted by the real replay walk. It is not merely physically valid
 raw journal bytes. -/

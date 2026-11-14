@@ -31,32 +31,71 @@ def sourcePrefix (durable : Durable) : List (List UInt8) :=
 def sourcePayload (intent : DataIntent ResourceBirthCodec.rootBytes) : List UInt8 :=
   DurableCheckpointCodec.recordFrame.encode (IntentRecord.ofIntent intent)
 
+/-- The running application digest of a loaded source's records (`historyDigest`), kept
+beside the source: computed once when the source is opened and extended by each append, so
+ordering a record hashes nothing below it. -/
+structure History (loaded : Durable) where
+  expected : Context
+  digest : Minidregg.Kernel.GenericSimplex.Bytes
+  exact : digest = (historyDigest expected).of (sourcePrefix loaded)
+
+/-- Linear in the source history: once, where the source is opened or reread. -/
+def History.start (expected : Context) (loaded : Durable) : History loaded := ⟨expected,_,rfl⟩
+
+/-- The digest after `records` were appended: one extension per appended record. -/
+def History.extend {loaded next : Durable} (h : History loaded)
+    (records : Minidregg.Kernel.GenericSimplex.Block)
+    (appended : sourcePrefix next = sourcePrefix loaded ++ records) : History next :=
+  ⟨h.expected,(historyDigest h.expected).over h.digest records, by
+    rw [appended, h.exact]
+    exact (Minidregg.Kernel.GenericSimplexRelative.ChainDigest.over_append _ _ _ _).symm⟩
+
 /-- Source-private application capability. The caller cannot decode one from
 bytes or replace expected context with the roster advertised by a packet.
 
 A commitment names its chain by a digest and carries no payload. `history` is the
 application history this reader takes it to order: the loaded source prefix, the record,
-and the committed records after it that the reader already holds. `reads` is the check that
-makes it so: the running digest of `history` is the application half of the signed digest.
-That no other history has that digest is the digest's collision-freedom, an assumption
-wherever two such tokens are compared (`GenericSimplexReceiverSafety`). -/
+and the committed records after it that the reader already holds (`later`). `reads` is the
+check that makes it so: the running digest of `history` is the application half of the
+signed digest. That no other history has that digest is the digest's collision-freedom, an
+assumption wherever two such tokens are compared (`GenericSimplexReceiverSafety`). The
+history is named, never built: the token holds only `later`. -/
 structure Ordered (expected : Context) (loaded : Durable)
     (intent : DataIntent ResourceBirthCodec.rootBytes) where
   private mk ::
   commitment : VerifiedCommit expected
-  history : Minidregg.Kernel.GenericSimplex.Block
-  reads : commitment.Reads history
-  sourceOrdered : (sourcePrefix loaded ++ [sourcePayload intent]).IsPrefix history
+  later : Minidregg.Kernel.GenericSimplex.Block
+  reads : commitment.Reads (sourcePrefix loaded ++ [sourcePayload intent] ++ later)
+
+def Ordered.history {expected : Context} {loaded : Durable}
+    {intent : DataIntent ResourceBirthCodec.rootBytes} (o : Ordered expected loaded intent) :
+    Minidregg.Kernel.GenericSimplex.Block :=
+  sourcePrefix loaded ++ [sourcePayload intent] ++ o.later
+
+theorem Ordered.sourceOrdered {expected : Context} {loaded : Durable}
+    {intent : DataIntent ResourceBirthCodec.rootBytes} (o : Ordered expected loaded intent) :
+    (sourcePrefix loaded ++ [sourcePayload intent]).IsPrefix o.history := ⟨o.later,rfl⟩
 
 /-- `later` are the committed records after this one, in order, up to the commitment's
-chain. The digest is computed over the whole history from its origin: linear in the source
-history, as `sourcePrefix` already is. -/
+chain. `history` is the running digest of the loaded source's records: the check extends it
+by this record and `later`, and hashes nothing of the source prefix. -/
 def order (expected : Context) (loaded : Durable)
     (intent : DataIntent ResourceBirthCodec.rootBytes) (commitment : VerifiedCommit expected)
-    (later : Minidregg.Kernel.GenericSimplex.Block) :
+    (history : History loaded) (later : Minidregg.Kernel.GenericSimplex.Block) :
     Option (Ordered expected loaded intent) :=
-  if reads : commitment.Reads (sourcePrefix loaded ++ [sourcePayload intent] ++ later) then
-    some ⟨commitment,_,reads,⟨later,rfl⟩⟩ else none
+  if same : history.expected = expected then
+    if reads : (historyDigest expected).over history.digest (sourcePayload intent :: later) =
+        historyHalf commitment.digest then
+      some ⟨commitment,later,by
+        have exact := history.exact
+        rw [same] at exact
+        show (historyDigest expected).over (historyDigest expected).origin
+          (sourcePrefix loaded ++ [sourcePayload intent] ++ later) = historyHalf commitment.digest
+        rw [List.append_assoc, Minidregg.Kernel.GenericSimplexRelative.ChainDigest.over_append,
+          ← reads, exact]
+        rfl⟩
+    else none
+  else none
 
 /-- The ordinary deployment gate cannot exempt controller writes. This transport
 is minted from the exact current source-admitted reservation token and accepts

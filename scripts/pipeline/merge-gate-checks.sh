@@ -85,8 +85,9 @@ builders() {
   run private-backend-wire bash scripts/gates/check-private-backend-wire .lake/build/bin
   # Generic Simplex (Kernel/GenericSimplex* + Verify/*): the harness, log-reopen, load and four-source-fixture
   # programs exe-roots builds, run, each with its plant red (fixed timer, split tip, flipped journal bit,
-  # corrupt checkpoint segment). Seconds; header names them.
-  run generic-simplex bash scripts/gates/check-generic-simplex .lake/build/bin
+  # corrupt checkpoint segment), and four participants end to end over four native source Stores with the
+  # three Rust helpers and the test signer built here. Under a minute; header names them.
+  run generic-simplex $SB bash -c 'for c in joint-agreement-crypto hyperdocument-link-sqlite-store; do cargo build --quiet --locked --release --manifest-path native/$c/Cargo.toml || exit 1; done; cargo build --quiet --locked --release --manifest-path native/credential-signature-verifier/Cargo.toml --bin minidregg-credential-signature-verifier --example sign-probe && bash scripts/gates/check-generic-simplex .lake/build/bin "$CARGO_TARGET_DIR/release"'
   # A `sorry` or a declared axiom in a deployed module is only a WARNING to the umbrella build above
   # (measured: `theorem t : 1 = 2 := sorry` in Compiler/DeclaredEffectCellRegistry builds green); the
   # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates

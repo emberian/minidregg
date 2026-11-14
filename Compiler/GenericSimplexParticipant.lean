@@ -37,10 +37,17 @@ abbrev Durable := Minidregg.Kernel.NativeHost.Durable
 abbrev Verified := Minidregg.Kernel.NativeHostReplay.Verified
 abbrev Pending := Minidregg.Compiler.GenericSimplexPending.Queue
 
-/-- Only native replay can construct the verified source component. -/
+/-- Only native replay can construct the verified source component. `history` is the
+running application digest of its records, extended by each append (`applyNext`). -/
 structure Source (config : SourceConfig) where
   target : Durable
   verified : Verified config target
+  history : Minidregg.Kernel.JointReceiver.History verified.opened.durable
+
+/-- A verified source as it was read: its running digest is computed here, once. -/
+def Source.read {config : SourceConfig} (context : Context) {target : Durable}
+    (verified : Verified config target) : Source config :=
+  ⟨target,verified,Minidregg.Kernel.JointReceiver.History.start context verified.opened.durable⟩
 
 /-- Volatile scheduling state. Restart may reset all of it: the journal keeps the replica's
 undrained output and its committed payloads the application has not taken. -/
@@ -53,6 +60,8 @@ structure Schedule where
   owed : Nat := 0
   /-- Last application-candidate relay per recipient: (recipient, height, ms). -/
   candidateSent : List (Nat × Nat × Nat) := []
+  /-- The COMMITs the replica held (`Replica.far`) when discovery last looked. -/
+  far : List WireMessage := []
 
 /-- Resend interval for the same unvalidated candidate to the same peer. A changed
 candidate height is relayed at once. -/
@@ -98,6 +107,16 @@ def latestObserved {context : Context} (r : Restored context) : List Block :=
       | some (.input (.deliveryAt _ m)) => m.value.bind (above m.height r.state.height)
       | _ => none
   | [] => []
+
+/-- An idle replica's view timer does not run: a tick moves its deadline one whole timeout
+ahead and nothing else ticks it until that deadline is due, so the deadline it holds may be
+about to pass. Before an idle replica is handed anything that can be work (a packet, an
+offer), it is ticked, so the work gets the whole timeout before this replica asks to leave
+the view. A replica that already wants out is left alone: its timer is running. -/
+def wake {config : SourceConfig} (p : Participant config) : IO Unit := do
+  if let some prior ← p.runtime.current then
+    if !wantsOut p.runtime.context.config prior.state.core then
+      let _ ← GenericSimplexNative.tick p.runtime
 
 /-- Every ingress is durably authenticated before it enters the engine, and discovery
 then schedules source validation; no path here grants a checked input itself. -/
@@ -163,6 +182,7 @@ def propose {config : SourceConfig} (p : Participant config) (signedIngress : By
   match ← Minidregg.Kernel.NativeHostReplay.deriveVerified p.source.verified signedIngress with
   | .error detail => return (p,.error detail)
   | .ok derived =>
+    wake p
     let payload := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.encode
       (Minidregg.Kernel.DurableReceiver.IntentRecord.ofIntent derived.intent)
     match ← persist (storage p.runtime.native) p.runtime.context (.input (.offer payload)) with
@@ -208,7 +228,7 @@ def completedReceipt {config : SourceConfig} (p : Participant config) (payload :
   let index ← (Minidregg.Kernel.JointReceiver.sourcePrefix
     p.source.verified.opened.durable).zipIdx.findSome? (fun (record,index) =>
       if record == payload then some index else none)
-  p.source.verified.receipts[index]?
+  p.source.verified.receiptAt index
 
 /-- Lost submit responses can be recovered from the exact original signed
 ingress, even when the caller never received the derived proposal bytes. -/
@@ -216,7 +236,7 @@ def completedIngress {config : SourceConfig} (p : Participant config) (signedIng
     Option Minidregg.Compiler.NativeHostCodec.Receipt := do
   let index ← p.source.verified.opened.durable.image.accepted.zipIdx.findSome?
     (fun (record,index) => if record.event.canonicalBytes == signedIngress then some index else none)
-  p.source.verified.receipts[index]?
+  p.source.verified.receiptAt index
 
 def completedCall {config : SourceConfig} (p : Participant config) (callBytes : Bytes) :
     Option Minidregg.Compiler.NativeHostCodec.Receipt := do
@@ -260,7 +280,8 @@ physical readback must extend it (`extendFrom`: the log chain continues from the
 retained one and every new tag verifies, so a rollback or a rewritten record
 refuses), and every new
 retained ingress is re-admitted at its original prefix. No engine flag or stale
-in-memory Source is promoted into a readback receipt. A genesis re-admission of
+in-memory Source is promoted into a readback receipt. The running digest of the reread
+source is computed afresh (linear, on this recovery path only). A genesis re-admission of
 the whole history is the operator `audit`, not a per-certificate cost. -/
 def reloadSource {config : SourceConfig} (p : Participant config) :
     IO (Participant config × String) := do
@@ -280,7 +301,8 @@ def reloadSource {config : SourceConfig} (p : Participant config) :
     match ← Minidregg.Kernel.NativeHostReplay.extendVerifiedAppended config reader p.source.verified
         target seedExact acceptedExact with
     | .error failure => return (p,"source replay: " ++ failure.detail)
-    | .ok verified => return ({p with source := ⟨target,verified⟩},"source reloaded and verified")
+    | .ok verified =>
+      return ({p with source := Source.read p.runtime.context verified},"source reloaded and verified")
 
 /-- Hand the application the next committed payload the replica keeps for it. An empty
 protocol payload is taken at once. A source record is installed by fresh native derivation
@@ -313,10 +335,10 @@ def applyNext {config : SourceConfig} (p : Participant config) : IO (Participant
   let some certificate ← recoverCommitment (storage p.runtime.native) (crypto p.runtime.native) context
     | return (p,"waiting for COMMIT witnesses")
   match ← Minidregg.Kernel.JointOrderedSourceReceiver.apply
-      p.source.verified context certificate (applicationHistory later) record.event.canonicalBytes with
+      p.source.verified context certificate p.source.history (applicationHistory later)
+      record.event.canonicalBytes with
   | .applied receipt =>
-    let verified := receipt.verified
-    taken {p with source := ⟨_,verified⟩} "applied"
+    taken {p with source := ⟨_,receipt.verified,receipt.history p.source.history⟩} "applied"
   | .refused detail => return (p,detail)
   | .ordinary _ => reloadSource p
   | .uncertain _ => reloadSource p
@@ -346,6 +368,11 @@ def candidateSlice {config : SourceConfig} (p : Participant config) :
         sent := (sent.filter (fun (r,_,_) => r != recipient)) ++ [(recipient,length,now)]
   return ({p with schedule := {p.schedule with candidateSent := sent}},packets)
 
+/-- A slice at least this long prints where its time went. Operator measurement control:
+`MINI_SERVE_TIMING_MS` lowers it from one second. -/
+def slowSliceMs : IO Nat := do
+  return ((← IO.getEnv "MINI_SERVE_TIMING_MS").bind String.toNat?).getD 1000
+
 /-- A finite host service call. The host supplies due arrivals before this call.
 It consumes reserved validation and continuation opportunities, sends the replica's whole
 undrained output, and hands the application at most one committed payload. Fair repeated
@@ -355,6 +382,18 @@ flag. -/
 def service {config : SourceConfig} (p : Participant config) (validationBudget : Nat) :
     IO (Participant config × List (Nat × ByteArray) × List GenericSimplexController.Outcome × String) := do
   let t0 ← IO.monoMsNow
+  -- A held COMMIT the replica has since read (`GenericSimplexRelative.release`) entered its
+  -- views under an input that carried no block, so the per-input discovery (`receive`) never
+  -- saw its block. Whenever the held set has changed, discovery runs over everything the
+  -- replica holds; that is bounded by its live state and happens only while it catches up.
+  let p ← do
+    match ← p.runtime.current with
+    | some prior =>
+      if prior.state.far == p.schedule.far then pure p
+      else pure {p with
+        pending := Minidregg.Compiler.GenericSimplexPending.discover prior.state p.pending
+        schedule := {p.schedule with far := prior.state.far}}
+    | none => pure p
   -- The committed source history, for the validator: the source's records, then the
   -- committed records the application has not taken yet. Built only when work is attempted.
   let committed : Unit → Block := fun _ =>
@@ -364,7 +403,7 @@ def service {config : SourceConfig} (p : Participant config) (validationBudget :
     | some prior => pure (applicationHistory prior.state.committed)
     | none => pure []
   let (pending,checks) ← GenericSimplexController.service p.runtime config p.source.verified.origin
-    (fun unit => committed unit ++ committedRecords) validationBudget p.pending
+    p.source.verified (fun unit => committed unit ++ committedRecords) validationBudget p.pending
   let p := {p with pending := pending}
   let t1 ← IO.monoMsNow
   -- A standing replica serves on a fixed tick. Journal a poll only for an exhausted pump
@@ -387,7 +426,7 @@ def service {config : SourceConfig} (p : Participant config) (validationBudget :
   let t4 ← IO.monoMsNow
   let (p,status) ← applyNext p
   let t5 ← IO.monoMsNow
-  if t5 - t0 ≥ 1000 then
+  if t5 - t0 ≥ (← slowSliceMs) then
     IO.eprintln s!"service ms: validation {t1-t0} ({checks.length} checks, {p.pending.pending.length} pending) clock {t2-t1} outgoing {t3-t2} ({packets.length}) candidate {t4-t3} apply {t5-t4} [{status}]"
   return (p,packets ++ candidates,checks,status)
 

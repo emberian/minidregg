@@ -56,11 +56,13 @@ inductive Result (config : Config) {target : Durable}
 /-- Typed ingress from the fixed deployment-native certificate verifier. The
 request supplies only source bytes; expected/context/helper are controller
 configuration. `later` are the committed records after this one that the caller holds, up
-to the certified chain. A quorum certificate authorizes order, not source permission.
+to the certified chain, and `history` is the running digest of the source's records
+(`JointReceiver.History`). A quorum certificate authorizes order, not source permission.
 This call obtains both independently before one existing source-record CAS. -/
 def apply {config : Config} {target : Durable} (old : Verified config target)
-    (expected : Context) (commitment : VerifiedCommit expected) (later : Minidregg.Kernel.GenericSimplex.Block)
-    (sourceBytes : List UInt8) :
+    (expected : Context) (commitment : VerifiedCommit expected)
+    (history : JointReceiver.History old.opened.durable)
+    (later : Minidregg.Kernel.GenericSimplex.Block) (sourceBytes : List UInt8) :
     IO (Result config old expected) := do
   if contextPinned : config.jointConsensus = some expected then
     if expected.scope != digestStream.encode config.deployment.domain then
@@ -70,7 +72,7 @@ def apply {config : Config} {target : Durable} (old : Verified config target)
     match ← deriveVerified old sourceBytes with
     | .error detail => return .refused detail
     | .ok derived =>
-      let some ordered := JointReceiver.order expected old.opened.durable derived.intent commitment later
+      let some ordered := JointReceiver.order expected old.opened.durable derived.intent commitment history later
         | return .refused "the commitment's digest is not that of the source prefix, the derived record and the later committed records"
       match ← DurableReceiverIO.receiveLoadedDetailed (orderedTransport derived)
           ResourceBirthCodec.rootBytes old.opened.durable derived.intent with
@@ -93,6 +95,24 @@ def Applied.verified {config : Config} {target : Durable}
     {old : Verified config target} {expected : Context} (applied : Applied config old expected) :
     Verified config (exactCandidate old applied.readback.derived applied.readback.ready applied.readback.tag) :=
   extendExact applied.reader old applied.readback
+
+/-- The applied source's records are the old ones and the record just appended. -/
+theorem Applied.sourcePrefix_verified {config : Config} {target : Durable}
+    {old : Verified config target} {expected : Context} (applied : Applied config old expected) :
+    JointReceiver.sourcePrefix applied.verified.opened.durable =
+      JointReceiver.sourcePrefix old.opened.durable ++
+        [JointReceiver.sourcePayload applied.readback.derived.intent] := by
+  simp only [JointReceiver.sourcePrefix, JointReceiver.sourcePayload]
+  rw [applied.verified.exactImage]
+  simp [exactCandidate, DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append]
+
+/-- The running digest of the applied source: the old one extended by the appended record. -/
+def Applied.history {config : Config} {target : Durable}
+    {old : Verified config target} {expected : Context} (applied : Applied config old expected)
+    (history : JointReceiver.History old.opened.durable) :
+    JointReceiver.History applied.verified.opened.durable :=
+  history.extend [JointReceiver.sourcePayload applied.readback.derived.intent]
+    applied.sourcePrefix_verified
 
 theorem applied_exact_source_record {config : Config} {target : Durable}
     {old : Verified config target} {expected : Context} (applied : Applied config old expected) :

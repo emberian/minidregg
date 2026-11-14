@@ -1,9 +1,14 @@
 /- The running replica never changes whose it is: `Replica.step` and `Replica.start` keep
-`core.self`. The native journal checks this on every replay (`GenericSimplexIO.replayLog`);
-this is the fact that makes the check one that cannot fail. -/
-import Kernel.GenericSimplexRelative
-import Kernel.GenericSimplexStructure
-import Theory.AssertAxioms
+`core.self`. A journal holds one replica's inputs, so its replay is that replica's:
+the native journal's replay rests on it (`GenericSimplexIO.replayLog_kept`) and compares no
+identity while it runs. -/
+module
+
+public import Kernel.GenericSimplexRelative
+public import Kernel.GenericSimplexStructure
+public import Theory.AssertAxioms
+
+public section
 
 namespace Minidregg.Kernel.GenericSimplexRelativeSelf
 open Minidregg.Kernel.GenericSimplex
