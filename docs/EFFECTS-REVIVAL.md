@@ -168,11 +168,18 @@ either); `sourceReadOf` and an opening's source still find the read by `payload 
 `world` (4), `scalar` (0), `computeFunding` (6), `moneyConsent` (8). The three writes thin consent
 displays today (`scalar`, `world`, `kindDefinition`) need the declaration to say which part of
 its patch the member can compute from the signed operation and the served store, so that
-`memberPatch` reads it from the registry: that field is the next change to `Effect`. The JSON
-grammars of `world` and `kindDefinition` (`worldDescriptor`, `worldDefinition`, `worldAction` in
-`Host/Json.lean`, copied in `Host/SourceAgreementJson.lean`) move to a kernel module beside
-`Kernel/ContentJson.lean` when their codes are declared, which is where the agreement decoder's
-remaining string arms go.
+`memberPatch` reads it from the registry: that field is the next change to `Effect`.
+
+**The payload's JSON has one reader** (`Kernel/ResourcePayloadJson.lean`, `payloadOfJson`). The
+grammar of the hand-armed payloads (`action`, `streamRef`, the world descriptor, definition and
+action, the money batch) is `Kernel/ResourceGrammarJson.lean`, upstream of the registry, so a
+declaration's `ofJson` can be one of its decoders when its code is bound. `Host/Json.lean` and
+`Host/SourceAgreementJson.lean` each held a copy of that grammar and of the payload reader; both
+are deleted. Which payloads a reader admits is its parameter (`refuses`): the Host's is empty,
+the agreement's names `moneyConsent`, which it refuses by name before reading any of it
+(executed in `Assurance/RegistryRefusalPoles.lean`). The agreement's refusal of a money consent
+used to read "expected scalar, append, …"; it reads "moneyConsent is not admitted by this
+reader". String arms: 11 before, 6 after (one reader, six hand-armed types).
 
 ## 1. What one effect costs by hand today (counted from the tree at `02ee34e8a`)
 

@@ -14,8 +14,14 @@ The poles of two statements about what a requester reads when a registered effec
 * `Kernel/ReadEffects.lean`: the two root-pinning reads (codes 3 and 7) have no operand. Here:
   each one's wire bytes are its tag octet alone and decode back to it, its JSON is `type` alone
   (another field is refused), and its refusals print under its declaration's name.
+* `Kernel/ResourcePayloadJson.lean`, `payloadOfJson`: which payloads a reader admits is its
+  parameter. Here: the same money consent is read by the Host's reader and refused by name by the
+  source agreement's, before anything of it is read (a malformed one gets the same refusal); a
+  `read` and a scalar write are read by both; a type nothing bears is refused by both, naming
+  what the registry binds.
 -/
 import Kernel.ResourcePayloadTag
+import Kernel.ResourcePayloadJson
 
 namespace Minidregg.Assurance.RegistryRefusalPoles
 open Minidregg.Kernel.DeclaredResourceController
@@ -48,5 +54,30 @@ open Minidregg.Effects
   | .ok _ => false | .error text => text == "p: unknown field root")
 #guard reprStr (Revival.DispatchRefusal.refused 3 "observationRequired" .empty) == "Effect.Read.observationRequired"
 #guard reprStr (Revival.DispatchRefusal.refused 7 "fieldNotNamed" .empty) == "Effect.KindRead.fieldNotNamed"
+
+section PayloadReaders
+open Minidregg.Kernel.ResourcePayloadJson
+
+private def consent : Lean.Json :=
+  Lean.Json.mkObj [("type", "moneyConsent"), ("batch", .null), ("positions", .arr #[]), ("funding", .null)]
+private def scalarWrite : Lean.Json :=
+  Lean.Json.mkObj [("type", "scalar"), ("actions", .arr #[])]
+private def admitted (refuses : List String) (json : Lean.Json) : Bool :=
+  match payloadOfJson refuses "p" json with | .ok _ => true | .error _ => false
+private def refusal (refuses : List String) (json : Lean.Json) : String :=
+  match payloadOfJson refuses "p" json with | .ok _ => "" | .error text => text
+
+#guard admitted hostRefuses consent
+#guard refusal agreementRefuses consent == "p.type: moneyConsent is not admitted by this reader"
+#guard refusal agreementRefuses (Lean.Json.mkObj [("type", "moneyConsent")]) ==
+  "p.type: moneyConsent is not admitted by this reader"
+#guard admitted hostRefuses scalarWrite && admitted agreementRefuses scalarWrite
+#guard admitted hostRefuses (Lean.Json.mkObj [("type", "read")]) &&
+  admitted agreementRefuses (Lean.Json.mkObj [("type", "read")])
+#guard refusal hostRefuses (Lean.Json.mkObj [("type", "nothing")]) ==
+  refusal agreementRefuses (Lean.Json.mkObj [("type", "nothing")])
+#guard (refusal hostRefuses (Lean.Json.mkObj [("type", "nothing")])).startsWith "p.type: expected scalar, append"
+
+end PayloadReaders
 
 end Minidregg.Assurance.RegistryRefusalPoles
