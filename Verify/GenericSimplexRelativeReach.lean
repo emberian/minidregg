@@ -8,7 +8,8 @@ the specification's.
 * `RelNetwork`, `RelReachable`: the network of running replicas, with each one's durable
   record (the chain it has committed, every message it has sent and the chain it was sent
   from). Authentication (`RelAuthentic`) is the specification's, on wire messages.
-* `RelativeFaithful` (STATEMENT, no proof): every reachable network of running replicas has
+* `RelativeFaithful` (statement; proved from the initial network in
+  `Verify/GenericSimplexRelativeFaithful.lean`): every reachable network of running replicas has
   a trace of the abstract model (`LocalFaithful`) that is its own: its correct members'
   sends are exactly the durable record and each correct replica's chain is a commit of it.
 * `relative_agreement_of_faithful` (proved): with that, the abstract model's agreement

@@ -346,33 +346,36 @@ whole chains, and each correct replica's chain is a commit of it).
     event above the floor read from the new origin (`rebaseEvent`). The trail gains the
     floor view's parent and one SEND per `tombstone`, each a faulty member's. `Rebased`
     states what `rebase` did to the views, by view number, and is a premise.
-- Stated, not proved: `RelativeFaithful`. Until it is proved, agreement of the running
-  replicas rests on that statement. What remains is the composition, in three parts:
-  1. `rebase` meets `Rebased`. `rebase` succeeds only if the floor view is kept and its
-     committed block is the committed tip, and `Rebased.floorView` asks for exactly that.
-     It is not a fact about one `step`: a step can commit in two views, and the floor
-     view's block is the tip only because the later view's commit extends the earlier
-     one's, which is the model's safety on the trail (`committed_ancestor_of_later`), as in
-     `ghost_rebase`. Also needed: `committedTip` is the longest block committed since the
-     origin moved, and `ViewsUnique` survives `mapM`. When `rebase` halts instead
-     (`failed`), nothing is committed and no `Rebased` is needed.
-  2. Reading. A message of a correct member that a replica decodes is, read as
-     `chain ++ block` with the reader's chain, a SEND of the trail: a VOTE, CANDIDATE or
-     READY by `support_extends_commit` and `above_denotes` (its view is above the reader's
-     floor, or `ingest` drops it); a COMMIT by `commit_reads_signed_chain` under
-     `CollisionFreeOn (Occurs …)`; a PROPOSE from the wire is never counted.
-  3. The induction over `RelReachable`, with `Ghost` for each correct replica at its
-     chain, the replica's height and digest tracking the chain, the `sent` record equal to
-     the member's SENDs of the trail through `denote`, the kept evidence and the held
-     COMMITs. `finish`, `deliver` and `release` are `ghost_step` (several in `release`) then
-     `ghost_rebase`; the other replicas keep their side by `ghost_extend`. `Ghost` at
-     `Replica.start` is the base case.
-  Premises: `ghost_start` shows a correct member's `start`, with its own audit as the trail,
-  is a `Ghost` over a `Good` trail for every configuration (the premises of `ghost_step`
-  are inhabited; it is also the single-replica base case). `Rebased`, the premise of
-  `ghost_rebase`, has no inhabitation witness yet: part 1 is that witness. What `Good`
-  refuses is what `LocalFaithful` refuses (`not_localFaithful_equivocation`,
-  `not_localFaithful_unsupported_commit`).
+- Proved, the induction on the run (`Verify/GenericSimplexRelativeSide.lean`,
+  `Verify/GenericSimplexRelativeFaithful.lean`): `relative_faithful`, `relative_agreement`:
+  `RelativeFaithful` and `RelativeAgreement` hold if the initial network is tracked
+  (`TrackedInitial`). The invariant is `Tracked net trail`: the trail is `Good`, each correct
+  replica has its `Side` of it, and each COMMIT a correct replica holds was delivered to it
+  and is authentic. `Side` is the replica's `Ghost` (its forgotten image is the replica's
+  state), `FloorInvariant`, `Tipped`, and its wire side `Wire`: every message it has written,
+  read through `denote`, is a SEND of the trail, and a COMMIT states its chain's length and
+  digest; every SEND of the member in the trail is recorded or queued; kept evidence is
+  written from a prefix of the chain.
+  - `rebased_meets` (`Kernel/GenericSimplexRebaseMeets.lean`): when the map over the kept
+    views in `rebase` succeeds, the state it leaves is `Rebased`. That the floor view's
+    block is the tip is what the map checks; that the floor view is there is `tipped_floor`
+    (`Kernel/GenericSimplexTip.lean`). When the map fails the replica halts as it was, and
+    its side still holds: the proof does not need `rebase` to succeed.
+  - `read_covered`, the reading lemma: what a replica decodes from an authentic message and
+    `ingest` can record (`Readable`: not a PROPOSE, a view above the floor, a block for a
+    VOTE or COMMIT) is a SEND of the trail at the reader's chain, by
+    `support_extends_commit` for a block and `commit_reads_signed_chain` under
+    `CollisionFreeOn (Occurs …)` for a COMMIT. A faulty member's message is added to the
+    trail.
+  - `side_finish`, `side_deliver`, `side_release`, `tracked_advance`: one input. A run of
+    specification steps before one drain is `Ran` (`ran_step`); it loses no SEND because no
+    rule removes a message from the outbox (`Kernel/GenericSimplexOutbox.lean`).
+- Stated, not proved: `TrackedInitial`, the base case: the initial network is tracked. Its
+  trail is the correct members' start audits one after another, each member's `Ghost` is
+  `ghost_start`. It needs of `GenericSimplex.start` that nothing is committed and nothing is
+  owed (`relInitial` starts every chain empty and records only the start's broadcasts), and
+  `Good` and `Ghost` across the concatenation. Until it is proved, agreement of the running
+  replicas rests on `TrackedInitial` in place of `RelativeFaithful`.
 - Executed: `relNet_faithful` (the conclusion on a reachable network whose correct
   replicas have committed; the trace is the specification's run of the same operation and
   the two engines' sends coincide exactly), `twoNet_run` and the witnesses on it for the

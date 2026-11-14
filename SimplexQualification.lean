@@ -12,6 +12,8 @@ import Kernel.GenericSimplexChecked
 import Kernel.GenericSimplexWindow
 import Kernel.GenericSimplexRelative
 import Kernel.GenericSimplexRebaseGhost
+import Kernel.GenericSimplexRebaseMeets
+import Kernel.GenericSimplexOutbox
 import Kernel.GenericSimplexRelativeSelf
 import Kernel.GenericSimplexSupportExtends
 import Kernel.GenericSimplexReceiverSafety
