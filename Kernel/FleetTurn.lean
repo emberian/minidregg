@@ -31,6 +31,7 @@ public import Compiler.NativeHostCodec
 public import Kernel.StreamWrite
 public import Compiler.WorldKindLawDependencies
 public import Compiler.PhysicalLawResolution
+public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -326,6 +327,10 @@ inductive Reject where
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The presented spend grant does not bound what the turn takes from the paying account
+  (`Theory.CapabilityValueBound.check`): a balance its scope does not name, or a `maxDelta`
+  bound on a balance below the fee plus the transferred amount. -/
+  | valueBound (reason : CapabilityValueBound.Refusal)
   deriving Repr
 
 def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
@@ -574,6 +579,35 @@ def authorize [DecidableEq F]
   | some authorization =>
       .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
 
+/-- **The value bound of the turn's debit.** The spend grant the turn was authorized under
+must bound the gross amount the turn's Book leg (the fee, then the optional transfer) takes
+from the paying account: its `fields` name each debited balance and its `maxDelta` bounds on
+them hold. `maxCost` already caps fee plus amount for this receiver; this is the bound every
+debiting receiver shares, in the asset's own units. -/
+def valueBound [DecidableEq F]
+    (prepared : Prepared deployment profile tariff ambient durable command)
+    (semantic : prepared.SemanticAccepted) : Except Reject Unit :=
+  match semantic.authorization.evidence.capabilityValue with
+  | none => .error .capabilityRejected
+  | some (cap, _) =>
+      match CapabilityValueBound.check cap.scope (batch tariff command).operations command.payer with
+      | .ok () => .ok ()
+      | .error reason => .error (.valueBound reason)
+
+theorem valueBound_ok [DecidableEq F]
+    {prepared : Prepared deployment profile tariff ambient durable command}
+    {semantic : prepared.SemanticAccepted} (ok : valueBound prepared semantic = .ok ()) :
+    ∃ cap digest, semantic.authorization.evidence.capabilityValue = some (cap, digest) ∧
+      CapabilityValueBound.ValueBound cap.scope (batch tariff command).operations command.payer := by
+  unfold valueBound at ok
+  split at ok
+  · cases ok
+  next cap digest named =>
+    refine ⟨cap, digest, named, ?_⟩
+    split at ok
+    next checked => exact (CapabilityValueBound.check_ok_iff _ _ _).mp checked
+    next => cases ok
+
 structure Accepted [DecidableEq F]
     (prepared : Prepared deployment profile tariff ambient durable command)
     (ingress : DecodedIngress) where
@@ -581,6 +615,17 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   semantic : prepared.SemanticAccepted
+  /-- The spend grant bounds the turn's gross debit of the paying account. -/
+  bounded : valueBound prepared semantic = .ok ()
+
+/-- **Every admitted fleet turn's debit is within its spend grant's value bound.** -/
+theorem Accepted.value_bounded [DecidableEq F]
+    {prepared : Prepared deployment profile tariff ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    ∃ cap digest,
+      accepted.semantic.authorization.evidence.capabilityValue = some (cap, digest) ∧
+        CapabilityValueBound.ValueBound cap.scope (batch tariff command).operations command.payer :=
+  valueBound_ok accepted.bounded
 theorem Accepted.sound [DecidableEq F]
     {prepared : Prepared deployment profile tariff ambient durable command} {ingress : DecodedIngress}
     (accepted : Accepted prepared ingress) :
@@ -611,7 +656,10 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
       if same : receipt.envelopeBytes = ingress.ingress.envelope then
         match authorize prepared receipt with
         | .error reason => return .error reason
-        | .ok semantic => return .ok ⟨receipt, same, semantic⟩
+        | .ok semantic =>
+            match bounded : valueBound prepared semantic with
+            | .error reason => return .error reason
+            | .ok () => return .ok ⟨receipt, same, semantic, bounded⟩
       else return .error .capabilityRejected
 
 /-- The source finalizes the draft's fee and next topic position before any
