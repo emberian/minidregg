@@ -280,9 +280,21 @@ def main (args : List String) : IO Unit := do
     "delayed source offer starved behind inert protocol blocks"
   ensure (safe delayedComplete && restarted delayedComplete)
     "delayed offer safety/replay"
-  -- Unvalidated histories from a Byzantine sender make discovery non-trivial.
-  let unvalidated := (List.range 3).foldl (fun n i =>
+  -- Unvalidated histories from a Byzantine sender make discovery non-trivial. They are sent
+  -- for views above each replica's commit floor: a view at or below it takes no message, so
+  -- the same messages for views 1 and 2 (committed long ago) must request nothing.
+  let pendingAt (n : Network) (i : Nat) :=
+    (Minidregg.Compiler.GenericSimplexPending.discover n.nodes[i]! {}).pending.length
+  let stale := (List.range 3).foldl (fun n i =>
       act (act n i (.delivery ⟨3,1,.vote,some [[77],[78]]⟩)) i (.delivery ⟨3,2,.commit,some [[79]]⟩))
+    delayedComplete
+  ensure ((List.range 3).all fun i =>
+      decide (delayedComplete.nodes[i]!.lastCommitted ≥ 2) && pendingAt stale i == pendingAt delayedComplete i)
+    "floor: a message for a view at or below the commit floor requested validation"
+  let unvalidated := (List.range 3).foldl (fun n i =>
+      let floor := n.nodes[i]!.lastCommitted
+      act (act n i (.delivery ⟨3,floor+1,.vote,some [[77],[78]]⟩)) i
+        (.delivery ⟨3,floor+2,.commit,some [[79]]⟩))
     delayedComplete
   ensure ((List.range 3).all fun i =>
       (Minidregg.Compiler.GenericSimplexPending.discover unvalidated.nodes[i]! {}).pending.length ≥ 3)

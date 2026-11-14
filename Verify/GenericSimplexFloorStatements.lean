@@ -17,11 +17,14 @@ def newSends (before after : State) : List Message :=
     | .send m => some m
     | _ => none
 
-/-- STATEMENT `lastCommitted_spec`. The maintained floor is the fold it replaces, at the
-start and after every step.
+/-- `lastCommitted_spec`: the maintained floor is the fold it replaces. PROVED in
+`Kernel.GenericSimplexFloor` (`start_floorSpec`, `step_floorSpec`, `lastCommitted_spec`) for
+every state reached from `start` by `step`. The form below quantifies over an arbitrary
+prior state and is NOT the proved one: with duplicate view numbers the fold and `viewAt`
+can disagree, so the proved invariant carries `CausalInvariant` (unique view numbers).
 
-satisfiable / premise: `floor_agrees_executed` (every honest state of four executed runs).
-teeth: `forgotten_floor_disagrees` (a state whose floor was reset does not agree). -/
+executed: `floor_agrees_executed`. teeth: `forgotten_floor_disagrees`, and
+`GenericSimplexFloor.lagging_floor_refused`. -/
 def FloorAgrees (s : State) : Prop := s.lastCommitted = lastCommittedView s
 
 def LastCommittedSpec : Prop :=

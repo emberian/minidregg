@@ -200,9 +200,11 @@ commit), against `main_commits_same_policy` for the kernel's step.
   receives that peer's commit evidence (`stranded_without_commit_transfer`: stuck without
   the missing COMMIT, progress with it). The native certificate relay
   (`GenericSimplexNative.receiveFinality`) is that transfer; nothing in the kernel sends it.
-- NOT proved: `lastCommitted = lastCommittedView` as an invariant (stated and executed,
-  `Verify/GenericSimplexFloorStatements.lean`), `FloorRefuses`, `RebaseSafe`'s consequence,
-  and progress (`EventualCommit`, `Verify/GenericSimplexJumpReach.lean`).
+- The field is the fold: `Kernel/GenericSimplexFloor.lean`, `lastCommitted_spec`, on every
+  state reached from `start` by `step`.
+- NOT proved (stated, with executed witnesses, `Verify/GenericSimplexFloorStatements.lean`
+  and `Verify/GenericSimplexJumpReach.lean`): `FloorRefuses`, `RebaseSafe`'s consequence,
+  `SettledBelowFrontier`, and progress (`EventualCommit`).
 - BREAKS: log magic version 5. The snapshot carries the floor; version-4 logs refuse
   (`GenericSimplexIO.v4_log_refused`). A mesh moves by re-genesis, as before.
 
