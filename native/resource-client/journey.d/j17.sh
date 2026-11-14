@@ -309,7 +309,9 @@ restart() {
     echo $? >"$SD/audit-$1.from.rc"
     echo $(( ($(date +%s%N) - t0) / 1000000 )) >"$SD/audit-$1.from.ms"
     local size; size=$(stat -c %s "$SD/audit-$2.anchor")
-    { head -c $((size - 1)) "$SD/audit-$2.anchor"; printf '%b' "\\$(printf '%03o' $(( ($(tail -c 1 "$SD/audit-$2.anchor" | od -An -tu1) + 1) % 256 )))"; } >"$SD/audit-$1.forged.anchor"
+    # another world root, still a canonical record: one plain byte inside the last digest
+    local byte=A; [ "$(tail -c 4 "$SD/audit-$2.anchor" | head -c 1)" != A ] || byte=B
+    { head -c $((size - 4)) "$SD/audit-$2.anchor"; printf '%s' "$byte"; tail -c 3 "$SD/audit-$2.anchor"; } >"$SD/audit-$1.forged.anchor"
     "$MINI" audit --host "$HOST" --config "$CONFIG" --from "$SD/audit-$1.forged.anchor" --anchor-out "$SD/audit-$1.forged.out.anchor" \
       >"$SD/audit-$1.forged.out" 2>"$SD/audit-$1.forged.err"
     echo $? >"$SD/audit-$1.forged.rc"

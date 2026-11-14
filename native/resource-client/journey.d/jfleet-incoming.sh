@@ -49,9 +49,9 @@ row "incoming: B's ledger holds exactly A's transfer" "one entry: amount 25, the
   "$([ "$RC" = 0 ] && [ -n "$TX" ] && jq -e --arg t "$TX" '(.entries | length) == 1 and .entries[0].amount == "25" and .entries[0].transactionId == $t' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
 
 run overdraw FS transfer --profile "$PB" --to "$A" --amount 100000
-row "transfer: B overdrawing its account is refused by the Host's book" "rc != 0 naming bookRefused or not admitted, nothing committed" \
+row "transfer: B overdrawing its account is refused by the Host's book" "rc != 0 naming the book refusal (book-refused) or not admitted, nothing committed" \
   "rc $RC, $(tail -1 "$ERR" | cut -c1-140)" \
-  "$([ "$RC" != 0 ] && grep -Eq 'bookRefused|not admitted' "$ERR" && ! grep -q '"committed"' "$OUT" && echo 1 || echo 0)"
+  "$([ "$RC" != 0 ] && grep -Eq 'bookRefused|book-refused|not admitted' "$ERR" && ! grep -q '"committed"' "$OUT" && echo 1 || echo 0)"
 run in2 FS incoming --profile "$PB"
 row "incoming: the refused overdraw left B's ledger as it was" "still one entry, amount 25" \
   "rc $RC, $(jq -c '[.entries[] | {amount,transactionId}]' "$OUT" 2>/dev/null | cut -c1-140)" \
