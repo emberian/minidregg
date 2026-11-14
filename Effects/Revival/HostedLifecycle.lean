@@ -113,7 +113,7 @@ def spec (rules : List Rule) : EffectSpec Context substrate Operation Refusal wh
   frame := fun _ => {.slot 0}
   verb := fun kind _ => match kind with
     | .object => .mutateObject | .account => .transfer | .program => .installProgram
-  view := fun op before after => [("phase",Int.ofNat op.phase), ("before",Int.ofNat before.status), ("after",Int.ofNat after.status)]
+  view := fun _ op before after => [("phase",Int.ofNat op.phase), ("before",Int.ofNat before.status), ("after",Int.ofNat after.status)]
 
 def handler (rules : List Rule) : Handler Context State where
   S := substrate

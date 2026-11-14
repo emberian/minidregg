@@ -144,17 +144,21 @@ end
 /-- `effectsOf`'s per-target step, by explicit position. -/
 def step (index : Nat) (target : Target) : Option BendWorldPlan.Effect :=
   match target.payload with
-  | .read | .kindRead | .fieldRead _ | .computeFunding _ => none
+  | .read | .kindRead | .computeFunding _ => none
+  | .registered code op =>
+      if (effectAt code.toNat).observeOnly op then none else some ⟨index, .registered code op⟩
   | payload => some ⟨index,payload⟩
 
 /-- Payloads `effectsOf` reports verbatim. -/
 def verbatim : Payload → Bool
-  | .read | .kindRead | .fieldRead _ | .computeFunding _ => false
+  | .read | .kindRead | .computeFunding _ => false
+  | .registered code op => !(effectAt code.toNat).observeOnly op
   | _ => true
 
 /-- Payloads `effectsOf` never reports. -/
 def inert : Payload → Bool
-  | .read | .kindRead | .fieldRead _ | .computeFunding _ => true
+  | .read | .kindRead | .computeFunding _ => true
+  | .registered code op => (effectAt code.toNat).observeOnly op
   | _ => false
 
 theorem finRange_pairs {α : Type} (l : List α) :
@@ -183,13 +187,13 @@ theorem step_inert {index : Nat} {target : Target} (h : inert target.payload = t
     step index target = none := by
   unfold step
   revert h
-  cases target.payload <;> simp [inert]
+  cases target.payload <;> simp +contextual [inert]
 
 theorem step_verbatim {index : Nat} {target : Target} (h : verbatim target.payload = true) :
     step index target = some ⟨index,target.payload⟩ := by
   unfold step
   revert h
-  cases target.payload <;> simp [verbatim]
+  cases target.payload <;> simp +contextual [verbatim]
 
 theorem filterMap_verbatim (targets : List Target) (k : Nat)
     (h : ∀ t ∈ targets, verbatim t.payload = true) :

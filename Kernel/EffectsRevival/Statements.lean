@@ -133,7 +133,7 @@ def contentSpec : ContentSpec where
   amount := fun _ _ => 0
   frame := contentFrame
   verb := fun kind _ => DeclaredResourceScalar.ordinaryVerb kind
-  view command before after := ContentResource.project before after command
+  view _ command before after := ContentResource.project before after command
   commutes := ContentResource.Command.commutes
 
 /-- A content target with the given header. -/
@@ -184,7 +184,7 @@ def ContentAgreement (E : ContentSpec) : Prop :=
     (∀ r : ContentResource.Reject,
       DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient ctx.command
           (contentTarget ctx E.version root command observe epoch roster) pre = .error (.content r) →
-        E.exec 1 ctx command pre.logical = .error (.refused 1 (E.refusalName r))) ∧
+        E.exec 1 ctx command pre.logical = .error (.refused 1 (E.refusalName r) (E.refusalDetail r))) ∧
     (∀ ps, E.sem ctx command pre.logical = .ok ps →
       DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient ctx.command
           (contentTarget ctx E.version root command observe epoch roster) pre =
@@ -203,7 +203,7 @@ def ContentAgreement (E : ContentSpec) : Prop :=
     (∀ before after : Store Hyperdocument.layout,
       DeclaredResourceController.targetProjection ctx.command.subject
         (contentTarget ctx version root command observe epoch roster) before after =
-          E.view command before after))
+          E.view ⟨ctx.command.subject, ctx.target⟩ command before after))
 
 /-- The content declaration's own obligation: every admitted content command writes only
 its declared fields and its descriptor (with the rotate) replays. -/
@@ -272,12 +272,6 @@ through the registry and deleting the content arms; this statement is that commi
 Scope: the target dispatch, not the whole of `prepareTarget` (the post law, the policy
 source, the audience freshness and the authority legs stay the controller's). -/
 
-/-- Reindex a declaration's context (the content declaration reads a `LiveCtx`; the host
-dispatch carries more). -/
-def EffectSpec.comap {C C' : Type} {S : Substrate} {O R : Type} (f : C' → C)
-    (E : EffectSpec C S O R) : EffectSpec C' S O R :=
-  { E with sem := fun c => E.sem (f c), rotate := fun c => E.rotate (f c) }
-
 /-- The host dispatch's context: the target computation's, plus the deployment and the
 target header (`selectTarget`'s cell law, the schema version, the expected root, the
 observe capability and audience fields). -/
@@ -302,7 +296,8 @@ def ofReject (code : Nat) : DeclaredResourceController.Reject → DispatchRefusa
   | .wrongRole => .wrongRole code
   | .unsupportedVersion => .unsupportedVersion code
   | .staleTarget => .staleTarget code
-  | .content r => .refused code (reprStr r)
+  | .content r => .refused code (reprStr r) []
+  | .effect refusal => refusal
   | r => .host code (reprStr r)
 
 /-- **Today's target dispatch**, as the controller runs it per target: decode the payload
@@ -357,10 +352,10 @@ def contentHandlerOf (E : ContentSpec) : Handler HostCtx HostCell where
   spec := E.comap HostCtx.toLiveCtx
   header := contentHeader
   fresh := contentFresh
-  select cell := match cell with
+  select _ cell := match cell with
     | ⟨.content, value⟩ => some value.logical
     | _ => none
-  pack s := ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer s⟩
+  pack _ s := ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer s⟩
 
 def contentHandler : Handler HostCtx HostCell := contentHandlerOf contentSpec
 
@@ -396,6 +391,114 @@ def HostMovedRootAccepted : Prop :=
   ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
     op.commutes = true ∧ contentFresh ctx cell = false ∧
     hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
+
+/-! ## §7b. The REGISTRY keystone: the deployed target dispatch dispatches code 9 through the registry.
+
+`Payload` has an open constructor, `registered code op`, whose every arm reads the declaration
+`effectAt code` (`Kernel/ResourceEffectRegistry.lean`). The cited read is bound at code 9 and
+has no constructor and no hand arm; codes 0 to 8 are still hand arms.
+
+`RegistryKeystone` is `Dispatches` of the DEPLOYED functions (`payloadStream`'s decode,
+`selectTarget`, `computeTarget`, the `targetPatch` validation, `packTarget`, exactly
+`hostTargetDispatch`) through `hostRegistry`, every declaration's handler at its code. Its
+`agreement` clause is a refinement of the controller's registered arms against the engine's
+`Handler.fire`, at every operation, context and cell; `noTwin` puts every bound code out of the
+hand arms; `unregistered` is the refusal by name.
+
+Scope of "by name": the target dispatch. A whole command whose payload tag is unbound still
+fails `commandCodec.decode` and is refused `malformedCommand` by the receiver; the JSON face
+names the type it did not find (`Host/Json.targetPayload`). -/
+
+/-- The engine context of a host dispatch. -/
+def dispatchCtxOf (ctx : HostCtx) : DeclaredResourceController.DispatchCtx :=
+  { DeclaredResourceController.targetCtx ctx.snapshot ctx.semantics ctx.ambient ctx.command
+      ctx.kind ctx.target ctx.capability ctx.observe ctx.epoch ctx.roster with
+    deployment := ctx.deployment, version := ctx.version, root := ctx.root }
+
+/-- **The registry the Host dispatches through**: every declaration's handler, at its code. -/
+def hostRegistry : Registry HostCtx HostCell :=
+  DeclaredResourceController.liveRegistry.map fun entry => (entry.1, entry.2.comap dispatchCtxOf)
+
+/-- The payload codes that are still hand arms. -/
+def liveLegacy : List Nat := [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+/-- **The deployed target dispatch.** A code neither bound nor a hand arm is refused by name;
+every other code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,
+selection, computation, patch validation and packing). -/
+def liveTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell : HostCell) :
+    Except DispatchRefusal HostCell :=
+  if DeclaredResourceController.registeredCode code = false ∧ code ∉ liveLegacy then
+    .error (.unregistered code)
+  else hostTargetDispatch code bytes ctx cell
+
+/-- **THE REGISTRY KEYSTONE.** -/
+def RegistryKeystone : Prop := Dispatches hostRegistry liveLegacy liveTargetDispatch
+
+/-- **Premise inhabitation.** Every bound handler is lawful: sound (its `select` and `pack`
+are inverse both ways under every context, the store substrate is framed) and complete. -/
+def RegistryPremise : Prop := ∀ code e, hostRegistry.lookup code = some e → e.Lawful
+
+/-- **Satisfiable (both poles of the cited read, through the deployed dispatch).** Some cited
+read is admitted and returns the cell it met; and some cited read is refused BY NAME with a
+structured detail that decodes to the one key that moved. -/
+def RegistryAccepted : Prop :=
+  (∃ (reads : List DeclaredResourceController.FieldRead) (ctx : HostCtx) (cell : HostCell),
+    reads ≠ [] ∧
+    liveTargetDispatch 9 ((StreamCodec.list DeclaredResourceController.fieldReadStream).encode reads)
+      ctx cell = .ok cell) ∧
+  (∃ (reads : List DeclaredResourceController.FieldRead) (ctx : HostCtx) (cell : HostCell)
+      (detail : List UInt8) (key : EffectDeclaration.StateKey),
+    liveTargetDispatch 9 ((StreamCodec.list DeclaredResourceController.fieldReadStream).encode reads)
+      ctx cell = .error (.refused 9 "citedStale" detail) ∧
+    DeclaredResourceController.movedStream.toLawful.decode detail = some [key])
+
+/-- The ghost of the cited read: the same declaration, admitting whatever the cell holds (its
+footprint is never compared). -/
+def citedGhost : DeclaredResourceController.Effect :=
+  { DeclaredResourceController.citedEffect with
+    spec := { DeclaredResourceController.citedSpec with sem := fun _ _ _ => .ok [] }
+    observes_silent := by
+      intro ctx op s ps _ emitted
+      exact (Except.ok.inj emitted).symm
+    complete := by
+      intro ctx op s ps ok
+      have empty : ps = [] := (Except.ok.inj ok).symm
+      subst empty
+      exact ⟨fun loc member => absurd member (Finset.notMem_empty loc), rfl⟩
+    view_unjoint := DeclaredResourceController.citedEffect.view_unjoint }
+
+/-- **Teeth.** The deployed dispatch does not dispatch through a registry whose code 9 never
+compares the footprint (agreement bites: the deployed arm refuses a stale read), nor through
+the registry with code 9 also kept as a hand arm (noTwin bites), nor is a code nothing binds
+read by anything (an explicit instance of the refusal by name, at a code beside the bound one
+and at one past the octet). -/
+def RegistryTeeth : Prop :=
+  ¬ Dispatches [(9, (citedGhost.handler 9).comap dispatchCtxOf)] liveLegacy liveTargetDispatch ∧
+  ¬ Dispatches hostRegistry (9 :: liveLegacy) liveTargetDispatch ∧
+  (∀ bytes ctx cell, liveTargetDispatch 10 bytes ctx cell = .error (.unregistered 10)) ∧
+  (∀ bytes ctx cell, liveTargetDispatch 300 bytes ctx cell = .error (.unregistered 300))
+
+/-- A payload's tag: `payloadStream`'s tag octet. -/
+def payloadTag (payload : DeclaredResourceController.Payload) : Nat :=
+  ((DeclaredResourceController.payloadStream.encode payload).headD 0).toNat
+
+/-- **THE LIVE LEGACY CENSUS, now.** The hand arms' decoder (`legacyPayloadDecode`) produces no
+payload at a bound code, and the payload decoder hands a bound tag to its declaration and to
+nothing else. With `Payload`'s open constructor the legacy input is what the hand decoder
+reads, not the whole inductive. -/
+def LiveLegacyCensus : Prop :=
+  (∀ bytes payload rest, DeclaredResourceController.legacyPayloadDecode bytes = some (payload, rest) →
+    DeclaredResourceController.registeredCode (payloadTag payload) = false) ∧
+  (∀ (tag : UInt8) bytes, DeclaredResourceController.registeredOctet tag = true →
+    DeclaredResourceController.payloadStream.decodePrefix (tag :: bytes) =
+      ((DeclaredResourceController.effectAt tag.toNat).spec.opStream.decodePrefix bytes).map
+        fun decoded => (.registered tag decoded.1, decoded.2))
+
+/-- **Census teeth**: an octet nothing binds and no hand arm reads is refused by the payload
+decoder itself, whatever follows it. -/
+def LiveLegacyCensusTeeth : Prop :=
+  ∀ (tag : UInt8) bytes, DeclaredResourceController.registeredOctet tag = false →
+    tag.toNat ∉ liveLegacy → DeclaredResourceController.payloadStream.decodePrefix (tag :: bytes) = none
 
 /-! ## §8. The deployed receiver factors through the dispatcher.
 
@@ -452,10 +555,6 @@ def PrepareFactors (E : ContentSpec) : Prop :=
       (dispatch [(1, contentHandlerOf E)] 1 (ContentResource.commandStream.encode command)
           (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
         genericChecks deployment directory ctx.snapshot ctx.target epoch before
-
-/-- The live legacy input type's tag: `payloadStream`'s tag octet. -/
-def payloadTag (payload : DeclaredResourceController.Payload) : Nat :=
-  ((DeclaredResourceController.payloadStream.encode payload).headD 0).toNat
 
 /-- **THE LIVE LEGACY CENSUS** (false until the content constructor is deleted). -/
 def HostLegacyCensus : Prop := LegacyDisjoint payloadTag [(1, contentHandler)]

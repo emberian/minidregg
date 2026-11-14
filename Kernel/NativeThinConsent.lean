@@ -157,7 +157,8 @@ def memberPatch (command : Command) (target : Target) (pre : Store target.layout
           | none => .error (.patchRefused id)
     | read => exact .ok []
     | kindRead => exact .ok []
-    | fieldRead _ => exact .error (.unsupportedPayload id "fieldRead: binds cited values, not the cell root")
+    | registered code _ =>
+        exact .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered effect is not displayed from a served view"))
     | content _ => exact .error (.unsupportedPayload id "content: reads policy coordinates and the height")
     | append _ => exact .error (.unsupportedPayload id "append: records the admission height")
     | computeFunding _ => exact .error (.unsupportedPayload id "compute funding: writes the shared Book")
@@ -219,7 +220,7 @@ theorem targetPatch_split (snapshot : AuthoritySnapshot) (semantics : Digest) (a
         simp only [memberPatch, Except.ok.injEq] at member
         subst member
         exact ⟨[], rfl, fun _ _ _ => rfl⟩
-    | fieldRead _ => simp [memberPatch] at member
+    | registered _ _ => simp [memberPatch] at member
     | content _ => simp [memberPatch] at member
     | append _ => simp [memberPatch] at member
     | computeFunding _ => simp [memberPatch] at member
@@ -290,7 +291,7 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
         have hb : (root != pre.root) = true := bne_iff_ne.mpr moved
         simp only [computeTarget, hb, if_true] at computed
         split_ifs at computed <;> simp [bind, Except.bind, pure, Except.pure] at computed
-    | fieldRead _ => exact supported.elim
+    | registered _ _ => exact supported.elim
     | content _ => exact supported.elim
     | append _ => exact supported.elim
     | computeFunding _ => exact supported.elim
@@ -330,7 +331,8 @@ def targetWire (target : Target) : StoreCodec.Wire target.layout := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ | fieldRead _ => exact DeclaredEffectCell.wire
+    | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.wire
+    | registered code _ => exact (effectAt code.toNat).wire
     | content _ | read => exact HyperdocumentCell.contentWire
     | append _ => exact StreamCell.headWire
     | world _ => exact WorldKindCell.instanceWire

@@ -2828,7 +2828,7 @@ fn delegation_bounds(bounds: &Value) -> Result<Value> {
     Ok(Value::Array(out))
 }
 
-/// A cited read of a declared cell (`Kernel/ResourceTransaction` `Payload.fieldRead`): the fields
+/// A cited read of a declared cell (`Kernel/CitedRead`, registry code 9, JSON `fieldRead`): the fields
 /// this turn read and the value it read at each (`null`: the field was absent). The Host compares
 /// them by value with the loaded cell and refuses naming every field that moved; nothing about the
 /// cell's root is bound, so writes to its other fields do not stale the citation. The author states
