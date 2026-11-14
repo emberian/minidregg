@@ -396,11 +396,34 @@ signers at different heights could not write one chain the same way.
 
 **Not adopted by the native layer.** `Compiler/GenericSimplexIO.lean` still replays with
 `step` on whole chains and checkpoints the whole state; `exportable` and
-`certificateCandidates` read old views and the audit; the participant never drains
-`outbox`; nothing forwards `relay`; `receivedBefore` answers a repeated CANDIDATE(⊥) as a
-duplicate without giving it to the kernel. The wire and the journal therefore still carry
-whole chains, and no log format moves for the running replica until the native layer
-adopts it. The kernel harness and the witnesses run the new rules.
+`certificateCandidates` read old views and the audit; the participant reads `outbox` by a
+cursor into a list that only grows and never drains it; nothing forwards `relay`;
+`receivedBefore` answers a repeated CANDIDATE(⊥) as a duplicate without giving it to the
+kernel, so neither floor evidence nor `serveViews` can be triggered natively. The wire and
+the journal therefore still carry whole chains. The kernel harness and the witnesses run
+the new rules.
+
+The adoption is one change across `GenericSimplexIO`, `GenericSimplexNative`,
+`GenericSimplexParticipant`, `GenericSimplexServe`, `GenericSimplexController`,
+`GenericSimplexTransferability` and the harnesses; the three gaps above cannot be closed
+one at a time on `step` (letting a repeated CANDIDATE(⊥) through without a driver that
+forwards and drains `relay` only grows `relay`). Its parts, in dependency order:
+1. Codecs for `WireMessage`, `WireInput` and `Replica` (`stateStream` already encodes the
+   core). An event is an encoded `WireInput`; the snapshot is a `Replica`.
+2. `replayEvents` runs `Replica.step c (chainDigest context)`; `Journal.snapshot` is the
+   replica, so a checkpoint is bounded by live state. `replayEvents_self` needs
+   `Replica.step` to keep `core.self` (through `finish`, `rebase`, `release`).
+3. The driver takes `Replica.drain` after every acknowledged input: `sends` to every peer,
+   `owed` to the named peer, `committed` to the application. The output of an input is
+   durable before it is sent, as today; the outbox cursors go away.
+4. `receiveAuthenticated` keeps its duplicate test for everything but CANDIDATE(⊥).
+5. A COMMIT witness is `(view, height, run, length, digest, attestation)`: the signature is
+   checked against `commitStatementBytes` before the block is read, and the kernel's
+   `decode` checks the block against the statement. `exportable` and the certificate answer
+   from the kept evidence (`Replica.evidence`) and the durable witnesses: a certificate is
+   `(context, view, length, digest, signers)` and its verifier needs the chain only above a
+   height it already holds.
+6. `logMagic` and the packet format move once, with this change.
 
 **BREAKS: log magic version 10; signed COMMIT statement version 3.** Version 7: the step
 changed (`validBlock`, `checked`, `offers`, the tick guard, the `ingest` horizon and repeat

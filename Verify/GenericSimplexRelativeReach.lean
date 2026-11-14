@@ -177,8 +177,8 @@ theorem relAllowedB_sound {net : RelNetwork} {receiver : Nat} {input : WireInput
       obtain ⟨entry, member, same⟩ := List.any_eq_true.mp sent
       refine ⟨entry, member, ?_⟩
       split at same <;> rename_i commit
-      · rw [if_pos commit]; exact of_decide_eq_true same
-      · rw [if_neg commit]; exact of_decide_eq_true same
+      · simp only [commit, ↓reduceIte]; exact of_decide_eq_true same
+      · simp only [commit, ↓reduceIte]; exact of_decide_eq_true same
   | checked height records => exact ⟨of_decide_eq_true rest, trivial⟩
   | tick _ | offer _ | poll => trivial
 
