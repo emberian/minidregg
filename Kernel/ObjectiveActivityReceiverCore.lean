@@ -71,6 +71,7 @@ public import Kernel.ObjectiveAdmittedTurn
 public import Kernel.ObjectiveKernelConfig
 public import Kernel.ObjectiveBendNativeAdmission
 public import Kernel.PayAssignmentOwner
+public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -822,6 +823,47 @@ def funding (config : Config) (durable : Durable) (command : Command) : Except R
       let available := (Theory.CanonicalResourceKernel.logicalBook book.logical).balance account config.asset
       if (price : Int) ≤ available then .ok () else .error (.kernel (.unfunded available price))
 
+/-- The capability a paying turn names on its payer account. -/
+def paymentCapability (command : Command) : Option CapabilityId :=
+  match command.turn with
+  | .birth _ _ _ capability _ _ _ _ _ _ => some capability
+  | .invoke _ _ _ _ _ _ _ _ _ capability => some capability
+  | _ => none
+
+/-- An account capability, as stored. -/
+def presentedGrant (snapshot : Snapshot) (capability : CapabilityId) :
+    Option (Capability .account × Unit) :=
+  (readCapability snapshot.cell .account capability).map fun stored => (stored.head, ())
+
+/-- **The value bound, before the run.** The grant a paying turn names on its payer must bound
+the turn's declared payment (`payment`: the public price of the declared envelope plus what
+the turn moves out of the account), read as one posting from the payer in the credit asset
+(`Theory.CapabilityValueBound.presentedCheck`). Refused `notAccountOwner`, before anything is
+decided and uncharged. -/
+def granted (config : Config) (snapshot : Snapshot) (command : Command) : Except Reject Unit :=
+  match payment config command, paymentCapability command with
+  | some (account, price), some capability =>
+      match CapabilityValueBound.presentedCheck (presentedGrant snapshot capability)
+          [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
+          account with
+      | .ok () => .ok ()
+      | .error _ => .error .notAccountOwner
+  | _, _ => .ok ()
+
+theorem granted_ok {config : Config} {snapshot : Snapshot} {command : Command}
+    (ok : granted config snapshot command = .ok ()) {account price : Nat}
+    {capability : CapabilityId} (paid : payment config command = some (account, price))
+    (named : paymentCapability command = some capability) :
+    CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
+      account := by
+  unfold granted at ok
+  rw [paid, named] at ok
+  simp only at ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+
 /-- A command that passed the gate, for the outcome its signer claims: the loaded authority,
 the configuration, the capabilities over the claim, and the funds. Built only by `gate`; the
 decision (`prepare`) takes one, so nothing is decided for a command that did not pass it. -/
@@ -836,6 +878,8 @@ structure Gated {F : Type} [Field F] (deployment : Deployment)
   preRootExact : preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot claimed = .ok ()
   funded : funding config durable command = .ok ()
+  /-- The payer's grant bounds the declared payment. -/
+  grantedExact : granted config authority.snapshot command = .ok ()
 theorem Gated.sound {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
     {command : Command} {claimed : Digest} (gated : Gated deployment profile ambient durable command claimed) :
@@ -861,7 +905,11 @@ def gate {F : Type} [Field F] (deployment : Deployment)
     | .ok () =>
       match funded : funding config durable command with
       | .error reason => throw reason
-      | .ok () => pure ⟨authority, config, configExact, preRoot, rfl, authorizedExact, funded⟩
+      | .ok () =>
+        match grantedExact : granted config snapshot command with
+        | .error reason => throw reason
+        | .ok () =>
+          pure ⟨authority, config, configExact, preRoot, rfl, authorizedExact, funded, grantedExact⟩
 
 /-- The signed request a gated command's signature must cover: over the CLAIMED outcome. -/
 def Gated.request {F : Type} [Field F] {deployment : Deployment}
@@ -2442,6 +2490,37 @@ theorem Failed.sound [DecidableEq F] {ingress : DecodedIngress}
       failureRequest deployment.domain profile.semantics ingress.command = some failed.request :=
   ⟨failed.envelopeExact, failed.causeExact, failed.charged, failed.requestExact⟩
 
+/-- **A charged failure's fee is within the payer grant's value bound**: the grant the failed
+turn named on its payer bounds the one posting a charged failure makes. -/
+theorem Failed.value_bounded [DecidableEq F] {ingress : DecodedIngress}
+    (failed : Failed deployment profile ambient durable ingress) :
+    ∃ capability, paymentCapability ingress.command = some capability ∧
+      CapabilityValueBound.Presented (presentedGrant failed.gated.authority.snapshot capability)
+        (ObjectiveActivity.failureBatch failed.gated.config failed.request).operations
+        failed.request.account := by
+  have req := failed.requestExact
+  have ok := failed.gated.grantedExact
+  unfold failureRequest at req
+  cases turn : ingress.command.turn with
+  | birth object objectCapability account accountCapability a5 a6 envelope a8 a9 deposit =>
+      rw [turn] at req
+      have same := Option.some.inj req
+      refine ⟨accountCapability, by simp [paymentCapability, turn], ?_⟩
+      rw [← same]
+      exact (granted_ok ok
+        (price := failed.gated.config.tariff.workOf envelope + deposit)
+        (by simp [payment, turn]) (by simp [paymentCapability, turn])).fee_mono
+        (Nat.le_add_right _ _)
+  | invoke object objectCapability a3 a4 a5 envelope a7 a8 account accountCapability =>
+      rw [turn] at req
+      have same := Option.some.inj req
+      refine ⟨accountCapability, by simp [paymentCapability, turn], ?_⟩
+      rw [← same]
+      exact granted_ok ok (by simp [payment, turn]) (by simp [paymentCapability, turn])
+  | _ =>
+      rw [turn] at req
+      cases req
+
 /-- What admission decides for a signed ingress: an accepted turn, or a charged failure. -/
 inductive Verdict [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -2925,8 +3004,8 @@ theorem retry_unverified_refused (reason : Reject) (prior : Receipt)
 /-- Repeating the same gate has one result; signature proof identity is irrelevant. -/
 theorem Gated.unique {claimed : Digest}
     (left right : Gated deployment profile ambient durable command claimed) : left = right := by
-  rcases left with ⟨la, lc, lce, lr, lre, lh, lf⟩
-  rcases right with ⟨ra, rc, rce, rr, rre, rh, rf⟩
+  rcases left with ⟨la, lc, lce, lr, lre, lh, lf, lg⟩
+  rcases right with ⟨ra, rc, rce, rr, rre, rh, rf, rg⟩
   cases CredentialAuthorityDomainReceiver.Loaded.unique la ra
   have cfg : lc = rc := Except.ok.inj (lce.symm.trans rce)
   cases cfg

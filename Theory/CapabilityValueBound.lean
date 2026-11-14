@@ -256,6 +256,24 @@ theorem valueBound_of_no_debit {kind : ResourceKind} (scope : Scope kind)
   rw [none] at listed
   cases listed
 
+/-- A bound that admits a fee admits a smaller fee of the same asset from the same payer. -/
+theorem valueBound_fee_mono {kind : ResourceKind} (scope : Scope kind)
+    (payer collector : AccountId) (asset : AssetId) {less more : Nat} (le : less ≤ more)
+    (bounded : ValueBound scope [.fee payer collector asset more] payer) :
+    ValueBound scope [.fee payer collector asset less] payer := by
+  rw [valueBound_iff] at bounded ⊢
+  intro debited member
+  have same : debited = asset := by
+    simp [debitAssets, debitAssetList, debits, Operation.posting] at member
+    first | exact member | exact member.symm
+  rw [same]
+  obtain ⟨named, within⟩ := bounded asset
+    (by simp [debitAssets, debitAssetList, debits, Operation.posting])
+  refine ⟨named, fun bound listed => ?_⟩
+  have limit := within bound listed
+  simp [grossDebit, debits, Operation.posting] at limit ⊢
+  omega
+
 /-! ## The statement for one admitted batch -/
 
 /-- **Every debit of the batch is within its presented capability's value bound.**
@@ -341,6 +359,14 @@ theorem presentedCheck_refuses {kind : ResourceKind} {D : Type} (cap : Capabilit
       .error (some refusal) := by
   obtain ⟨refusal, refused⟩ := (check_error_iff _ _ _).mpr unbounded
   exact ⟨refusal, by simp only [presentedCheck, refused]⟩
+
+theorem Presented.fee_mono {kind : ResourceKind} {D : Type}
+    {capability : Option (Capability kind × D)} {payer collector : AccountId} {asset : AssetId}
+    {less more : Nat} (le : less ≤ more)
+    (presented : Presented capability [.fee payer collector asset more] payer) :
+    Presented capability [.fee payer collector asset less] payer := by
+  obtain ⟨cap, commitment, named, bounded⟩ := presented
+  exact ⟨cap, commitment, named, valueBound_fee_mono cap.scope payer collector asset le bounded⟩
 
 /-- In plain terms: under `Presented`, every balance the operations debit from the account is
 named, and its gross debit is within every bound the capability sets on it. -/
