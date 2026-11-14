@@ -168,7 +168,7 @@ def render (packageBytes : List UInt8) (verifiedReceipt : Receipt)
       | .append _ => true
       | .world actions => !actions.isEmpty
       | .kindDefinition _ => true
-      | .read | .kindRead | .computeFunding _ | .moneyConsent _ => false) do
+      | .read | .kindRead | .fieldRead _ | .computeFunding _ | .moneyConsent _ => false) do
     throw "original call has no authored publication to the named resource"
   let messageId :=
     s!"<mini-grain-{verifiedReceipt.transactionId.value}-{verifiedReceipt.eventId.value}@{context.messageIdDomain}>"

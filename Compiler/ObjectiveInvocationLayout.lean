@@ -144,17 +144,17 @@ end
 /-- `effectsOf`'s per-target step, by explicit position. -/
 def step (index : Nat) (target : Target) : Option BendWorldPlan.Effect :=
   match target.payload with
-  | .read | .kindRead | .computeFunding _ => none
+  | .read | .kindRead | .fieldRead _ | .computeFunding _ => none
   | payload => some ⟨index,payload⟩
 
 /-- Payloads `effectsOf` reports verbatim. -/
 def verbatim : Payload → Bool
-  | .read | .kindRead | .computeFunding _ => false
+  | .read | .kindRead | .fieldRead _ | .computeFunding _ => false
   | _ => true
 
 /-- Payloads `effectsOf` never reports. -/
 def inert : Payload → Bool
-  | .read | .kindRead | .computeFunding _ => true
+  | .read | .kindRead | .fieldRead _ | .computeFunding _ => true
   | _ => false
 
 theorem finRange_pairs {α : Type} (l : List α) :

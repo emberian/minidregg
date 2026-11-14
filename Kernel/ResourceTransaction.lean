@@ -8,6 +8,7 @@ public import Compiler.NativeProtocolFrames
 public import Compiler.NativeInvocationStatement
 public import Compiler.ObjectiveInvocationClaim
 public import Kernel.DeclaredResourceScalar
+public import Theory.PlanBinding
 public import Kernel.WorldKindProjection
 public import Kernel.WorldKindMethods
 public import Kernel.WorldPrototypeConstruction
@@ -74,6 +75,14 @@ abbrev ComputeFunding := ResourceMoneyWire.FundingConsent
 abbrev computeFundingStream := ResourceMoneyWire.fundingStream
 abbrev MoneyConsent := ResourceMoneyWire.Consent
 
+/-- One cited read of a declared cell: a field's key and the value the signer read there
+(`none` = the field was absent). A list of them is the signed footprint of a `fieldRead`
+target (`Theory.PlanBinding.Footprint` at the declared-effect layout, `citedFootprint`). -/
+abbrev FieldRead := EffectDeclaration.StateKey × Option Int
+
+def fieldReadStream : StreamCodec FieldRead :=
+  StreamCodec.product DeclaredEffectCell.stateKeyStream (StreamCodec.option IntStream.intStream)
+
 /-- A target's payload: declared scalar actions, a content command, or one
 stream append (the entry's bytes; the receiver derives its sequence position
 and digest). -/
@@ -93,6 +102,12 @@ inductive Payload where
   | kindRead
   | computeFunding (funding : ComputeFunding)
   | moneyConsent (consent : MoneyConsent)
+  /-- An observe-only read of a declared cell, by value: the fields the signer cites and the
+  value read at each. It pins no root, writes nothing and advances no ratchet; it is admitted
+  when every cited field holds its cited value in the loaded cell (`citedStale` otherwise,
+  naming every moved field and no value), under an observe capability whose scope names every
+  cited field. The cell's law participants see exactly the cited fields (`citedProject`). -/
+  | fieldRead (reads : List FieldRead)
   deriving DecidableEq
 
 /-- A content command shows as its canonical command bytes. -/
@@ -108,6 +123,7 @@ instance : Repr Payload where
     | .kindRead => "Payload.kindRead"
     | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
     | .moneyConsent consent => Repr.addAppParen ("Payload.moneyConsent " ++ reprArg consent) prec
+    | .fieldRead reads => Repr.addAppParen ("Payload.fieldRead " ++ reprArg reads) prec
 
 structure Target where
   kind : ResourceKind
@@ -153,14 +169,14 @@ instance targetsValidDecidable (command : Command) : Decidable command.TargetsVa
 
 def Command.targetsWellFormed (command : Command) : Bool := decide command.TargetsValid
 
-/-- An observe-only read target (`read`, `kindRead`): it writes nothing, and
+/-- An observe-only read target (`read`, `kindRead`, `fieldRead`): it writes nothing, and
 its ONLY authorization is its `ReadLeg` (the requester's observe capability,
 signed for this exact command, judged by the source's current observe policy on
 the unchanged cell). No ordinary leg runs for it. A funding or money-consent
 target is read too, but it authorizes a debit and keeps its leg. -/
 def Target.observeOnly (target : Target) : Bool :=
   match target.payload with
-  | .read | .kindRead => true
+  | .read | .kindRead | .fieldRead _ => true
   | _ => false
 
 /-- Whether the command writes any target. A command of observe-only reads alone
@@ -191,6 +207,7 @@ def payloadStream : StreamCodec Payload where
     | .computeFunding funding => 6 :: computeFundingStream.encode funding
     | .kindRead => [7]
     | .moneyConsent consent => 8 :: ResourceMoneyWire.consentStream.encode consent
+    | .fieldRead reads => 9 :: (StreamCodec.list fieldReadStream).encode reads
   decodePrefix
     | 0 :: bytes => do
         let (actions, rest) ← (StreamCodec.list DeclaredResourceScalar.actionStream).decodePrefix bytes
@@ -215,6 +232,9 @@ def payloadStream : StreamCodec Payload where
     | 8 :: bytes => do
         let (consent, rest) ← ResourceMoneyWire.consentStream.decodePrefix bytes
         some (.moneyConsent consent, rest)
+    | 9 :: bytes => do
+        let (reads, rest) ← (StreamCodec.list fieldReadStream).decodePrefix bytes
+        some (.fieldRead reads, rest)
     | _ => none
   decodePrefix_encode := by
     intro payload suffix
@@ -479,7 +499,7 @@ a stream append on an object, observe for an observe-only read target, the
 kind's ordinary write verb otherwise. -/
 def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
   | .object, .append _ => .appendObject
-  | kind, .read | kind, .kindRead => observeVerb kind
+  | kind, .read | kind, .kindRead | kind, .fieldRead _ => observeVerb kind
   | kind, .moneyConsent _ => ordinaryVerb kind
   | kind, _ => ordinaryVerb kind
 
@@ -623,6 +643,13 @@ inductive Reject where
   | channel (reason : DomainEpoch.Refusal)
   /-- K-FIELDS: the leg changed a field its capability's scope does not name. -/
   | fieldNotNamed
+  /-- A `fieldRead` target cites a key that is not a field of the cell it reads. -/
+  | citedKey
+  /-- A `fieldRead` target's footprint does not hold at the loaded cell: every cited field whose
+  value moved, in the order cited. It names fields and no value, cited or current; it is
+  returned only after the read's observe capability was found to name every cited field
+  (`fieldNotNamed` before it), so it tells the requester nothing its grant does not. -/
+  | citedStale (moved : List EffectDeclaration.StateKey)
   /-- K-FIELDS: a named field moved past a per-field bound (`maxDelta`). -/
   | maxDeltaExceeded
   /-- A delegated capability lowered a balance on which its scope sets no `maxDelta` bound
@@ -641,7 +668,7 @@ def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
 /-- The store layout of the target's role: a declared-effect cell for scalar
 actions, a hyperdocument content cell for content commands. -/
 @[reducible] def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
-  | .scalar _ | .computeFunding _ | .moneyConsent _ => EffectDeclaration.effectLayout
+  | .scalar _ | .computeFunding _ | .moneyConsent _ | .fieldRead _ => EffectDeclaration.effectLayout
   | .content _ | .read => Hyperdocument.layout
   | .append _ => StreamCell.headLayout
   | .world _ => WorldKindCell.instanceLayout
@@ -651,7 +678,7 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.materializer
+    | scalar _ | computeFunding _ | moneyConsent _ | fieldRead _ => exact DeclaredEffectCell.materializer
     | content _ => exact HyperdocumentCell.contentMaterializer
     | append _ => exact StreamCell.headMaterializer
     | world _ => exact WorldKindCell.instanceMaterializer
@@ -670,7 +697,7 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact DeclaredResourceScalar.packDeclared kind cell
+    | scalar _ | fieldRead _ => exact DeclaredResourceScalar.packDeclared kind cell
     | computeFunding _ | moneyConsent _ => exact ⟨.accountMetadata, cell⟩
     | content _ => exact ⟨.content, cell⟩
     | append _ => exact ⟨.stream, cell⟩
@@ -683,7 +710,7 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact CanonicalCellRegistry.selectDeclared deployment id kind cell
+    | scalar _ | fieldRead _ => exact CanonicalCellRegistry.selectDeclared deployment id kind cell
     | computeFunding _ | moneyConsent _ => exact if kind = .account then
         CanonicalCellRegistry.selectDeclared deployment id .account cell else none
     | content _ => exact if kind = .object then
@@ -780,6 +807,173 @@ def scalarLeg (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Amb
   | .ok prepared => .ok (Patch.run prepared.post
       (DeclaredEffectCell.blinding.patch pre.logical ambient.height))
 
+/-! ### Cited reads (`Payload.fieldRead`)
+
+A turn reads a declared cell it does not write by citing fields and the values it read. The
+check is `Theory.PlanBinding.Footprint.admitAll` at the declared-effect layout: currency is by
+value, the refusal is the whole stale list (`citedMoved`), and nothing about the cell's root is signed. -/
+
+/-- The cited reads as a `PlanBinding` footprint. -/
+def citedFootprint (reads : List FieldRead) : PlanBinding.Footprint EffectDeclaration.effectLayout :=
+  reads.map fun read => ⟨read.1.address, read.2⟩
+
+/-- The cited fields whose value the store no longer holds, in the order cited. -/
+def citedMoved (store : Store EffectDeclaration.effectLayout) (reads : List FieldRead) :
+    List EffectDeclaration.StateKey :=
+  (reads.filter fun read => !decide (store read.1.address = read.2)).map (·.1)
+
+/-- **`citedMoved` is exactly the stale set**: a key is named iff it was cited and its value
+is not the cited one. -/
+theorem mem_citedMoved {store : Store EffectDeclaration.effectLayout} {reads : List FieldRead}
+    {key : EffectDeclaration.StateKey} :
+    key ∈ citedMoved store reads ↔ ∃ read ∈ reads, read.1 = key ∧ store read.1.address ≠ read.2 := by
+  simp only [citedMoved, List.mem_map, List.mem_filter]
+  constructor
+  · rintro ⟨read, ⟨member, stale⟩, rfl⟩
+    exact ⟨read, member, rfl, by simpa using stale⟩
+  · rintro ⟨read, member, rfl, stale⟩
+    exact ⟨read, ⟨member, by simpa using stale⟩, rfl⟩
+
+/-- No cited field is stale exactly when the cited footprint holds at the store
+(`PlanBinding.Footprint.Holds`, so `no_toctou_cited` and `moved_back_admits` apply). -/
+theorem citedMoved_eq_nil_iff (store : Store EffectDeclaration.effectLayout) (reads : List FieldRead) :
+    citedMoved store reads = [] ↔ PlanBinding.Footprint.Holds store (citedFootprint reads) := by
+  simp only [citedMoved, citedFootprint, PlanBinding.Footprint.Holds, List.map_eq_nil_iff,
+    List.filter_eq_nil_iff, List.mem_map]
+  constructor
+  · rintro held r ⟨read, member, rfl⟩
+    simpa using held read member
+  · intro holds read member
+    simpa using holds ⟨read.1.address, read.2⟩ ⟨read, member, rfl⟩
+
+/-- Currency is by value: two stores that agree at the cited fields name the same stale fields,
+whatever else differs between them (other fields, the blinding, hence the root). -/
+theorem citedMoved_congr {s s' : Store EffectDeclaration.effectLayout} {reads : List FieldRead}
+    (same : ∀ read ∈ reads, s read.1.address = s' read.1.address) :
+    citedMoved s reads = citedMoved s' reads := by
+  unfold citedMoved
+  congr 1
+  apply List.filter_congr
+  intro read member
+  rw [same read member]
+
+/-- Whether an observe capability's scope names every cited field. A cited read is a read of
+each field it names: a read outside the grant would be an equality oracle on that field. -/
+def citedScope (snapshot : AuthoritySnapshot) (kind : ResourceKind) (capability : CapabilityId)
+    (reads : List FieldRead) : Option Reject :=
+  match CredentialAuthorityState.readCapability snapshot.cell kind capability with
+  | none => some .observationRejected
+  | some stored =>
+      if reads.all fun read =>
+          decide (CellField.NamedBy stored.head.scope.fields
+            (ResourceObservationAdmission.declaredField read.1))
+      then none else some .fieldNotNamed
+
+/-- **The cited read**: the whole computation of a `fieldRead` target. It takes no root (the
+signed `expectedTargetRoot` is not compared), returns the loaded store unchanged, and refuses,
+in order: an account (`wrongRole`; balances are the Book's), a version other than 1, an
+audience binding, a capability that is not the target's observe capability, a key that is not
+a field of this cell (`citedKey`), a grant that does not name every cited field
+(`citedScope`), and last a footprint that does not hold (`citedStale`, every moved field). -/
+def citedRead (snapshot : AuthoritySnapshot) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (observe : Option CapabilityId) (audience : Bool)
+    (reads : List FieldRead) (store : Store EffectDeclaration.effectLayout) :
+    Except Reject (Store EffectDeclaration.effectLayout) :=
+  if kind = .account then .error .wrongRole
+  else if version ≠ 1 then .error .unsupportedVersion
+  else if audience then .error .wrongRole
+  else if observe ≠ some capability then .error .observationRequired
+  else if (reads.all fun read =>
+      DeclaredActionLowering.writableKeyCheck (⟨id⟩ : ResourceId kind) read.1) = false then
+    .error .citedKey
+  else match citedScope snapshot kind capability reads with
+    | some reason => .error reason
+    | none =>
+        if citedMoved store reads = [] then .ok store
+        else .error (.citedStale (citedMoved store reads))
+
+/-- **K1/K3, the accepting pole.** An admitted cited read returns the loaded store itself (it
+writes nothing, so no field, no blinding and no root moves), its footprint holds there, its
+one authorization is its observe capability, and that capability's scope names every cited
+field. -/
+theorem citedRead_ok {snapshot : AuthoritySnapshot} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {observe : Option CapabilityId} {audience : Bool}
+    {reads : List FieldRead} {store post : Store EffectDeclaration.effectLayout}
+    (ok : citedRead snapshot kind id capability version observe audience reads store = .ok post) :
+    post = store ∧ PlanBinding.Footprint.Holds store (citedFootprint reads) ∧
+      observe = some capability ∧ citedScope snapshot kind capability reads = none := by
+  unfold citedRead at ok
+  split at ok; · cases ok
+  split at ok; · cases ok
+  split at ok; · cases ok
+  split at ok; · cases ok
+  split at ok; · cases ok
+  rename_i observed _
+  split at ok
+  · cases ok
+  · rename_i named
+    split at ok
+    · rename_i current
+      cases ok
+      exact ⟨rfl, (citedMoved_eq_nil_iff _ _).1 current, Decidable.not_not.mp observed, named⟩
+    · cases ok
+
+/-- **K3, the refusing pole: the refusal names every moved field and nothing else.** Under a
+grant that names the cited fields, a `citedStale` refusal is exactly `citedMoved` (so, by
+`mem_citedMoved`, exactly the cited keys whose value is not the cited one), and it is not empty.
+It carries keys only. -/
+theorem citedRead_stale {snapshot : AuthoritySnapshot} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {observe : Option CapabilityId} {audience : Bool}
+    {reads : List FieldRead} {store : Store EffectDeclaration.effectLayout}
+    {moved : List EffectDeclaration.StateKey}
+    (granted : citedScope snapshot kind capability reads = none)
+    (refused : citedRead snapshot kind id capability version observe audience reads store =
+      .error (.citedStale moved)) :
+    moved = citedMoved store reads ∧ moved ≠ [] := by
+  unfold citedRead at refused
+  split at refused; · cases refused
+  split at refused; · cases refused
+  split at refused; · cases refused
+  split at refused; · cases refused
+  split at refused; · cases refused
+  split at refused
+  · rename_i reason found
+    rw [granted] at found
+    cases found
+  · split at refused
+    · cases refused
+    · rename_i stale
+      cases refused
+      exact ⟨rfl, stale⟩
+
+/-- **A guard is a read: a grant that does not name the cited fields learns nothing.** When the
+scope check refuses (the capability is not held, or some cited field is outside it), the
+result is the same at every store, so the requester cannot use a cited value as an equality
+oracle on a field its grant does not name. -/
+theorem citedRead_scope_blind {snapshot : AuthoritySnapshot} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {observe : Option CapabilityId} {audience : Bool}
+    {reads : List FieldRead} {reason : Reject}
+    (unnamed : citedScope snapshot kind capability reads = some reason)
+    (s s' : Store EffectDeclaration.effectLayout) :
+    citedRead snapshot kind id capability version observe audience reads s =
+      citedRead snapshot kind id capability version observe audience reads s' := by
+  unfold citedRead
+  simp only [unnamed]
+
+/-- **Currency is by value.** Two loaded cells that agree at the cited fields are admitted or
+refused alike: a cited value that moved and moved back is current again, and a cell whose root
+moved for any other reason (another field written, the ratchet advanced) is still current. -/
+theorem citedRead_value_current {snapshot : AuthoritySnapshot} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {observe : Option CapabilityId} {audience : Bool}
+    {reads : List FieldRead} {s s' : Store EffectDeclaration.effectLayout}
+    (same : ∀ read ∈ reads, s read.1.address = s' read.1.address) :
+    (citedRead snapshot kind id capability version observe audience reads s).toOption.isSome =
+      (citedRead snapshot kind id capability version observe audience reads s').toOption.isSome := by
+  unfold citedRead
+  rw [citedMoved_congr same]
+  repeat' split
+  all_goals rfl
+
 /-- The only target computation. It invokes source-owned typed operations,
 never a host supplied post. Every branch returns the post store the source
 operation computed at the loaded cell; a scalar or content write then advances
@@ -851,6 +1045,11 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if observe != some capability then throw .observationRequired
         pure pre.logical
 
+    | fieldRead reads =>
+        -- A cited read: no root is compared, nothing is written (`citedRead`).
+        exact citedRead snapshot kind id capability version observe
+          (audienceEpoch.isSome || audienceRoster.isSome) reads pre.logical
+
     | kindRead => exact do
         if kind != .object then throw .wrongRole
         if version != 1 then throw .unsupportedVersion
@@ -904,7 +1103,7 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
           | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
               (streamRecord snapshot semantics ambient command request))]
           | none => []
-    | read | kindRead | computeFunding _ | moneyConsent _ => exact []
+    | read | kindRead | fieldRead _ | computeFunding _ | moneyConsent _ => exact []
 
     | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
     | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
@@ -925,7 +1124,7 @@ def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ => exact none
+    | scalar _ | computeFunding _ | moneyConsent _ | fieldRead _ => exact none
     | content _ => exact none
     | world _ => exact none
     | kindDefinition _ | kindRead => exact none
@@ -963,7 +1162,7 @@ def Target.contentStore? (target : Target) (cell : TargetCell target) :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ => exact none
+    | scalar _ | computeFunding _ | moneyConsent _ | fieldRead _ => exact none
     | content _ => exact some cell.logical
     | append _ => exact none
     | read => exact some cell.logical
@@ -1126,6 +1325,31 @@ def prepareTarget (deployment : Deployment) (directory : Directory Nat Registry)
             else .error .invalidPost
           else .error .invalidPost
 
+/-- **K1: a prepared cited read pins no root, writes nothing and advances no ratchet.** Its
+post store is its loaded store (so every field, the blinding and the root are as loaded), its
+patch is empty, its footprint holds at the loaded store, and its capability is its observe
+capability. The target's signed `expectedTargetRoot` appears nowhere in the conclusion or in
+`citedRead`: any root prepares. -/
+theorem PreparedTarget.fieldRead_unchanged {deployment : Deployment}
+    {directory : Directory Nat Registry} {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {root : Digest} {reads : List FieldRead}
+    {observe : Option CapabilityId} {audienceEpoch : Option Nat}
+    {audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster}
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .fieldRead reads, observe, audienceEpoch, audienceRoster⟩) :
+    prepared.post = prepared.pre.logical ∧
+      targetPatch snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .fieldRead reads, observe, audienceEpoch, audienceRoster⟩
+        prepared.pre = [] ∧
+      PlanBinding.Footprint.Holds prepared.pre.logical (citedFootprint reads) ∧
+      observe = some capability := by
+  have computed : citedRead snapshot kind id capability version observe
+      (audienceEpoch.isSome || audienceRoster.isSome) reads prepared.pre.logical = .ok prepared.post :=
+    prepared.candidate.modeEvidence.down
+  have ok := citedRead_ok computed
+  exact ⟨ok.1, rfl, ok.2.1, ok.2.2.1⟩
+
 /-- **An admitted scalar write advances the target's blinding ratchet**
 (K-HIDE-ROTATE): the post blinding of every prepared scalar leg of a blinded
 declared cell is one ratchet step of the pre blinding at the admission height. -/
@@ -1284,6 +1508,27 @@ def fundingProject (funding : ComputeFunding) : List (String × Int) :=
    ("compute/payer/before", funding.expectedPayerBalance),
    ("compute/payer/after", funding.expectedPayerBalance - Int.ofNat funding.credits)]
 
+/-- The cited fields' present values in the loaded cell, as declared values (`resource/field/…`). -/
+def citedValues (id : Nat) (reads : List FieldRead) (store : Store EffectDeclaration.effectLayout) :
+    DeclaredResourceProjection.Values :=
+  (DeclaredResourceProjection.values id store).filter fun entry =>
+    reads.any fun read => decide (read.1 = .objectField ⟨id⟩ ⟨entry.1⟩)
+
+/-- The digest of a cited footprint: the canonical bytes of its reads, keys and values. A law
+can require it to equal a field of another participant (a verdict's read set), which binds
+the turn's cited reads of this cell to the ones that verdict recorded. -/
+def citedDigest (reads : List FieldRead) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.CITED/v1".toUTF8.toList
+    ((StreamCodec.list fieldReadStream).encode reads)).digest
+
+/-- What a law sees of a cited cell: exactly the cited fields that are present, under the
+declared names (`before` and `after` are the one loaded value: a read writes nothing), then
+the footprint's size and digest. A field the turn did not cite is not projected. -/
+def citedProject (id : Nat) (reads : List FieldRead) (store : Store EffectDeclaration.effectLayout) :
+    List (String × Int) :=
+  DeclaredResourceProjection.scalarSlots (citedValues id reads store) (citedValues id reads store) ++
+    [("cited/count", Int.ofNat reads.length), ("cited/digest", Int.ofNat (citedDigest reads).value)]
+
 /-- Exact scalar/content/stream projection from the committed old and candidate
 final states. Local names remain convenient; joint names expose every declared
 participant without granting a view of unrelated cells. -/
@@ -1302,6 +1547,7 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
     | kindDefinition _ => exact WorldKindProjection.definitionProject before after
     | kindRead => exact WorldPrototypeConstruction.observeProject before
     | read => exact ContentResource.project before after ⟨[]⟩
+    | fieldRead reads => exact citedProject id reads before
 
 /-- `targetProjection` filtered by `want`, a content cell's summaries computed only when named
 (`ContentResource.projectDemand`) and a declared cell's slots built only as named
@@ -1323,6 +1569,7 @@ def targetProjectionDemand (want : String → Bool) (leads : Nat → Bool) (subj
     | kindDefinition _ => exact (WorldKindProjection.definitionProject before after).filter fun slot => want slot.1
     | kindRead => exact (WorldPrototypeConstruction.observeProject before).filter fun slot => want slot.1
     | read => exact ContentResource.projectDemand want before after ⟨[]⟩
+    | fieldRead reads => exact (citedProject id reads before).filter fun slot => want slot.1
 
 theorem targetProjectionDemand_eq (want : String → Bool) (leads : Nat → Bool)
     (sound : ∀ a b, want (DeclaredResourceProjection.pairName a b) = true → leads a = true)
@@ -1397,7 +1644,7 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
     | append request => exact some [⟨i, 0,
         WorldPrototypeConstruction.bytesValue (StreamCell.appendStream.encode request)⟩]
     | kindDefinition definition => exact some [WorldPrototypeConstruction.constructorWrite i definition]
-    | read | kindRead => exact some []
+    | read | kindRead | fieldRead _ => exact some []
     | computeFunding _ => exact if kind = .account ∧ validatedFundingIndex = some i then some [] else none
     | moneyConsent _ => exact none -- Nock field-write output cannot certify canonical money.
 
