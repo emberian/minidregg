@@ -100,9 +100,16 @@ the replaced image as the previous segment. A legacy whole-image
 `step` the inputs were recorded under, since a journal is replayed, not read:
 version 2 = the timeout-backoff epoch (five-field `Config`); version 3 = the
 quiescent-leader epoch (a leader proposes only with work); version 4 = the
-base frame may carry a checkpoint snapshot (`Journal.snapshot`). An older log
-refuses at this magic rather than being replayed under a different `step`. -/
-def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,4]
+base frame may carry a checkpoint snapshot (`Journal.snapshot`); version 5 = the
+commit-floor epoch (`State.lastCommitted`: a view at or below the highest locally
+committed view takes no further message, views below it drop their received messages,
+and a replica at or below it enters the next view; the snapshot carries the field). An
+older log refuses at this magic rather than being replayed under a different `step`
+(`v4_log_refused`). -/
+def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,5]
+
+/-- The magic of the previous format (checkpoint snapshots, no commit floor). -/
+def logMagicV4 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,4]
 
 /-- The format version byte of an image that carries the "MINI-SIMPLEX-LOG"
 magic, whatever its version; `none` for anything else. Lets an open refuse an
@@ -216,6 +223,19 @@ def decodeLog (bytes : Bytes) : Option Log := do
   let base ← journalStream.toLawful.decode payload
   let deltas ← decodeDeltas rest.length rest
   some ⟨base,deltas.reverse⟩
+
+/-- A version-4 log never decodes, whatever follows its magic: its inputs were recorded
+under the step without the commit floor and its snapshot lacks the floor. -/
+theorem v4_log_refused (rest : Bytes) : decodeLog (logMagicV4 ++ rest) = none := by
+  have taken : (logMagicV4 ++ rest).take logMagic.length = logMagicV4 := rfl
+  have differs : (logMagicV4 != logMagic) = true := by decide
+  simp [decodeLog, taken, differs]
+
+/-- It is still recognised as an agreement log of version 4, so an open names it. -/
+theorem v4_log_named (rest : Bytes) : logFormatVersion (logMagicV4 ++ rest) = some 4 := by
+  rfl
+
+#assert_axioms v4_log_refused
 
 /-- Replay of a decoded log over the merged journal: from its checkpoint
 snapshot if it has one (which must be this replica's, and not failed), else

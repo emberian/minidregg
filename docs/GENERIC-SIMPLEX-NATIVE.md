@@ -50,7 +50,8 @@ underestimated Δ is never repaired: every view can time out forever.
     viewTimeout c s number = timeout · 2^min(number − (lastCommittedView s + 1), backoffCap)
 
 with truncated subtraction, and `lastCommittedView s` the highest view this
-replica has locally committed (`doCommit`), 0 if none. So the exponent counts the
+replica has locally committed (`doCommit`), 0 if none. Since the commit floor (below) the
+kernel reads the maintained field `s.lastCommitted` instead of that fold. So the exponent counts the
 views strictly between this replica's latest local commit and the view being
 entered, capped at `backoffCap`. That is the whole delta from the paper:
 
@@ -169,6 +170,41 @@ since genesis (97 s per replica on the 00f711 evidence copy). Now:
 - BREAKS: log magic version 4; version-3 logs refuse by name. The legacy
   whole-image `agreement.bin` path (`restore`, `convert-journal`) is deleted:
   since fix C no pre-epoch mesh can be converted, only re-genesised.
+
+## Commit floor (log format 5)
+
+**Why.** A replica that fell behind had no way past a view its peers no longer served, and
+old views were never retired. PR #18 proposed entering the view after the highest *prepared*
+view. That rule drops the late vote a walking replica casts in a prepared view, and one
+Byzantine member with one slow link can then keep every view at two honest votes:
+`Verify/GenericSimplexJumpStarvation.lean`, `pr_jump_starves_commit` (twelve views, no
+commit), against `main_commits_same_policy` for the kernel's step.
+
+**Now, exactly** (Kernel/GenericSimplex.lean):
+
+- `State.lastCommitted` is the commit floor: the highest locally committed view, raised by
+  `commitAt` (`doCommit` then `raiseFloor`) on a commit above it. `lastCommittedView` is its
+  specification; `viewTimeout` reads the field.
+- `ingest` refuses every message for a view at or below the floor.
+- `retire`: every view strictly below the floor drops its received messages. It keeps its
+  send guards (`voted`, `disableRequested`, `sentCommit`, `sentCandidates`, the READY lists)
+  and its outputs. The floor view is kept whole. The views are NOT removed: the three
+  guard invariants (`VoteRecorded`, `CandidateRecorded`, `CommitRecorded`) are stated for
+  every view number, and removing a view would need them restated relative to the floor.
+- `floorJump`, first in every pass: a replica at or below its floor enters the view after
+  it. Everything skipped is at or below a commit; the entered view runs on the base timer
+  (`viewTimeout_after_commit`).
+- Safety: every invariant gained a `commitAt` and a `floorJump` case; the nine
+  `progressOuter_*` lemmas and every safety statement are unchanged.
+- What it costs: a replica whose peer raised its floor can be stranded below it unless it
+  receives that peer's commit evidence (`stranded_without_commit_transfer`: stuck without
+  the missing COMMIT, progress with it). The native certificate relay
+  (`GenericSimplexNative.receiveFinality`) is that transfer; nothing in the kernel sends it.
+- NOT proved: `lastCommitted = lastCommittedView` as an invariant (stated and executed,
+  `Verify/GenericSimplexFloorStatements.lean`), `FloorRefuses`, `RebaseSafe`'s consequence,
+  and progress (`EventualCommit`, `Verify/GenericSimplexJumpReach.lean`).
+- BREAKS: log magic version 5. The snapshot carries the floor; version-4 logs refuse
+  (`GenericSimplexIO.v4_log_refused`). A mesh moves by re-genesis, as before.
 
 ## Native source consumer
 

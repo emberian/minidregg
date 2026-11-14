@@ -4,6 +4,7 @@ import Kernel.GenericSimplexVAInvariant
 namespace Minidregg.Kernel.GenericSimplexPreparedHistory
 open Minidregg.Kernel.GenericSimplex
 open Minidregg.Kernel.GenericSimplexCausal
+open Minidregg.Kernel.GenericSimplexLocal
 open Minidregg.Kernel.GenericSimplexVAInvariant
 set_option autoImplicit false
 
@@ -207,8 +208,8 @@ theorem history_same_fields (before after : State) (old : HistoryInvariant befor
 
 @[simp] theorem history_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
-    HistoryInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔ HistoryInvariant s := by
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat) :
+    HistoryInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted } ↔ HistoryInvariant s := by
   constructor <;> intro old <;> rcases old with ⟨prepared, disabled⟩ <;> exact ⟨prepared, disabled⟩
 
 theorem append_history (s : State) (event : GenericSimplex.AuditEvent)
@@ -232,6 +233,20 @@ theorem doCommit_history (s : State) (view : Nat) (block : Block)
   dsimp only
   split_ifs <;> first | exact old | exact clearInvariant | exact history_same_fields _ _ appended rfl rfl rfl
 
+theorem retire_history (s : State) (old : HistoryInvariant s) : HistoryInvariant (retire s) :=
+  ⟨fun view block member =>
+      old.prepared view block (by rw [← viewAt_retire_prepared]; exact member),
+    fun view disabled =>
+      old.disabled view (by rw [← viewAt_retire_disabled]; exact disabled)⟩
+
+theorem commitAt_history (s : State) (view : Nat) (block : Block)
+    (old : HistoryInvariant s) : HistoryInvariant (commitAt s view block) :=
+  raiseFloor_preserves HistoryInvariant
+    (fun state number prior => retire_history _ (by simpa only [history_record] using prior))
+    _ _ (doCommit_history s view block old)
+
+#assert_axioms commitAt_history
+
 macro "history_step" : tactic => `(tactic|
   first
     | assumption
@@ -239,6 +254,7 @@ macro "history_step" : tactic => `(tactic|
     | with_reducible apply register_history
     | with_reducible apply broadcast_history
     | with_reducible apply clear_history
+    | with_reducible apply commitAt_history
     | with_reducible apply doCommit_history
     | with_reducible apply putView_history
     | solve | simp_all [viewAt_number]
@@ -308,6 +324,13 @@ theorem enterView_history (c : Config) (s : State) (view : Nat)
     history_actions
   · history_actions
 
+theorem floorJump_history (c : Config) (s : State) (old : HistoryInvariant s) :
+    HistoryInvariant (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_history c s _ old
+  · exact old
+
 theorem progressOuter_history (c : Config) (s : State) (old : HistoryInvariant s) :
     HistoryInvariant (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -320,6 +343,7 @@ theorem pass_history (c : Config) (s : State) (old : HistoryInvariant s) :
     HistoryInvariant (pass c s) := by
   unfold pass
   apply progressOuter_history
+  apply floorJump_history
   apply history_fold
   · intro state view prior
     exact progressView_history c state view prior

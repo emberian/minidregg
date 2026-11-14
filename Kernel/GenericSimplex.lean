@@ -3,6 +3,11 @@ Fixed static n=3f+1 committee, authenticated reliable delivery, known delay boun
 after unknown GST. Past views remain active. Exact block ancestry replaces hashes.
 Source checking is an INTERNAL controller input, never a network packet.
 
+Commit floor (not in the paper): `lastCommitted` is the highest view this replica has
+committed. A view at or below it accepts no further message (`ingest`), a view strictly
+below it keeps its send guards and outputs but drops its received messages (`retire`),
+and a replica at or below it enters the view after it (`floorJump`).
+
 Deviation from the paper's known-Delta timer: a view's timeout doubles with each
 consecutive view entered since this replica's last local commit, up to
 2^backoffCap (backoffCap = 0 is the paper's fixed timer). The deadline only
@@ -93,6 +98,9 @@ structure State where
   committedTip : Block := []
   needsPoll : Bool := false
   failed : Bool := false
+  /-- The commit floor: the highest locally committed view (0 if none), maintained by
+  `raiseFloor`. `lastCommittedView` is its specification. -/
+  lastCommitted : Nat := 0
   deriving DecidableEq, BEq, Repr, Inhabited
 def viewAt (s : State) (number : Nat) : View :=
   (s.views.find? (fun v => v.number == number)).getD { number := number }
@@ -156,6 +164,20 @@ def doCommit (s : State) (number : Nat) (block : Block) : State :=
       { s with committedTip := block, delivered := s.delivered ++ [block] }
   else if isPrefix block s.committedTip then s
   else { s with failed := true }
+/-- Every view strictly below the floor drops its received messages. Its send guards
+(`voted`, `disableRequested`, `sentCommit`, `sentCandidates`, the READY lists) and its
+outputs (`prepared`, `disabled`, `committed`) stay: they are this replica's memory of
+what it must never contradict. -/
+def retire (s : State) : State :=
+  { s with views := s.views.map fun v =>
+      if v.number < s.lastCommitted then { v with received := [] } else v }
+/-- A commit above the floor raises the floor to its view and retires the views below. -/
+def raiseFloor (s : State) (number : Nat) : State :=
+  if s.lastCommitted < number && (viewAt s number).committed.isSome then
+    retire { s with lastCommitted := number }
+  else s
+def commitAt (s : State) (number : Nat) (block : Block) : State :=
+  raiseFloor (doCommit s number block) number
 def sendCandidate (s : State) (number : Nat) (arg : Argument) : State :=
   let v := viewAt s number
   if v.sentCandidates.contains arg ||
@@ -173,7 +195,7 @@ def valueRules (c : Config) (s : State) (number : Nat) (block : Block) : State :
       s := putView s { v with sentCommit := some block }
       s := broadcast s number .commit arg
   let v := viewAt s number
-  if count v .commit arg ≥ c.quorum then s := doCommit s number block
+  if count v .commit arg ≥ c.quorum then s := commitAt s number block
   let v := viewAt s number
   if count v .vote arg ≥ c.faults + 1 && validBlock s block then
     s := sendCandidate s number arg
@@ -238,14 +260,15 @@ def propose (s : State) : State :=
     let v := viewAt s s.current
     if v.proposal.isNone then putView s { v with proposal := some block } else s
   else { s with failed := true }
-/-- The highest view this replica has locally committed (0 if none). -/
+/-- The highest view this replica has locally committed (0 if none): the specification of
+the maintained field `State.lastCommitted`. -/
 def lastCommittedView (s : State) : Nat :=
   s.views.foldl (fun acc v => if v.committed.isSome then max acc v.number else acc) 0
 /-- View timer: `timeout · 2^min(k, backoffCap)` where `k` counts the views
-entered since the last local commit. An underestimated Delta is outgrown after
+after the last local commit. An underestimated Delta is outgrown after
 finitely many views instead of failing every view forever. -/
 def viewTimeout (c : Config) (s : State) (number : Nat) : Nat :=
-  c.timeout * 2 ^ min (number - (lastCommittedView s + 1)) c.backoffCap
+  c.timeout * 2 ^ min (number - (s.lastCommitted + 1)) c.backoffCap
 def enterView (c : Config) (s : State) (number : Nat) : State :=
   let s := { s with current := number, deadline := s.now + viewTimeout c s number }
   let s := putView s (viewAt s number)
@@ -268,10 +291,17 @@ def progressOuter (c : Config) (s : State) : State := Id.run do
       if let some block := v.prepared.head? then s := castVote s s.current block
     s := enterView c s (s.current + 1)
   return s
-/-- Every known view remains active. Fair poll slices preserve pending work. -/
+/-- Commit-floor catch-up: a replica at or below its floor enters the view after it.
+Everything it skips is at or below a view it has committed, so no vote it could still
+cast there is pending. The entered view runs on the base timer (`viewTimeout`). -/
+def floorJump (c : Config) (s : State) : State :=
+  if s.current ≤ s.lastCommitted then enterView c s (s.lastCommitted + 1) else s
+/-- Every known view remains active. Fair poll slices preserve pending work. The floor
+jump runs before the outer rules, so they act in a view above the floor. -/
 def pass (c : Config) (s : State) : State :=
   let numbers := (s.views.map View.number).eraseDups
-  progressOuter c (numbers.foldl (fun state number => progressView c state number) s)
+  progressOuter c (floorJump c
+    (numbers.foldl (fun state number => progressView c state number) s))
 def pump (c : Config) : Nat → State → State
   | 0, s => { s with needsPoll := true }
   | fuel + 1, s =>
@@ -314,7 +344,7 @@ inductive Input where
   | poll
   deriving DecidableEq, BEq, Repr, Inhabited
 def ingest (c : Config) (s : State) (m : Message) : State :=
-  if m.sender ≥ c.parties || m.view == 0 then s else
+  if m.sender ≥ c.parties || m.view == 0 || m.view ≤ s.lastCommitted then s else
   if (m.kind == .propose || m.kind == .vote || m.kind == .commit) && m.value.isNone then s else
   if m.kind == .propose then
     if m.sender != c.leader m.view then s else

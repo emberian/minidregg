@@ -620,8 +620,8 @@ structure CausalInvariant (s : State) : Prop where
 
 @[simp] theorem causal_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
-    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔ CausalInvariant s := by
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat) :
+    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted } ↔ CausalInvariant s := by
   constructor <;> intro old <;> rcases old with ⟨unique, votes, once, candidates, commits, locked⟩ <;>
     exact ⟨unique, votes, once, candidates, commits, locked⟩
 
@@ -850,12 +850,47 @@ theorem drain_causal (s : State) (invariant : CausalInvariant s) :
     CausalInvariant (drainOutbox s).2 :=
   causal_same_fields s (drainOutbox s).2 invariant rfl rfl rfl
 
+theorem retire_causal (s : State) (old : CausalInvariant s) : CausalInvariant (retire s) where
+  viewsUnique := by
+    unfold ViewsUnique
+    rw [retire_numbers]
+    exact old.viewsUnique
+  voteRecorded := by
+    intro number
+    rw [viewAt_retire_voted]
+    exact old.voteRecorded number
+  voteOnce := old.voteOnce
+  candidateRecorded := by
+    intro number arg
+    rw [viewAt_retire_candidates]
+    exact old.candidateRecorded number arg
+  commitRecorded := by
+    intro number block
+    rw [viewAt_retire_sentCommit]
+    exact old.commitRecorded number block
+  commitLock := by
+    intro w member
+    obtain ⟨v, inside, same | same⟩ := mem_retire member
+    · rw [same]; exact old.commitLock v inside
+    · rw [same]; exact old.commitLock v inside
+
+/-- The floor commit keeps every guard: retirement drops received messages only. -/
+theorem commitAt_causal (s : State) (view : Nat) (block : Block)
+    (old : CausalInvariant s) : CausalInvariant (commitAt s view block) :=
+  raiseFloor_preserves CausalInvariant
+    (fun state number prior => retire_causal _ (by simpa only [causal_record] using prior))
+    _ _ (doCommit_causal s view block old)
+
+#assert_axioms retire_causal
+#assert_axioms commitAt_causal
+
 macro "causal_step" : tactic => `(tactic|
   first
     | assumption
     | fail_if_no_progress simp only [causal_record]
     | with_reducible apply commit_send_causal
     | with_reducible apply clear_causal
+    | with_reducible apply commitAt_causal
     | with_reducible apply doCommit_causal
     | with_reducible apply sendCandidate_causal
     | with_reducible apply castVote_causal
@@ -905,6 +940,13 @@ theorem enterView_causal (c : Config) (s : State) (view : Nat)
     causal_chain
   · causal_chain
 
+theorem floorJump_causal (c : Config) (s : State) (old : CausalInvariant s) :
+    CausalInvariant (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_causal c s _ old
+  · exact old
+
 theorem progressOuter_causal (c : Config) (s : State) (old : CausalInvariant s) :
     CausalInvariant (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -917,6 +959,7 @@ theorem pass_causal (c : Config) (s : State) (old : CausalInvariant s) :
     CausalInvariant (pass c s) := by
   unfold pass
   apply progressOuter_causal
+  apply floorJump_causal
   apply causal_fold
   · intro state view prior
     exact progressView_causal c state view prior

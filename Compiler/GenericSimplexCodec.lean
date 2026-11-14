@@ -249,8 +249,9 @@ def stateStream : StreamCodec State :=
       (StreamCodec.product (StreamCodec.list viewStream) (StreamCodec.product (StreamCodec.list blockStream)
       (StreamCodec.product (StreamCodec.list bytesStream) (StreamCodec.product (StreamCodec.list messageStream)
       (StreamCodec.product (StreamCodec.list auditEventStream) (StreamCodec.product (StreamCodec.list blockStream)
-      (StreamCodec.product blockStream (StreamCodec.product StreamCodec.bool StreamCodec.bool))))))))))))
+      (StreamCodec.product blockStream (StreamCodec.product StreamCodec.bool
+      (StreamCodec.product StreamCodec.bool StreamCodec.nat)))))))))))))
     (fun s => (s.self,s.current,s.deadline,s.now,s.views,s.checked,s.offers,s.outbox,s.audit,
-      s.delivered,s.committedTip,s.needsPoll,s.failed))
-    (fun (a,b,c,d,e,f,g,h,i,j,k,l,m) => ⟨a,b,c,d,e,f,g,h,i,j,k,l,m⟩) (by intro s; cases s; rfl)
+      s.delivered,s.committedTip,s.needsPoll,s.failed,s.lastCommitted))
+    (fun (a,b,c,d,e,f,g,h,i,j,k,l,m,n) => ⟨a,b,c,d,e,f,g,h,i,j,k,l,m,n⟩) (by intro s; cases s; rfl)
 end Minidregg.Compiler.GenericSimplexCodec

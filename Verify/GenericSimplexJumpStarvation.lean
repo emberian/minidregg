@@ -9,8 +9,10 @@ two honest votes, and nothing commits.
 
 This file runs three rules on one adversary policy, n = 4, f = 1, party 3 faulty:
 
-* `.main`       : the `step` on main (bound to it by `stepV_main`, `startV_main`);
-* `.pr`         : main plus the PR's two lines at the end of `progressOuter`;
+* `.main`       : the kernel's `step` (bound to it by `stepV_main`, `startV_main`); since
+                  the commit floor landed that is the commit-floor step. The same three
+                  results against the kernel before it are at commit 36f7b4bcd;
+* `.pr`         : that step plus the PR's two lines at the end of the outer pass;
 * `.prLateVote` : the PR's jump, casting the late vote in the target view first.
 
 It imports the kernel only, so it elaborates without the proof closure. The
@@ -281,7 +283,7 @@ def lateVoteRun : Net := play .prLateVote rounds
 -- two views (the one-round lag on the 1-2 link).
 #guard (undeliveredViews prRun).all fun view => decide (view ≥ rounds - 1)
 
--- (c) main's `step` under the same adversary policy commits views 1..10 at all three.
+-- (c) the kernel's `step` under the same adversary policy commits views 1..10 at all three.
 #guard (honestStates mainRun).all fun s => s.delivered.length == 10
 #guard (List.range 10).all fun i =>
   (honestStates mainRun).all fun s => (viewAt s (i + 1)).committed.isSome
@@ -296,19 +298,26 @@ def lateVoteRun : Net := play .prLateVote rounds
   (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome
 #guard !anyFailed lateVoteRun
 
-/-! ## F2, executed: a floorless rebase halts every honest replica
+/-! ## F2, executed: forgetting old views, with and without the commit floor
 
-Rule `.main` throughout (the kernel's `step`). `dropViews v` is OUR model of the rebase
-asked about in issue #2 ("views ≤ v collapse"): it forgets those views and nothing else,
-and `ingest` still accepts their messages.
+Rule `.main` throughout (the kernel's `step`). View 1: party 0 proposes `[[1]]`, all three
+vote, the votes are delayed. All three time out, send CANDIDATE(⊥), and view 1 is disabled.
+View 2: party 1 proposes `[[2]]`, which commits at all three, so each floor is 2. Then the
+delayed view-1 votes arrive, with one Byzantine vote and one Byzantine COMMIT.
 
-View 1: party 0 proposes `[[1]]`, all three vote, the votes are delayed. All three time
-out, send CANDIDATE(⊥), and view 1 is disabled. View 2: party 1 proposes `[[2]]`, which
-commits at all three. Then the rebase at 2, then the delayed view-1 votes and one
-Byzantine vote. Each rebased replica has forgotten its CANDIDATE(⊥) and sends COMMIT. -/
+* `dropViews 2` forgets the views at or below 2 (issue #2's "views ≤ v collapse") and keeps
+  the floor: `ingest` refuses the late votes and nothing happens.
+* `forgetFloor` also resets the floor to 0, which is the kernel as it was before the commit
+  floor: each forgetful replica has lost its CANDIDATE(⊥), sends COMMIT for `[[1]]`, and
+  every honest replica halts. (On the kernel before this change that was `dropViews` alone:
+  commit 36f7b4bcd, `floorless_rebase_halts`.) -/
 
 def dropViews (v : Nat) (s : State) : State :=
   { s with views := s.views.filter fun view => decide (view.number > v) }
+
+def forgetFloor (v : Nat) (s : State) : State := { dropViews v s with lastCommitted := 0 }
+
+def noHold (_ _ : Nat) (_ : Message) : Bool := false
 
 def holdViewOneVotes (_ _ : Nat) (m : Message) : Bool := m.view == 1 && m.kind == .vote
 
@@ -324,35 +333,77 @@ def rebaseSetup : Net :=
 def lateVotes (net : Net) : Net :=
   let net := [0, 1, 2].foldl
     (fun n party => advanceV .main n party (.delivery ⟨3, 1, .vote, some [[1]]⟩)) net
-  let net := settle .main (fun _ _ _ => false) 64 net
+  let net := settle .main noHold 64 net
   -- One Byzantine COMMIT, so that two forgetful replicas are enough.
   let net := [0, 1, 2].foldl
     (fun n party => advanceV .main n party (.delivery ⟨3, 1, .commit, some [[1]]⟩)) net
-  settle .main (fun _ _ _ => false) 64 net
+  settle .main noHold 64 net
 
-def rebased (parties : List Nat) (net : Net) : Net :=
-  { net with states := parties.foldl (fun states p => states.set! p (dropViews 2 states[p]!)) net.states }
+def altered (change : State → State) (parties : List Nat) (net : Net) : Net :=
+  { net with states := parties.foldl (fun states p => states.set! p (change states[p]!)) net.states }
 
-def noRebase : Net := lateVotes rebaseSetup
-def rebaseAll : Net := lateVotes (rebased [0, 1, 2] rebaseSetup)
-def rebaseTwo : Net := lateVotes (rebased [0, 1] rebaseSetup)
+def keptMemory : Net := lateVotes rebaseSetup
+def droppedWithFloor : Net := lateVotes (altered (dropViews 2) [0, 1, 2] rebaseSetup)
+def droppedNoFloorAll : Net := lateVotes (altered (forgetFloor 2) [0, 1, 2] rebaseSetup)
+def droppedNoFloorTwo : Net := lateVotes (altered (forgetFloor 2) [0, 1] rebaseSetup)
 
--- Before the rebase: view 1 disabled, `[[2]]` committed in view 2 at all three, all healthy.
+-- Before: view 1 disabled, `[[2]]` committed in view 2 at all three, floor 2, all healthy.
 #guard rebaseSetup.ok && !anyFailed rebaseSetup
 #guard (honestStates rebaseSetup).all fun s =>
-  (viewAt s 1).disabled && (viewAt s 2).committed == some [[2]] && s.committedTip == [[2]]
--- Control, no rebase: the late votes arrive, nobody sends COMMIT in view 1, nobody fails.
-#guard noRebase.ok && !anyFailed noRebase && (sentBy noRebase 1 .commit).isEmpty
--- All three rebase: all three send COMMIT for `[[1]]` in view 1 and all three halt.
-#guard rebaseAll.ok && sentBy rebaseAll 1 .commit == [0, 1, 2]
-#guard (honestStates rebaseAll).all (·.failed)
--- Two rebase (f+1): they send COMMIT; with the Byzantine COMMIT all three halt, including
--- the replica that kept its memory.
-#guard rebaseTwo.ok && sentBy rebaseTwo 1 .commit == [0, 1]
-#guard (honestStates rebaseTwo).all (·.failed)
--- The halted replicas recorded the conflicting commit before halting.
-#guard (honestStates rebaseAll).all fun s =>
-  s.audit.contains (.commit s.self 1 [[1]]) && s.audit.contains (.commit s.self 2 [[2]])
+  (viewAt s 1).disabled && (viewAt s 2).committed == some [[2]] && s.committedTip == [[2]] &&
+    s.lastCommitted == 2 && (viewAt s 1).received.isEmpty
+-- Memory kept, and views forgotten with the floor kept: no view-1 COMMIT, nobody fails.
+#guard keptMemory.ok && !anyFailed keptMemory && (sentBy keptMemory 1 .commit).isEmpty
+#guard droppedWithFloor.ok && !anyFailed droppedWithFloor && (sentBy droppedWithFloor 1 .commit).isEmpty
+-- Views and floor forgotten by all three: all three send COMMIT for `[[1]]` and all halt.
+#guard droppedNoFloorAll.ok && sentBy droppedNoFloorAll 1 .commit == [0, 1, 2]
+#guard (honestStates droppedNoFloorAll).all (·.failed)
+-- By two (f+1), with the Byzantine COMMIT: both halt. Party 2 kept its floor, refuses the
+-- view-1 COMMITs, and stays healthy (before the commit floor it halted too).
+#guard droppedNoFloorTwo.ok && sentBy droppedNoFloorTwo 1 .commit == [0, 1]
+#guard (honestStates droppedNoFloorTwo).map (·.failed) == [true, true, false]
+
+/-! ## F3, executed: a replica stranded behind a peer's floor, and commit-evidence transfer
+
+Views 1 and 2 commit normally. View 3 (leader 2): party 0 receives nothing for it before its
+timer fires, so it sends CANDIDATE(⊥) and may no longer vote or send COMMIT there. Parties 1
+and 2 vote; party 3 votes to both and sends its COMMIT to party 2 only. Party 2 commits view
+3 and raises its floor to 3; party 1 has two COMMITs, prepares, and enters view 4. Party 0
+needs a third READY for the block; party 2 now refuses view-3 messages and never sends it.
+View 4's leader is party 3, silent. -/
+
+def tickAll (net : Net) (now : Nat) : Net :=
+  settle .main noHold 64 ([0, 1, 2].foldl (fun n party => advanceV .main n party (.tick now)) net)
+
+def strandSetup : Net :=
+  let net := (checks 3).foldl (fun n (receiver, input) => advanceV .main n receiver input) (initial .main)
+  let net := settle .main (fun _ receiver m => receiver == 0 && decide (m.view ≥ 3)) 64 net
+  let net := advanceV .main net 0 (.tick 100)
+  let net := [byz 1 3 .vote, byz 2 3 .vote, byz 2 3 .commit].foldl
+    (fun n (receiver, input) => advanceV .main n receiver input) net
+  tickAll (settle .main noHold 64 net) 200
+
+/-- No transfer: two more rounds of timeouts with every honest message delivered. -/
+def stranded : Net := tickAll (tickAll strandSetup 300) 400
+
+/-- Transfer: party 3's COMMIT for view 3, the one message of party 2's commit evidence the
+others lack, is delivered to parties 0 and 1 (natively: the recovered certificate). -/
+def transferred : Net :=
+  let net := [byz 0 3 .commit, byz 1 3 .commit].foldl
+    (fun n (receiver, input) => advanceV .main n receiver input) strandSetup
+  tickAll (tickAll (settle .main noHold 64 net) 300) 400
+
+def floors (net : Net) : List Nat := (honestStates net).map (·.lastCommitted)
+def tips (net : Net) : List Nat := (honestStates net).map (·.committedTip.length)
+
+-- Stranded: party 0 in view 3 at floor 2; parties 1 and 2 in view 4, which can end neither way.
+#guard strandSetup.ok && currents strandSetup == [3, 4, 4] && floors strandSetup == [2, 2, 3]
+#guard stranded.ok && !anyFailed stranded
+#guard currents stranded == [3, 4, 4] && floors stranded == [2, 2, 3] && tips stranded == [2, 2, 3]
+#guard (undelivered stranded).isEmpty
+-- With the transfer: all three reach floor 3, view 4 times out, and views 5 and 6 commit.
+#guard transferred.ok && !anyFailed transferred
+#guard floors transferred == [6, 6, 6] && tips transferred == [5, 5, 5]
 
 /-! ## The same facts as kernel-checked theorems (`decide +kernel`, standard axioms only) -/
 
@@ -383,19 +434,33 @@ theorem late_vote_jump_commits_same_policy :
       (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome) = true := by
   decide +kernel
 
-/-- F2. Without the rebase nobody sends a view-1 COMMIT and nobody fails; with it (all three,
-or only two plus one Byzantine COMMIT) every honest replica ends `failed`. -/
-theorem floorless_rebase_halts :
-    (noRebase.ok = true ∧ anyFailed noRebase = false ∧ sentBy noRebase 1 .commit = []) ∧
-    (rebaseAll.ok = true ∧ sentBy rebaseAll 1 .commit = [0, 1, 2] ∧
-      (honestStates rebaseAll).all (·.failed) = true) ∧
-    (rebaseTwo.ok = true ∧ sentBy rebaseTwo 1 .commit = [0, 1] ∧
-      (honestStates rebaseTwo).all (·.failed) = true) := by
+/-- F2. With the floor kept, forgetting the views at or below it is harmless; with the floor
+forgotten too every forgetful replica ends `failed` (all three; or two plus one Byzantine COMMIT, where
+the third keeps its floor and survives). -/
+theorem forgotten_floor_halts :
+    (keptMemory.ok = true ∧ anyFailed keptMemory = false ∧ sentBy keptMemory 1 .commit = []) ∧
+    (droppedWithFloor.ok = true ∧ anyFailed droppedWithFloor = false ∧
+      sentBy droppedWithFloor 1 .commit = []) ∧
+    (droppedNoFloorAll.ok = true ∧ sentBy droppedNoFloorAll 1 .commit = [0, 1, 2] ∧
+      (honestStates droppedNoFloorAll).all (·.failed) = true) ∧
+    (droppedNoFloorTwo.ok = true ∧ sentBy droppedNoFloorTwo 1 .commit = [0, 1] ∧
+      (honestStates droppedNoFloorTwo).map (·.failed) = [true, true, false]) := by
+  decide +kernel
+
+/-- F3. Without the transfer party 0 stays in view 3 and parties 1 and 2 in view 4 through
+two further rounds of timeouts with every honest message delivered; with it all three reach
+floor 6 and two more blocks commit. -/
+theorem stranded_without_commit_transfer :
+    (stranded.ok = true ∧ anyFailed stranded = false ∧ currents stranded = [3, 4, 4] ∧
+      floors stranded = [2, 2, 3] ∧ undelivered stranded = []) ∧
+    (transferred.ok = true ∧ anyFailed transferred = false ∧ floors transferred = [6, 6, 6] ∧
+      tips transferred = [5, 5, 5]) := by
   decide +kernel
 
 #print axioms pr_jump_starves_commit
 #print axioms main_commits_same_policy
 #print axioms late_vote_jump_commits_same_policy
-#print axioms floorless_rebase_halts
+#print axioms forgotten_floor_halts
+#print axioms stranded_without_commit_transfer
 
 end Minidregg.Verify.GenericSimplexJumpStarvation

@@ -48,8 +48,8 @@ theorem append_output (s : State) (events : List AuditEvent) (old : OutputHistor
 
 @[simp] theorem output_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (tip : Block) (needsPoll failed : Bool) :
-    OutputHistory {self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := s.delivered, committedTip := tip, needsPoll := needsPoll, failed := failed} ↔ OutputHistory s := by
+    (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat) :
+    OutputHistory {self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := s.delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted } ↔ OutputHistory s := by
   constructor <;> intro old <;> rcases old with ⟨committed, delivered⟩ <;>
     exact ⟨committed, delivered⟩
 
@@ -157,6 +157,19 @@ theorem doCommit_output (s : State) (view : Nat) (block : Block) (old : OutputHi
 #assert_axioms commitUpdate_output
 #assert_axioms deliveredAppend_output
 #assert_axioms doCommit_output
+theorem retire_output (s : State) (old : OutputHistory s) : OutputHistory (retire s) :=
+  ⟨fun view block committed =>
+      old.committed view block (by rw [← viewAt_retire_committed]; exact committed),
+    old.delivered⟩
+
+theorem commitAt_output (s : State) (view : Nat) (block : Block) (old : OutputHistory s) :
+    OutputHistory (commitAt s view block) :=
+  raiseFloor_preserves OutputHistory
+    (fun state number prior => retire_output _ (by simpa only [output_record] using prior))
+    _ _ (doCommit_output s view block old)
+
+#assert_axioms commitAt_output
+
 macro "output_step" : tactic => `(tactic|
   first
     | assumption
@@ -164,6 +177,7 @@ macro "output_step" : tactic => `(tactic|
     | with_reducible apply register_output
     | with_reducible apply broadcast_output
     | with_reducible apply clear_output
+    | with_reducible apply commitAt_output
     | with_reducible apply doCommit_output
     | with_reducible apply putView_output
     | solve | simp_all [viewAt_number]
@@ -233,6 +247,13 @@ theorem enterView_output (c : Config) (s : State) (view : Nat)
     output_actions
   · output_actions
 
+theorem floorJump_output (c : Config) (s : State) (old : OutputHistory s) :
+    OutputHistory (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_output c s _ old
+  · exact old
+
 theorem progressOuter_output (c : Config) (s : State) (old : OutputHistory s) :
     OutputHistory (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -245,6 +266,7 @@ theorem pass_output (c : Config) (s : State) (old : OutputHistory s) :
     OutputHistory (pass c s) := by
   unfold pass
   apply progressOuter_output
+  apply floorJump_output
   apply output_fold
   · intro state view prior
     exact progressView_output c state view prior

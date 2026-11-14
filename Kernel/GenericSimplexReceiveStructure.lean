@@ -9,7 +9,7 @@ set_option autoImplicit false
 theorem backed_record (external : Message → Prop) (state : State)
     (self current deadline now : Nat) (checked : List Block) (offers : List Bytes)
     (outbox : List Message) (delivered : List Block) (tip : Block)
-    (needsPoll failed : Bool) :
+    (needsPoll failed : Bool) (lastCommitted : Nat) :
     Backed external {
       self := self
       current := current
@@ -23,7 +23,7 @@ theorem backed_record (external : Message → Prop) (state : State)
       delivered := delivered
       committedTip := tip
       needsPoll := needsPoll
-      failed := failed } ↔ Backed external state := Iff.rfl
+      failed := failed, lastCommitted := lastCommitted } ↔ Backed external state := Iff.rfl
 
 theorem putView_copied_received {external : Message → Prop} {state : State}
     (view : View) (number : Nat) (backed : Backed external state)
@@ -46,6 +46,7 @@ macro "backed_step" : tactic => `(tactic|
     | split
     | with_reducible apply broadcast_backed
     | with_reducible apply clear_backed
+    | with_reducible apply commitAt_backed
     | with_reducible apply doCommit_backed
     | with_reducible apply castVote_backed
     | with_reducible apply sendCandidate_backed
@@ -90,6 +91,13 @@ theorem enterView_backed {external : Message → Prop} (c : Config) (state : Sta
     backed_chain
   · backed_chain
 
+theorem floorJump_backed {external : Message → Prop} (c : Config) (state : State)
+    (backed : Backed external state) : Backed external (floorJump c state) := by
+  unfold floorJump
+  split
+  · exact enterView_backed c state _ backed
+  · exact backed
+
 theorem progressOuter_backed {external : Message → Prop} (c : Config) (state : State)
     (backed : Backed external state) : Backed external (progressOuter c state) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -102,6 +110,7 @@ theorem pass_backed {external : Message → Prop} (c : Config) (state : State)
     (backed : Backed external state) : Backed external (pass c state) := by
   unfold pass
   apply progressOuter_backed
+  apply floorJump_backed
   apply backed_fold
   · intro s number hs; exact progressView_backed c s number hs
   · exact backed

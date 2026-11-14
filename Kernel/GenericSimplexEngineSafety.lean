@@ -122,9 +122,10 @@ theorem viewTimeout_bounds (c : Config) (s : State) (number : Nat) :
   · exact Nat.mul_le_mul_left _ (Nat.pow_le_pow_right (by decide) (Nat.min_le_right _ _))
 
 /-- The backoff exponent restarts after a local commit: the view right after
-the highest locally committed view runs on the fixed timer. -/
+the commit floor (the highest locally committed view; the view `floorJump` enters) runs
+on the fixed timer. -/
 theorem viewTimeout_after_commit (c : Config) (s : State) :
-    viewTimeout c s (lastCommittedView s + 1) = c.timeout := by
+    viewTimeout c s (s.lastCommitted + 1) = c.timeout := by
   simp [viewTimeout]
 
 #assert_axioms reachable_emission_invariants

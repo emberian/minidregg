@@ -47,7 +47,7 @@ theorem preserves_trans {a b c : State} (ab : Preserves a b) (bc : Preserves b c
 @[simp] theorem preserves_record (a b : State) (current deadline now : Nat)
     (views : List View) (checked : List Block) (offers : List Bytes)
     (outbox : List Message) (delivered : List Block) (tip : Block)
-    (needsPoll failed : Bool) :
+    (needsPoll failed : Bool) (lastCommitted : Nat) :
     Preserves a {
       self := b.self
       current := current
@@ -61,7 +61,7 @@ theorem preserves_trans {a b c : State} (ab : Preserves a b) (bc : Preserves b c
       delivered := delivered
       committedTip := tip
       needsPoll := needsPoll
-      failed := failed } ↔ Preserves a b := Iff.rfl
+      failed := failed, lastCommitted := lastCommitted } ↔ Preserves a b := Iff.rfl
 
 theorem preserves_broadcast {a b : State} (view : Nat) (kind : Kind) (arg : Argument)
     (prior : Preserves a b) : Preserves a (broadcast b view kind arg) :=
@@ -75,6 +75,10 @@ theorem preserves_commit {a b : State} (view : Nat) (block : Block)
     (prior : Preserves a b) : Preserves a (doCommit b view block) :=
   preserves_trans prior ⟨⟨doCommit_self b view block, doCommit_audit_prefix b view block⟩,
     doCommit_owned b view block⟩
+theorem preserves_commitAt {a b : State} (view : Nat) (block : Block)
+    (prior : Preserves a b) : Preserves a (commitAt b view block) :=
+  preserves_trans prior ⟨⟨commitAt_self b view block, commitAt_audit_prefix b view block⟩,
+    commitAt_owned b view block⟩
 theorem preserves_candidate {a b : State} (view : Nat) (arg : Argument)
     (prior : Preserves a b) : Preserves a (sendCandidate b view arg) :=
   preserves_trans prior ⟨⟨sendCandidate_self b view arg, sendCandidate_audit_prefix b view arg⟩,
@@ -100,6 +104,7 @@ macro "audit_step" : tactic => `(tactic|
     | split
     | with_reducible apply preserves_broadcast
     | with_reducible apply preserves_clear
+    | with_reducible apply preserves_commitAt
     | with_reducible apply preserves_commit
     | with_reducible apply preserves_candidate
     | with_reducible apply preserves_vote)
@@ -139,6 +144,12 @@ theorem enterView_preserves (c : Config) (s : State) (number : Nat) :
     audit_chain
   · audit_chain
 
+theorem floorJump_preserves (c : Config) (s : State) : Preserves s (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_preserves c s _
+  · exact preserves_refl s
+
 theorem progressOuter_preserves (c : Config) (s : State) :
     Preserves s (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -151,6 +162,7 @@ theorem progressOuter_preserves (c : Config) (s : State) :
 theorem pass_preserves (c : Config) (s : State) : Preserves s (pass c s) := by
   unfold pass
   apply preserves_trans _ (progressOuter_preserves c _)
+  apply preserves_trans _ (floorJump_preserves c _)
   apply preserves_fold
   · intro state number; exact progressView_preserves c state number
   · exact preserves_refl s

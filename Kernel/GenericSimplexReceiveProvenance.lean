@@ -147,6 +147,20 @@ theorem sendCandidate_backed {external : Message → Prop} {state : State}
   · apply broadcast_backed
     exact putView_received_unchanged number _ backed rfl
 
+theorem retire_backed {external : Message → Prop} {state : State}
+    (backed : Backed external state) : Backed external (retire state) := by
+  intro view member message received
+  obtain ⟨v, inside, same | same⟩ := mem_retire member
+  · rw [same] at received; exact backed v inside message received
+  · rw [same] at received; simp [quiet] at received
+
+theorem commitAt_backed {external : Message → Prop} {state : State}
+    (number : Nat) (block : Block) (backed : Backed external state) :
+    Backed external (commitAt state number block) :=
+  raiseFloor_preserves (Backed external) (fun _ _ prior => retire_backed prior)
+    _ _ (doCommit_backed number block backed)
+
+#assert_axioms commitAt_backed
 #assert_axioms doCommit_backed
 #assert_axioms castVote_backed
 #assert_axioms sendCandidate_backed

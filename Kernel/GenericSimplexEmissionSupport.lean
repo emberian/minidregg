@@ -347,6 +347,14 @@ theorem candidate_invariant {c : Config} {external : Message → Prop} {s : Stat
   | none => exact True.intro
   | some block => exact candidate_send_cause c s external old.scopeOK old.backed view block enough
 
+theorem commitAt_invariant {c : Config} {external : Message → Prop} {s : State}
+    (view : Nat) (block : Block) (old : EmissionInvariant c external s)
+    (enough : c.quorum ≤ count (viewAt s view) .commit (some block)) :
+    EmissionInvariant c external (commitAt s view block) :=
+  raiseFloor_preserves (EmissionInvariant c external)
+    (fun _ _ prior => ⟨retire_scoped prior.scopeOK, retire_backed prior.backed, prior.emitted⟩)
+    _ _ (doCommit_invariant view block old enough)
+
 #assert_axioms putCopied_invariant
 #assert_axioms broadcast_invariant
 #assert_axioms clear_invariant
@@ -390,11 +398,11 @@ theorem valueRules_invariant (c : Config) (external : Message → Prop) (s : Sta
       else s
   have phaseInv : EmissionInvariant c external phase := votePhase_invariant view block old
   let afterCommit := if count (viewAt phase view) .commit (some block) ≥ c.quorum then
-      doCommit phase view block else phase
+      commitAt phase view block else phase
   have commitInv : EmissionInvariant c external afterCommit := by
     dsimp only [afterCommit]
     split
-    · apply doCommit_invariant view block phaseInv
+    · apply commitAt_invariant view block phaseInv
       assumption
     · exact phaseInv
   have equation : valueRules c s view block =
@@ -469,8 +477,8 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
 #assert_axioms argumentRules_invariant
 @[simp] theorem emission_record (c : Config) (external : Message → Prop) (s : State)
     (current deadline now : Nat) (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
-    EmissionInvariant c external { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat) :
+    EmissionInvariant c external { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted } ↔
       EmissionInvariant c external s := by
   constructor <;> intro old <;> rcases old with ⟨scopeOK, backed, emitted⟩ <;>
     exact ⟨scopeOK, backed, emitted⟩
@@ -533,6 +541,14 @@ theorem enterView_invariant (c : Config) (external : Message → Prop) (s : Stat
     emission_basic_chain
   · emission_basic_chain
 
+theorem floorJump_invariant (c : Config) (external : Message → Prop) (s : State)
+    (old : EmissionInvariant c external s) :
+    EmissionInvariant c external (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_invariant c external s _ old
+  · exact old
+
 theorem progressOuter_invariant (c : Config) (external : Message → Prop) (s : State)
     (old : EmissionInvariant c external s) :
     EmissionInvariant c external (progressOuter c s) := by
@@ -547,6 +563,7 @@ theorem pass_invariant (c : Config) (external : Message → Prop) (s : State)
     EmissionInvariant c external (pass c s) := by
   unfold pass
   apply progressOuter_invariant
+  apply floorJump_invariant
   apply emission_fold
   · intro state view prior; exact progressView_invariant c external state view size prior
   · exact old

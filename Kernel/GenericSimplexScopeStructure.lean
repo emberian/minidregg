@@ -21,6 +21,7 @@ macro "scoped_step" : tactic => `(tactic|
     | split
     | with_reducible apply broadcast_scoped
     | with_reducible apply clear_scoped
+    | with_reducible apply commitAt_scoped
     | with_reducible apply doCommit_scoped
     | with_reducible apply castVote_scoped
     | with_reducible apply sendCandidate_scoped
@@ -65,6 +66,13 @@ theorem enterView_scoped (c : Config) (state : State)
     scoped_chain
   · scoped_chain
 
+theorem floorJump_scoped (c : Config) (state : State)
+    (scopeOK : Scoped c state) : Scoped c (floorJump c state) := by
+  unfold floorJump
+  split
+  · exact enterView_scoped c state _ scopeOK
+  · exact scopeOK
+
 theorem progressOuter_scoped (c : Config) (state : State)
     (scopeOK : Scoped c state) : Scoped c (progressOuter c state) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -77,6 +85,7 @@ theorem pass_scoped (c : Config) (state : State)
     (scopeOK : Scoped c state) : Scoped c (pass c state) := by
   unfold pass
   apply progressOuter_scoped
+  apply floorJump_scoped
   apply scoped_fold
   · intro s number hs; exact progressView_scoped c s number hs
   · exact scopeOK
