@@ -58,13 +58,52 @@ and its continuation; where they disagree with this section, this section is the
   remaining kinds have 294 constructor arms and 16 string arms in 17 files.
 * **One JSON vocabulary**: `EffectJson` (`Kernel/ResourceEffect.lean`) is the strict reading both
   a declaration's face and the Host's request decoders use; `Host/Json`'s private copies are
-  deleted.
+  deleted. (`Host/SourceAgreementJson.lean` still carries its own copy of the request decoder,
+  payload arms included: seven of the sixteen string arms are its.)
+* **Thin consent displays a registered observation without a view**
+  (`NativeThinConsent.registeredRead`, `RegisteredReadDisplayStatement` proved): the effect's code,
+  the signed operation's canonical bytes and `Effect.display`'s lines. A registered WRITE is still
+  refused `unsupportedPayload` there.
 
-**Next** (in order): content (code 1) onto `Effect` (its context needs the operation id and the
-source reads, as lazily computed fields of `EffectCtx`; `ContentAgreement`, `ContentComplete` and
-`PrepareFactors` are its gate, and the recorded fixtures move); then the remaining codes, cheapest
-first: `read` (3), `kindRead` (7), `scalar` (0), `computeFunding` (6), `moneyConsent` (8),
-`world` (4), `kindDefinition` (5), `append` (2, needs a fresh-cell output).
+**Next: content (code 1).** Not started. What it takes, from reading the tree:
+
+1. `Kernel/ContentEffect.lean`, upstream of `Kernel/ResourceEffectRegistry.lean`: `contentEffect :
+   Effect` from today's `contentSpec` (`Statements.lean` §6), re-indexed from `LiveCtx` to
+   `EffectCtx`. `EffectCtx` needs two more fields, both lazy: the operation id
+   (`contentOperation`, a hash of the whole command: a `Thunk Digest`) and the source reads
+   (`contentContext`'s lookup: `Nat → Option CapabilityId`, the observe capability of the
+   command's read target at a cell). `complete` is `ContentComplete`: move its proof
+   (`ContentProofs.lean` up to `contentComplete`, about 450 lines that are about
+   `ContentResource.run` and not about `LiveCtx`) upstream with it. `view_unjoint` is
+   `JointSlots.contentProject_unjoint`. `pack`/`unpack` ignore the role (`⟨.content, cell⟩`); the
+   header's `accepts` refuses a role that is not an object.
+2. `Effect.run` should stop calling `EffectSpec.exec` at run time: under `complete` the frame check
+   and the guarded replay cannot refuse, so `run` can be the semantics then `Patch.run`, with
+   `run_eq_exec` proved from `complete` (`RegistryProofs.effect_compute_agrees` then rewrites by
+   it). Without this a content write pays a `Finset` footprint check per command.
+3. Bind `(1, contentEffect)` in `liveEffects`; delete `Payload.content`, `Reject.content`, the
+   content arm of `legacyPayloadDecode`/`payloadEncode` and the 32 constructor arms and 2 string
+   arms the census lists (12 files). Keep construction sites compiling with
+   `abbrev contentPayload (command) : Payload := .registered 1 command` (as `citedPayload`).
+   `liveLegacy` becomes `[0, 2, …, 8]`; `registryKeystone` needs no new proof.
+4. The JSON face: `contentAction`/`contentCommand` (`Host/Json.lean`, about 80 lines plus the id
+   and selector decoders they call) move to the declaration's `ofJson`; `FnInboxView`'s
+   `contentActionJson` to `toJson`.
+5. Statements: `ContentAgreement` is consumed (it compared the hand arm with the declaration;
+   delete it with the arm). `HostKeystone` becomes `RegistryKeystone` with code 1 bound; delete
+   `contentHandler`, `contentHeader`, `contentFresh` (twins of `Effect.handler`). `HostTeeth`'s
+   ghost goes as `registryTeeth_ghost` does. `PrepareFactors` should be restated for every bound
+   code over `Effect.handler` and re-proved (the present proof, 300 lines, leans on
+   `ContentAgreement`).
+6. Refusal text moves from `Reject.content (ContentResource.Reject.x)` to
+   `Reject.effect (Effect.Content.x)`: check the journeys that match content refusals. Wire bytes
+   of code 1 do not move, so the recorded fixtures should not either; re-record only if they hold
+   refusal text.
+
+Then the remaining codes, cheapest first: `read` (3), `kindRead` (7), `scalar` (0),
+`computeFunding` (6), `moneyConsent` (8), `world` (4), `kindDefinition` (5), `append` (2, needs a
+fresh-cell output). `read` and `kindRead` pin a root (`commutes` false), so their thin-consent
+display must keep the served-opening check the hand arm has, not the view-less one.
 
 ## 1. What one effect costs by hand today (counted from the tree at `02ee34e8a`)
 
