@@ -33,7 +33,9 @@ In one CAS it
   authority cell is not written).
 
 The request's `cost` is fee + transferred amount, so a spend grant's
-`maxCost` caps what one turn can move. Operation identity is
+`maxCost` caps what one fleet turn can move. It caps nothing through other
+receivers, whose `cost` is a byte count or a fee (see "Costs and open
+edges"). Operation identity is
 `(subject, paying account, nonce)`: an exact repeat replays the original
 receipt; a changed command under the same identity is a transaction conflict,
 never a second effect.
