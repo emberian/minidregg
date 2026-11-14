@@ -48,6 +48,8 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.CanonicalCellRegistry (registry)
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Compiler.CredentialAuthorityDomainReceiver
+open Minidregg.Compiler.CredentialAuthorityLayout (RealizesAuthority loadCell stepCell loadCell_realizes
+  loadCell_of_realizes stepCell_realizes stepCell_of_realizes)
 open Minidregg.Compiler.DurableServed (Served)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (VerifiedFootprint)
@@ -197,7 +199,19 @@ theorem loadServedDirectory_ofLoaded {store : StoreIdentity}
             cases decoded
           · cases light
 
-/-- The deployment's authority cell, decoded from the served bytes. No spent
+/-- The enumerable cells of a served state, as identifiers. -/
+def servedEnumerated {store : StoreIdentity} (served : State store) : List Nat :=
+  served.cellIds.map (·.value)
+
+/-- Outside its enumeration a served state whose absent default is `[]` holds no bytes. -/
+theorem servedEnumerated_support {store : StoreIdentity} (served : State store)
+    (absentDefault : served.absentBytes = []) (cellId : Nat) (outside : cellId ∉ servedEnumerated served) :
+    served.canonicalBytes ⟨cellId⟩ = [] :=
+  (served.canonicalBytes_outside ⟨cellId⟩ fun member =>
+    outside (List.mem_map.mpr ⟨_, member, rfl⟩)).trans absentDefault
+
+/-- The deployment's authority store, as the cells of the served state realise it (the head at
+the pinned identifier and one entry cell per address: `RealizesAuthority`). No spent
 function and no clock are carried: `snapshotOn` takes the clock from the
 served height and the spent markers from a verified footprint. -/
 structure ServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store : StoreIdentity}
@@ -205,7 +219,8 @@ structure ServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store
   private mk ::
   cell : CredentialAuthorityDomain.Cell
   valid : deployment.Valid
-  observed : served.canonicalBytes (cellIdOf deployment) = cellBytes cell
+  absentDefault : served.absentBytes = []
+  observed : RealizesAuthority served.canonicalBytes deployment.authorityCellId cell.logical
   /-- The cell's authorization projection, computed once per served state: every request's
   snapshot (`snapshotOn`) carries this one, not a projection rebuilt per reference. -/
   authState : AuthState
@@ -215,14 +230,26 @@ structure ServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store
   issued : Thunk (List (IssuerId × Epoch × Digest))
   issuedExact : issued.get = CredentialAuthorityDomain.issuedOf deployment.domain cell
 
+/-- The served authority over a cell the served cells realise. -/
+private def ServedAuthority.ofCell (deployment : CanonicalCellRegistry.Deployment) {store : StoreIdentity}
+    (served : State store) (cell : CredentialAuthorityDomain.Cell) (valid : deployment.Valid)
+    (absentDefault : served.absentBytes = [])
+    (observed : RealizesAuthority served.canonicalBytes deployment.authorityCellId cell.logical) :
+    ServedAuthority deployment served :=
+  ⟨cell, valid, absentDefault, observed, CredentialAuthorityDomain.authStateOf cell, rfl,
+    Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain cell, rfl⟩
+
+/-- An open: every enumerable cell read once, the head checked against the store they hold
+(`CredentialAuthorityLayout.loadCell`). -/
 def loadServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store : StoreIdentity}
     (served : State store) : Option (ServedAuthority deployment served) :=
   if valid : deployment.Valid then
-    match decoded : decodeCell (served.canonicalBytes (cellIdOf deployment)) with
-    | none => none
-    | some cell => some ⟨cell, valid, (decodeCell_canonical decoded).symm,
-        CredentialAuthorityDomain.authStateOf cell, rfl,
-        Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain cell, rfl⟩
+    if absentDefault : served.absentBytes = [] then
+      match loaded : loadCell served.canonicalBytes deployment.authorityCellId (servedEnumerated served) with
+      | none => none
+      | some cell => some (ServedAuthority.ofCell deployment served cell valid absentDefault
+          (loadCell_realizes (servedEnumerated_support served absentDefault) loaded))
+    else none
   else none
 
 /-- The authority snapshot for a request: the clock is the served height and
@@ -242,7 +269,7 @@ theorem ServedAuthority.snapshotOn_eq {deployment : CanonicalCellRegistry.Deploy
     authority.snapshotOn footprint =
       CredentialAuthorityDomain.Snapshot.ofCell deployment.domain served.height
         (spentOf deployment.domain (served.viewAt footprint)) authority.cell := by
-  obtain ⟨cell, valid, observed, authState, exact, issued, issuedExact⟩ := authority
+  obtain ⟨cell, valid, absentDefault, observed, authState, exact, issued, issuedExact⟩ := authority
   subst exact
   have held : issued = Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain cell :=
     Thunk.ext issuedExact
@@ -258,36 +285,81 @@ theorem ServedAuthority.snapshotOn_cell {deployment : CanonicalCellRegistry.Depl
     (authority.snapshotOn footprint).cell = authority.cell ∧
       (authority.snapshotOn footprint).revision = served.height := ⟨rfl, rfl⟩
 
-/-- **The light authority of the full shape's state decodes the full shape's
-authority cell.** -/
+/-- Two authorities of one served state are equal: the cells determine the store. -/
+theorem ServedAuthority.unique {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+    {served : State store} (left right : ServedAuthority deployment served) : left = right := by
+  have same : left.cell = right.cell :=
+    CellState.Materialized.ext (left.observed.unique right.observed)
+  obtain ⟨leftCell, _, _, _, leftState, leftExact, leftIssued, leftIssuedExact⟩ := left
+  obtain ⟨rightCell, _, _, _, rightState, rightExact, rightIssued, rightIssuedExact⟩ := right
+  simp only at same
+  subst same leftExact rightExact
+  have issued : leftIssued = rightIssued := Thunk.ext (leftIssuedExact.trans rightIssuedExact.symm)
+  subst issued
+  rfl
+
+/-- The open loads every store the served cells realise. -/
+theorem loadServedAuthority_of_realizes {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+    {served : State store} (valid : deployment.Valid) (absentDefault : served.absentBytes = [])
+    {logical : Theory.Store.Store CredentialAuthorityState.layout}
+    (realized : RealizesAuthority served.canonicalBytes deployment.authorityCellId logical) :
+    ∃ authority, loadServedAuthority deployment served = some authority ∧ authority.cell.logical = logical := by
+  obtain ⟨cell, found, same⟩ :=
+    loadCell_of_realizes (servedEnumerated_support served absentDefault) realized
+  unfold loadServedAuthority
+  rw [dif_pos valid, dif_pos absentDefault]
+  split
+  · rename_i missing
+    rw [found] at missing
+    cases missing
+  · rename_i other loaded
+    rw [found] at loaded
+    cases loaded
+    exact ⟨_, rfl, same⟩
+
+/-- Loading a state that has an authority yields that authority. -/
+theorem ServedAuthority.load_eq {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
+    {served : State store} (authority : ServedAuthority deployment served) :
+    loadServedAuthority deployment served = some authority := by
+  obtain ⟨other, found, _⟩ :=
+    loadServedAuthority_of_realizes authority.valid authority.absentDefault authority.observed
+  rw [found, ServedAuthority.unique other authority]
+
+/-- **The light authority of the full shape's state is the full shape's authority**: the same
+cell, and the same refusal. -/
 theorem loadServedAuthority_ofLoaded (deployment : CanonicalCellRegistry.Deployment) {store : StoreIdentity}
     (loaded : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) (sameStart : store.logStart = loaded.logStart) :
     (loadServedAuthority deployment (Served.ofLoaded loaded sameStart)).map (·.cell) =
-      (loadDeployment deployment loaded.snapshot).map (·.snapshot.cell) := by
-  unfold loadServedAuthority loadDeployment loadDeploymentAt
-  by_cases valid : deployment.Valid
-  · rw [dif_pos valid, dif_pos valid]
-    have bytes : (Served.ofLoaded loaded sameStart).canonicalBytes (cellIdOf deployment) =
-        loaded.snapshot.canonicalBytes (cellIdOf deployment) := by
-      rw [Served.ofLoaded_canonicalBytes]
-    split
-    · rename_i servedNone
-      split
-      · rfl
-      · rename_i _ fullSome
-        rw [bytes, fullSome] at servedNone
-        cases servedNone
-    · rename_i _ servedSome
-      split
-      · rename_i fullNone
-        rw [bytes, fullNone] at servedSome
-        cases servedSome
-      · rename_i _ fullSome
-        rw [bytes, fullSome] at servedSome
-        cases servedSome
-        rfl
-  · rw [dif_neg valid, dif_neg valid]
-    rfl
+      (loadDeployment deployment loaded).map (·.snapshot.cell) := by
+  have bytes : (Served.ofLoaded loaded sameStart).canonicalBytes = loaded.snapshot.canonicalBytes :=
+    Served.ofLoaded_canonicalBytes loaded sameStart
+  have absent : (Served.ofLoaded loaded sameStart).absentBytes = loaded.image.seed.absentBytes := rfl
+  cases light : loadServedAuthority deployment (Served.ofLoaded loaded sameStart) with
+  | some lightLoaded =>
+      have realized : RealizesAuthority loaded.snapshot.canonicalBytes deployment.authorityCellId
+          lightLoaded.cell.logical := bytes ▸ lightLoaded.observed
+      obtain ⟨fullLoaded, found, same⟩ := loadDeployment_exact deployment loaded lightLoaded.valid
+        (absent.symm.trans lightLoaded.absentDefault) lightLoaded.cell.logical realized
+      rw [found]
+      exact congrArg some (CellState.Materialized.ext same.symm)
+  | none =>
+      cases full : loadDeployment deployment loaded with
+      | none => rfl
+      | some fullLoaded =>
+          exfalso
+          have absentDefault : loaded.image.seed.absentBytes = [] := by
+            unfold loadDeployment loadDeploymentAt at full
+            split at full
+            · split at full
+              · assumption
+              · cases full
+            · cases full
+          have realized : RealizesAuthority (Served.ofLoaded loaded sameStart).canonicalBytes
+              deployment.authorityCellId fullLoaded.snapshot.cell.logical := bytes ▸ fullLoaded.observed
+          obtain ⟨_, found, _⟩ := loadServedAuthority_of_realizes fullLoaded.valid
+            (absent.trans absentDefault) realized
+          rw [found] at light
+          cases light
 
 /-! ## A later served state, loaded against an earlier one
 
@@ -344,7 +416,7 @@ def changedCells {earlier store : StoreIdentity} (before : State earlier) (serve
     !bytesBEq (before.canonicalBytes cellId) (served.canonicalBytes cellId)
 
 theorem changedCells_moved {earlier store : StoreIdentity} {before : State earlier}
-    (held : ServedDirectory before) (served : State store) (absent : served.absentBytes = []) :
+    (beforeAbsent : before.absentBytes = []) (served : State store) (absent : served.absentBytes = []) :
     Served.Moved before served (changedCells before served) where
   keeps cellId unchanged := by
     by_cases enumerated : cellId ∈ served.cellIds ++ before.cellIds
@@ -354,14 +426,14 @@ theorem changedCells_moved {earlier store : StoreIdentity} {before : State earli
       exact (bytesBEq_iff.mp same).symm
     · simp only [List.mem_append, not_or] at enumerated
       rw [served.canonicalBytes_outside cellId enumerated.1, before.canonicalBytes_outside cellId enumerated.2,
-        absent, held.absentDefault]
+        absent, beforeAbsent]
 
 /-- `loadServedDirectory` of a later state, decoding only the cells whose bytes differ from
 `held`'s state (`loadServedDirectoryFrom_eq`). -/
 def loadServedDirectoryFrom {earlier store : StoreIdentity} {before : State earlier}
     (held : ServedDirectory before) (served : State store) : Option (ServedDirectory served) :=
   if absent : served.absentBytes = [] then
-    loadServedDirectoryStep held served (changedCells before served) (changedCells_moved held served absent)
+    loadServedDirectoryStep held served (changedCells before served) (changedCells_moved held.absentDefault served absent)
   else none
 
 /-- **The incremental served load is the served load**: same refusal, same directory. -/
@@ -375,53 +447,55 @@ theorem loadServedDirectoryFrom_eq {earlier store : StoreIdentity} {before : Sta
     unfold loadServedDirectory
     rw [dif_neg absent]
 
-/-- Two authorities of one served state are equal. -/
-theorem ServedAuthority.unique {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
-    {served : State store} (left right : ServedAuthority deployment served) : left = right := by
-  have same : left.cell = right.cell := by
-    have decoded := congrArg decodeCell (left.observed.symm.trans right.observed)
-    rw [decodeCell_bytes, decodeCell_bytes] at decoded
-    exact Option.some.inj decoded
-  obtain ⟨leftCell, _, _, leftState, leftExact, leftIssued, leftIssuedExact⟩ := left
-  obtain ⟨rightCell, _, _, rightState, rightExact, rightIssued, rightIssuedExact⟩ := right
-  simp only at same
-  subst same leftExact rightExact
-  have issued : leftIssued = rightIssued := Thunk.ext (leftIssuedExact.trans rightIssuedExact.symm)
-  subst issued
-  rfl
+/-- `loadServedAuthority` of a state one step after a held one: the held cell is followed along
+the cells the step wrote (`CredentialAuthorityLayout.stepCell`: one decode and one path of the
+kept structure per written entry), then the head is checked against it. The rest of the store is
+not read. `loadServedAuthorityStep_eq`: it is `loadServedAuthority`. -/
+def loadServedAuthorityStep {deployment : CanonicalCellRegistry.Deployment} {earlier store : StoreIdentity}
+    {before : State earlier} (prior : ServedAuthority deployment before) (served : State store)
+    (written : List CellId) (moved : Served.Moved before served written) :
+    Option (ServedAuthority deployment served) :=
+  if absentDefault : served.absentBytes = [] then
+    match stepped : stepCell before.canonicalBytes served.canonicalBytes deployment.authorityCellId
+        prior.cell (written.map (·.value)) with
+    | none => none
+    | some cell => some (ServedAuthority.ofCell deployment served cell prior.valid absentDefault
+        (stepCell_realizes prior.observed (fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
+          unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)) stepped))
+  else none
 
-/-- Loading a state that has an authority yields that authority. -/
-theorem ServedAuthority.load_eq {deployment : CanonicalCellRegistry.Deployment} {store : StoreIdentity}
-    {served : State store} (authority : ServedAuthority deployment served) :
-    loadServedAuthority deployment served = some authority := by
-  unfold loadServedAuthority
-  rw [dif_pos authority.valid]
-  split
-  · rename_i missing
-    rw [authority.observed, decodeCell_bytes] at missing
-    cases missing
-  · exact congrArg some (ServedAuthority.unique _ authority)
+theorem loadServedAuthorityStep_eq {deployment : CanonicalCellRegistry.Deployment}
+    {earlier store : StoreIdentity} {before : State earlier} (prior : ServedAuthority deployment before)
+    (served : State store) (written : List CellId) (moved : Served.Moved before served written) :
+    loadServedAuthorityStep prior served written moved = loadServedAuthority deployment served := by
+  cases stepped : loadServedAuthorityStep prior served written moved with
+  | some loaded => exact (ServedAuthority.load_eq loaded).symm
+  | none =>
+      cases full : loadServedAuthority deployment served with
+      | none => rfl
+      | some other =>
+          exfalso
+          obtain ⟨cell, found, _⟩ := stepCell_of_realizes (written := written.map (·.value))
+            prior.observed (fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
+              unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)) other.observed
+          unfold loadServedAuthorityStep at stepped
+          rw [dif_pos other.absentDefault] at stepped
+          split at stepped
+          · rename_i missing
+            rw [found] at missing
+            cases missing
+          · cases stepped
 
-/-- `loadServedAuthority` of a later state: the held cell when the authority
-cell's bytes are unchanged, otherwise the bytes decoded and stepped relative to
-`held.cell` (`loadServedAuthorityFrom_eq`). -/
+/-- `loadServedAuthority` of a later state against a held one, with no record of what was
+written: the cells whose bytes differ are found by comparison (`changedCells`) and the held cell
+is stepped along them. `loadServedAuthorityFrom_eq`: it is `loadServedAuthority`. -/
 def loadServedAuthorityFrom {deployment : CanonicalCellRegistry.Deployment} {earlier store : StoreIdentity}
     {before : State earlier} (held : ServedAuthority deployment before) (served : State store) :
     Option (ServedAuthority deployment served) :=
-  if same : bytesBEq (served.canonicalBytes (cellIdOf deployment))
-      (before.canonicalBytes (cellIdOf deployment)) then
-    some ⟨held.cell, held.valid, (bytesBEq_iff.mp same).trans held.observed,
-      held.authState, held.authStateExact, held.issued, held.issuedExact⟩
-  else
-    match decoded : decodeCell (served.canonicalBytes (cellIdOf deployment)) with
-    | none => none
-    | some cell =>
-        let stepped := held.cell.relativeTo cell
-        some ⟨stepped, held.valid,
-          (decodeCell_canonical decoded).symm.trans
-            (congrArg cellBytes (CellState.Materialized.relativeTo_eq held.cell cell).symm),
-          CredentialAuthorityDomain.authStateOf stepped, rfl,
-          Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain stepped, rfl⟩
+  if absent : served.absentBytes = [] then
+    loadServedAuthorityStep held served (changedCells before served)
+      (changedCells_moved held.absentDefault served absent)
+  else none
 
 theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deployment}
     {earlier store : StoreIdentity} {before : State earlier} (held : ServedAuthority deployment before)
@@ -429,79 +503,13 @@ theorem loadServedAuthorityFrom_eq {deployment : CanonicalCellRegistry.Deploymen
     loadServedAuthorityFrom held served = loadServedAuthority deployment served := by
   unfold loadServedAuthorityFrom
   split
-  · exact (ServedAuthority.load_eq _).symm
-  · split
-    · rename_i missing
-      unfold loadServedAuthority
-      rw [dif_pos held.valid]
-      split
-      · rfl
-      · rename_i _ present
-        rw [missing] at present
-        cases present
-    · exact (ServedAuthority.load_eq _).symm
+  · exact loadServedAuthorityStep_eq _ _ _ _
+  · rename_i absent
+    unfold loadServedAuthority
+    split
+    all_goals first | rfl | simp [absent]
 
-/-- An authority cell the Host itself wrote, beside the bytes it encoded it to: a write's
-post-cell (`ResourceBirthAuthority.post`, a patch applied to the pre-cell, so its kept trie
-follows the pre-cell's by the patch instead of being built). -/
-structure HeldCell where
-  cell : CredentialAuthorityDomain.Cell
-  bytes : List UInt8
-  exact : bytes = cellBytes cell
-
-/-- The held cell of a post-cell. -/
-def HeldCell.ofCell (cell : CredentialAuthorityDomain.Cell) : HeldCell := ⟨cell, cellBytes cell, rfl⟩
-
-/-- `loadServedAuthorityFrom` given the post-cell of the write that produced `served`: when
-the served authority bytes are that cell's, the cell is taken as it is, without decoding the
-bytes or rebuilding its trie; otherwise `loadServedAuthorityFrom`. `loadServedAuthorityHeld_eq`:
-it is `loadServedAuthority`. -/
-def loadServedAuthorityHeld {deployment : CanonicalCellRegistry.Deployment} {earlier store : StoreIdentity}
-    {before : State earlier} (prior : ServedAuthority deployment before) (held : Option HeldCell)
-    (served : State store) : Option (ServedAuthority deployment served) :=
-  match held with
-  | some post =>
-      if same : bytesBEq (served.canonicalBytes (cellIdOf deployment)) post.bytes then
-        some ⟨post.cell, prior.valid, (bytesBEq_iff.mp same).trans post.exact,
-          CredentialAuthorityDomain.authStateOf post.cell, rfl,
-          Thunk.mk fun _ => CredentialAuthorityDomain.issuedOf deployment.domain post.cell, rfl⟩
-      else loadServedAuthorityFrom prior served
-  | none => loadServedAuthorityFrom prior served
-
-theorem loadServedAuthorityHeld_eq {deployment : CanonicalCellRegistry.Deployment}
-    {earlier store : StoreIdentity} {before : State earlier} (prior : ServedAuthority deployment before)
-    (held : Option HeldCell) (served : State store) :
-    loadServedAuthorityHeld prior held served = loadServedAuthority deployment served := by
-  unfold loadServedAuthorityHeld
-  split
-  · split
-    · exact (ServedAuthority.load_eq _).symm
-    · exact loadServedAuthorityFrom_eq prior served
-  · exact loadServedAuthorityFrom_eq prior served
-
-/-- Teeth: a held cell whose bytes are not the served ones is not taken; the served bytes are
-decoded instead. -/
-theorem loadServedAuthorityHeld_other {deployment : CanonicalCellRegistry.Deployment}
-    {earlier store : StoreIdentity} {before : State earlier} (prior : ServedAuthority deployment before)
-    (post : HeldCell) (served : State store)
-    (other : served.canonicalBytes (cellIdOf deployment) ≠ post.bytes) :
-    loadServedAuthorityHeld prior (some post) served = loadServedAuthorityFrom prior served := by
-  dsimp only [loadServedAuthorityHeld]
-  rw [dif_neg (fun same => other (bytesBEq_iff.mp same))]
-
-/-- Satisfiable: a held cell whose bytes are the served ones is the loaded cell. -/
-theorem loadServedAuthorityHeld_taken {deployment : CanonicalCellRegistry.Deployment}
-    {earlier store : StoreIdentity} {before : State earlier} (prior : ServedAuthority deployment before)
-    (post : HeldCell) (served : State store)
-    (same : served.canonicalBytes (cellIdOf deployment) = post.bytes) :
-    ((loadServedAuthorityHeld prior (some post) served).map (·.cell)) = some post.cell := by
-  dsimp only [loadServedAuthorityHeld]
-  rw [dif_pos (bytesBEq_iff.mpr same)]
-  rfl
-
-#assert_axioms loadServedAuthorityHeld_eq
-#assert_axioms loadServedAuthorityHeld_other
-#assert_axioms loadServedAuthorityHeld_taken
+#assert_axioms loadServedAuthorityStep_eq
 
 #assert_axioms ServedDirectory.bytes_exact
 #assert_axioms ServedDirectory.slots_eq_of_bytes

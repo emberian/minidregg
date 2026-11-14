@@ -194,7 +194,8 @@ inductive Ground (deployment : CanonicalCellRegistry.Deployment) where
 
 namespace Ground
 
-open CredentialAuthorityDomainReceiver (cellIdOf cellBytes cellRoot)
+open CredentialAuthorityDomainReceiver (cellIdOf)
+open CredentialAuthorityLayout (RealizesAuthority Update)
 
 variable {deployment : CanonicalCellRegistry.Deployment}
 
@@ -310,8 +311,10 @@ theorem authoritySpent (ground : Ground deployment) :
   | light basis => rfl
   | full _ _ authority => exact authority.spentExact
 
+/-- The ground's authority store is the one its cells realise: the head at the pinned identifier
+holds its logical root and each address's own entry cell holds its value. -/
 theorem authorityObserved (ground : Ground deployment) :
-    ground.view.canonicalBytes (cellIdOf deployment) = cellBytes ground.authority.cell := by
+    RealizesAuthority ground.view.canonicalBytes deployment.authorityCellId ground.authority.cell.logical := by
   cases ground with
   | light basis => exact basis.authority.observed
   | full _ _ authority => exact authority.observed
@@ -507,34 +510,59 @@ theorem markerSpent_full (durable : DurableReceiverIO.Loaded ResourceBirthCodec.
     (Ground.ofLoaded durable directory authority).markerSpent marker = some (authority.snapshot.spent marker) := by
   simp [markerSpent, declaresNullifier, Ground.authority]
 
-/-- The one authority write: the post cell at the authority cell, guarded at
-its root in this ground. -/
-def authorityWrite (ground : Ground deployment) (post : CredentialAuthorityDomain.Cell) :
-    Minidregg.Kernel.DurableDataIntent.DataWrite where
-  cellId := cellIdOf deployment
-  expectedPre := ground.view.model.roots (cellIdOf deployment)
-  exactPost := cellRoot post
-  canonicalPostBytes := cellBytes post
+/-- The authority writes of an update of this ground's authority cell: the head with the post
+logical root and one entry cell per touched address, each guarded at its cell's root in this
+ground (`CredentialAuthorityLayout.lowerAuthority`). The update carries its frame, so a touched
+address cannot be left unwritten. -/
+def authorityWrites (ground : Ground deployment) (update : Update ground.authority.cell) :
+    List Minidregg.Kernel.DurableDataIntent.DataWrite :=
+  update.writes ground.view deployment.authorityCellId
 
-def authorityWrites (ground : Ground deployment) (post : CredentialAuthorityDomain.Cell) :
-    List Minidregg.Kernel.DurableDataIntent.DataWrite := [ground.authorityWrite post]
-
+/-- The one read dependency of the authority domain: the head. Every authority update writes the
+head, so this guard refuses a stale read of any entry
+(`CredentialAuthorityLayout.stale_authority_read_refused`); authority writes stay serialised
+against authority readers. -/
 def authorityReadGuard (ground : Ground deployment) : Minidregg.Kernel.DurableDataIntent.ReadGuard :=
   { cellId := cellIdOf deployment, expectedRoot := ground.view.model.roots (cellIdOf deployment) }
 
 def authorityReadGuards (ground : Ground deployment) : List Minidregg.Kernel.DurableDataIntent.ReadGuard :=
   [ground.authorityReadGuard]
 
-theorem authorityWrite_root_bound (ground : Ground deployment) (post : CredentialAuthorityDomain.Cell) :
-    ResourceBirthCodec.rootBytes (ground.authorityWrite post).canonicalPostBytes =
-      (ground.authorityWrite post).exactPost := rfl
+theorem authorityWrites_root_bound (ground : Ground deployment) (update : Update ground.authority.cell)
+    (write : Minidregg.Kernel.DurableDataIntent.DataWrite) (member : write ∈ ground.authorityWrites update) :
+    ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost :=
+  CredentialAuthorityLayout.lowerAuthority_root_bound _ _ _ _ _ write member
 
-/-- The authority write's guard is the authority cell's own root. -/
-theorem authorityWrite_pre_is_root (ground : Ground deployment) (post : CredentialAuthorityDomain.Cell) :
-    (ground.authorityWrite post).expectedPre = cellRoot ground.authority.cell := by
-  show ground.view.model.roots _ = ResourceBirthCodec.rootBytes (cellBytes _)
-  rw [← ground.authorityObserved]
-  exact (ground.view.coherent _).symm
+/-- Every authority write is guarded at its cell's root in this ground. -/
+theorem authorityWrites_pre_exact (ground : Ground deployment) (update : Update ground.authority.cell)
+    (write : Minidregg.Kernel.DurableDataIntent.DataWrite) (member : write ∈ ground.authorityWrites update) :
+    write.expectedPre = ground.view.model.roots write.cellId :=
+  CredentialAuthorityLayout.lowerAuthority_pre_exact _ _ _ _ _ write member
+
+/-- Every authority write is a live authority cell lawful at its identifier. -/
+theorem authorityWrites_decodes (ground : Ground deployment) (update : Update ground.authority.cell)
+    (write : Minidregg.Kernel.DurableDataIntent.DataWrite) (member : write ∈ ground.authorityWrites update) :
+    ∃ cell, write.canonicalPostBytes = CredentialAuthorityLayout.encodeCell cell ∧
+      CredentialAuthorityEntry.PhysicalLaw deployment.authorityCellId write.cellId.value cell.logical :=
+  CredentialAuthorityLayout.lowerAuthority_decodes _ _ _ _ _ write member
+
+/-- The head is among the cells of every authority update. -/
+theorem authorityWrites_head (ground : Ground deployment) (update : Update ground.authority.cell) :
+    cellIdOf deployment ∈ (ground.authorityWrites update).map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId := by
+  simp [authorityWrites, Update.writes, CredentialAuthorityLayout.lowerAuthority_cellIds, cellIdOf]
+
+/-- **The installed image realises the update's post store**: an intent whose writes are the
+update's lowering and writes outside the authority kind, at distinct cells, leaves cells whose
+head holds the post root and whose entries hold the post values. -/
+theorem authorityWrites_installed (ground : Ground deployment) (update : Update ground.authority.cell)
+    (intent : Minidregg.Kernel.DurableDataIntent.DataIntent ResourceBirthCodec.rootBytes)
+    (other : List Minidregg.Kernel.DurableDataIntent.DataWrite)
+    (writes : intent.writes = other ++ ground.authorityWrites update)
+    (distinct : (intent.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId).Nodup)
+    (foreign : CredentialAuthorityLayout.Foreign ground.view other) :
+    RealizesAuthority (DataSnapshot.install ground.view intent).canonicalBytes deployment.authorityCellId
+      update.post.logical :=
+  update.realizes ground.authorityObserved intent other writes distinct foreign
 
 theorem authorityReadGuards_exact (ground : Ground deployment) (guard : Minidregg.Kernel.DurableDataIntent.ReadGuard)
     (member : guard ∈ ground.authorityReadGuards) :
@@ -660,7 +688,7 @@ end Grounded
 
 #assert_axioms Basis.view_lookup_declared
 #assert_axioms Basis.view_consumed_declared
-#assert_axioms Ground.authorityWrite_pre_is_root
+#assert_axioms Ground.authorityWrites_installed
 #assert_axioms Ground.markerSpent_some
 #assert_axioms Ground.markerSpent_undeclared
 #assert_axioms Ground.markerSpent_full

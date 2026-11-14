@@ -130,11 +130,22 @@ def seatWire : Wire Kernel.SeatCell.layout where
   keyCodecId := fun _ => "unit"
   valueCodecId := fun _ => "dregg/seat-cell/v1"
 
+/-- An authority cell (the head or one entry): one RAM address holding its payload. -/
+def authorityWire : Wire (Kernel.ProtectedCell.layout CredentialAuthorityEntry.spec) where
+  name := "dregg/authority-cell-address/v1"
+  namespaces := [()]
+  namespaces_complete := by intro u; cases u; simp
+  namespaceStream := unitStream
+  keyStream := fun _ => unitStream
+  valueStream := fun _ => Kernel.ProtectedCell.payloadStream CredentialAuthorityEntry.spec
+  keyCodecId := fun _ => "unit"
+  valueCodecId := fun _ => "dregg/authority-cell/v1"
+
 /-- **One wire per registered kind.** -/
 def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .content => HyperdocumentCell.contentWire
   | .eventHistory => HyperdocumentCell.eventWire
-  | .authority => CredentialAuthorityCell.wire
+  | .authority => authorityWire
   | .declaredObject => DeclaredEffectCell.wire
   | .resourceBook => bookWire
   | .accountMetadata => DeclaredEffectCell.wire
