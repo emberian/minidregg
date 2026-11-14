@@ -7686,11 +7686,11 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let some text := String.fromUTF8? requestBytes.toByteArray
                               | throw (IO.userError "fleet incoming request is not UTF-8")
                             let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
-                            let (topic, cursor, limit) ← IO.ofExcept
-                              (Minidregg.Host.Json.fleetPollRequest request)
+                            let (topic, cursor, limit, budget) ← IO.ofExcept
+                              (Minidregg.Host.Json.fleetIncomingRequest request)
                             let light := (← sessionCurrent pinnedConfig state).light
                             match ← NativeHost.fleetIncomingLight pinnedConfig light
-                                observationBytes topic cursor limit with
+                                observationBytes topic cursor limit budget with
                             | .ok view => return ((180 : UInt8),
                                 (Minidregg.Host.Json.fleetIncomingJson view).compress.toUTF8.toList)
                             | .error refusal => return ((255 : UInt8), refusalFrame "fleet-incoming" refusal)

@@ -224,7 +224,7 @@ theorem dryTransport_prepareAppend (t : DurableReceiverIO.Transport) (reached : 
     DurableReceiverIO.prepareAppend (dryTransport t reached) loaded ready key =
       DurableReceiverIO.prepareAppend t loaded ready key := by
   unfold DurableReceiverIO.prepareAppend DurableReceiverIO.Loaded.headIndexRoot
-    DurableReceiverIO.withIndexRows DurableReceiverIO.indexRowsRead dryTransport
+    DurableReceiverIO.applyIndex DurableReceiverIO.withIndexRows DurableReceiverIO.indexRowsRead dryTransport
   rfl
 
 /-- **At the Store writer, the dry run agrees with submission on a tail-bound

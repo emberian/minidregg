@@ -19,6 +19,7 @@ public import Compiler.DurableHistoryStore
 public import Kernel.FnConsumerProgressHistory
 public import Kernel.PreparedInvocationDiagnostics
 public import Kernel.NativeHostLight
+public import Theory.JournalSequencePage
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -2242,55 +2243,85 @@ theorem fleetIncomingFrom_complete {account : Nat} {topic : List UInt8} {after :
       simp only [fleetIncomingFrom, List.mem_append]
       exact Or.inr next
 
+/-- How a reader names where it resumes the ledger: a logical height (every payment above
+it), or a position in the account's sequence (every payment after that member). -/
+inductive FleetCursor where
+  | height (logical : Nat)
+  | position (after : Nat)
+
 structure FleetIncomingView where
   subject : SubjectId
   account : Nat
   topic : List UInt8
-  cursor : Nat
+  /-- The height cursor the request gave, if it gave one. -/
+  cursor : Option Nat
   /-- The current logical height (`logicalHeight`): the next record takes `tip + 1`. -/
   tip : Nat
+  /-- The position the page was read after (the request's, or the height cursor's). -/
+  after : Nat
+  /-- What the page is: rows, the tip, a named gap, or an oversize member
+  (`Theory.JournalSequences.Page`). Never an empty page of rows. -/
+  page : Theory.JournalSequences.Page
+  /-- The entries of a page of rows, in sequence order from position `after + 1`. -/
   entries : List FleetIncomingEntry
 
-/-- The heights of a sequence's members strictly above `cursor`, at most `limit`, read from
-its rows: the count, a bisection for the cursor (`Theory.JournalSequences.below`, at most
-`belowFuel count` rows), then the next positions in order
-(`Theory.JournalSequences.window_spec`). -/
-def sequenceWindow {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store) (seq : Digest256) (cursor limit : Nat) :
-    IO (Except Refusal (List Nat)) := do
-  match ← reader.seqCount seq with
-  | .error refusal => return .error (historyRefusal refusal)
-  | .ok counted =>
-      let count := counted.value.getD 0
-      let mut lo := 0
-      let mut hi := count
-      for _ in [0:Theory.JournalSequences.belowFuel count] do
-        if lo < hi then
-          let mid := (lo + hi + 1) / 2
-          match ← reader.seqItem seq mid with
-          | .error refusal => return .error (historyRefusal refusal)
-          | .ok item =>
-              match item.value with
-              | some height => if height ≤ cursor then lo := mid else hi := mid - 1
-              | none => hi := mid - 1
-      let mut heights : Array Nat := #[]
-      for offset in [0:limit] do
-        if lo + 1 + offset ≤ count then
-          match ← reader.seqItem seq (lo + 1 + offset) with
-          | .error refusal => return .error (historyRefusal refusal)
-          | .ok item =>
-              match item.value with
-              | some height => heights := heights.push height
-              | none => return .error (journalIndexRefusal "a sequence names no member at a position within its count")
-      return .ok heights.toList
+/-- The byte budget of a ledger page whose request names none. -/
+def fleetPageBytes : Nat := 262144
 
-/-- Payments to the observed account above `cursor`, at most `limit`
-(bounded by `fleetPollMax`), behind a current signed observation of that
-account by its reader (op 180). Read from the account's incoming sequence
-(`JournalIndex.Name.fleetIncoming account topic`): its window above the cursor, then the one
-record at each height. Heights on the wire are logical (`genesisHeight` plus the Store's). -/
+/-- The height at or below which this Store no longer holds records. The deployed Store
+retires nothing, so no read answers a gap today; a Store that retires a prefix or opens from
+a checkpoint alone names its horizon here, and the page read (`sequencePage`) then answers
+`Theory.JournalSequences.Page.gap` for members below it. -/
+def journalRetired : Nat := 0
+
+/-- A sequence's count and position rows as effectful reads of the Store's index. -/
+def sequenceRows {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (seq : Digest256) :
+    ExceptT Refusal IO Nat × (Nat → ExceptT Refusal IO (Option Nat)) :=
+  (ExceptT.mk do
+      match ← reader.seqCount seq with
+      | .error refusal => return .error (historyRefusal refusal)
+      | .ok counted => return .ok (counted.value.getD 0),
+    fun position => ExceptT.mk do
+      match ← reader.seqItem seq position with
+      | .error refusal => return .error (historyRefusal refusal)
+      | .ok item => return .ok item.value)
+
+/-- The position of a height cursor: how many members are at or below `height`, by the
+bisection `Theory.JournalSequences.belowM` (`belowM_pure`, `below_spec`). -/
+def sequencePosition {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (seq : Digest256) (height : Nat) :
+    IO (Except Refusal Nat) :=
+  let (count, rows) := sequenceRows reader seq
+  ExceptT.run do
+    let counted ← count
+    Theory.JournalSequences.belowM rows height (Theory.JournalSequences.belowFuel counted) 0 counted
+
+/-- One page of a sequence above position `after`: `Theory.JournalSequences.pageM` over the
+Store's rows, each member's size given by `size`. Over rows that answer as the journal's
+recomputation does it is `Theory.JournalSequences.page` (`pageM_pure`): rows in order within
+both limits, the tip, a named gap, or an oversize member (`page_rows`, `page_tip`,
+`page_gap`, `page_oversize`). A row missing inside the count refuses. -/
+def sequencePage {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (seq : Digest256)
+    (size : Nat → ExceptT Refusal IO Nat) (retired after limit budget : Nat) :
+    IO (Except Refusal Theory.JournalSequences.Page) := do
+  let (count, rows) := sequenceRows reader seq
+  match ← (Theory.JournalSequences.pageM count rows size retired after limit budget).run with
+  | .error refusal => return .error refusal
+  | .ok (.absent position) =>
+      return .error (journalIndexRefusal s!"a sequence names no member at position {position} within its count")
+  | .ok page => return .ok page
+
+/-- Payments to the observed account, one page (op 180), behind a current signed
+observation of that account by its reader. Read from the account's incoming sequence
+(`JournalIndex.Name.fleetIncoming account topic`): the cursor's position (a height cursor is
+bisected to one), then `sequencePage`: at most `limit` (bounded by `fleetPollMax`) members
+whose signed ingress bytes fit `budget`, each the one record at the height its row names.
+The answer is never an empty page of rows: it is rows, the tip, a named gap or an oversize
+member. Heights on the wire are logical (`genesisHeight` plus the Store's). -/
 def fleetIncomingLight (config : Config) (light : NativeHostLight.Light config)
-    (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
+    (signedObservationBytes topic : List UInt8) (cursor : FleetCursor) (limit budget : Nat) :
     IO (Except Refusal FleetIncomingView) := do
   if topic.length > FleetTurn.maxTopicBytes then
     return .error { reason := .malformed, detail := "fleet topic must be 0..64 bytes" }
@@ -2299,19 +2330,33 @@ def fleetIncomingLight (config : Config) (light : NativeHostLight.Light config)
   | .ok (subject, account) =>
       let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
       let name := JournalIndex.Name.fleetIncoming account topic
-      match ← sequenceWindow reader name.id (cursor - config.genesisHeight) (min limit fleetPollMax) with
-      | .error refusal => return .error refusal
-      | .ok heights =>
-          let mut entries : Array FleetIncomingEntry := #[]
-          for height in heights do
-            match ← sequenceMember reader name height with
+      let after ← match cursor with
+        | .position after => pure after
+        | .height logical =>
+            match ← sequencePosition reader name.id (logical - config.genesisHeight) with
             | .error refusal => return .error refusal
-            | .ok read =>
-                match fleetIncomingEntry? account topic (config.genesisHeight + height) read.record with
-                | some entry => entries := entries.push entry
-                | none => return .error (journalIndexRefusal s!"the record at height {height} is not a payment to the account")
-          return .ok ⟨subject, account, topic, cursor, config.genesisHeight + light.opening.head.height,
-            entries.toList⟩
+            | .ok position => pure position
+      let read ← IO.mkRef (#[] : Array FleetIncomingEntry)
+      let size : Nat → ExceptT Refusal IO Nat := fun height => ExceptT.mk do
+        match ← sequenceMember reader name height with
+        | .error refusal => return .error refusal
+        | .ok member =>
+            match fleetIncomingEntry? account topic (config.genesisHeight + height) member.record with
+            | some entry =>
+                read.modify (·.push entry)
+                return .ok member.record.event.canonicalBytes.length
+            | none => return .error (journalIndexRefusal s!"the record at height {height} is not a payment to the account")
+      match ← sequencePage reader name.id size journalRetired after (min limit fleetPollMax) budget with
+      | .error refusal => return .error refusal
+      | .ok page =>
+          let delivered := match page with
+            | .rows _ heights => heights.length
+            | _ => 0
+          let logical := match cursor with
+            | .height logical => some logical
+            | .position _ => none
+          return .ok ⟨subject, account, topic, logical, config.genesisHeight + light.opening.head.height,
+            after, page, (← read.get).toList.take delivered⟩
 
 #assert_axioms fleetIncomingEntry?_sound
 #assert_axioms fleetIncomingEntry?_other_destination
