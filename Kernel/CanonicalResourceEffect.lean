@@ -162,13 +162,22 @@ def RequestContext.request
   policyId := context.policyId
   policyEpoch := context.policyEpoch
   policyRevision := context.policyRevision
-  cost := operation.feeDebit
+  cost := (operationCodec.encode operation).length
 
 @[simp] theorem RequestContext.request_target
     {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (context : RequestContext) (pre : CellState.Materialized M)
     (operation : CanonicalResourceKernel.Operation) :
     (context.request pre operation).target.value = operation.posting.source :=
+  rfl
+
+/-- A Book request's `cost` is the operation's encoded length. The amount an operation
+moves is not in it: the presented grant's balance bound limits that. -/
+@[simp] theorem RequestContext.request_cost
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
+    (context : RequestContext) (pre : CellState.Materialized M)
+    (operation : CanonicalResourceKernel.Operation) :
+    (context.request pre operation).cost = (operationCodec.encode operation).length :=
   rfl
 
 @[simp] theorem RequestContext.request_argsDigest
@@ -334,7 +343,8 @@ def batchSourceRequest {registry : CellRegistry.TypeRegistry Digest}
     (position : Fin descriptor.resourceBatch.operations.length) : Request .account :=
   { (contexts position).request pre (descriptor.resourceBatch.operations.get position) with
     argsDigest := sourceArgsDigest encoding descriptor position
-    effectsDigest := encoding.effectsDigest descriptor }
+    effectsDigest := encoding.effectsDigest descriptor
+    cost := (encoding.codec.encode descriptor).length }
 
 /-- The descriptor's fee is its final resource operation, so its authorization
 also supplies the outer accepted effect request without an extra authority. -/
@@ -349,6 +359,17 @@ def birthRequest {registry : CellRegistry.TypeRegistry Digest}
     (contexts : Nat → RequestContext) (descriptor : ResourceBirth.Descriptor registry) :
     Request .account :=
   batchSourceRequest encoding pre contexts descriptor (feePosition descriptor)
+
+/-- Every source leg of a birth costs the descriptor's encoded length, whatever its operation
+moves. -/
+@[simp] theorem batchSourceRequest_cost {registry : CellRegistry.TypeRegistry Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
+    (encoding : ResourceBirth.SourceEncoding registry) (pre : CellState.Materialized M)
+    (contexts : Nat → RequestContext) (descriptor : ResourceBirth.Descriptor registry)
+    (position : Fin descriptor.resourceBatch.operations.length) :
+    (batchSourceRequest encoding pre contexts descriptor position).cost =
+      (encoding.codec.encode descriptor).length :=
+  rfl
 
 @[simp] theorem feePosition_operation {registry : CellRegistry.TypeRegistry Digest}
     (descriptor : ResourceBirth.Descriptor registry) :
@@ -368,9 +389,8 @@ def birthRequest {registry : CellRegistry.TypeRegistry Digest}
     {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (encoding : ResourceBirth.SourceEncoding registry) (pre : CellState.Materialized M)
     (contexts : Nat → RequestContext) (descriptor : ResourceBirth.Descriptor registry) :
-    (birthRequest encoding pre contexts descriptor).cost = descriptor.fee.amount := by
-  change (descriptor.resourceBatch.operations.get (feePosition descriptor)).feeDebit = _
-  rw [feePosition_operation]
+    (birthRequest encoding pre contexts descriptor).cost =
+      (encoding.codec.encode descriptor).length :=
   rfl
 
 /-- The factory and Book policies observe their own primary cell roots under

@@ -607,7 +607,17 @@ def factoryRequest {registry : TypeRegistry Digest}
   policyId := pins.policyId
   policyEpoch := oldAuthority.policyEpoch pins.policyId
   policyRevision := oldAuthority.policyRevision pins.policyId
-  cost := descriptor.fee.amount
+  cost := (encoding.codec.encode descriptor).length
+
+/-- The factory leg's `cost` is the descriptor's encoded length, the unit of every signed
+request. The fee is a Book debit, bounded by the payer grant's balance bound. -/
+@[simp] theorem factoryRequest_cost {registry : TypeRegistry Digest}
+    (pins : FactoryPins) (encoding : SourceEncoding registry)
+    (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
+    (descriptor : Descriptor registry) :
+    (factoryRequest pins encoding oldAuthority factoryPreRoot height descriptor).cost =
+      (encoding.codec.encode descriptor).length :=
+  rfl
 
 /-- Authorization is obtained before any newborn authority or account exists.
 This token binds the complete descriptor, the exact selected old factory

@@ -151,7 +151,7 @@ def factoryValues (pins : PublicPins) (descriptor : Descriptor Registry) : Reque
   policyId := ⟨pins.factory⟩
   policyEpoch := 0
   policyRevision := 0
-  cost := descriptor.fee.amount
+  cost := (CanonicalCellRegistry.sourceEncoding.codec.encode descriptor).length
 
 /-- An allocation leg (`ResourceBirthController.allocationRequest`). -/
 def allocationValues (pins : PublicPins) (descriptor : Descriptor Registry) (cell : Nat) :
@@ -183,7 +183,7 @@ def sourceValues (pins : PublicPins) (descriptor : Descriptor Registry)
     policyId := ⟨operation.posting.source⟩
     policyEpoch := 0
     policyRevision := 0
-    cost := operation.feeDebit }
+    cost := (CanonicalCellRegistry.sourceEncoding.codec.encode descriptor).length }
 
 /-- The member's derivation of one branch request of a birth. -/
 def birthValues (pins : PublicPins) (descriptor : Descriptor Registry) :

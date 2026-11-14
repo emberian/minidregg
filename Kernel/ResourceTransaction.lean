@@ -530,15 +530,9 @@ def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
 
 def Target.verb (target : Target) : Verb target.kind := payloadVerb target.kind target.payload
 
-/-- Payment authority is charged the exact consented credit amount; all other
-legs retain canonical command-byte cost. Structural preparation rejects a
-funding payload on any role except account. -/
-def requestCost (encodedCommand : List UInt8) (target : Target) : Nat :=
-  match target.payload with
-  | .computeFunding funding => funding.credits
-  | .moneyConsent consent => encodedCommand.length +
-      (consent.funding.map ResourceMoneyWire.FundingConsent.credits).getD 0
-  | _ => encodedCommand.length
+/-! Every leg's `cost` is the canonical command's encoded length, the unit every signed
+request has. The credits a funding or money leg moves are bounded by the presented grant's
+balance bound (`DeclaredResourceController.debitBoundCheck`), never by `cost`. -/
 
 /-- The original expression is retained as a specification for the optimized
 request construction. It is not called by the production request path. -/
@@ -559,11 +553,11 @@ def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (amb
   policyId := ⟨target.target⟩
   policyEpoch := snapshot.authState.policyEpoch ⟨target.target⟩
   policyRevision := snapshot.authState.policyRevision ⟨target.target⟩
-  cost := requestCost (commandCodec.encode command) target
+  cost := (commandCodec.encode command).length
 
 /-- Encode the canonical command and its domain/profile frame once per
 request. The same exact framed bytes feed both digest domains; the raw
-funding credits are the funding leg cost; other legs retain canonical command length. -/
+command's encoded length is every leg's cost. -/
 def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (target : Target) (preRoot : Digest) : Request target.kind :=
   let encodedCommand := commandCodec.encode command
@@ -585,7 +579,7 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
     policyId := ⟨target.target⟩
     policyEpoch := snapshot.authState.policyEpoch ⟨target.target⟩
     policyRevision := snapshot.authState.policyRevision ⟨target.target⟩
-    cost := requestCost encodedCommand target }
+    cost := encodedCommand.length }
 
 /-- For every old authority snapshot and transaction input, caching only the
 two canonical byte strings changes no request field, digest, or cost. -/
@@ -593,6 +587,14 @@ theorem requestFor_eq_reference (snapshot : AuthoritySnapshot) (semantics : Dige
     (ambient : Ambient) (command : Command) (target : Target) (preRoot : Digest) :
     requestFor snapshot semantics ambient command target preRoot =
       requestForReference snapshot semantics ambient command target preRoot := by
+  rfl
+
+/-- Every leg of a resource transaction costs the command's encoded length: a funding or money
+leg's credits are not in it. -/
+@[simp] theorem requestFor_cost (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (target : Target) (preRoot : Digest) :
+    (requestFor snapshot semantics ambient command target preRoot).cost =
+      (commandCodec.encode command).length :=
   rfl
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.requestFor_eq_reference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
