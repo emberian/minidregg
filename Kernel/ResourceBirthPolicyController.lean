@@ -18,6 +18,7 @@ public import Compiler.CanonicalAccountView
 public import Compiler.PhysicalLawResolution
 public import Compiler.WorldKindLawDependencies
 public import Kernel.PlatformCellDomain
+public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -108,6 +109,10 @@ inductive Reject where
   /-- The factory pins carry a creation tariff other than that record's: the birth would be
   priced from a tariff the platform cell does not hold. -/
   | platformStale
+  /-- A source branch's presented capability does not bound the birth's gross debit of that
+  branch's account (`Theory.CapabilityValueBound.check`): a balance its scope does not name,
+  or a `maxDelta` bound on a balance below what the birth's fee and funding take from it. -/
+  | valueBound (reason : CapabilityValueBound.Refusal)
   deriving DecidableEq, Repr
 
 /-- The checkable part of the existing factory authorization. All fields
@@ -183,6 +188,42 @@ instance initialPoliciesBoundDecidable {registry : TypeRegistry Digest}
 def require (condition : Prop) [Decidable condition] (reason : Reject) :
     Except Reject (PLift condition) :=
   if accepted : condition then .ok ⟨accepted⟩ else .error reason
+
+/-- **The value bound of a debiting branch.** The capability presented for `account`'s debit
+must bound the gross amount `operations` take from `account` (`CapabilityValueBound.check`:
+its `fields` name each debited balance, its `maxDelta` bounds on them hold). No capability is
+`capability`; a failed bound is `valueBound`, naming the asset. -/
+def valueBoundCheck {kind : ResourceKind} (capability : Option (Capability kind × Digest))
+    (operations : List CanonicalResourceKernel.Operation) (account : Nat) : Except Reject Unit :=
+  match capability with
+  | none => .error .capability
+  | some (cap, _) =>
+      match CapabilityValueBound.check cap.scope operations account with
+      | .ok () => .ok ()
+      | .error reason => .error (.valueBound reason)
+
+theorem valueBoundCheck_ok {kind : ResourceKind} {capability : Option (Capability kind × Digest)}
+    {operations : List CanonicalResourceKernel.Operation} {account : Nat}
+    (ok : valueBoundCheck capability operations account = .ok ()) :
+    ∃ cap digest, capability = some (cap, digest) ∧
+      CapabilityValueBound.ValueBound cap.scope operations account := by
+  unfold valueBoundCheck at ok
+  rcases capability with _ | ⟨cap, digest⟩
+  · cases ok
+  · refine ⟨cap, digest, rfl, ?_⟩
+    simp only at ok
+    split at ok
+    next checked => exact (CapabilityValueBound.check_ok_iff _ _ _).mp checked
+    next => cases ok
+
+/-- Teeth: a capability whose scope fails the bound is refused `valueBound`, never admitted. -/
+theorem valueBoundCheck_refuses {kind : ResourceKind} (cap : Capability kind) (digest : Digest)
+    (operations : List CanonicalResourceKernel.Operation) (account : Nat)
+    (unbounded : ¬ CapabilityValueBound.ValueBound cap.scope operations account) :
+    ∃ reason, valueBoundCheck (some (cap, digest)) operations account =
+      .error (.valueBound reason) := by
+  obtain ⟨reason, refused⟩ := (CapabilityValueBound.check_error_iff _ _ _).mpr unbounded
+  exact ⟨reason, by simp only [valueBoundCheck, refused]⟩
 
 /-- The actual metadata admission path. Failing a later check returns no
 prefix result and produces no authorization token. -/
@@ -2370,6 +2411,12 @@ structure AdmittedBundle [DecidableEq F]
     {height : Height} (pending : Pending prepared height) (bundle : CredentialBundle) : Type where
   branches : (branch : Branch descriptor) → BranchAccepted pending branch
   inputsExact : ∀ branch, bundle.forBranch branch = some (branches branch).credential
+  /-- Every source branch's capability bounds the birth's gross debit (fee and funding) of
+  that branch's account (`valueBoundCheck`). -/
+  sourcesBounded : ∀ index : Fin descriptor.resourceBatch.operations.length,
+    valueBoundCheck (branches (.source index)).authorization.evidence.capabilityValue
+      descriptor.resourceBatch.operations
+      (descriptor.resourceBatch.operations.get index).posting.source = .ok ()
 
 /-- Select one dependent branch directly from its finite index. -/
 private def directFinCases {n : Nat} {A : Fin (n + 1) → Type}
@@ -2440,12 +2487,29 @@ def Pending.admitBundleNative [DecidableEq F]
                   let sourceResults : Except Reject
                       ((index : Fin descriptor.resourceBatch.operations.length) →
                         { accepted : BranchAccepted pending (.source index) //
-                          accepted.credential = bundle.sources.get (sourceIndex index) }) ←
+                          accepted.credential = bundle.sources.get (sourceIndex index) ∧
+                          valueBoundCheck accepted.authorization.evidence.capabilityValue
+                            descriptor.resourceBatch.operations
+                            (descriptor.resourceBatch.operations.get index).posting.source = .ok () }) ←
                     sequenceFin (E := Reject) (A := fun index : Fin descriptor.resourceBatch.operations.length =>
                         { accepted : BranchAccepted pending (.source index) //
-                          accepted.credential = bundle.sources.get (sourceIndex index) })
-                      (fun index => pending.admitBranchNative (.source index) native
-                        (bundle.sources.get (sourceIndex index)))
+                          accepted.credential = bundle.sources.get (sourceIndex index) ∧
+                          valueBoundCheck accepted.authorization.evidence.capabilityValue
+                            descriptor.resourceBatch.operations
+                            (descriptor.resourceBatch.operations.get index).posting.source = .ok () })
+                      (fun index => do
+                        match ← pending.admitBranchNative (.source index) native
+                            (bundle.sources.get (sourceIndex index)) with
+                        | .error reason => return .error reason
+                        | .ok accepted =>
+                            -- The capability admitted for this debit bounds the value the
+                            -- whole batch takes from its account.
+                            match bounded : valueBoundCheck
+                                accepted.val.authorization.evidence.capabilityValue
+                                descriptor.resourceBatch.operations
+                                (descriptor.resourceBatch.operations.get index).posting.source with
+                            | .error reason => return .error reason
+                            | .ok () => return .ok ⟨accepted.val, accepted.property, bounded⟩)
                   match sourceResults with
                   | .error reason => return .error reason
                   | .ok sources =>
@@ -2467,11 +2531,55 @@ def Pending.admitBundleNative [DecidableEq F]
                                 exact List.getElem?_eq_getElem (by omega)
                             | source index =>
                                 change bundle.sources[index.val]? = some (sources index).val.credential
-                                rw [(sources index).property]
+                                rw [(sources index).property.1]
                                 simp only [List.get_eq_getElem]
-                                exact List.getElem?_eq_getElem (by omega) }
+                                exact List.getElem?_eq_getElem (by omega)
+                          sourcesBounded := fun index => (sources index).property.2 }
     else return .error .credentialShape
   else return .error .credentialShape
+
+/-- **Every debit of an admitted birth is within its capability's value bound.** For each
+Book operation of the birth (each funding transfer and the fee), the capability admitted for
+that operation's source branch names every balance the birth debits from that account and
+bounds the birth's gross debit of each (`CapabilityValueBound.ValueBound`). -/
+theorem AdmittedBundle.source_value_bounded [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
+    {height : Height} {pending : Pending prepared height} {bundle : CredentialBundle}
+    (admitted : AdmittedBundle pending bundle)
+    (index : Fin descriptor.resourceBatch.operations.length) :
+    ∃ cap digest,
+      (admitted.branches (.source index)).authorization.evidence.capabilityValue =
+          some (cap, digest) ∧
+        CapabilityValueBound.ValueBound cap.scope descriptor.resourceBatch.operations
+          (descriptor.resourceBatch.operations.get index).posting.source :=
+  valueBoundCheck_ok (admitted.sourcesBounded index)
+
+/-- The same, in plain terms: the debited balance is named, and the birth's gross debit of
+that account in that asset is within every `maxDelta` bound the capability sets on it. -/
+theorem AdmittedBundle.source_gross_debit_bounded [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
+    {height : Height} {pending : Pending prepared height} {bundle : CredentialBundle}
+    (admitted : AdmittedBundle pending bundle)
+    (index : Fin descriptor.resourceBatch.operations.length) :
+    ∃ cap digest,
+      (admitted.branches (.source index)).authorization.evidence.capabilityValue =
+          some (cap, digest) ∧
+        CellField.NamedBy cap.scope.fields
+          (.balance (descriptor.resourceBatch.operations.get index).posting.asset) ∧
+        ∀ bound,
+          (CellField.balance (descriptor.resourceBatch.operations.get index).posting.asset, bound) ∈
+              cap.scope.maxDelta →
+            CapabilityValueBound.grossDebit descriptor.resourceBatch.operations
+                (descriptor.resourceBatch.operations.get index).posting.source
+                (descriptor.resourceBatch.operations.get index).posting.asset ≤ bound := by
+  obtain ⟨cap, digest, named, bounded⟩ := admitted.source_value_bounded index
+  exact ⟨cap, digest, named,
+    (CapabilityValueBound.valueBound_iff _ _ _).mp bounded _
+      (CapabilityValueBound.mem_debitAssets_of_mem (List.get_mem _ _))⟩
+
+#assert_axioms valueBoundCheck_ok
+#assert_axioms AdmittedBundle.source_value_bounded
+#assert_axioms AdmittedBundle.source_gross_debit_bounded
 
 /-- Owner consent has a separate purpose domain and binds the full factory
 source descriptor plus its exact birth incidence. It is not an ordinary write
