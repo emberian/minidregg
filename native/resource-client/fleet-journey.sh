@@ -2,7 +2,8 @@
 # Agent-fleet journey on one fresh, private Mini Store:
 #   join (enroll + owned funded account) x2 -> send (topic event + payment +
 #   fee) -> transfer -> receipt lookup (by transaction id, by agent head, by
-#   attempt) -> publish x2 -> poll by cursor -> refusal poles -> cold restart
+#   attempt) -> publish x2 -> poll by cursor -> a bounded delegated spend ->
+#   refusal poles -> cold restart
 #   and re-poll. Every verb is timed; every refusal is required to refuse.
 # Run on the same Linux host as the native Host/Store/verifier. Nothing is
 # copied from another Store. The service started here is always stopped.
@@ -190,6 +191,35 @@ EXPECT_A=$((1000 - 7 - 25 - 4 * FEE))
 EXPECT_B=$((500 + 7 + 25 - FEE))
 jq -e --arg v "$EXPECT_A" '[.balances[] | select(.[0] == "0") | .[1]] == [$v]' "$OUT/read-a.json" >/dev/null
 jq -e --arg v "$EXPECT_B" '[.balances[] | select(.[0] == "0") | .[1]] == [$v]' "$OUT/read-b.json" >/dev/null
+
+# --- the value bound of a delegated spend grant -----------------------------
+# agent-a delegates `transfer` on its account to agent-b, bounded at 40 + one fee of the credit
+# balance a turn (`maxDelta` on balance:0; fees count toward the gross debit). agent-b spends
+# exactly the bound, and one more is refused by name. A grant that bounds some other balance
+# sets no bound on the one it debits and is refused `missingBalanceBound`.
+spend_grant() { # ID IMPORT-NAME MAXDELTA-JSON
+  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"account","recipient":"%s","verbs":["observe","transfer"],"maxCost":"100000","maxDelta":%s}\n' \
+    "$B_SUBJECT" "$3" >"$ROOT/$1.json"
+  step "$1-propose" delegate -- "$MINI" workspace --action propose --dir "$ROOT/agent-a" \
+    --proposal-id "$1" --request "$ROOT/$1.json"
+  step "$1-submit" delegate -- "$MINI" workspace --action submit --dir "$ROOT/agent-a" \
+    --intent "$ROOT/agent-a/proposals/$1/intent.json" --attempt "$ROOT/agent-a/attempts/grant-$1"
+  step "$1-publish" delegate -- "$MINI" workspace --action publish-delegation \
+    --dir "$ROOT/agent-a" --proposal-id "$1" --attempt "$ROOT/agent-a/attempts/grant-$1"
+  "$MINI" workspace --action import --dir "$ROOT/agent-b" --name "$2" \
+    --from-ref "$ROOT/agent-a/proposals/$1/recipient-reference.json" >/dev/null
+}
+spend_grant spend-b a-purse "[{\"field\":\"balance:0\",\"max\":\"$((40 + FEE))\"}]"
+step bounded-spend transfer -- "$MINI" fleet --action transfer --dir "$ROOT/agent-b" \
+  --account a-purse --to "$B_ACCOUNT" --amount 40
+jq -e '.transfer.amount == "40"' "$OUT/bounded-spend.json" >/dev/null
+refuse bounded-overspend transfer -- "$MINI" fleet --action transfer --dir "$ROOT/agent-b" \
+  --account a-purse --to "$B_ACCOUNT" --amount 41
+grep -q 'maxDeltaExceeded' "$OUT/bounded-overspend.stderr"
+spend_grant loose-b a-loose '[{"field":"balance:999","max":"5"}]'
+refuse unbounded-spend transfer -- "$MINI" fleet --action transfer --dir "$ROOT/agent-b" \
+  --account a-loose --to "$B_ACCOUNT" --amount 1
+grep -q 'missingBalanceBound' "$OUT/unbounded-spend.stderr"
 
 # --- refusal poles --------------------------------------------------------
 # Overdraw: amount + fee exceeds the paying account's balance.
