@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""§2 of Assurance/SheetLaw.lean and of Assurance/CitedLand.lean is a mechanical embed of law JSON; this
-script is that embed.
+"""§2 of Assurance/SheetLaw.lean, of Assurance/ItemLaw.lean and of Assurance/CitedLand.lean is a mechanical
+embed of law JSON; this script is that embed.
 
 usage (from the repository root):
   scripts/gen-sheetlaw.py           rewrite each §2 (its first generated line .. `end Law`) from the JSON
   scripts/gen-sheetlaw.py --check   exit 1 if a §2 differs from what the JSON generates
 
 Sources (`EMBEDS`): for SheetLaw, native/resource-client/templates/mud/law.management.json (clause 0) and
-native/resource-client/templates/mud/sheet/law.sheet.json (an `all` of clauses 1..N); for CitedLand,
+native/resource-client/templates/mud/sheet/law.sheet.json (an `all` of clauses 1..N); for ItemLaw, the same
+clause 0 and native/resource-client/templates/mud/item/law.item.json (clauses 1..N); for CitedLand,
 native/resource-client/templates/fleet/verdict/law.verdict.json (clauses 0..) and
 native/resource-client/templates/fleet/branch/law.branch.json (clauses 1..). Placeholder `{X}`
 becomes `p.X`; negative literals are parenthesised; nothing is re-sorted, dropped or simplified.
@@ -52,6 +53,9 @@ EMBEDS = {
     "Assurance/SheetLaw.lean": ("def management (p : Params) : Pred :=", [
         (f"{T}/law.management.json", "management", None),
         (f"{T}/sheet/law.sheet.json", "sheetClause", 1)]),
+    "Assurance/ItemLaw.lean": ("def management (p : Params) : Pred :=", [
+        (f"{T}/law.management.json", "management", None),
+        (f"{T}/item/law.item.json", "itemClause", 1)]),
     "Assurance/CitedLand.lean": ("/-- clause 0 -/\ndef verdictClause0 (p : Params) : Pred :=", [
         (f"{FLEET}/verdict/law.verdict.json", "verdictClause", 0),
         (f"{FLEET}/branch/law.branch.json", "branchClause", 1)]),

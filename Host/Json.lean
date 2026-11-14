@@ -285,62 +285,22 @@ def parse (source : String) : Result Lean.Json := do
 private def failAt {α : Type} (path message : String) : Result α :=
   .error s!"{path}: {message}"
 
+/-! The strict reading of a request (an object's fields are exactly the named ones, numbers are
+canonical decimal strings) is the one a declared effect's JSON face is written in
+(`Kernel/ResourceEffect.lean`, `EffectJson`): one vocabulary for the Host's decoders and the
+declarations'. -/
+open Minidregg.Kernel.DeclaredResourceController.EffectJson
+  (exactObject field string nat int list optional decimal signedDecimal)
+
 private def object (path : String) (json : Lean.Json) :
     Result (Std.TreeMap.Raw String Lean.Json compare) :=
   (json.getObj?).mapError (fun e => s!"{path}: {e}")
-
-private def exactObject (path : String) (fields : List String) (json : Lean.Json) :
-    Result (Std.TreeMap.Raw String Lean.Json compare) := do
-  let value ← object path json
-  let actual := value.foldl (init := []) (fun names key _ => key :: names)
-  for key in fields do
-    unless actual.contains key do throw s!"{path}: missing field {key}"
-  for key in actual do
-    unless fields.contains key do throw s!"{path}: unknown field {key}"
-  pure value
-
-private def field (path name : String)
-    (obj : Std.TreeMap.Raw String Lean.Json compare) : Result Lean.Json :=
-  match obj.get? name with
-  | some value => pure value
-  | none => failAt path s!"missing field {name}"
-
-private def string (path : String) (json : Lean.Json) : Result String :=
-  json.getStr?.mapError (fun _ => s!"{path}: string expected")
-
-private def nat (path : String) (json : Lean.Json) : Result Nat := do
-  let source ← string path json
-  match source.toNat? with
-  | some value =>
-      if toString value = source then pure value
-      else failAt path "canonical unsigned decimal string expected"
-  | none => failAt path "unsigned decimal string expected"
-
-private def int (path : String) (json : Lean.Json) : Result Int := do
-  let source ← string path json
-  match source.toInt? with
-  | some value =>
-      if toString value = source then pure value
-      else failAt path "canonical signed decimal string expected"
-  | none => failAt path "signed decimal string expected"
 
 private def bool (path : String) (json : Lean.Json) : Result Bool :=
   json.getBool?.mapError (fun _ => s!"{path}: boolean expected")
 
 private def array (path : String) (json : Lean.Json) : Result (Array Lean.Json) :=
   json.getArr?.mapError (fun _ => s!"{path}: array expected")
-
-private def list {α : Type} (path : String) (decode : String → Lean.Json → Result α)
-    (json : Lean.Json) : Result (List α) := do
-  let values ← array path json
-  let mut out := []
-  for i in [:values.size] do
-    out := out ++ [← decode s!"{path}[{i}]" values[i]!]
-  pure out
-
-private def optional {α : Type} (path : String) (decode : String → Lean.Json → Result α)
-    (json : Lean.Json) : Result (Option α) :=
-  if json.isNull then pure none else some <$> decode path json
 
 private def hexNibble (c : Char) : Option Nat :=
   if '0' ≤ c ∧ c ≤ '9' then some (c.toNat - '0'.toNat)
@@ -373,8 +333,6 @@ def encodeHex (bytes : List UInt8) : String :=
       output := output.push (UInt8.ofNat ((hexDigit (byte.toNat % 16)).toNat))
     return String.fromUTF8! output
 
-private def decimal (value : Nat) : Lean.Json := .str (toString value)
-private def signedDecimal (value : Int) : Lean.Json := .str (toString value)
 private def hexJson (value : List UInt8) : Lean.Json := .str (encodeHex value)
 
 /-- A controller's refusal carries its typed `Reject` as the detail; `clause` is that detail

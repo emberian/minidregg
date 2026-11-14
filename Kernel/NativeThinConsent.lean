@@ -158,7 +158,9 @@ def memberPatch (command : Command) (target : Target) (pre : Store target.layout
     | read => exact .ok []
     | kindRead => exact .ok []
     | registered code _ =>
-        exact .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered effect is not displayed from a served view"))
+        -- A registered observation is displayed without a view (`registeredRead`); a registered
+        -- write has no member patch here yet.
+        exact .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
     | content _ => exact .error (.unsupportedPayload id "content: reads policy coordinates and the height")
     | append _ => exact .error (.unsupportedPayload id "append: records the admission height")
     | computeFunding _ => exact .error (.unsupportedPayload id "compute funding: writes the shared Book")
@@ -1479,25 +1481,127 @@ def observeValues (domain semantics : Digest) (federation : FederationId) (comma
       ((StreamCodec.product bytesStream StreamCodec.nat).encode
         (commandBytes domain semantics command, target.target))).digest }
 
+/-- What a registered observation shows: its effect's wire code, the canonical bytes of the
+signed operation, and the declaration's own lines for it (`Effect.display`). -/
+structure ReadDisplay where
+  code : Nat
+  operation : List UInt8
+  lines : List String
+  deriving DecidableEq, Repr
+
 /-- What thin consent shows for one target: its id and, for a write, the canonical bytes of the
 post at every member-authored address the served opening discloses (`opened_display_is_commit`),
 with the post's deployed root only when the opening seals nothing. When it seals an entry, the
-shown store lacks that entry, so its root is not the committed root and is not shown. -/
+shown store lacks that entry, so its root is not the committed root and is not shown. A
+registered observation shows its operation instead (`observation`, `registeredRead`). -/
 structure Display where
   target : Nat
   post : Option (List UInt8 × Option Digest)
+  observation : Option ReadDisplay
   deriving DecidableEq, Repr
 
-/-- One target: its served view checked over its salted opening (`checkOpened`) and its
-display. -/
+/-- **A registered observation**: an observe-only operation of a declared effect (a cited read).
+It signs no root, so there is no served opening to check it against, and it needs none: it
+commits nothing (`registered_read_display`), and what the signature binds is the operation,
+which is shown whole. -/
+def registeredRead (target : Target) : Option ReadDisplay :=
+  match target.payload with
+  | .registered code op =>
+      if (effectAt code.toNat).observeOnly op = true then
+        some ⟨code.toNat, (effectAt code.toNat).spec.opStream.encode op,
+          (effectAt code.toNat).display op⟩
+      else none
+  | _ => none
+
+/-- One target. A registered observation is displayed from the signed command alone, its view
+unread; every other target has its served view checked over its salted opening (`checkOpened`). -/
 def displayTarget (deployment : Deployment) (command : Command) (target : Target)
-    (view : List UInt8) : Except Refusal Display := do
-  let shown ← checkOpened deployment command target view
-  if target.isRead then pure ⟨target.target, none⟩
-  else
-    let encoded := target.materializer.codec.encode shown
-    pure ⟨target.target, some (encoded,
-      if sealsNothing target view then some (target.materializer.rootBytes encoded) else none)⟩
+    (view : List UInt8) : Except Refusal Display :=
+  match registeredRead target with
+  | some observation => .ok ⟨target.target, none, some observation⟩
+  | none =>
+    match checkOpened deployment command target view with
+    | .error refusal => .error refusal
+    | .ok shown =>
+      if target.isRead then .ok ⟨target.target, none, none⟩
+      else
+        let encoded := target.materializer.codec.encode shown
+        .ok ⟨target.target, some (encoded,
+          if sealsNothing target view then some (target.materializer.rootBytes encoded) else none), none⟩
+
+/-- **What a registered observation's display commits to.** For an observe-only operation of a
+declared effect, at every header and command:
+
+1. *view-less*: whatever view the Host serves (none, or a forged one), the display is the same:
+   the effect's code, the signed operation's canonical bytes and the declaration's lines;
+2. *the shown bytes are the operation*: another operation of that effect with the same shown
+   bytes is this operation, so the display leaves nothing of the signed footprint unshown;
+3. *nothing commits*: for the executor's own prepared target, the committed post is the loaded
+   store and the target's patch is empty.
+
+A cited read adds what `PreparedTarget.cited_unchanged` proves of it: its footprint (the shown
+keys and values) holds at the loaded cell, and its capability is its observe capability. -/
+def RegisteredReadDisplayStatement : Prop :=
+  ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest) (code : UInt8)
+    (op : (effectAt code.toNat).O) (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option Minidregg.Theory.ObjectAudienceRoster.Roster),
+    (effectAt code.toNat).observeOnly op = true →
+    (∀ view, displayTarget deployment command
+        ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩ view =
+      .ok ⟨id, none, some ⟨code.toNat, (effectAt code.toNat).spec.opStream.encode op,
+        (effectAt code.toNat).display op⟩⟩) ∧
+    (∀ other : (effectAt code.toNat).O,
+      (effectAt code.toNat).spec.opStream.encode other =
+        (effectAt code.toNat).spec.opStream.encode op → other = op) ∧
+    (∀ {directory : CellRegistry.Directory Nat Registry} {snapshot : AuthoritySnapshot}
+      {semantics : Digest} {ambient : Ambient}
+      (prepared : PreparedTarget deployment directory snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩),
+      prepared.post = prepared.pre.logical ∧
+        targetPatch snapshot semantics ambient command
+          ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩
+          prepared.pre = [])
+
+/-- **Teeth.** Only a registered observation is displayed without a checked view: every other
+target's display carries no observation, and it exists only when `checkOpened` accepted the
+served view (so a view with the wrong root still refuses it). -/
+def ViewlessOnlyForRegisteredReadStatement : Prop :=
+  ∀ (deployment : Deployment) (command : Command) (target : Target) (view : List UInt8)
+    (display : Display),
+    registeredRead target = none → displayTarget deployment command target view = .ok display →
+      display.observation = none ∧ ∃ shown, checkOpened deployment command target view = .ok shown
+
+theorem registered_read_display : RegisteredReadDisplayStatement := by
+  intro deployment command kind id capability version root code op observe epoch roster read
+  refine ⟨?_, ?_, ?_⟩
+  · intro view
+    simp only [displayTarget, registeredRead, read, if_true]
+  · intro other same
+    have decoded := (effectAt code.toNat).spec.opStream.toLawful.decode_encode other
+    rw [show (effectAt code.toNat).spec.opStream.toLawful.encode other =
+      (effectAt code.toNat).spec.opStream.encode other from rfl, same] at decoded
+    exact Option.some.inj (decoded.symm.trans ((effectAt code.toNat).spec.opStream.toLawful.decode_encode op))
+  · intro directory snapshot semantics ambient prepared
+    have silent := targetPatch_observeOnly snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩
+      prepared.pre read
+    refine ⟨?_, silent⟩
+    rw [post_run prepared, silent]
+    rfl
+
+theorem viewless_only_for_registered_read : ViewlessOnlyForRegisteredReadStatement := by
+  intro deployment command target view display unregistered shown
+  simp only [displayTarget, unregistered] at shown
+  cases checked : checkOpened deployment command target view with
+  | error refusal => rw [checked] at shown; cases shown
+  | ok store =>
+    rw [checked] at shown
+    refine ⟨?_, store, rfl⟩
+    dsimp only at shown
+    split at shown <;> (cases shown; rfl)
+
+#assert_axioms registered_read_display viewless_only_for_registered_read
 
 /-- **Thin invocation consent.** The proposed plan is this deployment's plan of
 this intent's own invocation; every slot is the invocation's role in order and

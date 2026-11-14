@@ -83,6 +83,10 @@ structure Params where
   LANTERN : Int
   /-- The realm cell every room is born under (clause 34). -/
   REALM_ROOM : Int
+  /-- The realm cell every item is born under (clauses 17, 18: the key and the lantern). -/
+  REALM_ITEM : Int
+  /-- The realm cell every sheet is born under (clause 26: the attacker). -/
+  REALM_SHEET : Int
 
 /-! ## §2. The law, literally (`law.management.json`, then `sheet/law.sheet.json` clauses 1–34) -/
 
@@ -264,73 +268,85 @@ def sheetClause17 (p : Params) : Pred :=
         .eq "joint/index/1/resource/field/9/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/10/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/11/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/12/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/13/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/14/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/15/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/16/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/17/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/18/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/19/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/20/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/21/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/22/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/23/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/24/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/25/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/26/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/27/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/28/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/29/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/30/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/31/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/32/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/33/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/34/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/35/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/36/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/37/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/38/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/39/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/40/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]],
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]],
       Pred.any [
         .not (.eqSlots "joint/index/1/resource/field/41/after" "joint/index/2/resource/field/0/after"),
         .eq "joint/index/1/resource/field/42/after" 0,
         Pred.all [
           .eqSlots "joint/index/1/resource/field/43/after" "joint/index/3/resource/field/0/after",
-          .eqSlots "joint/index/3/resource/field/2/after" "request/subject"]]]]
+          .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
+          .eq "joint/index/3/cell/parent" p.REALM_ITEM]]]]
 
 /-- clause 18 -/
 def sheetClause18 (p : Params) : Pred :=
@@ -342,11 +358,13 @@ def sheetClause18 (p : Params) : Pred :=
     Pred.all [
       .eq "joint/index/3/resource/field/1/after" p.LANTERN,
       .eqSlots "joint/index/3/resource/field/2/after" "request/subject",
-      .not (.le "joint/index/3/resource/field/5/after" 0)],
+      .not (.le "joint/index/3/resource/field/5/after" 0),
+      .eq "joint/index/3/cell/parent" p.REALM_ITEM],
     Pred.all [
       .eq "joint/index/4/resource/field/1/after" p.LANTERN,
       .eqSlots "joint/index/4/resource/field/2/after" "request/subject",
-      .not (.le "joint/index/4/resource/field/5/after" 0)]]
+      .not (.le "joint/index/4/resource/field/5/after" 0),
+      .eq "joint/index/4/cell/parent" p.REALM_ITEM]]
 
 /-- clause 19 -/
 def sheetClause19 (p : Params) : Pred :=
@@ -431,7 +449,8 @@ def sheetClause26 (p : Params) : Pred :=
       .memberOf "joint/index/0/resource/field/7/before" [1, 2],
       .eqSlots "joint/index/0/resource/field/8/before" "resource/field/0/after",
       .eq "joint/index/0/resource/field/5/before" 1,
-      .eqSlots "joint/index/0/resource/field/1/after" "resource/field/1/after"]]
+      .eqSlots "joint/index/0/resource/field/1/after" "resource/field/1/after",
+      .eq "joint/index/0/cell/parent" p.REALM_SHEET]]
 
 /-- clause 27 -/
 def sheetClause27 (p : Params) : Pred :=
@@ -598,6 +617,79 @@ theorem lookalike_room_refused (p : Params) (o n : State)
   rcases elsewhere with h | h
   · exact h from_
   · exact h to_
+
+/-- What clause 26 calls unhurt: hp did not fall and no affliction rose. -/
+def unhurt : Pred :=
+  Pred.all [
+    .not (.le "resource/field/2/delta" (-1)),
+    .le "resource/field/10/delta" 0,
+    .le "resource/field/11/delta" 0,
+    .le "resource/field/12/delta" 0]
+
+/-- **Clause 26 (the attacker is a born sheet).** An admitted mutate that hurts the sheet cites, at
+joint position 0, a cell whose recorded parent is the realm's sheet cell. The attacker's intent,
+target, alive and room are fields; its birth is the authority cell's record. -/
+theorem hurt_cites_born_attacker (p : Params) (o n : State)
+    (admitted : eval (sheetLaw p) o n = true) (verb : n.get "request/verb" = some 2)
+    (hurt : eval unhurt o n = false) :
+    n.get "joint/index/0/cell/parent" = some p.REALM_SHEET := by
+  have c := sheet_clause admitted (q := sheetClause26 p) (by simp [sheetClauses])
+  simp only [sheetClause26, ev_any, List.mem_cons, List.not_mem_nil, or_false, exists_eq_or_imp,
+    exists_eq_left] at c
+  rcases c with c | c | c
+  · exact absurd (ev_eq.mpr verb) (ev_not.mp c)
+  · exact Bool.noConfusion (c.symm.trans hurt)
+  · exact ev_eq.mp (ev_all.mp c (.eq "joint/index/0/cell/parent" p.REALM_SHEET) (by simp))
+
+/-- **Teeth: a look-alike attacker is refused.** Hurting the sheet with a cell at position 0 that
+was not born under the realm's sheet cell is refused, whatever that cell's fields hold. -/
+theorem lookalike_attacker_refused (p : Params) (o n : State)
+    (verb : n.get "request/verb" = some 2) (hurt : eval unhurt o n = false)
+    (elsewhere : n.get "joint/index/0/cell/parent" ≠ some p.REALM_SHEET) :
+    eval (sheetLaw p) o n = false := by
+  rw [Bool.eq_false_iff]
+  intro admitted
+  exact elsewhere (hurt_cites_born_attacker p o n admitted verb hurt)
+
+/-- **Clause 18 (the lantern is a born item).** An admitted move by the owner into a dark room
+cites, at joint position 3 or 4, a lantern whose recorded parent is the realm's item cell: the
+birth is in the same alternative as the kind, so it is the lantern that lit the room that is born. -/
+theorem dark_move_cites_born_lantern (p : Params) (o n : State)
+    (admitted : eval (sheetLaw p) o n = true) (verb : n.get "request/verb" = some 2)
+    (subject : n.get "request/subject" = some p.S)
+    (moved : n.get "resource/field/1/delta" ≠ some 0)
+    (dark : n.get "joint/index/2/resource/field/2/after" ≠ some 0) :
+    (n.get "joint/index/3/resource/field/1/after" = some p.LANTERN ∧
+        n.get "joint/index/3/cell/parent" = some p.REALM_ITEM) ∨
+      (n.get "joint/index/4/resource/field/1/after" = some p.LANTERN ∧
+        n.get "joint/index/4/cell/parent" = some p.REALM_ITEM) := by
+  have c := sheet_clause admitted (q := sheetClause18 p) (by simp [sheetClauses])
+  simp only [sheetClause18, ev_any, List.mem_cons, List.not_mem_nil, or_false, exists_eq_or_imp,
+    exists_eq_left] at c
+  rcases c with c | c | c | c | c | c
+  · exact absurd (ev_eq.mpr verb) (ev_not.mp c)
+  · exact absurd (ev_eq.mpr subject) (ev_not.mp c)
+  · exact absurd (ev_eq.mp c) moved
+  · exact absurd (ev_eq.mp c) dark
+  · exact .inl ⟨ev_eq.mp (ev_all.mp c (.eq "joint/index/3/resource/field/1/after" p.LANTERN) (by simp)),
+      ev_eq.mp (ev_all.mp c (.eq "joint/index/3/cell/parent" p.REALM_ITEM) (by simp))⟩
+  · exact .inr ⟨ev_eq.mp (ev_all.mp c (.eq "joint/index/4/resource/field/1/after" p.LANTERN) (by simp)),
+      ev_eq.mp (ev_all.mp c (.eq "joint/index/4/cell/parent" p.REALM_ITEM) (by simp))⟩
+
+/-- **Teeth: a look-alike lantern is refused.** A move into a dark room with no cell at position 3
+or 4 born under the realm's item cell is refused, whatever those cells' fields hold. -/
+theorem lookalike_lantern_refused (p : Params) (o n : State)
+    (verb : n.get "request/verb" = some 2) (subject : n.get "request/subject" = some p.S)
+    (moved : n.get "resource/field/1/delta" ≠ some 0)
+    (dark : n.get "joint/index/2/resource/field/2/after" ≠ some 0)
+    (elsewhere3 : n.get "joint/index/3/cell/parent" ≠ some p.REALM_ITEM)
+    (elsewhere4 : n.get "joint/index/4/cell/parent" ≠ some p.REALM_ITEM) :
+    eval (sheetLaw p) o n = false := by
+  rw [Bool.eq_false_iff]
+  intro admitted
+  rcases dark_move_cites_born_lantern p o n admitted verb subject moved dark with h | h
+  · exact elsewhere3 h.2
+  · exact elsewhere4 h.2
 
 /-- **Clause 4 (deaths-monotone), per step.** Every admitted mutate carries a `deaths` value in both
 views and the new one is not smaller. -/
@@ -995,7 +1087,8 @@ section Poles
 
 def tidewrack : Params :=
   { S := 7, REF := 3, W_FOUNDER := 1, MAXHIT_LT := -7, HPMAX := 10, HOME := 105,
-    NEG_RESPAWN := 0, NEG_COST := -3, NEG_ECOST := -4, LANTERN := 2, REALM_ROOM := 40 }
+    NEG_RESPAWN := 0, NEG_COST := -3, NEG_ECOST := -4, LANTERN := 2, REALM_ROOM := 40,
+    REALM_ITEM := 50, REALM_SHEET := 60 }
 
 /-- A sheet from its fifteen fields, in `fields.json` order. -/
 def sheet (at' hp bal eq alive deaths intent target respawn asthma paralysis clumsiness ward skill : Int) :
@@ -1025,20 +1118,25 @@ def attacker : List (Nat × Nat × String × Int) :=
    (0, 3, "before", 0), (0, 3, "after", 103)]
 
 /-- The referee's resolution of the strike, with the clock at 100 and the attacker at joint 0. -/
-def strikeTurn : Turn := ⟨2, 3, some 100, attacker, slain⟩
+def strikeTurn : Turn := ⟨2, 3, some 100, attacker, slain, [(0, "parent", 60)]⟩
+/-- The same resolution with a look-alike at joint 0: every field the law reads of an attacker, in a
+cell born under another cell (61) than the realm's sheet cell. -/
+def lookalikeStrikeTurn : Turn := ⟨2, 3, some 100, attacker, slain, [(0, "parent", 61)]⟩
+/-- And with no birth record at all for joint 0. -/
+def unbornStrikeTurn : Turn := ⟨2, 3, some 100, attacker, slain, []⟩
 /-- The same write on this branch: no clock slot, no joint slot. -/
-def strikeTurnWaveC : Turn := ⟨2, 3, none, [], slain⟩
+def strikeTurnWaveC : Turn := ⟨2, 3, none, [], slain, []⟩
 /-- The referee kills a healthy sheet: no hp change, no attacker. -/
-def smiteTurn : Turn := ⟨2, 3, none, [], smitten⟩
-def prayTurn : Turn := ⟨2, 7, none, [], prayed⟩
-def reviveTurn : Turn := ⟨2, 3, some 105, [], revived⟩
-def reviveTurnWaveC : Turn := ⟨2, 3, none, [], revived⟩
-def ownerReviveTurn : Turn := ⟨2, 7, some 105, [], revived⟩
-def ownerAimTurn : Turn := ⟨2, 7, none, [], aimed⟩
-def strangerAimTurn : Turn := ⟨2, 9, some 100, [], aimed⟩
-def strangerLookTurn : Turn := ⟨1, 9, none, [], live⟩
-def ownerStrikeTurn : Turn := ⟨2, 7, some 100, [], striking⟩
-def ownerStrikeTurnWaveC : Turn := ⟨2, 7, none, [], striking⟩
+def smiteTurn : Turn := ⟨2, 3, none, [], smitten, []⟩
+def prayTurn : Turn := ⟨2, 7, none, [], prayed, []⟩
+def reviveTurn : Turn := ⟨2, 3, some 105, [], revived, []⟩
+def reviveTurnWaveC : Turn := ⟨2, 3, none, [], revived, []⟩
+def ownerReviveTurn : Turn := ⟨2, 7, some 105, [], revived, []⟩
+def ownerAimTurn : Turn := ⟨2, 7, none, [], aimed, []⟩
+def strangerAimTurn : Turn := ⟨2, 9, some 100, [], aimed, []⟩
+def strangerLookTurn : Turn := ⟨1, 9, none, [], live, []⟩
+def ownerStrikeTurn : Turn := ⟨2, 7, some 100, [], striking, []⟩
+def ownerStrikeTurnWaveC : Turn := ⟨2, 7, none, [], striking, []⟩
 
 set_option maxRecDepth 20000 in
 /-- **Satisfiable pole.** With K-CLOCK and K-JOINT-INDEX's slots present, the referee's resolution of
@@ -1133,11 +1231,11 @@ def balRaised : Values := sheet 101 3 5 0 1 0 1 5 0 0 0 0 0 1
 /-- `casting` (intent 2) after the referee raises `eq` by 5. -/
 def eqRaised : Values := sheet 101 3 0 5 1 0 2 5 0 0 0 0 0 1
 /-- The referee raises `bal` by 5 to 5 at clock 2: `2 ≤ 5 + NEG_COST`. -/
-def balRaiseTurn : Turn := ⟨2, 3, some 2, [], balRaised⟩
-def balRaiseTurnNoClock : Turn := ⟨2, 3, none, [], balRaised⟩
+def balRaiseTurn : Turn := ⟨2, 3, some 2, [], balRaised, []⟩
+def balRaiseTurnNoClock : Turn := ⟨2, 3, none, [], balRaised, []⟩
 /-- The referee raises `eq` by 5 to 5 at clock 1: `1 ≤ 5 + NEG_ECOST`. -/
-def eqRaiseTurn : Turn := ⟨2, 3, some 1, [], eqRaised⟩
-def eqRaiseTurnNoClock : Turn := ⟨2, 3, none, [], eqRaised⟩
+def eqRaiseTurn : Turn := ⟨2, 3, some 1, [], eqRaised, []⟩
+def eqRaiseTurnNoClock : Turn := ⟨2, 3, none, [], eqRaised, []⟩
 
 set_option maxRecDepth 20000 in
 /-- **Poles for `bal_raise_needs_clock` / `eq_raise_needs_clock`.** Positive controls: the referee's
@@ -1207,6 +1305,49 @@ theorem rooms_born_poles :
       eval (sheetClause34 tidewrack) (moveStep 40 40) (moveStep (-1) 40) = false ∧
       eval (sheetClause34 tidewrack) ⟨[]⟩
         ⟨[("request/verb", 2), ("request/subject", 7), ("resource/field/1/delta", 0)]⟩ = true := by
+  decide
+
+/-! ### Clauses 17, 18 and 26 on concrete steps: the key, the lantern and the attacker are born -/
+
+/-- The owner (7) moves north through a locked exit: room 101's north exit (field 8) leads to room
+102, it is locked (field 9), its key is item 900 (field 10); the cell at position 3 holds id 900
+and owner 7, and was born under `parent` (absent when `none`). -/
+def lockedStep (parent : Option Int) : State :=
+  ⟨[("request/verb", 2), ("request/subject", 7), ("resource/field/1/delta", 1),
+    ("joint/index/1/resource/field/8/after", 102), ("joint/index/2/resource/field/0/after", 102),
+    ("joint/index/1/resource/field/9/after", 1), ("joint/index/1/resource/field/10/after", 900),
+    ("joint/index/3/resource/field/0/after", 900), ("joint/index/3/resource/field/2/after", 7)] ++
+    (match parent with | some cell => [("joint/index/3/cell/parent", cell)] | none => [])⟩
+
+/-- The owner moves into a dark room (room field 2) holding, at position 3, a lit lantern (kind 2,
+owner 7, 3 charges) born under `parent`. -/
+def darkStep (parent : Option Int) : State :=
+  ⟨[("request/verb", 2), ("request/subject", 7), ("resource/field/1/delta", 1),
+    ("joint/index/2/resource/field/2/after", 1),
+    ("joint/index/3/resource/field/1/after", 2), ("joint/index/3/resource/field/2/after", 7),
+    ("joint/index/3/resource/field/5/after", 3)] ++
+    (match parent with | some cell => [("joint/index/3/cell/parent", cell)] | none => [])⟩
+
+/-- **The key's and the lantern's poles.** Born under the realm's item cell (50) the key opens the
+door and the lantern lights the room; the same fields in a cell born under another cell (51), or
+with no birth record, are refused. -/
+theorem items_born_poles :
+    eval (sheetClause17 tidewrack) (lockedStep (some 50)) (lockedStep (some 50)) = true ∧
+      eval (sheetClause17 tidewrack) (lockedStep (some 51)) (lockedStep (some 51)) = false ∧
+      eval (sheetClause17 tidewrack) (lockedStep none) (lockedStep none) = false ∧
+      eval (sheetClause18 tidewrack) (darkStep (some 50)) (darkStep (some 50)) = true ∧
+      eval (sheetClause18 tidewrack) (darkStep (some 51)) (darkStep (some 51)) = false ∧
+      eval (sheetClause18 tidewrack) (darkStep none) (darkStep none) = false := by
+  decide
+
+set_option maxRecDepth 20000 in
+/-- **The attacker's poles, on the whole law.** The strike `death_reachable_by_strike` admits is
+refused when the cell at position 0 holds the same fields but was born under another cell, or has
+no birth record. -/
+theorem attacker_born_poles :
+    admits (sheetLaw tidewrack) live strikeTurn = true ∧
+      admits (sheetLaw tidewrack) live lookalikeStrikeTurn = false ∧
+      admits (sheetLaw tidewrack) live unbornStrikeTurn = false := by
   decide
 
 /-! ## Axiom pins -/

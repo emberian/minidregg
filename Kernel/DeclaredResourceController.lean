@@ -6,6 +6,7 @@ shared replay marker is the intent's durable nullifier. -/
 module
 
 public import Kernel.ResourceTransaction
+public import Kernel.ResourcePayloadTag
 public import Kernel.ResourceInvocationSignatureFirst
 public import Kernel.ObjectiveBendNativeAdmission
 public import Compiler.NativeInvocationProfile
@@ -3113,7 +3114,8 @@ def withAcceptedOn {F : Type} [Field F] [DecidableEq F] {R : Type}
     (ordinaryResult : ReceiveResult → IO R)
     (objective : ObjectiveBendNativeAdmission.ReadOracle IO := .refuse) : IO R := do
   match commandCodec.decode signed.commandBytes with
-  | none => ordinaryResult (.rejected .malformedCommand)
+  -- Bytes that are not a command: an unread payload tag by name, else `malformedCommand`.
+  | none => ordinaryResult (.rejected (decodeRefusal signed.commandBytes))
   | some command =>
       if !ground.declaresTransaction (transactionId deployment.domain profile.semantics command) then
         ordinaryResult (.rejected .undeclaredTransaction)
