@@ -7,4 +7,5 @@
 # updated 2026-11-08: 4921 (tree 6419): packed record bodies and checkpoints on the open (bytes-repr)
 # updated 2026-11-08: 4918 (tree 6416): held served directory: the directory decode no longer lists every row
 # updated 2026-11-08: 4931 (tree 6429): main at 3503d5d2e counts 4935 (the held-seal modules, red against 4918); the provider admission batch lowers it by 4
-4931
+# updated 2026-11-14: 4961 (tree 6465): runtime paths from the journal index and effects registry landings converted; the remainder is statement binders over the Kernel list codec model and the unread-tag reader on the refusal path
+4961
