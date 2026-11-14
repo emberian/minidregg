@@ -144,21 +144,20 @@ end
 /-- `effectsOf`'s per-target step, by explicit position. -/
 def step (index : Nat) (target : Target) : Option BendWorldPlan.Effect :=
   match target.payload with
-  | .computeFunding _ => none
   | .registered code op =>
-      if (effectAt code.toNat).observeOnly op then none else some ⟨index, .registered code op⟩
+      if (effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting then none
+      else some ⟨index, .registered code op⟩
   | payload => some ⟨index,payload⟩
 
 /-- Payloads `effectsOf` reports verbatim. -/
 def verbatim : Payload → Bool
-  | .computeFunding _ => false
-  | .registered code op => !(effectAt code.toNat).observeOnly op
+  | .registered code op =>
+      !((effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting)
   | _ => true
 
 /-- Payloads `effectsOf` never reports. -/
 def inert : Payload → Bool
-  | .computeFunding _ => true
-  | .registered code op => (effectAt code.toNat).observeOnly op
+  | .registered code op => (effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting
   | _ => false
 
 theorem finRange_pairs {α : Type} (l : List α) :

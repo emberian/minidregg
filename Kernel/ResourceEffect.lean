@@ -248,13 +248,27 @@ structure Effect : Type 1 where
   /-- **The semantic footprint**, for a cell whose fields are not its addresses: a world
   instance's fields live inside its payload entry, and a capability's scope names those. `none`
   (the default): the footprint is read off the changed addresses by `spec.field` and
-  `spec.amount`. -/
-  footprint : Option (Store L → Store L → Footprint) := none
+  `spec.amount`. It is given the operation: a compute funding's footprint is the debit its
+  operation names on the shared Book, which no address of its own cell shows. -/
+  footprint : Option (O → Store L → Store L → Footprint) := none
   /-- **What a run may claim of this operation** (K-RAN): the field writes a re-executed program's
-  product must name, from the loaded store, the program, the target's index in the command and
-  the target's cell id. `none` (the default): one write at coordinate 0 holding the operation's
+  product must name, from the loaded store, the program, the target's index in the command, the
+  target's cell id and whether the target is the account the transaction's compute funding was
+  validated at. `none` (the default): one write at coordinate 0 holding the operation's
   canonical bytes. -/
-  runWrites : Option (Store L → Digest → Nat → Nat → O → Option (List Eval.FieldWrite)) := none
+  runWrites : Option (Store L → Digest → Nat → Nat → Bool → O → Option (List Eval.FieldWrite)) := none
+  /-- **The target is never written**: every admitted operation leaves the cell as loaded (what
+  the operation does is outside its target, on the shared Book). The transaction then enters the
+  target as a read guard on its root, not as a write (`Target.isRead`). `unchanging_silent`
+  holds the flag to the semantics. -/
+  unchanging : Bool := false
+  unchanging_silent : unchanging = true → ∀ (ctx : EffectCtx) (op : O) (s : Store L)
+      (ps : Patch L), spec.emitted ctx op s = .ok ps → ps = [] := by
+    intro stated; cases stated
+  /-- **The operation is the kernel's accounting, not an application effect**: a plan of the
+  command's application effects does not report it (a compute funding leg is validated and
+  charged by the kernel). -/
+  accounting : Bool := false
   /-- Whether the operation authors anything: a world write without actions is admitted and
   changes nothing, and is no one's publication. -/
   authors : O → Bool := fun _ => true

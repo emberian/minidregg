@@ -77,12 +77,6 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
     | .append request => .mkObj
         [("type", toJson "append"), ("topicBytes", number request.topic.length),
          ("payloadBytes", number request.payload.length)]
-    | .moneyConsent consent => Minidregg.Host.Json.moneyConsentJson consent
-    | .computeFunding funding => .mkObj
-        [("type", toJson "computeFunding"), ("asset", number funding.asset),
-         ("credits", number funding.credits),
-         ("expectedPayerBalance", signed funding.expectedPayerBalance),
-         ("expectedBookRoot", number funding.expectedBookRoot.value)]
     | .registered code op => .mkObj
         (("type", toJson (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).name) :: (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).toJson op)
   .mkObj [("kind", toJson kind), ("target", number target.target),

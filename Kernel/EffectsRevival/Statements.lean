@@ -357,7 +357,7 @@ def hostRegistry : Registry HostCtx HostCell :=
   DeclaredResourceController.liveRegistry.map fun entry => (entry.1, entry.2.comap dispatchCtxOf)
 
 /-- The payload codes that are still hand arms. -/
-def liveLegacy : List Nat := [2, 6, 8]
+def liveLegacy : List Nat := [2]
 
 /-- **The deployed target dispatch.** A code neither bound nor a hand arm is refused by name;
 every other code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,
@@ -436,6 +436,7 @@ def citedGhost : DeclaredResourceController.Effect :=
     spec := { DeclaredResourceController.citedSpec with sem := fun _ _ _ => .ok [] }
     member := none
     member_exact := by intro _ stated; cases stated
+    unchanging_silent := by intro stated; cases stated
     observes_silent := by
       intro ctx op s ps _ emitted
       exact (Except.ok.inj emitted).symm

@@ -23,6 +23,11 @@ ordinary role, some action), so none of those refusals has a preparation to char
 admits a write, the member patch that shows "no change" fails `MemberExact`; the admitted write
 that inhabits the premise is executed (`Assurance/MemberPatchPoles.lean`).
 
+`MoneyPreparedUnchanged` (proved: `moneyPreparedUnchanged`): every prepared compute funding or
+money consent target is an account at schema version 1 with the signed root and no audience
+field, and its post is the loaded store. Its poles are executed
+(`Assurance/MemberPatchPoles.lean`): an admitted sample of each, and each refusal by name.
+
 The other two teeth do not need a sample and are proved beside the keystone
 (`MemberPatchUnstatedRefused`, `MemberPatchCommutingRefused`).
 -/
@@ -261,6 +266,79 @@ theorem scalarPreparedHeader : ScalarPreparedHeader := by
     obtain ⟨ordinary, present, _⟩ := scalarSem_ok sem
     exact ⟨versioned, scalarEffect.compute_pinned dispatched rfl, ordinary, present⟩
 
+/-- **A money consent's target is read, not written.** Every prepared compute funding or money
+consent target is an account at schema version 1 whose root is the signed one, carries no
+audience field, and its post is the store it was loaded with. -/
+def MoneyPreparedUnchanged : Prop :=
+  (∀ (deployment : Deployment) (directory : CellRegistry.Directory Nat Registry)
+    (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (funding : ComputeFunding) (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .computeFunding funding, observe, audienceEpoch,
+        audienceRoster⟩),
+    kind = .account ∧ version = 1 ∧ root = prepared.pre.root ∧ audienceEpoch = none ∧
+      audienceRoster = none ∧ prepared.post = prepared.pre.logical) ∧
+  (∀ (deployment : Deployment) (directory : CellRegistry.Directory Nat Registry)
+    (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (consent : MoneyConsent) (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .moneyConsent consent, observe, audienceEpoch,
+        audienceRoster⟩),
+    kind = .account ∧ version = 1 ∧ root = prepared.pre.root ∧ audienceEpoch = none ∧
+      audienceRoster = none ∧ prepared.post = prepared.pre.logical)
+
+set_option backward.isDefEq.respectTransparency false in
+theorem moneyPreparedUnchanged : MoneyPreparedUnchanged := by
+  constructor
+  · intro deployment directory snapshot semantics ambient command kind id capability version root
+      funding observe audienceEpoch audienceRoster prepared
+    have computed : (computeFundingEffect.compute 6 (targetCtx snapshot semantics ambient command
+        kind id capability observe audienceEpoch audienceRoster) version root funding
+          prepared.pre).mapError Reject.ofDispatch = .ok prepared.post :=
+      prepared.candidate.modeEvidence.down
+    cases dispatched : computeFundingEffect.compute 6 (targetCtx snapshot semantics ambient command
+        kind id capability observe audienceEpoch audienceRoster) version root funding
+          prepared.pre with
+    | error refusal => rw [dispatched] at computed; cases computed
+    | ok post =>
+      rw [dispatched] at computed
+      have same : post = prepared.post := Except.ok.inj computed
+      obtain ⟨accepted, versioned, ps, sem, ran⟩ := computeFundingEffect.compute_ok dispatched
+      obtain ⟨empty, epoch, roster⟩ :=
+        moneySem_ok (O := ComputeFunding) (op := funding) (store := prepared.pre.logical) sem
+      subst empty
+      have loaded : some prepared.pre.logical = some post := ran
+      have role : (kind == ResourceKind.account) = true := accepted
+      exact ⟨by simpa using role, versioned,
+        computeFundingEffect.compute_pinned dispatched rfl, epoch, roster,
+        same ▸ (Option.some.inj loaded).symm⟩
+  · intro deployment directory snapshot semantics ambient command kind id capability version root
+      consent observe audienceEpoch audienceRoster prepared
+    have computed : (moneyConsentEffect.compute 8 (targetCtx snapshot semantics ambient command
+        kind id capability observe audienceEpoch audienceRoster) version root consent
+          prepared.pre).mapError Reject.ofDispatch = .ok prepared.post :=
+      prepared.candidate.modeEvidence.down
+    cases dispatched : moneyConsentEffect.compute 8 (targetCtx snapshot semantics ambient command
+        kind id capability observe audienceEpoch audienceRoster) version root consent
+          prepared.pre with
+    | error refusal => rw [dispatched] at computed; cases computed
+    | ok post =>
+      rw [dispatched] at computed
+      have same : post = prepared.post := Except.ok.inj computed
+      obtain ⟨accepted, versioned, ps, sem, ran⟩ := moneyConsentEffect.compute_ok dispatched
+      obtain ⟨empty, epoch, roster⟩ :=
+        moneySem_ok (O := MoneyConsent) (op := consent) (store := prepared.pre.logical) sem
+      subst empty
+      have loaded : some prepared.pre.logical = some post := ran
+      have role : (kind == ResourceKind.account) = true := accepted
+      exact ⟨by simpa using role, versioned,
+        moneyConsentEffect.compute_pinned dispatched rfl, epoch, roster,
+        same ▸ (Option.some.inj loaded).symm⟩
+
 /-- A declared object cell 41 that declares field 2 and holds nothing else. -/
 def scalarStore : Store EffectDeclaration.effectLayout :=
   Store.set 0 (EffectDeclaration.StateKey.fieldDeclared ⟨41⟩ ⟨2⟩).address (some 1)
@@ -306,6 +384,6 @@ theorem memberPatch_ghost_refuted : MemberPatchGhostRefuted := by
   cases same
 
 #assert_axioms memberPatch_satisfiable memberPatch_ghost_refuted sampleNext_valid sample_prepared
-#assert_axioms computeTarget_world_arm scalarPreparedHeader scalarMember_ghost_refuted
+#assert_axioms computeTarget_world_arm scalarPreparedHeader scalarMember_ghost_refuted moneyPreparedUnchanged
 
 end Minidregg.Kernel.NativeThinConsent

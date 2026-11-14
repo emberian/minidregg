@@ -166,8 +166,7 @@ def render (packageBytes : List UInt8) (verifiedReceipt : Receipt)
       | .append _ => true
       | .registered code op =>
           !(Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).observeOnly op &&
-            (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).authors op
-      | .computeFunding _ | .moneyConsent _ => false) do
+            (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).authors op) do
     throw "original call has no authored publication to the named resource"
   let messageId :=
     s!"<mini-grain-{verifiedReceipt.transactionId.value}-{verifiedReceipt.eventId.value}@{context.messageIdDomain}>"

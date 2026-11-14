@@ -1101,8 +1101,6 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
           simp only [found, decoded, commanded, writtenFound, Option.bind_some, bind] at shown
           cases append : written.payload with
           | registered _ _ => simp [append] at shown
-          | computeFunding _ => simp [append] at shown
-          | moneyConsent _ => simp [append] at shown
           | append request =>
             simp only [append] at shown
             by_cases digestEq : StreamCell.payloadDigest request.payload = record.entry.payloadDigest

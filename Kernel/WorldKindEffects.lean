@@ -368,9 +368,9 @@ def worldEffect : Effect where
     have prepared := (worldSem_ok (show worldSem ctx actions store = .ok ps from sem)).1
     exact Option.some.inj (prepared.symm.trans answered)
   member_tail := fun _ _ _ _ _ _ _ => rfl
-  footprint := some fun pre post =>
+  footprint := some fun _ pre post =>
     (WorldKindProjection.footprint pre post).getD ⟨{.body}, fun _ => 0⟩
-  runWrites := some fun pre program index _ actions => WorldKindMethods.writes pre program index actions
+  runWrites := some fun pre program index _ _ actions => WorldKindMethods.writes pre program index actions
   authors := fun actions => !actions.isEmpty
   unpack_pack := fun _ _ => rfl
   pack_unpack := by

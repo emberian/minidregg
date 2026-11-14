@@ -183,8 +183,6 @@ def memberPatch (command : Command) (target : Target) (pre : Store target.layout
           | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
           | .error .inapplicable => .error (.patchRefused id)
     | append _ => exact .error (.unsupportedPayload id "append: records the admission height")
-    | computeFunding _ => exact .error (.unsupportedPayload id "compute funding: writes the shared Book")
-    | moneyConsent _ => exact .error (.unsupportedPayload id "money: writes the shared Book")
 
 /-- A registered target's member patch is its declaration's, refusals renamed. -/
 theorem memberPatch_registered_ok {command : Command} {kind : ResourceKind} {id : Nat}
@@ -300,8 +298,6 @@ theorem memberPatchKeystone : MemberPatchKeystone := by
           exact ⟨_, split, fun store address owned =>
             frame store address (Bool.eq_false_iff.mpr owned)⟩
     | append _ => simp [memberPatch] at member
-    | computeFunding _ => simp [memberPatch] at member
-    | moneyConsent _ => simp [memberPatch] at member
 
 theorem memberPatch_unstated_refused : MemberPatchUnstatedRefused := by
   refine ⟨?_, rfl⟩
@@ -330,18 +326,13 @@ theorem memberPatch_commuting_refused : MemberPatchCommutingRefused := by
 #assert_axioms memberPatchKeystone memberPatch_unstated_refused memberPatch_commuting_refused
 #assert_axioms targetCtx_signed memberPatch_registered_ok memberPatch_registered_of
 
-/-- **A payload with an unsigned input is refused by name, never displayed
-with a default.** -/
-theorem memberPatch_money_refused (command : Command) (kind : ResourceKind) (id : Nat)
-    (capability : CapabilityId) (version : Nat) (root : Digest) (consent : MoneyConsent)
-    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
-    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
-    (pre : Store EffectDeclaration.effectLayout) :
-    memberPatch command ⟨kind, id, capability, version, root, .moneyConsent consent, observe,
-      audienceEpoch, audienceRoster⟩ pre =
-      .error (.unsupportedPayload id "money: writes the shared Book") := rfl
+/-- **A payload with an unsigned input is refused by name, never displayed with a default.**
+Neither money consent states a member patch, so each is refused at every store
+(`memberPatch_unstated_refused`). -/
+theorem memberPatch_money_unstated :
+    (effectAt 6).member = none ∧ (effectAt 8).member = none := ⟨rfl, rfl⟩
 
-#assert_axioms memberPatch_money_refused
+#assert_axioms memberPatch_money_unstated
 
 /-- The payloads whose committed post thin consent can display. -/
 def Supported (target : Target) : Prop :=
@@ -383,8 +374,6 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
         | error refusal => rw [dispatched] at computed'; cases computed'
         | ok computedPost => exact Effect.compute_pinned _ dispatched supported.1
     | append _ => exact supported.elim
-    | computeFunding _ => exact supported.elim
-    | moneyConsent _ => exact supported.elim
 
 /-- The executor's committed post is the target patch run on the loaded pre-state. -/
 theorem post_run {deployment : Deployment} {directory : CellRegistry.Directory Nat Registry}
@@ -420,7 +409,6 @@ def targetWire (target : Target) : StoreCodec.Wire target.layout := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.wire
     | registered code _ => exact (effectAt code.toNat).wire
     | append _ => exact StreamCell.headWire
 

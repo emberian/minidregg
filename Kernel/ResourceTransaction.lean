@@ -67,25 +67,18 @@ light basis of a request (its declared keys answered from the authenticated
 history) or the full shape's loaded directory and authority. -/
 abbrev Ground (deployment : Deployment) := Minidregg.Compiler.ServedBasis.Ground deployment
 
-/-- Transaction9's explicit consent to a source-derived Book burn. Payer and
-capability are the containing signed account target, not duplicated here. -/
-abbrev ComputeFunding := ResourceMoneyWire.FundingConsent
-abbrev computeFundingStream := ResourceMoneyWire.fundingStream
-abbrev MoneyConsent := ResourceMoneyWire.Consent
-
 /-- A target's payload: one stream append (the entry's bytes; the receiver derives its sequence
-position and digest), a funding or money consent, or an operation of a registered effect
-(declared scalar actions are the registered operation at code 0, `Payload.scalar`; a content
-command the one at code 1, `Payload.content`). -/
+position and digest) or an operation of a registered effect (declared scalar actions are the
+registered operation at code 0, `Payload.scalar`; a content command the one at code 1,
+`Payload.content`; a compute funding the one at code 6 and a money consent the one at code 8). -/
 inductive Payload where
   | append (request : StreamCell.Append)
-  | computeFunding (funding : ComputeFunding)
-  | moneyConsent (consent : MoneyConsent)
   /-- An operation of a registered effect (`Kernel/ResourceEffectRegistry.lean`): the wire code
   and that code's declared operation. Every arm of every function over a payload reads this
   constructor from the declaration `effectAt code`; an unbound code has no operation, so no
   payload carries one. Declared scalar actions are code 0, the content write is code 1, the content read 3, a world instance's
-  actions 4, the kind definition revision 5, the whole kind definition read 7, the cited read 9. -/
+  actions 4, the kind definition revision 5, the compute funding 6, the whole kind definition
+  read 7, the money consent 8, the cited read 9. -/
   | registered (code : UInt8) (op : (effectAt code.toNat).O)
   deriving DecidableEq
 
@@ -101,6 +94,18 @@ constructor and no arm of its own; this names the payload for the code that buil
 one out of a signed command. -/
 @[match_pattern] abbrev Payload.content (command : ContentResource.Command) : Payload :=
   .registered 1 command
+
+/-- **A compute funding consent**: the registered operation at code 6 (`computeFundingEffect`).
+It has no constructor and no dispatch arm; it is a pattern for the code that reads the signed
+funding out of a command (`prepareCompute`) or builds one. -/
+@[match_pattern] abbrev Payload.computeFunding (funding : ComputeFunding) : Payload :=
+  .registered 6 funding
+
+/-- **A money consent**: the registered operation at code 8 (`moneyConsentEffect`). It has no
+constructor and no dispatch arm; it is a pattern for the code that reads the signed consents
+out of a command (`moneyEntries`, the admitted batch's slots and footprints). -/
+@[match_pattern] abbrev Payload.moneyConsent (consent : MoneyConsent) : Payload :=
+  .registered 8 consent
 
 /-- **The observe-only content read**: the registered operation at code 3, which has no
 operand (`readEffect`). Not a pattern: no function has an arm for it. -/
@@ -124,8 +129,6 @@ abbrev Payload.kindDefinition (definition : WorldKindCell.Definition) : Payload 
 instance : Repr Payload where
   reprPrec payload prec := match payload with
     | .append request => Repr.addAppParen ("Payload.append " ++ reprArg request) prec
-    | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
-    | .moneyConsent consent => Repr.addAppParen ("Payload.moneyConsent " ++ reprArg consent) prec
     | .registered code op =>
         Repr.addAppParen ("Payload.registered " ++ (effectAt code.toNat).name ++ " " ++
           reprArg ((effectAt code.toNat).spec.opStream.encode op)) prec
@@ -206,8 +209,6 @@ def Command.requiresObservation (command : Command) : Bool :=
 code and its operation is encoded by its declaration's own codec. -/
 def payloadEncode : Payload → List UInt8
   | .append request => 2 :: StreamCell.appendStream.encode request
-  | .computeFunding funding => 6 :: computeFundingStream.encode funding
-  | .moneyConsent consent => 8 :: ResourceMoneyWire.consentStream.encode consent
   | .registered code op => code :: (effectAt code.toNat).spec.opStream.encode op
 
 /-- The hand arms' decoder: the payload tags no declaration binds yet. -/
@@ -215,12 +216,6 @@ def legacyPayloadDecode : List UInt8 → Option (Payload × List UInt8)
   | 2 :: bytes => do
       let (request, rest) ← StreamCell.appendStream.decodePrefix bytes
       some (.append request, rest)
-  | 6 :: bytes => do
-      let (funding, rest) ← computeFundingStream.decodePrefix bytes
-      some (.computeFunding funding, rest)
-  | 8 :: bytes => do
-      let (consent, rest) ← ResourceMoneyWire.consentStream.decodePrefix bytes
-      some (.moneyConsent consent, rest)
   | _ => none
 
 theorem legacyPayloadDecode_canonical : ∀ bytes value suffix,
@@ -242,14 +237,13 @@ def payloadStream : StreamCodec Payload where
       else legacyPayloadDecode (tag :: bytes)
   decodePrefix_encode := by
     intro payload suffix
-    obtain ⟨u2, u6, u8⟩ := legacy_unbound
+    have u2 := legacy_unbound
     cases payload with
     | registered code op =>
         by_cases bound : registeredOctet code = true
         · simp [payloadEncode, bound, StreamCodec.decodePrefix_encode]
         · exact (unbound_elim (by simpa using bound) op).elim
-    | _ => simp [payloadEncode, legacyPayloadDecode, u2, u6, u8,
-        StreamCodec.decodePrefix_encode]
+    | _ => simp [payloadEncode, legacyPayloadDecode, u2, StreamCodec.decodePrefix_encode]
   encode_decodePrefix := by
     intro bytes value suffix decoded
     rcases bytes with _ | ⟨tag, bytes⟩
@@ -518,7 +512,6 @@ kind's ordinary write verb otherwise. -/
 def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
   | .object, .append _ => .appendObject
   | kind, .registered code op => (effectAt code.toNat).spec.verb kind op
-  | kind, .moneyConsent _ => ordinaryVerb kind
   | kind, _ => ordinaryVerb kind
 
 def Target.verb (target : Target) : Verb target.kind := payloadVerb target.kind target.payload
@@ -690,10 +683,9 @@ def Reject.ofDispatch : Effects.Revival.DispatchRefusal → Reject
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
   | none => .error reason | some value => .ok value
 
-/-- The store layout of the target's role: a declared-effect cell for a funding or money
-consent, a stream head for an append, its declaration's for a registered effect. -/
+/-- The store layout of the target's role: a stream head for an append, its declaration's for
+a registered effect. -/
 @[reducible] def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
-  | .computeFunding _ | .moneyConsent _ => EffectDeclaration.effectLayout
   | .registered code _ => (effectAt code.toNat).L
   | .append _ => StreamCell.headLayout
 
@@ -701,7 +693,6 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.materializer
     | registered code _ => exact (effectAt code.toNat).materializer
     | append _ => exact StreamCell.headMaterializer
 
@@ -718,7 +709,6 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | registered code _ => exact (effectAt code.toNat).pack kind cell
-    | computeFunding _ | moneyConsent _ => exact ⟨.accountMetadata, cell⟩
     | append _ => exact ⟨.stream, cell⟩
 
 def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell Registry) :
@@ -727,8 +717,6 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | registered code _ => exact (effectAt code.toNat).select deployment id kind cell
-    | computeFunding _ | moneyConsent _ => exact if kind = .account then
-        CanonicalCellRegistry.selectDeclared deployment id .account cell else none
     | append _ => exact if kind = .object then
         if CanonicalCellRegistry.CellLaw deployment id cell then
           match cell with | ⟨.stream, value⟩ => some value | _ => none
@@ -786,18 +774,6 @@ def computeTarget (snapshot : AuthoritySnapshot)
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | computeFunding _ => exact do
-        if kind != .account then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        if audienceEpoch.isSome || audienceRoster.isSome then throw .computeFunding
-        pure pre.logical
-    | moneyConsent _ => exact do
-        if kind != .account then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        if audienceEpoch.isSome || audienceRoster.isSome then throw .computeFunding
-        pure pre.logical
     | append request => exact do
         if kind != .object then throw .wrongRole
         if version != StreamCell.commandVersion then throw .unsupportedVersion
@@ -837,7 +813,6 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
           | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
               (streamRecord snapshot semantics ambient command request))]
           | none => []
-    | computeFunding _ | moneyConsent _ => exact []
     | registered code op =>
         exact (effectAt code.toNat).patch (targetCtx snapshot semantics ambient command kind id
           capability observe audienceEpoch audienceRoster) op pre.logical
@@ -1184,7 +1159,7 @@ def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | computeFunding _ | moneyConsent _ | registered _ _ => exact none
+    | registered _ _ => exact none
     | append request =>
         exact (StreamCell.headOf pre.logical).map fun head =>
           StreamCell.appendEntry id head (streamRecord snapshot semantics ambient command request)
@@ -1672,16 +1647,6 @@ def streamSlots (request : StreamCell.Append) (before : Store StreamCell.headLay
     | some (cell, sequence) => [("request/ref/cell", Int.ofNat cell), ("request/ref/sequence", Int.ofNat sequence)]
     | none => [])
 
-/-- The explicit consent's numeric view. prepareCompute binds these exact
-payer balance, Book root and credits to the loaded Book before an accepted invocation can use
-them; no arbitrary balance mutation is installed in account metadata. -/
-def fundingProject (funding : ComputeFunding) : List (String × Int) :=
-  [("compute/charge", 1),
-   ("compute/asset", Int.ofNat funding.asset),
-   ("compute/credits", Int.ofNat funding.credits),
-   ("compute/payer/before", funding.expectedPayerBalance),
-   ("compute/payer/after", funding.expectedPayerBalance - Int.ofNat funding.credits)]
-
 /-- Exact scalar/content/stream projection from the committed old and candidate
 final states. Local names remain convenient; joint names expose every declared
 participant without granting a view of unrelated cells. -/
@@ -1689,10 +1654,6 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | computeFunding funding => exact fundingProject funding
-    | moneyConsent consent => exact
-        [("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
-          (consent.funding.map fundingProject).getD []
     | append request => exact streamSlots request before
     | registered code op => exact (effectAt code.toNat).spec.view ⟨subject, id⟩ op before after
 
@@ -1706,10 +1667,6 @@ def targetProjectionDemand (want : String → Bool) (leads : Nat → Bool) (subj
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | computeFunding funding => exact (fundingProject funding).filter fun slot => want slot.1
-    | moneyConsent consent => exact
-        ([("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
-          (consent.funding.map fundingProject).getD []).filter fun slot => want slot.1
     | append request => exact (streamSlots request before).filter fun slot => want slot.1
     | registered code op =>
         exact (effectAt code.toNat).viewDemand want leads ⟨subject, id⟩ op before after
@@ -1776,15 +1733,16 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
     | registered code op =>
         -- A registered effect's claimed writes are its declaration's (`Effect.runWrites`: a world
         -- instance's are its method's bound outputs, a scalar operation's are its actions' field
-        -- writes of this target), by default the operation's canonical bytes;
+        -- writes of this target; a compute funding's the empty list at the validated funding
+        -- account and nothing elsewhere; a money consent's nothing: a program's field-write
+        -- output cannot certify canonical money), by default the operation's canonical bytes;
         -- an observing one writes nothing.
         exact if (effectAt code.toNat).observeOnly op then some [] else
           match (effectAt code.toNat).runWrites with
-          | some claimed => claimed pre program i id op
+          | some claimed =>
+              claimed pre program i id (decide (kind = .account ∧ validatedFundingIndex = some i)) op
           | none => some [⟨i, 0,
               WorldPrototypeConstruction.bytesValue ((effectAt code.toNat).spec.opStream.encode op)⟩]
-    | computeFunding _ => exact if kind = .account ∧ validatedFundingIndex = some i then some [] else none
-    | moneyConsent _ => exact none -- Nock field-write output cannot certify canonical money.
 
 /-- Merely spelling a funding payload cannot remove it from run-effect
 checking. Only prepareCompute's validated index enables the system-leg route. -/
@@ -1792,8 +1750,7 @@ theorem funding_unvalidated (index target : Nat) (capability : CapabilityId)
     (root program : Digest) (funding : ComputeFunding)
     (pre : Store EffectDeclaration.effectLayout) :
     targetWrites index ⟨.account, target, capability, 1, root,
-      .computeFunding funding, none, none, none⟩ pre program none = none := by
-  simp [targetWrites]
+      .computeFunding funding, none, none, none⟩ pre program none = none := rfl
 
 /-- Extract checked effects from every actual loaded participant. A world
 participant must bind the claimed immutable program in its retained ROM table. -/

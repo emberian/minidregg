@@ -76,7 +76,7 @@ private def refusal (refuses : List String) (json : Lean.Json) : String :=
   admitted agreementRefuses (Lean.Json.mkObj [("type", "read")])
 #guard refusal hostRefuses (Lean.Json.mkObj [("type", "nothing")]) ==
   refusal agreementRefuses (Lean.Json.mkObj [("type", "nothing")])
-#guard (refusal hostRefuses (Lean.Json.mkObj [("type", "nothing")])).startsWith "p.type: expected append, moneyConsent, computeFunding or a registered effect (scalar, content"
+#guard (refusal hostRefuses (Lean.Json.mkObj [("type", "nothing")])).startsWith "p.type: expected append or a registered effect (scalar, content"
 
 end PayloadReaders
 

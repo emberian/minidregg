@@ -368,8 +368,8 @@ What moved:
   header refusals lose their scalar prefix: a scalar `staleTarget` was
   `Reject.scalar (….staleTarget)` and is the controller's `Reject.staleTarget`, and likewise
   `unsupportedVersion` (`NativeHost.isStaleTarget` has one arm now).
-  The unknown-`type` refusal reads "expected append, moneyConsent, computeFunding or a registered
-  effect (scalar, content, …)". Moved with it in the same commit: `scripts/kn2/plant-drift-m4.sh`,
+  The unknown-`type` refusal names what the registry binds (today "expected append or a
+  registered effect (scalar, content, …)"). Moved with it in the same commit: `scripts/kn2/plant-drift-m4.sh`,
   the fixture in `native/resource-client/src/main.rs`, and `jclosure.sh`, `jjob1.sh`, `jjob.sh`,
   which grepped the raw constructor `undeclaredField N` that the client stopped printing when the
   Host began naming clauses.
@@ -387,12 +387,56 @@ What moved:
   a reader (its match names no other payload kind) from a dispatch arm (its match names another)
   and counts zero dispatch arms on both patterns.
 
-**Next**, the remaining codes, in the order of what each needs:
+**The two money consents are declared** (`Kernel/MoneyEffects.lean`: `computeFundingEffect`,
+code 6, JSON `computeFunding`; `moneyConsentEffect`, code 8, JSON `moneyConsent`). The
+constructors `Payload.computeFunding` and `Payload.moneyConsent` and every dispatch arm on them
+are deleted (transaction module, controller, thin consent, `Compiler/BendWorldPlan.lean`,
+`Compiler/ObjectiveInvocationLayout.lean`, `Host/FnInboxView.lean`, `Host/InspectRender.lean`,
+`Host/GrainOriginSource.lean`, the payload JSON reader; `Host/Json.lean`'s `moneyConsentJson`
+and `moneyOperationJson` moved into the declaration's `toJson`). `liveLegacy = [2]`.
 
-* `computeFunding` (6) and `moneyConsent` (8): the cell is unchanged; what they do is outside the
-  target (the shared Book), so `member = none`. Their footprint is the monetary one
-  (`Effect.footprint` now exists for it).
-* `append` (2): needs a fresh-cell output (the entry cell) that `Effect` cannot state yet.
+* One spec for both (`moneySpec`, over the operation's codec and view): an account at schema
+  version 1, the root pinned, no rotate, an empty frame, the account's ordinary write verb. The
+  semantics (`moneySem`) refuses a target that carries audience fields and otherwise emits the
+  empty patch. `MoneyPreparedUnchanged` (proved, `Kernel/MemberPatchPoles.lean`): every prepared
+  money target is an account at version 1 with the signed root and no audience field, and its
+  post is the loaded store. Its poles are executed (an admitted sample of each; each refusal by
+  name, in the hand arms' order).
+* `member = none` for both: thin consent refuses them by name at every store
+  (`MemberPatchUnstatedRefused`, which is generic; `memberPatch_money_refused` is deleted as its
+  instance).
+* What `Effect` learned for them, each a field with a default:
+  `footprint` takes the operation (the funding's footprint is the debit of its credits on its
+  asset's balance; the consent's own is empty, its monetary footprint stays the admitted batch's,
+  `monetaryFootprint?`); `runWrites` takes whether the target is the account the transaction's
+  funding was validated at (a funding claims the empty list there and nothing elsewhere, a
+  consent nothing); `unchanging` with its law `unchanging_silent` (the target is never written,
+  so `Target.isRead` enters it as a read guard: `observeOnly op || unchanging`); `accounting`
+  (the funding is the kernel's accounting, so `BendWorldPlan.effectsOf` and
+  `ObjectiveInvocationLayout.step`/`verbatim`/`inert` leave it out: `observeOnly op ||
+  accounting`; a money consent is reported, as before).
+* What reads the signed operations at the transaction's level stays, on the patterns
+  `Payload.computeFunding` / `Payload.moneyConsent` (`@[match_pattern]` abbreviations of
+  `.registered 6 _` / `.registered 8 _`): `prepareCompute` (the one funding leg),
+  `moneyEntries`, and the controller's `moneyPolicySlots`, `moneyReadCovered`,
+  `monetaryFootprint?`, `monetaryDebitFootprint?`, `monetaryVerbs?`. The census counts them as
+  readers (a match that names no hand constructor) and zero dispatch arms on either pattern.
+* Moved: the refusal of a money target with audience fields was `Reject.computeFunding` and is
+  `Reject.effect (Effect.ComputeFunding.audienceFields)` /
+  `Reject.effect (Effect.MoneyConsent.audienceFields)`; thin consent's text for them was
+  "compute funding: writes the shared Book" / "money: writes the shared Book" and is the generic
+  "<name>: a registered write is not displayed from a served view"; `spec.field` classifies a
+  money cell's addresses as `body` where `targetField` said `balance asset` for a funding (no
+  address of a money target changes, and its footprint is the declaration's, so nothing reads
+  the classification); a non-account money target is selected and then refused `wrongRole` by
+  the header, where the hand selection refused `wrongRole` itself (the same refusal).
+* Not moved: wire bytes of codes 6 and 8 (tag octet, then `fundingStream` / `consentStream`),
+  the request JSON, the inbox JSON, the inspect lines, the projection slots, the order of the
+  four refusals (all executed in `Assurance/MemberPatchPoles.lean`).
+
+**Next**: `append` (2). It needs a fresh-cell output (the entry cell) that `Effect` cannot
+state yet. After it `liveLegacy = []`, the legacy decoder and `Payload`'s last hand constructor
+go, and the census's hand column is zero.
 
 **The payload's JSON has one reader** (`Kernel/ResourcePayloadJson.lean`, `payloadOfJson`). The
 grammar of the hand-armed payloads (`action`, `streamRef`, the world descriptor, definition and

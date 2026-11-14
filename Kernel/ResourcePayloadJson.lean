@@ -67,7 +67,7 @@ def registeredOfJson (path tag : String) (json : Lean.Json) :
       ((DeclaredResourceController.effectAt code.toNat).ofJson path json).map fun op =>
         DeclaredResourceController.Payload.registered code op
   | none => failAt (path ++ ".type")
-      s!"expected append, moneyConsent, computeFunding or a registered effect ({", ".intercalate DeclaredResourceController.effectNames})"
+      s!"expected append or a registered effect ({", ".intercalate DeclaredResourceController.effectNames})"
 
 /-- **A target's payload, from its JSON.** `refuses`: the types this reader does not admit. -/
 def payloadOfJson (refuses : List String) (path : String) (json : Lean.Json) :
@@ -84,18 +84,6 @@ def payloadOfJson (refuses : List String) (path : String) (json : Lean.Json) :
       let recipient ← optional (path ++ ".to") nat (← field path "to" obj)
       let ref ← optional (path ++ ".ref") streamRef (← field path "ref" obj)
       pure (.append ⟨topic, payload, recipient.map SubjectId.mk, ref⟩)
-  | "moneyConsent" =>
-      let obj ← exactObject path ["type", "batch", "positions", "funding"] json
-      pure (.moneyConsent ⟨
-        ← optional (path ++ ".batch") moneyBatch (← field path "batch" obj),
-        ← list (path ++ ".positions") nat (← field path "positions" obj),
-        ← optional (path ++ ".funding") moneyFunding (← field path "funding" obj)⟩)
-  | "computeFunding" =>
-      let obj ← exactObject path ["type", "asset", "credits", "expectedPayerBalance", "expectedBookRoot"] json
-      pure (.computeFunding ⟨← nat (path ++ ".asset") (← field path "asset" obj),
-        ← nat (path ++ ".credits") (← field path "credits" obj),
-        ← int (path ++ ".expectedPayerBalance") (← field path "expectedPayerBalance" obj),
-        ⟨← nat (path ++ ".expectedBookRoot") (← field path "expectedBookRoot" obj)⟩⟩)
   | other => registeredOfJson path other json
 
 end Minidregg.Kernel.ResourcePayloadJson

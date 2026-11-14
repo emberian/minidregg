@@ -763,44 +763,6 @@ private def worldInstanceJson (root : Digest) (store : Store.Store WorldKindCell
          Lean.Json.arr #[.str ("world/" ++ slot.1), signedDecimal slot.2])),
      ("methods", worldMethodsJson value)])]
 
-private def moneyOperationJson : Minidregg.Theory.CanonicalResourceKernel.Operation → Lean.Json
-  | .transfer source destination asset amount => .mkObj
-      [("type", .str "transfer"), ("source", decimal source), ("destination", decimal destination),
-       ("asset", decimal asset), ("amount", decimal amount)]
-  | .fee source destination asset amount => .mkObj
-      [("type", .str "fee"), ("source", decimal source), ("destination", decimal destination),
-       ("asset", decimal asset), ("amount", decimal amount)]
-  | .mint asset destination amount => .mkObj
-      [("type", .str "mint"), ("asset", decimal asset), ("destination", decimal destination),
-       ("amount", decimal amount)]
-  | .burn source asset amount => .mkObj
-      [("type", .str "burn"), ("source", decimal source), ("asset", decimal asset),
-       ("amount", decimal amount)]
-  | .lease leaseId holder lessor asset rate epochs startsAt => .mkObj
-      [("type", .str "lease"), ("leaseId", decimal leaseId), ("holder", decimal holder),
-       ("lessor", decimal lessor), ("asset", decimal asset), ("rate", decimal rate),
-       ("epochs", decimal epochs), ("startsAt", decimal startsAt)]
-  | .setFloor asset account floor => .mkObj
-      [("type", .str "setFloor"), ("asset", decimal asset), ("account", decimal account),
-       ("floor", decimal floor)]
-  | .sweep holder commons asset permille epochs amount => .mkObj
-      [("type", .str "sweep"), ("holder", decimal holder), ("commons", decimal commons),
-       ("asset", decimal asset), ("permille", decimal permille), ("epochs", decimal epochs),
-       ("amount", decimal amount)]
-
-/-- Complete typed declaration view. Values become authoritative only through
-canonical native preparation, signatures, current law and joint admission. -/
-def moneyConsentJson (consent : Minidregg.Kernel.ResourceMoneyWire.Consent) : Lean.Json :=
-  .mkObj [("type", .str "moneyConsent"),
-    ("batch", (consent.batch.map fun batch => .mkObj
-      [("expectedBookRoot", decimal batch.expectedBookRoot.value),
-       ("operations", .arr (batch.operations.toArray.map moneyOperationJson))]).getD .null),
-    ("positions", .arr (consent.positions.toArray.map decimal)),
-    ("funding", (consent.funding.map fun funding => .mkObj
-      [("asset", decimal funding.asset), ("credits", decimal funding.credits),
-       ("expectedPayerBalance", signedDecimal funding.expectedPayerBalance),
-       ("expectedBookRoot", decimal funding.expectedBookRoot.value)]).getD .null)]
-
 private def audienceRosterEntry (path : String) (json : Lean.Json) :
     Result Minidregg.Theory.ObjectAudienceRoster.Entry := do
   let obj ← exactObject path ["subject", "capability", "deviceSource", "deviceGeneration", "keyCommitment"] json

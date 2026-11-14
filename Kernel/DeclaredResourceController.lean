@@ -555,25 +555,11 @@ theorem streamSlots_unjoint (request : StreamCell.Append) (before : Store Stream
         simp only [h, List.mem_cons, List.not_mem_nil, or_false] at hp
         rcases hp with rfl | rfl <;> dsimp only <;> decide
 
-theorem fundingProject_unjoint (funding : ComputeFunding) : Unjoint (fundingProject funding) := by
-  intro p hp
-  simp only [fundingProject, List.mem_cons, List.not_mem_nil, or_false] at hp
-  rcases hp with rfl | rfl | rfl | rfl | rfl <;> dsimp only <;> decide
-
 theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before after : Store target.layout) :
     Unjoint (targetProjection subject target before after) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | computeFunding funding => exact fundingProject_unjoint funding
-    | moneyConsent consent =>
-        apply unjoint_append
-        · intro p hp
-          simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
-          rcases hp with rfl | rfl <;> dsimp only <;> decide
-        · cases funding : consent.funding with
-          | none => intro p hp; cases hp
-          | some supplied => exact fundingProject_unjoint supplied
     | append request => exact streamSlots_unjoint _ _
     | registered code op => exact (effectAt code.toNat).view_unjoint ⟨subject, id⟩ op before after
 
@@ -1503,8 +1489,6 @@ def targetField (target : Target) : Address target.layout → CellField := by
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | append _ => exact fun _ => .body
-    | computeFunding funding => exact fun _ => .balance funding.asset
-    | moneyConsent _ => exact fun _ => .body
     -- A registered effect's field classification is its declaration's.
     | registered code _ => exact (effectAt code.toNat).spec.field
 
@@ -1514,8 +1498,6 @@ def targetAmount (target : Target) :
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | append _ => exact fun _ _ => 0
-    | computeFunding _ | moneyConsent _ =>
-        exact fun _ _ => 0
     | registered code _ => exact fun address value => (effectAt code.toNat).spec.amount address (some value)
 
 /-- The address the kernel's blinding ratchet writes on every leg of a
@@ -1527,8 +1509,6 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | append _ => exact fun _ => false
-    | computeFunding _ | moneyConsent _ =>
-        exact fun _ => false
     | registered code _ => exact (effectAt code.toNat).spec.rotated
 
 /-- What one write changed, but the ratchet's address. -/
@@ -1541,19 +1521,16 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | moneyConsent _ => exact ⟨∅, fun _ => 0⟩ -- Real monetary footprint is legFullFootprint below.
-    | computeFunding funding =>
-        exact ⟨if funding.credits = 0 then ∅ else {.balance funding.asset},
-          fun field => if field = .balance funding.asset then -(Int.ofNat funding.credits) else 0⟩
     | append action =>
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) pre post
     | registered code op =>
       -- A declaration whose fields are not its addresses states its own footprint
-      -- (`Effect.footprint`: a world instance's inner fields).
+      -- (`Effect.footprint`: a world instance's inner fields; a compute funding's debit of its
+      -- credits; a money consent's is empty, its monetary footprint is `monetaryFootprint?`).
       exact match (effectAt code.toNat).footprint with
-        | some semantic => semantic pre post
+        | some semantic => semantic op pre post
         | none => ResourceObservationAdmission.footprintOf
             (changedEffect ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩ pre post)
             (targetField ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩)
@@ -1564,7 +1541,6 @@ actual patch writes and exclude the hiding ratchet. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout) : Footprint :=
   match target.payload with
-  | .computeFunding _ | .moneyConsent _ => targetFullFootprint target pre post
   | .registered code _ =>
       if (effectAt code.toNat).footprint.isSome then targetFullFootprint target pre post
       else ResourceObservationAdmission.footprintOf
@@ -1918,11 +1894,11 @@ def entryWrites (prepared : PreparedInvocation deployment profile ambient ground
     (appendedEntry ground.authority profile.semantics ambient command command.targets[i]
       (prepared.targets i).pre).map StreamWrite.entryWrite
 
-/-- An observe-only read target is read, not written. -/
+/-- A target that is read, not written: an observe-only read, or an operation of a declaration
+whose target is never written (`Effect.unchanging`: a compute funding, a money consent). -/
 def Target.isRead (target : Target) : Bool :=
   match target.payload with
-  | .computeFunding _ | .moneyConsent _ => true
-  | .registered code op => (effectAt code.toNat).observeOnly op
+  | .registered code op => (effectAt code.toNat).observeOnly op || (effectAt code.toNat).unchanging
   | _ => false
 
 /-- A read target enters as a read guard on its cell's current root, as the

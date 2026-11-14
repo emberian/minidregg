@@ -284,7 +284,7 @@ def scalarEffect : Effect where
     intro _ f stated ctx actions left right
     cases stated
     rfl
-  runWrites := some fun _ _ index target actions => actions.mapM (actionWrite index target)
+  runWrites := some fun _ _ index target _ actions => actions.mapM (actionWrite index target)
   authors := fun actions => !actions.isEmpty
   unpack_pack := unpackDeclared_pack
   pack_unpack := packDeclared_unpack

@@ -37,6 +37,7 @@ root. The poles, on the deployed declarations:
 -/
 import Kernel.MemberPatchPoles
 import Kernel.ResourcePayloadJson
+import Compiler.ObjectiveInvocationLayout
 
 namespace Minidregg.Assurance.MemberPatchPoles
 open Minidregg.Kernel.DeclaredResourceController
@@ -331,5 +332,116 @@ def before (kind : ResourceKind) (version : Nat) (root : Digest) (actions : List
     (fun writes => writes.map fun w => (w.field, w.value)) == some [(2, 7)]
 
 end Scalar
+
+/-! ## The two money consents, declared at codes 6 and 8 -/
+
+section Money
+open Minidregg.Kernel.NativeThinConsent
+open Minidregg.Compiler
+open Minidregg.Theory
+open Minidregg.Theory.Store
+open Minidregg.Theory.CellState
+
+def funding : ComputeFunding := ⟨1, 5, 100, ⟨7⟩⟩
+def consent : MoneyConsent := ⟨none, [3], some funding⟩
+
+def accountPre : Materialized DeclaredEffectCell.materializer :=
+  materialize DeclaredEffectCell.materializer 0
+
+def moneyTarget (payload : Payload) (kind : ResourceKind) (version : Nat) (root : Digest)
+    (epoch : Option Nat) : Target :=
+  ⟨kind, 41, ⟨6⟩, version, root, payload, none, epoch, none⟩
+
+def fund (kind : ResourceKind) (version : Nat) (root : Digest) (epoch : Option Nat) :
+    Except Reject (Store EffectDeclaration.effectLayout) :=
+  computeTarget scalarSnapshot ⟨0⟩ sampleAmbient sampleCommand
+    (moneyTarget (.computeFunding funding) kind version root epoch) accountPre
+
+def consents (kind : ResourceKind) (version : Nat) (root : Digest) (epoch : Option Nat) :
+    Except Reject (Store EffectDeclaration.effectLayout) :=
+  computeTarget scalarSnapshot ⟨0⟩ sampleAmbient sampleCommand
+    (moneyTarget (.moneyConsent consent) kind version root epoch) accountPre
+
+def unchanged (result : Except Reject (Store EffectDeclaration.effectLayout)) : Bool :=
+  match result with
+  | .ok post => declaredBytes post == declaredBytes accountPre.logical
+  | .error _ => false
+
+def wrongRoot : Digest := ⟨accountPre.root.value + 1⟩
+
+-- Satisfiable, executed: each consent is admitted at an account and leaves the cell as loaded.
+#guard unchanged (fund .account 1 accountPre.root none)
+#guard unchanged (consents .account 1 accountPre.root none)
+-- The refusals, in the hand arms' order: role, schema version, root, audience fields.
+#guard named (fund .object 2 wrongRoot (some 1)) == "Reject.wrongRole"
+#guard named (fund .account 2 wrongRoot (some 1)) == "Reject.unsupportedVersion"
+#guard named (fund .account 1 wrongRoot (some 1)) == "Reject.staleTarget"
+#guard named (fund .account 1 accountPre.root (some 1)) ==
+  "Reject.effect (Effect.ComputeFunding.audienceFields)"
+#guard named (consents .object 2 wrongRoot (some 1)) == "Reject.wrongRole"
+#guard named (consents .account 2 wrongRoot (some 1)) == "Reject.unsupportedVersion"
+#guard named (consents .account 1 wrongRoot (some 1)) == "Reject.staleTarget"
+#guard named (consents .account 1 accountPre.root (some 1)) ==
+  "Reject.effect (Effect.MoneyConsent.audienceFields)"
+-- Neither is shown from a served view: the declaration states no member patch.
+#guard (match memberPatch sampleCommand
+    (moneyTarget (.computeFunding funding) .account 1 accountPre.root none) accountPre.logical with
+  | .error (.unsupportedPayload 41 text) =>
+      text == "computeFunding: a registered write is not displayed from a served view"
+  | _ => false)
+#guard (match memberPatch sampleCommand
+    (moneyTarget (.moneyConsent consent) .account 1 accountPre.root none) accountPre.logical with
+  | .error (.unsupportedPayload 41 text) =>
+      text == "moneyConsent: a registered write is not displayed from a served view"
+  | _ => false)
+-- The target is a read guard, never a write; the plan of application effects leaves the funding
+-- out and reports the consent.
+#guard (moneyTarget (.computeFunding funding) .account 1 accountPre.root none).isRead
+#guard (moneyTarget (.moneyConsent consent) .account 1 accountPre.root none).isRead
+#guard Minidregg.Compiler.ObjectiveInvocationLayout.inert (.computeFunding funding)
+#guard Minidregg.Compiler.ObjectiveInvocationLayout.verbatim (.moneyConsent consent)
+-- What a run may claim: the empty list at the validated funding account, nothing elsewhere and
+-- nothing of a money consent.
+#guard (targetWrites 0 (moneyTarget (.computeFunding funding) .account 1 accountPre.root none)
+    accountPre.logical ⟨0⟩ (some 0)).map (·.length) == some 0
+#guard (targetWrites 0 (moneyTarget (.computeFunding funding) .account 1 accountPre.root none)
+    accountPre.logical ⟨0⟩ (some 1)).isNone
+#guard (targetWrites 0 (moneyTarget (.computeFunding funding) .object 1 accountPre.root none)
+    accountPre.logical ⟨0⟩ (some 0)).isNone
+#guard (targetWrites 0 (moneyTarget (.moneyConsent consent) .account 1 accountPre.root none)
+    accountPre.logical ⟨0⟩ (some 0)).isNone
+-- The funding's footprint is the debit of its credits on its asset's balance; the consent's own
+-- footprint is empty.
+#guard (targetFullFootprint (moneyTarget (.computeFunding funding) .account 1 accountPre.root none)
+    accountPre.logical accountPre.logical).delta (.balance 1) == -5
+#guard decide ((targetFullFootprint (moneyTarget (.computeFunding funding) .account 1
+    accountPre.root none) accountPre.logical accountPre.logical).touched = {.balance 1})
+#guard decide ((targetFullFootprint (moneyTarget (.moneyConsent consent) .account 1
+    accountPre.root none) accountPre.logical accountPre.logical).touched = ∅)
+-- The wire is the hand arms': the tag octet, then the operation's own codec.
+#guard payloadStream.encode (.computeFunding funding) ==
+  6 :: Minidregg.Kernel.ResourceMoneyWire.fundingStream.encode funding
+#guard payloadStream.encode (.moneyConsent consent) ==
+  8 :: Minidregg.Kernel.ResourceMoneyWire.consentStream.encode consent
+#guard (payloadStream.decodePrefix (payloadStream.encode (.moneyConsent consent) ++ [99])).map
+    (fun d => (decide (d.1 = .moneyConsent consent), d.2)) == some (true, [99])
+-- The JSON faces: the inbox's objects, and the request reader's.
+#guard (Lean.Json.mkObj (("type", "computeFunding") :: (effectAt 6).toJson funding)).compress ==
+  "{\"asset\":\"1\",\"credits\":\"5\",\"expectedBookRoot\":\"7\",\"expectedPayerBalance\":\"100\",\"type\":\"computeFunding\"}"
+#guard (Lean.Json.mkObj (("type", "moneyConsent") :: (effectAt 8).toJson consent)).compress ==
+  "{\"batch\":null,\"funding\":{\"asset\":\"1\",\"credits\":\"5\",\"expectedBookRoot\":\"7\",\"expectedPayerBalance\":\"100\"},\"positions\":[\"3\"],\"type\":\"moneyConsent\"}"
+#guard (match Minidregg.Kernel.ResourcePayloadJson.payloadOfJson [] "p"
+    (Lean.Json.mkObj (("type", "computeFunding") :: (effectAt 6).toJson funding)) with
+  | .ok payload => decide (payload = .computeFunding funding) | .error _ => false)
+#guard (match Minidregg.Kernel.ResourcePayloadJson.payloadOfJson [] "p"
+    (Lean.Json.mkObj (("type", "moneyConsent") :: (effectAt 8).toJson consent)) with
+  | .ok payload => decide (payload = .moneyConsent consent) | .error _ => false)
+#guard (effectAt 6).display funding ==
+  ["funds compute with 5 credits of asset 1; payer pre-balance 100, Book root 7"]
+#guard (effectAt 8).display consent ==
+  ["canonical Book batch: 0 operations carried; 1 signed source positions; 5 compute credits"]
+#guard (effectAt 6).authors funding == false && (effectAt 8).authors consent == false
+
+end Money
 
 end Minidregg.Assurance.MemberPatchPoles

@@ -31,7 +31,7 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 /-- The payload tags the hand arms read (`legacyPayloadDecode`). -/
-def legacyPayloadTags : List UInt8 := [0, 1, 2, 3, 4, 5, 6, 7, 8]
+def legacyPayloadTags : List UInt8 := [2]
 
 /-- An octet no declaration binds and no hand arm reads. -/
 def payloadUnread (tag : UInt8) : Bool := !registeredOctet tag && !legacyPayloadTags.contains tag
@@ -45,16 +45,8 @@ theorem payload_unread {tag : UInt8} (unread : payloadUnread tag = true) (bytes 
   rw [if_neg (by rw [unbound]; exact Bool.false_ne_true)]
   have ne : ∀ k ∈ legacyPayloadTags, tag ≠ k := fun k member same =>
     absurd (List.contains_iff_mem.mpr (same ▸ member)) (by rw [outside]; exact Bool.false_ne_true)
-  have h0 := ne 0 (by decide)
-  have h1 := ne 1 (by decide)
   have h2 := ne 2 (by decide)
-  have h3 := ne 3 (by decide)
-  have h4 := ne 4 (by decide)
-  have h5 := ne 5 (by decide)
-  have h6 := ne 6 (by decide)
-  have h7 := ne 7 (by decide)
-  have h8 := ne 8 (by decide)
-  simp [legacyPayloadDecode, h0, h1, h2, h3, h4, h5, h6, h7, h8]
+  simp [legacyPayloadDecode, h2]
 
 /-- A target's fields before its payload, as `targetStream` reads them. -/
 def targetHeadStream :

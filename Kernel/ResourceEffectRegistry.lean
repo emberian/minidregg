@@ -14,6 +14,7 @@ module
 
 public import Kernel.CitedRead
 public import Kernel.ContentEffect
+public import Kernel.MoneyEffects
 public import Kernel.ReadEffects
 public import Kernel.ScalarEffect
 public import Kernel.WorldKindEffects
@@ -30,7 +31,8 @@ set_option autoImplicit false
 
 /-- **The registry**: wire code ↦ declaration. -/
 def liveEffects : List (Nat × Effect) := [(0, scalarEffect), (1, contentEffect), (3, readEffect),
-  (4, worldEffect), (5, kindDefinitionEffect), (7, kindReadEffect), (9, citedEffect)]
+  (4, worldEffect), (5, kindDefinitionEffect), (6, computeFundingEffect), (7, kindReadEffect),
+  (8, moneyConsentEffect), (9, citedEffect)]
 
 /-- Whether a code is bound. -/
 def registeredCode (code : Nat) : Bool := (liveEffects.lookup code).isSome
@@ -104,9 +106,8 @@ abbrev contentCode : UInt8 := 1
 
 theorem effectAt_content : effectAt contentCode.toNat = contentEffect := rfl
 
-/-- The legacy payload tags are unbound (what `payloadStream`'s round-trip reads). -/
-theorem legacy_unbound :
-    registeredOctet 2 = false ∧ registeredOctet 6 = false ∧ registeredOctet 8 = false := by
+/-- The legacy payload tag is unbound (what `payloadStream`'s round-trip reads). -/
+theorem legacy_unbound : registeredOctet 2 = false := by
   decide
 
 /-- The content read's payload tag. -/

@@ -151,7 +151,8 @@ theorem registryPremise : RegistryPremise := by
 theorem registry_noTwin : ∀ code ∈ liveLegacy, hostRegistry.lookup code = none := by
   intro code member
   simp only [liveLegacy, List.mem_cons, List.not_mem_nil, or_false] at member
-  rcases member with rfl | rfl | rfl | rfl <;> rfl
+  subst member
+  rfl
 
 /-- `unregistered`: a code neither bound nor hand-armed is refused by name. -/
 theorem registry_unregistered : ∀ code, hostRegistry.lookup code = none → code ∉ liveLegacy →
@@ -207,9 +208,7 @@ theorem liveLegacyCensusTeeth : LiveLegacyCensusTeeth := by
   have ne : ∀ k : UInt8, k.toNat ∈ liveLegacy → tag ≠ k :=
     fun k member same => outside (same ▸ member)
   have h2 := ne 2 (by decide)
-  have h6 := ne 6 (by decide)
-  have h8 := ne 8 (by decide)
-  simp [DeclaredResourceController.legacyPayloadDecode, h2, h6, h8]
+  simp [DeclaredResourceController.legacyPayloadDecode, h2]
 
 /-! ## The registry keystone: the deployed dispatch IS the engine's, at every bound code.
 
