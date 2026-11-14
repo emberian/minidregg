@@ -108,7 +108,7 @@ open(path("permit-all.json"), "w").write('{"type":"all","predicates":[]}\n')
 
 GATE = bytes.fromhex("c5855fc892e320581c76e196c804d3be8ae1e3301354f7b1212bcc716ea2133b0836046ec846c321e247c3cab4003d5d98dc5919dd0b6cc1dd167cac0a")
 def slot(f, k): return {"target": "0", "slot": f"resource/field/{f}/before", "key": k, "type": "nat"}
-ABI = {"version": "2", "arm": "2", "fuel": "1000000000", "sample": [slot(2, "n"), slot(3, "c")],
+ABI = {"version": "3", "evaluator": "nock", "context": "live", "arm": "2", "fuel": "1000000000", "sample": [slot(2, "n"), slot(3, "c")],
        "outputs": [{"key": "c", "target": "0", "field": "3", "type": "nat"}], "libraries": []}
 d = subprocess.run([HOST, CONFIG, "describe"], capture_output=True, text=True)
 budget = json.loads(d.stdout).get("nockFSync") if d.returncode == 0 else None

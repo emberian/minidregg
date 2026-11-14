@@ -339,27 +339,19 @@ def citedOfJson (path : String) (json : Lean.Json) : Except String (List FieldRe
     let observed ← EffectJson.optional (path ++ ".observed") EffectJson.int (← EffectJson.field path "observed" read)
     pure (key, observed)) (← EffectJson.field path "reads" obj)
 
-/-- A cited key in words: the field's number, or the program's code. -/
-def citedKeyText : EffectDeclaration.StateKey → String
-  | .objectField _ field => s!"field {field.value}"
-  | .programCode _ => "program code"
-  | other => reprStr other
-
 /-- What a member is shown of a cited read before signing: that it writes nothing, and every
 cited field with the value the signature binds it to. The signed bytes are exactly these keys
 and values (`fieldReadStream`), so the display commits to the whole footprint. -/
 def citedDisplay (reads : List FieldRead) : List String :=
   s!"cited read of {reads.length} field(s), bound by value; no resource write" ::
     reads.map fun read =>
+      let key := match read.1 with
+        | .objectField _ field => s!"field {field.value}"
+        | .programCode _ => "program code"
+        | other => reprStr other
       match read.2 with
-      | some value => s!"  {citedKeyText read.1} = {value}"
-      | none => s!"  {citedKeyText read.1} absent"
-
-/-- A refusal's detail in words: the moved fields of `citedStale`, as the display names them. -/
-def citedRefusalText (_name : String) (detail : List UInt8) : String :=
-  match movedStream.toLawful.decode detail with
-  | some moved => "[" ++ ", ".intercalate (moved.map citedKeyText) ++ "]"
-  | none => ""
+      | some value => s!"  {key} = {value}"
+      | none => s!"  {key} absent"
 
 /-! ## The declaration -/
 
@@ -433,7 +425,6 @@ def citedEffect : Effect where
   toJson := citedToJson
   ofJson := citedOfJson
   display := citedDisplay
-  refusalText := citedRefusalText
   unpack_pack := unpackDeclared_pack
   pack_unpack := packDeclared_unpack
   observes_silent := by

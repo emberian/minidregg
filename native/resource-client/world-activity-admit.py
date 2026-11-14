@@ -282,12 +282,12 @@ try:
                     and World.total_of(v) == 5, {'source': source_of(v), 'state': v.get('state')})
             second0 = bal(v, w.SECOND)
             # A delivery naming the activity's own purse as the account that pays its added envelope is refused.
-            # The receiver refuses it first, `notAccountOwner` (a payer is admitted only for its owner, and no
+            # The receiver refuses it first, `notAccountHolder` (a payer is admitted only for its owner, and no
             # member owns a purse); the kernel's `Delivery.purseApart` (`payerInvalid`) is the proved second line
             # behind it. The sponsor signs with a spend capability it really holds, on its own account.
             w.turn('deliver-from-the-purse-refused', w.sponsor, {'kind': 'deliver', 'record': rec,
                    'await': World.await_of(v)['id'], 'account': rec, 'accountCapability': str(w.SPONSOR_SPEND)},
-                   'refused', 'notAccountOwner')
+                   'refused', 'notAccountHolder')
             deliver('deliver-commit', v, rec)
             v1 = w.state('obj', 'after-transfer', tx)
             w.check('transfer-performed-moves-exactly-1',

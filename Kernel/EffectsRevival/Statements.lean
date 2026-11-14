@@ -405,10 +405,9 @@ has no constructor and no hand arm; codes 0 to 8 are still hand arms.
 `Handler.fire`, at every operation, context and cell; `noTwin` puts every bound code out of the
 hand arms; `unregistered` is the refusal by name.
 
-By name at the receiver too: command bytes whose payload tag nothing reads fail
-`commandCodec.decode`, and the receiver answers `Reject.effect (.unregistered tag)` for them, not
-`malformedCommand` (`Kernel/ResourcePayloadTag.lean`, `UnboundTagNamed`); the JSON face names the
-type it did not find (`Host/Json.registeredPayload`). -/
+Scope of "by name": the target dispatch. A whole command whose payload tag is unbound still
+fails `commandCodec.decode` and is refused `malformedCommand` by the receiver; the JSON face
+names the type it did not find (`Host/Json.targetPayload`). -/
 
 /-- The engine context of a host dispatch. -/
 def dispatchCtxOf (ctx : HostCtx) : DeclaredResourceController.DispatchCtx :=

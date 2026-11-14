@@ -7,13 +7,10 @@ any [ not (verb == 2), subject == {FOUNDER}, eqSlots subject field leader before
 any [ not (verb == 2), field id == {G} ];
 -- 3 leader-by-ballot [J-MUD-5 row 10]: `leader` changes only to the result of a closed leader ballot of this org,
 --   a newer one than the last (field ballot).
---   [K2] The ballot is a cell born under {ORG_BALLOTS}, the cell this org's ballots are born under: org, office,
---   open, result and id are fields, and a cell born anywhere holding them would hand the org to its maker.
 any [ not (verb == 2), field leader delta == 0,
       all [ joint 1 ballot org == {G}, joint 1 ballot office == 1, joint 1 ballot open == 0,
             not (joint 1 ballot result == 0), eqSlots field leader joint 1 ballot result,
-            eqSlots field ballot joint 1 ballot id, not (field ballot delta <= 0),
-            joint 1 cell parent == {ORG_BALLOTS} ] ];
+            eqSlots field ballot joint 1 ballot id, not (field ballot delta <= 0) ] ];
 -- 4 ballot-only-with-leader: `ballot` records the handover and moves with nothing else.
 any [ not (verb == 2), field ballot delta == 0, not (field leader delta == 0) ];
 -- 5 offices [J-MUD-5 row 2]: the treasurer and recruiter fields (the law-side mirror of the office delegations)

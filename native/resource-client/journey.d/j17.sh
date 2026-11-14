@@ -155,10 +155,10 @@ finish() {
   echo "J17: $FAILED of $N rows not as expected; first: $FIRST_FAIL" >&2; exit 1
 }
 
-deliver() { # FROM-DIR TO-DIR: copy every json file not already there
+deliver() { # FROM-DIR TO-DIR: deliver current reference files, including renewed till grants
   mkdir -p -m 700 "$2"
   local f
-  for f in "$1"/*.json; do [ -e "$f" ] || continue; [ -e "$2/$(basename "$f")" ] || install -m 0600 "$f" "$2/"; done
+  for f in "$1"/*.json; do [ -e "$f" ] || continue; install -m 0600 "$f" "$2/"; done
 }
 
 room_height() { "$MINI" credit --action room --dir "$WS/alice" --room "$1" 2>/dev/null | jq -r .height; }
@@ -199,14 +199,17 @@ BACCT=$(jq -r .feePayer "$WS/bob/birth-context.json")
 FEE=$(jq -r '.tariffBase' "$CONFIG"); BIRTH=$(jq -r '.tariffPerBirth' "$CONFIG"); GRANT=$(jq -r '.tariffPerGrant' "$CONFIG")
 
 # ------------------------------------------------ the room, its tariff, its concierge
-# The room has no week price when its concierge is installed, so the till grant's refund
-# limit is named here: the largest payment this journey has the concierge return.
-ok room alice "room new lab --template workroom --concierge $CON --period $PERIOD --refund-limit 200"
+# Setting the price renews the initially zero-bound till grant.
+ok room alice "room new lab --template workroom --concierge $CON --period $PERIOD"
 LAB=$(jq -r .target "$WS/alice/refs/lab.json")
 checkp room "the founder holds the till lab-till (an account)" jq -e '.kind == "account"' "$WS/alice/refs/lab-till.json"
 checkp room "the program names lab, its till and the concierge" \
   jq -e --arg r "$LAB" --arg c "$CON" '.room == $r and .concierge == $c and .topic == "renew"' "$H/alice/concierge/lab.json"
+INITIAL_TILL_CAP=$(jq -r .capability "$H/alice/outbox/$CON/lab-till.json")
 ok room alice "tariff lab set week $WEEK"
+checkp room "setting the price replaces the zero-bound till grant" \
+  jq -e --arg old "$INITIAL_TILL_CAP" --arg bound "$((WEEK + FEE))" --arg asset "balance:$(jq -r .asset "$CONFIG")" \
+  '.capability != $old and .maxDelta == [{field:$asset,max:$bound}]' "$H/alice/outbox/$CON/lab-till.json"
 ok room alice "tariff lab set hermes/turn 2"
 ok room alice "tariff lab"
 checkp room "tariff lab shows week $WEEK, period $PERIOD, the till and the concierge" \
@@ -372,6 +375,7 @@ ok race eve "import lab $REF"
 ok race eve "pay lab week"
 checkp race "eve's payment says the price and the height it read" grep -q "at the price $WEEK read at height" "$OUT"
 ok race alice "tariff lab set week 200"
+operator race "DELIVER: renewed till grant" deliver "$H/alice/outbox/$CON" "$H/con/inbox"
 concierge race lab "the founder raised the price between the payment and the pass"
 check race "eve's payment is honoured at the price it read" "issued $E" \
   "$(jq -r '.decisions[0] | "\(.decision) \(.subject)"' "$PASS" 2>/dev/null)"
@@ -380,6 +384,7 @@ operator race "DELIVER: the concierge's reference into eve's inbox" deliver "$H/
 ok race eve "room status lab"
 checkp race "room status: eve holds a member window" grep -q "my window: member until height" "$OUT"
 ok race alice "tariff lab set week $WEEK"
+operator race "DELIVER: renewed till grant" deliver "$H/alice/outbox/$CON" "$H/con/inbox"
 HQ=$(room_height lab)
 operator race "eve pays with a memo quoting a price the tariff never had (50 at $HQ)" \
   "$MINI" fleet --action send --dir "$WS/eve" --account account --topic renew \

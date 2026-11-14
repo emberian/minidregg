@@ -206,7 +206,7 @@ inductive Reject where
   /-- The signer holds no capability admissible for mutating the object. -/
   | notObjectHolder
   /-- The signer does not own the Book account the turn spends. -/
-  | notAccountOwner
+  | notAccountHolder
   /-- The named holder activity is not an awaiting activity this signer pays for. -/
   | notActivityPayer
   /-- The signer's account grant does not bound what the turn takes from the account it
@@ -343,7 +343,7 @@ def authorized {rootBytes : List UInt8 → Digest} (data : DataSnapshot rootByte
     else .error .notObjectHolder
   let account (a : Nat) : Except Reject Unit :=
     if accountHolder snapshot semantics ambient command a command.grants.account preRoot outcome then .ok ()
-    else .error .notAccountOwner
+    else .error .notAccountHolder
   match command.turn with
   | .handOver _ _ | .exit _ => .ok ()
   -- the publication's payer (named in the stored bytes) consents by its account grant
@@ -384,7 +384,7 @@ def valueBounded (snapshot : Snapshot) (command : Command)
   | some account =>
       match CapabilityValueBound.presentedCheck (presentedGrant snapshot command) operations account with
       | .ok () => .ok ()
-      | .error none => .error .notAccountOwner
+      | .error none => .error .notAccountHolder
       | .error (some reason) => .error (.valueBound reason)
 
 theorem valueBounded_ok {snapshot : Snapshot} {command : Command}

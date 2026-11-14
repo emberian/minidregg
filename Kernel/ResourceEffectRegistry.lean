@@ -57,32 +57,6 @@ def effectNamed (name : String) : Option UInt8 :=
 /-- The names the registry binds (for a refusal that lists what it expected). -/
 def effectNames : List String := liveEffects.map fun entry => entry.2.name
 
-/-- A declaration's name as a constructor namespace (`fieldRead` is `FieldRead`). -/
-def effectTitle (code : Nat) : String := (effectAt code).name.capitalize
-
-/-- **A dispatch refusal as its requester reads it.** A code nothing binds is
-`Effect.Registry.unregistered <code>`; every other refusal is `Effect.<Name>.<refusal>`, the declaration's
-own refusal followed by its detail in the declaration's words (`Effect.refusalText`; a cited
-read's `citedStale` lists the fields that moved). -/
-def dispatchRefusalText : Revival.DispatchRefusal → String
-  | .unregistered code => s!"Effect.Registry.unregistered {code}"
-  | .malformed code => s!"Effect.{effectTitle code}.malformed"
-  | .wrongRole code => s!"Effect.{effectTitle code}.wrongRole"
-  | .refused code name detail =>
-      let words := (effectAt code).refusalText name detail
-      s!"Effect.{effectTitle code}.{name}" ++ (if words.isEmpty then "" else " " ++ words)
-  | .outOfFrame code => s!"Effect.{effectTitle code}.outOfFrame"
-  | .guardFailed code => s!"Effect.{effectTitle code}.guardFailed"
-  | .unsupportedVersion code => s!"Effect.{effectTitle code}.unsupportedVersion"
-  | .staleTarget code => s!"Effect.{effectTitle code}.staleTarget"
-  | .host code name => s!"Effect.{effectTitle code}.host {name}"
-
-/-- The one `Repr` of a dispatch refusal: the registry's reading. The Host commits a refusal's
-detail as the `repr` of its `Reject` (`Host/RefusalText.lean`), so this is what a requester sees
-(executed in `Assurance/RegistryRefusalPoles.lean`). -/
-instance : Repr Revival.DispatchRefusal where
-  reprPrec refusal prec := Repr.addAppParen (.text (dispatchRefusalText refusal)) prec
-
 /-- **The engine registry**: every declaration's handler at its code. -/
 def liveRegistry : Revival.Registry DispatchCtx (PackedCell Registry) :=
   liveEffects.map fun entry => (entry.1, entry.2.handler entry.1)

@@ -8,7 +8,7 @@ proof, no migration, no change under `Kernel/` in this lane.
 The owner's ruling this answers: hand-written kernel effects are not acceptable.  A new kernel
 effect comes out of a declaration, and the hand arm it replaces is deleted in the same commit.
 
-## 0. Present state (lane `registry-effects-2`, 2026-11-13)
+## 0. Present state (lane `registry-effects`, 2026-11-13)
 
 The open constructor exists and one effect lives on it. §1 to §8 below are the October design
 and its continuation; where they disagree with this section, this section is the tree.
@@ -21,8 +21,7 @@ and its continuation; where they disagree with this section, this section is the
   decoder (`legacyPayloadDecode`). Binding a tag a hand arm still owns does not build
   (`legacy_unbound` is what `payloadStream`'s round-trip reads).
 * **`Effect`** (`Kernel/ResourceEffect.lean`) is the declaration: typed cell (`L`, `wire`, `pack`,
-  `unpack`), `spec : EffectSpec`, the JSON face (`name`, `toJson`, `ofJson`), the display, the
-  refusal text (`refusalText`: a refusal's detail in words), and its
+  `unpack`), `spec : EffectSpec`, the JSON face (`name`, `toJson`, `ofJson`), the display, and its
   obligations as proof fields (`unpack_pack`, `pack_unpack`, `observes_silent`, `complete`,
   `view_unjoint`). Derived from it: `compute` (header from `accepts`/`version`/`commutes`, then
   the engine's `exec`), `patch` (the emitted descriptor), `observeOnly` (the verb is the observe
@@ -36,74 +35,24 @@ and its continuation; where they disagree with this section, this section is the
   `fieldRead`). `Payload.fieldRead`, `Reject.citedKey`/`citedStale` and every hand arm of it are
   deleted. Wire bytes of code 9 are unchanged (tag octet 9, then the list of reads). Its refusals
   surface as `Reject.effect (.refused 9 name detail)`; `citedStale`'s detail is the moved keys
-  (`citedStale_detail`), printed as `Effect.FieldRead.citedStale [field 5, …]`
-  (`dispatchRefusalText`, the one `Repr` of a dispatch refusal: it reads the declaration).
-* **An unread payload tag is refused by name at the receiver** (`Kernel/ResourcePayloadTag.lean`):
-  command bytes whose payload tag no declaration binds and no hand arm reads are answered
-  `Reject.effect (.unregistered tag)`, every other undecodable byte string `malformedCommand`.
-  `UnboundTagNamed` is proved: a named octet is bound by nothing, read by nothing, and its bytes
-  are not a command.
-* **Statements** (`Kernel/EffectsRevival/Statements.lean` §7b), all **proved**
-  (`RegistryProofs.lean`): `RegistryKeystone` (`Dispatches hostRegistry liveLegacy
-  liveTargetDispatch`, with `liveLegacy = [0..8]`), `RegistryPremise`, `RegistryAccepted` (both
-  poles of the cited read at an authority cell holding a field-scoped observe capability),
-  `RegistryTeeth`, `LiveLegacyCensus`, `LiveLegacyCensusTeeth`. The keystone's heart,
-  `liveTargetDispatch_registered`, is proved for an arbitrary declaration: at a bound code the
-  deployed functions are the engine's `dispatch`. Binding another code adds no proof there.
+  (`citedStale_detail`).
+* **Statements** (`Kernel/EffectsRevival/Statements.lean` §7b): `RegistryKeystone`
+  (`Dispatches hostRegistry liveLegacy liveTargetDispatch`, with `liveLegacy = [0..8]`),
+  `RegistryPremise`, `RegistryAccepted`, `RegistryTeeth`, `LiveLegacyCensus`,
+  `LiveLegacyCensusTeeth`. **Proved** (`RegistryProofs.lean`): the premise for any `Effect`, the
+  census and its teeth, `noTwin`, `unregistered`, the name clauses of the teeth. **Owed**: the
+  `agreement` and `frame` clauses, `RegistryAccepted`, the ghost clause of the teeth.
   `HostKeystone` (content, code 1) is unchanged and still false: content is still a hand arm.
 * **The census is a script**: `scripts/effect-arm-census.py` (hand arms per payload kind, read
-  from the `Payload` inductive; it sees arms of a structure field given by cases and the JSON
-  `type` string arms of a request decoder). At `787333fc3` `fieldRead` had 33 constructor arms and
-  one string arm in 10 Lean files; it now has none, and a declared kind cannot have one. The nine
-  remaining kinds have 294 constructor arms and 16 string arms in 17 files.
-* **One JSON vocabulary**: `EffectJson` (`Kernel/ResourceEffect.lean`) is the strict reading both
-  a declaration's face and the Host's request decoders use; `Host/Json`'s private copies are
-  deleted. (`Host/SourceAgreementJson.lean` still carries its own copy of the request decoder,
-  payload arms included: seven of the sixteen string arms are its.)
-* **Thin consent displays a registered observation without a view**
-  (`NativeThinConsent.registeredRead`, `RegisteredReadDisplayStatement` proved): the effect's code,
-  the signed operation's canonical bytes and `Effect.display`'s lines. A registered WRITE is still
-  refused `unsupportedPayload` there.
+  from the `Payload` inductive). At `787333fc3` `fieldRead` had 32 hand arms in 9 Lean files by
+  that script; it now has none, and a declared kind cannot have one.
 
-**Next: content (code 1).** Not started. What it takes, from reading the tree:
-
-1. `Kernel/ContentEffect.lean`, upstream of `Kernel/ResourceEffectRegistry.lean`: `contentEffect :
-   Effect` from today's `contentSpec` (`Statements.lean` §6), re-indexed from `LiveCtx` to
-   `EffectCtx`. `EffectCtx` needs two more fields, both lazy: the operation id
-   (`contentOperation`, a hash of the whole command: a `Thunk Digest`) and the source reads
-   (`contentContext`'s lookup: `Nat → Option CapabilityId`, the observe capability of the
-   command's read target at a cell). `complete` is `ContentComplete`: move its proof
-   (`ContentProofs.lean` up to `contentComplete`, about 450 lines that are about
-   `ContentResource.run` and not about `LiveCtx`) upstream with it. `view_unjoint` is
-   `JointSlots.contentProject_unjoint`. `pack`/`unpack` ignore the role (`⟨.content, cell⟩`); the
-   header's `accepts` refuses a role that is not an object.
-2. `Effect.run` should stop calling `EffectSpec.exec` at run time: under `complete` the frame check
-   and the guarded replay cannot refuse, so `run` can be the semantics then `Patch.run`, with
-   `run_eq_exec` proved from `complete` (`RegistryProofs.effect_compute_agrees` then rewrites by
-   it). Without this a content write pays a `Finset` footprint check per command.
-3. Bind `(1, contentEffect)` in `liveEffects`; delete `Payload.content`, `Reject.content`, the
-   content arm of `legacyPayloadDecode`/`payloadEncode` and the 32 constructor arms and 2 string
-   arms the census lists (12 files). Keep construction sites compiling with
-   `abbrev contentPayload (command) : Payload := .registered 1 command` (as `citedPayload`).
-   `liveLegacy` becomes `[0, 2, …, 8]`; `registryKeystone` needs no new proof.
-4. The JSON face: `contentAction`/`contentCommand` (`Host/Json.lean`, about 80 lines plus the id
-   and selector decoders they call) move to the declaration's `ofJson`; `FnInboxView`'s
-   `contentActionJson` to `toJson`.
-5. Statements: `ContentAgreement` is consumed (it compared the hand arm with the declaration;
-   delete it with the arm). `HostKeystone` becomes `RegistryKeystone` with code 1 bound; delete
-   `contentHandler`, `contentHeader`, `contentFresh` (twins of `Effect.handler`). `HostTeeth`'s
-   ghost goes as `registryTeeth_ghost` does. `PrepareFactors` should be restated for every bound
-   code over `Effect.handler` and re-proved (the present proof, 300 lines, leans on
-   `ContentAgreement`).
-6. Refusal text moves from `Reject.content (ContentResource.Reject.x)` to
-   `Reject.effect (Effect.Content.x)`: check the journeys that match content refusals. Wire bytes
-   of code 1 do not move, so the recorded fixtures should not either; re-record only if they hold
-   refusal text.
-
-Then the remaining codes, cheapest first: `read` (3), `kindRead` (7), `scalar` (0),
+**Next** (in order): prove `RegistryKeystone` (show the deployed dispatch of a registered payload
+as `Effect`-level terms, then case on selection and the computation); content (code 1) onto
+`Effect` (its context needs the operation id and the source reads, as lazily computed fields of
+`EffectCtx`); then the remaining codes, cheapest first: `read` (3), `kindRead` (7), `scalar` (0),
 `computeFunding` (6), `moneyConsent` (8), `world` (4), `kindDefinition` (5), `append` (2, needs a
-fresh-cell output). `read` and `kindRead` pin a root (`commutes` false), so their thin-consent
-display must keep the served-opening check the hand arm has, not the view-less one.
+fresh-cell output).
 
 ## 1. What one effect costs by hand today (counted from the tree at `02ee34e8a`)
 

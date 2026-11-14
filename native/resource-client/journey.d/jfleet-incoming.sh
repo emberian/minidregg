@@ -89,9 +89,13 @@ row "incoming --after-seq the returned resumeSeq: the tip, named" "page.state ti
   "rc $RC, resumeSeq '${SEQ:-none}', $(jq -c '{page,n:(.entries|length)}' "$OUT" 2>/dev/null | cut -c1-120)" \
   "$([ "$RC" = 0 ] && [ "$SEQ" = 2 ] && jq -e '.page.state == "tip" and .page.count == "2" and (.entries | length) == 0' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
 run in9 FS incoming --profile "$PB" --after-seq 1 --max-bytes 1
-row "incoming --max-bytes 1: a payment larger than the budget is named, not skipped" "page.state oversize at seq 2, no entries, resumeSeq 1" \
-  "rc $RC, $(jq -c '{page,resumeSeq,n:(.entries|length)}' "$OUT" 2>/dev/null | cut -c1-120)" \
-  "$([ "$RC" = 0 ] && jq -e '.page.state == "oversize" and .page.seq == "2" and .resumeSeq == "1" and (.entries | length) == 0' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+row "incoming --max-bytes 1: a payment larger than the budget refuses by name, not skipped" "rc != 0 naming incomingOversize at position 2, no entries printed" \
+  "rc $RC, $(tail -1 "$ERR" | cut -c1-140)" \
+  "$([ "$RC" != 0 ] && grep -q 'incomingOversize: the member at position 2 ' "$ERR" && ! grep -q '"entries"' "$OUT" && echo 1 || echo 0)"
+run in10 FS incoming --profile "$PB" --after-seq 0 --limit 2 --max-bytes 1
+row "incoming --limit 2 --max-bytes 1 from the start: the first payment also exceeds the budget" "rc != 0 naming incomingOversize at position 1" \
+  "rc $RC, $(tail -1 "$ERR" | cut -c1-140)" \
+  "$([ "$RC" != 0 ] && grep -q 'incomingOversize: the member at position 1 ' "$ERR" && echo 1 || echo 0)"
 
 cp "$D/log/in4.out" "$D/in4.expected"
 run shim env MINI_BIN="$MINI" "$HERE/../dregg-client-sign" incoming --profile "$PB"

@@ -22,7 +22,7 @@ with the Book's totals of X, Y and the credit asset (which never change).
                   kernel mints under derived ids with the instance's package).
   E2 offers       Alice (the sponsor) offers give 10 X want >= 5 Y; Bob (40)
                   offers give 7 Y want >= 9 X; an offer funded from another
-                  subject's account is refused (notAccountOwner); an offer
+                  subject's account is refused (notAccountHolder); an offer
                   expecting another package is refused (assayFailed); a spent
                   invitation is refused.
   E4 raid         the method relays a raid (Alice gets 4 Y, loses 10 X): refused
@@ -400,7 +400,7 @@ check('E1-invitation-from-code', inv_sell.get('package') == PIN and inv_sell.get
       and inv_sell.get('holder') == ALICE and inv_sell.get('instance') == objects['swap']['object'], inv_sell)
 
 # --- E2: offers ---------------------------------------------------------------------
-offer('E2-foreign-funding-refused', bob_ws, 'swap', buy, 'buy', [(X, 1)], [(Y, 1)], 'refused', 'notAccountOwner',
+offer('E2-foreign-funding-refused', bob_ws, 'swap', buy, 'buy', [(X, 1)], [(Y, 1)], 'refused', 'notAccountHolder',
       funding=ALICE_ACCOUNT, account_cap=BOB_SPEND)
 offer('E2-wrong-package-refused', alice_ws, 'swap', sell, 'sell', [(X, 10)], [(Y, 5)], 'refused', 'assayFailed',
       funding=ALICE_ACCOUNT, account_cap=ALICE_SPEND, package='12345')

@@ -57,11 +57,6 @@
           "type": "eqSlots",
           "left": "joint/index/0/resource/field/1/after",
           "right": "resource/field/2/after"
-        },
-        {
-          "type": "eq",
-          "slot": "joint/index/0/cell/parent",
-          "value": "{REALM_QUEST}"
         }
       ]
     }

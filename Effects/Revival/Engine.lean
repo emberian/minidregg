@@ -126,9 +126,7 @@ structure EffectSpec (Ctx : Type) (S : Substrate) (O R : Type) where
 
 /-- Every refusal the dispatcher can return.  `refused` carries the declaration's own
 name for its refusal and that refusal's structured detail (canonical bytes, empty when the
-declaration states none); the rest are the dispatcher's, each naming the code.  It derives no
-`Repr`: a refusal is printed by the registry that knows the code's declaration
-(`Kernel/ResourceEffectRegistry.lean`), so the detail is read back in the declaration's words. -/
+declaration states none); the rest are the dispatcher's, each naming the code. -/
 inductive DispatchRefusal where
   | unregistered (code : Nat)
   | malformed (code : Nat)
@@ -140,7 +138,7 @@ inductive DispatchRefusal where
   | staleTarget (code : Nat)
   /-- Any other refusal of the live controller, by its `Reject` name. -/
   | host (code : Nat) (name : String)
-  deriving DecidableEq
+  deriving DecidableEq, Repr
 
 namespace EffectSpec
 

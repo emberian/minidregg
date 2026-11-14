@@ -175,11 +175,6 @@
               "type": "eqSlots",
               "left": "resource/field/3/after",
               "right": "joint/index/1/resource/field/1/after"
-            },
-            {
-              "type": "eq",
-              "slot": "joint/index/1/cell/parent",
-              "value": "{REALM_SHEET}"
             }
           ]
         }
@@ -226,11 +221,6 @@
               "type": "eqSlots",
               "left": "joint/index/1/resource/field/1/after",
               "right": "resource/field/3/before"
-            },
-            {
-              "type": "eq",
-              "slot": "joint/index/1/cell/parent",
-              "value": "{REALM_SHEET}"
             }
           ]
         }

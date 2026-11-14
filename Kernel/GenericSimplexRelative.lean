@@ -10,14 +10,13 @@ engine: every rule that acts is `GenericSimplex.step`'s.
   (`decode`); a receiver at a lower height cannot read the block and keeps nothing of it but
   the fact that the sender is ahead. After a commit the replica moves its own origin up
   (`rebase`): every block it keeps loses the committed prefix, and a received message whose
-  block does not extend the commit is dropped; a dropped VOTE leaves a `tombstone`, so a
-  member that voted twice in a view stays excluded from its VOTE counts.
+  block does not extend the commit is dropped.
 * Delivery policy. A message the replica cannot read, or a COMMIT for a view above its
   horizon, is not handed to the engine. One held COMMIT per member waits in `far`, and the
   engine gets a held group when a quorum of members names the same view and block
-  (`release`). Holding and reordering deliveries is something the specification's network
-  may always do, so the policy needs no safety argument of its own. (The cap on a member's
-  messages of one kind in one view is the specification's: `GenericSimplex.overCap`.)
+  (`release`). A member's messages of one kind in one view are capped (`cap`). Holding,
+  dropping and reordering deliveries is something the specification's network may always
+  do, so the policy needs no safety argument of its own.
 * Recovery. A replica keeps the COMMIT evidence of its last `Config.window` commits, each
   relative to the height before that commit. A peer that asks to leave a view (CANDIDATE(⊥))
   from a lower height is owed, each time it asks, the evidence from its own height on, in
@@ -103,15 +102,8 @@ def stripOption (tip : Block) : Option Block → Option (Option Block)
   | none => some none
   | some block => (strip tip block).map some
 
-/-- What is kept of a VOTE whose block does not extend the commit: that its sender voted
-for something else in this view. The engine reads a view's VOTEs across values in one
-place, `voteEquivocator`, and a replica that forgot the vote would start counting an
-equivocator's other vote. The empty block is a value no wire message decodes to
-(`decode_nonempty`), and no correct member is among its senders. -/
-def tombstone (m : Message) : Message := { m with value := some [] }
-
 /-- A view above the floor after a commit of `tip`. Received messages that do not extend
-the commit are dropped (a VOTE leaves its `tombstone`): no correct member sent them. What this replica itself sent,
+the commit are dropped: no correct member sent them. What this replica itself sent,
 prepared or proposed must extend it; if not, the result is `none` and the replica halts. -/
 def rebaseView (c : Config) (self : Nat) (tip : Block) (v : View) : Option View := do
   let sentCommit ← stripOption tip v.sentCommit
@@ -128,10 +120,8 @@ def rebaseView (c : Config) (self : Nat) (tip : Block) (v : View) : Option View 
         | none => if c.leader v.number == self then none else some none
   some { v with
     proposal, sentCommit, committed, sentCandidates, sentReadyCore, sentReadyRelay, prepared
-    received := v.received.foldl (fun kept m =>
-      match stripArgument tip m.value with
-      | some value => kept ++ [{ m with value }]
-      | none => if m.kind == .vote then addUnique kept (tombstone m) else kept) [] }
+    received := v.received.filterMap fun m =>
+      (stripArgument tip m.value).map fun value => { m with value } }
 
 /-- After a step that committed, the committed payloads leave the engine's state: the
 height rises by their number, every kept block loses them, and the floor view keeps only
@@ -158,6 +148,14 @@ def rebase (c : Config) (r : Replica) : Replica :=
       committed := r.committed ++ tip }
 
 /-! ## One input -/
+
+/-- What one member may put in one view record under one kind. A correct member sends at
+most one PROPOSE, VOTE and COMMIT there, and a CANDIDATE or READY for ⊥ and for each block
+with a correct vote: at most `2 * faults + 2`. -/
+def cap (c : Config) : Nat := c.parties + 1
+
+def capped (c : Config) (core : State) (m : Message) : Bool :=
+  ((viewAt core m.view).received.filter fun x => x.sender == m.sender && x.kind == m.kind).length ≥ cap c
 
 /-- Outputs of an engine step leave in wire form, then the origin moves if it committed.
 Floor evidence (a relayed message for the floor view) is relative to `evidenceHeight`;
@@ -199,6 +197,7 @@ def deliver (c : Config) (r : Replica) (now : Option Nat) (w : WireMessage) : Re
   | some m =>
       if m.kind == .commit && horizon c core < m.view then
         finish c { r with far := holdFar r.far w } (noteAhead core m.sender m.view)
+      else if capped c core m then finish c r core
       else finish c r (liveStep c core (match now with
         | some time => .deliveryAt time m
         | none => .delivery m))
@@ -286,26 +285,6 @@ theorem decode_encode (r : Replica) (m : Message)
     | some block =>
       have positive : 0 < block.length := List.length_pos_iff.mpr (nonempty block rfl)
       simp [decode, encode, above, positive]
-
-/-- No wire message decodes to the empty block: it is free to mark a `tombstone`. -/
-theorem decode_nonempty (r : Replica) (w : WireMessage) (m : Message) (block : Block)
-    (decoded : decode r w = some m) (valued : m.value = some block) : block ≠ [] := by
-  unfold decode at decoded
-  cases value : w.value with
-  | none => rw [value] at decoded; cases decoded; cases valued
-  | some run =>
-    simp only [value, above] at decoded
-    by_cases holds : (decide (w.height ≤ r.height) && decide (r.height - w.height < run.length)) = true
-    · simp only [holds, if_true, Option.map_some, Option.some.injEq] at decoded
-      rw [← decoded] at valued
-      simp only [Option.some.injEq] at valued
-      rw [Bool.and_eq_true, decide_eq_true_eq, decide_eq_true_eq] at holds
-      intro empty
-      rw [← valued] at empty
-      have := congrArg List.length empty
-      rw [List.length_drop, List.length_nil] at this
-      omega
-    · simp [holds] at decoded
 
 /-- A block from a sender that has committed more is not read. -/
 theorem decode_ahead (r : Replica) (w : WireMessage) (run : Block)

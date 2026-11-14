@@ -144,11 +144,6 @@
               "value": "{RAT}"
             },
             {
-              "type": "eq",
-              "slot": "joint/index/1/cell/parent",
-              "value": "{REALM_SHEET}"
-            },
-            {
               "type": "eqSlots",
               "left": "resource/field/3/after",
               "right": "joint/index/1/resource/field/6/after"
@@ -177,11 +172,6 @@
               "type": "eq",
               "slot": "joint/index/1/resource/field/0/after",
               "value": "{RAT}"
-            },
-            {
-              "type": "eq",
-              "slot": "joint/index/1/cell/parent",
-              "value": "{REALM_SHEET}"
             },
             {
               "type": "not",

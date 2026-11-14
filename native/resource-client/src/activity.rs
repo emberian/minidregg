@@ -22,7 +22,7 @@
 //!   births: [{object, transaction}..]}`.
 //!
 //! Every refusal is the Host's, by name (the kernel's reason, `notObjectHolder`,
-//! `notAccountOwner`, a signature refusal).
+//! `notAccountHolder`, a signature refusal).
 use crate::agent_reserve::field;
 use crate::*;
 use serde_json::{json, Value};
@@ -75,14 +75,11 @@ fn invoke(ws: &Ws, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
         Some((byte, body)) if crate::is_outcome_frame(*byte) && matches!(operation, 212 | 213) && !body.is_empty() => Ok(body.to_vec()),
         Some((254, body)) => Err(format!(
             "never forwarded: op{operation}: {}",
-            String::from_utf8_lossy(&body[body.len().saturating_sub(600)..]).split_whitespace().collect::<Vec<_>>().join(" ")
+            crate::refusal_text::render(body)
         )),
         Some((byte, body)) if crate::is_outcome_frame(*byte) => Err(format!(
             "refused: op{operation}: {}",
-            String::from_utf8_lossy(&body[body.len().saturating_sub(600)..])
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
+            crate::refusal_text::render(body)
         )),
         _ => Err(format!("activity: op{operation} returned an invalid frame")),
     }

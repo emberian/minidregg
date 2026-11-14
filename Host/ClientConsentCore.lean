@@ -463,14 +463,7 @@ def thinRefusal (refusal : NativeThinConsent.Refusal) : String :=
 when the opening seals nothing (`NativeThinConsent.Display`). -/
 def displayJson (display : NativeThinConsent.Display) : Json :=
   match display.post with
-  | none => Json.mkObj ([("target", toJson (toString display.target)), ("read", true)] ++
-      -- A registered observation: the signed operation's bytes and its declaration's lines.
-      match display.observation with
-      | some observation =>
-          [("effect", toJson (toString observation.code)),
-           ("operationBytes", toJson (SourceAgreementJson.encodeHex observation.operation)),
-           ("shows", toJson observation.lines)]
-      | none => [])
+  | none => Json.mkObj [("target", toJson (toString display.target)), ("read", true)]
   | some (bytes, root) => Json.mkObj ([("target", toJson (toString display.target))] ++
       (match root with
         | some root => [("postRoot", toJson (toString root.value))]

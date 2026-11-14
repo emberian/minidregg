@@ -101,11 +101,6 @@
                 "slot": "resource/field/2/delta",
                 "value": "0"
               }
-            },
-            {
-              "type": "eq",
-              "slot": "joint/index/1/cell/parent",
-              "value": "{ORG_BALLOTS}"
             }
           ]
         }

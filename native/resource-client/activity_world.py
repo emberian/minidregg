@@ -302,7 +302,7 @@ class World:
                      'NEWPARTICIPANT_EXTRA_SUBJECTS': str(root / 'enrollment-second.json'),
                      'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance,
                      # every owner capability's perRequestBytes is the template's ownerBudget, and a publish costs its own
-                     # byte length: the world apps' packages (104-150 KB) exceed the default 100000 (`notAccountOwner`)
+                     # byte length: the world apps' packages (104-150 KB) exceed the default 100000 (`notAccountHolder`)
                      'NEWPARTICIPANT_OWNER_BUDGET': OWNER_BUDGET})
         self.config = self.W / 'deployment' / 'pinned-config.json'
         self.sponsor = self.W / 'sponsor'

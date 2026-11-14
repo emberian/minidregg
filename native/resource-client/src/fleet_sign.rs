@@ -133,7 +133,7 @@ fn parse(argv: Vec<OsString>) -> Result<Flags> {
         topic_given: false,
         since: "0".into(),
         after_seq: None,
-        max_bytes: "262144".into(),
+        max_bytes: fleet::INCOMING_PAGE_BYTES.into(),
         limit: "64".into(),
         to: None,
         amount: None,

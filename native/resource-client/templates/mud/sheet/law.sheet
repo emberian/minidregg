@@ -62,54 +62,35 @@ any [ not (verb == 2), not (subject == {S}), field at delta == 0,
         eqSlots joint 1 room exit-in joint 2 room id,
         eqSlots joint 1 room exit-out joint 2 room id ] ];
 -- 17 door [J-MUD-1 rows 7, 8, 9]: every locked exit taken needs its key (joint 3) held by the mover. NEEDS K-JOINT-INDEX.
---   [K2] The key is a cell born under the realm's item cell {REALM_ITEM}: `id` and `owner` are fields its
---   holder's law could be written to hold, so without the birth record any cell with an item's field
---   numbers, an `id` equal to the lock's key and the mover as `owner` opened the door.
 any [ not (verb == 2), not (subject == {S}), field at delta == 0,
       all [ any [ not (eqSlots joint 1 room exit-n joint 2 room id), joint 1 room locked-n == 0,
-              all [ eqSlots joint 1 room key-n joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-n joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-s joint 2 room id), joint 1 room locked-s == 0,
-              all [ eqSlots joint 1 room key-s joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-s joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-e joint 2 room id), joint 1 room locked-e == 0,
-              all [ eqSlots joint 1 room key-e joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-e joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-w joint 2 room id), joint 1 room locked-w == 0,
-              all [ eqSlots joint 1 room key-w joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-w joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-ne joint 2 room id), joint 1 room locked-ne == 0,
-              all [ eqSlots joint 1 room key-ne joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-ne joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-nw joint 2 room id), joint 1 room locked-nw == 0,
-              all [ eqSlots joint 1 room key-nw joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-nw joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-se joint 2 room id), joint 1 room locked-se == 0,
-              all [ eqSlots joint 1 room key-se joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-se joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-sw joint 2 room id), joint 1 room locked-sw == 0,
-              all [ eqSlots joint 1 room key-sw joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-sw joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-u joint 2 room id), joint 1 room locked-u == 0,
-              all [ eqSlots joint 1 room key-u joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-u joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-d joint 2 room id), joint 1 room locked-d == 0,
-              all [ eqSlots joint 1 room key-d joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-d joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-in joint 2 room id), joint 1 room locked-in == 0,
-              all [ eqSlots joint 1 room key-in joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ],
+              all [ eqSlots joint 1 room key-in joint 3 item id, eqSlots joint 3 item owner subject ] ],
         any [ not (eqSlots joint 1 room exit-out joint 2 room id), joint 1 room locked-out == 0,
-              all [ eqSlots joint 1 room key-out joint 3 item id, eqSlots joint 3 item owner subject,
-                    joint 3 cell parent == {REALM_ITEM} ] ] ] ];
+              all [ eqSlots joint 1 room key-out joint 3 item id, eqSlots joint 3 item owner subject ] ] ] ];
 -- 18 dark [J-MUD-1 rows 5, 5b]: a dark room needs a lit lantern (joint 3 or 4) held by the mover. NEEDS K-JOINT-INDEX.
---   [K2] The lantern is a cell born under {REALM_ITEM}, stated inside the alternative that trusts it: a
---   separate clause could be met by a real lantern at one position while a look-alike at the other lit the room.
 any [ not (verb == 2), not (subject == {S}), field at delta == 0, joint 2 room dark == 0,
-      all [ joint 3 item kind == {LANTERN}, eqSlots joint 3 item owner subject, not (joint 3 item charges <= 0),
-            joint 3 cell parent == {REALM_ITEM} ],
-      all [ joint 4 item kind == {LANTERN}, eqSlots joint 4 item owner subject, not (joint 4 item charges <= 0),
-            joint 4 cell parent == {REALM_ITEM} ] ];
+      all [ joint 3 item kind == {LANTERN}, eqSlots joint 3 item owner subject, not (joint 3 item charges <= 0) ],
+      all [ joint 4 item kind == {LANTERN}, eqSlots joint 4 item owner subject, not (joint 4 item charges <= 0) ] ];
 -- 19 lease [J-MUD-6]: a leased room (a manse) admits only while now <= until. NEEDS K-CLOCK + K-JOINT-INDEX.
 any [ not (verb == 2), not (subject == {S}), field at delta == 0, joint 2 room leased == 0, leSlots clock now joint 2 room until ];
 -- 20 ref-at: the referee moves a sheet only when reviving it (to HOME, clause 23).
@@ -132,14 +113,10 @@ any [ not (verb == 2), not (all [ field alive before == 1, field alive after == 
       leSlotsOff clock now field respawn {NEG_RESPAWN} ];
 -- 26 attacker [J-MUD-3 rows 2, 4]: hurting this sheet (hp down or an affliction up) needs a live attacker at
 --   joint 0, in this room, whose pending intent was strike/cast naming this sheet, and this sheet alive.
---   NEEDS K-JOINT-INDEX. [K2] The attacker is a cell born under the realm's sheet cell {REALM_SHEET}: its
---   intent, target, alive and at are fields, and a cell born anywhere under a law of the referee's or an
---   accomplice's choosing could hold them. Clause 27 reads the same position and is reached only with this
---   alternative (26 and 27 are conjoined and both require it when the sheet is hurt), so the birth is stated once.
+--   NEEDS K-JOINT-INDEX.
 any [ not (verb == 2), all [ not (field hp delta <= -1), field aff-asthma delta <= 0, field aff-paralysis delta <= 0, field aff-clumsiness delta <= 0 ],
       all [ field alive before == 1, joint 0 sheet intent before in {1,2}, eqSlots joint 0 sheet target before field id,
-            joint 0 sheet alive before == 1, eqSlots joint 0 sheet at field at,
-            joint 0 cell parent == {REALM_SHEET} ] ];
+            joint 0 sheet alive before == 1, eqSlots joint 0 sheet at field at ] ];
 -- 27 attacker-paid [J-MUD-3 row 4b]: the attacker had balance (equilibrium for cast) and paid it:
 --   bal/after >= now + COST, written now <= bal/after - COST ({NEG_COST} = -COST, {NEG_ECOST} = -ECOST).
 --   NEEDS K-JOINT-INDEX + K-CLOCK + K-PRED-OFFSET. Positive form (SHEET-ITEM-LAW finding 4); here the

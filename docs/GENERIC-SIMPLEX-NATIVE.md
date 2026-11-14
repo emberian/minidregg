@@ -276,14 +276,8 @@ specification's network may always do, so the policy carries no safety argument.
   member (`holdFar_unique`), the one for that member's highest view. The engine gets held
   COMMITs when they are readable and within the horizon, or when a quorum of members holds
   the same view and block and no record above the horizon is already waiting (`release`).
-- The cap on a member's messages of one kind in one view record is not policy: it is the
-  specification's (`Config.cap` = `parties + 1`, `overCap` in `ingest`; proved:
-  `GenericSimplexWindow.ingest_over_cap`). A correct member sends at most `2 * faults + 2`.
-- The hold of far COMMITs is still policy here, and the specification still takes any
-  number of COMMITs above its horizon. Moving it means `State` holds messages that are
-  authentic but not yet received, and `step` receives them later on its own: every
-  invariant of the proof closure that speaks of received messages (`backed`, the receive
-  provenance and scope families) has to carry that set. Not done.
+- A member's messages of one kind in one view record are capped at `parties + 1` (`cap`):
+  a correct member sends at most `2 * faults + 2`.
 - `addOffer`'s refusal of a payload already committed sees only the payloads above the
   height (none between inputs). Not offering a committed operation again is the driver's.
 
@@ -306,28 +300,9 @@ block denotes and drops exactly the blocks that do not strictly extend the commi
 (`strip_denotes`, `strip_conflict`); and the specification's agreement theorem is the
 running replicas' given the refinement (`relative_agreement_of_refines`). Stated, not
 proved: `RelativeRefines` (`Verify/GenericSimplexRelativeReach.lean`), the refinement
-itself. Until it is proved, agreement of the running replicas rests on that statement.
-
-What its proof needs, and what was found looking for it:
-- It is not a step-for-step simulation of one specification run. `rebase` drops received
-  messages whose blocks do not extend the commit, and the specification never forgets a
-  received message. The one rule that reads a view's messages across values is
-  `voteEquivocator`: as first written, a replica that dropped a member's conflicting VOTE
-  began to count that member's other VOTE, which the specification's replica never does.
-  `rebase` now leaves a `tombstone` for a dropped VOTE (executed:
-  `equivocation_survives_commit`), so the dropped messages are ones no rule can act on
-  below a count of f + 1, and their senders are all faulty.
-- The relation to prove invariant is therefore: the replica's state is the specification
-  state's image under `strip` at the committed chain, up to received messages whose block
-  conflicts with the committed chain, each from a faulty member. The step lemma needs
-  (i) the safety invariant that a block a correct member supports in a view above a
-  committed view strictly extends the committed chain (then `above_denotes` reads what
-  the sender meant, and `strip` never fails on the replica's own sends), and (ii) that
-  rules are insensitive to at most f conflicting messages per value.
-- `RelativeRefines` also promises the same `current` and `lastCommitted`. That holds for
-  the specification run in which every delivery the policy holds or drops is delayed or
-  never made; it is part of the statement and stays.
-
+itself. Its proof is an induction on the run with the specification's safety invariants: a
+block a correct member supports in a view above a committed view extends the committed
+chain. Until it is proved, agreement of the running replicas rests on that statement.
 Executed (`Verify/GenericSimplexRelative.lean`): the same eight operations through both
 engines end in the same views, floors and chains; a replica four commits behind is served
 and catches up; one twelve behind stays behind until the COMMITs are replayed in order;
@@ -337,34 +312,12 @@ and catches up; one twelve behind stays behind until the COMMITs are replayed in
 rules (`2f+1` CANDIDATEs, `f+1` READYs) is enabled first; it used to send it once per
 rule. The F1 schedule did not depend on the duplicate: its facts hold unchanged.
 
-**The signed statement (decision; not implemented).** Today a COMMIT is signed over
-`commitmentBytes context view block` with the whole chain as `block`. Two correct signers
-at different heights encode one chain differently, so the statement becomes:
-
-    commitmentBytes context view length digest =
-      "MINI-SIMPLEX-COMMIT-SEND" ‖ 3 ‖ contextStream context ‖ nat view ‖ nat length ‖ digest
-
-- `length`: the number of payloads of the chain the COMMIT is for, empty protocol payloads
-  included (consensus ancestry, not the application height).
-- `digest`: 32 bytes, the running digest `D length` of that chain, where
-  `D 0 = cSHAKE256(contextStream context, S = "minidregg/simplex/chain", 32)` and
-  `D (i+1) = cSHAKE256(D i ‖ bytesStream payload_i, S = "minidregg/simplex/chain", 32)`.
-  `bytesStream` is the length-prefixed encoding the journal already uses, so the chain's
-  split into payloads is bound; `D 0` binds the context, so a digest of one domain's chain
-  is not one of another's.
-- A `Replica` keeps `D height` (32 bytes) beside `height`, and `rebase` extends it over the
-  payloads it commits. To sign or check a COMMIT for a relative block `run` it folds `run`
-  from its own digest: cost is the suffix, never the chain.
-- The wire COMMIT carries `(view, length, digest, signature)` beside the relative block, so
-  a receiver verifies the signature before it can read the block. A held far COMMIT
-  (`far`) is therefore authenticated when held, and a relayed one needs no re-encoding
-  clause (`RelAuthentic`'s second disjunct goes away).
-- A certificate is `(context, view, length, digest, signers)`. A verifier that holds the
-  chain up to some `h ≤ length - |suffix|` checks `fold (D h) suffix = digest`; one that
-  holds nothing replays from `D 0`. `exportable` and `certificateCandidates` then need the
-  floor's `(view, length, digest)` and the durable COMMIT witnesses, not old views.
-- The tag byte moves 2 → 3 and the journal format moves with it. Only COMMIT is signed
-  today; nothing else changes.
+**Signatures.** A COMMIT's signature is over `commitmentBytes context view block` with the
+whole chain as `block`. With relative blocks two correct signers at different heights
+encode one chain differently, so the signed statement has to be canonical some other way:
+the view, the chain's length and a running digest of the chain, which each replica can
+extend from its own digest over the suffix. That is the native layer's change and is not
+made.
 
 **Not adopted by the native layer.** `Compiler/GenericSimplexIO.lean` still replays with
 `step` on whole chains and checkpoints the whole state; `exportable` and
@@ -374,12 +327,11 @@ duplicate without giving it to the kernel. The wire and the journal therefore st
 whole chains, and no log format moves for the running replica until the native layer
 adopts it. The kernel harness and the witnesses run the new rules.
 
-**BREAKS: log magic version 9.** Version 7: the step changed (`validBlock`, `checked`,
+**BREAKS: log magic version 8.** Version 7: the step changed (`validBlock`, `checked`,
 `offers`, the tick guard, the `ingest` horizon and repeat answer) and the snapshot carries
-`ahead`. Version 8: `ingest` takes a COMMIT above the horizon and READY is sent once.
-Version 9: `ingest` caps a member's share of a view record. Each changes what a journal
-replays to. Older logs refuse (`GenericSimplexIO.v8_log_refused`). A mesh moves by
-re-genesis.
+`ahead`. Version 8: `ingest` takes a COMMIT above the horizon and READY is sent once, so a
+version-7 journal does not replay to the same states. Older logs refuse (`GenericSimplexIO.v7_log_refused`). A
+mesh moves by re-genesis.
 
 ## Native source consumer
 

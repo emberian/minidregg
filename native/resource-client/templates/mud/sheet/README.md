@@ -25,8 +25,8 @@ theorems cite. The appended files continue the numbering.
 | 14 | move-from | joint 1 is the room I am in | K-JOINT-INDEX |
 | 15 | move-to | joint 2 is the room I arrive in | K-JOINT-INDEX |
 | 16 | exits | some exit of joint 1 is joint 2 | K-JOINT-INDEX |
-| 17 | door | a locked exit needs its key (joint 3), held by the mover, a cell born under the realm's item cell `{REALM_ITEM}` | K-JOINT-INDEX, K2 identity slots |
-| 18 | dark | a dark room needs a lit lantern (joint 3 or 4), held by the mover, a cell born under `{REALM_ITEM}` | K-JOINT-INDEX, K2 identity slots |
+| 17 | door | a locked exit needs its key (joint 3), held by the mover | K-JOINT-INDEX |
+| 18 | dark | a dark room needs a lit lantern (joint 3 or 4), held by the mover | K-JOINT-INDEX |
 | 19 | lease | a leased room admits only while now ≤ until | K-CLOCK, K-JOINT-INDEX |
 | 20 | ref-at | the referee moves a sheet only when reviving it | — |
 | 21 | no-heal | the referee never raises hp except on revive | — |
@@ -34,7 +34,7 @@ theorems cite. The appended files continue the numbering.
 | 23 | revive | alive 0→1 only by `{REF}`, after a prayer and respawn ≤ now, to HPMAX at HOME | K-CLOCK |
 | 24 | respawn-at-death | respawn moves only on alive 1→0 | — |
 | 25 | death-timer | dying: `now ≤ respawn − RESPAWN` (**positive form, fails closed**) | K-CLOCK, K-PRED-OFFSET |
-| 26 | attacker | hurting needs a live attacker at joint 0, same room, whose intent names me, a cell born under the realm's sheet cell `{REALM_SHEET}` | K-JOINT-INDEX, K2 identity slots |
+| 26 | attacker | hurting needs a live attacker at joint 0, same room, whose intent names me | K-JOINT-INDEX |
 | 27 | attacker-paid | the attacker had bal/eq ≤ now and paid: `now ≤ bal − COST` / `now ≤ eq − ECOST` (**positive form**) | K-JOINT-INDEX, K-CLOCK, K-PRED-OFFSET |
 | 28 | bal-paid | the referee raises bal only for my physical intent, to `now ≤ bal − COST` (**positive form, fails closed**) | K-CLOCK, K-PRED-OFFSET |
 | 29 | eq-paid | the same for eq and cast, `now ≤ eq − ECOST` (**positive form, fails closed**) | K-CLOCK, K-PRED-OFFSET |
