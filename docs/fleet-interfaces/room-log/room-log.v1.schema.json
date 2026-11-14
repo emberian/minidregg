@@ -1,0 +1,66 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "urn:room-log-request:v1",
+ "title": "Requested room-log companion shapes",
+ "$comment": "DRAFT, not an existing upstream API. Physical API names and cursor encoding remain open. The row is opaque: the existing ChatBackend suite owns signing and verification. Wrapper vectors use synthetic rows, not valid signed ChatBackend rows.",
+ "oneOf": [
+  {"$ref": "#/$defs/link"},
+  {"$ref": "#/$defs/page"},
+  {"$ref": "#/$defs/wake"},
+  {"$ref": "#/$defs/gap"}
+ ],
+ "$defs": {
+  "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+  "cursor": {
+   "type": "object", "additionalProperties": false,
+   "required": ["room", "after", "head"],
+   "properties": {
+    "room": {"type": "string", "minLength": 1, "maxLength": 128},
+    "after": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "head": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]}
+   }
+  },
+  "link": {
+   "type": "object", "additionalProperties": false,
+   "required": ["kind", "v", "room", "position", "previous", "row", "digest"],
+   "properties": {
+    "kind": {"const": "room-log-link"}, "v": {"const": 1},
+    "room": {"type": "string", "minLength": 1, "maxLength": 128},
+    "position": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "previous": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "row": {"type": "object"},
+    "digest": {"$ref": "#/$defs/digest"}
+   }
+  },
+  "page": {
+   "type": "object", "additionalProperties": false,
+   "required": ["kind", "v", "room", "after", "next", "rows", "more", "source", "scanned_from_start"],
+   "properties": {
+    "kind": {"const": "room-log-page"}, "v": {"const": 1},
+    "room": {"type": "string", "minLength": 1, "maxLength": 128},
+    "after": {"$ref": "#/$defs/cursor"}, "next": {"$ref": "#/$defs/cursor"},
+    "rows": {"type": "array", "items": {"$ref": "#/$defs/link"}, "maxItems": 1024},
+    "more": {"type": "boolean"}, "source": {"enum": ["hot", "journal"]},
+    "scanned_from_start": {"const": false}
+   }
+  },
+  "wake": {
+   "type": "object", "additionalProperties": false,
+   "required": ["kind", "v", "page"],
+   "properties": {
+    "kind": {"const": "room-log-wake"}, "v": {"const": 1}, "page": {"$ref": "#/$defs/page"}
+   }
+  },
+  "gap": {
+   "type": "object", "additionalProperties": false,
+   "required": ["kind", "v", "room", "reason", "resume", "history_available"],
+   "properties": {
+    "kind": {"const": "room-log-gap"}, "v": {"const": 1},
+    "room": {"type": "string", "minLength": 1, "maxLength": 128},
+    "reason": {"enum": ["history-unavailable", "subscriber-overflow", "cursor-room-mismatch", "row-too-large", "ordering-frontier-unsettled"]},
+    "resume": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/cursor"}]},
+    "history_available": {"type": "boolean"}
+   }
+  }
+ }
+}

@@ -1,0 +1,702 @@
+{
+ "fixtures": {
+  "links": [
+   {
+    "digest": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+    "kind": "room-log-link",
+    "position": 1,
+    "previous": null,
+    "room": "room-a",
+    "row": {
+     "fixture_id": "row-1",
+     "text": "alpha"
+    },
+    "v": 1
+   },
+   {
+    "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+    "kind": "room-log-link",
+    "position": 2,
+    "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+    "room": "room-a",
+    "row": {
+     "fixture_id": "row-2",
+     "text": "beta"
+    },
+    "v": 1
+   },
+   {
+    "digest": "sha256:353dd7bfdfe5abf96e5ae7cfaebbc9d7a5ec3de348739def6f2853e3565928ea",
+    "kind": "room-log-link",
+    "position": 3,
+    "previous": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+    "room": "room-a",
+    "row": {
+     "fixture_id": "row-3",
+     "text": "gamma"
+    },
+    "v": 1
+   }
+  ]
+ },
+ "generated_by": "room_log_vectors.py",
+ "hash_rule": "sha256(CHAT.ROOM-LINK/v1 || 0x00 || canonical(link without digest)); canonical JSON follows PR19",
+ "scope": "Synthetic wrapper/schema checks only; not adapter, signature, durability, resource or concurrency qualification",
+ "status": "proposed-contract-examples",
+ "vectors": [
+  {
+   "expect": {
+    "response": {
+     "after": {
+      "after": 1,
+      "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a"
+     },
+     "kind": "room-log-page",
+     "more": true,
+     "next": {
+      "after": 2,
+      "head": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "room": "room-a"
+     },
+     "room": "room-a",
+     "rows": [
+      {
+       "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+       "kind": "room-log-link",
+       "position": 2,
+       "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+       "room": "room-a",
+       "row": {
+        "fixture_id": "row-2",
+        "text": "beta"
+       },
+       "v": 1
+      }
+     ],
+     "scanned_from_start": false,
+     "source": "hot",
+     "v": 1
+    }
+   },
+   "input": {
+    "after": {
+     "after": 1,
+     "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+     "room": "room-a"
+    },
+    "available": [
+     1,
+     2,
+     3
+    ],
+    "max_rows": 1
+   },
+   "name": "cursor-resume",
+   "why": "Only bounded new rows after the saved frontier, no byte-zero reparse"
+  },
+  {
+   "expect": {
+    "response": {
+     "after": {
+      "after": 1,
+      "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a"
+     },
+     "kind": "room-log-page",
+     "more": true,
+     "next": {
+      "after": 2,
+      "head": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "room": "room-a"
+     },
+     "room": "room-a",
+     "rows": [
+      {
+       "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+       "kind": "room-log-link",
+       "position": 2,
+       "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+       "room": "room-a",
+       "row": {
+        "fixture_id": "row-2",
+        "text": "beta"
+       },
+       "v": 1
+      }
+     ],
+     "scanned_from_start": false,
+     "source": "journal",
+     "v": 1
+    }
+   },
+   "input": {
+    "after": {
+     "after": 1,
+     "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+     "room": "room-a"
+    },
+    "physical_generation_changed": true
+   },
+   "name": "compaction-resume",
+   "why": "Moving physical bytes does not change a logical cursor"
+  },
+  {
+   "expect": {
+    "response": {
+     "after": {
+      "after": 1,
+      "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a"
+     },
+     "kind": "room-log-page",
+     "more": false,
+     "next": {
+      "after": 3,
+      "head": "sha256:353dd7bfdfe5abf96e5ae7cfaebbc9d7a5ec3de348739def6f2853e3565928ea",
+      "room": "room-a"
+     },
+     "room": "room-a",
+     "rows": [
+      {
+       "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+       "kind": "room-log-link",
+       "position": 2,
+       "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+       "room": "room-a",
+       "row": {
+        "fixture_id": "row-2",
+        "text": "beta"
+       },
+       "v": 1
+      },
+      {
+       "digest": "sha256:353dd7bfdfe5abf96e5ae7cfaebbc9d7a5ec3de348739def6f2853e3565928ea",
+       "kind": "room-log-link",
+       "position": 3,
+       "previous": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+       "room": "room-a",
+       "row": {
+        "fixture_id": "row-3",
+        "text": "gamma"
+       },
+       "v": 1
+      }
+     ],
+     "scanned_from_start": false,
+     "source": "journal",
+     "v": 1
+    }
+   },
+   "input": {
+    "after": {
+     "after": 1,
+     "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+     "room": "room-a"
+    },
+    "hot_positions": [
+     3
+    ],
+    "journal_positions": [
+     1,
+     2,
+     3
+    ]
+   },
+   "name": "cold-history",
+   "why": "Hot eviction does not erase journal history"
+  },
+  {
+   "expect": {
+    "clock_policy": "server-admission-time",
+    "hot_positions": [
+     2,
+     3
+    ],
+    "journal_positions": [
+     1,
+     2,
+     3
+    ],
+    "note": "Requested semantics; counters and actual RAM bounds not exercised"
+   },
+   "input": {
+    "admitted_ms": [
+     0,
+     1,
+     604800000
+    ],
+    "hot_window_ms": 604800000,
+    "max_hot_bytes": 4096,
+    "max_hot_rows": 2,
+    "max_pin_bytes": 1024,
+    "now_ms": 604800000
+   },
+   "name": "hot-window-boundary",
+   "why": "Proposed half-open seven-day window plus independent byte/row/pin bounds"
+  },
+  {
+   "expect": {
+    "response": {
+     "kind": "room-log-wake",
+     "page": {
+      "after": {
+       "after": 1,
+       "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+       "room": "room-a"
+      },
+      "kind": "room-log-page",
+      "more": true,
+      "next": {
+       "after": 2,
+       "head": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+       "room": "room-a"
+      },
+      "room": "room-a",
+      "rows": [
+       {
+        "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+        "kind": "room-log-link",
+        "position": 2,
+        "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+        "room": "room-a",
+        "row": {
+         "fixture_id": "row-2",
+         "text": "beta"
+        },
+        "v": 1
+       }
+      ],
+      "scanned_from_start": false,
+      "source": "hot",
+      "v": 1
+     },
+     "v": 1
+    },
+    "second_read_required": false
+   },
+   "input": {
+    "append": 2,
+    "subscription_frontier": {
+     "after": 1,
+     "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+     "room": "room-a"
+    }
+   },
+   "name": "inline-wake",
+   "why": "Wake includes the new rows; no second lookup required to inspect this batch"
+  },
+  {
+   "expect": {
+    "allowed_duplicate_identity": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+    "response": {
+     "kind": "room-log-wake",
+     "page": {
+      "after": {
+       "after": 1,
+       "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+       "room": "room-a"
+      },
+      "kind": "room-log-page",
+      "more": true,
+      "next": {
+       "after": 2,
+       "head": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+       "room": "room-a"
+      },
+      "room": "room-a",
+      "rows": [
+       {
+        "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+        "kind": "room-log-link",
+        "position": 2,
+        "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+        "room": "room-a",
+        "row": {
+         "fixture_id": "row-2",
+         "text": "beta"
+        },
+        "v": 1
+       }
+      ],
+      "scanned_from_start": false,
+      "source": "hot",
+      "v": 1
+     },
+     "v": 1
+    }
+   },
+   "input": {
+    "schedule": [
+     "read-through-1",
+     "append-2",
+     "subscribe-from-1"
+    ]
+   },
+   "name": "subscribe-race",
+   "why": "An append between initial read and registration has no lost interval"
+  },
+  {
+   "expect": {
+    "positions_added": 1,
+    "same_entry_digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7"
+   },
+   "input": {
+    "schedule": [
+     "append-key-a-row-2",
+     "lose-ack",
+     "retry-key-a-row-2"
+    ]
+   },
+   "name": "retry-identity",
+   "why": "Lost acknowledgement/exact retry keeps one immutable entry"
+  },
+  {
+   "expect": {
+    "positions_added_by_retry": 0,
+    "refused": "conflict"
+   },
+   "input": {
+    "first_row": {
+     "text": "beta"
+    },
+    "key": "key-a",
+    "retry_row": {
+     "text": "changed"
+    }
+   },
+   "name": "retry-conflict",
+   "why": "One idempotency key cannot authorize different row bytes"
+  },
+  {
+   "expect": {
+    "queue_growth_unbounded": false,
+    "response": {
+     "history_available": true,
+     "kind": "room-log-gap",
+     "reason": "subscriber-overflow",
+     "resume": {
+      "after": 1,
+      "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a"
+     },
+     "room": "room-a",
+     "v": 1
+    },
+    "silent_drop": false
+   },
+   "input": {
+    "after": {
+     "after": 1,
+     "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+     "room": "room-a"
+    },
+    "max_queue_bytes": 1024,
+    "max_queue_rows": 1,
+    "new_positions": [
+     2,
+     3
+    ]
+   },
+   "name": "slow-subscriber",
+   "why": "Overflow stays bounded and explicitly resumes from the journal"
+  },
+  {
+   "expect": {
+    "complete_empty_success": false,
+    "response": {
+     "history_available": false,
+     "kind": "room-log-gap",
+     "reason": "history-unavailable",
+     "resume": {
+      "after": 1,
+      "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a"
+     },
+     "room": "room-a",
+     "v": 1
+    }
+   },
+   "input": {
+    "after": {
+     "after": 1,
+     "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+     "room": "room-a"
+    },
+    "journal_available": false
+   },
+   "name": "missing-history",
+   "why": "Deleted/unavailable history is not an empty complete page"
+  },
+  {
+   "expect": {
+    "response": {
+     "history_available": false,
+     "kind": "room-log-gap",
+     "reason": "cursor-room-mismatch",
+     "resume": null,
+     "room": "room-a",
+     "v": 1
+    },
+    "rows_disclosed": 0
+   },
+   "input": {
+    "cursor_room": "room-b",
+    "requested_room": "room-a"
+   },
+   "name": "cross-room-cursor",
+   "why": "A cursor never widens room authorization or leaks another room"
+  },
+  {
+   "expect": {
+    "response": {
+     "history_available": true,
+     "kind": "room-log-gap",
+     "reason": "row-too-large",
+     "resume": {
+      "after": 1,
+      "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a"
+     },
+     "room": "room-a",
+     "v": 1
+    }
+   },
+   "input": {
+    "after": {
+     "after": 1,
+     "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+     "room": "room-a"
+    },
+    "max_page_bytes": 8
+   },
+   "name": "row-too-large",
+   "why": "A page byte limit cannot silently skip an oversized row or advance its cursor"
+  },
+  {
+   "expect": {
+    "response": {
+     "history_available": true,
+     "kind": "room-log-gap",
+     "reason": "ordering-frontier-unsettled",
+     "resume": {
+      "after": 1,
+      "head": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a"
+     },
+     "room": "room-a",
+     "v": 1
+    },
+    "silently_skip_late_entry": false
+   },
+   "input": {
+    "unsettled_earlier_key": [
+     11,
+     2,
+     2,
+     1
+    ],
+    "visible_merge_keys": [
+     [
+      12,
+      1,
+      1,
+      2
+     ]
+    ]
+   },
+   "name": "late-stream-frontier",
+   "why": "Current merge order needs a stable frontier before advancing a cursor"
+  },
+  {
+   "expect": {
+    "committed_wake_emitted": false,
+    "durably_committed": false,
+    "reason": "not-durable",
+    "signed_row_still_available": true
+   },
+   "input": {
+    "journal_write_succeeded": false,
+    "signed_row_available": true
+   },
+   "name": "journal-ack-failure",
+   "why": "Signing, anchoring and durable room-log acknowledgement are different states"
+  },
+  {
+   "expect": {
+    "chain_valid": true
+   },
+   "input": {
+    "links": [
+     {
+      "digest": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "kind": "room-log-link",
+      "position": 1,
+      "previous": null,
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-1",
+       "text": "alpha"
+      },
+      "v": 1
+     },
+     {
+      "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "kind": "room-log-link",
+      "position": 2,
+      "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-2",
+       "text": "beta"
+      },
+      "v": 1
+     },
+     {
+      "digest": "sha256:353dd7bfdfe5abf96e5ae7cfaebbc9d7a5ec3de348739def6f2853e3565928ea",
+      "kind": "room-log-link",
+      "position": 3,
+      "previous": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-3",
+       "text": "gamma"
+      },
+      "v": 1
+     }
+    ]
+   },
+   "name": "hash-chain-replay",
+   "why": "Wrapper hashes bind order and original row values, without modifying them"
+  },
+  {
+   "expect": {
+    "chain_valid": false
+   },
+   "input": {
+    "links": [
+     {
+      "digest": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "kind": "room-log-link",
+      "position": 1,
+      "previous": null,
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-1",
+       "text": "alpha"
+      },
+      "v": 1
+     },
+     {
+      "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "kind": "room-log-link",
+      "position": 2,
+      "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-2",
+       "text": "changed"
+      },
+      "v": 1
+     },
+     {
+      "digest": "sha256:353dd7bfdfe5abf96e5ae7cfaebbc9d7a5ec3de348739def6f2853e3565928ea",
+      "kind": "room-log-link",
+      "position": 3,
+      "previous": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-3",
+       "text": "gamma"
+      },
+      "v": 1
+     }
+    ]
+   },
+   "name": "changed-row-control",
+   "why": "A planted row mutation must not verify"
+  },
+  {
+   "expect": {
+    "chain_valid": false
+   },
+   "input": {
+    "links": [
+     {
+      "digest": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "kind": "room-log-link",
+      "position": 2,
+      "previous": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-2",
+       "text": "beta"
+      },
+      "v": 1
+     },
+     {
+      "digest": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "kind": "room-log-link",
+      "position": 1,
+      "previous": null,
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-1",
+       "text": "alpha"
+      },
+      "v": 1
+     },
+     {
+      "digest": "sha256:353dd7bfdfe5abf96e5ae7cfaebbc9d7a5ec3de348739def6f2853e3565928ea",
+      "kind": "room-log-link",
+      "position": 3,
+      "previous": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-3",
+       "text": "gamma"
+      },
+      "v": 1
+     }
+    ]
+   },
+   "name": "reorder-control",
+   "why": "A planted reorder must not verify"
+  },
+  {
+   "expect": {
+    "chain_valid": false
+   },
+   "input": {
+    "links": [
+     {
+      "digest": "sha256:c18ae39c5ac8667296a0f8cb96e1ff99722f92eb0b00916320cddc5eb4c28372",
+      "kind": "room-log-link",
+      "position": 1,
+      "previous": null,
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-1",
+       "text": "alpha"
+      },
+      "v": 1
+     },
+     {
+      "digest": "sha256:353dd7bfdfe5abf96e5ae7cfaebbc9d7a5ec3de348739def6f2853e3565928ea",
+      "kind": "room-log-link",
+      "position": 3,
+      "previous": "sha256:472ec6217a5c08896c456181861f2cb0c90f8987f90b91a0d03fb3ab1ecdeea7",
+      "room": "room-a",
+      "row": {
+       "fixture_id": "row-3",
+       "text": "gamma"
+      },
+      "v": 1
+     }
+    ]
+   },
+   "name": "missing-link-control",
+   "why": "A planted dropped predecessor must not verify"
+  }
+ ]
+}
