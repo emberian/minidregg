@@ -207,7 +207,6 @@ theorem liveLegacyCensusTeeth : LiveLegacyCensusTeeth := by
   have ne : ∀ k : UInt8, k.toNat ∈ liveLegacy → tag ≠ k :=
     fun k member same => outside (same ▸ member)
   have h0 := ne 0 (by decide)
-  have h1 := ne 1 (by decide)
   have h2 := ne 2 (by decide)
   have h3 := ne 3 (by decide)
   have h4 := ne 4 (by decide)
@@ -215,7 +214,7 @@ theorem liveLegacyCensusTeeth : LiveLegacyCensusTeeth := by
   have h6 := ne 6 (by decide)
   have h7 := ne 7 (by decide)
   have h8 := ne 8 (by decide)
-  simp [DeclaredResourceController.legacyPayloadDecode, h0, h1, h2, h3, h4, h5, h6, h7, h8]
+  simp [DeclaredResourceController.legacyPayloadDecode, h0, h2, h3, h4, h5, h6, h7, h8]
 
 /-! ## The registry keystone: the deployed dispatch IS the engine's, at every bound code.
 
@@ -559,6 +558,11 @@ theorem registryKeystone : RegistryKeystone := by
     rw [liveTargetDispatch_registered found] at admitted
     exact engine.frame code h found bytes ctx cell cell' admitted
 
+/-- **THE DEPLOYED KEYSTONE FOR CONTENT, PROVED.** The deployed dispatch dispatches through the
+registry, whose entry at code 1 is the handler derived from the content declaration, and code 1
+is no hand arm. -/
+theorem hostKeystone : HostKeystone := ⟨registryKeystone, rfl, by decide⟩
+
 /-! ## The poles of the cited read, through the deployed dispatch.
 
 The authority cell holds one capability, `⟨0⟩`: an observe grant whose scope names one field,
@@ -740,6 +744,7 @@ theorem registryTeeth : RegistryTeeth :=
 #assert_axioms liveLegacyCensus
 #assert_axioms liveLegacyCensusTeeth
 #assert_axioms registryKeystone
+#assert_axioms hostKeystone
 #assert_axioms registryAccepted
 #assert_axioms registryTeeth
 

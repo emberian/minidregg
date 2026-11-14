@@ -13,6 +13,7 @@ tags must stay out of this list: `payloadStream`'s round-trip is proved from
 module
 
 public import Kernel.CitedRead
+public import Kernel.ContentEffect
 
 @[expose] public section
 
@@ -25,7 +26,7 @@ open Minidregg.Theory.CellRegistry
 set_option autoImplicit false
 
 /-- **The registry**: wire code ↦ declaration. -/
-def liveEffects : List (Nat × Effect) := [(9, citedEffect)]
+def liveEffects : List (Nat × Effect) := [(1, contentEffect), (9, citedEffect)]
 
 /-- Whether a code is bound. -/
 def registeredCode (code : Nat) : Bool := (liveEffects.lookup code).isSome
@@ -92,14 +93,21 @@ abbrev citedCode : UInt8 := 9
 
 theorem effectAt_cited : effectAt citedCode.toNat = citedEffect := rfl
 
+/-- The content write's payload tag. -/
+abbrev contentCode : UInt8 := 1
+
+theorem effectAt_content : effectAt contentCode.toNat = contentEffect := rfl
+
 /-- The legacy payload tags are unbound (what `payloadStream`'s round-trip reads). -/
 theorem legacy_unbound :
-    registeredOctet 0 = false ∧ registeredOctet 1 = false ∧ registeredOctet 2 = false ∧
+    registeredOctet 0 = false ∧ registeredOctet 2 = false ∧
     registeredOctet 3 = false ∧ registeredOctet 4 = false ∧ registeredOctet 5 = false ∧
     registeredOctet 6 = false ∧ registeredOctet 7 = false ∧ registeredOctet 8 = false := by
   decide
 
 example : (effectAt citedCode.toNat).O = List FieldRead := rfl
+example : (effectAt contentCode.toNat).O = ContentResource.Command := rfl
+example : (effectAt contentCode.toNat).L = Hyperdocument.layout := rfl
 example : (effectAt (9 : UInt8).toNat).L = EffectDeclaration.effectLayout := rfl
 
 end Minidregg.Kernel.DeclaredResourceController

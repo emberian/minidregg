@@ -466,7 +466,6 @@ private def draftLines : Draft → List String
             | .kindRead => ["    authenticated whole kind definition read; no resource write"]
             | .registered code op => ((Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).display op).map fun line => "    " ++ line
             | .scalar actions => actions.map (fun a => "    " ++ actionText a)
-            | .content command => [s!"    content command ({(ContentResource.commandCodec.encode command).length} bytes)"]
             | .append _ => ["    stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]
             | .world actions => [s!"    world instance: {actions.length} guarded field actions"]
             | .moneyConsent consent =>

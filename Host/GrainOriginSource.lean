@@ -164,7 +164,6 @@ def render (packageBytes : List UInt8) (verifiedReceipt : Receipt)
       target.target == selection.publicationTarget &&
       match target.payload with
       | .scalar actions => !actions.isEmpty
-      | .content content => !content.actions.isEmpty
       | .append _ => true
       | .world actions => !actions.isEmpty
       | .kindDefinition _ => true

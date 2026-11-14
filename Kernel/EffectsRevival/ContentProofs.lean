@@ -91,31 +91,7 @@ theorem contentNarrowed_incomplete : ¬ contentNarrowed.Complete := by
   simp [contentNarrowed, contentFrame, contentActionFrame, sampleLinkCommand,
     ResourceObservationAdmission.contentFieldAt, ResourceObservationAdmission.contentField] at written
 
-/-! ## The live legacy census is false today. -/
-
-/-- `Payload.content` still carries code 1: the census is refuted until the migration
-deletes that constructor. -/
-theorem hostLegacyCensusRefutedToday : HostLegacyCensusRefutedToday := fun census =>
-  census (.content ⟨[]⟩) (by simp [payloadTag, DeclaredResourceController.payloadStream,
-    DeclaredResourceController.payloadEncode])
-
 /-! ## `ContentAgreement contentSpec`: the deployed content arm IS the declaration. -/
-
-theorem store_run_iff {L : Layout.{0, 0, 0}} :
-    ∀ (ps : List (Store.Op L)) (s s' : Store L),
-      (storeSubstrate L).run s ps = some s' ↔ Patch.ValidFrom s ps ∧ Patch.run s ps = s'
-  | [], s, s' => by
-      show (some s = some s') ↔ (True ∧ s = s')
-      exact ⟨fun h => ⟨trivial, Option.some.inj h⟩, fun h => h.2 ▸ rfl⟩
-  | p :: ps, s, s' => by
-      by_cases enabled : p.Enabled s
-      · have stepped : (storeSubstrate L).step p s = some (p.apply s) := by
-          simp only [storeSubstrate]; exact if_pos enabled
-        simp only [Substrate.run, stepped, Patch.ValidFrom, Patch.run_cons, enabled, true_and]
-        exact store_run_iff ps _ s'
-      · have stepped : (storeSubstrate L).step p s = none := by
-          simp only [storeSubstrate]; exact if_neg enabled
-        simp [Substrate.run, stepped, Patch.ValidFrom, enabled]
 
 /-- The content arm of `computeTarget` under a passing header: the source preparation, its
 post followed by the kernel's blinding rotation. -/
@@ -129,10 +105,10 @@ theorem computeTarget_content_header (ctx : LiveCtx) (command : ContentResource.
           (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
           (ContentResource.documentOf ctx.target)
           (DeclaredResourceController.contentContext ctx.snapshot ctx.ambient ctx.command) pre command with
-      | .error reason => .error (.content reason)
+      | .error reason => .error (.effect (.refused 1 (DeclaredResourceController.contentRefusalName reason) .empty))
       | .ok prepared => .ok (Patch.run prepared.post.logical
           (HyperdocumentCell.contentBlinding.patch pre.logical ctx.ambient.height)) := by
-  simp [DeclaredResourceController.computeTarget, contentTarget, object, bind,
+  simp [DeclaredResourceController.computeTarget_content_arm, contentTarget, object, bind,
     Except.bind, pure, Except.pure]
   split
   · rename_i stale
@@ -154,16 +130,16 @@ theorem contentAgreement : ContentAgreement contentSpec := by
   · intro version root rejected
     have notObject : ctx.kind ≠ .object := by
       intro object; simp [object] at rejected
-    simp [DeclaredResourceController.computeTarget, contentTarget, notObject, bind, Except.bind]
+    simp [DeclaredResourceController.computeTarget_content_arm, contentTarget, notObject, bind, Except.bind]
   · intro version root accepted wrongVersion
     have object : ctx.kind = .object := by simpa using accepted
     have wrongVersion' : version ≠ ContentResource.commandVersion := wrongVersion
-    simp [DeclaredResourceController.computeTarget, contentTarget, object, wrongVersion', bind,
+    simp [DeclaredResourceController.computeTarget_content_arm, contentTarget, object, wrongVersion', bind,
       Except.bind, pure, Except.pure]
   · intro root accepted commutes stale
     have object : ctx.kind = .object := by simpa using accepted
     have commutes' : command.commutes = false := commutes
-    simp [DeclaredResourceController.computeTarget, contentTarget, object, commutes',
+    simp [DeclaredResourceController.computeTarget_content_arm, contentTarget, object, commutes',
       bind, Except.bind, pure, Except.pure]
     intro same
     exact absurd same stale
@@ -183,7 +159,7 @@ theorem contentAgreement : ContentAgreement contentSpec := by
       refine ⟨?_, ?_, ?_⟩
       · intro post
         simp [EffectSpec.exec, refused, prepared]
-      · intro r computed
+      · intro name detail computed
         rw [prepared] at computed
         cases computed
         simp [EffectSpec.exec, refused]
@@ -217,7 +193,7 @@ theorem contentAgreement : ContentAgreement contentSpec := by
         refine ⟨?_, ?_, ?_⟩
         · intro post
           simp [EffectSpec.exec, refused, prepared]
-        · intro r computed
+        · intro name detail computed
           rw [prepared] at computed
           cases computed
           simp [EffectSpec.exec, refused]
@@ -240,7 +216,11 @@ theorem contentAgreement : ContentAgreement contentSpec := by
         have patch : DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient
             ctx.command (contentTarget ctx contentSpec.version root command observe epoch roster) pre =
               progress.2 ++ HyperdocumentCell.contentBlinding.patch pre.logical ctx.ambient.height := by
-          simp [DeclaredResourceController.targetPatch, contentTarget, ran]
+          have arm := DeclaredResourceController.targetPatch_content_arm ctx.snapshot ctx.semantics
+            ctx.ambient ctx.command ctx.kind ctx.target ctx.capability contentSpec.version root command
+            observe epoch roster pre nonempty
+          rw [ran] at arm
+          exact arm
         have complete := contentComplete ctx command pre.logical progress.2 emitted
         refine ⟨?_, ?_, ?_⟩
         · intro post
@@ -261,7 +241,7 @@ theorem contentAgreement : ContentAgreement contentSpec := by
             erw [store_run_validFrom (L := Hyperdocument.layout) _ _ valid]
             rw [postExact] at computed
             simpa [Patch.run_append] using computed
-        · intro r computed
+        · intro name detail computed
           rw [preparedOk] at computed
           cases computed
         · intro ps emitted'
@@ -396,9 +376,8 @@ theorem hostDispatch_blinded : ∃ post,
   have selected : DeclaredResourceController.selectTarget sampleDeployment
       (hostTarget sampleHostCtx (.content sampleLinkCommand)) (⟨.content, cellOf blindedStore⟩ : HostCell) =
         some (cellOf blindedStore) := by
-    simp only [DeclaredResourceController.selectTarget, hostTarget, sampleHostCtx, hostCtxOf]
-    have object : sampleCtx.kind = .object := rfl
-    rw [if_pos object, if_pos blindedCell_law]
+    simp only [DeclaredResourceController.selectTarget_content, hostTarget, sampleHostCtx, hostCtxOf]
+    rw [if_pos blindedCell_law]
   unfold hostTargetDispatch
   rw [if_neg (by decide), decoded]
   simp only
@@ -420,50 +399,11 @@ theorem hostAccepted : HostAccepted := by
   obtain ⟨post, -, dispatched⟩ := hostDispatch_blinded
   exact ⟨sampleLinkCommand, sampleHostCtx, ⟨.content, cellOf blindedStore⟩, _, dispatched⟩
 
-/-! ## The deployed payload decoder, read as a prefix. -/
-
-theorem contentPrefixAgreement : ContentPrefixAgreement := by
-  intro rest
-  cases decoded : ContentResource.commandStream.decodePrefix rest with
-  | none =>
-    simp [payloadPrefix, readPrefix, DeclaredResourceController.payloadStream, decoded,
-      DeclaredResourceController.payloadEncode,
-      DeclaredResourceController.legacyPayloadDecode, DeclaredResourceController.legacy_unbound.2.1,
-      contentHandler, contentHandlerOf, EffectSpec.comap, List.lookup]
-  | some pair =>
-    obtain ⟨command, suffix⟩ := pair
-    simp [payloadPrefix, readPrefix, DeclaredResourceController.payloadStream, decoded, payloadTag,
-      DeclaredResourceController.payloadEncode,
-      DeclaredResourceController.legacyPayloadDecode, DeclaredResourceController.legacy_unbound.2.1,
-      contentHandler, contentHandlerOf, EffectSpec.comap, List.lookup]
-
-theorem contentPrefixAccepts : ContentPrefixAccepts :=
-  ⟨⟨[]⟩, [], by
-    have decoded := ContentResource.commandStream.decodePrefix_encode ⟨[]⟩ []
-    simp only [List.append_nil] at decoded
-    simp [payloadPrefix, DeclaredResourceController.payloadStream, payloadTag, decoded,
-      DeclaredResourceController.payloadEncode,
-      DeclaredResourceController.legacyPayloadDecode, DeclaredResourceController.legacy_unbound.2.1]⟩
-
-theorem contentPrefixTeeth : ContentPrefixTeeth := by
-  intro same
-  have content : readPrefix [(3, contentHandler)] [3] = none := rfl
-  have read : payloadPrefix [3] = some (3, [], []) := rfl
-  rw [content, read] at same
-  cases same
-
-/-! ## Axiom pins. -/
-
-#assert_axioms hostLegacyCensusRefutedToday
-
 #assert_axioms contentComplete
 #assert_axioms contentNarrowed_incomplete
 #assert_axioms contentAgreement
 #assert_axioms contentAccepted
 #assert_axioms contentTeeth
 #assert_axioms hostAccepted
-#assert_axioms contentPrefixAgreement
-#assert_axioms contentPrefixAccepts
-#assert_axioms contentPrefixTeeth
 
 end Minidregg.Effects.Revival

@@ -122,7 +122,10 @@ theorem contentSpec_sem (ctx : LiveCtx) (command : ContentResource.Command)
 
 @[simp] theorem contentSpec_opStream : contentSpec.opStream = ContentResource.commandStream := rfl
 
-@[simp] theorem contentSpec_refusalName (r : ContentResource.Reject) : contentSpec.refusalName r = reprStr r := rfl
+@[simp] theorem contentSpec_refusalName (r : ContentResource.Reject) :
+    contentSpec.refusalName r = DeclaredResourceController.contentRefusalName r := rfl
+
+@[simp] theorem contentSpec_refusalDetail (r : ContentResource.Reject) : contentSpec.refusalDetail r = .empty := rfl
 
 @[simp] theorem contentSpec_rotated (loc : Address Hyperdocument.layout) :
     contentSpec.rotated loc = (match loc.1 with | .blinding => true | _ => false) := rfl
@@ -138,8 +141,11 @@ abbrev contentTarget (ctx : LiveCtx) (version : Nat) (root : Digest)
     DeclaredResourceController.Target :=
   ⟨ctx.kind, ctx.target, ctx.capability, version, root, .content command, observe, epoch, roster⟩
 
-/-- **LIVE KEYSTONE: the deployed content arm agrees with the declaration.**  For every
-transaction context, content command and loaded content cell:
+/-- **LIVE KEYSTONE: the deployed computation of a content target agrees with the declaration.**
+A content payload is the registered operation at code 1, so the deployed computation is
+`Effect.compute contentEffect` read through `computeTarget`; this states what that computation is
+against a declaration `E`, and its teeth (`ContentTeeth`, `ContentCommuteTeeth`) are what it is
+not. For every transaction context, content command and loaded content cell:
 
 1. header — the live arm's three header refusals are the generic ones the declaration's
    `accepts`/`version`/`commutes` determine (`wrongRole`, `unsupportedVersion`, and
@@ -148,7 +154,8 @@ transaction context, content command and loaded content cell:
    command commutes, at ANY planned root), the derived executor admits with post `p`
    exactly when the live arm computes `p` AND the live patch validates at the loaded
    store (what `prepareTarget` requires before it builds a candidate);
-3. refusal — a content refusal of the live arm is the declaration's, by name;
+3. refusal — a refusal the deployed computation names under code 1 is the declaration's, with
+   the same name and detail;
 4. descriptor — the live patch IS the declaration's descriptor followed by its rotate
    (`computeTarget`/`targetPatch` stop being twins);
 5. authority — `targetField`, `targetRatchet`, `targetAmount`, `payloadVerb` and
@@ -176,10 +183,11 @@ def ContentAgreement (E : ContentSpec) : Prop :=
           Patch.ValidFrom pre.logical
             (DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient ctx.command
               (contentTarget ctx E.version root command observe epoch roster) pre))) ∧
-    (∀ r : ContentResource.Reject,
+    (∀ (name : String) (detail : ByteArray),
       DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient ctx.command
-          (contentTarget ctx E.version root command observe epoch roster) pre = .error (.content r) →
-        E.exec 1 ctx command pre.logical = .error (.refused 1 (E.refusalName r) (E.refusalDetail r))) ∧
+          (contentTarget ctx E.version root command observe epoch roster) pre =
+            .error (.effect (.refused 1 name detail)) →
+        E.exec 1 ctx command pre.logical = .error (.refused 1 name detail)) ∧
     (∀ ps, E.sem ctx command pre.logical = .ok ps →
       DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient ctx.command
           (contentTarget ctx E.version root command observe epoch roster) pre =
@@ -249,20 +257,20 @@ def ContentCommuteTeeth : Prop :=
 /-- **The live keystone, whole.** -/
 def LiveKeystone : Prop := ContentAgreement contentSpec ∧ ContentComplete
 
-/-! ## §7. The DEPLOYED keystone: the Host's target dispatch dispatches through the registry.
+/-! ## §7. The DEPLOYED keystone: the Host's target dispatch dispatches content through the registry.
 
-`ContentAgreement` alone would license keeping the hand arm beside the declaration (the
-law-13 twin).  `HostKeystone` is the statement that closes it: today's target dispatch,
-`hostTargetDispatch` (the payload decode, `selectTarget`, `computeTarget`, the
-`targetPatch` validation and `packTarget` the controller runs per target), dispatches
-through the one-entry registry `[(1, contentHandler)]` with every other payload code in
-`hostLegacy`.  `noTwin` puts code 1 out of the hand arms.
+`ContentAgreement` alone would license keeping a hand arm beside the declaration (the law-13
+twin). `HostKeystone` closes it for content: the deployed target dispatch
+(`liveTargetDispatch`: the payload decode, `selectTarget`, `computeTarget`, the `targetPatch`
+validation and `packTarget` the controller runs per target) dispatches through the registry
+(`RegistryKeystone`, §7b), the registry binds code 1 to the handler DERIVED from the content
+declaration, and code 1 is not a hand arm. `Payload` has no content constructor, so there is
+no arm for a twin to be.
 
-**Known false today, by clause:** `unregistered`: an unknown payload tag (9-255, or a code
-of 256 and up) is refused `malformed`, not by name, and code 1 is still served by the hand
-arm, which `agreement` only matches if the arm is the declaration (`ContentAgreement` plus
-`ContentComplete`).  The migration commit makes it true by rewiring the payload decoder
-through the registry and deleting the content arms; this statement is that commit's gate.
+`hostTargetDispatch`, `contentHandler` and the statements over them below (`HostTeeth`,
+`PrepareFactors`, the accepted poles) are the content dispatch written out by hand: the header
+in the live order, the content cell selected and packed. They are what the derived handler is
+checked against, pole by pole.
 
 Scope: the target dispatch, not the whole of `prepareTarget` (the post law, the policy
 source, the audience freshness and the authority legs stay the controller's). -/
@@ -291,7 +299,6 @@ def ofReject (code : Nat) : DeclaredResourceController.Reject → DispatchRefusa
   | .wrongRole => .wrongRole code
   | .unsupportedVersion => .unsupportedVersion code
   | .staleTarget => .staleTarget code
-  | .content r => .refused code (reprStr r) .empty
   | .effect refusal => refusal
   | r => .host code (reprStr r)
 
@@ -354,12 +361,8 @@ def contentHandlerOf (E : ContentSpec) : Handler HostCtx HostCell where
 
 def contentHandler : Handler HostCtx HostCell := contentHandlerOf contentSpec
 
-/-- Every payload code but content's is still a hand arm. -/
+/-- Every payload code but content's and the cited read's is still a hand arm. -/
 def hostLegacy : List Nat := [0, 2, 3, 4, 5, 6, 7, 8]
-
-/-- **THE DEPLOYED KEYSTONE.** -/
-def HostKeystone : Prop :=
-  Dispatches [(1, contentHandler)] hostLegacy hostTargetDispatch
 
 /-- **Teeth.**  The host dispatch does not dispatch through a registry whose content
 handler drops the rotate, nor through one that also keeps code 1 as a hand arm. -/
@@ -391,7 +394,8 @@ def HostMovedRootAccepted : Prop :=
 
 `Payload` has an open constructor, `registered code op`, whose every arm reads the declaration
 `effectAt code` (`Kernel/ResourceEffectRegistry.lean`). The cited read is bound at code 9 and
-has no constructor and no hand arm; codes 0 to 8 are still hand arms.
+has no constructor and no hand arm, nor has the content write at code 1; codes 0 and 2 to 8 are
+still hand arms.
 
 `RegistryKeystone` is `Dispatches` of the DEPLOYED functions (`payloadStream`'s decode,
 `selectTarget`, `computeTarget`, the `targetPatch` validation, `packTarget`, exactly
@@ -416,7 +420,7 @@ def hostRegistry : Registry HostCtx HostCell :=
   DeclaredResourceController.liveRegistry.map fun entry => (entry.1, entry.2.comap dispatchCtxOf)
 
 /-- The payload codes that are still hand arms. -/
-def liveLegacy : List Nat := [0, 1, 2, 3, 4, 5, 6, 7, 8]
+def liveLegacy : List Nat := [0, 2, 3, 4, 5, 6, 7, 8]
 
 /-- **The deployed target dispatch.** A code neither bound nor a hand arm is refused by name;
 every other code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,
@@ -429,6 +433,15 @@ def liveTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell :
 
 /-- **THE REGISTRY KEYSTONE.** -/
 def RegistryKeystone : Prop := Dispatches hostRegistry liveLegacy liveTargetDispatch
+
+/-- **THE DEPLOYED KEYSTONE, for content.** The deployed target dispatch dispatches through the
+registry; the registry's entry at code 1 is the handler derived from the content declaration
+(`Effect.handler`, nothing authored for the dispatch); and code 1 is not a hand arm. -/
+def HostKeystone : Prop :=
+  RegistryKeystone ∧
+  hostRegistry.lookup 1 =
+    some ((DeclaredResourceController.contentEffect.handler 1).comap dispatchCtxOf) ∧
+  1 ∉ liveLegacy
 
 /-- **Premise inhabitation.** Every bound handler is lawful: sound (its `select` and `pack`
 are inverse both ways under every context, the store substrate is framed) and complete. -/
@@ -506,10 +519,7 @@ audience, never the payload or the command.  The bridge's three directions (acce
 acceptance up to generic refusal, refusal by name) are its corollaries, and it is the shape
 `prepareTarget` takes at the migration commit, where this is that commit's gate.
 
-`HostLegacyCensus` is the structural deletion check over the live legacy input type, the
-`Payload` inductive: no payload constructor at a registered code.  It is FALSE today
-(`Payload.content` has tag 1); it becomes provable exactly when the migration removes that
-constructor. -/
+The census of what the hand decoder still reads is `LiveLegacyCensus` (§7b). -/
 
 /-- The host context of a content target. -/
 def hostCtxOf (ctx : LiveCtx) (deployment : DeclaredResourceController.Deployment)
@@ -535,7 +545,12 @@ def genericChecks (deployment : DeclaredResourceController.Deployment)
 
 /-- **THE RECEIVER FACTORIZATION.**  For a content target whose slot is present, the
 deployed preparation (its post packed, its refusals named) is the dispatch, then the
-generic checks. -/
+generic checks.
+
+OWED for `contentSpec` since content became a registered effect. It was proved against the hand
+arm, whose selection implied the role; the declaration's selection does not (a content cell is
+selected under any role and the computation refuses `wrongRole`), so the proof needs that case
+and is to be restated for every bound code over `hostRegistry`, from `effect_dispatch_fire`. -/
 def PrepareFactors (E : ContentSpec) : Prop :=
   ∀ (deployment : DeclaredResourceController.Deployment)
     (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
@@ -551,45 +566,5 @@ def PrepareFactors (E : ContentSpec) : Prop :=
       (dispatch [(1, contentHandlerOf E)] 1 (ContentResource.commandStream.encode command)
           (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
         genericChecks deployment directory ctx.snapshot ctx.target epoch before
-
-/-- **THE LIVE LEGACY CENSUS** (false until the content constructor is deleted). -/
-def HostLegacyCensus : Prop := LegacyDisjoint payloadTag [(1, contentHandler)]
-
-/-- **Census teeth, today**: the content payload still carries code 1, so the census is
-false until the migration deletes it. -/
-def HostLegacyCensusRefutedToday : Prop := ¬ HostLegacyCensus
-
-/-! ### The deployed payload decoder, read as a prefix (review gap 3, live).
-
-`targetStream` reads a target's payload with `payloadStream.decodePrefix` and then continues
-with the target's later fields.  `ContentPrefixAgreement` says that on content's code the
-deployed decoder consumes exactly what the registry's prefix reader consumes and hands back
-the same suffix, so routing the payload through the registry at the migration commit does
-not move a single target's bytes.  Its teeth: the agreement is not a property of every code
-(binding the content handler at the observe-only read's code 3 disagrees). -/
-
-/-- The deployed payload decoder as a prefix reader: the tag octet, the payload's bytes after
-it, the suffix. -/
-def payloadPrefix : PrefixReader := fun bytes =>
-  (DeclaredResourceController.payloadStream.decodePrefix bytes).map fun decoded =>
-    (payloadTag decoded.1, (DeclaredResourceController.payloadStream.encode decoded.1).tail, decoded.2)
-
-/-- **LIVE PREFIX AGREEMENT.**  On content's code, every byte string is read alike by the
-deployed payload decoder and by the registry's prefix reader: refused alike, or the same
-operation bytes and the same suffix. -/
-def ContentPrefixAgreement : Prop :=
-  ∀ rest, payloadPrefix (1 :: rest) = readPrefix [(1, contentHandler)] (1 :: rest)
-
-/-- **Satisfiable.**  The agreement's accepting side is inhabited: a content command's
-encoding after code 1, with any suffix, is read as that command's bytes and that suffix. -/
-def ContentPrefixAccepts : Prop :=
-  ∃ (command : ContentResource.Command) (suffix : List UInt8),
-    payloadPrefix (1 :: (ContentResource.commandStream.encode command ++ suffix)) =
-      some (1, ContentResource.commandStream.encode command, suffix)
-
-/-- **Teeth.**  At the read's code (3), the deployed decoder accepts `[3]` (an observe-only
-read, no bytes after its tag) while the content handler bound there refuses it. -/
-def ContentPrefixTeeth : Prop :=
-  payloadPrefix [3] ≠ readPrefix [(3, contentHandler)] [3]
 
 end Minidregg.Effects.Revival

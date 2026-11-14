@@ -575,7 +575,6 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
         · cases funding : consent.funding with
           | none => intro p hp; cases hp
           | some supplied => exact fundingProject_unjoint supplied
-    | content content => exact contentProject_unjoint _ _ _
     | append request => exact streamSlots_unjoint _ _
     | world _ => exact WorldKindProjection.project_unjoint _ _ _
     | kindDefinition _ => exact WorldKindProjection.definitionProject_unjoint _ _
@@ -1509,7 +1508,6 @@ def targetField (target : Target) : Address target.layout → CellField := by
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
-    | content _ => exact fun address => ResourceObservationAdmission.contentFieldAt address
     | append _ => exact fun _ => .body
     | world _ => exact fun _ => .body
     | kindDefinition _ | kindRead => exact fun _ => .body
@@ -1526,7 +1524,6 @@ def targetAmount (target : Target) :
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact fun _ value => value
-    | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
     | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | read =>
         exact fun _ _ => 0
@@ -1541,7 +1538,6 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
-    | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
     | read => exact fun _ => false
     | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ =>
@@ -1568,10 +1564,6 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) pre post
-    | content action =>
-      exact ResourceObservationAdmission.footprintOf
-        (changedEffect ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩ pre post)
-        (targetField ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .content action, observe, audienceEpoch, audienceRoster⟩) pre post
     | append action =>
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩ pre post)
@@ -2786,34 +2778,39 @@ theorem transclude_requires_source_coverage [DecidableEq F]
     ∃ j : TargetIndex command, command.targets[j].target = request.source ∧
       command.targets[j].payload = .read ∧
       Nonempty (ReadLeg prepared j (signed.observeEnvelopes[j.val]?.getD [])) ∧
-      ∃ store, command.targets[j].contentStore? (prepared.targets j).pre = some store ∧
-        ContentResource.openingHolds store request = true := by
-  have all := prepared.openings
-  unfold openingsCheck at all
-  have atHost := List.all_eq_true.mp all i (List.mem_finRange i)
-  simp only [hostPayload] at atHost
-  have atAction := List.all_eq_true.mp atHost _ member
-  simp only at atAction
+      ∃ value : ContentResource.ContentCell, (prepared.targets j).before = ⟨.content, value⟩ ∧
+        ContentResource.openingHolds value.logical request = true := by
+  have unrefused := prepared.openings
+  unfold openingsRefusal at unrefused
+  have atHost := List.findSome?_eq_none_iff.mp unrefused i (List.mem_finRange i)
+  unfold targetOpening at atHost
+  rw [hostPayload] at atHost
+  have all : ((effectAt (1 : UInt8).toNat).opens content).all (fun opening =>
+      (List.finRange command.targets.length).any fun j =>
+        decide (command.targets[j].target = opening.1) &&
+          decide (command.targets[j].payload = .read) &&
+            opening.2 ((prepared.targets j).before)) = true := by
+    by_contra failed
+    have reduced : (if ((effectAt (1 : UInt8).toNat).opens content).all (fun opening =>
+        (List.finRange command.targets.length).any fun j =>
+          decide (command.targets[j].target = opening.1) &&
+            decide (command.targets[j].payload = .read) &&
+              opening.2 ((prepared.targets j).before)) = true
+      then (none : Option Effects.Revival.DispatchRefusal)
+      else some (Effects.Revival.DispatchRefusal.refused (1 : UInt8).toNat "staleOpening" .empty)) =
+        Option.none := atHost
+    rw [if_neg failed] at reduced
+    cases reduced
+  obtain ⟨holdsAt, listed, opened⟩ := mem_contentOpens member
+  have atAction := List.all_eq_true.mp all (request.source, holdsAt) listed
   obtain ⟨j, _, holds⟩ := List.any_eq_true.mp atAction
   simp only [Bool.and_eq_true, decide_eq_true_eq] at holds
   obtain ⟨⟨sameTarget, isRead⟩, opening⟩ := holds
-  have different : i.val ≠ j.val := by
-    intro same
-    have equal : i = j := Fin.ext same
-    subst equal
-    rw [hostPayload] at isRead
-    cases isRead
   have many : command.requiresObservation = true :=
     requiresObservation_of_observeOnly j (by
       simp only [Target.observeOnly, isRead])
-  refine ⟨j, sameTarget, isRead, ⟨accepted.observations many j⟩, ?_⟩
-  have checked : (match command.targets[j].contentStore? (prepared.targets j).pre with
-      | some store => ContentResource.openingHolds store request
-      | none => false) = true := opening
-  split at checked
-  · rename_i store found
-    exact ⟨store, found, checked⟩
-  · cases checked
+  obtain ⟨value, shape, held⟩ := opened _ opening
+  exact ⟨j, sameTarget, isRead, ⟨accepted.observations many j⟩, value, shape, held⟩
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.transclude_requires_source_coverage' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms transclude_requires_source_coverage

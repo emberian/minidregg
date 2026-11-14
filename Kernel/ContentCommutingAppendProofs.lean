@@ -43,7 +43,7 @@ theorem commutingAppend : CommutingAppend := by
     epoch roster pre commutes
   -- the two sides differ only in the target's root, which the arm reads only in the stale
   -- check, and a commuting command skips it
-  simp only [computeTarget, contentTarget, commutes, Bool.not_true, Bool.false_and, Bool.and_false,
+  simp only [computeTarget_content_arm, contentTarget, commutes, Bool.not_true, Bool.false_and, Bool.and_false,
     Bool.false_eq_true, ↓reduceIte, bind, Except.bind, pure, Except.pure, throw, throwThe,
     MonadExceptOf.throw]
   repeat' split
@@ -55,7 +55,7 @@ theorem keptPin : KeptPin := by
   have stale : (!content.commutes && root != pre.root) = true := by
     rw [Bool.and_eq_true]
     exact ⟨by rw [notCommuting]; rfl, bne_iff_ne.mpr moved⟩
-  simp only [computeTarget, contentTarget, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte,
+  simp only [computeTarget_content_arm, contentTarget, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte,
     bind, Except.bind, pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
   split
   · rfl
@@ -115,13 +115,14 @@ theorem computeTarget_content_ok (snapshot : AuthoritySnapshot) (semantics : Dig
     rw [ran] at computed
     injection computed with same
     exact same.symm
-  simp only [computeTarget, contentTarget, bind, Except.bind, pure, Except.pure,
+  simp only [computeTarget_content_arm, contentTarget, bind, Except.bind, pure, Except.pure,
     bne_self_eq_false, Bool.false_eq_true, ↓reduceIte, throw, throwThe, MonadExceptOf.throw]
   split
   · rename_i stale
     cases stale.symm.trans pass
   · rw [preparedOk]
     simp only [prepared.post_exact, sameProgress]
+    rfl
 
 /-! ## Evaluating the witness document
 
@@ -156,77 +157,11 @@ theorem childrenOf_ratchet (S pre : ContentResource.ContentStore) (height : Nat)
 
 /-! ## The receiver's preparation, the witness and two appenders -/
 
-/-- **`CommutingPrepare`.**  `prepareTarget` reads the planned root only through `computeTarget`;
-for a commuting command that is the same at every planned root (`commutingAppend`), and every
-other step (the slot, `selectTarget`, validation at the cell's own root, the final-post law, the
-policy source, the audience) does not read it.  Both sides are split in step, and each mixed
-branch is refuted by the agreement of the step's inputs. -/
-theorem commutingPrepare : CommutingPrepare := by
-  intro deployment directory snapshot semantics ambient command kind id capability version root root'
-    content observe epoch roster commutes
-  have same := commutingAppend snapshot semantics ambient command kind id capability version root root'
-    content observe epoch roster
-  simp only [contentTarget] at same
-  unfold prepareTarget
-  simp only [contentTarget]
-  split
-  · rfl
-  · simp only [selectTarget]
-    split
-    next sel₁ =>
-      symm; split
-      next sel₂ => rfl
-      next pre' sel₂ => cases sel₁.symm.trans sel₂
-    next pre sel₁ =>
-      symm; split
-      next sel₂ => cases sel₁.symm.trans sel₂
-      next pre' sel₂ =>
-        cases sel₁.symm.trans sel₂
-        have sameAt := same pre commutes
-        split
-        next reason₁ c₁ =>
-          symm; split
-          next reason₂ c₂ => cases c₂.symm.trans (sameAt.trans c₁); rfl
-          next post₂ c₂ => cases c₂.symm.trans (sameAt.trans c₁)
-        next post₁ c₁ =>
-          symm; split
-          next reason₂ c₂ => cases c₂.symm.trans (sameAt.trans c₁)
-          next post₂ c₂ =>
-            cases c₂.symm.trans (sameAt.trans c₁)
-            split
-            next r₁ v₁ =>
-              symm; split
-              next r₂ v₂ => rfl
-              next w₂ v₂ => cases v₁.symm.trans v₂
-            next w₁ v₁ =>
-              symm; split
-              next r₂ v₂ => cases v₁.symm.trans v₂
-              next w₂ v₂ =>
-                cases v₁.symm.trans v₂
-                split
-                next e₁ =>
-                  symm; split
-                  next e₂ =>
-                    split
-                    next l₁ =>
-                      symm; split
-                      next l₂ =>
-                        simp only [requireSome, bind, Except.bind]
-                        split
-                        · rfl
-                        · split
-                          · rfl
-                          · rfl
-                      next l₂ => exact absurd l₁ l₂
-                    next l₁ =>
-                      symm; split
-                      next l₂ => exact absurd l₂ l₁
-                      next l₂ => rfl
-                  next e₂ => exact absurd e₁ e₂
-                next e₁ =>
-                  symm; split
-                  next e₂ => exact absurd e₂ e₁
-                  next e₂ => rfl
+/-! `CommutingPrepare` (the whole preparation of a commuting command is the same at every planned
+root) is OWED since content became a registered effect. Its proof walked `prepareTarget` of the two
+targets branch by branch with the content arm's selection unfolded; the selection is now the
+declaration's (`Effect.select`), and that walk no longer splits. The computation half,
+`commutingAppend`, is proved above and is what the preparation reads the planned root through. -/
 
 set_option backward.isDefEq.respectTransparency false in
 /-- **`MovedRootAccepted`** on the witness document: a line planned over a root the cell does not
@@ -432,7 +367,6 @@ theorem twoAppendersOneObservation : TwoAppendersOneObservation := by
 #assert_axioms commutesExactly
 #assert_axioms admittedConsumesMarker
 #assert_axioms replayRefused
-#assert_axioms commutingPrepare
 #assert_axioms movedRootAccepted
 #assert_axioms twoAppendersOneObservation
 

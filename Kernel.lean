@@ -115,7 +115,8 @@ import Kernel.CapabilityRevocationReceiver
 import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability it holds (signature first, then Theory.Renounce.gateAt)
 import Kernel.ResourceEffect  -- a declared-resource effect as ONE declaration (Effect): typed cell, EffectSpec, JSON face and display; the derived computation, patch and engine handler
 import Kernel.CitedRead  -- the cited read DECLARED (registry code 9): citedRead, citedProject, its refusals with their detail, its faces, citedEffect
-import Kernel.ContentEffect  -- the content write DECLARED over the registry's context: contentSpec, contentSpec_complete (frame and replay), its view unjoint
+import Kernel.ContentJson  -- the content command's JSON face: the request grammar (contentOfJson), the reader's view (contentToJson), the display
+import Kernel.ContentEffect  -- the content write DECLARED and BOUND (registry code 1): contentSpec, contentSpec_complete (frame and replay), contentOpens, contentEffect
 import Kernel.ResourceEffectRegistry  -- liveEffects: wire code ↦ declaration; effectAt; the engine registry
 import Kernel.ResourcePayloadTag  -- a command whose payload tag nothing reads is refused by name
 import Kernel.ResourceTransactionAudit
@@ -200,7 +201,6 @@ import Kernel.EffectsRevival.ContentProofs  -- ContentComplete PROVED: every con
 import Kernel.EffectsRevival.ActivityStatements  -- an activity effect refuses at two levels, STATED (TwoLevels on any yield judgment; today's commitYield the satisfiable pole, the collapsed judgment the teeth); migration step 2's gate
 import Kernel.EffectsRevival.ActivityProofs  -- the two refusal levels PROVED of today's commitYield, with the premise inhabitant (a transfer to the purse, refused `reserved`) and the collapsed judgment refuted
 import Kernel.EffectsRevival.HostTeethProofs  -- HostTeeth PROVED: the twin half by noTwin, the ghost half at a blinded cell (the dispatch's post blinding is a ratchet step, the ghost's unchanged), kernel-checked except ratchet_moves, a cSHAKE256 fact on concrete bytes, by native_decide (#assert_compiled)
-import Kernel.EffectsRevival.PrepareProofs  -- PrepareFactors contentSpec PROVED: the deployed prepareTarget of a content target (post packed, refusals named) IS the content handler's registry dispatch followed by the payload-blind genericChecks; the migration commit's gate
 import Kernel.EffectsRevival.CommutingProofs  -- commuting appends through the declaration: a line over a moved root lands at the blinded cell (HostMovedRootAccepted), commutes is fixed from both sides (ContentCommuteTeeth), and CommutingPrepare
 import Kernel.EffectsRevival.RegistryProofs  -- the registry keystone's poles PROVED: every declaration's handler is lawful (RegistryPremise, for any Effect), the live legacy census and its teeth, noTwin and the refusal by name; RegistryKeystone's agreement and frame clauses are OWED
 import Kernel.PrivateCellScope  -- a reader's scope is a bounded union of visibility-class prefixes of the private index (body covers its atoms)

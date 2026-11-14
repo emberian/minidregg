@@ -1101,7 +1101,6 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
           simp only [found, decoded, commanded, writtenFound, Option.bind_some, bind] at shown
           cases append : written.payload with
           | scalar _ => simp [append] at shown
-          | content _ => simp [append] at shown
           | world _ => simp [append] at shown
           | kindDefinition _ => simp [append] at shown
           | kindRead => simp [append] at shown

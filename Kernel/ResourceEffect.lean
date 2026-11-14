@@ -15,7 +15,8 @@ record from which every one of those arms is read.
   classification, the declared frame, the verb, the law's view and whether the operation commutes
   are all there;
 * its faces: `name` (the JSON `type`), `toJson`, `ofJson`, `display` (what a member is shown
-  before signing, and what `mini inspect` prints) and `refusalText` (a refusal's detail in words).
+  before signing, and what `mini inspect` prints) and `refusalText` (a refusal's detail in words);
+* its openings (`opens`): what an operation claims of other cells its transaction reads.
 
 Derived here, with nothing authored per effect: the computation (`compute`: the header the
 declaration's `accepts`/`version`/`commutes` determine, then the engine's checked executor
@@ -179,6 +180,16 @@ structure Effect : Type 1 where
   /-- A refusal's structured detail in words: `detail` is `spec.refusalDetail`'s bytes of the
   refusal `name`. Empty when the name says it all. -/
   refusalText : String → ByteArray → String := fun _ _ => ""
+  /-- The operation's openings: what it claims of OTHER cells of its transaction. Each names a
+  cell the transaction must read observe-only and what must hold of that cell as loaded; the
+  controller refuses a command one of whose openings does not hold (`openingsRefusal`). -/
+  opens : O → List (Nat × (PackedCell Registry → Bool)) := fun _ => []
+  /-- The law's view restricted to the slots a demand names. A declaration whose view is costly
+  computes only what is named (a content cell's summaries); the default filters the whole view. -/
+  viewDemand : (String → Bool) → Revival.Site → O → Store L → Store L → List (String × Int) :=
+    fun want site op before after => (spec.view site op before after).filter fun slot => want slot.1
+  viewDemand_eq : ∀ want site op before after, viewDemand want site op before after =
+    (spec.view site op before after).filter fun slot => want slot.1 := by intros; rfl
   unpack_pack : ∀ kind cell, unpack kind (pack kind cell) = some cell
   pack_unpack : ∀ kind packed cell, unpack kind packed = some cell → pack kind cell = packed
   /-- An effect authorized as an observation emits nothing: no write, no rotate. -/

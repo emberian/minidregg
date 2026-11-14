@@ -20,14 +20,18 @@ Proved here, the obligations an `Effect` record asks of a declaration:
 * `contentSpec_writes`: its verb is never an observation.
 * `JointSlots.contentProject_unjoint`: no slot of its view is a joint key.
 
-The deployed hand arm (`computeTarget`'s content case) is still what runs; its agreement with
-this declaration is `Kernel.EffectsRevival.Statements.ContentAgreement`.
+`contentEffect` is the record the registry binds at code 1: the content cell under
+`HyperdocumentCell.contentWire`, the declaration, its JSON face (`Kernel/ContentJson.lean`) and its
+openings (`contentOpens`: every transclusion names a cell the transaction reads, whose loaded
+state must hold the opening). The controller has no content arm; what it runs for a content
+target is `Effect.compute contentEffect`.
 -/
 module
 
 public import Kernel.ResourceEffect
 public import Kernel.ResourceObservationAdmission
 public import Kernel.ContentResource
+public import Kernel.ContentJson
 public import Effects.Revival.EngineProofs
 public import Theory.AssertAxioms
 
@@ -493,6 +497,22 @@ theorem store_footprint_mem {L : Layout.{0, 0, 0}} :
 
 /-! ## `ContentComplete`. -/
 
+theorem store_run_iff {L : Layout.{0, 0, 0}} :
+    ∀ (ps : List (Store.Op L)) (s s' : Store L),
+      (storeSubstrate L).run s ps = some s' ↔ Patch.ValidFrom s ps ∧ Patch.run s ps = s'
+  | [], s, s' => by
+      show (some s = some s') ↔ (True ∧ s = s')
+      exact ⟨fun h => ⟨trivial, Option.some.inj h⟩, fun h => h.2 ▸ rfl⟩
+  | p :: ps, s, s' => by
+      by_cases enabled : p.Enabled s
+      · have stepped : (storeSubstrate L).step p s = some (p.apply s) := by
+          simp only [storeSubstrate]; exact if_pos enabled
+        simp only [Substrate.run, stepped, Patch.ValidFrom, Patch.run_cons, enabled, true_and]
+        exact store_run_iff ps _ s'
+      · have stepped : (storeSubstrate L).step p s = none := by
+          simp only [storeSubstrate]; exact if_neg enabled
+        simp [Substrate.run, stepped, Patch.ValidFrom, enabled]
+
 theorem except_map_ok {α β ε : Type} {f : α → β} {x : Except ε α} {b : β}
     (mapped : Except.map f x = .ok b) : ∃ a, x = .ok a ∧ f a = b := by
   cases x with
@@ -506,6 +526,7 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Effects
 open Minidregg.Effects.Revival (contentFrame contentActionFrame ContentSubstrate)
 open Minidregg.Theory
+open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
 open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
@@ -533,12 +554,16 @@ def contentSem (ctx : EffectCtx) (command : ContentResource.Command)
   else (ContentResource.run ⟨ctx.subject, ctx.kind, ctx.capability⟩ ⟨ctx.operation ()⟩
       (ContentResource.documentOf ctx.target) (contentContextOf ctx) s command).map Prod.snd
 
+/-- A content refusal's name: its constructor (`staleOpening`), without the namespace. -/
+def contentRefusalName (reason : ContentResource.Reject) : String :=
+  ((reprStr reason).splitOn ".").getLastD ""
+
 /-- **The content-cell write, declared.** Wire code 1 of the target payload, the action
 grammar's codec (`ContentResource.commandStream`), version `ContentResource.commandVersion`. -/
 def contentSpec : Revival.EffectSpec EffectCtx ContentSubstrate ContentResource.Command
     ContentResource.Reject where
   opStream := ContentResource.commandStream
-  refusalName r := reprStr r
+  refusalName := contentRefusalName
   accepts kind := kind == .object
   version := ContentResource.commandVersion
   sem := contentSem
@@ -621,6 +646,71 @@ theorem contentProject_unjoint (before after : ContentResource.ContentStore) (co
   all_goals (dsimp only; decide)
 
 end JointSlots
+
+/-! ## The declaration, as the registry binds it -/
+
+/-- **A content command's openings**: one per `transclude`. Each names its source, a cell the
+transaction must read observe-only, and requires that cell's loaded state to be a content cell
+that holds the opening (the pinned atoms at their pinned revisions). -/
+def contentOpens (command : ContentResource.Command) : List (Nat × (PackedCell Registry → Bool)) :=
+  command.actions.filterMap fun action =>
+    match action with
+    | .transclude _ _ request => some (request.source, fun cell =>
+        match cell with
+        | ⟨.content, value⟩ => ContentResource.openingHolds value.logical request
+        | _ => false)
+    | _ => none
+
+theorem mem_contentOpens {command : ContentResource.Command}
+    {transclusion : Hyperdocument.TransclusionId} {link : Hyperdocument.LinkId}
+    {request : ContentResource.TranscludeRequest}
+    (member : .transclude transclusion link request ∈ command.actions) :
+    ∃ holds : PackedCell Registry → Bool, (request.source, holds) ∈ contentOpens command ∧
+      ∀ cell, holds cell = true →
+        ∃ value : ContentResource.ContentCell, cell = ⟨.content, value⟩ ∧
+          ContentResource.openingHolds value.logical request = true := by
+  refine ⟨_, List.mem_filterMap.mpr ⟨_, member, rfl⟩, ?_⟩
+  intro cell holds
+  split at holds
+  · exact ⟨_, rfl, holds⟩
+  · cases holds
+
+/-- **The content write, as the registry binds it** (code 1, JSON `content`). The typed cell is
+the hyperdocument content cell; any role selects it (the declaration's `accepts` refuses a role
+that is not an object). -/
+def contentEffect : Effect where
+  name := "content"
+  L := Hyperdocument.layout
+  wire := HyperdocumentCell.contentWire
+  O := ContentResource.Command
+  R := ContentResource.Reject
+  decO := inferInstance
+  spec := contentSpec
+  pack := fun _ cell => ⟨.content, cell⟩
+  unpack := fun _ packed =>
+    match packed with
+    | ⟨.content, value⟩ => some value
+    | _ => none
+  toJson := ContentJson.contentToJson
+  ofJson := ContentJson.contentOfJson
+  display := ContentJson.contentDisplay
+  opens := contentOpens
+  viewDemand := fun want _ command before after =>
+    ContentResource.projectDemand want before after command
+  viewDemand_eq := fun want _ command before after =>
+    ContentResource.projectDemand_eq want before after command
+  unpack_pack := fun _ _ => rfl
+  pack_unpack := by
+    intro kind packed cell selected
+    split at selected
+    · cases selected; rfl
+    · cases selected
+  observes_silent := by
+    intro ctx command s ps observed _
+    rw [contentSpec_writes] at observed
+    cases observed
+  complete := contentSpec_complete
+  view_unjoint := fun _ command before after => JointSlots.contentProject_unjoint before after command
 
 #assert_axioms contentSpec_complete contentSpec_writes JointSlots.contentProject_unjoint
 

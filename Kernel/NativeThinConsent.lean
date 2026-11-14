@@ -161,7 +161,6 @@ def memberPatch (command : Command) (target : Target) (pre : Store target.layout
         -- A registered observation is displayed without a view (`registeredRead`); a registered
         -- write has no member patch here yet.
         exact .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
-    | content _ => exact .error (.unsupportedPayload id "content: reads policy coordinates and the height")
     | append _ => exact .error (.unsupportedPayload id "append: records the admission height")
     | computeFunding _ => exact .error (.unsupportedPayload id "compute funding: writes the shared Book")
     | moneyConsent _ => exact .error (.unsupportedPayload id "money: writes the shared Book")
@@ -223,7 +222,6 @@ theorem targetPatch_split (snapshot : AuthoritySnapshot) (semantics : Digest) (a
         subst member
         exact ⟨[], rfl, fun _ _ _ => rfl⟩
     | registered _ _ => simp [memberPatch] at member
-    | content _ => simp [memberPatch] at member
     | append _ => simp [memberPatch] at member
     | computeFunding _ => simp [memberPatch] at member
     | moneyConsent _ => simp [memberPatch] at member
@@ -294,7 +292,6 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
         simp only [computeTarget, hb, if_true] at computed
         split_ifs at computed <;> simp [bind, Except.bind, pure, Except.pure] at computed
     | registered _ _ => exact supported.elim
-    | content _ => exact supported.elim
     | append _ => exact supported.elim
     | computeFunding _ => exact supported.elim
     | moneyConsent _ => exact supported.elim
@@ -335,7 +332,7 @@ def targetWire (target : Target) : StoreCodec.Wire target.layout := by
     cases payload with
     | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.wire
     | registered code _ => exact (effectAt code.toNat).wire
-    | content _ | read => exact HyperdocumentCell.contentWire
+    | read => exact HyperdocumentCell.contentWire
     | append _ => exact StreamCell.headWire
     | world _ => exact WorldKindCell.instanceWire
     | kindDefinition _ | kindRead => exact WorldKindCell.definitionWire
@@ -1339,7 +1336,7 @@ theorem honest_content_stream_write_named : HonestContentStreamWriteNamedStateme
       (wire := HyperdocumentCell.contentWire) rfl
     have narrowedLogical : narrowed.logical =
         Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .content) payload.logical := by
-      simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+      simp only [target, selectTarget_content, ResourceObservationAdmission.narrowPacked] at selected
       split_ifs at selected
       rw [← Option.some.inj selected]
       exact materialize_logical _ _

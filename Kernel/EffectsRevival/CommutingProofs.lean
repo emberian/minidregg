@@ -8,7 +8,6 @@ the blinded sample cell of `ContentProofs`, and `Kernel.ContentCommutingAppend.C
 module
 
 public import Kernel.EffectsRevival.ContentProofs
-public import Kernel.EffectsRevival.PrepareProofs
 public import Kernel.ContentCommutingAppendProofs
 public import Theory.AssertAxioms
 
@@ -106,9 +105,8 @@ theorem hostDispatch_blinded_of (op : ContentResource.Command) (root : Digest)
   have selected : DeclaredResourceController.selectTarget sampleDeployment
       (hostTarget (hostCtxOf sampleCtx sampleDeployment contentSpec.version root none none none)
         (.content op)) (⟨.content, cellOf blindedStore⟩ : HostCell) = some (cellOf blindedStore) := by
-    simp only [DeclaredResourceController.selectTarget, hostTarget, hostCtxOf]
-    have object : sampleCtx.kind = .object := rfl
-    rw [if_pos object, if_pos blindedCell_law]
+    simp only [DeclaredResourceController.selectTarget_content, hostTarget, hostCtxOf]
+    rw [if_pos blindedCell_law]
   unfold hostTargetDispatch
   rw [if_neg (by decide), decoded]
   simp only

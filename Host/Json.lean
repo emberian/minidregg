@@ -282,9 +282,6 @@ def parse (source : String) : Result Lean.Json := do
   duplicateScan source.toList []
   Lean.Json.parse source
 
-private def failAt {α : Type} (path message : String) : Result α :=
-  .error s!"{path}: {message}"
-
 /-! The strict reading of a request (an object's fields are exactly the named ones, numbers are
 canonical decimal strings) is the one a declared effect's JSON face is written in
 (`Kernel/ResourceEffect.lean`, `EffectJson`): one vocabulary for the Host's decoders and the
@@ -292,46 +289,14 @@ declarations'. -/
 open Minidregg.Kernel.DeclaredResourceController.EffectJson
   (exactObject field string nat int list optional decimal signedDecimal)
 
-private def object (path : String) (json : Lean.Json) :
-    Result (Std.TreeMap.Raw String Lean.Json compare) :=
-  (json.getObj?).mapError (fun e => s!"{path}: {e}")
-
-private def bool (path : String) (json : Lean.Json) : Result Bool :=
-  json.getBool?.mapError (fun _ => s!"{path}: boolean expected")
+/-! The content grammar (a content command's actions, and the strict helpers it is written in) is
+the content declaration's JSON face (`Kernel/ContentJson.lean`); the Host's other decoders read
+the same helpers. -/
+open Minidregg.Kernel.ContentJson
+export Minidregg.Kernel.ContentJson (decodeHex encodeHex)
 
 private def array (path : String) (json : Lean.Json) : Result (Array Lean.Json) :=
   json.getArr?.mapError (fun _ => s!"{path}: array expected")
-
-private def hexNibble (c : Char) : Option Nat :=
-  if '0' ≤ c ∧ c ≤ '9' then some (c.toNat - '0'.toNat)
-  else if 'a' ≤ c ∧ c ≤ 'f' then some (10 + c.toNat - 'a'.toNat)
-  else if 'A' ≤ c ∧ c ≤ 'F' then some (10 + c.toNat - 'A'.toNat)
-  else none
-
-def decodeHex (path : String) (json : Lean.Json) : Result (List UInt8) := do
-  let source ← string path json
-  let input := source.toUTF8
-  unless input.size % 2 = 0 do
-    failAt path "even-length hexadecimal string expected"
-  let mut output := ByteArray.empty
-  for i in [:input.size / 2] do
-    let high := hexNibble (Char.ofNat (input[2 * i]!.toNat))
-    let low := hexNibble (Char.ofNat (input[2 * i + 1]!.toNat))
-    match high, low with
-    | some h, some l => output := output.push (UInt8.ofNat (16 * h + l))
-    | _, _ => failAt path "even-length hexadecimal string expected"
-  pure output.toList
-
-private def hexDigit (n : Nat) : Char :=
-  Char.ofNat (if n < 10 then '0'.toNat + n else 'a'.toNat + n - 10)
-
-def encodeHex (bytes : List UInt8) : String :=
-  Id.run do
-    let mut output := ByteArray.empty
-    for byte in bytes do
-      output := output.push (UInt8.ofNat ((hexDigit (byte.toNat / 16)).toNat))
-      output := output.push (UInt8.ofNat ((hexDigit (byte.toNat % 16)).toNat))
-    return String.fromUTF8! output
 
 private def hexJson (value : List UInt8) : Lean.Json := .str (encodeHex value)
 
@@ -342,12 +307,6 @@ private def controllerClause (reason : RefusalReason) (detail : List UInt8) : Li
   match reason, String.fromUTF8? (ByteArray.mk detail.toArray) with
   | .operationRejected, some text => [("clause", .str (Minidregg.Host.RefusalText.render text))]
   | _, _ => []
-
-private def tagged (path : String) (json : Lean.Json) : Result
-    (String × Std.TreeMap.Raw String Lean.Json compare) := do
-  let obj ← object path json
-  let tag ← string (path ++ ".type") (← field path "type" obj)
-  pure (tag, obj)
 
 partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
   let (tag, _) ← tagged path json
@@ -430,13 +389,6 @@ partial def predicateJson : Pred → Lean.Json
       ("predicates", .arr (children.toList.toArray.map predicateJson))]
   | .anyL children => .mkObj [("type", "any"),
       ("predicates", .arr (children.toList.toArray.map predicateJson))]
-
-private def resourceKind (path : String) (json : Lean.Json) : Result ResourceKind := do
-  match ← string path json with
-  | "object" => pure .object
-  | "account" => pure .account
-  | "program" => pure .program
-  | _ => failAt path "expected object, account, or program"
 
 /-- Selectors describe source-owned projection tags. Absence/null selects all;
 `[]` selects none. JSON defaults author v6 only, never reinterpret old wire. -/
@@ -768,283 +720,6 @@ private def action (path : String) (json : Lean.Json) : Result Action := do
         (← int (path ++ ".amount") (← field path "amount" obj)))
   | _ => failAt (path ++ ".type") "unknown action constructor"
 
-private def identifier {version : Hyperdocument.CodecVersion} {domain : Hyperdocument.IdDomain}
-    (path : String) (json : Lean.Json) : Result (Hyperdocument.Identifier version domain) := do
-  pure ⟨⟨← nat path json⟩⟩
-
-private def principal (path : String) (json : Lean.Json) : Result Hyperdocument.PrincipalRef := do
-  let obj ← exactObject path ["subject", "capabilityKind", "capability"] json
-  pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
-    ← resourceKind (path ++ ".capabilityKind") (← field path "capabilityKind" obj),
-    ⟨← nat (path ++ ".capability") (← field path "capability" obj)⟩⟩
-
-private def authoredFragment (path : String) (json : Lean.Json) : Result Hyperdocument.AuthoredFragment := do
-  let obj ← exactObject path ["ciphertext", "wrapping", "author", "operation", "wrappedBy", "wrappedAt"] json
-  pure ⟨← decodeHex (path ++ ".ciphertext") (← field path "ciphertext" obj),
-    ← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj),
-    ← principal (path ++ ".author") (← field path "author" obj),
-    ← identifier (path ++ ".operation") (← field path "operation" obj),
-    ← principal (path ++ ".wrappedBy") (← field path "wrappedBy" obj),
-    ← identifier (path ++ ".wrappedAt") (← field path "wrappedAt" obj)⟩
-
-private def atomKind (path : String) (json : Lean.Json) : Result Hyperdocument.AtomKind := do
-  let (tag, _) ← tagged path json
-  match tag with
-  | "text" => exactObject path ["type"] json *> pure .text
-  | "inlineObject" =>
-      let obj ← exactObject path ["type", "schema"] json
-      pure (.inlineObject ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩)
-  | "sealedObject" =>
-      let obj ← exactObject path ["type", "schema", "fragment"] json
-      pure (.sealedObject ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩
-        (← authoredFragment (path ++ ".fragment") (← field path "fragment" obj)))
-  | _ => failAt (path ++ ".type") "expected text, inlineObject or sealedObject"
-
-private def transclusionMode (path : String) (json : Lean.Json) :
-    Result Hyperdocument.TransclusionMode := do
-  match ← string path json with
-  | "snapshot" => pure .snapshot | "live" => pure .live
-  | _ => failAt path "expected snapshot or live"
-
-private def atomRecord (path : String) (json : Lean.Json) : Result Hyperdocument.AtomRecord := do
-  let obj ← exactObject path ["document", "kind", "payload", "createdBy", "createdAt", "revision",
-    "tombstonedAt"] json
-  pure ⟨← identifier (path ++ ".document") (← field path "document" obj),
-    ← atomKind (path ++ ".kind") (← field path "kind" obj),
-    ← decodeHex (path ++ ".payload") (← field path "payload" obj),
-    ← principal (path ++ ".createdBy") (← field path "createdBy" obj),
-    ← identifier (path ++ ".createdAt") (← field path "createdAt" obj),
-    ← identifier (path ++ ".revision") (← field path "revision" obj),
-    ← optional (path ++ ".tombstonedAt") identifier (← field path "tombstonedAt" obj)⟩
-
-private def anchorBias (path : String) (json : Lean.Json) : Result Hyperdocument.AnchorBias := do
-  match ← string path json with
-  | "before" => pure .before | "after" => pure .after
-  | _ => failAt path "expected before or after"
-
-private def deathPolicy (path : String) (json : Lean.Json) : Result Hyperdocument.EndpointDeathPolicy := do
-  match ← string path json with
-  | "invalidate" => pure .invalidate
-  | "keepTombstone" => pure .keepTombstone
-  | "preferPrevious" => pure .preferPrevious
-  | "preferNext" => pure .preferNext
-  | "preferPreviousThenNext" => pure .preferPreviousThenNext
-  | "preferNextThenPrevious" => pure .preferNextThenPrevious
-  | _ => failAt path "unknown endpoint death policy"
-
-private def stablePoint (path : String) (json : Lean.Json) : Result Hyperdocument.StablePoint := do
-  let obj ← exactObject path ["run", "neighbor", "bias", "death"] json
-  pure ⟨← identifier (path ++ ".run") (← field path "run" obj),
-    ← optional (path ++ ".neighbor") identifier (← field path "neighbor" obj),
-    ← anchorBias (path ++ ".bias") (← field path "bias" obj),
-    ← deathPolicy (path ++ ".death") (← field path "death" obj)⟩
-
-private def stableRange (path : String) (json : Lean.Json) : Result Hyperdocument.StableRange := do
-  let obj ← exactObject path ["start", "finish"] json
-  pure ⟨← stablePoint (path ++ ".start") (← field path "start" obj),
-    ← stablePoint (path ++ ".finish") (← field path "finish" obj)⟩
-
-private def pin (path : String) (json : Lean.Json) :
-    Result (Hyperdocument.AtomId × Hyperdocument.OperationId) := do
-  let obj ← exactObject path ["atom", "revision"] json
-  pure (← identifier (path ++ ".atom") (← field path "atom" obj),
-    ← identifier (path ++ ".revision") (← field path "revision" obj))
-
-private def transcludeRequest (path : String) (json : Lean.Json) :
-    Result ContentResource.TranscludeRequest := do
-  let obj ← exactObject path ["source", "range", "mode", "pins"] json
-  pure ⟨← nat (path ++ ".source") (← field path "source" obj),
-    ← stableRange (path ++ ".range") (← field path "range" obj),
-    ← transclusionMode (path ++ ".mode") (← field path "mode" obj),
-    ← list (path ++ ".pins") pin (← field path "pins" obj)⟩
-
-private def linkTarget (path : String) (json : Lean.Json) : Result Hyperdocument.LinkTarget := do
-  let (tag, _) ← tagged path json
-  match tag with
-  | "document" =>
-      let obj ← exactObject path ["type", "id"] json
-      pure (.document (← identifier (path ++ ".id") (← field path "id" obj)))
-  | "element" =>
-      let obj ← exactObject path ["type", "id"] json
-      pure (.element (← identifier (path ++ ".id") (← field path "id" obj)))
-  | "range" =>
-      let obj ← exactObject path ["type", "document", "range"] json
-      pure (.range (← identifier (path ++ ".document") (← field path "document" obj))
-        (← stableRange (path ++ ".range") (← field path "range" obj)))
-  | "external" =>
-      let obj ← exactObject path ["type", "scheme", "authority", "path"] json
-      pure (.external (← decodeHex (path ++ ".scheme") (← field path "scheme" obj))
-        (← decodeHex (path ++ ".authority") (← field path "authority" obj))
-        (← decodeHex (path ++ ".path") (← field path "path" obj)))
-  | _ => failAt (path ++ ".type") "unknown link target"
-
-/-- `{"type":"splice","index":N,"child":E}`, `{"type":"move","child":E,"index":N}` or
-`{"type":"remove","child":E}`. -/
-private def elementOp (path : String) (json : Lean.Json) : Result ContentResource.ElementOp := do
-  let (tag, _) ← tagged path json
-  match tag with
-  | "splice" =>
-      let obj ← exactObject path ["type", "index", "child"] json
-      pure (.splice (← nat (path ++ ".index") (← field path "index" obj))
-        (← identifier (path ++ ".child") (← field path "child" obj)))
-  | "move" =>
-      let obj ← exactObject path ["type", "child", "index"] json
-      pure (.move (← identifier (path ++ ".child") (← field path "child" obj))
-        (← nat (path ++ ".index") (← field path "index" obj)))
-  | "remove" =>
-      let obj ← exactObject path ["type", "child"] json
-      pure (.remove (← identifier (path ++ ".child") (← field path "child" obj)))
-  | _ => failAt (path ++ ".type") "expected splice, move or remove"
-
-/-- `{"type":"atom","atom":A}` or `{"type":"element","element":E}`. -/
-private def markTarget (path : String) (json : Lean.Json) : Result ContentResource.MarkTarget := do
-  let (tag, _) ← tagged path json
-  match tag with
-  | "atom" =>
-      let obj ← exactObject path ["type", "atom"] json
-      pure (.atom (← identifier (path ++ ".atom") (← field path "atom" obj)))
-  | "element" =>
-      let obj ← exactObject path ["type", "element"] json
-      pure (.element (← identifier (path ++ ".element") (← field path "element" obj)))
-  | _ => failAt (path ++ ".type") "noSuchTarget: expected atom or element"
-
-/-- `{"type":"bold"|"italic"|"code"|"heading"}` or
-`{"type":"link","link":L,"target":TARGET}`; any other kind is refused
-`unknownKind` here, since the kernel's grammar cannot carry one. -/
-private def markSpec (path : String) (json : Lean.Json) : Result ContentResource.MarkSpec := do
-  let (tag, _) ← tagged path json
-  match tag with
-  | "bold" =>
-      let _ ← exactObject path ["type"] json
-      pure ContentResource.MarkSpec.bold
-  | "italic" =>
-      let _ ← exactObject path ["type"] json
-      pure ContentResource.MarkSpec.italic
-  | "code" =>
-      let _ ← exactObject path ["type"] json
-      pure ContentResource.MarkSpec.code
-  | "heading" =>
-      let _ ← exactObject path ["type"] json
-      pure ContentResource.MarkSpec.heading
-  | "link" =>
-      let obj ← exactObject path ["type", "link", "target"] json
-      pure (.link (← identifier (path ++ ".link") (← field path "link" obj))
-        (← linkTarget (path ++ ".target") (← field path "target" obj)))
-  | other =>
-      failAt (path ++ ".type") s!"unknownKind: {other} (expected bold, italic, code, heading or link)"
-
-/-- Protected body provenance is normalized by the content receiver. -/
-private def annotationBody (path : String) (json : Lean.Json) : Result Hyperdocument.AnnotationBody := do
-  match json with
-  | .str _ => pure (.inline (← decodeHex path json))
-  | _ =>
-      let obj ← exactObject path ["type", "fragment"] json
-      if (← string (path ++ ".type") (← field path "type" obj)) != "sealed" then
-        failAt path "expected sealed annotation body"
-      else pure (.sealed (← authoredFragment (path ++ ".fragment") (← field path "fragment" obj)))
-
-/-- The guard of `rewrapAnnotation` is the annotation's exact canonical store entry: the
-bytes a signed view carries as the entry's `canonical`, address then record. It must be
-canonical and must name the annotation being rewrapped; the record it carries is the
-prior state the action is guarded on. -/
-private def annotationBefore (path : String) (annotation : Hyperdocument.AnnotationId)
-    (json : Lean.Json) : Result Hyperdocument.AnnotationRecord := do
-  let bytes ← decodeHex path json
-  let codec := StoreCodec.entryStream HyperdocumentCell.contentWire
-  match codec.toLawful.decode bytes with
-  | some entry =>
-      match entry with
-      | ⟨⟨.annotations, identifier⟩, record⟩ =>
-          let identifier : Hyperdocument.AnnotationId := identifier
-          let record : Hyperdocument.AnnotationRecord := record
-          if identifier.digest.value != annotation.digest.value then
-            failAt path "annotation guard names another annotation"
-          else pure record
-      | _ => failAt path "annotation guard is not an annotation entry"
-  | none => failAt path "invalid exact annotation guard"
-
-private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
-  let (tag, _) ← tagged path json
-  match tag with
-  | "createDocument" =>
-      let obj ← exactObject path ["type", "rootElement", "schema"] json
-      pure (.createDocument (← identifier (path ++ ".rootElement") (← field path "rootElement" obj))
-        ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩)
-  | "createContainer" =>
-      let obj ← exactObject path ["type", "element"] json
-      pure (.createContainer (← identifier (path ++ ".element") (← field path "element" obj)))
-  | "editElement" =>
-      let obj ← exactObject path ["type", "element", "revision", "op"] json
-      pure (.editElement ⟨← identifier (path ++ ".element") (← field path "element" obj),
-        ← identifier (path ++ ".revision") (← field path "revision" obj),
-        ← elementOp (path ++ ".op") (← field path "op" obj)⟩)
-  | "createAtom" =>
-      let obj ← exactObject path ["type", "atom", "kind", "payload"] json
-      pure (.createAtom (← identifier (path ++ ".atom") (← field path "atom" obj))
-        (← atomKind (path ++ ".kind") (← field path "kind" obj))
-        (← decodeHex (path ++ ".payload") (← field path "payload" obj)))
-  | "createRun" =>
-      let obj ← exactObject path ["type", "run", "atoms"] json
-      pure (.createRun (← identifier (path ++ ".run") (← field path "run" obj))
-        (← list (path ++ ".atoms") identifier (← field path "atoms" obj)))
-  | "editAtom" =>
-      let obj ← exactObject path ["type", "atom", "before", "kind", "payload", "tombstone"] json
-      pure (.editAtom ⟨← identifier (path ++ ".atom") (← field path "atom" obj),
-        ← atomRecord (path ++ ".before") (← field path "before" obj),
-        ← atomKind (path ++ ".kind") (← field path "kind" obj),
-        ← decodeHex (path ++ ".payload") (← field path "payload" obj),
-        ← bool (path ++ ".tombstone") (← field path "tombstone" obj)⟩)
-  | "link" =>
-      let obj ← exactObject path ["type", "link", "source", "target", "relation"] json
-      pure (.link (← identifier (path ++ ".link") (← field path "link" obj))
-        (← optional (path ++ ".source") stableRange (← field path "source" obj))
-        (← linkTarget (path ++ ".target") (← field path "target" obj))
-        ⟨← nat (path ++ ".relation") (← field path "relation" obj)⟩)
-  | "annotate" =>
-      let obj ← exactObject path ["type", "annotation", "atom", "revision", "body"] json
-      pure (.annotate (← identifier (path ++ ".annotation") (← field path "annotation" obj))
-        (← identifier (path ++ ".atom") (← field path "atom" obj))
-        (← identifier (path ++ ".revision") (← field path "revision" obj))
-        (← annotationBody (path ++ ".body") (← field path "body" obj)))
-  | "rewrapAtom" =>
-      let obj ← exactObject path ["type", "atom", "before", "wrapping"] json
-      pure (.rewrapAtom (← identifier (path ++ ".atom") (← field path "atom" obj))
-        (← atomRecord (path ++ ".before") (← field path "before" obj))
-        (← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj)))
-  | "rewrapAnnotation" =>
-      let obj ← exactObject path ["type", "annotation", "before", "wrapping"] json
-      let annotation ← identifier (path ++ ".annotation") (← field path "annotation" obj)
-      pure (.rewrapAnnotation annotation
-        (← annotationBefore (path ++ ".before") annotation (← field path "before" obj))
-        (← decodeHex (path ++ ".wrapping") (← field path "wrapping" obj)))
-  | "unlink" =>
-      let obj ← exactObject path ["type", "link"] json
-      pure (.unlink (← identifier (path ++ ".link") (← field path "link" obj)))
-  | "mark" =>
-      let obj ← exactObject path ["type", "mark", "target", "revision", "kind"] json
-      pure (.mark (← identifier (path ++ ".mark") (← field path "mark" obj))
-        ⟨← markTarget (path ++ ".target") (← field path "target" obj),
-          ← identifier (path ++ ".revision") (← field path "revision" obj),
-          ← markSpec (path ++ ".kind") (← field path "kind" obj)⟩)
-  | "unmark" =>
-      let obj ← exactObject path ["type", "mark"] json
-      pure (.unmark (← identifier (path ++ ".mark") (← field path "mark" obj)))
-  | "insertRun" =>
-      let obj ← exactObject path ["type", "run", "anchor", "atoms"] json
-      pure (.insertRun (← identifier (path ++ ".run") (← field path "run" obj))
-        (← optional (path ++ ".anchor") stablePoint (← field path "anchor" obj))
-        (← list (path ++ ".atoms") identifier (← field path "atoms" obj)))
-  | "transclude" =>
-      let obj ← exactObject path ["type", "transclusion", "link", "request"] json
-      pure (.transclude (← identifier (path ++ ".transclusion") (← field path "transclusion" obj))
-        (← identifier (path ++ ".link") (← field path "link" obj))
-        (← transcludeRequest (path ++ ".request") (← field path "request" obj)))
-  | _ => failAt (path ++ ".type") "unknown content action"
-
-private def contentCommand (path : String) (json : Lean.Json) : Result ContentResource.Command := do
-  let obj ← exactObject path ["actions"] json
-  pure ⟨← list (path ++ ".actions") contentAction (← field path "actions" obj)⟩
-
 private def streamRef (path : String) (json : Lean.Json) : Result (Nat × Nat) := do
   let obj ← exactObject path ["cell", "sequence"] json
   pure (← nat (path ++ ".cell") (← field path "cell" obj),
@@ -1348,7 +1023,7 @@ private def registeredPayload (path tag : String) (json : Lean.Json) :
       ((Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).ofJson path json).map fun op =>
         DeclaredResourceController.Payload.registered code op
   | none => failAt (path ++ ".type")
-      s!"expected scalar, content, append, read, kindRead, world, kindDefinition, moneyConsent, computeFunding or a registered effect ({", ".intercalate Minidregg.Kernel.DeclaredResourceController.effectNames})"
+      s!"expected scalar, append, read, kindRead, world, kindDefinition, moneyConsent, computeFunding or a registered effect ({", ".intercalate Minidregg.Kernel.DeclaredResourceController.effectNames})"
 
 private def targetPayload (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Payload := do
@@ -1357,11 +1032,6 @@ private def targetPayload (path : String) (json : Lean.Json) :
   | "scalar" =>
       let obj ← exactObject path ["type", "actions"] json
       pure (.scalar (← list (path ++ ".actions") action (← field path "actions" obj)))
-  | "content" =>
-      let obj ← exactObject path ["type", "actions"] json
-      let actionsJson ← field path "actions" obj
-      let command ← contentCommand path (.mkObj [("actions", actionsJson)])
-      pure (.content command)
   | "append" =>
       let obj ← exactObject path ["type", "topic", "payload", "to", "ref"] json
       let topic ← decodeHex (path ++ ".topic") (← field path "topic" obj)

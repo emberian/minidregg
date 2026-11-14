@@ -63,7 +63,7 @@ outcome() {
 }
 detail() { if [ "$(outcome "$1")" = refused ]; then refusal_text "$1"; else tail -1 "$D/$1.err" | cut -c1-200; fi; }
 refused_by() {
-  if [ "$(outcome "$1")" = refused ] && refusal_text "$1" | grep -q "Reject.$2"; then echo "refused:$2"
+  if [ "$(outcome "$1")" = refused ] && refusal_text "$1" | grep -Eq "(Reject|Effect\.Content)\.$2"; then echo "refused:$2"
   else echo "$(outcome "$1")"; fi
 }
 ok() { [ "$(cat "$D/$1.rc")" = 0 ] || { echo "setup $1 failed: $(tail -3 "$D/$1.err")" >&2; exit 1; }; }
