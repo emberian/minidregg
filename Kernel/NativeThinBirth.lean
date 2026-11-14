@@ -368,7 +368,7 @@ def DisplayIsCommitStatement : Prop :=
     CanonicalCellRegistry.sourceEncoding.codec.encode (userPart d) = shown.draft ∧
     d.auxiliaryCreates = prepared.grants.auxiliaryCreates ∧
     prepared.writes = ResourceBirthController.Concrete.planWrites deployment d
-      prepared.factory.payload prepared.book.payload prepared.resources.post (ground.authorityWrites prepared.grants.post) ∧
+      prepared.factory.payload prepared.book.payload prepared.resources.post (ground.authorityWrites prepared.grants.update) ∧
     ResourceBirthController.allocationWrites d =
       (userPart d).createRequests.map ResourceBirthController.birthWrite ++
         prepared.grants.auxiliaryCreates.map ResourceBirthController.birthWrite ∧
