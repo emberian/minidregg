@@ -771,7 +771,7 @@ def main(argv=None):
                 'kind': 'object', 'domain': str(genesis['domain']), 'semantics': genesis['expectedSemantics'], 'subject': owner_subject, 'nonce': str(n + 1),
                 'expectedTargetRoot': cell['root'], 'parentId': parent, 'target': str(target),
                 'child': {'id': child, 'root': parent, 'parent': parent, 'issuer': str(configured['issuer']), 'holder': {'type': 'subject', 'subject': holder},
-                          'targets': [str(target)], 'verbs': verbs, 'maxCost': '50000', 'notBefore': str(born_height()),
+                          'targets': [str(target)], 'verbs': verbs, 'perRequestBytes': '50000', 'notBefore': str(born_height()),
                           'notAfter': str(born_height() + int(configured['lifetime']) - 1), 'issuerEpoch': genesis['issuerEpoch'],
                           'policyId': str(target), 'policyEpoch': '0', 'ancestors': [parent], 'channels': []}}}},
                 'grants': [{'kind': 'object', 'target': str(target), 'capability': parent}]}

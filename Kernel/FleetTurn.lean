@@ -263,7 +263,7 @@ structure Ambient where
 
 /-- The request is the ordinary account-spend request over the paying account,
 under that account's own installed law. Its cost is the encoded command's length,
-the unit every other signed command's request has, so `maxCost` is a size ceiling here too.
+the unit every other signed command's request has, so `perRequestBytes` is a size ceiling here too.
 What the turn takes from the account is bounded by the grant's value bound (`valueBound`). -/
 def context (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) : RequestContext where
@@ -584,7 +584,7 @@ def authorize [DecidableEq F]
 must bound the gross amount the turn's Book leg (the fee, then the optional transfer) takes
 from the paying account: its `fields` name each debited balance and its `maxDelta` bounds on
 them hold, and a delegated grant sets a bound on each. This is the bound every debiting
-receiver shares, in the asset's own units; `maxCost` is a size ceiling and bounds no value. -/
+receiver shares, in the asset's own units; `perRequestBytes` is a size ceiling and bounds no value. -/
 def valueBound [DecidableEq F]
     (prepared : Prepared deployment profile tariff ambient durable command)
     (semantic : prepared.SemanticAccepted) : Except Reject Unit :=

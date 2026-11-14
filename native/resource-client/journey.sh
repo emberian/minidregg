@@ -725,7 +725,7 @@ step_J3() {
   local P=$SPONSOR_WS/proposals/grant-newcomer A=$SPONSOR_WS/attempts/grant-newcomer
   ARTIFACT=$A/outcome.json
   jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"shared",
-    recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$REQ/delegate.json"
+    recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$REQ/delegate.json"
   call propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/delegate.json" \
     --proposal-id grant-newcomer || fail "delegate propose failed: $(tail -1 "$SD/propose.err")" || return
   jq -e --arg r "$NEWCOMER_SUBJECT" '.purpose.draft.command.child

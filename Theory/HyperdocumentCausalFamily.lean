@@ -317,7 +317,7 @@ def capability : Capability .object where
   scope :=
     { targets := .explicit {(declaration.toRequest config).target}
       verbs := {.mutateObject}
-      maxCost := 1 }
+      perRequestBytes := 1 }
   notBefore := 0
   notAfter := 100
   issuerEpoch := 0

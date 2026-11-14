@@ -29,7 +29,7 @@ const DOOR_USER: &str = "mini-door";
 /// How often each member's overdue bend awaits are delivered (`settle_bends`): a few minutes past a
 /// deadline the purse is home.
 const SETTLE_EVERY_S: u64 = 300;
-const PUBLIC_READ_MAX_COST: &str = include_str!("../../../../deploy/demo-seed/public-read-max-cost");
+const PUBLIC_READ_REQUEST_BYTES: &str = include_str!("../../../../deploy/demo-seed/public-read-request-bytes");
 const DISCORD_USER: &str = "mini-discord";
 const TENANT_GROUP: &str = "mini-sessions";
 /// A stranger who never finishes paying: the request is closed after this long.
@@ -1605,7 +1605,7 @@ impl<O: BoxOps> Processor<O> {
             self.save(r)?;
         }
         if !house.join("proposals").join(&id).exists() {
-            let ran = self.ops.tenant_line(author, &format!("delegate {id} {doc} {subject} observe {}", PUBLIC_READ_MAX_COST.trim()));
+            let ran = self.ops.tenant_line(author, &format!("delegate {id} {doc} {subject} observe {}", PUBLIC_READ_REQUEST_BYTES.trim()));
             if !ran.ok {
                 return Err(format!("delegate: {}", ran.why()));
             }
@@ -2099,7 +2099,7 @@ mod tests {
         let s = read_json(&w.request_path(r.id())).unwrap();
         assert_eq!((s["publications"]["welcome"]["joined"].as_bool(), s["publications"]["house-rules"]["joined"].as_bool()), (Some(true), Some(true)), "{s}");
         let id = s["publications"]["welcome"]["id"].as_str().unwrap().to_owned();
-        assert_eq!(count(&w, &format!("box: delegate {id} welcome 4100 observe {}", PUBLIC_READ_MAX_COST.trim())), 1);
+        assert_eq!(count(&w, &format!("box: delegate {id} welcome 4100 observe {}", PUBLIC_READ_REQUEST_BYTES.trim())), 1);
         assert_eq!((count(&w, &format!("box: submit {id}")), count(&w, &format!("box: retry {id}")), count(&w, &format!("box: publish {id}"))), (1, 1, 2));
         assert_eq!(count(&w, "alice: import welcome @welcome-reference.json"), 1);
         let given = std::fs::read_to_string(w.p.home("alice").join("requests/welcome-reference.json")).unwrap();

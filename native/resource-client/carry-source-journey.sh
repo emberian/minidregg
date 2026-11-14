@@ -147,7 +147,7 @@ jq -e '([.cell.entries[] | select(.type == "document" or .type == "atom")] | len
 run quotes-show "$MINI" workspace --action doc-show --dir "$WS" --name quotes
 # A same-subject delegated reference still has to obey its narrower scope.
 jq -n --arg subject "$(jq -r '.sponsor.subject' "$RUN/params.json")" \
-  '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"notes",recipient:$subject,verbs:["observe","mutate"],maxCost:"50000",fields:["annotations"]}' >"$RUN/reviewer.json"
+  '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"notes",recipient:$subject,verbs:["observe","mutate"],perRequestBytes:"50000",fields:["annotations"]}' >"$RUN/reviewer.json"
 run reviewer-propose "$MINI" workspace --action propose --dir "$WS" --request "$RUN/reviewer.json" --proposal-id reviewer
 run reviewer-submit "$MINI" workspace --action submit --dir "$WS" --intent "$WS/proposals/reviewer/intent.json" --attempt "$WS/attempts/reviewer"
 jq -e '.type == "confirmed"' "$WS/attempts/reviewer/outcome.json" >/dev/null

@@ -136,7 +136,7 @@ mark "hosted grain born: parent $TASK owner 8 worker 9, tool $TOOL_TASK owner 9"
 "$MINI" workspace --action import --dir "$RUN/host-workspace" --name parent --kind object \
   --target "$TASK" --observe-capability 8761 --control-capability 8762 >/dev/null
 jq -n '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"parent",
-  recipient:"9",verbs:["observe","mutate"],maxCost:"50000"}' >"$RUN/witness-request.json"
+  recipient:"9",verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$RUN/witness-request.json"
 "$MINI" workspace --action propose --dir "$RUN/host-workspace" --request "$RUN/witness-request.json" \
   --proposal-id witness >"$EV/witness-propose.stdout" 2>"$EV/witness-propose.stderr"
 "$MINI" workspace --action submit --dir "$RUN/host-workspace" \
@@ -166,7 +166,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$RUN/all-true.json"
 "$MINI" workspace --action create --dir "$ROOT/sponsor" --name shared --storage declared \
   --predicate "$RUN/all-true.json" --fields 2 >"$EV/sponsor-create.stdout" 2>"$EV/sponsor-create.stderr"
 jq -n '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"shared",
-  recipient:"9",verbs:["observe","mutate","delegate"],maxCost:"50000"}' >"$RUN/grant-hermes.json"
+  recipient:"9",verbs:["observe","mutate","delegate"],perRequestBytes:"50000"}' >"$RUN/grant-hermes.json"
 "$MINI" workspace --action propose --dir "$ROOT/sponsor" --request "$RUN/grant-hermes.json" \
   --proposal-id grant-hermes >/dev/null 2>&1
 "$MINI" workspace --action submit --dir "$ROOT/sponsor" \

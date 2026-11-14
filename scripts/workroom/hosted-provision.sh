@@ -147,7 +147,7 @@ jq -n --arg semantics "$SEMANTICS" --arg root "$root" --arg authority "$authorit
       nonce:"64101",expectedTargetRoot:$root,parentId:"111",target:"7803",
       child:{id:"113",root:"111",parent:"111",issuer:"5",
         holder:{type:"subject",subject:"10"},targets:["7803"],
-        verbs:["observe","mutate"],maxCost:"50000",notBefore:"10",notAfter:"1000",
+        verbs:["observe","mutate"],perRequestBytes:"50000",notBefore:"10",notAfter:"1000",
         issuerEpoch:"2",policyId:"7803",policyEpoch:"0",ancestors:["111"],channels:[]}}}},
     grants:[{kind:"object",target:"7803",capability:"111"}]}' \
   >"$EVIDENCE/b-parent-witness-intent.json"
@@ -169,7 +169,7 @@ for grant in write read; do
         nonce:($nonce+"2"),expectedTargetRoot:$root,parentId:"89",target:"8001",
         child:{id:$child,root:"89",parent:"89",issuer:"5",
           holder:{type:"subject",subject:"10"},targets:["8001"],
-          verbs:$verbs,maxCost:"50000",notBefore:"10",notAfter:"1000",
+          verbs:$verbs,perRequestBytes:"50000",notBefore:"10",notAfter:"1000",
           issuerEpoch:"2",policyId:"8001",policyEpoch:"0",ancestors:["89"],channels:[]}}}},
       grants:[{kind:"object",target:"8001",capability:"89"}]}' \
     >"$EVIDENCE/b-content-$grant-intent.json"

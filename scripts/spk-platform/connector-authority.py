@@ -35,7 +35,7 @@ def pending_action(attempt):
 
 def bound_limit(head, capability):
     require(head["id"] == capability, "signed document capability differs")
-    return str(min(1000000, int(head["maxCost"])))
+    return str(min(1000000, int(head["perRequestBytes"])))
 
 def execute(world, root, proposal_id):
     c = s.connector_selection(world)
@@ -104,12 +104,12 @@ def execute(world, root, proposal_id):
         run(owner_ws, world.config_path, "inspect", "view-object-capability", query_dir / "view.bin", inspected,
             native=True, binary=world.manifest["host"])
         head = load(inspected)["head"]
-        retain(limit_path, {"maxCost": bound_limit(head, source_ref["operationCapability"]),
+        retain(limit_path, {"perRequestBytes": bound_limit(head, source_ref["operationCapability"]),
                             "capabilityView": str(query_dir / "view.json"), "capabilityViewSha256": sha(query_dir / "view.json")})
     limit = load(limit_path)
     require(sha(limit["capabilityView"]) == limit["capabilityViewSha256"], "retained grant limit view differs")
     request = {"type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": alias,
-               "recipient": c["subject"], "verbs": ["observe", "mutate"], "maxCost": limit["maxCost"]}
+               "recipient": c["subject"], "verbs": ["observe", "mutate"], "perRequestBytes": limit["perRequestBytes"]}
     request_path = root / "document-grant-request-v2.json"; retain(request_path, request)
     proposal = owner_ws / "proposals" / proposal_id
     attempt = owner_ws / "attempts" / proposal_id

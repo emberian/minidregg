@@ -62,7 +62,7 @@ def proposal(label, body):
     work(label + "-submit", ["--action", "submit", "--intent", str(args.owner / "proposals" / label / "intent.json"), "--attempt", str(args.owner / "attempts" / label)])
 
 def grant(label, fields=None):
-    body = dict(action="delegate", name=name, recipient=subject, verbs=["observe"], maxCost="50000")
+    body = dict(action="delegate", name=name, recipient=subject, verbs=["observe"], perRequestBytes="50000")
     if fields is not None:
         body["fields"] = fields
     proposal(label, body)

@@ -69,7 +69,7 @@ def headJson {kind : ResourceKind} (cap : Capability kind) : Json := .mkObj
      | .under room => ("room", decimal room)),
    ("verbs", .arr <| ((cap.scope.verbs.image verbTag).sort (· ≤ ·)).toArray.map
      (fun tag => verbName (verbOfTag kind tag))),
-   ("maxCost", decimal cap.scope.maxCost),
+   ("perRequestBytes", decimal cap.scope.perRequestBytes),
    ("notBefore", decimal cap.notBefore), ("notAfter", decimal cap.notAfter),
    ("issuerEpoch", decimal cap.issuerEpoch), ("policyId", decimal cap.policyId.value),
    ("policyEpoch", decimal cap.policyEpoch),

@@ -44,7 +44,7 @@ pub(crate) const MEMBER_VERBS: &[&str] = &["observe", "place", "append"];
 const CONCIERGE_VERBS: &[&str] = &["observe", "place", "append", "delegate"];
 
 const DEFAULT_PERIOD: &str = "2016";
-const MAX_COST: &str = "50000";
+const PER_REQUEST_BYTES: &str = "50000";
 
 fn text(value: OsString, label: &str) -> Result<String> {
     value.into_string().map_err(|_| format!("{label} must be UTF-8"))
@@ -79,7 +79,7 @@ fn till_grant(till_name: &str, concierge: &str, asset: &str, refund_limit: &str,
         .ok_or("refund limit plus the fee is out of range")?;
     let field = format!("balance:{asset}");
     Ok(json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-        "name":till_name,"recipient":concierge,"verbs":["observe","transfer"],"maxCost":MAX_COST,
+        "name":till_name,"recipient":concierge,"verbs":["observe","transfer"],"perRequestBytes":PER_REQUEST_BYTES,
         "fields":[field],"maxDelta":[{"field":field,"max":bound.to_string()}]}))
 }
 
@@ -565,7 +565,7 @@ pub(crate) fn renew(
     decimal(subject, "member subject")?;
     decimal(not_after, "notAfter")?;
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-        "name":name,"recipient":subject,"verbs":verbs,"maxCost":MAX_COST,"room":true,
+        "name":name,"recipient":subject,"verbs":verbs,"perRequestBytes":PER_REQUEST_BYTES,"room":true,
         "notAfter":not_after});
     let attempt = propose_and_submit(root, ws, id, &request)?;
     workspace::publish_delegation(root, id, &attempt)?;
@@ -653,7 +653,7 @@ fn install(
     // The concierge's grant under the room, and its read of the till.
     let grant = format!("{name}-concierge");
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-        "name":name,"recipient":concierge,"verbs":CONCIERGE_VERBS,"maxCost":MAX_COST,"room":true});
+        "name":name,"recipient":concierge,"verbs":CONCIERGE_VERBS,"perRequestBytes":PER_REQUEST_BYTES,"room":true});
     let attempt = propose_and_submit(root, ws, &grant, &request)?;
     workspace::publish_delegation(root, &grant, &attempt)?;
     write_json(

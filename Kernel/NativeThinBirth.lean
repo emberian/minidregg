@@ -112,7 +112,7 @@ def coordinatesOf (descriptor : Descriptor Registry) : BirthCoordinates where
     let owner ← descriptor.grants[2 * position]?
     let ancestors := (owner.capability.head.ancestors.image CapabilityId.value).sort (· ≤ ·)
     if ancestors.isEmpty then none else pure (placement.value, ancestors)
-  ownerBudget := (descriptor.grants.head?.map fun grant => grant.capability.head.scope.maxCost).getD 0
+  ownerBudget := (descriptor.grants.head?.map fun grant => grant.capability.head.scope.perRequestBytes).getD 0
   lifetime := (descriptor.grants.head?.map fun grant =>
     grant.capability.head.notAfter - grant.capability.head.notBefore).getD 0
   fee := descriptor.fee

@@ -120,7 +120,7 @@ chan=$(jq -r .target "$AW/refs/chan.json")
 
 # B joins the room with observe + append (the room grant covers chan); only the laws stand between.
 jq -n --arg r "$B" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"chroom",
-  recipient:$r,verbs:["observe","append"],maxCost:"50000",room:true}' >"$D/req/invite-b.json"
+  recipient:$r,verbs:["observe","append"],perRequestBytes:"50000",room:true}' >"$D/req/invite-b.json"
 run invite-propose "$MINI" workspace --action propose --dir "$AW" --request "$D/req/invite-b.json" \
   --proposal-id chinvite-b; ok invite-propose
 run invite-submit "$MINI" workspace --action submit --dir "$AW" \

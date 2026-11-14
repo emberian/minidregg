@@ -74,7 +74,7 @@ checks its real method effects, current restrictive export and retained old meth
 after a kind revision. It is prepared but has not run against a source-matched Host.
 Nine focused Rust tests pass; this does not qualify the Lean source receiver.
 
-## Actual compute funding, not command-byte maxCost
+## Actual compute funding, not command-byte perRequestBytes
 
 Existing exact steps flow into `ResourceCost.proofWork`, then the durable global
 lifetime deployment meter. The new source quota is separate. `RunComputeBudgetDomain`

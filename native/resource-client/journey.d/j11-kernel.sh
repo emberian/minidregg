@@ -100,7 +100,7 @@ row outsider-tail refused
 # Invites: room delegations to B and C (observe + append under commons).
 invite() { # WHO SUBJECT
   jq -n --arg r "$2" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"commons",
-    recipient:$r,verbs:["observe","append"],maxCost:"50000",room:true}' >"$D/req/sinvite-$1.json"
+    recipient:$r,verbs:["observe","append"],perRequestBytes:"50000",room:true}' >"$D/req/sinvite-$1.json"
   run "sinvite-$1-propose" "$MINI" workspace --action propose --dir "$AW" --request "$D/req/sinvite-$1.json" \
     --proposal-id "sinvite-$1"; ok "sinvite-$1-propose"
   run "sinvite-$1-submit" "$MINI" workspace --action submit --dir "$AW" \

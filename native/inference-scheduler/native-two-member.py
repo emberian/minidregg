@@ -142,7 +142,7 @@ def delegate(label, owner, target, parent, child, holder, nonce, verbs=None):
         'parentId':str(parent),'target':str(target),
         'child':{'id':str(child),'root':str(parent),'parent':str(parent),'issuer':'5',
         'holder':{'type':'subject','subject':str(holder)},'targets':[str(target)],'verbs':verbs or ['observe','mutate'],
-        'maxCost':'50000','notBefore':'10','notAfter':'1000','issuerEpoch':'2','policyId':str(target),
+        'perRequestBytes':'50000','notBefore':'10','notAfter':'1000','issuerEpoch':'2','policyId':str(target),
         'policyEpoch':'0','ancestors':[str(parent)],'channels':[]}}}},
         'grants':[{'kind':'object','target':str(target),'capability':str(parent)}]}
     result=ns['mini_submit'](label,intent,owner)

@@ -173,7 +173,7 @@ def capability : Capability .object where
   scope :=
     { targets := .explicit {⟨5⟩}
       verbs := {.mutateObject}
-      maxCost := 20 }
+      perRequestBytes := 20 }
   notBefore := 0
   notAfter := 100
   issuerEpoch := 0

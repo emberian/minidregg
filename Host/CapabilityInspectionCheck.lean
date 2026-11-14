@@ -26,7 +26,7 @@ def main : IO Unit := do
     ("id", "141"), ("root", "101"), ("parent", "101"), ("issuer", "17"),
     ("holder", Json.mkObj [("type", "subject"), ("subject", "8")]),
     ("targets", Json.arr #["8401"]), ("verbs", Json.arr #["observe", "delegate"]),
-    ("maxCost", "9007199254740993"), ("notBefore", "23"), ("notAfter", "99999"),
+    ("perRequestBytes", "9007199254740993"), ("notBefore", "23"), ("notAfter", "99999"),
     ("issuerEpoch", "7"), ("policyId", "8401"), ("policyEpoch", "11"),
     ("ancestors", Json.arr #["101"]), ("channels", Json.arr #["29", "31"])]
   match inspected.getObjVal? "head" with

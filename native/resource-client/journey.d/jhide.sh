@@ -106,7 +106,7 @@ add_height "$SPONSOR_WS/attempts/h-c3/outcome.json"
 scalar hledger create 4 20 >"$D/req/c4.json"; [ "$(invoke "$SPONSOR_WS" h-c4 "$D/req/c4.json")" = installed ] || { echo "create 4 failed" >&2; exit 1; }
 add_height "$SPONSOR_WS/attempts/h-c4/outcome.json"
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"hledger",
-  recipient:$r,verbs:["observe"],maxCost:"50000",fields:["3"]}' >"$D/req/give.json"
+  recipient:$r,verbs:["observe"],perRequestBytes:"50000",fields:["3"]}' >"$D/req/give.json"
 run give-propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/give.json" --proposal-id h-give; must give-propose
 run give "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/h-give/intent.json" \
   --attempt "$SPONSOR_WS/attempts/h-give"

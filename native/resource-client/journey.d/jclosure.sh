@@ -105,7 +105,7 @@ row board "A seals the board (install: every write leaves fields 2 and 3 as they
   "$(attempt_answer "$WS_A/attempts/jcl-seal/outcome.json" | jq -r '.type + " " + (.confirmation // "")' 2>/dev/null)" \
   "$(attempt_answer "$WS_A/attempts/jcl-seal/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1; echo $?)"
 jq -n --arg r "$B" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"kcl-board",
-  recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/grant.json"
+  recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$D/req/grant.json"
 run grant-propose "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/grant.json" --proposal-id jcl-grant
 run grant-submit "$MINI" workspace --action submit --dir "$WS_A" --intent "$WS_A/proposals/jcl-grant/intent.json" \
   --attempt "$WS_A/attempts/jcl-grant"

@@ -32,7 +32,7 @@ mkdir -p "$DIR"
 W="$DIR/world"
 # A program jam is ~566 KB (NOCK-RUNNER A6: hoonc ships the stdlib in every
 # trap). Observing a birth intent costs its byte length against the owner
-# capability's maxCost (the template ownerBudget, 100000 by default), so this
+# capability's perRequestBytes (the template ownerBudget, 100000 by default), so this
 # world is bootstrapped with a budget a program birth fits under.
 NEWPARTICIPANT_OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-4000000} \
   sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \

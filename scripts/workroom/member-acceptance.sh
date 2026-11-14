@@ -144,7 +144,7 @@ delegate() {
         child:{id:$child,root:"89",parent:"89",issuer:"5",
           holder:{type:"subject",subject:"9"},targets:["8001"],
           verbs:(if $verb == "both" then ["observe","mutate"] else [$verb] end),
-          maxCost:"50000",notBefore:"10",notAfter:"1000",
+          perRequestBytes:"50000",notBefore:"10",notAfter:"1000",
           issuerEpoch:"2",policyId:"8001",policyEpoch:"0",ancestors:["89"],channels:[]}}}},
       grants:[{kind:"object",target:"8001",capability:"89"}]}' \
     >"$EVIDENCE/$label-intent.json"

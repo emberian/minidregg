@@ -95,7 +95,7 @@ def child : Capability .object where
   parent := some ⟨1⟩
   issuer := ⟨pinIssuer⟩
   holder := .bearer
-  scope := { targets := .explicit ∅, verbs := ∅, maxCost := 0 }
+  scope := { targets := .explicit ∅, verbs := ∅, perRequestBytes := 0 }
   notBefore := 0
   notAfter := 0
   issuerEpoch := 0

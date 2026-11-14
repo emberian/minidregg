@@ -52,7 +52,7 @@ Present state, rewritten whole. This lane qualifies rehearsal #3. Its board is
   member's appOwnerCapability as `appDelegateCapability`. The product fix is 52d15a6ce (apps.rs
   `delegate_share`). Owed harness change: after `lifecycle`, a step `share-delegation` in which the
   owner delegates the manager a child of appOwnerCapability (verbs observe, mutate, delegate, append,
-  place; maxCost = template ownerBudget), with propose/submit/publish-delegation in the owner's
+  place; perRequestBytes = template ownerBudget), with propose/submit/publish-delegation in the owner's
   workspace, and the ticket's `appDelegateCapability` naming the child. Then run
   `qrun.sh` on an overlay of Host 9bd52317c and Rust b65465c72.
 - **Lean, on dregg-ref:**

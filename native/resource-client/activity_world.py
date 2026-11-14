@@ -301,7 +301,7 @@ class World:
                 env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
                      'NEWPARTICIPANT_EXTRA_SUBJECTS': str(root / 'enrollment-second.json'),
                      'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance,
-                     # every owner capability's maxCost is the template's ownerBudget, and a publish costs its own
+                     # every owner capability's perRequestBytes is the template's ownerBudget, and a publish costs its own
                      # byte length: the world apps' packages (104-150 KB) exceed the default 100000 (`notAccountOwner`)
                      'NEWPARTICIPANT_OWNER_BUDGET': OWNER_BUDGET})
         self.config = self.W / 'deployment' / 'pinned-config.json'

@@ -261,7 +261,7 @@ INBOX=$(jq -er '.target' "$B/sponsor/refs/inbox.json")
 end
 begin b-delegate-to-home-subject
 jq -n --arg r "$SOURCE_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",
-  name:"inbox",recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' \
+  name:"inbox",recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' \
   >"$B/delegate-request.json"
 "$MINI" workspace --action propose --dir "$B/sponsor" --request "$B/delegate-request.json" \
   --proposal-id grant-source-owner >"$B/delegate-propose.stdout"

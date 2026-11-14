@@ -1618,7 +1618,7 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str
 /// The member delegates the manager a child of the app owner capability with the verbs a share ticket's
 /// issuer needs (observe, mutate, delegate, append, place), through the shell's own propose, submit and
 /// publish-delegation, and returns the recipient reference (which names the child capability).
-fn delegate_share(root: &Path, ws: &Value, app_ref: &str, manager: &str, max_cost: &str) -> Result<Value> {
+fn delegate_share(root: &Path, ws: &Value, app_ref: &str, manager: &str, per_request_bytes: &str) -> Result<Value> {
     use crate::workspace as w;
     let id = format!("share-{app_ref}");
     let recipient_ref = root.join("proposals").join(&id).join("recipient-reference.json");
@@ -1627,7 +1627,7 @@ fn delegate_share(root: &Path, ws: &Value, app_ref: &str, manager: &str, max_cos
     }
     let proposal = root.join("sources").join(format!("{id}.request.json"));
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":app_ref,"recipient":manager,
-        "verbs":["observe","mutate","delegate","append","place"],"maxCost":max_cost});
+        "verbs":["observe","mutate","delegate","append","place"],"perRequestBytes":per_request_bytes});
     let _ = fs::remove_file(&proposal);
     crate::create_private(&proposal, &serde_json::to_vec_pretty(&request).map_err(|e| e.to_string())?)?;
     let mini = std::env::current_exe().map_err(|e| e.to_string())?;

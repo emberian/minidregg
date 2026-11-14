@@ -2110,7 +2110,7 @@ fn create_cell_as(session: &Session, name: &str, storage: &str, law: &Value, roo
 /// and return the recipient reference.
 fn room_grant(session: &Session, room: &str, recipient: &str, verbs: &[String]) -> Result<Value, Done> {
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":room,
-        "recipient":recipient,"verbs":verbs,"maxCost":"50000","room":true});
+        "recipient":recipient,"verbs":verbs,"perRequestBytes":"50000","room":true});
     let done = propose_submit(session, "grant", &request)?;
     let id = done["id"].as_str().unwrap_or_default().to_owned();
     let ws = &session.workspace;

@@ -133,7 +133,7 @@ jq -e --arg r "$realm" '.birth.resources[0].room == $r and .birth.resources[0].k
 delegate() { # ID WELL RECIPIENT-SUBJECT RECIPIENT-WS
   jq -n --arg n "$2" --arg r "$3" --arg f "balance:$(jq -r .target "$SPONSOR_WS/refs/$2.json")" \
     '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,
-    recipient:$r,verbs:["observe","mintAsset"],maxCost:"50000",maxDelta:[{field:$f,max:"30"}]}' >"$D/req/$1.json"
+    recipient:$r,verbs:["observe","mintAsset"],perRequestBytes:"50000",maxDelta:[{field:$f,max:"30"}]}' >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$1.json" \
     --proposal-id "$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$SPONSOR_WS" \

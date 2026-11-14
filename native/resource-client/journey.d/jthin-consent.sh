@@ -164,7 +164,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
   --predicate "$D/req/permit-all.json" --fields 401-405 >"$D/log/blind-create.out" 2>"$D/log/blind-create.err" \
   || fail blind-create 0 1 x "$(tail -3 "$D/log/blind-create.err")"
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"tc-blind",
-  recipient:$r,verbs:["observe","mutate"],fields:["401"],maxCost:"50000"}' >"$D/req/blind-grant.json"
+  recipient:$r,verbs:["observe","mutate"],fields:["401"],perRequestBytes:"50000"}' >"$D/req/blind-grant.json"
 "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/blind-grant.json" --proposal-id tc-blind-grant \
   >"$D/log/blind-grant.out" 2>"$D/log/blind-grant.err" || fail blind-grant 0 1 x "$(tail -3 "$D/log/blind-grant.err")"
 "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/tc-blind-grant/intent.json" \

@@ -33,7 +33,7 @@ ap.add_argument('--root', required=True)
 ap.add_argument('--pad', type=int, default=3000)
 ap.add_argument('--repeat', type=int, default=5)
 a = ap.parse_args()
-# The padded package's publication command is ~200 KB; the owner capabilities' maxCost (the command's byte
+# The padded package's publication command is ~200 KB; the owner capabilities' perRequestBytes (the command's byte
 # length a capability admits) is raised for this world so the publication itself is admitted.
 os.environ['NEWPARTICIPANT_OWNER_BUDGET'] = '4000000'
 w = World(a.bin, a.root, HERE.parent.parent)

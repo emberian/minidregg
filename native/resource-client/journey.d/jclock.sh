@@ -381,7 +381,7 @@ jq -n --slurpfile m "$MUD/law.management.json" --slurpfile s "$MUD/sheet/law.she
 subst <"$MUD/sheet/init.sheet.json" >"$REQ/sheet-init.json"
 run screate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "$SHEET" --storage declared --predicate "$REQ/sheet-mgmt.json" --fields 0-14
 turn "$SPONSOR_WS" sheet-init "$REQ/sheet-init.json"; si=$?
-jq -n --arg r "$REF" --arg n "$SHEET" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$REQ/sheet-grant.json"
+jq -n --arg r "$REF" --arg n "$SHEET" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$REQ/sheet-grant.json"
 turn "$SPONSOR_WS" sheet-grant "$REQ/sheet-grant.json"; sg=$?
 run sheet-publish "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --proposal-id clock-sheet-grant --attempt "$SPONSOR_WS/attempts/clock-sheet-grant"
 run sheet-import "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name "$SHEET" --from-ref "$SPONSOR_WS/proposals/clock-sheet-grant/recipient-reference.json"

@@ -180,7 +180,7 @@ fn kind_of(name: &str) -> Kind {
     ) {
         return Kind::Ref;
     }
-    if matches!(base, "N" | "AMOUNT" | "COST" | "MAX-COST" | "PRICE" | "QTY" | "LINE" | "SECONDS" | "HEIGHT" | "H" | "H1" | "H2" | "FUNDING" | "OFFSET" | "SUPPLY" | "B" | "P" | "A" | "EPOCH" | "REVISION" | "ATOM") {
+    if matches!(base, "N" | "AMOUNT" | "COST" | "PER-REQUEST-BYTES" | "PRICE" | "QTY" | "LINE" | "SECONDS" | "HEIGHT" | "H" | "H1" | "H2" | "FUNDING" | "OFFSET" | "SUPPLY" | "B" | "P" | "A" | "EPOCH" | "REVISION" | "ATOM") {
         return Kind::Number;
     }
     if name.contains('|') && name.split('|').all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) {
@@ -726,13 +726,13 @@ mod tests {
 
     #[test]
     fn grammar_shapes_render_and_assemble() {
-        let alts = alternatives("delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST");
+        let alts = alternatives("delegate ID REF RECIPIENT VERB[,VERB...] PER-REQUEST-BYTES");
         assert_eq!(alts.len(), 1);
         let t = &alts[0].tokens;
         assert_eq!(t[0], Tok::Lit("delegate".into()));
         assert_eq!(t[1], Tok::Arg { name: "ID".into(), optional: false, kind: Kind::Id });
         assert_eq!(t[2], Tok::Arg { name: "REF".into(), optional: false, kind: Kind::Ref });
-        assert_eq!(t[5], Tok::Arg { name: "MAX-COST".into(), optional: false, kind: Kind::Number });
+        assert_eq!(t[5], Tok::Arg { name: "PER-REQUEST-BYTES".into(), optional: false, kind: Kind::Number });
         assert!(alts[0].proposes("mini workspace --action propose (action delegate)"));
         let room = alternatives("room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT]");
         assert_eq!(room.len(), 2);

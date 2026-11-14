@@ -299,7 +299,7 @@ cat >"$EVIDENCE/parent-witness-delegation.json" <<EOF
  "expectedTargetRoot":"$PARENT_ROOT","parentId":"71","target":"$CONTROLLER_TASK",
  "child":{"id":"73","root":"71","parent":"71","issuer":"5",
   "holder":{"type":"subject","subject":"8"},"targets":["$CONTROLLER_TASK"],
-  "verbs":["observe","mutate"],"maxCost":"50000",
+  "verbs":["observe","mutate"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"$CONTROLLER_TASK","policyEpoch":"0","ancestors":["71"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"$CONTROLLER_TASK","capability":"71"}]}
@@ -321,7 +321,7 @@ if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
  "expectedTargetRoot":"$PARENT_ROOT","parentId":"71","target":"$CONTROLLER_TASK",
  "child":{"id":"75","root":"71","parent":"71","issuer":"5",
   "holder":{"type":"subject","subject":"9"},"targets":["$CONTROLLER_TASK"],
-  "verbs":["observe","mutate"],"maxCost":"50000",
+  "verbs":["observe","mutate"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"$CONTROLLER_TASK","policyEpoch":"0","ancestors":["71"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"$CONTROLLER_TASK","capability":"71"}]}
@@ -351,7 +351,7 @@ cat >"$EVIDENCE/publication-delegation.json" <<EOF
  "expectedTargetRoot":"$PUBLICATION_ROOT","parentId":"91","target":"$PUBLICATION_TARGET",
  "child":{"id":"93","root":"91","parent":"91","issuer":"5",
   "holder":{"type":"subject","subject":"8"},"targets":["$PUBLICATION_TARGET"],
-  "verbs":["observe","mutate"],"maxCost":"50000",
+  "verbs":["observe","mutate"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"$PUBLICATION_TARGET","policyEpoch":"0","ancestors":["91"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"$PUBLICATION_TARGET","capability":"91"}]}
@@ -374,7 +374,7 @@ cat >"$EVIDENCE/publication-read-delegation.json" <<EOF
  "expectedTargetRoot":"$PUBLICATION_ROOT","parentId":"91","target":"$PUBLICATION_TARGET",
  "child":{"id":"94","root":"91","parent":"91","issuer":"5",
   "holder":{"type":"subject","subject":"8"},"targets":["$PUBLICATION_TARGET"],
-  "verbs":["observe"],"maxCost":"50000",
+  "verbs":["observe"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"$PUBLICATION_TARGET","policyEpoch":"0","ancestors":["91"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"$PUBLICATION_TARGET","capability":"91"}]}

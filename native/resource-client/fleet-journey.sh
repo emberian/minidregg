@@ -150,7 +150,7 @@ jq -e --slurpfile s "$OUT/send.json" '(.events | length) == 1 and
 # The existing narrowed-delegation path; reading a topic is the account's
 # observe grant, so a subscriber holds exactly that and nothing more.
 B_SUBJECT=$(jq -er .subject "$OUT/join-b.record.json")
-printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"account","recipient":"%s","verbs":["observe"],"maxCost":"100000"}\n' \
+printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"account","recipient":"%s","verbs":["observe"],"perRequestBytes":"100000"}\n' \
   "$B_SUBJECT" >"$ROOT/observe-grant.json"
 step grant-propose delegate -- "$MINI" workspace --action propose --dir "$ROOT/agent-a" \
   --proposal-id observe-b --request "$ROOT/observe-grant.json"
@@ -198,7 +198,7 @@ jq -e --arg v "$EXPECT_B" '[.balances[] | select(.[0] == "0") | .[1]] == [$v]' "
 # exactly the bound, and one more is refused by name. A grant that bounds some other balance
 # sets no bound on the one it debits and is refused `missingBalanceBound`.
 spend_grant() { # ID IMPORT-NAME MAXDELTA-JSON
-  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"account","recipient":"%s","verbs":["observe","transfer"],"maxCost":"100000","maxDelta":%s}\n' \
+  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"account","recipient":"%s","verbs":["observe","transfer"],"perRequestBytes":"100000","maxDelta":%s}\n' \
     "$B_SUBJECT" "$3" >"$ROOT/$1.json"
   step "$1-propose" delegate -- "$MINI" workspace --action propose --dir "$ROOT/agent-a" \
     --proposal-id "$1" --request "$ROOT/$1.json"

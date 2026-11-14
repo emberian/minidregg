@@ -347,7 +347,7 @@ cat >"$EVIDENCE/parent-witness-delegation.json" <<EOF
  "expectedTargetRoot":"$PARENT_ROOT","parentId":"71","target":"$WORKROOM_PARENT_TASK",
  "child":{"id":"73","root":"71","parent":"71","issuer":"5",
   "holder":{"type":"subject","subject":"8"},"targets":["$WORKROOM_PARENT_TASK"],
-  "verbs":["observe","mutate"],"maxCost":"50000",
+  "verbs":["observe","mutate"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"$WORKROOM_PARENT_TASK","policyEpoch":"0","ancestors":["71"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"$WORKROOM_PARENT_TASK","capability":"71"}]}
@@ -368,7 +368,7 @@ cat >"$EVIDENCE/publication-delegation.json" <<EOF
  "expectedTargetRoot":"$PUBLICATION_ROOT","parentId":"91","target":"7003",
  "child":{"id":"93","root":"91","parent":"91","issuer":"5",
   "holder":{"type":"subject","subject":"8"},"targets":["7003"],
-  "verbs":["observe","mutate"],"maxCost":"50000",
+  "verbs":["observe","mutate"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"7003","policyEpoch":"0","ancestors":["91"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"7003","capability":"91"}]}
@@ -391,7 +391,7 @@ cat >"$EVIDENCE/publication-read-delegation.json" <<EOF
  "expectedTargetRoot":"$PUBLICATION_ROOT","parentId":"91","target":"7003",
  "child":{"id":"94","root":"91","parent":"91","issuer":"5",
   "holder":{"type":"subject","subject":"8"},"targets":["7003"],
-  "verbs":["observe"],"maxCost":"50000",
+  "verbs":["observe"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"7003","policyEpoch":"0","ancestors":["91"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"7003","capability":"91"}]}
@@ -416,7 +416,7 @@ cat >"$EVIDENCE/workroom-delegation.json" <<EOF
  "expectedTargetRoot":"$WORKROOM_ROOT","parentId":"89","target":"8001",
  "child":{"id":"95","root":"89","parent":"89","issuer":"5",
   "holder":{"type":"subject","subject":"8"},"targets":["8001"],
-  "verbs":["observe","mutate"],"maxCost":"50000",
+  "verbs":["observe","mutate"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"8001","policyEpoch":"0","ancestors":["89"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"8001","capability":"89"}]}
@@ -438,7 +438,7 @@ cat >"$EVIDENCE/workroom-read-delegation.json" <<EOF
  "expectedTargetRoot":"$WORKROOM_ROOT","parentId":"89","target":"8001",
  "child":{"id":"96","root":"89","parent":"89","issuer":"5",
   "holder":{"type":"subject","subject":"8"},"targets":["8001"],
-  "verbs":["observe"],"maxCost":"50000",
+  "verbs":["observe"],"perRequestBytes":"50000",
   "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
   "policyId":"8001","policyEpoch":"0","ancestors":["89"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"8001","capability":"89"}]}
