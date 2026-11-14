@@ -509,63 +509,61 @@ def LiveLegacyCensusTeeth : Prop :=
   ∀ (tag : UInt8) bytes, DeclaredResourceController.registeredOctet tag = false →
     tag.toNat ∉ liveLegacy → DeclaredResourceController.payloadStream.decodePrefix (tag :: bytes) = none
 
-/-! ## §8. The deployed receiver factors through the dispatcher.
+/-! ## §8. The deployed receiver factors through the registry.
 
-`HostKeystone` is about `hostTargetDispatch`, a wrapper this file writes; its contract alone
-is not the receiver's.  `PrepareFactors` (pass 27) states the controller's own per-target
-preparation, `ResourceTransaction.prepareTarget`, as the content handler's dispatch followed
-by `genericChecks`, which reads only the pre and post cells, the policy source and the
-audience, never the payload or the command.  The bridge's three directions (acceptance,
-acceptance up to generic refusal, refusal by name) are its corollaries, and it is the shape
-`prepareTarget` takes at the migration commit, where this is that commit's gate.
+`RegistryKeystone` is about `liveTargetDispatch`, a function this file writes out of the
+controller's arms; its contract alone is not the receiver's. `PrepareFactors` states the
+controller's own per-target preparation, `ResourceTransaction.prepareTarget`, at every target
+of a bound code: its packed post and its named refusal are the registry's dispatch of the
+operation's bytes, then `genericChecks`, which reads only the pre and post cells, the policy
+source and the audience, never the payload or the command. -/
 
-The census of what the hand decoder still reads is `LiveLegacyCensus` (§7b). -/
-
-/-- The host context of a content target. -/
+/-- The host context of a target. -/
 def hostCtxOf (ctx : LiveCtx) (deployment : DeclaredResourceController.Deployment)
     (version : Nat) (root : Digest) (observe : Option CapabilityId) (epoch : Option Nat)
     (roster : Option ObjectAudienceRoster.Roster) : HostCtx :=
   { ctx with deployment, version, root, observe, epoch, roster }
 
 /-- The receiver's checks after the effect, payload-blind by signature: the final-post law,
-the policy source, audience freshness (`prepareTarget`'s order), each refusal named. -/
-def genericChecks (deployment : DeclaredResourceController.Deployment)
+the policy source, audience freshness (`prepareTarget`'s order), each refusal named under the
+target's code. -/
+def genericChecks (code : Nat) (deployment : DeclaredResourceController.Deployment)
     (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
     (snapshot : DeclaredResourceController.AuthoritySnapshot) (target : Nat)
     (epoch : Option Nat) (before after : HostCell) : Except DispatchRefusal HostCell :=
   if CanonicalCellRegistry.FinalPostLaw deployment target before after then
     match CanonicalCellRegistry.loadPolicySource snapshot.domain directory
         (snapshot.authState.policyAddress ⟨target⟩ (snapshot.authState.policyRevision ⟨target⟩)) with
-    | none => .error (ofReject 1 .policyUnavailable)
+    | none => .error (ofReject code .policyUnavailable)
     | some source =>
       match ObjectAudience.checkFresh source.record.audience target epoch with
-      | .error reason => .error (ofReject 1 (.audience reason))
+      | .error reason => .error (ofReject code (.audience reason))
       | .ok () => .ok after
-  else .error (ofReject 1 .invalidPost)
+  else .error (ofReject code .invalidPost)
 
-/-- **THE RECEIVER FACTORIZATION.**  For a content target whose slot is present, the
-deployed preparation (its post packed, its refusals named) is the dispatch, then the
-generic checks.
-
-OWED for `contentSpec` since content became a registered effect. It was proved against the hand
-arm, whose selection implied the role; the declaration's selection does not (a content cell is
-selected under any role and the computation refuses `wrongRole`), so the proof needs that case
-and is to be restated for every bound code over `hostRegistry`, from `effect_dispatch_fire`. -/
-def PrepareFactors (E : ContentSpec) : Prop :=
+/-- **THE RECEIVER FACTORIZATION.** For a target of a bound code whose slot is present, the
+deployed preparation (its post packed, its refusals named under the code) is the registry's
+dispatch of the operation, then the generic checks. It is one statement for every declared
+effect: nothing in it names content or the cited read. -/
+def PrepareFactors : Prop :=
   ∀ (deployment : DeclaredResourceController.Deployment)
     (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
-    (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
-    (observe : Option CapabilityId) (epoch : Option Nat)
+    (ctx : LiveCtx) (tag : UInt8) (op : (DeclaredResourceController.effectAt tag.toNat).O)
+    (version : Nat) (root : Digest) (observe : Option CapabilityId) (epoch : Option Nat)
     (roster : Option ObjectAudienceRoster.Roster) (before : HostCell),
+    DeclaredResourceController.registeredCode tag.toNat = true →
     directory.slots ctx.target = .present before →
     ((DeclaredResourceController.prepareTarget deployment directory ctx.snapshot ctx.semantics
-        ctx.ambient ctx.command (contentTarget ctx version root command observe epoch roster)).map
+        ctx.ambient ctx.command
+        (hostTarget (hostCtxOf ctx deployment version root observe epoch roster)
+          (.registered tag op))).map
         (fun prepared => DeclaredResourceController.packTarget
-          (contentTarget ctx version root command observe epoch roster) prepared.candidate.post)).mapError
-        (ofReject 1) =
-      (dispatch [(1, contentHandlerOf E)] 1 (ContentResource.commandStream.encode command)
+          (hostTarget (hostCtxOf ctx deployment version root observe epoch roster)
+            (.registered tag op)) prepared.candidate.post)).mapError (ofReject tag.toNat) =
+      (dispatch hostRegistry tag.toNat
+          ((DeclaredResourceController.effectAt tag.toNat).spec.opStream.encode op)
           (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
-        genericChecks deployment directory ctx.snapshot ctx.target epoch before
+        genericChecks tag.toNat deployment directory ctx.snapshot ctx.target epoch before
 
 /-! ### The wrong-role pole
 

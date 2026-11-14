@@ -1,13 +1,19 @@
 /-
-# `Kernel/EffectsRevival/PrepareProofs.lean` — the receiver's preparation of a content target
+# `Kernel/EffectsRevival/PrepareProofs.lean` — the receiver's preparation of a registered target
 
-The wrong-role pole (`ContentWrongRole`, `ContentWrongRoleUncharged`, `ContentWrongRoleCommand`),
-and `PrepareFactors contentSpec` on every target under a role that is not an object, the case
-the hand arm's selection never reached. `PrepareFactors contentSpec` on object targets is owed.
+`PrepareFactors`, proved for every bound code: what `prepareTarget` answers at a registered
+target is the registry's dispatch of its operation, then the generic checks. The proof reads
+`prepareTarget` through `prepareTarget_packed` and the deployed arms through
+`effect_dispatch_fire`; nothing in it is about one effect.
+
+The wrong-role pole of the content binding (`ContentWrongRole`, `ContentWrongRoleUncharged`,
+`ContentWrongRoleCommand`), executed on the sample cell.
 -/
 module
 
 public import Kernel.EffectsRevival.CommutingProofs
+public import Kernel.EffectsRevival.RegistryProofs
+public import Kernel.ResourcePreparePacked
 public import Effects.Revival.EngineProofs
 public import Theory.AssertAxioms
 
@@ -133,76 +139,137 @@ theorem contentWrongRoleCommand : ContentWrongRoleCommand := by
   simp only [loaded, DeclaredResourceController.requireSome, DeclaredResourceController.collect,
     refused, bind, Except.bind, Except.map]
 
-/-- The spec-side header refuses a role that is not an object, whatever the cell. -/
-theorem contentHeader_wrongRole (ctx : LiveCtx) (deployment : DeclaredResourceController.Deployment)
-    (version : Nat) (root : Digest) (observe : Option CapabilityId) (epoch : Option Nat)
-    (roster : Option ObjectAudienceRoster.Roster) (before : HostCell) (wrong : ctx.kind ≠ .object) :
-    contentHeader (hostCtxOf ctx deployment version root observe epoch roster) before =
-      .error (.wrongRole 1) := by
-  unfold contentHeader
-  rw [if_pos (Or.inl (by simp [hostCtxOf, wrong]))]
+/-! ## `PrepareFactors`: the receiver's preparation is the registry's dispatch, then the generic checks -/
 
-set_option backward.isDefEq.respectTransparency false in
-theorem dispatch_content (ctx : HostCtx) (cell : HostCell) (command : ContentResource.Command) :
-    dispatch [(1, contentHandlerOf contentSpec)] 1 (ContentResource.commandStream.encode command) ctx cell =
-      (contentHandlerOf contentSpec).fire 1 ctx command cell := by
-  simp only [dispatch, List.lookup, beq_self_eq_true]
-  rw [show (contentHandlerOf contentSpec).spec.opStream = ContentResource.commandStream from rfl,
-    decode_encode_op]
+theorem hostRegistry_lookup_bound {code : Nat}
+    (bound : DeclaredResourceController.registeredCode code = true) :
+    hostRegistry.lookup code =
+      some (((DeclaredResourceController.effectAt code).handler code).comap dispatchCtxOf) := by
+  rw [hostRegistry_lookup_eq]
+  unfold DeclaredResourceController.registeredCode at bound
+  unfold DeclaredResourceController.effectAt
+  cases found : DeclaredResourceController.liveEffects.lookup code with
+  | none => rw [found] at bound; cases bound
+  | some e => rfl
 
-/-- **`PrepareFactors contentSpec` at every role that is not an object**: both sides refuse
-`wrongRole` under code 1. -/
-theorem prepareFactors_wrongRole (deployment : DeclaredResourceController.Deployment)
-    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
-    (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
-    (observe : Option CapabilityId) (epoch : Option Nat)
-    (roster : Option ObjectAudienceRoster.Roster) (before : HostCell)
-    (wrong : ctx.kind ≠ .object) (present : directory.slots ctx.target = .present before) :
-    ((DeclaredResourceController.prepareTarget deployment directory ctx.snapshot ctx.semantics
-        ctx.ambient ctx.command (contentTarget ctx version root command observe epoch roster)).map
-        (fun prepared => DeclaredResourceController.packTarget
-          (contentTarget ctx version root command observe epoch roster) prepared.candidate.post)).mapError
-        (ofReject 1) =
-      (dispatch [(1, contentHandlerOf contentSpec)] 1 (ContentResource.commandStream.encode command)
-          (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
-        genericChecks deployment directory ctx.snapshot ctx.target epoch before := by
-  rw [prepareTarget_content_wrongRole deployment directory ctx command version root observe epoch
-    roster before wrong present, dispatch_content]
-  simp only [Handler.fire, Handler.admits, contentHandlerOf,
-    contentHeader_wrongRole ctx deployment version root observe epoch roster before wrong]
-  rfl
+theorem mapError_ok {ε ε' α : Type} {f : ε → ε'} {x : Except ε α} {a : α}
+    (ok : x.mapError f = .ok a) : x = .ok a := by
+  cases x with
+  | error e => cases ok
+  | ok b => cases ok; rfl
 
-/-- **`CommutingPrepare` at every role that is not an object**: the two planned roots are refused
-alike, whether or not the command commutes. -/
-theorem commutingPrepare_wrongRole (deployment : DeclaredResourceController.Deployment)
-    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
-    (snapshot : DeclaredResourceController.AuthoritySnapshot) (semantics : Digest)
-    (ambient : DeclaredResourceController.Ambient) (command : DeclaredResourceController.Command)
-    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat)
-    (root root' : Digest) (content : ContentResource.Command) (observe : Option CapabilityId)
-    (epoch : Option Nat) (roster : Option ObjectAudienceRoster.Roster) (wrong : kind ≠ .object) :
-    (DeclaredResourceController.prepareTarget deployment directory snapshot semantics ambient command
-        (ContentCommutingAppend.contentTarget kind id capability version root content observe epoch
-          roster)).map
-        (fun prepared => DeclaredResourceController.packTarget
-          (ContentCommutingAppend.contentTarget kind id capability version root content observe epoch
-            roster) prepared.candidate.post) =
-      (DeclaredResourceController.prepareTarget deployment directory snapshot semantics ambient command
-        (ContentCommutingAppend.contentTarget kind id capability version root' content observe epoch
-          roster)).map
-        (fun prepared => DeclaredResourceController.packTarget
-          (ContentCommutingAppend.contentTarget kind id capability version root' content observe epoch
-            roster) prepared.candidate.post) := by
-  have planned := contentWrongRole deployment directory
-    ⟨snapshot, semantics, ambient, command, kind, id, capability⟩ content version root observe epoch
-    roster wrong
-  have moved := contentWrongRole deployment directory
-    ⟨snapshot, semantics, ambient, command, kind, id, capability⟩ content version root' observe epoch
-    roster wrong
-  simp only [contentTarget] at planned moved
-  simp only [ContentCommutingAppend.contentTarget]
-  rw [planned, moved]
-  cases directory.slots id <;> rfl
+/-- **The receiver's four reads of a registered target are its handler fired, then the generic
+checks**, at every context, operation and loaded cell. -/
+theorem receive_registered
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry) (h : HostCtx)
+    (tag : UInt8) (op : (DeclaredResourceController.effectAt tag.toNat).O) (before : HostCell) :
+    (DeclaredResourceController.receive (.present before)
+        (DeclaredResourceController.selectTarget h.deployment (hostTarget h (.registered tag op)))
+        (DeclaredResourceController.computeTarget h.snapshot h.semantics h.ambient h.command
+          (hostTarget h (.registered tag op)))
+        (fun before pre post => DeclaredResourceController.afterTarget h.deployment directory
+          h.snapshot (hostTarget h (.registered tag op)).materializer
+          (DeclaredResourceController.packTarget (hostTarget h (.registered tag op)))
+          (hostTarget h (.registered tag op)).target
+          (hostTarget h (.registered tag op)).audienceEpoch before pre
+          (DeclaredResourceController.targetPatch h.snapshot h.semantics h.ambient h.command
+            (hostTarget h (.registered tag op)) pre) post)).mapError (ofReject tag.toNat) =
+      ((DeclaredResourceController.effectAt tag.toNat).handler tag.toNat).fire tag.toNat
+          (dispatchCtxOf h) op before >>=
+        genericChecks tag.toNat h.deployment directory h.snapshot h.target h.epoch before := by
+  rw [← effect_dispatch_fire (DeclaredResourceController.effectAt tag.toNat) tag.toNat
+    (dispatchCtxOf h) op before]
+  cases selected : DeclaredResourceController.selectTarget h.deployment
+      (hostTarget h (.registered tag op)) before with
+  | none =>
+    have selected' : (DeclaredResourceController.effectAt tag.toNat).select
+        (dispatchCtxOf h).deployment (dispatchCtxOf h).target (dispatchCtxOf h).kind before =
+          none := selected
+    simp only [DeclaredResourceController.receive, selected, selected']
+    rfl
+  | some pre =>
+    have selected' : (DeclaredResourceController.effectAt tag.toNat).select
+        (dispatchCtxOf h).deployment (dispatchCtxOf h).target (dispatchCtxOf h).kind before =
+          some pre := selected
+    cases computed : DeclaredResourceController.computeTarget h.snapshot h.semantics h.ambient
+        h.command (hostTarget h (.registered tag op)) pre with
+    | error reason =>
+      have computed' : ((DeclaredResourceController.effectAt tag.toNat).compute tag.toNat
+          (dispatchCtxOf h).toEffectCtx (dispatchCtxOf h).version (dispatchCtxOf h).root op
+          pre).mapError DeclaredResourceController.Reject.ofDispatch = .error reason := computed
+      simp only [DeclaredResourceController.receive, selected, selected', computed, computed']
+      rfl
+    | ok post =>
+      have computed' : ((DeclaredResourceController.effectAt tag.toNat).compute tag.toNat
+          (dispatchCtxOf h).toEffectCtx (dispatchCtxOf h).version (dispatchCtxOf h).root op
+          pre).mapError DeclaredResourceController.Reject.ofDispatch = .ok post := computed
+      obtain ⟨-, -, ps, emitted, replayed⟩ :=
+        (DeclaredResourceController.effectAt tag.toNat).compute_ok (mapError_ok computed')
+      have patched : (DeclaredResourceController.effectAt tag.toNat).patch
+          (dispatchCtxOf h).toEffectCtx op pre.logical =
+            ps ++ (DeclaredResourceController.effectAt tag.toNat).spec.rotate
+              (dispatchCtxOf h).toEffectCtx pre.logical := by
+        unfold DeclaredResourceController.Effect.patch EffectSpec.emitted
+        rw [emitted]
+        rfl
+      rw [← patched] at replayed
+      obtain ⟨valid, ran⟩ := (store_run_iff _ _ _).mp replayed
+      have disabled : Patch.firstDisabled? pre.logical
+          (DeclaredResourceController.targetPatch h.snapshot h.semantics h.ambient h.command
+            (hostTarget h (.registered tag op)) pre) = none :=
+        (Patch.firstDisabled?_eq_none_iff _ _).2 valid
+      have ran' : Patch.run pre.logical
+          (DeclaredResourceController.targetPatch h.snapshot h.semantics h.ambient h.command
+            (hostTarget h (.registered tag op)) pre) = post := ran
+      simp only [DeclaredResourceController.receive, selected, selected', computed, computed',
+        DeclaredResourceController.afterTarget, disabled]
+      rw [ran', if_pos rfl, if_pos valid]
+      simp only [bind, Except.bind, genericChecks]
+      by_cases law : CanonicalCellRegistry.FinalPostLaw h.deployment
+          (hostTarget h (.registered tag op)).target before
+          (DeclaredResourceController.packTarget (hostTarget h (.registered tag op))
+            (materialize (hostTarget h (.registered tag op)).materializer post))
+      · rw [if_pos law, if_pos (show CanonicalCellRegistry.FinalPostLaw h.deployment h.target before
+          ((DeclaredResourceController.effectAt tag.toNat).pack (dispatchCtxOf h).kind
+            (materialize (DeclaredResourceController.effectAt tag.toNat).materializer post)) from law)]
+        cases source : CanonicalCellRegistry.loadPolicySource h.snapshot.domain directory
+            (h.snapshot.authState.policyAddress ⟨h.target⟩
+              (h.snapshot.authState.policyRevision ⟨h.target⟩)) with
+        | none => rfl
+        | some loaded =>
+          dsimp only
+          cases fresh : ObjectAudience.checkFresh loaded.record.audience h.target h.epoch with
+          | error reason => rfl
+          | ok unit => rfl
+      · rw [if_neg law, if_neg (show ¬ CanonicalCellRegistry.FinalPostLaw h.deployment h.target before
+          ((DeclaredResourceController.effectAt tag.toNat).pack (dispatchCtxOf h).kind
+            (materialize (DeclaredResourceController.effectAt tag.toNat).materializer post)) from law)]
+        rfl
+
+theorem prepareFactors : PrepareFactors := by
+  intro deployment directory ctx tag op version root observe epoch roster before bound present
+  have fired : dispatch hostRegistry tag.toNat
+        ((DeclaredResourceController.effectAt tag.toNat).spec.opStream.encode op)
+        (hostCtxOf ctx deployment version root observe epoch roster) before =
+      ((DeclaredResourceController.effectAt tag.toNat).handler tag.toNat).fire tag.toNat
+        (dispatchCtxOf (hostCtxOf ctx deployment version root observe epoch roster)) op before := by
+    rw [dispatch_found (hostRegistry_lookup_bound bound)]
+    unfold Handler.read
+    have decoded : (((DeclaredResourceController.effectAt tag.toNat).handler tag.toNat).comap
+          dispatchCtxOf).spec.opStream.toLawful.decode
+        ((DeclaredResourceController.effectAt tag.toNat).spec.opStream.encode op) = some op :=
+      decode_encode_op (DeclaredResourceController.effectAt tag.toNat).spec.opStream op
+    rw [decoded]
+    exact Handler.comap_fire dispatchCtxOf
+      ((DeclaredResourceController.effectAt tag.toNat).handler tag.toNat) tag.toNat
+      (hostCtxOf ctx deployment version root observe epoch roster) op before
+  rw [fired, DeclaredResourceController.prepareTarget_packed]
+  have present' : directory.slots
+      (hostTarget (hostCtxOf ctx deployment version root observe epoch roster)
+        (.registered tag op)).target = .present before := present
+  rw [present']
+  exact receive_registered directory (hostCtxOf ctx deployment version root observe epoch roster)
+    tag op before
 
 /-! ## The pole, executed on the sample cell -/
 
@@ -245,8 +312,7 @@ theorem sampleRole_teeth :
 #assert_axioms contentWrongRole
 #assert_axioms contentWrongRoleUncharged
 #assert_axioms contentWrongRoleCommand
-#assert_axioms prepareFactors_wrongRole
-#assert_axioms commutingPrepare_wrongRole
+#assert_axioms prepareFactors
 #assert_axioms sampleWrongRole
 #assert_axioms sampleRole_teeth
 

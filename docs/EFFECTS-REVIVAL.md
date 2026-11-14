@@ -113,7 +113,7 @@ and its continuation; where they disagree with this section, this section is the
     codec itself is (`payloadStream` decodes the command from the signed command's bytes, as
     before); the operation is carried as `ContentResource.Command`.
 
-**Owed after the content binding:**
+**After the content binding (1 and 2 were owed and are proved; 3 on are open):**
 
 The role is the one behaviour that moved place (selection no longer asks it; the computation's
 header refuses it first). `PrepareProofs.lean` proves it did not move in value:
@@ -123,10 +123,10 @@ preparation of any command holding one, so no compute or money plan), `ContentWr
 (`prepareOn`'s refusal of a one-target command is `wrongRole`, after the clock and before
 everything else), with `sampleWrongRole` and `sampleRole_teeth` on the sample cell.
 
-1. `PrepareFactors` (`Statements.lean` §8): was proved for `contentSpec` against the hand arm.
-   Its proof used that selection implies the role. Proved now at every non-object role
-   (`prepareFactors_wrongRole`); owed at the object role. Restate it for every bound code over
-   `hostRegistry` and prove it from `effect_dispatch_fire`.
+1. `PrepareFactors` is proved again, restated for every bound code (`prepareFactors`): at a
+   registered target whose slot is present, `prepareTarget` (post packed, refusals named under
+   the code) is `dispatch hostRegistry` of the operation's bytes, then `genericChecks`. It names
+   no effect; binding a code brings its receiver factorization with it.
 2. `CommutingPrepare` is proved again (`commutingPrepare`), from `prepareTarget_packed`
    (`Kernel/ResourcePreparePacked.lean`): what `prepareTarget` answers, for every target, is
    `receive` of the slot, the selection, the computation and `afterTarget`, and of those only the
