@@ -832,8 +832,8 @@ def funding (config : Config) (durable : Durable) (command : Command) : Except R
 /-- **What a spending turn declares**: the account it spends, the capability it names on it,
 and the amount the command itself fixes: the public price of a declared or added envelope, a
 birth's deposit, a top-up's amount. A migration names its account but its fee is the pending
-upgrade's (read from the Store), so it declares nothing here and is judged on its decided
-batch (`decidedBound`). A publication or a creation names a payer and posts nothing. -/
+upgrade's, so it declares nothing here: the gate reads that fee from the Store
+(`migrationSpend`, `migrationGranted`), and the decided batch is judged again (`decidedBound`). A publication or a creation names a payer and posts nothing. -/
 def spend (config : Config) (command : Command) : Option (Nat × CapabilityId × Nat) :=
   match command.turn with
   | .birth _ _ account capability _ _ envelope _ _ deposit =>
@@ -875,8 +875,8 @@ credit asset (`Theory.CapabilityValueBound.presentedCheck`). Refused `valueBound
 before anything is decided and uncharged (`notAccountOwner` when the capability is not
 stored). It is the cheap early refusal; what an accepted turn actually posts is judged by
 `decidedBound`. -/
-def granted (config : Config) (snapshot : Snapshot) (command : Command) : Except Reject Unit :=
-  match spend config command with
+def grantedFor (config : Config) (snapshot : Snapshot) :
+    Option (Nat × CapabilityId × Nat) → Except Reject Unit
   | some (account, capability, price) =>
       match CapabilityValueBound.presentedCheck (presentedGrant snapshot capability)
           [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
@@ -886,6 +886,22 @@ def granted (config : Config) (snapshot : Snapshot) (command : Command) : Except
       | .error (some reason) => .error (.valueBound reason)
   | none => .ok ()
 
+theorem grantedFor_ok {config : Config} {snapshot : Snapshot} {account price : Nat}
+    {capability : CapabilityId}
+    (ok : grantedFor config snapshot (some (account, capability, price)) = .ok ()) :
+    CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
+      account := by
+  unfold grantedFor at ok
+  simp only at ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
+
+def granted (config : Config) (snapshot : Snapshot) (command : Command) : Except Reject Unit :=
+  grantedFor config snapshot (spend config command)
+
 theorem granted_ok {config : Config} {snapshot : Snapshot} {command : Command}
     (ok : granted config snapshot command = .ok ()) {account price : Nat}
     {capability : CapabilityId} (declared : spend config command = some (account, capability, price)) :
@@ -894,11 +910,54 @@ theorem granted_ok {config : Config} {snapshot : Snapshot} {command : Command}
       account := by
   unfold granted at ok
   rw [declared] at ok
-  simp only at ok
-  split at ok
-  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
-  next => cases ok
-  next => cases ok
+  exact grantedFor_ok ok
+
+/-- **What a migration will take from its account**, read from the Store before anything
+runs: the fee of the upgrade pending on the object (`ObjectiveActivity.migrateFee`), the same
+record and phase the decision reads (`Migrated.recordExact`, `Migrated.draining`). `none` for
+any other turn, and for a migration the decision will refuse without running (no object, not
+draining). -/
+def migrationSpend (config : Config) (durable : Durable) (command : Command) :
+    Option (Nat × CapabilityId × Nat) :=
+  match command.turn with
+  | .migrate object account capability =>
+      match ObjectiveActivity.readObject config durable.snapshot ⟨object⟩ with
+      | .ok (some record) =>
+          match record.phase with
+          | .draining next _ => some (account, capability, ObjectiveActivity.migrateFee config next)
+          | _ => none
+      | _ => none
+  | _ => none
+
+/-- **A migration's fee is bounded before the migration runs.** The grant the migration names
+on its account must bound the pending upgrade's fee, or the turn is refused `valueBound` at
+the gate: before the signature, before the migration term is evaluated, uncharged. Charging
+it instead would debit the very account the grant does not let this signer debit that far. -/
+def migrationGranted (config : Config) (durable : Durable) (snapshot : Snapshot)
+    (command : Command) : Except Reject Unit :=
+  grantedFor config snapshot (migrationSpend config durable command)
+
+theorem migrationGranted_ok {config : Config} {durable : Durable} {snapshot : Snapshot}
+    {command : Command} (ok : migrationGranted config durable snapshot command = .ok ())
+    {account fee : Nat} {capability : CapabilityId}
+    (pending : migrationSpend config durable command = some (account, capability, fee)) :
+    CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset fee]
+      account := by
+  unfold migrationGranted at ok
+  rw [pending] at ok
+  exact grantedFor_ok ok
+
+/-- Teeth: a migration whose pending fee the named grant does not bound has no gate verdict
+`ok`. -/
+theorem migrationGranted_refuses {config : Config} {durable : Durable} {snapshot : Snapshot}
+    {command : Command} {account fee : Nat} {capability : CapabilityId}
+    (pending : migrationSpend config durable command = some (account, capability, fee))
+    (unbounded : ¬ CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset fee]
+      account) :
+    migrationGranted config durable snapshot command ≠ .ok () := fun ok =>
+  unbounded (migrationGranted_ok ok pending)
 
 /-- **The value bound on what the turn decided.** The grant a turn names on the account it
 spends (`payerOf`) must bound the account's gross debit in the Book operations the decided
@@ -949,6 +1008,8 @@ structure Gated {F : Type} [Field F] (deployment : Deployment)
   funded : funding config durable command = .ok ()
   /-- The payer's grant bounds the declared payment. -/
   grantedExact : granted config authority.snapshot command = .ok ()
+  /-- A migration's grant bounds the pending upgrade's fee. -/
+  migrationExact : migrationGranted config durable authority.snapshot command = .ok ()
 theorem Gated.sound {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
     {command : Command} {claimed : Digest} (gated : Gated deployment profile ambient durable command claimed) :
@@ -978,7 +1039,11 @@ def gate {F : Type} [Field F] (deployment : Deployment)
         match grantedExact : granted config snapshot command with
         | .error reason => throw reason
         | .ok () =>
-          pure ⟨authority, config, configExact, preRoot, rfl, authorizedExact, funded, grantedExact⟩
+          match migrationExact : migrationGranted config durable snapshot command with
+          | .error reason => throw reason
+          | .ok () =>
+            pure ⟨authority, config, configExact, preRoot, rfl, authorizedExact, funded, grantedExact,
+              migrationExact⟩
 
 /-- The signed request a gated command's signature must cover: over the CLAIMED outcome. -/
 def Gated.request {F : Type} [Field F] {deployment : Deployment}
@@ -3126,8 +3191,8 @@ theorem retry_unverified_refused (reason : Reject) (prior : Receipt)
 /-- Repeating the same gate has one result; signature proof identity is irrelevant. -/
 theorem Gated.unique {claimed : Digest}
     (left right : Gated deployment profile ambient durable command claimed) : left = right := by
-  rcases left with ⟨la, lc, lce, lr, lre, lh, lf, lg⟩
-  rcases right with ⟨ra, rc, rce, rr, rre, rh, rf, rg⟩
+  rcases left with ⟨la, lc, lce, lr, lre, lh, lf, lg, lm⟩
+  rcases right with ⟨ra, rc, rce, rr, rre, rh, rf, rg, rm⟩
   cases CredentialAuthorityDomainReceiver.Loaded.unique la ra
   have cfg : lc = rc := Except.ok.inj (lce.symm.trans rce)
   cases cfg
