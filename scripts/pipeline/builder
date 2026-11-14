@@ -216,8 +216,6 @@ for p in parts:
       echo
       suspects "$green" "$sha"
     fi
-    # a live-model phase the gate did not run this round (scripts/pipeline/gate, J14_INPUTS): said plainly, also when green
-    if grep -q $'\tnot-run:' "$G/j14.tsv" 2>/dev/null; then echo; echo "j14-apps (live model) $(cut -f3 "$G/j14.tsv" | head -1)."; fi
     if [ -s "$ft" ]; then echo; cat "$ft"; fi
   } > "$out"
   cp "$sig" "$prev"

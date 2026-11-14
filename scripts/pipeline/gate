@@ -4,16 +4,14 @@
 # from that ref). tour (J0-J8 world + JWF dry + THIN) || composed (keep-going, edge dregg-infra) || enrol-resume || j14-apps,
 # in parallel; then flatness alone (law 17, never another run's verdict); then gate-from-runs.py; then the sweep.
 # World-ups under the world-up flock. PHASES="tour composed enrol j14" selects phases; SUF names a rerun.
-# j14-apps calls a live model, so it does not run on every tip (ember 2026-11-14): it runs when the commits since
-# the last round that RAN it touch one of J14_INPUTS below, on the first round ever, on a rerun (SUF set), with J14_FORCE=1,
-# and when the last run is more than 24 hours old (J14_MAX_AGE_MIN, default 1440: the Lean Host and the mini client
-# are not in J14_INPUTS, so a change there that breaks only the live path shows within a day). Otherwise its row is `not-run: inputs unchanged since <sha>` and carries that round's verdict: a
-# carried PASS does not hold `green`, a carried FAIL still does. The last run is BUILDER_ROOT/j14-last
-# (`SHA<TAB>VERDICT<TAB>DETAIL`), written only by a round that ran the phase.
+# j14-apps makes no model call in the gate (ember 2026-11-14): it runs to the journey's `qualify` ending on every
+# round (the hidden tool mini_app_<alias>_qualify through the controller; its write and read-back cross admission
+# and settlement), reads no provider key and reaches no provider. By hand, J14_LIVE=1 runs the live `probe` ending
+# instead (Hermes on glm-5.3-flash with j14-secrets/zai.key; J14_POOL_KEY, J14_MODEL, J14_ENDPOINT override).
 # Box knobs (env; defaults are hbox's): BUILDER_ROOT (/home/hbox/lanes/integ), GATE_RUNS (the world roots, /ci),
 # WORLD_UP_LOCK (/tank/lanes/world-up.lock), EDGE (BUILDER_ROOT/dregg-infra-EDGE_REV/edge/mini), PLAYWRIGHT_DIR.
 # Inputs staged once under BUILDER_ROOT: j14-hroot (Hermes runtime root), j14-data (davros.spk, inventory.json),
-# j14-secrets/zai.key (the Z.AI coding-plan key j14-apps calls glm-5.3-flash with; never printed), spk-cache.
+# j14-secrets/zai.key (read only by a J14_LIVE=1 run; never printed), spk-cache.
 set -u
 umask 022   # install-user-world refuses a group-writable controller-world.py (mode & 0o7022)
 I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; SHA=${1:?}; C=$I/candidates/$SHA; S8=${SHA:0:8}; G=$I/gate-$S8${SUF:-}; LOG=$I/COMMANDS.log
@@ -171,48 +169,7 @@ enrol() { sh $SRC/native/resource-client/enrol-resume-acceptance.sh $C/bin/minid
 # $I/j14-data (davros.spk, inventory.json), $I/j14-secrets/zai.key (never printed). The model route is the demo's
 # zai-glm row (glm-5.3-flash on the Z.AI coding plan; ember 2026-11-14: never OpenRouter); J14_POOL_KEY, J14_MODEL and
 # J14_ENDPOINT name another key file, model and openai-compatible endpoint.
-# What the j14 phase reads, as paths of the tree (one array; a change under any of them reruns the phase): the
-# resident's runtime and its launcher, the app host and its installer, the key broker, the Hermes runtime root
-# builder, the journey and the scripts it executes, the Davros declaration, and this script. NOT in the list, on
-# purpose: the Lean Host (Kernel/, Host/, Compiler/) and the mini client (native/resource-client/src). The phase
-# runs both, but they move on most tips and the tour and composed (apps, residents) exercise them every round
-# with the fixture provider; listing them would run the live model on every tip again.
-J14_INPUTS=(native/grain-runtime native/spk-host native/mini-keys native/launch-gate native/inference-scheduler
-  deploy/hermes deploy/spk-host deploy/grain-host apps/interfaces/davros.json
-  native/resource-client/journey.d/j14-apps.py native/resource-client/journey.d/j14-oracle.py
-  native/resource-client/journey.d/j14-oracle-inputs.py native/resource-client/journey.d/j14-oracle-evidence.py
-  native/resource-client/newparticipant-acceptance.sh scripts/application-attachment.py scripts/spk-platform
-  scripts/pipeline/gate)
-# j14_decide SHA: prints `run REASON`, or `carry LAST_SHA VERDICT` when no input moved since the last run.
-# J14_REPO (default BUILDER_ROOT/src) holds the objects; J14_LAST (default BUILDER_ROOT/j14-last) the last run.
-j14_decide() {
-  local sha=$1 repo=${J14_REPO:-$I/src} last=${J14_LAST:-$I/j14-last} lsha lv touched
-  [ "${J14_FORCE:-0}" != 1 ] || { echo "run forced (J14_FORCE=1)"; return; }
-  [ -z "${SUF:-}" ] || { echo "run rerun ($SUF)"; return; }
-  [ -s "$last" ] || { echo "run first (no $last)"; return; }
-  IFS=$'\t' read -r lsha lv _ < "$last"
-  case $lv in PASS|FAIL) ;; *) echo "run unreadable last run ($last)"; return ;; esac
-  [ -z "$(find "$last" -mmin +"${J14_MAX_AGE_MIN:-1440}" 2>/dev/null)" ] || { echo "run last run older than ${J14_MAX_AGE_MIN:-1440} min (${lsha:0:12})"; return; }
-  git -C "$repo" cat-file -e "$lsha^{commit}" 2>/dev/null && git -C "$repo" cat-file -e "$sha^{commit}" 2>/dev/null ||
-    { echo "run unknown commit (${lsha:0:12} or ${sha:0:12} is not in $repo)"; return; }
-  touched=$(git -C "$repo" diff --name-only "$lsha" "$sha" -- "${J14_INPUTS[@]}" | head -1)
-  if [ -n "$touched" ]; then echo "run inputs changed since ${lsha:0:12} ($touched)"; else echo "carry $lsha $lv"; fi
-}
 j14apps() {
-  local d; d=$(j14_decide "$SHA")
-  if [ "${d%% *}" = carry ]; then
-    local lsha lv; read -r _ lsha lv <<<"$d"
-    printf 'j14-apps\t%s\tnot-run: inputs unchanged since %s (carried %s: %s)\n' "$lv" "${lsha:0:12}" "$lv" \
-      "$(cut -f3 "${J14_LAST:-$I/j14-last}" | head -1 | cut -c1-160)" > $G/j14.tsv
-    say "GATE $S8 j14-apps: not-run: inputs unchanged since ${lsha:0:12}; carried $lv"
-    return
-  fi
-  say "GATE $S8 j14-apps runs: ${d#run }"
-  j14run
-  [ -s $G/j14.tsv ] && printf '%s\t%s\t%s\n' "$SHA" "$(cut -f2 $G/j14.tsv | head -1)" "$(cut -f3 $G/j14.tsv | head -1 | cut -c1-200)" > "${J14_LAST:-$I/j14-last}.tmp" &&
-    mv "${J14_LAST:-$I/j14-last}.tmp" "${J14_LAST:-$I/j14-last}"
-}
-j14run() {
   local RUNJ=$R/j-${S8:0:6}${SUF:-}; local J=$RUNJ
   mkdir -p -m 755 $J/bin $J/cand && mkdir -p -m 711 $RUNJ/s && mkdir -p -m 700 $RUNJ/step && ln -sfn $RUNJ $G/j14
   cp -p $C/bin/* $J/bin/ 2>/dev/null; cp -p $SRC/deploy/spk-host/spk-ingest $J/bin/spk-ingest
@@ -229,13 +186,17 @@ for k, v in list(m.items()):
 (j / 'cand' / 'manifest.json').write_text(json.dumps(m, indent=2) + '\n')
 PY
   bash $SRC/deploy/hermes/build-runtime-root --rebind $I/j14-hroot $J/cand > $J/rebind.json 2> $J/rebind.err || { printf 'j14-apps\tFAIL\thermes root rebind failed; %s/rebind.err\n' "$J" > $G/j14.tsv; return; }
-  ( cd $SRC && env J14_APPS_UNTIL=probe MINI=$J/bin/mini HOST=$J/bin/minidregg-host STORE=$J/bin/minidregg-link-sqlite-store \
+  # no live model: `qualify`, with no key in the environment. J14_LIVE=1 (by hand): the live `probe` ending.
+  local until=qualify live=()
+  if [ "${J14_LIVE:-0}" = 1 ]; then until=probe
+    live=(J14_APPS_POOL_KEY=${J14_POOL_KEY:-$I/j14-secrets/zai.key} J14_APPS_MODEL=${J14_MODEL:-glm-5.3-flash}
+          J14_APPS_ENDPOINT=${J14_ENDPOINT:-https://api.z.ai/api/coding/paas/v4/chat/completions}); fi
+  ( cd $SRC && env J14_APPS_UNTIL=$until MINI=$J/bin/mini HOST=$J/bin/minidregg-host STORE=$J/bin/minidregg-link-sqlite-store \
       VERIFIER=$J/bin/minidregg-credential-signature-verifier GRAIN_RUNTIME=$J/bin/grain-runtime TEST_PROVIDER=$C/fixtures/mini-hermes-test-provider \
       J14_ORACLE_BIN=$J/bin J14_ORACLE_CANDIDATE_MANIFEST=$J/cand/manifest.json J14_HERMES_ROOT=$I/j14-hroot \
       J14_ORACLE_SPK=$I/j14-data/davros.spk J14_ORACLE_DATA_SOURCE=$I/j14-data J14_ORACLE_INVENTORY=$I/j14-data/inventory.json \
       J14_ORACLE_SOCKET_PARENT=$RUNJ/s J14_ORACLE_ORCHESTRATION_COMMIT=${SHA:0:9} \
-      J14_APPS_DECLARATION=$SRC/apps/interfaces/davros.json J14_APPS_POOL_KEY=${J14_POOL_KEY:-$I/j14-secrets/zai.key} J14_APPS_MODEL=${J14_MODEL:-glm-5.3-flash} \
-      J14_APPS_ENDPOINT=${J14_ENDPOINT:-https://api.z.ai/api/coding/paas/v4/chat/completions} JOURNEY_STEP_DIR=$RUNJ/step \
+      J14_APPS_DECLARATION=$SRC/apps/interfaces/davros.json "${live[@]}" JOURNEY_STEP_DIR=$RUNJ/step \
       python3 native/resource-client/journey.d/j14-apps.py > $J/journey.log 2>&1 ); local rc=$?
   local res; res=$(ls $RUNJ/step/*/result.json 2>/dev/null | head -1)
   if [[ $rc == 0 && -n $res ]] && jq -e '.passed == true' "$res" >/dev/null; then

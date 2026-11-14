@@ -15,7 +15,8 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   1. `integ-build` (from that tip) runs prime-cargo, rust-check, host, consent, rust and pack into
      `candidates/<sha>/READY`. It then syncs the umbrella tree and frees `src`, so the next round can start. The
      umbrellas (Fixtures, ObjectiveProofs, CensusChecks, Minidregg) and the fixture rerecord finish beside it.
-  2. `gate`: the tour (J0-J8 and JWF dry), composed (keep-going), enrol-resume and j14-apps in parallel, with the
+  2. `gate`: the tour (J0-J8 and JWF dry), composed (keep-going), enrol-resume and j14-apps (to `qualify`: no model call;
+     `J14_LIVE=1` by hand runs the live probe on glm-5.3-flash) in parallel, with the
      flatness run beside them. The edge is dregg-infra 97fc590 on hbox (builder-run.sh's EDGE_REV; the script's
      own default is 3ddd90f): cf0b94f plus one file, jworld-scratch.sh reading the client's usage whole before it
      searches it (branch `gate/cf0b94f-help-grep`; dregg-infra main carries the same fix as 697b8ff). Under
