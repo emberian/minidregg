@@ -190,6 +190,22 @@ def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIng
       some (.ok (receipt domain semantics ingress))
     else some (.error ())
 
+/-- A recorded intent is exactly this ingress's: its transaction id, its event (the whole
+signed ingress) and its one nullifier. -/
+def exactRecord (domain semantics : Digest) (ingress : DecodedIngress)
+    (recorded : DurableCommitProtocol.Intent TransactionId CellId StableNullifier ReplayEnvelope) : Bool :=
+  decide (recorded.transactionId = transactionId domain semantics ingress ∧
+    recorded.event.event = event domain semantics ingress ∧
+    recorded.nullifiers = [nullifier domain semantics ingress])
+
+/-- The replay verdict on a ground, read only through its answer for the turn's transaction
+id (`ServedBasis.Ground.replayOf`): the light lookup's one journal read. On the full ground
+it is `replay`'s verdict (`recorded_full`). -/
+def replayOn (domain semantics : Digest) (ground : ServedBasis.Ground deployment)
+    (ingress : DecodedIngress) : ServedBasis.Ground.Replay Receipt :=
+  ground.replayOf (transactionId domain semantics ingress) (exactRecord domain semantics ingress)
+    (receipt domain semantics ingress)
+
 inductive Result where
   | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
   | rejected (reason : Reject)

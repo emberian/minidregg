@@ -113,6 +113,21 @@ structure LastWrite {store : StoreIdentity} (head : Head store) (cell : Minidreg
   value : Option Nat
   opens : DurableIndex.Opens head.indexRoot (DurableIndex.cellKey cell) (value.map DurableIndex.heightValue)
 
+/-- A journal sequence's length (`Kernel.JournalIndex`), or its verified absence (no record
+belongs to it), opened against the head's index root (family 3). -/
+structure SeqCount {store : StoreIdentity} (head : Head store)
+    (seq : Minidregg.Compiler.Tower256ConcreteBackend.Digest256) where
+  value : Option Nat
+  opens : DurableIndex.Opens head.indexRoot (DurableIndex.seqCountKey seq) (value.map DurableIndex.heightValue)
+
+/-- The height of a journal sequence's member at `position` (from 1), or its verified absence,
+opened against the head's index root (family 4). -/
+structure SeqItem {store : StoreIdentity} (head : Head store)
+    (seq : Minidregg.Compiler.Tower256ConcreteBackend.Digest256) (position : Nat) where
+  value : Option Nat
+  opens : DurableIndex.Opens head.indexRoot (DurableIndex.seqItemKey seq position)
+    (value.map DurableIndex.heightValue)
+
 /-- The state after `height` records, with what makes it authentic:
 * the base is the seed (height 0, the pinned genesis) or a checkpoint whose
   MAC verified under the head's key (`openSealed`), sitting on the log: the
@@ -239,6 +254,12 @@ structure Reader (rootBytes : List UInt8 → Digest) (store : StoreIdentity) whe
   spent : (nullifier : StableNullifier) → IO (Except Refusal (Spent head nullifier))
   /-- The height of the last record that wrote a cell, or its verified absence. -/
   lastWrite : (cell : Minidregg.Kernel.DurableDataIntent.CellId) → IO (Except Refusal (LastWrite head cell))
+  /-- How many records belong to a journal sequence. -/
+  seqCount : (seq : Minidregg.Compiler.Tower256ConcreteBackend.Digest256) →
+    IO (Except Refusal (SeqCount head seq))
+  /-- The height of a journal sequence's member at a position (from 1). -/
+  seqItem : (seq : Minidregg.Compiler.Tower256ConcreteBackend.Digest256) → (position : Nat) →
+    IO (Except Refusal (SeqItem head seq position))
   /-- Records `first..last` (inclusive), each verified. Bounded windows only on request paths. -/
   range : (first last : Nat) →
     IO (Except Refusal (List ((height : Nat) × Record head height)))

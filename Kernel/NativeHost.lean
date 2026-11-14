@@ -1760,7 +1760,7 @@ def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetT
 /-- Planning reads the paying account's balance and topic head, so it is
 released only behind a current signed observation of that account by the
 turn's own signer. -/
-def fleetObservedAccount (config : Config) (opened : Opened config)
+def fleetObservedOn (config : Config) (ground : ServedBasis.Ground config.deployment)
     (signedObservationBytes : List UInt8) : IO (Except Refusal (SubjectId × Nat)) := do
   let some signed := NativeObservationCodec.signedCodec.decode signedObservationBytes
     | return .error (.of .malformed)
@@ -1768,12 +1768,24 @@ def fleetObservedAccount (config : Config) (opened : Opened config)
   | .query query =>
       if query.kind != .account || query.view != .resource then
         return .error (.of .malformed)
-      match ← NativeObservationController.authorize config.signature
-          (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
+      match ← NativeObservationController.authorize config.signature ground config.profile config.federation
           config.genesisHeight signed with
       | .error refusal => return .error refusal
       | .ok _ => return .ok (signed.challenge.intent.subject, query.target)
   | .prepare _ => return .error (.of .malformed)
+
+def fleetObservedAccount (config : Config) (opened : Opened config)
+    (signedObservationBytes : List UInt8) : IO (Except Refusal (SubjectId × Nat)) :=
+  fleetObservedOn config (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
+    signedObservationBytes
+
+/-- The observed account on a light opening: the served state alone (a basis declaring no
+key), no journal read. -/
+def fleetObservedLight (config : Config) (light : NativeHostLight.Light config)
+    (signedObservationBytes : List UInt8) : IO (Except Refusal (SubjectId × Nat)) := do
+  match ← light.basis ⟨[], []⟩ with
+  | .error detail => return .error { reason := .operationRejected, detail := detail }
+  | .ok basis => fleetObservedOn config (.ofBasis basis) signedObservationBytes
 
 def fleetPlanAuthorizedLoaded (config : Config) (opened : Opened config)
     (signedObservationBytes draftBytes : List UInt8) :
@@ -1828,22 +1840,6 @@ def provisionLookupLoaded (config : Config) (opened : Opened config)
   | none => refused .malformed "provision-factory-observe" "noncanonical signed ingress"
   | some ingress =>
     match ParticipantFactoryProvisioningReceiver.replay config.deployment.domain
-        config.profile.semantics opened.durable ingress with
-    | some (.ok receipt) =>
-        match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
-        | some original => .confirmed .replayed original
-        | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
-    | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-    | none => .absent
-
-/-- Receipt-only historical lookup of one retained ingress. Absence never
-submits fresh work. -/
-def fleetLookupLoaded (config : Config) (opened : Opened config)
-    (bytes : List UInt8) : Outcome :=
-  match FleetTurn.decodeIngress bytes with
-  | none => refused .malformed "fleet-turn" "noncanonical signed ingress"
-  | some ingress =>
-    match FleetTurnReceiver.replay config.deployment.domain
         config.profile.semantics opened.durable ingress with
     | some (.ok receipt) =>
         match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
@@ -1946,6 +1942,31 @@ def operatorAcceptedLog (config : Config) (opened : Opened config) :
     IO (List DurableReceiver.IntentRecord) :=
   operatorAcceptedLogOfDurable config opened.durable
 
+/-- Receipt-only historical lookup of one retained fleet ingress (op 99) on a light opening:
+its transaction id read from the authenticated history into a basis, the replay verdict on
+that ground, and the original receipt sealed through the Reader. Absence never submits
+fresh work. -/
+def fleetLookupLight (config : Config) (light : NativeHostLight.Light config)
+    (bytes : List UInt8) : IO Outcome := do
+  match FleetTurn.decodeIngress bytes with
+  | none => return refused .malformed "fleet-turn" "noncanonical signed ingress"
+  | some ingress =>
+      let transaction := FleetTurnReceiver.transactionId config.deployment.domain
+        config.profile.semantics ingress
+      match ← light.basis ⟨[transaction], []⟩ with
+      | .error detail => return .unavailable detail.toUTF8.toList
+      | .ok basis =>
+          match FleetTurnReceiver.replayOn config.deployment.domain config.profile.semantics
+              (deployment := config.deployment) (.ofBasis basis) ingress with
+          | .undeclared => return refused .operationRejected "replay" "transaction identity undeclared"
+          | .fresh => return .absent
+          | .conflict => return refused .conflict "replay" "transaction identity conflict"
+          | .original receipt =>
+              match ← historicalReceiptLight config light receipt.transactionId receipt.eventId with
+              | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+              | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+              | .ok (some original) => return .confirmed .replayed original
+
 /-- One topic event as a reader sees it. `height` is the admission height,
 unique per accepted record on one Host: K authors' streams of one topic merge
 into one ordered feed by `(height, sequence)`. A poll carries no receipt: a
@@ -2005,30 +2026,29 @@ def fleetPollMax : Nat := 64
 
 /-- Events of `(observed account, topic)` strictly after `cursor`, behind a
 current signed observation of that account. Reading an account's topics is
-the account's own observe grant; a topic label confers nothing. -/
-def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
+the account's own observe grant; a topic label confers nothing. Served from the light
+opening: the topic's stream cells in the held directory, then at most `fleetPollMax`
+payloads, one `byTx` each. -/
+def fleetPollLight (config : Config) (light : NativeHostLight.Light config)
     (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
     IO (Except Refusal FleetPollView) := do
   if topic.isEmpty || topic.length > FleetTurn.maxTopicBytes then
     return .error { reason := .malformed, detail := "fleet topic must be 1..64 bytes" }
-  match ← fleetObservedAccount config opened signedObservationBytes with
+  match ← fleetObservedLight config light signedObservationBytes with
   | .error refusal => return .error refusal
   | .ok (subject, payer) =>
       let stream := FleetTurn.streamDigest config.deployment.domain payer topic
-      let directory := opened.directory.directory
+      let directory := light.opened.directory.directory
       let entries := FleetTurn.eventsSince config.deployment directory stream cursor
         (min limit fleetPollMax)
       let head := FleetTurn.streamHead config.deployment directory stream
-      -- One Reader per request; at most `fleetPollMax` events, one `byTx` each.
-      match ← historyReader config opened with
-      | .error refusal => return .error refusal
-      | .ok ⟨_, reader⟩ =>
-          let mut events : Array FleetPolledEvent := #[]
-          for item in entries do
-            match ← fleetPolledEvent reader item with
-            | .error refusal => return .error refusal
-            | .ok event => events := events.push event
-          return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail, events.toList⟩
+      let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+      let mut events : Array FleetPolledEvent := #[]
+      for item in entries do
+        match ← fleetPolledEvent reader item with
+        | .error refusal => return .error refusal
+        | .ok event => events := events.push event
+      return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail, events.toList⟩
 
 structure FleetHeadView where
   subject : SubjectId
@@ -2037,21 +2057,48 @@ structure FleetHeadView where
   turns : Nat
   head : Option (Digest × Receipt)
 
-/-- The newest accepted fleet turn paid by the observed account. This is a
-scan of the accepted journal, decoding each retained ingress exactly. -/
-def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)
+/-- A refusal for an index row the journal does not bear out: never an empty answer. -/
+def journalIndexRefusal (detail : String) : Refusal :=
+  { reason := .operationRejected, detail := s!"journal index: {detail}" }
+
+/-- The record at a height a sequence row names, required to carry the sequence's name: an
+index that lists a record which does not belong is refused by name. -/
+def sequenceMember {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (name : JournalIndex.Name) (height : Nat) :
+    IO (Except Refusal (DurableHistoryReader.Record reader.head height)) := do
+  match ← reader.atHeight height with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok read =>
+      if name ∈ JournalIndex.names read.record then return .ok read
+      else return .error (journalIndexRefusal s!"the record at height {height} is not a member of the sequence that lists it")
+
+/-- The newest accepted fleet turn paid by the observed account and how many there are
+(op 101), from the payer's journal sequence (`JournalIndex.Name.fleetPayer`): its count
+row, the row at that position, and the one record at the height it names. No scan. -/
+def fleetHeadLight (config : Config) (light : NativeHostLight.Light config)
     (signedObservationBytes : List UInt8) : IO (Except Refusal FleetHeadView) := do
-  match ← fleetObservedAccount config opened signedObservationBytes with
+  match ← fleetObservedLight config light signedObservationBytes with
   | .error refusal => return .error refusal
   | .ok (subject, payer) =>
-      let paid := opened.durable.image.accepted.filter fun record =>
-        match FleetTurn.decodeIngress record.event.canonicalBytes with
-        | some ingress => ingress.command.payer == payer
-        | none => false
-      let head := paid.getLast?.bind fun record =>
-        (historicalReceipt config opened.durable record.transactionId record.event.eventId).map
-          fun receipt => (record.transactionId, receipt)
-      return .ok ⟨subject, payer, paid.length, head⟩
+      let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+      let name := JournalIndex.Name.fleetPayer payer
+      match ← reader.seqCount name.id with
+      | .error refusal => return .error (historyRefusal refusal)
+      | .ok counted =>
+          match counted.value with
+          | none => return .ok ⟨subject, payer, 0, none⟩
+          | some turns =>
+              match ← reader.seqItem name.id turns with
+              | .error refusal => return .error (historyRefusal refusal)
+              | .ok item =>
+                  match item.value with
+                  | none => return .error (journalIndexRefusal "a sequence names no member at its count")
+                  | some height =>
+                      match ← sequenceMember reader name height with
+                      | .error refusal => return .error refusal
+                      | .ok read =>
+                          return .ok ⟨subject, payer, turns,
+                            some (read.record.transactionId, receiptOfRecord read)⟩
 /-! ## The incoming ledger of an account (op 180)
 
 A fleet turn's topic belongs to the PAYING account (`FleetTurn`, module doc),
@@ -2204,21 +2251,67 @@ structure FleetIncomingView where
   tip : Nat
   entries : List FleetIncomingEntry
 
+/-- The heights of a sequence's members strictly above `cursor`, at most `limit`, read from
+its rows: the count, a bisection for the cursor (`Theory.JournalSequences.below`, at most
+`belowFuel count` rows), then the next positions in order
+(`Theory.JournalSequences.window_spec`). -/
+def sequenceWindow {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (seq : Digest256) (cursor limit : Nat) :
+    IO (Except Refusal (List Nat)) := do
+  match ← reader.seqCount seq with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok counted =>
+      let count := counted.value.getD 0
+      let mut lo := 0
+      let mut hi := count
+      for _ in [0:Theory.JournalSequences.belowFuel count] do
+        if lo < hi then
+          let mid := (lo + hi + 1) / 2
+          match ← reader.seqItem seq mid with
+          | .error refusal => return .error (historyRefusal refusal)
+          | .ok item =>
+              match item.value with
+              | some height => if height ≤ cursor then lo := mid else hi := mid - 1
+              | none => hi := mid - 1
+      let mut heights : Array Nat := #[]
+      for offset in [0:limit] do
+        if lo + 1 + offset ≤ count then
+          match ← reader.seqItem seq (lo + 1 + offset) with
+          | .error refusal => return .error (historyRefusal refusal)
+          | .ok item =>
+              match item.value with
+              | some height => heights := heights.push height
+              | none => return .error (journalIndexRefusal "a sequence names no member at a position within its count")
+      return .ok heights.toList
+
 /-- Payments to the observed account above `cursor`, at most `limit`
 (bounded by `fleetPollMax`), behind a current signed observation of that
-account by its reader. -/
-def fleetIncomingAuthorizedLoaded (config : Config) (opened : Opened config)
+account by its reader (op 180). Read from the account's incoming sequence
+(`JournalIndex.Name.fleetIncoming account topic`): its window above the cursor, then the one
+record at each height. Heights on the wire are logical (`genesisHeight` plus the Store's). -/
+def fleetIncomingLight (config : Config) (light : NativeHostLight.Light config)
     (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
     IO (Except Refusal FleetIncomingView) := do
   if topic.length > FleetTurn.maxTopicBytes then
     return .error { reason := .malformed, detail := "fleet topic must be 0..64 bytes" }
-  match ← fleetObservedAccount config opened signedObservationBytes with
+  match ← fleetObservedLight config light signedObservationBytes with
   | .error refusal => return .error refusal
   | .ok (subject, account) =>
-      let entries := fleetIncomingFrom account topic cursor (config.genesisHeight + 1)
-        opened.durable.image.accepted
-      return .ok ⟨subject, account, topic, cursor, logicalHeight config opened.durable,
-        entries.take (min limit fleetPollMax)⟩
+      let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+      let name := JournalIndex.Name.fleetIncoming account topic
+      match ← sequenceWindow reader name.id (cursor - config.genesisHeight) (min limit fleetPollMax) with
+      | .error refusal => return .error refusal
+      | .ok heights =>
+          let mut entries : Array FleetIncomingEntry := #[]
+          for height in heights do
+            match ← sequenceMember reader name height with
+            | .error refusal => return .error refusal
+            | .ok read =>
+                match fleetIncomingEntry? account topic (config.genesisHeight + height) read.record with
+                | some entry => entries := entries.push entry
+                | none => return .error (journalIndexRefusal s!"the record at height {height} is not a payment to the account")
+          return .ok ⟨subject, account, topic, cursor, config.genesisHeight + light.opening.head.height,
+            entries.toList⟩
 
 #assert_axioms fleetIncomingEntry?_sound
 #assert_axioms fleetIncomingEntry?_other_destination

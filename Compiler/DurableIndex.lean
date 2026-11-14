@@ -14,6 +14,11 @@ with one root. This module pins its deployed shape:
   `nodeBytes` (injective, `nodeBytes_injective`).
 * `collision_is_cshake` — a node collision of `dig` is a cSHAKE256 collision
   (two different inputs, one 32-byte output).
+* the journal sequence families (3 and 4): for a sequence id (32 octets) the number of
+  records that belong to it and the height of its `i`-th member, maintained by two row
+  writes per sequence a record belongs to (`IndexRows.seq_changes_exact`: the rows after an
+  append are the recomputation's, `Theory.JournalSequences`). A served read of "the newest"
+  or "the next after a cursor" opens rows; it never walks the log.
 * `lookup_sound` / `reveal_sound` — `Theory.AuthTrie.verify_sound` and
   `Theory.AuthTrie.reveal_sound` instantiated at THIS key path and THIS digest:
   a verified single answer is the map's, and a verified reveal answers exactly
@@ -24,6 +29,7 @@ with one root. This module pins its deployed shape:
 module
 
 public import Theory.AuthTrieRange
+public import Theory.JournalSequences
 public import Compiler.Sp800185Cshake256
 public import Kernel.WorldRoot
 public import Compiler.DurableReceiverCodec
@@ -238,6 +244,10 @@ def transaction : UInt8 := 1
 /-- A written cell ↦ the height of the LAST record that wrote it (the only family an
 append overwrites). -/
 def lastWrite : UInt8 := 2
+/-- A journal sequence ↦ the number of records that belong to it (absent: none). -/
+def seqCount : UInt8 := 3
+/-- (A journal sequence, a position from 1) ↦ the height of its member at that position. -/
+def seqItem : UInt8 := 4
 end Family
 
 def keyCustomization : List UInt8 := "DREGG/NATIVE-HOST/INDEX-KEY/v1".toUTF8.toList
@@ -271,6 +281,24 @@ theorem cellKey_ne_transactionKey (cell : Kernel.DurableDataIntent.CellId)
   intro same
   have families := congrArg IndexKey.family same
   simp [cellKey, transactionKey, Family.transaction, Family.lastWrite] at families
+
+/-- The count row of a journal sequence (family 3): how many records belong to it. -/
+def seqCountKey (seq : Digest256) : IndexKey := ⟨Family.seqCount, seq, noSecondary⟩
+
+/-- A position as a secondary. -/
+def seqPosition (position : Nat) : Digest256 := ⟨position % 256 ^ 32, Nat.mod_lt _ (by decide)⟩
+
+/-- The row of a sequence's `position`-th member (family 4; positions from 1). -/
+def seqItemKey (seq : Digest256) (position : Nat) : IndexKey := ⟨Family.seqItem, seq, seqPosition position⟩
+
+theorem seqPosition_val {position : Nat} (small : position < 256 ^ 32) : (seqPosition position).val = position :=
+  Nat.mod_eq_of_lt small
+
+theorem seqPosition_eq_iff {position : Nat} (small : position < 256 ^ 32) (secondary : Digest256) :
+    secondary = seqPosition position ↔ secondary.val = position := by
+  constructor
+  · rintro rfl; exact seqPosition_val small
+  · intro same; exact Fin.ext (by rw [seqPosition_val small]; exact same)
 
 /-- **A spent key is never a transaction key**, whatever the inputs: the family
 byte differs, so the two never share a trie path (`family_disjoint`). -/
@@ -765,7 +793,7 @@ theorem lastWrite_untouched (records : List Kernel.DurableReceiver.IntentRecord)
         · exact ih r last record inInit written
         · -- the record is `final` itself: it writes `cell`, so its keys hold `cell`'s
           have isFinal : record = final := by
-            rw [List.drop_append_eq_append_drop] at inDrop
+            rw [List.drop_append] at inDrop
             rcases List.mem_append.mp inDrop with early | late
             · exact absurd early inInit
             · exact List.mem_singleton.mp (List.mem_of_mem_drop late)
@@ -809,6 +837,109 @@ theorem mapLookup_modelApply_same (v : List UInt8) :
       · simp [inRest]
       · by_cases same : k = k' <;> simp [inRest, same]
 
+/-- The rows one record writes for the sequences it belongs to, from each one's count before
+it: the count row, and the row of the new last position ↦ the record's height. -/
+def seqChanges (height : Nat) (counts : List (Digest256 × Nat)) : List (IndexKey × Option (List UInt8)) :=
+  counts.flatMap fun entry =>
+    [(seqCountKey entry.1, some (heightValue (entry.2 + 1))),
+      (seqItemKey entry.1 (entry.2 + 1), some (heightValue height))]
+
+/-- A sequence's count as a logical map holds it: an absent row is zero. -/
+def seqCountOf (m : List (IndexKey × List UInt8)) (seq : Digest256) : Nat :=
+  ((mapLookup m (seqCountKey seq)).bind heightOf).getD 0
+
+/-- **What the sequence rows do to a lookup**: a member's count row holds its count plus one,
+its new last position holds the height, every other key is untouched. -/
+theorem mapLookup_seqChanges (height : Nat) (count : Digest256 → Nat) :
+    ∀ (seqs : List Digest256) (m : List (IndexKey × List UInt8)) (k : IndexKey),
+      mapLookup (modelApply m (seqChanges height (seqs.map fun seq => (seq, count seq)))) k =
+        if k.family = Family.seqCount ∧ k.secondary = noSecondary ∧ k.primary ∈ seqs then
+          some (heightValue (count k.primary + 1))
+        else if k.family = Family.seqItem ∧ k.primary ∈ seqs ∧
+            k.secondary = seqPosition (count k.primary + 1) then some (heightValue height)
+        else mapLookup m k
+  | [], m, k => by simp [seqChanges, modelApply]
+  | seq :: rest, m, k => by
+      have ih := mapLookup_seqChanges height count rest
+        (modelSet (modelSet m (seqCountKey seq) (some (heightValue (count seq + 1))))
+          (seqItemKey seq (count seq + 1)) (some (heightValue height))) k
+      have unfolded : modelApply m (seqChanges height ((seq :: rest).map fun seq => (seq, count seq))) =
+          modelApply (modelSet (modelSet m (seqCountKey seq) (some (heightValue (count seq + 1))))
+            (seqItemKey seq (count seq + 1)) (some (heightValue height)))
+            (seqChanges height (rest.map fun seq => (seq, count seq))) := by
+        simp [seqChanges, modelApply]
+      rw [unfolded, ih, mapLookup_modelSet_some, mapLookup_modelSet_some]
+      obtain ⟨family, primary, secondary⟩ := k
+      simp only [seqCountKey, seqItemKey, IndexKey.mk.injEq, List.mem_cons]
+      by_cases isCount : family = Family.seqCount
+      · have notItem : ¬ family = Family.seqItem := by rw [isCount]; decide
+        by_cases padded : secondary = noSecondary
+        · by_cases inRest : primary ∈ rest
+          · simp [isCount, padded, inRest]
+          · by_cases same : primary = seq
+            · subst same; simp [isCount, padded, Family.seqCount, Family.seqItem]
+            · simp [isCount, padded, inRest, same, Family.seqCount, Family.seqItem]
+        · simp [isCount, padded, Family.seqCount, Family.seqItem]
+      · by_cases isItem : family = Family.seqItem
+        · by_cases inRest : primary ∈ rest
+          · by_cases last : secondary = seqPosition (count primary + 1)
+            · simp [isItem, inRest, last, Family.seqCount, Family.seqItem]
+            · by_cases same : primary = seq
+              · subst same; simp [isItem, inRest, last, Family.seqCount, Family.seqItem]
+              · simp [isItem, inRest, last, same, Family.seqCount, Family.seqItem]
+          · by_cases same : primary = seq
+            · subst same; simp [isItem, inRest, Family.seqCount, Family.seqItem]
+            · simp [isItem, inRest, same, Family.seqCount, Family.seqItem]
+        · simp [isCount, isItem]
+
+/-- The sequence families of a history's logical map, defined without the trie: a count row
+holds the number of records that belong to the sequence (absent when none does), and the
+row at position `i` holds the height of the `i`-th such record. -/
+def seqLogical (journal : List (List Digest256)) (k : IndexKey) : Option (List UInt8) :=
+  if k.family = Family.seqCount then
+    if k.secondary = noSecondary ∧ Theory.JournalSequences.count journal k.primary ≠ 0 then
+      some (heightValue (Theory.JournalSequences.count journal k.primary))
+    else none
+  else (Theory.JournalSequences.item journal k.primary k.secondary.val).map heightValue
+
+theorem seqCountOf_of_logical (journal : List (List Digest256)) (m : List (IndexKey × List UInt8))
+    (seq : Digest256) (before : mapLookup m (seqCountKey seq) = seqLogical journal (seqCountKey seq)) :
+    seqCountOf m seq = Theory.JournalSequences.count journal seq := by
+  unfold seqCountOf
+  rw [before]
+  simp only [seqLogical, seqCountKey, true_and, ite_true]
+  by_cases zero : Theory.JournalSequences.count journal seq = 0 <;> simp [zero]
+
+/-- **The model theorem for the sequence families.** If the map before the append holds the
+journal's sequence rows, then after the record's sequence rows (counts read from that map) it
+holds the rows of the journal with the record appended. -/
+theorem seq_changes_exact (journal : List (List Digest256)) (members : List Digest256)
+    (m : List (IndexKey × List UInt8))
+    (before : ∀ k, k.family = Family.seqCount ∨ k.family = Family.seqItem → mapLookup m k = seqLogical journal k)
+    (bound : journal.length + 1 < 256 ^ 32) (seqs : List Digest256) (same : ∀ seq, seq ∈ seqs ↔ seq ∈ members)
+    (k : IndexKey) (family : k.family = Family.seqCount ∨ k.family = Family.seqItem) :
+    mapLookup (modelApply m (seqChanges (journal.length + 1) (seqs.map fun seq => (seq, seqCountOf m seq)))) k =
+      seqLogical (journal ++ [members]) k := by
+  rw [mapLookup_seqChanges]
+  have counted : seqCountOf m k.primary = Theory.JournalSequences.count journal k.primary :=
+    seqCountOf_of_logical journal m k.primary (before _ (Or.inl rfl))
+  rw [counted, before k family]
+  simp only [same]
+  have differ : Family.seqCount ≠ Family.seqItem := by decide
+  rcases family with isCount | isItem
+  · simp only [isCount, differ, true_and, false_and, ite_false, seqLogical, ite_true]
+    rw [Theory.JournalSequences.count_append]
+    by_cases padded : k.secondary = noSecondary
+    · by_cases belongs : k.primary ∈ members <;> simp [padded, belongs]
+    · simp [padded]
+  · have small : Theory.JournalSequences.count journal k.primary + 1 < 256 ^ 32 :=
+      Nat.lt_of_le_of_lt (Nat.succ_le_succ (Theory.JournalSequences.count_le_length journal k.primary)) bound
+    simp only [isItem, differ.symm, true_and, false_and, ite_false, seqLogical, seqPosition_eq_iff small,
+      Theory.JournalSequences.item_append]
+    by_cases last : k.primary ∈ members ∧ k.secondary.val = Theory.JournalSequences.count journal k.primary + 1
+    · simp [last]
+    · simp [last]
+
 /-- **The model theorem.** If the map before the append is the history's map,
 and the record's keys are fresh in it (the executor's guarantee, and what
 `apply` refuses otherwise), then the map before updated by the record's rows is
@@ -846,25 +977,59 @@ def insert (height : Nat) (store : List Bool → Option Row) (root : Digest) :
       let (finalRoot, later) ← insert height (overlay store rows) root' rest
       return (finalRoot, later ++ rows.filter fun row => !later.any (·.1 = row.1))
 
-/-- Insert the record's keys at `height` on the Store's rows, against `root`, then
-overwrite the last-write row of each cell it writes (`cellChanges`): the new root and
-the rows to write. A family-0/1 key already present is refused. -/
+/-- A sequence's count read from the Store's rows, verified against `root`: an absent row
+is zero; a row that is not a number is refused. -/
+def seqCount (store : List Bool → Option Row) (root : Digest) (seq : Digest256) : Except String Nat :=
+  match lookupRows store root (seqCountKey seq) with
+  | .error message => .error message
+  | .ok answer =>
+      match answer.value.bind heightOf, answer.value with
+      | some count, _ => .ok count
+      | none, none => .ok 0
+      | none, some _ => .error "the index holds a sequence count that is not a number"
+
+/-- The counts of the sequences a record belongs to, each read once before any of its rows
+is written. -/
+def seqCounts (store : List Bool → Option Row) (root : Digest) :
+    List Digest256 → Except String (List (Digest256 × Nat))
+  | [] => .ok []
+  | seq :: rest =>
+      match seqCount store root seq with
+      | .error message => .error message
+      | .ok count =>
+          match seqCounts store root rest with
+          | .error message => .error message
+          | .ok counts => .ok ((seq, count) :: counts)
+
+/-- Every key an append reads or writes for its sequences: each one's count row, and the
+row of the position after its count (read from the rows the append is about to extend). -/
+def seqKeys (counts : List (Digest256 × Nat)) : List IndexKey :=
+  counts.flatMap fun entry => [seqCountKey entry.1, seqItemKey entry.1 (entry.2 + 1)]
+
+/-- Insert the record's keys at `height` on the Store's rows, against `root`, overwrite the
+last-write row of each cell it writes (`cellChanges`), then extend each journal sequence it
+belongs to (`seqChanges`: the count row and the new last position, two rows per sequence
+whatever the journal holds): the new root and the rows to write. A family-0/1 key already
+present is refused. -/
 def apply (store : List Bool → Option Row) (root : Digest) (height : Nat)
     (transactionId : TransactionId) (nullifiers : List StableNullifier)
-    (cells : List Kernel.DurableDataIntent.CellId) :
+    (cells : List Kernel.DurableDataIntent.CellId) (seqs : List Digest256) :
     Except String (Digest × List (List Bool × Row)) := do
   let (inserted, early) ← insert height store root (keys transactionId nullifiers)
-  let (final, late) ← setAll (overlay store early) inserted (cellChanges height cells)
-  return (final, late ++ early.filter fun row => !late.any (·.1 = row.1))
+  let (middle, mid) ← setAll (overlay store early) inserted (cellChanges height cells)
+  let counts ← seqCounts (overlay (overlay store early) mid) middle (Theory.JournalSequences.distinct seqs)
+  let (final, late) ← setAll (overlay (overlay store early) mid) middle (seqChanges height counts)
+  return (final, late ++ (mid ++ early.filter fun row => !mid.any (·.1 = row.1)).filter
+    fun row => !late.any (·.1 = row.1))
 
 /-- **The model theorem, with the overwrite.** If the map before the append is the
 history's logical map and the record's family-0/1 keys are fresh in it, the map after
 its inserts and then its cell overwrites is the logical map of the history with the
 record appended: each cell it writes now maps to its own height. -/
 theorem logical_changes_exact (records : List Kernel.DurableReceiver.IntentRecord)
-    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8))
-    (before : ∀ k, mapLookup m k = logical records k)
-    (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, logical records k = none) (k : IndexKey) :
+    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8)) (k : IndexKey)
+    (before : mapLookup m k = logical records k)
+    (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, logical records k = none) :
     mapLookup (modelApply (modelApply m (changes (records.length + 1) record.transactionId record.nullifiers))
         (cellChanges (records.length + 1) (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId))) k =
       logical (records ++ [record]) k := by
@@ -887,19 +1052,109 @@ theorem logical_changes_exact (records : List Kernel.DurableReceiver.IntentRecor
     · exact absurd mem (not_key_of_family fam')
     · rwa [if_neg fam'] at answer
 
+/-- A sequence-family key is never among a record's transaction and nullifier keys. -/
+theorem not_key_of_seq_family {transactionId : Kernel.DurableDataIntent.TransactionId}
+    {nullifiers : List Kernel.DurableDataIntent.StableNullifier} {k : IndexKey}
+    (family : k.family = Family.seqCount ∨ k.family = Family.seqItem) : k ∉ keys transactionId nullifiers := by
+  intro member
+  rcases List.mem_cons.mp member with same | rest
+  · subst same
+    rcases family with family | family <;>
+      simp [transactionKey, Family.transaction, Family.seqCount, Family.seqItem] at family
+  · obtain ⟨nullifier, _, rfl⟩ := List.mem_map.mp rest
+    rcases family with family | family <;>
+      simp [nullifierKey, Family.spent, Family.seqCount, Family.seqItem] at family
+
+/-- **The whole logical map of a history**, defined without the trie: the sequence families
+are the recomputation over the sequences each record belongs to (`seqLogical`), the rest is
+`logical`. `sequences` is the deployment's derivation of a record's sequences. -/
+def indexed (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256)
+    (records : List Kernel.DurableReceiver.IntentRecord) (k : IndexKey) : Option (List UInt8) :=
+  if k.family = Family.seqCount ∨ k.family = Family.seqItem then seqLogical (records.map sequences) k
+  else logical records k
+
+theorem indexed_nil (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256) (k : IndexKey) :
+    indexed sequences [] k = none := by
+  unfold indexed
+  split
+  · unfold seqLogical
+    split
+    · simp [Theory.JournalSequences.count, Theory.JournalSequences.heights,
+        Theory.JournalSequences.heightsFrom]
+    · simp [Theory.JournalSequences.item, Theory.JournalSequences.heights,
+        Theory.JournalSequences.heightsFrom]
+  · unfold logical
+    split
+    · rfl
+    · simp [declared]
+
+/-- The first two phases of an append leave every sequence row as it was. -/
+theorem mapLookup_phases_seq (record : Kernel.DurableReceiver.IntentRecord) (height : Nat)
+    (m : List (IndexKey × List UInt8)) (k : IndexKey)
+    (family : k.family = Family.seqCount ∨ k.family = Family.seqItem) :
+    mapLookup (modelApply (modelApply m (changes height record.transactionId record.nullifiers))
+        (cellChanges height (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId))) k =
+      mapLookup m k := by
+  have cellsForm : cellChanges height (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId) =
+      (cellKeys record).map (fun k => (k, some (heightValue height))) := by
+    simp [cellChanges, cellKeys, List.map_map, Function.comp_def]
+  have notCell : k.family ≠ Family.lastWrite := by
+    rcases family with family | family <;> rw [family] <;> decide
+  rw [cellsForm, mapLookup_modelApply_same, if_neg (not_cellKey_of_family notCell), changes,
+    mapLookup_modelApply_same, if_neg (not_key_of_seq_family family)]
+
+/-- **The maintained index is the recomputation** (the step, over the logical map). If the
+map before the append is the history's, the record's family-0/1 keys are fresh in it, and the
+sequence rows are written from the counts the map holds, then the map after the record's
+three phases is the logical map of the history with the record appended. -/
+theorem indexed_changes_exact (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256)
+    (records : List Kernel.DurableReceiver.IntentRecord)
+    (record : Kernel.DurableReceiver.IntentRecord) (m : List (IndexKey × List UInt8))
+    (before : ∀ k, mapLookup m k = indexed sequences records k)
+    (fresh : ∀ k ∈ keys record.transactionId record.nullifiers, indexed sequences records k = none)
+    (bound : records.length + 1 < 256 ^ 32) (seqs : List Digest256)
+    (same : ∀ seq, seq ∈ seqs ↔ seq ∈ sequences record) (k : IndexKey) :
+    mapLookup (modelApply (modelApply (modelApply m
+          (changes (records.length + 1) record.transactionId record.nullifiers))
+          (cellChanges (records.length + 1) (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId)))
+        (seqChanges (records.length + 1) (seqs.map fun seq => (seq, seqCountOf
+          (modelApply (modelApply m (changes (records.length + 1) record.transactionId record.nullifiers))
+            (cellChanges (records.length + 1)
+              (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId))) seq)))) k =
+      indexed sequences (records ++ [record]) k := by
+  by_cases family : k.family = Family.seqCount ∨ k.family = Family.seqItem
+  · have exact := seq_changes_exact (records.map sequences) (sequences record)
+      (modelApply (modelApply m (changes (records.length + 1) record.transactionId record.nullifiers))
+        (cellChanges (records.length + 1) (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId)))
+      (fun k' family' => by
+        rw [mapLookup_phases_seq record _ m k' family', before k', indexed, if_pos family'])
+      (by rw [List.length_map]; exact bound) seqs same k family
+    rw [List.length_map] at exact
+    rw [exact, indexed, if_pos family, List.map_append, List.map_cons, List.map_nil]
+  · have notCount : ¬ k.family = Family.seqCount := fun h => family (Or.inl h)
+    have notItem : ¬ k.family = Family.seqItem := fun h => family (Or.inr h)
+    rw [mapLookup_seqChanges]
+    simp only [notCount, notItem, false_and, ite_false]
+    rw [indexed, if_neg family]
+    refine logical_changes_exact records record m k (by rw [before, indexed, if_neg family]) ?_
+    intro k' mem
+    have answer := fresh k' mem
+    rwa [indexed, if_neg (fun family' => not_key_of_seq_family family' mem)] at answer
+
 end IndexRows
 
 /-! ## Maintained-index proof boundary
 
-`LogicalIndex` is the history's logical map `IndexRows.logical` (the first-record map
-`IndexRows.declared` for families 0 and 1, the last-write map for family 2); a finite
+`LogicalIndex` is the history's logical map `IndexRows.indexed` (the first-record map
+`IndexRows.declared` for families 0 and 1, the last-write map for family 2, the journal
+sequences' counts and positions for families 3 and 4); a finite
 map represents it when its lookups agree. Heights are values, not a third key
 family. `Represents` also requires the Store's reachable rows to encode the
 canonical trie (stale rows under empty or compressed subtrees are unrestricted).
 The single-set preservation contract below is an explicit, still-open premise,
 not a claim that the deployed incremental trie has been proved correct. -/
 
-abbrev LogicalIndex := IndexRows.logical
+abbrev LogicalIndex := IndexRows.indexed
 
 /-- Reachable rows of the canonical compressed trie. Empty subtrees need no
 row; a singleton stops at its leaf, exactly as `walk` and `set` do. -/
@@ -1124,12 +1379,83 @@ theorem lookup_entries (m : List (IndexKey × List UInt8)) (k : IndexKey) :
 /-- A maintained history has the canonical root and rows of a finite
 representation of its logical map. This does not assert that a MAC-bound head
 alone establishes maintenance. -/
-def Maintained (records : List Kernel.DurableReceiver.IntentRecord)
+def Maintained (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256)
+    (records : List Kernel.DurableReceiver.IntentRecord)
     (rows : List Bool → Option Row) (root : Digest) : Prop :=
-  ∃ m, Represents rows root m ∧ ∀ k, mapLookup m k = LogicalIndex records k
+  ∃ m, Represents rows root m ∧ ∀ k, mapLookup m k = LogicalIndex sequences records k
 
-theorem maintained_init (rows : List Bool → Option Row) : Maintained [] rows emptyDigest := by
-  exact ⟨[], represents_empty rows, by intro k; rfl⟩
+theorem maintained_init (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256)
+    (rows : List Bool → Option Row) : Maintained sequences [] rows emptyDigest := by
+  exact ⟨[], represents_empty rows, fun k => (IndexRows.indexed_nil sequences k).symm⟩
+
+/-- A verified count answer that is not the map's. By `Answer.sound` it exhibits a cSHAKE256
+collision (`countCollision_is_cshake`). -/
+def CountCollision (m : List (IndexKey × List UInt8)) (seq : Digest256) : Prop :=
+  ∃ answer : Answer (rootOf m) (seqCountKey seq), answer.value ≠ mapLookup m (seqCountKey seq)
+
+theorem countCollision_is_cshake {m : List (IndexKey × List UInt8)} {seq : Digest256}
+    (wf : WF 520 (entries bitsOf m)) (collision : CountCollision m seq) :
+    ∃ x y : List UInt8, x ≠ y ∧
+      Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
+  obtain ⟨answer, differ⟩ := collision
+  rcases Answer.sound wf answer with same | ⟨_, _, a, b, _, _, bytes, hashes⟩
+  · exact absurd (same.trans (lookup_entries m _)) differ
+  · exact ⟨nodeBytes a, nodeBytes b, bytes, hashes⟩
+
+namespace IndexRows
+
+/-- A count read from rows that represent a map is the map's count, or the verified answer
+differs from the map's (a collision). -/
+theorem seqCount_model {rows : List Bool → Option Row} {root : Digest} {m : List (IndexKey × List UInt8)}
+    (rep : Represents rows root m) (seq : Digest256) (count : Nat)
+    (ok : seqCount rows root seq = .ok count) : count = seqCountOf m seq ∨ CountCollision m seq := by
+  obtain ⟨rfl, _, _⟩ := rep
+  unfold seqCount at ok
+  cases looked : lookupRows rows (rootOf m) (seqCountKey seq) with
+  | error message => simp [looked] at ok
+  | ok answer =>
+      by_cases same : answer.value = mapLookup m (seqCountKey seq)
+      · left
+        unfold seqCountOf
+        rw [← same]
+        cases bound : answer.value.bind heightOf with
+        | some found =>
+            have eq : found = count := by simpa [looked, bound] using ok
+            rw [← eq]; rfl
+        | none =>
+            cases value : answer.value with
+            | none =>
+                have eq : 0 = count := by simpa [looked, bound, value] using ok
+                rw [← eq]; rfl
+            | some held =>
+                have unheld : heightOf held = none := by simpa [value] using bound
+                simp [looked, value, unheld] at ok
+      · exact Or.inr ⟨answer, same⟩
+
+theorem seqCounts_model {rows : List Bool → Option Row} {root : Digest} {m : List (IndexKey × List UInt8)}
+    (rep : Represents rows root m) : ∀ (seqs : List Digest256) (counts : List (Digest256 × Nat)),
+      seqCounts rows root seqs = .ok counts →
+      counts = seqs.map (fun seq => (seq, seqCountOf m seq)) ∨ ∃ seq, CountCollision m seq
+  | [], counts, ok => by
+      simp only [seqCounts, Except.ok.injEq] at ok
+      subst ok
+      exact Or.inl rfl
+  | seq :: rest, counts, ok => by
+      unfold seqCounts at ok
+      split at ok
+      · cases ok
+      · rename_i count first
+        split at ok
+        · cases ok
+        · rename_i later tail
+          cases ok
+          rcases seqCount_model rep seq count first with here | collision
+          · rcases seqCounts_model rep rest later tail with there | collision
+            · left; rw [here, there]; rfl
+            · exact Or.inr collision
+          · exact Or.inr ⟨seq, collision⟩
+
+end IndexRows
 
 namespace IndexRows
 
@@ -1162,17 +1488,21 @@ theorem insert_eq_setAll (height : Nat) (ks : List IndexKey)
                     simpa [setAll, step, tail, recur, bind, pure, Except.bind, Except.pure] using ok
 
 /-- The omission-sensitive theorem: the public entry point executes exactly its
-declared changes, the inserts then the cell overwrites, each through `setAll`. This
-theorem has NO `SetPreserves` hypothesis. -/
+declared changes, the inserts, the cell overwrites, then the sequence rows from the counts
+it read, each through `setAll`. This theorem has NO `SetPreserves` hypothesis. -/
 theorem apply_steps (store : List Bool → Option Row) (root : Digest) (height : Nat)
     (transactionId : Kernel.DurableDataIntent.TransactionId) (nullifiers : List Kernel.DurableDataIntent.StableNullifier)
-    (cells : List Kernel.DurableDataIntent.CellId)
+    (cells : List Kernel.DurableDataIntent.CellId) (seqs : List Digest256)
     (next : Digest) (written : List (List Bool × Row))
-    (ok : apply store root height transactionId nullifiers cells = .ok (next, written)) :
-    ∃ inserted early late,
+    (ok : apply store root height transactionId nullifiers cells seqs = .ok (next, written)) :
+    ∃ inserted early middle mid counts late,
       setAll store root (changes height transactionId nullifiers) = .ok (inserted, early) ∧
-      setAll (overlay store early) inserted (cellChanges height cells) = .ok (next, late) ∧
-      written = late ++ early.filter fun row => !late.any (·.1 = row.1) := by
+      setAll (overlay store early) inserted (cellChanges height cells) = .ok (middle, mid) ∧
+      seqCounts (overlay (overlay store early) mid) middle (Theory.JournalSequences.distinct seqs) =
+        .ok counts ∧
+      setAll (overlay (overlay store early) mid) middle (seqChanges height counts) = .ok (next, late) ∧
+      written = late ++ (mid ++ early.filter fun row => !mid.any (·.1 = row.1)).filter
+        fun row => !late.any (·.1 = row.1) := by
   unfold apply at ok
   cases first : insert height store root (keys transactionId nullifiers) with
   | error e => simp [first, bind, Except.bind] at ok
@@ -1181,10 +1511,20 @@ theorem apply_steps (store : List Bool → Option Row) (root : Digest) (height :
       cases second : setAll (overlay store early) inserted (cellChanges height cells) with
       | error e => simp [first, second, bind, Except.bind] at ok
       | ok result =>
-          obtain ⟨final, late⟩ := result
-          simp only [first, second, bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at ok
-          obtain ⟨rfl, rfl⟩ := ok
-          exact ⟨inserted, early, late, insert_eq_setAll height _ store root inserted early first, second, rfl⟩
+          obtain ⟨middle, mid⟩ := result
+          cases third : seqCounts (overlay (overlay store early) mid) middle
+              (Theory.JournalSequences.distinct seqs) with
+          | error e => simp [first, second, third, bind, Except.bind] at ok
+          | ok counts =>
+              cases fourth : setAll (overlay (overlay store early) mid) middle (seqChanges height counts) with
+              | error e => simp [first, second, third, fourth, bind, Except.bind] at ok
+              | ok result =>
+                  obtain ⟨final, late⟩ := result
+                  simp only [first, second, third, fourth, bind, Except.bind, pure, Except.pure,
+                    Except.ok.injEq, Prod.mk.injEq] at ok
+                  obtain ⟨rfl, rfl⟩ := ok
+                  exact ⟨inserted, early, middle, mid, counts, late,
+                    insert_eq_setAll height _ store root inserted early first, second, third, fourth, rfl⟩
 
 end IndexRows
 
@@ -1237,27 +1577,41 @@ single-set theorem is explicit; freshness is in the logical history, just as
 in `changes_exact`. This is not yet a proof that every committed Store is maintained. -/
 theorem maintained_apply
     (step : ∀ rows root m k value, SetPreserves set rows root m k value)
+    (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256)
     (records : List Kernel.DurableReceiver.IntentRecord)
     (record : Kernel.DurableReceiver.IntentRecord) (rows : List Bool → Option Row)
-    (root : Digest) (before : Maintained records rows root)
-    (fresh : ∀ k ∈ IndexRows.keys record.transactionId record.nullifiers, LogicalIndex records k = none)
+    (root : Digest) (before : Maintained sequences records rows root)
+    (fresh : ∀ k ∈ IndexRows.keys record.transactionId record.nullifiers,
+      LogicalIndex sequences records k = none)
+    (bound : records.length + 1 < 256 ^ 32)
     (next : Digest) (written : List (List Bool × Row))
     (ok : IndexRows.apply rows root (records.length + 1) record.transactionId record.nullifiers
-      (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId) = .ok (next, written)) :
-    Maintained (records ++ [record]) (overlay rows written) next ∨
+      (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId) (sequences record) =
+        .ok (next, written)) :
+    Maintained sequences (records ++ [record]) (overlay rows written) next ∨
       SetAllCollision rows root (IndexRows.changes (records.length + 1)
         record.transactionId record.nullifiers) ∨
-      ∃ inserted early, SetAllCollision (overlay rows early) inserted (IndexRows.cellChanges
-        (records.length + 1) (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId)) := by
+      (∃ inserted early, SetAllCollision (overlay rows early) inserted (IndexRows.cellChanges
+        (records.length + 1) (record.writes.map Kernel.DurableDataIntent.DataWrite.cellId))) ∨
+      (∃ m seq, WF 520 (entries bitsOf m) ∧ CountCollision m seq) ∨
+      ∃ store middle counts, SetAllCollision store middle
+        (IndexRows.seqChanges (records.length + 1) counts) := by
   obtain ⟨m, rep, logical⟩ := before
-  obtain ⟨inserted, early, late, first, second, rfl⟩ :=
-    IndexRows.apply_steps rows root _ _ _ _ next written ok
-  rcases setAll_preserves step _ rows root m rep inserted early first with mid | collision
-  · rcases setAll_preserves step _ (overlay rows early) inserted _ mid next late second with after | later
-    · refine Or.inl ⟨_, ?_, IndexRows.logical_changes_exact records record m logical fresh⟩
-      rw [overlay_merge]
-      exact after
-    · exact Or.inr (Or.inr ⟨inserted, early, later⟩)
+  obtain ⟨inserted, early, middle, mid, counts, late, first, second, third, fourth, rfl⟩ :=
+    IndexRows.apply_steps rows root _ _ _ _ _ next written ok
+  rcases setAll_preserves step _ rows root m rep inserted early first with afterFirst | collision
+  · rcases setAll_preserves step _ (overlay rows early) inserted _ afterFirst middle mid second with
+      afterSecond | collision
+    · rcases IndexRows.seqCounts_model afterSecond _ counts third with countsEq | ⟨seq, collision⟩
+      · subst countsEq
+        rcases setAll_preserves step _ _ middle _ afterSecond next late fourth with afterThird | collision
+        · refine Or.inl ⟨_, ?_, IndexRows.indexed_changes_exact sequences records record m logical fresh
+            bound _ (fun seq => Theory.JournalSequences.mem_distinct seq _)⟩
+          rw [overlay_merge, overlay_merge]
+          exact afterThird
+        · exact Or.inr (Or.inr (Or.inr (Or.inr ⟨_, _, _, collision⟩)))
+      · exact Or.inr (Or.inr (Or.inr (Or.inl ⟨_, seq, afterSecond.2.1, collision⟩)))
+    · exact Or.inr (Or.inr (Or.inl ⟨inserted, early, collision⟩))
   · exact Or.inr (Or.inl collision)
 
 /-- With no nullifiers the deployed append path produces exactly the one-leaf
@@ -1265,14 +1619,15 @@ transaction trie. The omission plant uses this result after dropping the
 consumed nullifier list at the public entry point. -/
 theorem apply_transaction_only (rows : List Bool → Option Row) (height : Nat)
     (tx : Kernel.DurableDataIntent.TransactionId) :
-    IndexRows.apply rows emptyDigest height tx [] [] =
+    IndexRows.apply rows emptyDigest height tx [] [] [] =
       .ok (dig (.leaf (transactionKey tx) (heightValue height)),
         [([], .leaf (transactionKey tx) (heightValue height))]) := by
-  suffices general : ∀ root, root = emptyDigest → IndexRows.apply rows root height tx [] [] =
+  suffices general : ∀ root, root = emptyDigest → IndexRows.apply rows root height tx [] [] [] =
       .ok (dig (.leaf (transactionKey tx) (heightValue height)),
         [([], .leaf (transactionKey tx) (heightValue height))]) from general _ rfl
   intro root empty
   simp only [IndexRows.apply, IndexRows.keys, List.map_nil, IndexRows.insert, IndexRows.cellChanges, setAll,
+    Theory.JournalSequences.distinct, IndexRows.seqCounts, IndexRows.seqChanges, List.flatMap_nil,
     lookupRows_of_eq_emptyDigest rows root _ empty, set_some_of_eq_emptyDigest rows root _ _ empty,
     bind, Except.bind, pure, Except.pure]
   rfl
@@ -1289,12 +1644,15 @@ theorem omitted_nullifier_absence (height : Nat) (tx : Kernel.DurableDataIntent.
 
 /-- The same key is present in the one-record logical history whenever that
 record consumed it, independent of the operational index implementation. -/
-theorem consumed_declared (record : Kernel.DurableReceiver.IntentRecord)
+theorem consumed_declared (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256)
+    (record : Kernel.DurableReceiver.IntentRecord)
     (nullifier : Kernel.DurableDataIntent.StableNullifier) (consumed : nullifier ∈ record.nullifiers) :
-    LogicalIndex [record] (nullifierKey nullifier) = some (heightValue 1) := by
+    LogicalIndex sequences [record] (nullifierKey nullifier) = some (heightValue 1) := by
   have mem : nullifierKey nullifier ∈ IndexRows.keys record.transactionId record.nullifiers :=
     List.mem_cons_of_mem _ (List.mem_map.mpr ⟨nullifier, consumed, rfl⟩)
-  simp [LogicalIndex, IndexRows.logical, nullifierKey, Family.spent, Family.lastWrite, IndexRows.declared, mem]
+  have family : (nullifierKey nullifier).family = Family.spent := rfl
+  simp [LogicalIndex, IndexRows.indexed, IndexRows.logical, family, Family.spent, Family.lastWrite,
+    Family.seqCount, Family.seqItem, IndexRows.declared, mem]
 
 #assert_axioms apply_transaction_only
 #assert_axioms omitted_nullifier_absence
@@ -1307,6 +1665,11 @@ theorem consumed_declared (record : Kernel.DurableReceiver.IntentRecord)
 #assert_axioms IndexRows.insert_eq_setAll
 #assert_axioms IndexRows.apply_steps
 #assert_axioms IndexRows.logical_changes_exact
+#assert_axioms IndexRows.mapLookup_seqChanges
+#assert_axioms IndexRows.seq_changes_exact
+#assert_axioms IndexRows.indexed_changes_exact
+#assert_axioms IndexRows.seqCounts_model
+#assert_axioms countCollision_is_cshake
 #assert_axioms IndexRows.lastWrite_untouched
 #assert_axioms IndexRows.lastWrite_later_write
 #assert_axioms setAll_preserves
