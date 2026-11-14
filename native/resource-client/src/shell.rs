@@ -518,18 +518,20 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
             let name = p.arg(0);
             let private = p.has("--private");
             let given = |f: &str| p.flag(f).flatten();
-            if private && ["--law", "--template", "--concierge", "--period"].iter().any(|f| p.has(f)) {
+            if private && ["--law", "--template", "--concierge", "--period", "--refund-limit"].iter().any(|f| p.has(f)) {
                 return Err("--private is the private room's law (its keys cell, your wrap); it takes no --law, --template or --concierge".into());
             }
-            // `--concierge SUBJECT [--period N]`: the room's lines, then one
+            // `--concierge SUBJECT [--period N] [--refund-limit N]`: the room's lines, then one
             // `room concierge` line (P-CREDIT): the room is born first, then
-            // its till, runner account and the concierge's grants.
+            // its till, runner account and the concierge's grants. A room born here has no
+            // week price yet, so without `--refund-limit` the till grant bounds a refund at 0:
+            // name the largest payment the concierge may return.
             if let Some(concierge) = given("--concierge") {
                 workspace_name(name, "a room with a concierge (its lines name proposals after it)")?;
                 let mut first = format!("room new {name}");
                 for (flag_name, value) in &p.flags {
                     if let Some(value) = value {
-                        if *flag_name != "--concierge" && *flag_name != "--period" {
+                        if !["--concierge", "--period", "--refund-limit"].contains(flag_name) {
                             first.push_str(&format!(" {flag_name} {value}"));
                         }
                     }
@@ -537,6 +539,9 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
                 let mut last = format!("room concierge {name} {concierge}");
                 if let Some(period) = given("--period") {
                     last.push_str(&format!(" --period {period}"));
+                }
+                if let Some(limit) = given("--refund-limit") {
+                    last.push_str(&format!(" --refund-limit {limit}"));
                 }
                 let founder = session_subject(session)?;
                 let text = match given("--template") {
@@ -551,6 +556,9 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
             }
             if p.has("--period") {
                 return Err("--period is the concierge's week (--concierge SUBJECT --period N)".into());
+            }
+            if p.has("--refund-limit") {
+                return Err("--refund-limit is the concierge's till grant (--concierge SUBJECT --refund-limit N)".into());
             }
             if let Some(spec) = given("--template") {
                 if p.flags.len() != 1 {

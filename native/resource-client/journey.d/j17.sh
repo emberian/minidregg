@@ -199,7 +199,9 @@ BACCT=$(jq -r .feePayer "$WS/bob/birth-context.json")
 FEE=$(jq -r '.tariffBase' "$CONFIG"); BIRTH=$(jq -r '.tariffPerBirth' "$CONFIG"); GRANT=$(jq -r '.tariffPerGrant' "$CONFIG")
 
 # ------------------------------------------------ the room, its tariff, its concierge
-ok room alice "room new lab --template workroom --concierge $CON --period $PERIOD"
+# The room has no week price when its concierge is installed, so the till grant's refund
+# limit is named here: the largest payment this journey has the concierge return.
+ok room alice "room new lab --template workroom --concierge $CON --period $PERIOD --refund-limit 200"
 LAB=$(jq -r .target "$WS/alice/refs/lab.json")
 checkp room "the founder holds the till lab-till (an account)" jq -e '.kind == "account"' "$WS/alice/refs/lab-till.json"
 checkp room "the program names lab, its till and the concierge" \
