@@ -311,20 +311,79 @@ What moved, and what did not:
 
 **Next**, the remaining codes, in the order of what each needs:
 
-* `scalar` (0). Its computation is `scalarScope` (reads the authority cell: `capabilityRejected`,
-  `fieldNotNamed`), then `DeclaredResourceScalar.prepareCell`, then the blinding ratchet at the
-  admission height. As a declaration: `rotate := blinding.patch s ctx.ambient.height`,
-  `rotated := (· = blinding.address)`, `member := some fun m actions _ => some (cellPatch …)`
-  with `memberReadsStore := false` (the patch is the command's alone; this is what lets a
-  field-scoped member sign a write, THIN row N1), `KernelOwned` becomes the generic `rotated`.
-  `prepareCell` takes a `DeclaredResourceScalar.Command` built from the signed fields AND the
-  schema version and expected root, which `EffectCtx` does not hold (the header owns them): the
-  semantics must be `prepareCell` with its own version and root checks factored out, which is a
-  statement to make first (`prepareCell` = header checks, then a root-free core). Every scalar
-  refusal text moves from `Reject.scalar (DeclaredResourceScalar.Reject.x)` to
-  `Reject.effect (Effect.Scalar.x)`; the rendered clauses (`guard-rejected 0`,
-  `undeclared-field 3`) are read by the Rust client and most journeys, so `Host/RefusalText`
-  and those greps move in the same commit. Run J0..J8 with it.
+* `scalar` (0). What exists (`Kernel/DeclaredResourceScalar.lean`, proved):
+  `prepareStore kind target actions store` is the root-free core of a scalar preparation (the
+  role's cell law, the scoped admission of every action, every guard in sequence, field closure,
+  the cell law at the post); it answers the actions' patch (`actionsPatch`, which a command's
+  `cellPatch` is whatever its version, root and nonce: `cellPatch_actions`). `prepareCell` IS its
+  own header (an ordinary role, schema version 1, some action, the loaded root) followed by
+  that core, so there is one body; the purse and job receivers call `prepareCell` and are
+  unchanged. `prepareCell_factors` states the factoring of its answer. `prepareStore_ok` gives
+  what an answer means; `admitted_writes_no_blinding` and `prepareStore_ratchet_valid` say an
+  answered patch followed by the kernel's ratchet is valid from the loaded store at every height
+  (the declaration's `complete`, proved as a fact about the receiver).
+
+  The binding, as ruled (coordinator, 2026-11-14):
+  1. `scalarEffect` (a new `Kernel/ScalarEffect.lean`; `citedEffect` is the template on the same
+     cell: `EffectDeclaration.effectLayout`, `DeclaredEffectCell.wire`, `packDeclared`,
+     `unpackDeclared` and their two laws). `R := DeclaredResourceScalar.Reject`;
+     `accepts := fun _ => true`; `version := 1`;
+     `sem ctx actions store := if ctx.kind = .account then accountRequiresBook else if actions = []
+     then emptyActions else prepareStore ctx.kind ctx.target actions store`;
+     `rotate ctx s := DeclaredEffectCell.blinding.patch s ctx.ambient.height`;
+     `rotated := fun a => match a.2 with | .blinding => true | _ => false` (today's
+     `targetRatchet`); `field := fun a => declaredField a.2`; `amount := fun _ v => v` (today's
+     `targetAmount`); `frame actions := (Patch.writeFootprint (actionsPatch actions)).image
+     (declaredField ·.2)`; `verb := ordinaryVerb`; `view site _ := DeclaredResourceProjection.project
+     site.target`; `member := some fun _ actions _ => some (actionsPatch actions)` with
+     `memberReadsStore := false` (what lets a field-scoped member sign a write, THIN row N1).
+     `complete` is `prepareStore_ok` for the frame and `prepareStore_ratchet_valid` for the
+     replay (content's proof in `Kernel/ContentEffect.lean` is the shape); `member_tail` is
+     `Patch.run_frame` off the ratchet's one write.
+  2. The scope check stays the controller's, before the header, so `Reject.capabilityRejected`
+     and `Reject.fieldNotNamed` keep their identity and order: `Effect` gets
+     `guardFields : O → Option (List CellField)` (the fields the operation's guards read; `none`
+     by default; scalar states `some` of `guardKeys` mapped through `declaredField`), and the
+     registered arm of `computeTarget` runs today's `scalarScope` on it first.
+  3. Two more fields change shape: `Effect.viewDemand` takes the `leads` gate
+     (`DeclaredResourceProjection.projectDemand want leads`; `viewDemand_eq` under `sound`), and
+     `Effect.runWrites` takes the target id (`actionWrite i id`).
+  4. `Payload.scalar` becomes a `@[match_pattern]` abbrev of `.registered 0 actions`, as
+     `Payload.content` is: `NativeHostReplay` (3024, 5262), `NativeProviderHistory` (122, 131) and
+     `AgentGrain` read particular actions out of a scalar operation. Those are data readers. The
+     arm census must count zero dispatch arms on it; teach `scripts/effect-arm-census.py` the
+     difference if it cannot tell.
+  5. Precedence that moves, each needing an executed pole and a proof or check that the refusal
+     is pre-admission and uncharged before and after: today's order is `accountRequiresBook`,
+     `unsupportedVersion`, `emptyActions`, `staleTarget`; the declaration's is
+     `unsupportedVersion`, `staleTarget`, `accountRequiresBook`, `emptyActions`. Exactly three
+     pairs change order (not four): an account with a wrong version, an account with a stale
+     root, and no action with a stale root. No action with a wrong version, and an account
+     with no action, keep their order; execute one of them as the control.
+  6. Text that moves: `Reject.scalar (DeclaredResourceScalar.Reject.x)` becomes
+     `Reject.effect (Effect.Scalar.x)`; rendered, `declared-resource-scalar: guard-rejected 0`
+     becomes `effect: scalar: guard-rejected 0`. `refusalDetail` carries the index of
+     `guardRejected` and the field of `undeclaredField`, and `refusalText` prints it, so the
+     suffixes every journey greps (`guard-rejected N`, `undeclaredField N`) stay. Two places
+     spell the old prefix and move in the same commit: `scripts/kn2/plant-drift-m4.sh` line 16
+     and the fixture in `native/resource-client/src/main.rs` (about lines 4409-4412).
+  7. The hand arms to delete (`scripts/effect-arm-census.py --sites`): `ResourceTransaction`
+     (`Repr`, payload bytes, `Target.layout`, `Target.materializer`, `packTarget`,
+     `selectTarget`, `computeTarget` with `scalarLeg`, `targetPatch`, `appendedEntry`,
+     `targetProjection`, `targetProjectionDemand` and its `_eq`, `targetWrites`),
+     `DeclaredResourceController` (`targetProjection_unjoint`, `targetField`, `targetAmount`,
+     `targetRatchet`, `targetFullFootprint`), `NativeThinConsent` (six, with `KernelOwned`,
+     which becomes the generic `rotated`), `NativeObservationController` 1103, the Host's
+     `FnInboxView` 108 (its `actionJson` and `keyJson` become the declaration's `toJson`),
+     `InspectRender` 465 (`actionText` becomes `display`), `GrainOriginSource` 166
+     (`authors := fun actions => !actions.isEmpty`), and the `"scalar"` string arm of
+     `ResourcePayloadJson`. `Reject.scalar` goes with them.
+  8. Run J0..J8 with THIN, K12T, J12, J12W, KF, P7KR, JSLK, plus KCL, JDISCLOSE, JJOB1 and
+     JPAY6, which read the scalar clauses.
+
+  A build note: bare `lean` on `Kernel/DeclaredResourceScalar.lean` reports a private-constructor
+  error that `lake build Kernel.DeclaredResourceScalar` does not (the unmodified file does the
+  same); check that module through lake.
 * `computeFunding` (6) and `moneyConsent` (8): the cell is unchanged; what they do is outside the
   target (the shared Book), so `member = none`. Their footprint is the monetary one
   (`Effect.footprint` now exists for it).

@@ -309,6 +309,132 @@ structure PreparedCell (snapshot : AuthoritySnapshot)
   candidate : PolicyInstall.Candidate (cellFamily snapshot semantics ambient pre)
     pre command post
 
+/-- The actions' one guarded patch. A command's patch is this, whatever its schema version,
+expected root and nonce (`cellPatch_actions`). -/
+def actionsPatch (actions : List Action) : Patch effectLayout :=
+  actions.flatMap Action.ops
+
+theorem cellPatch_actions (command : Command) : cellPatch command = actionsPatch command.actions := rfl
+
+/-- **The root-free core of a scalar preparation**: what the actions do to a store under a role
+and a cell id, with no schema version, expected root, signer or nonce. The role's cell law at
+the loaded store, the scoped admission of every action, every guard in sequence, field closure
+(K-FIELD-CLOSURE: a field the cell did not declare is refused by name, before any law is
+evaluated), then the cell law at the post. It answers the actions' patch. -/
+def prepareStore (kind : ResourceKind) (target : Nat) (actions : List Action)
+    (store : Store effectLayout) : Except Reject (Patch effectLayout) :=
+  if CanonicalCellRegistry.DeclaredCellLaw kind target store then
+    if actions.all (Action.admissionCheck (⟨target⟩ : ResourceId kind)) = true then
+      match Patch.firstDisabled? store (actionsPatch actions) with
+      | some index => .error (.guardRejected index)
+      | none =>
+          match FieldClosure.check target store (Patch.run store (actionsPatch actions)) with
+          | some field => .error (.undeclaredField field)
+          | none =>
+              if CanonicalCellRegistry.DeclaredCellLaw kind target
+                  (Patch.run store (actionsPatch actions)) then .ok (actionsPatch actions)
+              else .error .invalidPost
+    else .error .inadmissibleAction
+  else .error .wrongRole
+
+/-- What an answered core says: the patch is the actions', the cell law holds before and after,
+every action is admitted, every guard holds in sequence, and the write is closed. -/
+theorem prepareStore_ok {kind : ResourceKind} {target : Nat} {actions : List Action}
+    {store : Store effectLayout} {patch : Patch effectLayout}
+    (answered : prepareStore kind target actions store = .ok patch) :
+    patch = actionsPatch actions ∧
+      CanonicalCellRegistry.DeclaredCellLaw kind target store ∧
+      actions.all (Action.admissionCheck (⟨target⟩ : ResourceId kind)) = true ∧
+      Patch.ValidFrom store (actionsPatch actions) ∧
+      FieldClosure.check target store (Patch.run store (actionsPatch actions)) = none ∧
+      CanonicalCellRegistry.DeclaredCellLaw kind target (Patch.run store (actionsPatch actions)) := by
+  unfold prepareStore at answered
+  split at answered
+  · rename_i preLaw
+    split at answered
+    · rename_i admitted
+      split at answered
+      · cases answered
+      · rename_i enabled
+        split at answered
+        · cases answered
+        · rename_i closed
+          split at answered
+          · rename_i postLaw
+            cases answered
+            exact ⟨rfl, preLaw, admitted,
+              (Patch.firstDisabled?_eq_none_iff store (actionsPatch actions)).1 enabled, closed,
+              postLaw⟩
+          · cases answered
+    · cases answered
+  · cases answered
+
+/-- An answered core is the command's sequential action semantics at the loaded cell. -/
+theorem prepareStore_semantic {pre : EffectCell} {command : Command} {patch : Patch effectLayout}
+    (answered : prepareStore command.kind command.target command.actions pre.logical = .ok patch) :
+    CanonicalActionResult pre command (Patch.run pre.logical (cellPatch command)) :=
+  (command.declaration.run_eq_some_iff _ _).mpr
+    ⟨(prepareStore_ok answered).2.2.1, (prepareStore_ok answered).2.2.2.1, rfl⟩
+
+/-- No admitted action writes the blinding: no role's writable key is it (`writableKeyCheck`). -/
+theorem admitted_writes_no_blinding {kind : ResourceKind} {target : ResourceId kind}
+    (actions : List Action) (admitted : actions.all (Action.admissionCheck target) = true) :
+    DeclaredEffectCell.blinding.address ∉ Patch.writeFootprint (actionsPatch actions) := by
+  intro written
+  rw [Patch.mem_writeFootprint_iff] at written
+  obtain ⟨op, member, address⟩ := written
+  obtain ⟨action, actionMember, opMember⟩ := List.mem_flatMap.mp member
+  have actionAdmitted : action.admissionCheck target = true :=
+    List.all_eq_true.mp admitted action actionMember
+  have blinding : DeclaredEffectCell.blinding.address = EffectDeclaration.StateKey.blinding.address := rfl
+  rw [blinding] at address
+  cases action with
+  | create key initial =>
+    simp only [Action.ops, List.mem_singleton] at opMember
+    subst opMember
+    rw [guardedSet_address] at address
+    have same := EffectDeclaration.StateKey.address_injective (Option.some.inj address)
+    subst same
+    cases kind <;> simp [Action.admissionCheck, writableKeyCheck] at actionAdmitted
+  | write key expected replacement =>
+    simp only [Action.ops, List.mem_singleton] at opMember
+    subst opMember
+    rw [guardedSet_address] at address
+    have same := EffectDeclaration.StateKey.address_injective (Option.some.inj address)
+    subst same
+    cases kind <;> simp [Action.admissionCheck, writableKeyCheck] at actionAdmitted
+  | move source destination resource sourceExpected destinationExpected amount =>
+    simp only [Action.ops, List.mem_cons, List.not_mem_nil, or_false] at opMember
+    rcases opMember with rfl | rfl <;>
+    · rw [guardedSet_address] at address
+      have same := EffectDeclaration.StateKey.address_injective (Option.some.inj address)
+      cases same
+
+/-- **An answered core replays with the kernel's ratchet** (K-HIDE-ROTATE): its patch leaves the
+blinding where the loaded store has it, so the ratchet's guard at the pre blinding holds after
+it, at every height. The leg's whole patch is valid from the loaded store. -/
+theorem prepareStore_ratchet_valid {kind : ResourceKind} {target : Nat} {actions : List Action}
+    {store : Store effectLayout} {patch : Patch effectLayout}
+    (answered : prepareStore kind target actions store = .ok patch) (height : Nat) :
+    Patch.ValidFrom store (patch ++ DeclaredEffectCell.blinding.patch store height) := by
+  obtain ⟨same, _, admitted, valid, _, _⟩ := prepareStore_ok answered
+  subst same
+  have kept : Patch.run store (actionsPatch actions) DeclaredEffectCell.blinding.address =
+      store DeclaredEffectCell.blinding.address :=
+    Patch.run_frame _ _ _ (admitted_writes_no_blinding actions admitted)
+  refine (Patch.validFrom_append _ _ _).2 ⟨valid, ?_⟩
+  unfold StoreCodec.Blinding.patch
+  split
+  · rename_i value present
+    refine ⟨⟨rfl, ?_⟩, trivial⟩
+    change Patch.run store (actionsPatch actions) DeclaredEffectCell.blinding.address = some value
+    rw [kept]
+    exact present
+  · trivial
+
+/-- **A scalar preparation**: the command's own header (an ordinary role, schema version 1,
+some action, the loaded root), then the root-free core (`prepareStore`) at the loaded store.
+`prepareCell_factors` says so of its answer. -/
 def prepareCell (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (pre : EffectCell) (command : Command) :
     Except Reject (PreparedCell snapshot semantics ambient pre command) := do
@@ -316,39 +442,60 @@ def prepareCell (snapshot : AuthoritySnapshot)
     if version : command.schemaVersion = 1 then
       if nonempty : command.actions ≠ [] then
         if root : command.expectedTargetRoot = pre.root then
-          if preLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target
-              pre.logical then
-            if admitted : command.declaration.admissionCheck = true then
-              match validate DeclaredEffectCell.materializer pre
-                  pre.root (cellPatch command) with
-              | .rejected (.stalePreRoot) => .error .staleTarget
-              | .rejected (.disabledOperation index) => .error (.guardRejected index)
-              | .accepted validated =>
-                  let post := Patch.run pre.logical (cellPatch command)
-                  -- K-FIELD-CLOSURE: a field the cell did not declare is refused by
-                  -- name here, before any law is evaluated.
-                  match closed : FieldClosure.check command.target pre.logical post with
-                  | some field => .error (.undeclaredField field)
-                  | none =>
-                  if postLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind
-                      command.target post then
-                    let semantic : CanonicalActionResult pre command post :=
-                      (command.declaration.run_eq_some_iff _ _).mpr
-                        ⟨admitted, validated.valid, rfl⟩
-                    .ok ⟨post,
-                      { preStateBound := rfl
-                        modeEvidence :=
-                          ⟨preLaw, root, version, ordinary, nonempty, admitted, closed, postLaw,
-                            semantic⟩
-                        validated := validated
-                        postcondition := ⟨rfl, semantic, postLaw⟩ }⟩
-                  else .error .invalidPost
-            else .error .inadmissibleAction
-          else .error .wrongRole
+          match core : prepareStore command.kind command.target command.actions pre.logical with
+          | .error reason => .error reason
+          | .ok _ =>
+              let post := Patch.run pre.logical (cellPatch command)
+              .ok ⟨post,
+                { preStateBound := rfl
+                  modeEvidence :=
+                    ⟨(prepareStore_ok core).2.1, root, version, ordinary, nonempty,
+                      (prepareStore_ok core).2.2.1, (prepareStore_ok core).2.2.2.2.1,
+                      (prepareStore_ok core).2.2.2.2.2, prepareStore_semantic core⟩
+                  validated := (validate_accepts DeclaredEffectCell.materializer pre pre.root
+                    (cellPatch command) rfl (prepareStore_ok core).2.2.2.1).elim fun found _ => found
+                  postcondition :=
+                    ⟨rfl, prepareStore_semantic core, (prepareStore_ok core).2.2.2.2.2⟩ }⟩
         else .error .staleTarget
       else .error .emptyActions
     else .error .unsupportedVersion
   else .error .accountRequiresBook
+
+/-- **`prepareCell` is its header, then the root-free core.** The header reads the command's
+role, schema version, action count and expected root; everything after it reads only the role,
+the cell id, the actions and the loaded store. -/
+theorem prepareCell_factors (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (pre : EffectCell) (command : Command) :
+    (prepareCell snapshot semantics ambient pre command).map (·.post) =
+      if command.kind = .account then .error .accountRequiresBook
+      else if command.schemaVersion ≠ 1 then .error .unsupportedVersion
+      else if command.actions = [] then .error .emptyActions
+      else if command.expectedTargetRoot ≠ pre.root then .error .staleTarget
+      else (prepareStore command.kind command.target command.actions pre.logical).map
+        (Patch.run pre.logical) := by
+  unfold prepareCell
+  by_cases account : command.kind = .account
+  · rw [dif_neg (not_not.mpr account), if_pos account]; rfl
+  rw [dif_pos account, if_neg account]
+  by_cases version : command.schemaVersion = 1
+  swap
+  · rw [dif_neg version, if_pos version]; rfl
+  rw [dif_pos version, if_neg (not_not.mpr version)]
+  by_cases empty : command.actions = []
+  · rw [dif_neg (not_not.mpr empty), if_pos empty]; rfl
+  rw [dif_pos empty, if_neg empty]
+  by_cases root : command.expectedTargetRoot = pre.root
+  swap
+  · rw [dif_neg root, if_pos root]; rfl
+  rw [dif_pos root, if_neg (not_not.mpr root)]
+  split
+  · rename_i reason core; rw [core]; rfl
+  · rename_i patch core
+    have answered : (prepareStore command.kind command.target command.actions pre.logical).map
+        (Patch.run pre.logical) = .ok (Patch.run pre.logical (cellPatch command)) := by
+      rw [core, (prepareStore_ok core).1]; rfl
+    rw [answered]
+    rfl
 
 theorem PreparedCell.action_semantics_exact
     {snapshot : AuthoritySnapshot} {semantics : Digest} {ambient : Ambient}
@@ -396,32 +543,30 @@ theorem undeclared_field_refused
     (nonempty : command.actions ≠ []) (root : command.expectedTargetRoot = pre.root)
     (preLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target pre.logical)
     (admitted : command.declaration.admissionCheck = true)
-    {validated : CellState.ValidatedPatch DeclaredEffectCell.materializer pre pre.root
-      (cellPatch command)}
-    (accepted : validate DeclaredEffectCell.materializer pre pre.root (cellPatch command) =
-      .accepted validated)
+    (enabled : Patch.firstDisabled? pre.logical (cellPatch command) = none)
     {field : Nat}
     (named : FieldClosure.check command.target pre.logical
       (Patch.run pre.logical (cellPatch command)) = some field) :
     prepareCell snapshot semantics ambient pre command = .error (.undeclaredField field) := by
-  unfold prepareCell
-  rw [dif_pos ordinary, dif_pos version, dif_pos nonempty, dif_pos root, dif_pos preLaw,
-    dif_pos admitted]
-  split
-  · rename_i heq; rw [accepted] at heq; cases heq
-  · rename_i heq; rw [accepted] at heq; cases heq
-  · rename_i heq
-    rw [accepted] at heq
-    cases heq
+  have core : prepareStore command.kind command.target command.actions pre.logical =
+      .error (.undeclaredField field) := by
+    unfold prepareStore
+    rw [if_pos preLaw, if_pos (show command.actions.all
+      (Action.admissionCheck (⟨command.target⟩ : ResourceId command.kind)) = true from admitted)]
+    rw [show Patch.firstDisabled? pre.logical (actionsPatch command.actions) = none from enabled]
     dsimp only
-    split
-    · rename_i found heq2
-      rw [named] at heq2
-      cases heq2
-      rfl
-    · rename_i heq2
-      rw [named] at heq2
-      cases heq2
+    rw [show FieldClosure.check command.target pre.logical
+      (Patch.run pre.logical (actionsPatch command.actions)) = some field from named]
+  unfold prepareCell
+  rw [dif_pos ordinary, dif_pos version, dif_pos nonempty, dif_pos root]
+  split
+  · rename_i reason found
+    rw [core] at found
+    cases found
+    rfl
+  · rename_i found
+    rw [core] at found
+    cases found
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceScalar.PreparedCell.changes_only_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedCell.changes_only_declared
