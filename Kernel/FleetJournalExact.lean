@@ -7,17 +7,19 @@ filter). They are now reads of journal sequence rows (`NativeHost.fleetHeadLight
 recomputed sequence heights (`Theory.JournalSequences.heights`, which the kept rows equal:
 `Theory.JournalSequences.index_from_replay`, `DurableIndex.IndexRows.indexed_changes_exact`).
 
-Both are STATED here and owed as theorems. The route is proved in `Theory.JournalSequences`:
-`scanFrom_take` (a bounded scan is the window's entries), `window_spec` (the window is the
-bisection and the next positions), `filter_length_eq_count` and `filter_getLast?` (the count
-and the newest member), with `JournalIndex.mem_sequences_iff` for the premise that a record
-is in a name's sequence exactly when it carries the name. What remains is the bridge from
-`fleetIncomingEntry?` and the head's filter to "carries the name", and the height shift by
-`genesisHeight`.
+Both are proved (`incomingExact`, `headExact`): a record yields an incoming entry, or is one
+of a payer's turns, exactly when it carries the name (`incoming_isSome_iff`,
+`paid_iff`), which without a collision is membership of the name's sequence
+(`JournalIndex.mem_sequences_iff`); the rest is `Theory.JournalSequences.scanFrom_take_shift`,
+`filter_length_eq_count` and `filter_getLast?`. The served read of those heights is
+`NativeHost.sequencePosition` (the cursor's position, `Theory.JournalSequences.belowM`) and
+`NativeHost.sequencePage` (`Theory.JournalSequences.pageM`): `belowM_pure`, `below_spec`,
+`pageM_pure`, `page_rows`, with `drop_below_eq_filter` joining a position to a height cursor.
 -/
 module
 
 public import Kernel.NativeHost
+import Theory.AssertAxioms
 
 @[expose] public section
 
@@ -60,5 +62,106 @@ def HeadExact : Prop :=
         Theory.JournalSequences.count (log.map JournalIndex.sequences) (JournalIndex.Name.fleetPayer payer).id ∧
       (paidBy payer log).getLast? =
         ((heights (.fleetPayer payer) log).getLast?).bind (fun height => log[height - 1]?)
+
+/-- A record yields a ledger entry for `(account, topic)` exactly when it carries that name. -/
+theorem incoming_isSome_iff (account : Nat) (topic : List UInt8) (height : Nat) (record : IntentRecord) :
+    (NativeHost.fleetIncomingEntry? account topic height record).isSome = true ↔
+      JournalIndex.Name.fleetIncoming account topic ∈ JournalIndex.names record := by
+  unfold NativeHost.fleetIncomingEntry? JournalIndex.names
+  cases decoded : FleetTurn.decodeIngress record.event.canonicalBytes with
+  | none => simp
+  | some ingress =>
+      cases paid : ingress.command.transfer with
+      | none => simp [JournalIndex.fleetNames, paid]
+      | some transfer =>
+          by_cases dest : transfer.destination = account
+          · subst dest
+            cases published : ingress.command.publication with
+            | none =>
+                by_cases empty : topic = []
+                · subst empty
+                  simp [JournalIndex.fleetNames, paid, published, NativeHost.fleetTopicMatches]
+                · have empty' : ¬ [] = topic := fun h => empty h.symm
+                  simp [JournalIndex.fleetNames, paid, published, NativeHost.fleetTopicMatches, empty, empty']
+            | some publication =>
+                by_cases empty : topic = []
+                · subst empty
+                  simp [JournalIndex.fleetNames, paid, published, NativeHost.fleetTopicMatches]
+                · have empty' : ¬ [] = topic := fun h => empty h.symm
+                  by_cases same : publication.topic = topic
+                  · subst same
+                    simp [JournalIndex.fleetNames, paid, published, NativeHost.fleetTopicMatches, empty]
+                  · have same' : ¬ topic = publication.topic := fun h => same h.symm
+                    by_cases blank : publication.topic = []
+                    · simp [JournalIndex.fleetNames, paid, published, NativeHost.fleetTopicMatches, empty,
+                        empty', same, same', blank]
+                    · simp [JournalIndex.fleetNames, paid, published, NativeHost.fleetTopicMatches, empty,
+                        empty', same, same', blank]
+          · have dest' : ¬ account = transfer.destination := fun h => dest h.symm
+            cases published : ingress.command.publication with
+            | none => simp [JournalIndex.fleetNames, paid, published, dest, dest']
+            | some publication =>
+                by_cases blank : publication.topic = []
+                · simp [JournalIndex.fleetNames, paid, published, dest, dest', blank]
+                · simp [JournalIndex.fleetNames, paid, published, dest, dest', blank]
+
+/-- A record is one of `payer`'s turns exactly when it carries the payer's name. -/
+theorem paid_iff (payer : Nat) (record : IntentRecord) :
+    (match FleetTurn.decodeIngress record.event.canonicalBytes with
+      | some ingress => ingress.command.payer == payer
+      | none => false) = true ↔
+      JournalIndex.Name.fleetPayer payer ∈ JournalIndex.names record := by
+  unfold JournalIndex.names
+  cases decoded : FleetTurn.decodeIngress record.event.canonicalBytes with
+  | none => simp
+  | some ingress =>
+      have tail : JournalIndex.Name.fleetPayer payer ∈ JournalIndex.fleetNames ingress.command ↔
+          payer = ingress.command.payer := by
+        unfold JournalIndex.fleetNames
+        cases ingress.command.transfer with
+        | none => simp
+        | some transfer =>
+            cases ingress.command.publication with
+            | none => simp
+            | some publication => by_cases blank : publication.topic.isEmpty <;> simp [blank]
+      simp only [tail, beq_iff_eq]
+      exact eq_comm
+
+private theorem fleetIncomingFrom_eq_scan (account : Nat) (topic : List UInt8) (after : Nat) :
+    ∀ (start : Nat) (log : List IntentRecord),
+      NativeHost.fleetIncomingFrom account topic after start log =
+        Theory.JournalSequences.scanFrom (NativeHost.fleetIncomingEntry? account topic) after start log
+  | _, [] => rfl
+  | start, record :: rest => by
+      simp only [NativeHost.fleetIncomingFrom, Theory.JournalSequences.scanFrom,
+        fleetIncomingFrom_eq_scan account topic after (start + 1) rest]
+
+theorem incomingExact : IncomingExact := by
+  intro genesis account topic cursor limit log clean
+  rw [fleetIncomingFrom_eq_scan]
+  exact Theory.JournalSequences.scanFrom_take_shift JournalIndex.sequences
+    (JournalIndex.Name.fleetIncoming account topic).id (NativeHost.fleetIncomingEntry? account topic)
+    genesis cursor limit log
+    (fun record inLog height => (incoming_isSome_iff account topic height record).trans
+      (JournalIndex.mem_sequences_iff clean inLog).symm)
+
+theorem headExact : HeadExact := by
+  intro payer log clean
+  have same : paidBy payer log =
+      log.filter (fun record => decide ((JournalIndex.Name.fleetPayer payer).id ∈ JournalIndex.sequences record)) := by
+    unfold paidBy
+    apply List.filter_congr
+    intro record inLog
+    have carried := (paid_iff payer record).trans (JournalIndex.mem_sequences_iff clean inLog).symm
+    by_cases member : (JournalIndex.Name.fleetPayer payer).id ∈ JournalIndex.sequences record
+    · simpa [member] using carried.mpr member
+    · have off := mt carried.mp member
+      simpa [member] using off
+  rw [same]
+  exact ⟨Theory.JournalSequences.filter_length_eq_count JournalIndex.sequences _ log,
+    Theory.JournalSequences.filter_getLast? JournalIndex.sequences _ 1 log⟩
+
+#assert_axioms incomingExact
+#assert_axioms headExact
 
 end Minidregg.Kernel.FleetJournalExact

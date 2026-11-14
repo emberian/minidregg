@@ -41,9 +41,21 @@ if lake env lean "$mutant" > "$out/mutant.log" 2>&1; then
   exit 1
 fi
 # Pin the rejection to the unconditional theorem's proof, not an unrelated error.
-proof_line=$(awk '/^theorem apply_steps / { found=1 } found && /insert_eq_setAll height/ { print NR; exit }' "$mutant")
-[[ -n "$proof_line" ]]
-grep -E "index-mutant.lean:${proof_line}:[0-9]+: error" "$out/mutant.log"
+# The theorem's lines: from its statement to the `end IndexRows` that follows it.
+first_line=$(awk '/^theorem apply_steps / { print NR; exit }' "$mutant")
+last_line=$(awk -v first="$first_line" 'NR > first && /^end IndexRows$/ { print NR; exit }' "$mutant")
+[[ -n "$first_line" && -n "$last_line" ]]
+inside=$(grep -oE "index-mutant.lean:[0-9]+:[0-9]+: error" "$out/mutant.log" | sort -u |
+  awk -F: -v first="$first_line" -v last="$last_line" '$2 >= first && $2 <= last { print }')
+[[ -n "$inside" ]]
+printf '%s\n' "$inside"
+# Every other error is an axiom assertion that depends on the broken theorem.
+if grep -E "index-mutant.lean:[0-9]+:[0-9]+: error" "$out/mutant.log" |
+    awk -F: -v first="$first_line" -v last="$last_line" '$2 < first || $2 > last { print }' |
+    grep -v 'depends on axioms' | grep -q .; then
+  printf '%s\n' 'FAIL: the mutant is rejected outside IndexRows.apply_steps' >&2
+  exit 1
+fi
 printf '%s\n' 'RED: IndexRows.apply_steps rejects the omitted consumed nullifiers (no SetPreserves premise)'
 printf '%s\n' 'WITNESS: the transaction-only root accepts genuine absence of a logically consumed nullifier'
 printf 'Evidence: %s\n' "$out"

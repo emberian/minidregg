@@ -17,6 +17,14 @@
 # record) runs first and is timed into audit.tsv (AUDIT_TIMEOUT seconds, default
 # 3600; rc 124 is a timeout), with the box load when it started.
 #
+# The Store has a tail bound (the fixture's L, MINI_TAIL_BOUND, default 256): writes more than L
+# records past the certified head are refused. Every CERTIFY_EVERY turns (default 32) the
+# operator's certifier runs, as the deployed timer does: `mini checkpoint --action certify` in
+# the sponsor's workspace under the factory controller capability, which certifies the head when
+# the uncertified tail is at least CERTIFY_MIN_TAIL (default 64) and skips otherwise. Each run
+# is logged to certify.log; a certify that fails ends the run. A confirmed certify is a record
+# of its own, so chain_index runs ahead of the turn number.
+#
 # usage: fleet-sign-growth.sh HOST MINI STORE VERIFIER NEW_PRIVATE_DIRECTORY [TURNS] [LEVELS]
 set -eu
 umask 077
@@ -60,6 +68,15 @@ export MINI_FLEET_HOME="$ROOT/fleet-home" MINI_FLEET_SPONSOR="$FIX/sponsor"
 "$MINI" fleet-sign join --profile bravo --fund 100 >"$OUT/join-bravo.json" 2>"$OUT/join-bravo.stderr"
 B=$(jq -er .cell "$OUT/join-bravo.json")
 
+CONTROL=$(jq -er .factoryControllerCapability "$FIX/genesis.json")
+certify() {
+  printf '== after turn %s: ' "$1" >>"$OUT/certify.log"
+  "$MINI" checkpoint --action certify --workspace "$FIX/sponsor" --control "$CONTROL" \
+    --min-tail "${CERTIFY_MIN_TAIL:-64}" >>"$OUT/certify.log" 2>&1 \
+    || { echo "certify failed after turn $1 (see $OUT/certify.log)" >&2; exit 1; }
+  printf '\n' >>"$OUT/certify.log"
+}
+
 T="$OUT/turns.tsv"; R="$OUT/reopen.tsv"
 printf 'n\tverb\tseconds\treplans\tchain_index\tsubmit_s\tload1\tstore_bytes\n' >"$T"
 printf 'level\tchain_index\tserve_ready_s\tfirst_receipt_s\tstore_bytes\n' >"$R"
@@ -83,6 +100,7 @@ while [ "$n" -le "$TURNS" ]; do
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$verb" "$(elapsed "$t0" "$t1")" \
     "$(jq -r .replans "$f")" "$(jq -r .chain_index "$f")" "$submit_s" \
     "$(cut -d' ' -f1 /proc/loadavg)" "$(du -sb "$FIX/store" | cut -f1)" >>"$T"
+  [ $((n % ${CERTIFY_EVERY:-32})) -ne 0 ] || certify "$n"
   for level in $LEVELS; do
     if [ "$n" -eq "$level" ]; then
       TX=$(jq -er .turn_hash "$f")

@@ -558,10 +558,12 @@ theorem Head.genesis_fields (store : StoreIdentity) (root : Digest) :
 
 /-- The deployed genesis head carries the root of the empty logical history.
 Arbitrary stale index rows are unreachable at the empty root. -/
-theorem Head.genesis_index_maintained (store : StoreIdentity) (root : Digest)
+theorem Head.genesis_index_maintained
+    (sequences : Kernel.DurableReceiver.IntentRecord → List Digest256)
+    (store : StoreIdentity) (root : Digest)
     (rows : List Bool → Option DurableIndex.Row) :
-    DurableIndex.Maintained [] rows (Head.genesis store root).indexRoot :=
-  DurableIndex.maintained_init rows
+    DurableIndex.Maintained sequences [] rows (Head.genesis store root).indexRoot :=
+  DurableIndex.maintained_init sequences rows
 
 #assert_axioms Head.genesis_index_maintained
 

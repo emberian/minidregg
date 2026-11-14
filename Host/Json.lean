@@ -5724,12 +5724,36 @@ account. Payload bytes are the turn's own signed publication. -/
 def fleetIncomingJson (view : NativeHost.FleetIncomingView) : Lean.Json := .mkObj
   [("type", "minidregg-fleet-incoming-v1"), ("subject", decimal view.subject.value),
    ("account", decimal view.account), ("topic", hexJson view.topic),
-   ("cursor", decimal view.cursor), ("tip", decimal view.tip),
+   ("cursor", match view.cursor with | some cursor => decimal cursor | none => .null),
+   ("tip", decimal view.tip), ("afterSeq", decimal view.after),
+   ("resumeSeq", decimal (Minidregg.Theory.JournalSequences.Page.resume view.after view.page)),
+   ("page", match view.page with
+     | .rows first heights => .mkObj [("state", "rows"), ("firstSeq", decimal first),
+         ("rows", decimal heights.length)]
+     | .tip count => .mkObj [("state", "tip"), ("count", decimal count)]
+     | .gap through => .mkObj [("state", "gap"), ("throughSeq", decimal through)]
+     | .oversize position _ => .mkObj [("state", "oversize"), ("seq", decimal position)]
+     | .absent position => .mkObj [("state", "absent"), ("seq", decimal position)]),
    ("entries", .arr <| view.entries.toArray.map fun entry => .mkObj
      [("height", decimal entry.height), ("transactionId", decimal entry.transactionId.value),
       ("subject", decimal entry.subject.value), ("payer", decimal entry.payer),
       ("asset", decimal entry.asset), ("amount", decimal entry.amount),
       ("topic", hexJson entry.topic), ("payload", hexJson entry.payload)])]
+
+/-- `{"topic": HEX, "afterSeq": DECIMAL, "limit": DECIMAL, "maxBytes": DECIMAL}` (resume after
+a position, under a byte budget) or `{"topic": HEX, "cursor": DECIMAL, "limit": DECIMAL}`
+(everything above a logical height, under the default budget). -/
+def fleetIncomingRequest (json : Lean.Json) : Result (List UInt8 × NativeHost.FleetCursor × Nat × Nat) :=
+  match exactObject "$" ["topic", "afterSeq", "limit", "maxBytes"] json with
+  | .ok obj => do
+      pure (← decodeHex "$.topic" (← field "$" "topic" obj),
+        .position (← nat "$.afterSeq" (← field "$" "afterSeq" obj)),
+        ← nat "$.limit" (← field "$" "limit" obj), ← nat "$.maxBytes" (← field "$" "maxBytes" obj))
+  | .error _ => do
+      let obj ← exactObject "$" ["topic", "cursor", "limit"] json
+      pure (← decodeHex "$.topic" (← field "$" "topic" obj),
+        .height (← nat "$.cursor" (← field "$" "cursor" obj)),
+        ← nat "$.limit" (← field "$" "limit" obj), NativeHost.fleetPageBytes)
 
 /-- `{"topic": HEX, "cursor": DECIMAL, "limit": DECIMAL}` -/
 def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := do

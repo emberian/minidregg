@@ -76,6 +76,15 @@ def heightsFrom (seq : S) : Nat → List (List S) → List Nat
       if seq ∈ members then start :: heightsFrom seq (start + 1) rest
       else heightsFrom seq (start + 1) rest
 
+/-- Starting the height assignment `shift` later moves every listed height by `shift`. -/
+theorem heightsFrom_shift (seq : S) (shift : Nat) : ∀ (start : Nat) (journal : List (List S)),
+    heightsFrom seq (shift + start) journal = (heightsFrom seq start journal).map (shift + ·)
+  | _, [] => rfl
+  | start, members :: rest => by
+      have ih := heightsFrom_shift seq shift (start + 1) rest
+      rw [← Nat.add_assoc] at ih
+      by_cases belongs : seq ∈ members <;> simp [heightsFrom, belongs, ih]
+
 /-- **The recomputation**: the heights (from 1) of the journal's records that belong to `seq`. -/
 def heights (journal : List (List S)) (seq : S) : List Nat := heightsFrom seq 1 journal
 
@@ -481,6 +490,135 @@ theorem window_spec (listed : List Nat) (sorted : listed.Pairwise (· < ·)) (cu
   · omega
   · rfl
 
+/-! ## The window read as it runs
+
+`belowM`, `readM` and `windowM` are the bisection and the in-order read with each row fetched
+through a monad: the served reader runs them over the Store's index rows. Over rows that
+answer without effect they are `below`, `read` and `window` (`belowM_pure`, `readM_pure`,
+`windowM_pure`), and over the rows of a sorted listing `window` is the first `limit` members
+above the cursor (`window_exact`). -/
+
+/-- `below`, each probed row read through `m`. -/
+def belowM {m : Type → Type} [Monad m] (rows : Nat → m (Option Nat)) (cursor : Nat) :
+    Nat → Nat → Nat → m Nat
+  | 0, lo, _ => pure lo
+  | fuel + 1, lo, hi =>
+      if lo < hi then do
+        let found ← rows ((lo + hi + 1) / 2)
+        match found with
+        | some height =>
+            if height ≤ cursor then belowM rows cursor fuel ((lo + hi + 1) / 2) hi
+            else belowM rows cursor fuel lo ((lo + hi + 1) / 2 - 1)
+        | none => belowM rows cursor fuel lo ((lo + hi + 1) / 2 - 1)
+      else pure lo
+
+/-- At most `limit` rows in order from `start`, ending at the first absent one. -/
+def read (rows : Nat → Option Nat) (start : Nat) : Nat → List Nat
+  | 0 => []
+  | limit + 1 =>
+      match rows start with
+      | some height => height :: read rows (start + 1) limit
+      | none => []
+
+/-- `read`, each row read through `m`. -/
+def readM {m : Type → Type} [Monad m] (rows : Nat → m (Option Nat)) (start : Nat) : Nat → m (List Nat)
+  | 0 => pure []
+  | limit + 1 => do
+      let found ← rows start
+      match found with
+      | some height => do
+          let rest ← readM rows (start + 1) limit
+          pure (height :: rest)
+      | none => pure []
+
+/-- A window read: how many members are at or below the cursor, and the next `limit` in order. -/
+structure Window where
+  count : Nat
+  below : Nat
+  heights : List Nat
+
+/-- The window above `cursor` of a sequence with `count` members. -/
+def window (rows : Nat → Option Nat) (count cursor limit : Nat) : Window :=
+  let split := below rows cursor (belowFuel count) 0 count
+  ⟨count, split, read rows (split + 1) limit⟩
+
+/-- `window`, the count and each row read through `m`. It reads at most
+`belowFuel count + limit` rows. -/
+def windowM {m : Type → Type} [Monad m] (count : m Nat) (rows : Nat → m (Option Nat))
+    (cursor limit : Nat) : m Window := do
+  let counted ← count
+  let split ← belowM rows cursor (belowFuel counted) 0 counted
+  let heights ← readM rows (split + 1) limit
+  pure ⟨counted, split, heights⟩
+
+theorem belowM_pure {m : Type → Type} [Monad m] [LawfulMonad m] (rows : Nat → Option Nat) (cursor : Nat) :
+    ∀ fuel lo hi : Nat,
+      belowM (m := m) (fun position => pure (rows position)) cursor fuel lo hi =
+        pure (below rows cursor fuel lo hi)
+  | 0, lo, hi => rfl
+  | fuel + 1, lo, hi => by
+      unfold belowM below
+      by_cases open_ : lo < hi
+      · simp only [open_, ite_true, pure_bind]
+        cases found : rows ((lo + hi + 1) / 2) with
+        | none => simp only [belowM_pure rows cursor fuel]
+        | some height =>
+            by_cases low : height ≤ cursor
+            · simp only [low, ite_true, belowM_pure rows cursor fuel]
+            · simp only [low, ite_false, belowM_pure rows cursor fuel]
+      · simp only [open_, ite_false]
+
+theorem readM_pure {m : Type → Type} [Monad m] [LawfulMonad m] (rows : Nat → Option Nat) :
+    ∀ limit start : Nat,
+      readM (m := m) (fun position => pure (rows position)) start limit = pure (read rows start limit)
+  | 0, start => rfl
+  | limit + 1, start => by
+      unfold readM read
+      simp only [pure_bind]
+      cases found : rows start with
+      | none => rfl
+      | some height => simp only [readM_pure rows limit, pure_bind]
+
+/-- **The read that runs is the read that is specified**: over rows that answer without
+effect, `windowM` is `window`. -/
+theorem windowM_pure {m : Type → Type} [Monad m] [LawfulMonad m] (count : Nat) (rows : Nat → Option Nat)
+    (cursor limit : Nat) :
+    windowM (m := m) (pure count) (fun position => pure (rows position)) cursor limit =
+      pure (window rows count cursor limit) := by
+  simp only [windowM, window, pure_bind, belowM_pure, readM_pure]
+
+theorem read_itemOf (listed : List Nat) : ∀ limit start : Nat,
+    read (itemOf listed) (start + 1) limit = (listed.drop start).take limit
+  | 0, start => by simp [read]
+  | limit + 1, start => by
+      unfold read
+      have at_ : itemOf listed (start + 1) = listed[start]? := by simp [itemOf]
+      rw [at_]
+      cases found : listed[start]? with
+      | none =>
+          have beyond : listed.length ≤ start := by simpa using found
+          simp [List.drop_eq_nil_of_le beyond]
+      | some height =>
+          obtain ⟨inside, rfl⟩ := List.getElem?_eq_some_iff.mp found
+          simp only [read_itemOf listed limit (start + 1)]
+          rw [List.drop_eq_getElem_cons inside, List.take_succ_cons]
+
+/-- **The window read is exact**: over the rows of a sorted listing, the split is the number
+of members at or below the cursor and the heights are the first `limit` members above it. -/
+theorem window_exact (listed : List Nat) (sorted : listed.Pairwise (· < ·)) (cursor limit : Nat) :
+    (window (itemOf listed) listed.length cursor limit).below =
+        (listed.filter (fun height => height ≤ cursor)).length ∧
+      (window (itemOf listed) listed.length cursor limit).heights =
+        (listed.filter (fun height => cursor < height)).take limit := by
+  have split := below_spec listed sorted cursor (belowFuel listed.length) 0 listed.length (Nat.zero_le _)
+    (Nat.le_refl _) (by simpa using lt_two_pow_belowFuel listed.length)
+    (fun i height before _ => absurd before (Nat.not_lt_zero i))
+    (fun i height beyond found => by
+      rw [List.getElem?_eq_none beyond] at found; cases found)
+  refine ⟨split, ?_⟩
+  simp only [window]
+  rw [split, read_itemOf, drop_below_eq_filter listed sorted cursor]
+
 /-! ## The scan the index replaces
 
 `scanFrom` is the shape of a journal read that walks every record: entries strictly above
@@ -576,6 +714,36 @@ theorem scanFrom_take (members : R → List S) (seq : S) (entry : Nat → R → 
   apply filterMap_take_of_isSome
   intro height member
   exact entryAt_isSome members seq entry start log exact height (List.mem_filter.mp member).1
+
+/-- **The scan in logical heights is the index read.** With the first record at height
+`genesis + 1`, the first `limit` entries of the scan above `after` are the entries read back
+at the first `limit` sequence heights above `after - genesis` (the sequence's heights count
+from 1; a logical height is `genesis` more). -/
+theorem scanFrom_take_shift (members : R → List S) (seq : S) (entry : Nat → R → Option E)
+    (genesis after limit : Nat) (log : List R)
+    (exact : ∀ record ∈ log, ∀ height, (entry height record).isSome = true ↔ seq ∈ members record) :
+    (scanFrom entry after (genesis + 1) log).take limit =
+      (((heights (log.map members) seq).filter (fun height => after - genesis < height)).take limit).filterMap
+        (fun height => (log[height - 1]?).bind (entry (genesis + height))) := by
+  rw [scanFrom_take members seq entry after limit (genesis + 1) log exact,
+    heightsFrom_shift seq genesis 1, List.filter_map, ← List.map_take, List.filterMap_map]
+  have same : (heightsFrom seq 1 (log.map members)).filter ((fun height => decide (after < height)) ∘ (genesis + ·)) =
+      (heights (log.map members) seq).filter (fun height => after - genesis < height) := by
+    unfold heights
+    apply List.filter_congr
+    intro height member
+    have positive := (heightsFrom_bounds seq 1 (log.map members) height member).1
+    simp only [Function.comp]
+    by_cases above : after < genesis + height
+    · have : after - genesis < height := by omega
+      simp [above, this]
+    · have : ¬ after - genesis < height := by omega
+      simp [above, this]
+  rw [same]
+  apply filterMap_congr'
+  intro height _
+  simp only [Function.comp, entryAt]
+  rw [show genesis + height - (genesis + 1) = height - 1 by omega]
 
 /-- The records that belong, in order, are the records at the listed heights. -/
 theorem filter_eq_heights (members : R → List S) (seq : S) : ∀ (start : Nat) (log : List R),
@@ -736,6 +904,11 @@ theorem window_excludes_cursor :
       (rows.count 7) + 1 + i)) = [] := by
   decide
 
+/-- The window as the reader runs it, above height 1: one member at or below, then height 3. -/
+theorem window_runs :
+    windowM (m := Id) (pure (rows.count 7)) (fun position => pure (rows.item 7 position)) 1 8 =
+      pure ⟨2, 1, [3]⟩ := rfl
+
 end Example
 
 #assert_axioms mem_distinct
@@ -748,8 +921,11 @@ end Example
 #assert_axioms writes_length
 #assert_axioms advance_holds
 #assert_axioms below_spec
+#assert_axioms windowM_pure
+#assert_axioms window_exact
 #assert_axioms window_spec
 #assert_axioms scanFrom_take
+#assert_axioms scanFrom_take_shift
 #assert_axioms filter_length_eq_count
 #assert_axioms filter_getLast?
 #assert_axioms index_from_replay
