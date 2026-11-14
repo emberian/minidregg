@@ -5,8 +5,9 @@
 # in parallel; then flatness alone (law 17, never another run's verdict); then gate-from-runs.py; then the sweep.
 # World-ups under the world-up flock. PHASES="tour composed enrol j14" selects phases; SUF names a rerun.
 # j14-apps calls a live model, so it does not run on every tip (ember 2026-11-14): it runs when the commits since
-# the last round that RAN it touch one of J14_INPUTS below, on the first round ever, on a rerun (SUF set) and with
-# J14_FORCE=1. Otherwise its row is `not-run: inputs unchanged since <sha>` and carries that round's verdict: a
+# the last round that RAN it touch one of J14_INPUTS below, on the first round ever, on a rerun (SUF set), with J14_FORCE=1,
+# and when the last run is more than 24 hours old (J14_MAX_AGE_MIN, default 1440: the Lean Host and the mini client
+# are not in J14_INPUTS, so a change there that breaks only the live path shows within a day). Otherwise its row is `not-run: inputs unchanged since <sha>` and carries that round's verdict: a
 # carried PASS does not hold `green`, a carried FAIL still does. The last run is BUILDER_ROOT/j14-last
 # (`SHA<TAB>VERDICT<TAB>DETAIL`), written only by a round that ran the phase.
 # Box knobs (env; defaults are hbox's): BUILDER_ROOT (/home/hbox/lanes/integ), GATE_RUNS (the world roots, /ci),
@@ -191,6 +192,7 @@ j14_decide() {
   [ -s "$last" ] || { echo "run first (no $last)"; return; }
   IFS=$'\t' read -r lsha lv _ < "$last"
   case $lv in PASS|FAIL) ;; *) echo "run unreadable last run ($last)"; return ;; esac
+  [ -z "$(find "$last" -mmin +"${J14_MAX_AGE_MIN:-1440}" 2>/dev/null)" ] || { echo "run last run older than ${J14_MAX_AGE_MIN:-1440} min (${lsha:0:12})"; return; }
   git -C "$repo" cat-file -e "$lsha^{commit}" 2>/dev/null && git -C "$repo" cat-file -e "$sha^{commit}" 2>/dev/null ||
     { echo "run unknown commit (${lsha:0:12} or ${sha:0:12} is not in $repo)"; return; }
   touched=$(git -C "$repo" diff --name-only "$lsha" "$sha" -- "${J14_INPUTS[@]}" | head -1)

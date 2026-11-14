@@ -36,7 +36,9 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   `p=$(cat /home/hbox/lanes/integ/builder.pid); tr '\0' ' ' </proc/$p/cmdline` (it must read
   `bash /home/hbox/lanes/integ/builder-main.sh`), then `kill $p`. Stop it right after a `BUILDER round ... done` line
   in COMMANDS.log, or while it sleeps. Its detached children (an integ-build, the umbrellas) finish on their own. A
-  stopped mid-gate round leaves no REDS.md for that tip; the next builder rebuilds the tip. If builder.pid is
+  stopped mid-gate round leaves no REDS.md for that tip; the next builder rebuilds the tip. A `sleep` child of the
+  stopped builder keeps builder/builder.lock for up to the poll interval (30 s): a start inside that window is
+  refused (`another builder holds ... builder.lock` in builder.out); wait it out and start again. If builder.pid is
   missing the builder may still be alive: see step 1 of the rebuild below.
 - **Start it**: `cd /home/hbox/lanes/integ && setsid nohup bash builder-run.sh >> builder.out 2>&1 < /dev/null &`.
   builder-run.sh sources ~/.minidregg-env, sets BUILDER_ROOT, GATE_RUNS=/ci, WORLD_UP_LOCK=/tank/lanes/world-up.lock,
