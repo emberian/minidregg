@@ -52,6 +52,7 @@ public import Kernel.CapabilityRevocationController
 public import Kernel.ResourceBirthController
 public import Kernel.SeatStore
 public import Kernel.PayAssignmentOwner
+public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -208,6 +209,10 @@ inductive Reject where
   | notAccountOwner
   /-- The named holder activity is not an awaiting activity this signer pays for. -/
   | notActivityPayer
+  /-- The signer's account grant does not bound what the turn takes from the account it
+  spends (`Theory.CapabilityValueBound.check`): a balance its scope does not name, or a
+  `maxDelta` bound on a balance below the turn's gross debit. -/
+  | valueBound (reason : CapabilityValueBound.Refusal)
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr
 
@@ -351,6 +356,50 @@ def authorized {rootBytes : List UInt8 → Digest} (data : DataSnapshot rootByte
       | none => pure ()
       | some record => if activityPayer data command.subject record then pure () else throw .notActivityPayer
 
+/-! ## The value bound of the account grant -/
+
+/-- The Book account a turn spends under the signer's account grant (the accounts
+`authorized` demands that grant for): a publication's payer, an invocation's payer, an
+offer's funding account. -/
+def spentAccount (command : Command) : Option Nat :=
+  match command.turn with
+  | .publish stored => some ((ObjectiveActivity.decodeStored stored).map (·.payer) |>.getD 0)
+  | .invoke _ _ _ payer _ => some payer
+  | .offer _ _ funding _ _ _ => some funding
+  | .create _ _ _ | .handOver _ _ | .exit _ => none
+
+/-- The account capability the command names, as stored. -/
+def presentedGrant (snapshot : Snapshot) (command : Command) : Option (Capability .account × Unit) :=
+  command.grants.account.bind fun capability =>
+    (readCapability snapshot.cell .account capability).map fun stored => (stored.head, ())
+
+/-- **The value bound of the turn's debit.** The signer's account grant must bound the gross
+amount the turn's one admitted Book batch (`operations`: the kernel's batch, then the fees)
+takes from the account it spends. A seat's own account is debited under the instance's
+contract and the kernel's exit rule, not under this grant, and is not judged here. -/
+def valueBounded (snapshot : Snapshot) (command : Command)
+    (operations : List CanonicalResourceKernel.Operation) : Except Reject Unit :=
+  match spentAccount command with
+  | none => .ok ()
+  | some account =>
+      match CapabilityValueBound.presentedCheck (presentedGrant snapshot command) operations account with
+      | .ok () => .ok ()
+      | .error none => .error .notAccountOwner
+      | .error (some reason) => .error (.valueBound reason)
+
+theorem valueBounded_ok {snapshot : Snapshot} {command : Command}
+    {operations : List CanonicalResourceKernel.Operation}
+    (ok : valueBounded snapshot command operations = .ok ()) {account : Nat}
+    (spent : spentAccount command = some account) :
+    CapabilityValueBound.Presented (presentedGrant snapshot command) operations account := by
+  unfold valueBounded at ok
+  rw [spent] at ok
+  simp only at ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
+
 /-! ## Preparation -/
 
 def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
@@ -372,6 +421,9 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   outcome : Digest
   outcomeExact : outcome = outcomeDigest decided.posts
   authorizedExact : authorized durable.snapshot authority.snapshot profile.semantics ambient command preRoot outcome = .ok ()
+  /-- The account grant bounds the turn's gross debit of the account it spends. -/
+  boundedExact : valueBounded authority.snapshot command
+    (Seats.seqBatch decided.batch decided.fees).operations = .ok ()
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -392,8 +444,12 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
       match authorizedExact : authorized durable.snapshot snapshot profile.semantics ambient command preRoot outcome with
       | .error reason => throw reason
       | .ok () =>
-        pure ⟨directory, authority, config, configExact, decided, decidedExact, preRoot, rfl, outcome, rfl,
-          authorizedExact⟩
+        match boundedExact : valueBounded snapshot command
+            (Seats.seqBatch decided.batch decided.fees).operations with
+        | .error reason => throw reason
+        | .ok () =>
+          pure ⟨directory, authority, config, configExact, decided, decidedExact, preRoot, rfl, outcome, rfl,
+            authorizedExact, boundedExact⟩
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
@@ -569,6 +625,23 @@ theorem offer_requires_account_holder (accepted : Accepted deployment profile am
   · exact owned
   · simp [owned, bind, Except.bind] at ok
 
+/-- **Every admitted seat turn's debit of the account it spends is within the account grant's
+value bound**: each balance the turn's Book batch debits from that account is named by the
+grant's scope, and the gross debit is within every `maxDelta` bound the scope sets on it. -/
+theorem spend_value_bounded (accepted : Accepted deployment profile ambient durable ingress)
+    {account : Nat} (spent : spentAccount ingress.command = some account) :
+    ∃ cap commitment,
+      presentedGrant accepted.prepared.authority.snapshot ingress.command = some (cap, commitment) ∧
+        ∀ asset ∈ CapabilityValueBound.debitAssets
+            (Seats.seqBatch accepted.prepared.decided.batch accepted.prepared.decided.fees).operations
+            account,
+          CellField.NamedBy cap.scope.fields (.balance asset) ∧
+            ∀ bound, (CellField.balance asset, bound) ∈ cap.scope.maxDelta →
+              CapabilityValueBound.grossDebit
+                (Seats.seqBatch accepted.prepared.decided.batch accepted.prepared.decided.fees).operations
+                account asset ≤ bound :=
+  (valueBounded_ok accepted.prepared.boundedExact spent).gross
+
 /-- **Only an instance holder runs the contract's method, and it pays.** A
 reallocation or a mint exists only as a member of the Plan an `invoke`
 re-executes; an accepted `invoke`'s signer holds a capability admissible for
@@ -655,8 +728,8 @@ inductive Result where
 
 /-- The receiver's deterministic preparation fixes all intent data. -/
 theorem Prepared.unique (left right : Prepared deployment profile ambient durable command) : left = right := by
-  rcases left with ⟨ld, la, lc, lce, lt, lte, lr, lre, lo, loe, lh⟩
-  rcases right with ⟨rd, ra, rc, rce, rt, rte, rr, rre, ro, roe, rh⟩
+  rcases left with ⟨ld, la, lc, lce, lt, lte, lr, lre, lo, loe, lh, lb⟩
+  rcases right with ⟨rd, ra, rc, rce, rt, rte, rr, rre, ro, roe, rh, rb⟩
   cases LoadedDirectory.unique ld rd
   cases CredentialAuthorityDomainReceiver.Loaded.unique la ra
   have cfg : lc = rc := Except.ok.inj (lce.symm.trans rce)
