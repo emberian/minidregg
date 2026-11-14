@@ -367,9 +367,15 @@ theorem pump_history (c : Config) (fuel : Nat) (s : State) (old : HistoryInvaria
 
 theorem ingest_history (c : Config) (s : State) (message : Message)
     (old : HistoryInvariant s) : HistoryInvariant (ingest c s message) := by
-  unfold ingest serveFloor noteAhead serveViews
-  dsimp only
-  history_actions
+  unfold ingest
+  repeat' split
+  all_goals first
+    | exact old
+    | (try unfold serveFloor
+       try unfold noteAhead
+       try unfold serveViews
+       try dsimp only
+       history_actions)
 
 theorem step_history (c : Config) (s : State) (input : Input) (old : HistoryInvariant s) :
     HistoryInvariant (step c s input) := by

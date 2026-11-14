@@ -284,9 +284,15 @@ theorem pump_output (c : Config) (fuel : Nat) (s : State) (old : OutputHistory s
 
 theorem ingest_output (c : Config) (s : State) (message : Message)
     (old : OutputHistory s) : OutputHistory (ingest c s message) := by
-  unfold ingest serveFloor noteAhead serveViews
-  dsimp only
-  output_actions
+  unfold ingest
+  repeat' split
+  all_goals first
+    | exact old
+    | (try unfold serveFloor
+       try unfold noteAhead
+       try unfold serveViews
+       try dsimp only
+       output_actions)
 
 theorem step_output (c : Config) (s : State) (input : Input) (old : OutputHistory s) :
     OutputHistory (step c s input) := by

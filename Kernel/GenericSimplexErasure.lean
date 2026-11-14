@@ -1047,8 +1047,10 @@ theorem ingest_same {s t : State} (c : Config) (same : Same s t) (m : Message) :
       rw [far]
       split
       · exact noteAhead_same same m.sender m.view
-      · dsimp only
-        rw [same_viewAt same m.view live, same_current same]
+      · have cap : overCap c s m = overCap c t m := by
+          unfold overCap; rw [same_viewAt same m.view live]
+        dsimp only
+        rw [same_viewAt same m.view live, same_current same, cap]
         repeat' split
         all_goals first
           | exact same

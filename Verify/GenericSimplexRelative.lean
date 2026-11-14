@@ -14,7 +14,8 @@ would; no replica holds it.
   commits' own COMMIT messages are replayed to it in order, as a durable record would.
 * One member's 4,000 COMMITs for far views leave one held message and no view record; three
   members' COMMITs for one far view and block commit it.
-* One member's fifty different VOTEs in one view leave `cap` of them.
+* One member's fifty different VOTEs in one view leave `Config.cap` of them (the
+  specification's `ingest` refuses the rest).
 * Control: with the origin never moved the same run commits the same chains and keeps
   blocks as long as the history.
 
@@ -180,7 +181,28 @@ theorem delivery_policy :
       (kept (farQuorum [1, 2]))[0]! = (kept one)[0]!) ∧
     ((farQuorum [1, 2, 3]).chains[0]! = history 2 ∧ ((farQuorum [1, 2, 3]).nodes[0]!).core.lastCommitted = 40 ∧
       ((farQuorum [1, 2, 3]).nodes[0]!).core.current = 41 ∧ ((farQuorum [1, 2, 3]).nodes[0]!).far = []) ∧
-    (((viewAt (equivocation.nodes[0]!).core 2).received.filter fun m => m.sender == 3).length = cap cfg) := by
+    (((viewAt (equivocation.nodes[0]!).core 2).received.filter fun m => m.sender == 3).length = cfg.cap) := by
+  native_decide
+
+/-! ## Equivocation survives a commit
+
+Node 0 is in view 2 at height 1. Member 3 sends it two VOTEs for view 3: one for a block
+that will not extend the next commit, one for a block that will. Record 2 then commits in
+view 2 and the origin moves. The first vote's block is gone; member 3 is still excluded
+from view 3's VOTE counts, as in the specification, where nothing is forgotten. -/
+
+def twoVotes : Net :=
+  [[[9, 9]], [payload 2, [9, 8]]].foldl (fun n block =>
+    act n 0 (.delivery ⟨3, 3, .vote, 1, some block⟩)) one
+
+def twoVotesCommitted : Net := checkedAll all twoVotes 2
+
+theorem equivocation_survives_commit :
+    voteEquivocator (viewAt (twoVotes.nodes[0]!).core 3) 3 = true ∧
+    heights twoVotesCommitted = [2, 2, 2, 2] ∧
+    ((viewAt (twoVotesCommitted.nodes[0]!).core 3).received.map (·.value)) = [some [], some [[9, 8]]] ∧
+    voteEquivocator (viewAt (twoVotesCommitted.nodes[0]!).core 3) 3 = true ∧
+    count (viewAt (twoVotesCommitted.nodes[0]!).core 3) .vote (some [[9, 8]]) = 0 := by
   native_decide
 
 /-! ## Control: the origin never moved -/
