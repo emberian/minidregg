@@ -4,9 +4,11 @@
 #
 #   scripts/gates/check-generic-simplex [BIN_DIR [HELPER_DIR]]
 #     BIN_DIR     the Lean executables (default .lake/build/bin)
-#     HELPER_DIR  the Rust helpers, a cargo profile directory (default ${CARGO_TARGET_DIR:-target}/release):
-#                 minidregg-link-sqlite-store (the source Store), minidregg-credential-signature-verifier,
-#                 mini-joint-agreement-crypto (the agreement helper session), examples/sign-probe (test signer)
+#     HELPER_DIR  the Rust helpers, a cargo profile directory: minidregg-link-sqlite-store (the source
+#                 Store), minidregg-credential-signature-verifier, mini-joint-agreement-crypto (the agreement
+#                 helper session), examples/sign-probe (test signer). Not given: the gate builds them from
+#                 this tree's native/ crates (cargo, release, into ${CARGO_TARGET_DIR:-target/generic-simplex},
+#                 under swarm-build where there is one), so no caller has to know where they are.
 #
 #   generic-simplex-harness          the native layer (four replicas over in-memory journals: sealed packets,
 #                                    COMMIT signatures, relay, drain, checkpoint, certificate), the recorded 00f711 stall, backoff recovery, idle quiescence, normal
@@ -37,7 +39,20 @@
 #                                                domain's: the certified record is never ordered or appended
 set -uo pipefail
 bin=${1:-.lake/build/bin}
-helpers=${2:-${CARGO_TARGET_DIR:-target}/release}
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+if [[ -n ${2:-} ]]; then helpers=$2
+else
+  export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$here/target/generic-simplex}
+  wrap=(); command -v swarm-build >/dev/null 2>&1 && wrap=(swarm-build)
+  for crate in joint-agreement-crypto hyperdocument-link-sqlite-store; do
+    ${wrap[@]+"${wrap[@]}"} cargo build --quiet --locked --release --manifest-path "$here/native/$crate/Cargo.toml" ||
+      { echo "check-generic-simplex: cargo build of native/$crate failed" >&2; exit 2; }
+  done
+  ${wrap[@]+"${wrap[@]}"} cargo build --quiet --locked --release --manifest-path "$here/native/credential-signature-verifier/Cargo.toml" \
+      --bin minidregg-credential-signature-verifier --example sign-probe ||
+    { echo "check-generic-simplex: cargo build of native/credential-signature-verifier failed" >&2; exit 2; }
+  helpers=$CARGO_TARGET_DIR/release
+fi
 for e in generic-simplex-harness generic-simplex-log-reopen generic-simplex-load minidregg-four-source-fixture; do
   [[ -x $bin/$e ]] || { echo "check-generic-simplex: $bin/$e is not executable" >&2; exit 2; }
 done
@@ -49,7 +64,7 @@ done
 fixture=$bin/minidregg-four-source-fixture
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/generic-simplex-audit.XXXXXX")
 serving=()
-stop_serving() { for pid in "${serving[@]}"; do kill "$pid" 2>/dev/null; done; serving=(); }
+stop_serving() { for pid in ${serving[@]+"${serving[@]}"}; do kill "$pid" 2>/dev/null; done; serving=(); }
 trap 'stop_serving; rm -rf "$tmp"' EXIT
 # A fresh four-Store world in $tmp/NAME with a 2 s view timeout, and one birth call authored on it.
 world() {  # NAME
