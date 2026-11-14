@@ -71,8 +71,9 @@ theorem scoped_record (c : Config) (state : State)
     (current deadline now : Nat) (checked : List Block) (offers : List Bytes)
     (outbox : List Message) (audit : List AuditEvent) (delivered : List Block) (tip : Block)
     (needsPoll failed : Bool) (lastCommitted : Nat)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
-Scoped c { self := state.self, current := current, deadline := deadline, now := now, views := state.views, checked := checked, offers := offers, outbox := outbox, audit := audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ Scoped c state := Iff.rfl
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+Scoped c { self := state.self, current := current, deadline := deadline, now := now, views := state.views, checked := checked, offers := offers, outbox := outbox, audit := audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ Scoped c state := Iff.rfl
 
 theorem broadcast_scoped {c : Config} {state : State}
     (number : Nat) (kind : Kind) (arg : Argument) (scopeOK : Scoped c state) :

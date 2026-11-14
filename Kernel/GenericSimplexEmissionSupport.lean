@@ -473,8 +473,9 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
 @[simp] theorem emission_record (c : Config) (external : Message → Prop) (s : State)
     (current deadline now : Nat) (checked : List Block) (offers : List Bytes) (outbox : List Message)
     (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
-    EmissionInvariant c external { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    EmissionInvariant c external { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔
       EmissionInvariant c external s := by
   constructor <;> intro old <;> rcases old with ⟨scopeOK, backed, emitted⟩ <;>
     exact ⟨scopeOK, backed, emitted⟩
@@ -598,7 +599,7 @@ theorem register_invariant {c : Config} {external : Message → Prop} {s : State
 theorem ingest_invariant (c : Config) (external : Message → Prop) (s : State)
     (message : Message) (old : EmissionInvariant c external s) (available : external message) :
     EmissionInvariant c external (ingest c s message) := by
-  unfold ingest serveFloor
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   repeat' first
     | (with_reducible apply register_invariant message old <;> first | assumption | simp_all <;> omega)

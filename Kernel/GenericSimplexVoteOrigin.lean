@@ -37,8 +37,9 @@ theorem voteOrigins_append (events : List OriginEvent) (event : OriginEvent)
 theorem origin_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
     (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
-    OriginInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ OriginInvariant s := by
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    OriginInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ OriginInvariant s := by
   simp only [OriginInvariant, history_record]
 
 theorem putView_origin (s : State) (v : View) (old : OriginInvariant s)
@@ -214,7 +215,7 @@ theorem pump_origin (c : Config) (fuel : Nat) (s : State) (old : OriginInvariant
 
 theorem ingest_origin (c : Config) (s : State) (message : Message) (old : OriginInvariant s) :
     OriginInvariant (ingest c s message) := by
-  unfold ingest serveFloor
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   origin_chain
 

@@ -214,8 +214,9 @@ theorem history_same_fields (before after : State) (old : HistoryInvariant befor
 @[simp] theorem history_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
     (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
-    HistoryInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ HistoryInvariant s := by
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    HistoryInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ HistoryInvariant s := by
   constructor <;> intro old <;> rcases old with ⟨prepared, disabled⟩ <;> exact ⟨prepared, disabled⟩
 
 theorem append_history (s : State) (event : GenericSimplex.AuditEvent)
@@ -366,7 +367,7 @@ theorem pump_history (c : Config) (fuel : Nat) (s : State) (old : HistoryInvaria
 
 theorem ingest_history (c : Config) (s : State) (message : Message)
     (old : HistoryInvariant s) : HistoryInvariant (ingest c s message) := by
-  unfold ingest serveFloor
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   history_actions
 

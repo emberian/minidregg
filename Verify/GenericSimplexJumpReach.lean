@@ -44,7 +44,10 @@ theorem allowed_sound {net : Net} {receiver : Nat} {input : Input}
     AllowedInput poleConfig poleFaulty poleChecked (toNetwork net) receiver input :=
   allowedB_sound (by rw [← allowed_eq_allowedB]; exact ok)
 
-/-- The `.main` run through the real `runChecked`: admitted, same honest states. -/
+set_option maxHeartbeats 0 in
+/-- The `.main` run through the real `runChecked`: admitted, same honest states. The kernel
+replays the whole twelve-round run through the specification `step`, which keeps every
+view and the audit; that takes more than the default heartbeats. -/
 theorem mainRun_runChecked :
     ((runChecked poleConfig poleFaulty (initial poleConfig 0) mainRun.schedule).map
       fun net => [0, 1, 2].map net.localState) = some (honestStates mainRun) := by
@@ -132,6 +135,22 @@ def CommitTransfer (e : Execution c faulty checked) (gst delta : Nat) : Prop :=
     m ∈ (viewAt (e.state i p) v).received → m.kind = .commit → m.value = some b →
     ∃ j, e.time j ≤ max (e.time i) gst + delta ∧ e.delivers j q m
 
+/-- Relay transfer: what an honest replica owes a peer (`State.relay`: its floor evidence,
+and its own messages for the views a lagging peer asked about, `serveViews`) reaches that
+peer within `delta`. The driver forwards and drains `relay`. -/
+def RelayTransfer (e : Execution c faulty checked) (gst delta : Nat) : Prop :=
+  ∀ i p q m, Honest c faulty p → Honest c faulty q → (q, m) ∈ (e.state i p).relay →
+    ∃ j, e.time j ≤ max (e.time i) gst + delta ∧ e.delivers j q m
+
+/-- Repeat transfer: a message an honest replica puts in its outbox at input `i` (a first
+send, or the repeated CANDIDATE(⊥) of a replica stuck past its timeout) is handed to every
+other honest replica after `i`, within `delta`. `Synchronous.delivery` alone does not say
+this: one early delivery of a message discharges it for every later index. -/
+def RepeatTransfer (e : Execution c faulty checked) (gst delta : Nat) : Prop :=
+  ∀ i p q m, Honest c faulty p → Honest c faulty q → q ≠ p →
+    m ∈ (e.state (i + 1) p).outbox.drop (e.state i p).outbox.length →
+    ∃ j, i < j ∧ e.time j ≤ max (e.time i) gst + delta ∧ e.delivers j q m
+
 /-- The source-check premise, as the controller's contract for one payload: from index `i`
 on, every honest replica that has not committed the payload holds it as an offer that is
 valid on top of its current best parent. -/
@@ -142,12 +161,15 @@ def Pending (e : Execution c faulty checked) (i : Nat) (payload : Bytes) : Prop 
 
 /-- STATEMENT `eventual_commit` (no proof). Scope, all in the statement: a static committee
 of n = 3f+1 with at most f faulty; delays at most `delta` after `gst`; the capped timer at
-least `7 * delta`; commit-evidence transfer; the payload kept offered and checked. Then
+least `7 * delta`; commit-evidence transfer; relay and repeat transfer (a replica keeps
+no record above its horizon, so one that fell behind recovers only through its repeated
+CANDIDATE(⊥) and the peers' answers in `relay`); the payload kept offered and checked. Then
 there is a bound, uniform in the execution, within which every honest replica has
 committed the payload.
 
 satisfiable / premise-inhabitation: NOT executed (an `Execution` is infinite). teeth: the
-`CommitTransfer` premise is not idle (`stranded_without_commit_transfer`); with PR #18's
+`CommitTransfer` premise is not idle (`stranded_without_commit_transfer`), nor is
+`RelayTransfer` (`GenericSimplexWindow`: `caughtUp true` stays behind); with PR #18's
 prepared jump in the step the conclusion fails on a schedule of this shape
 (`pr_jump_starves_commit` shows its first twelve views). -/
 def EventualCommit : Prop :=
@@ -156,7 +178,8 @@ def EventualCommit : Prop :=
     (gst delta i : Nat) (payload : Bytes),
     c.wellFormed = true → faulty.card ≤ c.faults →
     7 * delta ≤ c.timeout * 2 ^ c.backoffCap →
-    Synchronous e gst delta → CommitTransfer e gst delta → Pending e i payload →
+    Synchronous e gst delta → CommitTransfer e gst delta → RelayTransfer e gst delta →
+    RepeatTransfer e gst delta → Pending e i payload →
     ∃ j, e.time j ≤ max (e.time i) gst + bound * c.parties * (c.timeout * 2 ^ c.backoffCap) ∧
       ∀ p, Honest c faulty p → payload ∈ (e.state j p).committedTip
 

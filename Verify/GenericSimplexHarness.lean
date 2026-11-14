@@ -253,9 +253,9 @@ def main (args : List String) : IO Unit := do
   ensure (timedSafe fixed) "fixed timer: delivered histories not prefix-consistent"
   IO.println s!"PASS backoff recovery: payload committed at views {views} on all four, no resubmit, delivered prefix-consistent; the fixed timer under the same schedule committed nothing by t=4000 (views reached {fixed.nodes.toList.map (·.current)})"
   -- (3) Idle quiescence: one operation, then nothing. It commits in view 1;
-  -- afterwards no leader has work, so no block is proposed and every later
-  -- view ends by CANDIDATE(⊥) on the backoff timer. A late offer is proposed
-  -- by the then-current leader without waiting for a view change.
+  -- afterwards no replica has a reason to leave view 2 (`wantsOut`), so no block
+  -- is proposed, no CANDIDATE(⊥) is sent and the view does not end. A late offer
+  -- is proposed by the leader of that view.
   let quick : Delay := fun _ _ _ => 1
   let cfgI : Config := {cfg with timeout := 100, backoffCap := 3}
   let idle := (Timed.initial cfgI quick [payload] [block]).runUntil quick 10 20000 400000
@@ -263,14 +263,16 @@ def main (args : List String) : IO Unit := do
   ensure (idle.nodes.all fun s => s.committedTip == block)
     "idle: the single operation did not commit, or a later block was committed"
   ensure (proposals idle == 1) s!"idle: {proposals idle} proposals for one operation"
-  ensure (idle.nodes.all fun s => s.current ≥ 5) "idle: views stopped advancing"
+  ensure (idle.nodes.all fun s => s.current == 2 && (forget s).views.length ≤ 2 &&
+      !(s.outbox.any fun m => m.kind == .candidate && m.value.isNone))
+    "idle: a view ended, or a replica asked to leave one, with no work"
   ensure (timedSafe idle) "idle: delivered histories not prefix-consistent"
   let lateOffer := (List.range 4).foldl (fun t i => t.act quick i (.checked block2)) idle
   let late := lateOffer.runUntil quick 10 (idle.now + 50) 100000
   ensure (late.nodes.all fun s => s.committedTip == block2)
     "idle: a late offer was not proposed and committed within the current view"
   ensure (timedSafe late) "late offer: delivered histories not prefix-consistent"
-  IO.println s!"PASS idle quiescence: 1 proposal for 1 operation over t=20000 (views reached {idle.nodes.toList.map (·.current)}); a late offer committed within {late.now - idle.now} time units of being checked (views now {late.nodes.toList.map (·.current)})"
+  IO.println s!"PASS idle quiescence: 1 proposal for 1 operation over t=20000, no view ended without work (views {idle.nodes.toList.map (·.current)}); a late offer committed within {late.now - idle.now} time units of being checked (views now {late.nodes.toList.map (·.current)})"
   let normal := run 4000 initial (fun _ => false)
   let normal := if plant == some "split-tip" then
       {normal with nodes := normal.nodes.modify 1 fun s => {s with committedTip := [[99]]}}

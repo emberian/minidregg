@@ -32,8 +32,9 @@ theorem floor_of_same (a b : State) (old : FloorInvariant a)
 @[simp] theorem floor_record (s : State) (self current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
     (audit : List AuditEvent) (delivered : List Block) (tip : Block) (needsPoll failed : Bool)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
-    FloorInvariant { self := self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := s.lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ FloorInvariant s := by
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    FloorInvariant { self := self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := s.lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ FloorInvariant s := by
   constructor <;> intro old <;> exact ⟨old.bound, old.attained⟩
 
 theorem putView_floor (s : State) (v : View) (old : FloorInvariant s)
@@ -283,7 +284,7 @@ theorem pump_floor (c : Config) (fuel : Nat) (s : State) (old : FloorInvariant s
 
 theorem ingest_floor (c : Config) (s : State) (message : Message)
     (old : FloorInvariant s) : FloorInvariant (ingest c s message) := by
-  unfold ingest serveFloor
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   floor_chain
 

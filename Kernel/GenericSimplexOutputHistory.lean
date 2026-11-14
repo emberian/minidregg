@@ -49,8 +49,9 @@ theorem append_output (s : State) (events : List AuditEvent) (old : OutputHistor
 @[simp] theorem output_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
     (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
-    OutputHistory {self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := s.delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ OutputHistory s := by
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    OutputHistory {self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := s.delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ OutputHistory s := by
   constructor <;> intro old <;> rcases old with ⟨committed, delivered⟩ <;>
     exact ⟨committed, delivered⟩
 
@@ -283,7 +284,7 @@ theorem pump_output (c : Config) (fuel : Nat) (s : State) (old : OutputHistory s
 
 theorem ingest_output (c : Config) (s : State) (message : Message)
     (old : OutputHistory s) : OutputHistory (ingest c s message) := by
-  unfold ingest serveFloor
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   output_actions
 

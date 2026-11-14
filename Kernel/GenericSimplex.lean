@@ -60,6 +60,9 @@ def Config.wellFormed (c : Config) : Bool :=
   c.parties == 3 * c.faults + 1 && c.timeout > 0 && c.pumpBudget > 0
 def Config.quorum (c : Config) : Nat := c.parties - c.faults
 def Config.leader (c : Config) (view : Nat) : Nat := (view - 1) % c.parties
+/-- How far above its own view (or floor) a replica keeps a record for a view a member
+names: two leader rotations. A message for a later view is not stored (`ingest`). -/
+def Config.window (c : Config) : Nat := 2 * c.parties
 structure View where
   number : Nat
   proposal : Option Block := none
@@ -110,6 +113,10 @@ structure State where
   served : List Nat := []
   /-- Evidence owed to a peer (destination, message); the driver forwards and drains it. -/
   relay : List (Nat × Message) := []
+  /-- Per member, the highest view it has named above this replica's horizon (the message
+  itself is not kept). `faults + 1` members ahead of the current view are a reason to leave
+  it (`wantsOut`); at most one entry per member. -/
+  ahead : List (Nat × Nat) := []
   deriving DecidableEq, BEq, Repr, Inhabited
 def viewAt (s : State) (number : Nat) : View :=
   (s.views.find? (fun v => v.number == number)).getD { number := number }
@@ -269,8 +276,8 @@ def hasWork (s : State) : Bool :=
   let parent := bestParent s
   s.offers.any (fun bytes => validBlock s (parent ++ [bytes])) ||
     (bestParentView s + 1 < s.current && !isPrefix parent s.committedTip)
-/-- Quiescent proposal: with no work the leader proposes nothing and its view
-ends by CANDIDATE(⊥). An idle domain therefore adds no blocks. -/
+/-- Quiescent proposal: with no work the leader proposes nothing. An idle domain adds no
+blocks, and its view does not end (`wantsOut`). -/
 def propose (s : State) : State :=
   if !hasWork s then s else
   let parent := bestParent s
@@ -376,20 +383,51 @@ def serveFloor (s : State) (peer : Nat) : State :=
   if peer == s.self || s.served.contains peer || s.floorEvidence.isEmpty then s else
   { s with relay := s.relay ++ s.floorEvidence.map (fun m => (peer, m)),
            served := s.served ++ [peer] }
+/-- A reason to leave the current view: this replica holds work the view has not committed
+(a checked offer on the best parent, or a prepared parent that is not yet in the committed
+tip), the view has a proposal, this replica has already asked to leave it, `faults + 1`
+members have (one of them correct), or `faults + 1` members have named a view above this
+replica's horizon (one of them correct: this replica is behind). Without one the view timer does not run: an idle
+domain stays in its view and sends nothing. No safety rule reads this. -/
+def wantsOut (c : Config) (s : State) : Bool :=
+  let v := viewAt s s.current
+  let parent := bestParent s
+  s.offers.any (fun bytes => validBlock s (parent ++ [bytes])) || !isPrefix parent s.committedTip ||
+    v.proposal.isSome || v.disableRequested || count v .candidate none ≥ c.faults + 1 ||
+    (s.ahead.filter fun entry => s.current < entry.2).length ≥ c.faults + 1
 /-- A payload already in the committed tip is not work and is not offered again. -/
 def addOffer (s : State) (payload : Bytes) : List Bytes :=
   if s.committedTip.contains payload then s.offers else addUnique s.offers payload
+/-- The last view a record is kept for: `window` views above the current view. -/
+def horizon (c : Config) (s : State) : Nat := max s.current s.lastCommitted + c.window
+/-- A member named a view above the horizon: remember only how far ahead it claims to be. -/
+def noteAhead (s : State) (sender view : Nat) : State :=
+  if s.ahead.any (fun entry => entry.1 == sender && view ≤ entry.2) then s else
+  { s with ahead := s.ahead.filter (fun entry => entry.1 != sender) ++ [(sender, view)] }
+/-- A peer repeats its CANDIDATE(⊥) for a view this replica has left above its floor: the
+peer is stuck there, possibly because it could not keep what was sent (`horizon`). It is
+owed this replica's own messages for that view and the views after it that the peer can
+now keep. Nothing is recorded: the repeat is paced by the peer's own timer. -/
+def serveViews (c : Config) (s : State) (peer view : Nat) : State :=
+  if peer == s.self then s else
+  { s with relay := s.relay ++
+      (List.range (min s.current (view + c.window) + 1 - view)).flatMap (fun offset =>
+        ((viewAt s (view + offset)).received.filter fun m => m.sender == s.self).map
+          fun m => (peer, m)) }
 def ingest (c : Config) (s : State) (m : Message) : State :=
   if m.sender ≥ c.parties || m.view == 0 then s else
   if m.view ≤ s.lastCommitted then
     if m.kind == .candidate && m.value.isNone then serveFloor s m.sender else s
   else
+  if horizon c s < m.view then noteAhead s m.sender m.view else
   if (m.kind == .propose || m.kind == .vote || m.kind == .commit) && m.value.isNone then s else
   if m.kind == .propose then
     if m.sender != c.leader m.view then s else
     let v := viewAt s m.view
     if v.proposal.isSome then s else
     putView s { v with proposal := m.value }
+  else if m.kind == .candidate && m.value.isNone && m.view < s.current &&
+      (viewAt s m.view).received.contains m then serveViews c s m.sender m.view
   else register s m
 def step (c : Config) (s : State) (input : Input) : State :=
   if !c.wellFormed || s.self ≥ c.parties || s.failed then { s with failed := true } else
@@ -410,6 +448,9 @@ def step (c : Config) (s : State) (input : Input) : State :=
         -- Drain already enabled local actions before a same-time timeout.
         let s := pump c c.pumpBudget s
         let s := { s with now := max s.now now }
+        -- An idle view's timer does not run: its deadline stays one whole timeout ahead, so
+        -- work that arrives later gets the whole timeout before this replica asks to leave.
+        if !wantsOut c s then { s with deadline := s.now + viewTimeout c s s.current } else
         if !s.needsPoll && s.now ≥ s.deadline then
           let s := { s with deadline := s.now + viewTimeout c s s.current }
           let v := viewAt s s.current

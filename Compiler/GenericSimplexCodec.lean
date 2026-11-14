@@ -252,8 +252,9 @@ def stateStream : StreamCodec State :=
       (StreamCodec.product blockStream (StreamCodec.product StreamCodec.bool
       (StreamCodec.product StreamCodec.bool (StreamCodec.product StreamCodec.nat
       (StreamCodec.product (StreamCodec.list messageStream) (StreamCodec.product (StreamCodec.list StreamCodec.nat)
-      (StreamCodec.list (StreamCodec.product StreamCodec.nat messageStream))))))))))))))))))
+      (StreamCodec.product (StreamCodec.list (StreamCodec.product StreamCodec.nat messageStream))
+      (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))))))))))))
     (fun s => (s.self,s.current,s.deadline,s.now,s.views,s.checked,s.offers,s.outbox,s.audit,
-      s.delivered,s.committedTip,s.needsPoll,s.failed,s.lastCommitted,s.floorEvidence,s.served,s.relay))
-    (fun (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q) => ⟨a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q⟩) (by intro s; cases s; rfl)
+      s.delivered,s.committedTip,s.needsPoll,s.failed,s.lastCommitted,s.floorEvidence,s.served,s.relay,s.ahead))
+    (fun (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r) => ⟨a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r⟩) (by intro s; cases s; rfl)
 end Minidregg.Compiler.GenericSimplexCodec

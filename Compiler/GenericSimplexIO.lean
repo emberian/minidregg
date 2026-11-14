@@ -107,13 +107,17 @@ and a replica at or below it enters the next view; the snapshot carries the fiel
 version 6 = the erasable-floor epoch (no rule acts in a view at or below the floor or
 reads a view below it, a parent comes from the floor view or above, the floor keeps its
 COMMIT evidence and serves it to a peer still at or below it, a replica stuck past its
-timeout repeats itself, and the snapshot carries `floorEvidence`, `served`, `relay`). An
-older log refuses at this magic rather than being replayed under a different `step`
-(`v5_log_refused`). -/
-def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,6]
+timeout repeats itself, and the snapshot carries `floorEvidence`, `served`, `relay`);
+version 7 = the retained epoch (`checked` keeps maximal source histories and `validBlock`
+asks for a prefix of one, a committed payload leaves the offers, a view's timer runs only
+with a reason to leave it (`wantsOut`), a message for a view above the horizon is not
+stored and a repeated CANDIDATE(⊥) for a view its receiver has left is answered with the
+receiver's own messages; the snapshot carries `ahead`). An older log refuses at this magic
+rather than being replayed under a different `step` (`v6_log_refused`). -/
+def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,7]
 
-/-- The magic of the previous format (commit floor with retained views). -/
-def logMagicV5 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,5]
+/-- The magic of the previous format (erasable floor, unretained checked set). -/
+def logMagicV6 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,6]
 
 /-- The format version byte of an image that carries the "MINI-SIMPLEX-LOG"
 magic, whatever its version; `none` for anything else. Lets an open refuse an
@@ -228,18 +232,18 @@ def decodeLog (bytes : Bytes) : Option Log := do
   let deltas ← decodeDeltas rest.length rest
   some ⟨base,deltas.reverse⟩
 
-/-- A version-5 log never decodes, whatever follows its magic: its inputs were recorded
-under a different step and its snapshot lacks the floor evidence. -/
-theorem v5_log_refused (rest : Bytes) : decodeLog (logMagicV5 ++ rest) = none := by
-  have taken : (logMagicV5 ++ rest).take logMagic.length = logMagicV5 := rfl
-  have differs : (logMagicV5 != logMagic) = true := by decide
+/-- A version-6 log never decodes, whatever follows its magic: its inputs were recorded
+under a different step and its snapshot lacks `ahead`. -/
+theorem v6_log_refused (rest : Bytes) : decodeLog (logMagicV6 ++ rest) = none := by
+  have taken : (logMagicV6 ++ rest).take logMagic.length = logMagicV6 := rfl
+  have differs : (logMagicV6 != logMagic) = true := by decide
   simp [decodeLog, taken, differs]
 
-/-- It is still recognised as an agreement log of version 5, so an open names it. -/
-theorem v5_log_named (rest : Bytes) : logFormatVersion (logMagicV5 ++ rest) = some 5 := by
+/-- It is still recognised as an agreement log of version 6, so an open names it. -/
+theorem v6_log_named (rest : Bytes) : logFormatVersion (logMagicV6 ++ rest) = some 6 := by
   rfl
 
-#assert_axioms v5_log_refused
+#assert_axioms v6_log_refused
 
 /-- Replay of a decoded log over the merged journal: from its checkpoint
 snapshot if it has one (which must be this replica's, and not failed), else
