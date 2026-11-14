@@ -7,7 +7,7 @@
 # Box knobs (env; defaults are hbox's): BUILDER_ROOT (/home/hbox/lanes/integ), GATE_RUNS (the world roots, /ci),
 # WORLD_UP_LOCK (/tank/lanes/world-up.lock), EDGE (BUILDER_ROOT/dregg-infra-EDGE_REV/edge/mini), PLAYWRIGHT_DIR.
 # Inputs staged once under BUILDER_ROOT: j14-hroot (Hermes runtime root), j14-data (davros.spk, inventory.json),
-# j14-secrets/openrouter.key (never printed), spk-cache.
+# j14-secrets/zai.key (the Z.AI coding-plan key j14-apps calls glm-5.3-flash with; never printed), spk-cache.
 set -u
 umask 022   # install-user-world refuses a group-writable controller-world.py (mode & 0o7022)
 I=${BUILDER_ROOT:-/home/hbox/lanes/integ}; SHA=${1:?}; C=$I/candidates/$SHA; S8=${SHA:0:8}; G=$I/gate-$S8${SUF:-}; LOG=$I/COMMANDS.log
@@ -162,7 +162,9 @@ enrol() { sh $SRC/native/resource-client/enrol-resume-acceptance.sh $C/bin/minid
 # j14-apps (rehearsal-3 meat): one Store, Hermes as resident with typed Davros tools (refused without the room grant,
 # then PUT 201 and GET 200 through Mini with admission/settlement receipts), and a separate human GET of the agent's
 # content. Inputs staged once from the apps-agents lane: $I/j14-hroot (Hermes runtime root, rebound to this candidate),
-# $I/j14-data (davros.spk, inventory.json), $I/j14-secrets/openrouter.key (never printed).
+# $I/j14-data (davros.spk, inventory.json), $I/j14-secrets/zai.key (never printed). The model route is the demo's
+# zai-glm row (glm-5.3-flash on the Z.AI coding plan; ember 2026-11-14: never OpenRouter); J14_POOL_KEY, J14_MODEL and
+# J14_ENDPOINT name another key file, model and openai-compatible endpoint.
 j14apps() {
   local RUNJ=$R/j-${S8:0:6}${SUF:-}; local J=$RUNJ
   mkdir -p -m 755 $J/bin $J/cand && mkdir -p -m 711 $RUNJ/s && mkdir -p -m 700 $RUNJ/step && ln -sfn $RUNJ $G/j14
@@ -185,7 +187,8 @@ PY
       J14_ORACLE_BIN=$J/bin J14_ORACLE_CANDIDATE_MANIFEST=$J/cand/manifest.json J14_HERMES_ROOT=$I/j14-hroot \
       J14_ORACLE_SPK=$I/j14-data/davros.spk J14_ORACLE_DATA_SOURCE=$I/j14-data J14_ORACLE_INVENTORY=$I/j14-data/inventory.json \
       J14_ORACLE_SOCKET_PARENT=$RUNJ/s J14_ORACLE_ORCHESTRATION_COMMIT=${SHA:0:9} \
-      J14_APPS_DECLARATION=$SRC/apps/interfaces/davros.json J14_APPS_POOL_KEY=$I/j14-secrets/openrouter.key JOURNEY_STEP_DIR=$RUNJ/step \
+      J14_APPS_DECLARATION=$SRC/apps/interfaces/davros.json J14_APPS_POOL_KEY=${J14_POOL_KEY:-$I/j14-secrets/zai.key} J14_APPS_MODEL=${J14_MODEL:-glm-5.3-flash} \
+      J14_APPS_ENDPOINT=${J14_ENDPOINT:-https://api.z.ai/api/coding/paas/v4/chat/completions} JOURNEY_STEP_DIR=$RUNJ/step \
       python3 native/resource-client/journey.d/j14-apps.py > $J/journey.log 2>&1 ); local rc=$?
   local res; res=$(ls $RUNJ/step/*/result.json 2>/dev/null | head -1)
   if [[ $rc == 0 && -n $res ]] && jq -e '.passed == true' "$res" >/dev/null; then

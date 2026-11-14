@@ -5,13 +5,16 @@ Derives from the J14_ORACLE driver (the native phases are shared). The differenc
   * the app is a repackaged Davros whose package declares an api interface;
   * the controller config carries a typed attachment (toolTask.typedApplications) instead of
     an Oracle service profile;
-  * the provider route is the operator's pool row (OpenRouter) by default, the real model, with
-    the key read from J14_APPS_POOL_KEY (a private file; never printed or logged);
+  * the provider route is the operator's pool row, the real model: by default the demo's `zai-glm` row
+    (deploy/hermes/demo/providers-zai-rows.json: the Z.AI coding plan's endpoint, glm-5.3-flash; ember
+    2026-11-14: the gate runs on the plan, never OpenRouter), with the key read from J14_APPS_POOL_KEY
+    (a private file; never printed or logged). J14_APPS_ENDPOINT and J14_APPS_MODEL name another
+    openai-compatible route;
   * the probe is one Hermes task: refused without the room's apps grant, then put and get.
 
 J14_APPS_UNTIL names the last phase to run (world, prepare_platform, prepare_application,
 worker, room, attach, probe). Extra env: J14_APPS_DECLARATION (apps/interfaces/davros.json),
-J14_APPS_MODEL, J14_APPS_POOL_KEY.
+J14_APPS_MODEL, J14_APPS_ENDPOINT, J14_APPS_POOL_KEY.
 
 Native qualification of any declaration (conversation protocols included): J14_APPS_ALIAS names the
 attachment (default dav), J14_APPS_ROLE the permission role the route's ticket holds (default 1, Davros's
@@ -36,7 +39,8 @@ def declaration_digest(value):
 class Apps(m.Journey):
     PROVIDER_FIXTURE=False
     DATA_PUBLICATION=False
-    MODEL=os.environ.get('J14_APPS_MODEL','anthropic/claude-sonnet-4.5')
+    MODEL=os.environ.get('J14_APPS_MODEL','glm-5.3-flash')
+    ENDPOINT=os.environ.get('J14_APPS_ENDPOINT','https://api.z.ai/api/coding/paas/v4/chat/completions')
     MAX_INPUT=65536
     MAX_OUTPUT=2048
 
@@ -145,7 +149,7 @@ Do not call mini_say or perform unrelated index, digest, or document maintenance
     # ---- provider: the operator's pool row, the real model -------------------------------------
     def start_provider(self,port):
         write(self.table,{'type':'mini-provider-table-v2','providers':[{'name':POOL,'kind':'openai-compatible',
-            'endpoint':'https://openrouter.ai/api/v1/chat/completions','models':[self.MODEL],'credential':'pool',
+            'endpoint':self.ENDPOINT,'models':[self.MODEL],'credential':'pool',
             'caps':{'perCall':str(self.MAX_OUTPUT),'perDay':'200','ceilingMicroUsd':'12000000','callMicroUsd':'250000',
                     'memberDayMicroUsd':'12000000','memberTotalMicroUsd':'12000000'}}]})
 
