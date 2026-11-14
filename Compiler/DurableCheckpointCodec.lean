@@ -171,7 +171,10 @@ structure StoreEpoch where
   component. `index/trie-v2` adds family 2 (a written cell ↦ the height of the
   last record that wrote it) and the journal sequence families 3 and 4 (`Kernel.JournalIndex`:
   a sequence's length and the height of each member): a v1 index has no such rows, so a Store
-  born with it is refused naming this component. A change to which sequences a record belongs
+  born with it is refused naming this component. `index/trie-v3` folds a sequence item's position
+  into the leading bits of its path (`DurableIndex.IndexKey.pathPrimary`): the same keys and
+  values under other paths, so another root, and a v2 Store is refused naming this component.
+  A change to which sequences a record belongs
   to changes the index of every Store and is a new label here. A three-component label (an epoch
   born before it) reads as `none` and is refused by naming this component. -/
   accumulator : String
@@ -216,7 +219,7 @@ def persistedSchemaRefs : String :=
 /-- The epoch this Host writes and reads, including the cell layout descriptors. -/
 def StoreEpoch.current : StoreEpoch :=
   ⟨DeclaredEffectCell.stateKeyCodecId, persistedSchemaRefs, logTagLabel,
-    "history/mmr-v1;index/trie-v2;checkpoint/v5", "commands/v2"⟩
+    "history/mmr-v1;index/trie-v3;checkpoint/v5", "commands/v2"⟩
 
 /-- The label carried in the seed frame: every component, `;`-separated (the
 accumulator is itself two parts, `history/…;spent/…`). -/

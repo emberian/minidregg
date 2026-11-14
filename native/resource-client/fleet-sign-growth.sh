@@ -34,6 +34,15 @@
 # run exits 3 when an after-median exceeds CERTIFY_COST_FACTOR (default 2) times its
 # before-median plus 0.03 s; the evidence is complete either way.
 #
+# Neither the Store's bytes per record nor a cold open may rise with the count. growth-bounds.tsv
+# compares the first and the last reopen level (it needs two): the Store bytes each record added
+# between them against the bytes per record up to the first (which carry the fixture's own
+# records, so the allowance is generous), and against STORE_BYTES_PER_RECORD_MAX (default
+# 20000); and the last level's first receipt against the first level's. The run exits 4 when
+# the later bytes per record exceed STORE_GROWTH_FACTOR (default 1.5) times the earlier or the
+# maximum, or the later first receipt exceeds OPEN_GROWTH_FACTOR (default 2) times the earlier
+# plus 0.5 s or FIRST_RECEIPT_MAX seconds (default 5).
+#
 # A reopened Host runs with its open and phase traces on (serve-LEVEL.log), so a slow first
 # receipt names its phase.
 #
@@ -160,6 +169,20 @@ printf 'control-fresh-topic\tsend\t%s\t%s\t%s\n' "$(elapsed "$t0" "$(now)")" \
 stop_server
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$CONFIG" >"$OUT/binaries.sha256"
 touch "$OUT/certified-turns"
+BOUNDS=0
+awk -F'\t' -v growth="${STORE_GROWTH_FACTOR:-1.5}" -v most="${STORE_BYTES_PER_RECORD_MAX:-20000}" \
+  -v opening="${OPEN_GROWTH_FACTOR:-2}" -v slowest="${FIRST_RECEIPT_MAX:-5}" '
+  FNR > 1 { rows++; if (rows == 1) { c0 = $2; o0 = $4; b0 = $5 } c1 = $2; o1 = $4; b1 = $5 }
+  END {
+    printf "measure\tfirst_level\tlast_level\tverdict\n"
+    if (rows < 2 || c1 <= c0 || c0 <= 0) exit 0
+    early = b0 / c0; late = (b1 - b0) / (c1 - c0)
+    verdict = (late > growth * early || late > most) ? "over" : "ok"; if (verdict == "over") bad = 1
+    printf "store_bytes_per_record\t%.0f\t%.0f\t%s\n", early, late, verdict
+    verdict = (o1 > opening * o0 + 0.5 || o1 > slowest) ? "over" : "ok"; if (verdict == "over") bad = 1
+    printf "first_receipt_s\t%.3f\t%.3f\t%s\n", o0, o1, verdict
+    exit bad ? 4 : 0
+  }' "$R" >"$OUT/growth-bounds.tsv" || BOUNDS=4
 awk -F'\t' -v factor="${CERTIFY_COST_FACTOR:-2}" '
   function median(from, to,   k, m, i, j, t, v) {
     m = 0
@@ -182,4 +205,7 @@ awk -F'\t' -v factor="${CERTIFY_COST_FACTOR:-2}" '
     exit bad ? 3 : 0
   }' "$OUT/certified-turns" "$T" >"$OUT/certify-cost.tsv" || {
     echo "a certify made later turns slower (see $OUT/certify-cost.tsv)" >&2; printf '%s\n' "$OUT"; exit 3; }
+[ "$BOUNDS" -eq 0 ] || {
+  echo "Store bytes per record or the cold open rose with the count (see $OUT/growth-bounds.tsv)" >&2
+  printf '%s\n' "$OUT"; exit 4; }
 printf '%s\n' "$OUT"

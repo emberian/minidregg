@@ -31,11 +31,13 @@ module
 public import Theory.AuthTrieRange
 public import Theory.JournalSequences
 public import Theory.KeyedModel
+public import Theory.SequenceSpread
 public import Compiler.Sp800185Cshake256
 public import Kernel.WorldRoot
 public import Compiler.DurableReceiverCodec
 public import Theory.AssertAxioms
 meta import Theory.AuthTrieRange
+meta import Theory.SequenceSpread
 meta import Compiler.Sp800185Cshake256
 meta import Kernel.WorldRoot
 meta import Compiler.DurableReceiverCodec
@@ -80,9 +82,27 @@ structure IndexKey where
 /-- The padding of a family that has no secondary. -/
 def noSecondary : Digest256 := 0
 
-/-- The key's 65 bytes: the family byte, then the primary, then the secondary. -/
+/-- The family whose path folds its secondary into its primary: the journal sequence items
+(`Family.seqItem`), keyed by (sequence id, position). -/
+def spreadFamily : UInt8 := 4
+
+/-- **The primary as the path writes it.** For the sequence item family it is the sequence id
+with the position folded into its leading path bits (`Theory.SequenceSpread.fold`); for every
+other family it is the primary. Written id first, all items of one sequence would share the
+id's 256 path bits: one chain of some 500 rows per sequence, rewritten by every append to it
+and read whole by every open (`index/trie-v2`: 55 KB of Store per fleet record, 10 s of a cold
+open at 60 records past a checkpoint). Folded, two items of a sequence of `n` diverge within
+`log2 n` bits (`seqItemKey_diverge`). -/
+def IndexKey.pathPrimary (k : IndexKey) : Digest256 :=
+  if k.family = spreadFamily then
+    ⟨Theory.SequenceSpread.fold k.primary.val k.secondary.val,
+      Theory.SequenceSpread.fold_lt_octets k.primary.isLt _⟩
+  else k.primary
+
+/-- The key's 65 bytes: the family byte, then the primary as the path writes it
+(`pathPrimary`), then the secondary. -/
 def IndexKey.bytes (k : IndexKey) : List UInt8 :=
-  k.family :: ((fixedStream 32).encode k.primary ++ (fixedStream 32).encode k.secondary)
+  k.family :: ((fixedStream 32).encode k.pathPrimary ++ (fixedStream 32).encode k.secondary)
 
 theorem IndexKey.bytes_length (k : IndexKey) : k.bytes.length = 65 := by
   simp [IndexKey.bytes, fixedStream_encode_length]
@@ -103,10 +123,19 @@ theorem key_injective {k₁ k₂ : IndexKey} (same : k₁.bytes = k₂.bytes) : 
   obtain ⟨f₂, p₂, s₂⟩ := k₂
   simp only [IndexKey.bytes, List.cons.injEq] at same
   obtain ⟨hf, rest⟩ := same
-  have lenEq : ((fixedStream 32).encode p₁).length = ((fixedStream 32).encode p₂).length := by
-    simp [fixedStream_encode_length]
-  obtain ⟨hp, hs⟩ := List.append_inj rest lenEq
-  rw [hf, fixed_injective hp, fixed_injective hs]
+  obtain ⟨hp, hs⟩ := List.append_inj rest (by simp [fixedStream_encode_length])
+  have secondary : s₁ = s₂ := fixed_injective hs
+  have path := fixed_injective hp
+  subst hf
+  subst secondary
+  simp only [IndexKey.pathPrimary] at path
+  by_cases spreads : f₁ = spreadFamily
+  · rw [if_pos spreads, if_pos spreads] at path
+    have folded : Theory.SequenceSpread.fold p₁.val s₁.val = Theory.SequenceSpread.fold p₂.val s₁.val :=
+      congrArg Fin.val path
+    rw [Fin.ext (Theory.SequenceSpread.fold_cancel folded)]
+  · rw [if_neg spreads, if_neg spreads] at path
+    rw [path]
 
 theorem family_disjoint {k₁ k₂ : IndexKey} (differ : k₁.family ≠ k₂.family) : k₁.bytes ≠ k₂.bytes :=
   fun same => differ (congrArg IndexKey.family (key_injective same))
@@ -301,6 +330,38 @@ theorem seqPosition_eq_iff {position : Nat} (small : position < 256 ^ 32) (secon
   constructor
   · rintro rfl; exact seqPosition_val small
   · intro same; exact Fin.ext (by rw [seqPosition_val small]; exact same)
+
+/-- The sequence item family is the one whose path is folded. -/
+theorem seqItem_spreads : Family.seqItem = spreadFamily := rfl
+
+/-- **The bound on a sequence's depth.** Two items of one sequence at different positions below
+`2 ^ k` have path primaries that differ within their first `k` path bits
+(`Theory.SequenceSpread.pathBit`; path bit `i` of the primary is bit `8 + i` of `bitsOf`, the
+family octet first). So a sequence of `n` items adds no shared prefix longer than `log2 n` bits
+to the trie, and an append to it writes the rows of a path of the depth a random key has
+(logarithmic in the keys the trie holds), whatever `n` is. The bound is tight
+(`Theory.SequenceSpread.fold_shared`). -/
+theorem seqItemKey_diverge (seq : Digest256) {p q k : Nat} (differ : p ≠ q) (pSmall : p < 2 ^ k)
+    (qSmall : q < 2 ^ k) (fits : k ≤ 256) :
+    ∃ i, i < k ∧ Theory.SequenceSpread.pathBit (seqItemKey seq p).pathPrimary.val i ≠
+      Theory.SequenceSpread.pathBit (seqItemKey seq q).pathPrimary.val i := by
+  have width : (256 : Nat) ^ 32 = 2 ^ 256 := by decide
+  have room : 2 ^ k ≤ 256 ^ 32 := by rw [width]; exact Nat.pow_le_pow_right (by decide) fits
+  have folded : ∀ position, position < 2 ^ k →
+      (seqItemKey seq position).pathPrimary.val = Theory.SequenceSpread.fold seq.val position := by
+    intro position small
+    have exact := seqPosition_val (Nat.lt_of_lt_of_le small room)
+    simp only [seqItemKey, IndexKey.pathPrimary, seqItem_spreads, ite_true, exact]
+  rw [folded p pSmall, folded q qSmall]
+  exact Theory.SequenceSpread.fold_diverge seq.val differ pSmall qSmall fits
+
+-- The path of an item key carries its position on the bits after the family octet, least
+-- significant bit first: positions 1 and 2 of one sequence part at the first two of them and
+-- position 256 sets the ninth (the octet and bit order `Theory.SequenceSpread.pathIndex`
+-- states, checked here on the deployed path).
+#guard ((bitsOf (seqItemKey 0 1)).drop 8).take 2 == [true, false] &&
+  ((bitsOf (seqItemKey 0 2)).drop 8).take 2 == [false, true] &&
+  ((bitsOf (seqItemKey 0 256)).drop 8).take 9 == [false, false, false, false, false, false, false, false, true]
 
 /-- **A spent key is never a transaction key**, whatever the inputs: the family
 byte differs, so the two never share a trie path (`family_disjoint`). -/
