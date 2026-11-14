@@ -1,15 +1,34 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `7db8a63a850e` (builder: REDS.md for e97b99da1fa7 (1 red)). Round finished 2026-11-14T08:00Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-7db8a63a`.
+Tip: `86ccb09c7e81` (builder: REDS.md for 7db8a63a850e (1 red)). Round finished 2026-11-14T08:07Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-86ccb09c`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| host | rc=1 ✖ [2156/2549] Building Kernel.ResourceBirthController (122s) | - | no | suspects' owners | /home/hbox/lanes/integ/logs/host.log |
+| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 788dfb51fb5a..7db8a63a850e`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..86ccb09c7e81`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `86ccb09c` builder: REDS.md for 7db8a63a850e (1 red) (owner: build-loop)
+- `9c761504` fleet reads off the journal index: exactness proved, the page read with a horizon, op 180 pages by p (owner: apps-hermes)
+- `631425b9` journal index: sequence families 3 and 4, fleet head/incoming/poll/lookup on the light opening (inde (owner: read-path)
+- `dc6d032a` wip index family 2 (owner: read-path)
+- `e65459d9` `room new --concierge` takes `--refund-limit`; j17 names one (owner: apps-hermes)
+- `751b07ff` demo-seed: remove `public-read-max-cost`, renamed `public-read-request-bytes`
+- `7745da9c` Activity: a migration's fee is bounded at the gate; a turn's end debits only held seats
+- `d31ba6ca` The resource-transaction money leg uses the one gross-debit footprint (owner: apps-hermes)
+- `4e81a7ca` One birth branch core: `Kernel.BranchAdmission` (owner: apps-hermes)
+- `c8e19e50` `AccountGrant.Held` and `AccountGrant.RootOwner`: the pay assignment is the owner's alone
+- `962efddf` `Scope.maxCost` is `Scope.perRequestBytes` (owner: apps-hermes, bytes-repr, read-path)
+- `a3987eba` Request cost is an encoded length everywhere: birth, Book effect and resource-transaction legs (owner: apps-hermes)
+- `9372f1f6` agreement(kernel)!: idle timer and view window, log format 7 (owner: read-path)
+- `aba2c4d7` agreement(verify): the jump-starvation control runs against the current step again
+- `9f7f404a` agreement(kernel)!: the checked set is retained and a committed payload leaves the offers
 - `7db8a63a` builder: REDS.md for e97b99da1fa7 (1 red) (owner: build-loop)
 - `9be139da` kernel: `Payload.registered`, the open payload constructor; the cited read is one declaration and it (owner: apps-hermes)
 - `e97b99da` builder: REDS.md for aac9eba601a1 (1 red) (owner: build-loop)
@@ -35,18 +54,3 @@ Suspect commits since green (`git log 788dfb51fb5a..7db8a63a850e`), newest first
 - `9aefe693` Fleet turn: the spend grant bounds the turn's gross debit of the paying account
 - `28546122` Grain-backed birth: the same value bound on every source branch
 - `40c68b05` Shell: `delegate` takes `--fields` and `--max-delta`, the value bound of a spend grant (owner: apps-hermes)
-- `1d3d28d3` Birth: each source branch's capability bounds the birth's gross debit of its account (owner: apps-hermes)
-- `4788bffc` Theory.CapabilityValueBound: the value bound a capability carries, stated once for every debit
-- `e3226a3d` builder: REDS.md for 788dfb51fb5a (0 red) (owner: build-loop)
-
-## Flatness (published, does not gate `green`)
-
-| row | verdict | metric | early | late | ratio | bound | owner |
-|---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.208 | 0.219 | 1.056 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 40.321 | 101.145 | 2.509 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.218 | 0.251 | 1.150 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 21.619 | 81.342 | 3.763 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.723 | 0.736 | 1.018 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 213.607 | 271.111 | 1.269 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-7db8a63a/flatness.log | - | - | - | - | host-execution, store-retained |
