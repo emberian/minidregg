@@ -1,15 +1,17 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `578fdbf35ab3` (jwell: a well refusal is read from the client's own report; the past-grant row expects `va). Round finished 2026-11-14T05:29Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-578fdbf3`.
+Tip: `aac9eba601a1` (agreement(kernel)!: erasable commit floor (`forget`, `liveStep`, floor evidence relay), lo). Round finished 2026-11-14T06:22Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-aac9eba6`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 788dfb51fb5a..578fdbf35ab3`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..aac9eba601a1`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `aac9eba6` agreement(kernel)!: erasable commit floor (`forget`, `liveStep`, floor evidence relay), log format 6 (owner: read-path)
+- `77539c37` builder: REDS.md for 578fdbf35ab3 (1 red) (owner: build-loop)
 - `578fdbf3` jwell: a well refusal is read from the client's own report; the past-grant row expects `valueBound` (owner: apps-hermes)
 - `6bc7ceeb` Fleet turn: the request's cost is the encoded command's length, like every other signed command
 - `65530eba` fixtures: native runs re-recorded from the lane candidate 6ac47818be95 (accepted stale, doc-write st
@@ -35,10 +37,10 @@ Suspect commits since green (`git log 788dfb51fb5a..578fdbf35ab3`), newest first
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.331 | 0.369 | 1.114 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 84.764 | 171.580 | 2.024 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.249 | 0.322 | 1.293 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 42.871 | 160.548 | 3.745 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.826 | 0.799 | 0.968 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 457.030 | 464.212 | 1.016 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-578fdbf3/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.263 | 0.300 | 1.137 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 100.836 | 186.880 | 1.853 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.267 | 0.272 | 1.018 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 45.729 | 158.927 | 3.475 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.820 | 0.595 | 0.726 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 467.032 | 380.236 | 0.814 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-aac9eba6/flatness.log | - | - | - | - | host-execution, store-retained |
