@@ -156,6 +156,9 @@ theorem same_served {s t : State} (same : Same s t) : s.served = t.served := by
 theorem same_relay {s t : State} (same : Same s t) : s.relay = t.relay := by
   have fields : (forget s).relay = (forget t).relay := congrArg State.relay same
   exact fields
+theorem same_ahead {s t : State} (same : Same s t) : s.ahead = t.ahead := by
+  have fields : (forget s).ahead = (forget t).ahead := congrArg State.ahead same
+  exact fields
 
 theorem same_viewAt_floor {s t : State} (same : Same s t) (number : Nat)
     (live : s.lastCommitted ≤ number) : viewAt s number = viewAt t number := by
@@ -207,7 +210,7 @@ theorem same_raise {s t : State} (same : Same s t) (number : Nat) (above : s.las
   dsimp only
   rw [high, same_self same, same_current same, same_deadline same, same_now same, same_checked same,
     same_offers same, same_outbox same, same_delivered same, same_committedTip same,
-    same_needsPoll same, same_failed same, same_relay same]
+    same_needsPoll same, same_failed same, same_relay same, same_ahead same]
 
 /-! ## Floor and current are untouched by the rules that do not commit -/
 
@@ -990,6 +993,42 @@ theorem serveFloor_same {s t : State} (same : Same s t) (peer : Nat) :
   unfold Same
   rw [serveFloor_forget s peer, serveFloor_forget t peer, same]
 
+theorem noteAhead_same {s t : State} (same : Same s t) (sender view : Nat) :
+    Same (noteAhead s sender view) (noteAhead t sender view) := by
+  unfold noteAhead
+  rw [← same_ahead same]
+  split
+  · exact same
+  · exact congrArg (fun z : State =>
+      { z with ahead := s.ahead.filter (fun entry : Nat × Nat => entry.1 != sender) ++ [(sender, view)] }) same
+
+/-- What `serveViews` owes a peer: this replica's own messages from `view` on. -/
+def ownFrom (c : Config) (s : State) (peer view : Nat) : List (Nat × Message) :=
+  (List.range (min s.current (view + c.window) + 1 - view)).flatMap (fun offset =>
+    ((viewAt s (view + offset)).received.filter fun m => m.sender == s.self).map
+      fun m => (peer, m))
+
+theorem serveViews_eq (c : Config) (s : State) (peer view : Nat) :
+    serveViews c s peer view =
+      if peer == s.self then s else { s with relay := s.relay ++ ownFrom c s peer view } := rfl
+
+theorem same_ownFrom {s t : State} (c : Config) (same : Same s t) (peer view : Nat)
+    (live : s.lastCommitted < view) : ownFrom c s peer view = ownFrom c t peer view := by
+  unfold ownFrom
+  rw [same_self same, same_current same]
+  congr 1
+  funext offset
+  rw [same_viewAt same (view + offset) (by omega)]
+
+theorem serveViews_same {s t : State} (c : Config) (same : Same s t) (peer view : Nat)
+    (live : s.lastCommitted < view) : Same (serveViews c s peer view) (serveViews c t peer view) := by
+  rw [serveViews_eq, serveViews_eq, ← same_ownFrom c same peer view live, ← same_relay same]
+  have cond : (peer == t.self) = (peer == s.self) := by rw [same_self same]
+  rw [cond]
+  split
+  · exact same
+  · exact congrArg (fun z : State => { z with relay := s.relay ++ ownFrom c s peer view }) same
+
 theorem ingest_same {s t : State} (c : Config) (same : Same s t) (m : Message) :
     Same (ingest c s m) (ingest c t m) := by
   unfold ingest
@@ -1001,13 +1040,19 @@ theorem ingest_same {s t : State} (c : Config) (same : Same s t) (m : Message) :
       · exact serveFloor_same same m.sender
       · exact same
     · have live : s.lastCommitted < m.view := by rw [same_lastCommitted same]; omega
-      dsimp only
-      rw [same_viewAt same m.view live]
-      repeat' split
-      all_goals first
-        | exact same
-        | exact register_same same m live
-        | exact same_putView same _ (by show _ < (viewAt _ _).number; rw [viewAt_number]; exact live)
+      have far : horizon c s = horizon c t := by
+        unfold horizon; rw [same_current same, same_lastCommitted same]
+      rw [far]
+      split
+      · exact noteAhead_same same m.sender m.view
+      · dsimp only
+        rw [same_viewAt same m.view live, same_current same]
+        repeat' split
+        all_goals first
+          | exact same
+          | exact register_same same m live
+          | exact serveViews_same c same m.sender m.view live
+          | exact same_putView same _ (by show _ < (viewAt _ _).number; rw [viewAt_number]; exact live)
 
 /-- The timeout part of a tick, with what it reads named. -/
 def timeoutWith (c : Config) (v : View) (current self : Nat) (fire : Bool) (x : State) : State :=
@@ -1021,7 +1066,16 @@ def timeoutWith (c : Config) (v : View) (current self : Nat) (fire : Bool) (x : 
     else { x with deadline := x.now + viewTimeout c x current }
   else x
 def timeoutRule (c : Config) (x : State) : State :=
+  if !wantsOut c x then { x with deadline := x.now + viewTimeout c x x.current } else
   timeoutWith c (viewAt x x.current) x.current x.self (!x.needsPoll && decide (x.now ≥ x.deadline)) x
+
+theorem same_wantsOut {s t : State} (c : Config) (same : Same s t)
+    (live : s.lastCommitted < s.current) : wantsOut c s = wantsOut c t := by
+  unfold wantsOut
+  dsimp only
+  rw [same_bestParent same, same_offers same, same_committedTip same, ← same_current same,
+    same_viewAt same s.current live, same_ahead same]
+  simp only [same_validBlock same]
 
 theorem timeoutWith_same {x y : State} (c : Config) (same : Same x y) (v : View)
     (current self : Nat) (fire : Bool) (live : x.lastCommitted < current) (at_ : v.number = current) :
@@ -1042,9 +1096,13 @@ theorem timeoutWith_same {x y : State} (c : Config) (same : Same x y) (v : View)
 theorem timeoutRule_same {x y : State} (c : Config) (same : Same x y)
     (live : x.lastCommitted < x.current) : Same (timeoutRule c x) (timeoutRule c y) := by
   unfold timeoutRule
-  rw [← same_current same, ← same_self same, ← same_needsPoll same, ← same_now same,
-    ← same_deadline same, ← same_viewAt same x.current live]
-  exact timeoutWith_same c same _ _ _ _ live (viewAt_number x x.current)
+  rw [← same_wantsOut c same live]
+  split
+  · exact congrArg (fun z : State => { z with deadline := z.now + viewTimeout c z x.current })
+      same |>.trans (by rw [same_current same])
+  · rw [← same_current same, ← same_self same, ← same_needsPoll same, ← same_now same,
+      ← same_deadline same, ← same_viewAt same x.current live]
+    exact timeoutWith_same c same _ _ _ _ live (viewAt_number x x.current)
 
 /-- The input part of `step`, before the final pump. -/
 def absorb (c : Config) (s : State) (input : Input) : State :=

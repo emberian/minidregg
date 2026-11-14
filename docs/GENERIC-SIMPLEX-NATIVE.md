@@ -129,19 +129,16 @@ evidence: CPU per appended input 0.57 s rising to 1.68 s over 45 minutes idle).
   (GenericSimplexWitnesses) begin with checked offers, since a leader with
   no offer no longer proposes; they still exhibit a committing honest run and
   the f+1-fault conflicting commits.
-- Consequences: an idle domain proposes nothing and every view ends by
-  CANDIDATE(⊥) on the backoff timer (one view per `timeout · 2^backoffCap` at
-  steady idle). An operation arriving mid-view is proposed by the current
-  leader at once. A stuck prepared parent costs one extra view. Liveness is
-  not a theorem here.
+- Consequences: an idle domain proposes nothing, and since log format 7 its
+  view does not end either (the idle timer, below). An operation arriving
+  mid-view is proposed by the current leader at once. A stuck prepared parent
+  costs one extra view. Liveness is not a theorem here.
 - Journals record inputs, and replaying them under a different `step` would
   reinterpret them, so this is log format version 3; older logs refuse at the
   magic.
 - Test: `Verify.GenericSimplexHarness` "idle quiescence": one operation, one
-  proposal over t = 20000 while the views keep advancing (28 views), and a late
-  offer committed within 50 time units of being checked. With `hasWork`
-  forced true (the old behaviour) the harness does not finish its recovery run
-  in 900 s (logs/p2-mutant-alwayswork.log).
+  proposal over t = 20000, no CANDIDATE(⊥) and no view ended after it, and a
+  late offer committed within 50 time units of being checked.
 
 ## Journal checkpoints (log format 4)
 
@@ -206,24 +203,66 @@ since genesis (97 s per replica on the 00f711 evidence copy). Now:
   that never forwards `relay`; three more commits on one that does, with no input from
   outside the kernel's own outputs).
 
-**Cost.** A running replica keeps the floor view and the views since its last commit. That
-is flat while commits flow and grows through a commit-free stretch (an idle domain keeps
-timing out views). Not yet removed: the per-view recount of received messages, and the
-growth of `checked`.
-
 **Not proved** (stated in `Verify/GenericSimplexJumpReach.lean`): `SettledBelowFrontier`,
 `EventualCommit`. Not stated as theorems: that every send is above the floor (executed:
 `floor_refuses_executed`), and that received evidence installs the floor (executed above).
 
+## The retained engine (log format 7)
+
+**Checked set and offers** (`Kernel/GenericSimplexChecked.lean`, proved). The measured
+cost under load was not the view walk: time per operation rose with the fourth power of
+the chain length, because `hasWork` rescanned every offer ever made and each `validBlock`
+searched the whole `checked` list once per prefix. Now:
+
+- `State.checked` keeps the maximal checked source histories (`addChecked`). The native
+  checker replays a history from the pinned genesis, which replays every prefix of it, so
+  validity is prefix-closed (`validBlock_prefix`) and one growing chain is one entry
+  (`addChecked_chain`); no kept history is a prefix of another (`addChecked_antichain`);
+  checking a block makes valid exactly the prefixes of its history (`addChecked_exact`).
+- `validBlock` walks the block once per kept history.
+- A committed payload leaves `offers` (`doCommit_offers`) and is not offered again
+  (`addOffer`): the offers are the pending work.
+- Bound: one input costs O(L · (m + k) + p), with L the payload count of the longest live
+  block, m the messages kept in the views above the floor, k the kept histories (1 for one
+  chain; one per checked fork) and p the pending offers. L is the whole chain: every
+  message carries its exact ancestry, so cost per input is still linear in history
+  (interpreter, four replicas: 15 ms per operation at 40 operations, 83 ms at 160; before,
+  3,009 ms at 40). Removing that factor needs floor-relative blocks on the wire.
+
+**Idle timer** (`wantsOut`). A view's timer runs only while this replica has a reason to
+leave it: a checked offer on its best parent, a prepared parent not yet in its committed
+tip, a proposal in the view, its own earlier request to leave, CANDIDATE(⊥) from
+`faults + 1` members, or `faults + 1` members ahead of it. Otherwise each tick moves the
+deadline one whole timeout ahead. An idle domain therefore stays in its view, sends
+nothing and keeps a constant state; work that arrives gets the whole timeout. This was
+chosen over summarising runs of disabled views because the idle views were also traffic
+and journal appends, and because no safety rule reads the deadline, so no safety theorem
+moved. What still grows: a stretch with work pending and no commit possible adds one view
+per `timeout · 2^backoffCap`.
+
+**View window** (`Kernel/GenericSimplexWindow.lean`, proved). `ingest` keeps a record only
+for views up to `horizon` = `Config.window` (two leader rotations) above the current view.
+A message above it leaves only an `ahead` note, one per member (`ingest_beyond`,
+`noteAhead_unique`); a message within it that the replica has not received is registered
+exactly as before (`ingest_within`, `ingest_within_propose`). Recovery of what was
+dropped: `faults + 1` members ahead is a reason to leave the view; a replica still in a
+view a timeout after asking repeats its CANDIDATE(⊥); a peer that has left that view
+answers the repeat with its own messages for it and the following `window` views
+(`serveViews`, through `relay`). Executed (`Verify/GenericSimplexWindow.lean`): 4,000
+far-future messages create no record; a replica twelve views behind with everything above
+its horizon dropped reaches the others' view, and stays behind when `relay` is not
+forwarded. Not bounded: the messages one member can put in one view record by
+equivocating.
+
 **Not adopted by the native layer.** `Compiler/GenericSimplexIO.lean` still replays with
 `step` and checkpoints the whole state; `exportable` and `certificateCandidates` read old
-views and the audit. The kernel harness, the load harness and the witnesses run the new
-rules; the load harness runs `liveStep`.
+views and the audit; nothing forwards `relay`, and `receivedBefore` answers a repeated
+CANDIDATE(⊥) as a duplicate without giving it to the kernel. The kernel harness, the load
+harness and the witnesses run the new rules; the load harness runs `liveStep`.
 
-**BREAKS: log magic version 6.** The step changed (rule order in `valueRules`, the floor
-guards, the parent range, the repeated CANDIDATE(⊥), the timer pushed on timeout, the pump
-test) and the snapshot carries `floorEvidence`, `served`, `relay`. Version-5 logs refuse
-(`GenericSimplexIO.v5_log_refused`). A mesh moves by re-genesis, as before.
+**BREAKS: log magic version 7.** The step changed (`validBlock`, `checked`, `offers`, the
+tick guard, the `ingest` horizon and repeat answer) and the snapshot carries `ahead`.
+Version-6 logs refuse (`GenericSimplexIO.v6_log_refused`). A mesh moves by re-genesis.
 
 ## Native source consumer
 

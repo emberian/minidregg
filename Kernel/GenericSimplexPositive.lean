@@ -19,8 +19,9 @@ def Positive (s : State) : Prop :=
 theorem positive_record (s : State) (deadline now : Nat) (checked : List Block)
     (offers : List Bytes) (outbox : List Message) (delivered : List Block) (tip : Block)
     (needsPoll failed : Bool) (lastCommitted : Nat)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
-    Positive {self := s.self, current := s.current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ Positive s := Iff.rfl
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    Positive {self := s.self, current := s.current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ Positive s := Iff.rfl
 
 theorem positive_new_current (s : State) (current deadline : Nat) (old : Positive s)
     (pos : 0 < current) : Positive {s with current := current, deadline := deadline} :=
@@ -243,7 +244,7 @@ theorem pump_positive (c : Config) (fuel : Nat) (s : State) (old : Positive s) :
 
 theorem ingest_positive (c : Config) (s : State) (message : Message) (old : Positive s) :
     Positive (ingest c s message) := by
-  unfold ingest serveFloor
+  unfold ingest serveFloor noteAhead serveViews
   split
   · exact old
   · rename_i admitted

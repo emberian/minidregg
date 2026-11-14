@@ -8,4 +8,6 @@ import Kernel.GenericSimplexEngineSafety
 import Kernel.GenericSimplexObservationSafety
 import Kernel.GenericSimplexFloor
 import Kernel.GenericSimplexErasure
+import Kernel.GenericSimplexChecked
+import Kernel.GenericSimplexWindow
 import Kernel.GenericSimplexReceiverSafety

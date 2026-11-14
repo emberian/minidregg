@@ -78,6 +78,7 @@ def stepV (rule : Rule) (c : Config) (s : State) (input : Input) : State :=
     | .tick now =>
         let s := pumpV rule c c.pumpBudget s
         let s := { s with now := max s.now now }
+        if !wantsOut c s then { s with deadline := s.now + viewTimeout c s s.current } else
         if !s.needsPoll && s.now ≥ s.deadline then
           let s := { s with deadline := s.now + viewTimeout c s s.current }
           let v := viewAt s s.current

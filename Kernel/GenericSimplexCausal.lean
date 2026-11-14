@@ -621,8 +621,9 @@ structure CausalInvariant (s : State) : Prop where
 @[simp] theorem causal_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
     (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
-    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ CausalInvariant s := by
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ CausalInvariant s := by
   constructor <;> intro old <;> rcases old with ⟨unique, votes, once, candidates, commits, locked⟩ <;>
     exact ⟨unique, votes, once, candidates, commits, locked⟩
 
@@ -822,7 +823,7 @@ theorem causal_fold {α : Type} (action : State → α → State)
 
 theorem ingest_causal (c : Config) (s : State) (message : Message)
     (old : CausalInvariant s) : CausalInvariant (ingest c s message) := by
-  unfold ingest serveFloor
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   split_ifs
   all_goals first

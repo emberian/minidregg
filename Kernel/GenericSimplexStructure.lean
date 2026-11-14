@@ -48,7 +48,8 @@ theorem preserves_trans {a b c : State} (ab : Preserves a b) (bc : Preserves b c
     (views : List View) (checked : List Block) (offers : List Bytes)
     (outbox : List Message) (delivered : List Block) (tip : Block)
     (needsPoll failed : Bool) (lastCommitted : Nat)
-    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
     Preserves a {
       self := b.self
       current := current
@@ -62,7 +63,7 @@ theorem preserves_trans {a b c : State} (ab : Preserves a b) (bc : Preserves b c
       delivered := delivered
       committedTip := tip
       needsPoll := needsPoll
-      failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ Preserves a b := Iff.rfl
+      failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ Preserves a b := Iff.rfl
 
 theorem preserves_broadcast {a b : State} (view : Nat) (kind : Kind) (arg : Argument)
     (prior : Preserves a b) : Preserves a (broadcast b view kind arg) :=
@@ -183,7 +184,7 @@ theorem pump_preserves (c : Config) (fuel : Nat) (s : State) :
 
 theorem ingest_preserves (c : Config) (s : State) (m : Message) :
     Preserves s (ingest c s m) := by
-  unfold ingest serveFloor
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   repeat' first
     | audit_step
