@@ -86,6 +86,7 @@ import Kernel.NativeHost
 import Kernel.NativeHostServed -- KN2 2b-1: a validated served state (no history): validateServed, OpenedServed
 import Kernel.NativeHostLight -- KN2 2b-1: the validated light opening a session serves ported operations from
 import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (opened_display_is_commit), lying Hosts refused by name
+import Kernel.MemberPatchPoles  -- MemberPatchKeystone's poles PROVED on the kind definition: an admitted revision whose non-empty member patch run is the receiver's post; the always-empty ghost fails MemberExact
 import Kernel.ContentCommutingAppend  -- appends to one document commute: a commuting content command is computed at the cell it meets (statements; the ruling of 2026-10-28)
 import Kernel.ContentCommutingAppendProofs  -- the commuting-append statements PROVED: the content arm reads the planned root only for commands that do not commute; kept pin, exact exemption, the marker spent, replay refused, the blinded witness and two appenders from one observation
 import Kernel.NativeHostSession
@@ -117,6 +118,7 @@ import Kernel.ResourceEffect  -- a declared-resource effect as ONE declaration (
 import Kernel.ResourceGrammarJson  -- the request grammar of the hand-armed payloads (scalar action, stream ref, world descriptor/definition/action, money batch), once: the Host's and the agreement's decoders both read it
 import Kernel.ResourcePayloadJson  -- payloadOfJson: the one reader of a target payload's JSON; which payloads a reader admits is its parameter (hostRefuses, agreementRefuses)
 import Kernel.ReadEffects  -- the two root-pinning reads DECLARED and BOUND (registry codes 3 and 7): readEffect, kindReadEffect; no operand, no hand arm
+import Kernel.WorldKindEffects  -- the kind definition revision DECLARED and BOUND (registry code 5): kindDefinitionEffect, its member patch (prepareDefinition at the served store) with completeness and its converse; no hand arm
 import Kernel.CitedRead  -- the cited read DECLARED (registry code 9): citedRead, citedProject, its refusals with their detail, its faces, citedEffect
 import Kernel.ContentJson  -- the content command's JSON face: the request grammar (contentOfJson), the reader's view (contentToJson), the display
 import Kernel.ContentEffect  -- the content write DECLARED and BOUND (registry code 1): contentSpec, contentSpec_complete (frame and replay), contentOpens, contentEffect

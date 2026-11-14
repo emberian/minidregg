@@ -1102,7 +1102,6 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
           cases append : written.payload with
           | scalar _ => simp [append] at shown
           | world _ => simp [append] at shown
-          | kindDefinition _ => simp [append] at shown
           | registered _ _ => simp [append] at shown
           | computeFunding _ => simp [append] at shown
           | moneyConsent _ => simp [append] at shown

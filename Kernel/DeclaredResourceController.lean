@@ -577,7 +577,6 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
           | some supplied => exact fundingProject_unjoint supplied
     | append request => exact streamSlots_unjoint _ _
     | world _ => exact WorldKindProjection.project_unjoint _ _ _
-    | kindDefinition _ => exact WorldKindProjection.definitionProject_unjoint _ _
     | registered code op => exact (effectAt code.toNat).view_unjoint ⟨subject, id⟩ op before after
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
@@ -1508,7 +1507,6 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
     | append _ => exact fun _ => .body
     | world _ => exact fun _ => .body
-    | kindDefinition _ => exact fun _ => .body
     | computeFunding funding => exact fun _ => .balance funding.asset
     | moneyConsent _ => exact fun _ => .body
     -- A registered effect's field classification is its declaration's.
@@ -1521,7 +1519,7 @@ def targetAmount (target : Target) :
     cases payload with
     | scalar _ => exact fun _ value => value
     | append _ => exact fun _ _ => 0
-    | world _ | kindDefinition _ | computeFunding _ | moneyConsent _ =>
+    | world _ | computeFunding _ | moneyConsent _ =>
         exact fun _ _ => 0
     | registered code _ => exact fun address value => (effectAt code.toNat).spec.amount address (some value)
 
@@ -1535,7 +1533,7 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
     cases payload with
     | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
-    | world _ | kindDefinition _ | computeFunding _ | moneyConsent _ =>
+    | world _ | computeFunding _ | moneyConsent _ =>
         exact fun _ => false
     | registered code _ => exact (effectAt code.toNat).spec.rotated
 
@@ -1563,10 +1561,6 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) pre post
-    | kindDefinition definition =>
-      exact ResourceObservationAdmission.footprintOf
-        (changedEffect ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩ pre post)
-        (targetField ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) pre post
     | registered code op =>
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩ pre post)

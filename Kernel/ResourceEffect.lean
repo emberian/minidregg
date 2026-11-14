@@ -247,6 +247,19 @@ structure Effect : Type 1 where
 
 instance (e : Effect) : DecidableEq e.O := e.decO
 
+/-- **A member patch agrees with a semantics**: wherever both answer, they answer the same
+patch. The law `Effect.member_exact` holds a declaration's stated member patch to it; a function
+that fails it cannot be stated (`Effect.member_stated_exact`). -/
+def MemberExact {L : Layout.{0, 0, 0}} {O R : Type}
+    (spec : Revival.EffectSpec EffectCtx (Revival.storeSubstrate L) O R)
+    (f : MemberCtx → O → Store L → Option (Patch L)) : Prop :=
+  ∀ (ctx : EffectCtx) (op : O) (s : Store L) (ps patch : Patch L),
+    f ctx.signed op s = some patch → spec.sem ctx op s = .ok ps → ps = patch
+
+theorem Effect.member_stated_exact (e : Effect) {f : MemberCtx → e.O → Store e.L → Option (Patch e.L)}
+    (stated : e.member = some f) : MemberExact e.spec f :=
+  e.member_exact f stated
+
 /-- The dispatch's context: the effect's, plus the deployment and the header's version and
 expected root. -/
 structure DispatchCtx extends EffectCtx where

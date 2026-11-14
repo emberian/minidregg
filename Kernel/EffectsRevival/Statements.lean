@@ -354,7 +354,7 @@ def hostRegistry : Registry HostCtx HostCell :=
   DeclaredResourceController.liveRegistry.map fun entry => (entry.1, entry.2.comap dispatchCtxOf)
 
 /-- The payload codes that are still hand arms. -/
-def liveLegacy : List Nat := [0, 2, 4, 5, 6, 8]
+def liveLegacy : List Nat := [0, 2, 4, 6, 8]
 
 /-- **The deployed target dispatch.** A code neither bound nor a hand arm is refused by name;
 every other code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,

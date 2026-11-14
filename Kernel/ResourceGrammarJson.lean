@@ -1,9 +1,10 @@
 /-
-# `Kernel/ResourceGrammarJson.lean` — the request grammar of the hand-armed payloads, once
+# `Kernel/ResourceGrammarJson.lean` — the request grammar of the scalar, world and money payloads, once
 
 The JSON grammar of a scalar action, a stream reference, a world descriptor, definition and
 action, and a money batch: what a `scalar`, `append`, `world`, `kindDefinition` or
-`moneyConsent` payload is written in. The Host's request decoder (`Host/Json.lean`) and the
+`moneyConsent` payload is written in (`kindDefinition` is a registered effect and reads
+`worldDefinition` as its declaration's face). The Host's request decoder (`Host/Json.lean`) and the
 source agreement's (`Host/SourceAgreementJson.lean`) each held a copy; both read this one. It
 sits upstream of the effect registry so that a declaration's JSON face (`Effect.ofJson`) can be
 one of these decoders when its code is bound. The strict helpers are `EffectJson`'s and

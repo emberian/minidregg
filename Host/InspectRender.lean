@@ -469,8 +469,6 @@ private def draftLines : Draft → List String
                 [s!"    canonical Book batch: {(consent.batch.map fun batch => batch.operations.length).getD 0} operations carried; {consent.positions.length} signed source positions; {(consent.funding.map fun funding => funding.credits).getD 0} compute credits"]
             | .computeFunding funding =>
                 [s!"    funds compute with {funding.credits} credits of asset {funding.asset}; payer pre-balance {funding.expectedPayerBalance}, Book root {funding.expectedBookRoot.value}"]
-            | .kindDefinition definition =>
-                [s!"    kind {definition.descriptor.kind}: layout revision {definition.descriptor.revision}, {definition.descriptor.fields.length} semantic fields"]
   | .delegate bytes => match CapabilityDelegationController.commandCodec.decode bytes with
     | none => ["  delegate: noncanonical command"]
     | some ⟨kind, command⟩ =>

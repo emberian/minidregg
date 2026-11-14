@@ -80,14 +80,13 @@ inductive Payload where
   | scalar (actions : List DeclaredActionLowering.Action)
   | append (request : StreamCell.Append)
   | world (actions : List WorldKindInstance.Action)
-  | kindDefinition (definition : WorldKindCell.Definition)
   | computeFunding (funding : ComputeFunding)
   | moneyConsent (consent : MoneyConsent)
   /-- An operation of a registered effect (`Kernel/ResourceEffectRegistry.lean`): the wire code
   and that code's declared operation. Every arm of every function over a payload reads this
   constructor from the declaration `effectAt code`; an unbound code has no operation, so no
-  payload carries one. The content write is code 1, the content read 3, the whole kind
-  definition read 7, the cited read 9. -/
+  payload carries one. The content write is code 1, the content read 3, the kind definition
+  revision 5, the whole kind definition read 7, the cited read 9. -/
   | registered (code : UInt8) (op : (effectAt code.toNat).O)
   deriving DecidableEq
 
@@ -105,13 +104,17 @@ abbrev Payload.read : Payload := .registered 3 ()
 operand (`kindReadEffect`). Not a pattern: no function has an arm for it. -/
 abbrev Payload.kindRead : Payload := .registered 7 ()
 
+/-- **A kind definition revision**: the registered operation at code 5, whose operand is the
+whole next definition (`kindDefinitionEffect`). Not a pattern: no function has an arm for it. -/
+abbrev Payload.kindDefinition (definition : WorldKindCell.Definition) : Payload :=
+  .registered 5 definition
+
 /-- A registered operation shows as its declaration's name and its canonical bytes. -/
 instance : Repr Payload where
   reprPrec payload prec := match payload with
     | .scalar actions => Repr.addAppParen ("Payload.scalar " ++ reprArg actions) prec
     | .append request => Repr.addAppParen ("Payload.append " ++ reprArg request) prec
     | .world actions => Repr.addAppParen ("Payload.world " ++ reprArg actions) prec
-    | .kindDefinition definition => Repr.addAppParen ("Payload.kindDefinition " ++ reprArg definition) prec
     | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
     | .moneyConsent consent => Repr.addAppParen ("Payload.moneyConsent " ++ reprArg consent) prec
     | .registered code op =>
@@ -196,7 +199,6 @@ def payloadEncode : Payload → List UInt8
   | .scalar actions => 0 :: (StreamCodec.list DeclaredResourceScalar.actionStream).encode actions
   | .append request => 2 :: StreamCell.appendStream.encode request
   | .world actions => 4 :: (StreamCodec.list WorldKindInstance.actionStream).encode actions
-  | .kindDefinition definition => 5 :: WorldKindCell.definitionStream.encode definition
   | .computeFunding funding => 6 :: computeFundingStream.encode funding
   | .moneyConsent consent => 8 :: ResourceMoneyWire.consentStream.encode consent
   | .registered code op => code :: (effectAt code.toNat).spec.opStream.encode op
@@ -212,9 +214,6 @@ def legacyPayloadDecode : List UInt8 → Option (Payload × List UInt8)
   | 4 :: bytes => do
       let (actions, rest) ← (StreamCodec.list WorldKindInstance.actionStream).decodePrefix bytes
       some (.world actions, rest)
-  | 5 :: bytes => do
-      let (definition, rest) ← WorldKindCell.definitionStream.decodePrefix bytes
-      some (.kindDefinition definition, rest)
   | 6 :: bytes => do
       let (funding, rest) ← computeFundingStream.decodePrefix bytes
       some (.computeFunding funding, rest)
@@ -242,13 +241,13 @@ def payloadStream : StreamCodec Payload where
       else legacyPayloadDecode (tag :: bytes)
   decodePrefix_encode := by
     intro payload suffix
-    obtain ⟨u0, u2, u4, u5, u6, u8⟩ := legacy_unbound
+    obtain ⟨u0, u2, u4, u6, u8⟩ := legacy_unbound
     cases payload with
     | registered code op =>
         by_cases bound : registeredOctet code = true
         · simp [payloadEncode, bound, StreamCodec.decodePrefix_encode]
         · exact (unbound_elim (by simpa using bound) op).elim
-    | _ => simp [payloadEncode, legacyPayloadDecode, u0, u2, u4, u5, u6, u8,
+    | _ => simp [payloadEncode, legacyPayloadDecode, u0, u2, u4, u6, u8,
         StreamCodec.decodePrefix_encode]
   encode_decodePrefix := by
     intro bytes value suffix decoded
@@ -653,7 +652,7 @@ inductive Reject where
   /-- A stream append's `ref` names an entry of the same stream at or beyond its head: a
   reference points back at an existing entry, never at one still in flight. -/
   | streamRef
-  | worldKind | kindDefinition
+  | worldKind
   | computeFunding
   | computeBudget (reason : RunComputeBudgetDomain.Reject)
   | money (reason : ResourceMoneyReceiver.Reject)
@@ -697,7 +696,6 @@ effect. -/
   | .registered code _ => (effectAt code.toNat).L
   | .append _ => StreamCell.headLayout
   | .world _ => WorldKindCell.instanceLayout
-  | .kindDefinition _ => WorldKindCell.definitionLayout
 
 def Target.materializer (target : Target) : Materializer target.layout Digest := by
   cases target with
@@ -707,7 +705,6 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
     | registered code _ => exact (effectAt code.toNat).materializer
     | append _ => exact StreamCell.headMaterializer
     | world _ => exact WorldKindCell.instanceMaterializer
-    | kindDefinition _ => exact WorldKindCell.definitionMaterializer
 
 abbrev TargetCell (target : Target) := Materialized target.materializer
 
@@ -726,7 +723,6 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
     | computeFunding _ | moneyConsent _ => exact ⟨.accountMetadata, cell⟩
     | append _ => exact ⟨.stream, cell⟩
     | world _ => exact ⟨.worldInstance, cell⟩
-    | kindDefinition _ => exact ⟨.worldKind, cell⟩
 
 def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell Registry) :
     Option (TargetCell target) := by
@@ -745,11 +741,6 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
     | world _ => exact if kind = .object then
         if CanonicalCellRegistry.CellLaw deployment id cell then
           match cell with | ⟨.worldInstance, value⟩ => some value | _ => none
-        else none
-      else none
-    | kindDefinition _ => exact if kind = .object then
-        if CanonicalCellRegistry.CellLaw deployment id cell then
-          match cell with | ⟨.worldKind, value⟩ => some value | _ => none
         else none
       else none
 
@@ -894,13 +885,6 @@ def computeTarget (snapshot : AuthoritySnapshot)
         let post := Patch.run pre.logical patch
         if (WorldKindProjection.footprint pre.logical post).isNone then throw .worldKind
         pure post
-    | kindDefinition definition => exact do
-        if kind != .object then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        let some patch := WorldKindCell.prepareDefinition pre.logical definition | throw .kindDefinition
-        if !decide (Patch.ValidFrom pre.logical patch) then throw .kindDefinition
-        pure (Patch.run pre.logical patch)
 
 /-- The target's one guarded patch, generated by its source operation from the
 loaded store: the scalar declaration's own lowering followed by the kernel's ratchet of the cell's blinding (guarded at the
@@ -924,7 +908,6 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
           capability observe audienceEpoch audienceRoster) op pre.logical
 
     | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
-    | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
 
 /-- An observe-only read target's patch is empty: it writes nothing. -/
 theorem targetPatch_observeOnly (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -1183,6 +1166,82 @@ theorem selectTarget_content (deployment : Deployment) (kind : ResourceKind) (id
   rcases cell with ⟨physical, value⟩
   cases physical <;> rfl
 
+/-! ## A kind definition revision, in the deleted arm's own terms -/
+
+set_option backward.isDefEq.respectTransparency false in
+/-- **The bridge**: a kind definition target's computation is the expression the hand arm of
+`computeTarget` was before the revision was declared, its refusal now the declaration's by name
+(`Reject.kindDefinition` is deleted). The hand arm also refused a prepared patch that did not
+apply; a prepared revision always applies (`prepareDefinition_valid`), so that line never ran. -/
+theorem computeTarget_kindDefinition_arm (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (definition : WorldKindCell.Definition) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : Materialized WorldKindCell.definitionMaterializer) :
+    computeTarget snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch,
+          audienceRoster⟩ pre =
+      (if kind != .object then .error Reject.wrongRole
+        else if version != 1 then .error Reject.unsupportedVersion
+        else if root != pre.root then .error Reject.staleTarget
+        else match WorldKindCell.prepareDefinition pre.logical definition with
+          | none => .error (Reject.effect (.refused 5 "notNextRevision" .empty))
+          | some patch => .ok (Patch.run pre.logical patch) :
+        Except Reject (Store WorldKindCell.definitionLayout)) := by
+  show (kindDefinitionEffect.compute 5 (targetCtx snapshot semantics ambient command kind id
+    capability observe audienceEpoch audienceRoster) version root definition pre).mapError
+      Reject.ofDispatch = _
+  unfold Effect.compute
+  rw [kindDefinition_run]
+  have ctxKind : (targetCtx snapshot semantics ambient command kind id capability observe
+      audienceEpoch audienceRoster).kind = kind := rfl
+  have accepts : kindDefinitionEffect.spec.accepts kind = (kind == .object) := rfl
+  have current : kindDefinitionEffect.spec.version = 1 := rfl
+  have pinned : kindDefinitionEffect.spec.commutes definition = false := rfl
+  rw [ctxKind, accepts, current, pinned]
+  by_cases role : (kind == ResourceKind.object) = false
+  · have refused : (kind != ResourceKind.object) = true := by simp [bne, role]
+    rw [if_pos role, if_pos refused]
+    rfl
+  have accepted : ¬ (kind != ResourceKind.object) = true := by
+    simpa [bne] using role
+  rw [if_neg role, if_neg accepted]
+  by_cases versioned : version ≠ 1
+  · have refused : (version != 1) = true := bne_iff_ne.mpr versioned
+    rw [if_pos versioned, if_pos refused]
+    rfl
+  have current' : ¬ (version != 1) = true := fun refused => versioned (bne_iff_ne.mp refused)
+  rw [if_neg versioned, if_neg current']
+  by_cases moved : false = false ∧ root ≠ pre.root
+  · have refused : (root != pre.root) = true := bne_iff_ne.mpr moved.2
+    rw [if_pos moved, if_pos refused]
+    rfl
+  have same : ¬ (root != pre.root) = true := fun refused => moved ⟨rfl, bne_iff_ne.mp refused⟩
+  rw [if_neg moved, if_neg same]
+  cases WorldKindCell.prepareDefinition pre.logical definition <;> rfl
+
+/-- The bridge for the patch: the prepared write, or nothing where none is prepared. -/
+theorem targetPatch_kindDefinition_arm (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (definition : WorldKindCell.Definition) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : Materialized WorldKindCell.definitionMaterializer) :
+    targetPatch snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch,
+          audienceRoster⟩ pre =
+      (WorldKindCell.prepareDefinition pre.logical definition).getD [] := by
+  show kindDefinitionEffect.patch _ definition pre.logical = _
+  unfold Effect.patch Effects.Revival.EffectSpec.emitted
+  cases prepared : WorldKindCell.prepareDefinition pre.logical definition with
+  | none =>
+    rw [kindDefinitionSem_none prepared]
+    rfl
+  | some patch =>
+    rw [kindDefinitionSem_some prepared]
+    exact List.append_nil patch
+
 /-- The entry an append target records, at the cell `entryCellId target n`:
 the loaded head's next position and tail. Scalar and content targets record none.
 The head write is the target's own patch; this entry is its one fresh cell. -/
@@ -1193,7 +1252,6 @@ def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient :
     cases payload with
     | scalar _ | computeFunding _ | moneyConsent _ | registered _ _ => exact none
     | world _ => exact none
-    | kindDefinition _ => exact none
     | append request =>
         exact (StreamCell.headOf pre.logical).map fun head =>
           StreamCell.appendEntry id head (streamRecord snapshot semantics ambient command request)
@@ -1615,7 +1673,6 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
           (consent.funding.map fundingProject).getD []
     | append request => exact streamSlots request before
     | world _ => exact WorldKindProjection.project subject before after
-    | kindDefinition _ => exact WorldKindProjection.definitionProject before after
     | registered code op => exact (effectAt code.toNat).spec.view ⟨subject, id⟩ op before after
 
 /-- `targetProjection` filtered by `want`, a content cell's summaries computed only when named
@@ -1634,7 +1691,6 @@ def targetProjectionDemand (want : String → Bool) (leads : Nat → Bool) (subj
           (consent.funding.map fundingProject).getD []).filter fun slot => want slot.1
     | append request => exact (streamSlots request before).filter fun slot => want slot.1
     | world _ => exact (WorldKindProjection.project subject before after).filter fun slot => want slot.1
-    | kindDefinition _ => exact (WorldKindProjection.definitionProject before after).filter fun slot => want slot.1
     | registered code op =>
         exact (effectAt code.toNat).viewDemand want ⟨subject, id⟩ op before after
 
@@ -1707,7 +1763,6 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
     | world actions => exact WorldKindMethods.writes pre program i actions
     | append request => exact some [⟨i, 0,
         WorldPrototypeConstruction.bytesValue (StreamCell.appendStream.encode request)⟩]
-    | kindDefinition definition => exact some [WorldPrototypeConstruction.constructorWrite i definition]
     | registered code op =>
         -- A registered effect's claimed write is its operation's canonical bytes; an observing
         -- one writes nothing.

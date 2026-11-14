@@ -146,7 +146,6 @@ operation is `Unit`, its codec writes nothing, so the wire bytes are the tag oct
 before, and the JSON is `{"type": …}` alone, as before. `Payload.read` and `Payload.kindRead` are
 names for `.registered 3 ()` and `.registered 7 ()` (not patterns: no function has an arm for
 either); `sourceReadOf` and an opening's source still find the read by `payload = .read`.
-`liveLegacy = [0, 2, 4, 5, 6, 8]`.
 
 * Refusal text moved: a read whose capability is not its observe capability was
   `Reject.observationRequired` and is `Reject.effect (Effect.Read.observationRequired)`; the kind
@@ -219,8 +218,50 @@ consent has no per-effect arm.
   operation signs no root to display a post at" (an effect that states a member patch and
   commutes).
 
-**Next**, the remaining codes: `kindDefinition` (5), `world` (4), `scalar` (0), `append` (2, needs
-a fresh-cell output), `computeFunding` (6), `moneyConsent` (8).
+**The kind definition revision is bound** (`Kernel/WorldKindEffects.lean`): `kindDefinitionEffect`
+at code 5 (JSON `kindDefinition`). `liveLegacy = [0, 2, 4, 6, 8]`. It is the first registered
+WRITE thin consent displays: its declaration states its member patch
+(`WorldKindCell.prepareDefinition` at the served store) and that the patch reads the store, so it
+is shown only from a view that seals nothing, as the hand arm was.
+
+* Wire bytes of code 5 are unchanged (tag octet 5, then `WorldKindCell.definitionStream`). The
+  request JSON is unchanged (`{"type": "kindDefinition", "definition": …}`, read by
+  `ResourceGrammarJson.worldDefinition` as the declaration's `ofJson`). The inbox JSON is
+  unchanged (`kind`, `revision`, `exactDefinitionHex`: the declaration's `toJson`). The inspect
+  line is unchanged (the declaration's `display`).
+* `Payload.kindDefinition` is a name for `.registered 5 definition` (not a pattern).
+  `Reject.kindDefinition` is deleted with the arm that threw it. Every hand arm is deleted: the
+  codec, layout, materializer, packing, selection, computation, patch, projection, footprint,
+  field, amount, ratchet and run-write arms of the controller, thin consent's member patch, wire,
+  root and `Supported` arms, the Host's inbox, inspection and publication arms, and the reader's
+  string arm.
+* Refusal text moved: a definition that is not the stored one's next revision was
+  `Reject.kindDefinition` and is `Reject.effect (Effect.KindDefinition.notNextRevision)`. An
+  unknown payload `type` is refused with a list in which `kindDefinition` is now among the
+  registered names. `repr` of a kind-definition payload is the registered form (the name and the
+  operation's canonical bytes).
+* `computeTarget_kindDefinition_arm` and `targetPatch_kindDefinition_arm` (proved) say the
+  registered computation and patch are the deleted arm's expressions with that one refusal
+  renamed. The hand arm also refused a prepared patch that did not apply; a prepared revision
+  always applies (`prepareDefinition_valid`), so that line never ran and has no successor.
+* The role moved place, not value, as for content and the reads (`RegisteredWrongRole`).
+* The run check's claimed write is the same value: `constructorWrite i definition` was coordinate
+  0 holding the jam of the definition's canonical bytes, which is what a registered write claims.
+* Member patch: `kindDefinition_member_complete` (where the semantics admits, the member is
+  shown exactly its patch) and its converse `kindDefinition_member_admitted` (the semantics
+  reads nothing the member does not, so a shown revision is refused only by the header: role,
+  schema version, moved root).
+* `MemberPatchKeystone`'s poles on it (`Kernel/MemberPatchPoles.lean`, proved):
+  `MemberPatchSatisfiable` (an admitted revision whose non-empty member patch, run on the loaded
+  store, is the receiver's post) and `MemberPatchGhostRefuted` (the kind definition's semantics
+  with the always-empty member patch fails `MemberExact`, so that record is not an `Effect`).
+  Executed in `Assurance/MemberPatchPoles.lean` on a kind with fields: the admitted revision, a
+  skipped revision refused by both sides under their own names, and a revision under an account
+  role where the member patch answers and the receiver refuses `wrongRole`.
+* `HonestKindDefinitionViewAcceptedStatement` stands as stated and proved.
+
+**Next**, the remaining codes: `world` (4), `scalar` (0), `append` (2, needs a fresh-cell output),
+`computeFunding` (6), `moneyConsent` (8).
 
 **The payload's JSON has one reader** (`Kernel/ResourcePayloadJson.lean`, `payloadOfJson`). The
 grammar of the hand-armed payloads (`action`, `streamRef`, the world descriptor, definition and
