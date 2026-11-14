@@ -33,6 +33,7 @@ public import Effects.Revival.Engine
 public import Kernel.DeclaredResourceScalar
 public import Compiler.ObjectAudienceRoster
 public import Lean.Data.Json
+public import Theory.Eval
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -232,6 +233,18 @@ structure Effect : Type 1 where
     first
       | (intro reads; cases reads)
       | (intro _ _ stated; cases stated)
+  /-- **The semantic footprint**, for a cell whose fields are not its addresses: a world
+  instance's fields live inside its payload entry, and a capability's scope names those. `none`
+  (the default): the footprint is read off the changed addresses by `spec.field` and
+  `spec.amount`. -/
+  footprint : Option (Store L → Store L → Footprint) := none
+  /-- **What a run may claim of this operation** (K-RAN): the field writes a re-executed program's
+  product must name, from the loaded store, the program and the target's index. `none` (the
+  default): one write at coordinate 0 holding the operation's canonical bytes. -/
+  runWrites : Option (Store L → Digest → Nat → O → Option (List Eval.FieldWrite)) := none
+  /-- Whether the operation authors anything: a world write without actions is admitted and
+  changes nothing, and is no one's publication. -/
+  authors : O → Bool := fun _ => true
   unpack_pack : ∀ kind cell, unpack kind (pack kind cell) = some cell
   pack_unpack : ∀ kind packed cell, unpack kind packed = some cell → pack kind cell = packed
   /-- An effect authorized as an observation emits nothing: no write, no rotate. -/

@@ -16,6 +16,10 @@ root. The poles, on the deployed declarations:
   skips a number is refused by both: the receiver by the declaration's name (`notNextRevision`),
   the member patch as not applying (`patchRefused`). Under an account role the receiver refuses
   `wrongRole` while the member patch still answers: shown, then refused, nothing commits.
+* *a registered write whose fields are inside its cell*: world actions (code 4) on a poll
+  instance. A vote is computed and shown; the shown patch run is the receiver's post; a write
+  whose guard does not hold is refused by both sides by name; the footprint is the inner field
+  (the declaration's `footprint`), and an empty action list authors nothing.
 * *the wire and the faces*: the payload's bytes are the tag octet 5 and the definition's
   canonical bytes, as the hand arm wrote them; the inbox JSON is `kind`, `revision`,
   `exactDefinitionHex`; the refusal prints under the declaration's name.
@@ -119,5 +123,66 @@ def revise (kind : ResourceKind) (definition : WorldKindCell.Definition) :
   | .ok _ => false | .error text => text == "p: missing field definition")
 
 end KindDefinition
+
+/-! ## A registered write whose fields are inside its cell: world actions -/
+
+section World
+open Minidregg.Kernel.NativeThinConsent
+open Minidregg.Compiler
+open Minidregg.Compiler.WorldKindDescriptor
+open Minidregg.Theory.Store
+open Minidregg.Theory.CellState
+open Minidregg.Kernel (WorldKindInstance.Action)
+
+def pollDescriptor : Descriptor := ⟨9, 1, [votesField]⟩
+
+/-- A poll instance without votes. -/
+def pollPre : Materialized WorldKindCell.instanceMaterializer :=
+  materialize WorldKindCell.instanceMaterializer
+    (WorldKindCell.instanceOf ⟨0⟩ ⟨pollDescriptor, by decide, 0⟩)
+
+/-- One vote: field 2 at key 7 becomes 1. -/
+def vote : List WorldKindInstance.Action := [.create 2 7 (ScalarCodec.natural.stream.encode 1)]
+/-- A write of a vote that was never cast. -/
+def revote : List WorldKindInstance.Action :=
+  [.write 2 7 (ScalarCodec.natural.stream.encode 1) (ScalarCodec.natural.stream.encode 2)]
+
+def worldTarget (actions : List WorldKindInstance.Action) : Target :=
+  ⟨.object, 9, ⟨0⟩, 1, pollPre.root, .world actions, none, none, none⟩
+
+def act (actions : List WorldKindInstance.Action) :
+    Except Reject (Store WorldKindCell.instanceLayout) ×
+      Except Minidregg.Kernel.NativeThinConsent.Refusal (Patch WorldKindCell.instanceLayout) :=
+  (computeTarget sampleSnapshot ⟨0⟩ sampleAmbient sampleCommand (worldTarget actions) pollPre,
+   memberPatch sampleCommand (worldTarget actions) pollPre.logical)
+
+def instanceBytes (store : Store WorldKindCell.instanceLayout) : List UInt8 :=
+  WorldKindCell.instanceMaterializer.codec.encode store
+
+-- Satisfiable, executed: the vote is computed and shown; the shown patch is one write, and run
+-- on the loaded store it is the receiver's post, which differs from the pre-state.
+#guard (match act vote with
+  | (.ok post, .ok patch) =>
+      patch.length == 1 && instanceBytes (Patch.run pollPre.logical patch) == instanceBytes post &&
+        instanceBytes post != instanceBytes pollPre.logical
+  | _ => false)
+-- A guard that does not hold: refused by both, each by its own name.
+#guard (match act revote with
+  | (.error (.effect refusal), .error (Minidregg.Kernel.NativeThinConsent.Refusal.patchRefused 9)) =>
+      reprStr refusal == "Effect.World.worldKind"
+  | _ => false)
+-- The footprint is the declaration's: the inner field, not the cell's body.
+#guard (match act vote with
+  | (.ok post, _) =>
+      decide ((targetFullFootprint (worldTarget vote) pollPre.logical post).touched ≠ {CellField.body})
+  | _ => false)
+#guard (effectAt 4).authors [] == false && (effectAt 4).authors vote == true
+#guard payloadStream.encode (.world vote) ==
+  4 :: (Tower256ConcreteBackend.StreamCodec.list Minidregg.Kernel.WorldKindInstance.actionStream).encode vote
+#guard effectNamed "world" == some 4
+#guard ((effectAt 4).toJson vote).map (·.1) == ["actionCount", "exactActionsHex"]
+#guard (effectAt 4).display vote == ["world instance: 1 guarded field actions"]
+
+end World
 
 end Minidregg.Assurance.MemberPatchPoles

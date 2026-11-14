@@ -28,8 +28,8 @@ open Minidregg.Theory.CellRegistry
 set_option autoImplicit false
 
 /-- **The registry**: wire code ↦ declaration. -/
-def liveEffects : List (Nat × Effect) := [(1, contentEffect), (3, readEffect), (5, kindDefinitionEffect), (7, kindReadEffect),
-  (9, citedEffect)]
+def liveEffects : List (Nat × Effect) := [(1, contentEffect), (3, readEffect), (4, worldEffect), (5, kindDefinitionEffect),
+  (7, kindReadEffect), (9, citedEffect)]
 
 /-- Whether a code is bound. -/
 def registeredCode (code : Nat) : Bool := (liveEffects.lookup code).isSome
@@ -104,7 +104,6 @@ theorem effectAt_content : effectAt contentCode.toNat = contentEffect := rfl
 /-- The legacy payload tags are unbound (what `payloadStream`'s round-trip reads). -/
 theorem legacy_unbound :
     registeredOctet 0 = false ∧ registeredOctet 2 = false ∧
-    registeredOctet 4 = false ∧
     registeredOctet 6 = false ∧ registeredOctet 8 = false := by
   decide
 
@@ -117,6 +116,11 @@ theorem effectAt_read : effectAt readCode.toNat = readEffect := rfl
 abbrev kindReadCode : UInt8 := 7
 
 theorem effectAt_kindRead : effectAt kindReadCode.toNat = kindReadEffect := rfl
+
+/-- The world actions' payload tag. -/
+abbrev worldCode : UInt8 := 4
+
+theorem effectAt_world : effectAt worldCode.toNat = worldEffect := rfl
 
 /-- The kind definition revision's payload tag. -/
 abbrev kindDefinitionCode : UInt8 := 5

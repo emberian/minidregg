@@ -111,9 +111,6 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
     | .append request => .mkObj
         [("type", toJson "append"), ("topicBytes", number request.topic.length),
          ("payloadBytes", number request.payload.length)]
-    | .world actions => .mkObj
-        [("type", toJson "world"), ("actionCount", number actions.length),
-         ("exactActionsHex", hex ((Tower256ConcreteBackend.StreamCodec.list WorldKindInstance.actionStream).encode actions))]
     | .moneyConsent consent => Minidregg.Host.Json.moneyConsentJson consent
     | .computeFunding funding => .mkObj
         [("type", toJson "computeFunding"), ("asset", number funding.asset),

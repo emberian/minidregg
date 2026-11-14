@@ -36,8 +36,8 @@ coordinates and the height; a stream append, which records the height; money and
 legs, which write the shared Book) is refused by name. It is not displayed with a default.
 The full-peer provider still covers those. World and kind-definition payloads, whose patches
 read the pre-state, require an opening that seals nothing (a full-scope view).
-(A kind-definition revision is a registered effect, code 5; its declaration states its member
-patch and that the patch reads the store.)
+(World actions and a kind-definition revision are registered effects, codes 4 and 5; each
+declaration states its member patch and that the patch reads the store.)
 
 A registered effect has no arm here. Its declaration says whether a member can compute its
 patch (`Effect.member`), and ONE rule reads it: a registered operation is displayed from its
@@ -177,10 +177,6 @@ def memberPatch (command : Command) (target : Target) (pre : Store target.layout
         exact .ok (DeclaredResourceScalar.cellPatch (scalarCommand command
           ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩
           actions))
-    | world actions =>
-        exact match WorldKindCell.preparePatch pre actions with
-          | some patch => .ok patch
-          | none => .error (.patchRefused id)
     | registered code op =>
         -- The one rule: displayed from the served view iff the declaration states a member
         -- patch and the operation pins its root. An observation that commutes is displayed
@@ -301,16 +297,6 @@ theorem memberPatchKeystone : MemberPatchKeystone := by
         refine ⟨DeclaredEffectCell.blinding.patch pre.logical ambient.height, rfl, ?_⟩
         intro store address owned
         exact DeclaredEffectCell.blinding.run_patch_frame store pre.logical ambient.height address owned
-    | world actions =>
-        simp only [memberPatch] at member
-        split at member
-        · rename_i prepared found
-          simp only [Except.ok.injEq] at member
-          subst member
-          refine ⟨[], ?_, fun _ _ _ => rfl⟩
-          simp only [targetPatch, found, Option.getD_some]
-          exact (List.append_nil _).symm
-        · cases member
     | registered code op =>
         have computed' : ((effectAt code.toNat).compute code.toNat
             (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
@@ -371,7 +357,7 @@ theorem memberPatch_money_refused (command : Command) (kind : ResourceKind) (id 
 /-- The payloads whose committed post thin consent can display. -/
 def Supported (target : Target) : Prop :=
   match target.payload with
-  | .scalar _ | .world _ => True
+  | .scalar _ => True
   | .registered code op =>
       (effectAt code.toNat).spec.commutes op = false ∧ (effectAt code.toNat).member.isSome = true
   | _ => False
@@ -405,11 +391,6 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
         all_goals first
           | (rename_i cell _; exact cell.candidate.modeEvidence.rootExact)
           | cases computed
-    | world actions =>
-        by_contra moved
-        have hb : (root != pre.root) = true := bne_iff_ne.mpr moved
-        simp only [computeTarget, hb, if_true] at computed
-        split_ifs at computed <;> simp [bind, Except.bind, pure, Except.pure] at computed
     | registered code op =>
         have computed' : ((effectAt code.toNat).compute code.toNat
             (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
@@ -460,7 +441,6 @@ def targetWire (target : Target) : StoreCodec.Wire target.layout := by
     | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.wire
     | registered code _ => exact (effectAt code.toNat).wire
     | append _ => exact StreamCell.headWire
-    | world _ => exact WorldKindCell.instanceWire
 
 /-- The entry bytes an opening discloses, in canonical order. -/
 def openedBytes (items : List StoreHiding.Item) : List (List UInt8) :=
@@ -482,7 +462,6 @@ grant narrowed by field scope is refused for them (`pre_reading_sealed_refused`)
 payload's member patch is the command's alone (`memberPatch_pre_independent`). -/
 def patchReadsPre (target : Target) : Bool :=
   match target.payload with
-  | .world _ => true
   | .registered code _ =>
       (effectAt code.toNat).member.isSome && (effectAt code.toNat).memberReadsStore
   | _ => false
@@ -1365,7 +1344,9 @@ theorem honest_world_view_accepted : HonestWorldViewAcceptedStatement := by
   have narrowedLogical : narrowed.logical =
       Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible none .worldInstance) payload.logical := by
     simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+    unfold Effect.select at selected
     split_ifs at selected
+    change some _ = some narrowed at selected
     rw [← Option.some.inj selected]
     exact materialize_logical _ _
   have none_sealed : (NativeObservationController.openingView none ⟨.worldInstance, payload⟩).2.any
@@ -1374,8 +1355,9 @@ theorem honest_world_view_accepted : HonestWorldViewAcceptedStatement := by
   refine ⟨⟨Patch.run narrowed.logical patch, ?_⟩, ?_⟩
   · rw [checkOpened_of (servedOpening_honest target none _ balances quote) opens.2 opens.1.symm
       (decode_narrowed none _) selected ?opened (by rw [none_sealed]; simp)]
-    · have member : memberPatch command target narrowed.logical = .ok patch := by
-        simp [memberPatch, target, prepared]
+    · have member : memberPatch command target narrowed.logical = .ok patch :=
+        memberPatch_registered_of (code := worldCode) (op := actions)
+          (worldEffect.memberPatch_of rfl rfl prepared)
       rw [member]
       exact if_pos valid
     · show (StoreCodec.entries WorldKindCell.instanceWire narrowed.logical).map

@@ -67,7 +67,7 @@ def registeredOfJson (path tag : String) (json : Lean.Json) :
       ((DeclaredResourceController.effectAt code.toNat).ofJson path json).map fun op =>
         DeclaredResourceController.Payload.registered code op
   | none => failAt (path ++ ".type")
-      s!"expected scalar, append, world, moneyConsent, computeFunding or a registered effect ({", ".intercalate DeclaredResourceController.effectNames})"
+      s!"expected scalar, append, moneyConsent, computeFunding or a registered effect ({", ".intercalate DeclaredResourceController.effectNames})"
 
 /-- **A target's payload, from its JSON.** `refuses`: the types this reader does not admit. -/
 def payloadOfJson (refuses : List String) (path : String) (json : Lean.Json) :
@@ -87,10 +87,6 @@ def payloadOfJson (refuses : List String) (path : String) (json : Lean.Json) :
       let recipient ← optional (path ++ ".to") nat (← field path "to" obj)
       let ref ← optional (path ++ ".ref") streamRef (← field path "ref" obj)
       pure (.append ⟨topic, payload, recipient.map SubjectId.mk, ref⟩)
-  | "world" =>
-      let obj ← exactObject path ["type", "descriptor", "actions"] json
-      let descriptor ← worldDescriptor (path ++ ".descriptor") (← field path "descriptor" obj)
-      pure (.world (← list (path ++ ".actions") (worldAction descriptor) (← field path "actions" obj)))
   | "moneyConsent" =>
       let obj ← exactObject path ["type", "batch", "positions", "funding"] json
       pure (.moneyConsent ⟨

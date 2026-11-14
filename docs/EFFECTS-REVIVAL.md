@@ -260,8 +260,75 @@ is shown only from a view that seals nothing, as the hand arm was.
   role where the member patch answers and the receiver refuses `wrongRole`.
 * `HonestKindDefinitionViewAcceptedStatement` stands as stated and proved.
 
-**Next**, the remaining codes: `world` (4), `scalar` (0), `append` (2, needs a fresh-cell output),
-`computeFunding` (6), `moneyConsent` (8).
+**World actions are bound** (`worldEffect`, `Kernel/WorldKindEffects.lean`): code 4, JSON `world`.
+`liveLegacy = [0, 2, 6, 8]`. The semantics is `WorldKindCell.preparePatch` at the loaded store,
+admitted when the patch applies and the post decodes under the same descriptor; one refusal,
+`worldKind`. The declaration states its member patch (`preparePatch` at the served store, which
+reads the store: a view that seals nothing, as before).
+
+A world instance is the first declared cell whose fields are not its addresses (its fields live
+inside the payload entry). Three things the hand arms said in their own places are now fields of
+`Effect`, each with a default every other declaration takes:
+
+* `footprint : Option (Store L → Store L → Footprint)`: the semantic footprint. `none` reads it
+  off the changed addresses by `spec.field`/`spec.amount`; world states
+  `WorldKindProjection.footprint` (the inner fields a capability's scope names).
+  `targetFullFootprint` and `targetFootprint` read it; `targetFootprint_exact` is proved for
+  both cases.
+* `runWrites : Option (Store L → Digest → Nat → O → Option (List Eval.FieldWrite))`: what a run
+  may claim (K-RAN). `none` is one write at coordinate 0 holding the operation's canonical bytes;
+  world states `WorldKindMethods.writes` (its method's bound outputs at the loaded store).
+* `authors : O → Bool` (default `true`): whether the operation authors anything. An empty world
+  action list is admitted and changes nothing; the grain-origin publication check
+  (`Host/GrainOriginSource.lean`) asked `!actions.isEmpty` of the hand arm and asks
+  `!observeOnly op && authors op` of a registered one.
+
+What moved, and what did not:
+
+* Wire bytes of code 4 are unchanged (tag octet 4, then the action list's bytes). The request
+  JSON is unchanged (`{"type": "world", "descriptor": …, "actions": […]}`; the descriptor is what
+  the actions are read against and is not part of the operation). The inbox JSON is unchanged
+  (`actionCount`, `exactActionsHex`). The inspect line is unchanged.
+* Refusal text moved: `Reject.worldKind` (deleted) is
+  `Reject.effect (Effect.World.worldKind)`; the rendered clause still ends `world-kind`. The
+  unknown-`type` refusal lists `world` among the registered names.
+* `targetPatch` of a world target the receiver REFUSES is now `[]`, where the hand arm gave the
+  prepared patch even when it did not apply or its post did not decode. Nothing reads the patch
+  of a refused target (a `PreparedTarget` exists only where the computation is admitted).
+* The role moved place, not value (`RegisteredWrongRole`).
+* `world_member_complete` is proved (where the semantics admits, the member is shown exactly its
+  patch). Its converse is false and not claimed: the semantics also refuses a patch that does
+  not apply (thin consent checks `Patch.ValidFrom` itself) or whose post does not decode.
+* `HonestWorldViewAcceptedStatement` stands as stated, proved over the declaration.
+* Executed (`Assurance/MemberPatchPoles.lean`, a poll instance): a vote is computed and shown and
+  the shown patch run is the receiver's post; a write whose guard fails is refused by both sides
+  by name; the footprint is the inner field; `authors [] = false`; the wire bytes and faces.
+* Stated and OWED, not proved: `ComputeTargetWorldArm` (`Kernel/MemberPatchPoles.lean`), the
+  registered computation is the deleted arm's expression with the one refusal renamed. Code 5's
+  is proved (`computeTarget_kindDefinition_arm`); this one is by the same proof over `worldSem`.
+  Until then the claim "the admitted set did not move" rests on reading `worldSem` against the
+  deleted arm, the executed poles, and the journeys.
+
+**Next**, the remaining codes, in the order of what each needs:
+
+* `scalar` (0). Its computation is `scalarScope` (reads the authority cell: `capabilityRejected`,
+  `fieldNotNamed`), then `DeclaredResourceScalar.prepareCell`, then the blinding ratchet at the
+  admission height. As a declaration: `rotate := blinding.patch s ctx.ambient.height`,
+  `rotated := (· = blinding.address)`, `member := some fun m actions _ => some (cellPatch …)`
+  with `memberReadsStore := false` (the patch is the command's alone; this is what lets a
+  field-scoped member sign a write, THIN row N1), `KernelOwned` becomes the generic `rotated`.
+  `prepareCell` takes a `DeclaredResourceScalar.Command` built from the signed fields AND the
+  schema version and expected root, which `EffectCtx` does not hold (the header owns them): the
+  semantics must be `prepareCell` with its own version and root checks factored out, which is a
+  statement to make first (`prepareCell` = header checks, then a root-free core). Every scalar
+  refusal text moves from `Reject.scalar (DeclaredResourceScalar.Reject.x)` to
+  `Reject.effect (Effect.Scalar.x)`; the rendered clauses (`guard-rejected 0`,
+  `undeclared-field 3`) are read by the Rust client and most journeys, so `Host/RefusalText`
+  and those greps move in the same commit. Run J0..J8 with it.
+* `computeFunding` (6) and `moneyConsent` (8): the cell is unchanged; what they do is outside the
+  target (the shared Book), so `member = none`. Their footprint is the monetary one
+  (`Effect.footprint` now exists for it).
+* `append` (2): needs a fresh-cell output (the entry cell) that `Effect` cannot state yet.
 
 **The payload's JSON has one reader** (`Kernel/ResourcePayloadJson.lean`, `payloadOfJson`). The
 grammar of the hand-armed payloads (`action`, `streamRef`, the world descriptor, definition and

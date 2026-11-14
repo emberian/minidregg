@@ -576,7 +576,6 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
           | none => intro p hp; cases hp
           | some supplied => exact fundingProject_unjoint supplied
     | append request => exact streamSlots_unjoint _ _
-    | world _ => exact WorldKindProjection.project_unjoint _ _ _
     | registered code op => exact (effectAt code.toNat).view_unjoint ⟨subject, id⟩ op before after
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
@@ -1506,7 +1505,6 @@ def targetField (target : Target) : Address target.layout → CellField := by
     cases payload with
     | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
     | append _ => exact fun _ => .body
-    | world _ => exact fun _ => .body
     | computeFunding funding => exact fun _ => .balance funding.asset
     | moneyConsent _ => exact fun _ => .body
     -- A registered effect's field classification is its declaration's.
@@ -1519,7 +1517,7 @@ def targetAmount (target : Target) :
     cases payload with
     | scalar _ => exact fun _ value => value
     | append _ => exact fun _ _ => 0
-    | world _ | computeFunding _ | moneyConsent _ =>
+    | computeFunding _ | moneyConsent _ =>
         exact fun _ _ => 0
     | registered code _ => exact fun address value => (effectAt code.toNat).spec.amount address (some value)
 
@@ -1533,7 +1531,7 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
     cases payload with
     | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
-    | world _ | computeFunding _ | moneyConsent _ =>
+    | computeFunding _ | moneyConsent _ =>
         exact fun _ => false
     | registered code _ => exact (effectAt code.toNat).spec.rotated
 
@@ -1551,8 +1549,6 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
     | computeFunding funding =>
         exact ⟨if funding.credits = 0 then ∅ else {.balance funding.asset},
           fun field => if field = .balance funding.asset then -(Int.ofNat funding.credits) else 0⟩
-    | world actions =>
-        exact (WorldKindProjection.footprint pre post).getD ⟨{.body}, fun _ => 0⟩
     | scalar actions =>
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre post)
@@ -1562,17 +1558,27 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
         (changedEffect ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) pre post
     | registered code op =>
-      exact ResourceObservationAdmission.footprintOf
-        (changedEffect ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩ pre post)
-        (targetField ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩)
-        (targetAmount ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩) pre post
+      -- A declaration whose fields are not its addresses states its own footprint
+      -- (`Effect.footprint`: a world instance's inner fields).
+      exact match (effectAt code.toNat).footprint with
+        | some semantic => semantic pre post
+        | none => ResourceObservationAdmission.footprintOf
+            (changedEffect ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩ pre post)
+            (targetField ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩)
+            (targetAmount ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩) pre post
 
 /-- Dynamic inner stores share the footprint engine. Existing roles scan their
 actual patch writes and exclude the hiding ratchet. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout) : Footprint :=
   match target.payload with
-  | .world _ | .computeFunding _ | .moneyConsent _ => targetFullFootprint target pre post
+  | .computeFunding _ | .moneyConsent _ => targetFullFootprint target pre post
+  | .registered code _ =>
+      if (effectAt code.toNat).footprint.isSome then targetFullFootprint target pre post
+      else ResourceObservationAdmission.footprintOf
+        (ResourceObservationAdmission.changedWithin
+          ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
+        (targetField target) (targetAmount target) pre post
   | _ => ResourceObservationAdmission.footprintOf
       (ResourceObservationAdmission.changedWithin
         ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
@@ -1584,8 +1590,17 @@ theorem targetFootprint_exact (target : Target) (patch : Patch target.layout)
     targetFootprint target patch pre post = targetFullFootprint target pre post := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
-    cases payload <;> simp only [targetFootprint, targetFullFootprint, changedEffect]
-    all_goals rw [Minidregg.Theory.StoreFootprint.changedWithin_filtered frame]
+    cases payload with
+    | registered code op =>
+        cases stated : (effectAt code.toNat).footprint with
+        | some semantic => simp only [targetFootprint, stated, Option.isSome_some, if_true]
+        | none =>
+          simp only [targetFootprint, targetFullFootprint, changedEffect, stated,
+            Option.isSome_none, Bool.false_eq_true, if_false]
+          rw [Minidregg.Theory.StoreFootprint.changedWithin_filtered frame]
+    | _ =>
+        (simp only [targetFootprint, targetFullFootprint, changedEffect] <;>
+          rw [Minidregg.Theory.StoreFootprint.changedWithin_filtered frame])
 
 /-- The footprint of one incidence: a target's write, or nothing for the
 authority read. -/

@@ -1,5 +1,5 @@
 /-
-# `Kernel/WorldKindEffects.lean` — a world kind's definition revision, ONE declaration
+# `Kernel/WorldKindEffects.lean` — a world kind's definition revision and a world instance's actions, each ONE declaration
 
 `kindDefinitionEffect` (code 5, JSON `kindDefinition`): replace a world-kind cell's definition by
 its next revision. The operation is the whole next `WorldKindCell.Definition`; the wire bytes are
@@ -9,7 +9,15 @@ definition address naming the definition it replaces, or the one refusal `notNex
 stored definition, another kind, a revision that is not the next one, or a definition that does
 not instantiate).
 
-It pins its root. Its patch reads the loaded store and nothing of the receiver (no authority
+`worldEffect` (code 4, JSON `world`): a list of guarded field actions on a world instance. The
+wire bytes are the tag octet 4 and the action list's bytes, as the hand arm wrote them. The
+semantics is `WorldKindCell.preparePatch` at the loaded store, admitted when the patch applies
+and the post decodes under the same descriptor; one refusal, `worldKind`. Three things about it
+are not the default and are stated on the declaration: its semantic footprint (the inner
+fields, `Effect.footprint`), what a run may claim of it (`Effect.runWrites`: its method's bound
+outputs) and that an empty action list authors nothing (`Effect.authors`).
+
+Each pins its root. The revision's patch reads the loaded store and nothing of the receiver (no authority
 snapshot, no height), so the declaration states it as its member patch (`Effect.member`): thin
 consent displays a revision from a served view that seals nothing.
 -/
@@ -19,6 +27,7 @@ public import Kernel.ResourceEffect
 public import Kernel.ContentEffect
 public import Kernel.ResourceGrammarJson
 public import Kernel.WorldKindProjection
+public import Kernel.WorldKindMethods
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -252,5 +261,147 @@ theorem kindDefinition_member_admitted (ctx : EffectCtx) (definition : WorldKind
         WorldKindCell.prepareDefinition served next) := stated.symm
   cases same
   exact kindDefinitionSem_some answered ctx
+
+/-! ## A world instance's actions -/
+
+inductive WorldRefusal where
+  /-- The actions do not lower over the instance's descriptor, a guard does not hold at the
+  loaded store, or the post is no instance of the same descriptor. -/
+  | worldKind
+  deriving DecidableEq, Repr
+
+def WorldRefusal.name : WorldRefusal → String
+  | .worldKind => "worldKind"
+
+/-- The actions' guarded patch at the loaded store (`WorldKindCell.preparePatch`: one write of
+the payload entry naming the bytes it replaces), admitted when it applies and its post decodes
+under the same descriptor. -/
+def worldSem (_ : EffectCtx) (actions : List WorldKindInstance.Action)
+    (store : Store WorldKindCell.instanceLayout) :
+    Except WorldRefusal (Patch WorldKindCell.instanceLayout) :=
+  match WorldKindCell.preparePatch store actions with
+  | none => .error .worldKind
+  | some patch =>
+    if Patch.ValidFrom store patch then
+      if (WorldKindProjection.footprint store (Patch.run store patch)).isNone then .error .worldKind
+      else .ok patch
+    else .error .worldKind
+
+theorem worldSem_ok {ctx : EffectCtx} {actions : List WorldKindInstance.Action}
+    {store : Store WorldKindCell.instanceLayout} {ps : Patch WorldKindCell.instanceLayout}
+    (ok : worldSem ctx actions store = .ok ps) :
+    WorldKindCell.preparePatch store actions = some ps ∧ Patch.ValidFrom store ps ∧
+      (WorldKindProjection.footprint store (Patch.run store ps)).isSome = true := by
+  unfold worldSem at ok
+  split at ok
+  · cases ok
+  · rename_i patch prepared
+    split at ok
+    · rename_i valid
+      split at ok
+      · cases ok
+      · rename_i decoded
+        have decodes : (WorldKindProjection.footprint store (Patch.run store patch)).isSome = true := by
+          cases found : WorldKindProjection.footprint store (Patch.run store patch) with
+          | none => rw [found] at decoded; exact absurd rfl decoded
+          | some _ => rfl
+        cases ok
+        exact ⟨prepared, valid, decodes⟩
+    · cases ok
+
+/-- **The world actions' declaration.** An object's world-instance cell at schema version 1; the
+root is pinned; no rotate; every write is the body's (the scope's fields are the inner ones:
+`worldEffect.footprint`); the authorization is the kind's ordinary write. -/
+def worldSpec : Revival.EffectSpec EffectCtx
+    (Revival.storeSubstrate WorldKindCell.instanceLayout)
+    (List WorldKindInstance.Action) WorldRefusal where
+  opStream := StreamCodec.list WorldKindInstance.actionStream
+  refusalName := WorldRefusal.name
+  accepts := fun kind => kind == .object
+  version := 1
+  sem := worldSem
+  rotate := fun _ _ => []
+  rotated := fun _ => false
+  field := fun _ => .body
+  amount := fun _ _ => 0
+  frame := fun _ => {.body}
+  verb := fun kind _ => DeclaredResourceScalar.ordinaryVerb kind
+  view := fun site _ before after => WorldKindProjection.project site.subject before after
+
+/-- The JSON face: `{"type": "world", "descriptor": …, "actions": […]}`; the descriptor is what
+the actions are read against and is not part of the operation. -/
+def worldOfJson (path : String) (json : Lean.Json) :
+    Except String (List WorldKindInstance.Action) := do
+  let obj ← EffectJson.exactObject path ["type", "descriptor", "actions"] json
+  let descriptor ← ResourceGrammarJson.worldDescriptor (path ++ ".descriptor")
+    (← EffectJson.field path "descriptor" obj)
+  EffectJson.list (path ++ ".actions") (ResourceGrammarJson.worldAction descriptor)
+    (← EffectJson.field path "actions" obj)
+
+/-- What an inbox shows of signed world actions: how many, and their canonical bytes. -/
+def worldToJson (actions : List WorldKindInstance.Action) : List (String × Lean.Json) :=
+  [("actionCount", EffectJson.decimal actions.length),
+   ("exactActionsHex", .str (ContentJson.encodeHex
+     ((StreamCodec.list WorldKindInstance.actionStream).encode actions)))]
+
+/-- **A world instance's actions, as the registry binds them** (code 4, JSON `world`). -/
+def worldEffect : Effect where
+  name := "world"
+  L := WorldKindCell.instanceLayout
+  wire := WorldKindCell.instanceWire
+  O := List WorldKindInstance.Action
+  R := WorldRefusal
+  decO := inferInstance
+  spec := worldSpec
+  pack := fun _ cell => ⟨.worldInstance, cell⟩
+  unpack := fun _ packed =>
+    match packed with
+    | ⟨.worldInstance, value⟩ => some value
+    | _ => none
+  toJson := worldToJson
+  ofJson := worldOfJson
+  display := fun actions => [s!"world instance: {actions.length} guarded field actions"]
+  member := some fun _ actions store => WorldKindCell.preparePatch store actions
+  member_exact := by
+    intro f stated ctx actions store ps patch answered sem
+    cases stated
+    have prepared := (worldSem_ok (show worldSem ctx actions store = .ok ps from sem)).1
+    exact Option.some.inj (prepared.symm.trans answered)
+  member_tail := fun _ _ _ _ _ _ _ => rfl
+  footprint := some fun pre post =>
+    (WorldKindProjection.footprint pre post).getD ⟨{.body}, fun _ => 0⟩
+  runWrites := some fun pre program index actions => WorldKindMethods.writes pre program index actions
+  authors := fun actions => !actions.isEmpty
+  unpack_pack := fun _ _ => rfl
+  pack_unpack := by
+    intro kind packed cell selected
+    split at selected
+    · cases selected; rfl
+    · cases selected
+  observes_silent := by
+    intro ctx actions store ps observed _
+    exact absurd ((ordinaryVerb_writes ctx.kind).symm.trans observed) Bool.false_ne_true
+  complete := by
+    intro ctx actions store ps ok
+    have valid := (worldSem_ok (show worldSem ctx actions store = .ok ps from ok)).2.1
+    refine ⟨fun loc _ _ => Finset.mem_singleton_self _, ?_⟩
+    have ran := Revival.store_run_validFrom ps store valid
+    have nil : ps ++ worldSpec.rotate ctx store = ps := List.append_nil ps
+    rw [nil, ran]
+    rfl
+  view_unjoint := fun site _ before after => WorldKindProjection.project_unjoint site.subject before after
+
+/-- **The world actions' member patch is complete**: wherever the semantics admits the actions,
+the member is shown exactly their patch. World actions pin their root at every operation. The
+converse does not hold and is not claimed: the semantics also refuses a patch that does not
+apply or whose post does not decode, which thin consent checks itself (`Patch.ValidFrom`) or
+which commits nothing. -/
+theorem world_member_complete (ctx : EffectCtx) (actions : List WorldKindInstance.Action)
+    (store : Store WorldKindCell.instanceLayout) (ps : Patch WorldKindCell.instanceLayout)
+    (admitted : worldEffect.spec.sem ctx actions store = .ok ps) :
+    worldEffect.spec.commutes actions = false ∧
+      worldEffect.memberPatch ctx.signed actions store = .ok ps :=
+  ⟨rfl, worldEffect.memberPatch_of rfl rfl
+    (worldSem_ok (show worldSem ctx actions store = .ok ps from admitted)).1⟩
 
 end Minidregg.Kernel.DeclaredResourceController

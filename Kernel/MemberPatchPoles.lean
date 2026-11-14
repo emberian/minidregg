@@ -13,6 +13,9 @@ whose declaration states a member patch (the kind definition revision, code 5):
   `MemberExact`. `Effect.member_exact` is a field of the declaration, so that record is not an
   `Effect`: the law has teeth at the declaration, before any theorem about thin consent.
 
+`ComputeTargetWorldArm` is stated here and owed (not proved): the world actions' registered
+computation is the deleted hand arm's expression.
+
 The other two teeth do not need a sample and are proved beside the keystone
 (`MemberPatchUnstatedRefused`, `MemberPatchCommutingRefused`).
 -/
@@ -74,6 +77,32 @@ def MemberPatchSatisfiable : Prop :=
 shows the empty patch for every revision. -/
 def MemberPatchGhostRefuted : Prop :=
   ¬ MemberExact kindDefinitionSpec (fun _ _ _ => some [])
+
+/-- **Owed: stated, not proved.** A world target's computation is the expression the hand arm
+of `computeTarget` was before world actions were declared, its one refusal now the
+declaration's by name. The kind definition's is proved (`computeTarget_kindDefinition_arm`);
+this one is by the same proof over `worldSem`. -/
+def ComputeTargetWorldArm : Prop :=
+  ∀ (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (actions : List WorldKindInstance.Action) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : Materialized WorldKindCell.instanceMaterializer),
+    computeTarget snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .world actions, observe, audienceEpoch,
+          audienceRoster⟩ pre =
+      (if kind != .object then .error Reject.wrongRole
+        else if version != 1 then .error Reject.unsupportedVersion
+        else if root != pre.root then .error Reject.staleTarget
+        else match WorldKindCell.preparePatch pre.logical actions with
+          | none => .error (Reject.effect (.refused 4 "worldKind" .empty))
+          | some patch =>
+            if Patch.ValidFrom pre.logical patch then
+              if (WorldKindProjection.footprint pre.logical (Patch.run pre.logical patch)).isNone
+              then .error (Reject.effect (.refused 4 "worldKind" .empty))
+              else .ok (Patch.run pre.logical patch)
+            else .error (Reject.effect (.refused 4 "worldKind" .empty)) :
+        Except Reject (Store WorldKindCell.instanceLayout))
 
 /-! ## The sample: a fieldless kind at revision 1, revised to revision 2 -/
 

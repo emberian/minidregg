@@ -165,8 +165,9 @@ def render (packageBytes : List UInt8) (verifiedReceipt : Receipt)
       match target.payload with
       | .scalar actions => !actions.isEmpty
       | .append _ => true
-      | .world actions => !actions.isEmpty
-      | .registered code op => !(Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).observeOnly op
+      | .registered code op =>
+          !(Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).observeOnly op &&
+            (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).authors op
       | .computeFunding _ | .moneyConsent _ => false) do
     throw "original call has no authored publication to the named resource"
   let messageId :=

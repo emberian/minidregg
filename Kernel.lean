@@ -118,7 +118,7 @@ import Kernel.ResourceEffect  -- a declared-resource effect as ONE declaration (
 import Kernel.ResourceGrammarJson  -- the request grammar of the hand-armed payloads (scalar action, stream ref, world descriptor/definition/action, money batch), once: the Host's and the agreement's decoders both read it
 import Kernel.ResourcePayloadJson  -- payloadOfJson: the one reader of a target payload's JSON; which payloads a reader admits is its parameter (hostRefuses, agreementRefuses)
 import Kernel.ReadEffects  -- the two root-pinning reads DECLARED and BOUND (registry codes 3 and 7): readEffect, kindReadEffect; no operand, no hand arm
-import Kernel.WorldKindEffects  -- the kind definition revision DECLARED and BOUND (registry code 5): kindDefinitionEffect, its member patch (prepareDefinition at the served store) with completeness and its converse; no hand arm
+import Kernel.WorldKindEffects  -- world actions and the kind definition revision DECLARED and BOUND (registry codes 4 and 5): worldEffect (member patch preparePatch, its own footprint, run writes and authorship), kindDefinitionEffect (member patch prepareDefinition, complete and its converse); no hand arm
 import Kernel.CitedRead  -- the cited read DECLARED (registry code 9): citedRead, citedProject, its refusals with their detail, its faces, citedEffect
 import Kernel.ContentJson  -- the content command's JSON face: the request grammar (contentOfJson), the reader's view (contentToJson), the display
 import Kernel.ContentEffect  -- the content write DECLARED and BOUND (registry code 1): contentSpec, contentSpec_complete (frame and replay), contentOpens, contentEffect
