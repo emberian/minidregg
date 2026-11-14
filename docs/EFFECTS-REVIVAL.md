@@ -434,9 +434,44 @@ and `moneyOperationJson` moved into the declaration's `toJson`). `liveLegacy = [
   the request JSON, the inbox JSON, the inspect lines, the projection slots, the order of the
   four refusals (all executed in `Assurance/MemberPatchPoles.lean`).
 
-**Next**: `append` (2). It needs a fresh-cell output (the entry cell) that `Effect` cannot
-state yet. After it `liveLegacy = []`, the legacy decoder and `Payload`'s last hand constructor
-go, and the census's hand column is zero.
+**Next**: `append` (2), the last hand constructor (27 arms and one string arm in 8 files:
+13 in the transaction module, 5 in the controller, 4 in thin consent, 2 in
+`NativeObservationController`, one each in `Host/FnInboxView.lean`, `Host/InspectRender.lean`,
+`Host/GrainOriginSource.lean`). What the source says a binding takes (read, not built):
+
+* The spec: an object's stream head (`StreamCell.headLayout`, `headWire`, packed
+  `⟨.stream, cell⟩`), version `StreamCell.commandVersion`, verb `appendObject` on an object,
+  `commutes := fun _ => true` (an append pins no root: `append_planned_root_irrelevant`), no
+  rotate. The semantics is the hand arm of `computeTarget`: the two length bounds,
+  `DomainEpoch.admitAppend` at the loaded head, the head's presence and `room` binding, the
+  `ref` bound, then the one `headWriteOp`. Its refusals (`streamTopic`, `streamPayload`,
+  `channel reason`, `wrongRole` twice, `streamRef`) become the declaration's by name unless
+  `Reject.ofDispatch` carries them back; say which text moves.
+* `streamRecord` takes the whole command but reads its subject and nonce only (through
+  `operationMarker`), plus the snapshot's domain, the semantics digest and the height: all in
+  `EffectCtx`. `operationMarker` should take the subject and nonce so the semantics can call it.
+* **The fresh cell.** `appendedEntry` (the entry at the loaded head's next position) is what
+  `Effect` cannot state: a field for the cells an admitted operation gives birth to, from the
+  context, the operation and the loaded store (the entry is `StreamCell.Entry`; the controller's
+  `entryWrites` maps it through `StreamWrite.entryWrite` to a `DataWrite`, and
+  `Kernel/StreamWrite.lean` is downstream of nothing in the registry). Statement first: the
+  birth is stated iff the semantics admits, and its cell is not the target's.
+* `member = none` (the record holds the admission height, which is neither signed nor served):
+  thin consent's text "append: records the admission height" becomes the generic one.
+* `targetWrites`: the default (one write at coordinate 0 holding the operation's canonical
+  bytes) is the hand arm's expression. `Target.isRead` is false, `authors` is true, the view is
+  `streamSlots request before`.
+* After it: `liveLegacy = []`, `legacyPayloadDecode`, `legacy_unbound`, `legacyPayloadTags` and
+  the `Payload` inductive's last hand constructor go (`Payload` is then a structure over the
+  registry), and the census's hand column is zero.
+* Journeys for it: the stream and feed journeys beside the standing set.
+
+Not run on any head of this lane: JJOB1 and JJOB. They need `JOB_PROGRAMS/collatz.jam` (and
+JJOB `liar.jam` and `NOCK_RUN`); the tree holds `collatz.hoon`, `liar.hoon` and each jam's
+provenance (the pinned `hoonc` at nockchain `cbd9298f` with two bootstrap jams by hash, mode
+`--new --arbitrary`, then a kick at axis 2 and a minimal re-jam), but no script that produces
+the jam, and neither a built `hoonc` nor the tool for the kick and re-jam nor the runner is on
+the Mac or hbox (`~/dev/nockchain` holds the revision, unbuilt).
 
 **The payload's JSON has one reader** (`Kernel/ResourcePayloadJson.lean`, `payloadOfJson`). The
 grammar of the hand-armed payloads (`action`, `streamRef`, the world descriptor, definition and
