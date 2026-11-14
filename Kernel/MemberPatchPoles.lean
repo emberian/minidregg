@@ -13,7 +13,7 @@ whose declaration states a member patch (the kind definition revision, code 5):
   `MemberExact`. `Effect.member_exact` is a field of the declaration, so that record is not an
   `Effect`: the law has teeth at the declaration, before any theorem about thin consent.
 
-`ComputeTargetWorldArm` is stated here and owed (not proved): the world actions' registered
+`ComputeTargetWorldArm` (proved: `computeTarget_world_arm`): the world actions' registered
 computation is the deleted hand arm's expression.
 
 The other two teeth do not need a sample and are proved beside the keystone
@@ -78,10 +78,9 @@ shows the empty patch for every revision. -/
 def MemberPatchGhostRefuted : Prop :=
   ¬ MemberExact kindDefinitionSpec (fun _ _ _ => some [])
 
-/-- **Owed: stated, not proved.** A world target's computation is the expression the hand arm
-of `computeTarget` was before world actions were declared, its one refusal now the
-declaration's by name. The kind definition's is proved (`computeTarget_kindDefinition_arm`);
-this one is by the same proof over `worldSem`. -/
+/-- **The bridge for world actions.** A world target's computation is the expression the hand
+arm of `computeTarget` was before world actions were declared, its one refusal now the
+declaration's by name (the kind definition's twin is `computeTarget_kindDefinition_arm`). -/
 def ComputeTargetWorldArm : Prop :=
   ∀ (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
     (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
@@ -169,6 +168,55 @@ theorem memberPatch_satisfiable : MemberPatchSatisfiable := by
   · exact memberPatch_registered_of (code := kindDefinitionCode) (op := sampleNext)
       (kindDefinitionEffect.memberPatch_of rfl rfl sample_prepared)
 
+set_option backward.isDefEq.respectTransparency false in
+theorem computeTarget_world_arm : ComputeTargetWorldArm := by
+  intro snapshot semantics ambient command kind id capability version root actions observe
+    audienceEpoch audienceRoster pre
+  show (worldEffect.compute 4 (targetCtx snapshot semantics ambient command kind id
+    capability observe audienceEpoch audienceRoster) version root actions pre).mapError
+      Reject.ofDispatch = _
+  unfold Effect.compute
+  rw [world_run]
+  have ctxKind : (targetCtx snapshot semantics ambient command kind id capability observe
+      audienceEpoch audienceRoster).kind = kind := rfl
+  have accepts : worldEffect.spec.accepts kind = (kind == .object) := rfl
+  have current : worldEffect.spec.version = 1 := rfl
+  have pinned : worldEffect.spec.commutes actions = false := rfl
+  rw [ctxKind, accepts, current, pinned]
+  by_cases role : (kind == ResourceKind.object) = false
+  · have refused : (kind != ResourceKind.object) = true := by simp [bne, role]
+    rw [if_pos role, if_pos refused]
+    rfl
+  have accepted : ¬ (kind != ResourceKind.object) = true := by
+    simpa [bne] using role
+  rw [if_neg role, if_neg accepted]
+  by_cases versioned : version ≠ 1
+  · have refused : (version != 1) = true := bne_iff_ne.mpr versioned
+    rw [if_pos versioned, if_pos refused]
+    rfl
+  have current' : ¬ (version != 1) = true := fun refused => versioned (bne_iff_ne.mp refused)
+  rw [if_neg versioned, if_neg current']
+  by_cases moved : false = false ∧ root ≠ pre.root
+  · have refused : (root != pre.root) = true := bne_iff_ne.mpr moved.2
+    rw [if_pos moved, if_pos refused]
+    rfl
+  have same : ¬ (root != pre.root) = true := fun refused => moved ⟨rfl, bne_iff_ne.mp refused⟩
+  rw [if_neg moved, if_neg same]
+  cases WorldKindCell.preparePatch pre.logical actions with
+  | none => rfl
+  | some patch =>
+    dsimp only
+    by_cases valid : Patch.ValidFrom pre.logical patch
+    · rw [if_pos valid, if_pos valid]
+      by_cases undecoded :
+          (WorldKindProjection.footprint pre.logical (Patch.run pre.logical patch)).isNone = true
+      · rw [if_pos undecoded, if_pos undecoded]
+        rfl
+      · rw [if_neg undecoded, if_neg undecoded]
+        rfl
+    · rw [if_neg valid, if_neg valid]
+      rfl
+
 theorem memberPatch_ghost_refuted : MemberPatchGhostRefuted := by
   intro exact
   have sem : kindDefinitionSpec.sem
@@ -179,5 +227,6 @@ theorem memberPatch_ghost_refuted : MemberPatchGhostRefuted := by
   cases same
 
 #assert_axioms memberPatch_satisfiable memberPatch_ghost_refuted sampleNext_valid sample_prepared
+#assert_axioms computeTarget_world_arm
 
 end Minidregg.Kernel.NativeThinConsent

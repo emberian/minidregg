@@ -303,9 +303,9 @@ What moved, and what did not:
 * Executed (`Assurance/MemberPatchPoles.lean`, a poll instance): a vote is computed and shown and
   the shown patch run is the receiver's post; a write whose guard fails is refused by both sides
   by name; the footprint is the inner field; `authors [] = false`; the wire bytes and faces.
-* Stated and OWED, not proved: `ComputeTargetWorldArm` (`Kernel/MemberPatchPoles.lean`), the
-  registered computation is the deleted arm's expression with the one refusal renamed. Code 5's
-  is proved (`computeTarget_kindDefinition_arm`); this one is by the same proof over `worldSem`.
+* `ComputeTargetWorldArm` (`Kernel/MemberPatchPoles.lean`, proved: `computeTarget_world_arm`,
+  over `world_run`): the registered computation is the deleted arm's expression with the one
+  refusal renamed.
   Until then the claim "the admitted set did not move" rests on reading `worldSem` against the
   deleted arm, the executed poles, and the journeys.
 

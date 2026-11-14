@@ -391,6 +391,51 @@ def worldEffect : Effect where
     rfl
   view_unjoint := fun site _ before after => WorldKindProjection.project_unjoint site.subject before after
 
+/-- A patch that applies replays to its run: world actions have no rotate. -/
+theorem world_replay (ctx : EffectCtx) (store : Store WorldKindCell.instanceLayout)
+    (ps : List (Revival.storeSubstrate worldEffect.L).Prim)
+    (valid : Patch.ValidFrom store ps) :
+    (Revival.storeSubstrate worldEffect.L).run store
+      (ps ++ worldEffect.spec.rotate ctx store) = some (Patch.run store ps) := by
+  have ran := Revival.store_run_validFrom ps store valid
+  have nil : ps ++ worldEffect.spec.rotate ctx store = ps := List.append_nil ps
+  rw [nil]
+  exact ran
+
+/-- What the controller runs for world actions: the prepared patch replayed where it applies and
+its post decodes, or the one refusal. -/
+theorem world_run (code : Nat) (ctx : EffectCtx) (actions : List WorldKindInstance.Action)
+    (store : Store WorldKindCell.instanceLayout) :
+    worldEffect.run code ctx actions store =
+      match WorldKindCell.preparePatch store actions with
+      | none => .error (.refused code "worldKind" .empty)
+      | some patch =>
+        if Patch.ValidFrom store patch then
+          if (WorldKindProjection.footprint store (Patch.run store patch)).isNone
+          then .error (.refused code "worldKind" .empty)
+          else .ok (Patch.run store patch)
+        else .error (.refused code "worldKind" .empty) := by
+  unfold Effect.run
+  have declared : worldEffect.spec.sem ctx actions store = worldSem ctx actions store := rfl
+  rw [declared]
+  unfold worldSem
+  cases prepared : WorldKindCell.preparePatch store actions with
+  | none => rfl
+  | some patch =>
+    dsimp only
+    by_cases valid : Patch.ValidFrom store patch
+    · rw [if_pos valid, if_pos valid]
+      by_cases undecoded :
+          (WorldKindProjection.footprint store (Patch.run store patch)).isNone = true
+      · rw [if_pos undecoded, if_pos undecoded]
+        rfl
+      · rw [if_neg undecoded, if_neg undecoded]
+        dsimp only
+        rw [world_replay ctx store patch valid]
+        rfl
+    · rw [if_neg valid, if_neg valid]
+      rfl
+
 /-- **The world actions' member patch is complete**: wherever the semantics admits the actions,
 the member is shown exactly their patch. World actions pin their root at every operation. The
 converse does not hold and is not claimed: the semantics also refuses a patch that does not
