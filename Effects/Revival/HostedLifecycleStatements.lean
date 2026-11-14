@@ -16,11 +16,11 @@ def Satisfiable : Prop :=
 
 def Teeth : Prop :=
   receive {context with current := false} openOperation {} =
-    .error (.refused 0 "currentAuthority") ∧
+    .error (.refused 0 "currentAuthority" []) ∧
   receive {context with retained := false} openOperation {} =
-    .error (.refused 0 "exactPreimage") ∧
+    .error (.refused 0 "exactPreimage" []) ∧
   (∀ state, receive context openOperation {} = .ok state →
-    receive context openOperation state = .error (.refused 0 "channelState"))
+    receive context openOperation state = .error (.refused 0 "channelState" []))
 
 def Premise : Prop := ∃ ctx : Context, ctx.current = true ∧ ctx.retained = true ∧ ctx.budget = true
 end Minidregg.Effects.Revival.HostedConversationEngine

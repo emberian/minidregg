@@ -121,8 +121,8 @@ def handler (rules : List Rule) : Handler Context State where
   R := Refusal
   spec := spec rules
   header := fun _ _ => .ok ()
-  select := some
-  pack := id
+  select := fun _ cell => some cell
+  pack := fun _ state => state
 
 def registry (rules : List Rule) : Registry Context State := [(0,handler rules)]
 
