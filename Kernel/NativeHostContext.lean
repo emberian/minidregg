@@ -644,59 +644,136 @@ theorem loadPolicySource_records_eq (domain : Digest)
       (CanonicalCellRegistry.loadPolicySource domain before address).map (·.record) := by
   rw [loadPolicySource_record, loadPolicySource_record, same]
 
-/-- **A policy's sourcing survives a step that wrote no policy source cell**: the verdict
-reads the directory only at the source cell its head names, which (being a source cell
-before) was not written, so it holds the same record after. -/
-theorem policySourced_inherit (config : Config)
-    (before after : Directory Nat CanonicalCellRegistry.registry)
-    (logical : Store.Store CredentialAuthorityState.layout) (written : List Nat)
-    (keeps : ∀ identifier, identifier ∉ written → after.slots identifier = before.slots identifier)
-    (fresh : ∀ identifier ∈ written, holdsNoPolicySource (before.slots identifier) = true)
-    (address : Store.Address CredentialAuthorityState.layout)
-    (prior : policySourced config before logical address = true) :
-    policySourced config after logical address = true := by
-  rcases address with ⟨kind, identifier⟩
-  cases kind
-  all_goals try rfl
-  unfold policySourced at prior ⊢
-  cases found : CredentialAuthorityDomain.headAt logical identifier with
-  | none => simp only [found] at prior; cases prior
-  | some head =>
-      simp only [found] at prior ⊢
-      cases loadedBefore : CanonicalCellRegistry.loadPolicySource config.deployment.domain before head.address with
-      | none => simp only [loadedBefore] at prior; cases prior
-      | some source =>
-          simp only [loadedBefore] at prior
-          have unwritten : PolicySourceCell.physicalId config.deployment.domain head.address ∉ written := by
-            intro member
-            have none := fresh _ member
-            rw [loadPolicySource_some_present loadedBefore] at none
-            cases none
-          have records := loadPolicySource_records_eq config.deployment.domain before after head.address
-            (keeps _ unwritten)
-          cases loadedAfter : CanonicalCellRegistry.loadPolicySource config.deployment.domain after head.address with
-          | none => rw [loadedAfter, loadedBefore] at records; cases records
-          | some source' =>
-              rw [loadedAfter, loadedBefore] at records
-              simp only [Option.map_some, Option.some.injEq] at records
-              simp only
-              rw [records]
-              exact prior
+/-- The policy a slot's source cell records, if it holds one. -/
+def sourcePolicyAt : CellSlot CanonicalCellRegistry.registry → Option PolicyId
+  | .present ⟨.policySource, payload⟩ => (PolicySourceCell.recordAt payload.logical).map (·.policyId)
+  | _ => none
 
-theorem policiesSourced_inherit (config : Config)
+theorem sourcePolicyAt_of_record {domain address : Digest}
+    {slot : CellSlot CanonicalCellRegistry.registry} {record : CanonicalPolicyAdmission.PolicyRecord}
+    (found : sourceRecordAt domain address slot = some record) :
+    sourcePolicyAt slot = some record.policyId := by
+  cases slot with
+  | absent => cases found
+  | present cell =>
+      obtain ⟨kind, payload⟩ := cell
+      cases kind
+      all_goals first
+        | cases found
+        | (simp only [sourceRecordAt] at found
+           simp only [sourcePolicyAt]
+           cases recorded : PolicySourceCell.recordAt payload.logical with
+           | none => simp [recorded] at found
+           | some held =>
+               simp only [recorded] at found
+               split at found
+               · cases found; rfl
+               · cases found)
+
+/-- The policy whose head an authority address belongs to: its generation, its revision, or one
+of its revision addresses. -/
+def headPolicyOf : Store.Address CredentialAuthorityState.layout → Option PolicyId
+  | ⟨.policyEpoch, policy⟩ => some policy
+  | ⟨.policyRevision, policy⟩ => some policy
+  | ⟨.policyAddress, (policy, _)⟩ => some policy
+  | _ => none
+
+/-- **The policies a step can have unsourced**: those with a head coordinate among the authority
+addresses the step moved, and those whose source cell the step wrote. Every other recorded policy
+keeps its head and its source (`policiesSourced_step`). -/
+def affectedPolicies (changed : List (Store.Address CredentialAuthorityState.layout))
+    (before : Directory Nat CanonicalCellRegistry.registry) (written : List Nat) : List PolicyId :=
+  changed.filterMap headPolicyOf ++ written.filterMap fun identifier => sourcePolicyAt (before.slots identifier)
+
+/-- The sourcing check of a step: each affected policy that is still recorded is sourced in the
+state after it. -/
+def sourcedStepCheck (config : Config) (after : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) (affected : List PolicyId) : Bool :=
+  affected.all fun policy =>
+    (logical ⟨.policyRevision, policy⟩).isNone ||
+      policySourced config after logical ⟨.policyRevision, policy⟩
+
+/-- **Sourcing is maintained by the step, not re-walked.** Where every recorded policy was
+sourced before, the directory kept every unwritten slot, the authority store kept every address
+outside `changed` (the frame of the patch, read off the written cells:
+`CredentialAuthorityLayout.HoldsAuthority.framed`), and each affected policy passes
+`sourcedStepCheck`, every recorded policy is sourced after. The head being unwritten is never
+the premise: an unaffected policy is one none of whose head coordinates moved and whose source
+cell was not written. -/
+theorem policiesSourced_step (config : Config)
     (before after : Directory Nat CanonicalCellRegistry.registry)
-    (logical : Store.Store CredentialAuthorityState.layout) (written : List Nat)
+    (old new : Store.Store CredentialAuthorityState.layout) (written : List Nat)
+    (changed : List (Store.Address CredentialAuthorityState.layout))
     (keeps : ∀ identifier, identifier ∉ written → after.slots identifier = before.slots identifier)
-    (fresh : (written.all fun identifier => holdsNoPolicySource (before.slots identifier)) = true)
-    (prior : policiesSourced config before logical = true) :
-    policiesSourced config after logical = true := by
+    (framed : ∀ address, address ∉ changed → new address = old address)
+    (prior : policiesSourced config before old = true)
+    (checked : sourcedStepCheck config after new (affectedPolicies changed before written) = true) :
+    policiesSourced config after new = true := by
   unfold policiesSourced at prior ⊢
   rw [decide_eq_true_iff] at prior ⊢
   intro address member
-  exact policySourced_inherit config before after logical written keeps
-    (fun identifier inWritten => List.all_eq_true.mp fresh identifier inWritten) address (prior address member)
+  rcases address with ⟨kind, identifier⟩
+  cases kind
+  all_goals try rfl
+  by_cases affected : identifier ∈ affectedPolicies changed before written
+  · have passed := List.all_eq_true.mp checked identifier affected
+    have recorded : new ⟨.policyRevision, identifier⟩ ≠ none :=
+      Minidregg.Theory.SparseMap.mem_support_iff.mp member
+    cases present : new ⟨.policyRevision, identifier⟩ with
+    | none => exact absurd present recorded
+    | some revision => simpa [present] using passed
+  · have unmoved : ∀ address, headPolicyOf address = some identifier → new address = old address := by
+      intro address heads
+      apply framed
+      intro moved
+      exact affected (List.mem_append_left _ (List.mem_filterMap.mpr ⟨address, moved, heads⟩))
+    have heads : CredentialAuthorityDomain.headAt new identifier =
+        CredentialAuthorityDomain.headAt old identifier := by
+      unfold CredentialAuthorityDomain.headAt
+      rw [unmoved ⟨.policyEpoch, identifier⟩ rfl, unmoved ⟨.policyRevision, identifier⟩ rfl]
+      cases old ⟨.policyEpoch, identifier⟩ with
+      | none => rfl
+      | some generation =>
+          cases revision : old ⟨.policyRevision, identifier⟩ with
+          | none => rfl
+          | some version =>
+              simp only [Option.bind_eq_bind, Option.bind_some]
+              rw [unmoved ⟨.policyAddress, (identifier, version)⟩ rfl]
+    have recordedBefore : (⟨.policyRevision, identifier⟩ : Store.Address CredentialAuthorityState.layout) ∈
+        old.support := by
+      rw [Minidregg.Theory.SparseMap.mem_support_iff, ← unmoved ⟨.policyRevision, identifier⟩ rfl]
+      exact Minidregg.Theory.SparseMap.mem_support_iff.mp member
+    have sourcedBefore := prior _ recordedBefore
+    unfold policySourced at sourcedBefore ⊢
+    rw [heads]
+    cases found : CredentialAuthorityDomain.headAt old identifier with
+    | none => simp only [found] at sourcedBefore; cases sourcedBefore
+    | some head =>
+        simp only [found] at sourcedBefore ⊢
+        cases loadedBefore : CanonicalCellRegistry.loadPolicySource config.deployment.domain before head.address with
+        | none => simp only [loadedBefore] at sourcedBefore; cases sourcedBefore
+        | some source =>
+            simp only [loadedBefore] at sourcedBefore
+            have named : source.record.policyId = identifier := (of_decide_eq_true sourcedBefore).1
+            have unwritten : PolicySourceCell.physicalId config.deployment.domain head.address ∉ written := by
+              intro wrote
+              have recorded := loadPolicySource_record config.deployment.domain before head.address
+              rw [loadedBefore, Option.map_some] at recorded
+              have policy := sourcePolicyAt_of_record recorded.symm
+              rw [named] at policy
+              exact affected (List.mem_append_right _ (List.mem_filterMap.mpr ⟨_, wrote, policy⟩))
+            have records := loadPolicySource_records_eq config.deployment.domain before after head.address
+              (keeps _ unwritten)
+            cases loadedAfter : CanonicalCellRegistry.loadPolicySource config.deployment.domain after head.address with
+            | none => rw [loadedAfter, loadedBefore] at records; cases records
+            | some source' =>
+                rw [loadedAfter, loadedBefore] at records
+                simp only [Option.map_some, Option.some.injEq] at records
+                simp only
+                rw [records]
+                exact sourcedBefore
 
-#assert_axioms policiesSourced_inherit
+#assert_axioms policiesSourced_step
 
 /-- One stored cell obeys its role and domain law (vacuous for an absent slot). -/
 def cellLawful (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
@@ -1505,46 +1582,50 @@ theorem cellsLawfulLoadedStep_eq (config : Config) (prior : Opened config) (dura
     · exact lawful identifier member
     · exact loadedCellLawful_outside config loaded identifier member
 
-/-- A step wrote no authority cell (neither the head nor any cell of the authority space:
-`CredentialAuthorityLayout.authorityUnwritten`) and no cell that held a policy source before it. -/
-def sourcesUnwrittenLoaded (config : Config) (prior : Opened config)
-    (written : List DurableDataIntent.CellId) : Bool :=
-  CredentialAuthorityLayout.authorityUnwritten config.deployment.authorityCellId written &&
-    written.all fun identifier => holdsNoPolicySource (prior.directory.directory.slots identifier.value)
+/-- The policies the step from `prior` to `durable` can have unsourced (`affectedPolicies`), read
+off the cells it wrote. -/
+def stepAffectedLoaded (config : Config) (prior : Opened config) (durable : Durable)
+    (written : List DurableDataIntent.CellId) : List PolicyId :=
+  affectedPolicies
+    (CredentialAuthorityLayout.changedAddresses prior.durable.snapshot.canonicalBytes
+      durable.snapshot.canonicalBytes (written.map (·.value)))
+    prior.directory.directory (written.map (·.value))
 
 theorem stepSourcedLoaded_holds (config : Config) (prior : Opened config) (durable : Durable)
     (written : List DurableDataIntent.CellId) (moved : LoadedMoved prior.durable durable written)
-    (unwritten : sourcesUnwrittenLoaded config prior written = true)
     (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot) :
+    (authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot)
+    (checked : sourcedStepCheck config loaded.directory authority.snapshot.logical
+      (stepAffectedLoaded config prior durable written) = true) :
     policiesSourced config loaded.directory authority.snapshot.logical = true := by
-  simp only [sourcesUnwrittenLoaded, Bool.and_eq_true, List.all_eq_true] at unwritten
-  obtain ⟨noAuthority, noSource⟩ := unwritten
-  have sameLogical : authority.snapshot.logical = prior.authority.snapshot.logical :=
-    authority.observed.unique (prior.authority.observed.of_unwritten moved noAuthority)
-  rw [sameLogical]
-  apply policiesSourced_inherit config prior.directory.directory loaded.directory
-    prior.authority.snapshot.logical (written.map (·.value))
+  have kept : ∀ cellId, cellId ∉ written.map (·.value) →
+      durable.snapshot.canonicalBytes ⟨cellId⟩ = prior.durable.snapshot.canonicalBytes ⟨cellId⟩ :=
+    fun cellId unwritten => moved ⟨cellId⟩ fun member => unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)
+  apply policiesSourced_step config prior.directory.directory loaded.directory
+    prior.authority.snapshot.logical authority.snapshot.logical (written.map (·.value)) _ ?_ ?_
+    prior.sourced checked
   · intro identifier notWritten
     exact (CredentialAuthorityDomainReceiver.LoadedDirectory.slots_eq_of_bytes prior.directory loaded
-      identifier (moved ⟨identifier⟩ fun member => notWritten (List.mem_map.mpr ⟨_, member, rfl⟩)).symm).symm
-  · rw [List.all_eq_true]
-    intro identifier member
-    obtain ⟨cell, inWritten, same⟩ := List.mem_map.mp member
-    subst same
-    exact noSource cell inWritten
-  · exact prior.sourced
+      identifier (kept identifier notWritten).symm).symm
+  · exact prior.authority.observed.framed authority.observed kept
 
-/-- The sourcing evidence a step hands the checks: exact when it wrote no source. -/
+/-- The sourcing evidence a step hands the checks: exact when each policy the step can have
+unsourced is sourced after it. No policy outside those is read. -/
 def stepSourcedLoaded (config : Config) (prior : Opened config) (durable : Durable)
     (written : List DurableDataIntent.CellId) (moved : LoadedMoved prior.durable durable written)
     (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
     (authority? : Option (CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot)) :
     ExactEvidence (CoreSourced config directory? authority? (·.directory) (·.snapshot.logical)) :=
-  if unwritten : sourcesUnwrittenLoaded config prior written = true then
-    some ⟨fun loaded authority _ _ =>
-      stepSourcedLoaded_holds config prior durable written moved unwritten loaded authority⟩
-  else none
+  match directory?, authority? with
+  | some loaded, some authority =>
+      if checked : sourcedStepCheck config loaded.directory authority.snapshot.logical
+          (stepAffectedLoaded config prior durable written) = true then
+        some ⟨fun _ _ sameDirectory sameAuthority => by
+          cases sameDirectory
+          cases sameAuthority
+          exact stepSourcedLoaded_holds config prior durable written moved loaded authority checked⟩
+      else none
+  | _, _ => none
 
 /-- **Validation of the image one step after a validated one**, over the cells the step wrote. -/
 def validateLoadedStep (config : Config) (prior : Opened config) (durable : Durable)

@@ -337,13 +337,9 @@ theorem loadServedAuthority_ofLoaded (deployment : CanonicalCellRegistry.Deploym
       | none => rfl
       | some fullLoaded =>
           exfalso
-          have absentDefault : loaded.image.seed.absentBytes = [] := by
-            unfold loadDeployment loadDeploymentAt at full
-            split at full
-            · assumption
-            · cases full
+          obtain ⟨absentDefault, sealed⟩ := loadDeploymentAt_sealed full
           have realized : RealizesAuthority (Served.ofLoaded loaded sameStart).canonicalBytes
-              deployment.authorityCellId fullLoaded.snapshot.cell.logical := bytes ▸ fullLoaded.observed
+              deployment.authorityCellId fullLoaded.snapshot.cell.logical := bytes ▸ sealed
           obtain ⟨_, found, _⟩ := loadServedAuthority_of_realizes fullLoaded.valid
             (absent.trans absentDefault) realized
           rw [found] at light
@@ -448,7 +444,7 @@ def loadServedAuthorityStep {deployment : CanonicalCellRegistry.Deployment} {ear
         prior.cell (written.map (·.value)) with
     | none => none
     | some cell => some (ServedAuthority.ofCell deployment served cell prior.valid absentDefault
-        (stepCell_realizes prior.observed (fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
+        (stepCell_realizes prior.observed.holds (fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
           unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)) stepped))
   else none
 
@@ -464,7 +460,7 @@ theorem loadServedAuthorityStep_eq {deployment : CanonicalCellRegistry.Deploymen
       | some other =>
           exfalso
           obtain ⟨cell, found, _⟩ := stepCell_of_realizes (written := written.map (·.value))
-            prior.observed (fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
+            prior.observed.holds (fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
               unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)) other.observed
           unfold loadServedAuthorityStep at stepped
           rw [dif_pos other.absentDefault] at stepped

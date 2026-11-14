@@ -465,7 +465,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
+  let authority ← requireSome .authorityUnavailable (readDeployment deployment durable)
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot = snapshot.cell.root then
@@ -625,7 +625,7 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable
+  let some authority := readDeployment deployment durable
     | .error "authority unavailable"
   let some pay := PayCellDomain.load deployment durable.snapshot
     | .error "pay cell unavailable"

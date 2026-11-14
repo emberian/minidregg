@@ -429,7 +429,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
+  let authority ← requireSome .authorityUnavailable (readDeployment deployment durable)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot ≠ snapshot.cell.root then throw .staleAuthority
   if snapshot.spent (marker snapshot.domain profile.semantics command) then throw .replayedMarker

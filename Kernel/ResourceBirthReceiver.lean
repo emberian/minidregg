@@ -314,7 +314,7 @@ theorem platform_unwritten
       CredentialAuthorityLayout.lowerAuthority_cellIds _ _ _ _ _] at written
     rcases List.mem_cons.mp written with head | entry
     · -- the head: the loaded directory holds a live authority cell there, not the platform cell
-      have headHeld := ground.authorityObserved.head
+      have headHeld := ground.authorityObserved.headed
       unfold CredentialAuthorityLayout.headAt at headHeld
       cases opened : CredentialAuthorityLayout.decodeCell
           (ground.view.canonicalBytes ⟨deployment.authorityCellId⟩) with
@@ -602,8 +602,9 @@ theorem installed_authority {height : Height}
       · obtain ⟨item, inBirths, rfl⟩ := List.mem_map.mp birth
         rcases accepted.prepared.initials item inBirths with user | sourced
         · exact CanonicalCellRegistry.userInitial_not_authority user
-        · rw [sourced.2.1]; decide
-      · rw [accepted.prepared.auxiliaryExact] at auxiliary
+        · rw [sourced.2.1]; intro same; cases same
+      · change request ∈ accepted.ingress.descriptor.auxiliaryCreates at auxiliary
+        rw [accepted.prepared.auxiliaryExact] at auxiliary
         obtain ⟨record, _, rfl⟩ := List.mem_map.mp auxiliary
         intro same
         cases same
@@ -612,13 +613,13 @@ theorem installed_authority {height : Height}
     · exact ⟨by
         rw [show (ResourceBirthController.Concrete.packedWrite deployment.factoryId _ _).cellId =
           ⟨deployment.factoryId⟩ from rfl, ground.bytes_of_present _ _ accepted.prepared.factory.present]
-        exact CredentialAuthorityLayout.decodeCell_live_other _ (by decide),
-        CredentialAuthorityLayout.decodeCell_live_other _ (by decide)⟩
+        exact CredentialAuthorityLayout.decodeCell_live_other _ (by intro same; cases same),
+        CredentialAuthorityLayout.decodeCell_live_other _ (by intro same; cases same)⟩
     · exact ⟨by
         rw [show (ResourceBirthController.Concrete.packedWrite deployment.resourceBookId _ _).cellId =
           ⟨deployment.resourceBookId⟩ from rfl, ground.bytes_of_present _ _ accepted.prepared.book.present]
-        exact CredentialAuthorityLayout.decodeCell_live_other _ (by decide),
-        CredentialAuthorityLayout.decodeCell_live_other _ (by decide)⟩
+        exact CredentialAuthorityLayout.decodeCell_live_other _ (by intro same; cases same),
+        CredentialAuthorityLayout.decodeCell_live_other _ (by intro same; cases same)⟩
 
 /-- **`BirthAuthorityWritesBounded` holds of the receiver's own writes.** The authority writes
 of an admitted birth's intent are `lowerBirth` at the batch's post, so their count and encoded

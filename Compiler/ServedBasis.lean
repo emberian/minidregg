@@ -195,7 +195,7 @@ inductive Ground (deployment : CanonicalCellRegistry.Deployment) where
 namespace Ground
 
 open CredentialAuthorityDomainReceiver (cellIdOf)
-open CredentialAuthorityLayout (RealizesAuthority Update)
+open CredentialAuthorityLayout (RealizesAuthority HoldsAuthority Update)
 
 variable {deployment : CanonicalCellRegistry.Deployment}
 
@@ -321,12 +321,13 @@ theorem authoritySpent (ground : Ground deployment) :
   | light basis => rfl
   | full _ _ authority => exact authority.spentExact
 
-/-- The ground's authority store is the one its cells realise: the head at the pinned identifier
-holds its logical root and each address's own entry cell holds its value. -/
+/-- The ground's authority store is the one its cells hold: a head at the pinned identifier and
+each address's value at its own entry cell. (The light shape's is sealed as well: its served
+authority compared the head's root at the open and at every step.) -/
 theorem authorityObserved (ground : Ground deployment) :
-    RealizesAuthority ground.view.canonicalBytes deployment.authorityCellId ground.authority.cell.logical := by
+    HoldsAuthority ground.view.canonicalBytes deployment.authorityCellId ground.authority.cell.logical := by
   cases ground with
-  | light basis => exact basis.authority.observed
+  | light basis => exact basis.authority.observed.holds
   | full _ _ authority => exact authority.observed
 
 /-- Whether this ground answers a nullifier: on the light route only a declared

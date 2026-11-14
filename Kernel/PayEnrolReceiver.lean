@@ -898,7 +898,7 @@ structure Planned (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
   directory : LoadedDirectory durable
   directoryExact : loadDirectory durable = some directory
   authority : Loaded deployment durable.snapshot
-  authorityExact : loadDeployment deployment durable = some authority
+  authorityExact : readDeployment deployment durable = some authority
   pay : PayCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
   factory : FactoryCell deployment directory.directory
@@ -949,7 +949,7 @@ def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
   match directoryExact : loadDirectory durable with
   | none => throw .directoryUnavailable
   | some directory =>
-  match authorityExact : loadDeployment deployment durable with
+  match authorityExact : readDeployment deployment durable with
   | none => throw .authorityUnavailable
   | some authority =>
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
@@ -1346,7 +1346,7 @@ enrollment family's refusal type. -/
 def envelopeClaims {R : Type} (unavailable : R) (signature : CredentialSignatureAdmission.Reject → R)
     (deployment : Deployment) (durable : Durable) (ingress : DecodedIngress) :
     Except R (List SigQuery) :=
-  match loadDeployment deployment durable with
+  match readDeployment deployment durable with
   | none => .error unavailable
   | some authority =>
       match CredentialSignatureAdmission.envelopeClaim authority.snapshot ingress.command.observer
@@ -1728,7 +1728,7 @@ def signingHeader {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (native : CredentialSignatureIO.NativeConfig) (command : Command) :
     IO (Except String CredentialSignedEnvelopeController.SignedHeader) := do
-  let some authority := loadDeployment deployment durable
+  let some authority := readDeployment deployment durable
     | return .error "authority unavailable"
   let some pay := PayCellDomain.load deployment durable.snapshot
     | return .error "pay cell unavailable"

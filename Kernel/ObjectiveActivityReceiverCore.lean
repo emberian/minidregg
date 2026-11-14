@@ -1022,7 +1022,7 @@ theorem Gated.sound {F : Type} [Field F] {deployment : Deployment}
 def gate {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) (claimed : Digest) : Except Reject (Gated deployment profile ambient durable command claimed) := do
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
+  let authority ← requireSome .authorityUnavailable (readDeployment deployment durable)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot ≠ snapshot.cell.root then throw .staleAuthority
   if snapshot.spent (marker snapshot.domain profile.semantics command) then throw .replayedMarker
@@ -1140,7 +1140,7 @@ before verifying or deciding anything, whatever the command's content or the out
 The same op id with a different call is refused here; the same call is answered first by `replay`. -/
 theorem gate_spent_refused
     {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot} {claimed : Digest}
-    (auth : loadDeployment deployment durable = some authority)
+    (auth : readDeployment deployment durable = some authority)
     (current : command.expectedAuthorityRoot = authority.snapshot.cell.root)
     (spent : authority.snapshot.spent (marker authority.snapshot.domain profile.semantics command) = true) :
     gate deployment profile ambient durable command claimed = .error .replayedMarker := by
@@ -3086,7 +3086,7 @@ way. -/
 def verifyRetry (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig) (durable : Durable)
     (ingress : DecodedIngress) : IO (Except Reject Unit) := do
-  let some authority := loadDeployment deployment durable
+  let some authority := readDeployment deployment durable
     | return .error .authorityUnavailable
   let command := ingress.command
   let claimed := marker authority.snapshot.domain profile.semantics command

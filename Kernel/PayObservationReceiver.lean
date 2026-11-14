@@ -298,7 +298,7 @@ structure Planned {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
   directory : LoadedDirectory durable
   directoryExact : loadDirectory durable = some directory
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
-  authorityExact : loadDeployment deployment durable = some authority
+  authorityExact : readDeployment deployment durable = some authority
   pay : PayCellDomain.Loaded deployment durable.snapshot
   clock : ClockCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
@@ -323,7 +323,7 @@ def planReport {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
   match directoryExact : loadDirectory durable with
   | none => throw .directoryUnavailable
   | some directory =>
-  match authorityExact : loadDeployment deployment durable with
+  match authorityExact : readDeployment deployment durable with
   | none => throw .authorityUnavailable
   | some authority =>
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
@@ -440,7 +440,7 @@ post is the decided batch applied to the loaded Book.  A value built any way at
 all carries all of it. -/
 theorem Planned.sound (planned : Planned deployment profile ambient durable command) :
     loadDirectory durable = some planned.directory ∧
-      loadDeployment deployment durable = some planned.authority ∧
+      readDeployment deployment durable = some planned.authority ∧
       decideObservations planned.pay.cell.logical planned.clock.clock (bookOf planned.book)
         command.tip command.observations = .ok planned.plan ∧
       chainTipOf planned.payPost.logical = some command.tip ∧
@@ -490,7 +490,7 @@ header.  A key lookup and a decode; no decision is made before the Receiver has
 verified it. -/
 def claims (deployment : Deployment) (durable : Durable) (ingress : DecodedIngress) :
     Except Reject (List SigQuery) :=
-  match loadDeployment deployment durable with
+  match readDeployment deployment durable with
   | none => .error .authorityUnavailable
   | some authority =>
       match CredentialSignatureAdmission.envelopeClaim authority.snapshot ingress.command.observer
@@ -878,7 +878,7 @@ decide, the header is built over an empty plan at the current tariff and clock
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable
+  let some authority := readDeployment deployment durable
     | .error "authority unavailable"
   let some pay := PayCellDomain.load deployment durable.snapshot
     | .error "pay cell unavailable"

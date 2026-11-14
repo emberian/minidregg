@@ -66,12 +66,14 @@ theorem selected_current (loaded : Loaded deployment physical) (subject : Subjec
     CredentialAuthorityState.currentSigningKey loaded.snapshot.logical subject = some selected.key :=
   selected.current
 
-theorem selected_root (loaded : Loaded deployment physical) (subject : SubjectId)
+/-- The selected key is read from the store the physical cells hold: the subject's key record
+sits at its own entry cell. -/
+theorem selected_held (loaded : Loaded deployment physical) (subject : SubjectId)
     (epoch : Nat) (publicKey : List UInt8) (_selected : Selected loaded subject epoch publicKey) :
-    CredentialAuthorityDomainReceiver.cellRoot loaded.snapshot.cell =
-      physical.model.roots (CredentialAuthorityDomainReceiver.cellIdOf deployment) :=
-  loaded.root_exact
+    CredentialAuthorityLayout.HoldsAuthority physical.canonicalBytes deployment.authorityCellId
+      loaded.snapshot.cell.logical :=
+  loaded.observed
 
 #assert_axioms selected_current
-#assert_axioms selected_root
+#assert_axioms selected_held
 end Minidregg.Kernel.NativeCurrentSigningKey

@@ -28,11 +28,12 @@
 #                                    is confirmed to its client by the other three receipts, and replica 3,
 #                                    restarted with no further call, asks its peers and holds the record too.
 #                                    `append-flatness`: ${GENERIC_SIMPLEX_FLAT_HEIGHTS:-48} births in process;
-#                                    the median application hand-off (the ordered append) per KB of appended
-#                                    record over the last 8 heights may be at most 2 times that over the first
-#                                    8 (a birth's record itself grows with the height; the row bounds what the
-#                                    append adds to that). A ratio of medians on one box in one run: a bound
-#                                    on growth, not a published timing.
+#                                    the median application hand-off (the ordered append) over the last 8
+#                                    heights may be at most 2 times that over the first 8, and the median
+#                                    appended record at most one eighth larger: both raw, neither per KB (a
+#                                    birth's authority writes are the head and its own entries, never the
+#                                    store). A ratio of medians on one box in one run: a bound on growth,
+#                                    not a published timing.
 #                                    `rejoin`: one replica stopped for two calls and restarted into an idle
 #                                    domain catches up, in process, logical clock, no timer
 #
@@ -171,7 +172,7 @@ plant corrupt-segment 'segment 1: its snapshot is not the state the previous seg
   bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/bad" --plant corrupt-segment && "$1/minidregg-four-source-fixture" audit-journal "$2/bad" 0' _ "$bin" "$tmp"
 plant foreign-history "the commitment's digest is not that of the source prefix" \
   run_world bad-run 40 --plant foreign-history
-plant revalidate-prefix 'append flatness: the median application hand-off per KB' \
+plant revalidate-prefix 'append flatness: the median application hand-off over the last' \
   flat flat-bad 12 3 2 --plant revalidate-prefix
 plant silent-rejoin 'rejoin: the restarted replica stayed behind' \
   rejoin rejoin-bad --plant silent-rejoin

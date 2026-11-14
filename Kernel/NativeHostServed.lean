@@ -430,53 +430,60 @@ theorem cellsLawfulStep_eq (config : Config) {earlier store : StoreIdentity}
     · exact lawful identifier member
     · exact servedCellLawful_outside config loaded identifier member
 
-/-- A step wrote no authority cell (neither the head nor any cell of the authority space:
-`CredentialAuthorityLayout.authorityUnwritten`) and no cell that held a policy source before it. -/
-def sourcesUnwritten (config : Config) {earlier : StoreIdentity} (prior : OpenedServed config earlier)
-    (written : List DurableDataIntent.CellId) : Bool :=
-  CredentialAuthorityLayout.authorityUnwritten config.deployment.authorityCellId written &&
-    written.all fun identifier => holdsNoPolicySource (prior.directory.directory.slots identifier.value)
+/-- The policies the step from `prior` to `served` can have unsourced (`affectedPolicies`), read
+off the cells it wrote. -/
+def stepAffected (config : Config) {earlier store : StoreIdentity} (prior : OpenedServed config earlier)
+    (served : State store) (written : List DurableDataIntent.CellId) : List PolicyId :=
+  affectedPolicies
+    (CredentialAuthorityLayout.changedAddresses prior.served.canonicalBytes served.canonicalBytes
+      (written.map (·.value)))
+    prior.directory.directory (written.map (·.value))
 
 theorem stepSourced_holds (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store)
     (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
-    (unwritten : sourcesUnwritten config prior written = true)
-    (loaded : ServedDirectory served) (authority : ServedAuthority config.deployment served) :
+    (loaded : ServedDirectory served) (authority : ServedAuthority config.deployment served)
+    (checked : sourcedStepCheck config loaded.directory authority.cell.logical
+      (stepAffected config prior served written) = true) :
     policiesSourced config loaded.directory authority.cell.logical = true := by
-  simp only [sourcesUnwritten, Bool.and_eq_true, List.all_eq_true] at unwritten
-  obtain ⟨noAuthority, noSource⟩ := unwritten
-  have sameCell : authority.cell = prior.authority.cell :=
-    CellState.Materialized.ext (authority.observed.unique
-      (prior.authority.observed.of_unwritten moved.keeps noAuthority))
-  rw [sameCell]
-  apply policiesSourced_inherit config prior.directory.directory loaded.directory
-    prior.authority.cell.logical (written.map (·.value))
+  have kept : ∀ cellId, cellId ∉ written.map (·.value) →
+      served.canonicalBytes ⟨cellId⟩ = prior.served.canonicalBytes ⟨cellId⟩ :=
+    fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
+      unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)
+  apply policiesSourced_step config prior.directory.directory loaded.directory
+    prior.authority.cell.logical authority.cell.logical (written.map (·.value)) _ ?_ ?_
+    prior.sourced checked
   · intro identifier notWritten
     exact (servedSlots_eq_of_bytes prior.directory loaded identifier
-      (moved.keeps ⟨identifier⟩ fun member => notWritten (List.mem_map.mpr ⟨_, member, rfl⟩)).symm).symm
-  · rw [List.all_eq_true]
-    intro identifier member
-    obtain ⟨cell, inWritten, same⟩ := List.mem_map.mp member
-    subst same
-    exact noSource cell inWritten
-  · exact prior.sourced
+      (kept identifier notWritten).symm).symm
+  · exact prior.authority.observed.holds.framed authority.observed.holds kept
 
-/-- The sourcing evidence a step hands the checks: exact when it wrote no source. -/
+/-- The sourcing evidence a step hands the checks: exact when each policy the step can have
+unsourced (a head coordinate among the moved authority addresses, or a written source cell) is
+sourced after it. No policy outside those is read, and the head being unwritten is never the
+test. -/
 def stepSourced (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store)
     (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written)
     (directory? : Option (ServedDirectory served))
     (authority? : Option (ServedAuthority config.deployment served)) :
     ExactEvidence (CoreSourced config directory? authority? (·.directory) (·.cell.logical)) :=
-  if unwritten : sourcesUnwritten config prior written = true then
-    some ⟨fun loaded authority _ _ =>
-      stepSourced_holds config prior served written moved unwritten loaded authority⟩
-  else none
+  match directory?, authority? with
+  | some loaded, some authority =>
+      if checked : sourcedStepCheck config loaded.directory authority.cell.logical
+          (stepAffected config prior served written) = true then
+        some ⟨fun _ _ sameDirectory sameAuthority => by
+          cases sameDirectory
+          cases sameAuthority
+          exact stepSourced_holds config prior served written moved loaded authority checked⟩
+      else none
+  | _, _ => none
 
 /-- **Validation of the state one step after a validated one**, over the cells the step
-wrote: the directory decodes only the written cells (`loadServedDirectoryStep`), the authority cell is the held post-cell or
-decoded only when moved, the cell law runs on the written cells, and the sourcing walk is
-inherited unless the step wrote the authority cell or a policy source. -/
+wrote: the directory decodes only the written cells (`loadServedDirectoryStep`), the authority
+store is the held one followed along the written cells (`loadServedAuthorityStep`), the cell law
+runs on the written cells, and sourcing is checked on the policies the step can have unsourced
+only (`stepSourced`, `policiesSourced_step`). -/
 def validateServedStep (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store)
     (written : List DurableDataIntent.CellId) (moved : Served.Moved prior.served served written) :

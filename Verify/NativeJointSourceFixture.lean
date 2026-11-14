@@ -357,16 +357,16 @@ def fixtureGenesis (root : System.FilePath) (helpers : Helpers) : IO NativeHostG
 /-- `append-flatness`: COUNT births, one after another, through in-process agreement among
 the world's four participants (the per-replica `iteration` the standing service runs), each
 authored on the proposer's own verified tip. Printed per height: the wall time of the call,
-the size of the appended record (and of its original ingress and its largest write), and the
-time each replica's application hand-off took when it applied the record (`applyNext`: the certificate, the ordered append with its readback,
+the size of the appended record (and of its original ingress, its largest write and its authority
+writes: the head and the entry cells), and the time each replica's application hand-off took
+when it applied the record (`applyNext`: the certificate, the ordered append with its readback,
 the acknowledgement).
 
-A birth's record is not of constant size: it rewrites a cell that accumulates with every
-birth, so the record grows with the height (about 160 bytes per birth in this world) and
-every cost proportional to the record's bytes grows with it. The row therefore judges the
-hand-off per KB of appended record: it fails when that median over the last WINDOW heights
-exceeds FACTOR times the median over the first WINDOW. What it bounds is the growth of the
-append beyond the growth of the record it appends.
+A birth's record is of constant size for a constant descriptor shape: its authority writes are
+the head and one entry cell per address the birth touches, never the store. The row judges two
+raw quantities over the last WINDOW heights against the first WINDOW: the median application
+hand-off may be at most FACTOR times the first window's, and the median appended record may be
+at most one eighth larger. Neither is normalised by the record's size.
 
 With `revalidate` (the `revalidate-prefix` plant) every replica also replays its whole source
 prefix from the genesis after each append (`JointSourcePrefixValidation.validate`), which is
@@ -391,6 +391,8 @@ def appendFlatness (root : System.FilePath) (helpers : Helpers) (signer : System
     let mut largest : Nat × Nat := (0,0)
     let mut eventBytes := 0
     let mut writeCount := 0
+    let mut authorityBytes := 0
+    let mut authorityCount := 0
     let mut fuel := 400
     while replicas.any (fun replica => sourceHeight replica < target) do
       if fuel == 0 then
@@ -410,6 +412,10 @@ def appendFlatness (root : System.FilePath) (helpers : Helpers) (signer : System
                 (write.cellId.value,write.canonicalPostBytes.length) else best) (0,0)
             eventBytes := record.event.canonicalBytes.length
             writeCount := record.writes.length
+            let authority := record.writes.filter fun write =>
+              (CredentialAuthorityLayout.decodeCell write.canonicalPostBytes).isSome
+            authorityBytes := authority.foldl (fun total write => total + write.canonicalPostBytes.length) 0
+            authorityCount := authority.length
           if revalidate then
             let before ← IO.monoNanosNow
             match ← JointSourcePrefixValidation.validate replica.config
@@ -419,18 +425,20 @@ def appendFlatness (root : System.FilePath) (helpers : Helpers) (signer : System
             | _ => throw (IO.userError "revalidate-prefix: the applied source prefix did not replay")
             spent := spent + ((← IO.monoNanosNow) - before)
           samples := samples.push (spent / 1000)
-    series := series.push (samples.map fun spent => spent * 1024 / (max 1 recordBytes))
+    series := series.push samples
     sizes := sizes.push recordBytes
     times := times.push (median samples)
-    IO.println s!"{target}\t{((← IO.monoNanosNow) - started) / 1000000}\t{recordBytes}\t{median samples}\t{samples.toList}\tevent {eventBytes} B, {writeCount} writes, largest {largest.2} B to cell {largest.1}"
+    IO.println s!"{target}\t{((← IO.monoNanosNow) - started) / 1000000}\t{recordBytes}\t{median samples}\t{samples.toList}\tevent {eventBytes} B, {writeCount} writes, largest {largest.2} B to cell {largest.1}, authority {authorityBytes} B in {authorityCount} writes"
   let pool := fun (part : Array (Array Nat)) => part.foldl (· ++ ·) #[]
   let head := median (pool (series.extract 0 window))
   let tail := median (pool (series.extract (count - window) count))
-  let shape := fun (first last : Nat) =>
-    s!"{median (times.extract first last)} us for a {median (sizes.extract first last)}-byte record"
+  let headSize := median (sizes.extract 0 window)
+  let tailSize := median (sizes.extract (count - window) count)
   require (tail ≤ factor * head)
-    s!"append flatness: the median application hand-off per KB of appended record over the last {window} heights took {tail} us ({shape (count - window) count}), more than {factor} times the {head} us of the first {window} ({shape 0 window})"
-  IO.println s!"FLAT ordered append over heights {base + 1}..{base + count}: median hand-off per KB of appended record {head} us over the first {window} ({shape 0 window}), {tail} us over the last {window} ({shape (count - window) count}); bound: {factor} times the first"
+    s!"append flatness: the median application hand-off over the last {window} heights took {tail} us for a {tailSize}-byte record, more than {factor} times the {head} us of the first {window} ({headSize}-byte record)"
+  require (tailSize ≤ headSize + headSize / 8)
+    s!"append flatness: the median appended record over the last {window} heights is {tailSize} bytes, more than one eighth above the {headSize} bytes of the first {window}"
+  IO.println s!"FLAT ordered append over heights {base + 1}..{base + count}: median hand-off {head} us for a {headSize}-byte record over the first {window}, {tail} us for a {tailSize}-byte record over the last {window}; bounds: {factor} times the first hand-off, one eighth above the first record"
 
 /-- `rejoin`: one replica stopped for two calls and restarted catches up, in process and
 with no timer. Call 1 is agreed by all four. Replica 3 then takes no input: calls 2 and 3

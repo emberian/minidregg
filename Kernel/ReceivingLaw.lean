@@ -769,7 +769,7 @@ def Laws.physical {Fld : Type} [Field Fld] [DecidableEq Fld]
   birth := physicalBirth
   resolveBirth durable patch write step := do
     let directory ← loadDirectory durable
-    let authority ← loadDeployment deployment durable
+    let authority ← readDeployment deployment durable
     let newborn ← livePost write
     let structural ← WorldKindLawDependencies.loadNewborn deployment directory.directory
       write.cellId.value newborn
@@ -779,7 +779,7 @@ def Laws.physical {Fld : Type} [Field Fld] [DecidableEq Fld]
       structural.readGuards.map fun (cell, root) => (⟨⟨cell⟩, root⟩ : ReadGuard) }
   resolve durable target step := do
     let directory ← loadDirectory durable
-    let authority ← loadDeployment deployment durable
+    let authority ← readDeployment deployment durable
     let structural ← WorldKindLawDependencies.loadTarget deployment directory.directory target
     let sources ← PhysicalLawResolution.readGuards authority.snapshot directory.directory
       profile.semantics target structural.additional
@@ -801,7 +801,7 @@ theorem physical_resolve_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld]
     (Laws.physical profile deployment).resolve durable target step = some law ↔
       ∃ directory authority structural sources judged,
         loadDirectory durable = some directory ∧
-        loadDeployment deployment durable = some authority ∧
+        readDeployment deployment durable = some authority ∧
         WorldKindLawDependencies.loadTarget deployment directory.directory target = some structural ∧
         PhysicalLawResolution.readGuards authority.snapshot directory.directory profile.semantics
           target structural.additional = some sources ∧
@@ -833,7 +833,7 @@ theorem physical_resolveBirth_some_iff {Fld : Type} [Field Fld] [DecidableEq Fld
     (Laws.physical profile deployment).resolveBirth durable patch write step = some law ↔
       ∃ directory authority newborn structural exported,
         loadDirectory durable = some directory ∧
-        loadDeployment deployment durable = some authority ∧
+        readDeployment deployment durable = some authority ∧
         livePost write = some newborn ∧
         WorldKindLawDependencies.loadNewborn deployment directory.directory write.cellId.value
           newborn = some structural ∧

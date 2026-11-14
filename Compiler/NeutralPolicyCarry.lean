@@ -363,7 +363,7 @@ def derive (deployment : CanonicalCellRegistry.Deployment)
     if !hasSourceRole bytes then checkUnchangedNonPolicy deployment identifier bytes
   let bindings ← liftSources sources targetSemantics
   let authority ← need "carry needs the authority store its cells realise"
-    (CredentialAuthorityLayout.loadCell loaded.snapshot.canonicalBytes deployment.authorityCellId
+    (CredentialAuthorityLayout.readCell loaded.snapshot.canonicalBytes deployment.authorityCellId
       (CredentialAuthorityDomainReceiver.enumerated loaded))
   finishPlan deployment bindings authority loaded [] 1
 

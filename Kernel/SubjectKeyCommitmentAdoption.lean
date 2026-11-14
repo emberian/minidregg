@@ -144,7 +144,7 @@ structure Prepared (deployment : Deployment) (semantics : Digest) (durable : Dur
 
 def prepare (deployment : Deployment) (semantics : Digest) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment semantics durable command) := do
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
+  let authority ← requireSome .authorityUnavailable (readDeployment deployment durable)
   let snapshot := authority.snapshot
   if eligible : KeyCommitmentAdoption.Eligible snapshot.logical snapshot.revision command.adoption then
     if fresh : ParticipantKeyEnrollment.allKeys snapshot.logical

@@ -140,6 +140,51 @@ theorem decodeCell_live_other (cell : PackedCell registry) (other : cell.kind �
     decodeCell (LifecycleImage.bytes registry (.live cell)) = none :=
   decodeCell_other_kind (LifecycleImage.decode_encode registry (.live cell)) other
 
+/-! ### A store of the old layout is refused by name
+
+Before this layout the authority kind's payload was the whole logical store under the
+`minidregg/credential-authority/v6` store frame, in one cell at the pinned identifier. That image
+is not an authority cell now: its payload begins with the store codec's magic, not this cell's
+frame, so it decodes to nothing and no load reads it as a head. -/
+
+/-- The image the old layout held at the authority identifier: the live envelope of kind tag 3
+over the whole store's v6 encoding. -/
+def oldLayoutImage (store : Store layout) : List UInt8 :=
+  imagePrefix ++ CredentialAuthorityCell.materializer.codec.encode store
+
+/-- **An old-layout authority cell is refused**, whatever store it encodes: it holds no
+authority cell (`decodeCell`), so it is neither a head nor an entry. -/
+theorem old_layout_refused (store : Store layout) : decodeCell (oldLayoutImage store) = none := by
+  obtain ⟨tail, encoded⟩ : ∃ tail, CredentialAuthorityCell.materializer.codec.encode store = 68 :: tail :=
+    ⟨_, rfl⟩
+  have framed : ∃ rest, spec.wireFrame = 109 :: rest := by
+    cases frame : spec.wireFrame with
+    | nil => exact absurd (congrArg List.length frame) (by decide +kernel)
+    | cons first rest =>
+        have head : spec.wireFrame.head? = some 109 := by decide +kernel
+        rw [frame] at head
+        cases head
+        exact ⟨rest, rfl⟩
+  obtain ⟨rest, frame⟩ := framed
+  have refused : ProtectedCell.decode spec (68 :: tail) = none := by
+    unfold ProtectedCell.decode
+    rw [if_neg]
+    rw [frame]
+    intro same
+    simp only [List.length_cons, List.take_succ_cons, List.cons.injEq] at same
+    exact absurd same.1 (by decide)
+  unfold decodeCell oldLayoutImage
+  rw [encoded]
+  have decoded : (LifecycleImage.codec registry).decode (imagePrefix ++ 68 :: tail) = none := by
+    show LifecycleImage.rawDecode registry (68 :: 82 :: 2 :: 1 :: 68 :: 82 :: 1 :: 3 :: 68 :: tail) = none
+    simp only [LifecycleImage.rawDecode, PackedCell.decode]
+    show (((registry.materializer CanonicalCellRegistry.Kind.authority).codec.decode (68 :: tail)).map _).map _ = none
+    rw [show (registry.materializer CanonicalCellRegistry.Kind.authority).codec.decode (68 :: tail) =
+      ProtectedCell.decode spec (68 :: tail) from rfl, refused]
+    rfl
+  rw [decoded]
+  split <;> rfl
+
 abbrev PhysicalSnapshot := DataSnapshot ResourceBirthCodec.rootBytes
 
 /-! ## What the cells hold -/
@@ -153,55 +198,45 @@ def valueAt (bytesAt : CellId → List UInt8) (address : Address layout) :
 def headAt (bytesAt : CellId → List UInt8) (authorityCellId : Nat) : Option Digest :=
   (decodeCell (bytesAt ⟨authorityCellId⟩)).bind cellHead
 
-/-- **The cells realise a logical authority store**: the head cell holds the store's logical
-root, and at every address the store's value is what the address's own entry cell holds for it
-(canonical decoding of the image, the cell and the value; the cell is read at the address's
-coordinate and must name the address; an absent address has no such payload). -/
+/-- **The cells realise a logical authority store**: the head sits below the authority space
+and holds the store's logical root, and at every address the store's value is what the address's
+own entry cell holds for it (canonical decoding of the image, the cell and the value; the cell is
+read at the address's coordinate and must name the address; an absent address has no such
+payload). -/
 structure RealizesAuthority (bytesAt : CellId → List UInt8) (authorityCellId : Nat)
     (logical : Store layout) : Prop where
+  below : authorityCellId < ProtectedCell.authorityBase
   head : headAt bytesAt authorityCellId = some (CredentialAuthorityCell.materializer.rootOf logical)
   entries : ∀ address, logical address = valueAt bytesAt address
+
+/-- **The cells hold a logical authority store**: `RealizesAuthority` without the comparison of
+the head's root. The head is a head (below the authority space), and every address reads its
+value at its own entry cell. This is what a read of a state already sealed needs, and it costs no
+root: the root comparison is the open's and the step's (`loadCell`, `stepCell`), made once per
+state by whoever serves it. -/
+structure HoldsAuthority (bytesAt : CellId → List UInt8) (authorityCellId : Nat)
+    (logical : Store layout) : Prop where
+  below : authorityCellId < ProtectedCell.authorityBase
+  headed : (headAt bytesAt authorityCellId).isSome = true
+  entries : ∀ address, logical address = valueAt bytesAt address
+
+theorem RealizesAuthority.holds {bytesAt : CellId → List UInt8} {authorityCellId : Nat}
+    {logical : Store layout} (realized : RealizesAuthority bytesAt authorityCellId logical) :
+    HoldsAuthority bytesAt authorityCellId logical :=
+  ⟨realized.below, by rw [realized.head]; rfl, realized.entries⟩
+
+/-- The logical store is a function of the cells: two stores held by the same bytes are equal. -/
+theorem HoldsAuthority.unique {bytesAt : CellId → List UInt8} {authorityCellId : Nat}
+    {left right : Store layout} (first : HoldsAuthority bytesAt authorityCellId left)
+    (second : HoldsAuthority bytesAt authorityCellId right) : left = right :=
+  SparseMap.ext fun address => (first.entries address).trans (second.entries address).symm
 
 /-- The logical store is a function of the cells: two stores realised by the same bytes are
 equal. -/
 theorem RealizesAuthority.unique {bytesAt : CellId → List UInt8} {authorityCellId : Nat}
     {left right : Store layout} (first : RealizesAuthority bytesAt authorityCellId left)
     (second : RealizesAuthority bytesAt authorityCellId right) : left = right :=
-  SparseMap.ext fun address => (first.entries address).trans (second.entries address).symm
-
-/-- Realisation reads only the head's bytes and the authority space. -/
-theorem RealizesAuthority.congr {left right : CellId → List UInt8} {authorityCellId : Nat}
-    {logical : Store layout} (realized : RealizesAuthority left authorityCellId logical)
-    (head : right ⟨authorityCellId⟩ = left ⟨authorityCellId⟩)
-    (entries : ∀ address, right ⟨entryCellId address⟩ = left ⟨entryCellId address⟩) :
-    RealizesAuthority right authorityCellId logical :=
-  ⟨by unfold headAt; rw [head]; exact realized.head,
-    fun address => by unfold valueAt; rw [entries address]; exact realized.entries address⟩
-
-/-- A step wrote no authority cell: neither the head nor any cell of the authority space. The
-head alone is never the test: an entry written without the head would move the store. -/
-def authorityUnwritten (authorityCellId : Nat) (written : List CellId) : Bool :=
-  !(written.contains ⟨authorityCellId⟩) &&
-    written.all fun cellId => decide (cellId.value < ProtectedCell.authorityBase)
-
-/-- **A step that wrote no authority cell leaves the realised store as it was.** -/
-theorem RealizesAuthority.of_unwritten {before after : CellId → List UInt8} {authorityCellId : Nat}
-    {logical : Store layout} {written : List CellId}
-    (realized : RealizesAuthority before authorityCellId logical)
-    (kept : ∀ cellId, cellId ∉ written → after cellId = before cellId)
-    (unwritten : authorityUnwritten authorityCellId written = true) :
-    RealizesAuthority after authorityCellId logical := by
-  simp only [authorityUnwritten, Bool.and_eq_true, Bool.not_eq_eq_eq_not, Bool.not_true,
-    List.all_eq_true, decide_eq_true_eq] at unwritten
-  obtain ⟨notHead, below⟩ := unwritten
-  apply realized.congr
-  · exact kept _ fun member => by
-      rw [List.contains_iff_mem.mpr member] at notHead; cases notHead
-  · intro address
-    exact kept _ fun member => by
-      have small := below _ member
-      have large := entryCellId_authority address
-      exact absurd small (Nat.not_lt.mpr large)
+  first.holds.unique second.holds
 
 /-! ## The lowering -/
 
@@ -323,7 +358,7 @@ together with writes outside the authority kind, all at distinct cells, installs
 realises `post`. No vacancy is asked: an address's cell is its own (`entryCellId_injective`). -/
 theorem lower_realizes {physical : PhysicalSnapshot} {authorityCellId : Nat}
     {logical post : Store layout} {touched : List (Address layout)}
-    (realized : RealizesAuthority physical.canonicalBytes authorityCellId logical)
+    (realized : HoldsAuthority physical.canonicalBytes authorityCellId logical)
     (frame : ∀ address, address ∉ touched → post address = logical address)
     (intent : DataIntent ResourceBirthCodec.rootBytes) (other : List DataWrite)
     (writes : intent.writes = other ++ lowerAuthority physical authorityCellId touched
@@ -338,7 +373,7 @@ theorem lower_realizes {physical : PhysicalSnapshot} {authorityCellId : Nat}
     intro address member
     rw [writes]
     exact List.mem_append_right _ (List.mem_cons_of_mem _ (List.mem_map_of_mem member))
-  refine ⟨?_, ?_⟩
+  refine ⟨realized.below, ?_, ?_⟩
   · unfold headAt
     rw [DataSnapshot.install_canonicalBytes]
     have found := lookupPostBytes_of_mem headMember distinct
@@ -373,20 +408,12 @@ theorem lower_realizes {physical : PhysicalSnapshot} {authorityCellId : Nat}
             obtain ⟨before, after⟩ := foreign write outside
             unfold valueAt
             rw [← sameCell, before, after]
-          · -- the head write: the cell was the head and is the head
-            have preHead := realized.head
-            unfold headAt at preHead
-            have sameId : (⟨entryCellId address⟩ : CellId) = ⟨authorityCellId⟩ := sameCell.symm
-            unfold valueAt
-            rw [sameId]
-            cases opened : decodeCell (physical.canonicalBytes ⟨authorityCellId⟩) with
-            | none => rw [opened] at preHead; cases preHead
-            | some cell =>
-                rw [opened] at preHead
-                simp only [Option.bind_some] at preHead
-                simp only [headWrite, cellWrite, decodeCell_encodeCell, Option.bind_some]
-                rw [cellValue_of_cellHead preHead address,
-                  cellValue_of_cellHead (cellHead_headCell _) address]
+          · -- the head write: the head is below the authority space, no address's cell
+            have sameId : entryCellId address = authorityCellId :=
+              (congrArg Digest.value sameCell).symm
+            have above := entryCellId_authority address
+            have below := realized.below
+            omega
           · -- another touched address's entry: its cell is not this address's
             have sameCoordinate : entryCellId written = entryCellId address :=
               congrArg Digest.value sameCell
@@ -395,7 +422,7 @@ theorem lower_realizes {physical : PhysicalSnapshot} {authorityCellId : Nat}
 /-- **Addresses outside the touched set read as before**, in the physical state itself. -/
 theorem lower_frame {physical : PhysicalSnapshot} {authorityCellId : Nat}
     {logical post : Store layout} {touched : List (Address layout)}
-    (realized : RealizesAuthority physical.canonicalBytes authorityCellId logical)
+    (realized : HoldsAuthority physical.canonicalBytes authorityCellId logical)
     (frame : ∀ address, address ∉ touched → post address = logical address)
     (intent : DataIntent ResourceBirthCodec.rootBytes) (other : List DataWrite)
     (writes : intent.writes = other ++ lowerAuthority physical authorityCellId touched
@@ -418,6 +445,17 @@ theorem wrong_head_refused {bytesAt : CellId → List UInt8} {authorityCellId : 
     ¬ RealizesAuthority bytesAt authorityCellId logical := fun realized =>
   wrong (Option.some.inj (held.symm.trans realized.head))
 
+/-- **A store of the old layout loads nothing**: cells whose authority identifier holds the old
+whole-store image realise no authority store, so every load refuses it. -/
+theorem old_layout_unrealized {bytesAt : CellId → List UInt8} {authorityCellId : Nat}
+    (store : Store layout) (old : bytesAt ⟨authorityCellId⟩ = oldLayoutImage store)
+    (logical : Store layout) : ¬ RealizesAuthority bytesAt authorityCellId logical := by
+  intro realized
+  have head := realized.head
+  unfold headAt at head
+  rw [old, old_layout_refused] at head
+  cases head
+
 /-- False absence (and false presence, and a false value): a store that differs from what one
 address's cell holds is not realised. -/
 theorem false_value_refused {bytesAt : CellId → List UInt8} {authorityCellId : Nat}
@@ -430,7 +468,7 @@ theorem false_value_refused {bytesAt : CellId → List UInt8} {authorityCellId :
 moved does not install the post store. -/
 theorem omitted_entry_refused {physical : PhysicalSnapshot} {authorityCellId : Nat}
     {logical post : Store layout}
-    (realized : RealizesAuthority physical.canonicalBytes authorityCellId logical)
+    (realized : HoldsAuthority physical.canonicalBytes authorityCellId logical)
     (intent : DataIntent ResourceBirthCodec.rootBytes) (address : Address layout)
     (moved : post address ≠ logical address)
     (omitted : (⟨entryCellId address⟩ : CellId) ∉ intent.writes.map DataWrite.cellId) :
@@ -519,14 +557,15 @@ def parentageAt (bytesAt : CellId → List UInt8) (cellIds : List Nat)
   parentOf cell := valueAt bytesAt ⟨.parent, cell⟩
   bound := Trunc.mk ⟨cellIds.length, by
     classical
-    have injective : Function.Injective fun cell : Nat => entryCellId ⟨AuthorityPlane.parent, cell⟩ :=
-      fun left right same => by
-        have addresses := entryCellId_injective same
-        exact eq_of_heq (Sigma.mk.inj addresses).2
-    refine ⟨cellIds.toFinset.preimage _ injective.injOn, ?_, ?_⟩
-    · refine (Finset.card_le_card_of_injOn (fun cell => entryCellId ⟨AuthorityPlane.parent, cell⟩)
-        (fun cell member => Finset.mem_preimage.mp member) injective.injOn).trans ?_
-      exact List.toFinset_card_le cellIds
+    let coordinate : Nat → Nat := fun cell => entryCellId ⟨AuthorityPlane.parent, cell⟩
+    have injective : Function.Injective coordinate := fun left right same => by
+      have addresses : (⟨AuthorityPlane.parent, left⟩ : Address layout) = ⟨AuthorityPlane.parent, right⟩ :=
+        entryCellId_injective same
+      exact eq_of_heq (Sigma.mk.inj addresses).2
+    refine ⟨cellIds.toFinset.preimage coordinate injective.injOn, ?_, ?_⟩
+    · exact (Finset.card_le_card_of_injOn coordinate
+        (fun cell member => Finset.mem_coe.mpr (Finset.mem_preimage.mp (Finset.mem_coe.mp member)))
+        injective.injOn).trans (List.toFinset_card_le cellIds)
     · intro cell recorded
       rw [Finset.mem_preimage, List.mem_toFinset]
       by_contra outside
@@ -769,6 +808,53 @@ theorem stepStore_exact (before after : CellId → List UInt8) (store : Store la
     unfold valueAt
     rw [kept _ unwritten]
 
+/-- **The addresses a step can have moved**: for each written cell, the address its entry named
+before and the address its entry names now. Every other address reads as it did
+(`valueAt_unchanged`), so a check that follows the store (policy sourcing) revisits only these. -/
+def changedAddresses (before after : CellId → List UInt8) (written : List Nat) :
+    List (Address layout) :=
+  written.flatMap fun cellId =>
+    (((decodeCell (before ⟨cellId⟩)).bind (entryOf cellId)).toList.map Sigma.fst) ++
+      (((decodeCell (after ⟨cellId⟩)).bind (entryOf cellId)).toList.map Sigma.fst)
+
+/-- **The frame of a step, in the cells themselves.** An address the step's written cells neither
+named before nor name now reads the same after the step, whatever the head says: it is never
+inferred from the head being unwritten. -/
+theorem valueAt_unchanged {before after : CellId → List UInt8} {written : List Nat}
+    (kept : ∀ cellId, cellId ∉ written → after ⟨cellId⟩ = before ⟨cellId⟩)
+    {address : Address layout} (outside : address ∉ changedAddresses before after written) :
+    valueAt after address = valueAt before address := by
+  by_cases wrote : entryCellId address ∈ written
+  · have absent : ∀ (bytesAt : CellId → List UInt8),
+        (∀ value, (decodeCell (bytesAt ⟨entryCellId address⟩)).bind (entryOf (entryCellId address)) =
+          some ⟨address, value⟩ → address ∈ changedAddresses before after written) →
+        valueAt bytesAt address = none := by
+      intro bytesAt named
+      cases held : valueAt bytesAt address with
+      | none => rfl
+      | some value => exact absurd (named value (entry_of_valueAt held)) outside
+    rw [absent after, absent before]
+    · intro value found
+      refine List.mem_flatMap.mpr ⟨entryCellId address, wrote, List.mem_append_left _ ?_⟩
+      rw [found]
+      simp
+    · intro value found
+      refine List.mem_flatMap.mpr ⟨entryCellId address, wrote, List.mem_append_right _ ?_⟩
+      rw [found]
+      simp
+  · unfold valueAt
+    rw [kept _ wrote]
+
+/-- The frame between two held stores one step apart. -/
+theorem HoldsAuthority.framed {before after : CellId → List UInt8} {authorityCellId : Nat}
+    {old new : Store layout} {written : List Nat}
+    (held : HoldsAuthority before authorityCellId old)
+    (now : HoldsAuthority after authorityCellId new)
+    (kept : ∀ cellId, cellId ∉ written → after ⟨cellId⟩ = before ⟨cellId⟩)
+    (address : Address layout) (outside : address ∉ changedAddresses before after written) :
+    new address = old address := by
+  rw [now.entries, held.entries, valueAt_unchanged kept outside]
+
 /-- The operations of one written cell of a step: free what it held, allocate what it holds. -/
 def entryOps (before after : CellId → List UInt8) (cellId : Nat) : Patch layout :=
   (match (decodeCell (before ⟨cellId⟩)).bind (entryOf cellId) with
@@ -797,14 +883,22 @@ theorem run_stepPatch (before after : CellId → List UInt8) :
       rw [List.flatMap_cons, Patch.run_append, run_entryOps, List.foldl_cons]
       exact run_stepPatch before after rest _
 
-/-! ## Loading the cell -/
+/-! ## Loading the cell
 
-/-- **An open**: the store every enumerable cell holds, materialized, when the head holds its
-logical root. -/
+Two pairs. `loadCell` and `stepCell` SEAL: they compare the head's root with the root of the store
+the cells hold, the open once over the whole store and the step along the written cells only.
+The serving Host runs them, once per served state. `readCell` and `followCell` READ a state
+already sealed: the same store, no root computed. A receiver handed a durable image the Host
+validated reads through these. -/
+
+/-- **An open, sealed**: the store every enumerable cell holds, materialized, when the head is
+below the authority space and holds that store's logical root. -/
 def loadCell (bytesAt : CellId → List UInt8) (authorityCellId : Nat) (cellIds : List Nat) :
     Option CredentialAuthorityCell.Cell :=
   let cell := materialize CredentialAuthorityCell.materializer (loadStore bytesAt cellIds)
-  if headAt bytesAt authorityCellId = some cell.root then some cell else none
+  if authorityCellId < ProtectedCell.authorityBase ∧ headAt bytesAt authorityCellId = some cell.root then
+    some cell
+  else none
 
 theorem loadCell_realizes {bytesAt : CellId → List UInt8} {authorityCellId : Nat} {cellIds : List Nat}
     (support : ∀ cellId, cellId ∉ cellIds → bytesAt ⟨cellId⟩ = [])
@@ -813,9 +907,9 @@ theorem loadCell_realizes {bytesAt : CellId → List UInt8} {authorityCellId : N
   unfold loadCell at loaded
   dsimp only at loaded
   split at loaded
-  · rename_i head
+  · rename_i sealed
     cases loaded
-    exact ⟨head, fun address => loadStore_exact bytesAt cellIds support address⟩
+    exact ⟨sealed.1, sealed.2, fun address => loadStore_exact bytesAt cellIds support address⟩
   · cases loaded
 
 /-- The open loads every realised store, and only it. -/
@@ -827,10 +921,40 @@ theorem loadCell_of_realizes {bytesAt : CellId → List UInt8} {authorityCellId 
     (loadStore_exact bytesAt cellIds support address).trans (realized.entries address).symm
   refine ⟨materialize CredentialAuthorityCell.materializer (loadStore bytesAt cellIds), ?_, same⟩
   unfold loadCell
-  rw [if_pos (by rw [same]; exact realized.head)]
+  rw [if_pos ⟨realized.below, by rw [same]; exact realized.head⟩]
 
-/-- **A step**: the held cell followed along the cells the step wrote, when the head now holds
-its logical root. One decode and one path of the kept structure per written entry. -/
+/-- **An open, read**: the store every enumerable cell holds, materialized, when the head is a
+head below the authority space. No root is computed. -/
+def readCell (bytesAt : CellId → List UInt8) (authorityCellId : Nat) (cellIds : List Nat) :
+    Option CredentialAuthorityCell.Cell :=
+  if authorityCellId < ProtectedCell.authorityBase ∧ (headAt bytesAt authorityCellId).isSome = true then
+    some (materialize CredentialAuthorityCell.materializer (loadStore bytesAt cellIds))
+  else none
+
+theorem readCell_holds {bytesAt : CellId → List UInt8} {authorityCellId : Nat} {cellIds : List Nat}
+    (support : ∀ cellId, cellId ∉ cellIds → bytesAt ⟨cellId⟩ = [])
+    {cell : CredentialAuthorityCell.Cell} (read : readCell bytesAt authorityCellId cellIds = some cell) :
+    HoldsAuthority bytesAt authorityCellId cell.logical := by
+  unfold readCell at read
+  split at read
+  · rename_i headed
+    cases read
+    exact ⟨headed.1, headed.2, fun address => loadStore_exact bytesAt cellIds support address⟩
+  · cases read
+
+/-- The read loads every held store, and only it. -/
+theorem readCell_of_holds {bytesAt : CellId → List UInt8} {authorityCellId : Nat} {cellIds : List Nat}
+    (support : ∀ cellId, cellId ∉ cellIds → bytesAt ⟨cellId⟩ = [])
+    {logical : Store layout} (held : HoldsAuthority bytesAt authorityCellId logical) :
+    ∃ cell, readCell bytesAt authorityCellId cellIds = some cell ∧ cell.logical = logical := by
+  have same : loadStore bytesAt cellIds = logical := SparseMap.ext fun address =>
+    (loadStore_exact bytesAt cellIds support address).trans (held.entries address).symm
+  refine ⟨materialize CredentialAuthorityCell.materializer (loadStore bytesAt cellIds), ?_, same⟩
+  unfold readCell
+  rw [if_pos ⟨held.below, held.headed⟩]
+
+/-- **A step, sealed**: the held cell followed along the cells the step wrote, when the head now
+holds its logical root. One decode and one path of the kept structure per written entry. -/
 def stepCell (before after : CellId → List UInt8) (authorityCellId : Nat)
     (prior : CredentialAuthorityCell.Cell) (written : List Nat) : Option CredentialAuthorityCell.Cell :=
   let cell := prior.follow (stepPatch before after written)
@@ -849,7 +973,7 @@ theorem stepCell_logical {before after : CellId → List UInt8} {authorityCellId
 
 theorem stepCell_realizes {before after : CellId → List UInt8} {authorityCellId : Nat}
     {prior cell : CredentialAuthorityCell.Cell} {written : List Nat}
-    (held : RealizesAuthority before authorityCellId prior.logical)
+    (held : HoldsAuthority before authorityCellId prior.logical)
     (kept : ∀ cellId, cellId ∉ written → after ⟨cellId⟩ = before ⟨cellId⟩)
     (stepped : stepCell before after authorityCellId prior written = some cell) :
     RealizesAuthority after authorityCellId cell.logical := by
@@ -859,7 +983,7 @@ theorem stepCell_realizes {before after : CellId → List UInt8} {authorityCellI
   split at stepped
   · rename_i head
     cases stepped
-    refine ⟨head, fun address => ?_⟩
+    refine ⟨held.below, head, fun address => ?_⟩
     rw [logical]
     exact stepStore_exact before after prior.logical written held.entries kept address
   · cases stepped
@@ -867,7 +991,7 @@ theorem stepCell_realizes {before after : CellId → List UInt8} {authorityCellI
 /-- The step loads every store the cells now realise, and only it. -/
 theorem stepCell_of_realizes {before after : CellId → List UInt8} {authorityCellId : Nat}
     {prior : CredentialAuthorityCell.Cell} {written : List Nat}
-    (held : RealizesAuthority before authorityCellId prior.logical)
+    (held : HoldsAuthority before authorityCellId prior.logical)
     (kept : ∀ cellId, cellId ∉ written → after ⟨cellId⟩ = before ⟨cellId⟩)
     {logical : Store layout} (realized : RealizesAuthority after authorityCellId logical) :
     ∃ cell, stepCell before after authorityCellId prior written = some cell ∧ cell.logical = logical := by
@@ -882,6 +1006,46 @@ theorem stepCell_of_realizes {before after : CellId → List UInt8} {authorityCe
     show headAt after authorityCellId = some (CredentialAuthorityCell.materializer.rootOf
       (Patch.run prior.logical (stepPatch before after written)))
     rw [same]; exact realized.head)]
+
+/-- **A step, read**: the held cell followed along the cells the step wrote, when the head is
+still a head. No root is computed. -/
+def followCell (before after : CellId → List UInt8) (authorityCellId : Nat)
+    (prior : CredentialAuthorityCell.Cell) (written : List Nat) : Option CredentialAuthorityCell.Cell :=
+  if (headAt after authorityCellId).isSome = true then
+    some (prior.follow (stepPatch before after written))
+  else none
+
+theorem followCell_holds {before after : CellId → List UInt8} {authorityCellId : Nat}
+    {prior cell : CredentialAuthorityCell.Cell} {written : List Nat}
+    (held : HoldsAuthority before authorityCellId prior.logical)
+    (kept : ∀ cellId, cellId ∉ written → after ⟨cellId⟩ = before ⟨cellId⟩)
+    (followed : followCell before after authorityCellId prior written = some cell) :
+    HoldsAuthority after authorityCellId cell.logical := by
+  unfold followCell at followed
+  split at followed
+  · rename_i headed
+    cases followed
+    refine ⟨held.below, headed, fun address => ?_⟩
+    show Patch.run prior.logical (stepPatch before after written) address = _
+    rw [run_stepPatch]
+    exact stepStore_exact before after prior.logical written held.entries kept address
+  · cases followed
+
+/-- The followed cell is every store the cells now hold, and only it. -/
+theorem followCell_of_holds {before after : CellId → List UInt8} {authorityCellId : Nat}
+    {prior : CredentialAuthorityCell.Cell} {written : List Nat}
+    (held : HoldsAuthority before authorityCellId prior.logical)
+    (kept : ∀ cellId, cellId ∉ written → after ⟨cellId⟩ = before ⟨cellId⟩)
+    {logical : Store layout} (now : HoldsAuthority after authorityCellId logical) :
+    ∃ cell, followCell before after authorityCellId prior written = some cell ∧ cell.logical = logical := by
+  refine ⟨prior.follow (stepPatch before after written), ?_, ?_⟩
+  · unfold followCell
+    rw [if_pos now.headed]
+  · show Patch.run prior.logical (stepPatch before after written) = logical
+    rw [run_stepPatch]
+    exact SparseMap.ext fun address =>
+      (stepStore_exact before after prior.logical written held.entries kept address).trans
+        (now.entries address).symm
 
 /-! ## An update: the post cell, what it touched, and the frame -/
 
@@ -927,7 +1091,7 @@ def Update.writes {pre : CredentialAuthorityCell.Cell} (update : Update pre)
 /-- **An update's lowering installs its post store.** -/
 theorem Update.realizes {pre : CredentialAuthorityCell.Cell} (update : Update pre)
     {physical : PhysicalSnapshot} {authorityCellId : Nat}
-    (realized : RealizesAuthority physical.canonicalBytes authorityCellId pre.logical)
+    (realized : HoldsAuthority physical.canonicalBytes authorityCellId pre.logical)
     (intent : DataIntent ResourceBirthCodec.rootBytes) (other : List DataWrite)
     (writes : intent.writes = other ++ update.writes physical authorityCellId)
     (distinct : (intent.writes.map DataWrite.cellId).Nodup)
@@ -1063,7 +1227,7 @@ def BirthAuthorityRealized : Prop :=
     (authorityCellId : Nat) (pre : CredentialAuthorityCell.Cell) (descriptor : Descriptor registry)
     (evidence : ResourceBirthAuthority.BatchEvidence pre descriptor)
     (intent : DataIntent ResourceBirthCodec.rootBytes) (other : List DataWrite),
-    RealizesAuthority physical.canonicalBytes authorityCellId pre.logical →
+    HoldsAuthority physical.canonicalBytes authorityCellId pre.logical →
     intent.writes = other ++ lowerBirth physical authorityCellId descriptor
       (ResourceBirthAuthority.post pre descriptor evidence) →
     (intent.writes.map DataWrite.cellId).Nodup →
@@ -1228,6 +1392,8 @@ theorem birthAuthorityWriteBytes : BirthAuthorityWriteBytes := by
 theorem birthAuthorityWritesBounded : BirthAuthorityWritesBounded :=
   ⟨birthAuthorityWriteCount, birthAuthorityWriteBytes, birthAuthorityRealized⟩
 
+#assert_axioms old_layout_refused
+#assert_axioms old_layout_unrealized
 #assert_axioms lower_realizes
 #assert_axioms lower_frame
 #assert_axioms RealizesAuthority.unique
@@ -1240,12 +1406,17 @@ theorem birthAuthorityWritesBounded : BirthAuthorityWritesBounded :=
 #assert_axioms parentageAt_of_realizes
 #assert_axioms loadStore_exact
 #assert_axioms stepStore_exact
+#assert_axioms valueAt_unchanged
+#assert_axioms HoldsAuthority.framed
 #assert_axioms Update.realizes
-#assert_axioms RealizesAuthority.of_unwritten
 #assert_axioms loadCell_realizes
 #assert_axioms loadCell_of_realizes
 #assert_axioms stepCell_realizes
 #assert_axioms stepCell_of_realizes
+#assert_axioms readCell_holds
+#assert_axioms readCell_of_holds
+#assert_axioms followCell_holds
+#assert_axioms followCell_of_holds
 #assert_axioms lowerAuthority_nodup
 #assert_axioms birthAuthorityWritesBounded
 

@@ -317,7 +317,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable)
+  let authority ← requireSome .authorityUnavailable (readDeployment deployment durable)
   let factory ← requireSome .factoryUnavailable
     (ResourceTargetAdmission.observe deployment directory.directory .object
       deployment.factoryId command.expectedFactoryRoot)

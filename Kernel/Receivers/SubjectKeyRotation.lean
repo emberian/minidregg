@@ -219,7 +219,7 @@ structure Checked (env : Env) (durable : Durable) (command : Command) where
 /-- The gate's checks given the new key's signature. -/
 def check (env : Env) (durable : Durable) (command : Command) :
     Except Reject (Checked env durable command) := do
-  let authority ← need .authorityUnavailable (loadDeployment env.deployment durable)
+  let authority ← need .authorityUnavailable (readDeployment env.deployment durable)
   let snapshot := authority.snapshot
   match gated : KeyPreRotation.gate nextKeyDigest snapshot.logical command.rotation
       (presented command true) with
