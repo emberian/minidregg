@@ -264,3 +264,18 @@ authority files, lie between; the re-recorded fixtures still build on the newer 
 - **Not run**: `lane-check` as a script (the Lake targets above replace it); the composed, enrol
   and j14 gate phases; any writer family the tour does not reach on a native Host (key rotation,
   renounce, the pay and application share families: they compile and are untested natively).
+
+## Next (in this order; none of it is done)
+
+1. The step cost: hand the Host the family's post cell with its `HoldsAuthority` proof through
+   `Received.appended` (fix (a) under "Owed"), then `store-bench` after a birth and after a
+   delegation on matched worlds, three runs each, against main.
+2. The hand-off growth: `append-flatness` has one time per application hand-off
+   (`GenericSimplexParticipant` returns one `applyNanos`). Split it by phase (certificate,
+   ordered append with readback, acknowledgement), print the phases at ordinals 1, 40, 120, 200
+   and name the one that grows.
+3. An executed pole of a whole birth receive with an unnamed first write below the authority
+   space, refused `neutralBirthUnjudged`.
+4. Rebase onto `origin/main` once the registry lane's `append` binding has landed, then on that
+   head: the whole build (it has not run since `Kernel.FirstWriteCoverage` joined `Kernel.lean`;
+   the module itself builds), the native Host, J0 to J8, THIN, the Simplex gate at 200 heights.
