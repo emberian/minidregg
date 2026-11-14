@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lane-candidates -- a lane keeps one candidate; the rest go when the next one is made.
+#
+#   scripts/pipeline/lane-candidates list  LANE|LANE_DIR
+#   scripts/pipeline/lane-candidates prune [--keep N] [--dry] LANE|LANE_DIR        (N defaults to 1)
+#
+# LANE_DIR is the lane's directory ($LANE_POOL_ROOT/lanes/LANE, resolved through pool.env when a lane name is
+# given): its candidates are LANE_DIR/candidates/<id>/ (lane-build.sh overlay, native-loop), and each overlay also
+# leaves the source archive it was packaged from in LANE_DIR/logs/source-<commit>.tar (about 125 MB).
+# prune keeps the newest N candidates (by modification time) and removes the others, and likewise keeps the newest
+# N source archives. A candidate that a live process still uses (its executable, its cwd or an argument is under
+# the candidate) is never removed: it is reported `in use` and prune exits 1, so stop that run first
+# (scripts/pipeline/lane-journey tears its own runs down). native-loop prunes after each candidate it makes.
+set -u
+die() { echo "lane-candidates: $*" >&2; exit 64; }
+verb=${1:-}; shift || true
+keep=1 dry=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --keep) keep=${2:-}; shift 2 || die "--keep N" ;;
+    --dry) dry=1; shift ;;
+    *) break ;;
+  esac
+done
+[[ $keep =~ ^[0-9]+$ ]] || die "--keep takes a number"
+[ $# -eq 1 ] || die "usage: lane-candidates list|prune [--keep N] [--dry] LANE|LANE_DIR"
+if [ -d "$1" ]; then lane_dir=$(CDPATH='' cd -- "$1" && pwd -P)
+else
+  pool_env=
+  for f in "${LANE_POOL_ENV:-}" "${LANE_POOL_ROOT:+$LANE_POOL_ROOT/pool.env}" /srv/pool/pool.env /build/pool/pool.env "$HOME/pool/pool.env"; do
+    [ -n "$f" ] && [ -f "$f" ] && { pool_env=$f; break; }
+  done
+  [ -n "$pool_env" ] || die "no pool.env (set LANE_POOL_ENV) and $1 is not a directory"
+  # shellcheck disable=SC1090
+  . "$pool_env"
+  lane_dir=$LANE_POOL_ROOT/lanes/$1
+  [ -d "$lane_dir" ] || die "no lane directory $lane_dir"
+fi
+C=$lane_dir/candidates
+newest_first() { # DIR GLOB-TEST: entries of DIR newest first, one path per line
+  local f; for f in "$1"/*; do [ -e "$f" ] || continue; "$2" "$f" && printf '%s\t%s\n' "$(stat -c %Y "$f")" "$f"; done | sort -rn | cut -f2-; }
+is_candidate() { [ -d "$1" ] && [ -f "$1/manifest.json" ]; }
+is_source_tar() { case ${1##*/} in source-*.tar) [ -f "$1" ] ;; *) return 1 ;; esac; }
+size_mb() { du -sm "$1" 2>/dev/null | cut -f1; }
+users_of() { # DIR: PIDs whose executable, cwd or an argument is under DIR
+  local d p x
+  for d in /proc/[0-9]*; do p=${d#/proc/}
+    for x in "$(readlink "$d/exe" 2>/dev/null)" "$(readlink "$d/cwd" 2>/dev/null)"; do case $x in "$1"|"$1"/*) echo "$p"; continue 2 ;; esac; done
+    { tr '\0' '\n' < "$d/cmdline"; } 2>/dev/null | grep -q -F "$1/" && echo "$p"
+  done; }
+case $verb in
+  list)
+    newest_first "$C" is_candidate | while IFS= read -r d; do
+      printf '%s\t%s MB\t%s\n' "${d##*/}" "$(size_mb "$d")" "$(date -d "@$(stat -c %Y "$d")" '+%m-%d %H:%M')"; done ;;
+  prune)
+    rc=0 freed=0 n=0
+    while IFS= read -r d; do
+      n=$((n + 1)); [ $n -le "$keep" ] && { echo "keep    ${d##*/}"; continue; }
+      users=$(users_of "$d" | tr '\n' ' ')
+      if [ -n "$users" ]; then echo "in use  ${d##*/} (PID $users): not removed"; rc=1; continue; fi
+      mb=$(size_mb "$d")
+      if [ -n "$dry" ]; then echo "would remove ${d##*/} ($mb MB)"
+      else chmod -R u+w "$d" 2>/dev/null; rm -rf -- "$d" && { echo "removed ${d##*/} ($mb MB)"; freed=$((freed + mb)); } || { echo "could not remove ${d##*/}"; rc=1; }
+      fi
+    done < <(newest_first "$C" is_candidate)
+    n=0
+    while IFS= read -r f; do
+      n=$((n + 1)); [ $n -le "$keep" ] && continue
+      mb=$(size_mb "$f")
+      if [ -n "$dry" ]; then echo "would remove logs/${f##*/} ($mb MB)"
+      else rm -f -- "$f" && { echo "removed logs/${f##*/} ($mb MB)"; freed=$((freed + mb)); }
+      fi
+    done < <(newest_first "$lane_dir/logs" is_source_tar)
+    echo "lane-candidates: $lane_dir: kept the newest $keep, freed $freed MB"
+    exit $rc ;;
+  *) die "usage: lane-candidates list|prune [--keep N] [--dry] LANE|LANE_DIR" ;;
+esac

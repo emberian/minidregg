@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lane-journey -- the one supported way for a lane to run journey steps on a candidate.
+#
+#   scripts/pipeline/lane-journey CANDIDATE_DIR NEW_ROOT STEP...        (KEEP=1 keeps NEW_ROOT)
+#
+# It runs `native/resource-client/journey.sh --only STEP... --keep-going CANDIDATE_DIR/manifest.json NEW_ROOT/run`
+# from this tree (the lane's journey files), and it tears down what that run started, whatever way it ends:
+# success, a failed step, or a signal to this script (TERM, INT, HUP). journey.sh itself stops only its own
+# `mini serve`; residents, anchors and consent processes a step starts outlive it (hbox 2026-11-14: 511 of them).
+#
+# Everything the run starts lives under NEW_ROOT, which must not exist yet, and is recorded by PID file there:
+#   NEW_ROOT/lane-journey.pid   this script        (the PID to stop a run by: `kill $(cat NEW_ROOT/lane-journey.pid)`)
+#   NEW_ROOT/journey.pid        journey.sh
+#   NEW_ROOT/run/...            the world's own PID files (pid/, anchors, sessions), written by the journey
+# On exit: journey.sh gets TERM if it still runs (up to 40 s), then `world-reap NEW_ROOT` stops every process those
+# PID files name, with descendants, by PID only. Then NEW_ROOT is removed, unless KEEP=1, or world-reap reports a
+# process of NEW_ROOT that no PID file names: that one is printed, left running, and NEW_ROOT stays so it can be
+# found (exit 3 when the journey itself passed).
+# Left beside the root, small, for the lane to read: NEW_ROOT.log (journey.sh's output) and NEW_ROOT.result.json
+# (journey-result.json). While it runs, follow NEW_ROOT/journey.log.
+# Exit status: journey.sh's (0 only when every named step passed), 130 after a signal, 3 as above, 64 on usage.
+# Environment: ~/.minidregg-env is sourced when present; GRAIN_RUNTIME and PAY_WATCHER_BIN default to the
+# candidate's own binaries. Run it detached like any long job (`setsid nohup ... &`); its PID file is above.
+set -u
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+repo=$(CDPATH='' cd -- "$here/../.." && pwd -P)
+die() { echo "lane-journey: $*" >&2; exit 64; }
+[ $# -ge 3 ] || die "usage: lane-journey CANDIDATE_DIR NEW_ROOT STEP..."
+cand=$1 root=$2; shift 2
+case $root in /*/*/*) ;; *) die "NEW_ROOT must be an absolute path at least three levels deep" ;; esac
+case $root in */) die "NEW_ROOT must not end in /" ;; esac
+[ ! -e "$root" ] || die "$root already exists"
+[ -f "$cand/manifest.json" ] || die "no manifest.json in $cand"
+cand=$(CDPATH='' cd -- "$cand" && pwd -P)
+umask 022
+mkdir -p "$(dirname "$root")" && mkdir "$root" || die "cannot create $root"
+echo $$ > "$root/lane-journey.pid"
+# shellcheck disable=SC1090
+[ -f "$HOME/.minidregg-env" ] && . "$HOME/.minidregg-env"
+[ -n "${GRAIN_RUNTIME:-}" ] || { [ -x "$cand/bin/grain-runtime" ] && export GRAIN_RUNTIME=$cand/bin/grain-runtime; }
+[ -n "${PAY_WATCHER_BIN:-}" ] || { [ -x "$cand/bin/pay-watcher" ] && export PAY_WATCHER_BIN=$cand/bin/pay-watcher; }
+args=(); for s in "$@"; do args+=(--only "$s"); done
+jp= rc=1 signalled=
+finish() {
+  trap '' INT TERM HUP
+  if [ -n "$jp" ] && kill -0 "$jp" 2>/dev/null; then
+    kill -TERM "$jp" 2>/dev/null
+    for _ in $(seq 1 200); do kill -0 "$jp" 2>/dev/null || break; sleep 0.2; done
+  fi
+  [ -f "$root/journey.log" ] && cp -f "$root/journey.log" "$root.log"
+  [ -f "$root/run/journey-result.json" ] && cp -f "$root/run/journey-result.json" "$root.result.json"
+  rm -f "$root/lane-journey.pid"
+  local out
+  out=$("$here/world-reap" "$root" 2>/dev/null); printf '%s\n' "$out"
+  if ! printf '%s\n' "$out" | grep -q '; 0 unnamed left$'; then
+    echo "lane-journey: $root is kept: a process of it is named by no PID file (above); tell the owner, do not kill by pattern" >&2
+    [ "$rc" != 0 ] || rc=3
+  elif [ "${KEEP:-0}" = 1 ]; then echo "lane-journey: KEEP=1, $root is kept (its processes are stopped)"
+  else
+    chmod -R u+w "$root" 2>/dev/null
+    rm -rf -- "$root" 2>/dev/null || { echo "lane-journey: could not remove all of $root" >&2; [ "$rc" != 0 ] || rc=3; }
+  fi
+  [ -z "$signalled" ] || rc=130
+  exit "$rc"
+}
+trap finish EXIT
+trap 'signalled=1; exit 130' INT TERM HUP
+cd "$repo" || die "no tree at $repo"
+bash native/resource-client/journey.sh "${args[@]}" --keep-going "$cand/manifest.json" "$root/run" > "$root/journey.log" 2>&1 < /dev/null &
+jp=$!; echo "$jp" > "$root/journey.pid"
+wait "$jp"; rc=$?
+grep -E '^[A-Z0-9]+ +(PASS|FAIL|UNBUILT|UNMEASURED|UNCONFIGURED|SKIPPED)|^FRONTIER|^frontier' "$root/journey.log" | cut -c1-220
+echo "lane-journey: journey rc=$rc"

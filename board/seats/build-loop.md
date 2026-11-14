@@ -133,6 +133,14 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
   `lane-tree release SEAT`. `lane-tree status` shows the holder, lease age, idle minutes and dirty count.
 - Native host: `lane-tree native SEAT` (own linked packages copy), then `scripts/pipeline/native-loop SEAT BASE LABEL`.
   That is a Lean change to a native candidate in about 7 minutes (was about 48).
+- A lane journey run tears down what it starts: run journey steps on a candidate only with
+  `scripts/pipeline/lane-journey CANDIDATE_DIR NEW_ROOT STEP...` (detached, like any long job). It records itself and
+  journey.sh by PID file under NEW_ROOT, and on every exit (pass, fail, TERM/INT/HUP) stops the world's processes by
+  PID file (`world-reap`) and removes NEW_ROOT (KEEP=1 keeps it). NEW_ROOT.log and NEW_ROOT.result.json stay beside
+  it. Never `journey.sh` by hand in a lane: it stops only its own `mini serve` (11-14: 511 leaked processes).
+- A lane keeps one candidate: `native-loop` ends with `scripts/pipeline/lane-candidates prune LANE_DIR`, which keeps
+  the newest (LANE_CANDIDATES_KEEP=N for more), removes the older candidates and their logs/source-*.tar, and never
+  removes one a live process uses. After a by-hand `lane-build.sh overlay`, run the prune yourself.
 - Leases: a lease expires after 12 h (LANE_POOL_TTL_H). It is idle when nothing has touched it for 30 min
   (LANE_POOL_IDLE_M; touched = acquire, renew or an uncommitted file written) and no process has its cwd, an open
   file or its command line in the tree. The next acquire takes an idle or expired tree (a free one first), and
