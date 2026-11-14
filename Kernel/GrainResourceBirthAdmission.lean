@@ -7,6 +7,7 @@ module
 
 public import Kernel.GrainResourceBirthTransaction
 public import Compiler.PhysicalLawResolution
+public import Kernel.BranchAdmission
 public import Compiler.WorldKindLawDependencies
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -613,6 +614,27 @@ structure CheckedBranch {F : Type} [Field F] [DecidableEq F]
   modeBound : requiresCapability branch = true →
     authorization.evidence.capabilityValue.isSome = true
 
+/-- A branch that debits or writes a grain target presents a capability; the others take
+one when the credential names it, else the creator's signature. -/
+def branchMode {tariff : Tariff} {source : Source} (branch : Branch tariff source) :
+    BranchAdmission.Mode :=
+  if requiresCapability branch then .required else .optional
+
+/-- The shared branch core's refusals, as this receiver names them. A request that does not
+bind to its law, or a law the compiler cannot lower, is named as the plain birth names it. -/
+def Reject.ofBranch : BranchAdmission.Reject → Reject
+  | .capability => .capability
+  | .signature => .nativeSignature .sourceBinding
+  | .credentialShape => .credentialShape
+  | .policyUnavailable => .policyUnavailable
+  | .policyBinding => .metadata .policyBinding
+  | .policyUnsupported => .metadata .policyUnsupported
+  | .policyInputRange => .policyInputRange
+  | .policyCastAlias => .policyCastAlias
+  | .policyRejected => .policyRejected
+
+/-- One branch of a grain-backed birth: its policy source and guards, then the shared core's
+evidence and judgement (`BranchAdmission.admit`) on the branch's configuration. -/
 def Pending.admitBranch {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {ground : Ground deployment}
@@ -629,8 +651,6 @@ def Pending.admitBranch {F : Type} [Field F] [DecidableEq F]
     Except Reject (CheckedBranch pending branch credential) := do
   if exactEnvelope : receipt.envelopeBytes = credential.envelope then
     let wanted := branchRequest birth grain ambient.height branch
-    let step := pending.branchStep branch
-    let config := pending.branchConfig branch
     let old := ground.authority.authState
     let policySource ← match CanonicalCellRegistry.loadPolicySource deployment.domain
         ground.directory
@@ -648,45 +668,21 @@ def Pending.admitBranch {F : Type} [Field F] [DecidableEq F]
     let guardsBound ← (if bound : guardsChecked.val.all (fun guard =>
         decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true then
       Except.ok (PLift.up bound) else Except.error .policySourceConflict)
-    let evidence : Evidence config.portal old wanted.2 ←
-      if requiresCapability branch then
-        match credential.capability with
-        | none => .error .capability
-        | some identifier =>
-            match config.capabilityEvidenceChecked wanted.2 identifier () receipt () (fun _ => ()) with
-            | .error _ => .error .capability
-            | .ok evidence => .ok evidence
-      else
-        match credential.capability with
-        | some identifier =>
-            match config.capabilityEvidenceChecked wanted.2 identifier () receipt () (fun _ => ()) with
-            | .error _ => .error .capability
-            | .ok evidence => .ok evidence
-        | none =>
-            if epoch : wanted.2.subjectKeyEpoch = old.subjectKeyEpoch wanted.2.subject then
-              if verified : config.portal.verifySignature wanted.2 receipt = true then
-                .ok (.signature receipt epoch verified)
-              else .error (Reject.nativeSignature .sourceBinding)
-            else .error (Reject.nativeSignature .sourceBinding)
-    if epoch : wanted.2.policyEpoch = old.policyEpoch wanted.2.policyId then
-      if revision : wanted.2.policyRevision = old.policyRevision wanted.2.policyId then
-        match config.resolve? with
-        | none => .error .policyUnavailable
-        | some committed =>
-            let witness := committed.witness
-            match ComposedPolicyAdmission.admit config wanted.2 evidence witness
-                (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
-            | none => .error .policyRejected
-            | some admitted =>
-                let authorization := pending.liftAuthorization branch admitted
-                if modeBound : requiresCapability branch = true →
-                    authorization.evidence.capabilityValue.isSome = true then
-                  .ok ⟨receipt, exactEnvelope, policySource,
-                    dependenciesChecked.val, dependenciesChecked.property,
-                    guardsChecked.val, guardsChecked.property, guardsBound.down, authorization, modeBound⟩
-                else .error .capability
-      else .error .policyUnavailable
-    else .error .policyUnavailable
+    match (BranchAdmission.admit profile.compilerProfile ground.authority ground.directory
+        (useMarker profile deployment tariff source) (pending.branchStep branch)
+        wanted.2.target.value
+        (((pending.branchDependencies branch).map
+          WorldKindLawDependencies.Dependencies.additional).getD [])
+        wanted.2 (branchMode branch) credential.capability receipt).mapError Reject.ofBranch with
+    | .error reason => .error reason
+    | .ok admitted =>
+        let authorization := pending.liftAuthorization branch admitted
+        if modeBound : requiresCapability branch = true →
+            authorization.evidence.capabilityValue.isSome = true then
+          .ok ⟨receipt, exactEnvelope, policySource,
+            dependenciesChecked.val, dependenciesChecked.property,
+            guardsChecked.val, guardsChecked.property, guardsBound.down, authorization, modeBound⟩
+        else .error .capability
   else .error .credentialShape
 
 /-- **An admitted grain branch's law accepts that branch's own step**: the committed
