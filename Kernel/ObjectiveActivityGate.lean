@@ -51,8 +51,19 @@ open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
-/-- A cell in the kernel activity's protected coordinate space. -/
-def Protected (cell : CellId) : Prop := ObjectiveActivityCell.reservedBase ≤ cell.value
+/-- A cell in the kernel activity's protected coordinate space: at or above `reservedBase = 2^256`
+and below the authority space (`ProtectedCell.authorityBase = 2^257`). Every protected coordinate
+is `2^256` plus a 256-bit digest, so it is inside (`coordinate_protected`); the entry cells of the
+credential authority store are at or above `2^257` and are not protected by this gate: only the
+authority lowering writes them. -/
+def Protected (cell : CellId) : Prop :=
+  ObjectiveActivityCell.reservedBase ≤ cell.value ∧ cell.value < ProtectedCell.authorityBase
+
+/-- Every coordinate of a protected family is in the protected space. -/
+theorem coordinate_protected (spec : ProtectedCell.Spec) (domain : Digest) (role : spec.Role)
+    (key : List UInt8) : Protected ⟨ProtectedCell.coordinate spec domain role key⟩ :=
+  ⟨ProtectedCell.coordinate_reserved spec domain role key,
+    ProtectedCell.coordinate_lt_authorityBase spec domain role key⟩
 
 instance (cell : CellId) : Decidable (Protected cell) := by unfold Protected; infer_instance
 
@@ -125,7 +136,7 @@ theorem coordinate_refused {rootBytes : List UInt8 → Digest} {intent : DataInt
     (at_ : write.cellId = ⟨ObjectiveActivityCell.coordinate domain role key⟩) :
     ∃ cell, ordinaryGate intent = .error (.protectedWrite cell) :=
   let ⟨cell, refused, _⟩ := ordinaryGate_refuses writes
-    (by rw [at_]; exact ObjectiveActivityCell.coordinate_reserved domain role key)
+    (by rw [at_]; exact coordinate_protected ObjectiveActivityCell.spec domain role key)
   ⟨cell, refused⟩
 
 /-- An installed intent the gate admitted leaves every protected cell's bytes

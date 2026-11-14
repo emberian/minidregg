@@ -100,6 +100,23 @@ def coordinate (domain : Digest) (role : spec.Role) (key : List UInt8) : Nat :=
 theorem coordinate_reserved (domain : Digest) (role : spec.Role) (key : List UInt8) :
     reservedBase ≤ coordinate spec domain role key := Nat.le_add_right _ _
 
+/-- The authority space: every entry cell of the credential authority store is at or above
+`2^257` (`Compiler.CredentialAuthorityEntry.entryId`). Every protected coordinate is below it
+(`coordinate_lt_authorityBase`), and so is every id a resource birth may choose. -/
+def authorityBase : Nat := 2 * 2 ^ 256
+
+theorem reservedBase_le_authorityBase : reservedBase ≤ authorityBase := by
+  unfold reservedBase authorityBase; omega
+
+/-- Every coordinate is below the authority space: `2^256` plus a 256-bit digest. -/
+theorem coordinate_lt_authorityBase (domain : Digest) (role : spec.Role) (key : List UInt8) :
+    coordinate spec domain role key < authorityBase := by
+  have digest := Sp800185Cshake256.hash_digest_lt_two_pow_256 spec.idCustomization
+    ((StreamCodec.product digestStream (StreamCodec.product spec.roleStream bytesStream)).encode
+      (domain, role, key))
+  unfold coordinate reservedBase authorityBase
+  omega
+
 /-! ## The cell: one RAM address -/
 
 abbrev layout : Store.Layout.{0, 0, 0} where
@@ -209,4 +226,5 @@ theorem cellValid_coordinate (domain : Digest) (payload : Payload spec) :
 #assert_axioms payloadAt_cellOf
 #assert_axioms cellValid_coordinate
 #assert_axioms coordinate_reserved
+#assert_axioms coordinate_lt_authorityBase
 end Minidregg.Kernel.ProtectedCell

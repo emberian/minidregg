@@ -411,7 +411,8 @@ undecodable string are refused. -/
 def PhysicalPostLaw (deployment : Deployment) (write : DataWrite) : Prop :=
   match (LifecycleImage.codec Registry).decode write.canonicalPostBytes with
   | some (.live cell) => CanonicalCellRegistry.CellLaw deployment write.cellId.value cell
-  | some .retired => Kernel.ObjectiveActivityCell.reservedBase ≤ write.cellId.value
+  | some .retired => Kernel.ObjectiveActivityCell.reservedBase ≤ write.cellId.value ∧
+      write.cellId.value < Kernel.ProtectedCell.authorityBase
   | _ => False
 
 instance physicalPostLawDecidable (deployment : Deployment) (write : DataWrite) :

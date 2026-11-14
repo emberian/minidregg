@@ -56,6 +56,7 @@ public import Compiler.PersistedCodecTags.Core
 public import Compiler.WorldKindCell
 public import Compiler.DeclaredEffectCell
 public import Compiler.CredentialAuthorityCell
+public import Compiler.CredentialAuthorityEntry
 public import Compiler.HyperdocumentCell
 public import Compiler.CanonicalResourcePageMaterializer
 public import Compiler.ResourceBirthCodec
@@ -370,7 +371,7 @@ The declared roles are v5 since `state-key/tagged-v4` added the declaration tail
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 3⟩
   | .eventHistory => ⟨⟨91002⟩, 2⟩
-  | .authority => ⟨⟨91003⟩, 8⟩
+  | .authority => ⟨⟨91003⟩, 9⟩
   | .declaredObject => ⟨⟨91004⟩, 5⟩
   | .resourceBook => ⟨⟨91005⟩, 3⟩
   | .accountMetadata => ⟨⟨91007⟩, 5⟩
@@ -400,7 +401,7 @@ theorem schemaRef_injective : Function.Injective schemaRef := by
 abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .content => Hyperdocument.layout
   | .eventHistory => Kernel.HyperdocumentEventLog.Sparse.layout
-  | .authority => CredentialAuthorityState.layout
+  | .authority => Kernel.ProtectedCell.layout CredentialAuthorityEntry.spec
   | .declaredObject => EffectDeclaration.effectLayout
   | .resourceBook => CanonicalResourceKernel.layout
   | .accountMetadata => EffectDeclaration.effectLayout
@@ -421,7 +422,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
   | .eventHistory => HyperdocumentCell.eventMaterializer
-  | .authority => CredentialAuthorityCell.materializer
+  | .authority => Kernel.ProtectedCell.materializer CredentialAuthorityEntry.spec
   | .declaredObject => DeclaredEffectCell.materializer
   | .resourceBook => CanonicalResourcePageMaterializer.materializer
   | .accountMetadata => DeclaredEffectCell.materializer
@@ -461,7 +462,6 @@ theorem materializer_canonical (kind : Kind) (bytes : List UInt8)
 def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .content => some HyperdocumentCell.contentWire
   | .eventHistory => some HyperdocumentCell.eventWire
-  | .authority => some CredentialAuthorityCell.wire
   | .declaredObject => some DeclaredEffectCell.wire
   | .accountMetadata => some DeclaredEffectCell.wire
   | .declaredProgram => some DeclaredEffectCell.wire
@@ -473,12 +473,12 @@ def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .worldKind => some WorldKindCell.definitionWire
   | .worldInstance => some WorldKindCell.instanceWire
   | .platform => some Kernel.PlatformCellLayout.wire
-  | .resourceBook | .policySource | .nockProgram | .objectiveActivity | .seat => none
+  | .authority | .resourceBook | .policySource | .nockProgram | .objectiveActivity | .seat => none
 
 /-- The store wire of every kind rooted by its wire's SALTED root (the flat
 `StoreCodec.materializer`): every kind with a wire except those rooted privately. -/
 def saltedWire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
-  | .eventHistory | .authority => none
+  | .eventHistory => none
   | kind => wire? kind
 
 /-- The store wire of every kind rooted by its wire's PRIVATE root
@@ -486,7 +486,6 @@ def saltedWire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
 history. Every kind with a wire is exactly one of salted or private. -/
 def privateWire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .eventHistory => some HyperdocumentCell.eventWire
-  | .authority => some CredentialAuthorityCell.wire
   | _ => none
 
 theorem wire_salted_or_private (kind : Kind) :
@@ -561,7 +560,7 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
 @[simp] theorem registry_event_materializer :
     registry.materializer .eventHistory = HyperdocumentCell.eventMaterializer := rfl
 @[simp] theorem registry_authority_materializer :
-    registry.materializer .authority = CredentialAuthorityCell.materializer := rfl
+    registry.materializer .authority = Kernel.ProtectedCell.materializer CredentialAuthorityEntry.spec := rfl
 @[simp] theorem registry_book_materializer :
     registry.materializer .resourceBook = CanonicalResourcePageMaterializer.materializer := rfl
 @[simp] theorem registry_factory_materializer :
@@ -939,7 +938,7 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
   | .declaredProgram, state => DeclaredCellLaw .program cellId state
   | .content, state => ContentLaw state
   | .eventHistory, state => EventHistoryLaw deployment state
-  | .authority, _ => cellId = deployment.authorityCellId
+  | .authority, state => CredentialAuthorityEntry.PhysicalLaw deployment.authorityCellId cellId state
   | .resourceBook, state => cellId = deployment.resourceBookId ∧
       (CanonicalResourcePageMaterializer.bookAt state).isSome = true ∧
       (CanonicalResourceKernel.logicalBook state).AccountSupported
@@ -1136,11 +1135,48 @@ theorem book_identity_is_pinned (deployment : Deployment) (cellId : Nat)
     (valid : CellLaw deployment cellId ⟨.resourceBook, payload⟩) :
     cellId = deployment.resourceBookId := valid.2.1
 
-/-- The one authority cell lives at the deployment's pinned identifier. -/
+/-- The authority head lives at the deployment's pinned identifier: an authority cell that holds
+a logical root (`CredentialAuthorityEntry.cellHead`) is lawful only there. -/
 theorem authority_identity_is_pinned (deployment : Deployment) (cellId : Nat)
-    (payload : Materialized CredentialAuthorityCell.materializer)
+    (payload : CredentialAuthorityEntry.PhysicalCell) (root : Digest)
+    (head : CredentialAuthorityEntry.cellHead payload = some root)
     (valid : CellLaw deployment cellId ⟨.authority, payload⟩) :
-    cellId = deployment.authorityCellId := valid.2
+    cellId = deployment.authorityCellId := by
+  have law : CredentialAuthorityEntry.PhysicalLaw deployment.authorityCellId cellId payload.logical :=
+    valid.2
+  unfold CredentialAuthorityEntry.cellHead at head
+  unfold CredentialAuthorityEntry.PhysicalLaw at law
+  cases present : Kernel.ProtectedCell.payloadAt CredentialAuthorityEntry.spec payload.logical with
+  | none => rw [present] at head; cases head
+  | some held =>
+      rw [present] at head law
+      simp only [Option.bind_some] at head
+      split at head
+      · rename_i isHead
+        simp only [isHead.1] at law
+        exact law.2
+      · cases head
+
+/-- An authority entry lives at the coordinate of the address it names, and nowhere else. -/
+theorem authority_entry_is_placed (deployment : Deployment) (cellId : Nat)
+    (payload : CredentialAuthorityEntry.PhysicalCell)
+    (address : Store.Address CredentialAuthorityState.layout)
+    (value : CredentialAuthorityState.layout.Value address.1)
+    (held : CredentialAuthorityEntry.cellValue address payload = some value)
+    (valid : CellLaw deployment cellId ⟨.authority, payload⟩) :
+    cellId = CredentialAuthorityEntry.entryCellId address := by
+  have law : CredentialAuthorityEntry.PhysicalLaw deployment.authorityCellId cellId payload.logical :=
+    valid.2
+  unfold CredentialAuthorityEntry.cellValue at held
+  cases present : Kernel.ProtectedCell.payloadAt CredentialAuthorityEntry.spec payload.logical with
+  | none => rw [present] at held; cases held
+  | some stored =>
+      rw [present] at held
+      simp only [Option.bind_some, CredentialAuthorityEntry.payloadValue] at held
+      split at held
+      · rename_i named
+        exact law.names present named
+      · cases held
 
 /-- Loaded and final canonical Books cannot carry balances for unregistered
 accounts. The lossless wire codec deliberately imposes no such semantic law. -/
@@ -1163,7 +1199,7 @@ theorem no_user_book_birth (deployment : Deployment) (cellId : Nat)
     ¬UserInitial deployment cellId ⟨.resourceBook, payload⟩ := fun admitted => admitted.1.2
 
 theorem no_user_authority_birth (deployment : Deployment) (cellId : Nat)
-    (payload : Materialized CredentialAuthorityCell.materializer) :
+    (payload : CredentialAuthorityEntry.PhysicalCell) :
     ¬UserInitial deployment cellId ⟨.authority, payload⟩ := fun admitted => admitted.1.2
 
 theorem no_user_event_birth (deployment : Deployment) (cellId : Nat)
