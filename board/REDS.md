@@ -1,16 +1,23 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `f0ed42e2752a` (builder: REDS.md for e9dc4c0be201 (3 red)). Round finished 2026-11-14T14:34Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-f0ed42e2`.
+Tip: `16ff33ac3aa2` (builder: REDS.md for f0ed42e2752a (2 red)). Round finished 2026-11-14T14:41Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-16ff33ac`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | ratchets | rc=1 see /home/hbox/lanes/integ/logs/ratchets.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/ratchets.log |
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-f0ed42/journey.log |
+| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-16ff33/journey.log |
 
-Suspect commits since green (`git log 788dfb51fb5a..f0ed42e2752a`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..16ff33ac3aa2`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `16ff33ac` builder: REDS.md for f0ed42e2752a (2 red) (owner: build-loop)
+- `643e3927` journey THIN: the kind-read rows start their own consent provider (owner: apps-hermes)
+- `50b72670` thin consent: an observe-only read's observation header is derived as the Host derives it
+- `eb1181a5` journey THIN: a `kindRead` beside a write is signed under thin consent; a lied view of it is refused (owner: apps-hermes)
+- `a7431e4c` thin consent: a command holding an observe-only read is no longer refused `slotShape`
+- `e6d38997` journey THIN: the served view comes from the proxy; the step runs all its rows again (owner: apps-hermes)
 - `f0ed42e2` builder: REDS.md for e9dc4c0be201 (3 red) (owner: build-loop)
 - `5c29e9be` gates(generic-simplex): the gate builds its own Rust helpers, so every caller passes one argument
 - `e9dc4c0b` builder: REDS.md for 1b5666369348 (3 red) (owner: build-loop)
@@ -45,21 +52,15 @@ Suspect commits since green (`git log 788dfb51fb5a..f0ed42e2752a`), newest first
 - `54dee83b` fixtures: native runs re-recorded from candidate a4472f3f65b2 (accepted stale, doc-write stale)
 - `99e9e84c` journeys: what the first Host run of the light fleet line showed (owner: apps-hermes)
 - `2d17fe4e` `mini audit --from ANCHOR`: the audit resumed at the anchor an accepting audit left (owner: apps-hermes)
-- `e5725f72` the concierge branch on the lane: one incoming reader, the till grant follows the week price, `notAc (owner: apps-hermes, build-loop)
-- `120e113e` builder: REDS.md for a4472f3f65b2 (3 red) (owner: build-loop)
-- `47d92a43` agreement(kernel)!: the cap on a member's share of a view record is the specification's, log format 
-- `a4472f3f` docs: the effects revival's present state, and what the content migration takes
-- `04fe80dd` laws: every joint participant the MUD laws trust is bound to its birth; `LawView.Turn` carries ident (owner: apps-hermes)
-- `10b3ed1c` thin consent: a registered observation is displayed without a served view
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.161 | 0.204 | 1.264 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 35.498 | 56.951 | 1.604 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.106 | 0.151 | 1.427 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 18.584 | 53.328 | 2.870 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.327 | 0.298 | 0.910 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 439.610 | 133.934 | 0.305 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-f0ed42e2/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.189 | 0.214 | 1.128 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 27.401 | 56.530 | 2.063 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.145 | 0.190 | 1.311 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 20.523 | 52.687 | 2.567 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.395 | 0.310 | 0.784 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 427.204 | 125.340 | 0.293 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-16ff33ac/flatness.log | - | - | - | - | host-execution, store-retained |
