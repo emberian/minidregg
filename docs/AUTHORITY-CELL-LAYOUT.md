@@ -1,9 +1,9 @@
 # The authority store's physical layout
 
 State on `lane/authority-cells`: the registry's `.authority` kind is the cell layout and every
-writer family and reader is ported to it. **The whole build is not yet green on this head**: the
-section "Build state" names what is verified and what is not. Nothing here is landable until
-that section says the whole build, the Host and the gates pass.
+writer family and reader is ported to it. The whole build is green, a native Host built from the
+lane passes the tour, and the Simplex gate passes with the appended record flat over 200 births.
+The section "Validation" says exactly what ran on which commit and what is still owed.
 
 ## The problem (measured before the change, four-replica fixture, 200 births)
 
@@ -140,9 +140,28 @@ existing logical patch to it; only this lowering is new.
 - `Loaded.pastBytes` scans the accepted records from the asked height back for each cell it
   reads, so an `at height` read costs a fixed number of such scans. That scan is the history
   index's, not this layout's.
-- The serving Host follows the written cells itself after its own write (`stepCell`) instead of
-  taking the family's post cell: one more trie path per written entry than before (`HeldCell` is
-  deleted). Measure before optimising.
+- **The step validation costs more than before, measured.** The serving Host follows the written
+  cells itself after its own write (`stepCell`) instead of taking the family's post cell (`HeldCell`
+  is deleted), and rechecks the policies the step can have unsourced. `store-bench` on matched
+  worlds (hbox, one run each, a ratio on one box and not a published timing): after a birth,
+  `validateLoadedStep` and `validateServedStep` take 14.8 ms per step over 12 written cells, against
+  0.6 ms over 5 written cells on main; after a delegation 4.3 ms over 3 written cells against
+  0.8 ms over 1. That is about 1.2 to 1.4 ms per written cell. The cause is not isolated: the
+  candidates are the trie path each followed entry walks (the family already walked the same path
+  when it applied its patch), and `sourcedStepCheck` on the policies a birth installs. The fix to
+  try first is to hand the Host the family's post cell again, now proof-carrying over
+  `RealizesAuthority`, so each path is walked once.
+- **The hand-off time is not flat.** In the 200-birth `append-flatness` run the median application
+  hand-off was 52.7 ms over the first 8 heights and 85.7 ms over the last 8 (1.63 times, inside
+  the row's bound of 2). The record is flat; something else in the hand-off still grows with
+  height. Not attributed.
+- **The byte paths are still lists.** `scripts/check-bytes-repr.sh` counts 5031 against 4961 on
+  main. The rise is the binder `CellId → List UInt8` (the type of `DataSnapshot.canonicalBytes`
+  and `Loaded.pastBytes`) on the layout's definitions and theorems, and the list signatures of
+  `encodeCell`, `decodeCell`, `natOfBytes` and `entryId` over the lifecycle list codec. No path
+  executes more list bytes than before and each record carries fewer. The real fix is its own
+  change: `DataSnapshot.canonicalBytes`, `DataWrite.canonicalPostBytes` and the lifecycle codec as
+  `ByteArray`, after which these binders convert with no work here.
 
 ## Non-Lean consumers of cell identifiers (checked, none sees an entry id)
 
@@ -172,41 +191,44 @@ codec encodes an identifier as a variable-length natural.
 - The legacy Store2 carry (`NeutralPolicyCarry`) converts the source's one authority cell whole
   and lowers it to a head and one entry per address.
 
-## Build state (exactly, at the commit that carries this file)
+## Validation
 
-Everything in the worktree is committed and pushed to `lane/authority-cells`; nothing is
-local-only. hbox tree `/home/hbox/pool/t2` is leased to `authority-cells` and holds the warm
-build of whole-build pass seven (log `/home/hbox/lanes/authority-cells-scratch/whole-7.log`).
+What ran, all on hbox in the pooled tree `t2`, base `origin/main` at `23f9aac22` unless said:
 
-- **Builds (pass seven, `swarm-build lake build Minidregg`)**: every module except
-  `Kernel.NativeHostContext` and what imports it. That includes the registry, the entry and
-  layout modules, `CredentialAuthorityDomainReceiver`, `CredentialAuthorityServed`, `ServedBasis`,
-  `ReceivingLaw`, `AuthoritySpaceGate`, `NeutralPolicyCarry`, every receiver that does not import
-  the Host context, `ResourceBirthReceiver` (the tie), `PolicyInstallReceiver`,
-  `NativeObservationController`.
-- **Red: one module, one cause.** `Kernel/NativeHostContext.lean`, `stepSourcedLoaded_holds`: the
-  `checked` hypothesis is stated through `stepAffectedLoaded` and did not unify. The fix in this
-  commit (`unfold stepAffectedLoaded at checked`, and the same line in
-  `NativeHostServed.stepSourced_holds`) is NOT yet built. Everything above the Host context
-  (`NativeHostServed`, `NativeHostLight`, `NativeHost`, `NativeHostReplay`, `Host/*`, `Fixtures/*`,
-  `Verify/*`, the `ReceivingLawFixture` pole added after pass six) has never been compiled against
-  the flipped registry: expect further reds there (the adopt callbacks lost their fourth argument
-  in about forty places by a scripted edit; `NativeHostReplay` passes
-  `{ durable with headTag := _ }` to `loadDeployment`; fixtures and probes that pin roots or build
-  an authority cell by hand, for example `scripts/probe-canonical-cell-registry.lean`).
-- **bytes-repr is 5031 against 4961 on main** (the alias and dropped ascriptions are undone; the
-  rise is statement binders and the `List UInt8` signatures of `encodeCell`, `decodeCell`,
-  `natOfBytes`, `entryId`, the gate). Per file: `CredentialAuthorityLayout` +55,
-  `CredentialAuthorityEntry` +6, `AuthoritySpaceGate` +6, `NativeObservationController` +3,
-  `NativeHostContext` +2, `ProtectedCell` +1, `ObjectiveActivityGate` +1, `CapabilityRenounce` +1,
-  `CredentialAuthorityServed` -1, `CredentialAuthorityDomainReceiver` -4. The coordinator raises
-  the ceiling or the cell-bytes path moves to `ByteArray`; `DataWrite.canonicalPostBytes` and the
-  registry codecs are `List UInt8` today, so the second is a larger change.
-- **Not run**: a green whole build; `lane-check` of `Host/Main.lean` and
-  `Host/ClientConsentCore.lean`; the native Host; the tour J0..J8 and THIN; the Simplex gate.
-  `check-import-boundary.sh` passes on the worktree.
-- **Owed measurements**: the largest write and the authority bytes at heights 1, 40, 120 and 200
-  (`append-flatness` now prints `authority N B in M writes` and judges two raw bounds); the cost of
-  the Host following its own written cells (`stepCell`) where it used to be handed the post cell.
-- **Next step**: `whole.sh` in the lane scratchpad (sync, whole build, red list), fix the Host
-  layer, then the validation batch above, then the four numbers.
+- **Whole build**: `swarm-build lake build Minidregg` rc 0, together with the modules outside the
+  umbrella that import the layout (`Host.ClientConsentSession`,
+  `Host.ClientConsentSpecializedSession`, `Host.WorldSim`, `Host.TurnLogFollower`,
+  `Host.CarryVerifierMain`, `Host.Kn2StoreBench`, `Verify.NativeJointSourceFixture`,
+  `Verify.GenericSimplex{Harness,LogReopen,Load}`, `Verify.ResourceReserveBirthFixture`,
+  `Fixtures.BirthPlanPoles`, `Kernel.NativeThinConsent`, `Host.ThinBirthConsent`,
+  `Host.ClientConsentCore`). These were built as Lake targets, which is stricter than `lane-check`.
+- **Static checks**: `check-import-boundary.sh` OK; `check-bytes-repr.sh` 5031 (ceiling 4961: the
+  coordinator sets the new ceiling, see "Owed").
+- **Native Host**: `native-loop` overlay candidate `29af9d6bd9a0` on base candidate `23f9aac22`.
+- **Tour**: J0 to J8 and THIN pass on that candidate. The first native run refused every birth
+  `neutralBirthUnjudged`: `ResourceBirthController.Concrete.bornIn` took an entry cell's first
+  write for a birth the factory step must name. It now excludes the authority space. No Lean
+  build had shown it.
+- **Wider rows, keep-going**: J12X, JSERVE, G (1000 writes), K4, KT, JJ, K10, KF pass. KBW, KC,
+  K11, KCH and KH fail, and fail the same way on the base candidate (control runs of the same
+  rows on `23f9aac22`). P7KR is unconfigured without a shell in the manifest.
+- **Fixtures**: `scripts/native-accepted-fixture/rerecord.sh` re-recorded both native fixtures
+  from that candidate; their projections equal the hand-written authorities, which did not change.
+- **Simplex gate**: `scripts/gates/check-generic-simplex .lake/build/bin` with 200 heights:
+  10 runs pass, every plant red as recorded. `append-flatness` over 200 births, by birth ordinal:
+
+  | ordinal | record before | record now | largest write before | largest write now | authority now |
+  |---|---|---|---|---|---|
+  | 1 | 5,116 | 5,126 | 1,324 | 107 | 616 B in 8 writes |
+  | 40 | 11,366 | 5,135 | 7,568 | 107 | 616 B in 8 writes |
+  | 120 | 24,169 | 5,123 | 20,377 | 107 | 615 B in 8 writes |
+  | 200 | 36,989 | 5,135 | 33,185 | 107 | 615 B in 8 writes |
+
+  The row is two raw bounds (hand-off at most 2 times, record at most one eighth above the first
+  window) and prints these as its `WRITES` line.
+- **Executed poles** (compiled in the umbrella): `AuthoritySpaceGate.forged_empty_refused`,
+  `forged_other_kind_refused`, `ordinary_admitted`, `last_protected_cell`;
+  `ReceivingLawFixture.foreign_authority_writer_refused`.
+- **Not run**: `lane-check` as a script (the Lake targets above replace it); the composed, enrol
+  and j14 gate phases; any writer family the tour does not reach on a native Host (key rotation,
+  renounce, the pay and application share families: they compile and are untested natively).
