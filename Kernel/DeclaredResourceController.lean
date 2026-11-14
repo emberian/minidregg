@@ -306,16 +306,39 @@ def participantWant (keys : List Minidregg.Pred.Slot) (command : Command) (i : T
   keys.contains name || keys.contains (jointTargetKey command.targets[i].target name) ||
     keys.contains (jointIndexKey i.val name)
 
+/-- Whether a demanded name can be a pair delta led by field `a` of some participant: every such
+slot's name, under any key prefix, contains `pairStem a`. -/
+def pairLeads (keys : List Minidregg.Pred.Slot) (a : Nat) : Bool :=
+  ResourceAuthorityProjection.demandsStem keys (DeclaredResourceProjection.pairStem a)
+
+/-- `pairLeads` covers every pair a participant's demand names. -/
+theorem participantWant_leads (keys : List Minidregg.Pred.Slot) (command : Command)
+    (i : TargetIndex command) (a b : Nat)
+    (wanted : participantWant keys command i (DeclaredResourceProjection.pairName a b) = true) :
+    pairLeads keys a = true := by
+  have reach : ∀ pfx : String,
+      keys.contains (pfx ++ DeclaredResourceProjection.pairName a b) = true → pairLeads keys a = true := by
+    intro pfx member
+    refine List.any_eq_true.mpr ⟨pfx ++ DeclaredResourceProjection.pairName a b, by simpa using member, ?_⟩
+    rw [String.toList_append, DeclaredResourceProjection.pairName_stem]
+    exact ResourceAuthorityProjection.infixB_append _ pfx.toList _
+  simp only [participantWant, Bool.or_eq_true] at wanted
+  rcases wanted with (plain | target) | index
+  · exact reach "" (by simpa using plain)
+  · exact reach ("joint/target/" ++ toString command.targets[i].target ++ "/") target
+  · exact reach ("joint/index/" ++ toString i.val ++ "/") index
+
 /-- Participant `i`'s slots as a demand needs them: its per-byte cell block only when `gate` holds,
-and its target summaries only as `want` names them (`ResourceTransaction.targetProjectionDemand`). -/
-def participantSlotsGated (gate : Bool) (want : String → Bool)
+and its target summaries only as `want` names them (`ResourceTransaction.targetProjectionDemand`,
+`leads` gating a declared cell's pair deltas). -/
+def participantSlotsGated (gate : Bool) (want : String → Bool) (leads : Nat → Bool)
     (prepared : PreparedInvocation deployment profile ambient ground command)
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
     (i : TargetIndex command) : List (String × Int) :=
   (if gate then
       bytesSlots "resource/bytes" 0 (command.targets[i].materializer.codec.encode (logical (some i)))
     else []) ++
-    (targetProjectionDemand want command.subject command.targets[i] (prepared.targets i).pre.logical
+    (targetProjectionDemand want leads command.subject command.targets[i] (prepared.targets i).pre.logical
         (logical (some i)) ++
       moneyPolicySlots prepared i)
 
@@ -324,10 +347,12 @@ filter alike. -/
 theorem participantSlots_filter_gated
     (prepared : PreparedInvocation deployment profile ambient ground command)
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
-    (keys : List Minidregg.Pred.Slot) (pfx : String) (want : String → Bool)
-    (wanted : ∀ name, keys.contains (pfx ++ name) = true → want name = true) (i : TargetIndex command) :
+    (keys : List Minidregg.Pred.Slot) (pfx : String) (want : String → Bool) (leads : Nat → Bool)
+    (wanted : ∀ name, keys.contains (pfx ++ name) = true → want name = true)
+    (sound : ∀ a b, want (DeclaredResourceProjection.pairName a b) = true → leads a = true)
+    (i : TargetIndex command) :
     (participantSlots prepared logical i).filter (fun slot => keys.contains (pfx ++ slot.1)) =
-      (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes") want
+      (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes") want leads
         prepared logical i).filter (fun slot => keys.contains (pfx ++ slot.1)) := by
   have keep : ∀ l : List (String × Int),
       (l.filter fun slot => want slot.1).filter (fun slot => keys.contains (pfx ++ slot.1)) =
@@ -339,11 +364,11 @@ theorem participantSlots_filter_gated
     cases h : keys.contains (pfx ++ slot.1) with
     | false => simp
     | true => simp [wanted _ h]
-  have demanded : targetProjectionDemand want command.subject command.targets[i]
+  have demanded : targetProjectionDemand want leads command.subject command.targets[i]
       (prepared.targets i).pre.logical (logical (some i)) =
       (targetProjection command.subject command.targets[i] (prepared.targets i).pre.logical
         (logical (some i))).filter fun slot => want slot.1 :=
-    targetProjectionDemand_eq _ _ _ _ _
+    targetProjectionDemand_eq _ _ sound _ _ _ _
   unfold participantSlots participantSlotsGated
   rw [demanded, List.filter_append, List.filter_append, List.filter_append,
     List.filter_append, keep]
@@ -414,7 +439,8 @@ def projectWithCommonDemand (keys : List Minidregg.Pred.Slot)
     Minidregg.Pred.State :=
   let gate := ResourceAuthorityProjection.demandsStem keys "resource/bytes"
   let localIndex := primary.getD (firstIndex prepared)
-  let projected := Array.ofFn fun i => participantSlotsGated gate (participantWant keys command i) prepared logical i
+  let projected := Array.ofFn fun i =>
+    participantSlotsGated gate (participantWant keys command i) (pairLeads keys) prepared logical i
   let slots := fun i : TargetIndex command => projected[i.val]'(by
     simpa only [projected, Array.size_ofFn] using i.isLt)
   (⟨common ++ slots localIndex ++ jointSlots command.targets slots⟩ : Minidregg.Pred.State).restrict keys
@@ -427,28 +453,33 @@ theorem projectWithCommonDemand_exact (keys : List Minidregg.Pred.Slot)
       projectWithCommonFor keys prepared primary common logical := by
   have local_ : ∀ i, (participantSlots prepared logical i).filter (fun slot => keys.contains slot.1) =
       (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes")
-        (participantWant keys command i) prepared logical i).filter (fun slot => keys.contains slot.1) := by
+        (participantWant keys command i) (pairLeads keys) prepared logical i).filter
+          (fun slot => keys.contains slot.1) := by
     intro i
     simpa using participantSlots_filter_gated prepared logical keys "" (participantWant keys command i)
-      (fun name h => by simp_all [participantWant]) i
+      (pairLeads keys) (fun name h => by simp_all [participantWant]) (participantWant_leads keys command i) i
   have target : ∀ i : TargetIndex command,
       (participantSlots prepared logical i).filter
           (fun slot => keys.contains (jointTargetKey command.targets[i].target slot.1)) =
         (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes")
-          (participantWant keys command i) prepared logical i).filter
+          (participantWant keys command i) (pairLeads keys) prepared logical i).filter
           (fun slot => keys.contains (jointTargetKey command.targets[i].target slot.1)) := fun i =>
     participantSlots_filter_gated prepared logical keys
       ("joint/target/" ++ toString command.targets[i].target ++ "/") (participantWant keys command i)
-      (fun name h => by simp only [participantWant, jointTargetKey, h, Bool.or_true, Bool.true_or]) i
+      (pairLeads keys)
+      (fun name h => by simp only [participantWant, jointTargetKey, h, Bool.or_true, Bool.true_or])
+      (participantWant_leads keys command i) i
   have index : ∀ i : TargetIndex command,
       (participantSlots prepared logical i).filter
           (fun slot => keys.contains (jointIndexKey i.val slot.1)) =
         (participantSlotsGated (ResourceAuthorityProjection.demandsStem keys "resource/bytes")
-          (participantWant keys command i) prepared logical i).filter
+          (participantWant keys command i) (pairLeads keys) prepared logical i).filter
           (fun slot => keys.contains (jointIndexKey i.val slot.1)) := fun i =>
     participantSlots_filter_gated prepared logical keys
       ("joint/index/" ++ toString i.val ++ "/") (participantWant keys command i)
-      (fun name h => by simp only [participantWant, jointIndexKey, h, Bool.or_true, Bool.true_or]) i
+      (pairLeads keys)
+      (fun name h => by simp only [participantWant, jointIndexKey, h, Bool.or_true, Bool.true_or])
+      (participantWant_leads keys command i) i
   simp only [projectWithCommonDemand, projectWithCommonFor, projectWithCommon, Minidregg.Pred.State.restrict,
     Array.getElem_ofFn, jointSlots, List.filter_append, List.filter_flatMap, List.filter_map,
     Function.comp_def, local_, target, index]

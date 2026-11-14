@@ -1304,13 +1304,15 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
     | read => exact ContentResource.project before after ⟨[]⟩
 
 /-- `targetProjection` filtered by `want`, a content cell's summaries computed only when named
-(`ContentResource.projectDemand`, `targetProjectionDemand_eq`). -/
-def targetProjectionDemand (want : String → Bool) (subject : SubjectId) (target : Target)
-    (before after : Store target.layout) : List (String × Int) := by
+(`ContentResource.projectDemand`) and a declared cell's slots built only as named
+(`DeclaredResourceProjection.projectDemand`, with `leads` gating its pair deltas);
+`targetProjectionDemand_eq`. -/
+def targetProjectionDemand (want : String → Bool) (leads : Nat → Bool) (subject : SubjectId)
+    (target : Target) (before after : Store target.layout) : List (String × Int) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact (DeclaredResourceProjection.project id before after).filter fun slot => want slot.1
+    | scalar _ => exact DeclaredResourceProjection.projectDemand want leads id before after
     | computeFunding funding => exact (fundingProject funding).filter fun slot => want slot.1
     | moneyConsent consent => exact
         ([("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
@@ -1322,13 +1324,15 @@ def targetProjectionDemand (want : String → Bool) (subject : SubjectId) (targe
     | kindRead => exact (WorldPrototypeConstruction.observeProject before).filter fun slot => want slot.1
     | read => exact ContentResource.projectDemand want before after ⟨[]⟩
 
-theorem targetProjectionDemand_eq (want : String → Bool) (subject : SubjectId) (target : Target)
-    (before after : Store target.layout) :
-    targetProjectionDemand want subject target before after =
+theorem targetProjectionDemand_eq (want : String → Bool) (leads : Nat → Bool)
+    (sound : ∀ a b, want (DeclaredResourceProjection.pairName a b) = true → leads a = true)
+    (subject : SubjectId) (target : Target) (before after : Store target.layout) :
+    targetProjectionDemand want leads subject target before after =
       (targetProjection subject target before after).filter fun slot => want slot.1 := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
+    | scalar _ => exact DeclaredResourceProjection.projectDemand_eq want leads sound id before after
     | content content => exact ContentResource.projectDemand_eq want before after content
     | read => exact ContentResource.projectDemand_eq want before after ⟨[]⟩
     | _ => rfl
