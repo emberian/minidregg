@@ -5,8 +5,10 @@ import Kernel.GenericSimplex
 
 * Idle: after one operation commits, two hundred ticks over 10,000 time units send no
   message and end no view; work that then arrives commits in the view the replicas sat in.
-* Spam: 4,000 messages from one member for views far above the horizon create no view
-  record, leave one `ahead` entry, and give no reason to leave the view.
+* Spam: 3,000 messages from one member for views far above the horizon create no view
+  record, leave one `ahead` entry, and give no reason to leave the view. (A COMMIT is the
+  one kind the specification takes there; the running replica holds one per member:
+  `Verify.GenericSimplexRelative.delivery_policy`.)
 * Lag: replicas 1, 2, 3 leave twelve views without a commit while replica 0 hears nothing;
   it then receives its backlog newest first, so everything above its horizon is dropped. It
   walks to view 10 on what it kept, sees three members ahead, asks to leave, repeats, is
@@ -77,7 +79,7 @@ def lateOp : Net := checkedAll idle [[7], [8]]
 
 def spam (s : State) : State :=
   (List.range 1000).foldl (fun s v =>
-    [Kind.vote, .commit, .candidate, .ready].foldl (fun s kind =>
+    [Kind.vote, .candidate, .ready].foldl (fun s kind =>
       liveStep cfg s (.delivery ⟨3, 20 + v, kind, some [[UInt8.ofNat v]]⟩)) s) s
 
 def spammed : State := spam initial.nodes[1]!

@@ -471,13 +471,15 @@ theorem valueRules_same {s t : State} (c : Config) (same : Same s t) (number : N
 
 def coreRule (c : Config) (s : State) (number : Nat) (arg : Argument) : State :=
   if count (viewAt s number) .candidate arg ≥ 2 * c.faults + 1 &&
-      !(viewAt s number).sentReadyCore.contains arg then
+      !(viewAt s number).sentReadyCore.contains arg &&
+      !(viewAt s number).sentReadyRelay.contains arg then
     broadcast (putView s { viewAt s number with
       sentReadyCore := (viewAt s number).sentReadyCore ++ [arg] }) number .ready arg
   else s
 def relayRule (c : Config) (s : State) (number : Nat) (arg : Argument) : State :=
   if count (viewAt s number) .ready arg ≥ c.faults + 1 &&
-      !(viewAt s number).sentReadyRelay.contains arg then
+      !(viewAt s number).sentReadyRelay.contains arg &&
+      !(viewAt s number).sentReadyCore.contains arg then
     broadcast (putView s { viewAt s number with
       sentReadyRelay := (viewAt s number).sentReadyRelay ++ [arg] }) number .ready arg
   else s

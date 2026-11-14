@@ -10,4 +10,5 @@ import Kernel.GenericSimplexFloor
 import Kernel.GenericSimplexErasure
 import Kernel.GenericSimplexChecked
 import Kernel.GenericSimplexWindow
+import Kernel.GenericSimplexRelative
 import Kernel.GenericSimplexReceiverSafety

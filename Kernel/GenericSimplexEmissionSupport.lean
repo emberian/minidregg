@@ -423,7 +423,8 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
     simp only [Config.quorum, size]
     omega
   let core := if count (viewAt s view) .candidate arg ≥ 2 * c.faults + 1 &&
-      !(viewAt s view).sentReadyCore.contains arg then
+      !(viewAt s view).sentReadyCore.contains arg &&
+      !(viewAt s view).sentReadyRelay.contains arg then
         broadcast (putView s {viewAt s view with sentReadyCore :=
           (viewAt s view).sentReadyCore ++ [arg]}) view .ready arg else s
   have coreInv : EmissionInvariant c external core := by
@@ -436,10 +437,11 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
       · apply Or.inl
         simpa only [putView_audit, quorum] using
           actual_count_evidence c s external old.scopeOK old.backed view .candidate arg
-            (2 * c.faults + 1) enabled.1
+            (2 * c.faults + 1) enabled.1.1
     · exact old
   let relay := if count (viewAt core view) .ready arg ≥ c.faults + 1 &&
-      !(viewAt core view).sentReadyRelay.contains arg then
+      !(viewAt core view).sentReadyRelay.contains arg &&
+      !(viewAt core view).sentReadyCore.contains arg then
         broadcast (putView core {viewAt core view with sentReadyRelay :=
           (viewAt core view).sentReadyRelay ++ [arg]}) view .ready arg else core
   have relayInv : EmissionInvariant c external relay := by
@@ -451,7 +453,7 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
       · exact putCopied_invariant view _ coreInv rfl rfl
       · apply Or.inr
         exact actual_count_evidence c core external coreInv.scopeOK coreInv.backed
-          view .ready arg (c.faults + 1) enabled.1
+          view .ready arg (c.faults + 1) enabled.1.1
     · exact coreInv
   have equation : argumentRules c s view arg =
       (if count (viewAt relay view) .ready arg ≥ 2 * c.faults + 1 then

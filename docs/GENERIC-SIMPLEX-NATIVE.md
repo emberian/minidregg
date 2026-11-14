@@ -224,10 +224,10 @@ searched the whole `checked` list once per prefix. Now:
   (`addOffer`): the offers are the pending work.
 - Bound: one input costs O(L · (m + k) + p), with L the payload count of the longest live
   block, m the messages kept in the views above the floor, k the kept histories (1 for one
-  chain; one per checked fork) and p the pending offers. L is the whole chain: every
-  message carries its exact ancestry, so cost per input is still linear in history
-  (interpreter, four replicas: 15 ms per operation at 40 operations, 83 ms at 160; before,
-  3,009 ms at 40). Removing that factor needs floor-relative blocks on the wire.
+  chain; one per checked fork) and p the pending offers. In the specification L is the
+  whole chain, because a block there is its exact ancestry (interpreter, four replicas:
+  15 ms per operation at 40 operations, 83 ms at 160; before, 3,009 ms at 40). In the
+  running replica L is the payloads above its committed height (next section).
 
 **Idle timer** (`wantsOut`). A view's timer runs only while this replica has a reason to
 leave it: a checked offer on its best parent, a prepared parent not yet in its committed
@@ -248,21 +248,90 @@ exactly as before (`ingest_within`, `ingest_within_propose`). Recovery of what w
 dropped: `faults + 1` members ahead is a reason to leave the view; a replica still in a
 view a timeout after asking repeats its CANDIDATE(⊥); a peer that has left that view
 answers the repeat with its own messages for it and the following `window` views
-(`serveViews`, through `relay`). Executed (`Verify/GenericSimplexWindow.lean`): 4,000
+(`serveViews`, through `relay`). Executed (`Verify/GenericSimplexWindow.lean`): 3,000
 far-future messages create no record; a replica twelve views behind with everything above
 its horizon dropped reaches the others' view, and stays behind when `relay` is not
-forwarded. Not bounded: the messages one member can put in one view record by
-equivocating.
+forwarded. A COMMIT is the one kind `ingest` takes above the horizon: a quorum of them
+moves the floor, and a replica that dropped them could never learn it is behind a commit.
+The specification does not bound them; the running replica does (next section).
+
+## The running replica: relative blocks (`Kernel/GenericSimplexRelative.lean`)
+
+`Replica.step` is `liveStep` between a codec and a delivery policy. It adds no rule.
+
+**Codec.** A block is the payloads above the replica's committed height, in memory and on
+the wire. A `WireMessage` carries its sender's height and that suffix. A receiver at the
+same or a greater height drops the part it has committed (`decode`); one at a lower
+height cannot read the block and keeps only that the sender is ahead. After a commit the
+replica moves its origin (`rebase`): the height rises, every kept block loses the
+committed payloads, the floor view keeps only the parent it offers, and a received message
+whose block does not extend the commit is dropped. If something the replica itself sent,
+prepared or proposed does not extend the commit, it halts (`failed`): the safety theorem
+excludes that state under at most f faults. The checker reports source records the same
+way, relative to an application height (`WireInput.checked`).
+
+**Delivery policy.** Holding, dropping and reordering deliveries is what the
+specification's network may always do, so the policy carries no safety argument.
+- A COMMIT the replica cannot read yet, or for a view above its horizon, is held: one per
+  member (`holdFar_unique`), the one for that member's highest view. The engine gets held
+  COMMITs when they are readable and within the horizon, or when a quorum of members holds
+  the same view and block and no record above the horizon is already waiting (`release`).
+- A member's messages of one kind in one view record are capped at `parties + 1` (`cap`):
+  a correct member sends at most `2 * faults + 2`.
+- `addOffer`'s refusal of a payload already committed sees only the payloads above the
+  height (none between inputs). Not offering a committed operation again is the driver's.
+
+**Recovery.** A replica keeps the COMMIT evidence of its last `Config.window` commits,
+each relative to the height before that commit. A peer that asks to leave a view from a
+lower height is sent, each time it asks, every kept commit from its height on, in order.
+A replica further behind than its peers keep needs the earlier certificates in order from
+a durable record: that transfer is the driver's, and `CommitTransfer` in `EventualCommit`
+must be read as in-order for it.
+
+**Bound.** One input costs O(u · (m + k) + p + n²): u the payloads of the longest
+uncommitted block, m ≤ (window + 2) · 4 · n · (n + 1) kept messages, k kept checked
+histories, p pending offers, n held COMMITs. None depends on the committed height.
+Interpreter, four replicas, 640 operations: 13 ms per operation at 10, 15 ms at 160,
+10 ms at 640; every kept block is empty between operations.
+
+**Agreement.** Proved: the codec reads the chain the sender meant when the receiver's
+committed chain is a strict prefix of it (`above_denotes`); moving the origin keeps what a
+block denotes and drops exactly the blocks that do not strictly extend the commit
+(`strip_denotes`, `strip_conflict`); and the specification's agreement theorem is the
+running replicas' given the refinement (`relative_agreement_of_refines`). Stated, not
+proved: `RelativeRefines` (`Verify/GenericSimplexRelativeReach.lean`), the refinement
+itself. Its proof is an induction on the run with the specification's safety invariants: a
+block a correct member supports in a view above a committed view extends the committed
+chain. Until it is proved, agreement of the running replicas rests on that statement.
+Executed (`Verify/GenericSimplexRelative.lean`): the same eight operations through both
+engines end in the same views, floors and chains; a replica four commits behind is served
+and catches up; one twelve behind stays behind until the COMMITs are replayed in order;
+4,000 far COMMITs from one member leave one held message; fifty VOTEs leave five.
+
+**READY once.** `argumentRules` sends READY for one argument once, by whichever of its two
+rules (`2f+1` CANDIDATEs, `f+1` READYs) is enabled first; it used to send it once per
+rule. The F1 schedule did not depend on the duplicate: its facts hold unchanged.
+
+**Signatures.** A COMMIT's signature is over `commitmentBytes context view block` with the
+whole chain as `block`. With relative blocks two correct signers at different heights
+encode one chain differently, so the signed statement has to be canonical some other way:
+the view, the chain's length and a running digest of the chain, which each replica can
+extend from its own digest over the suffix. That is the native layer's change and is not
+made.
 
 **Not adopted by the native layer.** `Compiler/GenericSimplexIO.lean` still replays with
-`step` and checkpoints the whole state; `exportable` and `certificateCandidates` read old
-views and the audit; nothing forwards `relay`, and `receivedBefore` answers a repeated
-CANDIDATE(⊥) as a duplicate without giving it to the kernel. The kernel harness, the load
-harness and the witnesses run the new rules; the load harness runs `liveStep`.
+`step` on whole chains and checkpoints the whole state; `exportable` and
+`certificateCandidates` read old views and the audit; the participant never drains
+`outbox`; nothing forwards `relay`; `receivedBefore` answers a repeated CANDIDATE(⊥) as a
+duplicate without giving it to the kernel. The wire and the journal therefore still carry
+whole chains, and no log format moves for the running replica until the native layer
+adopts it. The kernel harness and the witnesses run the new rules.
 
-**BREAKS: log magic version 7.** The step changed (`validBlock`, `checked`, `offers`, the
-tick guard, the `ingest` horizon and repeat answer) and the snapshot carries `ahead`.
-Version-6 logs refuse (`GenericSimplexIO.v6_log_refused`). A mesh moves by re-genesis.
+**BREAKS: log magic version 8.** Version 7: the step changed (`validBlock`, `checked`,
+`offers`, the tick guard, the `ingest` horizon and repeat answer) and the snapshot carries
+`ahead`. Version 8: `ingest` takes a COMMIT above the horizon and READY is sent once, so a
+version-7 journal does not replay to the same states. Older logs refuse (`GenericSimplexIO.v7_log_refused`). A
+mesh moves by re-genesis.
 
 ## Native source consumer
 

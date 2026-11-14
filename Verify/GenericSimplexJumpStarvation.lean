@@ -13,10 +13,11 @@ Why F1 was once thought gone. Between 788dfb51f and aac9eba60 this policy stoppe
 `.pr`, and the two F1 theorems were removed. The step was not the reason. The network here
 had learned to forward a message that appears a second time in a party's outbox (the
 repeated CANDIDATE(⊥) of a stuck replica) and forwarded it past the policy's slow link.
-An honest replica also sends each READY twice (once by the `2f+1` CANDIDATE rule, once by
+An honest replica then sent each READY twice (once by the `2f+1` CANDIDATE rule, once by
 the `f+1` READY rule), so every held READY leaked through and the lagged party voted. With
-repeats held like any other message (`repeated`) the policy starves `.pr` under the present
-step exactly as before.
+repeats held like any other message (`repeated`) the policy starves `.pr` exactly as
+before. The kernel now sends READY for one argument once; the schedule did not depend on
+the duplicate, and every fact below holds unchanged without it.
 
 The facts are theorems by compiled evaluation (`native_decide`): each run is evaluated once,
 in well under a second. A run of twelve rounds costs the kernel's reduction about half a
@@ -222,7 +223,7 @@ def owed (net : Net) : List (Nat × Message) :=
       decide (receiver < 3) && receiver != relayer && !net.seen.contains (receiver, m)
 
 /-- Messages an honest party put in its outbox again since the last scan (the repeated
-CANDIDATE(⊥) of a stuck replica, and the second copy of each READY): each goes to both
+CANDIDATE(⊥) of a stuck replica): each goes to both
 other honest parties once more, unless the policy holds it. -/
 def repeated (net : Net) (hold : Nat → Nat → Message → Bool) : List (Nat × Message) :=
   [0, 1, 2].flatMap fun sender =>

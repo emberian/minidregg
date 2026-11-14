@@ -460,6 +460,7 @@ theorem lagging_floor_refused :
   Minidregg.Kernel.GenericSimplexWindow.noteAhead_members
   Minidregg.Kernel.GenericSimplexWindow.ingest_within
   Minidregg.Kernel.GenericSimplexWindow.ingest_within_propose
+  Minidregg.Kernel.GenericSimplexWindow.tick_idle
 #assert_axioms Minidregg.Kernel.GenericSimplexErasure.liveStep_run
 #assert_axioms Minidregg.Kernel.GenericSimplexErasure.rebase_observational
 end Minidregg.Kernel.GenericSimplexFloor

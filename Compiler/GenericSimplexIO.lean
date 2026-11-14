@@ -112,12 +112,14 @@ version 7 = the retained epoch (`checked` keeps maximal source histories and `va
 asks for a prefix of one, a committed payload leaves the offers, a view's timer runs only
 with a reason to leave it (`wantsOut`), a message for a view above the horizon is not
 stored and a repeated CANDIDATE(⊥) for a view its receiver has left is answered with the
-receiver's own messages; the snapshot carries `ahead`). An older log refuses at this magic
-rather than being replayed under a different `step` (`v6_log_refused`). -/
-def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,7]
+receiver's own messages; the snapshot carries `ahead`);
+version 8 = `ingest` takes a COMMIT for a view above the horizon (a quorum of them moves
+the floor), and READY for one argument is sent once. An older log refuses at this magic rather than being replayed under a
+different `step` (`v7_log_refused`). -/
+def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,8]
 
-/-- The magic of the previous format (erasable floor, unretained checked set). -/
-def logMagicV6 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,6]
+/-- The magic of the previous format (no COMMIT was taken above the horizon). -/
+def logMagicV7 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,7]
 
 /-- The format version byte of an image that carries the "MINI-SIMPLEX-LOG"
 magic, whatever its version; `none` for anything else. Lets an open refuse an
@@ -232,18 +234,18 @@ def decodeLog (bytes : Bytes) : Option Log := do
   let deltas ← decodeDeltas rest.length rest
   some ⟨base,deltas.reverse⟩
 
-/-- A version-6 log never decodes, whatever follows its magic: its inputs were recorded
-under a different step and its snapshot lacks `ahead`. -/
-theorem v6_log_refused (rest : Bytes) : decodeLog (logMagicV6 ++ rest) = none := by
-  have taken : (logMagicV6 ++ rest).take logMagic.length = logMagicV6 := rfl
-  have differs : (logMagicV6 != logMagic) = true := by decide
+/-- A version-7 log never decodes, whatever follows its magic: its inputs were recorded
+under a different step. -/
+theorem v7_log_refused (rest : Bytes) : decodeLog (logMagicV7 ++ rest) = none := by
+  have taken : (logMagicV7 ++ rest).take logMagic.length = logMagicV7 := rfl
+  have differs : (logMagicV7 != logMagic) = true := by decide
   simp [decodeLog, taken, differs]
 
-/-- It is still recognised as an agreement log of version 6, so an open names it. -/
-theorem v6_log_named (rest : Bytes) : logFormatVersion (logMagicV6 ++ rest) = some 6 := by
+/-- It is still recognised as an agreement log of version 7, so an open names it. -/
+theorem v7_log_named (rest : Bytes) : logFormatVersion (logMagicV7 ++ rest) = some 7 := by
   rfl
 
-#assert_axioms v6_log_refused
+#assert_axioms v7_log_refused
 
 /-- Replay of a decoded log over the merged journal: from its checkpoint
 snapshot if it has one (which must be this replica's, and not failed), else

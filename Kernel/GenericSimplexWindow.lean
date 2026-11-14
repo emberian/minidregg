@@ -1,8 +1,8 @@
 /- The view window of the agreement engine. A replica keeps a view record only for views up
 to `horizon` (`Config.window` above its current view). Kernel-only. Stated and proved here:
 
-* `ingest_beyond`: a member's message for a view above the horizon changes nothing but the
-  `ahead` note (`noteAhead_frame`): no view record, no send, no relay;
+* `ingest_beyond`: a member's message for a view above the horizon, other than a COMMIT,
+  changes nothing but the `ahead` note (`noteAhead_frame`): no view record, no send, no relay;
 * `noteAhead_unique`, `noteAhead_members`: `ahead` holds one entry per member, so at most
   `parties` entries whatever a Byzantine member names;
 * `ingest_within`: a message for a view above the floor and within the horizon that this
@@ -24,16 +24,19 @@ theorem floor_le_horizon (c : Config) (s : State) : s.lastCommitted ≤ horizon 
 theorem current_le_horizon (c : Config) (s : State) : s.current ≤ horizon c s := by
   unfold horizon; omega
 
-/-- **Above the horizon nothing is kept.** -/
+/-- **Above the horizon nothing is kept** but a COMMIT. -/
 theorem ingest_beyond (c : Config) (s : State) (m : Message)
-    (member : m.sender < c.parties) (far : horizon c s < m.view) :
+    (member : m.sender < c.parties) (far : horizon c s < m.view) (other : m.kind ≠ .commit) :
     ingest c s m = noteAhead s m.sender m.view := by
+  have kind : (m.kind != .commit) = true := by
+    cases named : m.kind <;> first | exact absurd named other | rfl
   have floor := floor_le_horizon c s
   have guard : (decide (m.sender ≥ c.parties) || m.view == 0) = false := by
     simp only [Bool.or_eq_false_iff, decide_eq_false_iff_not, beq_eq_false_iff_ne]
     omega
   unfold ingest
-  rw [if_neg (by rw [guard]; exact Bool.false_ne_true), if_neg (by omega), if_pos far]
+  rw [if_neg (by rw [guard]; exact Bool.false_ne_true), if_neg (by omega),
+    if_pos (by rw [kind, Bool.and_true]; exact decide_eq_true far)]
 
 theorem noteAhead_frame (s : State) (sender view : Nat) :
     (noteAhead s sender view).views = s.views ∧ (noteAhead s sender view).outbox = s.outbox ∧
@@ -102,7 +105,8 @@ theorem ingest_within (c : Config) (s : State) (m : Message)
       (viewAt s m.view).received.contains m) = false := by
     rw [fresh, Bool.and_false]
   unfold ingest
-  rw [if_neg (by rw [guard]; exact Bool.false_ne_true), if_neg (by omega), if_neg (by omega),
+  rw [if_neg (by rw [guard]; exact Bool.false_ne_true), if_neg (by omega),
+    if_neg (by rw [Bool.and_eq_true, decide_eq_true_eq]; omega),
     if_neg (by rw [unvalued]; exact Bool.false_ne_true),
     if_neg (by rw [notPropose]; exact Bool.false_ne_true),
     if_neg (by rw [notRepeat]; exact Bool.false_ne_true)]
@@ -123,11 +127,33 @@ theorem ingest_within_propose (c : Config) (s : State) (m : Message)
   have proposes : (m.kind == .propose) = true := by rw [propose]; rfl
   have leads : (m.sender != c.leader m.view) = false := by rw [← leader]; exact bne_self_eq_false _
   unfold ingest
-  rw [if_neg (by rw [guard]; exact Bool.false_ne_true), if_neg (by omega), if_neg (by omega),
+  rw [if_neg (by rw [guard]; exact Bool.false_ne_true), if_neg (by omega),
+    if_neg (by rw [Bool.and_eq_true, decide_eq_true_eq]; omega),
     if_neg (by rw [unvalued]; exact Bool.false_ne_true), if_pos proposes,
     if_neg (by rw [leads]; exact Bool.false_ne_true)]
   dsimp only
   rw [first]
+  rfl
+
+/-- A tick, up to the timer's decision: local actions drained, the clock advanced. -/
+def ticked (c : Config) (s : State) (now : Nat) : State :=
+  { pump c c.pumpBudget s with now := max (pump c c.pumpBudget s).now now }
+
+/-- **An idle view's timer does nothing but move its deadline.** When the replica has no
+reason to leave its view (`wantsOut`), a tick is the drain of local actions before and
+after, with the deadline set one whole timeout ahead: the timer asks for no disable and
+repeats no CANDIDATE(⊥). (That the two drains send nothing in a quiescent state is not
+proved here; executed: `Verify.GenericSimplexWindow`, `idle.sent == oneOp.sent`.) -/
+theorem tick_idle (c : Config) (s : State) (now : Nat)
+    (running : (!c.wellFormed || decide (s.self ≥ c.parties) || s.failed) = false)
+    (idle : wantsOut c (ticked c s now) = false) :
+    step c s (.tick now) = pump c c.pumpBudget
+      { ticked c s now with
+        deadline := (ticked c s now).now + viewTimeout c (ticked c s now) (ticked c s now).current } := by
+  unfold step
+  rw [if_neg (by rw [running]; exact Bool.false_ne_true)]
+  show pump c c.pumpBudget (if (!wantsOut c (ticked c s now)) = true then _ else _) = _
+  rw [if_pos (by rw [idle]; rfl)]
   rfl
 
 end Minidregg.Kernel.GenericSimplexWindow

@@ -228,11 +228,14 @@ def argumentRules (c : Config) (s : State) (number : Nat) (arg : Argument) : Sta
   if number ≤ s.lastCommitted then s else Id.run do
   let mut s := s
   let v := viewAt s number
-  if count v .candidate arg ≥ 2 * c.faults + 1 && !v.sentReadyCore.contains arg then
+  -- READY for one argument is sent once, by whichever of the two rules is enabled first.
+  if count v .candidate arg ≥ 2 * c.faults + 1 && !v.sentReadyCore.contains arg &&
+      !v.sentReadyRelay.contains arg then
     s := putView s { v with sentReadyCore := v.sentReadyCore ++ [arg] }
     s := broadcast s number .ready arg
   let v := viewAt s number
-  if count v .ready arg ≥ c.faults + 1 && !v.sentReadyRelay.contains arg then
+  if count v .ready arg ≥ c.faults + 1 && !v.sentReadyRelay.contains arg &&
+      !v.sentReadyCore.contains arg then
     s := putView s { v with sentReadyRelay := v.sentReadyRelay ++ [arg] }
     s := broadcast s number .ready arg
   let v := viewAt s number
@@ -398,7 +401,11 @@ def wantsOut (c : Config) (s : State) : Bool :=
 /-- A payload already in the committed tip is not work and is not offered again. -/
 def addOffer (s : State) (payload : Bytes) : List Bytes :=
   if s.committedTip.contains payload then s.offers else addUnique s.offers payload
-/-- The last view a record is kept for: `window` views above the current view. -/
+/-- The last view a record is kept for: `window` views above the current view. A COMMIT
+is the one kind `ingest` takes above it: a quorum of them moves the floor, and a replica
+that cannot keep them can never be told it is behind a commit. The running replica bounds
+them by holding one per member until a quorum agrees (`GenericSimplexRelative.release`):
+that is a delivery order, which this specification does not constrain. -/
 def horizon (c : Config) (s : State) : Nat := max s.current s.lastCommitted + c.window
 /-- A member named a view above the horizon: remember only how far ahead it claims to be. -/
 def noteAhead (s : State) (sender view : Nat) : State :=
@@ -419,7 +426,7 @@ def ingest (c : Config) (s : State) (m : Message) : State :=
   if m.view ≤ s.lastCommitted then
     if m.kind == .candidate && m.value.isNone then serveFloor s m.sender else s
   else
-  if horizon c s < m.view then noteAhead s m.sender m.view else
+  if horizon c s < m.view && m.kind != .commit then noteAhead s m.sender m.view else
   if (m.kind == .propose || m.kind == .vote || m.kind == .commit) && m.value.isNone then s else
   if m.kind == .propose then
     if m.sender != c.leader m.view then s else
