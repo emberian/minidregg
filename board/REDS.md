@@ -1,17 +1,20 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `1a7fcf5b3429` (builder: REDS.md for 87b77ef2c594 (3 red)). Round finished 2026-11-14T10:53Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-1a7fcf5b`.
+Tip: `197c649737ae` (index/trie-v3: a sequence item's position is folded into the leading bits of its path). Round finished 2026-11-14T11:26Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-197c6497`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | ratchets | rc=1 see /home/hbox/lanes/integ/logs/ratchets.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/ratchets.log |
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-1a7fcf/journey.log |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-197c64/journey.log |
 
-Suspect commits since green (`git log 788dfb51fb5a..1a7fcf5b3429`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..197c649737ae`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `197c6497` index/trie-v3: a sequence item's position is folded into the leading bits of its path (owner: apps-hermes, read-path)
+- `b07ea189` bytes: the index's logical map is `Theory.KeyedModel.Model`; the fleet page readers take the deploye
+- `5a59d8ff` builder: REDS.md for 1a7fcf5b3429 (3 red) (owner: build-loop)
 - `1a7fcf5b` builder: REDS.md for 87b77ef2c594 (3 red) (owner: build-loop)
 - `27025da1` effects: a refusal's detail and thin consent's shown operation are `ByteArray`
 - `c1dbafe3` the Host's held index trie follows every verified suffix: a certify no longer slows the session's la (owner: apps-hermes)
@@ -49,18 +52,15 @@ Suspect commits since green (`git log 788dfb51fb5a..1a7fcf5b3429`), newest first
 - `d31ba6ca` The resource-transaction money leg uses the one gross-debit footprint (owner: apps-hermes)
 - `4e81a7ca` One birth branch core: `Kernel.BranchAdmission` (owner: apps-hermes)
 - `c8e19e50` `AccountGrant.Held` and `AccountGrant.RootOwner`: the pay assignment is the owner's alone
-- `962efddf` `Scope.maxCost` is `Scope.perRequestBytes` (owner: apps-hermes, bytes-repr, read-path)
-- `a3987eba` Request cost is an encoded length everywhere: birth, Book effect and resource-transaction legs (owner: apps-hermes)
-- `9372f1f6` agreement(kernel)!: idle timer and view window, log format 7 (owner: read-path)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.243 | 0.230 | 0.946 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 46.453 | 98.394 | 2.118 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.198 | 0.261 | 1.320 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 29.505 | 89.480 | 3.033 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.694 | 0.375 | 0.540 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 190.228 | 205.897 | 1.082 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-1a7fcf5b/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.190 | 0.222 | 1.169 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 32.736 | 117.012 | 3.574 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.141 | 0.223 | 1.576 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 19.008 | 60.602 | 3.188 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.903 | 0.431 | 0.477 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 884.316 | 184.485 | 0.209 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-197c6497/flatness.log | - | - | - | - | host-execution, store-retained |
