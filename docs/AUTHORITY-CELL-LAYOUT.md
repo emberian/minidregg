@@ -146,11 +146,21 @@ existing logical patch to it; only this lowering is new.
   worlds (hbox, one run each, a ratio on one box and not a published timing): after a birth,
   `validateLoadedStep` and `validateServedStep` take 14.8 ms per step over 12 written cells, against
   0.6 ms over 5 written cells on main; after a delegation 4.3 ms over 3 written cells against
-  0.8 ms over 1. That is about 1.2 to 1.4 ms per written cell. The cause is not isolated: the
-  candidates are the trie path each followed entry walks (the family already walked the same path
-  when it applied its patch), and `sourcedStepCheck` on the policies a birth installs. The fix to
-  try first is to hand the Host the family's post cell again, now proof-carrying over
-  `RealizesAuthority`, so each path is walked once.
+  0.8 ms over 1. **Attributed** (`store-bench` now times each part of a served step alone, ten
+  repetitions): after a birth the whole step is 18.5 ms, of which `loadServedAuthorityStep`
+  (`stepCell`) is 16.0 ms and the directory step, the decode of the written cells, the cell law,
+  the affected policies and the sourcing check of 7 policies are each 0.1 ms or less; after a
+  delegation 5.6 ms, of which `stepCell` is 4.6 ms. So the cost is the kept trie: about 1.1 ms per
+  `set` of `PrivateCellRoot.materializer` (the bench frees and sets each entry, two sets; a real
+  step sets a new entry once, so a real birth step is about half the bench's). Policy sourcing is
+  not it. The same 1.1 ms per `set` is paid by the family when it applies its patch, on main too;
+  the lane pays it a second time in the Host. **Not fixed.** Two fixes, both wanted: (a) the
+  Host takes the family's post cell through `Received.appended`, carrying
+  `HoldsAuthority next.served.canonicalBytes authorityCellId post.logical` (each family's
+  `installed_authority`), with `stepCell` as the path when none is handed: main's `HeldCell` was
+  checked by comparing the one cell's bytes, which no longer exists, so the hand-off must carry
+  the proof; (b) find why one path of a 516-bit trie costs 1.1 ms (`Sp800185Cshake256.hash` over
+  `List UInt8`, bit-list paths), which would speed every authority write.
 - **The hand-off time is not flat.** In the 200-birth `append-flatness` run the median application
   hand-off was 52.7 ms over the first 8 heights and 85.7 ms over the last 8 (1.63 times, inside
   the row's bound of 2). The record is flat; something else in the hand-off still grows with
@@ -212,9 +222,28 @@ authority files, lie between; the re-recorded fixtures still build on the newer 
   `neutralBirthUnjudged`: `ResourceBirthController.Concrete.bornIn` took an entry cell's first
   write for a birth the factory step must name. It now excludes the authority space. No Lean
   build had shown it.
-- **Wider rows, keep-going**: J12X, JSERVE, G (1000 writes), K4, KT, JJ, K10, KF pass. KBW, KC,
-  K11, KCH and KH fail, and fail the same way on the base candidate (control runs of the same
-  rows on `23f9aac22`). P7KR is unconfigured without a shell in the manifest.
+- **Wider rows, keep-going**: J12X, JSERVE, G (1000 writes), K4, KT, JJ, K10, KF pass. Rows that
+  fail, each failing the same way on the base candidate in a control run of the same row:
+  KBW (`stale-birth` expects `birthStale`, the birth is installed); KC (K-CLOCK 31 of 33);
+  K11 (`create-gift` exits 3 where a refusal is expected, `same-2` is accepted where a refusal is
+  expected); KCH (its Lean probe needs `supportInterpreter`); KH (`scalar: undeclared-field 3` at
+  prepare); JROT (2 of 34: the refusals are spelled `not-precommitted` and `not-prerotated`, the
+  row expects `notPrecommitted` and `notPrerotated`); K10C (2 of 184: `not-holder` where the row
+  expects `notHolder`).
+- **Writer families on the native Host** (overlay candidate `9417d57ad8bf` on base candidate
+  `a2a03e8e4`): key rotation JROT (32 of 34, the two above) and JROTL 10/10; renounce and kick
+  through K10C (182 of 184, the two above); pay JPAY2 18/18, JPAY3 24/24, JPAY4 26/26, JPAYE2
+  38/38, JPAYE3 27/27; job money JJOBM 39/39; J17 212 rows in its own world. Which of these
+  reach commitment adoption, factory provisioning, share issue and the lifetime grant was not
+  established.
+- **First writes**: `Kernel.FirstWriteCoverage.first_write_covered` (in an intent the gate admits
+  and whose births the step names, a write with the fresh pre-root is named below the authority
+  space, or is a live authority cell in it), `authority_space_never_unnamed`,
+  `unnamed_below_refused`. They are theorems over every step and patch, not executed poles. The
+  executed instances are the tour's J2 on a native Host (a birth admitted with its entry cells
+  unnamed; refused before the `bornIn` change), `ReceivingLawFixture`'s `neutralBirthUnjudged`
+  poles, and `AuthoritySpaceGate.forged_other_kind_refused`. A pole that runs a whole birth
+  receive in Lean with an unnamed cell below the space is owed.
 - **Fixtures**: `scripts/native-accepted-fixture/rerecord.sh` re-recorded both native fixtures
   from that candidate; their projections equal the hand-written authorities, which did not change.
 - **Simplex gate**: `scripts/gates/check-generic-simplex .lake/build/bin` with 200 heights:
