@@ -25,7 +25,7 @@
 #   b-burns-5-gold           B burns from its own purse                    -> admitted
 #   b-overburns-gold         B burns 100 holding 15                        -> refused bookRefused
 #   r-mints-past-cap-gold    15 outstanding of gold's cap 100; 86 more     -> refused bookRefused
-#   r-mints-past-grant-gold  31 more is within the cap, past R's bound 30  -> refused maxDeltaExceeded
+#   r-mints-past-grant-gold  31 more is within the cap, past R's bound 30  -> refused valueBound
 #   r-burns-b-gold           R presents its gold grant to debit B's purse  -> refused noGrant
 #   mint-credit-asset        a mint naming the credit asset's well         -> refused creditWell
 #   mint-root-account        a mint naming a root account (no realm)       -> refused notRealmWell
@@ -60,7 +60,8 @@ run() { # NAME cmd...
   "$@" >"$D/$name.out" 2>"$D/$name.err"; echo $? >"$D/$name.rc"
 }
 host_refused() {
-  [ "$(cat "$D/$1.rc")" != 0 ] && grep -q "encoded refusal: $REFUSAL_TAG" "$D/$1.err"
+  # A well refusal is blind on final: the client reports the Host's refusal byte and no record.
+  [ "$(cat "$D/$1.rc")" != 0 ] && grep -q "encoded refusal: $REFUSAL_TAG\|Host refused well submit with no record" "$D/$1.err"
 }
 refusal_text() {
   grep -o 'encoded refusal: [0-9a-f]*' "$D/$1.err" | tail -1 | cut -d' ' -f3 | xxd -r -p 2>/dev/null \
@@ -176,7 +177,7 @@ row b-overburns-gold refused bookRefused
 run r-mints-past-cap-gold "$MINI" well --action mint --dir "$TW" --well gold --account "$purse" --amount 86
 row r-mints-past-cap-gold refused bookRefused
 run r-mints-past-grant-gold "$MINI" well --action mint --dir "$TW" --well gold --account "$purse" --amount 31
-row r-mints-past-grant-gold refused maxDeltaExceeded
+row r-mints-past-grant-gold refused valueBound
 run r-burns-b-gold "$MINI" well --action burn --dir "$TW" --well "$gold" --account "$purse" --amount 1 \
   --capability "$rgold"
 row r-burns-b-gold refused noGrant
