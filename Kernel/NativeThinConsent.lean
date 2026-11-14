@@ -1482,9 +1482,13 @@ def legValues (domain semantics : Digest) (federation : FederationId) (command :
   policyRevision := 0
   cost := (commandCodec.encode command).length
 
-/-- A participant's observation leg (`readRequest`). -/
+/-- A participant's observation leg (`readRequest`). An observe-only read's observation IS its
+leg: the request is the leg's own, whose verb is already the observe verb and whose effects
+digest binds the exact command. Every other target's observation is the separate,
+domain-separated view request. -/
 def observeValues (domain semantics : Digest) (federation : FederationId) (command : Command)
     (target : Target) : Request target.kind :=
+  if target.observeOnly then legValues domain semantics federation command target else
   { legValues domain semantics federation command target with
     verb := observeVerb target.kind
     effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v8".toUTF8.toList
