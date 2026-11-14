@@ -2222,7 +2222,7 @@ private def signatureRejectStream : StreamCodec (CredentialSignatureAdmission.Re
       (StreamCodec.sum signatureFailureStream
       unitStream))
       (StreamCodec.sum (StreamCodec.sum unitStream
-      (StreamCodec.list StreamCodec.byte))
+      (StreamCodec.list (StreamCodec.list StreamCodec.byte)))
       (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
       unitStream))))
     (fun value => match value with

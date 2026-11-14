@@ -1858,6 +1858,47 @@
           "value": "0"
         }
       ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/subject",
+            "value": "{S}"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/1/delta",
+          "value": "0"
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "joint/index/1/cell/parent",
+              "value": "{REALM_ROOM}"
+            },
+            {
+              "type": "eq",
+              "slot": "joint/index/2/cell/parent",
+              "value": "{REALM_ROOM}"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

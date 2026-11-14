@@ -1,0 +1,135 @@
+{
+  "type": "all",
+  "predicates": [
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "eq",
+          "slot": "request/verb",
+          "value": "1"
+        },
+        {
+          "type": "eq",
+          "slot": "request/verb",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eqSlots",
+          "left": "request/subject",
+          "right": "resource/field/3/after"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "writeOnce",
+              "slot": "resource/field/0/after"
+            },
+            {
+              "type": "writeOnce",
+              "slot": "resource/field/1/after"
+            },
+            {
+              "type": "writeOnce",
+              "slot": "resource/field/2/after"
+            },
+            {
+              "type": "writeOnce",
+              "slot": "resource/field/3/after"
+            },
+            {
+              "type": "writeOnce",
+              "slot": "resource/field/4/after"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "memberOf",
+              "slot": "resource/field/1/after",
+              "values": [
+                "1",
+                "2",
+                "3"
+              ]
+            },
+            {
+              "type": "memberOf",
+              "slot": "resource/field/2/after",
+              "values": [
+                "1",
+                "2",
+                "3"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/1/after",
+          "value": "1"
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/2/after",
+          "value": "2"
+        }
+      ]
+    }
+  ]
+}

@@ -402,6 +402,37 @@ theorem cited_survive_install {s : Store L} {cited : Footprint L} (holds : Holds
     admitAll (Patch.run s patch) cited = .ok () :=
   (admitAll_ok_iff _ _).2 (holds_run_disjoint holds patch unwritten)
 
+/-- A footprint as a patch of read ops, one per cited address: the form a cited read has in the
+World model, where a leg's leading reads are its footprint (`Kernel.World.Leg.guards`). -/
+def guards (fp : Footprint L) : Patch L :=
+  fp.map fun r => Op.read r.address.1 r.address.2 r.observed
+
+/-- The read leg writes nothing: running it returns the store it was run at. -/
+theorem run_guards (s : Store L) (fp : Footprint L) : Patch.run s fp.guards = s := by
+  induction fp with
+  | nil => rfl
+  | cons r rest ih => exact ih
+
+/-- **The read leg is valid exactly when the footprint holds.** So a World turn carrying a
+cited footprint as a leg of reads is admitted at the stores `admitAll` admits, and at no other. -/
+theorem guards_valid_iff (s : Store L) (fp : Footprint L) :
+    Patch.ValidFrom s fp.guards ↔ Holds s fp := by
+  induction fp with
+  | nil => exact ⟨fun _ _ member => absurd member List.not_mem_nil, fun _ => trivial⟩
+  | cons r rest ih =>
+      show (s ⟨r.address.1, r.address.2⟩ = r.observed ∧ Patch.ValidFrom s (guards rest)) ↔
+        Holds s (r :: rest)
+      rw [ih]
+      unfold Holds
+      rw [List.forall_mem_cons]
+
+/-- The read leg executes from `s` to `s`, or not at all. -/
+theorem guards_executes_iff (s post : Store L) (fp : Footprint L) :
+    Patch.Executes s fp.guards post ↔ Holds s fp ∧ post = s := by
+  unfold Patch.Executes
+  rw [guards_valid_iff, run_guards]
+  exact ⟨fun h => ⟨h.1, h.2.symm⟩, fun h => ⟨h.1, h.2.symm⟩⟩
+
 end Footprint
 
 /-! ## Footprint binding against whole-root binding -/

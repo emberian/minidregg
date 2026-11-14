@@ -4,5 +4,5 @@
 -- as an unsupported policy. K-RAN shipped the checked run as the atom `ran P` (Pred.ran, docs/NOCK.md §2.4), not as
 -- `witnessed`; this clause has not been moved to it. {VK_RESOLVER} = "nock:" ++ hex H(resolver jam), which rotates whenever
 -- affliction-table.json changes (the table is compiled into the program, programs/README.md).
--- 34 witnessed [J-MUD-9]: a referee write IS the resolver's run on the observed sheets.
+-- 35 witnessed [J-MUD-9]: a referee write IS the resolver's run on the observed sheets.
 any [ not (verb == 2), not (subject == {REF}), witnessed {VK_RESOLVER} ]

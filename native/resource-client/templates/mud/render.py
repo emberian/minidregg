@@ -14,6 +14,11 @@
 #     `field NAME [VIEW]`, `joint I KIND NAME [VIEW]` -> joint/index/I/resource/field/N/VIEW
 #     (K-JOINT-INDEX, NOT LANDED; I is the command's 0-based target index, as List.finRange at
 #     c-c2:Kernel/DeclaredResourceController.lean:176-180), and `slot PATH` (a raw slot string).
+#     `joint I cell id|kind|law|parent` -> joint/index/I/cell/NAME: the kernel's own record of the cell at
+#     position I (`DeclaredResourceController.identitySlots`): its id, storage kind, the address of its
+#     installed law, and the cell it was born under (-1 for none). No view: these are not cell fields.
+#     `joint I cited count|digest` -> joint/index/I/cited/NAME: the size and digest of the footprint a
+#     `fieldRead` target at position I cites (`ResourceTransaction.citedProject`).
 # Every field reference resolves through */fields.json ("kinds" -> kind -> name -> number).
 #
 # usage: python3 render.py TEMPLATES_MUD_DIR LAWFILE...   (paths relative to TEMPLATES_MUD_DIR)
@@ -28,6 +33,7 @@ for f in sorted(glob.glob(os.path.join(T, "**", "fields.json"), recursive=True))
 
 TOK = re.compile(r"slot\s+\S+|\{[A-Z0-9_]+\}|<=|==|-?\d+|[A-Za-z][A-Za-z0-9_-]*|[\[\]\(\)\{\},;]")
 VIEWS = ("before", "after", "delta")
+IDENTITY = ("id", "kind", "law", "parent")
 
 def tok(s):
     s = "\n".join(line.split("--", 1)[0] for line in s.splitlines())
@@ -83,7 +89,14 @@ class P:
             return f"resource/field/{n}/{v}", v
         if w == "joint":
             i = s.eat(); assert re.fullmatch(r"\d+", i), i
-            k = s.eat(); n = s.fnum(k, s.eat()); v = s.view()
+            k = s.eat()
+            if k == "cell":
+                n = s.eat(); assert n in IDENTITY, n
+                return f"joint/index/{i}/cell/{n}", None
+            if k == "cited":
+                n = s.eat(); assert n in ("count", "digest"), n
+                return f"joint/index/{i}/cited/{n}", None
+            n = s.fnum(k, s.eat()); v = s.view()
             return f"joint/index/{i}/resource/field/{n}/{v}", v
         raise SystemExit("unknown slot word " + w)
     def pred(s):

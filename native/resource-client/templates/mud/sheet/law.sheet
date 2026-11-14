@@ -5,7 +5,7 @@
 -- The owner's intent is three fields written in one turn: intent (action), target (a sheet id), skill.
 --   owner's go/flee:        0 = this sheet, 1 = current room, 2 = destination room, 3 = key or light item, 4 = light item
 --   referee's resolution:   0 = attacker sheet, 1 = defender sheet
--- Appended files continue the numbering: law.sheet-witnessed is 34, law.sheet-cure-lawful 35.
+-- Appended files continue the numbering: law.sheet-witnessed is 35, law.sheet-cure-lawful 36.
 -- Atoms beyond today's Pred: eqSlots/leSlots (k-sloteq, landed on the data-model line), leSlotsOff (K-PRED-OFFSET),
 -- clock now (K-CLOCK), joint I ... (K-JOINT-INDEX). Each clause's NEEDS is in its comment.
 
@@ -149,4 +149,13 @@ any [ not (verb == 2), field def-ward delta <= 0, field intent before == 3 ];
 --   and `fixed_law_refuses_smite_admits_strike` is the pole. One-step shape because resolver.hoon writes
 --   `1/2 hp2` and `1/5 0` in the same product, and clause 6 already refuses hp <= 0 with alive left at 1,
 --   so a two-step death (hp first, alive next) could never have been admitted.
-any [ not (verb == 2), not (all [ field alive before == 1, field alive after == 0 ]), field hp <= 0 ]
+any [ not (verb == 2), not (all [ field alive before == 1, field alive after == 0 ]), field hp <= 0 ];
+-- 34 rooms-born [K2]: the rooms a move cites (joint 1, joint 2) are cells born under the realm cell {REALM_ROOM}.
+--   Clauses 14-19 read a room's id, exits, locks, dark and lease from whatever cell the mover put at those
+--   positions; without this clause a cell born anywhere, holding a room's field numbers with the mover's
+--   choice of exits, satisfied them. `cell parent` is the authority cell's record of where the cell was
+--   born, never a field of the cell (DeclaredResourceController.joint_identity_exact), so who can make a
+--   room is who the realm cell's birth policy admits. Not `cell law`: each room's law is its own
+--   (law.room is instantiated per room), so one address cannot name them all.
+any [ not (verb == 2), not (subject == {S}), field at delta == 0,
+      all [ joint 1 cell parent == {REALM_ROOM}, joint 2 cell parent == {REALM_ROOM} ] ]

@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Assurance/SheetLaw.lean §2 is a mechanical embed of the MUD sheet law JSON; this script is that embed.
+"""§2 of Assurance/SheetLaw.lean and of Assurance/CitedLand.lean is a mechanical embed of law JSON; this
+script is that embed.
 
 usage (from the repository root):
-  scripts/gen-sheetlaw.py           rewrite §2 (`def management` .. `end Law`) from the JSON
-  scripts/gen-sheetlaw.py --check   exit 1 if §2 differs from what the JSON generates
+  scripts/gen-sheetlaw.py           rewrite each §2 (its first generated line .. `end Law`) from the JSON
+  scripts/gen-sheetlaw.py --check   exit 1 if a §2 differs from what the JSON generates
 
-Sources: native/resource-client/templates/mud/law.management.json (clause 0) and
-native/resource-client/templates/mud/sheet/law.sheet.json (an `all` of clauses 1..N). Placeholder `{X}`
+Sources (`EMBEDS`): for SheetLaw, native/resource-client/templates/mud/law.management.json (clause 0) and
+native/resource-client/templates/mud/sheet/law.sheet.json (an `all` of clauses 1..N); for CitedLand,
+native/resource-client/templates/fleet/verdict/law.verdict.json (clauses 0..) and
+native/resource-client/templates/fleet/branch/law.branch.json (clauses 1..). Placeholder `{X}`
 becomes `p.X`; negative literals are parenthesised; nothing is re-sorted, dropped or simplified.
 Changing the JSON without re-running this script leaves the theorems about a different law."""
 import json, re, sys
 
 T = "native/resource-client/templates/mud"
-F = "Assurance/SheetLaw.lean"
+FLEET = "native/resource-client/templates/fleet"
 
 def val(v):
     v = str(v)
@@ -36,31 +39,50 @@ def render(n, ind):
         return f".{t} {q(n['slot'])} {val(n['value'])}"
     if t == "memberOf":
         return f".memberOf {q(n['slot'])} [" + ", ".join(val(v) for v in n["values"]) + "]"
-    if t == "monotone":
-        return f".monotone {q(n['slot'])}"
+    if t in ("monotone", "writeOnce"):
+        return f".{t} {q(n['slot'])}"
     if t in ("eqSlots", "leSlots"):
         return f".{t} {q(n['left'])} {q(n['right'])}"
     if t == "leSlotsOff":
         return f".leSlotsOff {q(n['left'])} {q(n['right'])} {val(n['offset'])}"
     sys.exit(f"gen-sheetlaw: no Lean rendering for atom type {t!r}")
 
-def generate():
-    mg = json.load(open(f"{T}/law.management.json"))
-    sh = json.load(open(f"{T}/sheet/law.sheet.json"))
-    if sh["type"] != "all":
-        sys.exit("gen-sheetlaw: law.sheet.json is not an `all` of clauses")
-    out = ["def management (p : Params) : Pred :=", "  " + render(mg, 2), ""]
-    for i, c in enumerate(sh["predicates"], 1):
-        out += [f"/-- clause {i} -/", f"def sheetClause{i} (p : Params) : Pred :=", "  " + render(c, 2), ""]
-    return "\n".join(out) + "\n\n", len(sh["predicates"])
+# file -> (first generated line, [(json, def prefix, first clause number or None for one unnumbered def)])
+EMBEDS = {
+    "Assurance/SheetLaw.lean": ("def management (p : Params) : Pred :=", [
+        (f"{T}/law.management.json", "management", None),
+        (f"{T}/sheet/law.sheet.json", "sheetClause", 1)]),
+    "Assurance/CitedLand.lean": ("/-- clause 0 -/\ndef verdictClause0 (p : Params) : Pred :=", [
+        (f"{FLEET}/verdict/law.verdict.json", "verdictClause", 0),
+        (f"{FLEET}/branch/law.branch.json", "branchClause", 1)]),
+}
 
-gen, n = generate()
-s = open(F).read()
-a, b = s.index("def management (p : Params) : Pred :="), s.index("end Law")
-if "--check" in sys.argv[1:]:
-    if s[a:b] != gen:
-        sys.exit(f"gen-sheetlaw: {F} §2 is not the embed of {T}/sheet/law.sheet.json; run scripts/gen-sheetlaw.py")
-    print(f"gen-sheetlaw: {F} §2 matches the JSON ({n} clauses)")
-else:
-    open(F, "w").write(s[:a] + gen + s[b:])
-    print(f"gen-sheetlaw: wrote {F} §2 ({n} clauses); sheetClauses must list sheetClause1..{n}")
+def generate(parts):
+    out, counts = [], []
+    for path, prefix, first in parts:
+        law = json.load(open(path))
+        if first is None:
+            out += [f"def {prefix} (p : Params) : Pred :=", "  " + render(law, 2), ""]
+            continue
+        if law["type"] != "all":
+            sys.exit(f"gen-sheetlaw: {path} is not an `all` of clauses")
+        for i, c in enumerate(law["predicates"], first):
+            out += [f"/-- clause {i} -/", f"def {prefix}{i} (p : Params) : Pred :=", "  " + render(c, 2), ""]
+        counts.append(f"{prefix}{first}..{first + len(law['predicates']) - 1}")
+    return "\n".join(out) + "\n\n", ", ".join(counts)
+
+check, bad = "--check" in sys.argv[1:], []
+for F, (start, parts) in EMBEDS.items():
+    gen, n = generate(parts)
+    s = open(F).read()
+    a, b = s.index(start), s.index("end Law")
+    if check:
+        if s[a:b] != gen:
+            bad.append(F)
+        else:
+            print(f"gen-sheetlaw: {F} §2 matches the JSON ({n})")
+    else:
+        open(F, "w").write(s[:a] + gen + s[b:])
+        print(f"gen-sheetlaw: wrote {F} §2 ({n}); the clause lists must name each")
+if bad:
+    sys.exit(f"gen-sheetlaw: §2 is not the embed of its JSON in: {', '.join(bad)}; run scripts/gen-sheetlaw.py")
