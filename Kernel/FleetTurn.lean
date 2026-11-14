@@ -587,26 +587,22 @@ debiting receiver shares, in the asset's own units. -/
 def valueBound [DecidableEq F]
     (prepared : Prepared deployment profile tariff ambient durable command)
     (semantic : prepared.SemanticAccepted) : Except Reject Unit :=
-  match semantic.authorization.evidence.capabilityValue with
-  | none => .error .capabilityRejected
-  | some (cap, _) =>
-      match CapabilityValueBound.check cap.scope (batch tariff command).operations command.payer with
-      | .ok () => .ok ()
-      | .error reason => .error (.valueBound reason)
+  match CapabilityValueBound.presentedCheck semantic.authorization.evidence.capabilityValue
+      (batch tariff command).operations command.payer with
+  | .ok () => .ok ()
+  | .error none => .error .capabilityRejected
+  | .error (some reason) => .error (.valueBound reason)
 
 theorem valueBound_ok [DecidableEq F]
     {prepared : Prepared deployment profile tariff ambient durable command}
     {semantic : prepared.SemanticAccepted} (ok : valueBound prepared semantic = .ok ()) :
     ∃ cap digest, semantic.authorization.evidence.capabilityValue = some (cap, digest) ∧
-      CapabilityValueBound.ValueBound cap.scope (batch tariff command).operations command.payer := by
+      CapabilityValueBound.StrictBound cap (batch tariff command).operations command.payer := by
   unfold valueBound at ok
   split at ok
-  · cases ok
-  next cap digest named =>
-    refine ⟨cap, digest, named, ?_⟩
-    split at ok
-    next checked => exact (CapabilityValueBound.check_ok_iff _ _ _).mp checked
-    next => cases ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
 
 structure Accepted [DecidableEq F]
     (prepared : Prepared deployment profile tariff ambient durable command)
@@ -624,7 +620,7 @@ theorem Accepted.value_bounded [DecidableEq F]
     (accepted : Accepted prepared ingress) :
     ∃ cap digest,
       accepted.semantic.authorization.evidence.capabilityValue = some (cap, digest) ∧
-        CapabilityValueBound.ValueBound cap.scope (batch tariff command).operations command.payer :=
+        CapabilityValueBound.StrictBound cap (batch tariff command).operations command.payer :=
   valueBound_ok accepted.bounded
 theorem Accepted.sound [DecidableEq F]
     {prepared : Prepared deployment profile tariff ambient durable command} {ingress : DecodedIngress}

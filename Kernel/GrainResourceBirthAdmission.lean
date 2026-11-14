@@ -1108,7 +1108,7 @@ theorem Accepted.source_value_bounded {F : Type} [Field F] [DecidableEq F]
     ∃ cap digest,
       (accepted.checked (.inl (.source index))).authorization.evidence.capabilityValue =
           some (cap, digest) ∧
-        Minidregg.Theory.CapabilityValueBound.ValueBound cap.scope
+        Minidregg.Theory.CapabilityValueBound.StrictBound cap
           source.birth.resourceBatch.operations
           (source.birth.resourceBatch.operations.get index).posting.source :=
   ResourceBirthPolicyController.valueBoundCheck_ok (accepted.sourcesBounded index)

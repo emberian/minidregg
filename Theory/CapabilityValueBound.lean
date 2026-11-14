@@ -25,15 +25,25 @@ account under a presented capability checks the same thing.
 * `BatchBounded presented operations` -- the statement for one admitted batch: every operation's
   source has a presented capability whose scope bounds the batch's gross debit of that source.
 
+* `StrictBound cap operations account` -- what a receiver requires: `ValueBound` of the
+  capability's scope, and, if the capability is delegated, a `maxDelta` bound on every debited
+  balance (`BoundsSet`). Decided by `strictCheck`; the extra refusal is
+  `missingBalanceBound asset`.
+* `Presented capability operations account` -- the receiver's form over its authorization
+  evidence, decided by `presentedCheck`.
+
 ## What an absent bound means
 
 `maxDelta` is a set of bounds and the empty set bounds nothing; `fields = none` names every
-field (`TypedAuthorization` §2a). So a capability that names no field set and carries no
-`balance` bound is unbounded in value (`valueBound_of_unrestricted`). This holds for a root
-capability and for a delegated one alike: a delegation narrows only what its author wrote
-(`CellField.BoundsNarrow`: a child may add a bound, never drop one), so the grants the tree
-issues today without `maxDelta` keep the reach they have. A delegator bounds value by writing
-the bound; once written, no descendant can loosen it (`valueBound_of_narrows`).
+field (`TypedAuthorization` §2a). So a SCOPE that names no field set and carries no `balance`
+bound is unbounded in value (`valueBound_of_unrestricted`). A root capability keeps that
+reading: its holder owns the account. A delegated capability (`parent ≠ none`) does not: it
+must set a bound on every balance it debits, fees included, or the debit is refused
+`missingBalanceBound` (`BoundsSet`). Only the lineage gives the exemption; holding an owner
+grant does not. A written bound cannot be loosened by a descendant (`valueBound_of_narrows`).
+
+The bound limits ONE batch (one admitted turn). It is not a cumulative allowance: repeated
+turns, each within the bound, can together move more than the bound.
 
 ## Theorems
 
@@ -151,6 +161,9 @@ inductive Refusal where
   | fieldNotNamed (asset : AssetId)
   /-- The gross debit `debited` of `asset` exceeds a bound the scope sets on its balance. -/
   | maxDeltaExceeded (asset : AssetId) (debited : Nat)
+  /-- The capability is delegated and its scope sets no `maxDelta` bound on the balance of
+  `asset`, which the operations debit. -/
+  | missingBalanceBound (asset : AssetId)
   deriving DecidableEq, Repr
 
 /-- The refusal one debited asset earns, if any. -/
@@ -307,6 +320,131 @@ theorem batchBounded_gross {kind : ResourceKind} {presented : AccountId → Opti
     (valueBound_iff scope operations operation.posting.source).mp covered _
       (mem_debitAssets_of_mem member)⟩
 
+/-! ## Delegated capabilities must set the bound
+
+`ValueBound` reads an absent bound as no bound. That is right for a root capability, whose
+holder owns the account. A delegated capability (one with a parent in its lineage) must set a
+`maxDelta` bound on every balance it debits: an omitted limit must not expose the delegator's
+whole balance. Only the lineage (`parent = none`) gives the root exemption; holding an owner
+grant does not.
+
+The bound is a limit on ONE batch (one admitted turn), not a cumulative allowance: repeated
+turns, each within the bound, can still move more than the bound in total. -/
+
+/-- The scope sets some `maxDelta` bound on the balance of `asset`. -/
+def HasBound {kind : ResourceKind} (scope : Scope kind) (asset : AssetId) : Prop :=
+  ∃ entry ∈ scope.maxDelta, entry.1 = CellField.balance asset
+
+instance {kind : ResourceKind} (scope : Scope kind) (asset : AssetId) :
+    Decidable (HasBound scope asset) := by
+  unfold HasBound
+  infer_instance
+
+theorem hasBound_iff {kind : ResourceKind} (scope : Scope kind) (asset : AssetId) :
+    HasBound scope asset ↔ ∃ bound, (CellField.balance asset, bound) ∈ scope.maxDelta := by
+  constructor
+  · rintro ⟨⟨field, bound⟩, member, same⟩
+    change field = CellField.balance asset at same
+    subst same
+    exact ⟨bound, member⟩
+  · rintro ⟨bound, member⟩
+    exact ⟨_, member, rfl⟩
+
+/-- A delegated capability sets a bound on every balance the operations debit from the
+account. A root capability (`parent = none`) owes none. -/
+def BoundsSet {kind : ResourceKind} (cap : Capability kind) (operations : List Operation)
+    (account : AccountId) : Prop :=
+  cap.parent ≠ none → ∀ asset ∈ debitAssets operations account,
+    ∃ bound, (CellField.balance asset, bound) ∈ cap.scope.maxDelta
+
+/-- **The strict value bound**, the condition every debiting receiver adds to its existing
+authorization of an account debit (fees included): the scope names every debited balance and
+every bound it sets holds for the gross debit, and a delegated capability sets a bound on
+every debited balance. -/
+def StrictBound {kind : ResourceKind} (cap : Capability kind) (operations : List Operation)
+    (account : AccountId) : Prop :=
+  ValueBound cap.scope operations account ∧ BoundsSet cap operations account
+
+/-- The first debited asset, in posting order, on which a delegated capability sets no bound. -/
+def missingBound {kind : ResourceKind} (cap : Capability kind) (operations : List Operation)
+    (account : AccountId) : Option AssetId :=
+  if cap.parent = none then none
+  else (debitAssetList operations account).find? fun asset => !decide (HasBound cap.scope asset)
+
+theorem missingBound_eq_none_iff {kind : ResourceKind} (cap : Capability kind)
+    (operations : List Operation) (account : AccountId) :
+    missingBound cap operations account = none ↔ BoundsSet cap operations account := by
+  unfold missingBound BoundsSet
+  by_cases root : cap.parent = none
+  · rw [if_pos root]
+    exact iff_of_true rfl (fun delegated => absurd root delegated)
+  · rw [if_neg root, List.find?_eq_none]
+    constructor
+    · intro all _ asset member
+      have listed : asset ∈ debitAssetList operations account := by
+        simpa [debitAssets] using member
+      have bound := all asset listed
+      simp only [Bool.not_eq_true, Bool.not_eq_false', decide_eq_true_eq, Bool.not_not] at bound
+      exact (hasBound_iff _ _).mp (by simpa using bound)
+    · intro all asset listed
+      have bound := (hasBound_iff _ _).mpr
+        (all root asset (by simpa [debitAssets] using listed))
+      simp [bound]
+
+/-- The strict check: the scope's own refusal first, then the missing bound, each by name. -/
+def strictCheck {kind : ResourceKind} (cap : Capability kind) (operations : List Operation)
+    (account : AccountId) : Except Refusal Unit :=
+  match check cap.scope operations account with
+  | .error refusal => .error refusal
+  | .ok () =>
+      match missingBound cap operations account with
+      | some asset => .error (.missingBalanceBound asset)
+      | none => .ok ()
+
+/-- **The strict check decides the strict bound.** -/
+theorem strictCheck_ok_iff {kind : ResourceKind} (cap : Capability kind)
+    (operations : List Operation) (account : AccountId) :
+    strictCheck cap operations account = .ok () ↔ StrictBound cap operations account := by
+  unfold strictCheck StrictBound
+  rw [← check_ok_iff, ← missingBound_eq_none_iff]
+  cases check cap.scope operations account with
+  | error refusal => simp
+  | ok done =>
+    cases done
+    cases missingBound cap operations account <;> simp
+
+instance {kind : ResourceKind} (cap : Capability kind) (operations : List Operation)
+    (account : AccountId) : Decidable (StrictBound cap operations account) :=
+  decidable_of_iff _ (strictCheck_ok_iff cap operations account)
+
+/-- A refusal is a refusal of the strict bound. -/
+theorem strictCheck_error_iff {kind : ResourceKind} (cap : Capability kind)
+    (operations : List Operation) (account : AccountId) :
+    (∃ refusal, strictCheck cap operations account = .error refusal) ↔
+      ¬ StrictBound cap operations account := by
+  rw [← strictCheck_ok_iff]
+  cases strictCheck cap operations account with
+  | ok done => cases done; simp
+  | error refusal => simp
+
+/-- A root capability's strict bound is its scope's bound: absent stays unbounded. -/
+theorem strictBound_root {kind : ResourceKind} (cap : Capability kind)
+    (operations : List Operation) (account : AccountId) (root : cap.parent = none) :
+    StrictBound cap operations account ↔ ValueBound cap.scope operations account :=
+  ⟨fun strict => strict.1, fun bounded => ⟨bounded, fun delegated => absurd root delegated⟩⟩
+
+/-- **A delegated capability's debit is bounded by a number it wrote.** Under the strict
+bound, each debited balance carries a bound and the gross debit is within it. -/
+theorem StrictBound.delegated_gross {kind : ResourceKind} {cap : Capability kind}
+    {operations : List Operation} {account : AccountId}
+    (strict : StrictBound cap operations account) (delegated : cap.parent ≠ none)
+    {asset : AssetId} (member : asset ∈ debitAssets operations account) :
+    ∃ bound, (CellField.balance asset, bound) ∈ cap.scope.maxDelta ∧
+      grossDebit operations account asset ≤ bound := by
+  obtain ⟨bound, listed⟩ := strict.2 delegated asset member
+  exact ⟨bound, listed,
+    ((valueBound_iff cap.scope operations account).mp strict.1 asset member).2 bound listed⟩
+
 /-! ## The receiver's form: the capability a debit was authorized under -/
 
 /-- **The presented capability bounds the debit.** `capability` is what the receiver's
@@ -315,16 +453,16 @@ authorization evidence holds for the debit of `account` (the capability and its 
 def Presented {kind : ResourceKind} {D : Type} (capability : Option (Capability kind × D))
     (operations : List Operation) (account : AccountId) : Prop :=
   ∃ cap commitment, capability = some (cap, commitment) ∧
-    ValueBound cap.scope operations account
+    StrictBound cap operations account
 
 /-- The decision of `Presented`. `error none`: no capability; `error (some refusal)`: the
-scope does not bound the debit, by name. -/
+capability does not bound the debit, by name. -/
 def presentedCheck {kind : ResourceKind} {D : Type} (capability : Option (Capability kind × D))
     (operations : List Operation) (account : AccountId) : Except (Option Refusal) Unit :=
   match capability with
   | none => .error none
   | some (cap, _) =>
-      match check cap.scope operations account with
+      match strictCheck cap operations account with
       | .ok () => .ok ()
       | .error refusal => .error (some refusal)
 
@@ -341,23 +479,23 @@ theorem presentedCheck_ok_iff {kind : ResourceKind} {D : Type}
     · intro ok
       refine ⟨cap, commitment, ⟨rfl, rfl⟩, ?_⟩
       split at ok
-      next checked => exact (check_ok_iff _ _ _).mp checked
+      next checked => exact (strictCheck_ok_iff _ _ _).mp checked
       next => cases ok
     · rintro ⟨_, _, ⟨rfl, rfl⟩, bounded⟩
-      rw [(check_ok_iff _ _ _).mpr bounded]
+      rw [(strictCheck_ok_iff _ _ _).mpr bounded]
 
 instance {kind : ResourceKind} {D : Type} (capability : Option (Capability kind × D))
     (operations : List Operation) (account : AccountId) :
     Decidable (Presented capability operations account) :=
   decidable_of_iff _ (presentedCheck_ok_iff capability operations account)
 
-/-- Teeth: a presented capability whose scope fails the bound is refused, by name. -/
+/-- Teeth: a presented capability that fails the strict bound is refused, by name. -/
 theorem presentedCheck_refuses {kind : ResourceKind} {D : Type} (cap : Capability kind)
     (commitment : D) (operations : List Operation) (account : AccountId)
-    (unbounded : ¬ ValueBound cap.scope operations account) :
+    (unbounded : ¬ StrictBound cap operations account) :
     ∃ refusal, presentedCheck (some (cap, commitment)) operations account =
       .error (some refusal) := by
-  obtain ⟨refusal, refused⟩ := (check_error_iff _ _ _).mpr unbounded
+  obtain ⟨refusal, refused⟩ := (strictCheck_error_iff _ _ _).mpr unbounded
   exact ⟨refusal, by simp only [presentedCheck, refused]⟩
 
 theorem Presented.fee_mono {kind : ResourceKind} {D : Type}
@@ -365,8 +503,10 @@ theorem Presented.fee_mono {kind : ResourceKind} {D : Type}
     {less more : Nat} (le : less ≤ more)
     (presented : Presented capability [.fee payer collector asset more] payer) :
     Presented capability [.fee payer collector asset less] payer := by
-  obtain ⟨cap, commitment, named, bounded⟩ := presented
-  exact ⟨cap, commitment, named, valueBound_fee_mono cap.scope payer collector asset le bounded⟩
+  obtain ⟨cap, commitment, named, bounded, set⟩ := presented
+  exact ⟨cap, commitment, named, valueBound_fee_mono cap.scope payer collector asset le bounded,
+    fun delegated debited member => set delegated debited (by
+      simpa [debitAssets, debitAssetList, debits, Operation.posting] using member)⟩
 
 /-- In plain terms: under `Presented`, every balance the operations debit from the account is
 named, and its gross debit is within every bound the capability sets on it. -/
@@ -379,7 +519,19 @@ theorem Presented.gross {kind : ResourceKind} {D : Type}
           ∀ bound, (CellField.balance asset, bound) ∈ cap.scope.maxDelta →
             grossDebit operations account asset ≤ bound := by
   obtain ⟨cap, commitment, named, bounded⟩ := presented
-  exact ⟨cap, commitment, named, (valueBound_iff cap.scope operations account).mp bounded⟩
+  exact ⟨cap, commitment, named, (valueBound_iff cap.scope operations account).mp bounded.1⟩
+
+/-- Under `Presented`, a delegated capability wrote a bound on every debited balance and the
+gross debit is within it. -/
+theorem Presented.delegated_gross {kind : ResourceKind} {D : Type}
+    {capability : Option (Capability kind × D)} {operations : List Operation}
+    {account : AccountId} (presented : Presented capability operations account) :
+    ∃ cap commitment, capability = some (cap, commitment) ∧
+      (cap.parent ≠ none → ∀ asset ∈ debitAssets operations account,
+        ∃ bound, (CellField.balance asset, bound) ∈ cap.scope.maxDelta ∧
+          grossDebit operations account asset ≤ bound) := by
+  obtain ⟨cap, commitment, named, strict⟩ := presented
+  exact ⟨cap, commitment, named, fun delegated _ member => strict.delegated_gross delegated member⟩
 
 /-! ## Witnesses -/
 
@@ -453,6 +605,54 @@ theorem large_refused :
 /-- Another account's debit is not this capability's concern. -/
 theorem other_account_unjudged : check bounded large other = .ok () := by decide
 
+/-- A capability over the payer with the given lineage and scope. -/
+def capability (parent : Option CapabilityId) (scope : Scope .account) : Capability .account where
+  id := ⟨21⟩
+  root := ⟨20⟩
+  parent := parent
+  issuer := ⟨7⟩
+  holder := .subject ⟨4⟩
+  scope := scope
+  notBefore := 0
+  notAfter := 100
+  issuerEpoch := 0
+  policyId := ⟨payer⟩
+  policyEpoch := 0
+  ancestors := ∅
+  channels := ∅
+
+/-- A scope that bounds the credit balance at zero. -/
+def zero : Scope .account := { bounded with maxDelta := {(.balance credit, 0)} }
+
+/-- Strict, satisfiable: a delegated capability with a bound, within it. -/
+theorem delegated_within_admitted :
+    strictCheck (capability (some ⟨20⟩) bounded) within payer = .ok () := by decide
+
+/-- Strict, teeth: a delegated capability with no bound is refused for any positive debit,
+however small, naming the balance. -/
+theorem delegated_unbounded_refused :
+    strictCheck (capability (some ⟨20⟩) root) feeOnly payer =
+      .error (.missingBalanceBound credit) := by decide
+
+/-- Strict, teeth: a delegated capability bounded at zero cannot pay a positive fee. -/
+theorem delegated_zero_cannot_pay_fee :
+    strictCheck (capability (some ⟨20⟩) zero) feeOnly payer =
+      .error (.maxDeltaExceeded credit 3) := by decide
+
+/-- Strict: a root capability with no bound is admitted at any size. -/
+theorem root_unbounded_admitted :
+    strictCheck (capability none root) large payer = .ok () := by decide
+
+/-- Strict: a delegated capability that debits nothing owes no bound. -/
+theorem delegated_no_debit_admitted :
+    strictCheck (capability (some ⟨20⟩) root) large other = .ok () := by decide
+
+/-- Premise inhabitation: the refused delegated capability is delegated, and the batch it is
+refused on debits the payer. -/
+theorem strict_premise_inhabited :
+    (capability (some ⟨20⟩) root).parent ≠ none ∧ grossDebit feeOnly payer credit = 3 := by
+  decide
+
 /-- The batch statement, satisfiable: the payer presents the bounded scope. -/
 theorem batch_bounded :
     BatchBounded (fun account => if account = payer then some bounded else none) within := by
@@ -483,5 +683,8 @@ end Witness
 #assert_axioms Witness.unnamed_refused
 #assert_axioms Witness.root_unbounded
 #assert_axioms Witness.batch_bounded
+#assert_axioms Witness.delegated_within_admitted Witness.delegated_unbounded_refused
+#assert_axioms Witness.delegated_zero_cannot_pay_fee Witness.root_unbounded_admitted
+#assert_axioms strictCheck_ok_iff missingBound_eq_none_iff presentedCheck_ok_iff
 
 end Minidregg.Theory.CapabilityValueBound

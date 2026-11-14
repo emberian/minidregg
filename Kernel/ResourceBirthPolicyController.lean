@@ -195,34 +195,30 @@ its `fields` name each debited balance, its `maxDelta` bounds on them hold). No 
 `capability`; a failed bound is `valueBound`, naming the asset. -/
 def valueBoundCheck {kind : ResourceKind} (capability : Option (Capability kind × Digest))
     (operations : List CanonicalResourceKernel.Operation) (account : Nat) : Except Reject Unit :=
-  match capability with
-  | none => .error .capability
-  | some (cap, _) =>
-      match CapabilityValueBound.check cap.scope operations account with
-      | .ok () => .ok ()
-      | .error reason => .error (.valueBound reason)
+  match CapabilityValueBound.presentedCheck capability operations account with
+  | .ok () => .ok ()
+  | .error none => .error .capability
+  | .error (some reason) => .error (.valueBound reason)
 
 theorem valueBoundCheck_ok {kind : ResourceKind} {capability : Option (Capability kind × Digest)}
     {operations : List CanonicalResourceKernel.Operation} {account : Nat}
     (ok : valueBoundCheck capability operations account = .ok ()) :
     ∃ cap digest, capability = some (cap, digest) ∧
-      CapabilityValueBound.ValueBound cap.scope operations account := by
+      CapabilityValueBound.StrictBound cap operations account := by
   unfold valueBoundCheck at ok
-  rcases capability with _ | ⟨cap, digest⟩
-  · cases ok
-  · refine ⟨cap, digest, rfl, ?_⟩
-    simp only at ok
-    split at ok
-    next checked => exact (CapabilityValueBound.check_ok_iff _ _ _).mp checked
-    next => cases ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
 
 /-- Teeth: a capability whose scope fails the bound is refused `valueBound`, never admitted. -/
 theorem valueBoundCheck_refuses {kind : ResourceKind} (cap : Capability kind) (digest : Digest)
     (operations : List CanonicalResourceKernel.Operation) (account : Nat)
-    (unbounded : ¬ CapabilityValueBound.ValueBound cap.scope operations account) :
+    (unbounded : ¬ CapabilityValueBound.StrictBound cap operations account) :
     ∃ reason, valueBoundCheck (some (cap, digest)) operations account =
       .error (.valueBound reason) := by
-  obtain ⟨reason, refused⟩ := (CapabilityValueBound.check_error_iff _ _ _).mpr unbounded
+  obtain ⟨reason, refused⟩ :=
+    CapabilityValueBound.presentedCheck_refuses cap digest operations account unbounded
   exact ⟨reason, by simp only [valueBoundCheck, refused]⟩
 
 /-- The actual metadata admission path. Failing a later check returns no
@@ -2541,7 +2537,8 @@ def Pending.admitBundleNative [DecidableEq F]
 /-- **Every debit of an admitted birth is within its capability's value bound.** For each
 Book operation of the birth (each funding transfer and the fee), the capability admitted for
 that operation's source branch names every balance the birth debits from that account and
-bounds the birth's gross debit of each (`CapabilityValueBound.ValueBound`). -/
+bounds the birth's gross debit of each, and a delegated capability sets that bound itself
+(`CapabilityValueBound.StrictBound`). -/
 theorem AdmittedBundle.source_value_bounded [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} {pending : Pending prepared height} {bundle : CredentialBundle}
@@ -2550,7 +2547,7 @@ theorem AdmittedBundle.source_value_bounded [DecidableEq F]
     ∃ cap digest,
       (admitted.branches (.source index)).authorization.evidence.capabilityValue =
           some (cap, digest) ∧
-        CapabilityValueBound.ValueBound cap.scope descriptor.resourceBatch.operations
+        CapabilityValueBound.StrictBound cap descriptor.resourceBatch.operations
           (descriptor.resourceBatch.operations.get index).posting.source :=
   valueBoundCheck_ok (admitted.sourcesBounded index)
 
@@ -2574,7 +2571,7 @@ theorem AdmittedBundle.source_gross_debit_bounded [DecidableEq F]
                 (descriptor.resourceBatch.operations.get index).posting.asset ≤ bound := by
   obtain ⟨cap, digest, named, bounded⟩ := admitted.source_value_bounded index
   exact ⟨cap, digest, named,
-    (CapabilityValueBound.valueBound_iff _ _ _).mp bounded _
+    (CapabilityValueBound.valueBound_iff _ _ _).mp bounded.1 _
       (CapabilityValueBound.mem_debitAssets_of_mem (List.get_mem _ _))⟩
 
 #assert_axioms valueBoundCheck_ok
