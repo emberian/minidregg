@@ -115,11 +115,22 @@ and its continuation; where they disagree with this section, this section is the
 
 **Owed after the content binding:**
 
-1. `PrepareFactors` (`Statements.lean` §8): was proved for `contentSpec` against the hand arm
-   (`PrepareProofs.lean`, deleted). Its proof used that selection implies the role. Restate it
-   for every bound code over `hostRegistry` and prove it from `effect_dispatch_fire`.
+The role is the one behaviour that moved place (selection no longer asks it; the computation's
+header refuses it first). `PrepareProofs.lean` proves it did not move in value:
+`ContentWrongRole` (the whole value of `prepareTarget` on a content target under a non-object
+role is `missingTarget` or `wrongRole`), `ContentWrongRoleUncharged` (no prepared target, so no
+preparation of any command holding one, so no compute or money plan), `ContentWrongRoleCommand`
+(`prepareOn`'s refusal of a one-target command is `wrongRole`, after the clock and before
+everything else), with `sampleWrongRole` and `sampleRole_teeth` on the sample cell.
+
+1. `PrepareFactors` (`Statements.lean` §8): was proved for `contentSpec` against the hand arm.
+   Its proof used that selection implies the role. Proved now at every non-object role
+   (`prepareFactors_wrongRole`); owed at the object role. Restate it for every bound code over
+   `hostRegistry` and prove it from `effect_dispatch_fire`.
 2. `CommutingPrepare` (`Kernel/ContentCommutingAppend.lean`): its proof walked `prepareTarget`
-   of two targets branch by branch and no longer splits over `Effect.select`. A lemma that
+   of two targets branch by branch and no longer splits over `Effect.select`. Proved at every
+   non-object role (`commutingPrepare_wrongRole`) and at the computation (`commutingAppend`,
+   `sampleAtom_moved_computed`); owed for the whole preparation at the object role. A lemma that
    `prepareTarget` reads the planned root only through `computeTarget`, for any registered
    target, would give it for every commuting effect at once.
 3. The hand-written `contentHandler`/`contentHeader`/`contentFresh` in `Statements.lean` §7 are a

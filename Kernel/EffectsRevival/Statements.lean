@@ -567,4 +567,89 @@ def PrepareFactors (E : ContentSpec) : Prop :=
           (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
         genericChecks deployment directory ctx.snapshot ctx.target epoch before
 
+/-! ### The wrong-role pole
+
+Before content was declared, `selectTarget` at a content target asked the role first, so a
+content target under a role that is not an object was not selected and `prepareTarget` answered
+`wrongRole` there. The declaration's selection (`Effect.select`) does not read the role: a
+content cell under the cell law is selected, and the computation's header refuses `wrongRole`
+as its first check. The three statements below say the receiver answers exactly what it
+answered before, for every input, and that no preparation exists to carry a charge. -/
+
+/-- **The wrong-role pole.** A content target under a role that is not an object is refused by
+the deployed preparation whatever the loaded cell, the schema version, the planned root and the
+command: `missingTarget` when its slot is absent, `wrongRole` otherwise. That is the whole
+value of `prepareTarget` on such a target, so no other refusal (a stale root, a version, a
+content refusal, a patch or law or policy or audience refusal) can come before it; and it is the
+value the hand arm's selection gave. -/
+def ContentWrongRole : Prop :=
+  ∀ (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
+    (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster),
+    ctx.kind ≠ .object →
+    DeclaredResourceController.prepareTarget deployment directory ctx.snapshot ctx.semantics
+        ctx.ambient ctx.command (contentTarget ctx version root command observe epoch roster) =
+      match directory.slots ctx.target with
+      | .absent => .error .missingTarget
+      | .present _ => .error .wrongRole
+
+/-- **Nothing is prepared, so nothing is charged.** No prepared target exists for a content
+target under a role that is not an object, and so no preparation of any command that holds one
+(`PreparedOn.targets`). A command's compute plan and money plan are fields of its preparation
+(`PreparedOn.compute`, `PreparedOn.money`), built by `prepareOn` only after every target is
+prepared: there is none to install. -/
+def ContentWrongRoleUncharged : Prop :=
+  (∀ (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
+    (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster),
+    ctx.kind ≠ .object →
+    IsEmpty (DeclaredResourceController.PreparedTarget deployment directory ctx.snapshot
+      ctx.semantics ctx.ambient ctx.command
+      (contentTarget ctx version root command observe epoch roster))) ∧
+  (∀ {F : Type} [Field F] (deployment : DeclaredResourceController.Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : DeclaredResourceController.Ambient)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (authority : DeclaredResourceController.AuthoritySnapshot)
+    (cells : RunComputeBudgetDomain.Physical) (declared : Bool)
+    (command : DeclaredResourceController.Command)
+    (i : DeclaredResourceController.TargetIndex command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (content : ContentResource.Command) (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster),
+    command.targets[i] =
+      ⟨kind, id, capability, version, root, .content content, observe, epoch, roster⟩ →
+    kind ≠ .object →
+    IsEmpty (DeclaredResourceController.PreparedOn deployment profile ambient directory authority
+      cells declared command))
+
+/-- **The command's refusal, and where it falls.** A command whose one target is a content
+target under a role that is not an object, its slot present, and which passes the gates before
+its targets (it writes, its marker is declared, the clock loads), is refused `wrongRole` by
+`prepareOn`: after the clock, at the target, before the openings, the marker, the compute plan,
+the run check and the money plan, none of which is evaluated. -/
+def ContentWrongRoleCommand : Prop :=
+  ∀ {F : Type} [Field F] (deployment : DeclaredResourceController.Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : DeclaredResourceController.Ambient)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (authority : DeclaredResourceController.AuthoritySnapshot)
+    (cells : RunComputeBudgetDomain.Physical)
+    (subject : SubjectId) (nonce : Nat) (run : Option Run.RunClaim)
+    (family : Option NativeInvocationStatement.Family)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (content : ContentResource.Command) (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster)
+    (before : CellRegistry.PackedCell DeclaredResourceController.Registry)
+    (clock : ClockCellDomain.Loaded deployment cells),
+    kind ≠ .object → directory.slots id = .present before →
+    ClockCellDomain.load deployment cells = some clock →
+    (⟨subject, nonce, [⟨kind, id, capability, version, root, .content content, observe, epoch,
+        roster⟩], run, family⟩ : DeclaredResourceController.Command).writesSome = true →
+    (DeclaredResourceController.prepareOn deployment profile ambient directory authority cells true
+        ⟨subject, nonce, [⟨kind, id, capability, version, root, .content content, observe, epoch,
+          roster⟩], run, family⟩).map (fun _ => ()) = .error .wrongRole
+
 end Minidregg.Effects.Revival
