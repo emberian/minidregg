@@ -8,7 +8,8 @@ elsewhere:
   `Kernel.GenericSimplexErasure.rebase_observational`, `step_erase`, `liveStep_run`.
 
 This file runs them on the F2 state (satisfiable) and on a state that lost its floor (teeth).
-The `Reachable`-level statements are in `Verify.GenericSimplexJumpReach`. -/
+The `Reachable`-level statements are in `Verify.GenericSimplexJumpReach`, and so are this
+file's axiom pins (it imports the kernel only). -/
 namespace Minidregg.Verify.GenericSimplexFloorStatements
 open Minidregg.Kernel.GenericSimplex
 open Minidregg.Verify.GenericSimplexJumpStarvation
@@ -37,10 +38,11 @@ def lateInputs : List Input :=
 
 def allHonest (net : Net) (test : State → Bool) : Bool := (honestStates net).all test
 
+/-- Compiled evaluation: four whole runs, one of them twelve rounds. -/
 theorem floor_agrees_executed :
     ([mainRun, rescued, stranded, keptMemory].all fun net =>
       allHonest net fun s => s.lastCommitted == lastCommittedView s) = true := by
-  decide +kernel
+  native_decide
 
 /-- Teeth: a state whose floor field was reset lags its committed view. -/
 theorem lagging_floor_disagrees : ¬ FloorAgrees { before 0 with lastCommitted := 0 } := by
@@ -75,11 +77,5 @@ theorem forgotten_floor_observable :
       (run cfg t lateInputs).outbox != (run cfg s lateInputs).outbox &&
         (newSends t (run cfg t lateInputs)).any fun m => m.view == 1 && m.kind == .commit) = true := by
   decide +kernel
-
-#print axioms floor_agrees_executed
-#print axioms lagging_floor_disagrees
-#print axioms floor_refuses_executed
-#print axioms erasure_executed
-#print axioms forgotten_floor_observable
 
 end Minidregg.Verify.GenericSimplexFloorStatements

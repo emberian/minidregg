@@ -1,5 +1,6 @@
 import Kernel.GenericSimplexObservationSafety
-import Verify.GenericSimplexJumpStarvation
+import Theory.AssertCompiled
+import Verify.GenericSimplexFloorStatements
 
 /-! Ties the executed controls of `Verify.GenericSimplexJumpStarvation` to the proof
 closure's own vocabulary.
@@ -7,10 +8,15 @@ closure's own vocabulary.
 * `allowed_eq_allowedB`: the admission test those runs used IS `allowedB poleConfig
   poleFaulty` on the network of their states, so every input they applied satisfies the
   real `AllowedInput` (`allowed_sound`), whichever step rule produced the states.
-* `mainRun_runChecked`: the `.main` run's concrete input list, fed to the real
-  `runChecked` from the real `initial`, is admitted and ends in the same honest states;
-  hence `mainRun_reachable`.
-* `SettledBelowFrontier`, `EventualCommit`: statements, no proofs. -/
+* `reachRun_runChecked`: the concrete input list of a three-round `.main` run, fed to the
+  real `runChecked` from the real `initial`, is admitted and ends in the same honest states
+  (kernel-checked: this one is a premise of `reachRun_reachable`, so the kernel is the
+  point, and three rounds cost it seconds); hence `reachRun_reachable`, and
+  `settled_premise_inhabited`.
+* `SettledBelowFrontier`, `EventualCommit`: statements, no proofs.
+* The pins: `#assert_axioms` on what the kernel checked, `#assert_compiled` on the executed
+  controls of `GenericSimplexJumpStarvation` and `GenericSimplexFloorStatements` that are
+  compiled evaluations. -/
 namespace Minidregg.Verify.GenericSimplexJumpReach
 open Minidregg.Kernel.GenericSimplex
 open Minidregg.Kernel.GeneralSimplexReachability
@@ -44,31 +50,48 @@ theorem allowed_sound {net : Net} {receiver : Nat} {input : Input}
     AllowedInput poleConfig poleFaulty poleChecked (toNetwork net) receiver input :=
   allowedB_sound (by rw [← allowed_eq_allowedB]; exact ok)
 
-set_option maxHeartbeats 0 in
-/-- The `.main` run through the real `runChecked`: admitted, same honest states. The kernel
-replays the whole twelve-round run through the specification `step`, which keeps every
-view and the audit; that takes more than the default heartbeats. -/
-theorem mainRun_runChecked :
-    ((runChecked poleConfig poleFaulty (initial poleConfig 0) mainRun.schedule).map
-      fun net => [0, 1, 2].map net.localState) = some (honestStates mainRun) := by
+/-- The three-round `.main` run through the real `runChecked`: admitted, same honest
+states. -/
+theorem reachRun_runChecked :
+    ((runChecked poleConfig poleFaulty (initial poleConfig 0) reachRun.schedule).map
+      fun net => [0, 1, 2].map net.localState) = some (honestStates reachRun) := by
   decide +kernel
 
-theorem mainRun_reachable :
+theorem reachRun_reachable :
     ∃ net, Reachable poleConfig poleFaulty poleChecked 0 net ∧
-      [0, 1, 2].map net.localState = honestStates mainRun := by
-  rcases run : runChecked poleConfig poleFaulty (initial poleConfig 0) mainRun.schedule with _ | net
-  · have admitted := mainRun_runChecked
+      [0, 1, 2].map net.localState = honestStates reachRun := by
+  rcases run : runChecked poleConfig poleFaulty (initial poleConfig 0) reachRun.schedule with _ | net
+  · have admitted := reachRun_runChecked
     rw [run] at admitted
     simp at admitted
   · refine ⟨net, runChecked_reachable _ _ net .initial run, ?_⟩
-    have admitted := mainRun_runChecked
+    have admitted := reachRun_runChecked
     rw [run] at admitted
     simpa using admitted
+
+/-- The run's honest replicas are past view 1 (views 4, 2, 3) and have committed it. -/
+theorem reachRun_frontier :
+    ((honestStates reachRun).all fun s =>
+      decide (1 < s.current) && (viewAt s 1).committed.isSome) = true := by
+  decide +kernel
+
+/-- Premise inhabitation for `SettledBelowFrontier`: a reachable network of the pole
+committee in which honest party 0 has passed view 1. -/
+theorem settled_premise_inhabited :
+    ∃ net, Reachable poleConfig poleFaulty poleChecked 0 net ∧
+      1 < (net.localState 0).current := by
+  obtain ⟨net, reachable, states⟩ := reachRun_reachable
+  refine ⟨net, reachable, ?_⟩
+  have frontier := reachRun_frontier
+  rw [← states] at frontier
+  simp only [List.map_cons, List.map_nil, List.all_cons, List.all_nil, Bool.and_true,
+    Bool.and_eq_true, decide_eq_true_eq] at frontier
+  omega
 
 /-- STATEMENT (no proof). Every view an honest replica has passed is prepared or disabled
 at some honest replica, or lies at or below a view some honest replica committed.
 
-satisfiable / premise-inhabitation: `mainRun_reachable`, `poleNet_reachable`.
+satisfiable / premise-inhabitation: `settled_premise_inhabited`, `poleNet_reachable`.
 teeth: a step that enters a view on an unprepared hint (PR #18's "unprepared hint" mutant). -/
 def SettledBelowFrontier : Prop :=
   ∀ {c : Config} {faulty : Finset Nat} {checked : Network → Nat → Block → Prop}
@@ -183,8 +206,18 @@ def EventualCommit : Prop :=
     ∃ j, e.time j ≤ max (e.time i) gst + bound * c.parties * (c.timeout * 2 ^ c.backoffCap) ∧
       ∀ p, Honest c faulty p → payload ∈ (e.state j p).committedTip
 
-#print axioms allowed_eq_allowedB
-#print axioms mainRun_runChecked
-#print axioms mainRun_reachable
+#assert_axioms allowed_eq_allowedB allowed_sound reachRun_runChecked reachRun_reachable
+  reachRun_frontier settled_premise_inhabited
+#assert_axioms stepV_main startV_main
+#assert_axioms GenericSimplexFloorStatements.lagging_floor_disagrees
+  GenericSimplexFloorStatements.floor_refuses_executed
+  GenericSimplexFloorStatements.erasure_executed
+  GenericSimplexFloorStatements.forgotten_floor_observable
+#assert_compiled pr_jump_starves_commit
+#assert_compiled main_commits_same_policy
+#assert_compiled late_vote_jump_commits_same_policy
+#assert_compiled forgotten_floor_halts
+#assert_compiled stranding_ends_with_floor_evidence
+#assert_compiled GenericSimplexFloorStatements.floor_agrees_executed
 
 end Minidregg.Verify.GenericSimplexJumpReach

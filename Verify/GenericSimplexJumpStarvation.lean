@@ -18,6 +18,12 @@ the `f+1` READY rule), so every held READY leaked through and the lagged party v
 repeats held like any other message (`repeated`) the policy starves `.pr` under the present
 step exactly as before.
 
+The facts are theorems by compiled evaluation (`native_decide`): each run is evaluated once,
+in well under a second. A run of twelve rounds costs the kernel's reduction about half a
+minute, and these are executed controls of a schedule, where the kernel is not the point;
+`Verify/GenericSimplexJumpReach.lean` pins each with `#assert_compiled` and carries the
+kernel-checked reachable witness on a short run (`reachRun`).
+
 It imports the kernel only, so it elaborates without the proof closure. The admission test
 `allowed` is `GenericSimplexObservationSafety.allowedB` restated without `Finset` (same
 clauses, `poleFaulty = {3}`; tied to it in `Verify/GenericSimplexJumpReach.lean`). -/
@@ -291,45 +297,52 @@ def report (net : Net) (rounds : Nat) : String :=
     s!"prepared={(honestStates net).map fun s => (viewAt s w).prepared.length} " ++
     s!"committed={(honestStates net).map fun s => (viewAt s w).committed.isSome}")
 
-/-! ## F1, executed: twelve rounds, three leader rotations
-
-`#guard` evaluates the compiled definitions at elaboration and fails the file if false. -/
+/-! ## F1, executed: twelve rounds, three leader rotations -/
 
 def rounds : Nat := 12
 def prRun : Net := play .pr rounds
 def mainRun : Net := play .main rounds
 def lateVoteRun : Net := play .prLateVote rounds
+/-- Three rounds under the kernel's `step`: short enough for the kernel to replay through
+the real `runChecked` (`GenericSimplexJumpReach.reachRun_runChecked`). -/
+def reachRun : Net := play .main 3
 
--- (a) every input of each run passed `allowed`, and the PR run's concrete input list
--- replays to the same states.
-#guard prRun.ok && mainRun.ok && lateVoteRun.ok
-#guard (runV .pr prRun.schedule).ok && (runV .pr prRun.schedule).states == prRun.states
+/-- F1. Under the PR's rule the adversary policy is admitted for twelve rounds (three leader
+rotations) and its concrete input list replays to the same states; the honest replicas
+reach views 13, 12, 13 (no tick was delivered: every view ended prepared); every view has
+exactly two honest VOTEs, where three are needed, and at most one honest COMMIT; no honest
+replica commits, delivers or fails. Fairness of the finite run: the only honest messages
+not yet delivered are for the last two views (the one-round lag on the 1-2 link). -/
+theorem pr_jump_starves_commit :
+    prRun.ok = true ∧
+    ((runV .pr prRun.schedule).ok && (runV .pr prRun.schedule).states == prRun.states) = true ∧
+    currents prRun = [13, 12, 13] ∧
+    anyDelivered prRun = false ∧ anyCommitted prRun = false ∧ anyFailed prRun = false ∧
+    ((List.range rounds).all fun i => (sentBy prRun (i + 1) .vote).length == 2) = true ∧
+    ((List.range rounds).all fun i => decide ((sentBy prRun (i + 1) .commit).length ≤ 1)) = true ∧
+    ((undeliveredViews prRun).all fun view => decide (view ≥ rounds - 1)) = true := by
+  native_decide
 
--- (b) under the PR's rule: nothing delivered, nothing committed, nobody failed, and the
--- views kept advancing (no tick was delivered: every view ended prepared).
-#guard !anyDelivered prRun && !anyCommitted prRun && !anyFailed prRun
-#guard currents prRun == [13, 12, 13]
--- Every view has exactly two honest VOTEs and at most one honest COMMIT. Three are needed.
-#guard (List.range rounds).all fun i => (sentBy prRun (i + 1) .vote).length == 2
-#guard (List.range rounds).all fun i => decide ((sentBy prRun (i + 1) .commit).length ≤ 1)
--- Fairness of the finite run: the only honest messages not yet delivered are for the last
--- two views (the one-round lag on the 1-2 link).
-#guard (undeliveredViews prRun).all fun view => decide (view ≥ rounds - 1)
+/-- Control. Main's `step` (`stepV_main`) under the same policy commits views 1..10 at all
+three honest replicas. The PR run's literal input list is not admitted under main (it
+delivers messages only the jumping replicas sent), so the comparison is by policy. -/
+theorem main_commits_same_policy :
+    mainRun.ok = true ∧ anyFailed mainRun = false ∧
+    ((honestStates mainRun).all fun s => s.delivered.length == 10) = true ∧
+    ((List.range 10).all fun i =>
+      (honestStates mainRun).all fun s => (viewAt s (i + 1)).committed.isSome) = true ∧
+    (runV .main prRun.schedule).ok = false := by
+  native_decide
 
--- (c) the kernel's `step` under the same adversary policy commits views 1..10 at all three.
-#guard (honestStates mainRun).all fun s => s.delivered.length == 10
-#guard (List.range 10).all fun i =>
-  (honestStates mainRun).all fun s => (viewAt s (i + 1)).committed.isSome
-#guard !anyFailed mainRun
--- The PR run's literal input list is not admitted under main: it delivers messages only
--- the jumping replicas sent. The comparison is therefore by policy, not by input list.
-#guard !(runV .main prRun.schedule).ok
+/-- Repair. The jump that first casts the late vote in its target view commits views 2..10
+under the same policy. This is one schedule, not a progress theorem. -/
+theorem late_vote_jump_commits_same_policy :
+    lateVoteRun.ok = true ∧ anyFailed lateVoteRun = false ∧
+    ((honestStates lateVoteRun).all fun s => s.delivered.length == 9) = true ∧
+    ((List.range 9).all fun i =>
+      (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome) = true := by
+  native_decide
 
--- Repair: the jump casts the late vote in its target view. Same policy: views 2..10 commit.
-#guard (honestStates lateVoteRun).all fun s => s.delivered.length == 9
-#guard (List.range 9).all fun i =>
-  (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome
-#guard !anyFailed lateVoteRun
 /-! ## F2, executed: forgetting old views, with and without the commit floor
 
 Rule `.main` throughout (the kernel's `step`). View 1: party 0 proposes `[[1]]`, all three
@@ -379,21 +392,24 @@ def droppedWithFloor : Net := lateVotes (altered forgetViews [0, 1, 2] rebaseSet
 def droppedNoFloorAll : Net := lateVotes (altered forgetFloor [0, 1, 2] rebaseSetup)
 def droppedNoFloorTwo : Net := lateVotes (altered forgetFloor [0, 1] rebaseSetup)
 
--- Before: view 1 disabled, `[[2]]` committed in view 2 at all three, floor 2, all healthy.
-#guard rebaseSetup.ok && !anyFailed rebaseSetup
-#guard (honestStates rebaseSetup).all fun s =>
-  (viewAt s 1).disabled && (viewAt s 2).committed == some [[2]] && s.committedTip == [[2]] &&
-    s.lastCommitted == 2
--- Memory kept, and views forgotten with the floor kept: no view-1 COMMIT, nobody fails.
-#guard keptMemory.ok && !anyFailed keptMemory && (sentBy keptMemory 1 .commit).isEmpty
-#guard droppedWithFloor.ok && !anyFailed droppedWithFloor && (sentBy droppedWithFloor 1 .commit).isEmpty
--- Views and floor forgotten by all three: all three send COMMIT for `[[1]]` and all halt.
-#guard droppedNoFloorAll.ok && sentBy droppedNoFloorAll 1 .commit == [0, 1, 2]
-#guard (honestStates droppedNoFloorAll).all (·.failed)
--- By two (f+1), with the Byzantine COMMIT: both halt. Party 2 kept its floor, refuses the
--- view-1 COMMITs, and stays healthy (before the commit floor it halted too).
-#guard droppedNoFloorTwo.ok && sentBy droppedNoFloorTwo 1 .commit == [0, 1]
-#guard (honestStates droppedNoFloorTwo).map (·.failed) == [true, true, false]
+/-- F2. Before the late votes: view 1 disabled, `[[2]]` committed in view 2 at all three,
+floor 2, all healthy. Then, with the floor kept, forgetting the views at or below it is
+harmless (no view-1 COMMIT, nobody fails). With the floor forgotten too every forgetful
+replica sends COMMIT for `[[1]]` and ends `failed`: all three; or two (f+1) plus one
+Byzantine COMMIT, where the third keeps its floor, refuses the view-1 COMMITs and survives. -/
+theorem forgotten_floor_halts :
+    (rebaseSetup.ok = true ∧ anyFailed rebaseSetup = false ∧
+      ((honestStates rebaseSetup).all fun s =>
+        (viewAt s 1).disabled && (viewAt s 2).committed == some [[2]] &&
+          s.committedTip == [[2]] && s.lastCommitted == 2) = true) ∧
+    (keptMemory.ok = true ∧ anyFailed keptMemory = false ∧ sentBy keptMemory 1 .commit = []) ∧
+    (droppedWithFloor.ok = true ∧ anyFailed droppedWithFloor = false ∧
+      sentBy droppedWithFloor 1 .commit = []) ∧
+    (droppedNoFloorAll.ok = true ∧ sentBy droppedNoFloorAll 1 .commit = [0, 1, 2] ∧
+      (honestStates droppedNoFloorAll).all (·.failed) = true) ∧
+    (droppedNoFloorTwo.ok = true ∧ sentBy droppedNoFloorTwo 1 .commit = [0, 1] ∧
+      (honestStates droppedNoFloorTwo).map (·.failed) = [true, true, false]) := by
+  native_decide
 
 /-! ## F3, executed: a replica stranded behind a peer's floor, and commit-evidence transfer
 
@@ -431,71 +447,15 @@ def rescued : Net := tickAll (tickAll (strandSetup false) 300) 400
 def floors (net : Net) : List Nat := (honestStates net).map (·.lastCommitted)
 def tips (net : Net) : List Nat := (honestStates net).map (·.committedTip.length)
 
--- Without forwarding: party 0 in view 3 at floor 2; parties 1 and 2 in view 4, which can end
--- neither way.
-#guard stranded.ok && !anyFailed stranded
-#guard currents stranded == [3, 4, 4] && floors stranded == [2, 2, 3] && tips stranded == [2, 2, 3]
-#guard (undelivered stranded).isEmpty
--- With it: all three reach floor 3, view 4 times out, and views 5 and 6 commit.
-#guard rescued.ok && !anyFailed rescued
-#guard floors rescued == [6, 6, 6] && tips rescued == [5, 5, 5]
-
-/-! ## The same facts as kernel-checked theorems (`decide +kernel`, standard axioms only) -/
-
-/-- F1. Under the PR's rule the adversary policy is admitted for twelve rounds (three leader
-rotations), the honest replicas reach views 13, 12, 13, every view has exactly two honest
-VOTEs and at most one honest COMMIT, and no honest replica commits or delivers anything. -/
-theorem pr_jump_starves_commit :
-    prRun.ok = true ∧ currents prRun = [13, 12, 13] ∧
-    anyDelivered prRun = false ∧ anyCommitted prRun = false ∧ anyFailed prRun = false ∧
-    ((List.range rounds).all fun i => (sentBy prRun (i + 1) .vote).length == 2) = true ∧
-    ((List.range rounds).all fun i => decide ((sentBy prRun (i + 1) .commit).length ≤ 1)) = true ∧
-    ((undeliveredViews prRun).all fun view => decide (view ≥ rounds - 1)) = true := by
-  decide +kernel
-
-/-- Repair. The jump that first casts the late vote in its target view commits views 2..10
-under the same policy. This is one schedule, not a progress theorem. -/
-theorem late_vote_jump_commits_same_policy :
-    lateVoteRun.ok = true ∧ anyFailed lateVoteRun = false ∧
-    ((List.range 9).all fun i =>
-      (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome) = true := by
-  decide +kernel
-
-/-- Control. Main's `step` (`stepV_main`) under the same policy commits views 1..10 at all
-three honest replicas. -/
-theorem main_commits_same_policy :
-    mainRun.ok = true ∧ anyFailed mainRun = false ∧
-    ((List.range 10).all fun i =>
-      (honestStates mainRun).all fun s => (viewAt s (i + 1)).committed.isSome) = true := by
-  decide +kernel
-
-/-- F2. With the floor kept, forgetting the views at or below it is harmless; with the floor
-forgotten too every forgetful replica ends `failed` (all three; or two plus one Byzantine COMMIT, where
-the third keeps its floor and survives). -/
-theorem forgotten_floor_halts :
-    (keptMemory.ok = true ∧ anyFailed keptMemory = false ∧ sentBy keptMemory 1 .commit = []) ∧
-    (droppedWithFloor.ok = true ∧ anyFailed droppedWithFloor = false ∧
-      sentBy droppedWithFloor 1 .commit = []) ∧
-    (droppedNoFloorAll.ok = true ∧ sentBy droppedNoFloorAll 1 .commit = [0, 1, 2] ∧
-      (honestStates droppedNoFloorAll).all (·.failed) = true) ∧
-    (droppedNoFloorTwo.ok = true ∧ sentBy droppedNoFloorTwo 1 .commit = [0, 1] ∧
-      (honestStates droppedNoFloorTwo).map (·.failed) = [true, true, false]) := by
-  decide +kernel
-
-/-- F3. On a network that never forwards floor evidence party 0 stays in view 3 and parties
-1 and 2 in view 4 through two further rounds of timeouts with every honest message
-delivered; with the evidence forwarded all three reach floor 6 and two more blocks commit. -/
+/-- F3. On a network that never forwards floor evidence party 0 stays in view 3 at floor 2
+and parties 1 and 2 in view 4, which can end neither way, through two further rounds of
+timeouts with every honest message delivered. With the evidence forwarded all three reach
+floor 3, view 4 times out, and views 5 and 6 commit. -/
 theorem stranding_ends_with_floor_evidence :
     (stranded.ok = true ∧ anyFailed stranded = false ∧ currents stranded = [3, 4, 4] ∧
-      floors stranded = [2, 2, 3] ∧ undelivered stranded = []) ∧
+      floors stranded = [2, 2, 3] ∧ tips stranded = [2, 2, 3] ∧ undelivered stranded = []) ∧
     (rescued.ok = true ∧ anyFailed rescued = false ∧ floors rescued = [6, 6, 6] ∧
       tips rescued = [5, 5, 5]) := by
-  decide +kernel
-
-#print axioms pr_jump_starves_commit
-#print axioms late_vote_jump_commits_same_policy
-#print axioms main_commits_same_policy
-#print axioms forgotten_floor_halts
-#print axioms stranding_ends_with_floor_evidence
+  native_decide
 
 end Minidregg.Verify.GenericSimplexJumpStarvation

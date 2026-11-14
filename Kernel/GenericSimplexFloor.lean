@@ -1,5 +1,7 @@
 import Kernel.GenericSimplexOutputHistory
 import Kernel.GenericSimplexErasure
+import Kernel.GenericSimplexChecked
+import Kernel.GenericSimplexWindow
 import Mathlib.Tactic.SplitIfs
 
 /-! The commit floor is the fold it replaced.
@@ -442,6 +444,22 @@ theorem lagging_floor_refused :
 #assert_axioms lastCommitted_spec
 #assert_axioms lagging_floor_refused
 #assert_axioms Minidregg.Kernel.GenericSimplexErasure.step_erase
+-- The kernel-only files state and prove; their pins are here, where the pin command is.
+#assert_axioms Minidregg.Kernel.GenericSimplexChecked.validBlock_iff
+  Minidregg.Kernel.GenericSimplexChecked.validBlock_prefix
+  Minidregg.Kernel.GenericSimplexChecked.addChecked_exact
+  Minidregg.Kernel.GenericSimplexChecked.addChecked_valid
+  Minidregg.Kernel.GenericSimplexChecked.addChecked_mono
+  Minidregg.Kernel.GenericSimplexChecked.addChecked_antichain
+  Minidregg.Kernel.GenericSimplexChecked.addChecked_chain
+  Minidregg.Kernel.GenericSimplexChecked.doCommit_offers_subset
+  Minidregg.Kernel.GenericSimplexChecked.doCommit_offers
+#assert_axioms Minidregg.Kernel.GenericSimplexWindow.ingest_beyond
+  Minidregg.Kernel.GenericSimplexWindow.noteAhead_frame
+  Minidregg.Kernel.GenericSimplexWindow.noteAhead_unique
+  Minidregg.Kernel.GenericSimplexWindow.noteAhead_members
+  Minidregg.Kernel.GenericSimplexWindow.ingest_within
+  Minidregg.Kernel.GenericSimplexWindow.ingest_within_propose
 #assert_axioms Minidregg.Kernel.GenericSimplexErasure.liveStep_run
 #assert_axioms Minidregg.Kernel.GenericSimplexErasure.rebase_observational
 end Minidregg.Kernel.GenericSimplexFloor
