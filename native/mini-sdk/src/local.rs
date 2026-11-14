@@ -472,6 +472,11 @@ mod tests {
         fs::write(dir.join("moved.json"), b"{ }").unwrap();
         codec.frame(&host, &dir.join("moved.json"), crate::host_operations::AUTHOR, b"intent").unwrap();
         assert_eq!(starts(&dir), 2);
+        let copy = dir.join("codec-host-copy");
+        fs::copy(&host, &copy).unwrap();
+        fs::rename(&copy, &host).unwrap();
+        codec.frame(&host, &dir.join("moved.json"), crate::host_operations::AUTHOR, b"intent").unwrap();
+        assert_eq!(starts(&dir), 3, "a replaced image file starts another child");
         assert!(matches!(codec.frame(&host, &dir.join("moved.json"), crate::host_operations::FN_POLL, b""), Err(CodecError::Failed(_))));
 
         let other = stub_dir("codec-refusal");

@@ -177,9 +177,10 @@ Quest: an unattended builder on `main` that nobody waits on; inner loops of seco
 
 ## Outside PRs (akapug)
 - Landed 10-31 and closed: #5 (d9f333dbf), #4 (ae98da48b, ported). Superseded and closed: #16, #14, #7.
-- #18 (simplex prepared jump): open. Its item 1 (does the catch-up jump enter the deployed agreement step now?) is
-  with ember via root. If yes, it needs items 2-5 (logMagic 5, drop the Fabric-bound script, drop the ResearchWip
-  hunk, rebase onto Lean 4.35) before merge. If no, say so on the PR.
+- #18 (simplex prepared jump): open, changes requested. Ember's review of 10-31 23:03Z asked for a progress theorem
+  with the jump, what the jump trusts, logMagic 5 with a v4-refusal theorem, the O(V²) `preparedAbove` fixed with
+  old views retired, and the Fabric-bound script fitted to main; nothing has been pushed since. The PR edits the one
+  `step`; no shipped process runs it (the Host imports the engine for codec types only). Taken over 11-13.
 
 ## Seams needed
 - infra (a5bc08dce78e7405e): the kept-world rebind tool; ship.sh accepting `.overlay.id`.

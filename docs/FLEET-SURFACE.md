@@ -194,8 +194,12 @@ load ~20, 3 stale observations + 9 stale plans at load ~45.
 
 ## Costs and open edges, measured or read
 
-- **Every commit stales every other agent's plan (MEASURED; the
-  fleet-throughput question).** The signing header binds the authority-cell
+- **Every commit staled every other agent's plan (MEASURED 2026-09-30; no
+  longer the design).** Since `44ae5cd21` a fleet turn does not write the
+  authority cell, and authors on one topic name write disjoint streams
+  (`fleet_disjoint_authors_no_replan`), so independent authors do not
+  re-plan. The numbers below are the record of the earlier design and have
+  not been re-measured. Then, the signing header bound the authority-cell
   root, and every admitted operation consumes its marker in that cell, so a
   plan signed before any other commit is refused at submit with
   `staleAuthority` (checked from the header's root before any signature is
@@ -220,9 +224,14 @@ load ~20, 3 stale observations + 9 stale plans at load ~45.
   suffix: 7.6 to 13.3 s per round. The remaining growth is the per-request
   reread and decode of the whole durable image. The participant key
   enrollment submit (op 88) still reopens the Store per submit.
-- **Journal scans (READ).** Receipt-by-transaction (op 102), the agent head
-  (op 101) and poll's payload retrieval find records by a linear pass over
-  `durable.image.accepted`. DATAMODEL §3.3 moves `journal : TxId ↦ (height,
+- **Journal scans (READ; partly fixed).** Since 2026-11-02 receipt-by-transaction
+  (op 102) is an index read on the light opening
+  (`receiptByTransactionLight`), and poll (op 100) fetches each payload by
+  `Reader.byTx`, at most 64 per request, though still on the full image. The
+  agent head (op 101) and incoming (op 180) still pass over
+  `durable.image.accepted` and decode every ingress. As first written:
+  receipt-by-transaction, the agent head and poll's payload retrieval found
+  records by a linear pass. DATAMODEL §3.3 moves `journal : TxId ↦ (height,
   H(turn))` and `receipts : height ↦ digest` into indexed namespaces of the
   system cell (Wave B/C); ops 102 and 100 become exact index reads then. The
   agent head needs an index §3.3 does not list (`payer ↦ newest fleet turn`);
@@ -241,7 +250,44 @@ load ~20, 3 stale observations + 9 stale plans at load ~45.
   inspection (authoring and inspection are Lean's, so the client never
   decodes a binary itself): 2.1 s for send or transfer uncontended on the
   final run.
-- **Speaking needs spend authority.** Appending to an account's topic
-  requires the `transfer` verb on it, because every turn pays from it. A
-  "may publish but not spend" grant would need a new verb in
-  `TypedAuthorization`.
+- **Speaking needs the `transfer` verb; confining it to speaking is the account law's job.** Appending to an
+  account's topic requires `transfer` on it, because every turn pays from it.
+  A request's cost is its fee plus the amount it moves (`FleetTurn.context`),
+  and a capability covers a request only when that cost is at most its
+  `maxCost` (`Scope.Covers.cost`). So a `transfer` capability delegated with
+  `maxCost` equal to the pinned `tariff.base` admits a fleet publication and
+  refuses every fleet turn that moves value. That is not a spend ceiling:
+  `cost` is priced per receiver (a Book transfer leg's cost is its fee debit,
+  0 for an ordinary transfer; a resource transaction's is its command
+  length), so the same capability presented to another receiver, such as a
+  birth's funding leg naming this account as source, is not bounded by it.
+  The control that holds is the account's law: the fleet receiver alone
+  projects `fleet/operation/turn` and `fleet/transfer/amount`, and an atom on
+  an absent slot is false, so a clause admitting the seat's subject only when
+  `fleet/operation/turn == 1` and `fleet/transfer/amount == 0` confines it to
+  fee-only fleet turns, with no new verb and no dependence on the tariff. Two
+  limits remain. The holder can still spend the account down one fee at a
+  time: fund the account with the role's budget. And a capability on an
+  account covers every topic of that account.
+  Roles are therefore accounts: a stream is `H(domain, account, topic)` and
+  belongs to its payer (`fleet_stream_is_payers`), so `verdict` on a
+  reviewer's account and `verdict` on a lander's are different streams, and a
+  reader identifies a record by (author account, topic). No `mini fleet`
+  action performs that delegation yet; it is a `workspace --action propose`
+  delegate with a `MAX-COST`.
+
+## Operator duties
+
+- **Certify.** A Store refuses records once its head is more than `tailBound`
+  heights (a required Host config field; 256 in the fixtures) past the
+  certified height. Something must run `mini checkpoint --action certify` more
+  often than that; a timer once a minute is safe under sustained writes,
+  because the rule accepts any held prefix past the certified height. If it
+  lapses, writes are refused with `tail-bound`, nothing is lost, and one
+  certify resumes. `fleet-sign-growth.sh` does not certify, so it stops near
+  that bound.
+- **Consent provider.** `mini` signs only through `minidregg-client-consent`,
+  found as the pinned path, then `MINI_CONSENT_HOST`, then a file of that name
+  beside the Host binary (`native/resource-client/src/client_consent.rs`).
+  Without it the first signing request fails; `mini serve` does not check at
+  start. `mini consent-full-ready` checks it by hand.
