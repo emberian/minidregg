@@ -567,7 +567,7 @@ and returns the cell it met; a read citing it as `1` is refused `citedStale`, na
 /-- An observe capability scoped to one field. -/
 def citedCapability : CredentialAuthorityState.StoredCapability .object :=
   ⟨{ id := ⟨0⟩, root := ⟨0⟩, parent := none, issuer := ⟨0⟩, holder := .bearer,
-     scope := { targets := .explicit {⟨0⟩}, verbs := {.observeObject}, maxCost := 0,
+     scope := { targets := .explicit {⟨0⟩}, verbs := {.observeObject}, perRequestBytes := 0,
                 fields := some {.slot 5} },
      notBefore := 0, notAfter := 0, issuerEpoch := 0, policyId := ⟨0⟩, policyEpoch := 0,
      ancestors := ∅, channels := ∅ }, []⟩
