@@ -354,8 +354,13 @@ def freshRoot : Digest := physicalRoot (LifecycleImage.fresh (registry := Regist
 theorem birthWrite_pre (request : CreateRequest (CellId := Nat) Registry) :
     (birthWrite request).expectedPre = freshRoot := rfl
 
-/-- A write of a final patch creates its cell: its expected pre-root is the fresh root. -/
-def bornIn (write : DataWrite) : Bool := write.expectedPre == freshRoot
+/-- A write of a final patch creates a cell a law must judge: its expected pre-root is the fresh
+root and it lies below the authority space. An authority entry's first write also has the fresh
+pre-root, and is no birth in this sense: it is a kernel-only write (`AuthoritySpaceGate.gate`
+admits only the authority kind there, the Receiver's `lawFault` only an authority writer), its
+content the family's own authority patch, exactly as the one authority cell's was. -/
+def bornIn (write : DataWrite) : Bool :=
+  write.expectedPre == freshRoot && decide (write.cellId.value < Kernel.ProtectedCell.authorityBase)
 
 /-- **The newborns a factory step names**: every create request of the signed
 descriptor -- its births and its source-generated auxiliary creates -- as

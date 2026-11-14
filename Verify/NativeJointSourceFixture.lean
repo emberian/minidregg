@@ -381,6 +381,7 @@ def appendFlatness (root : System.FilePath) (helpers : Helpers) (signer : System
   let mut series : Array (Array Nat) := #[]
   let mut sizes : Array Nat := #[]
   let mut times : Array Nat := #[]
+  let mut marks : Array String := #[]
   for k in List.range count do
     let started ← IO.monoNanosNow
     replicas ← offerBirth replicas source signer (base + k)
@@ -428,6 +429,8 @@ def appendFlatness (root : System.FilePath) (helpers : Helpers) (signer : System
     series := series.push samples
     sizes := sizes.push recordBytes
     times := times.push (median samples)
+    if k + 1 ∈ [1, 40, 120, 200] || k + 1 == count then
+      marks := marks.push s!"{k + 1}: record {recordBytes}, largest write {largest.2}, authority {authorityBytes} in {authorityCount} writes"
     IO.println s!"{target}\t{((← IO.monoNanosNow) - started) / 1000000}\t{recordBytes}\t{median samples}\t{samples.toList}\tevent {eventBytes} B, {writeCount} writes, largest {largest.2} B to cell {largest.1}, authority {authorityBytes} B in {authorityCount} writes"
   let pool := fun (part : Array (Array Nat)) => part.foldl (· ++ ·) #[]
   let head := median (pool (series.extract 0 window))
@@ -438,6 +441,7 @@ def appendFlatness (root : System.FilePath) (helpers : Helpers) (signer : System
     s!"append flatness: the median application hand-off over the last {window} heights took {tail} us for a {tailSize}-byte record, more than {factor} times the {head} us of the first {window} ({headSize}-byte record)"
   require (tailSize ≤ headSize + headSize / 8)
     s!"append flatness: the median appended record over the last {window} heights is {tailSize} bytes, more than one eighth above the {headSize} bytes of the first {window}"
+  IO.println s!"WRITES by birth ordinal (bytes): {"; ".intercalate marks.toList}"
   IO.println s!"FLAT ordered append over heights {base + 1}..{base + count}: median hand-off {head} us for a {headSize}-byte record over the first {window}, {tail} us for a {tailSize}-byte record over the last {window}; bounds: {factor} times the first hand-off, one eighth above the first record"
 
 /-- `rejoin`: one replica stopped for two calls and restarted catches up, in process and
