@@ -629,17 +629,22 @@ real Stores, hbox, one run; median application hand-off of the four replicas):
 
 - The cause is the record, not the walk over history. A birth rewrites a cell that
   accumulates with every birth (the record is 5,123 bytes at height 1 and grows by about
-  160 bytes per birth), and a record carries the whole written cell. By reading, not yet by
-  measurement: it is the credential authority cell, one cell that holds every stored
-  capability (`CredentialAuthorityDomain.Cell`); a birth adds two capabilities to it, and
-  `issuedOf` hashes every stored capability again whenever the cell changes. The row prints
-  each record's largest write and its cell, which settles it.
+  160 bytes per birth), and a record carries the whole written cell. It is the credential authority
+  cell, one cell that holds every stored capability (`CredentialAuthorityDomain.Cell`): a
+  second run printed each record's largest write, which is to cell 12 (the fixture's
+  `authorityCellId`) and is 1,324 bytes at height 1, 7,568 at 40, 20,377 at 120 and 33,185
+  at 200, of records of 5,116, 11,366, 24,169 and 36,989 bytes; the original ingress stays
+  about 2,450 bytes and the record has five writes at every height. A birth adds two
+  capabilities to that cell, and `issuedOf` hashes every stored capability again whenever
+  the cell changes. That second run's hand-offs were 117, 104, 224 and 213 ms at the same
+  heights: the box is shared and two runs differ by more than a factor of two at one height.
   Every pass over the record's bytes (derivation, canonical encoding as a list of octets,
   chain and leaf digests, the Store's append and exact readback, the second `extend` in
   `ExactReadback.ofAppended`) grows with it. Per KB of record the hand-off is 11 ms at
   height 1, 9 ms at 40 and 14 ms at 200. The cure is on the source side and is not done: a
   birth must write only what it adds (the authority cell split into one cell per capability,
-  or a record that carries a write as a delta); either moves record bytes and world roots. Until then the ordered append is linear in
+  or a record that carries a write as a delta); either moves record bytes and world roots.
+  The design is docs/AUTHORITY-CELL-LAYOUT.md. Until then the ordered append is linear in
   the number of births, at about 2.4 ms per birth on this box.
 - Removed: `ExactReadback.ofAppended` validated the appended image against every cell of the
   image (`validateLoadedFrom`: a comparison of each cell's bytes with the prior image's). It
