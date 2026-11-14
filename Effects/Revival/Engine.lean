@@ -122,7 +122,7 @@ structure EffectSpec (Ctx : Type) (S : Substrate) (O R : Type) where
   verb : (kind : ResourceKind) → O → Verb kind
   view : Site → O → S.State → S.State → List (String × Int)
   commutes : O → Bool := fun _ => false
-  refusalDetail : R → List UInt8 := fun _ => []
+  refusalDetail : R → ByteArray := fun _ => .empty
 
 /-- Every refusal the dispatcher can return.  `refused` carries the declaration's own
 name for its refusal and that refusal's structured detail (canonical bytes, empty when the
@@ -133,7 +133,7 @@ inductive DispatchRefusal where
   | unregistered (code : Nat)
   | malformed (code : Nat)
   | wrongRole (code : Nat)
-  | refused (code : Nat) (name : String) (detail : List UInt8)
+  | refused (code : Nat) (name : String) (detail : ByteArray)
   | outOfFrame (code : Nat)
   | guardFailed (code : Nat)
   | unsupportedVersion (code : Nat)
@@ -463,7 +463,7 @@ refusal surfaces under its own name. -/
 def CompletenessSatisfiable : Prop :=
   (toyEntry entryASpec).Lawful ∧
   dispatch [(0, toyEntry entryASpec)] 0 (StreamCodec.nat.encode 12) () toyEmpty =
-    .error (.refused 0 "tooLarge" [])
+    .error (.refused 0 "tooLarge" .empty)
 
 /-- **Teeth.**  Entry B is not lawful: its out-of-frame operation (refused `outOfFrame`
 in `EngineSatisfiable`) keeps it out of every `LawfulRegistry`. -/

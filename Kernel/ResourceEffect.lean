@@ -178,7 +178,7 @@ structure Effect : Type 1 where
   display : O → List String
   /-- A refusal's structured detail in words: `detail` is `spec.refusalDetail`'s bytes of the
   refusal `name`. Empty when the name says it all. -/
-  refusalText : String → List UInt8 → String := fun _ _ => ""
+  refusalText : String → ByteArray → String := fun _ _ => ""
   unpack_pack : ∀ kind cell, unpack kind (pack kind cell) = some cell
   pack_unpack : ∀ kind packed cell, unpack kind packed = some cell → pack kind cell = packed
   /-- An effect authorized as an observation emits nothing: no write, no rotate. -/

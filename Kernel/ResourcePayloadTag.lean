@@ -89,6 +89,7 @@ def unboundTagBody (body : List UInt8) : Option UInt8 :=
     | none => none
   | none => none
 
+-- Over the list the receiver already holds (`signed.commandBytes`); it moves to `ByteArray` when the command bytes do.
 /-- **The unread payload tag of command bytes**, under either command frame. -/
 def unboundTag (bytes : List UInt8) : Option UInt8 :=
   if bytes.take commandFrame.length = commandFrame then

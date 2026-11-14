@@ -1481,11 +1481,14 @@ def observeValues (domain semantics : Digest) (federation : FederationId) (comma
       ((StreamCodec.product bytesStream StreamCodec.nat).encode
         (commandBytes domain semantics command, target.target))).digest }
 
+/-- Bytes print as their octets (for the derived `Repr` of a display). -/
+local instance : Repr ByteArray := ⟨fun bytes prec => reprPrec bytes.data prec⟩
+
 /-- What a registered observation shows: its effect's wire code, the canonical bytes of the
 signed operation, and the declaration's own lines for it (`Effect.display`). -/
 structure ReadDisplay where
   code : Nat
-  operation : List UInt8
+  operation : ByteArray
   lines : List String
   deriving DecidableEq, Repr
 
@@ -1508,7 +1511,7 @@ def registeredRead (target : Target) : Option ReadDisplay :=
   match target.payload with
   | .registered code op =>
       if (effectAt code.toNat).observeOnly op = true then
-        some ⟨code.toNat, (effectAt code.toNat).spec.opStream.encode op,
+        some ⟨code.toNat, ⟨((effectAt code.toNat).spec.opStream.encode op).toArray⟩,
           (effectAt code.toNat).display op⟩
       else none
   | _ => none
@@ -1549,7 +1552,7 @@ def RegisteredReadDisplayStatement : Prop :=
     (effectAt code.toNat).observeOnly op = true →
     (∀ view, displayTarget deployment command
         ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩ view =
-      .ok ⟨id, none, some ⟨code.toNat, (effectAt code.toNat).spec.opStream.encode op,
+      .ok ⟨id, none, some ⟨code.toNat, ⟨((effectAt code.toNat).spec.opStream.encode op).toArray⟩,
         (effectAt code.toNat).display op⟩⟩) ∧
     (∀ other : (effectAt code.toNat).O,
       (effectAt code.toNat).spec.opStream.encode other =

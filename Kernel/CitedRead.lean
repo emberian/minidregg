@@ -141,13 +141,13 @@ abbrev movedStream : StreamCodec (List EffectDeclaration.StateKey) :=
   StreamCodec.list DeclaredEffectCell.stateKeyStream
 
 /-- A refusal's structured detail: the moved keys of `citedStale`, nothing for the rest. -/
-def CitedRefusal.detail : CitedRefusal → List UInt8
-  | .citedStale moved => movedStream.encode moved
-  | _ => []
+def CitedRefusal.detail : CitedRefusal → ByteArray
+  | .citedStale moved => ⟨(movedStream.encode moved).toArray⟩
+  | _ => .empty
 
 /-- The detail of a stale refusal decodes to exactly its moved keys. -/
 theorem citedStale_detail (moved : List EffectDeclaration.StateKey) :
-    movedStream.toLawful.decode (CitedRefusal.detail (.citedStale moved)) = some moved :=
+    movedStream.toLawful.decode (CitedRefusal.detail (.citedStale moved)).data.toList = some moved :=
   movedStream.toLawful.decode_encode moved
 
 /-! ## The read -/
@@ -356,8 +356,8 @@ def citedDisplay (reads : List FieldRead) : List String :=
       | none => s!"  {citedKeyText read.1} absent"
 
 /-- A refusal's detail in words: the moved fields of `citedStale`, as the display names them. -/
-def citedRefusalText (_name : String) (detail : List UInt8) : String :=
-  match movedStream.toLawful.decode detail with
+def citedRefusalText (_name : String) (detail : ByteArray) : String :=
+  match movedStream.toLawful.decode detail.data.toList with
   | some moved => "[" ++ ", ".intercalate (moved.map citedKeyText) ++ "]"
   | none => ""
 

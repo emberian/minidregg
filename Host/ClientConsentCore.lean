@@ -468,7 +468,7 @@ def displayJson (display : NativeThinConsent.Display) : Json :=
       match display.observation with
       | some observation =>
           [("effect", toJson (toString observation.code)),
-           ("operationBytes", toJson (SourceAgreementJson.encodeHex observation.operation)),
+           ("operationBytes", toJson (SourceAgreementJson.encodeHex observation.operation.data.toList)),
            ("shows", toJson observation.lines)]
       | none => [])
   | some (bytes, root) => Json.mkObj ([("target", toJson (toString display.target))] ++

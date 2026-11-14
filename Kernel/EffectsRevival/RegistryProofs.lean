@@ -682,7 +682,7 @@ theorem cited_stale :
     liveTargetDispatch 9
         ((StreamCodec.list DeclaredResourceController.fieldReadStream).encode [(citedKey, some 1)])
         citedCtx citedCell =
-      .error (.refused 9 "citedStale" (DeclaredResourceController.movedStream.encode [citedKey])) := by
+      .error (.refused 9 "citedStale" ⟨(DeclaredResourceController.movedStream.encode [citedKey]).toArray⟩) := by
   have read : DeclaredResourceController.citedRead citedSnapshot .object 0 ⟨0⟩ (some ⟨0⟩) false
       [(citedKey, some 1)] citedStore = .error (.citedStale [citedKey]) := by
     rw [citedRead_sample, citedMoved_one]
@@ -695,7 +695,7 @@ theorem cited_stale :
     rfl
   have executed : DeclaredResourceController.citedSpec.exec 9 (dispatchCtxOf citedCtx).toEffectCtx
       [(citedKey, some 1)] citedStore =
-        .error (.refused 9 "citedStale" (DeclaredResourceController.movedStream.encode [citedKey])) :=
+        .error (.refused 9 "citedStale" ⟨(DeclaredResourceController.movedStream.encode [citedKey]).toArray⟩) :=
     EffectSpec.exec_refused refused
   rw [cited_dispatch, executed]
   rfl
@@ -725,7 +725,7 @@ theorem registryTeeth_ghost :
     rw [executed]
     rfl
   have clash : (Except.error (.refused 9 "citedStale"
-      (DeclaredResourceController.movedStream.encode [citedKey])) : Except DispatchRefusal HostCell) =
+      ⟨(DeclaredResourceController.movedStream.encode [citedKey]).toArray⟩) : Except DispatchRefusal HostCell) =
         .ok citedCell :=
     cited_stale.symm.trans (agreed.trans admitted)
   cases clash

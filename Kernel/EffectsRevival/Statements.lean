@@ -291,7 +291,7 @@ def ofReject (code : Nat) : DeclaredResourceController.Reject → DispatchRefusa
   | .wrongRole => .wrongRole code
   | .unsupportedVersion => .unsupportedVersion code
   | .staleTarget => .staleTarget code
-  | .content r => .refused code (reprStr r) []
+  | .content r => .refused code (reprStr r) .empty
   | .effect refusal => refusal
   | r => .host code (reprStr r)
 
@@ -443,10 +443,10 @@ def RegistryAccepted : Prop :=
     liveTargetDispatch 9 ((StreamCodec.list DeclaredResourceController.fieldReadStream).encode reads)
       ctx cell = .ok cell) ∧
   (∃ (reads : List DeclaredResourceController.FieldRead) (ctx : HostCtx) (cell : HostCell)
-      (detail : List UInt8) (key : EffectDeclaration.StateKey),
+      (detail : ByteArray) (key : EffectDeclaration.StateKey),
     liveTargetDispatch 9 ((StreamCodec.list DeclaredResourceController.fieldReadStream).encode reads)
       ctx cell = .error (.refused 9 "citedStale" detail) ∧
-    DeclaredResourceController.movedStream.toLawful.decode detail = some [key])
+    DeclaredResourceController.movedStream.toLawful.decode detail.data.toList = some [key])
 
 /-- The ghost of the cited read: the same declaration, admitting whatever the cell holds (its
 footprint is never compared). -/

@@ -28,11 +28,11 @@ open Minidregg.Effects
 #guard (match decodeRefusal (tagProbe []) with | .malformedCommand => true | _ => false)
 
 #guard reprStr (Revival.DispatchRefusal.refused 9 "citedStale"
-    (movedStream.encode [.objectField ⟨0⟩ ⟨5⟩, .programCode ⟨0⟩])) ==
+    ⟨(movedStream.encode [.objectField ⟨0⟩ ⟨5⟩, .programCode ⟨0⟩]).toArray⟩) ==
   "Effect.FieldRead.citedStale [field 5, program code]"
-#guard reprStr (Revival.DispatchRefusal.refused 9 "fieldNotNamed" []) == "Effect.FieldRead.fieldNotNamed"
+#guard reprStr (Revival.DispatchRefusal.refused 9 "fieldNotNamed" .empty) == "Effect.FieldRead.fieldNotNamed"
 #guard reprStr (Revival.DispatchRefusal.unregistered 10) == "Effect.Registry.unregistered 10"
-#guard reprStr (Reject.effect (.refused 9 "citedStale" (movedStream.encode [.objectField ⟨0⟩ ⟨5⟩]))) ==
+#guard reprStr (Reject.effect (.refused 9 "citedStale" ⟨(movedStream.encode [.objectField ⟨0⟩ ⟨5⟩]).toArray⟩)) ==
   "Minidregg.Kernel.DeclaredResourceController.Reject.effect (Effect.FieldRead.citedStale [field 5])"
 
 end Minidregg.Assurance.RegistryRefusalPoles
