@@ -16,7 +16,7 @@ two cells, decided by `PurseRefill.decideRefill`:
 Authorization: the owner signs a capability-mode request of kind `account`,
 target `A`, verb `transfer`, presenting the owner capability, admitted under
 `A`'s current law with the operation slot `authority/operation/purse-refill`
-(the `PayAssignmentReceiver` pattern); `decideRefill` checks the owner-grant
+(the `PayAssignmentReceiver` pattern); `decideRefill` checks the account-grant
 fact on that same stored capability.  The effect digest commits to the command
 bytes and the decided plan, so the signature binds the burn, the gain and the
 purse's pre-state.  The pay cell (the tariff's credit asset) and both laws'
@@ -361,7 +361,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
       (authority.snapshot.authState.policyRevision ⟨command.account⟩))
 
 /-- The decision, in order: the loaded cells, the pinned authority root, the pure
-`decideRefill` (tariff, owner grant, not the issuer, positive, readable purse,
+`decideRefill` (tariff, account grant, not the issuer, positive, readable purse,
 Book admission, balanced joint delta), the marker, the purse's declared-cell
 checks and patch validation, the purse's installed law with the refill slot,
 and the account law's source.  Refusals before the signature check are named
@@ -440,12 +440,12 @@ theorem Prepared.bookPost_exact (prepared : Prepared deployment profile ambient 
       prepared.plan.batch.apply (bookOf prepared.book) :=
   prepared.resources.post_logicalBook
 
-/-- A prepared refill holds the owner grant on the capability it presents. -/
+/-- A prepared refill holds the account grant on the capability it presents. -/
 theorem Prepared.owner (prepared : Prepared deployment profile ambient durable command) :
-    PayAssignmentReceiver.OwnerGrant
+    AccountGrant.Held
       (readCapability prepared.authority.snapshot.cell .account command.capability)
       command.subject command.account :=
-  refill_requires_owner prepared.decided
+  refill_requires_grant prepared.decided
 
 /-- A prepared refill's two legs balance at the credit coordinate. -/
 theorem Prepared.balanced (prepared : Prepared deployment profile ambient durable command) :

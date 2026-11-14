@@ -20,8 +20,8 @@ never commits (`overclaim_fails_commit`); accepted, the purse gained exactly
 what the payer burned (`refill_conserves`).
 
 The credit asset is the pay tariff's `asset` (P3 mints credit there), so a
-refill requires a valid tariff.  The payer must hold the owner grant on `A`
-(`refill_requires_owner`, the `PayAssignmentReceiver.OwnerGrant` fact) and may
+refill requires a valid tariff.  The payer must hold the account grant on `A`
+(`refill_requires_grant`, the `AccountGrant.Held` fact) and may
 not be the issuer well (`payerIsIssuer`): a burn from the well to itself moves
 no value and would fund the purse from nothing.
 
@@ -61,7 +61,6 @@ open Minidregg.Compiler
 open Minidregg.Kernel
 open Minidregg.Kernel.PayTariff
 open Minidregg.Kernel.PayCell
-open Minidregg.Kernel.PayAssignmentReceiver (OwnerGrant)
 open Minidregg.Theory.CanonicalResourceKernel
 open Minidregg.Theory.CredentialAuthorityState
 open Minidregg.Theory.TypedAuthorization
@@ -128,7 +127,7 @@ def aggregateDelta (book : Book) (plan : Plan) : Int :=
 
 /-! ## The pure decision -/
 
-/-- In order: a valid tariff (its `asset` is the credit), the owner grant on
+/-- In order: a valid tariff (its `asset` is the credit), the account grant on
 the account, not the issuer well, a positive burn, a readable purse, the Book
 admission of the burn, and the balanced joint delta. -/
 def decideRefill (tariff : Option Tariff) (stored : Option (StoredCapability .account))
@@ -138,7 +137,7 @@ def decideRefill (tariff : Option Tariff) (stored : Option (StoredCapability .ac
   | none => .error .tariffInvalid
   | some tariff =>
     if tariff.valid then
-      if OwnerGrant stored subject account then
+      if AccountGrant.Held stored subject account then
         if account = tariff.asset then .error .payerIsIssuer
         else if amount = 0 then .error .zeroAmount
         else match purse with
@@ -157,7 +156,7 @@ theorem decideRefill_ok {tariff : Option Tariff} {stored : Option (StoredCapabil
     {account amount gain : Nat} {plan : Plan}
     (accepted : decideRefill tariff stored subject book purse account amount gain = .ok plan) :
     (∃ t, tariff = some t ∧ t.valid ∧ plan.asset = t.asset) ∧
-      OwnerGrant stored subject account ∧ account ≠ plan.asset ∧ 0 < amount ∧
+      AccountGrant.Held stored subject account ∧ account ≠ plan.asset ∧ 0 < amount ∧
       purse = some plan.before ∧ plan.account = account ∧ plan.amount = amount ∧
       plan.gain = gain ∧ plan.batch.Admission book ∧ aggregateDelta book plan = 0 := by
   unfold decideRefill at accepted
@@ -167,7 +166,7 @@ theorem decideRefill_ok {tariff : Option Tariff} {stored : Option (StoredCapabil
     simp only at accepted
     by_cases valid : t.valid
     · rw [if_pos valid] at accepted
-      by_cases owner : OwnerGrant stored subject account
+      by_cases owner : AccountGrant.Held stored subject account
       · rw [if_pos owner] at accepted
         by_cases issuer : account = t.asset
         · rw [if_pos issuer] at accepted; cases accepted
@@ -307,12 +306,12 @@ theorem refill_conserves {tariff : Option Tariff} {stored : Option (StoredCapabi
   · simp [Plan.after, AgentGrain.refill_after, gainIsBurn]
   · simp [budget, Plan.after, AgentGrain.refill_after, gainIsBurn]; ring
 
-/-- **A refill requires the owner grant** on the burned account. -/
-theorem refill_requires_owner {tariff : Option Tariff} {stored : Option (StoredCapability .account)}
+/-- **A refill requires the account grant** on the burned account. -/
+theorem refill_requires_grant {tariff : Option Tariff} {stored : Option (StoredCapability .account)}
     {subject : SubjectId} {book : Book} {purse : Option AgentGrain.State}
     {account amount gain : Nat} {plan : Plan}
     (accepted : decideRefill tariff stored subject book purse account amount gain = .ok plan) :
-    OwnerGrant stored subject account :=
+    AccountGrant.Held stored subject account :=
   (decideRefill_ok accepted).2.1
 
 /-- **A refill stays within the payer's floor**: the payer held at least the
@@ -414,7 +413,7 @@ theorem fixture_genesis_tariff_refused :
 #assert_axioms overclaim_refused
 #assert_axioms refill_gain_is_burn
 #assert_axioms refill_conserves
-#assert_axioms refill_requires_owner
+#assert_axioms refill_requires_grant
 #assert_axioms refill_within_floor
 #assert_axioms purse_never_mints
 #assert_axioms fixture_refill_accepted

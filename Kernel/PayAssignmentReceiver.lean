@@ -6,11 +6,14 @@ Subject `S` asks for book index `i` for Book account `A`.  The pure decision
 
 1. the pay cell's tariff is valid (`assignment_requires_valid_tariff`; the
    genesis placeholder refuses every assignment),
-2. `S` holds the owner grant on `A` (`assignment_requires_owner`): the
-   capability the request presents is an account capability held by `S`
-   whose targets are exactly `{A}` and whose governing policy is `A`'s — the
+2. `S` owns `A` (`assignment_requires_owner`, `AccountGrant.RootOwner`): the
+   capability the request presents is a root account capability (no parent) held by `S`
+   whose targets are `{A}` or `under A` and whose governing policy is `A`'s — the
    `NativeForBirth ∧ holder = .subject owner` fact of
-   `ResourceBirth.Descriptor.OwnerGrantsBound`,
+   `ResourceBirth.Descriptor.OwnerGrantsBound`. A delegated child of that grant is refused
+   (`assignment_refuses_delegate`, `delegate_refused`): the binding is written once and
+   no balance bound limits it, so a `transfer` delegate may spend within its bound but
+   may not choose the account's deposit index,
 3. `A` has no index yet (`alreadyAssigned`),
 4. `i` is the next free index, `nextFree = (assignment support).card`
    (`indexNotNext`), and
@@ -31,7 +34,7 @@ authority it requires (owning `A`) is not widened by it.
 -/
 module
 
-public import Kernel.PayAssignmentOwner
+public import Kernel.AccountGrant
 public import Compiler.DurableReceiverIO
 public import Kernel.CapabilityRevocationController
 public import Kernel.PayCellDomain
@@ -102,7 +105,7 @@ def decideAssignment (store : PayStore) (stored : Option (StoredCapability .acco
   | none => .error .tariffInvalid
   | some tariff =>
       if tariff.valid then
-        if OwnerGrant stored subject account then
+        if AccountGrant.RootOwner stored subject account then
           if accountAssigned store account then .error .alreadyAssigned
           else if index = nextFree store then
             if (bookAt store index).isSome then .ok ()
@@ -119,7 +122,8 @@ def assignmentPatch (index account : Nat) : Patch PayCell.layout :=
 theorem decideAssignment_ok (store : PayStore) (stored : Option (StoredCapability .account))
     (subject : SubjectId) (account index : Nat)
     (accepted : decideAssignment store stored subject account index = .ok ()) :
-    (∃ tariff, tariffOf store = some tariff ∧ tariff.valid) ∧ OwnerGrant stored subject account ∧
+    (∃ tariff, tariffOf store = some tariff ∧ tariff.valid) ∧
+      AccountGrant.RootOwner stored subject account ∧
       accountAssigned store account = false ∧ index = nextFree store ∧
       (bookAt store index).isSome = true := by
   unfold decideAssignment at accepted
@@ -128,7 +132,7 @@ theorem decideAssignment_ok (store : PayStore) (stored : Option (StoredCapabilit
   | some tariff =>
       simp only [present] at accepted
       by_cases valid : tariff.valid
-      · by_cases owner : OwnerGrant stored subject account
+      · by_cases owner : AccountGrant.RootOwner stored subject account
         · by_cases assigned : accountAssigned store account = true
           · simp [valid, owner, assigned] at accepted
           · by_cases next : index = nextFree store
@@ -141,12 +145,21 @@ theorem decideAssignment_ok (store : PayStore) (stored : Option (StoredCapabilit
         · simp [valid, owner] at accepted
       · simp [valid] at accepted
 
-/-- **An assignment requires the owner grant.** -/
+/-- **An assignment requires the owner's root grant.** -/
 theorem assignment_requires_owner (store : PayStore) (stored : Option (StoredCapability .account))
     (subject : SubjectId) (account index : Nat)
     (accepted : decideAssignment store stored subject account index = .ok ()) :
-    OwnerGrant stored subject account :=
+    AccountGrant.RootOwner stored subject account :=
   (decideAssignment_ok store stored subject account index accepted).2.1
+
+/-- **No delegate is assigned an index.** Whatever the pay cell holds, a capability that
+attenuates another is refused: the assignment is the owner's. -/
+theorem assignment_refuses_delegate {parent child : StoredCapability .account}
+    {parentage : Parentage} (attenuates : child.head.Attenuates parent.head parentage)
+    (store : PayStore) (subject : SubjectId) (account index : Nat) :
+    decideAssignment store (some child) subject account index ≠ .ok () := fun accepted =>
+  AccountGrant.not_rootOwner_of_child attenuates
+    (assignment_requires_owner store (some child) subject account index accepted)
 
 /-- **An assignment requires an installed book row at the index.** -/
 theorem assignment_requires_book (store : PayStore) (stored : Option (StoredCapability .account))
@@ -205,6 +218,22 @@ theorem room_member_not_owner :
         scope := ⟨.under 7, {.observeAccount, .transfer, .delegateAccount}, 100000, none, ∅⟩,
         policyId := ⟨7⟩ }, []⟩)
       ⟨8⟩ 8 0 = .error .notOwner := by
+  decide +kernel
+
+/-- Refuting pole: subject 9 holds a delegated child of subject 8's owner grant on account 8,
+with the same targets, verbs and policy (the decision reads the head only, so the stored
+ancestry is left empty). It is a grant on the account (`AccountGrant.Held`, the fact the
+debiting receivers ask) and is refused here. -/
+def delegatedCapability : StoredCapability .account :=
+  ⟨{ (ownerCapability 8 8).head with
+      id := ⟨42⟩, parent := some ⟨41⟩, holder := .subject ⟨9⟩,
+      ancestors := {⟨41⟩} }, []⟩
+
+theorem delegate_holds_grant : AccountGrant.Held (some delegatedCapability) ⟨9⟩ 8 := by
+  decide +kernel
+
+theorem delegate_refused :
+    decideAssignment oneRowStore (some delegatedCapability) ⟨9⟩ 8 0 = .error .notOwner := by
   decide +kernel
 
 /-- Refuting pole of `assignment_requires_owner`: subject 9 presenting
@@ -477,7 +506,8 @@ def Prepared.payPost (prepared : Prepared deployment profile ambient durable com
 /-- A prepared assignment holds the owner grant on the stored capability the
 request presents. -/
 theorem Prepared.owner (prepared : Prepared deployment profile ambient durable command) :
-    OwnerGrant (readCapability prepared.authority.snapshot.cell .account command.capability)
+    AccountGrant.RootOwner
+      (readCapability prepared.authority.snapshot.cell .account command.capability)
       command.subject command.account :=
   assignment_requires_owner _ _ _ _ _ prepared.decided
 
@@ -772,6 +802,7 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 
 #assert_axioms decideAssignment_ok
 #assert_axioms assignment_requires_owner
+#assert_axioms assignment_refuses_delegate
 #assert_axioms assignment_requires_book
 #assert_axioms assignment_requires_valid_tariff
 #assert_axioms assignment_write_once
