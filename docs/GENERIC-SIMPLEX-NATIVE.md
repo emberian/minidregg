@@ -348,9 +348,14 @@ whole chains, and each correct replica's chain is a commit of it).
     states what `rebase` did to the views, by view number, and is a premise.
 - Stated, not proved: `RelativeFaithful`. Until it is proved, agreement of the running
   replicas rests on that statement. What remains is the composition, in three parts:
-  1. `rebase` meets `Rebased`. `rebase` checks the floor view's commit only if that view is
-     in the list, so this needs one more fact about `step`: a state with a nonempty
-     committed tip has its floor view (`(viewAt s s.lastCommitted).committed.isSome`).
+  1. `rebase` meets `Rebased`. `rebase` succeeds only if the floor view is kept and its
+     committed block is the committed tip, and `Rebased.floorView` asks for exactly that.
+     It is not a fact about one `step`: a step can commit in two views, and the floor
+     view's block is the tip only because the later view's commit extends the earlier
+     one's, which is the model's safety on the trail (`committed_ancestor_of_later`), as in
+     `ghost_rebase`. Also needed: `committedTip` is the longest block committed since the
+     origin moved, and `ViewsUnique` survives `mapM`. When `rebase` halts instead
+     (`failed`), nothing is committed and no `Rebased` is needed.
   2. Reading. A message of a correct member that a replica decodes is, read as
      `chain ++ block` with the reader's chain, a SEND of the trail: a VOTE, CANDIDATE or
      READY by `support_extends_commit` and `above_denotes` (its view is above the reader's
