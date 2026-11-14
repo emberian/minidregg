@@ -1,6 +1,7 @@
 import Assurance.Deployed
 import Kernel.GenericSimplex
 import Compiler.GenericSimplexPending
+import Verify.GenericSimplexRelative
 namespace Minidregg.Verify.GenericSimplexHarness
 open Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
@@ -209,7 +210,19 @@ def stallDelay (timeout : Nat) : Delay := fun _ recipient m =>
     else 1
   else 15 * timeout / 10
 
+/-- Three members' COMMITs for `[payload]` in view 1, delivered to a running replica whose
+checker has replayed it; returns what the replica committed. With `forge`, each carries the
+statement of another chain: a signature over one chain, shipped with the payloads of another. -/
+def forgedCommits (h : Minidregg.Kernel.GenericSimplexRelative.ChainDigest) (forge : Bool) : Block :=
+  let r := (Minidregg.Kernel.GenericSimplexRelative.Replica.start cfg h 0 0).drain.2
+  let r := (r.step cfg h (.checked 0 [payload])).drain.2
+  let statement := some (1, h.of [if forge then payload2 else payload])
+  ([1,2,3].foldl (fun r sender =>
+    r.step cfg h (.delivery ⟨sender, 1, .commit, 0, some [payload], statement⟩)) r).drain.1.committed
+
 /-- A plant the gate (`scripts/gates/check-generic-simplex`) runs to prove this harness can go red.
+`forged-digest` runs the signed-statement case on a digest that is the same for every chain:
+"forged running digest: a COMMIT for another chain was read".
 `fixed-timer` removes the backoff from the recovery run (`backoffCap := 0`, the paper's fixed
 timer): "backoff: pending block never committed". `split-tip` gives replica 1 a committed tip
 that is not a prefix of the others' after the normal run: "normal safety/replay". -/
@@ -217,12 +230,19 @@ def plantOf (args : List String) : IO (Option String) :=
   match args with
   | [] => pure none
   | ["--plant", name] =>
-      if name == "fixed-timer" || name == "split-tip" then pure (some name)
-      else throw (IO.userError s!"unknown plant {name}: fixed-timer | split-tip")
-  | _ => throw (IO.userError "usage: generic-simplex-harness [--plant fixed-timer|split-tip]")
+      if name == "fixed-timer" || name == "split-tip" || name == "forged-digest" then pure (some name)
+      else throw (IO.userError s!"unknown plant {name}: fixed-timer | split-tip | forged-digest")
+  | _ => throw (IO.userError "usage: generic-simplex-harness [--plant fixed-timer|split-tip|forged-digest]")
 
 def main (args : List String) : IO Unit := do
   let plant ← plantOf args
+  -- (0) The signed statement: a running replica reads a COMMIT only if the block it reads is
+  -- the chain the statement names.
+  let digest : Minidregg.Kernel.GenericSimplexRelative.ChainDigest :=
+    if plant == some "forged-digest" then { origin := [], extend := fun _ _ => [] }
+    else Minidregg.Verify.GenericSimplexRelative.plain
+  ensure (forgedCommits digest false == [payload]) "signed statement: three true COMMITs did not commit"
+  ensure (forgedCommits digest true == []) "forged running digest: a COMMIT for another chain was read"
   -- (1) The recorded stall, under the paper's fixed timer and under backoff.
   for cap in [0,3] do
     let cfgT : Config := {cfg with timeout := 100, backoffCap := cap}

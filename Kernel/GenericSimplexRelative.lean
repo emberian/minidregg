@@ -25,24 +25,73 @@ engine: every rule that acts is `GenericSimplex.step`'s.
   reads nothing a peer keeps in memory: it needs the earlier certificates in order from a
   peer's durable record. That transfer is the driver's.
 
+* The signed statement. A COMMIT is signed over `(view, length, digest)`: the length of the
+  chain it is for and that chain's running digest (`ChainDigest`). Neither depends on the
+  height the block is written from, so two members at different heights sign the same bytes
+  for the same chain, and a peer can pass a COMMIT on written from any height. A replica
+  keeps the digest of its committed chain, extends it over the payloads it commits, and
+  reads a COMMIT only when the block it reads has the stated length and digest
+  (`decode`): the cost is the block, never the chain.
+
 Kernel-only. Proved here: the codec's transport (`above_denotes`, `decode_encode`,
-`decode_ahead`), the rebase's (`strip_denotes`, `strip_conflict`), one held message per
-member (`holdFar_unique`). Stated, not proved: `RelativeAgreement`, `RelativeFaithful`
+`decode_ahead`), that a COMMIT a replica reads is for the chain that was signed
+(`commit_reads_signed_chain`, given a collision-free digest), the rebase's
+(`strip_denotes`, `strip_conflict`), one held message per member (`holdFar_unique`). Stated, not proved: `RelativeAgreement`, `RelativeFaithful`
 (`Verify/GenericSimplexRelativeReach.lean`). -/
-import Kernel.GenericSimplex
+module
+
+public import Kernel.GenericSimplex
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.Util
+
+@[expose] public section
 
 namespace Minidregg.Kernel.GenericSimplexRelative
 open Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
 
+/-- The running digest of a chain: `origin` for the empty chain, extended one payload at a
+time. Natively `origin` is cSHAKE256 of the domain's context and `extend` is cSHAKE256 of
+the digest followed by the length-prefixed payload (`GenericSimplexCodec.chainDigest`). -/
+structure ChainDigest where
+  origin : Bytes
+  extend : Bytes → Bytes → Bytes
+
+/-- The digest of a chain that continues with `run` from a chain whose digest is `digest`. -/
+def ChainDigest.over (h : ChainDigest) (digest : Bytes) (run : Block) : Bytes := run.foldl h.extend digest
+def ChainDigest.of (h : ChainDigest) (chain : Block) : Bytes := h.over h.origin chain
+
+theorem ChainDigest.over_append (h : ChainDigest) (digest : Bytes) (a b : Block) :
+    h.over digest (a ++ b) = h.over (h.over digest a) b := List.foldl_append
+
+/-- No two chains have one digest. A hash function meets this only as an assumption about
+the chains that occur; it is a named premise wherever it is used. -/
+def ChainDigest.CollisionFree (h : ChainDigest) : Prop := ∀ a b : Block, h.of a = h.of b → a = b
+
 /-- A message as it travels: the sender's committed height, and the block as the payloads
-above that height. -/
+above that height. A COMMIT also carries what its sender signed: the length and the
+running digest of the chain it is for. -/
 structure WireMessage where
   sender : Nat
   view : Nat
   kind : Kind
   height : Nat
   value : Argument
+  statement : Option (Nat × Bytes) := none
   deriving DecidableEq, BEq, Repr, Inhabited
 
 inductive WireInput where
@@ -61,12 +110,14 @@ structure Replica where
   core : State
   /-- Payloads committed so far (the length of the committed chain). -/
   height : Nat := 0
+  /-- The running digest of the committed chain. -/
+  digest : Bytes
   /-- Source records committed so far (its nonempty payloads). -/
   records : Nat := 0
   /-- The COMMIT messages of the last `Config.window` commits, oldest first, each with the
-  height before that commit, which its blocks are relative to. The last entry is
+  height and digest before that commit, which its blocks are relative to. The last entry is
   `core.floorEvidence`. -/
-  evidence : List (Nat × List Message) := []
+  evidence : List (Nat × Bytes × List Message) := []
   /-- At most one held COMMIT per member: unreadable yet, or for a view above the horizon. -/
   far : List WireMessage := []
   /-- Outputs since the last `drain`. -/
@@ -75,20 +126,31 @@ structure Replica where
   committed : Block := []
   deriving DecidableEq, BEq, Repr, Inhabited
 
-/-- The height `core.floorEvidence` is relative to: the height before the floor's commit. -/
-def Replica.evidenceHeight (r : Replica) : Nat := (r.evidence.getLast?.map (·.1)).getD 0
+/-- The height and digest `core.floorEvidence` is relative to: those before the floor's commit. -/
+def Replica.evidenceOrigin (h : ChainDigest) (r : Replica) : Nat × Bytes :=
+  (r.evidence.getLast?.map fun entry => (entry.1, entry.2.1)).getD (0, h.origin)
 
-def encode (height : Nat) (m : Message) : WireMessage := ⟨m.sender, m.view, m.kind, height, m.value⟩
+/-- A message written from a height whose chain has digest `digest`. The statement of a
+COMMIT is a function of the chain alone, so a peer that passes one on from another height
+writes the same statement. -/
+def encode (h : ChainDigest) (height : Nat) (digest : Bytes) (m : Message) : WireMessage :=
+  ⟨m.sender, m.view, m.kind, height, m.value,
+    if m.kind == .commit then m.value.map fun run => (height + run.length, h.over digest run) else none⟩
 
 /-- The part of a run of payloads starting at `base` that lies above `own`, when the run
 starts at or below `own` and reaches strictly above it. -/
 def above (base own : Nat) (run : Block) : Option Block :=
   if base ≤ own && own - base < run.length then some (run.drop (own - base)) else none
 
-def decode (r : Replica) (m : WireMessage) : Option Message :=
+/-- What the replica reads. A COMMIT is read only if the block it reads is the one the
+statement names: the stated length and digest are those of this replica's chain continued
+with the block. -/
+def decode (h : ChainDigest) (r : Replica) (m : WireMessage) : Option Message :=
   match m.value with
   | none => some ⟨m.sender, m.view, m.kind, none⟩
-  | some run => (above m.height r.height run).map fun block => ⟨m.sender, m.view, m.kind, some block⟩
+  | some run => (above m.height r.height run).bind fun block =>
+      if m.kind == .commit && m.statement != some (r.height + block.length, h.over r.digest block) then none
+      else some ⟨m.sender, m.view, m.kind, some block⟩
 
 /-! ## Moving the origin after a commit -/
 
@@ -138,7 +200,7 @@ def rebaseView (c : Config) (self : Nat) (tip : Block) (v : View) : Option View 
 height rises by their number, every kept block loses them, and the floor view keeps only
 the parent it offers (the empty block, which now denotes the committed chain). The floor
 evidence stays as it is, relative to `evidenceHeight`. -/
-def rebase (c : Config) (r : Replica) : Replica :=
+def rebase (c : Config) (h : ChainDigest) (r : Replica) : Replica :=
   let core := r.core
   let tip := core.committedTip
   if tip.isEmpty then r else
@@ -156,23 +218,25 @@ def rebase (c : Config) (r : Replica) : Replica :=
       core := { core with views, checked := core.checked.filterMap (strip history),
                           committedTip := [], delivered := [] }
       height := r.height + tip.length, records := r.records + history.length
+      digest := h.over r.digest tip
       committed := r.committed ++ tip }
 
 /-! ## One input -/
 
 /-- Outputs of an engine step leave in wire form, then the origin moves if it committed.
-Floor evidence (a relayed message for the floor view) is relative to `evidenceHeight`;
+Floor evidence (a relayed message for the floor view) is relative to `evidenceOrigin`;
 everything else to the height the step ran at. -/
-def finish (c : Config) (r : Replica) (core : State) : Replica :=
+def finish (c : Config) (h : ChainDigest) (r : Replica) (core : State) : Replica :=
   let floor := r.core.lastCommitted
-  rebase c { r with
+  let before := r.evidenceOrigin h
+  rebase c h { r with
     core := { core with outbox := [], relay := [] }
-    sends := r.sends ++ core.outbox.map (encode r.height)
+    sends := r.sends ++ core.outbox.map (encode h r.height r.digest)
     owed := r.owed ++ core.relay.map fun (peer, m) =>
-      (peer, encode (if m.view ≤ floor then r.evidenceHeight else r.height) m)
+      (peer, if m.view ≤ floor then encode h before.1 before.2 m else encode h r.height r.digest m)
     evidence :=
       if floor < core.lastCommitted then
-        let all := r.evidence ++ [(r.height, core.floorEvidence)]
+        let all := r.evidence ++ [(r.height, r.digest, core.floorEvidence)]
         all.drop (all.length - c.window)
       else r.evidence }
 
@@ -181,36 +245,36 @@ def holdFar (far : List WireMessage) (w : WireMessage) : List WireMessage :=
   if far.any (fun old => old.sender == w.sender && w.view < old.view) then far
   else far.filter (fun old => old.sender != w.sender) ++ [w]
 
-def deliver (c : Config) (r : Replica) (now : Option Nat) (w : WireMessage) : Replica :=
+def deliver (c : Config) (h : ChainDigest) (r : Replica) (now : Option Nat) (w : WireMessage) : Replica :=
   if w.sender ≥ c.parties then r else
   let core := r.core
   -- A peer asking to leave from a lower height is owed every kept commit from its height on.
   let asked := w.kind == .candidate && w.value.isNone && w.sender != core.self &&
     w.height < r.height && r.evidence.any (fun entry => entry.1 == w.height)
   let answer := (r.evidence.filter fun entry => w.height ≤ entry.1).flatMap fun entry =>
-    entry.2.map fun m => (w.sender, encode entry.1 m)
+    entry.2.2.map fun m => (w.sender, encode h entry.1 entry.2.1 m)
   let r := if asked then { r with owed := r.owed ++ answer } else r
-  match decode r w with
+  match decode h r w with
   | none =>
       if r.height < w.height then
         -- The sender has committed more than this replica: all it keeps is that fact, and a COMMIT.
         let core := noteAhead core w.sender (max w.view (core.current + 1))
-        finish c { r with far := if w.kind == .commit then holdFar r.far w else r.far } core
-      else finish c r core
+        finish c h { r with far := if w.kind == .commit then holdFar r.far w else r.far } core
+      else finish c h r core
   | some m =>
       if m.kind == .commit && horizon c core < m.view then
-        finish c { r with far := holdFar r.far w } (noteAhead core m.sender m.view)
-      else finish c r (liveStep c core (match now with
+        finish c h { r with far := holdFar r.far w } (noteAhead core m.sender m.view)
+      else finish c h r (liveStep c core (match now with
         | some time => .deliveryAt time m
         | none => .delivery m))
 
 /-- Hand the engine what was held and can now be used: every held COMMIT that is readable
 and within the horizon; otherwise, unless a record above the horizon is already waiting, a
 group of readable ones from a quorum of members for one view and block. -/
-def release (c : Config) (r : Replica) : Replica :=
+def release (c : Config) (h : ChainDigest) (r : Replica) : Replica :=
   let far := r.far.filter fun w => r.core.lastCommitted < w.view
   let r := { r with far }
-  let ready := far.filterMap fun w => (decode r w).map fun m => (w, m)
+  let ready := far.filterMap fun w => (decode h r w).map fun m => (w, m)
   let edge := horizon c r.core
   let near := ready.filter fun (_, m) => m.view ≤ edge
   let batch :=
@@ -221,24 +285,24 @@ def release (c : Config) (r : Replica) : Replica :=
       | none => []
       | some (_, m) => ready.filter fun (_, x) => x.view == m.view && x.value == m.value
   if batch.isEmpty then r else
-  finish c { r with far := far.filter fun w => !(batch.any fun (held, _) => held == w) }
+  finish c h { r with far := far.filter fun w => !(batch.any fun (held, _) => held == w) }
     (batch.foldl (fun core (_, m) => liveStep c core (.delivery m)) r.core)
 
-def Replica.step (c : Config) (r : Replica) (input : WireInput) : Replica :=
-  release c (match input with
-    | .delivery w => deliver c r none w
-    | .deliveryAt now w => deliver c r (some now) w
-    | .tick now => finish c r (liveStep c r.core (.tick now))
+def Replica.step (c : Config) (h : ChainDigest) (r : Replica) (input : WireInput) : Replica :=
+  release c h (match input with
+    | .delivery w => deliver c h r none w
+    | .deliveryAt now w => deliver c h r (some now) w
+    | .tick now => finish c h r (liveStep c r.core (.tick now))
     | .checked height records =>
         match above height r.records records with
-        | some run => finish c r (liveStep c r.core (.checked run))
+        | some run => finish c h r (liveStep c r.core (.checked run))
         | none => r
-    | .offer payload => finish c r (liveStep c r.core (.offer payload))
-    | .poll => finish c r (liveStep c r.core .poll))
+    | .offer payload => finish c h r (liveStep c r.core (.offer payload))
+    | .poll => finish c h r (liveStep c r.core .poll))
 
-def Replica.start (c : Config) (self now : Nat) : Replica :=
+def Replica.start (c : Config) (h : ChainDigest) (self now : Nat) : Replica :=
   let core := forget (GenericSimplex.start c self now)
-  finish c { core := core } core
+  finish c h { core := core, digest := h.origin } core
 
 structure Output where
   sends : List WireMessage
@@ -277,45 +341,88 @@ theorem above_denotes (sender receiver run : Block)
       _ = sender ++ run := by rw [List.append_assoc, List.take_append_drop]
 
 /-- At the sender's own height the block is read back unchanged. -/
-theorem decode_encode (r : Replica) (m : Message)
+theorem decode_encode (h : ChainDigest) (r : Replica) (m : Message)
     (nonempty : ∀ block, m.value = some block → block ≠ []) :
-    decode r (encode r.height m) = some m := by
+    decode h r (encode h r.height r.digest m) = some m := by
   cases m with
   | mk sender view kind value =>
     cases value with
     | none => rfl
     | some block =>
       have positive : 0 < block.length := List.length_pos_iff.mpr (nonempty block rfl)
-      simp [decode, encode, above, positive]
+      by_cases commit : kind = .commit <;> simp [decode, encode, above, positive, commit]
+
+/-- What `decode` yields for a block: the payloads above the replica's height, and for a
+COMMIT the statement checked against them. -/
+theorem decode_some (h : ChainDigest) (r : Replica) (w : WireMessage) (m : Message) (run : Block)
+    (valued : w.value = some run) (decoded : decode h r w = some m) :
+    w.height ≤ r.height ∧ r.height - w.height < run.length ∧
+      m = ⟨w.sender, w.view, w.kind, some (run.drop (r.height - w.height))⟩ ∧
+      (w.kind = .commit → w.statement = some (r.height + (run.drop (r.height - w.height)).length,
+        h.over r.digest (run.drop (r.height - w.height)))) := by
+  simp only [decode, valued, above] at decoded
+  by_cases holds : (decide (w.height ≤ r.height) && decide (r.height - w.height < run.length)) = true
+  · simp only [holds, if_true, Option.bind_some] at decoded
+    rw [Bool.and_eq_true, decide_eq_true_eq, decide_eq_true_eq] at holds
+    split at decoded
+    · cases decoded
+    · rename_i checked
+      simp only [Option.some.injEq] at decoded
+      refine ⟨holds.1, holds.2, decoded.symm, ?_⟩
+      intro commit
+      simpa [commit] using checked
+  · simp [holds] at decoded
 
 /-- No wire message decodes to the empty block: it is free to mark a `tombstone`. -/
-theorem decode_nonempty (r : Replica) (w : WireMessage) (m : Message) (block : Block)
-    (decoded : decode r w = some m) (valued : m.value = some block) : block ≠ [] := by
-  unfold decode at decoded
+theorem decode_nonempty (h : ChainDigest) (r : Replica) (w : WireMessage) (m : Message) (block : Block)
+    (decoded : decode h r w = some m) (valued : m.value = some block) : block ≠ [] := by
   cases value : w.value with
-  | none => rw [value] at decoded; cases decoded; cases valued
+  | none =>
+    simp only [decode, value, Option.some.injEq] at decoded
+    rw [← decoded] at valued
+    cases valued
   | some run =>
-    simp only [value, above] at decoded
-    by_cases holds : (decide (w.height ≤ r.height) && decide (r.height - w.height < run.length)) = true
-    · simp only [holds, if_true, Option.map_some, Option.some.injEq] at decoded
-      rw [← decoded] at valued
-      simp only [Option.some.injEq] at valued
-      rw [Bool.and_eq_true, decide_eq_true_eq, decide_eq_true_eq] at holds
-      intro empty
-      rw [← valued] at empty
-      have := congrArg List.length empty
-      rw [List.length_drop, List.length_nil] at this
-      omega
-    · simp [holds] at decoded
+    obtain ⟨_, short, same, _⟩ := decode_some h r w m run value decoded
+    rw [same] at valued
+    simp only [Option.some.injEq] at valued
+    intro empty
+    rw [← valued] at empty
+    have := congrArg List.length empty
+    rw [List.length_drop, List.length_nil] at this
+    omega
 
 /-- A block from a sender that has committed more is not read. -/
-theorem decode_ahead (r : Replica) (w : WireMessage) (run : Block)
-    (valued : w.value = some run) (ahead : r.height < w.height) : decode r w = none := by
+theorem decode_ahead (h : ChainDigest) (r : Replica) (w : WireMessage) (run : Block)
+    (valued : w.value = some run) (ahead : r.height < w.height) : decode h r w = none := by
   unfold decode above
   rw [valued]
   have no : (decide (w.height ≤ r.height) && decide (r.height - w.height < run.length)) = false := by
     rw [Bool.and_eq_false_iff]; left; rw [decide_eq_false_iff_not]; omega
-  simp only [no, Bool.false_eq_true, ite_false, Option.map_none]
+  simp only [no, Bool.false_eq_true, ite_false, Option.bind_none]
+
+/-- **A COMMIT that is read is for the chain that was signed.** `chain` is what the replica
+has committed and `signed` the chain the statement was made for, at whatever height its
+block was written from, by its sender or by a peer passing it on. -/
+theorem commit_reads_signed_chain (h : ChainDigest) (free : h.CollisionFree) (r : Replica)
+    (chain signed block : Block) (w : WireMessage) (m : Message)
+    (tracks : r.digest = h.of chain) (commit : w.kind = .commit)
+    (statement : w.statement = some (signed.length, h.of signed))
+    (decoded : decode h r w = some m) (valued : m.value = some block) : chain ++ block = signed := by
+  cases value : w.value with
+  | none =>
+    simp only [decode, value, Option.some.injEq] at decoded
+    rw [← decoded] at valued
+    cases valued
+  | some run =>
+    obtain ⟨_, _, same, checked⟩ := decode_some h r w m run value decoded
+    rw [same] at valued
+    simp only [Option.some.injEq] at valued
+    have stated := checked commit
+    rw [statement, valued, tracks] at stated
+    simp only [Option.some.injEq, Prod.mk.injEq] at stated
+    apply free
+    rw [ChainDigest.of, ChainDigest.over_append]
+    exact stated.2.symm
 
 /-- Moving the origin keeps what a block denotes. -/
 theorem strip_denotes (chain tip block rest : Block) (kept : strip tip block = some rest) :

@@ -31,7 +31,7 @@ The native COMMIT packet carries a transferable signature covered by its pairwis
 MAC. The recipient verifies both, then retains the signature and the counted
 delivery in one journal transaction. A recovered certificate imports those same
 original COMMIT messages. The statement binds the exact committee context, view
-and full block, with the COMMIT-SEND v2 domain separator.
+and the chain as its length and running digest, with the COMMIT-SEND v3 domain separator.
 
 The changed journal and wire schema are not an implicit migration path from the
 old local-output profile. Reconfiguration must preserve existing liabilities; a
@@ -356,34 +356,43 @@ and catches up; one twelve behind stays behind until the COMMITs are replayed in
 rules (`2f+1` CANDIDATEs, `f+1` READYs) is enabled first; it used to send it once per
 rule. The F1 schedule did not depend on the duplicate: its facts hold unchanged.
 
-**The signed statement (decision; not implemented).** Today a COMMIT is signed over
-`commitmentBytes context view block` with the whole chain as `block`. Two correct signers
-at different heights encode one chain differently, so the statement becomes:
+**The signed statement (version 3).** A COMMIT signature is over
 
-    commitmentBytes context view length digest =
-      "MINI-SIMPLEX-COMMIT-SEND" ‖ 3 ‖ contextStream context ‖ nat view ‖ nat length ‖ digest
+    commitStatementBytes context view length digest =
+      "MINI-SIMPLEX-COMMIT-SEND" ‖ 3 ‖ contextStream context ‖ nat view ‖ nat length ‖ bytesStream digest
+
+(`Compiler/GenericSimplexCodec.lean`). Version 2 signed the whole chain, so two correct
+signers at different heights could not write one chain the same way.
 
 - `length`: the number of payloads of the chain the COMMIT is for, empty protocol payloads
   included (consensus ancestry, not the application height).
-- `digest`: 32 bytes, the running digest `D length` of that chain, where
-  `D 0 = cSHAKE256(contextStream context, S = "minidregg/simplex/chain", 32)` and
-  `D (i+1) = cSHAKE256(D i ‖ bytesStream payload_i, S = "minidregg/simplex/chain", 32)`.
-  `bytesStream` is the length-prefixed encoding the journal already uses, so the chain's
-  split into payloads is bound; `D 0` binds the context, so a digest of one domain's chain
-  is not one of another's.
-- A `Replica` keeps `D height` (32 bytes) beside `height`, and `rebase` extends it over the
-  payloads it commits. To sign or check a COMMIT for a relative block `run` it folds `run`
-  from its own digest: cost is the suffix, never the chain.
-- The wire COMMIT carries `(view, length, digest, signature)` beside the relative block, so
-  a receiver verifies the signature before it can read the block. A held far COMMIT
-  (`far`) is therefore authenticated when held, and a relayed one needs no re-encoding
-  clause (`RelAuthentic`'s second disjunct goes away).
-- A certificate is `(context, view, length, digest, signers)`. A verifier that holds the
-  chain up to some `h ≤ length - |suffix|` checks `fold (D h) suffix = digest`; one that
-  holds nothing replays from `D 0`. `exportable` and `certificateCandidates` then need the
-  floor's `(view, length, digest)` and the durable COMMIT witnesses, not old views.
-- The tag byte moves 2 → 3 and the journal format moves with it. Only COMMIT is signed
-  today; nothing else changes.
+- `digest`: 32 bytes, the running digest of that chain (`chainDigest context`):
+  the empty chain's is `cSHAKE256(contextStream context, S = "minidregg/simplex/chain")`,
+  and a payload extends `d` to `cSHAKE256(d ‖ bytesStream payload, S)`. `bytesStream` is the
+  length-prefixed encoding the journal uses, so the chain's split into payloads is bound;
+  the origin binds the context, so one domain's digest is not another's.
+- `commitmentBytes context view block` is that statement for a whole chain. The
+  certificate and the COMMIT witness still carry the whole chain, and their verifiers
+  recompute the digest from the origin: linear in the chain until the native layer adopts
+  the running replica.
+- In the running replica (`Kernel/GenericSimplexRelative.lean`): a `Replica` keeps the
+  digest of its committed chain and `rebase` extends it over the payloads it commits. A
+  wire COMMIT carries its statement `(length, digest)` beside the relative block; `encode`
+  computes it from the writer's digest and the block, so a peer that passes a COMMIT on
+  from another height writes the same statement, and `decode` reads a COMMIT only when the
+  block it reads has the stated length and digest. Cost is the block, never the chain.
+- Proved: `commit_reads_signed_chain` (for a digest with no collisions, the block a
+  replica reads under a statement is the signed chain, wherever it was written from);
+  `commitmentBytes_binds_config` (equal signed bytes have equal context, view, length and
+  digest) and `commitmentBytes_binds_block` (equal chains, for a digest with no
+  collisions). `ChainDigest.CollisionFree` is a named premise, inhabited by
+  `Verify.GenericSimplexRelative.plain_collisionFree`; cSHAKE256 meets it only as an
+  assumption about the chains that occur.
+- `RelAuthentic` no longer has a clause for a relayed COMMIT: a COMMIT is authentic as its
+  sender, view and statement, and its height and block are whatever the forwarder wrote.
+- Executed: `forged_statement_refused` (three COMMITs with another chain's statement
+  commit nothing). Gate plant `forged-digest`: on a digest that is the same for every
+  chain the same three COMMITs are read, and the harness goes red.
 
 **Not adopted by the native layer.** `Compiler/GenericSimplexIO.lean` still replays with
 `step` on whole chains and checkpoints the whole state; `exportable` and
@@ -393,12 +402,14 @@ duplicate without giving it to the kernel. The wire and the journal therefore st
 whole chains, and no log format moves for the running replica until the native layer
 adopts it. The kernel harness and the witnesses run the new rules.
 
-**BREAKS: log magic version 9.** Version 7: the step changed (`validBlock`, `checked`,
-`offers`, the tick guard, the `ingest` horizon and repeat answer) and the snapshot carries
-`ahead`. Version 8: `ingest` takes a COMMIT above the horizon and READY is sent once.
-Version 9: `ingest` caps a member's share of a view record. Each changes what a journal
-replays to. Older logs refuse (`GenericSimplexIO.v8_log_refused`). A mesh moves by
-re-genesis.
+**BREAKS: log magic version 10; signed COMMIT statement version 3.** Version 7: the step
+changed (`validBlock`, `checked`, `offers`, the tick guard, the `ingest` horizon and repeat
+answer) and the snapshot carries `ahead`. Version 8: `ingest` takes a COMMIT above the
+horizon and READY is sent once. Version 9: `ingest` caps a member's share of a view
+record. Version 10: the COMMIT witnesses a journal keeps are signed over the version-3
+statement. Each changes what a journal replays to or exports. Older logs refuse
+(`GenericSimplexIO.v9_log_refused`); a version-2 signature does not verify. A mesh moves
+by re-genesis.
 
 ## Native source consumer
 

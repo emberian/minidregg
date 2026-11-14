@@ -67,18 +67,28 @@ theorem streamEncode_injective {α : Type} (codec : StreamCodec α) :
   exact Option.some.inj decoded
 
 /-- **The signed COMMIT statement names its configuration.** Equal signed preimages have equal
-context (hence equal configuration number), view and block: a COMMIT signature can never be
-counted under a configuration other than the one it was made in. (FDG:195 "A vote must name the
-configuration it is a vote in"; Mini already puts it inside the signed preimage.) -/
+context (hence equal configuration number), view, chain length and chain digest: a COMMIT
+signature can never be counted under a configuration other than the one it was made in.
+(FDG:195 "A vote must name the configuration it is a vote in"; Mini already puts it inside the
+signed preimage.) The statement carries the chain as its running digest, so the chains are
+equal for a digest with no collisions (`commitmentBytes_binds_block`). -/
 theorem commitmentBytes_binds_config {c c' : Context} {v v' : Nat} {b b' : Block}
     (h : commitmentBytes c v b = commitmentBytes c' v' b') :
-    c = c' ∧ v = v' ∧ b = b' := by
-  unfold commitmentBytes at h
+    c = c' ∧ v = v' ∧ b.length = b'.length ∧ (chainDigest c).of b = (chainDigest c').of b' := by
+  unfold commitmentBytes commitStatementBytes at h
   have h2 := List.append_cancel_left h
   have h3 := streamEncode_injective
-    (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat blockStream)) h2
+    (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat bytesStream))) h2
   simp only [Prod.mk.injEq] at h3
-  exact ⟨h3.1, h3.2.1, h3.2.2⟩
+  exact ⟨h3.1, h3.2.1, h3.2.2.1, h3.2.2.2⟩
+
+theorem commitmentBytes_binds_block {c c' : Context} {v v' : Nat} {b b' : Block}
+    (free : (chainDigest c).CollisionFree)
+    (h : commitmentBytes c v b = commitmentBytes c' v' b') : b = b' := by
+  obtain ⟨same, _, _, digest⟩ := commitmentBytes_binds_config h
+  subst same
+  exact free b b' digest
 
 theorem commitmentBytes_binds_configNumber {c c' : Context} {v v' : Nat} {b b' : Block}
     (h : commitmentBytes c v b = commitmentBytes c' v' b') : configNumber c = configNumber c' := by
@@ -322,6 +332,7 @@ theorem fixed_committee_churn_safe (f : Nat) : ChurnSafe (3 * f + 1) f (3 * f + 
 
 #assert_axioms streamEncode_injective
 #assert_axioms commitmentBytes_binds_config
+#assert_axioms commitmentBytes_binds_block
 #assert_axioms commitmentBytes_binds_configNumber
 #assert_axioms reconfigPayload_isReconfig
 #assert_axioms installPoint_extend

@@ -15,6 +15,8 @@
 # Plants, each red with its recorded message (a plant that passes, or fails another way, is red):
 #   harness --plant fixed-timer                  the recovery run without backoff (the paper's fixed timer)
 #   harness --plant split-tip                    replica 1's committed tip is not a prefix of the others'
+#   harness --plant forged-digest                the chain digest is the same for every chain, so a COMMIT
+#                                                signed for one chain is read with the payloads of another
 #   log-reopen --plant flip-byte                 one bit flipped in the middle of the delta-frame image
 #   four-source-fixture --plant corrupt-segment  live segment snapshot disagrees with previous replayed state
 set -uo pipefail
@@ -46,6 +48,7 @@ pass four-source-audit 'AUDITED replica 0: 2 segments from genesis' \
   bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/ok" && "$1/minidregg-four-source-fixture" audit-journal "$2/ok" 0' _ "$bin" "$tmp"
 plant fixed-timer 'backoff: pending block never committed' "$bin/generic-simplex-harness" --plant fixed-timer
 plant split-tip 'normal safety/replay' "$bin/generic-simplex-harness" --plant split-tip
+plant forged-digest 'forged running digest: a COMMIT for another chain was read' "$bin/generic-simplex-harness" --plant forged-digest
 plant flip-byte 'delta-frames: ' "$bin/generic-simplex-log-reopen" --plant flip-byte
 plant corrupt-segment 'segment 1: its snapshot is not the state the previous segment replays to' \
   bash -c '"$1/minidregg-four-source-fixture" write-audit-fixture "$2/bad" --plant corrupt-segment && "$1/minidregg-four-source-fixture" audit-journal "$2/bad" 0' _ "$bin" "$tmp"

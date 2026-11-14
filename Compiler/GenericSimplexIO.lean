@@ -116,12 +116,16 @@ receiver's own messages; the snapshot carries `ahead`);
 version 8 = `ingest` takes a COMMIT for a view above the horizon (a quorum of them moves
 the floor), and READY for one argument is sent once;
 version 9 = `ingest` keeps at most `Config.cap` messages of one member and kind in a view
-record. An older log refuses at this magic rather than being replayed under a different
-`step` (`v8_log_refused`). -/
-def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,9]
+record;
+version 10 = the COMMIT witnesses a journal keeps are signed over the chain's length and
+running digest (`commitStatementBytes`, tag 3), not over the whole chain: a witness kept
+under version 9 does not verify. An older log refuses at this magic rather than being
+replayed under a different `step` or exported under a different statement
+(`v9_log_refused`). -/
+def logMagic : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,10]
 
-/-- The magic of the previous format (no cap on a member's share of a view record). -/
-def logMagicV8 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,8]
+/-- The magic of the previous format (COMMIT witnesses signed over the whole chain). -/
+def logMagicV9 : Bytes := [77,73,78,73,45,83,73,77,80,76,69,88,45,76,79,71,9]
 
 /-- The format version byte of an image that carries the "MINI-SIMPLEX-LOG"
 magic, whatever its version; `none` for anything else. Lets an open refuse an
@@ -236,18 +240,18 @@ def decodeLog (bytes : Bytes) : Option Log := do
   let deltas ← decodeDeltas rest.length rest
   some ⟨base,deltas.reverse⟩
 
-/-- A version-8 log never decodes, whatever follows its magic: its inputs were recorded
-under a different step. -/
-theorem v8_log_refused (rest : Bytes) : decodeLog (logMagicV8 ++ rest) = none := by
-  have taken : (logMagicV8 ++ rest).take logMagic.length = logMagicV8 := rfl
-  have differs : (logMagicV8 != logMagic) = true := by decide
+/-- A version-9 log never decodes, whatever follows its magic: its COMMIT witnesses were
+signed over a different statement. -/
+theorem v9_log_refused (rest : Bytes) : decodeLog (logMagicV9 ++ rest) = none := by
+  have taken : (logMagicV9 ++ rest).take logMagic.length = logMagicV9 := rfl
+  have differs : (logMagicV9 != logMagic) = true := by decide
   simp [decodeLog, taken, differs]
 
-/-- It is still recognised as an agreement log of version 8, so an open names it. -/
-theorem v8_log_named (rest : Bytes) : logFormatVersion (logMagicV8 ++ rest) = some 8 := by
+/-- It is still recognised as an agreement log of version 9, so an open names it. -/
+theorem v9_log_named (rest : Bytes) : logFormatVersion (logMagicV9 ++ rest) = some 9 := by
   rfl
 
-#assert_axioms v8_log_refused
+#assert_axioms v9_log_refused
 
 /-- Replay of a decoded log over the merged journal: from its checkpoint
 snapshot if it has one (which must be this replica's, and not failed), else

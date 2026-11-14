@@ -1,6 +1,7 @@
 module
 
 public import Kernel.GenericSimplex
+public import Kernel.GenericSimplexRelative
 public import Compiler.DurableReceiverCodec
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -155,13 +156,31 @@ def certificateStream : StreamCodec Certificate :=
       (StreamCodec.product blockStream (StreamCodec.list attestationStream))))
     (fun c => (c.context,c.view,c.block,c.signers))
     (fun (c,v,b,s) => ⟨c,v,b,s⟩) (by intro c; cases c; rfl)
+/-- cSHAKE256 customization of the chain digest: "minidregg/simplex/chain". -/
+def chainSeparator : Bytes :=
+  [109,105,110,105,100,114,101,103,103,47,115,105,109,112,108,101,120,47,99,104,97,105,110]
+/-- The running digest of a domain's chain (`GenericSimplexRelative.ChainDigest`). The
+digest of the empty chain binds the context, so one domain's digest is not another's; each
+payload enters length-prefixed, so the chain's split into payloads is bound. Extending it is
+one cSHAKE256 call over 32 bytes and the payload. -/
+def chainDigest (context : Context) : Minidregg.Kernel.GenericSimplexRelative.ChainDigest where
+  origin := (Minidregg.Compiler.Sp800185Cshake256.hash chainSeparator (contextStream.encode context)).bytes
+  extend := fun digest payload =>
+    (Minidregg.Compiler.Sp800185Cshake256.hash chainSeparator (digest ++ bytesStream.encode payload)).bytes
+/-- What a COMMIT signature is over: the context, the view, and the chain the COMMIT is for
+as its length (every payload, empty protocol payloads included) and its running digest.
+Nothing in it depends on the height a block is written from, so members at different
+heights sign the same bytes for the same chain. Version 3; version 2 signed the whole chain. -/
+def commitStatementBytes (context : Context) (view length : Nat) (digest : Bytes) : Bytes :=
+  [77,73,78,73,45,83,73,77,80,76,69,88,45,67,79,77,77,73,84,45,83,69,78,68,3] ++
+    (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat bytesStream))).encode (context,view,length,digest)
 /-- A transferable signature witnesses a durable COMMIT protocol send. It does
-not require the signer to have received a COMMIT quorum itself. Version 2
-separates this statement from the obsolete local-output attestation. -/
+not require the signer to have received a COMMIT quorum itself. The statement for a whole
+chain: a holder of the chain up to any height computes the same bytes from its own digest
+and the payloads above it (`ChainDigest.over`). -/
 def commitmentBytes (context : Context) (view : Nat) (block : Block) : Bytes :=
-  [77,73,78,73,45,83,73,77,80,76,69,88,45,67,79,77,77,73,84,45,83,69,78,68,2] ++
-    (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat blockStream)).encode
-      (context,view,block)
+  commitStatementBytes context view block.length ((chainDigest context).of block)
 def exportable (s : State) (view : Nat) (block : Block) : Bool :=
   !s.failed && view > 0 && !block.isEmpty &&
     (viewAt s view).sentCommit == some block &&

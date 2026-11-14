@@ -27,6 +27,59 @@ set_option autoImplicit false
 
 def cfg : Config := ⟨4, 1, 100, 64, 0⟩
 
+/-! ## A digest with no collisions
+
+The chain itself, each payload byte behind a 1 and each payload closed by a 0. It is what
+the executed controls run on, and it inhabits `ChainDigest.CollisionFree`. -/
+
+def plainPayload (payload : Bytes) : Bytes := payload.flatMap (fun byte => [1, byte]) ++ [0]
+
+def plain : ChainDigest := { origin := [], extend := fun digest payload => digest ++ plainPayload payload }
+
+theorem plain_over (digest : Bytes) (run : Block) :
+    plain.over digest run = digest ++ run.flatMap plainPayload := by
+  unfold ChainDigest.over
+  induction run generalizing digest with
+  | nil => simp
+  | cons payload rest ih =>
+    rw [List.foldl_cons, ih]
+    simp [plain, List.append_assoc]
+
+theorem plainPayload_cancel (p q : Bytes) (x y : Bytes)
+    (same : plainPayload p ++ x = plainPayload q ++ y) : p = q ∧ x = y := by
+  induction p generalizing q with
+  | nil =>
+    cases q with
+    | nil => simpa [plainPayload] using same
+    | cons b q => simp [plainPayload] at same
+  | cons a p ih =>
+    cases q with
+    | nil => simp [plainPayload] at same
+    | cons b q =>
+      simp only [plainPayload, List.flatMap_cons, List.cons_append, List.nil_append, List.cons.injEq,
+        true_and] at same
+      obtain ⟨head, rest⟩ := same
+      obtain ⟨tail, ends⟩ := ih q (by simpa [plainPayload] using rest)
+      exact ⟨by rw [head, tail], ends⟩
+
+theorem plain_collisionFree : plain.CollisionFree := by
+  intro a b same
+  unfold ChainDigest.of at same
+  rw [plain_over, plain_over] at same
+  simp only [plain, List.nil_append] at same
+  induction a generalizing b with
+  | nil =>
+    cases b with
+    | nil => rfl
+    | cons q b => simp [plainPayload] at same
+  | cons p a ih =>
+    cases b with
+    | nil => simp [plainPayload] at same
+    | cons q b =>
+      rw [List.flatMap_cons, List.flatMap_cons] at same
+      obtain ⟨head, rest⟩ := plainPayload_cancel p q _ _ same
+      rw [head, ih b rest]
+
 structure Net where
   nodes : Array Replica
   /-- Everything each node has committed, in order. -/
@@ -44,16 +97,16 @@ def stepOf (n : Net) (r : Replica) (input : WireInput) : Replica :=
   if n.fixedOrigin then
     -- `Replica.step` with `rebase` left out: heights stay 0 and the engine keeps whole chains.
     let core := match input with
-      | .delivery w => (decode r w).elim r.core fun m => liveStep cfg r.core (.delivery m)
-      | .deliveryAt now w => (decode r w).elim r.core fun m => liveStep cfg r.core (.deliveryAt now m)
+      | .delivery w => (decode plain r w).elim r.core fun m => liveStep cfg r.core (.delivery m)
+      | .deliveryAt now w => (decode plain r w).elim r.core fun m => liveStep cfg r.core (.deliveryAt now m)
       | .tick now => liveStep cfg r.core (.tick now)
       | .checked _ records => liveStep cfg r.core (.checked records)
       | .offer payload => liveStep cfg r.core (.offer payload)
       | .poll => liveStep cfg r.core .poll
     { r with core := { core with outbox := [], relay := [], delivered := [] }
-             sends := core.outbox.map (encode 0)
+             sends := core.outbox.map (encode plain 0 plain.origin)
              committed := (core.delivered.getLast?.getD []).drop r.core.committedTip.length }
-  else r.step cfg input
+  else r.step cfg plain input
 
 def act (n : Net) (i : Nat) (input : WireInput) : Net :=
   let (out, next) := (stepOf n n.nodes[i]! input).drain
@@ -71,7 +124,7 @@ def drain : Nat → Net → Net
     | batch => drain fuel (batch.foldl (fun n (i, m) => act n i (.delivery m)) { n with queue := [] })
 
 def initial : Net :=
-  let nodes := (List.range 4).map fun i => (Replica.start cfg i 0).drain
+  let nodes := (List.range 4).map fun i => (Replica.start cfg plain i 0).drain
   drain 64 { nodes := (nodes.map (·.2)).toArray,
              queue := nodes.flatMap fun (out, r) =>
                out.sends.flatMap fun m => ((List.range 4).filter (· != r.core.self)).map fun p => (p, m) }
@@ -159,7 +212,14 @@ theorem recovery :
 
 def one : Net := ops all initial 1 1
 
-def farCommit (sender view : Nat) (block : Block) : WireMessage := ⟨sender, view, .commit, 1, some block⟩
+/-- A COMMIT written from height 1 of the chain `one` has committed. -/
+def farCommit (sender view : Nat) (block : Block) : WireMessage :=
+  encode plain 1 (plain.of (history 1)) ⟨sender, view, .commit, some block⟩
+
+/-- The same COMMIT with the statement of another chain: a signature over one chain, shipped
+with the payloads of another. -/
+def forgedCommit (sender view : Nat) (block : Block) : WireMessage :=
+  { farCommit sender view block with statement := some (2, plain.of [payload 1, payload 3]) }
 
 /-- Member 3 names 4,000 far views to node 0. -/
 def spam : Net :=
@@ -170,10 +230,15 @@ def farQuorum (senders : List Nat) : Net :=
   let n := act one 0 (.checked 1 [payload 2])
   drain 64 (senders.foldl (fun n s => act n 0 (.delivery (farCommit s 40 [payload 2]))) n)
 
+/-- The same quorum, each COMMIT carrying the statement of another chain. -/
+def forgedQuorum : Net :=
+  let n := act one 0 (.checked 1 [payload 2])
+  drain 64 ([1, 2, 3].foldl (fun n s => act n 0 (.delivery (forgedCommit s 40 [payload 2]))) n)
+
 /-- Member 3 votes for fifty different blocks in view 2. -/
 def equivocation : Net :=
   (List.range 50).foldl (fun n i =>
-    act n 0 (.delivery ⟨3, 2, .vote, 1, some [payload (100 + i)]⟩)) one
+    act n 0 (.delivery ⟨3, 2, .vote, 1, some [payload (100 + i)], none⟩)) one
 
 theorem delivery_policy :
     (kept spam = kept one ∧ (spam.nodes[0]!).far.length = 1 ∧ heights spam = heights one) ∧
@@ -182,6 +247,13 @@ theorem delivery_policy :
     ((farQuorum [1, 2, 3]).chains[0]! = history 2 ∧ ((farQuorum [1, 2, 3]).nodes[0]!).core.lastCommitted = 40 ∧
       ((farQuorum [1, 2, 3]).nodes[0]!).core.current = 41 ∧ ((farQuorum [1, 2, 3]).nodes[0]!).far = []) ∧
     (((viewAt (equivocation.nodes[0]!).core 2).received.filter fun m => m.sender == 3).length = cfg.cap) := by
+  native_decide
+
+/-- A COMMIT whose block is not the chain its statement names is not read: three of them
+commit nothing, where the three true ones commit record 2 (`delivery_policy`). -/
+theorem forged_statement_refused :
+    forgedQuorum.chains[0]! = history 1 ∧ (forgedQuorum.nodes[0]!).core.lastCommitted = (one.nodes[0]!).core.lastCommitted ∧
+    (forgedQuorum.nodes[0]!).far = [] := by
   native_decide
 
 /-! ## Equivocation survives a commit
@@ -193,7 +265,7 @@ from view 3's VOTE counts, as in the specification, where nothing is forgotten. 
 
 def twoVotes : Net :=
   [[[9, 9]], [payload 2, [9, 8]]].foldl (fun n block =>
-    act n 0 (.delivery ⟨3, 3, .vote, 1, some block⟩)) one
+    act n 0 (.delivery ⟨3, 3, .vote, 1, some block, none⟩)) one
 
 def twoVotesCommitted : Net := checkedAll all twoVotes 2
 
