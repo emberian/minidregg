@@ -531,36 +531,11 @@ theorem projectWithCommon_exact (prepared : PreparedInvocation deployment profil
 section JointIndex
 open JointSlots
 
-/-- A stream append's slots (`request/topic…`, `stream/sequence`, `request/to`,
-`request/ref/…`) are not joint keys. -/
-theorem streamSlots_unjoint (request : StreamCell.Append) (before : Store StreamCell.headLayout) :
-    Unjoint (streamSlots request before) := by
-  unfold streamSlots
-  refine unjoint_append _ _ (unjoint_append _ _ (unjoint_append _ _ ?_
-    (bytesSlots_unjoint "request/topic" 'r' (by decide) (by decide) _ _)) ?_) ?_
-  · intro p hp
-    simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
-    rcases hp with rfl | rfl <;> dsimp only <;> decide
-  · intro p hp
-    cases h : request.recipient with
-    | none => simp [h] at hp
-    | some subject =>
-        simp only [h, List.mem_cons, List.not_mem_nil, or_false] at hp
-        subst hp; dsimp only; decide
-  · intro p hp
-    cases h : request.ref with
-    | none => simp [h] at hp
-    | some pair =>
-        obtain ⟨cell, sequence⟩ := pair
-        simp only [h, List.mem_cons, List.not_mem_nil, or_false] at hp
-        rcases hp with rfl | rfl <;> dsimp only <;> decide
-
 theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before after : Store target.layout) :
     Unjoint (targetProjection subject target before after) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append request => exact streamSlots_unjoint _ _
     | registered code op => exact (effectAt code.toNat).view_unjoint ⟨subject, id⟩ op before after
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
@@ -1488,7 +1463,6 @@ def targetField (target : Target) : Address target.layout → CellField := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append _ => exact fun _ => .body
     -- A registered effect's field classification is its declaration's.
     | registered code _ => exact (effectAt code.toNat).spec.field
 
@@ -1497,7 +1471,6 @@ def targetAmount (target : Target) :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append _ => exact fun _ _ => 0
     | registered code _ => exact fun address value => (effectAt code.toNat).spec.amount address (some value)
 
 /-- The address the kernel's blinding ratchet writes on every leg of a
@@ -1508,7 +1481,6 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append _ => exact fun _ => false
     | registered code _ => exact (effectAt code.toNat).spec.rotated
 
 /-- What one write changed, but the ratchet's address. -/
@@ -1521,10 +1493,6 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append action =>
-      exact ResourceObservationAdmission.footprintOf
-        (changedEffect ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩ pre post)
-        (targetField ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩) pre post
     | registered code op =>
       -- A declaration whose fields are not its addresses states its own footprint
       -- (`Effect.footprint`: a world instance's inner fields; a compute funding's debit of its
@@ -1547,10 +1515,6 @@ def targetFootprint (target : Target) (patch : Patch target.layout)
         (ResourceObservationAdmission.changedWithin
           ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
         (targetField target) (targetAmount target) pre post
-  | _ => ResourceObservationAdmission.footprintOf
-      (ResourceObservationAdmission.changedWithin
-        ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
-      (targetField target) (targetAmount target) pre post
 
 theorem targetFootprint_exact (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout)
@@ -1566,9 +1530,6 @@ theorem targetFootprint_exact (target : Target) (patch : Patch target.layout)
           simp only [targetFootprint, targetFullFootprint, changedEffect, stated,
             Option.isSome_none, Bool.false_eq_true, if_false]
           rw [Minidregg.Theory.StoreFootprint.changedWithin_filtered frame]
-    | _ =>
-        (simp only [targetFootprint, targetFullFootprint, changedEffect] <;>
-          rw [Minidregg.Theory.StoreFootprint.changedWithin_filtered frame])
 
 /-- The footprint of one incidence: a target's write, or nothing for the
 authority read. -/
@@ -1886,20 +1847,20 @@ def targetWriteFast (prepared : PreparedInvocation deployment profile ambient gr
   simp only [targetWrite, targetWriteFast, ResourceBirthController.Concrete.packedWrite,
     ground.physicalCurrent _ _ (prepared.targets i).present]
 
-/-- The fresh entry cell of each stream-append target (`StreamWrite.entryWrite`):
-the target write is the stream's head, this is its one new entry. -/
+/-- The fresh cell each target gives birth to (`targetBirth`, the declaration's `Effect.born`):
+a stream append's target write is the stream's head, this is its one new entry cell
+(`StreamWrite.freshWrite`: expected absent, written live). -/
 def entryWrites (prepared : PreparedInvocation deployment profile ambient ground command) :
     List DataWrite :=
   (List.finRange command.targets.length).filterMap fun i =>
-    (appendedEntry ground.authority profile.semantics ambient command command.targets[i]
-      (prepared.targets i).pre).map StreamWrite.entryWrite
+    (targetBirth ground.authority profile.semantics ambient command command.targets[i]
+      (prepared.targets i).pre).map fun born => StreamWrite.freshWrite born.1 born.2
 
 /-- A target that is read, not written: an observe-only read, or an operation of a declaration
 whose target is never written (`Effect.unchanging`: a compute funding, a money consent). -/
 def Target.isRead (target : Target) : Bool :=
   match target.payload with
   | .registered code op => (effectAt code.toNat).observeOnly op || (effectAt code.toNat).unchanging
-  | _ => false
 
 /-- A read target enters as a read guard on its cell's current root, as the
 authority cell does: the commit refuses if the cell moved, and nothing of it
@@ -2203,8 +2164,8 @@ theorem writes_roots_bound (prepared : PreparedInvocation deployment profile amb
       · cases produced
         rfl
     · obtain ⟨i, _, found⟩ := List.mem_filterMap.mp entry
-      obtain ⟨appended, _, rfl⟩ := Option.map_eq_some_iff.mp found
-      exact StreamWrite.entryWrite_root appended
+      obtain ⟨born, _, rfl⟩ := Option.map_eq_some_iff.mp found
+      exact StreamWrite.freshWrite_root born.1 born.2
   · cases monetary : prepared.money with
     | none =>
       cases bound : prepared.compute with

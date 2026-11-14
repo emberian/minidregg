@@ -2,8 +2,7 @@
 # `Kernel/ResourcePayloadJson.lean` — a target's payload read from its JSON, once
 
 `payloadOfJson refuses` is the one reader of a target payload's JSON. A `type` a declaration
-bears is read by that declaration's own face (`Effect.ofJson`); the types still hand-armed are
-read here from the shared grammar (`Kernel/ResourceGrammarJson.lean`).
+bears is read by that declaration's own face (`Effect.ofJson`), and no other type is read.
 
 Which payloads a reader admits is its PARAMETER, not an accident of which copy it holds:
 `refuses` names the types this reader does not admit, and such a type is refused by name before
@@ -67,7 +66,7 @@ def registeredOfJson (path tag : String) (json : Lean.Json) :
       ((DeclaredResourceController.effectAt code.toNat).ofJson path json).map fun op =>
         DeclaredResourceController.Payload.registered code op
   | none => failAt (path ++ ".type")
-      s!"expected append or a registered effect ({", ".intercalate DeclaredResourceController.effectNames})"
+      s!"expected a registered effect ({", ".intercalate DeclaredResourceController.effectNames})"
 
 /-- **A target's payload, from its JSON.** `refuses`: the types this reader does not admit. -/
 def payloadOfJson (refuses : List String) (path : String) (json : Lean.Json) :
@@ -76,14 +75,6 @@ def payloadOfJson (refuses : List String) (path : String) (json : Lean.Json) :
   if refuses.contains tag then
     failAt (path ++ ".type") s!"{tag} is not admitted by this reader"
   else
-  match tag with
-  | "append" =>
-      let obj ← exactObject path ["type", "topic", "payload", "to", "ref"] json
-      let topic ← decodeHex (path ++ ".topic") (← field path "topic" obj)
-      let payload ← decodeHex (path ++ ".payload") (← field path "payload" obj)
-      let recipient ← optional (path ++ ".to") nat (← field path "to" obj)
-      let ref ← optional (path ++ ".ref") streamRef (← field path "ref" obj)
-      pure (.append ⟨topic, payload, recipient.map SubjectId.mk, ref⟩)
-  | other => registeredOfJson path other json
+  registeredOfJson path tag json
 
 end Minidregg.Kernel.ResourcePayloadJson

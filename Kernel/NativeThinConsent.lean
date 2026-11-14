@@ -182,7 +182,6 @@ def memberPatch (command : Command) (target : Target) (pre : Store target.layout
           | .error .unstated => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
           | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
           | .error .inapplicable => .error (.patchRefused id)
-    | append _ => exact .error (.unsupportedPayload id "append: records the admission height")
 
 /-- A registered target's member patch is its declaration's, refusals renamed. -/
 theorem memberPatch_registered_ok {command : Command} {kind : ResourceKind} {id : Nat}
@@ -228,7 +227,6 @@ def KernelOwned (target : Target) (address : Address target.layout) : Prop := by
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | registered code _ => exact (effectAt code.toNat).spec.rotated address = true
-    | _ => exact False
 
 /-- **Keystone: the member patch is the receiver's patch.** For every target, hand arm or
 registered: whenever the receiver's computation admits the target at a loaded cell and the member
@@ -297,7 +295,6 @@ theorem memberPatchKeystone : MemberPatchKeystone := by
             (memberPatch_registered_ok member)
           exact ⟨_, split, fun store address owned =>
             frame store address (Bool.eq_false_iff.mpr owned)⟩
-    | append _ => simp [memberPatch] at member
 
 theorem memberPatch_unstated_refused : MemberPatchUnstatedRefused := by
   refine ⟨?_, rfl⟩
@@ -339,7 +336,6 @@ def Supported (target : Target) : Prop :=
   match target.payload with
   | .registered code op =>
       (effectAt code.toNat).spec.commutes op = false ∧ (effectAt code.toNat).member.isSome = true
-  | _ => False
 
 theorem memberPatch_supported (command : Command) (target : Target) (store : Store target.layout)
     (patch : Patch target.layout) (member : memberPatch command target store = .ok patch) :
@@ -351,7 +347,6 @@ theorem memberPatch_supported (command : Command) (target : Target) (store : Sto
         obtain ⟨pinned, f, stated, _⟩ :=
           (effectAt code.toNat).memberPatch_ok (memberPatch_registered_ok member)
         exact ⟨pinned, by rw [stated]; rfl⟩
-    | _ => simp_all [memberPatch, Supported]
 
 /-- **The executor binds the signed root.** Every payload thin consent displays
 is computed by the executor only when the loaded cell's logical root is the root
@@ -373,7 +368,6 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
               audienceRoster) version root op pre with
         | error refusal => rw [dispatched] at computed'; cases computed'
         | ok computedPost => exact Effect.compute_pinned _ dispatched supported.1
-    | append _ => exact supported.elim
 
 /-- The executor's committed post is the target patch run on the loaded pre-state. -/
 theorem post_run {deployment : Deployment} {directory : CellRegistry.Directory Nat Registry}
@@ -410,7 +404,6 @@ def targetWire (target : Target) : StoreCodec.Wire target.layout := by
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | registered code _ => exact (effectAt code.toNat).wire
-    | append _ => exact StreamCell.headWire
 
 /-- The entry bytes an opening discloses, in canonical order. -/
 def openedBytes (items : List StoreHiding.Item) : List (List UInt8) :=
@@ -434,7 +427,6 @@ def patchReadsPre (target : Target) : Bool :=
   match target.payload with
   | .registered code _ =>
       (effectAt code.toNat).member.isSome && (effectAt code.toNat).memberReadsStore
-  | _ => false
 
 /-- **Thin consent's check of one served view.** The frame is the target's store frame; the
 root recomputed from the opening's items is the root the signed command names; the narrowed
@@ -860,7 +852,6 @@ theorem memberPatch_pre_independent (command : Command) (target : Target)
           | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
           | .error .inapplicable => .error (.patchRefused id))
         rw [(effectAt code.toNat).memberPatch_blind reads _ op right left]
-    | _ => simp_all [patchReadsPre, memberPatch]
 
 theorem entries_keys_nodup {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) :
     ((StoreCodec.entries wire store).map Sigma.fst).Nodup := by
@@ -1468,11 +1459,13 @@ theorem honest_content_stream_write_named : HonestContentStreamWriteNamedStateme
     have narrowedLogical : narrowed.logical =
         Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .stream) payload.logical := by
       simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+      unfold Effect.select at selected
       split_ifs at selected
+      change some _ = some narrowed at selected
       rw [← Option.some.inj selected]
       exact materialize_logical _ _
     rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
-      (decode_narrowed fields _) selected ?openedStream (by simp [patchReadsPre, target])]
+      (decode_narrowed fields _) selected ?openedStream (by rw [show patchReadsPre target = false from rfl]; simp)]
     · exact ⟨_, rfl⟩
     · show (StoreCodec.entries StreamCell.headWire narrowed.logical).map
           (StoreCodec.entryBytes StreamCell.headWire) =
@@ -1631,7 +1624,6 @@ def registeredRead (target : Target) : Option ReadDisplay :=
         some ⟨code.toNat, ⟨((effectAt code.toNat).spec.opStream.encode op).toArray⟩,
           (effectAt code.toNat).display op⟩
       else none
-  | _ => none
 
 /-- One target. A registered observation is displayed from the signed command alone, its view
 unread; every other target has its served view checked over its salted opening (`checkOpened`). -/

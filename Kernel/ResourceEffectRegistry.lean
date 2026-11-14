@@ -12,6 +12,7 @@ tags must stay out of this list: `payloadStream`'s round-trip is proved from
 -/
 module
 
+public import Kernel.AppendEffect
 public import Kernel.CitedRead
 public import Kernel.ContentEffect
 public import Kernel.MoneyEffects
@@ -30,7 +31,8 @@ open Minidregg.Theory.CellRegistry
 set_option autoImplicit false
 
 /-- **The registry**: wire code ↦ declaration. -/
-def liveEffects : List (Nat × Effect) := [(0, scalarEffect), (1, contentEffect), (3, readEffect),
+def liveEffects : List (Nat × Effect) := [(0, scalarEffect), (1, contentEffect), (2, appendEffect),
+  (3, readEffect),
   (4, worldEffect), (5, kindDefinitionEffect), (6, computeFundingEffect), (7, kindReadEffect),
   (8, moneyConsentEffect), (9, citedEffect)]
 
@@ -106,9 +108,10 @@ abbrev contentCode : UInt8 := 1
 
 theorem effectAt_content : effectAt contentCode.toNat = contentEffect := rfl
 
-/-- The legacy payload tag is unbound (what `payloadStream`'s round-trip reads). -/
-theorem legacy_unbound : registeredOctet 2 = false := by
-  decide
+/-- The stream append's payload tag. -/
+abbrev appendCode : UInt8 := 2
+
+theorem effectAt_append : effectAt appendCode.toNat = appendEffect := rfl
 
 /-- The content read's payload tag. -/
 abbrev readCode : UInt8 := 3

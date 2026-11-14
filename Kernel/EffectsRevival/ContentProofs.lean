@@ -358,7 +358,7 @@ theorem liveTargetDispatch_content (bytes : List UInt8) (ctx : HostCtx) (cell : 
   exact if_neg fun both => by
     have bound : DeclaredResourceController.registeredCode 1 = true := rfl
     rw [bound] at both
-    exact Bool.noConfusion both.1
+    exact Bool.noConfusion both
 
 /-- The content declaration selects the blinded sample cell under the object role. -/
 theorem sample_selected :

@@ -167,7 +167,7 @@ def contentKey : Except DispatchRefusal HostCell → Option (List UInt8)
 
 set_option backward.isDefEq.respectTransparency false in
 theorem hostGhost_disagrees :
-    ¬ Dispatches [(1, contentHostHandler.unrotated)] liveLegacy liveTargetDispatch := by
+    ¬ Dispatches [(1, contentHostHandler.unrotated)] [] liveTargetDispatch := by
   intro dispatches
   obtain ⟨post, executed, dispatched⟩ := hostDispatch_blinded
   have agree := dispatches.agreement 1 contentHostHandler.unrotated (by simp [List.lookup])
@@ -222,9 +222,9 @@ theorem hostGhost_disagrees :
   simp at moved
 
 theorem hostTwin_refuted :
-    ¬ Dispatches hostRegistry (1 :: liveLegacy) liveTargetDispatch := fun dispatches => by
+    ¬ Dispatches hostRegistry [1] liveTargetDispatch := fun dispatches => by
   have unbound := dispatches.noTwin 1 (by simp)
-  rw [hostKeystone.2.1] at unbound
+  rw [hostKeystone.2] at unbound
   cases unbound
 
 theorem hostTeeth : HostTeeth := ⟨hostGhost_disagrees, hostTwin_refuted⟩

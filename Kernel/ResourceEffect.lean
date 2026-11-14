@@ -174,6 +174,15 @@ structure MemberCtx where
 def EffectCtx.signed (ctx : EffectCtx) : MemberCtx :=
   ⟨ctx.subject, ctx.nonce, ctx.kind, ctx.target, ctx.capability⟩
 
+/-- **A birth is only an admitted operation's**: wherever a birth is stated, the semantics
+admits. The law `Effect.born_admitted` holds a declaration's `born` to it; a birth stated for a
+refused operation cannot be declared. -/
+def BornAdmitted {L : Layout.{0, 0, 0}} {O R : Type}
+    (spec : Revival.EffectSpec EffectCtx (Revival.storeSubstrate L) O R)
+    (born : EffectCtx → O → Store L → Option (Nat × PackedCell Registry)) : Prop :=
+  ∀ (ctx : EffectCtx) (op : O) (s : Store L),
+    (born ctx op s).isSome = true → ∃ ps, spec.sem ctx op s = .ok ps
+
 /-- **One declared-resource effect.** Every arm the controller, the compilers and the Host run
 for a registered payload is read from this record (`Payload.registered`). -/
 structure Effect : Type 1 where
@@ -288,6 +297,14 @@ structure Effect : Type 1 where
   monetary_unchanging : ∀ (op : O), (funding op).isSome || (consent op).isSome = true →
       unchanging = true := by
     intro _ stated; cases stated
+  /-- **The cell an admitted operation gives birth to**, if any: a fresh cell's id and its live
+  content, from the context, the operation and the loaded store (a stream append's entry cell,
+  beside the head its patch writes). The controller writes it fresh: the commit refuses if a
+  cell is already there. `born_admitted` holds it to the semantics: a refused operation gives
+  birth to nothing. `none` everywhere (the default): the operation writes its target only. -/
+  born : EffectCtx → O → Store L → Option (Nat × PackedCell Registry) := fun _ _ _ => none
+  born_admitted : BornAdmitted spec born := by
+    intro _ _ _ stated; cases stated
   /-- Whether the operation authors anything: a world write without actions is admitted and
   changes nothing, and is no one's publication. -/
   authors : O → Bool := fun _ => true

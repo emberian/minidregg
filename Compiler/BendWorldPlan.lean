@@ -91,7 +91,6 @@ def effectsOf (command : Command) : List Effect :=
     | .registered code op =>
         if (effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting then none
         else some ⟨index.val, .registered code op⟩
-    | payload => some ⟨index.val, payload⟩
 
 def matchesCommand (plan : Plan) (command : Command) : Bool :=
   decide (plan.effects = effectsOf command) &&

@@ -74,9 +74,6 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
   let kind := match target.kind with
     | .object => "object" | .account => "account" | .program => "program"
   let payload := match target.payload with
-    | .append request => .mkObj
-        [("type", toJson "append"), ("topicBytes", number request.topic.length),
-         ("payloadBytes", number request.payload.length)]
     | .registered code op => .mkObj
         (("type", toJson (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).name) :: (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).toJson op)
   .mkObj [("kind", toJson kind), ("target", number target.target),

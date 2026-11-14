@@ -8,12 +8,11 @@ constructor and the registry the deployed target dispatch reads:
   declaration (`effect_handler_lawful`): soundness from the declaration's `unpack_pack` and
   `pack_unpack` fields, completeness from its `complete` field. A declaration that is not lawful
   is not an `Effect`, so it cannot be bound.
-* `liveLegacyCensus : LiveLegacyCensus` and `liveLegacyCensusTeeth`: the hand decoder yields no
-  payload at a bound code, a bound tag is read by its declaration alone, and an octet neither
-  binds is refused by the payload decoder.
+* `payloadDecodeCensus : PayloadDecodeCensus` and `payloadDecodeCensusTeeth`: a bound tag is
+  read by its declaration alone, and an octet no declaration binds is refused by the payload
+  decoder. There is no hand decoder.
 * `registry_noTwin`, `registry_unregistered`: the `noTwin` and `unregistered` clauses of
-  `RegistryKeystone` (a hand-armed code is unbound; a code neither bound nor hand-armed refuses
-  by name), and `registryTeeth_named`: the three clauses of `RegistryTeeth` that are about names.
+  `RegistryKeystone` (no code is hand-armed; a code no declaration binds refuses by name), and `registryTeeth_named`: the three clauses of `RegistryTeeth` that are about names.
 
 * `registryKeystone : RegistryKeystone`: the deployed target dispatch dispatches every bound code
   through the registry. Its heart is `liveTargetDispatch_registered`: at a bound code and EVERY
@@ -147,17 +146,15 @@ theorem registryPremise : RegistryPremise := by
   obtain ⟨e, _, rfl⟩ := hostRegistry_bound found
   exact comap_lawful _ _ (effect_handler_lawful _ _)
 
-/-- `noTwin`: no hand-armed code is bound. -/
-theorem registry_noTwin : ∀ code ∈ liveLegacy, hostRegistry.lookup code = none := by
+/-- `noTwin`: there is no hand-armed code. -/
+theorem registry_noTwin : ∀ code ∈ ([] : List Nat), hostRegistry.lookup code = none := by
   intro code member
-  simp only [liveLegacy, List.mem_cons, List.not_mem_nil, or_false] at member
-  subst member
-  rfl
+  cases member
 
-/-- `unregistered`: a code neither bound nor hand-armed is refused by name. -/
-theorem registry_unregistered : ∀ code, hostRegistry.lookup code = none → code ∉ liveLegacy →
+/-- `unregistered`: a code no declaration binds is refused by name. -/
+theorem registry_unregistered : ∀ code, hostRegistry.lookup code = none → code ∉ ([] : List Nat) →
     ∀ bytes ctx cell, liveTargetDispatch code bytes ctx cell = .error (.unregistered code) := by
-  intro code missing outside bytes ctx cell
+  intro code missing _ bytes ctx cell
   have unbound : DeclaredResourceController.registeredCode code = false := by
     rw [hostRegistry_lookup_eq] at missing
     unfold DeclaredResourceController.registeredCode
@@ -165,12 +162,12 @@ theorem registry_unregistered : ∀ code, hostRegistry.lookup code = none → co
     | none => rfl
     | some e => rw [bound] at missing; cases missing
   unfold liveTargetDispatch
-  rw [if_pos ⟨unbound, outside⟩]
+  rw [if_pos unbound]
 
 /-- The clauses of `RegistryTeeth` about names: code 9 cannot also be a hand arm, and the codes
 beside it and past the octet are refused by name. -/
 theorem registryTeeth_named :
-    ¬ Dispatches hostRegistry (9 :: liveLegacy) liveTargetDispatch ∧
+    ¬ Dispatches hostRegistry [9] liveTargetDispatch ∧
     (∀ bytes ctx cell, liveTargetDispatch 10 bytes ctx cell = .error (.unregistered 10)) ∧
     (∀ bytes ctx cell, liveTargetDispatch 300 bytes ctx cell = .error (.unregistered 300)) := by
   refine ⟨?_, ?_, ?_⟩
@@ -183,32 +180,15 @@ theorem registryTeeth_named :
   · exact registry_unregistered 10 rfl (by decide)
   · exact registry_unregistered 300 rfl (by decide)
 
-theorem liveLegacyCensus : LiveLegacyCensus := by
-  refine ⟨?_, ?_⟩
-  · intro bytes payload rest decoded
-    unfold DeclaredResourceController.legacyPayloadDecode at decoded
-    split at decoded <;> first
-      | (cases decoded; done)
-      | (cases decoded; rfl)
-      | (simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
-         obtain ⟨⟨_, _⟩, _, same⟩ := decoded
-         simp only [Option.some.injEq, Prod.mk.injEq] at same
-         obtain ⟨same, _⟩ := same
-         subst same
-         rfl)
-  · intro tag bytes bound
-    show (if DeclaredResourceController.registeredOctet tag = true then _ else _) = _
-    rw [if_pos bound]
+theorem payloadDecodeCensus : PayloadDecodeCensus := by
+  intro tag bytes bound
+  show (if DeclaredResourceController.registeredOctet tag = true then _ else _) = _
+  rw [if_pos bound]
 
-theorem liveLegacyCensusTeeth : LiveLegacyCensusTeeth := by
-  intro tag bytes unbound outside
-  show (if DeclaredResourceController.registeredOctet tag = true then _
-    else DeclaredResourceController.legacyPayloadDecode (tag :: bytes)) = none
+theorem payloadDecodeCensusTeeth : PayloadDecodeCensusTeeth := by
+  intro tag bytes unbound
+  show (if DeclaredResourceController.registeredOctet tag = true then _ else none) = none
   rw [if_neg (by rw [unbound]; exact Bool.false_ne_true)]
-  have ne : ∀ k : UInt8, k.toNat ∈ liveLegacy → tag ≠ k :=
-    fun k member same => outside (same ▸ member)
-  have h2 := ne 2 (by decide)
-  simp [DeclaredResourceController.legacyPayloadDecode, h2]
 
 /-! ## The registry keystone: the deployed dispatch IS the engine's, at every bound code.
 
@@ -476,7 +456,7 @@ theorem payload_decode_bound (tag : UInt8)
     DeclaredResourceController.payloadStream.toLawful.decode (tag :: bytes) =
       ((DeclaredResourceController.effectAt tag.toNat).spec.opStream.toLawful.decode bytes).map
         (DeclaredResourceController.Payload.registered tag) := by
-  have census := liveLegacyCensus.2 tag bytes bound
+  have census := payloadDecodeCensus tag bytes bound
   simp only [StreamCodec.toLawful, census]
   cases (DeclaredResourceController.effectAt tag.toNat).spec.opStream.decodePrefix bytes with
   | none => rfl
@@ -555,8 +535,8 @@ theorem liveTargetDispatch_registered {code : Nat} {h : Handler HostCtx HostCell
     rw [bound]
     rfl
   subst declared
-  have notBoth : ¬ (DeclaredResourceController.registeredCode code = false ∧ code ∉ liveLegacy) :=
-    fun both => by rw [registered] at both; exact absurd both.1 (by decide)
+  have notBoth : ¬ (DeclaredResourceController.registeredCode code = false) :=
+    fun unbound => by rw [registered] at unbound; exact absurd unbound (by decide)
   unfold liveTargetDispatch
   rw [if_neg notBoth, hostTargetDispatch_bound code small registered bytes ctx cell,
     dispatch_found found]
@@ -578,7 +558,7 @@ theorem registryKeystone : RegistryKeystone := by
 /-- **THE DEPLOYED KEYSTONE FOR CONTENT, PROVED.** The deployed dispatch dispatches through the
 registry, whose entry at code 1 is the handler derived from the content declaration, and code 1
 is no hand arm. -/
-theorem hostKeystone : HostKeystone := ⟨registryKeystone, rfl, by decide⟩
+theorem hostKeystone : HostKeystone := ⟨registryKeystone, rfl⟩
 
 /-! ## The poles of the cited read, through the deployed dispatch.
 
@@ -728,7 +708,7 @@ theorem registryAccepted : RegistryAccepted :=
 
 /-- **The ghost clause**: the ghost admits the stale read the deployed dispatch refuses. -/
 theorem registryTeeth_ghost :
-    ¬ Dispatches [(9, (citedGhost.handler 9).comap dispatchCtxOf)] liveLegacy liveTargetDispatch := by
+    ¬ Dispatches [(9, (citedGhost.handler 9).comap dispatchCtxOf)] [] liveTargetDispatch := by
   intro dispatches
   have agreed := dispatches.agreement 9 ((citedGhost.handler 9).comap dispatchCtxOf) rfl
     [(citedKey, some 1)] citedCtx citedCell
@@ -758,8 +738,8 @@ theorem registryTeeth : RegistryTeeth :=
 #assert_axioms registry_noTwin
 #assert_axioms registry_unregistered
 #assert_axioms registryTeeth_named
-#assert_axioms liveLegacyCensus
-#assert_axioms liveLegacyCensusTeeth
+#assert_axioms payloadDecodeCensus
+#assert_axioms payloadDecodeCensusTeeth
 #assert_axioms registryKeystone
 #assert_axioms hostKeystone
 #assert_axioms registryAccepted

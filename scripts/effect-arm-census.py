@@ -15,8 +15,9 @@ that returns one). Inside such a declaration an arm on a STRING equal to a const
 its own column.
 
 A registered kind may have a PATTERN: a `@[match_pattern] abbrev Payload.<name>` of
-`.registered <code> _` (`Payload.scalar`, `Payload.content`), for code that reads particular
-data out of a signed operation of that one kind (a provider generation out of scalar actions).
+`.registered <code> _` (`Payload.scalar`, `Payload.content`, `Payload.append`), for code that
+reads particular data out of a signed operation of that one kind (a provider generation out of
+scalar actions; the payload a stream record's append carried).
 A match that distinguishes TWO OR MORE payload kinds, each a hand constructor or a pattern, is
 a function by cases over payload kinds: every pattern arm in it is a DISPATCH ARM, which a
 bound code must not have. A match that names exactly one kind is a single-kind READER. What

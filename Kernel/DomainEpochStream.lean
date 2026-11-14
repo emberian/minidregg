@@ -4,7 +4,7 @@
 `Kernel.DomainEpoch` is imported by the registry and by the transaction receiver, so the composition
 with the receiver's `computeTarget` lives here: the stream append's target computation runs
 `DomainEpoch.admitAppend` after its own checks, and a channel record the law refuses is refused
-`Reject.channel reason`, the clause named. Two locks hold the author: the stream's birth law
+the declaration's `channel` refusal (`appendRefusal (.channel reason)`), the clause named. Two locks hold the author: the stream's birth law
 (`StreamResource.authorLaw sequencer`, which refuses every write by another subject, the first record's
 included) and `ChannelLaw`'s `foreignAuthor` clause (every record after the first is by the previous
 record's author).
@@ -28,28 +28,31 @@ variable (snapshot : AuthoritySnapshot) (semantics : Digest)
   (ambient : Ambient) (command : Command)
   {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
 
-/-- **A channel refusal is the kernel's refusal**, by name: when the law refuses, the append's target
-computation is `.error (.channel reason)`. -/
+/-- **A channel refusal is the kernel's refusal**, by name: when the law refuses, the append's
+target computation is the declaration's `channel` refusal, the clause named. -/
 theorem computeTarget_channel_refused (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append)
     (observe : Option CapabilityId)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
+    (pre : Materialized StreamCell.headMaterializer)
     (object : kind = .object) (current : version = StreamCell.commandVersion)
     (topic : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payload : request.payload.length ≤ StreamCell.maxPayloadBytes)
     {reason : DomainEpoch.Refusal}
     (refused : DomainEpoch.admitAppend pre.logical command.subject request = .error reason) :
-    computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error (.channel reason) := by
-  subst object current
-  simp [computeTarget, topic, payload, refused]
-  rfl
+    computeTarget snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
+      .error (appendRefusal (.channel reason)) := by
+  have refused' : DomainEpoch.admitAppend pre.logical (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster).subject request = .error reason := refused
+  have planned : appendPlan (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request pre.logical = .error (.channel reason) := by
+    simp [appendPlan, topic, payload, refused']
+  refine (StreamResource.computeTarget_append snapshot semantics ambient command kind id capability
+    version root request observe pre object current).trans ?_
+  rw [planned]
 
 /-- The admitting pole: when the law admits, the append computes the stream's one new position. -/
 theorem computeTarget_channel_admitted (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append)
     (observe : Option CapabilityId)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
+    (pre : Materialized StreamCell.headMaterializer)
     (object : kind = .object) (current : version = StreamCell.commandVersion)
     (topic : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payload : request.payload.length ≤ StreamCell.maxPayloadBytes)
@@ -57,12 +60,18 @@ theorem computeTarget_channel_admitted (kind : ResourceKind) (id : Nat) (capabil
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
     (room : head.binding = .room)
     (refBehind : request.ref.any (fun r => r.1 == id && head.count < r.2) = false) :
-    computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
-      .ok ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
-        (streamRecord snapshot semantics ambient command request))).apply pre.logical) := by
-  subst object current
-  simp [computeTarget, topic, payload, admitted, loaded, room, refBehind]
+    computeTarget snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
+      .ok (Patch.run pre.logical [StreamCell.headWriteOp head (StreamCell.appendEntry id head
+        (appendRecord (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request))]) := by
+  have admitted' : DomainEpoch.admitAppend pre.logical (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster).subject request = .ok () := admitted
+  have refBehind' : request.ref.any (fun r => r.1 == (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster).target && head.count < r.2) = false :=
+    refBehind
+  have planned : appendPlan (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request pre.logical =
+      .ok (head, StreamCell.appendEntry (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster).target head (appendRecord (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request)) := by
+    simp [appendPlan, topic, payload, admitted', loaded, room, refBehind']
+  refine (StreamResource.computeTarget_append snapshot semantics ambient command kind id capability
+    version root request observe pre object current).trans ?_
+  rw [planned]
   rfl
 
 /-- A well-formed record fits the stream's payload bound (the largest class has `E = 64`: 2,095 bytes). -/
@@ -85,27 +94,27 @@ section Record
 variable (id : Nat) (capability : CapabilityId) (observe : Option CapabilityId)
   (r : DomainEpoch.EpochRecord)
   (root : Digest)
-  (pre : TargetCell ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩)
+  (pre : Materialized StreamCell.headMaterializer)
  
   {p : DomainEpoch.Prev} (last : DomainEpoch.prevOf pre.logical = .ok (some p))
 include last
 
-/-- The kernel refuses a gap (epoch `prev + 2` or more) `Reject.channel .epochGap`. -/
+/-- The kernel refuses a gap (epoch `prev + 2` or more) the declaration's `channel` refusal, clause `.epochGap`. -/
 theorem kernel_gap_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
     (gap : p.epoch.toNat + 1 < r.epoch.toNat) :
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
-      .error (.channel .epochGap) :=
+      .error (appendRefusal (.channel .epochGap)) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.gap_refused wf dom gap)
 
-/-- The kernel refuses a repeat or an out-of-order record `Reject.channel .epochNotAfter`. -/
+/-- The kernel refuses a repeat or an out-of-order record the declaration's `channel` refusal, clause `.epochNotAfter`. -/
 theorem kernel_out_of_order_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
     (notAfter : r.epoch.toNat ≤ p.epoch.toNat) :
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
-      .error (.channel .epochNotAfter) :=
+      .error (appendRefusal (.channel .epochNotAfter)) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.out_of_order_refused wf dom notAfter)
@@ -114,28 +123,28 @@ theorem kernel_out_of_order_refused (wf : r.WellFormed) (dom : r.domain = p.doma
 theorem kernel_foreign_domain_refused (wf : r.WellFormed) (dom : r.domain ≠ p.domain) :
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
-      .error (.channel .foreignDomain) :=
+      .error (appendRefusal (.channel .foreignDomain)) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.foreign_domain_refused wf dom)
 
-/-- The kernel refuses another subject's record `Reject.channel .foreignAuthor`. -/
+/-- The kernel refuses another subject's record the declaration's `channel` refusal, clause `.foreignAuthor`. -/
 theorem kernel_foreign_author_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
     (next : r.epoch.toNat = p.epoch.toNat + 1) (foreign : command.subject ≠ p.author) :
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
-      .error (.channel .foreignAuthor) :=
+      .error (appendRefusal (.channel .foreignAuthor)) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.foreign_author_refused wf dom next foreign)
 
-/-- The kernel refuses a record with the wrong root count `Reject.channel .rootCount`. -/
+/-- The kernel refuses a record with the wrong root count the declaration's `channel` refusal, clause `.rootCount`. -/
 theorem kernel_root_count_refused {P : Minidregg.Theory.Channel.Profile}
     (cls : Minidregg.Theory.Channel.profileOfId r.classId = some P) (count : r.tickRoots.length ≠ P.E)
     (fits : r.encode.length ≤ StreamCell.maxPayloadBytes) :
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
-      .error (.channel .rootCount) :=
+      .error (appendRefusal (.channel .rootCount)) :=
   computeTarget_channel_refused snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) fits
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.root_count_refused cls count _)
@@ -147,8 +156,9 @@ theorem kernel_next_admitted (wf : r.WellFormed) (dom : r.domain = p.domain)
     (room : head.binding = .room) :
     computeTarget snapshot semantics ambient command
         ⟨.object, id, capability, StreamCell.commandVersion, root, .append (DomainEpoch.recordAppend r), observe, audienceEpoch, audienceRoster⟩ pre =
-      .ok ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
-        (streamRecord snapshot semantics ambient command (DomainEpoch.recordAppend r)))).apply pre.logical) :=
+      .ok (Patch.run pre.logical [StreamCell.headWriteOp head (StreamCell.appendEntry id head
+        (appendRecord (targetCtx snapshot semantics ambient command .object id capability observe
+          audienceEpoch audienceRoster) (DomainEpoch.recordAppend r)))]) :=
   computeTarget_channel_admitted snapshot semantics ambient command _ _ _ _ _ _ _ pre rfl rfl
     (recordAppend_topic_fits r) (wellFormed_payload_fits wf)
     (by rw [DomainEpoch.admitAppend_record _ _ _ _ last]; exact DomainEpoch.next_record_admitted wf dom next seq)
@@ -160,17 +170,16 @@ end Record
 same admission result and head/entry constructors as `computeTarget`. Combined
 with `admittedHistory_chain`, historical epoch uniqueness is preserved without
 loading the preceding entries. -/
-theorem receiver_extends_admitted_history (id : Nat) (head : StreamCell.Head)
+theorem receiver_extends_admitted_history (ctx : EffectCtx) (id : Nat) (head : StreamCell.Head)
     (records : List StreamCell.StreamRecord) (request : StreamCell.Append)
     (history : DomainEpoch.AdmittedHistory id head records)
     (admitted : DomainEpoch.admitAppend (StreamCell.headStore head)
-      command.subject request = .ok ()) :
+      ctx.subject request = .ok ()) :
     DomainEpoch.AdmittedHistory id
-      (head.append (StreamCell.appendEntry id head
-        (streamRecord snapshot semantics ambient command request)))
-      (streamRecord snapshot semantics ambient command request :: records) := by
-  exact DomainEpoch.AdmittedHistory.append history command.subject request ambient.height
-    ⟨operationMarker snapshot.domain semantics command⟩ admitted
+      (head.append (StreamCell.appendEntry id head (appendRecord ctx request)))
+      (appendRecord ctx request :: records) := by
+  exact DomainEpoch.AdmittedHistory.append history ctx.subject request ctx.ambient.height
+    ⟨transactionMarker ctx.snapshot.domain ctx.semantics ctx.subject ctx.nonce⟩ admitted
 
 #assert_axioms receiver_extends_admitted_history
 #assert_axioms computeTarget_channel_refused

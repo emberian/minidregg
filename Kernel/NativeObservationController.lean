@@ -1099,10 +1099,8 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
         | none => simp [found, decoded, commanded, writtenFound] at shown
         | some written =>
           simp only [found, decoded, commanded, writtenFound, Option.bind_some, bind] at shown
-          cases append : written.payload with
-          | registered _ _ => simp [append] at shown
-          | append request =>
-            simp only [append] at shown
+          split at shown
+          · rename_i request append
             by_cases digestEq : StreamCell.payloadDigest request.payload = record.entry.payloadDigest
             · simp only [digestEq, if_true, Option.some.injEq] at shown
               subst shown
@@ -1115,6 +1113,7 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
                 decoded, commanded, List.mem_of_find?_eq_some writtenFound,
                 sameTarget, append, rfl⟩
             · simp [digestEq] at shown
+          · cases shown
 
 private theorem find?_eq_findIdx?_bind {α : Type} (p : α → Bool) :
     ∀ l : List α, l.find? p = (l.findIdx? p).bind (fun i => l[i]?)

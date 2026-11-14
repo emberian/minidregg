@@ -62,12 +62,20 @@ def entryCell (entry : Entry) : PackedCell Registry :=
 def headCellBytes (head : Head) : List UInt8 :=
   LifecycleImage.bytes Registry (.live (headCell head))
 
-/-- The one fresh entry cell of an append. -/
-def entryWrite (entry : Entry) : DataWrite where
-  cellId := ⟨entryCellId entry.head entry.sequence⟩
+/-- **A fresh cell's write**: the cell is expected absent and is written live with exactly
+this content. -/
+def freshWrite (cellId : Nat) (cell : PackedCell Registry) : DataWrite where
+  cellId := ⟨cellId⟩
   expectedPre := physicalRoot (.fresh : LifecycleImage Registry)
-  exactPost := physicalRoot (.live (entryCell entry))
-  canonicalPostBytes := LifecycleImage.bytes Registry (.live (entryCell entry))
+  exactPost := physicalRoot (.live cell)
+  canonicalPostBytes := LifecycleImage.bytes Registry (.live cell)
+
+theorem freshWrite_root (cellId : Nat) (cell : PackedCell Registry) :
+    rootBytes (freshWrite cellId cell).canonicalPostBytes = (freshWrite cellId cell).exactPost := rfl
+
+/-- The one fresh entry cell of an append. -/
+def entryWrite (entry : Entry) : DataWrite :=
+  freshWrite (entryCellId entry.head entry.sequence) (entryCell entry)
 
 theorem entryWrite_root (entry : Entry) :
     rootBytes (entryWrite entry).canonicalPostBytes = (entryWrite entry).exactPost := rfl

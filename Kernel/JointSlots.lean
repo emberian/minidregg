@@ -233,20 +233,6 @@ theorem jointSlots_target (targets : List Target) (slots : Fin targets.length �
       exact jointTargetKey_ne_jointIndexKey _ _ _ _ e.symm)
   rw [get_append, hb, hn, Option.or_none]
 
-theorem bytesSlots_unjoint (stem : String) (c : Char) (hc : stem.toList.head? = some c) (ne : c ≠ 'j') :
-    ∀ (offset : Nat) (bytes : List UInt8), Unjoint (ResourceAuthorityProjection.bytesSlots stem offset bytes)
-  | _, [] => by intro p hp; simp [ResourceAuthorityProjection.bytesSlots] at hp
-  | offset, byte :: rest => by
-      intro p hp
-      simp only [ResourceAuthorityProjection.bytesSlots, List.mem_cons] at hp
-      rcases hp with rfl | hp
-      · have : (s!"{stem}/{offset}").toList.head? = some c := by
-          show (stem ++ "/" ++ toString offset).toList.head? = some c
-          simp only [String.append_assoc]
-          exact head_append _ _ _ hc
-        rw [this]; simpa using ne
-      · exact bytesSlots_unjoint stem c hc ne (offset + 1) rest p hp
-
 theorem requestSlots_unjoint {kind : ResourceKind} (request : Request kind) :
     Unjoint (CanonicalRuntimeProfile.requestSlots request) := by
   intro p hp

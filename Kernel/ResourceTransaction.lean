@@ -67,16 +67,16 @@ light basis of a request (its declared keys answered from the authenticated
 history) or the full shape's loaded directory and authority. -/
 abbrev Ground (deployment : Deployment) := Minidregg.Compiler.ServedBasis.Ground deployment
 
-/-- A target's payload: one stream append (the entry's bytes; the receiver derives its sequence
-position and digest) or an operation of a registered effect (declared scalar actions are the
-registered operation at code 0, `Payload.scalar`; a content command the one at code 1,
-`Payload.content`; a compute funding the one at code 6 and a money consent the one at code 8). -/
+/-- A target's payload: an operation of a registered effect, and nothing else. Declared scalar
+actions are the registered operation at code 0 (`Payload.scalar`), a content command the one at
+code 1 (`Payload.content`), a stream append the one at code 2 (`Payload.append`), a compute
+funding the one at code 6 and a money consent the one at code 8. -/
 inductive Payload where
-  | append (request : StreamCell.Append)
   /-- An operation of a registered effect (`Kernel/ResourceEffectRegistry.lean`): the wire code
   and that code's declared operation. Every arm of every function over a payload reads this
   constructor from the declaration `effectAt code`; an unbound code has no operation, so no
-  payload carries one. Declared scalar actions are code 0, the content write is code 1, the content read 3, a world instance's
+  payload carries one. Declared scalar actions are code 0, the content write is code 1, the
+  stream append 2, the content read 3, a world instance's
   actions 4, the kind definition revision 5, the compute funding 6, the whole kind definition
   read 7, the money consent 8, the cited read 9. -/
   | registered (code : UInt8) (op : (effectAt code.toNat).O)
@@ -95,6 +95,12 @@ one out of a signed command. -/
 @[match_pattern] abbrev Payload.content (command : ContentResource.Command) : Payload :=
   .registered 1 command
 
+/-- **A stream append**: the registered operation at code 2 (`appendEffect`). It has no
+constructor and no dispatch arm; it is a pattern for the code that builds one or reads the
+signed entry out of an accepted command (the payload a stream record's append carried). -/
+@[match_pattern] abbrev Payload.append (request : StreamCell.Append) : Payload :=
+  .registered 2 request
+
 /-- **A compute funding consent**: the registered operation at code 6 (`computeFundingEffect`).
 It has no constructor and no arm anywhere; this names the payload for the code that builds
 one. What a payload funds is read from its declaration (`Payload.funding?`). -/
@@ -111,19 +117,16 @@ abbrev Payload.moneyConsent (consent : MoneyConsent) : Payload :=
 kind is named: a registered operation answers by its own declaration. -/
 def Payload.funding? : Payload → Option ComputeFunding
   | .registered code op => (effectAt code.toNat).funding op
-  | _ => none
 
 /-- **The money consent a payload is**: its declaration's (`Effect.consent`). -/
 def Payload.consent? : Payload → Option MoneyConsent
   | .registered code op => (effectAt code.toNat).consent op
-  | _ => none
 
 /-- The two readers agree: a consent's funding leg is the payload's. -/
 theorem Payload.consent?_funding {payload : Payload} {consent : MoneyConsent}
     (stated : payload.consent? = some consent) : payload.funding? = consent.funding := by
   cases payload with
   | registered code op => exact (effectAt code.toNat).consent_funding op consent stated
-  | _ => cases stated
 
 /-- **The observe-only content read**: the registered operation at code 3, which has no
 operand (`readEffect`). Not a pattern: no function has an arm for it. -/
@@ -146,7 +149,6 @@ abbrev Payload.kindDefinition (definition : WorldKindCell.Definition) : Payload 
 /-- A registered operation shows as its declaration's name and its canonical bytes. -/
 instance : Repr Payload where
   reprPrec payload prec := match payload with
-    | .append request => Repr.addAppParen ("Payload.append " ++ reprArg request) prec
     | .registered code op =>
         Repr.addAppParen ("Payload.registered " ++ (effectAt code.toNat).name ++ " " ++
           reprArg ((effectAt code.toNat).spec.opStream.encode op)) prec
@@ -204,7 +206,6 @@ target is read too, but it authorizes a debit and keeps its leg. -/
 def Target.observeOnly (target : Target) : Bool :=
   match target.payload with
   | .registered code op => (effectAt code.toNat).observeOnly op
-  | _ => false
 
 /-- Whether the command writes any target. A command of observe-only reads alone
 makes no transition: no law has anything to judge (a signed read is the
@@ -223,27 +224,13 @@ def Command.requiresObservation (command : Command) : Bool :=
     command.targetsWellFormed = true ↔ command.TargetsValid := by
   simp [targetsWellFormed]
 
-/-- The payload's bytes: its tag octet, then the operation. A registered payload's tag is its
-code and its operation is encoded by its declaration's own codec. -/
+/-- The payload's bytes: its tag octet (its code), then the operation in its declaration's own
+codec. -/
 def payloadEncode : Payload → List UInt8
-  | .append request => 2 :: StreamCell.appendStream.encode request
   | .registered code op => code :: (effectAt code.toNat).spec.opStream.encode op
 
-/-- The hand arms' decoder: the payload tags no declaration binds yet. -/
-def legacyPayloadDecode : List UInt8 → Option (Payload × List UInt8)
-  | 2 :: bytes => do
-      let (request, rest) ← StreamCell.appendStream.decodePrefix bytes
-      some (.append request, rest)
-  | _ => none
-
-theorem legacyPayloadDecode_canonical : ∀ bytes value suffix,
-    legacyPayloadDecode bytes = some (value, suffix) → payloadEncode value ++ suffix = bytes := by
-  unfold legacyPayloadDecode
-  stream_canonical
-
-/-- **The payload codec.** The registry reads first: a bound tag is decoded by its declaration's
-own prefix decoder and by nothing else; only an unbound tag reaches the hand arms, and a tag
-neither binds refuses. -/
+/-- **The payload codec.** A bound tag is decoded by its declaration's own prefix decoder and by
+nothing else; a tag no declaration binds refuses. -/
 def payloadStream : StreamCodec Payload where
   encode := payloadEncode
   decodePrefix
@@ -252,16 +239,14 @@ def payloadStream : StreamCodec Payload where
       if registeredOctet tag = true then
         ((effectAt tag.toNat).spec.opStream.decodePrefix bytes).map fun decoded =>
           (.registered tag decoded.1, decoded.2)
-      else legacyPayloadDecode (tag :: bytes)
+      else none
   decodePrefix_encode := by
     intro payload suffix
-    have u2 := legacy_unbound
     cases payload with
     | registered code op =>
         by_cases bound : registeredOctet code = true
         · simp [payloadEncode, bound, StreamCodec.decodePrefix_encode]
         · exact (unbound_elim (by simpa using bound) op).elim
-    | _ => simp [payloadEncode, legacyPayloadDecode, u2, StreamCodec.decodePrefix_encode]
   encode_decodePrefix := by
     intro bytes value suffix decoded
     rcases bytes with _ | ⟨tag, bytes⟩
@@ -273,7 +258,7 @@ def payloadStream : StreamCodec Payload where
         have canonical := (effectAt tag.toNat).spec.opStream.encode_decodePrefix _ _ _ ok
         simp only [payloadEncode, List.cons_append, canonical]
       · simp only [bound] at decoded
-        exact legacyPayloadDecode_canonical _ _ _ decoded
+        cases decoded
 
 def targetStream : StreamCodec Target :=
   StreamCodec.xmap
@@ -517,20 +502,15 @@ transaction10 vs transaction13); it can only collide with the original
 operation, which the exact ingress lookup refuses as a conflicting use.
 Collision resistance is a cryptographic assumption, not codec injectivity. -/
 def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.IDENTITY/v3".toUTF8.toList
-    ((StreamCodec.product digestStream (StreamCodec.product digestStream
-      (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
-      (domain, semantics, command.subject, command.nonce))).digest.value
+  transactionMarker domain semantics command.subject command.nonce
 
 abbrev ordinaryVerb := DeclaredResourceScalar.ordinaryVerb
 
-/-- The verb a target's authorization leg is checked under: `appendObject` for
-a stream append on an object, observe for an observe-only read target, the
-kind's ordinary write verb otherwise. -/
+/-- The verb a target's authorization leg is checked under: its declaration's (`appendObject`
+for a stream append on an object, observe for an observe-only read target, the kind's ordinary
+write verb otherwise). -/
 def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
-  | .object, .append _ => .appendObject
   | kind, .registered code op => (effectAt code.toNat).spec.verb kind op
-  | kind, _ => ordinaryVerb kind
 
 def Target.verb (target : Target) : Verb target.kind := payloadVerb target.kind target.payload
 
@@ -659,16 +639,10 @@ inductive Reject where
   /-- Measured usage exceeds the signed envelope's charge. -/
   | objectiveUsage
   | observationRequired | observationRejected | clockUnavailable
-  | streamTopic | streamPayload
-  /-- A stream append's `ref` names an entry of the same stream at or beyond its head: a
-  reference points back at an existing entry, never at one still in flight. -/
-  | streamRef
   | computeFunding
   | computeBudget (reason : RunComputeBudgetDomain.Reject)
   | money (reason : ResourceMoneyReceiver.Reject)
   | audience (reason : ObjectAudience.Reject)
-  /-- CH-EPOCH: a channel record's append refused by the channel law, the clause named. -/
-  | channel (reason : DomainEpoch.Refusal)
   /-- K-FIELDS: the leg changed a field its capability's scope does not name. -/
   | fieldNotNamed
   /-- A registered effect's refusal, as its dispatch returned it: the declaration's own named
@@ -698,21 +672,22 @@ def Reject.ofDispatch : Effects.Revival.DispatchRefusal → Reject
   | .fieldNotNamed _ => .fieldNotNamed
   | refusal => .effect refusal
 
+/-- An append's own refusal, as the controller returns it: the declaration's, under code 2. -/
+def appendRefusal (reason : AppendRefusal) : Reject :=
+  .effect (.refused 2 reason.name reason.detail)
+
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
   | none => .error reason | some value => .ok value
 
-/-- The store layout of the target's role: a stream head for an append, its declaration's for
-a registered effect. -/
+/-- The store layout of the target's role: its declaration's. -/
 @[reducible] def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
   | .registered code _ => (effectAt code.toNat).L
-  | .append _ => StreamCell.headLayout
 
 def Target.materializer (target : Target) : Materializer target.layout Digest := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | registered code _ => exact (effectAt code.toNat).materializer
-    | append _ => exact StreamCell.headMaterializer
 
 abbrev TargetCell (target : Target) := Materialized target.materializer
 
@@ -727,7 +702,6 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | registered code _ => exact (effectAt code.toNat).pack kind cell
-    | append _ => exact ⟨.stream, cell⟩
 
 def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell Registry) :
     Option (TargetCell target) := by
@@ -735,23 +709,12 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | registered code _ => exact (effectAt code.toNat).select deployment id kind cell
-    | append _ => exact if kind = .object then
-        if CanonicalCellRegistry.CellLaw deployment id cell then
-          match cell with | ⟨.stream, value⟩ => some value | _ => none
-        else none
-      else none
 
 def contentAuthor (command : Command) (target : Target) : Hyperdocument.PrincipalRef :=
   ⟨command.subject, target.kind, target.capability⟩
 
 def contentOperation (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
     Hyperdocument.OperationId := ⟨effectsDigest snapshot.domain semantics command⟩
-
-/-- The record an append stores: the request's entry plus the signing
-subject, the admission height and the exact transaction id. -/
-def streamRecord (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
-    (command : Command) (request : StreamCell.Append) : StreamCell.StreamRecord :=
-  ⟨command.subject, ambient.height, ⟨operationMarker snapshot.domain semantics command⟩, request.entry⟩
 
 /-- The observe capability of the cell a transaction reads observe-only at `source`. -/
 def sourceReadOf (command : Command) (source : Nat) : Option CapabilityId :=
@@ -777,39 +740,19 @@ def targetCtx (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Amb
     audienceEpoch, audienceRoster, fun _ => effectsDigest snapshot.domain semantics command,
     sourceReadOf command⟩
 
-/-- The only target computation. It invokes source-owned typed operations,
-never a host supplied post. Every branch returns the post store the source
-operation computed at the loaded cell.  A stream append has no blinding.
-Every hand arm but the append's refuses `staleTarget` when the loaded root is not the root its
-plan names; a registered effect's computation is its declaration's (`Effect.compute`: the header
-its `accepts`, `guardFields`, `version` and `commutes` determine, then its semantics and the
-guarded replay with its rotate: a scalar write advances the cell's blinding ratchet one link at
-the admission height, `StoreCodec.Blinding.patch`, K-HIDE-ROTATE). A scalar write is one
-(`computeTarget_scalar`), a content command another (`computeTarget_content`). -/
+/-- The only target computation: the derived computation of the target's one declaration
+(`Effect.compute`: the header its `accepts`, `guardFields`, `version` and `commutes` determine,
+then its semantics and the guarded replay with its rotate). It never takes a host supplied
+post. A scalar write advances the cell's blinding ratchet one link at the admission height
+(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE; `computeTarget_scalar`); a content command is
+another (`computeTarget_content`); a stream append is computed at the head it meets and pins no
+root (`computeTarget_append`). -/
 def computeTarget (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (command : Command) (target : Target)
     (pre : TargetCell target) : Except Reject target.Outcome := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append request => exact do
-        if kind != .object then throw .wrongRole
-        if version != StreamCell.commandVersion then throw .unsupportedVersion
-        -- An append is computed at the stream cell it meets: it pins no root. Its entry goes
-        -- at that cell's head, its channel is admitted at that cell (`DomainEpoch.admitAppend`),
-        -- and nothing in the signed request names the head
-        -- (`StreamResource.append_planned_root_irrelevant`).
-        if !decide (request.topic.length ≤ StreamCell.maxTopicBytes) then throw .streamTopic
-        if !decide (request.payload.length ≤ StreamCell.maxPayloadBytes) then throw .streamPayload
-        match DomainEpoch.admitAppend pre.logical command.subject request with
-        | .error reason => throw (.channel reason)
-        | .ok () => pure ()
-        let some head := StreamCell.headOf pre.logical | throw .wrongRole
-        -- A fleet topic's head is appended only by the fleet receiver.
-        if head.binding != .room then throw .wrongRole
-        if request.ref.any (fun r => r.1 == id && head.count < r.2) then throw .streamRef
-        pure ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
-          (streamRecord snapshot semantics ambient command request))).apply pre.logical)
     | registered code op =>
         -- A registered effect: the derived computation of its one declaration (`Effect.compute`).
         exact ((effectAt code.toNat).compute code.toNat
@@ -818,7 +761,7 @@ def computeTarget (snapshot : AuthoritySnapshot)
 
 
 /-- The target's one guarded patch, generated by its source operation from the
-loaded store: a registered effect's is its declaration's emitted descriptor (a scalar write's
+loaded store: its declaration's emitted descriptor (a scalar write's
 is the actions' own lowering followed by the kernel's ratchet of the cell's blinding, guarded at
 the pre blinding, so a source patch that moved it refuses). -/
 def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -826,11 +769,6 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append request =>
-        exact match StreamCell.headOf pre.logical with
-          | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
-              (streamRecord snapshot semantics ambient command request))]
-          | none => []
     | registered code op =>
         exact (effectAt code.toNat).patch (targetCtx snapshot semantics ambient command kind id
           capability observe audienceEpoch audienceRoster) op pre.logical
@@ -1169,18 +1107,18 @@ theorem targetPatch_kindDefinition_arm (snapshot : AuthoritySnapshot) (semantics
     rw [kindDefinitionSem_some prepared]
     exact List.append_nil patch
 
-/-- The entry an append target records, at the cell `entryCellId target n`:
-the loaded head's next position and tail. Scalar and content targets record none.
-The head write is the target's own patch; this entry is its one fresh cell. -/
-def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
-    (command : Command) (target : Target) (pre : TargetCell target) : Option StreamCell.Entry := by
+/-- **The cell a target gives birth to**, beside the write of its own cell: its declaration's
+(`Effect.born`). A stream append's is its entry cell at `entryCellId target n`, the loaded
+head's next position; no other declaration states one. -/
+def targetBirth (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) :
+    Option (Nat × PackedCell Registry) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | registered _ _ => exact none
-    | append request =>
-        exact (StreamCell.headOf pre.logical).map fun head =>
-          StreamCell.appendEntry id head (streamRecord snapshot semantics ambient command request)
+    | registered code op =>
+        exact (effectAt code.toNat).born (targetCtx snapshot semantics ambient command kind id
+          capability observe audienceEpoch audienceRoster) op pre.logical
 
 /-- One declaration is the complete transaction, fixed by the receiving plan.
 The family outcome is the actual typed result; mode evidence certifies the
@@ -1595,7 +1533,6 @@ def targetOpening (command : Command) (cells : TargetIndex command → PackedCel
             decide (command.targets[j].target = opening.1) &&
               decide (command.targets[j].payload = .read) && opening.2 (cells j)
       then none else some (.refused code.toNat "staleOpening" .empty)
-  | _ => none
 
 /-- The first opening of the command that does not hold, as a refusal; `none` when every
 opening of every target holds at the loaded cells. A content command's openings are its
@@ -1650,21 +1587,6 @@ def sourceStore (domain : Digest) (directory : Directory Nat Registry) :
 
 /-! ## The run check (K-RAN, docs/NOCK.md §2.4) -/
 
-/-- The policy slots of one stream append: the entry's fields as request
-slots, so a stream law can name its author (`request/subject`), its topics
-(`request/topic/…`) or its addressee (`request/to`); plus the position. -/
-def streamSlots (request : StreamCell.Append) (before : Store StreamCell.headLayout) :
-    List (String × Int) :=
-  [("request/topic/length", Int.ofNat request.topic.length),
-   ("stream/sequence", Int.ofNat (StreamCell.nextSeqOf before))] ++
-  Minidregg.Compiler.ResourceAuthorityProjection.bytesSlots "request/topic" 0 request.topic ++
-  (match request.recipient with
-    | some subject => [("request/to", Int.ofNat subject.value)]
-    | none => []) ++
-  (match request.ref with
-    | some (cell, sequence) => [("request/ref/cell", Int.ofNat cell), ("request/ref/sequence", Int.ofNat sequence)]
-    | none => [])
-
 /-- Exact scalar/content/stream projection from the committed old and candidate
 final states. Local names remain convenient; joint names expose every declared
 participant without granting a view of unrelated cells. -/
@@ -1672,7 +1594,6 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append request => exact streamSlots request before
     | registered code op => exact (effectAt code.toNat).spec.view ⟨subject, id⟩ op before after
 
 /-- `targetProjection` filtered by `want`, a content cell's summaries computed only when named
@@ -1685,7 +1606,6 @@ def targetProjectionDemand (want : String → Bool) (leads : Nat → Bool) (subj
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append request => exact (streamSlots request before).filter fun slot => want slot.1
     | registered code op =>
         exact (effectAt code.toNat).viewDemand want leads ⟨subject, id⟩ op before after
 
@@ -1699,7 +1619,6 @@ theorem targetProjectionDemand_eq (want : String → Bool) (leads : Nat → Bool
     cases payload with
     | registered code op =>
         exact (effectAt code.toNat).viewDemand_eq want leads sound ⟨subject, id⟩ op before after
-    | _ => rfl
 
 /-- The participant slot a sample reads: target `i`'s projection of its loaded
 pre-state (before = after = pre), so a program sees only committed values. -/
@@ -1746,8 +1665,6 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | append request => exact some [⟨i, 0,
-        WorldPrototypeConstruction.bytesValue (StreamCell.appendStream.encode request)⟩]
     | registered code op =>
         -- A registered effect's claimed writes are its declaration's (`Effect.runWrites`: a world
         -- instance's are its method's bound outputs, a scalar operation's are its actions' field

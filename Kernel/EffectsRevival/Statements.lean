@@ -330,16 +330,17 @@ def hostTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell :
 
 `Payload` has an open constructor, `registered code op`, whose every arm reads the declaration
 `effectAt code` (`Kernel/ResourceEffectRegistry.lean`). The cited read is bound at code 9 and
-has no constructor and no hand arm, nor have the scalar actions at code 0, the content write at
-code 1, the reads at 3 and 7, a world instance's actions at 4 and the kind definition revision at
-5; codes 2, 6 and 8 are still hand arms.
+has no constructor and no hand arm, nor has any other code: the scalar actions at 0, the
+content write at 1, the stream append at 2, the reads at 3 and 7, a world instance's actions at
+4, the kind definition revision at 5, the two money consents at 6 and 8. `registered` is
+`Payload`'s only constructor.
 
 `RegistryKeystone` is `Dispatches` of the DEPLOYED functions (`payloadStream`'s decode,
 `selectTarget`, `computeTarget`, the `targetPatch` validation, `packTarget`, exactly
 `hostTargetDispatch`) through `hostRegistry`, every declaration's handler at its code. Its
 `agreement` clause is a refinement of the controller's registered arms against the engine's
-`Handler.fire`, at every operation, context and cell; `noTwin` puts every bound code out of the
-hand arms; `unregistered` is the refusal by name.
+`Handler.fire`, at every operation, context and cell; the legacy list is empty, so `noTwin` is
+vacuous and `unregistered` is the refusal by name of every code no declaration binds.
 
 By name at the receiver too: command bytes whose payload tag nothing reads fail
 `commandCodec.decode`, and the receiver answers `Reject.effect (.unregistered tag)` for them, not
@@ -356,29 +357,28 @@ def dispatchCtxOf (ctx : HostCtx) : DeclaredResourceController.DispatchCtx :=
 def hostRegistry : Registry HostCtx HostCell :=
   DeclaredResourceController.liveRegistry.map fun entry => (entry.1, entry.2.comap dispatchCtxOf)
 
-/-- The payload codes that are still hand arms. -/
-def liveLegacy : List Nat := [2]
-
-/-- **The deployed target dispatch.** A code neither bound nor a hand arm is refused by name;
-every other code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,
+/-- **The deployed target dispatch.** A code no declaration binds is refused by name; every
+bound code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,
 selection, computation, patch validation and packing). -/
 def liveTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell : HostCell) :
     Except DispatchRefusal HostCell :=
-  if DeclaredResourceController.registeredCode code = false ∧ code ∉ liveLegacy then
+  if DeclaredResourceController.registeredCode code = false then
     .error (.unregistered code)
   else hostTargetDispatch code bytes ctx cell
 
-/-- **THE REGISTRY KEYSTONE.** -/
-def RegistryKeystone : Prop := Dispatches hostRegistry liveLegacy liveTargetDispatch
+/-- **THE REGISTRY KEYSTONE.** The deployed target dispatch dispatches through the registry
+with no hand arm: the legacy list is empty, so `Dispatches`' `unregistered` clause covers every
+code the registry does not bind. -/
+def RegistryKeystone : Prop := Dispatches hostRegistry [] liveTargetDispatch
 
 /-- **THE DEPLOYED KEYSTONE, for content.** The deployed target dispatch dispatches through the
 registry; the registry's entry at code 1 is the handler derived from the content declaration
-(`Effect.handler`, nothing authored for the dispatch); and code 1 is not a hand arm. -/
+(`Effect.handler`, nothing authored for the dispatch). No code is a hand arm
+(`RegistryKeystone`'s legacy list is empty). -/
 def HostKeystone : Prop :=
   RegistryKeystone ∧
   hostRegistry.lookup 1 =
-    some ((DeclaredResourceController.contentEffect.handler 1).comap dispatchCtxOf) ∧
-  1 ∉ liveLegacy
+    some ((DeclaredResourceController.contentEffect.handler 1).comap dispatchCtxOf)
 
 /-- A handler with its declaration's rotate dropped: the same header, freshness, selection and
 packing, an executor that never ratchets. -/
@@ -393,8 +393,8 @@ abbrev contentHostHandler : Handler HostCtx HostCell :=
 content handler drops the rotate, nor through the registry with code 1 also kept as a hand
 arm. -/
 def HostTeeth : Prop :=
-  ¬ Dispatches [(1, contentHostHandler.unrotated)] liveLegacy liveTargetDispatch ∧
-  ¬ Dispatches hostRegistry (1 :: liveLegacy) liveTargetDispatch
+  ¬ Dispatches [(1, contentHostHandler.unrotated)] [] liveTargetDispatch ∧
+  ¬ Dispatches hostRegistry [1] liveTargetDispatch
 
 /-- **Satisfiable (the accepted branch).** Some content cell and well-encoded content command
 are admitted by the deployed dispatch. -/
@@ -437,6 +437,7 @@ def citedGhost : DeclaredResourceController.Effect :=
     member := none
     member_exact := by intro _ stated; cases stated
     unchanging_silent := by intro stated; cases stated
+    born_admitted := by intro _ _ _ stated; cases stated
     observes_silent := by
       intro ctx op s ps _ emitted
       exact (Except.ok.inj emitted).symm
@@ -453,32 +454,24 @@ the registry with code 9 also kept as a hand arm (noTwin bites), nor is a code n
 read by anything (an explicit instance of the refusal by name, at a code beside the bound one
 and at one past the octet). -/
 def RegistryTeeth : Prop :=
-  ¬ Dispatches [(9, (citedGhost.handler 9).comap dispatchCtxOf)] liveLegacy liveTargetDispatch ∧
-  ¬ Dispatches hostRegistry (9 :: liveLegacy) liveTargetDispatch ∧
+  ¬ Dispatches [(9, (citedGhost.handler 9).comap dispatchCtxOf)] [] liveTargetDispatch ∧
+  ¬ Dispatches hostRegistry [9] liveTargetDispatch ∧
   (∀ bytes ctx cell, liveTargetDispatch 10 bytes ctx cell = .error (.unregistered 10)) ∧
   (∀ bytes ctx cell, liveTargetDispatch 300 bytes ctx cell = .error (.unregistered 300))
 
-/-- A payload's tag: `payloadStream`'s tag octet. -/
-def payloadTag (payload : DeclaredResourceController.Payload) : Nat :=
-  ((DeclaredResourceController.payloadStream.encode payload).headD 0).toNat
-
-/-- **THE LIVE LEGACY CENSUS, now.** The hand arms' decoder (`legacyPayloadDecode`) produces no
-payload at a bound code, and the payload decoder hands a bound tag to its declaration and to
-nothing else. With `Payload`'s open constructor the legacy input is what the hand decoder
-reads, not the whole inductive. -/
-def LiveLegacyCensus : Prop :=
-  (∀ bytes payload rest, DeclaredResourceController.legacyPayloadDecode bytes = some (payload, rest) →
-    DeclaredResourceController.registeredCode (payloadTag payload) = false) ∧
-  (∀ (tag : UInt8) bytes, DeclaredResourceController.registeredOctet tag = true →
+/-- **THE PAYLOAD DECODE CENSUS.** The payload decoder hands a bound tag to its declaration's
+own decoder and to nothing else: there is no hand decoder. -/
+def PayloadDecodeCensus : Prop :=
+  ∀ (tag : UInt8) bytes, DeclaredResourceController.registeredOctet tag = true →
     DeclaredResourceController.payloadStream.decodePrefix (tag :: bytes) =
       ((DeclaredResourceController.effectAt tag.toNat).spec.opStream.decodePrefix bytes).map
-        fun decoded => (.registered tag decoded.1, decoded.2))
+        fun decoded => (.registered tag decoded.1, decoded.2)
 
-/-- **Census teeth**: an octet nothing binds and no hand arm reads is refused by the payload
-decoder itself, whatever follows it. -/
-def LiveLegacyCensusTeeth : Prop :=
+/-- **Census teeth**: an octet no declaration binds is refused by the payload decoder itself,
+whatever follows it. -/
+def PayloadDecodeCensusTeeth : Prop :=
   ∀ (tag : UInt8) bytes, DeclaredResourceController.registeredOctet tag = false →
-    tag.toNat ∉ liveLegacy → DeclaredResourceController.payloadStream.decodePrefix (tag :: bytes) = none
+    DeclaredResourceController.payloadStream.decodePrefix (tag :: bytes) = none
 
 /-! ## §8. The deployed receiver factors through the registry.
 

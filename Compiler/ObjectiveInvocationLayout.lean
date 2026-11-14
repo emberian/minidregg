@@ -147,18 +147,15 @@ def step (index : Nat) (target : Target) : Option BendWorldPlan.Effect :=
   | .registered code op =>
       if (effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting then none
       else some ⟨index, .registered code op⟩
-  | payload => some ⟨index,payload⟩
 
 /-- Payloads `effectsOf` reports verbatim. -/
 def verbatim : Payload → Bool
   | .registered code op =>
       !((effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting)
-  | _ => true
 
 /-- Payloads `effectsOf` never reports. -/
 def inert : Payload → Bool
   | .registered code op => (effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting
-  | _ => false
 
 theorem finRange_pairs {α : Type} (l : List α) :
     (List.finRange l.length).map (fun i => (l[i],i.val)) = l.zipIdx := by

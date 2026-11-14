@@ -453,4 +453,105 @@ def wrongRoot : Digest := ⟨accountPre.root.value + 1⟩
 
 end Money
 
+/-! ## The stream append, declared at code 2 -/
+
+section Append
+open Minidregg.Kernel.NativeThinConsent
+open Minidregg.Compiler
+open Minidregg.Theory
+open Minidregg.Theory.Store
+open Minidregg.Theory.CellState
+
+def say : StreamCell.Append := ⟨[104, 105], [1, 2, 3], none, none⟩
+def sayAhead : StreamCell.Append := ⟨[104, 105], [1, 2, 3], none, some (41, 5)⟩
+def sayElsewhere : StreamCell.Append := ⟨[104, 105], [1, 2, 3], none, some (42, 5)⟩
+def longTopicSay : StreamCell.Append := ⟨List.replicate 65 0, [], none, none⟩
+def longPayloadSay : StreamCell.Append := ⟨[104], List.replicate 4097 0, none, none⟩
+
+def roomPre : Materialized StreamCell.headMaterializer :=
+  materialize StreamCell.headMaterializer (StreamCell.headStore StreamCell.emptyRoomHead)
+def topicPre : Materialized StreamCell.headMaterializer :=
+  materialize StreamCell.headMaterializer (StreamCell.headStore (StreamCell.emptyTopicHead ⟨9⟩))
+def headlessPre : Materialized StreamCell.headMaterializer :=
+  materialize StreamCell.headMaterializer 0
+
+def appendTarget (request : StreamCell.Append) (kind : ResourceKind) (version : Nat)
+    (root : Digest) : Target :=
+  ⟨kind, 41, ⟨5⟩, version, root, .append request, none, none, none⟩
+
+def speak (request : StreamCell.Append) (kind : ResourceKind) (version : Nat) (root : Digest)
+    (pre : Materialized StreamCell.headMaterializer) :
+    Except Reject (Store StreamCell.headLayout) :=
+  computeTarget scalarSnapshot ⟨0⟩ sampleAmbient sampleCommand
+    (appendTarget request kind version root) pre
+
+def said (result : Except Reject (Store StreamCell.headLayout)) : String :=
+  match result with
+  | .ok post => s!"admitted at {((StreamCell.headOf post).map (·.count)).getD 0}"
+  | .error reason => ((reprStr reason).splitOn "DeclaredResourceController.").getLastD ""
+
+def born (request : StreamCell.Append) (pre : Materialized StreamCell.headMaterializer) :
+    Option Nat :=
+  (targetBirth scalarSnapshot ⟨0⟩ sampleAmbient sampleCommand
+    (appendTarget request .object 1 pre.root) pre).map (·.1)
+
+-- Satisfiable, executed: an append to a room's empty stream is admitted, the head counts one,
+-- and the one birth is the entry cell at position 1 of that head.
+#guard said (speak say .object 1 roomPre.root roomPre) == "admitted at 1"
+#guard born say roomPre == some (StreamCell.entryCellId 41 1)
+-- The planned root is not read: the same append under any root is the same outcome.
+#guard said (speak say .object 1 ⟨roomPre.root.value + 1⟩ roomPre) == "admitted at 1"
+-- A `ref` into another stream, or back into this one, is no refusal; one ahead of the head is.
+#guard said (speak sayElsewhere .object 1 roomPre.root roomPre) == "admitted at 1"
+-- Each refusal by name, in the hand arm's order: the role, the schema version, the topic, the
+-- payload, the head's presence, its binding, the reference.
+#guard said (speak longTopicSay .account 2 roomPre.root topicPre) == "Reject.wrongRole"
+#guard said (speak longTopicSay .object 2 roomPre.root topicPre) == "Reject.unsupportedVersion"
+#guard said (speak longTopicSay .object 1 roomPre.root topicPre) ==
+  "Reject.effect (Effect.Append.streamTopic)"
+#guard said (speak longPayloadSay .object 1 roomPre.root topicPre) ==
+  "Reject.effect (Effect.Append.streamPayload)"
+#guard said (speak sayAhead .object 1 roomPre.root headlessPre) ==
+  "Reject.effect (Effect.Append.headAbsent)"
+#guard said (speak sayAhead .object 1 roomPre.root topicPre) ==
+  "Reject.effect (Effect.Append.topicHead)"
+#guard said (speak sayAhead .object 1 roomPre.root roomPre) ==
+  "Reject.effect (Effect.Append.streamRef)"
+-- The channel law's clause rides in the refusal's detail and is printed in its own words.
+#guard reprStr (appendRefusal (.channel .epochGap)) ==
+  "Minidregg.Kernel.DeclaredResourceController.Reject.effect (Effect.Append.channel (Minidregg.Kernel.DomainEpoch.Refusal.epochGap))"
+-- Teeth, executed: a refused append gives birth to nothing.
+#guard born sayAhead roomPre == none
+#guard born say topicPre == none
+#guard born longTopicSay roomPre == none
+-- Not shown from a served view: the record holds the admission height.
+#guard (match memberPatch sampleCommand (appendTarget say .object 1 roomPre.root) roomPre.logical with
+  | .error (.unsupportedPayload 41 text) =>
+      text == "append: a registered write is not displayed from a served view"
+  | _ => false)
+-- A write, authored, under the object's append verb; no funding, no consent.
+#guard !(appendTarget say .object 1 roomPre.root).isRead
+#guard (effectAt 2).authors say
+#guard decide ((appendTarget say .object 1 roomPre.root).verb = .appendObject)
+#guard decide ((Payload.append say).funding? = none) && decide ((Payload.append say).consent? = none)
+-- Not moved: the wire bytes of code 2, the request JSON, the inbox JSON, the inspect line, the
+-- law's slots, a run's claim of it.
+#guard payloadStream.encode (.append say) == 2 :: StreamCell.appendStream.encode say
+#guard (payloadStream.decodePrefix (payloadStream.encode (.append say) ++ [99])).map
+    (fun d => (decide (d.1 = .append say), d.2)) == some (true, [99])
+#guard (match Minidregg.Kernel.ResourcePayloadJson.payloadOfJson [] "p"
+    (Lean.Json.mkObj [("type", "append"), ("topic", "6869"), ("payload", "010203"),
+      ("to", .null), ("ref", .null)]) with
+  | .ok payload => decide (payload = .append say) | .error _ => false)
+#guard (Lean.Json.mkObj (("type", "append") :: (effectAt 2).toJson say)).compress ==
+  "{\"payloadBytes\":\"3\",\"topicBytes\":\"2\",\"type\":\"append\"}"
+#guard (effectAt 2).display say ==
+  ["stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]
+#guard (targetProjection ⟨7⟩ (appendTarget say .object 1 roomPre.root) roomPre.logical
+    roomPre.logical).take 2 == [("request/topic/length", 2), ("stream/sequence", 1)]
+#guard (targetWrites 0 (appendTarget say .object 1 roomPre.root) roomPre.logical ⟨0⟩).map
+    (fun writes => writes.map fun w => (w.target, w.field)) == some [(0, 0)]
+
+end Append
+
 end Minidregg.Assurance.MemberPatchPoles

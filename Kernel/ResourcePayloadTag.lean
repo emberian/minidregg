@@ -3,14 +3,14 @@
 
 `commandCodec.decode` answers `none` for every byte string that is not a command, and the receiver
 called all of them `malformedCommand`. One of them is not malformed: a command, well-formed up to a
-target's payload, whose payload tag octet no declaration binds and no hand arm reads (a client
+target's payload, whose payload tag octet no declaration binds (a client
 built against a registry this Host does not have). `unboundTag` finds that octet with the command
 codec's own component decoders, and `decodeRefusal` names it:
 `Reject.effect (.unregistered tag)`, the dispatcher's refusal for a code outside the registry.
 
-`UnboundTagNamed` (proved): a named octet is bound by no declaration and read by no hand arm, and
+`UnboundTagNamed` (proved): a named octet is bound by no declaration, and
 the bytes that carry it are not a command. So the name is never given to a command the Host
-would have run, and never to an octet it reads. Every other undecodable byte string is still
+would have run. Every other undecodable byte string is still
 `malformedCommand`.
 -/
 module
@@ -30,23 +30,15 @@ open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
-/-- The payload tags the hand arms read (`legacyPayloadDecode`). -/
-def legacyPayloadTags : List UInt8 := [2]
-
-/-- An octet no declaration binds and no hand arm reads. -/
-def payloadUnread (tag : UInt8) : Bool := !registeredOctet tag && !legacyPayloadTags.contains tag
+/-- An octet no declaration binds. -/
+def payloadUnread (tag : UInt8) : Bool := !registeredOctet tag
 
 /-- The payload decoder refuses an unread octet, whatever follows it. -/
 theorem payload_unread {tag : UInt8} (unread : payloadUnread tag = true) (bytes : List UInt8) :
     payloadStream.decodePrefix (tag :: bytes) = none := by
-  simp only [payloadUnread, Bool.and_eq_true, Bool.not_eq_true'] at unread
-  obtain ⟨unbound, outside⟩ := unread
-  show (if registeredOctet tag = true then _ else legacyPayloadDecode (tag :: bytes)) = none
-  rw [if_neg (by rw [unbound]; exact Bool.false_ne_true)]
-  have ne : ∀ k ∈ legacyPayloadTags, tag ≠ k := fun k member same =>
-    absurd (List.contains_iff_mem.mpr (same ▸ member)) (by rw [outside]; exact Bool.false_ne_true)
-  have h2 := ne 2 (by decide)
-  simp [legacyPayloadDecode, h2]
+  simp only [payloadUnread, Bool.not_eq_true'] at unread
+  show (if registeredOctet tag = true then _ else none) = none
+  rw [if_neg (by rw [unread]; exact Bool.false_ne_true)]
 
 /-- A target's fields before its payload, as `targetStream` reads them. -/
 def targetHeadStream :
@@ -97,11 +89,10 @@ def decodeRefusal (bytes : List UInt8) : Reject :=
   | some tag => .effect (.unregistered tag.toNat)
   | none => .malformedCommand
 
-/-- **THE STATEMENT.** A named octet is bound by nothing and read by nothing, and its bytes are
-not a command. -/
+/-- **THE STATEMENT.** A named octet is bound by nothing, and its bytes are not a command. -/
 def UnboundTagNamed : Prop :=
   ∀ bytes tag, unboundTag bytes = some tag →
-    registeredOctet tag = false ∧ tag ∉ legacyPayloadTags ∧ commandCodec.decode bytes = none
+    registeredOctet tag = false ∧ commandCodec.decode bytes = none
 
 /-! ## Proof -/
 
@@ -193,11 +184,9 @@ theorem unboundTagBody_sound {body : List UInt8} {tag : UInt8}
 
 theorem unboundTagNamed : UnboundTagNamed := by
   intro bytes tag found
-  have named : ∀ t, payloadUnread t = true → registeredOctet t = false ∧ t ∉ legacyPayloadTags := by
+  have named : ∀ t, payloadUnread t = true → registeredOctet t = false := by
     intro t unread
-    simp only [payloadUnread, Bool.and_eq_true, Bool.not_eq_true'] at unread
-    exact ⟨unread.1, fun member => absurd (List.contains_iff_mem.mpr member)
-      (by rw [unread.2]; exact Bool.false_ne_true)⟩
+    simpa only [payloadUnread, Bool.not_eq_true'] using unread
   have raw : payloadUnread tag = true ∧ rawCommandCodec.decode bytes = none := by
     unfold unboundTag at found
     split at found
@@ -215,7 +204,7 @@ theorem unboundTagNamed : UnboundTagNamed := by
         exact ⟨unread, by simp [rawCommandCodec, unframed, framed, StreamCodec.toLawful, whole]⟩
       · cases found
   obtain ⟨unread, undecoded⟩ := raw
-  refine ⟨(named tag unread).1, (named tag unread).2, ?_⟩
+  refine ⟨named tag unread, ?_⟩
   simp [commandCodec, ResourceBirthCodec.strictCodec, undecoded]
 
 #assert_axioms unboundTagNamed

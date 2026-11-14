@@ -10,16 +10,16 @@ effect comes out of a declaration, and the hand arm it replaces is deleted in th
 
 ## 0. Present state (lane `registry-effects-2`, 2026-11-14)
 
-The open constructor exists and one effect lives on it. §1 to §8 below are the October design
-and its continuation; where they disagree with this section, this section is the tree.
+`Payload` has one constructor, `registered`, and every payload kind is a declaration: there is
+no hand arm, no hand decoder and no legacy list. §1 to §8 below are the October design and its
+continuation; where they disagree with this section, this section is the tree.
 
 * **`Payload.registered (code : UInt8) (op : (effectAt code.toNat).O)`**
   (`Kernel/ResourceTransaction.lean`). `effectAt` reads `liveEffects`
   (`Kernel/ResourceEffectRegistry.lean`): wire code ↦ declaration. An unbound code's operation
-  type is `Empty`, so no payload can carry it. The payload decoder asks the registry first and
-  hands a bound tag to its declaration's own prefix decoder; only an unbound tag reaches the hand
-  decoder (`legacyPayloadDecode`). Binding a tag a hand arm still owns does not build
-  (`legacy_unbound` is what `payloadStream`'s round-trip reads).
+  type is `Empty`, so no payload can carry it. The payload decoder hands a bound tag to its
+  declaration's own prefix decoder and refuses every other tag. It is `Payload`'s only
+  constructor.
 * **`Effect`** (`Kernel/ResourceEffect.lean`) is the declaration: typed cell (`L`, `wire`, `pack`,
   `unpack`), `spec : EffectSpec`, the JSON face (`name`, `toJson`, `ofJson`), the display, the
   refusal text (`refusalText`: a refusal's detail in words), and its
@@ -39,15 +39,17 @@ and its continuation; where they disagree with this section, this section is the
   (`citedStale_detail`), printed as `Effect.FieldRead.citedStale [field 5, …]`
   (`dispatchRefusalText`, the one `Repr` of a dispatch refusal: it reads the declaration).
 * **An unread payload tag is refused by name at the receiver** (`Kernel/ResourcePayloadTag.lean`):
-  command bytes whose payload tag no declaration binds and no hand arm reads are answered
+  command bytes whose payload tag no declaration binds are answered
   `Reject.effect (.unregistered tag)`, every other undecodable byte string `malformedCommand`.
-  `UnboundTagNamed` is proved: a named octet is bound by nothing, read by nothing, and its bytes
-  are not a command.
+  `UnboundTagNamed` is proved: a named octet is bound by nothing and its bytes are not a
+  command.
 * **Statements** (`Kernel/EffectsRevival/Statements.lean` §7b), all **proved**
-  (`RegistryProofs.lean`): `RegistryKeystone` (`Dispatches hostRegistry liveLegacy
-  liveTargetDispatch`; `liveLegacy` is the codes still hand arms), `RegistryPremise`, `RegistryAccepted` (both
+  (`RegistryProofs.lean`): `RegistryKeystone` (`Dispatches hostRegistry []
+  liveTargetDispatch`: the legacy list is empty, so every code the registry does not bind is
+  refused by name), `RegistryPremise`, `RegistryAccepted` (both
   poles of the cited read at an authority cell holding a field-scoped observe capability),
-  `RegistryTeeth`, `LiveLegacyCensus`, `LiveLegacyCensusTeeth`. The keystone's heart,
+  `RegistryTeeth`, `PayloadDecodeCensus`, `PayloadDecodeCensusTeeth` (a bound tag is read by its
+  declaration alone; an unbound one is refused by the decoder). The keystone's heart,
   `liveTargetDispatch_registered`, is proved for an arbitrary declaration: at a bound code the
   deployed functions are the engine's `dispatch`. Binding another code adds no proof there.
   `HostKeystone` (content, code 1) is proved; see below.
@@ -55,7 +57,8 @@ and its continuation; where they disagree with this section, this section is the
   from the `Payload` inductive; it sees arms of a structure field given by cases and the JSON
   `type` string arms of a request decoder). At `787333fc3` `fieldRead` had 33 constructor arms and
   one string arm in 10 Lean files; it now has none, and a declared kind cannot have one. The nine
-  remaining kinds have 294 constructor arms and 16 string arms in 17 files.
+  other kinds had 294 constructor arms and 16 string arms in 17 files then; the census now
+  reads zero hand arms, zero string arms and zero dispatch arms.
 * **One JSON vocabulary**: `EffectJson` (`Kernel/ResourceEffect.lean`) is the strict reading both
   a declaration's face and the Host's request decoders use; `Host/Json`'s private copies are
   deleted. (`Host/SourceAgreementJson.lean` still carries its own copy of the request decoder,
@@ -438,37 +441,93 @@ and `moneyOperationJson` moved into the declaration's `toJson`). `liveLegacy = [
   the request JSON, the inbox JSON, the inspect lines, the projection slots, the order of the
   four refusals (all executed in `Assurance/MemberPatchPoles.lean`).
 
-**Next**: `append` (2), the last hand constructor (27 arms and one string arm in 8 files:
-13 in the transaction module, 5 in the controller, 4 in thin consent, 2 in
-`NativeObservationController`, one each in `Host/FnInboxView.lean`, `Host/InspectRender.lean`,
-`Host/GrainOriginSource.lean`). What the source says a binding takes (read, not built):
+**The stream append is declared** (`Kernel/AppendEffect.lean`, `appendEffect`, code 2, JSON
+`append`). The constructor `Payload.append`, the hand decoder `legacyPayloadDecode`,
+`legacy_unbound`, `legacyPayloadTags`, `liveLegacy` and every arm on the constructor are deleted
+(27 constructor arms and one string arm in 8 files: the transaction module, the controller,
+thin consent, `Host/FnInboxView.lean`, `Host/InspectRender.lean`, `Host/GrainOriginSource.lean`,
+the payload JSON reader). `Payload.append` is a `@[match_pattern]` abbreviation of
+`.registered 2 request`, read by one single-kind reader
+(`NativeObservationController.streamPayloadFrom`: the payload a stream record's append carried).
 
-* The spec: an object's stream head (`StreamCell.headLayout`, `headWire`, packed
-  `⟨.stream, cell⟩`), version `StreamCell.commandVersion`, verb `appendObject` on an object,
-  `commutes := fun _ => true` (an append pins no root: `append_planned_root_irrelevant`), no
-  rotate. The semantics is the hand arm of `computeTarget`: the two length bounds,
-  `DomainEpoch.admitAppend` at the loaded head, the head's presence and `room` binding, the
-  `ref` bound, then the one `headWriteOp`. Its refusals (`streamTopic`, `streamPayload`,
-  `channel reason`, `wrongRole` twice, `streamRef`) become the declaration's by name unless
-  `Reject.ofDispatch` carries them back; say which text moves.
-* `streamRecord` takes the whole command but reads its subject and nonce only (through
-  `operationMarker`), plus the snapshot's domain, the semantics digest and the height: all in
-  `EffectCtx`. `operationMarker` should take the subject and nonce so the semantics can call it.
-* **The fresh cell.** `appendedEntry` (the entry at the loaded head's next position) is what
-  `Effect` cannot state: a field for the cells an admitted operation gives birth to, from the
-  context, the operation and the loaded store (the entry is `StreamCell.Entry`; the controller's
-  `entryWrites` maps it through `StreamWrite.entryWrite` to a `DataWrite`, and
-  `Kernel/StreamWrite.lean` is downstream of nothing in the registry). Statement first: the
-  birth is stated iff the semantics admits, and its cell is not the target's.
-* `member = none` (the record holds the admission height, which is neither signed nor served):
-  thin consent's text "append: records the admission height" becomes the generic one.
-* `targetWrites`: the default (one write at coordinate 0 holding the operation's canonical
-  bytes) is the hand arm's expression. `Target.isRead` is false, `authors` is true, the view is
-  `streamSlots request before`.
-* After it: `liveLegacy = []`, `legacyPayloadDecode`, `legacy_unbound`, `legacyPayloadTags` and
-  the `Payload` inductive's last hand constructor go (`Payload` is then a structure over the
-  registry), and the census's hand column is zero.
-* Journeys for it: the stream and feed journeys beside the standing set.
+* The spec (`appendSpec`): an object's stream head (`StreamCell.headLayout`, `headWire`, packed
+  `⟨.stream, cell⟩`), version `StreamCell.commandVersion`, the object's append verb, `commutes`
+  everywhere (no root is pinned), no rotate, one field (`body`). One plan (`appendPlan`) decides:
+  the two length bounds, the channel law at the loaded head, the head's presence and `room`
+  binding, the `ref` bound; the semantics is the plan's one guarded head write.
+  `appendSpec_complete`; `append_run` and `StreamResource.computeTarget_append` state the
+  computation in the plan's terms.
+* **The fresh cell is a field of `Effect`**: `born : EffectCtx → O → Store L → Option (Nat ×
+  PackedCell Registry)` (a fresh cell's id and its live content), `none` by default, with the
+  law `born_admitted : BornAdmitted spec born` (a birth is only an admitted operation's). The
+  append's is the plan's entry as an entry cell (`entryBirth`). The controller's `entryWrites`
+  is `targetBirth` (the declaration's `born`) written by `StreamWrite.freshWrite` (expected
+  absent, written live); `StreamWrite.entryWrite` is `freshWrite` of the entry cell. Statements
+  (`Kernel/MemberPatchPoles.lean`, all proved): `AppendBornExact` (a birth exactly when the
+  semantics admits), `BornGhostRefuted` (no declarable `born` answers at a request the semantics
+  refuses everywhere: an over-long topic), `AppendPreparedBirth` (every prepared append target is
+  an object at the append's version whose patch is the one head write and whose birth is that
+  same entry at the loaded head's next position). Executed in `Assurance/MemberPatchPoles.lean`:
+  an admitted sample with its birth at `entryCellId 41 1`; a refused one with none. Not a law,
+  and not provable: that the born cell is not the target's (`entryCellId` is a hash). The commit
+  checks it: a fresh write of a cell that is present refuses.
+* `transactionMarker domain semantics subject nonce` (`Kernel/AppendEffect.lean`) is the
+  marker's body; `operationMarker domain semantics command` is it at the command's subject and
+  nonce. Its ~70 callers across the lifecycle receivers and the Host keep the command form.
+* `member = none`: the record holds the admission height.
+* Moved, refusal identity and text: `Reject.streamTopic`, `Reject.streamPayload`,
+  `Reject.streamRef` and `Reject.channel reason` are deleted; they are
+  `Reject.effect (Effect.Append.streamTopic)`, `…streamPayload`, `…streamRef` and
+  `…channel (Minidregg.Kernel.DomainEpoch.Refusal.<clause>)`, rendered
+  `…declared-resource-controller: effect: append: stream-ref` and
+  `…effect: append: channel: domain-epoch: epoch-gap`. A stream cell without a head and a fleet
+  topic's head were refused `Reject.wrongRole`; they are `Effect.Append.headAbsent` and
+  `Effect.Append.topicHead`. A non-object role and a wrong schema version stay the controller's
+  `wrongRole` and `unsupportedVersion`. Thin consent's "append: records the admission height"
+  is "append: a registered write is not displayed from a served view". The unknown-`type`
+  refusal reads "expected a registered effect (scalar, content, append, …)".
+* Moved, order: none. The header (role, version) precedes the plan as it preceded the arm's
+  checks; the plan keeps the arm's order (executed, each by name).
+* `targetPatch` of an append the receiver REFUSES is now `[]`, where the hand arm gave the head
+  write whenever a head was loaded (nothing reads it; `StreamResource.append_footprint` and
+  `append_entry_at_next` now take the admitted plan as their premise).
+* Not moved: wire bytes of code 2 (tag octet 2, then `appendStream`), the request JSON
+  (`{"type": "append", "topic", "payload", "to", "ref"}`), the inbox JSON (`topicBytes`,
+  `payloadBytes`), the inspect line, the law's slots (`streamSlots`), a run's claim, the
+  footprint, the entry cell's id and bytes.
+* `RegistryKeystone`, `HostKeystone`, `HostTeeth`, `RegistryTeeth` are restated with the legacy
+  list written out: `[]` where it was `liveLegacy`, `[1]` and `[9]` in the twin teeth.
+  `HostKeystone` loses its third clause (`1 ∉ liveLegacy`), which the empty list makes vacuous.
+  `LiveLegacyCensus` had two clauses; the first was about the hand decoder and went with it, the
+  second is `PayloadDecodeCensus`. `UnboundTagNamed` loses `tag ∉ legacyPayloadTags`.
+  `PrepareFactors` carried no legacy exception and stands as stated.
+
+**State of this head (handed off unvalidated).** The whole `lake build Minidregg` on hbox t3
+is RED at exactly one module, `Assurance/MemberPatchPoles.lean` (in the umbrella through
+`Assurance.lean`); every other module built, the proved statements included. Two of the
+append's executed poles there are red; they are the author's expectations, not yet diagnosed:
+
+* line 521, the `reprStr (appendRefusal (.channel .epochGap))` guard: the printed text is not
+  the string written there. The intended text is `Reject.effect (Effect.Append.channel
+  (Minidregg.Kernel.DomainEpoch.Refusal.epochGap))`; print the actual one (`#eval`) and either
+  correct the guard or `AppendRefusal.detail` / `appendEffect.refusalText`. Until then the
+  "Moved, refusal identity and text" line above for `channel` is unexecuted.
+* line 535, `decide ((appendTarget …).verb = .appendObject)`: no `Decidable` instance is found
+  for `Verb` equality through `Target.verb`; restate it over `CredentialAuthorityEntryCodec.verbTag`
+  or with `match`.
+
+Every other append pole in that file is after line 521 or before it in the same module, so none
+of them has been evaluated either. Owed before this head lands: those two poles green; the
+whole build once more; lane-check of Host/ClientConsentCore, Json, SourceAgreementJson,
+FnInboxView, InspectRender, GrainOriginSource; `scripts/check-import-boundary.sh`; a native
+Host; journeys once (J0..J8, KF, K12T, KW, J12, J12W, P7KR, THIN, JSLK, KCL, JDISCLOSE, JJOBM,
+JPAY2, JPAY3, JPAY4; J17 in its own world, since it fails after KW in a shared one; and for the
+append K11, JCHAT, JFEEDBACK, KTPL, KCH, M8); `scripts/check-bytes-repr.sh`. KCH's needles
+(`epochGap`, …) are matched against the raw refusal and the operator log and should still
+match; no journey or client source reads the kebab text of a stream refusal.
+
+**Next**: nothing of the payload is hand-written. What remains by cases over payload kinds is
+the nine single-kind reader arms on the three patterns (`scalar` 4, `content` 4, `append` 1).
 
 Not run on any head of this lane: JJOB1 and JJOB. They need `JOB_PROGRAMS/collatz.jam` (and
 JJOB `liar.jam` and `NOCK_RUN`); the tree holds `collatz.hoon`, `liar.hoon` and each jam's
@@ -486,7 +545,7 @@ are deleted. Which payloads a reader admits is its parameter (`refuses`): the Ho
 the agreement's names `moneyConsent`, which it refuses by name before reading any of it
 (executed in `Assurance/RegistryRefusalPoles.lean`). The agreement's refusal of a money consent
 used to read "expected scalar, append, …"; it reads "moneyConsent is not admitted by this
-reader". String arms: 11 before, 6 after (one reader, six hand-armed types).
+reader". String arms: 11 before that change, 6 after it, none now.
 
 ## 1. What one effect costs by hand today (counted from the tree at `02ee34e8a`)
 

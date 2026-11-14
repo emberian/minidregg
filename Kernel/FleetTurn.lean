@@ -629,7 +629,7 @@ theorem fleet_send_footprint (stream : Digest) (cellId : Nat) (current : TopicRe
   split at planned <;> try cases planned
   rename_i nonzero notTaken notGap
   refine ⟨?_, rfl, rfl, rfl, by omega⟩
-  simp [TopicPlan.writes, StreamWrite.headWrite, StreamWrite.entryWrite, StreamCell.appendEntry,
+  simp [TopicPlan.writes, StreamWrite.headWrite, StreamWrite.entryWrite, StreamWrite.freshWrite, StreamCell.appendEntry,
     StreamCell.Head.nextSeq]
 
 /-- **`fleet_send_cost_independent_of_history`.** A send's plan, and therefore

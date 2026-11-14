@@ -383,6 +383,102 @@ theorem memberPatch_ghost_refuted : MemberPatchGhostRefuted := by
   have same := exact _ sampleNext sampleStore samplePatch [] rfl sem
   cases same
 
+/-! ## The stream append's birth (`Effect.born`)
+
+The append is the one declaration that gives birth to a cell: the entry, beside the head its
+patch writes. Three statements hold the field: it is exact for the append (a birth exactly when
+the semantics admits), it cannot be stated for a refused operation (no declarable `born`
+answers at a request the semantics refuses everywhere), and every prepared append target's
+patch and birth are the same entry at the loaded head's next position. -/
+
+/-- **Satisfiable and exact.** An append gives birth exactly when its semantics admits. -/
+def AppendBornExact : Prop :=
+  ∀ (ctx : EffectCtx) (request : StreamCell.Append) (store : Store StreamCell.headLayout),
+    (appendEffect.born ctx request store).isSome = true ↔
+      ∃ ps, appendEffect.spec.sem ctx request store = .ok ps
+
+/-- A request whose topic is one byte over the bound. -/
+def longTopic : StreamCell.Append := ⟨List.replicate (StreamCell.maxTopicBytes + 1) 0, [], none, none⟩
+
+/-- **Teeth.** No declarable birth answers at a refused request: any `born` the law
+`BornAdmitted` admits for the append's semantics is `none` at the over-long topic, at every
+context and store. A ghost that always states a birth is not a declaration. -/
+def BornGhostRefuted : Prop :=
+  ∀ (born : EffectCtx → StreamCell.Append → Store StreamCell.headLayout →
+      Option (Nat × CellRegistry.PackedCell Registry)),
+    BornAdmitted appendSpec born →
+      ∀ (ctx : EffectCtx) (store : Store StreamCell.headLayout), born ctx longTopic store = none
+
+/-- **The prepared append.** Every prepared append target is an object at the append's schema
+version whose loaded cell holds a head; its patch is the one guarded write of that head with
+the entry at the head's next position, and its birth is that same entry's cell. The root is
+not among the facts: an append pins none. -/
+def AppendPreparedBirth : Prop :=
+  ∀ (deployment : Deployment) (directory : CellRegistry.Directory Nat Registry)
+    (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (request : StreamCell.Append) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch,
+        audienceRoster⟩),
+    kind = .object ∧ version = StreamCell.commandVersion ∧
+    ∃ head, StreamCell.headOf prepared.pre.logical = some head ∧
+      targetPatch snapshot semantics ambient command
+          ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch,
+        audienceRoster⟩ prepared.pre =
+        [StreamCell.headWriteOp head (StreamCell.appendEntry id head (appendRecord
+          (targetCtx snapshot semantics ambient command kind id capability observe
+        audienceEpoch audienceRoster) request))] ∧
+      targetBirth snapshot semantics ambient command
+          ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch,
+        audienceRoster⟩ prepared.pre =
+        some (entryBirth (StreamCell.appendEntry id head (appendRecord
+          (targetCtx snapshot semantics ambient command kind id capability observe
+        audienceEpoch audienceRoster) request)))
+
+theorem appendBornExact : AppendBornExact := by
+  intro ctx request store
+  refine Iff.trans ?_ (appendBorn_iff ctx request store)
+  show ((appendedEntry ctx request store).map entryBirth).isSome = true ↔ _
+  rw [Option.isSome_map]
+
+theorem bornGhostRefuted : BornGhostRefuted := by
+  intro born lawful ctx store
+  cases stated : born ctx longTopic store with
+  | none => rfl
+  | some cell =>
+    obtain ⟨ps, admitted⟩ := lawful ctx longTopic store (by rw [stated]; rfl)
+    have refused := appendPlan_longTopic ctx longTopic store (by decide)
+    have sem : appendSem ctx longTopic store = .ok ps := admitted
+    unfold appendSem at sem
+    rw [refused] at sem
+    cases sem
+
+set_option backward.isDefEq.respectTransparency false in
+theorem appendPreparedBirth : AppendPreparedBirth := by
+  intro deployment directory snapshot semantics ambient command kind id capability version root
+    request observe audienceEpoch audienceRoster prepared
+  have computed : (appendEffect.compute 2 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) version root request prepared.pre).mapError
+        Reject.ofDispatch = .ok prepared.post := prepared.candidate.modeEvidence.down
+  cases dispatched : appendEffect.compute 2 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) version root request prepared.pre with
+  | error refusal => rw [dispatched] at computed; cases computed
+  | ok post =>
+    obtain ⟨accepted, versioned, ps, sem, _⟩ := appendEffect.compute_ok dispatched
+    obtain ⟨head, loaded, planned, _⟩ := appendSem_ok
+      (show appendSem (targetCtx snapshot semantics ambient command kind id capability observe
+        audienceEpoch audienceRoster) request prepared.pre.logical = .ok ps from sem)
+    have object : kind = .object := by
+      cases kind
+      · rfl
+      · exact absurd (show false = true from accepted) Bool.false_ne_true
+      · exact absurd (show false = true from accepted) Bool.false_ne_true
+    exact ⟨object, versioned, head, loaded, append_patch planned, append_born planned⟩
+
+#assert_axioms appendBornExact bornGhostRefuted appendPreparedBirth
 #assert_axioms memberPatch_satisfiable memberPatch_ghost_refuted sampleNext_valid sample_prepared
 #assert_axioms computeTarget_world_arm scalarPreparedHeader scalarMember_ghost_refuted moneyPreparedUnchanged
 
