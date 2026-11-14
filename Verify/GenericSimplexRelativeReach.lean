@@ -235,5 +235,7 @@ theorem conflict_not_agreement :
 #assert_compiled GenericSimplexRelative.recovery
 #assert_compiled GenericSimplexRelative.delivery_policy
 #assert_compiled GenericSimplexRelative.fixed_origin_grows
+#assert_compiled GenericSimplexRelative.equivocation_survives_commit
+#assert_axioms decode_nonempty
 
 end Minidregg.Verify.GenericSimplexRelativeReach

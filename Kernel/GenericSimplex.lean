@@ -421,6 +421,13 @@ def serveViews (c : Config) (s : State) (peer view : Nat) : State :=
       (List.range (min s.current (view + c.window) + 1 - view)).flatMap (fun offset =>
         ((viewAt s (view + offset)).received.filter fun m => m.sender == s.self).map
           fun m => (peer, m)) }
+/-- What one member may put in one view record under one kind. A correct member sends at
+most one PROPOSE, VOTE and COMMIT there, and one CANDIDATE and one READY for ⊥ and for each
+block with a correct vote: at most `2 * faults + 2`. -/
+def Config.cap (c : Config) : Nat := c.parties + 1
+/-- The member has filled its share of the view record for this kind. -/
+def overCap (c : Config) (s : State) (m : Message) : Bool :=
+  ((viewAt s m.view).received.filter fun x => x.sender == m.sender && x.kind == m.kind).length ≥ c.cap
 def ingest (c : Config) (s : State) (m : Message) : State :=
   if m.sender ≥ c.parties || m.view == 0 then s else
   if m.view ≤ s.lastCommitted then
@@ -435,6 +442,7 @@ def ingest (c : Config) (s : State) (m : Message) : State :=
     putView s { v with proposal := m.value }
   else if m.kind == .candidate && m.value.isNone && m.view < s.current &&
       (viewAt s m.view).received.contains m then serveViews c s m.sender m.view
+  else if overCap c s m then s
   else register s m
 def step (c : Config) (s : State) (input : Input) : State :=
   if !c.wellFormed || s.self ≥ c.parties || s.failed then { s with failed := true } else

@@ -215,9 +215,15 @@ theorem pump_origin (c : Config) (fuel : Nat) (s : State) (old : OriginInvariant
 
 theorem ingest_origin (c : Config) (s : State) (message : Message) (old : OriginInvariant s) :
     OriginInvariant (ingest c s message) := by
-  unfold ingest serveFloor noteAhead serveViews
-  dsimp only
-  origin_chain
+  unfold ingest
+  repeat' split
+  all_goals first
+    | exact old
+    | (try unfold serveFloor
+       try unfold noteAhead
+       try unfold serveViews
+       try dsimp only
+       origin_chain)
 
 theorem step_origin (c : Config) (s : State) (input : Input) (old : OriginInvariant s) :
     OriginInvariant (step c s input) := by

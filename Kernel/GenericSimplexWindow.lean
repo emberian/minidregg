@@ -8,7 +8,9 @@ to `horizon` (`Config.window` above its current view). Kernel-only. Stated and p
 * `ingest_within`: a message for a view above the floor and within the horizon that this
   replica has not received is registered exactly as it was before the window existed
   (`ingest_within_propose` for the leader's proposal). The window refuses nothing a
-  replica within `window` views of the sender needs.
+  replica within `window` views of the sender needs;
+* `ingest_over_cap`: a member that has `Config.cap` messages of one kind in a view record
+  adds no more.
 
 What the window drops is recovered by `serveViews`; that it suffices is executed in
 `Verify/GenericSimplexWindow.lean` and is part of the liveness argument, not proved. -/
@@ -83,7 +85,8 @@ theorem ingest_within (c : Config) (s : State) (m : Message)
     (member : m.sender < c.parties) (above : s.lastCommitted < m.view)
     (near : m.view ≤ horizon c s) (other : m.kind ≠ .propose)
     (valued : m.kind = .vote ∨ m.kind = .commit → m.value.isSome = true)
-    (fresh : (viewAt s m.view).received.contains m = false) :
+    (fresh : (viewAt s m.view).received.contains m = false)
+    (room : overCap c s m = false) :
     ingest c s m = register s m := by
   have guard : (decide (m.sender ≥ c.parties) || m.view == 0) = false := by
     simp only [Bool.or_eq_false_iff, decide_eq_false_iff_not, beq_eq_false_iff_ne]
@@ -109,7 +112,34 @@ theorem ingest_within (c : Config) (s : State) (m : Message)
     if_neg (by rw [Bool.and_eq_true, decide_eq_true_eq]; omega),
     if_neg (by rw [unvalued]; exact Bool.false_ne_true),
     if_neg (by rw [notPropose]; exact Bool.false_ne_true),
-    if_neg (by rw [notRepeat]; exact Bool.false_ne_true)]
+    if_neg (by rw [notRepeat]; exact Bool.false_ne_true),
+    if_neg (by rw [room]; exact Bool.false_ne_true)]
+
+/-- **A member's share of a view record is bounded.** Once a member has `Config.cap`
+messages of one kind in a view record, a further one of that kind changes nothing: no
+record, no send, no relay. (The leader's PROPOSE is not a received message; a view keeps
+one.) -/
+theorem ingest_over_cap (c : Config) (s : State) (m : Message)
+    (member : m.sender < c.parties) (above : s.lastCommitted < m.view)
+    (near : m.view ≤ horizon c s) (other : m.kind ≠ .propose)
+    (fresh : (viewAt s m.view).received.contains m = false)
+    (full : overCap c s m = true) :
+    ingest c s m = s := by
+  have guard : (decide (m.sender ≥ c.parties) || m.view == 0) = false := by
+    simp only [Bool.or_eq_false_iff, decide_eq_false_iff_not, beq_eq_false_iff_ne]
+    omega
+  have notPropose : (m.kind == .propose) = false := by
+    cases kind : m.kind <;> first | exact absurd kind other | rfl
+  have notRepeat : (m.kind == .candidate && m.value.isNone && decide (m.view < s.current) &&
+      (viewAt s m.view).received.contains m) = false := by
+    rw [fresh, Bool.and_false]
+  unfold ingest
+  rw [if_neg (by rw [guard]; exact Bool.false_ne_true), if_neg (by omega),
+    if_neg (by rw [Bool.and_eq_true, decide_eq_true_eq]; omega)]
+  split
+  · rfl
+  · rw [if_neg (by rw [notPropose]; exact Bool.false_ne_true),
+      if_neg (by rw [notRepeat]; exact Bool.false_ne_true)]
 
 /-- The leader's first proposal for a view within the horizon is recorded. -/
 theorem ingest_within_propose (c : Config) (s : State) (m : Message)

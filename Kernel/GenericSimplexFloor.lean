@@ -286,9 +286,15 @@ theorem pump_floor (c : Config) (fuel : Nat) (s : State) (old : FloorInvariant s
 
 theorem ingest_floor (c : Config) (s : State) (message : Message)
     (old : FloorInvariant s) : FloorInvariant (ingest c s message) := by
-  unfold ingest serveFloor noteAhead serveViews
-  dsimp only
-  floor_chain
+  unfold ingest
+  repeat' split
+  all_goals first
+    | exact old
+    | (try unfold serveFloor
+       try unfold noteAhead
+       try unfold serveViews
+       try dsimp only
+       floor_chain)
 
 theorem step_floor (c : Config) (s : State) (input : Input) (old : FloorInvariant s) :
     FloorInvariant (step c s input) := by
@@ -461,6 +467,7 @@ theorem lagging_floor_refused :
   Minidregg.Kernel.GenericSimplexWindow.ingest_within
   Minidregg.Kernel.GenericSimplexWindow.ingest_within_propose
   Minidregg.Kernel.GenericSimplexWindow.tick_idle
+  Minidregg.Kernel.GenericSimplexWindow.ingest_over_cap
 #assert_axioms Minidregg.Kernel.GenericSimplexErasure.liveStep_run
 #assert_axioms Minidregg.Kernel.GenericSimplexErasure.rebase_observational
 end Minidregg.Kernel.GenericSimplexFloor
