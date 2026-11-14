@@ -61,7 +61,7 @@ def appendFresh (old incoming : List Block) : List Block :=
 
 /-- Not yet checked and not already rejected. -/
 def wanted (s : State) (queue : Queue) (b : Block) : Bool :=
-  !s.checked.any (fun checked => applicationHistory checked == b) && !queue.rejected.contains b
+  !validBlock s b && !queue.rejected.contains b
 
 /-- Discovery over the given observed blocks plus this replica's own offers.
 The retained queue is refiltered, never reordered. -/

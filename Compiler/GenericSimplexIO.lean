@@ -806,10 +806,12 @@ def persist (storage : Storage) (context : Context) (input : Input) : IO Result 
 
 /-- Candidate dissemination persists only unvalidated offers. Every complete
 source record remains subject to the native historical checker before checked.
-Keeping every nonempty record allows restart/catchup to rediscover the work. -/
+Every nonempty record not yet committed is kept, so restart/catchup rediscovers the work;
+a committed one is no longer work (`addOffer` would refuse it) and costs no append. -/
 def retainCandidateOffers (storage : Storage) (context : Context) (block : Block) : IO Result := do
   let some prior ← current storage context | return .invalid
-  let fresh := (applicationHistory block).filter (fun payload => !prior.state.offers.contains payload)
+  let fresh := (applicationHistory block).filter (fun payload =>
+    !prior.state.offers.contains payload && !prior.state.committedTip.contains payload)
   if fresh.isEmpty then return .durable prior.state
   let some (next,frame) := appendRestored prior
       (fresh.map (fun payload => encodeInput (.offer payload))) [] | return .invalid

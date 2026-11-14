@@ -285,7 +285,8 @@ theorem clear_same {s t : State} (same : Same s t) (number : Nat) (value : Argum
 def deliverAgainst (tip : Block) (x : State) (block : Block) : State :=
   if isPrefix tip block then
     if tip == block then x else
-      { x with committedTip := block, delivered := x.delivered ++ [block] }
+      { x with committedTip := block, delivered := x.delivered ++ [block],
+               offers := x.offers.filter fun payload => !(block.drop tip.length).contains payload }
   else if isPrefix block tip then x
   else { x with failed := true }
 def deliverTip (x : State) (block : Block) : State := deliverAgainst x.committedTip x block
@@ -299,7 +300,9 @@ theorem deliverTip_same {x y : State} (same : Same x y) (block : Block) :
   all_goals first
     | exact same
     | exact congrArg (fun z : State =>
-        { z with committedTip := block, delivered := z.delivered ++ [block] }) same
+        { z with committedTip := block, delivered := z.delivered ++ [block],
+                 offers := z.offers.filter fun payload =>
+                   !(block.drop x.committedTip.length).contains payload }) same
     | exact congrArg (fun z : State => { z with failed := true }) same
 
 theorem doCommit_eq (s : State) (number : Nat) (block : Block) :
@@ -1049,11 +1052,11 @@ def absorb (c : Config) (s : State) (input : Input) : State :=
   | .delivery m => ingest c s m
   | .deliveryAt now m => ingest c { s with now := max s.now now } m
   | .checked block =>
-      { s with checked := addUnique s.checked block,
+      { s with checked := addChecked s.checked block,
                offers := match block.getLast? with
-                 | some payload => if payload.isEmpty then s.offers else addUnique s.offers payload
+                 | some payload => if payload.isEmpty then s.offers else addOffer s payload
                  | none => s.offers }
-  | .offer payload => { s with offers := addUnique s.offers payload }
+  | .offer payload => { s with offers := addOffer s payload }
   | .poll => s
   | .tick now =>
       timeoutRule c { pump c c.pumpBudget s with now := max (pump c c.pumpBudget s).now now }
@@ -1073,12 +1076,12 @@ theorem absorb_same {s t : State} (c : Config) (same : Same s t) (input : Input)
     exact ingest_same c (congrArg (fun x : State => { x with now := max x.now now }) same) m
   | checked block =>
     exact congrArg (fun x : State =>
-      { x with checked := addUnique x.checked block,
+      { x with checked := addChecked x.checked block,
                offers := match block.getLast? with
-                 | some payload => if payload.isEmpty then x.offers else addUnique x.offers payload
+                 | some payload => if payload.isEmpty then x.offers else addOffer x payload
                  | none => x.offers }) same
   | offer payload =>
-    exact congrArg (fun x : State => { x with offers := addUnique x.offers payload }) same
+    exact congrArg (fun x : State => { x with offers := addOffer x payload }) same
   | poll => exact same
   | tick now =>
     have pumped := pump_same c c.pumpBudget same
