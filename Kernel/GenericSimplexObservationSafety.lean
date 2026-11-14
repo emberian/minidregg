@@ -23,7 +23,7 @@ theorem reachable_output_history {c : Config} {faulty : Finset Nat}
     intro other
     by_cases same : other = party
     · subst other
-      simpa only [advance, if_pos rfl] using step_output c _ input (ih party)
+      simpa only [advance, if_pos rfl, ite_true] using step_output c _ input (ih party)
     · simpa only [advance, if_neg same] using ih other
 
 theorem local_commit_is_committed {c : Config} {faulty : Finset Nat} {net : Network}

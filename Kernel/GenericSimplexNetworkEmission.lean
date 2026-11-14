@@ -105,7 +105,7 @@ theorem advance_supported_from_local {c : Config} {faulty : Finset Nat}
       have same : actor = party := by rw [owner] at exactOwner; exact Option.some.inj exactOwner
       subst actor
       apply owned_emission_supported advancedProjection party time event allowed.1 honest atTime owner
-      · simpa only [advance, if_pos rfl] using localJustified
+      · simpa only [advance, if_pos rfl, ite_true] using localJustified
       · intro message entry
         obtain ⟨before, atBefore⟩ := List.mem_iff_getElem?.mp entry
         obtain ⟨within, _⟩ := List.getElem?_eq_some_iff.mp atBefore
@@ -131,7 +131,7 @@ theorem advance_network_justified {c : Config} {faulty : Finset Nat} {net : Netw
     have widened := emission_weaken localJustified
       (next := ExternalAt (advance c faulty net party input).audit)
       (fun _ entry => List.mem_append.mpr (Or.inl entry))
-    simpa only [advance, if_pos rfl] using widened
+    simpa only [advance, if_pos rfl, ite_true] using widened
   · have widened := emission_weaken (old other enrolled honest)
       (next := ExternalAt (advance c faulty net party input).audit)
       (fun _ entry => (advance_audit_prefix c faulty net party input).subset entry)

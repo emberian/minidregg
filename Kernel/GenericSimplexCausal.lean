@@ -276,8 +276,9 @@ def VoteOnceAudit (s : State) : Prop := ∀ number first second,
 theorem voteOnce_unchanged_audit (before after : State)
     (sameSelf : after.self = before.self) (sameAudit : after.audit = before.audit)
     (once : VoteOnceAudit before) : VoteOnceAudit after := by
-  unfold VoteOnceAudit
-  simpa only [sameSelf, sameAudit] using once
+  intro number first second
+  rw [sameSelf, sameAudit]
+  exact once number first second
 
 theorem putView_voteOnce (s : State) (v : View) (once : VoteOnceAudit s) :
     VoteOnceAudit (putView s v) := once
@@ -699,10 +700,10 @@ theorem append_commit_causal (s : State) (view : Nat) (block : Block)
     CausalInvariant {s with audit := s.audit ++ [.commit s.self view block]} := by
   constructor
   · exact old.viewsUnique
-  · simpa [VoteRecorded] using old.voteRecorded
+  · simpa [VoteRecorded, viewAt] using old.voteRecorded
   · simpa [VoteOnceAudit] using old.voteOnce
-  · simpa [CandidateRecorded] using old.candidateRecorded
-  · simpa [CommitRecorded] using old.commitRecorded
+  · simpa [CandidateRecorded, viewAt] using old.candidateRecorded
+  · simpa [CommitRecorded, viewAt] using old.commitRecorded
   · exact old.commitLock
 
 theorem doCommit_causal (s : State) (view : Nat) (block : Block)
@@ -742,12 +743,12 @@ theorem sendCandidate_causal (s : State) (view : Nat) (arg : Argument)
     · apply broadcast_nonvote_voteRecorded _ view .candidate arg (by decide)
       apply putView_voteRecorded _ _ _ old.voteRecorded
       simp [viewAt_number]
-    · simpa only [sendCandidate, guard, if_false] using once
-    · simpa only [sendCandidate, guard, if_false] using candidate
+    · simpa only [sendCandidate, guard, Bool.false_eq_true, if_false] using once
+    · simpa only [sendCandidate, guard, Bool.false_eq_true, if_false] using candidate
     · apply broadcast_other_commitRecorded _ view .candidate arg (by decide)
       apply putView_commitRecorded _ _ _ old.commitRecorded
       simp [viewAt_number]
-    · simpa only [sendCandidate, guard, if_false] using locked
+    · simpa only [sendCandidate, guard, Bool.false_eq_true, if_false] using locked
 
 #assert_axioms register_unique
 #assert_axioms sendCandidate_causal
