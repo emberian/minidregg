@@ -682,7 +682,7 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
         ["room", "concierge"] => {
             let mut out = vec![flag("action", "install"), flag("dir", ws), flag("room", p.arg(0)), flag("concierge", p.arg(1)),
                 flag("outbox", session.home.join("outbox")), flag("program", session.home.join("concierge").join(format!("{}.json", p.arg(0))))];
-            for key in ["period", "fund"] {
+            for key in ["period", "fund", "refund-limit"] {
                 if let Some(value) = p.flag(&format!("--{key}")).flatten() {
                     out.push(flag(key, value));
                 }

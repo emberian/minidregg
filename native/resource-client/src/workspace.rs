@@ -2761,6 +2761,29 @@ fn delegation_fields(fields: &Value) -> Result<Value> {
     ))
 }
 
+/// The kernel refuses a delegated capability's debit of a balance it sets no
+/// `maxDelta` bound on (`Theory.CapabilityValueBound.StrictBound`,
+/// `missingBalanceBound`). A delegated account grant that carries `transfer`
+/// and bounds no balance could never spend, so it is refused here, before it
+/// is authored. The bound limits one turn; it is not a running total.
+pub(crate) fn transfer_grant_bounded(kind: &str, verbs: &[Value], bounds: Option<&Value>) -> Result<()> {
+    if kind != "account" || !verbs.iter().any(|verb| verb.as_str() == Some("transfer")) {
+        return Ok(());
+    }
+    let bounded = bounds.and_then(Value::as_array).is_some_and(|bounds| {
+        bounds.iter().any(|bound| {
+            bound.get("field").and_then(Value::as_str).is_some_and(|field| field.starts_with("balance:"))
+        })
+    });
+    if bounded {
+        return Ok(());
+    }
+    Err("a delegated `transfer` grant on an account must bound a balance: add maxDelta \
+         [{\"field\":\"balance:ASSET\",\"max\":\"N\"}] (shell: --max-delta balance:ASSET=N), the most one turn \
+         may take from the account, fees included; the Host refuses an unbounded delegated debit (missingBalanceBound)"
+        .into())
+}
+
 fn delegation_bounds(bounds: &Value) -> Result<Value> {
     let bounds = bounds
         .as_array()
@@ -3533,6 +3556,7 @@ fn propose_summary_once(
                 Some(bounds) => Some(delegation_bounds(bounds)?),
                 None => head.get("maxDelta").cloned(),
             };
+            transfer_grant_bounded(kind, selected_verbs, child_bounds.as_ref())?;
             {
                 let scope = child.as_object_mut().ok_or("child capability is not an object")?;
                 if let Some(fields) = child_fields {
@@ -4415,6 +4439,14 @@ pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path)
         "capability":member(delegation,"childCapability")?,
         "receipt":receipt,"proposalSha256":member(&summary,"intentSha256")?,
         "authority":"hint-only"});
+    // The grant's field set and per-turn bounds, as authored (a hint like the
+    // rest of this reference: the Host holds the capability). A holder reads
+    // its spend limit here before it submits a debit.
+    for key in ["fields", "maxDelta"] {
+        if let Some(scope) = child.get(key) {
+            value[key] = scope.clone();
+        }
+    }
     // A room invite (the child is `under` the target): the recipient's
     // reference says so, and `room list` shows it.
     if child.get("room").is_some() {

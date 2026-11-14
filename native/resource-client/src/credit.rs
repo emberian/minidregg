@@ -67,6 +67,47 @@ fn number(value: &str, label: &str) -> Result<u128> {
     value.parse().map_err(|_| format!("{label} out of range"))
 }
 
+/// The concierge's grant on the till. The kernel refuses a delegated debit of
+/// a balance the grant sets no bound on, so the grant names the one balance a
+/// refund moves (the pinned credit asset) and bounds one turn's gross debit of
+/// it at `refund_limit` (the largest payment one refund returns) plus `base`
+/// (the fleet turn's fee, which the till pays). The bound is per turn, not a
+/// running total: the concierge can still empty the till one refund at a time.
+fn till_grant(till_name: &str, concierge: &str, asset: &str, refund_limit: &str, base: &str) -> Result<Value> {
+    let bound = number(refund_limit, "refund limit")?
+        .checked_add(number(base, "tariff base")?)
+        .ok_or("refund limit plus the fee is out of range")?;
+    let field = format!("balance:{asset}");
+    Ok(json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
+        "name":till_name,"recipient":concierge,"verbs":["observe","transfer"],"maxCost":MAX_COST,
+        "fields":[field],"maxDelta":[{"field":field,"max":bound.to_string()}]}))
+}
+
+/// A refund checked against the limit its grant was authored with (the
+/// delegated reference this workspace imported), before anything is sent: the
+/// Host's refusal of a submitted turn is the uniform `request refused`, so the
+/// reason is given here. A reference that carries no limits (the owner's own,
+/// or a grant authored before limits were recorded) is left to the Host.
+fn refund_within_grant(reference: &Value, asset: &str, amount: &str, base: &str) -> Result<()> {
+    let Some(bounds) = reference["provenance"].get("maxDelta").and_then(Value::as_array) else { return Ok(()) };
+    let field = format!("balance:{asset}");
+    let need = number(amount, "refund amount")?
+        .checked_add(number(base, "tariff base")?)
+        .ok_or("refund amount plus the fee is out of range")?;
+    let limits: Vec<u128> = bounds
+        .iter()
+        .filter(|bound| bound.get("field").and_then(Value::as_str) == Some(field.as_str()))
+        .map(|bound| number(bound.get("max").and_then(Value::as_str).unwrap_or(""), "grant limit"))
+        .collect::<Result<_>>()?;
+    let Some(limit) = limits.iter().min() else {
+        return Err(format!("this grant sets no limit on {field}, so it cannot refund asset {asset}: the till's owner refunds it, or issues a grant bounded on {field}"));
+    };
+    if need > *limit {
+        return Err(format!("a refund of {amount} plus the fee {base} takes {need} of {field} from the till, over this grant's limit of {limit} a turn: the till's owner refunds it, or installs the concierge again with a larger --refund-limit"));
+    }
+    Ok(())
+}
+
 fn field_key(name: &str) -> Result<&'static str> {
     TARIFF_FIELDS
         .iter()
@@ -563,6 +604,7 @@ fn install(
     concierge: &str,
     period: &str,
     fund: &str,
+    refund_limit: Option<&str>,
     outbox: &Path,
     program: &Path,
 ) -> Result<()> {
@@ -621,8 +663,16 @@ fn install(
     // The concierge reads the till's ledger and refunds a payment it will not
     // honour from the till itself (`transfer`).
     let reads = format!("{name}-till-concierge");
-    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-        "name":till_name,"recipient":concierge,"verbs":["observe","transfer"],"maxCost":MAX_COST});
+    // One refund returns one payment. A payment the concierge honours or
+    // refunds is quoted at the room's week price, so that price (as the room
+    // holds it now) is the default limit; `--refund-limit` sets another. A
+    // larger payment is refunded by the till's owner.
+    let (base, asset) = crate::fleet::tariff(&crate::fleet::agent(root)?)?;
+    let refund_limit = match refund_limit {
+        Some(limit) => limit.to_owned(),
+        None => current.get("week").unwrap_or("0").to_owned(),
+    };
+    let request = till_grant(&till_name, concierge, &asset, &refund_limit, &base)?;
     let attempt = propose_and_submit(root, ws, &reads, &request)?;
     workspace::publish_delegation(root, &reads, &attempt)?;
     write_json(
@@ -633,6 +683,7 @@ fn install(
         "room":current.target,"founder":me,"concierge":concierge,"till":till_target,
         "runner":runner_target,"topic":RENEW_TOPIC,"memberVerbs":MEMBER_VERBS,
         "refs":{"room":name,"till":till_name,"runner":runner_name},
+        "refundLimit":{"asset":asset,"amount":refund_limit,"fee":base},
         "program":"for each renew entry on the till's incoming ledger: the entry's memo names the room, the week price and the height H it was read at; the entry must land within 64 heights of H; the tariff is read AT H; when the asset is the pinned credit asset, the quoted price is the tariff's week at H, the amount is at least that week, and the signer is a subject the room admits (a standing grant under the room, or tariff.open = 1 at H), issue `member` under the room with notAfter = max(entry.height, the signer's current notAfter) + tariff.period at H; otherwise refund the amount from the till to the payer on topic refund, journaled with the reason; when tariff.week = 0 every filed request from a standing room member issues height + period"});
     write_json(program, &value)?;
     print_json(&value)
@@ -1029,6 +1080,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             // The memo names what is refunded, so it is part of the refund's identity.
             let context = json!({"action":"refund","account":workspace::reference(&root, &account)?,"to":to,
                 "amount":amount,"asset":asset,"memo":memo});
+            let (base, pinned) = crate::fleet::tariff(&crate::fleet::agent(&root)?)?;
+            refund_within_grant(&workspace::reference(&root, &account)?, asset.as_deref().unwrap_or(&pinned), &amount, &base)?;
             let Some(record) = money_record(&root, "refund", operation, &context, again)? else { return Ok(()) };
             let result = crate::fleet::pay_turn_recorded(&root, &account, &to, &amount, asset.as_deref(),
                 Some((REFUND_TOPIC, memo.as_bytes())), Some(&record), context)?;
@@ -1047,10 +1100,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let concierge = text(args.required("concierge")?, "concierge")?;
             let period = opt(&mut args, "period")?.unwrap_or_else(|| DEFAULT_PERIOD.into());
             let fund = opt(&mut args, "fund")?.unwrap_or_else(|| "1".into());
+            let refund_limit = opt(&mut args, "refund-limit")?;
             let outbox = PathBuf::from(text(args.required("outbox")?, "outbox")?);
             let program = PathBuf::from(text(args.required("program")?, "program")?);
             args.finish()?;
-            install(&root, &ws, &name, &concierge, &period, &fund, &outbox, &program)
+            install(&root, &ws, &name, &concierge, &period, &fund, refund_limit.as_deref(), &outbox, &program)
         }
         "adopt" => {
             let inbox = PathBuf::from(text(args.required("inbox")?, "inbox")?);
@@ -1064,6 +1118,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_till_grant_bounds_one_refund_and_its_fee() {
+        let request = till_grant("lab-till", "9", "0", "40", "3").unwrap();
+        assert_eq!(request["verbs"], json!(["observe", "transfer"]));
+        assert_eq!(request["fields"], json!(["balance:0"]));
+        assert_eq!(request["maxDelta"], json!([{"field":"balance:0","max":"43"}]));
+        // The shared authoring admits it: a delegated account `transfer` with a balance bound.
+        workspace::transfer_grant_bounded("account", request["verbs"].as_array().unwrap(), request.get("maxDelta")).unwrap();
+        // A free room's concierge can pay a fee and refund nothing.
+        assert_eq!(till_grant("lab-till", "9", "0", "0", "3").unwrap()["maxDelta"][0]["max"], "3");
+        assert!(till_grant("lab-till", "9", "0", &u128::MAX.to_string(), "3").is_err());
+    }
+
+    #[test]
+    fn an_oversized_or_unsupported_refund_is_refused_before_it_is_sent() {
+        let grant = till_grant("lab-till", "9", "0", "40", "3").unwrap();
+        let reference = json!({"provenance":{"type":"minidregg-delegated-reference-v1","maxDelta":grant["maxDelta"]}});
+        refund_within_grant(&reference, "0", "40", "3").unwrap();
+        let over = refund_within_grant(&reference, "0", "41", "3").unwrap_err();
+        assert!(over.contains("over this grant's limit of 43") && over.contains("--refund-limit"), "{over}");
+        let other = refund_within_grant(&reference, "5", "1", "3").unwrap_err();
+        assert!(other.contains("sets no limit on balance:5"), "{other}");
+        // The owner's own reference carries no limits: the Host decides.
+        refund_within_grant(&json!({"provenance":null}), "0", "1000000", "3").unwrap();
+    }
 
     #[test]
     fn renewal_overflow_refuses() {

@@ -186,7 +186,7 @@ pub static ROOM: Grammar = Grammar {
         Leaf { path: &["room", "law"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "describe" },
         Leaf { path: &["room", "status"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox)" },
         Leaf { path: &["room", "renew"], args: &[arg("NAME", Kind::Ref), arg("SUBJECT", Kind::Subject)], flags: &[valued("--for", "N", Kind::Number), valued("--until", "H", Kind::Number)], effect: Effect::Transition, about: "mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT)" },
-        Leaf { path: &["room", "concierge"], args: &[arg("NAME", Kind::Id), arg("SUBJECT", Kind::Subject)], flags: &[valued("--period", "N", Kind::Number), valued("--fund", "N", Kind::Number)], effect: Effect::Transition, about: "mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json)" },
+        Leaf { path: &["room", "concierge"], args: &[arg("NAME", Kind::Id), arg("SUBJECT", Kind::Subject)], flags: &[valued("--period", "N", Kind::Number), valued("--fund", "N", Kind::Number), valued("--refund-limit", "N", Kind::Number)], effect: Effect::Transition, about: "mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json; --refund-limit N: the most one refund returns from the till, default the room's week price; the till grant bounds one turn at N plus the fee)" },
     ],
 };
 

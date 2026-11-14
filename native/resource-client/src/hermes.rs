@@ -291,6 +291,9 @@ pub(crate) struct RoleDoc {
     pub name: String,
     pub verbs: Vec<String>,
     pub law: Option<String>,
+    /// The grant's field set and per-turn `maxDelta` bounds, when the entry narrows them.
+    pub fields: Option<Value>,
+    pub max_delta: Option<Value>,
 }
 
 fn strings(value: &Value, key: &str) -> Result<Vec<String>, String> {
@@ -323,7 +326,19 @@ pub(crate) fn role(name: &str) -> Result<Role, String> {
             name: member(doc, "name").map_err(|e| e.to_string())?.to_owned(),
             verbs: strings(doc, "verbs")?,
             law: doc.get("law").and_then(Value::as_str).map(str::to_owned),
+            fields: doc.get("fields").cloned(),
+            max_delta: doc.get("maxDelta").cloned(),
         });
+        // A role that spends an account says how much: the kernel refuses a
+        // delegated debit of a balance the grant sets no bound on.
+        let doc = docs.last().expect("just pushed");
+        if doc.verbs.iter().any(|verb| verb == "transfer")
+            && !doc.max_delta.as_ref().and_then(Value::as_array).is_some_and(|bounds| {
+                bounds.iter().any(|b| b.get("field").and_then(Value::as_str).is_some_and(|f| f.starts_with("balance:")))
+            })
+        {
+            return Err(format!("role template {name}: {} grants transfer and sets no maxDelta on a balance", doc.name));
+        }
     }
     let program = grants.get("program").ok_or("role template: program absent")?;
     Ok(Role {
@@ -485,11 +500,25 @@ fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Va
     chat::propose_submit(session, prefix, request)
 }
 
+/// The delegation a role's grant entry asks for: its verbs, and the field set
+/// and per-turn bounds the entry carries (a grant of account `transfer` must
+/// carry a balance bound; `role` refuses a template without one).
+fn grant_request(name: &str, recipient: &str, doc: &RoleDoc) -> Value {
+    let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":name,
+        "recipient":recipient,"verbs":doc.verbs,"maxCost":"50000"});
+    if let Some(fields) = &doc.fields {
+        request["fields"] = fields.clone();
+    }
+    if let Some(bounds) = &doc.max_delta {
+        request["maxDelta"] = bounds.clone();
+    }
+    request
+}
+
 /// Delegate `verbs` on reference `name` to `recipient`, publish it, and return
 /// the recipient reference (what Hermes imports).
-fn delegate(session: &Session, name: &str, recipient: &str, verbs: &[String]) -> Result<Value, Done> {
-    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":name,
-        "recipient":recipient,"verbs":verbs,"maxCost":"50000"});
+fn delegate(session: &Session, name: &str, recipient: &str, doc: &RoleDoc) -> Result<Value, Done> {
+    let request = grant_request(name, recipient, doc);
     let done = propose_submit(session, "hermes-grant", &request)?;
     let id = done["id"].as_str().unwrap_or_default().to_owned();
     let ws = &session.workspace;
@@ -665,10 +694,10 @@ fn summon(
     if role_name == "runner" {
         let (inputs, outputs) = runner_cells(&program_text).map_err(usage)?;
         for cell in outputs {
-            docs.push(RoleDoc { name: cell, verbs: vec!["observe".into(), "mutate".into()], law: None });
+            docs.push(RoleDoc { name: cell, verbs: vec!["observe".into(), "mutate".into()], law: None, fields: None, max_delta: None });
         }
         for cell in inputs {
-            docs.push(RoleDoc { name: cell, verbs: vec!["observe".into()], law: None });
+            docs.push(RoleDoc { name: cell, verbs: vec!["observe".into()], law: None, fields: None, max_delta: None });
         }
     }
     let values = [("ROOM", room), ("FOUNDER", me.as_str()), ("H", h.as_str())];
@@ -681,7 +710,7 @@ fn summon(
                 let how = ensure_doc(session, room, &name, &law_of(&fill(law, &values))?)?;
                 println!("{room}: {name} {how} (its law admits you and Hermes)");
             }
-            let reference = delegate(session, &name, &h, &doc.verbs)?;
+            let reference = delegate(session, &name, &h, doc)?;
             put(&out.join(format!("{}.json",workspace::ref_file(&name))), &reference)?;
             state["steps"][&key] = json!(target(session, &name)?);
             put(&state_file, &state)?;
@@ -812,6 +841,20 @@ fn dismiss(session: &Session, room: &str) -> Result<(), Done> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_role_grant_carries_its_bounds() {
+        let plain = RoleDoc { name: "lab-index".into(), verbs: vec!["observe".into(), "mutate".into()],
+            law: None, fields: None, max_delta: None };
+        let request = grant_request("lab-index", "9", &plain);
+        assert!(request.get("fields").is_none() && request.get("maxDelta").is_none());
+        let spend = RoleDoc { name: "lab-till".into(), verbs: vec!["transfer".into()], law: None,
+            fields: Some(json!(["balance:0"])), max_delta: Some(json!([{"field":"balance:0","max":"5"}])) };
+        let request = grant_request("lab-till", "9", &spend);
+        assert_eq!(request["fields"], json!(["balance:0"]));
+        assert_eq!(request["maxDelta"], json!([{"field":"balance:0","max":"5"}]));
+        workspace::transfer_grant_bounded("account", request["verbs"].as_array().unwrap(), request.get("maxDelta")).unwrap();
+    }
 
     #[test]
     fn only_missing_registry_allows_fallback() {
