@@ -280,8 +280,8 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
 come from the SAME actual admitted global Book batch, never account metadata. -/
 def moneyPolicySlots (prepared : PreparedInvocation deployment profile ambient ground command)
     (i : TargetIndex command) : List (String × Int) :=
-  match prepared.money, command.targets[i].payload with
-  | some money, .moneyConsent consent =>
+  match prepared.money, command.targets[i].payload.consent? with
+  | some money, some consent =>
       money.accountSlots command.targets[i].target ++
         money.positionSlots ⟨command.targets[i].target, consent⟩
   | _, _ => []
@@ -1348,8 +1348,8 @@ def readPreparation [DecidableEq F] (prepared : PreparedInvocation deployment pr
 that account's actual current read capability, independently of debit consent. -/
 def moneyReadCovered (prepared : PreparedInvocation deployment profile ambient ground command)
     (i : TargetIndex command) : Prop :=
-  match prepared.money, command.targets[i].payload with
-  | some money, .moneyConsent _ =>
+  match prepared.money, command.targets[i].payload.consent? with
+  | some money, some _ =>
       ∀ asset ∈ money.roleAssets command.targets[i].target,
         CellField.NamedBy (ResourceObservationAdmission.readerFields (readContext prepared)
           command.targets[i].kind (readCapability i)) (.balance asset)
@@ -1574,8 +1574,8 @@ theorem targetFootprint_exact (target : Target) (patch : Patch target.layout)
 authority read. -/
 def monetaryFootprint? (prepared : PreparedInvocation deployment profile ambient ground command)
     (i : TargetIndex command) : Option Footprint :=
-  match prepared.money, command.targets[i].payload with
-  | some money, .moneyConsent consent => some (money.footprint ⟨command.targets[i].target, consent⟩)
+  match prepared.money, command.targets[i].payload.consent? with
+  | some money, some consent => some (money.footprint ⟨command.targets[i].target, consent⟩)
   | _, _ => none
 
 /-- Additional gross outgoing-value bound. The ordinary footprint remains
@@ -1584,8 +1584,8 @@ def monetaryDebitFootprint? (prepared : PreparedInvocation deployment profile am
     (incidence : Incidence command) : Option Footprint :=
   match incidence with
   | none => none
-  | some i => match prepared.money, command.targets[i].payload with
-      | some money, .moneyConsent _ =>
+  | some i => match prepared.money, command.targets[i].payload.consent? with
+      | some money, some _ =>
           some (money.grossDebitFootprint command.targets[i].target)
       | _, _ => none
 
@@ -1593,8 +1593,8 @@ def monetaryVerbs? (prepared : PreparedInvocation deployment profile ambient gro
     (incidence : Incidence command) : Option (List (Verb .account)) :=
   match incidence with
   | none => none
-  | some i => match prepared.money, command.targets[i].payload with
-      | some money, .moneyConsent consent =>
+  | some i => match prepared.money, command.targets[i].payload.consent? with
+      | some money, some consent =>
           some (ResourceMoneyWire.verbs money.batch ⟨command.targets[i].target, consent⟩)
       | _, _ => none
 

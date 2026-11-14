@@ -253,6 +253,8 @@ def computeFundingEffect : Effect where
   unchanging := true
   unchanging_silent := fun _ _ _ _ _ emitted => moneySpec_emitted emitted
   accounting := true
+  funding := some
+  monetary_unchanging := fun _ _ => rfl
   authors := fun _ => false
   unpack_pack := unpackDeclared_pack
   pack_unpack := packDeclared_unpack
@@ -280,6 +282,10 @@ def moneyConsentEffect : Effect where
   runWrites := some fun _ _ _ _ _ _ => none
   unchanging := true
   unchanging_silent := fun _ _ _ _ _ emitted => moneySpec_emitted emitted
+  funding := fun consent => consent.funding
+  consent := some
+  consent_funding := fun _ _ stated => by cases stated; rfl
+  monetary_unchanging := fun _ _ => rfl
   authors := fun _ => false
   unpack_pack := unpackDeclared_pack
   pack_unpack := packDeclared_unpack

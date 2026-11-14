@@ -96,16 +96,34 @@ one out of a signed command. -/
   .registered 1 command
 
 /-- **A compute funding consent**: the registered operation at code 6 (`computeFundingEffect`).
-It has no constructor and no dispatch arm; it is a pattern for the code that reads the signed
-funding out of a command (`prepareCompute`) or builds one. -/
-@[match_pattern] abbrev Payload.computeFunding (funding : ComputeFunding) : Payload :=
+It has no constructor and no arm anywhere; this names the payload for the code that builds
+one. What a payload funds is read from its declaration (`Payload.funding?`). -/
+abbrev Payload.computeFunding (funding : ComputeFunding) : Payload :=
   .registered 6 funding
 
 /-- **A money consent**: the registered operation at code 8 (`moneyConsentEffect`). It has no
-constructor and no dispatch arm; it is a pattern for the code that reads the signed consents
-out of a command (`moneyEntries`, the admitted batch's slots and footprints). -/
-@[match_pattern] abbrev Payload.moneyConsent (consent : MoneyConsent) : Payload :=
+constructor and no arm anywhere; this names the payload for the code that builds one. What a
+payload consents to is read from its declaration (`Payload.consent?`). -/
+abbrev Payload.moneyConsent (consent : MoneyConsent) : Payload :=
   .registered 8 consent
+
+/-- **The funding leg a payload consents to**: its declaration's (`Effect.funding`). No payload
+kind is named: a registered operation answers by its own declaration. -/
+def Payload.funding? : Payload → Option ComputeFunding
+  | .registered code op => (effectAt code.toNat).funding op
+  | _ => none
+
+/-- **The money consent a payload is**: its declaration's (`Effect.consent`). -/
+def Payload.consent? : Payload → Option MoneyConsent
+  | .registered code op => (effectAt code.toNat).consent op
+  | _ => none
+
+/-- The two readers agree: a consent's funding leg is the payload's. -/
+theorem Payload.consent?_funding {payload : Payload} {consent : MoneyConsent}
+    (stated : payload.consent? = some consent) : payload.funding? = consent.funding := by
+  cases payload with
+  | registered code op => exact (effectAt code.toNat).consent_funding op consent stated
+  | _ => cases stated
 
 /-- **The observe-only content read**: the registered operation at code 3, which has no
 operand (`readEffect`). Not a pattern: no function has an arm for it. -/
@@ -1880,21 +1898,13 @@ def prepareCompute (deployment : Deployment) (physical : RunComputeBudgetDomain.
   let funding ← (List.finRange command.targets.length).foldlM
     (fun (selected : Option RunComputeBudgetDomain.FundingInput) i => do
       let target := command.targets[i]
-      match target.payload with
-      | .computeFunding consent =>
+      match target.payload.funding? with
+      | none => pure selected
+      | some funding =>
           if target.kind != .account || selected.isSome || i.val + 1 != command.targets.length then
             throw .computeFunding
-          pure (some ⟨i.val, target.target, target.capability, consent.asset, consent.credits,
-            consent.expectedPayerBalance, consent.expectedBookRoot⟩)
-      | .moneyConsent consent =>
-          match consent.funding with
-          | none => pure selected
-          | some funding =>
-            if target.kind != .account || selected.isSome || i.val + 1 != command.targets.length then
-              throw .computeFunding
-            pure (some ⟨i.val, target.target, target.capability, funding.asset, funding.credits,
-              funding.expectedPayerBalance, funding.expectedBookRoot⟩)
-      | _ => pure selected) none
+          pure (some ⟨i.val, target.target, target.capability, funding.asset, funding.credits,
+            funding.expectedPayerBalance, funding.expectedBookRoot⟩)) none
   match objective with
   | some claim =>
       let prepared ← (RunComputeBudgetDomain.prepare deployment physical clock command.subject
@@ -1911,9 +1921,8 @@ def prepareCompute (deployment : Deployment) (physical : RunComputeBudgetDomain.
 
 /-- The account identity is taken only from the containing signed target. -/
 def moneyEntries (command : Command) : List ResourceMoneyWire.Entry :=
-  command.targets.filterMap fun target => match target.payload with
-    | .moneyConsent consent => some ⟨target.target, consent⟩
-    | _ => none
+  command.targets.filterMap fun target =>
+    target.payload.consent?.map fun consent => ⟨target.target, consent⟩
 
 def prepareMoney (deployment : Deployment) (physical : RunComputeBudgetDomain.Physical)
     (command : Command)

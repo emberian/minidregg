@@ -384,8 +384,9 @@ What moved:
 * `Payload.scalar` is a `@[match_pattern]` abbreviation of `.registered 0 actions`, as
   `Payload.content` is. Four arms read particular actions out of a signed scalar operation
   (`NativeHostReplay` twice, `NativeProviderHistory` twice); `scripts/effect-arm-census.py` tells
-  a reader (its match names no other payload kind) from a dispatch arm (its match names another)
-  and counts zero dispatch arms on both patterns.
+  a single-kind reader (its match names exactly one payload kind) from a dispatch arm (its match
+  distinguishes two or more kinds, hand constructor or pattern) and counts zero dispatch arms
+  on both patterns.
 
 **The two money consents are declared** (`Kernel/MoneyEffects.lean`: `computeFundingEffect`,
 code 6, JSON `computeFunding`; `moneyConsentEffect`, code 8, JSON `moneyConsent`). The
@@ -415,12 +416,15 @@ and `moneyOperationJson` moved into the declaration's `toJson`). `liveLegacy = [
   (the funding is the kernel's accounting, so `BendWorldPlan.effectsOf` and
   `ObjectiveInvocationLayout.step`/`verbatim`/`inert` leave it out: `observeOnly op ||
   accounting`; a money consent is reported, as before).
-* What reads the signed operations at the transaction's level stays, on the patterns
-  `Payload.computeFunding` / `Payload.moneyConsent` (`@[match_pattern]` abbreviations of
-  `.registered 6 _` / `.registered 8 _`): `prepareCompute` (the one funding leg),
-  `moneyEntries`, and the controller's `moneyPolicySlots`, `moneyReadCovered`,
-  `monetaryFootprint?`, `monetaryDebitFootprint?`, `monetaryVerbs?`. The census counts them as
-  readers (a match that names no hand constructor) and zero dispatch arms on either pattern.
+* What the transaction reads of the signed operations is the declaration's: `Effect.funding`
+  (the compute funding leg an operation consents to) and `Effect.consent` (the money consent it
+  is), each `none` by default, with two laws: `consent_funding` (a consent's funding leg is the
+  operation's) and `monetary_unchanging` (an operation that states either leaves its own cell
+  as loaded, so a writing effect cannot state one). `Payload.funding?` and `Payload.consent?`
+  ask `effectAt code`; `prepareCompute`, `moneyEntries` and the controller's
+  `moneyPolicySlots`, `moneyReadCovered`, `monetaryFootprint?`, `monetaryDebitFootprint?` and
+  `monetaryVerbs?` read those two and match on no payload kind. `Payload.computeFunding` and
+  `Payload.moneyConsent` are names for the code that builds one (not patterns).
 * Moved: the refusal of a money target with audience fields was `Reject.computeFunding` and is
   `Reject.effect (Effect.ComputeFunding.audienceFields)` /
   `Reject.effect (Effect.MoneyConsent.audienceFields)`; thin consent's text for them was

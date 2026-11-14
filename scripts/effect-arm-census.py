@@ -15,14 +15,14 @@ that returns one). Inside such a declaration an arm on a STRING equal to a const
 its own column.
 
 A registered kind may have a PATTERN: a `@[match_pattern] abbrev Payload.<name>` of
-`.registered <code> _` (`Payload.scalar`, `Payload.content`, `Payload.computeFunding`,
-`Payload.moneyConsent`), for code that reads particular data out of a signed operation of that
-kind (a provider generation out of scalar actions; the funding leg out of a compute funding or
-a money consent). An arm on a pattern is a READER when its match names no hand constructor (it
-answers for bound kinds by their patterns and falls through for every other payload), and a
-DISPATCH ARM when its match also names a hand constructor: that is a function by cases over
-payload kinds, which a bound code must not have. The table lists both per pattern; the
-dispatch column of a bound code is zero.
+`.registered <code> _` (`Payload.scalar`, `Payload.content`), for code that reads particular
+data out of a signed operation of that one kind (a provider generation out of scalar actions).
+A match that distinguishes TWO OR MORE payload kinds, each a hand constructor or a pattern, is
+a function by cases over payload kinds: every pattern arm in it is a DISPATCH ARM, which a
+bound code must not have. A match that names exactly one kind is a single-kind READER. What
+more than one kind answers is a field of the declaration, read through the registry
+(`Payload.funding?`, `Payload.consent?`), and matches on nothing. The table lists both per
+pattern; the dispatch column is zero.
 
 `registered` is the open constructor: its arms are the registry's (each reads the declaration
 `effectAt code`), counted on their own line and never as a kind's hand arms. A kind with no
@@ -91,7 +91,7 @@ for top in ("Kernel", "Compiler", "Host", "Assurance"):
                                 hits.append((p, rel, j + 1))
                     j += 1
                 for p, f, n in hits:
-                    (readers if kinds <= set(patterns) else dispatch)[p].append((f, n))
+                    (readers if len(kinds) <= 1 else dispatch)[p].append((f, n))
                 i = max(j, i + 1)
 
 legacy = [c for c in ctors if c != "registered"]

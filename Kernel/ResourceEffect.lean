@@ -31,6 +31,7 @@ module
 
 public import Effects.Revival.Engine
 public import Kernel.DeclaredResourceScalar
+public import Kernel.ResourceMoneyWire
 public import Compiler.ObjectAudienceRoster
 public import Lean.Data.Json
 public import Theory.Eval
@@ -269,6 +270,24 @@ structure Effect : Type 1 where
   command's application effects does not report it (a compute funding leg is validated and
   charged by the kernel). -/
   accounting : Bool := false
+  /-- **The compute funding leg the operation consents to**, if any: the asset, the credits and
+  the payer balance and Book root it expects. The transaction reads it here (`prepareCompute`
+  asks every target's declaration and matches on no payload kind); the Book it is charged on
+  is the transaction's. `none` (the default): the operation funds nothing. -/
+  funding : O → Option ResourceMoneyWire.FundingConsent := fun _ => none
+  /-- **The money consent the operation is**, if it is one: the positions on the shared Book the
+  signer consents to. The admitted batch's entries, policy slots, read coverage, footprints and
+  verbs are read here. `none` (the default): the operation consents to no Book position. -/
+  consent : O → Option ResourceMoneyWire.Consent := fun _ => none
+  /-- A consent's funding leg is the operation's funding leg: the two readers cannot disagree. -/
+  consent_funding : ∀ (op : O) (c : ResourceMoneyWire.Consent), consent op = some c →
+      funding op = c.funding := by
+    intro _ _ stated; cases stated
+  /-- Money is on the shared Book, never in the target: an operation that states a funding leg
+  or a consent leaves its own cell as loaded. -/
+  monetary_unchanging : ∀ (op : O), (funding op).isSome || (consent op).isSome = true →
+      unchanging = true := by
+    intro _ stated; cases stated
   /-- Whether the operation authors anything: a world write without actions is admitted and
   changes nothing, and is no one's publication. -/
   authors : O → Bool := fun _ => true

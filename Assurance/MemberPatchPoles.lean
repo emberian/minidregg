@@ -396,6 +396,15 @@ def wrongRoot : Digest := ⟨accountPre.root.value + 1⟩
   | _ => false)
 -- The target is a read guard, never a write; the plan of application effects leaves the funding
 -- out and reports the consent.
+-- What a payload funds and consents to is its declaration's answer. A funding funds and is no
+-- consent; a consent is itself and funds what it names; no other kind answers either reader.
+#guard decide ((Payload.computeFunding funding).funding? = some funding)
+#guard decide ((Payload.computeFunding funding).consent? = none)
+#guard decide ((Payload.moneyConsent consent).consent? = some consent)
+#guard decide ((Payload.moneyConsent consent).funding? = some funding)
+#guard decide ((Payload.moneyConsent ⟨none, [3], none⟩).funding? = none)
+#guard decide ((Payload.scalar []).funding? = none) && decide ((Payload.scalar []).consent? = none)
+#guard decide (Payload.read.funding? = none) && decide (Payload.read.consent? = none)
 #guard (moneyTarget (.computeFunding funding) .account 1 accountPre.root none).isRead
 #guard (moneyTarget (.moneyConsent consent) .account 1 accountPre.root none).isRead
 #guard Minidregg.Compiler.ObjectiveInvocationLayout.inert (.computeFunding funding)
