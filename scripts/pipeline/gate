@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/pipeline/gate SHA -- the gate for candidate $BUILDER_ROOT/candidates/SHA (was hbox's box-local gate15.sh).
 # harness = the candidate's own source.tar (HARNESS=<ref> overlays scripts/, deploy/spk-host and the journey harness
-# from that ref). tour (J0-J8 world + JWF dry) || composed (keep-going, edge dregg-infra) || enrol-resume || j14-apps,
+# from that ref). tour (J0-J8 world + JWF dry + THIN) || composed (keep-going, edge dregg-infra) || enrol-resume || j14-apps,
 # in parallel; then flatness alone (law 17, never another run's verdict); then gate-from-runs.py; then the sweep.
 # World-ups under the world-up flock. PHASES="tour composed enrol j14" selects phases; SUF names a rerun.
 # Box knobs (env; defaults are hbox's): BUILDER_ROOT (/home/hbox/lanes/integ), GATE_RUNS (the world roots, /ci),
@@ -38,8 +38,26 @@ tour() {
   setsid nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" > $G/serve-jwf.log 2>&1 < /dev/null & echo $! > $G/serve-jwf.pid
   for i in $(seq 1 100); do [ -S "$SOCKET" ] && break; sleep 0.3; done; sleep 2
   bash $SRC/native/resource-client/journey.d/jweb-frontend.sh --dry > $G/jwf.out 2> $G/jwf.err; echo "jwf rc=$?" >> $G/tour.log
+  # THIN (journey.d/jthin-consent.sh, the only journey of thin consent; it was red on main for days in 2026-11
+  # because no gate ran it). It runs here, on the tour's world and the same `mini serve`, AFTER the JWF dry run:
+  # THIN adds a kind, an instance and an object to the sponsor workspace, so it never precedes JWF's reads. The
+  # tour ends minutes before composed does, so the round's wall time does not move. Certified first, as
+  # journey.sh certifies between steps (the Store's tail bound). Rows: `thin-<row>` per passed row and one
+  # `thin-consent` row that carries the verdict (the hook stops at its first failed row).
+  local TD=$RUN/steps/THIN-gate trc tn
+  mkdir -p -m 700 "$TD"
+  "$MINI" checkpoint --action certify --workspace "$SPONSOR_WS" --control "$(jq -r .factoryControllerCapability $W/genesis.json)" \
+    --min-tail 64 > $TD/certify.json 2> $TD/certify.err
+  env JOURNEY_STEP_DIR=$TD NEWCOMER_WS=$WS NEWCOMER_SUBJECT=$SUBJECT SHELL_BIN=$MINI \
+    SPONSOR_SUBJECT="$(jq -r '.subject // 7' $SPONSOR_WS/workspace.json 2>/dev/null || echo 7)" \
+    timeout ${THIN_TIMEOUT_S:-900} bash $SRC/native/resource-client/journey.d/jthin-consent.sh > $G/thin.out 2> $G/thin.err; trc=$?
+  echo "thin rc=$trc" >> $G/tour.log
   kill "$(cat $G/serve-jwf.pid)" 2>/dev/null
   awk -F'\t' '$1 ~ /^(PASS|FAIL|UNCONFIGURED|UNJUDGED)$/ {print $2"\t"$1"\t"$3}' $G/jwf.out > $G/TOUR.tsv
+  awk -F'\t' 'NR > 1 && $4 == "PASS" {print "thin-" $1 "\tPASS\texpect " $2}' $TD/jthin-consent/rows.tsv >> $G/TOUR.tsv 2>/dev/null
+  tn=$(grep -c '^thin-' $G/TOUR.tsv)
+  if [ $trc = 0 ] && [ "$tn" -gt 0 ]; then printf 'thin-consent\tPASS\t%s rows\n' "$tn" >> $G/TOUR.tsv
+  else printf 'thin-consent\tFAIL\trc=%s after %s rows; %s; %s\n' "$trc" "$tn" "$(tail -n1 $G/thin.err | tr '\t' ' ' | cut -c1-160)" "$TD/jthin-consent/log" >> $G/TOUR.tsv; fi
   say "GATE $S8 tour: $(awk -F'\t' '{print $2}' $G/TOUR.tsv | sort | uniq -c | tr '\n' ' ')"
 }
 composed() {
