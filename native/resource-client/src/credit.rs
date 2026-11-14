@@ -1093,7 +1093,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let since = opt(&mut args, "since")?.unwrap_or_else(|| "0".into());
             let topic = opt(&mut args, "topic")?.unwrap_or_else(|| RENEW_TOPIC.into());
             args.finish()?;
-            print_json(&crate::fleet::incoming(&root, &account, &topic, &since, "64")?)
+            print_json(&crate::fleet::incoming(&root, &account, &topic, crate::fleet::Resume::Since(&since), "64")?)
         }
         "install" => {
             let name = text(args.required("room")?, "room")?;

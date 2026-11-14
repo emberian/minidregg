@@ -7635,9 +7635,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             return ((95 : UInt8), outcomeCodec.encode outcome)
                         | 96 =>
                             let (observationBytes, draftBytes) ← splitPair payload
-                            let opened ← sessionOpened pinnedConfig state
-                            let plan ← match ← NativeHost.fleetPlanAuthorizedLoaded
-                                pinnedConfig opened observationBytes draftBytes with
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            let plan ← match ← NativeHost.fleetPlanLight
+                                pinnedConfig light observationBytes draftBytes with
                               | .ok plan => pure plan
                               | .error refusal =>
                                   return ((255 : UInt8), refusalFrame "fleet-plan" refusal)
@@ -7654,9 +7654,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               throw (IO.userError "fleet turn ingress exceeds host frame bound")
                             return ((97 : UInt8), ingress)
                         | 98 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.fleetSubmitLoaded pinnedConfig opened payload
-                              (sessionConfirmed pinnedConfig state)
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            let outcome ← NativeHost.fleetSubmitLight pinnedConfig light payload
+                              (sessionConfirmed pinnedConfig state) (sessionAdopt pinnedConfig state light)
                             return ((98 : UInt8), outcomeCodec.encode outcome)
                         | 99 =>
                             let light := (← sessionCurrent pinnedConfig state).light

@@ -43,7 +43,7 @@ const USAGE: &str = "mini fleet-sign: dregg-client-sign's verbs as Mini fleet tu
        exit 0 only with the exact receipt of this turn\n\
   receipt (--turn-hash HEX64 | --head) [--profile P] [--home H]\n\
        the exact receipt of one transaction, or the profile account's newest fleet turn\n\
-  incoming [--topic S] [--since HEIGHT] [--limit N] [--profile P] [--home H]
+  incoming [--topic S] [--since HEIGHT | --after-seq N [--max-bytes B]] [--limit N] [--profile P] [--home H]
        the accepted fleet turns that paid the profile's account (Host op 180, behind the profile's
        signed observation of it), ascending above HEIGHT, on topic S (default: every topic)
   retry --attempt DIR [--profile P] [--home H]\n\
@@ -65,6 +65,8 @@ struct Flags {
     topic: String,
     topic_given: bool,
     since: String,
+    after_seq: Option<String>,
+    max_bytes: String,
     limit: String,
     to: Option<String>,
     amount: Option<String>,
@@ -130,6 +132,8 @@ fn parse(argv: Vec<OsString>) -> Result<Flags> {
         topic: "client-sign".into(),
         topic_given: false,
         since: "0".into(),
+        after_seq: None,
+        max_bytes: "262144".into(),
         limit: "64".into(),
         to: None,
         amount: None,
@@ -153,6 +157,8 @@ fn parse(argv: Vec<OsString>) -> Result<Flags> {
                 flags.topic_given = true;
             }
             "--since" => flags.since = value("--since")?,
+            "--after-seq" => flags.after_seq = Some(value("--after-seq")?),
+            "--max-bytes" => flags.max_bytes = value("--max-bytes")?,
             "--limit" => flags.limit = value("--limit")?,
             "--to" => flags.to = Some(value("--to")?),
             "--amount" => flags.amount = Some(value("--amount")?),
@@ -791,7 +797,11 @@ fn incoming(flags: &Flags) -> Result<Value> {
     let profile = profile(flags)?;
     let (agent, _, record) = joined(flags, &profile)?;
     let topic = if flags.topic_given { flags.topic.as_str() } else { "" };
-    let ledger = fleet::incoming(&agent.root, ACCOUNT, topic, &flags.since, &flags.limit)?;
+    let resume = match &flags.after_seq {
+        Some(after) => fleet::Resume::AfterSeq { after, max_bytes: &flags.max_bytes },
+        None => fleet::Resume::Since(&flags.since),
+    };
+    let ledger = fleet::incoming(&agent.root, ACCOUNT, topic, resume, &flags.limit)?;
     Ok(merge(json!({"profile": profile.name, "cell": record["account"]}), ledger))
 }
 
@@ -946,6 +956,9 @@ mod tests {
         let one = parse(argv(&["incoming", "--home", "/h", "--topic", "inbox", "--since", "7", "--limit", "3"])).unwrap();
         assert!(one.topic_given);
         assert_eq!((one.topic.as_str(), one.since.as_str(), one.limit.as_str()), ("inbox", "7", "3"));
+        assert!(one.after_seq.is_none());
+        let paged = parse(argv(&["incoming", "--home", "/h", "--after-seq", "5", "--max-bytes", "900"])).unwrap();
+        assert_eq!((paged.after_seq.as_deref(), paged.max_bytes.as_str()), (Some("5"), "900"));
     }
 
     #[test]

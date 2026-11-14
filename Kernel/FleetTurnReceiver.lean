@@ -59,46 +59,46 @@ def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNul
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {tariff : CreationTariff} {ambient : Ambient}
-  {durable : Durable} {command : Command}
+  {ground : ServedBasis.Ground deployment} {command : Command}
 
-def bookWrite (prepared : Prepared deployment profile tariff ambient durable command) : DataWrite :=
+def bookWrite (prepared : Prepared deployment profile tariff ambient ground command) : DataWrite :=
   ResourceBirthController.Concrete.packedWrite deployment.resourceBookId
     ⟨.resourceBook, prepared.book.payload⟩ ⟨.resourceBook, prepared.resources.post⟩
 
-def topicWrites (prepared : Prepared deployment profile tariff ambient durable command) :
+def topicWrites (prepared : Prepared deployment profile tariff ambient ground command) :
     List DataWrite :=
   prepared.topic.toList.flatMap TopicPlan.writes
 
-def writes (prepared : Prepared deployment profile tariff ambient durable command) : List DataWrite :=
+def writes (prepared : Prepared deployment profile tariff ambient ground command) : List DataWrite :=
   bookWrite prepared :: topicWrites prepared
 
 /-- All authenticated law heads, pinned predecessors and structural roots.
 PhysicalShape requires successful resolution before getD can supply any guards. -/
-def sourceGuards (prepared : Prepared deployment profile tariff ambient durable command) :
+def sourceGuards (prepared : Prepared deployment profile tariff ambient ground command) :
     List ReadGuard :=
   ((lawReadGuards prepared).getD []).map fun guard => ⟨⟨guard.1⟩, guard.2⟩
 
-def readGuards (prepared : Prepared deployment profile tariff ambient durable command) :
+def readGuards (prepared : Prepared deployment profile tariff ambient ground command) :
     List ReadGuard :=
   let written := (writes prepared).map DataWrite.cellId
-  (sourceGuards prepared ++ prepared.authority.readGuards).filter fun guard =>
+  (sourceGuards prepared ++ ground.authorityReadGuards).filter fun guard =>
     guard.cellId ∉ written
 
-def PhysicalShape (prepared : Prepared deployment profile tariff ambient durable command) : Prop :=
+def PhysicalShape (prepared : Prepared deployment profile tariff ambient ground command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
-    (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+    (∀ write ∈ writes prepared, write.expectedPre = ground.view.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (lawReadGuards prepared).isSome = true ∧
-    (∀ guard ∈ sourceGuards prepared ++ prepared.authority.readGuards,
-      guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
+    (∀ guard ∈ sourceGuards prepared ++ ground.authorityReadGuards,
+      guard.expectedRoot = ground.view.model.roots guard.cellId)
 
 instance physicalShapeDecidable
-    (prepared : Prepared deployment profile tariff ambient durable command) :
+    (prepared : Prepared deployment profile tariff ambient ground command) :
     Decidable (PhysicalShape prepared) := by
   unfold PhysicalShape
   infer_instance
 
-theorem writes_roots_bound (prepared : Prepared deployment profile tariff ambient durable command)
+theorem writes_roots_bound (prepared : Prepared deployment profile tariff ambient ground command)
     (write : DataWrite) (member : write ∈ writes prepared) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
   rcases List.mem_cons.mp member with rfl | rest
@@ -109,20 +109,20 @@ theorem writes_roots_bound (prepared : Prepared deployment profile tariff ambien
     · exact StreamWrite.headWrite_root _ _ _
     · exact StreamWrite.entryWrite_root _
 
-theorem readGuards_readonly (prepared : Prepared deployment profile tariff ambient durable command)
+theorem readGuards_readonly (prepared : Prepared deployment profile tariff ambient ground command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
     guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
   exact of_decide_eq_true (List.mem_filter.mp member).2
 
 structure AcceptedTurn [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (tariff : CreationTariff) (ambient : Ambient)
-    (durable : Durable) (ingress : DecodedIngress) where
+    (ground : ServedBasis.Ground deployment) (ingress : DecodedIngress) where
   private mk ::
-  prepared : Prepared deployment profile tariff ambient durable ingress.command
+  prepared : Prepared deployment profile tariff ambient ground ingress.command
   accepted : FleetTurn.Accepted prepared ingress
   physical : PhysicalShape prepared
 theorem AcceptedTurn.sound [DecidableEq F] {ingress : DecodedIngress}
-    (accepted : AcceptedTurn deployment profile tariff ambient durable ingress) :
+    (accepted : AcceptedTurn deployment profile tariff ambient ground ingress) :
     accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
     CanonicalResourceKernel.AcceptedBatch accepted.prepared.book.payload
       (batch tariff ingress.command) ∧
@@ -131,9 +131,10 @@ theorem AcceptedTurn.sound [DecidableEq F] {ingress : DecodedIngress}
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (tariff : CreationTariff) (ambient : Ambient)
-    (durable : Durable) (native : CredentialSignatureIO.NativeConfig) (ingress : DecodedIngress) :
-    IO (Except Reject (AcceptedTurn deployment profile tariff ambient durable ingress)) := do
-  match prepare deployment profile tariff ambient durable ingress.command with
+    (ground : ServedBasis.Ground deployment) (native : CredentialSignatureIO.NativeConfig)
+    (ingress : DecodedIngress) :
+    IO (Except Reject (AcceptedTurn deployment profile tariff ambient ground ingress)) := do
+  match prepare deployment profile tariff ambient ground ingress.command with
   | .error reason => return .error reason
   | .ok prepared =>
     if physical : PhysicalShape prepared then
@@ -145,12 +146,12 @@ def admitDecodedNative [DecidableEq F] (deployment : Deployment)
 variable [DecidableEq F] {ingress : DecodedIngress}
 
 /-- `feeDebit` is the exact Book fee posted to the collector. -/
-def charge (accepted : AcceptedTurn deployment profile tariff ambient durable ingress) :
+def charge (accepted : AcceptedTurn deployment profile tariff ambient ground ingress) :
     ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+  | .storageBytes => DeployedCharge.storageCharge ground.view
       (writes accepted.prepared)
       (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.envelope.length
@@ -158,7 +159,7 @@ def charge (accepted : AcceptedTurn deployment profile tariff ambient durable in
   | .feeDebit => ingress.command.fee
   | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-def intent (accepted : AcceptedTurn deployment profile tariff ambient durable ingress) :
+def intent (accepted : AcceptedTurn deployment profile tariff ambient ground ingress) :
     DataIntent rootBytes where
   transactionId := transactionId deployment.domain profile.semantics ingress
   subject := some ingress.command.subject
@@ -178,18 +179,6 @@ structure Receipt where
 def receipt (domain semantics : Digest) (ingress : DecodedIngress) : Receipt :=
   ⟨transactionId domain semantics ingress, (event domain semantics ingress).eventId⟩
 
-def replay (domain semantics : Digest) (durable : Durable) (ingress : DecodedIngress) :
-    Option (Except Unit Receipt) :=
-  match DurableCommitProtocol.Snapshot.lookupRecorded
-      (transactionId domain semantics ingress) durable.snapshot.model.journal with
-  | none => none
-  | some recorded =>
-    if recorded.transactionId = transactionId domain semantics ingress ∧
-        recorded.event.event = event domain semantics ingress ∧
-        recorded.nullifiers = [nullifier domain semantics ingress] then
-      some (.ok (receipt domain semantics ingress))
-    else some (.error ())
-
 /-- A recorded intent is exactly this ingress's: its transaction id, its event (the whole
 signed ingress) and its one nullifier. -/
 def exactRecord (domain semantics : Digest) (ingress : DecodedIngress)
@@ -198,9 +187,14 @@ def exactRecord (domain semantics : Digest) (ingress : DecodedIngress)
     recorded.event.event = event domain semantics ingress ∧
     recorded.nullifiers = [nullifier domain semantics ingress])
 
+/-- The keys a turn consults beyond the state: its transaction id (replay detection,
+`replayOn`) and its operation marker's nullifier (`FleetTurn.Prepared.unspent`). A light
+basis for a turn declares these. -/
+def turnKeys (domain semantics : Digest) (ingress : DecodedIngress) : DurableView.Keys :=
+  ⟨[transactionId domain semantics ingress], [nullifier domain semantics ingress]⟩
+
 /-- The replay verdict on a ground, read only through its answer for the turn's transaction
-id (`ServedBasis.Ground.replayOf`): the light lookup's one journal read. On the full ground
-it is `replay`'s verdict (`recorded_full`). -/
+id (`ServedBasis.Ground.replayOf`): one journal read on the light route. -/
 def replayOn (domain semantics : Digest) (ground : ServedBasis.Ground deployment)
     (ingress : DecodedIngress) : ServedBasis.Ground.Replay Receipt :=
   ground.replayOf (transactionId domain semantics ingress) (exactRecord domain semantics ingress)
@@ -215,25 +209,44 @@ inductive Result where
   | unavailable (detail : String)
   | uncertain (detail : String)
 
-def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (tariff : CreationTariff) (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (transport : DurableReceiverIO.Transport) (durable : Durable)
-    (bytes : List UInt8) : IO Result := do
+/-- **The light fleet receive.** The turn's keys (`turnKeys`) are read from the authenticated
+history into a basis (`basisOf`, the light opening's `Light.basisVia`); the replay check, the
+preparation and the admission run on `Ground.ofBasis`; the commit is
+`DurableServed.receiveServed` on the light opening. Nothing opens the full materialization.
+The admission height is `genesisHeight + basis.height`. -/
+def receiveServed (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (tariff : CreationTariff) (federation : FederationId) (genesisHeight : Nat)
+    (native : CredentialSignatureIO.NativeConfig) (transport : DurableReceiverIO.Transport)
+    (opening : DurableServed.Opening rootBytes)
+    (basisOf : DurableView.Keys →
+      IO (Except String (ServedBasis.Basis deployment opening.store)))
+    (bytes : List UInt8)
+    (adopt : (next : DurableServed.Opening rootBytes) → (written : List DurableDataIntent.CellId) →
+      DurableServed.Served.Moved opening.served next.served written →
+      Option CredentialAuthorityServed.HeldCell → IO Unit :=
+      fun _ _ _ _ => pure ()) : IO Result := do
   let some ingress := decodeIngress bytes
     | return .rejected .malformedIngress
-  match replay deployment.domain profile.semantics durable ingress with
-  | some (.ok prior) => return .confirmed .replayed prior
-  | some (.error _) => return .transactionConflict
-  | none =>
-    match ← admitDecodedNative deployment profile tariff ambient durable native ingress with
-    | .error reason => return .rejected reason
-    | .ok accepted =>
-      match ← DurableReceiverIO.receiveLoaded transport rootBytes durable (intent accepted) with
-      | .confirmed kind _ =>
-          return .confirmed kind (receipt deployment.domain profile.semantics ingress)
-      | .rejected reason => return .durableRejected reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail
-      | .uncertain detail => return .uncertain detail
+  match ← basisOf (turnKeys deployment.domain profile.semantics ingress) with
+  | .error detail => return .unavailable detail
+  | .ok basis =>
+      let ground : ServedBasis.Ground deployment := .ofBasis basis
+      match replayOn deployment.domain profile.semantics ground ingress with
+      | .original prior => return .confirmed .replayed prior
+      | .conflict => return .transactionConflict
+      | .undeclared => return .unavailable "the basis does not answer for the turn's transaction id"
+      | .fresh =>
+          match ← admitDecodedNative deployment profile tariff
+              ⟨federation, genesisHeight + basis.height⟩ ground native ingress with
+          | .error reason => return .rejected reason
+          | .ok accepted =>
+              let issued := receipt deployment.domain profile.semantics ingress
+              match ← DurableServed.receiveServed transport rootBytes opening (intent accepted) with
+              | .appended kind next _ _ _ _ moved => do adopt next _ moved none; return .confirmed kind issued
+              | .replayed _ => return .confirmed .replayed issued
+              | .rejected reason => return .durableRejected reason
+              | .contention => return .contention
+              | .unavailable detail => return .unavailable detail
+              | .uncertain detail => return .uncertain detail
 
 end Minidregg.Kernel.FleetTurnReceiver

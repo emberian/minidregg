@@ -1967,23 +1967,22 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
         trackOfWorld rootBytes image (DurableEngine.resume_of_resumeEngine found) world,
         chainLog, chainLogExact⟩, rfl, rfl, rfl, rfl⟩
 
-/-- **The opening cut at `height`, at or above its own base** (CONSENT-STORE): the
-base the Store's open used (its MAC-verified checkpoint, or the seed) is kept, the
-records from the base to `height` are replayed through the executor and folded as
-turns from the base's World (`Chained.baseWorld`), the chain is read off the open's
-verified prefixes and the stored roots are the verified tags'. Nothing below the base
-is executed or folded: the cost is the records between the base and `height`, at most
-the checkpoint interval when `height` is the head's checkpoint or an anchor above it. -/
-def Chained.cutAbove {rootBytes : List UInt8 → Digest} (opened : Chained rootBytes) (height : Nat) :
+/-- **The opening cut at `height`, over a base at or below it**: the image is the first
+`height` records, replayed through the executor from `base` (a state after `baseHeight`
+records: the Store's own base for `cutAbove`, or an earlier checkpoint for a cut below it,
+`Reader.stateAt`); the chain is read off the open's verified prefixes and the stored roots are
+the verified tags'. The base's authenticity is the caller's; nothing below it is executed. -/
+def Chained.cutAt {rootBytes : List UInt8 → Digest} (opened : Chained rootBytes) (height : Nat)
+    (baseHeight : Nat) (base : State) (world : Except String HostRefinesWorld.DWorld) :
     Except String {cut : Loaded rootBytes //
       cut.image = Image.ofAccepted opened.loaded.image.seed (opened.loaded.image.accepted.take height) ∧
-        cut.logStart = opened.loaded.logStart ∧ cut.baseHeight = opened.loaded.baseHeight ∧
-        cut.base = opened.loaded.base} :=
+        cut.logStart = opened.loaded.logStart ∧ cut.baseHeight = baseHeight ∧
+        cut.base = base} :=
   let loaded := opened.loaded
   if within : height ≤ loaded.height then
     have withinAccepted : height ≤ loaded.image.accepted.length := by
       simpa only [Loaded.height_eq] using within
-    if based : loaded.baseHeight ≤ height then
+    if based : baseHeight ≤ height then
       match found : opened.chains[height]? with
       | none => .error "durable chain prefix unavailable at the requested height"
       | some chain =>
@@ -1997,17 +1996,32 @@ def Chained.cutAbove {rootBytes : List UInt8 → Digest} (opened : Chained rootB
               chainPrefixes loaded.logStart (loaded.image.accepted.take height) := by
             rw [List.toList_toArray, loaded.chainLogExact,
               DurableLogTags.chainPrefixes_take _ _ _ withinAccepted]
-          let between := (loaded.image.accepted.take height).drop loaded.baseHeight
-          Loaded.build (Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height)) loaded.baseHeight
-            loaded.base (by simpa only [Image.accepted_ofAccepted, List.length_take,
+          Loaded.build (Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height)) baseHeight
+            base (by simpa only [Image.accepted_ofAccepted, List.length_take,
               Nat.min_eq_left withinAccepted] using based)
             loaded.logStart chain (by simpa only [Image.accepted_ofAccepted] using chainExact)
             (loaded.rootLog.extract 0 height) (by simpa only [Image.accepted_ofAccepted] using sized)
             (loaded.chainLog.toList.take (height + 1)).toArray
             (by simpa only [Image.accepted_ofAccepted] using cutLog)
-            (opened.baseWorld.bind fun w => foldRecords rootBytes w loaded.baseHeight between)
-    else .error s!"height {height} is below the Store's base at {loaded.baseHeight}"
+            world
+    else .error s!"height {height} is below the base at {baseHeight}"
   else .error "durable log is shorter than the requested height"
+
+/-- **The opening cut at `height`, at or above its own base** (CONSENT-STORE): the
+base the Store's open used (its MAC-verified checkpoint, or the seed) is kept, the
+records from the base to `height` are replayed through the executor and folded as
+turns from the base's World (`Chained.baseWorld`), the chain is read off the open's
+verified prefixes and the stored roots are the verified tags'. Nothing below the base
+is executed or folded: the cost is the records between the base and `height`, at most
+the checkpoint interval when `height` is the head's checkpoint or an anchor above it. -/
+def Chained.cutAbove {rootBytes : List UInt8 → Digest} (opened : Chained rootBytes) (height : Nat) :
+    Except String {cut : Loaded rootBytes //
+      cut.image = Image.ofAccepted opened.loaded.image.seed (opened.loaded.image.accepted.take height) ∧
+        cut.logStart = opened.loaded.logStart ∧ cut.baseHeight = opened.loaded.baseHeight ∧
+        cut.base = opened.loaded.base} :=
+  opened.cutAt height opened.loaded.baseHeight opened.loaded.base
+    (opened.baseWorld.bind fun w => foldRecords rootBytes w opened.loaded.baseHeight
+      ((opened.loaded.image.accepted.take height).drop opened.loaded.baseHeight))
 
 /-- **A cell's bytes at log height `height`** (K-HISTORY-READ): its last write among the
 first `height` accepted records, else its seeded bytes, else the deployment's fresh image:

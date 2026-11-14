@@ -1401,7 +1401,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (ParticipantFactoryProvisioningReceiver.intent accepted)
   | fleetTurn {ingress : FleetTurn.DecodedIngress}
       (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile opened.pins.tariff
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (FleetTurnReceiver.intent accepted)
   | payBook {ingress : PayBookReceiver.DecodedIngress}
       (accepted : PayBookReceiver.AcceptedChange config.deployment config.profile
@@ -2584,7 +2584,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok reserved => return .ok (Derived.ofJointReserve reserved)
   if let some ingress := FleetTurn.decodeIngress bytes then
     match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile opened.pins.tariff
-        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+        ⟨config.federation, height⟩ opened.ground config.signature ingress with
     | .error reason => return .error s!"fleet turn refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨FleetTurnReceiver.intent accepted,

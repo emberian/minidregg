@@ -75,6 +75,24 @@ row "incoming --since the returned cursor: nothing newer" "no entries" \
   "rc $RC, cursor '${CUR:-none}', $(jq -c '(.entries|length)' "$OUT" 2>/dev/null) entries" \
   "$([ "$RC" = 0 ] && [ -n "$CUR" ] && [ "$CUR" != 0 ] && jq -e '(.entries | length) == 0' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
 
+SEQ=$(jq -r '.resumeSeq // empty' "$D/log/in4.out" 2>/dev/null)
+run in6 FS incoming --profile "$PB" --after-seq 0 --limit 1
+row "incoming --after-seq 0 --limit 1: one page of rows from the first position" "page.state rows, firstSeq 1, one entry (25), resumeSeq 1" \
+  "rc $RC, $(jq -c '{page,resumeSeq,amounts:[.entries[] | .amount]}' "$OUT" 2>/dev/null | cut -c1-160)" \
+  "$([ "$RC" = 0 ] && jq -e '.page.state == "rows" and .page.firstSeq == "1" and .resumeSeq == "1" and [.entries[] | .amount] == ["25"]' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+run in7 FS incoming --profile "$PB" --after-seq 1
+row "incoming --after-seq 1: the page resumes at the next payment, none repeated" "page.state rows, firstSeq 2, one entry (3), resumeSeq 2" \
+  "rc $RC, $(jq -c '{page,resumeSeq,amounts:[.entries[] | .amount]}' "$OUT" 2>/dev/null | cut -c1-160)" \
+  "$([ "$RC" = 0 ] && jq -e '.page.state == "rows" and .page.firstSeq == "2" and .resumeSeq == "2" and [.entries[] | .amount] == ["3"]' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+run in8 FS incoming --profile "$PB" --after-seq "${SEQ:-0}"
+row "incoming --after-seq the returned resumeSeq: the tip, named" "page.state tip with count 2, no entries" \
+  "rc $RC, resumeSeq '${SEQ:-none}', $(jq -c '{page,n:(.entries|length)}' "$OUT" 2>/dev/null | cut -c1-120)" \
+  "$([ "$RC" = 0 ] && [ "$SEQ" = 2 ] && jq -e '.page.state == "tip" and .page.count == "2" and (.entries | length) == 0' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+run in9 FS incoming --profile "$PB" --after-seq 1 --max-bytes 1
+row "incoming --max-bytes 1: a payment larger than the budget is named, not skipped" "page.state oversize at seq 2, no entries, resumeSeq 1" \
+  "rc $RC, $(jq -c '{page,resumeSeq,n:(.entries|length)}' "$OUT" 2>/dev/null | cut -c1-120)" \
+  "$([ "$RC" = 0 ] && jq -e '.page.state == "oversize" and .page.seq == "2" and .resumeSeq == "1" and (.entries | length) == 0' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+
 cp "$D/log/in4.out" "$D/in4.expected"
 run shim env MINI_BIN="$MINI" "$HERE/../dregg-client-sign" incoming --profile "$PB"
 row "the helm adapter (dregg-client-sign) answers what mini fleet-sign does" "byte-identical incoming answer" \

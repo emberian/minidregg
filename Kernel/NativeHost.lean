@@ -1735,28 +1735,37 @@ def provisionSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened
 
 /-- The finalized command fills exactly two draft fields: the pinned base
 tariff and, when the draft's publication position is zero, the stream's next
-position on this image. Every other field is the draft's. -/
-def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.Command) :
-    FleetTurn.Command :=
+position in the directory it is given. Every other field is the draft's. -/
+def fleetFinalize (config : Config) (tariff : CreationTariff)
+    (directory : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
+    (draft : FleetTurn.Command) : FleetTurn.Command :=
   let publication := draft.publication.map fun publication =>
     if publication.sequence = 0 then
-      let head := FleetTurn.streamHead config.deployment opened.directory.directory
+      let head := FleetTurn.streamHead config.deployment directory
         (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
       { publication with sequence := head.nextSeq }
     else publication
-  { draft with fee := opened.pins.tariff.base, publication := publication }
+  { draft with fee := tariff.base, publication := publication }
 
-def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetTurn.Command) :
+/-- The signing plan of a finalized command on a ground: the light basis that declares the
+command's operation marker (`fleetPlanKeys`), at logical height `height`. -/
+def fleetPlanOn (config : Config) (tariff : CreationTariff)
+    (ground : ServedBasis.Ground config.deployment) (height : Nat) (command : FleetTurn.Command) :
     Except String FleetTurn.SigningPlan := do
-  let ambient : FleetTurn.Ambient := ⟨config.federation, logicalHeight config opened.durable⟩
-  let prepared ← (FleetTurn.prepare config.deployment config.profile opened.pins.tariff ambient
-    opened.durable command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
-  let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
+  let ambient : FleetTurn.Ambient := ⟨config.federation, height⟩
+  let _prepared ← (FleetTurn.prepare config.deployment config.profile tariff ambient
+    ground command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
+  let selected ← (CredentialSignatureAdmission.signingHeader ground.authority
     (FleetTurn.marker config.deployment.domain config.profile.semantics command)
-    ⟨.account, FleetTurn.request prepared.authority.snapshot config.profile.semantics ambient
+    ⟨.account, FleetTurn.request ground.authority config.profile.semantics ambient
       command⟩).mapError (fun reason => s!"fleet turn signer key: {repr reason}")
   pure ⟨config.deployment.domain, config.profile.semantics, FleetTurn.commandCodec.encode command,
     CredentialSignedEnvelopeController.headerCodec.encode selected⟩
+
+/-- The one key a plan reads beyond the state: the command's operation marker. -/
+def fleetPlanKeys (config : Config) (command : FleetTurn.Command) : DurableView.Keys :=
+  ⟨[], [CredentialAuthorityReplay.nullifier config.deployment.domain
+    (FleetTurn.marker config.deployment.domain config.profile.semantics command)]⟩
 
 /-- Planning reads the paying account's balance and topic head, so it is
 released only behind a current signed observation of that account by the
@@ -1788,18 +1797,51 @@ def fleetObservedLight (config : Config) (light : NativeHostLight.Light config)
   | .error detail => return .error { reason := .operationRejected, detail := detail }
   | .ok basis => fleetObservedOn config (.ofBasis basis) signedObservationBytes
 
-def fleetPlanAuthorizedLoaded (config : Config) (opened : Opened config)
-    (signedObservationBytes draftBytes : List UInt8) :
-    IO (Except Refusal FleetTurn.SigningPlan) := do
+/-- Op 96 over what it is given: the observed (signer, account), the tariff and directory
+the draft is finalized from, and the ground (with its logical height) the finalized command
+is prepared on. One program for the session's light opening and for a full peer's image. -/
+def fleetPlanAuthorizedWith (config : Config) (tariff : CreationTariff)
+    (directory : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
+    (observed : IO (Except Refusal (SubjectId × Nat)))
+    (groundOf : FleetTurn.Command → IO (Except Refusal (ServedBasis.Ground config.deployment × Nat)))
+    (draftBytes : List UInt8) : IO (Except Refusal FleetTurn.SigningPlan) := do
   let some draft := FleetTurn.commandCodec.decode draftBytes
     | return .error { reason := .malformed, detail := "noncanonical fleet turn draft" }
-  match ← fleetObservedAccount config opened signedObservationBytes with
+  match ← observed with
   | .error refusal => return .error refusal
   | .ok (subject, account) =>
       if subject != draft.subject || account != draft.payer then
         return .error (.of .malformed)
-      return ((fleetPlanLoaded config opened (fleetFinalize config opened draft)).mapError
-        fun detail => { reason := .operationRejected, detail := detail })
+      let command := fleetFinalize config tariff directory draft
+      match ← groundOf command with
+      | .error refusal => return .error refusal
+      | .ok (ground, height) =>
+          return ((fleetPlanOn config tariff ground height command).mapError
+            fun detail => { reason := .operationRejected, detail := detail })
+
+/-- Op 96 on the session's light opening: the observation is authorized on the served state,
+the draft finalized from the held directory, and the plan prepared on a basis declaring the
+command's marker (one index read). No full image. -/
+def fleetPlanLight (config : Config) (light : NativeHostLight.Light config)
+    (signedObservationBytes draftBytes : List UInt8) :
+    IO (Except Refusal FleetTurn.SigningPlan) :=
+  fleetPlanAuthorizedWith config light.opened.pins.tariff light.opened.directory.directory
+    (fleetObservedLight config light signedObservationBytes)
+    (fun command => do
+      match ← light.basis (fleetPlanKeys config command) with
+      | .error detail => return .error { reason := .operationRejected, detail := detail }
+      | .ok basis => return .ok (.ofBasis basis, config.genesisHeight + basis.height))
+    draftBytes
+
+/-- Op 96 recomputed by a full peer on the image it admitted (the consent provider's check of
+the plan it is asked to sign). -/
+def fleetPlanAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes draftBytes : List UInt8) :
+    IO (Except Refusal FleetTurn.SigningPlan) :=
+  fleetPlanAuthorizedWith config opened.pins.tariff opened.directory.directory
+    (fleetObservedAccount config opened signedObservationBytes)
+    (fun _ => pure (.ok (opened.ground, logicalHeight config opened.durable)))
+    draftBytes
 
 def fleetAssemble (plan : FleetTurn.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do
@@ -1811,19 +1853,20 @@ def fleetAssemble (plan : FleetTurn.SigningPlan) (signature : List UInt8) :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (FleetTurn.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-/-- `confirm` seals the original receipt from the image the caller already
-tracks (a session refreshes by the appended delta); it never substitutes a
-different admission. -/
-def fleetSubmitLoaded (config : Config) (opened : Opened config)
+/-- Op 98 on the session's light opening (`FleetTurnReceiver.receiveServed`): the turn's
+keys read into a basis, admission on its ground, the commit on the opening. `confirm` seals
+the original receipt; it never substitutes a different admission. -/
+def fleetSubmitLight (config : Config) (light : NativeHostLight.Light config)
     (bytes : List UInt8)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) :
     IO Outcome := do
-  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile opened.pins.tariff
-      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-      config.transport opened.durable bytes with
+  match ← FleetTurnReceiver.receiveServed config.deployment config.profile light.opened.pins.tariff
+      config.federation config.genesisHeight config.signature config.transport light.opening
+      (light.basisVia config.transport) bytes adopt with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-  -- The signed header names an authority root older than the loaded one: the
-  -- plan was made against an earlier image and nothing moved. That is the
+  -- The signed header names an authority root older than the served one: the
+  -- plan was made against an earlier state and nothing moved. That is the
   -- typed contention outcome (re-plan against the new state), decided from the
   -- header's root before any signature is examined.
   | .rejected (.signature (.envelope .staleAuthority)) => return .contention

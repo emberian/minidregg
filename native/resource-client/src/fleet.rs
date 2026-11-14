@@ -1029,30 +1029,87 @@ pub(crate) fn account_balance(root: &Path, name: &str) -> Result<(String, String
     ))
 }
 
-/// The incoming ledger of account reference `name` (Host op 180): accepted
-/// fleet turns that paid it above `since`, on `topic` (empty = every topic),
-/// behind this reader's signed observation of the account. Each entry gains
-/// `payloadText` when its payload is UTF-8.
-pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit: &str) -> Result<Value> {
-    canonical_decimal(since, "--since")?;
+/// Where an incoming-ledger read resumes: every payment above a logical height (the first
+/// read, or a reader that kept only a height), or after a position in the account's ledger
+/// (`resumeSeq` of the page before, under a byte budget).
+pub(crate) enum Resume<'a> {
+    Since(&'a str),
+    AfterSeq { after: &'a str, max_bytes: &'a str },
+}
+
+/// The page a Host answer claims, checked against its entries: `rows` is non-empty, starts
+/// right after the cursor and advances the resume position by its length; `tip`, `gap` and
+/// `oversize` carry no entries, and only a gap moves the resume position (to the last position
+/// whose record the Host does not hold). An answer with neither rows nor a named state is
+/// refused: an empty page is never a successful read.
+fn check_page(value: &Value, entries: usize, limit: u128) -> Result<&str> {
+    let number = |object: &Value, key: &str| -> Result<u128> {
+        field(object, key)?.parse().map_err(|_| format!("incoming ledger {key} out of range"))
+    };
+    let page = value.get("page").ok_or("incoming ledger names no page state")?;
+    let after = number(value, "afterSeq")?;
+    let resume = number(value, "resumeSeq")?;
+    let state = field(page, "state")?;
+    match state {
+        "rows" => {
+            let rows = number(page, "rows")?;
+            if entries == 0 || rows != entries as u128 || rows > limit.max(1) {
+                return Err("incoming ledger page does not hold the rows it counts".into());
+            }
+            if number(page, "firstSeq")? != after + 1 || resume != after + rows {
+                return Err("incoming ledger page does not start after the cursor".into());
+            }
+        }
+        "tip" | "oversize" => {
+            if entries != 0 || resume != after {
+                return Err(format!("incoming ledger {state} page carries rows or moves the cursor"));
+            }
+        }
+        "gap" => {
+            if entries != 0 || number(page, "throughSeq")? != resume || resume <= after {
+                return Err("incoming ledger gap does not name the position it runs through".into());
+            }
+        }
+        other => return Err(format!("incoming ledger page state {other} is not known")),
+    }
+    Ok(state)
+}
+
+/// The incoming ledger of account reference `name` (Host op 180): one page of the accepted
+/// fleet turns that paid it, on `topic` (empty = every topic), behind this reader's signed
+/// observation of the account. The answer names what the page is (`page.state`: `rows`, `tip`,
+/// `gap`, `oversize`) and where the next read resumes (`resumeSeq`, for `--after-seq`). Each
+/// entry gains `payloadText` when its payload is UTF-8.
+pub(crate) fn incoming(root: &Path, name: &str, topic: &str, resume: Resume, limit: &str) -> Result<Value> {
     canonical_decimal(limit, "--limit")?;
     if topic.len() > MAX_TOPIC {
         return Err("topic must be 0..64 bytes".into());
     }
+    let (request, floor) = match resume {
+        Resume::Since(since) => {
+            canonical_decimal(since, "--since")?;
+            (json!({"topic":hex(topic.as_bytes()),"cursor":since,"limit":limit}),
+                since.parse::<u128>().map_err(|_| "--since out of range")?)
+        }
+        Resume::AfterSeq { after, max_bytes } => {
+            canonical_decimal(after, "--after-seq")?;
+            canonical_decimal(max_bytes, "--max-bytes")?;
+            (json!({"topic":hex(topic.as_bytes()),"afterSeq":after,"limit":limit,"maxBytes":max_bytes}), 0)
+        }
+    };
     let agent = agent(root)?;
     let reference = account(&agent, name)?;
     let (_, signed) = observe(&agent, &reference)?;
-    let request = serde_json::to_vec(&json!({"topic":hex(topic.as_bytes()),"cursor":since,"limit":limit}))
-        .map_err(|error| error.to_string())?;
+    let request = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
     let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_INCOMING_LEDGER, &mini_sdk::local::pair_nonempty(&signed, &request)?)?;
     let mut value: Value =
         serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_INCOMING_LEDGER)?).map_err(|error| error.to_string())?;
     if field(&value, "account")? != field(&reference, "target")? || field(&value, "topic")? != hex(topic.as_bytes()) {
         return Err("incoming ledger answered for another account or topic".into());
     }
-    let floor: u128 = since.parse().map_err(|_| "--since out of range")?;
     let mut previous = floor;
     let mut entries = value["entries"].as_array().cloned().unwrap_or_default();
+    check_page(&value, entries.len(), limit.parse().map_err(|_| "--limit out of range")?)?;
     for entry in &mut entries {
         let height: u128 = field(entry, "height")?.parse().map_err(|_| "ledger height out of range")?;
         if height <= previous {
@@ -1308,8 +1365,18 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .map(|value| text(value, "--limit"))
                 .transpose()?
                 .unwrap_or_else(|| "64".into());
+            let after = args.optional("after-seq").map(|value| text(value, "--after-seq")).transpose()?;
+            let max_bytes = args
+                .optional("max-bytes")
+                .map(|value| text(value, "--max-bytes"))
+                .transpose()?
+                .unwrap_or_else(|| "262144".into());
             args.finish()?;
-            print_json(&incoming(&agent.root, &name, &topic, &since, &limit)?)
+            let resume = match &after {
+                Some(after) => Resume::AfterSeq { after, max_bytes: &max_bytes },
+                None => Resume::Since(&since),
+            };
+            print_json(&incoming(&agent.root, &name, &topic, resume, &limit)?)
         }
         "feed" => {
             let names = text(args.required("accounts")?, "account references")?;
@@ -1327,6 +1394,35 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn incoming_page_is_rows_or_a_named_state_never_an_empty_success() {
+        use serde_json::json;
+        let rows = json!({"afterSeq":"2","resumeSeq":"4","page":{"state":"rows","firstSeq":"3","rows":"2"}});
+        assert_eq!(super::check_page(&rows, 2, 8), Ok("rows"));
+        // The entries are not the rows it counts; a page of rows is never empty.
+        assert!(super::check_page(&rows, 1, 8).is_err());
+        let empty = json!({"afterSeq":"2","resumeSeq":"2","page":{"state":"rows","firstSeq":"3","rows":"0"}});
+        assert!(super::check_page(&empty, 0, 8).is_err());
+        // A page that skips a position, or resumes past what it delivered, is refused.
+        let skipped = json!({"afterSeq":"2","resumeSeq":"5","page":{"state":"rows","firstSeq":"4","rows":"2"}});
+        assert!(super::check_page(&skipped, 2, 8).is_err());
+        let ahead = json!({"afterSeq":"2","resumeSeq":"6","page":{"state":"rows","firstSeq":"3","rows":"2"}});
+        assert!(super::check_page(&ahead, 2, 8).is_err());
+        // More rows than the limit asked for.
+        assert!(super::check_page(&rows, 2, 1).is_err());
+        let tip = json!({"afterSeq":"4","resumeSeq":"4","page":{"state":"tip","count":"4"}});
+        assert_eq!(super::check_page(&tip, 0, 8), Ok("tip"));
+        assert!(super::check_page(&tip, 1, 8).is_err());
+        let gap = json!({"afterSeq":"0","resumeSeq":"2","page":{"state":"gap","throughSeq":"2"}});
+        assert_eq!(super::check_page(&gap, 0, 8), Ok("gap"));
+        let stuck = json!({"afterSeq":"2","resumeSeq":"2","page":{"state":"gap","throughSeq":"2"}});
+        assert!(super::check_page(&stuck, 0, 8).is_err());
+        let oversize = json!({"afterSeq":"3","resumeSeq":"3","page":{"state":"oversize","seq":"4"}});
+        assert_eq!(super::check_page(&oversize, 0, 8), Ok("oversize"));
+        // An answer without a page state (an older Host) is not read as an empty ledger.
+        assert!(super::check_page(&json!({"entries":[]}), 0, 8).is_err());
+    }
+
     use super::*;
 
     fn draft() -> Value {
