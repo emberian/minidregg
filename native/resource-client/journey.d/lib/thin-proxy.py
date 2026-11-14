@@ -9,6 +9,8 @@ supplied, as THIN_PROXY_MODE says:
   pass                 change nothing
   view=PATH            serve the bytes of PATH as every target's view (a view of
                        another state: the Host lies about the target)
+  view-last=PATH       serve the bytes of PATH as the LAST target's view only (the Host
+                       lies about one target and serves the others honestly)
   slots-from=PATH      keep the proposed plan up to its slots, then splice in the
                        slots of the plan at PATH (headers that sign another command);
                        THIN_PROXY_OTHER_INTENT names that plan's retained intent
@@ -139,6 +141,13 @@ def rewrite(payload, mode):
             raise SystemExit("thin-proxy: the substituted view equals the served one")
         log(f"view: replaced {len(views)} served view(s) with {mode[5:]}")
         return pair(intent, pair(signer, pair(plan, encode_byte_list(changed))))
+    if mode.startswith("view-last="):
+        with open(mode[10:], "rb") as handle:
+            lie = handle.read()
+        if not views or views[-1] == lie:
+            raise SystemExit("thin-proxy: no last view to replace, or the substituted view equals it")
+        log(f"view-last: replaced the last of {len(views)} served view(s) with {mode[10:]}")
+        return pair(intent, pair(signer, pair(plan, encode_byte_list(views[:-1] + [lie]))))
     if mode.startswith("slots-from="):
         with open(mode[11:], "rb") as handle:
             other = handle.read()

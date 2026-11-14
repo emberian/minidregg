@@ -258,6 +258,41 @@ DF=$(attempt_of "$ERR")
 check df-nothing-signed test ! -e "$DF/transaction-signatures.json"
 row df-refused headerMismatch "$RC" PASS
 
+# ---- KR: a whole kind definition read (`kindRead`, registered effect code 7) beside a write.
+# The read pins the kind's root, so thin consent checks its served opening like a write's; it is
+# shown as a read with no effect lines (only a read that pins no root is shown without a view).
+# KR1: admitted and signed. KR2: the Host serves another cell's view for the kind read alone and
+# the honest view for the write: refused before signing.
+P=$D/req/permit-all.json
+printf '%s\n' '{"type":"all","predicates":[]}' >"$P"
+"$MINI" workspace --action create --dir "$SPONSOR_WS" --name tc-note --storage declared --predicate "$P" --fields 2 \
+  >"$D/log/kr-create.out" 2>"$D/log/kr-create.err" || fail kr-create 0 1 x "$(tail -3 "$D/log/kr-create.err")"
+row kr-create 0 0 PASS
+kr() { # ID ACTION-JSON MODE: a scalar write of tc-note beside a kindRead of tc-poll, submitted under thin consent
+  local id=$1 action=$2 mode=$3
+  jq -nc --argjson a "$action" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[
+    {name:"tc-note",payload:{type:"scalar",actions:[$a]}},{name:"tc-poll",payload:{type:"kindRead"}}]}' >"$D/req/$id.json"
+  "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$id.json" --proposal-id "$id" \
+    >"$D/log/$id-propose.out" 2>"$D/log/$id-propose.err" || fail "$id-propose" 0 1 x "$(tail -3 "$D/log/$id-propose.err")"
+  : >"$D/proxy-$id.log"
+  RC=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+    THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE="$mode" THIN_PROXY_LOG="$D/proxy-$id.log" \
+    "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/$id/intent.json" \
+    --attempt "$SPONSOR_WS/attempts/$id" >"$D/log/$id-submit.out" 2>"$D/log/$id-submit.err" || RC=$?
+}
+kr tc-kr1 '{"type":"create","key":{"type":"object","field":"2"},"value":"1"}' pass
+[ "$RC" = 0 ] || fail kr-admitted 0 "$RC" x "$(tail -3 "$D/log/tc-kr1-submit.err")"
+check kr-thin-frames grep -q 'frame 232' "$D/proxy-tc-kr1.log"
+check kr-shown-as-read jq -e 'length == 2 and .[0].postBytes != null and .[1].read == true and (.[1] | has("effect") | not)' \
+  "$SPONSOR_WS/attempts/tc-kr1/thin-display.json"
+check kr-signed test -s "$SPONSOR_WS/attempts/tc-kr1/transaction-signatures.json"
+row kr-admitted 0 0 PASS
+kr tc-kr2 '{"type":"write","key":{"type":"object","field":"2"},"expected":"1","value":"2"}' "view-last=$D/view-pre-t1.bin"
+check kr-lie-planted grep -q 'view-last: replaced' "$D/proxy-tc-kr2.log"
+[ "$RC" != 0 ] || fail kr-lie-refused refused 0 x "thin consent signed a kind read over a view of another cell"
+check kr-lie-nothing-signed test ! -e "$SPONSOR_WS/attempts/tc-kr2/transaction-signatures.json"
+row kr-lie-refused "$(grep -m1 -o 'thin consent refused: [A-Za-z.]* *[A-Za-z]*' "$D/log/tc-kr2-submit.err" | cut -c1-70)" "$RC" PASS
+
 if [ -n "${THIN_MUTANT_PROVIDER:-}" ]; then
   check m-is-mutant sh -c "[ \"\$(sha256sum < '$THIN_MUTANT_PROVIDER')\" != \"\$(sha256sum < '$REAL')\" ]"
   ok m-propose-show alice 'instance show tc-one'
