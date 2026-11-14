@@ -1,15 +1,22 @@
 import Kernel.GenericSimplex
 
-/-! Executed controls for the commit floor: one adversary policy, a forgotten floor (F2), and
-a replica stranded behind a peer's floor (F3). n = 4, f = 1, party 3 faulty.
+/-! Executed controls for the agreement engine: a view jump that starves commit (F1), a
+forgotten floor (F2), a replica stranded behind a peer's floor (F3). n = 4, f = 1, party 3 faulty.
 
-History. This file began as the control for the prepared catch-up jump of PR #18 (F1: a
-jumper never casts the late vote, so one Byzantine member and one slow link keep every view
-at two honest votes). That result is kernel-checked at commit 788dfb51f
-(`pr_jump_starves_commit`, `late_vote_jump_commits_same_policy`). The PR is closed, and under
-the present `step` the same hand-tuned policy with the PR's lines appended no longer starves;
-it was not re-tuned. The `.pr` and `.prLateVote` rules below are therefore unexercised and
-are due for removal; `.main` is the kernel's `step` (`stepV_main`, `startV_main`).
+F1 is the negative control for any catch-up jump: a replica that jumps past a prepared view
+(PR #18's rule, `.pr`) never casts the late vote a walker casts on leaving it, so one
+Byzantine member and one slow link keep every view at two honest votes and nothing commits.
+The kernel's `step` (`.main`, bound by `stepV_main`, `startV_main`) commits under the same
+policy, and so does the jump that casts the late vote first (`.prLateVote`).
+
+Why F1 was once thought gone. Between 788dfb51f and aac9eba60 this policy stopped starving
+`.pr`, and the two F1 theorems were removed. The step was not the reason. The network here
+had learned to forward a message that appears a second time in a party's outbox (the
+repeated CANDIDATE(⊥) of a stuck replica) and forwarded it past the policy's slow link.
+An honest replica also sends each READY twice (once by the `2f+1` CANDIDATE rule, once by
+the `f+1` READY rule), so every held READY leaked through and the lagged party voted. With
+repeats held like any other message (`repeated`) the policy starves `.pr` under the present
+step exactly as before.
 
 It imports the kernel only, so it elaborates without the proof closure. The admission test
 `allowed` is `GenericSimplexObservationSafety.allowedB` restated without `Finset` (same
@@ -63,10 +70,10 @@ def stepV (rule : Rule) (c : Config) (s : State) (input : Input) : State :=
     | .deliveryAt now m => ingest c {s with now := max s.now now} m
     | .checked block =>
         let offers := match block.getLast? with
-          | some payload => if payload.isEmpty then s.offers else addUnique s.offers payload
+          | some payload => if payload.isEmpty then s.offers else addOffer s payload
           | none => s.offers
-        { s with checked := addUnique s.checked block, offers := offers }
-    | .offer payload => { s with offers := addUnique s.offers payload }
+        { s with checked := addChecked s.checked block, offers := offers }
+    | .offer payload => { s with offers := addOffer s payload }
     | .poll => s
     | .tick now =>
         let s := pumpV rule c c.pumpBudget s
@@ -208,21 +215,23 @@ def owed (net : Net) : List (Nat × Message) :=
       decide (receiver < 3) && receiver != relayer && !net.seen.contains (receiver, m)
 
 /-- Messages an honest party put in its outbox again since the last scan (the repeated
-CANDIDATE(⊥) of a stuck replica): each goes to both other honest parties once more. -/
-def repeated (net : Net) : List (Nat × Message) :=
+CANDIDATE(⊥) of a stuck replica, and the second copy of each READY): each goes to both
+other honest parties once more, unless the policy holds it. -/
+def repeated (net : Net) (hold : Nat → Nat → Message → Bool) : List (Nat × Message) :=
   [0, 1, 2].flatMap fun sender =>
     let box := (net.states[sender]!).outbox
     let start := net.scanned[sender]!
     (List.range (box.length - start)).flatMap fun k =>
       let m := box[start + k]!
       if (box.take (start + k)).contains m then
-        [0, 1, 2].filterMap fun receiver => if receiver != sender then some (receiver, m) else none
+        [0, 1, 2].filterMap fun receiver =>
+          if receiver != sender && !hold sender receiver m then some (receiver, m) else none
       else []
 
 def settle (rule : Rule) (hold : Nat → Nat → Message → Bool) : Nat → Net → Net
   | 0, net => { net with ok := false }
   | fuel + 1, net =>
-      let again := repeated net
+      let again := repeated net hold
       let net := { net with scanned := (List.range 4).map fun p => (net.states[p]!).outbox.length }
       match again, pending net hold ++ owed net with
       | [], [] => net
@@ -286,14 +295,40 @@ def report (net : Net) (rounds : Nat) : String :=
 `#guard` evaluates the compiled definitions at elaboration and fails the file if false. -/
 
 def rounds : Nat := 12
+def prRun : Net := play .pr rounds
 def mainRun : Net := play .main rounds
+def lateVoteRun : Net := play .prLateVote rounds
 
-#guard mainRun.ok
+-- (a) every input of each run passed `allowed`, and the PR run's concrete input list
+-- replays to the same states.
+#guard prRun.ok && mainRun.ok && lateVoteRun.ok
+#guard (runV .pr prRun.schedule).ok && (runV .pr prRun.schedule).states == prRun.states
+
+-- (b) under the PR's rule: nothing delivered, nothing committed, nobody failed, and the
+-- views kept advancing (no tick was delivered: every view ended prepared).
+#guard !anyDelivered prRun && !anyCommitted prRun && !anyFailed prRun
+#guard currents prRun == [13, 12, 13]
+-- Every view has exactly two honest VOTEs and at most one honest COMMIT. Three are needed.
+#guard (List.range rounds).all fun i => (sentBy prRun (i + 1) .vote).length == 2
+#guard (List.range rounds).all fun i => decide ((sentBy prRun (i + 1) .commit).length ≤ 1)
+-- Fairness of the finite run: the only honest messages not yet delivered are for the last
+-- two views (the one-round lag on the 1-2 link).
+#guard (undeliveredViews prRun).all fun view => decide (view ≥ rounds - 1)
+
 -- (c) the kernel's `step` under the same adversary policy commits views 1..10 at all three.
 #guard (honestStates mainRun).all fun s => s.delivered.length == 10
 #guard (List.range 10).all fun i =>
   (honestStates mainRun).all fun s => (viewAt s (i + 1)).committed.isSome
 #guard !anyFailed mainRun
+-- The PR run's literal input list is not admitted under main: it delivers messages only
+-- the jumping replicas sent. The comparison is therefore by policy, not by input list.
+#guard !(runV .main prRun.schedule).ok
+
+-- Repair: the jump casts the late vote in its target view. Same policy: views 2..10 commit.
+#guard (honestStates lateVoteRun).all fun s => s.delivered.length == 9
+#guard (List.range 9).all fun i =>
+  (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome
+#guard !anyFailed lateVoteRun
 /-! ## F2, executed: forgetting old views, with and without the commit floor
 
 Rule `.main` throughout (the kernel's `step`). View 1: party 0 proposes `[[1]]`, all three
@@ -406,6 +441,25 @@ def tips (net : Net) : List Nat := (honestStates net).map (·.committedTip.lengt
 
 /-! ## The same facts as kernel-checked theorems (`decide +kernel`, standard axioms only) -/
 
+/-- F1. Under the PR's rule the adversary policy is admitted for twelve rounds (three leader
+rotations), the honest replicas reach views 13, 12, 13, every view has exactly two honest
+VOTEs and at most one honest COMMIT, and no honest replica commits or delivers anything. -/
+theorem pr_jump_starves_commit :
+    prRun.ok = true ∧ currents prRun = [13, 12, 13] ∧
+    anyDelivered prRun = false ∧ anyCommitted prRun = false ∧ anyFailed prRun = false ∧
+    ((List.range rounds).all fun i => (sentBy prRun (i + 1) .vote).length == 2) = true ∧
+    ((List.range rounds).all fun i => decide ((sentBy prRun (i + 1) .commit).length ≤ 1)) = true ∧
+    ((undeliveredViews prRun).all fun view => decide (view ≥ rounds - 1)) = true := by
+  decide +kernel
+
+/-- Repair. The jump that first casts the late vote in its target view commits views 2..10
+under the same policy. This is one schedule, not a progress theorem. -/
+theorem late_vote_jump_commits_same_policy :
+    lateVoteRun.ok = true ∧ anyFailed lateVoteRun = false ∧
+    ((List.range 9).all fun i =>
+      (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome) = true := by
+  decide +kernel
+
 /-- Control. Main's `step` (`stepV_main`) under the same policy commits views 1..10 at all
 three honest replicas. -/
 theorem main_commits_same_policy :
@@ -437,6 +491,8 @@ theorem stranding_ends_with_floor_evidence :
       tips rescued = [5, 5, 5]) := by
   decide +kernel
 
+#print axioms pr_jump_starves_commit
+#print axioms late_vote_jump_commits_same_policy
 #print axioms main_commits_same_policy
 #print axioms forgotten_floor_halts
 #print axioms stranding_ends_with_floor_evidence
