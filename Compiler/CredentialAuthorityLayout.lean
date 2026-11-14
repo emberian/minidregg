@@ -34,6 +34,7 @@ public import Kernel.DurableDataIntent
 public import Compiler.CredentialAuthorityCell
 public import Compiler.ResourceBirthCodec
 public import Compiler.DurableReceiverCodec
+public import Compiler.Sp800185Cshake256
 public import Theory.ResourceBirthAuthority
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -834,11 +835,148 @@ theorem birthAuthorityRealized : BirthAuthorityRealized envelope := by
     fun address outside =>
       lower_frame envelope realized vacant frame intent other writes' distinct foreign address outside⟩
 
+/-! ### The byte clause -/
+
+theorem natLen_mono {small large : Nat} (le : small ≤ large) : natLen small ≤ natLen large := by
+  simp only [natLen, StreamCodec.nat, StreamCodec.encodeNat, StreamCodec.natDigits,
+    List.length_append, List.length_map, List.length_singleton]
+  exact Nat.add_le_add_right (Nat.le_length_digits_le 255 small large le) 1
+
+theorem rootBytes_lt (bytes) : (ResourceBirthCodec.rootBytes bytes).value < 2 ^ 256 :=
+  Sp800185Cshake256.hash_digest_lt_two_pow_256 _ _
+
+/-- The logical root is a cSHAKE256 digest. -/
+theorem logicalRoot_lt (store : Store layout) :
+    (CredentialAuthorityCell.materializer.rootOf store).value < 2 ^ 256 := by
+  rw [show CredentialAuthorityCell.materializer.rootOf store = _ from
+    PrivateCellRoot.materializer_rootOf CredentialAuthorityCell.wire (PrivateCellRoot.untagged _) store]
+  exact Sp800185Cshake256.hash_digest_lt_two_pow_256 _ _
+
+theorem write_length (write : DataWrite) :
+    (DurableReceiverCodec.writeStream.encode write).length =
+      natLen write.cellId.value + natLen write.expectedPre.value + natLen write.exactPost.value +
+        natLen write.canonicalPostBytes.length + write.canonicalPostBytes.length := by
+  simp only [DurableReceiverCodec.writeStream, StreamCodec.xmap, StreamCodec.product, digestStream,
+    bytesStream, natLen, List.length_append]
+  omega
+
+theorem role_length (role : spec.Role) : (spec.roleStream.encode role).length = 1 := by
+  cases role <;> rfl
+
+/-- The length of a physical cell's own bytes. -/
+theorem cell_length (payload : Option (ProtectedCell.Payload spec)) :
+    (materialize (ProtectedCell.materializer spec) (ProtectedCell.stateOfOption spec payload)).bytes.length =
+      spec.wireFrame.length + natLen spec.wireVersion +
+        match payload with
+        | none => 1
+        | some held => 2 + natLen held.key.length + held.key.length + natLen held.body.length +
+            held.body.length := by
+  have encoded : (materialize (ProtectedCell.materializer spec)
+      (ProtectedCell.stateOfOption spec payload)).bytes =
+      spec.wireFrame ++ (ProtectedCell.wirePayloadStream spec).encode (spec.wireVersion, payload) := by
+    show ProtectedCell.encode spec (ProtectedCell.stateOfOption spec payload) = _
+    rw [ProtectedCell.encode, ProtectedCell.payloadAt_stateOfOption]
+  rw [encoded]
+  cases payload with
+  | none =>
+      simp only [ProtectedCell.wirePayloadStream, StreamCodec.product, StreamCodec.option,
+        List.length_append, natLen, List.length_singleton]
+      omega
+  | some held =>
+      have role := role_length held.role
+      simp only [ProtectedCell.wirePayloadStream, ProtectedCell.payloadStream, StreamCodec.product,
+        StreamCodec.option, StreamCodec.xmap, bytesStream, List.length_append, natLen,
+        List.length_cons, role]
+      omega
+
+theorem cellWrite_length_le (physical : PhysicalSnapshot) (cellId idBound cellLength : Nat)
+    (cell : PhysicalCell) (idLe : cellId ≤ idBound) (cellLe : cell.bytes.length ≤ cellLength) :
+    (DurableReceiverCodec.writeStream.encode (cellWrite envelope physical cellId cell)).length ≤
+      writeBound envelope idBound cellLength := by
+  rw [write_length]
+  have pre : (physical.model.roots ⟨cellId⟩).value ≤ 2 ^ 256 := by
+    rw [← physical.coherent]; exact (rootBytes_lt _).le
+  have post := (rootBytes_lt (envelope.encode cell)).le
+  have length : (envelope.encode cell).length ≤ envelope.overhead + cellLength :=
+    (envelope.encode_length cell).trans (Nat.add_le_add_left cellLe _)
+  have idLength := natLen_mono idLe
+  have preLength := natLen_mono pre
+  have postLength := natLen_mono post
+  have lengthLength := natLen_mono length
+  simp only [cellWrite, writeBound]
+  omega
+
+theorem encodedLength_eq (writes : List DataWrite) :
+    encodedLength writes = natLen writes.length +
+      (writes.map fun write => (DurableReceiverCodec.writeStream.encode write).length).sum := by
+  simp only [encodedLength, StreamCodec.list, List.length_append, natLen]
+  congr 1
+  induction writes with
+  | nil => rfl
+  | cons write rest step => simp [StreamCodec.encodeMany, step]
+
+theorem birthAuthorityWriteBytes : BirthAuthorityWriteBytes envelope := by
+  intro registry physical domain authorityCellId pre descriptor evidence
+  have headLe : (DurableReceiverCodec.writeStream.encode (headWrite envelope physical authorityCellId
+      (ResourceBirthAuthority.post pre descriptor evidence).root)).length ≤
+      writeBound envelope (authorityCellId + 1) (cellBound 0 (natLen (2 ^ 256))) := by
+    apply cellWrite_length_le envelope physical _ _ _ _ (Nat.le_succ _)
+    have rootLe := natLen_mono (logicalRoot_lt
+      (ResourceBirthAuthority.post pre descriptor evidence).logical).le
+    have body : (digestStream.encode (ResourceBirthAuthority.post pre descriptor evidence).root).length =
+        natLen (CredentialAuthorityCell.materializer.rootOf
+          (ResourceBirthAuthority.post pre descriptor evidence).logical).value := rfl
+    have bodyLe : (digestStream.encode (ResourceBirthAuthority.post pre descriptor evidence).root).length ≤
+        natLen (2 ^ 256) := by rw [body]; exact rootLe
+    have bodyLength := natLen_mono bodyLe
+    rw [headCell, cell_length]
+    simp only [headPayload, List.length_nil, cellBound]
+    omega
+  have entryLe : ∀ entry ∈ ResourceBirthAuthority.entries descriptor,
+      (DurableReceiverCodec.writeStream.encode (entryWrite envelope physical domain
+        (ResourceBirthAuthority.post pre descriptor evidence).logical entry.1)).length ≤
+      writeBound envelope (2 ^ 257)
+        (cellBound (keyBytes entry.1).length ((valueStream entry.1.1).encode entry.2).length) := by
+    intro entry member
+    have value : (ResourceBirthAuthority.post pre descriptor evidence).logical entry.1 =
+        some entry.2 := by
+      rw [ResourceBirthAuthority.post_logical]
+      exact CredentialAuthorityEffects.setAll_member _ _ evidence.slotsDistinct entry member
+    have idLe : entryCellId domain entry.1 ≤ 2 ^ 257 := by
+      have digest := Sp800185Cshake256.hash_digest_lt_two_pow_256 spec.idCustomization
+        ((StreamCodec.product digestStream (StreamCodec.product spec.roleStream bytesStream)).encode
+          (domain, Role.entry entry.1.1, keyBytes entry.1))
+      simp only [entryCellId, ProtectedCell.coordinate, ProtectedCell.reservedBase]
+      omega
+    apply cellWrite_length_le envelope physical _ _ _ _ idLe
+    rw [value, entryCell, Option.map_some, cell_length]
+    simp only [entryPayload, cellBound]
+    omega
+  rw [encodedLength_eq]
+  simp only [lowerBirth, lowerAuthority, birthTouched, List.map_cons, List.map_map, List.sum_cons,
+    List.length_cons, List.length_map, authorityBirthBudget]
+  have count : (ResourceBirthAuthority.entries descriptor).length =
+      3 * descriptor.initialPolicies.length + 2 * descriptor.grants.length +
+        descriptor.parentRows.length := by
+    have := birthTouched_length descriptor
+    simpa [birthTouched] using this
+  have sums := List.sum_le_sum (l := ResourceBirthAuthority.entries descriptor) entryLe
+  have countLe : natLen ((ResourceBirthAuthority.entries descriptor).length + 1) ≤
+      natLen (1 + 3 * descriptor.initialPolicies.length + 2 * descriptor.grants.length +
+        descriptor.parentRows.length) := natLen_mono (by omega)
+  have total := Nat.add_le_add countLe (Nat.add_le_add headLe sums)
+  simpa [Function.comp_def, Nat.add_assoc] using total
+
+theorem birthAuthorityWritesBounded : BirthAuthorityWritesBounded envelope :=
+  ⟨birthAuthorityWriteCount envelope, birthAuthorityWriteBytes envelope,
+    birthAuthorityRealized envelope⟩
+
 #assert_axioms lower_realizes
 #assert_axioms lower_frame
 #assert_axioms omitted_entry_refused
 #assert_axioms birthAuthorityWriteCount
 #assert_axioms birthAuthorityRealized
+#assert_axioms birthAuthorityWritesBounded
 #assert_axioms checkVacant_ok_iff
 #assert_axioms collision_refused
 #assert_axioms head_guard_pins_root

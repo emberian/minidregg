@@ -1,7 +1,8 @@
 # The authority store's physical layout
 
 State on `lane/authority-cells`: the layout, its lowering and its refinement are defined and
-proved in `Compiler/CredentialAuthorityLayout.lean`. **No writer is migrated and the registry's
+proved in `Compiler/CredentialAuthorityLayout.lean`, including the keystone
+`BirthAuthorityWritesBounded` over the lowering. **No writer is migrated and the registry's
 `.authority` payload has not flipped**: every record still carries the whole authority cell. The
 measured growth below is therefore unchanged. The sections "Migrated", "Not migrated" and "Next
 step" are exact.
@@ -91,15 +92,15 @@ Proved (single-file check on hbox, no `sorry`, standard axioms only):
   (false absence), `occupied_not_vacant`, `foreign_not_vacant`, `collision_refused`. A stale guard
   is the existing preflight (`stale_read_guard_rejected`, and each write's `expectedPre`).
 
-Stated, proof owed:
-
-- `BirthAuthorityWriteBytes`: the encoded bytes of the birth's lowered writes are at most
-  `authorityBirthBudget.maxEncodedBytes`, a closed function of the envelope's constant, the head
-  identifier and the descriptor's entries through the codecs (`authorityBirthBudget_userPart`: the
-  kernel's auxiliary allocations do not enter it). It counts write framing, both roots of each
-  write and the head write as constants. It needs the base-255 natural codec's length to be
-  monotone, digests below `2^256`, and the cell codec's length.
-- `BirthAuthorityWritesBounded` is the conjunction of the three clauses.
+- `birthAuthorityWriteBytes`: the encoded bytes of the birth's lowered writes, at the birth's own
+  post cell, are at most `authorityBirthBudget.maxEncodedBytes`, a closed function of the
+  envelope's constant, the head identifier and the descriptor's entries through the codecs
+  (`authorityBirthBudget_userPart`: the kernel's auxiliary allocations do not enter it). It counts
+  each write's framing (identifier, both roots, the length prefix), the envelope and the head
+  write as constants; the entry lengths come from the descriptor and the codec, never from the
+  lowered output.
+- `birthAuthorityWritesBounded`: the keystone `BirthAuthorityWritesBounded`, the conjunction of the
+  count, byte and realisation clauses, for every `Envelope`.
 
 Owed and not claimed:
 
@@ -157,12 +158,11 @@ Nothing.
 
 ## Next step
 
-1. Prove `BirthAuthorityWriteBytes`.
-2. Flip the registry's `.authority` payload and instantiate `Envelope`; rewrite `Loaded` and the
+1. Flip the registry's `.authority` payload and instantiate `Envelope`; rewrite `Loaded` and the
    two write functions over `lowerAuthority`. From that commit the tree is red until all sixteen
    families compile, so it is one change: birth first (`ResourceBirthController.planWrites`,
    `PreparedPostAuthority`), then the thirteen other `Ground.authorityWrites` callers, then the
    `Loaded.writes` callers.
-3. Issuer locator; `policiesSourced` by changed policy coordinates; `birthRoom` reads the
+2. Issuer locator; `policiesSourced` by changed policy coordinates; `birthRoom` reads the
    parent-address post.
-4. Re-genesis; whole build; the tour; `append-flatness` as a raw bound with the four numbers.
+3. Re-genesis; whole build; the tour; `append-flatness` as a raw bound with the four numbers.
