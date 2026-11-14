@@ -202,3 +202,4 @@ import Kernel.PrivateCellView  -- a reader's class openings of the private index
 import Kernel.PrivateCellReceiver  -- the private cell's receiving state machine: gated store, kept index, one insert or erase walk per write, kept root = private root
 import Kernel.PrivateCellMaterializer  -- the private kinds' persistent structure: the kept index and blinding bytes, one walk per write, the root read from it
 import Kernel.PrivateCellOpening  -- the selective opening's relation: exact against the committed store's view, cell and version, or a fixed collision
+import Kernel.OwnerGrantDelegated  -- a delegated child of an owner grant passes `OwnerGrant` (holder, targets, policy id; never the lineage), beside the root-only variant it fails
