@@ -7,4 +7,5 @@ import Kernel.GenericSimplexEmissionSupport
 import Kernel.GenericSimplexEngineSafety
 import Kernel.GenericSimplexObservationSafety
 import Kernel.GenericSimplexFloor
+import Kernel.GenericSimplexErasure
 import Kernel.GenericSimplexReceiverSafety

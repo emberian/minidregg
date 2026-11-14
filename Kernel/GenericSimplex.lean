@@ -99,8 +99,17 @@ structure State where
   needsPoll : Bool := false
   failed : Bool := false
   /-- The commit floor: the highest locally committed view (0 if none), maintained by
-  `raiseFloor`. `lastCommittedView` is its specification. -/
+  `raiseFloor`. `lastCommittedView` is its specification. No rule writes a view at or
+  below it, and none reads a view below it: the floor view is kept only as the parent it
+  offers (`preparedAt`). -/
   lastCommitted : Nat := 0
+  /-- The COMMIT messages that committed the floor view: what a peer still at or below the
+  floor needs to commit it too. -/
+  floorEvidence : List Message := []
+  /-- Peers already served `floorEvidence` for this floor. -/
+  served : List Nat := []
+  /-- Evidence owed to a peer (destination, message); the driver forwards and drains it. -/
+  relay : List (Nat × Message) := []
   deriving DecidableEq, BEq, Repr, Inhabited
 def viewAt (s : State) (number : Nat) : View :=
   (s.views.find? (fun v => v.number == number)).getD { number := number }
@@ -164,27 +173,26 @@ def doCommit (s : State) (number : Nat) (block : Block) : State :=
       { s with committedTip := block, delivered := s.delivered ++ [block] }
   else if isPrefix block s.committedTip then s
   else { s with failed := true }
-/-- Every view strictly below the floor drops its received messages. Its send guards
-(`voted`, `disableRequested`, `sentCommit`, `sentCandidates`, the READY lists) and its
-outputs (`prepared`, `disabled`, `committed`) stay: they are this replica's memory of
-what it must never contradict. -/
-def retire (s : State) : State :=
-  { s with views := s.views.map fun v =>
-      if v.number < s.lastCommitted then { v with received := [] } else v }
-/-- A commit above the floor raises the floor to its view and retires the views below. -/
-def raiseFloor (s : State) (number : Nat) : State :=
-  if s.lastCommitted < number && (viewAt s number).committed.isSome then
-    retire { s with lastCommitted := number }
+/-- A commit above the floor raises the floor to its view. The floor keeps the COMMIT
+messages that committed it; no view below it is read again (`forget` drops them). -/
+def raiseFloor (s : State) (number : Nat) (block : Block) : State :=
+  let v := viewAt s number
+  if s.lastCommitted < number && v.committed == some block then
+    { s with lastCommitted := number, served := [],
+             floorEvidence := v.received.filter fun m => m.kind == .commit && m.value == some block }
   else s
 def commitAt (s : State) (number : Nat) (block : Block) : State :=
-  raiseFloor (doCommit s number block) number
+  raiseFloor (doCommit s number block) number block
 def sendCandidate (s : State) (number : Nat) (arg : Argument) : State :=
   let v := viewAt s number
   if v.sentCandidates.contains arg ||
       (v.sentCommit.isSome && v.sentCommit != arg) then s else
   let s := putView s { v with sentCandidates := v.sentCandidates ++ [arg] }
   broadcast s number .candidate arg
-def valueRules (c : Config) (s : State) (number : Nat) (block : Block) : State := Id.run do
+/-- The rules of one view for one block. A view at or below the floor has none. The commit
+rule runs last: it can raise the floor to this view, after which nothing here may act. -/
+def valueRules (c : Config) (s : State) (number : Nat) (block : Block) : State :=
+  if number ≤ s.lastCommitted then s else Id.run do
   let mut s := s
   let arg := some block
   let v := viewAt s number
@@ -195,12 +203,13 @@ def valueRules (c : Config) (s : State) (number : Nat) (block : Block) : State :
       s := putView s { v with sentCommit := some block }
       s := broadcast s number .commit arg
   let v := viewAt s number
-  if count v .commit arg ≥ c.quorum then s := commitAt s number block
-  let v := viewAt s number
   if count v .vote arg ≥ c.faults + 1 && validBlock s block then
     s := sendCandidate s number arg
+  let v := viewAt s number
+  if count v .commit arg ≥ c.quorum then s := commitAt s number block
   return s
-def argumentRules (c : Config) (s : State) (number : Nat) (arg : Argument) : State := Id.run do
+def argumentRules (c : Config) (s : State) (number : Nat) (arg : Argument) : State :=
+  if number ≤ s.lastCommitted then s else Id.run do
   let mut s := s
   let v := viewAt s number
   if count v .candidate arg ≥ 2 * c.faults + 1 && !v.sentReadyCore.contains arg then
@@ -225,20 +234,23 @@ def preparedAt (s : State) (view : Nat) : List Block :=
   if view == 0 then [[]] else (viewAt s view).prepared
 def disabledAt (s : State) (view : Nat) : Bool :=
   if view == 0 then false else (viewAt s view).disabled
+/-- The views a parent may come from: the floor and every view above it below `current`. -/
+def parentViews (s : State) : List Nat :=
+  (List.range (s.current - s.lastCommitted)).map (s.lastCommitted + ·)
 def isSafe (s : State) (block : Block) : Bool :=
-  !block.isEmpty && (List.range s.current).any fun old =>
+  !block.isEmpty && (parentViews s).any fun old =>
     (preparedAt s old).contains block.dropLast &&
     (List.range (s.current - (old + 1))).all (fun offset => disabledAt s (old + 1 + offset))
 def bestParent (s : State) : Block :=
-  ((List.range s.current).reverse.findSome? fun old => (preparedAt s old).head?).getD []
+  ((parentViews s).reverse.findSome? fun old => (preparedAt s old).head?).getD []
 def castVote (s : State) (number : Nat) (block : Block) : State :=
   let v := viewAt s number
   if v.voted || v.disableRequested then s else
   broadcast (putView s { v with voted := true }) number .vote (some block)
 /-- The view of `bestParent`: the highest view below `current` with a prepared
-block (0, the genesis view, if none). -/
+block (the floor, if none above it). -/
 def bestParentView (s : State) : Nat :=
-  ((List.range s.current).reverse.find? fun old => !(preparedAt s old).isEmpty).getD 0
+  ((parentViews s).reverse.find? fun old => !(preparedAt s old).isEmpty).getD s.lastCommitted
 /-- A leader has work when a checked offer extends the best parent, or when the
 best parent is prepared at least two views back (the view after it ended
 without a block) and is still not locally committed: an empty extension then
@@ -296,34 +308,39 @@ Everything it skips is at or below a view it has committed, so no vote it could 
 cast there is pending. The entered view runs on the base timer (`viewTimeout`). -/
 def floorJump (c : Config) (s : State) : State :=
   if s.current ≤ s.lastCommitted then enterView c s (s.lastCommitted + 1) else s
-/-- Every known view remains active. Fair poll slices preserve pending work. The floor
-jump runs before the outer rules, so they act in a view above the floor. -/
+/-- Every view above the floor remains active. Fair poll slices preserve pending work. The
+floor jump runs before the outer rules, so they act in a view above the floor. -/
 def pass (c : Config) (s : State) : State :=
-  let numbers := (s.views.map View.number).eraseDups
+  let numbers := s.views.filterMap fun v => if s.lastCommitted < v.number then some v.number else none
   progressOuter c (floorJump c
     (numbers.foldl (fun state number => progressView c state number) s))
+/-- What a running replica keeps: the floor view and the views above it. Every view below
+the floor, and the audit, are history no rule reads (`GenericSimplexErasure`). -/
+def forget (s : State) : State :=
+  { s with views := s.views.filter (fun v => s.lastCommitted ≤ v.number), audit := [] }
+/-- Passes repeat until one changes nothing a running replica keeps. -/
 def pump (c : Config) : Nat → State → State
   | 0, s => { s with needsPoll := true }
   | fuel + 1, s =>
       let s := { s with needsPoll := false }
       let next := pass c s
-      if next == s then next else pump c fuel next
+      if forget next == forget s then next else pump c fuel next
 
 deriving instance ReflBEq for Kind, Message, View, AuditEvent, State
 
 /-- Executable `pump`. A pass that changes nothing returns the very object it was
 given, and the whole-state `==` that detects that fixpoint walks every retained
-view, message, block byte and audit event, on every input (on the four-source
+view, message and block byte, on every input (on the four-source
 evidence copy this dominated both a replica's per-input cost and its reopen
 replay). `withPtrEq` answers that case by pointer equality first; it is
-logically `next == s` (`withPtrEq a b k h = k ()`), so `pump` stays the
+logically `forget next == forget s` (`withPtrEq a b k h = k ()`), so `pump` stays the
 definition every proof reads. -/
 def pumpFast (c : Config) : Nat → State → State
   | 0, s => { s with needsPoll := true }
   | fuel + 1, s =>
       let s := { s with needsPoll := false }
       let next := pass c s
-      if withPtrEq next s (fun _ => next == s) (fun same => by simp only [same, beq_self_eq_true])
+      if withPtrEq next s (fun _ => forget next == forget s) (fun same => by simp only [same, beq_self_eq_true])
       then next else pumpFast c fuel next
 
 @[csimp] theorem pump_eq_pumpFast : @pump = @pumpFast := by
@@ -343,8 +360,18 @@ inductive Input where
   | offer (payload : Bytes)
   | poll
   deriving DecidableEq, BEq, Repr, Inhabited
+/-- A peer that asks to leave a view at or below the floor (CANDIDATE(⊥): what a replica
+sends on timeout and repeats while stuck) is owed the floor's COMMIT evidence, once per peer
+per floor. -/
+def serveFloor (s : State) (peer : Nat) : State :=
+  if peer == s.self || s.served.contains peer || s.floorEvidence.isEmpty then s else
+  { s with relay := s.relay ++ s.floorEvidence.map (fun m => (peer, m)),
+           served := s.served ++ [peer] }
 def ingest (c : Config) (s : State) (m : Message) : State :=
-  if m.sender ≥ c.parties || m.view == 0 || m.view ≤ s.lastCommitted then s else
+  if m.sender ≥ c.parties || m.view == 0 then s else
+  if m.view ≤ s.lastCommitted then
+    if m.kind == .candidate && m.value.isNone then serveFloor s m.sender else s
+  else
   if (m.kind == .propose || m.kind == .vote || m.kind == .commit) && m.value.isNone then s else
   if m.kind == .propose then
     if m.sender != c.leader m.view then s else
@@ -371,9 +398,16 @@ def step (c : Config) (s : State) (input : Input) : State :=
         -- Drain already enabled local actions before a same-time timeout.
         let s := pump c c.pumpBudget s
         let s := { s with now := max s.now now }
-        let v := viewAt s s.current
-        if !s.needsPoll && s.now ≥ s.deadline && !v.disableRequested then
-          sendCandidate (putView s { v with disableRequested := true }) s.current none
+        if !s.needsPoll && s.now ≥ s.deadline then
+          let s := { s with deadline := s.now + viewTimeout c s s.current }
+          let v := viewAt s s.current
+          if !v.disableRequested then
+            sendCandidate (putView s { v with disableRequested := true }) s.current none
+          else if v.sentCandidates.contains none then
+            -- Still in the view a whole timeout after asking to leave it: ask again. A peer
+            -- whose floor has passed the view answers with its floor evidence (`serveFloor`).
+            { s with outbox := s.outbox ++ [⟨s.self, s.current, .candidate, none⟩] }
+          else s
         else s
   pump c c.pumpBudget next
 def start (c : Config) (self now : Nat) (offers : List Bytes := [])
@@ -386,6 +420,9 @@ def start (c : Config) (self now : Nat) (offers : List Bytes := [])
         offers := offers, checked := checked } 1)
 /-- The physical driver persists messages before draining this ephemeral queue. -/
 def drainOutbox (s : State) : List Message × State := (s.outbox, { s with outbox := [] })
+def drainRelay (s : State) : List (Nat × Message) × State := (s.relay, { s with relay := [] })
+/-- The executable transition: `step`, then forget. -/
+def liveStep (c : Config) (s : State) (input : Input) : State := forget (step c s input)
 @[simp] theorem empty_block_valid (s : State) : validBlock s [] = true := by
   simp [validBlock, applicationHistory]
 theorem applicationHistory_preserves_prefix {a b : Block} (hprefix : a.IsPrefix b) :

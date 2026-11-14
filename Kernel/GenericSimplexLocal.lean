@@ -244,116 +244,51 @@ theorem doCommit_audit_prefix (s : State) (number : Nat) (block : Block) :
   dsimp only
   split_ifs <;> simp_all [putView,List.append_assoc]
 
-/-- A retired view: the same view with its received messages dropped. -/
-def quiet (v : View) : View := { v with received := [] }
-
-theorem mem_retire {s : State} {w : View} (member : w ∈ (retire s).views) :
-    ∃ v ∈ s.views, w = v ∨ w = quiet v := by
-  obtain ⟨v, inside, same⟩ := List.mem_map.mp member
-  refine ⟨v, inside, ?_⟩
-  split at same
-  · exact Or.inr same.symm
-  · exact Or.inl same.symm
-
-theorem retire_numbers (s : State) :
-    (retire s).views.map View.number = s.views.map View.number := by
-  simp only [retire, List.map_map]
-  apply List.map_congr_left
-  intro v _
-  simp only [Function.comp]
-  split <;> rfl
-
-theorem viewAt_retire (s : State) (number : Nat) :
-    viewAt (retire s) number = viewAt s number ∨
-      viewAt (retire s) number = quiet (viewAt s number) := by
-  unfold viewAt retire
-  simp only [List.find?_map]
-  have same : ((fun v : View => v.number == number) ∘
-      fun v : View => if v.number < s.lastCommitted then { v with received := [] } else v) =
-      fun v : View => v.number == number := by
-    funext v
-    simp only [Function.comp]
-    split <;> rfl
-  rw [same]
-  cases s.views.find? (fun v => v.number == number) with
-  | none => exact Or.inl rfl
-  | some v =>
-    simp only [Option.map_some, Option.getD_some]
-    split
-    · exact Or.inr rfl
-    · exact Or.inl rfl
-
-/-- Every field but `received` of every view survives retirement. -/
-theorem viewAt_retire_quiet (s : State) (number : Nat) :
-    quiet (viewAt (retire s) number) = quiet (viewAt s number) := by
-  rcases viewAt_retire s number with same | same <;> rw [same] <;> rfl
-
-theorem raiseFloor_cases (s : State) (number : Nat) :
-    raiseFloor s number = s ∨ raiseFloor s number = retire { s with lastCommitted := number } := by
+theorem raiseFloor_cases (s : State) (number : Nat) (block : Block) :
+    raiseFloor s number block = s ∨ ∃ evidence, raiseFloor s number block =
+      { s with lastCommitted := number, served := [], floorEvidence := evidence } := by
   unfold raiseFloor
+  dsimp only
   split
-  · exact Or.inr rfl
+  · exact Or.inr ⟨_, rfl⟩
   · exact Or.inl rfl
 
-theorem retire_self (s : State) : (retire s).self = s.self := rfl
-theorem retire_audit (s : State) : (retire s).audit = s.audit := rfl
-theorem raiseFloor_self (s : State) (number : Nat) : (raiseFloor s number).self = s.self := by
-  rcases raiseFloor_cases s number with same | same <;> rw [same] <;> rfl
-theorem raiseFloor_audit (s : State) (number : Nat) : (raiseFloor s number).audit = s.audit := by
-  rcases raiseFloor_cases s number with same | same <;> rw [same] <;> rfl
+theorem raiseFloor_self (s : State) (number : Nat) (block : Block) :
+    (raiseFloor s number block).self = s.self := by
+  rcases raiseFloor_cases s number block with same | ⟨_, same⟩ <;> rw [same]
+theorem raiseFloor_audit (s : State) (number : Nat) (block : Block) :
+    (raiseFloor s number block).audit = s.audit := by
+  rcases raiseFloor_cases s number block with same | ⟨_, same⟩ <;> rw [same]
+theorem raiseFloor_views (s : State) (number : Nat) (block : Block) :
+    (raiseFloor s number block).views = s.views := by
+  rcases raiseFloor_cases s number block with same | ⟨_, same⟩ <;> rw [same]
 
-/-- Whatever survives a floor change and a retirement survives `raiseFloor`. -/
+/-- Whatever survives a change of the floor fields survives `raiseFloor`. -/
 theorem raiseFloor_preserves (P : State → Prop)
-    (retired : ∀ state number, P state → P (retire { state with lastCommitted := number }))
-    (s : State) (number : Nat) (old : P s) : P (raiseFloor s number) := by
-  rcases raiseFloor_cases s number with same | same <;> rw [same]
+    (raised : ∀ state number evidence, P state →
+      P { state with lastCommitted := number, served := [], floorEvidence := evidence })
+    (s : State) (number : Nat) (block : Block) (old : P s) : P (raiseFloor s number block) := by
+  rcases raiseFloor_cases s number block with same | ⟨evidence, same⟩ <;> rw [same]
   · exact old
-  · exact retired s number old
-theorem viewAt_retire_voted (s : State) (number : Nat) :
-    (viewAt (retire s) number).voted = (viewAt s number).voted := by
-  have same := congrArg View.voted (viewAt_retire_quiet s number)
-  exact same
-theorem viewAt_retire_candidates (s : State) (number : Nat) :
-    (viewAt (retire s) number).sentCandidates = (viewAt s number).sentCandidates := by
-  have same := congrArg View.sentCandidates (viewAt_retire_quiet s number)
-  exact same
-theorem viewAt_retire_sentCommit (s : State) (number : Nat) :
-    (viewAt (retire s) number).sentCommit = (viewAt s number).sentCommit := by
-  have same := congrArg View.sentCommit (viewAt_retire_quiet s number)
-  exact same
-theorem viewAt_retire_prepared (s : State) (number : Nat) :
-    (viewAt (retire s) number).prepared = (viewAt s number).prepared := by
-  have same := congrArg View.prepared (viewAt_retire_quiet s number)
-  exact same
-theorem viewAt_retire_disabled (s : State) (number : Nat) :
-    (viewAt (retire s) number).disabled = (viewAt s number).disabled := by
-  have same := congrArg View.disabled (viewAt_retire_quiet s number)
-  exact same
-theorem viewAt_retire_committed (s : State) (number : Nat) :
-    (viewAt (retire s) number).committed = (viewAt s number).committed := by
-  have same := congrArg View.committed (viewAt_retire_quiet s number)
-  exact same
+  · exact raised s number evidence old
 
 theorem commitAt_self (s : State) (number : Nat) (block : Block) :
     (commitAt s number block).self = s.self :=
-  (raiseFloor_self (doCommit s number block) number).trans (doCommit_self s number block)
+  (raiseFloor_self (doCommit s number block) number block).trans (doCommit_self s number block)
 
 theorem commitAt_audit (s : State) (number : Nat) (block : Block) :
     (commitAt s number block).audit = (doCommit s number block).audit :=
-  raiseFloor_audit (doCommit s number block) number
+  raiseFloor_audit (doCommit s number block) number block
 
 theorem commitAt_owned (s : State) (number : Nat) (block : Block)
     (owned : OwnedAudit s) : OwnedAudit (commitAt s number block) :=
-  raiseFloor_preserves OwnedAudit (fun _ _ prior => prior) _ _ (doCommit_owned s number block owned)
+  raiseFloor_preserves OwnedAudit (fun _ _ _ prior => prior) _ _ _ (doCommit_owned s number block owned)
 
 theorem commitAt_audit_prefix (s : State) (number : Nat) (block : Block) :
     s.audit <+: (commitAt s number block).audit := by
   rw [commitAt_audit]
   exact doCommit_audit_prefix s number block
 
-#assert_axioms mem_retire
-#assert_axioms retire_numbers
-#assert_axioms viewAt_retire
 #assert_axioms raiseFloor_preserves
 #assert_axioms commitAt_owned
 #assert_axioms commitAt_audit_prefix

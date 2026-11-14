@@ -620,8 +620,9 @@ structure CausalInvariant (s : State) : Prop where
 
 @[simp] theorem causal_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat) :
-    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted } ↔ CausalInvariant s := by
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
+    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ CausalInvariant s := by
   constructor <;> intro old <;> rcases old with ⟨unique, votes, once, candidates, commits, locked⟩ <;>
     exact ⟨unique, votes, once, candidates, commits, locked⟩
 
@@ -821,12 +822,13 @@ theorem causal_fold {α : Type} (action : State → α → State)
 
 theorem ingest_causal (c : Config) (s : State) (message : Message)
     (old : CausalInvariant s) : CausalInvariant (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor
   dsimp only
   split_ifs
   all_goals first
     | exact old
     | exact register_causal s message old
+    | simpa only [causal_record] using old
     | apply putView_passive_causal _ _ old <;> simp [viewAt_number]
 
 #assert_axioms putView_passive_causal
@@ -850,38 +852,13 @@ theorem drain_causal (s : State) (invariant : CausalInvariant s) :
     CausalInvariant (drainOutbox s).2 :=
   causal_same_fields s (drainOutbox s).2 invariant rfl rfl rfl
 
-theorem retire_causal (s : State) (old : CausalInvariant s) : CausalInvariant (retire s) where
-  viewsUnique := by
-    unfold ViewsUnique
-    rw [retire_numbers]
-    exact old.viewsUnique
-  voteRecorded := by
-    intro number
-    rw [viewAt_retire_voted]
-    exact old.voteRecorded number
-  voteOnce := old.voteOnce
-  candidateRecorded := by
-    intro number arg
-    rw [viewAt_retire_candidates]
-    exact old.candidateRecorded number arg
-  commitRecorded := by
-    intro number block
-    rw [viewAt_retire_sentCommit]
-    exact old.commitRecorded number block
-  commitLock := by
-    intro w member
-    obtain ⟨v, inside, same | same⟩ := mem_retire member
-    · rw [same]; exact old.commitLock v inside
-    · rw [same]; exact old.commitLock v inside
-
-/-- The floor commit keeps every guard: retirement drops received messages only. -/
+/-- The floor commit keeps every guard: raising the floor touches no view. -/
 theorem commitAt_causal (s : State) (view : Nat) (block : Block)
     (old : CausalInvariant s) : CausalInvariant (commitAt s view block) :=
   raiseFloor_preserves CausalInvariant
-    (fun state number prior => retire_causal _ (by simpa only [causal_record] using prior))
-    _ _ (doCommit_causal s view block old)
+    (fun state number evidence prior => by simpa only [causal_record] using prior)
+    _ _ _ (doCommit_causal s view block old)
 
-#assert_axioms retire_causal
 #assert_axioms commitAt_causal
 
 macro "causal_step" : tactic => `(tactic|

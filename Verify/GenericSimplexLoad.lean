@@ -17,17 +17,19 @@ structure Net where
   head : Nat := 0
   inputs : Nat := 0
 
-def fan (s : State) (old : Nat) : Array (Nat × Message) := Id.run do
+def fan (self : Nat) (sent : List Message) : Array (Nat × Message) := Id.run do
   let mut out := #[]
-  for m in s.outbox.drop old do
+  for m in sent do
     for r in List.range cfg.parties do
-      if r != s.self then out := out.push (r,m)
+      if r != self then out := out.push (r,m)
   return out
 
+/-- A running replica: `liveStep` (step, then forget), with the outbox and the owed floor
+evidence drained into the network after every input. -/
 def act (n : Net) (i : Nat) (input : Input) : Net :=
-  let old := n.nodes[i]!
-  let next := step cfg old input
-  { n with nodes := n.nodes.set! i next, queue := n.queue ++ fan next old.outbox.length,
+  let (sent,next) := drainOutbox (liveStep cfg n.nodes[i]! input)
+  let (owed,next) := drainRelay next
+  { n with nodes := n.nodes.set! i next, queue := n.queue ++ fan i sent ++ owed.toArray,
            inputs := n.inputs + 1 }
 
 partial def drain (n : Net) (done : Net → Bool) (fuel : Nat) : Net :=
@@ -44,7 +46,8 @@ def committed (k : Nat) (n : Net) : Bool :=
 
 def initial : Net :=
   let nodes := (List.range cfg.parties).map fun i => start cfg i 0 [] []
-  { nodes := nodes.toArray, queue := nodes.foldl (fun q s => q ++ fan s 0) #[] }
+  { nodes := (nodes.map fun s => (drainOutbox (forget s)).2).toArray,
+    queue := nodes.foldl (fun q s => q ++ fan s.self s.outbox) #[] }
 
 def main (args : List String) : IO UInt32 := do
   let total := (args.head? >>= String.toNat?).getD 1000

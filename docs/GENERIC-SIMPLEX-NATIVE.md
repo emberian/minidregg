@@ -171,42 +171,59 @@ since genesis (97 s per replica on the 00f711 evidence copy). Now:
   whole-image `agreement.bin` path (`restore`, `convert-journal`) is deleted:
   since fix C no pre-epoch mesh can be converted, only re-genesised.
 
-## Commit floor (log format 5)
+## Commit floor and erasure (log format 6)
 
-**Why.** A replica that fell behind had no way past a view its peers no longer served, and
-old views were never retired. PR #18 proposed entering the view after the highest *prepared*
-view. That rule drops the late vote a walking replica casts in a prepared view, and one
-Byzantine member with one slow link can then keep every view at two honest votes:
-`Verify/GenericSimplexJumpStarvation.lean`, `pr_jump_starves_commit` (twelve views, no
-commit), against `main_commits_same_policy` for the kernel's step.
-
-**Now, exactly** (Kernel/GenericSimplex.lean):
+**What it is** (Kernel/GenericSimplex.lean):
 
 - `State.lastCommitted` is the commit floor: the highest locally committed view, raised by
-  `commitAt` (`doCommit` then `raiseFloor`) on a commit above it. `lastCommittedView` is its
-  specification; `viewTimeout` reads the field.
-- `ingest` refuses every message for a view at or below the floor.
-- `retire`: every view strictly below the floor drops its received messages. It keeps its
-  send guards (`voted`, `disableRequested`, `sentCommit`, `sentCandidates`, the READY lists)
-  and its outputs. The floor view is kept whole. The views are NOT removed: the three
-  guard invariants (`VoteRecorded`, `CandidateRecorded`, `CommitRecorded`) are stated for
-  every view number, and removing a view would need them restated relative to the floor.
-- `floorJump`, first in every pass: a replica at or below its floor enters the view after
-  it. Everything skipped is at or below a commit; the entered view runs on the base timer
-  (`viewTimeout_after_commit`).
-- Safety: every invariant gained a `commitAt` and a `floorJump` case; the nine
-  `progressOuter_*` lemmas and every safety statement are unchanged.
-- What it costs: a replica whose peer raised its floor can be stranded below it unless it
-  receives that peer's commit evidence (`stranded_without_commit_transfer`: stuck without
-  the missing COMMIT, progress with it). The native certificate relay
-  (`GenericSimplexNative.receiveFinality`) is that transfer; nothing in the kernel sends it.
-- The field is the fold: `Kernel/GenericSimplexFloor.lean`, `lastCommitted_spec`, on every
-  state reached from `start` by `step`.
-- NOT proved (stated, with executed witnesses, `Verify/GenericSimplexFloorStatements.lean`
-  and `Verify/GenericSimplexJumpReach.lean`): `FloorRefuses`, `RebaseSafe`'s consequence,
-  `SettledBelowFrontier`, and progress (`EventualCommit`).
-- BREAKS: log magic version 5. The snapshot carries the floor; version-4 logs refuse
-  (`GenericSimplexIO.v4_log_refused`). A mesh moves by re-genesis, as before.
+  `commitAt` (`doCommit` then `raiseFloor`). It is the fold `lastCommittedView`
+  (`Kernel/GenericSimplexFloor.lean`, `lastCommitted_spec`).
+- A view at or below the floor has one behaviour, refusal: `valueRules` and `argumentRules`
+  do nothing there, `pass` walks only the views above the floor, and `ingest` takes no
+  message for it. No rule reads a view below the floor; the floor view is read only as a
+  parent (`isSafe`, `bestParent` range over `parentViews`: the floor and the views above it).
+- `floorJump`, first in every pass: a replica at or below its floor enters the view after it,
+  on the base timer (`viewTimeout_after_commit`).
+- `forget` drops the views below the floor and the audit. `liveStep` is `step` then `forget`:
+  the transition a running replica executes. `step` keeps everything and is what the safety
+  theorems are about.
+- Erasure (`Kernel/GenericSimplexErasure.lean`, kernel-only, proved):
+  `step_erase : forget (step c s i) = forget (step c (forget s) i)`, hence
+  `liveStep_run`: a replica running `liveStep` is, input for input, the `forget` image of the
+  same replica running `step`. Every theorem about a `step` replica's sends, commits,
+  delivered blocks, failure, view and floor is a theorem about the running one. The pump's
+  fixpoint test compares `forget` images for this reason.
+- Rebase (issue #2): two states with the same `forget` image send, commit, deliver and fail
+  identically on every input sequence (`rebase_observational`). That equation is the whole
+  condition on a restart-rebase; forgetting the floor itself breaks it and halts the replica
+  (`Verify/GenericSimplexJumpStarvation.lean`, `forgotten_floor_halts`).
+- Commit evidence: raising the floor records the COMMIT messages that committed it
+  (`floorEvidence`). A replica still in a view a whole timeout after asking to leave it
+  repeats its CANDIDATE(⊥); a peer whose floor has passed that view queues its evidence for
+  the asker in `relay` (`serveFloor`, once per peer per floor); the driver forwards and
+  drains it (`drainRelay`). The receiver commits by the ordinary COMMIT rule, so the evidence
+  needs no new trust. Executed: `stranding_ends_with_floor_evidence` (stuck on a network
+  that never forwards `relay`; three more commits on one that does, with no input from
+  outside the kernel's own outputs).
+
+**Cost.** A running replica keeps the floor view and the views since its last commit. That
+is flat while commits flow and grows through a commit-free stretch (an idle domain keeps
+timing out views). Not yet removed: the per-view recount of received messages, and the
+growth of `checked`.
+
+**Not proved** (stated in `Verify/GenericSimplexJumpReach.lean`): `SettledBelowFrontier`,
+`EventualCommit`. Not stated as theorems: that every send is above the floor (executed:
+`floor_refuses_executed`), and that received evidence installs the floor (executed above).
+
+**Not adopted by the native layer.** `Compiler/GenericSimplexIO.lean` still replays with
+`step` and checkpoints the whole state; `exportable` and `certificateCandidates` read old
+views and the audit. The kernel harness, the load harness and the witnesses run the new
+rules; the load harness runs `liveStep`.
+
+**BREAKS: log magic version 6.** The step changed (rule order in `valueRules`, the floor
+guards, the parent range, the repeated CANDIDATE(⊥), the timer pushed on timeout, the pump
+test) and the snapshot carries `floorEvidence`, `served`, `relay`. Version-5 logs refuse
+(`GenericSimplexIO.v5_log_refused`). A mesh moves by re-genesis, as before.
 
 ## Native source consumer
 

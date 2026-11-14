@@ -48,8 +48,9 @@ theorem append_output (s : State) (events : List AuditEvent) (old : OutputHistor
 
 @[simp] theorem output_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat) :
-    OutputHistory {self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := s.delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted } ↔ OutputHistory s := by
+    (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
+    OutputHistory {self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := s.delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ OutputHistory s := by
   constructor <;> intro old <;> rcases old with ⟨committed, delivered⟩ <;>
     exact ⟨committed, delivered⟩
 
@@ -157,16 +158,11 @@ theorem doCommit_output (s : State) (view : Nat) (block : Block) (old : OutputHi
 #assert_axioms commitUpdate_output
 #assert_axioms deliveredAppend_output
 #assert_axioms doCommit_output
-theorem retire_output (s : State) (old : OutputHistory s) : OutputHistory (retire s) :=
-  ⟨fun view block committed =>
-      old.committed view block (by rw [← viewAt_retire_committed]; exact committed),
-    old.delivered⟩
-
 theorem commitAt_output (s : State) (view : Nat) (block : Block) (old : OutputHistory s) :
     OutputHistory (commitAt s view block) :=
   raiseFloor_preserves OutputHistory
-    (fun state number prior => retire_output _ (by simpa only [output_record] using prior))
-    _ _ (doCommit_output s view block old)
+    (fun state number evidence prior => by simpa only [output_record] using prior)
+    _ _ _ (doCommit_output s view block old)
 
 #assert_axioms commitAt_output
 
@@ -287,7 +283,7 @@ theorem pump_output (c : Config) (fuel : Nat) (s : State) (old : OutputHistory s
 
 theorem ingest_output (c : Config) (s : State) (message : Message)
     (old : OutputHistory s) : OutputHistory (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor
   dsimp only
   output_actions
 

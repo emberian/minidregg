@@ -1,23 +1,19 @@
 import Kernel.GenericSimplex
 
-/-! Executed control for the prepared catch-up jump of PR #18 (issue #13).
+/-! Executed controls for the commit floor: one adversary policy, a forgotten floor (F2), and
+a replica stranded behind a peer's floor (F3). n = 4, f = 1, party 3 faulty.
 
-The claim under test (F1): a replica that jumps past a prepared view never casts the
-late vote a walker casts on leaving it (`progressOuter`, the `prepared.head?` vote),
-so an adversary with one Byzantine member and one slow link can keep every view at
-two honest votes, and nothing commits.
+History. This file began as the control for the prepared catch-up jump of PR #18 (F1: a
+jumper never casts the late vote, so one Byzantine member and one slow link keep every view
+at two honest votes). That result is kernel-checked at commit 788dfb51f
+(`pr_jump_starves_commit`, `late_vote_jump_commits_same_policy`). The PR is closed, and under
+the present `step` the same hand-tuned policy with the PR's lines appended no longer starves;
+it was not re-tuned. The `.pr` and `.prLateVote` rules below are therefore unexercised and
+are due for removal; `.main` is the kernel's `step` (`stepV_main`, `startV_main`).
 
-This file runs three rules on one adversary policy, n = 4, f = 1, party 3 faulty:
-
-* `.main`       : the kernel's `step` (bound to it by `stepV_main`, `startV_main`); since
-                  the commit floor landed that is the commit-floor step. The same three
-                  results against the kernel before it are at commit 36f7b4bcd;
-* `.pr`         : that step plus the PR's two lines at the end of the outer pass;
-* `.prLateVote` : the PR's jump, casting the late vote in the target view first.
-
-It imports the kernel only, so it elaborates without the proof closure. The
-admission test `allowed` is `GenericSimplexObservationSafety.allowedB` restated
-without `Finset` (same clauses, `poleFaulty = {3}`); it is not `runChecked` itself. -/
+It imports the kernel only, so it elaborates without the proof closure. The admission test
+`allowed` is `GenericSimplexObservationSafety.allowedB` restated without `Finset` (same
+clauses, `poleFaulty = {3}`; tied to it in `Verify/GenericSimplexJumpReach.lean`). -/
 namespace Minidregg.Verify.GenericSimplexJumpStarvation
 open Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
@@ -57,7 +53,7 @@ def pumpV (rule : Rule) (c : Config) : Nat → State → State
   | fuel + 1, s =>
       let s := { s with needsPoll := false }
       let next := passV rule c s
-      if next == s then next else pumpV rule c fuel next
+      if forget next == forget s then next else pumpV rule c fuel next
 
 /-- `step`, with `pump` replaced by `pumpV rule`. -/
 def stepV (rule : Rule) (c : Config) (s : State) (input : Input) : State :=
@@ -75,9 +71,14 @@ def stepV (rule : Rule) (c : Config) (s : State) (input : Input) : State :=
     | .tick now =>
         let s := pumpV rule c c.pumpBudget s
         let s := { s with now := max s.now now }
-        let v := viewAt s s.current
-        if !s.needsPoll && s.now ≥ s.deadline && !v.disableRequested then
-          sendCandidate (putView s { v with disableRequested := true }) s.current none
+        if !s.needsPoll && s.now ≥ s.deadline then
+          let s := { s with deadline := s.now + viewTimeout c s s.current }
+          let v := viewAt s s.current
+          if !v.disableRequested then
+            sendCandidate (putView s { v with disableRequested := true }) s.current none
+          else if v.sentCandidates.contains none then
+            { s with outbox := s.outbox ++ [⟨s.self, s.current, .candidate, none⟩] }
+          else s
         else s
   pumpV rule c c.pumpBudget next
 
@@ -124,6 +125,10 @@ structure Net where
   traceRev : List (Nat × Input) := []
   /-- False once an input `allowed` refuses was attempted. -/
   ok : Bool := true
+  /-- Per party, how much of its outbox the network has scanned for repeats. -/
+  scanned : List Nat := [0, 0, 0, 0]
+  /-- Control: a network that never forwards floor evidence. -/
+  relayOff : Bool := false
 
 def initial (rule : Rule) : Net :=
   { states := #[startV rule cfg 0 0, startV rule cfg 1 0, startV rule cfg 2 0, startV rule cfg 3 0] }
@@ -195,14 +200,36 @@ def pending (net : Net) (hold : Nat → Nat → Message → Bool) : List (Nat ×
             then some (receiver, m) else none
       | _ => []
 
+/-- Floor evidence an honest party owes an honest peer (`State.relay`), not yet delivered. -/
+def owed (net : Net) : List (Nat × Message) :=
+  if net.relayOff then [] else
+  [0, 1, 2].flatMap fun relayer =>
+    (net.states[relayer]!).relay.filter fun (receiver, m) =>
+      decide (receiver < 3) && receiver != relayer && !net.seen.contains (receiver, m)
+
+/-- Messages an honest party put in its outbox again since the last scan (the repeated
+CANDIDATE(⊥) of a stuck replica): each goes to both other honest parties once more. -/
+def repeated (net : Net) : List (Nat × Message) :=
+  [0, 1, 2].flatMap fun sender =>
+    let box := (net.states[sender]!).outbox
+    let start := net.scanned[sender]!
+    (List.range (box.length - start)).flatMap fun k =>
+      let m := box[start + k]!
+      if (box.take (start + k)).contains m then
+        [0, 1, 2].filterMap fun receiver => if receiver != sender then some (receiver, m) else none
+      else []
+
 def settle (rule : Rule) (hold : Nat → Nat → Message → Bool) : Nat → Net → Net
   | 0, net => { net with ok := false }
   | fuel + 1, net =>
-      match pending net hold with
-      | [] => net
-      | batch => settle rule hold fuel
+      let again := repeated net
+      let net := { net with scanned := (List.range 4).map fun p => (net.states[p]!).outbox.length }
+      match again, pending net hold ++ owed net with
+      | [], [] => net
+      | again, batch => settle rule hold fuel
           (batch.foldl (fun n (receiver, m) =>
-            if n.seen.contains (receiver, m) then n else advanceV rule n receiver (.delivery m)) net)
+            if n.seen.contains (receiver, m) then n else advanceV rule n receiver (.delivery m))
+            (again.foldl (fun n (receiver, m) => advanceV rule n receiver (.delivery m)) net))
 
 def playRound (rule : Rule) (net : Net) (w : Nat) : Net :=
   settle rule (held w) 64 ((byzRound w).foldl (fun n (receiver, input) => advanceV rule n receiver input) net)
@@ -259,45 +286,14 @@ def report (net : Net) (rounds : Nat) : String :=
 `#guard` evaluates the compiled definitions at elaboration and fails the file if false. -/
 
 def rounds : Nat := 12
-def prRun : Net := play .pr rounds
 def mainRun : Net := play .main rounds
-def lateVoteRun : Net := play .prLateVote rounds
 
--- (a) every input of each run passed `allowed`, and the PR run's concrete input list
--- replays to the same states.
-#guard prRun.ok && mainRun.ok && lateVoteRun.ok
-#guard prRun.schedule.length == 330
-#guard (runV .pr prRun.schedule).ok && (runV .pr prRun.schedule).states == prRun.states
-
--- (b) under the PR's rule: nothing delivered, nothing committed, nobody failed, and the
--- views kept advancing (no tick was delivered: every view ended prepared).
-#guard !anyDelivered prRun && !anyCommitted prRun && !anyFailed prRun
-#guard currents prRun == [13, 12, 13]
--- Every view has exactly two honest VOTEs.
-#guard (List.range rounds).all fun i => (sentBy prRun (i + 1) .vote).length == 2
--- Views 2..10 hold exactly one honest COMMIT (the jumper's, once the slow link delivers);
--- views 1, 11, 12 hold none. Party 3 sends none. Three are needed.
-#guard (List.range 9).all fun i => (sentBy prRun (i + 2) .commit).length == 1
-#guard [1, 11, 12].all fun w => (sentBy prRun w .commit).isEmpty
--- Fairness of the finite run: the only honest messages not yet delivered are for the last
--- two views (the one-round lag on the 1-2 link).
-#guard (undeliveredViews prRun).all fun view => decide (view ≥ rounds - 1)
-
+#guard mainRun.ok
 -- (c) the kernel's `step` under the same adversary policy commits views 1..10 at all three.
 #guard (honestStates mainRun).all fun s => s.delivered.length == 10
 #guard (List.range 10).all fun i =>
   (honestStates mainRun).all fun s => (viewAt s (i + 1)).committed.isSome
 #guard !anyFailed mainRun
--- The PR run's literal input list is not admitted under main: it delivers messages only
--- the jumping replicas sent. The comparison is therefore by policy, not by input list.
-#guard !(runV .main prRun.schedule).ok
-
--- Repair: the jump casts the late vote in its target view. Same policy: views 2..10 commit.
-#guard (honestStates lateVoteRun).all fun s => s.delivered.length == 9
-#guard (List.range 9).all fun i =>
-  (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome
-#guard !anyFailed lateVoteRun
-
 /-! ## F2, executed: forgetting old views, with and without the commit floor
 
 Rule `.main` throughout (the kernel's `step`). View 1: party 0 proposes `[[1]]`, all three
@@ -305,17 +301,17 @@ vote, the votes are delayed. All three time out, send CANDIDATE(⊥), and view 1
 View 2: party 1 proposes `[[2]]`, which commits at all three, so each floor is 2. Then the
 delayed view-1 votes arrive, with one Byzantine vote and one Byzantine COMMIT.
 
-* `dropViews 2` forgets the views at or below 2 (issue #2's "views ≤ v collapse") and keeps
-  the floor: `ingest` refuses the late votes and nothing happens.
-* `forgetFloor` also resets the floor to 0, which is the kernel as it was before the commit
-  floor: each forgetful replica has lost its CANDIDATE(⊥), sends COMMIT for `[[1]]`, and
-  every honest replica halts. (On the kernel before this change that was `dropViews` alone:
-  commit 36f7b4bcd, `floorless_rebase_halts`.) -/
+* `forgetViews` (the kernel's `forget`: views below the floor dropped, the floor kept; the
+  audit is kept here because this harness reads it as the record of what was really sent)
+  changes nothing: `ingest` refuses the late votes.
+* `forgetFloor` drops the views at or below the floor and resets the floor to 0, which is a
+  restart that lost its floor: each forgetful replica has lost its CANDIDATE(⊥), sends
+  COMMIT for `[[1]]`, and halts. -/
 
-def dropViews (v : Nat) (s : State) : State :=
-  { s with views := s.views.filter fun view => decide (view.number > v) }
+def forgetViews (s : State) : State := { forget s with audit := s.audit }
 
-def forgetFloor (v : Nat) (s : State) : State := { dropViews v s with lastCommitted := 0 }
+def forgetFloor (s : State) : State :=
+  { s with views := s.views.filter (fun v => decide (v.number > s.lastCommitted)), lastCommitted := 0 }
 
 def noHold (_ _ : Nat) (_ : Message) : Bool := false
 
@@ -343,15 +339,15 @@ def altered (change : State → State) (parties : List Nat) (net : Net) : Net :=
   { net with states := parties.foldl (fun states p => states.set! p (change states[p]!)) net.states }
 
 def keptMemory : Net := lateVotes rebaseSetup
-def droppedWithFloor : Net := lateVotes (altered (dropViews 2) [0, 1, 2] rebaseSetup)
-def droppedNoFloorAll : Net := lateVotes (altered (forgetFloor 2) [0, 1, 2] rebaseSetup)
-def droppedNoFloorTwo : Net := lateVotes (altered (forgetFloor 2) [0, 1] rebaseSetup)
+def droppedWithFloor : Net := lateVotes (altered forgetViews [0, 1, 2] rebaseSetup)
+def droppedNoFloorAll : Net := lateVotes (altered forgetFloor [0, 1, 2] rebaseSetup)
+def droppedNoFloorTwo : Net := lateVotes (altered forgetFloor [0, 1] rebaseSetup)
 
 -- Before: view 1 disabled, `[[2]]` committed in view 2 at all three, floor 2, all healthy.
 #guard rebaseSetup.ok && !anyFailed rebaseSetup
 #guard (honestStates rebaseSetup).all fun s =>
   (viewAt s 1).disabled && (viewAt s 2).committed == some [[2]] && s.committedTip == [[2]] &&
-    s.lastCommitted == 2 && (viewAt s 1).received.isEmpty
+    s.lastCommitted == 2
 -- Memory kept, and views forgotten with the floor kept: no view-1 COMMIT, nobody fails.
 #guard keptMemory.ok && !anyFailed keptMemory && (sentBy keptMemory 1 .commit).isEmpty
 #guard droppedWithFloor.ok && !anyFailed droppedWithFloor && (sentBy droppedWithFloor 1 .commit).isEmpty
@@ -369,54 +365,46 @@ Views 1 and 2 commit normally. View 3 (leader 2): party 0 receives nothing for i
 timer fires, so it sends CANDIDATE(⊥) and may no longer vote or send COMMIT there. Parties 1
 and 2 vote; party 3 votes to both and sends its COMMIT to party 2 only. Party 2 commits view
 3 and raises its floor to 3; party 1 has two COMMITs, prepares, and enters view 4. Party 0
-needs a third READY for the block; party 2 now refuses view-3 messages and never sends it.
-View 4's leader is party 3, silent. -/
+needs a third READY for the block, and party 2 takes no view-3 message any more. View 4's
+leader is party 3, silent.
+
+The kernel's answer: party 0, stuck past its timeout, repeats its CANDIDATE(⊥); party 2,
+whose floor has passed that view, puts its floor evidence (the three COMMITs) in `relay`;
+the network forwards it; party 0 commits view 3 and jumps. No input here is out of band:
+every delivery is a message some party's `outbox`, `audit` or `relay` holds, plus ticks.
+`relayOff` is the control: the same schedule on a network that never forwards `relay`. -/
 
 def tickAll (net : Net) (now : Nat) : Net :=
   settle .main noHold 64 ([0, 1, 2].foldl (fun n party => advanceV .main n party (.tick now)) net)
 
-def strandSetup : Net :=
-  let net := (checks 3).foldl (fun n (receiver, input) => advanceV .main n receiver input) (initial .main)
+def strandSetup (relayOff : Bool) : Net :=
+  let net := (checks 3).foldl (fun n (receiver, input) => advanceV .main n receiver input)
+    { initial .main with relayOff := relayOff }
   let net := settle .main (fun _ receiver m => receiver == 0 && decide (m.view ≥ 3)) 64 net
   let net := advanceV .main net 0 (.tick 100)
   let net := [byz 1 3 .vote, byz 2 3 .vote, byz 2 3 .commit].foldl
     (fun n (receiver, input) => advanceV .main n receiver input) net
   tickAll (settle .main noHold 64 net) 200
 
-/-- No transfer: two more rounds of timeouts with every honest message delivered. -/
-def stranded : Net := tickAll (tickAll strandSetup 300) 400
+/-- Evidence never forwarded: two more rounds of timeouts, every honest message delivered. -/
+def stranded : Net := tickAll (tickAll (strandSetup true) 300) 400
 
-/-- Transfer: party 3's COMMIT for view 3, the one message of party 2's commit evidence the
-others lack, is delivered to parties 0 and 1 (natively: the recovered certificate). -/
-def transferred : Net :=
-  let net := [byz 0 3 .commit, byz 1 3 .commit].foldl
-    (fun n (receiver, input) => advanceV .main n receiver input) strandSetup
-  tickAll (tickAll (settle .main noHold 64 net) 300) 400
+/-- Evidence forwarded: the same two rounds of timeouts. -/
+def rescued : Net := tickAll (tickAll (strandSetup false) 300) 400
 
 def floors (net : Net) : List Nat := (honestStates net).map (·.lastCommitted)
 def tips (net : Net) : List Nat := (honestStates net).map (·.committedTip.length)
 
--- Stranded: party 0 in view 3 at floor 2; parties 1 and 2 in view 4, which can end neither way.
-#guard strandSetup.ok && currents strandSetup == [3, 4, 4] && floors strandSetup == [2, 2, 3]
+-- Without forwarding: party 0 in view 3 at floor 2; parties 1 and 2 in view 4, which can end
+-- neither way.
 #guard stranded.ok && !anyFailed stranded
 #guard currents stranded == [3, 4, 4] && floors stranded == [2, 2, 3] && tips stranded == [2, 2, 3]
 #guard (undelivered stranded).isEmpty
--- With the transfer: all three reach floor 3, view 4 times out, and views 5 and 6 commit.
-#guard transferred.ok && !anyFailed transferred
-#guard floors transferred == [6, 6, 6] && tips transferred == [5, 5, 5]
+-- With it: all three reach floor 3, view 4 times out, and views 5 and 6 commit.
+#guard rescued.ok && !anyFailed rescued
+#guard floors rescued == [6, 6, 6] && tips rescued == [5, 5, 5]
 
 /-! ## The same facts as kernel-checked theorems (`decide +kernel`, standard axioms only) -/
-
-/-- F1. Under the PR's rule the adversary policy is admitted for twelve rounds (three leader
-rotations), the honest replicas reach views 13, 12, 13, every view has exactly two honest
-VOTEs and at most one honest COMMIT, and no honest replica commits or delivers anything. -/
-theorem pr_jump_starves_commit :
-    prRun.ok = true ∧ currents prRun = [13, 12, 13] ∧
-    anyDelivered prRun = false ∧ anyCommitted prRun = false ∧ anyFailed prRun = false ∧
-    ((List.range rounds).all fun i => (sentBy prRun (i + 1) .vote).length == 2) = true ∧
-    ((List.range rounds).all fun i => decide ((sentBy prRun (i + 1) .commit).length ≤ 1)) = true ∧
-    ((undeliveredViews prRun).all fun view => decide (view ≥ rounds - 1)) = true := by
-  decide +kernel
 
 /-- Control. Main's `step` (`stepV_main`) under the same policy commits views 1..10 at all
 three honest replicas. -/
@@ -424,14 +412,6 @@ theorem main_commits_same_policy :
     mainRun.ok = true ∧ anyFailed mainRun = false ∧
     ((List.range 10).all fun i =>
       (honestStates mainRun).all fun s => (viewAt s (i + 1)).committed.isSome) = true := by
-  decide +kernel
-
-/-- Repair. The jump that first casts the late vote in its target view commits views 2..10
-under the same policy. This is one schedule, not a progress theorem. -/
-theorem late_vote_jump_commits_same_policy :
-    lateVoteRun.ok = true ∧ anyFailed lateVoteRun = false ∧
-    ((List.range 9).all fun i =>
-      (honestStates lateVoteRun).all fun s => (viewAt s (i + 2)).committed.isSome) = true := by
   decide +kernel
 
 /-- F2. With the floor kept, forgetting the views at or below it is harmless; with the floor
@@ -447,20 +427,18 @@ theorem forgotten_floor_halts :
       (honestStates droppedNoFloorTwo).map (·.failed) = [true, true, false]) := by
   decide +kernel
 
-/-- F3. Without the transfer party 0 stays in view 3 and parties 1 and 2 in view 4 through
-two further rounds of timeouts with every honest message delivered; with it all three reach
-floor 6 and two more blocks commit. -/
-theorem stranded_without_commit_transfer :
+/-- F3. On a network that never forwards floor evidence party 0 stays in view 3 and parties
+1 and 2 in view 4 through two further rounds of timeouts with every honest message
+delivered; with the evidence forwarded all three reach floor 6 and two more blocks commit. -/
+theorem stranding_ends_with_floor_evidence :
     (stranded.ok = true ∧ anyFailed stranded = false ∧ currents stranded = [3, 4, 4] ∧
       floors stranded = [2, 2, 3] ∧ undelivered stranded = []) ∧
-    (transferred.ok = true ∧ anyFailed transferred = false ∧ floors transferred = [6, 6, 6] ∧
-      tips transferred = [5, 5, 5]) := by
+    (rescued.ok = true ∧ anyFailed rescued = false ∧ floors rescued = [6, 6, 6] ∧
+      tips rescued = [5, 5, 5]) := by
   decide +kernel
 
-#print axioms pr_jump_starves_commit
 #print axioms main_commits_same_policy
-#print axioms late_vote_jump_commits_same_policy
 #print axioms forgotten_floor_halts
-#print axioms stranded_without_commit_transfer
+#print axioms stranding_ends_with_floor_evidence
 
 end Minidregg.Verify.GenericSimplexJumpStarvation

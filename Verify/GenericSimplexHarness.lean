@@ -13,8 +13,9 @@ structure Network where
   queue : List (Nat × Message)
   deriving Repr
 def emissions (old next : State) : List (Nat × Message) :=
-  (next.outbox.drop old.outbox.length).flatMap fun m =>
-    ((List.range cfg.parties).filter (fun i => i != next.self)).map (fun i => (i,m))
+  ((next.outbox.drop old.outbox.length).flatMap fun m =>
+    ((List.range cfg.parties).filter (fun i => i != next.self)).map (fun i => (i,m))) ++
+  next.relay.drop old.relay.length
 def initial : Network := Id.run do
   let nodes := (List.range cfg.parties).map fun i => start cfg i 0 [payload] [block,[[43]]]
   let queue := nodes.flatMap fun s =>
@@ -51,6 +52,12 @@ def safe (n : Network) : Bool :=
 def restarted (n : Network) : Bool :=
   (List.range cfg.parties).all fun i =>
     (n.logs[i]!.foldl (step cfg) (start cfg i 0 [payload] [block,[[43]]])) == n.nodes[i]!
+/-- Erasure, executed on a whole run: the replica that forgets after every input is the
+forgotten image of the one that keeps everything (`GenericSimplexErasure.liveStep_run`). -/
+def erased (n : Network) : Bool :=
+  (List.range cfg.parties).all fun i =>
+    (n.logs[i]!.foldl (liveStep cfg) (forget (start cfg i 0 [payload] [block,[[43]]]))) ==
+      forget n.nodes[i]!
 def ensure (condition : Bool) (message : String) : IO Unit :=
   if condition then pure () else throw (IO.userError message)
 
@@ -270,6 +277,7 @@ def main (args : List String) : IO Unit := do
     else normal
   ensure (normal.nodes.all (fun s => !s.committedTip.isEmpty)) "normal progress"
   ensure (safe normal && restarted normal) "normal safety/replay"
+  ensure (erased normal) "normal: the forgetting replica is not the forgotten image of the full one"
   -- A source offer learned after consensus already inserted inert blocks must
   -- still be eligible: inert protocol ancestry is not a new source history.
   let delayedOffer := (List.range cfg.parties).foldl
@@ -280,6 +288,10 @@ def main (args : List String) : IO Unit := do
     "delayed source offer starved behind inert protocol blocks"
   ensure (safe delayedComplete && restarted delayedComplete)
     "delayed offer safety/replay"
+  ensure (erased delayedComplete)
+    "delayed offer: the forgetting replica is not the forgotten image of the full one"
+  ensure (delayedComplete.nodes.all fun s => (forget s).views.length ≤ 3)
+    "delayed offer: a forgetting replica keeps more than three views after its last commit"
   -- Unvalidated histories from a Byzantine sender make discovery non-trivial. They are sent
   -- for views above each replica's commit floor: a view at or below it takes no message, so
   -- the same messages for views 1 and 2 (committed long ago) must request nothing.

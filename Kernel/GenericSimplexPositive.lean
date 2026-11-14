@@ -18,8 +18,9 @@ def Positive (s : State) : Prop :=
 
 theorem positive_record (s : State) (deadline now : Nat) (checked : List Block)
     (offers : List Bytes) (outbox : List Message) (delivered : List Block) (tip : Block)
-    (needsPoll failed : Bool) (lastCommitted : Nat) :
-    Positive {self := s.self, current := s.current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted} ↔ Positive s := Iff.rfl
+    (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
+    Positive {self := s.self, current := s.current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ Positive s := Iff.rfl
 
 theorem positive_new_current (s : State) (current deadline : Nat) (old : Positive s)
     (pos : 0 < current) : Positive {s with current := current, deadline := deadline} :=
@@ -124,18 +125,11 @@ theorem sendCandidate_current_positive (s : State) (arg : Argument) (old : Posit
 @[simp] theorem broadcast_current (s : State) (view : Nat) (kind : Kind) (arg : Argument) :
     (broadcast s view kind arg).current = s.current := rfl
 
-theorem retire_positive (s : State) (old : Positive s) : Positive (retire s) := by
-  refine ⟨old.1, ?_, old.2.2⟩
-  intro view member
-  obtain ⟨v, inside, same | same⟩ := mem_retire member
-  · rw [same]; exact old.2.1 v inside
-  · rw [same]; exact old.2.1 v inside
-
 theorem commitAt_positive (s : State) (view : Nat) (block : Block)
     (old : Positive s) (pos : 0 < view) : Positive (commitAt s view block) :=
   raiseFloor_preserves Positive
-    (fun state number prior => retire_positive _ (by simpa only [positive_record] using prior))
-    _ _ (doCommit_positive s view block old pos)
+    (fun state number evidence prior => by simpa only [positive_record] using prior)
+    _ _ _ (doCommit_positive s view block old pos)
 
 macro "positive_step" : tactic => `(tactic|
   first
@@ -231,8 +225,11 @@ theorem pass_positive (c : Config) (s : State) (old : Positive s) : Positive (pa
   apply floorJump_positive
   apply progressViews_positive _ _ _ old
   intro view member
-  obtain ⟨stored, inside, number⟩ := List.mem_map.mp (List.mem_eraseDups.mp member)
-  simpa only [← number] using old.2.1 stored inside
+  obtain ⟨stored, inside, number⟩ := List.mem_filterMap.mp member
+  split at number
+  · have same : stored.number = view := by simpa using number
+    simpa only [← same] using old.2.1 stored inside
+  · cases number
 
 theorem pump_positive (c : Config) (fuel : Nat) (s : State) (old : Positive s) :
     Positive (pump c fuel s) := by
@@ -246,7 +243,7 @@ theorem pump_positive (c : Config) (fuel : Nat) (s : State) (old : Positive s) :
 
 theorem ingest_positive (c : Config) (s : State) (message : Message) (old : Positive s) :
     Positive (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor
   split
   · exact old
   · rename_i admitted

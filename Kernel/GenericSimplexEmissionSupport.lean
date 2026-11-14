@@ -1,5 +1,6 @@
 import Kernel.GenericSimplexCountSupport
 import Kernel.GenericSimplexReceiveProvenance
+import Kernel.GenericSimplexErasure
 import Kernel.GenericSimplexReceiveScope
 
 namespace Minidregg.Kernel.GenericSimplexEmissionSupport
@@ -352,8 +353,8 @@ theorem commitAt_invariant {c : Config} {external : Message → Prop} {s : State
     (enough : c.quorum ≤ count (viewAt s view) .commit (some block)) :
     EmissionInvariant c external (commitAt s view block) :=
   raiseFloor_preserves (EmissionInvariant c external)
-    (fun _ _ prior => ⟨retire_scoped prior.scopeOK, retire_backed prior.backed, prior.emitted⟩)
-    _ _ (doCommit_invariant view block old enough)
+    (fun _ _ _ prior => ⟨by simpa only [scoped_record] using prior.scopeOK, prior.backed, prior.emitted⟩)
+    _ _ _ (doCommit_invariant view block old enough)
 
 #assert_axioms putCopied_invariant
 #assert_axioms broadcast_invariant
@@ -389,34 +390,25 @@ theorem votePhase_invariant {c : Config} {external : Message → Prop} {s : Stat
 theorem valueRules_invariant (c : Config) (external : Message → Prop) (s : State)
     (view : Nat) (block : Block) (old : EmissionInvariant c external s) :
     EmissionInvariant c external (valueRules c s view block) := by
-  let phase := if count (viewAt s view) .vote (some block) ≥ c.quorum && validBlock s block then
-        let cleared := clear s view (some block)
-        let v := viewAt cleared view
-        if v.sentCommit.isNone && v.sentCandidates.all (fun a => a == some block) then
-          broadcast (putView cleared {v with sentCommit := some block}) view .commit (some block)
-        else cleared
-      else s
-  have phaseInv : EmissionInvariant c external phase := votePhase_invariant view block old
-  let afterCommit := if count (viewAt phase view) .commit (some block) ≥ c.quorum then
-      commitAt phase view block else phase
-  have commitInv : EmissionInvariant c external afterCommit := by
-    dsimp only [afterCommit]
-    split
-    · apply commitAt_invariant view block phaseInv
-      assumption
-    · exact phaseInv
-  have equation : valueRules c s view block =
-    (if count (viewAt afterCommit view) .vote (some block) ≥ c.faults + 1 &&
-      validBlock afterCommit block then sendCandidate afterCommit view (some block) else afterCommit) := by
-    simp only [valueRules, Id.run, bind, pure, afterCommit, phase]
-    split_ifs <;> rfl
-  rw [equation]
+  rw [GenericSimplexErasure.valueRules_eq]
   split
-  next enabled =>
-    apply candidate_invariant view (some block) commitInv
-    simp only [Bool.and_eq_true_iff, decide_eq_true_eq] at enabled
-    exact enabled.1
-  · exact commitInv
+  · exact old
+  · have phaseInv : EmissionInvariant c external (GenericSimplexErasure.voteRule c s view block) :=
+      votePhase_invariant view block old
+    have candidateInv : EmissionInvariant c external
+        (GenericSimplexErasure.candidateRule c (GenericSimplexErasure.voteRule c s view block) view block) := by
+      unfold GenericSimplexErasure.candidateRule
+      split
+      next enabled =>
+        apply candidate_invariant view (some block) phaseInv
+        simp only [Bool.and_eq_true_iff, decide_eq_true_eq] at enabled
+        exact enabled.1
+      · exact phaseInv
+    unfold GenericSimplexErasure.commitRule
+    split
+    · apply commitAt_invariant view block candidateInv
+      assumption
+    · exact candidateInv
 
 #assert_axioms votePhase_invariant
 #assert_axioms valueRules_invariant
@@ -424,6 +416,9 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
     (view : Nat) (arg : Argument) (size : c.parties = 3 * c.faults + 1)
     (old : EmissionInvariant c external s) :
     EmissionInvariant c external (argumentRules c s view arg) := by
+  by_cases dead : view ≤ s.lastCommitted
+  · rw [GenericSimplexErasure.argumentRules_eq, if_pos dead]
+    exact old
   have quorum : c.quorum = 2 * c.faults + 1 := by
     simp only [Config.quorum, size]
     omega
@@ -461,8 +456,8 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
   have equation : argumentRules c s view arg =
       (if count (viewAt relay view) .ready arg ≥ 2 * c.faults + 1 then
         clear relay view arg else relay) := by
-    simp only [argumentRules, Id.run, bind, pure, relay, core]
-    split_ifs <;> rfl
+    rw [GenericSimplexErasure.argumentRules_eq, if_neg dead]
+    rfl
   rw [equation]
   split
   next enough =>
@@ -477,8 +472,9 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
 #assert_axioms argumentRules_invariant
 @[simp] theorem emission_record (c : Config) (external : Message → Prop) (s : State)
     (current deadline now : Nat) (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat) :
-    EmissionInvariant c external { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted } ↔
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
+    EmissionInvariant c external { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔
       EmissionInvariant c external s := by
   constructor <;> intro old <;> rcases old with ⟨scopeOK, backed, emitted⟩ <;>
     exact ⟨scopeOK, backed, emitted⟩
@@ -602,7 +598,7 @@ theorem register_invariant {c : Config} {external : Message → Prop} {s : State
 theorem ingest_invariant (c : Config) (external : Message → Prop) (s : State)
     (message : Message) (old : EmissionInvariant c external s) (available : external message) :
     EmissionInvariant c external (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor
   dsimp only
   repeat' first
     | (with_reducible apply register_invariant message old <;> first | assumption | simp_all <;> omega)

@@ -105,7 +105,7 @@ theorem pump_scoped (c : Config) (fuel : Nat) (state : State)
 
 theorem ingest_scoped (c : Config) (state : State) (message : Message)
     (scopeOK : Scoped c state) : Scoped c (ingest c state message) := by
-  unfold ingest
+  unfold ingest serveFloor
   dsimp only
   repeat' first
     | (with_reducible apply register_scoped message scopeOK <;> simp_all <;> omega)

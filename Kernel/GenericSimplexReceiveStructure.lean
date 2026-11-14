@@ -9,7 +9,8 @@ set_option autoImplicit false
 theorem backed_record (external : Message → Prop) (state : State)
     (self current deadline now : Nat) (checked : List Block) (offers : List Bytes)
     (outbox : List Message) (delivered : List Block) (tip : Block)
-    (needsPoll failed : Bool) (lastCommitted : Nat) :
+    (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
     Backed external {
       self := self
       current := current
@@ -23,7 +24,7 @@ theorem backed_record (external : Message → Prop) (state : State)
       delivered := delivered
       committedTip := tip
       needsPoll := needsPoll
-      failed := failed, lastCommitted := lastCommitted } ↔ Backed external state := Iff.rfl
+      failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ Backed external state := Iff.rfl
 
 theorem putView_copied_received {external : Message → Prop} {state : State}
     (view : View) (number : Nat) (backed : Backed external state)
@@ -131,7 +132,7 @@ theorem pump_backed {external : Message → Prop} (c : Config) (fuel : Nat) (sta
 theorem ingest_backed {external : Message → Prop} (c : Config) (state : State)
     (message : Message) (backed : Backed external state) (available : external message) :
     Backed external (ingest c state message) := by
-  unfold ingest
+  unfold ingest serveFloor
   dsimp only
   repeat' first
     | with_reducible exact register_backed message backed (Or.inl available)

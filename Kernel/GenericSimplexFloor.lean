@@ -1,4 +1,5 @@
 import Kernel.GenericSimplexOutputHistory
+import Kernel.GenericSimplexErasure
 import Mathlib.Tactic.SplitIfs
 
 /-! The commit floor is the fold it replaced.
@@ -30,8 +31,9 @@ theorem floor_of_same (a b : State) (old : FloorInvariant a)
 
 @[simp] theorem floor_record (s : State) (self current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (audit : List AuditEvent) (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
-    FloorInvariant { self := self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := s.lastCommitted } ↔ FloorInvariant s := by
+    (audit : List AuditEvent) (delivered : List Block) (tip : Block) (needsPoll failed : Bool)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
+    FloorInvariant { self := self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := s.lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ FloorInvariant s := by
   constructor <;> intro old <;> exact ⟨old.bound, old.attained⟩
 
 theorem putView_floor (s : State) (v : View) (old : FloorInvariant s)
@@ -95,64 +97,71 @@ theorem castVote_floor (s : State) (view : Nat) (block : Block) (old : FloorInva
 
 /-- What `doCommit` does to the committed fields: the floor field is untouched, every other
 view is untouched, and a committed view stays committed. -/
-structure CommitFrame (s d : State) (number : Nat) : Prop where
+structure CommitFrame (s d : State) (number : Nat) (block : Block) : Prop where
   floor : d.lastCommitted = s.lastCommitted
   others : ∀ n, n ≠ number → (viewAt d n).committed = (viewAt s n).committed
   kept : (viewAt s number).committed.isSome = true → (viewAt d number).committed.isSome = true
+  fresh : (viewAt d number).committed = (viewAt s number).committed ∨
+    (viewAt d number).committed = some block
 
 theorem frame_of_put (s cleared next : State) (number : Nat) (block : Block)
     (floor : cleared.lastCommitted = s.lastCommitted)
     (same : ∀ n, (viewAt cleared n).committed = (viewAt s n).committed)
     (views : next.views =
       (putView cleared {viewAt cleared number with committed := some block}).views)
-    (nextFloor : next.lastCommitted = cleared.lastCommitted) : CommitFrame s next number := by
+    (nextFloor : next.lastCommitted = cleared.lastCommitted) : CommitFrame s next number block := by
   have at_ : ∀ n, viewAt next n =
       viewAt (putView cleared {viewAt cleared number with committed := some block}) n := by
     intro n
     simp only [viewAt, views]
   have index : ({viewAt cleared number with committed := some block} : View).number = number :=
     viewAt_number cleared number
-  refine ⟨nextFloor.trans floor, ?_, ?_⟩
+  have selected := viewAt_put_same cleared {viewAt cleared number with committed := some block}
+  rw [index] at selected
+  refine ⟨nextFloor.trans floor, ?_, ?_, ?_⟩
   · intro n other
     rw [at_, viewAt_put_other _ _ n (by rw [index]; exact other)]
     exact same n
   · intro _
-    have selected := viewAt_put_same cleared {viewAt cleared number with committed := some block}
-    rw [index] at selected
     rw [at_, selected]
     rfl
+  · right
+    rw [at_, selected]
 
 theorem doCommit_frame (s : State) (number : Nat) (block : Block) :
-    CommitFrame s (doCommit s number block) number := by
+    CommitFrame s (doCommit s number block) number block := by
   have floor := clear_lastCommitted s number (some block)
   have same := clear_committed s number (some block)
   unfold doCommit
   dsimp only
   split_ifs <;> first
-    | exact ⟨rfl, fun _ _ => rfl, id⟩
-    | exact ⟨floor, fun n _ => same n, fun flag => by rw [same]; exact flag⟩
+    | exact ⟨rfl, fun _ _ => rfl, id, Or.inl rfl⟩
+    | exact ⟨floor, fun n _ => same n, fun flag => by rw [same]; exact flag, Or.inl (same number)⟩
     | exact frame_of_put s _ _ number block floor same rfl rfl
 
 /-- The floor commit keeps the invariant: a commit above the floor raises the floor to it. -/
 theorem commitAt_floor (s : State) (number : Nat) (block : Block) (old : FloorInvariant s) :
     FloorInvariant (commitAt s number block) := by
-  obtain ⟨floor, others, kept⟩ := doCommit_frame s number block
+  obtain ⟨floor, others, kept, fresh⟩ := doCommit_frame s number block
   unfold commitAt raiseFloor
+  dsimp only
   split
   next raised =>
     simp only [Bool.and_eq_true, decide_eq_true_eq] at raised
     constructor
     · intro n flag
       show n ≤ number
-      rw [viewAt_retire_committed] at flag
+      have flag' : (viewAt (doCommit s number block) n).committed.isSome = true := flag
       by_cases chosen : n = number
       · omega
-      · have prior := old.bound n (by rw [← others n chosen]; exact flag)
+      · have prior := old.bound n (by rw [← others n chosen]; exact flag')
         omega
     · right
-      show (viewAt (retire _) number).committed.isSome = true
-      rw [viewAt_retire_committed]
-      exact raised.2
+      show (viewAt (doCommit s number block) number).committed.isSome = true
+      have exact : (viewAt (doCommit s number block) number).committed = some block := by
+        simpa using raised.2
+      rw [exact]
+      rfl
   next kept' =>
     simp only [Bool.and_eq_true, decide_eq_true_eq] at kept'
     constructor
@@ -160,8 +169,11 @@ theorem commitAt_floor (s : State) (number : Nat) (block : Block) (old : FloorIn
       rw [floor]
       by_cases chosen : n = number
       · subst chosen
-        have notAbove : ¬ (doCommit s n block).lastCommitted < n := fun above => kept' ⟨above, flag⟩
-        omega
+        rcases fresh with same | exact
+        · exact old.bound n (by rw [← same]; exact flag)
+        · have notAbove : ¬ (doCommit s n block).lastCommitted < n :=
+            fun above => kept' ⟨above, by rw [exact]; exact beq_self_eq_true _⟩
+          omega
       · exact old.bound n (by rw [← others n chosen]; exact flag)
     · rw [floor]
       rcases old.attained with zero | reached
@@ -271,7 +283,7 @@ theorem pump_floor (c : Config) (fuel : Nat) (s : State) (old : FloorInvariant s
 
 theorem ingest_floor (c : Config) (s : State) (message : Message)
     (old : FloorInvariant s) : FloorInvariant (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor
   dsimp only
   floor_chain
 
@@ -428,4 +440,7 @@ theorem lagging_floor_refused :
 #assert_axioms step_floorSpec
 #assert_axioms lastCommitted_spec
 #assert_axioms lagging_floor_refused
+#assert_axioms Minidregg.Kernel.GenericSimplexErasure.step_erase
+#assert_axioms Minidregg.Kernel.GenericSimplexErasure.liveStep_run
+#assert_axioms Minidregg.Kernel.GenericSimplexErasure.rebase_observational
 end Minidregg.Kernel.GenericSimplexFloor

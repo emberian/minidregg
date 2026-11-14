@@ -63,7 +63,12 @@ theorem isSafe_safeAt (s : State) (block : Block) (history : HistoryInvariant s)
   obtain ⟨nonempty, candidates⟩ := Bool.and_eq_true_iff.mp safe
   obtain ⟨previous, inRange, selected⟩ := List.any_eq_true.mp candidates
   obtain ⟨prepared, skipped⟩ := Bool.and_eq_true_iff.mp selected
-  refine ⟨?_, previous, List.mem_range.mp inRange, ?_, ?_⟩
+  have before : previous < s.current := by
+    unfold parentViews at inRange
+    obtain ⟨k, small, rfl⟩ := List.mem_map.mp inRange
+    have bound := List.mem_range.mp small
+    omega
+  refine ⟨?_, previous, before, ?_, ?_⟩
   · simpa using nonempty
   · apply preparedAt_witness s previous block.dropLast history.prepared
     simpa using prepared
@@ -208,8 +213,9 @@ theorem history_same_fields (before after : State) (old : HistoryInvariant befor
 
 @[simp] theorem history_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat) :
-    HistoryInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted } ↔ HistoryInvariant s := by
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message)) :
+    HistoryInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay } ↔ HistoryInvariant s := by
   constructor <;> intro old <;> rcases old with ⟨prepared, disabled⟩ <;> exact ⟨prepared, disabled⟩
 
 theorem append_history (s : State) (event : GenericSimplex.AuditEvent)
@@ -233,17 +239,11 @@ theorem doCommit_history (s : State) (view : Nat) (block : Block)
   dsimp only
   split_ifs <;> first | exact old | exact clearInvariant | exact history_same_fields _ _ appended rfl rfl rfl
 
-theorem retire_history (s : State) (old : HistoryInvariant s) : HistoryInvariant (retire s) :=
-  ⟨fun view block member =>
-      old.prepared view block (by rw [← viewAt_retire_prepared]; exact member),
-    fun view disabled =>
-      old.disabled view (by rw [← viewAt_retire_disabled]; exact disabled)⟩
-
 theorem commitAt_history (s : State) (view : Nat) (block : Block)
     (old : HistoryInvariant s) : HistoryInvariant (commitAt s view block) :=
   raiseFloor_preserves HistoryInvariant
-    (fun state number prior => retire_history _ (by simpa only [history_record] using prior))
-    _ _ (doCommit_history s view block old)
+    (fun state number evidence prior => by simpa only [history_record] using prior)
+    _ _ _ (doCommit_history s view block old)
 
 #assert_axioms commitAt_history
 
@@ -288,11 +288,13 @@ theorem history_fold {α : Type} (action : State → α → State)
   | nil => exact old
   | cons item rest ih => exact ih (action state item) (each state item old)
 
+set_option maxHeartbeats 1000000 in
 theorem valueRules_history (c : Config) (s : State) (view : Nat) (block : Block)
     (old : HistoryInvariant s) : HistoryInvariant (valueRules c s view block) := by
   simp only [valueRules, Id.run, bind, pure]
   history_actions
 
+set_option maxHeartbeats 1000000 in
 theorem argumentRules_history (c : Config) (s : State) (view : Nat) (arg : Argument)
     (old : HistoryInvariant s) : HistoryInvariant (argumentRules c s view arg) := by
   simp only [argumentRules, Id.run, bind, pure]
@@ -364,7 +366,7 @@ theorem pump_history (c : Config) (fuel : Nat) (s : State) (old : HistoryInvaria
 
 theorem ingest_history (c : Config) (s : State) (message : Message)
     (old : HistoryInvariant s) : HistoryInvariant (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor
   dsimp only
   history_actions
 
