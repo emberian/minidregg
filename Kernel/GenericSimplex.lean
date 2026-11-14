@@ -124,14 +124,21 @@ Consensus ancestry remains the full Block everywhere else. -/
 def applicationHistory (block : Block) : Block :=
   block.filter (fun payload => !payload.isEmpty)
 
-/-- Check every exact application-bearing source prefix. A check remains valid
-when protocol-only empty blocks are inserted, since those neither modify source
-state nor consume a source height. A different nonempty ancestor never matches.
-The native checker replays this same canonical source history from pinned genesis. -/
+def isPrefix (a b : Block) : Bool := b.take a.length == a
+/-- `State.checked` is the set of source histories the native checker has replayed from the
+pinned genesis, kept as its maximal elements: a replay of a history replays every prefix of
+it, so a history that is a prefix of a kept one is not kept, and a new history replaces the
+kept ones it extends. One chain of source records is one entry, whatever its length. -/
+def addChecked (checked : List Block) (block : Block) : List Block :=
+  let history := applicationHistory block
+  if history.isEmpty || checked.any (fun kept => isPrefix history kept) then checked
+  else checked.filter (fun kept => !isPrefix kept history) ++ [history]
+/-- A block is valid when its source history is a prefix of a checked one. Protocol-only
+empty blocks neither modify source state nor consume a source height, so they do not count;
+a different nonempty ancestor never matches. One walk of the block per kept history. -/
 def validBlock (s : State) (block : Block) : Bool :=
   let history := applicationHistory block
-  (List.range history.length).all fun i =>
-    s.checked.any (fun checked => applicationHistory checked == history.take (i + 1))
+  history.isEmpty || s.checked.any (fun kept => isPrefix history kept)
 def register (s : State) (m : Message) : State :=
   let v := viewAt s m.view
   putView s { v with received := addUnique v.received m }
@@ -160,7 +167,6 @@ def clear (s : State) (number : Nat) (value : Argument) : State :=
         let next := putView s { v with prepared := v.prepared ++ [block] }
         { next with audit := next.audit ++ [.prepare s.self number block] }
       else s
-def isPrefix (a b : Block) : Bool := b.take a.length == a
 def doCommit (s : State) (number : Nat) (block : Block) : State :=
   if !validBlock s block then s else
   let s := clear s number (some block)
@@ -170,7 +176,10 @@ def doCommit (s : State) (number : Nat) (block : Block) : State :=
   let s := { s with audit := s.audit ++ [.commit s.self number block] }
   if isPrefix s.committedTip block then
     if s.committedTip == block then s else
-      { s with committedTip := block, delivered := s.delivered ++ [block] }
+      -- A committed payload is no longer work: the offers keep only what is still pending.
+      { s with committedTip := block, delivered := s.delivered ++ [block],
+               offers := s.offers.filter fun payload =>
+                 !(block.drop s.committedTip.length).contains payload }
   else if isPrefix block s.committedTip then s
   else { s with failed := true }
 /-- A commit above the floor raises the floor to its view. The floor keeps the COMMIT
@@ -367,6 +376,9 @@ def serveFloor (s : State) (peer : Nat) : State :=
   if peer == s.self || s.served.contains peer || s.floorEvidence.isEmpty then s else
   { s with relay := s.relay ++ s.floorEvidence.map (fun m => (peer, m)),
            served := s.served ++ [peer] }
+/-- A payload already in the committed tip is not work and is not offered again. -/
+def addOffer (s : State) (payload : Bytes) : List Bytes :=
+  if s.committedTip.contains payload then s.offers else addUnique s.offers payload
 def ingest (c : Config) (s : State) (m : Message) : State :=
   if m.sender ≥ c.parties || m.view == 0 then s else
   if m.view ≤ s.lastCommitted then
@@ -388,10 +400,10 @@ def step (c : Config) (s : State) (input : Input) : State :=
         -- Register eligibility and offer atomically, before any leader action.
         -- A separate offer append could otherwise miss the just-enabled view.
         let offers := match block.getLast? with
-          | some payload => if payload.isEmpty then s.offers else addUnique s.offers payload
+          | some payload => if payload.isEmpty then s.offers else addOffer s payload
           | none => s.offers
-        { s with checked := addUnique s.checked block, offers := offers }
-    | .offer payload => { s with offers := addUnique s.offers payload }
+        { s with checked := addChecked s.checked block, offers := offers }
+    | .offer payload => { s with offers := addOffer s payload }
     | .poll => s
     | .tick now =>
         -- Due authenticated arrivals must be delivered before this input.
