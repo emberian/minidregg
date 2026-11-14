@@ -1,16 +1,19 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `1dccfb8f32f8` (gate: the tour phase runs THIN after the JWF dry run). Round finished 2026-11-14T20:21Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-1dccfb8f`.
+Tip: `a2a03e8e440e` (effects: what a payload funds and consents to is its declaration's field). Round finished 2026-11-14T20:50Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-a2a03e8e`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-1dccfb/journey.log |
+| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-a2a03e/journey.log |
 | gate:composed:composed | composed composed fail | not rerun | yes | infra, member-side | scratch world: jworld FAIL start the relay did not answer a pinned enrollment-view within 30 s |
 
-Suspect commits since green (`git log 788dfb51fb5a..1dccfb8f32f8`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..a2a03e8e440e`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `a2a03e8e` effects: what a payload funds and consents to is its declaration's field (owner: apps-hermes, bytes-repr)
+- `b1edf946` builder: REDS.md for 1dccfb8f32f8 (2 red) (owner: build-loop)
 - `1dccfb8f` gate: the tour phase runs THIN after the JWF dry run
 - `3cdf0c15` builder: REDS.md for 2ea52602020f (3 red) (owner: build-loop)
 - `2ea52602` docs(effects): what binding `append` takes, and why JJOB1 and JJOB were not run
@@ -49,17 +52,15 @@ Suspect commits since green (`git log 788dfb51fb5a..1dccfb8f32f8`), newest first
 - `884450e9` builder: REDS.md for 16ff33ac3aa2 (3 red) (owner: build-loop)
 - `62299c44` json: a target's payload has one reader; the agreement decoder's private grammar is deleted
 - `16ff33ac` builder: REDS.md for f0ed42e2752a (2 red) (owner: build-loop)
-- `643e3927` journey THIN: the kind-read rows start their own consent provider (owner: apps-hermes)
-- `50b72670` thin consent: an observe-only read's observation header is derived as the Host derives it
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.255 | 0.244 | 0.956 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 54.188 | 122.515 | 2.261 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.221 | 0.241 | 1.091 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_wall_ms | 97.571 | 148.695 | 1.524 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.666 | 0.353 | 0.530 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 332.334 | 201.288 | 0.606 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-1dccfb8f/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.177 | 0.242 | 1.367 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 35.347 | 104.554 | 2.958 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_cpu_ms | 0.157 | 0.359 | 2.286 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 37.488 | 115.827 | 3.090 | 1.590 | host-execution, store-retained |
+| flatness-get | FAIL | get_cpu_ms | 0.375 | 0.745 | 1.987 | 1.856 | read-path |
+| flatness-get | FAIL | get_wall_ms | 126.442 | 279.264 | 2.209 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-a2a03e8e/flatness.log | - | - | - | - | host-execution, store-retained |
