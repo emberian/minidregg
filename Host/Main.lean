@@ -1216,13 +1216,13 @@ def description (config : NativeHost.Config) : IO Lean.Json := do
 entries, and the parts of that `set` each alone. -/
 def trieBench (size : Nat) : IO Unit := do
   let aux := CredentialAuthorityCell.materializer.aux
-  let address (i : Nat) : Minidregg.Theory.Store.Address CredentialAuthorityCell.layout :=
+  let address (i : Nat) : Minidregg.Theory.Store.Address Minidregg.Theory.CredentialAuthorityState.layout :=
     ⟨.revoked, .channel ⟨i⟩⟩
   let per (label : String) (count : Nat) (t0 : Nat) : IO Unit := do
     let nanos := (← IO.monoNanosNow) - t0
     IO.println s!"{label}: {nanos / count / 1000}.{(nanos / count % 1000) / 100} us each over {count}"
   let t0 ← IO.monoNanosNow
-  let mut kept := (aux.build (Minidregg.Theory.Store.fromEntries [])).1
+  let mut kept := (aux.build (Minidregg.Compiler.StoreCodec.fromEntries [])).1
   for i in [0:size] do kept := aux.set kept (address i) (some ())
   IO.println s!"built {size} entries by set in {((← IO.monoNanosNow) - t0) / 1000000} ms, root {(aux.root? kept).map (·.value)}"
   let rounds := 200
@@ -1231,7 +1231,7 @@ def trieBench (size : Nat) : IO Unit := do
   for i in [0:rounds] do next := aux.set next (address (size + i)) (some ())
   IO.println s!"root after {(aux.root? next).map (·.value)}"
   per s!"set (new entry, store of {size})" rounds t0
-  let tag := PrivateCellRoot.untagged CredentialAuthorityCell.layout
+  let tag := PrivateCellRoot.untagged Minidregg.Theory.CredentialAuthorityState.layout
   let t0 ← IO.monoNanosNow
   let mut bits := 0
   for i in [0:rounds] do
@@ -1241,7 +1241,7 @@ def trieBench (size : Nat) : IO Unit := do
   let t0 ← IO.monoNanosNow
   let mut sum := 0
   for i in [0:rounds] do
-    sum := sum + (PrivateCellRoot.contentDigest CredentialAuthorityCell.wire (address (size + i)) []).bytes.headD 0 |>.toNat
+    sum := sum + ((PrivateCellRoot.contentDigest CredentialAuthorityCell.wire (address (size + i)) []).bytes.headD 0).toNat
   IO.println s!"content digests {sum}"
   per "contentDigest" rounds t0
   let t0 ← IO.monoNanosNow
