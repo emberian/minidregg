@@ -1,17 +1,22 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `23f9aac22833` (effects: scalar actions are bound at code 0; their hand arms are deleted). Round finished 2026-11-14T19:11Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-23f9aac2`.
+Tip: `2ea52602020f` (docs(effects): what binding `append` takes, and why JJOB1 and JJOB were not run). Round finished 2026-11-14T20:00Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-2ea52602`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-23f9aa/journey.log |
-| gate:composed:store-restart | composed store-restart fail | not rerun | no | host-execution | fail: store-restart:world: the relay did not answer a pinned enrollment-view within 30 s; |
+| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-2ea526/journey.log |
+| gate:composed:composed | composed composed fail | not rerun | no | infra, member-side | scratch world: jworld FAIL start the relay did not answer a pinned enrollment-view within 30 s |
 
-Suspect commits since green (`git log 788dfb51fb5a..23f9aac22833`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..2ea52602020f`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `2ea52602` docs(effects): what binding `append` takes, and why JJOB1 and JJOB were not run
+- `b95b35aa` effects: the two money consents are bound at codes 6 and 8; their hand arms are deleted (owner: apps-hermes, bytes-repr)
+- `778bc98b` effects: the scalar ghost is refuted wherever a write is admitted (owner: bytes-repr)
+- `bc17d3fd` journey JDISCLOSE: the refusal line has its own variable (owner: apps-hermes)
+- `c40f190a` builder: REDS.md for 23f9aac22833 (3 red) (owner: build-loop)
 - `23f9aac2` effects: scalar actions are bound at code 0; their hand arms are deleted (owner: apps-hermes, bytes-repr)
 - `e3026acf` builder: REDS.md for ab8af8e598aa (2 red) (owner: build-loop)
 - `ab8af8e5` builder: REDS.md for 26be70adf141 (4 red) (owner: build-loop)
@@ -47,20 +52,15 @@ Suspect commits since green (`git log 788dfb51fb5a..23f9aac22833`), newest first
 - `50b72670` thin consent: an observe-only read's observation header is derived as the Host derives it
 - `eb1181a5` journey THIN: a `kindRead` beside a write is signed under thin consent; a lied view of it is refused (owner: apps-hermes)
 - `a7431e4c` thin consent: a command holding an observe-only read is no longer refused `slotShape`
-- `e6d38997` journey THIN: the served view comes from the proxy; the step runs all its rows again (owner: apps-hermes)
-- `f0ed42e2` builder: REDS.md for e9dc4c0be201 (3 red) (owner: build-loop)
-- `5c29e9be` gates(generic-simplex): the gate builds its own Rust helpers, so every caller passes one argument
-- `e9dc4c0b` builder: REDS.md for 1b5666369348 (3 red) (owner: build-loop)
-- `83d19700` effects: the content read and the kind read are bound at codes 3 and 7; their hand arms are deleted (owner: apps-hermes)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.184 | 0.226 | 1.226 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 35.114 | 79.478 | 2.263 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.193 | 0.248 | 1.285 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 30.213 | 98.112 | 3.247 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.601 | 0.565 | 0.940 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 335.497 | 318.891 | 0.951 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-23f9aac2/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.220 | 0.220 | 0.999 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 52.317 | 90.974 | 1.739 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.196 | 0.291 | 1.488 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 43.964 | 94.308 | 2.145 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.517 | 0.359 | 0.695 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 164.737 | 138.251 | 0.839 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-2ea52602/flatness.log | - | - | - | - | host-execution, store-retained |
