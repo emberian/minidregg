@@ -1229,8 +1229,18 @@ def trieBench (size : Nat) : IO Unit := do
   let t0 ← IO.monoNanosNow
   let mut next := kept
   for i in [0:rounds] do next := aux.set next (address (size + i)) (some ())
-  IO.println s!"root after {(aux.root? next).map (·.value)}"
-  per s!"set (new entry, store of {size})" rounds t0
+  per s!"set (new entry, store of {size}, the built index still held)" rounds t0
+  IO.println s!"root after {(aux.root? next).map (·.value)} over {(aux.root? kept).map (·.value)}"
+  kept := next
+  let t0 ← IO.monoNanosNow
+  for i in [0:rounds] do next := aux.set next (address (size + rounds + i)) (some ())
+  per s!"set (new entry, store of {size}, second batch)" rounds t0
+  IO.println s!"root after {(aux.root? next).map (·.value)} over {(aux.root? kept).map (·.value)}"
+  let t0 ← IO.monoNanosNow
+  let mut once := next
+  for i in [0:rounds] do once := aux.set next (address (size + 2 * rounds + i)) (some ())
+  per s!"set (one entry on a held index, store of {size})" rounds t0
+  IO.println s!"root after {(aux.root? once).map (·.value)}"
   let tag := PrivateCellRoot.untagged Minidregg.Theory.CredentialAuthorityState.layout
   let t0 ← IO.monoNanosNow
   let mut bits := 0

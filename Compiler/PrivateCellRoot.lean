@@ -37,6 +37,7 @@ public import Theory.AuthTrieErase
 public import Theory.CellState
 public import Kernel.WorldRoot
 public import Compiler.Tower256ConcreteBackend
+public import Theory.Sp800185Cshake256Midstate
 import Theory.AssertAxioms
 
 @[expose] public section
@@ -258,6 +259,50 @@ theorem pathNodeBytes_injective {x y : NodeIn Path Inner Inner} (same : pathNode
 /-- The path-keyed node digest: cSHAKE256 under the node customization over its bytes. -/
 def pathDig (node : NodeIn Path Inner Inner) : Inner :=
   Sp800185Cshake256.hash nodeCustomization (pathNodeBytes node)
+
+/-- The node customization absorbed once; every node digest finishes from it. -/
+def nodeMidstate : ByteArray :=
+  Sp800185Cshake256.Midstate.cshake256AbsorbKernel
+    (Sp800185Cshake256.Native.bytesOfList nodeCustomization) (Sp800185Cshake256.Native.bytesOfList [])
+
+/-- cSHAKE256 under the node customization, finished from the absorbed customization: one
+permutation for a node's bytes in place of two. -/
+def nodeHashFast (bytes : List UInt8) : List UInt8 :=
+  (Sp800185Cshake256.Midstate.cshake256FinishKernel nodeMidstate
+    (Sp800185Cshake256.Native.bytesOfList bytes)).data.toList
+
+theorem nodeHashFast_eq (bytes : List UInt8) :
+    nodeHashFast bytes = Sp800185Cshake256.cshake256Bytes nodeCustomization bytes := by
+  unfold nodeHashFast nodeMidstate
+  rw [Sp800185Cshake256.Midstate.cshake256_cached, List.nil_append]
+
+theorem nodeHashFast_length (bytes : List UInt8) : (nodeHashFast bytes).length = 32 :=
+  (congrArg List.length (nodeHashFast_eq bytes)).trans (Sp800185Cshake256.cshake256Bytes_length _ _)
+
+/-- The empty node's digest, computed once (a kept trie reads it at every level whose sibling
+is empty). -/
+def emptyDig : Inner := Sp800185Cshake256.hash nodeCustomization [2]
+
+/-- What compiled code runs for `pathDig`: the empty digest as a constant, a leaf or a branch
+finished from the absorbed customization. -/
+def pathDigFast : NodeIn Path Inner Inner → Inner
+  | .empty => emptyDig
+  | .leaf p d => ⟨nodeHashFast (pathNodeBytes (.leaf p d)), nodeHashFast_length _⟩
+  | .branch l r => ⟨nodeHashFast (pathNodeBytes (.branch l r)), nodeHashFast_length _⟩
+
+/-- **The compiled node digest is the node digest**, for every node. -/
+@[csimp] theorem pathDig_eq_fast : pathDig = pathDigFast := by
+  funext node
+  cases node with
+  | empty => rfl
+  | leaf p d =>
+      unfold pathDig pathDigFast Sp800185Cshake256.hash
+      rw [Sp800185Cshake256.Output.mk.injEq]
+      exact (nodeHashFast_eq _).symm
+  | branch l r =>
+      unfold pathDig pathDigFast Sp800185Cshake256.hash
+      rw [Sp800185Cshake256.Output.mk.injEq]
+      exact (nodeHashFast_eq _).symm
 
 /-- An index node's image: its address replaced by its path, its value bytes by its content
 digest. -/
