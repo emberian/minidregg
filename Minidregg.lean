@@ -30,7 +30,11 @@ import Compiler.PredCompileSlotWitness
 import Compiler.PredOrderGadgetWitness
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
+import Kernel.ApplicationFailedStartRecoveryReceiver  -- with the three V4 retry receivers: receivers no Host module imports any more; `Deployed` roots them, so this umbrella (and the censuses over it) does too
 import Kernel.ApplicationGrainLaws
+import Kernel.ApplicationLifecycleRetryBeginV4Receiver
+import Kernel.ApplicationLifecycleRetryClaimV4Receiver
+import Kernel.ApplicationLifecycleRetryCompletionV4Receiver
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
