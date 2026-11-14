@@ -169,8 +169,10 @@ structure StoreEpoch where
   `Compiler.DurableIndex`, KN2-STORE-OPEN). `index/trie-v1` replaced the separate
   spent map (`spent/trie-v1`): a Store born with it is refused naming this
   component. `index/trie-v2` adds family 2 (a written cell ↦ the height of the
-  last record that wrote it): a v1 index has no such rows, so a Store born with
-  it is refused naming this component. A three-component label (an epoch
+  last record that wrote it) and the journal sequence families 3 and 4 (`Kernel.JournalIndex`:
+  a sequence's length and the height of each member): a v1 index has no such rows, so a Store
+  born with it is refused naming this component. A change to which sequences a record belongs
+  to changes the index of every Store and is a new label here. A three-component label (an epoch
   born before it) reads as `none` and is refused by naming this component. -/
   accumulator : String
   /-- The command codecs of the log records. `commands/v2`: the delegation

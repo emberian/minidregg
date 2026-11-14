@@ -29,6 +29,7 @@ public import Compiler.NativeCoprocess
 public import Compiler.DurableLogTags
 public import Compiler.DurableHistory
 public import Compiler.DurableIndex
+public import Kernel.JournalIndex
 public import Std.Data.HashMap
 public import Std.Data.HashSet
 public import Kernel.PresenceIndex
@@ -2312,6 +2313,28 @@ def withIndexRows {α : Type} (transport : Transport) (height : Nat) (keys : Lis
               if answer matches .ok _ then transport.holdIndexRows height false rows.toList
               return answer
 
+
+/-- **The index after an append of `record`** at `height`, from the rows at `held` (the height
+before it) under `root`: the record's transaction id and nullifiers inserted, the last-write
+row of each cell it writes overwritten, and each journal sequence it belongs to
+(`Kernel.JournalIndex.sequences`) extended. The counts of its sequences are read first: they
+name the position rows the append writes, so a transport that holds no rows reads those too.
+`IndexRows.apply` reads and verifies every count again on the rows it is given. -/
+def applyIndex (transport : Transport) (held : Nat) (root : Digest) (height : Nat) (record : IntentRecord) :
+    IO (Except String (Digest × List (List Bool × DurableIndex.Row))) := do
+  let cells := record.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId
+  let seqs := Minidregg.Theory.JournalSequences.distinct (Minidregg.Kernel.JournalIndex.sequences record)
+  let mut counts : List (Tower256ConcreteBackend.Digest256 × Nat) := []
+  unless seqs.isEmpty do
+    match ← withIndexRows transport held (seqs.map DurableIndex.seqCountKey)
+        (fun rows => DurableIndex.IndexRows.seqCounts rows root seqs) with
+    | .error message => return .error message
+    | .ok read => counts := read
+  let keys := DurableIndex.IndexRows.appendKeys record.transactionId record.nullifiers cells ++
+    DurableIndex.IndexRows.seqKeys counts
+  withIndexRows transport held keys fun rows =>
+    DurableIndex.IndexRows.apply rows root height record.transactionId record.nullifiers cells
+      (Minidregg.Kernel.JournalIndex.sequences record)
 
 /-- Hand the holder the whole index trie at `height` (the serving Host's open, row 37 of
 docs/PERF-CLIENT.md): a breadth-first walk from the root, one Store read per level, following each

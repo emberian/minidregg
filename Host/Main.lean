@@ -7659,8 +7659,8 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               (sessionConfirmed pinnedConfig state)
                             return ((98 : UInt8), outcomeCodec.encode outcome)
                         | 99 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let outcome := NativeHost.fleetLookupLoaded pinnedConfig opened payload
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            let outcome ← NativeHost.fleetLookupLight pinnedConfig light payload
                             return ((99 : UInt8), outcomeCodec.encode outcome)
                         | 100 =>
                             let (observationBytes, requestBytes) ← splitPair payload
@@ -7669,15 +7669,15 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
                             let (topic, cursor, limit) ← IO.ofExcept
                               (Minidregg.Host.Json.fleetPollRequest request)
-                            let opened ← sessionOpened pinnedConfig state
-                            match ← NativeHost.fleetPollAuthorizedLoaded pinnedConfig opened
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            match ← NativeHost.fleetPollLight pinnedConfig light
                                 observationBytes topic cursor limit with
                             | .ok view => return ((100 : UInt8),
                                 (Minidregg.Host.Json.fleetPollJson view).compress.toUTF8.toList)
                             | .error refusal => return ((255 : UInt8), refusalFrame "fleet-poll" refusal)
                         | 101 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            match ← NativeHost.fleetHeadAuthorizedLoaded pinnedConfig opened payload with
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            match ← NativeHost.fleetHeadLight pinnedConfig light payload with
                             | .ok view => return ((101 : UInt8),
                                 (Minidregg.Host.Json.fleetHeadJson view).compress.toUTF8.toList)
                             | .error refusal => return ((255 : UInt8), refusalFrame "fleet-head" refusal)
@@ -7688,8 +7688,8 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
                             let (topic, cursor, limit) ← IO.ofExcept
                               (Minidregg.Host.Json.fleetPollRequest request)
-                            let opened ← sessionOpened pinnedConfig state
-                            match ← NativeHost.fleetIncomingAuthorizedLoaded pinnedConfig opened
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            match ← NativeHost.fleetIncomingLight pinnedConfig light
                                 observationBytes topic cursor limit with
                             | .ok view => return ((180 : UInt8),
                                 (Minidregg.Host.Json.fleetIncomingJson view).compress.toUTF8.toList)
