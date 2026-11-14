@@ -14,6 +14,7 @@ module
 
 public import Kernel.CitedRead
 public import Kernel.ContentEffect
+public import Kernel.ReadEffects
 
 @[expose] public section
 
@@ -26,7 +27,7 @@ open Minidregg.Theory.CellRegistry
 set_option autoImplicit false
 
 /-- **The registry**: wire code ↦ declaration. -/
-def liveEffects : List (Nat × Effect) := [(1, contentEffect), (9, citedEffect)]
+def liveEffects : List (Nat × Effect) := [(1, contentEffect), (3, readEffect), (7, kindReadEffect), (9, citedEffect)]
 
 /-- Whether a code is bound. -/
 def registeredCode (code : Nat) : Bool := (liveEffects.lookup code).isSome
@@ -101,11 +102,23 @@ theorem effectAt_content : effectAt contentCode.toNat = contentEffect := rfl
 /-- The legacy payload tags are unbound (what `payloadStream`'s round-trip reads). -/
 theorem legacy_unbound :
     registeredOctet 0 = false ∧ registeredOctet 2 = false ∧
-    registeredOctet 3 = false ∧ registeredOctet 4 = false ∧ registeredOctet 5 = false ∧
-    registeredOctet 6 = false ∧ registeredOctet 7 = false ∧ registeredOctet 8 = false := by
+    registeredOctet 4 = false ∧ registeredOctet 5 = false ∧
+    registeredOctet 6 = false ∧ registeredOctet 8 = false := by
   decide
 
+/-- The content read's payload tag. -/
+abbrev readCode : UInt8 := 3
+
+theorem effectAt_read : effectAt readCode.toNat = readEffect := rfl
+
+/-- The whole kind definition read's payload tag. -/
+abbrev kindReadCode : UInt8 := 7
+
+theorem effectAt_kindRead : effectAt kindReadCode.toNat = kindReadEffect := rfl
+
 example : (effectAt citedCode.toNat).O = List FieldRead := rfl
+example : (effectAt readCode.toNat).O = Unit := rfl
+example : (effectAt kindReadCode.toNat).L = WorldKindCell.definitionLayout := rfl
 example : (effectAt contentCode.toNat).O = ContentResource.Command := rfl
 example : (effectAt contentCode.toNat).L = Hyperdocument.layout := rfl
 example : (effectAt (9 : UInt8).toNat).L = EffectDeclaration.effectLayout := rfl

@@ -139,6 +139,58 @@ theorem contentWrongRoleCommand : ContentWrongRoleCommand := by
   simp only [loaded, DeclaredResourceController.requireSome, DeclaredResourceController.collect,
     refused, bind, Except.bind, Except.map]
 
+theorem registeredWrongRole : RegisteredWrongRole := by
+  intro deployment directory snapshot semantics ambient command kind id capability version root
+    code op observe epoch roster wrong
+  have refused : ∀ pre, DeclaredResourceController.computeTarget snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩ pre =
+        .error .wrongRole := by
+    intro pre
+    have wrong' : (DeclaredResourceController.effectAt code.toNat).spec.accepts
+        (DeclaredResourceController.targetCtx snapshot semantics ambient command kind id capability
+          observe epoch roster).kind = false := wrong
+    show (DeclaredResourceController.Effect.compute _ code.toNat _ version root op pre).mapError
+      DeclaredResourceController.Reject.ofDispatch = _
+    unfold DeclaredResourceController.Effect.compute
+    rw [if_pos wrong']
+    rfl
+  have absentCase : directory.slots id = .absent →
+      DeclaredResourceController.prepareTarget deployment directory snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩ =
+        .error .missingTarget := by
+    intro absent
+    unfold DeclaredResourceController.prepareTarget
+    split
+    · rfl
+    · rename_i before found
+      cases found.symm.trans absent
+  have presentCase : ∀ before, directory.slots id = .present before →
+      DeclaredResourceController.prepareTarget deployment directory snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩ =
+        .error .wrongRole := by
+    intro before present
+    unfold DeclaredResourceController.prepareTarget
+    split
+    · rename_i absent
+      cases absent.symm.trans present
+    · split
+      · rfl
+      · rename_i pre selected
+        split
+        · rename_i reason computed
+          cases computed.symm.trans (refused pre)
+          rfl
+        · rename_i post computed
+          cases computed.symm.trans (refused pre)
+  cases slot : directory.slots id with
+  | absent => exact absentCase slot
+  | present before => exact presentCase before slot
+
+theorem readRoles : ReadRoles := ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+#assert_axioms registeredWrongRole
+#assert_axioms readRoles
+
 /-! ## `PrepareFactors`: the receiver's preparation is the registry's dispatch, then the generic checks -/
 
 theorem hostRegistry_lookup_bound {code : Nat}

@@ -124,8 +124,6 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
          ("credits", number funding.credits),
          ("expectedPayerBalance", signed funding.expectedPayerBalance),
          ("expectedBookRoot", number funding.expectedBookRoot.value)]
-    | .read => .mkObj [("type", toJson "read")]
-    | .kindRead => .mkObj [("type", toJson "kindRead")]
     | .registered code op => .mkObj
         (("type", toJson (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).name) :: (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).toJson op)
   .mkObj [("kind", toJson kind), ("target", number target.target),

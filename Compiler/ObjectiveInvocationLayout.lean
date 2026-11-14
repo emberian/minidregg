@@ -144,20 +144,20 @@ end
 /-- `effectsOf`'s per-target step, by explicit position. -/
 def step (index : Nat) (target : Target) : Option BendWorldPlan.Effect :=
   match target.payload with
-  | .read | .kindRead | .computeFunding _ => none
+  | .computeFunding _ => none
   | .registered code op =>
       if (effectAt code.toNat).observeOnly op then none else some ⟨index, .registered code op⟩
   | payload => some ⟨index,payload⟩
 
 /-- Payloads `effectsOf` reports verbatim. -/
 def verbatim : Payload → Bool
-  | .read | .kindRead | .computeFunding _ => false
+  | .computeFunding _ => false
   | .registered code op => !(effectAt code.toNat).observeOnly op
   | _ => true
 
 /-- Payloads `effectsOf` never reports. -/
 def inert : Payload → Bool
-  | .read | .kindRead | .computeFunding _ => true
+  | .computeFunding _ => true
   | .registered code op => (effectAt code.toNat).observeOnly op
   | _ => false
 
@@ -239,7 +239,7 @@ theorem effectsOf_placeholders (command : Command)
     (reads : ∀ t ∈ command.targets, t.payload = .read) :
     BendWorldPlan.effectsOf command = [] := by
   rw [effectsOf_zipIdx]
-  exact filterMap_inert command.targets 0 (fun t m => by simp [reads t m, inert])
+  exact filterMap_inert command.targets 0 (fun t m => by rw [reads t m]; rfl)
 
 /-- A draft whose roles are read placeholders cannot carry any effectful plan
 through the gate's exact comparison: the producer must lay out final payloads

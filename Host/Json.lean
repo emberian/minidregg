@@ -1023,7 +1023,7 @@ private def registeredPayload (path tag : String) (json : Lean.Json) :
       ((Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).ofJson path json).map fun op =>
         DeclaredResourceController.Payload.registered code op
   | none => failAt (path ++ ".type")
-      s!"expected scalar, append, read, kindRead, world, kindDefinition, moneyConsent, computeFunding or a registered effect ({", ".intercalate Minidregg.Kernel.DeclaredResourceController.effectNames})"
+      s!"expected scalar, append, world, kindDefinition, moneyConsent, computeFunding or a registered effect ({", ".intercalate Minidregg.Kernel.DeclaredResourceController.effectNames})"
 
 private def targetPayload (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Payload := do
@@ -1058,12 +1058,6 @@ private def targetPayload (path : String) (json : Lean.Json) :
         ← nat (path ++ ".credits") (← field path "credits" obj),
         ← int (path ++ ".expectedPayerBalance") (← field path "expectedPayerBalance" obj),
         ⟨← nat (path ++ ".expectedBookRoot") (← field path "expectedBookRoot" obj)⟩⟩)
-  | "read" =>
-      let _ ← exactObject path ["type"] json
-      pure .read
-  | "kindRead" =>
-      let _ ← exactObject path ["type"] json
-      pure .kindRead
   | other => registeredPayload path other json
 
 private def audienceRosterEntry (path : String) (json : Lean.Json) :

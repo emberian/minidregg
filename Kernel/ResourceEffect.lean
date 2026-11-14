@@ -326,6 +326,23 @@ theorem compute_ok {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Digest
   obtain ⟨ps, sem, _, ran⟩ := Revival.EffectSpec.exec_ok (E := e.spec) ok
   exact ⟨by simpa using accepted, Decidable.not_not.mp versioned, ps, sem, ran⟩
 
+/-- An admitted computation of an operation that does not commute ran at the root its plan
+names: the loaded cell's root is the signed one. -/
+theorem compute_pinned {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Digest} {op : e.O}
+    {pre : e.Cell} {post : Store e.L}
+    (ok : e.compute code ctx version root op pre = .ok post)
+    (pinned : e.spec.commutes op = false) : root = pre.root := by
+  unfold compute at ok
+  by_cases accepted : e.spec.accepts ctx.kind = false
+  · rw [if_pos accepted] at ok; cases ok
+  rw [if_neg accepted] at ok
+  by_cases versioned : version ≠ e.spec.version
+  · rw [if_pos versioned] at ok; cases ok
+  rw [if_neg versioned] at ok
+  by_cases moved : e.spec.commutes op = false ∧ root ≠ pre.root
+  · rw [if_pos moved] at ok; cases ok
+  · exact Decidable.not_not.mp fun ne => moved ⟨pinned, ne⟩
+
 /-- **The engine handler of a declaration**, over the controller's cell universe: what
 `Effects.Revival.Dispatches` is stated over. Its header is the live order: selection (role and
 cell law), the accepted role, the schema version; its freshness is the expected root. -/

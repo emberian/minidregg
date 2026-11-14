@@ -354,7 +354,7 @@ def hostRegistry : Registry HostCtx HostCell :=
   DeclaredResourceController.liveRegistry.map fun entry => (entry.1, entry.2.comap dispatchCtxOf)
 
 /-- The payload codes that are still hand arms. -/
-def liveLegacy : List Nat := [0, 2, 3, 4, 5, 6, 7, 8]
+def liveLegacy : List Nat := [0, 2, 4, 5, 6, 8]
 
 /-- **The deployed target dispatch.** A code neither bound nor a hand arm is refused by name;
 every other code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,
@@ -557,6 +557,39 @@ def ContentWrongRole : Prop :=
       match directory.slots ctx.target with
       | .absent => .error .missingTarget
       | .present _ => .error .wrongRole
+
+/-- **The wrong-role pole, for every registered effect.** A registered target under a role its
+declaration does not accept is refused by the deployed preparation whatever the loaded cell, the
+schema version, the planned root, the operation and the command: `missingTarget` when its slot
+is absent, `wrongRole` otherwise. That is the whole value of `prepareTarget` there, so no other
+refusal comes before it. A hand arm whose selection required the role answered the same: binding
+a code does not move this refusal (the content read and the kind read under an account or a
+program, `readWrongRole`). -/
+def RegisteredWrongRole : Prop :=
+  ∀ (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (snapshot : DeclaredResourceController.AuthoritySnapshot) (semantics : Digest)
+    (ambient : DeclaredResourceController.Ambient) (command : DeclaredResourceController.Command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (code : UInt8) (op : (DeclaredResourceController.effectAt code.toNat).O)
+    (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster),
+    (DeclaredResourceController.effectAt code.toNat).spec.accepts kind = false →
+    DeclaredResourceController.prepareTarget deployment directory snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩ =
+      match directory.slots id with
+      | .absent => .error .missingTarget
+      | .present _ => .error .wrongRole
+
+/-- **The pole is inhabited at the two reads**: neither accepts an account or a program, and
+both accept an object (so the premise of `RegisteredWrongRole` is not vacuous and not total). -/
+def ReadRoles : Prop :=
+  DeclaredResourceController.readEffect.spec.accepts .account = false ∧
+  DeclaredResourceController.readEffect.spec.accepts .program = false ∧
+  DeclaredResourceController.readEffect.spec.accepts .object = true ∧
+  DeclaredResourceController.kindReadEffect.spec.accepts .account = false ∧
+  DeclaredResourceController.kindReadEffect.spec.accepts .program = false ∧
+  DeclaredResourceController.kindReadEffect.spec.accepts .object = true
 
 /-- **Nothing is prepared, so nothing is charged.** No prepared target exists for a content
 target under a role that is not an object, and so no preparation of any command that holds one

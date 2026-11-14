@@ -81,20 +81,13 @@ inductive Payload where
   | append (request : StreamCell.Append)
   | world (actions : List WorldKindInstance.Action)
   | kindDefinition (definition : WorldKindCell.Definition)
-  /-- An observe-only read of a content cell: no patch, authorized under the
-  observe verb.  A `transclude` of another target of the same command names
-  this cell as its source; this read is where the admission checks the
-  transcluder's grant and the source's own policy at this height, and its
-  loaded state is what the opening is checked against. -/
-  | read
-  /-- Whole authenticated world-kind definition, observe-only. -/
-  | kindRead
   | computeFunding (funding : ComputeFunding)
   | moneyConsent (consent : MoneyConsent)
   /-- An operation of a registered effect (`Kernel/ResourceEffectRegistry.lean`): the wire code
   and that code's declared operation. Every arm of every function over a payload reads this
   constructor from the declaration `effectAt code`; an unbound code has no operation, so no
-  payload carries one. The content write is code 1, the cited read code 9. -/
+  payload carries one. The content write is code 1, the content read 3, the whole kind
+  definition read 7, the cited read 9. -/
   | registered (code : UInt8) (op : (effectAt code.toNat).O)
   deriving DecidableEq
 
@@ -104,6 +97,14 @@ one out of a signed command. -/
 @[match_pattern] abbrev Payload.content (command : ContentResource.Command) : Payload :=
   .registered 1 command
 
+/-- **The observe-only content read**: the registered operation at code 3, which has no
+operand (`readEffect`). Not a pattern: no function has an arm for it. -/
+abbrev Payload.read : Payload := .registered 3 ()
+
+/-- **The whole kind definition read**: the registered operation at code 7, which has no
+operand (`kindReadEffect`). Not a pattern: no function has an arm for it. -/
+abbrev Payload.kindRead : Payload := .registered 7 ()
+
 /-- A registered operation shows as its declaration's name and its canonical bytes. -/
 instance : Repr Payload where
   reprPrec payload prec := match payload with
@@ -111,8 +112,6 @@ instance : Repr Payload where
     | .append request => Repr.addAppParen ("Payload.append " ++ reprArg request) prec
     | .world actions => Repr.addAppParen ("Payload.world " ++ reprArg actions) prec
     | .kindDefinition definition => Repr.addAppParen ("Payload.kindDefinition " ++ reprArg definition) prec
-    | .read => "Payload.read"
-    | .kindRead => "Payload.kindRead"
     | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
     | .moneyConsent consent => Repr.addAppParen ("Payload.moneyConsent " ++ reprArg consent) prec
     | .registered code op =>
@@ -163,15 +162,14 @@ instance targetsValidDecidable (command : Command) : Decidable command.TargetsVa
 
 def Command.targetsWellFormed (command : Command) : Bool := decide command.TargetsValid
 
-/-- An observe-only read target (`read`, `kindRead`, a registered effect whose verb is the
-observe verb, as the cited read): it writes nothing, and
+/-- An observe-only read target (a registered effect whose verb is the observe verb: the
+content read, the kind read, the cited read): it writes nothing, and
 its ONLY authorization is its `ReadLeg` (the requester's observe capability,
 signed for this exact command, judged by the source's current observe policy on
 the unchanged cell). No ordinary leg runs for it. A funding or money-consent
 target is read too, but it authorizes a debit and keeps its leg. -/
 def Target.observeOnly (target : Target) : Bool :=
   match target.payload with
-  | .read | .kindRead => true
   | .registered code op => (effectAt code.toNat).observeOnly op
   | _ => false
 
@@ -197,11 +195,9 @@ code and its operation is encoded by its declaration's own codec. -/
 def payloadEncode : Payload → List UInt8
   | .scalar actions => 0 :: (StreamCodec.list DeclaredResourceScalar.actionStream).encode actions
   | .append request => 2 :: StreamCell.appendStream.encode request
-  | .read => [3]
   | .world actions => 4 :: (StreamCodec.list WorldKindInstance.actionStream).encode actions
   | .kindDefinition definition => 5 :: WorldKindCell.definitionStream.encode definition
   | .computeFunding funding => 6 :: computeFundingStream.encode funding
-  | .kindRead => [7]
   | .moneyConsent consent => 8 :: ResourceMoneyWire.consentStream.encode consent
   | .registered code op => code :: (effectAt code.toNat).spec.opStream.encode op
 
@@ -213,7 +209,6 @@ def legacyPayloadDecode : List UInt8 → Option (Payload × List UInt8)
   | 2 :: bytes => do
       let (request, rest) ← StreamCell.appendStream.decodePrefix bytes
       some (.append request, rest)
-  | 3 :: bytes => some (.read, bytes)
   | 4 :: bytes => do
       let (actions, rest) ← (StreamCodec.list WorldKindInstance.actionStream).decodePrefix bytes
       some (.world actions, rest)
@@ -223,7 +218,6 @@ def legacyPayloadDecode : List UInt8 → Option (Payload × List UInt8)
   | 6 :: bytes => do
       let (funding, rest) ← computeFundingStream.decodePrefix bytes
       some (.computeFunding funding, rest)
-  | 7 :: bytes => some (.kindRead, bytes)
   | 8 :: bytes => do
       let (consent, rest) ← ResourceMoneyWire.consentStream.decodePrefix bytes
       some (.moneyConsent consent, rest)
@@ -248,13 +242,13 @@ def payloadStream : StreamCodec Payload where
       else legacyPayloadDecode (tag :: bytes)
   decodePrefix_encode := by
     intro payload suffix
-    obtain ⟨u0, u2, u3, u4, u5, u6, u7, u8⟩ := legacy_unbound
+    obtain ⟨u0, u2, u4, u5, u6, u8⟩ := legacy_unbound
     cases payload with
     | registered code op =>
         by_cases bound : registeredOctet code = true
         · simp [payloadEncode, bound, StreamCodec.decodePrefix_encode]
         · exact (unbound_elim (by simpa using bound) op).elim
-    | _ => simp [payloadEncode, legacyPayloadDecode, u0, u2, u3, u4, u5, u6, u7, u8,
+    | _ => simp [payloadEncode, legacyPayloadDecode, u0, u2, u4, u5, u6, u8,
         StreamCodec.decodePrefix_encode]
   encode_decodePrefix := by
     intro bytes value suffix decoded
@@ -523,7 +517,6 @@ a stream append on an object, observe for an observe-only read target, the
 kind's ordinary write verb otherwise. -/
 def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
   | .object, .append _ => .appendObject
-  | kind, .read | kind, .kindRead => observeVerb kind
   | kind, .registered code op => (effectAt code.toNat).spec.verb kind op
   | kind, .moneyConsent _ => ordinaryVerb kind
   | kind, _ => ordinaryVerb kind
@@ -702,10 +695,9 @@ effect. -/
 @[reducible] def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
   | .scalar _ | .computeFunding _ | .moneyConsent _ => EffectDeclaration.effectLayout
   | .registered code _ => (effectAt code.toNat).L
-  | .read => Hyperdocument.layout
   | .append _ => StreamCell.headLayout
   | .world _ => WorldKindCell.instanceLayout
-  | .kindDefinition _ | .kindRead => WorldKindCell.definitionLayout
+  | .kindDefinition _ => WorldKindCell.definitionLayout
 
 def Target.materializer (target : Target) : Materializer target.layout Digest := by
   cases target with
@@ -715,8 +707,7 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
     | registered code _ => exact (effectAt code.toNat).materializer
     | append _ => exact StreamCell.headMaterializer
     | world _ => exact WorldKindCell.instanceMaterializer
-    | kindDefinition _ | kindRead => exact WorldKindCell.definitionMaterializer
-    | read => exact HyperdocumentCell.contentMaterializer
+    | kindDefinition _ => exact WorldKindCell.definitionMaterializer
 
 abbrev TargetCell (target : Target) := Materialized target.materializer
 
@@ -735,8 +726,7 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
     | computeFunding _ | moneyConsent _ => exact ⟨.accountMetadata, cell⟩
     | append _ => exact ⟨.stream, cell⟩
     | world _ => exact ⟨.worldInstance, cell⟩
-    | kindDefinition _ | kindRead => exact ⟨.worldKind, cell⟩
-    | read => exact ⟨.content, cell⟩
+    | kindDefinition _ => exact ⟨.worldKind, cell⟩
 
 def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell Registry) :
     Option (TargetCell target) := by
@@ -757,14 +747,9 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
           match cell with | ⟨.worldInstance, value⟩ => some value | _ => none
         else none
       else none
-    | kindDefinition _ | kindRead => exact if kind = .object then
+    | kindDefinition _ => exact if kind = .object then
         if CanonicalCellRegistry.CellLaw deployment id cell then
           match cell with | ⟨.worldKind, value⟩ => some value | _ => none
-        else none
-      else none
-    | read => exact if kind = .object then
-        if CanonicalCellRegistry.CellLaw deployment id cell then
-          match cell with | ⟨.content, value⟩ => some value | _ => none
         else none
       else none
 
@@ -894,30 +879,11 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if request.ref.any (fun r => r.1 == id && head.count < r.2) then throw .streamRef
         pure ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
           (streamRecord snapshot semantics ambient command request))).apply pre.logical)
-    | read => exact do
-        if kind != .object then throw .wrongRole
-        if version != ContentResource.commandVersion then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        -- Its only authorization is its observation: the named capability is the observe one.
-        if observe != some capability then throw .observationRequired
-        pure pre.logical
-
     | registered code op =>
         -- A registered effect: the derived computation of its one declaration (`Effect.compute`).
         exact ((effectAt code.toNat).compute code.toNat
           (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
             audienceRoster) version root op pre).mapError Reject.ofDispatch
-
-    | kindRead => exact do
-        if kind != .object then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        -- Partial grants never receive canonical hidden defaults.
-        if observe != some capability then throw .observationRequired
-        let some stored := CredentialAuthorityState.readCapability snapshot.cell .object capability
-          | throw .observationRejected
-        if stored.head.scope.fields.isSome then throw .fieldNotNamed
-        pure pre.logical
 
     | world actions => exact do
         if kind != .object then throw .wrongRole
@@ -952,7 +918,7 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : A
           | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
               (streamRecord snapshot semantics ambient command request))]
           | none => []
-    | read | kindRead | computeFunding _ | moneyConsent _ => exact []
+    | computeFunding _ | moneyConsent _ => exact []
     | registered code op =>
         exact (effectAt code.toNat).patch (targetCtx snapshot semantics ambient command kind id
           capability observe audienceEpoch audienceRoster) op pre.logical
@@ -1227,8 +1193,7 @@ def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient :
     cases payload with
     | scalar _ | computeFunding _ | moneyConsent _ | registered _ _ => exact none
     | world _ => exact none
-    | kindDefinition _ | kindRead => exact none
-    | read => exact none
+    | kindDefinition _ => exact none
     | append request =>
         exact (StreamCell.headOf pre.logical).map fun head =>
           StreamCell.appendEntry id head (streamRecord snapshot semantics ambient command request)
@@ -1361,13 +1326,16 @@ theorem computeTarget_read_observe (snapshot : AuthoritySnapshot) (semantics : D
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     simp only at read
     subst read
-    simp only [computeTarget] at computed
-    show observe = some capability
-    repeat' split at computed
-    all_goals first
-      | (rename_i same; simpa only [bne_iff_ne, ne_eq, Decidable.not_not] using same)
-      | (exfalso; simp [throw, throwThe, MonadExceptOf.throw, Functor.map, Except.map, bind,
-          Except.bind, pure, Except.pure] at computed)
+    have computed' : (readEffect.compute readCode.toNat
+        (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+          audienceRoster) version root () pre).mapError Reject.ofDispatch = .ok post := computed
+    cases dispatched : readEffect.compute readCode.toNat
+        (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+          audienceRoster) version root () pre with
+    | error refusal => rw [dispatched] at computed'; cases computed'
+    | ok computedPost =>
+      obtain ⟨_, _, ps, sem, _⟩ := Effect.compute_ok readEffect dispatched
+      exact (readSem_ok (op := ()) (store := pre.logical) sem).2
 
 /-- **A prepared read target names its observe capability.** No observe-only
 content read is prepared, hence none accepted, whose `capability` is not its
@@ -1648,8 +1616,6 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
     | append request => exact streamSlots request before
     | world _ => exact WorldKindProjection.project subject before after
     | kindDefinition _ => exact WorldKindProjection.definitionProject before after
-    | kindRead => exact WorldPrototypeConstruction.observeProject before
-    | read => exact ContentResource.project before after ⟨[]⟩
     | registered code op => exact (effectAt code.toNat).spec.view ⟨subject, id⟩ op before after
 
 /-- `targetProjection` filtered by `want`, a content cell's summaries computed only when named
@@ -1669,8 +1635,6 @@ def targetProjectionDemand (want : String → Bool) (leads : Nat → Bool) (subj
     | append request => exact (streamSlots request before).filter fun slot => want slot.1
     | world _ => exact (WorldKindProjection.project subject before after).filter fun slot => want slot.1
     | kindDefinition _ => exact (WorldKindProjection.definitionProject before after).filter fun slot => want slot.1
-    | kindRead => exact (WorldPrototypeConstruction.observeProject before).filter fun slot => want slot.1
-    | read => exact ContentResource.projectDemand want before after ⟨[]⟩
     | registered code op =>
         exact (effectAt code.toNat).viewDemand want ⟨subject, id⟩ op before after
 
@@ -1683,7 +1647,6 @@ theorem targetProjectionDemand_eq (want : String → Bool) (leads : Nat → Bool
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact DeclaredResourceProjection.projectDemand_eq want leads sound id before after
-    | read => exact ContentResource.projectDemand_eq want before after ⟨[]⟩
     | registered code op => exact (effectAt code.toNat).viewDemand_eq want ⟨subject, id⟩ op before after
     | _ => rfl
 
@@ -1745,7 +1708,6 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
     | append request => exact some [⟨i, 0,
         WorldPrototypeConstruction.bytesValue (StreamCell.appendStream.encode request)⟩]
     | kindDefinition definition => exact some [WorldPrototypeConstruction.constructorWrite i definition]
-    | read | kindRead => exact some []
     | registered code op =>
         -- A registered effect's claimed write is its operation's canonical bytes; an observing
         -- one writes nothing.

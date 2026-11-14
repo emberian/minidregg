@@ -828,9 +828,6 @@ private def targetPayload (path : String) (json : Lean.Json) :
         ← nat (path ++ ".credits") (← field path "credits" obj),
         ← int (path ++ ".expectedPayerBalance") (← field path "expectedPayerBalance" obj),
         ⟨← nat (path ++ ".expectedBookRoot") (← field path "expectedBookRoot" obj)⟩⟩)
-  | "read" =>
-      let _ ← exactObject path ["type"] json
-      pure .read
   | other =>
       -- A registered effect's payload is read by its declaration's own JSON face.
       match Minidregg.Kernel.DeclaredResourceController.effectNamed other with
@@ -838,7 +835,7 @@ private def targetPayload (path : String) (json : Lean.Json) :
           let op ← (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).ofJson path json
           pure (DeclaredResourceController.Payload.registered code op)
       | none => failAt (path ++ ".type") <|
-          s!"expected scalar, append, read, world, kindDefinition, computeFunding or a registered effect ({", ".intercalate Minidregg.Kernel.DeclaredResourceController.effectNames})"
+          s!"expected scalar, append, world, kindDefinition, computeFunding or a registered effect ({", ".intercalate Minidregg.Kernel.DeclaredResourceController.effectNames})"
 
 private def audienceRosterEntry (path : String) (json : Lean.Json) :
     Result Minidregg.Theory.ObjectAudienceRoster.Entry := do

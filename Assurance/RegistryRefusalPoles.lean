@@ -11,6 +11,9 @@ The poles of two statements about what a requester reads when a registered effec
 * `Kernel/ResourceEffectRegistry.lean`, `dispatchRefusalText`: a refusal prints its declaration's
   name, its own name, and its detail in the declaration's words. Here: a cited read's
   `citedStale` lists the fields that moved.
+* `Kernel/ReadEffects.lean`: the two root-pinning reads (codes 3 and 7) have no operand. Here:
+  each one's wire bytes are its tag octet alone and decode back to it, its JSON is `type` alone
+  (another field is refused), and its refusals print under its declaration's name.
 -/
 import Kernel.ResourcePayloadTag
 
@@ -34,5 +37,16 @@ open Minidregg.Effects
 #guard reprStr (Revival.DispatchRefusal.unregistered 10) == "Effect.Registry.unregistered 10"
 #guard reprStr (Reject.effect (.refused 9 "citedStale" ⟨(movedStream.encode [.objectField ⟨0⟩ ⟨5⟩]).toArray⟩)) ==
   "Minidregg.Kernel.DeclaredResourceController.Reject.effect (Effect.FieldRead.citedStale [field 5])"
+
+#guard payloadStream.encode .read == [3]
+#guard payloadStream.encode .kindRead == [7]
+#guard (payloadStream.decodePrefix [3, 99]).map (fun d => (decide (d.1 = .read), d.2)) == some (true, [99])
+#guard (payloadStream.decodePrefix [7]).map (fun d => (decide (d.1 = .kindRead), d.2)) == some (true, [])
+#guard (effectNamed "read", effectNamed "kindRead") == (some 3, some 7)
+#guard (match (effectAt 3).ofJson "p" (Lean.Json.mkObj [("type", "read")]) with | .ok _ => true | .error _ => false)
+#guard (match (effectAt 7).ofJson "p" (Lean.Json.mkObj [("type", "kindRead"), ("root", "1")]) with
+  | .ok _ => false | .error text => text == "p: unknown field root")
+#guard reprStr (Revival.DispatchRefusal.refused 3 "observationRequired" .empty) == "Effect.Read.observationRequired"
+#guard reprStr (Revival.DispatchRefusal.refused 7 "fieldNotNamed" .empty) == "Effect.KindRead.fieldNotNamed"
 
 end Minidregg.Assurance.RegistryRefusalPoles

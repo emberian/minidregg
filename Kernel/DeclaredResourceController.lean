@@ -578,8 +578,6 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
     | append request => exact streamSlots_unjoint _ _
     | world _ => exact WorldKindProjection.project_unjoint _ _ _
     | kindDefinition _ => exact WorldKindProjection.definitionProject_unjoint _ _
-    | kindRead => exact WorldPrototypeConstruction.observeProject_unjoint _
-    | read => exact contentProject_unjoint _ _ _
     | registered code op => exact (effectAt code.toNat).view_unjoint ⟨subject, id⟩ op before after
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
@@ -1510,11 +1508,9 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
     | append _ => exact fun _ => .body
     | world _ => exact fun _ => .body
-    | kindDefinition _ | kindRead => exact fun _ => .body
+    | kindDefinition _ => exact fun _ => .body
     | computeFunding funding => exact fun _ => .balance funding.asset
     | moneyConsent _ => exact fun _ => .body
-    -- An observe-only read writes nothing; its addresses are content addresses.
-    | read => exact fun address => ResourceObservationAdmission.contentFieldAt address
     -- A registered effect's field classification is its declaration's.
     | registered code _ => exact (effectAt code.toNat).spec.field
 
@@ -1525,7 +1521,7 @@ def targetAmount (target : Target) :
     cases payload with
     | scalar _ => exact fun _ value => value
     | append _ => exact fun _ _ => 0
-    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | read =>
+    | world _ | kindDefinition _ | computeFunding _ | moneyConsent _ =>
         exact fun _ _ => 0
     | registered code _ => exact fun address value => (effectAt code.toNat).spec.amount address (some value)
 
@@ -1539,8 +1535,7 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
     cases payload with
     | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
-    | read => exact fun _ => false
-    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ =>
+    | world _ | kindDefinition _ | computeFunding _ | moneyConsent _ =>
         exact fun _ => false
     | registered code _ => exact (effectAt code.toNat).spec.rotated
 
@@ -1572,15 +1567,6 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch, audienceRoster⟩) pre post
-    | kindRead =>
-      exact ResourceObservationAdmission.footprintOf
-        (changedEffect ⟨kind, id, capability, version, root, .kindRead, observe, audienceEpoch, audienceRoster⟩ pre post)
-        (targetField ⟨kind, id, capability, version, root, .kindRead, observe, audienceEpoch, audienceRoster⟩)
-        (targetAmount ⟨kind, id, capability, version, root, .kindRead, observe, audienceEpoch, audienceRoster⟩) pre post
-    | read =>
-      exact ResourceObservationAdmission.footprintOf
-        (changedEffect ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩ pre post)
-        (targetField ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) pre post
     | registered code op =>
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩ pre post)
@@ -1934,7 +1920,7 @@ def entryWrites (prepared : PreparedInvocation deployment profile ambient ground
 /-- An observe-only read target is read, not written. -/
 def Target.isRead (target : Target) : Bool :=
   match target.payload with
-  | .read | .kindRead | .computeFunding _ | .moneyConsent _ => true
+  | .computeFunding _ | .moneyConsent _ => true
   | .registered code op => (effectAt code.toNat).observeOnly op
   | _ => false
 
@@ -2808,7 +2794,9 @@ theorem transclude_requires_source_coverage [DecidableEq F]
   obtain ⟨⟨sameTarget, isRead⟩, opening⟩ := holds
   have many : command.requiresObservation = true :=
     requiresObservation_of_observeOnly j (by
-      simp only [Target.observeOnly, isRead])
+      unfold Target.observeOnly
+      rw [isRead]
+      rfl)
   obtain ⟨value, shape, held⟩ := opened _ opening
   exact ⟨j, sameTarget, isRead, ⟨accepted.observations many j⟩, value, shape, held⟩
 

@@ -45,7 +45,7 @@ and its continuation; where they disagree with this section, this section is the
   are not a command.
 * **Statements** (`Kernel/EffectsRevival/Statements.lean` §7b), all **proved**
   (`RegistryProofs.lean`): `RegistryKeystone` (`Dispatches hostRegistry liveLegacy
-  liveTargetDispatch`, with `liveLegacy = [0..8]`), `RegistryPremise`, `RegistryAccepted` (both
+  liveTargetDispatch`; `liveLegacy` is the codes still hand arms), `RegistryPremise`, `RegistryAccepted` (both
   poles of the cited read at an authority cell holding a field-scoped observe capability),
   `RegistryTeeth`, `LiveLegacyCensus`, `LiveLegacyCensusTeeth`. The keystone's heart,
   `liveTargetDispatch_registered`, is proved for an arbitrary declaration: at a bound code the
@@ -140,12 +140,39 @@ everything else), with `sampleWrongRole` and `sampleRole_teeth` on the sample ce
 4. Thin consent refuses a content write (`unsupportedPayload`; the text is now the registered
    one, "content: a registered write is not displayed from a served view").
 
-**Next**, the remaining codes, cheapest first: `read` (3), `kindRead` (7), `scalar` (0),
-`computeFunding` (6), `moneyConsent` (8), `world` (4), `kindDefinition` (5), `append` (2, needs a
-fresh-cell output). `read` and `kindRead` pin a root (`commutes` false), so their thin-consent
-display must keep the served-opening check the hand arm has, not the view-less one. `read` shares
-the content cell; `sourceReadOf` and an opening's source both find it by `payload = .read`, so
-those two readers move with it.
+**The two root-pinning reads are bound** (`Kernel/ReadEffects.lean`): `readEffect` at code 3
+(JSON `read`) and `kindReadEffect` at code 7 (JSON `kindRead`). Neither has an operand: the
+operation is `Unit`, its codec writes nothing, so the wire bytes are the tag octet alone, as
+before, and the JSON is `{"type": …}` alone, as before. `Payload.read` and `Payload.kindRead` are
+names for `.registered 3 ()` and `.registered 7 ()` (not patterns: no function has an arm for
+either); `sourceReadOf` and an opening's source still find the read by `payload = .read`.
+`liveLegacy = [0, 2, 4, 5, 6, 8]`.
+
+* Refusal text moved: a read whose capability is not its observe capability was
+  `Reject.observationRequired` and is `Reject.effect (Effect.Read.observationRequired)`; the kind
+  read's three (`observationRequired`, `observationRejected`, `fieldNotNamed`) are under
+  `Effect.KindRead`. The header refusals (`wrongRole`, `unsupportedVersion`, `staleTarget`) keep
+  the controller's names and their order.
+* The role moved place as it did for content, and not in value: `RegisteredWrongRole`
+  (`PrepareProofs.lean`) says it of every registered effect at every role its declaration does
+  not accept, `ReadRoles` that the two reads accept an object and nothing else.
+* Thin consent: a registered observation is displayed view-less only when it commutes
+  (`registeredRead`). One that pins its root has the empty member patch and goes through
+  `checkOpened` at the signed root like every hand arm (`memberPatch`, `Supported`,
+  `computeTarget_root` by `Effect.compute_pinned`); `pinned_read_not_viewless` names the two.
+  A member signing a `read` or a `kindRead` is shown what it was shown before.
+* `Host/SourceAgreementJson.lean` reads `kindRead` now (through the registry), as it came to
+  read `fieldRead`.
+
+**Next**, the remaining codes: `kindDefinition` (5), `append` (2, needs a fresh-cell output),
+`world` (4), `scalar` (0), `computeFunding` (6), `moneyConsent` (8). The three writes thin consent
+displays today (`scalar`, `world`, `kindDefinition`) need the declaration to say which part of
+its patch the member can compute from the signed operation and the served store, so that
+`memberPatch` reads it from the registry: that field is the next change to `Effect`. The JSON
+grammars of `world` and `kindDefinition` (`worldDescriptor`, `worldDefinition`, `worldAction` in
+`Host/Json.lean`, copied in `Host/SourceAgreementJson.lean`) move to a kernel module beside
+`Kernel/ContentJson.lean` when their codes are declared, which is where the agreement decoder's
+remaining string arms go.
 
 ## 1. What one effect costs by hand today (counted from the tree at `02ee34e8a`)
 

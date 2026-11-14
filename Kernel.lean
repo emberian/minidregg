@@ -114,6 +114,7 @@ import Kernel.AgentGrain
 import Kernel.CapabilityRevocationReceiver
 import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability it holds (signature first, then Theory.Renounce.gateAt)
 import Kernel.ResourceEffect  -- a declared-resource effect as ONE declaration (Effect): typed cell, EffectSpec, JSON face and display; the derived computation, patch and engine handler
+import Kernel.ReadEffects  -- the two root-pinning reads DECLARED and BOUND (registry codes 3 and 7): readEffect, kindReadEffect; no operand, no hand arm
 import Kernel.CitedRead  -- the cited read DECLARED (registry code 9): citedRead, citedProject, its refusals with their detail, its faces, citedEffect
 import Kernel.ContentJson  -- the content command's JSON face: the request grammar (contentOfJson), the reader's view (contentToJson), the display
 import Kernel.ContentEffect  -- the content write DECLARED and BOUND (registry code 1): contentSpec, contentSpec_complete (frame and replay), contentOpens, contentEffect
