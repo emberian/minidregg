@@ -344,13 +344,13 @@ expectgot read "alice opens bob's line" "$T_B0" "$(jq -r '.entries[0].private.te
 
 # ------------------------------------------------ what the operator sees
 jq -n --arg s "$SPONSOR_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"lab",
-  recipient:$s,verbs:["observe"],maxCost:"100",room:true}' >"$RQ/op-lab.json"
+  recipient:$s,verbs:["observe"],perRequestBytes:"100",room:true}' >"$RQ/op-lab.json"
 raw operator alice "grants the operator an observe-only grant under lab (no wrap)" ok "$MINI" workspace --action propose \
   --dir "$WS/alice" --request "$RQ/op-lab.json" --proposal-id op-lab
 handoff operator alice op-lab
 printf '%s\n' "$REF" >"$SD/op-lab-ref.json"
 jq -n --arg s "$SPONSOR_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"pub",
-  recipient:$s,verbs:["observe"],maxCost:"100",room:true}' >"$RQ/op-pub.json"
+  recipient:$s,verbs:["observe"],perRequestBytes:"100",room:true}' >"$RQ/op-pub.json"
 raw operator alice "grants the operator an observe-only grant under pub" ok "$MINI" workspace --action propose \
   --dir "$WS/alice" --request "$RQ/op-pub.json" --proposal-id op-pub
 handoff operator alice op-pub

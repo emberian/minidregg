@@ -209,7 +209,7 @@ def propose_submit(ws, pid, request):
     except Exception: o = {}
     return r1, r2, o
 propose_submit(A, "invite-p", {"type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": "lab",
-               "recipient": "21", "verbs": ["observe", "mutate"], "maxCost": "500000", "room": True})
+               "recipient": "21", "verbs": ["observe", "mutate"], "perRequestBytes": "500000", "room": True})
 run(MINI, "workspace", "--action", "publish-delegation", "--dir", A, "--proposal-id", "invite-p", "--attempt", os.path.join(A, "attempts", "invite-p"))
 r = run(MINI, "workspace", "--action", "import", "--dir", P, "--name", "lab", "--from-ref", os.path.join(A, "proposals", "invite-p", "recipient-reference.json"))
 row("setup: the Store, the room lab (A), P invited (under lab), accounts A 7, P 121, S 122",

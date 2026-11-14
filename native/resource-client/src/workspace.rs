@@ -3465,12 +3465,12 @@ fn propose_summary_once(
                 .filter(|key| obj.contains_key(**key))
                 .count();
             if obj.len() != 6 + optional_keys
-                || ["name", "recipient", "verbs", "maxCost"]
+                || ["name", "recipient", "verbs", "perRequestBytes"]
                     .iter()
                     .any(|field| !obj.contains_key(*field))
             {
                 return Err(
-                    "delegate proposal requires type, action, name, recipient, verbs, maxCost"
+                    "delegate proposal requires type, action, name, recipient, verbs, perRequestBytes"
                         .into(),
                 );
             }
@@ -3480,8 +3480,8 @@ fn propose_summary_once(
             let parent_id = member(&reference, "operationCapability")?;
             let recipient = member(&request, "recipient")?;
             decimal(recipient, "delegate recipient")?;
-            let maximum = member(&request, "maxCost")?;
-            field_decimal(maximum, "delegation maxCost")?;
+            let maximum = member(&request, "perRequestBytes")?;
+            field_decimal(maximum, "delegation perRequestBytes")?;
             let selected_verbs = request
                 .get("verbs")
                 .and_then(Value::as_array)
@@ -3544,10 +3544,10 @@ fn propose_summary_once(
                 return Err("parent capability lacks delegation verb".into());
             }
             readable_delegation_verbs(selected_verbs, parent_verbs)?;
-            let parent_max = member(head, "maxCost")?;
-            field_decimal(parent_max, "parent maxCost")?;
+            let parent_max = member(head, "perRequestBytes")?;
+            field_decimal(parent_max, "parent perRequestBytes")?;
             if !decimal_leq(maximum, parent_max) {
-                return Err("delegation maxCost exceeds parent".into());
+                return Err("delegation perRequestBytes exceeds parent".into());
             }
             let parent_before = member(head, "notBefore")?;
             let parent_after = member(head, "notAfter")?;
@@ -3625,7 +3625,7 @@ fn propose_summary_once(
             field_decimal(target_root, "delegation target root")?;
             let mut child = json!({"id":child_id,"root":member(head,"root")?,"parent":parent_id,
                 "issuer":member(head,"issuer")?,"holder":{"type":"subject","subject":recipient},
-                "targets":[target],"verbs":selected_verbs,"maxCost":maximum,
+                "targets":[target],"verbs":selected_verbs,"perRequestBytes":maximum,
                 "notBefore":child_before,"notAfter":child_after,
                 "issuerEpoch":member(head,"issuerEpoch")?,"policyId":member(head,"policyId")?,
                 "policyEpoch":member(head,"policyEpoch")?,"ancestors":ancestors,
@@ -9533,7 +9533,7 @@ mod tests {
         let proposal = root.join("proposals/to-bob");
         make_private_dir(&proposal).unwrap();
         let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-            "name":"shared","recipient":"8","verbs":["observe"],"maxCost":"10"});
+            "name":"shared","recipient":"8","verbs":["observe"],"perRequestBytes":"10"});
         create_private(
             &proposal.join("request.json"),
             &serde_json::to_vec(&request).unwrap(),

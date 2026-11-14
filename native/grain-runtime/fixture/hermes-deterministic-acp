@@ -163,10 +163,10 @@ def run_prompt(session, server, text):
                     outcome = mcp.call("mini_workspace_submit", {"proposalId": proposal["proposalId"]})
                     say(session, f"submission {outcome.get('operationId')}: {outcome.get('resolution')} ({outcome.get('basis')})")
                 elif op == "@delegate":
-                    name, recipient, verbs, max_cost = words[1], words[2], words[3].split(","), words[4]
+                    name, recipient, verbs, per_request_bytes = words[1], words[2], words[3].split(","), words[4]
                     proposal = mcp.call("mini_workspace_propose", {"request": {
                         "type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": name,
-                        "recipient": recipient, "verbs": verbs, "maxCost": max_cost}})
+                        "recipient": recipient, "verbs": verbs, "perRequestBytes": per_request_bytes}})
                     last_delegation = proposal["proposalId"]
                     outcome = mcp.call("mini_workspace_submit", {"proposalId": last_delegation})
                     say(session, f"delegation {last_delegation}: {outcome.get('resolution')}")

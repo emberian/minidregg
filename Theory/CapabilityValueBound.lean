@@ -2,9 +2,9 @@
 # Theory.CapabilityValueBound -- the value bound a capability carries, for every debit
 
 A capability's scope bounds a request three ways (`Theory.TypedAuthorization.Scope`): its
-`targets`, its `verbs` and `maxCost`, a ceiling on `Request.cost`. `Request.cost` is a
+`targets`, its `verbs` and `perRequestBytes`, a ceiling on `Request.cost`. `Request.cost` is a
 size: the encoded length of the command, descriptor or operation the request commits. It is
-never a fee and never the value a debit moves, so `maxCost` is not a value bound.
+never a fee and never the value a debit moves, so `perRequestBytes` is not a value bound.
 
 The scope's value bound is `maxDelta` on the field `CellField.balance asset`, with `fields`
 naming which balances the capability may move at all. This module states that bound once, for
@@ -601,7 +601,7 @@ def gold : AssetId := 1
 def bounded : Scope .account where
   targets := .explicit {⟨payer⟩}
   verbs := {.transfer}
-  maxCost := 3
+  perRequestBytes := 3
   fields := some {.balance credit}
   maxDelta := {(.balance credit, 5)}
 
@@ -609,7 +609,7 @@ def bounded : Scope .account where
 def root : Scope .account where
   targets := .explicit {⟨payer⟩}
   verbs := {.transfer}
-  maxCost := 100000
+  perRequestBytes := 100000
 
 def within : List Operation := [.transfer payer other credit 5]
 def over : List Operation := [.transfer payer other credit 6]

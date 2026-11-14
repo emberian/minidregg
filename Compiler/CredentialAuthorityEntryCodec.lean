@@ -306,7 +306,7 @@ def scopeTupleStream (kind : ResourceKind) : StreamCodec (ScopeTuple kind) :=
         (StreamCodec.product (StreamCodec.option fieldSetStream) boundSetStream)))
 
 def scopeTuple {kind : ResourceKind} (scope : Scope kind) : ScopeTuple kind :=
-  (scope.targets, scope.verbs, scope.maxCost, scope.fields, scope.maxDelta)
+  (scope.targets, scope.verbs, scope.perRequestBytes, scope.fields, scope.maxDelta)
 
 def scopeOfTuple {kind : ResourceKind} (tuple : ScopeTuple kind) : Scope kind :=
   ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩
@@ -420,37 +420,37 @@ def storedCapabilityStream (kind : ResourceKind) :
 
 /-- An explicit scope survives transport exactly. -/
 theorem scope_explicit_roundtrip (kind : ResourceKind)
-    (targets : Finset (ResourceId kind)) (verbs : Finset (Verb kind)) (maxCost : Nat)
+    (targets : Finset (ResourceId kind)) (verbs : Finset (Verb kind)) (perRequestBytes : Nat)
     (fields : Option (Finset CellField)) (bounds : Finset (CellField × Nat))
     (suffix : List UInt8) :
     (scopeStream kind).decodePrefix
-        ((scopeStream kind).encode ⟨.explicit targets, verbs, maxCost, fields, bounds⟩ ++ suffix) =
-      some (⟨.explicit targets, verbs, maxCost, fields, bounds⟩, suffix) :=
+        ((scopeStream kind).encode ⟨.explicit targets, verbs, perRequestBytes, fields, bounds⟩ ++ suffix) =
+      some (⟨.explicit targets, verbs, perRequestBytes, fields, bounds⟩, suffix) :=
   (scopeStream kind).decodePrefix_encode _ suffix
 
 /-- An `under` scope survives transport exactly. -/
 theorem scope_under_roundtrip (kind : ResourceKind)
-    (room : Nat) (verbs : Finset (Verb kind)) (maxCost : Nat) (fields : Option (Finset CellField)) (bounds : Finset (CellField × Nat))
+    (room : Nat) (verbs : Finset (Verb kind)) (perRequestBytes : Nat) (fields : Option (Finset CellField)) (bounds : Finset (CellField × Nat))
     (suffix : List UInt8) :
     (scopeStream kind).decodePrefix
-        ((scopeStream kind).encode ⟨.under room, verbs, maxCost, fields, bounds⟩ ++ suffix) =
-      some (⟨.under room, verbs, maxCost, fields, bounds⟩, suffix) :=
+        ((scopeStream kind).encode ⟨.under room, verbs, perRequestBytes, fields, bounds⟩ ++ suffix) =
+      some (⟨.under room, verbs, perRequestBytes, fields, bounds⟩, suffix) :=
   (scopeStream kind).decodePrefix_encode _ suffix
 
 /-- The tag byte is the first byte of every scope frame. -/
 theorem scope_frame_tag (kind : ResourceKind) (scope : Scope kind) :
     ((scopeStream kind).encode scope).head? =
       some (match scope.targets with | .explicit _ => 0 | .under _ => 1) := by
-  rcases scope with ⟨targets, verbs, maxCost, fields, bounds⟩
+  rcases scope with ⟨targets, verbs, perRequestBytes, fields, bounds⟩
   cases targets <;> rfl
 
 /-- An explicit scope and an `under` scope never share bytes. -/
 theorem scope_explicit_ne_under (kind : ResourceKind)
     (targets : Finset (ResourceId kind)) (room : Nat)
-    (verbs verbs' : Finset (Verb kind)) (maxCost maxCost' : Nat)
+    (verbs verbs' : Finset (Verb kind)) (perRequestBytes perRequestBytes' : Nat)
     (fields fields' : Option (Finset CellField)) (bounds bounds' : Finset (CellField × Nat)) :
-    (scopeStream kind).encode ⟨.explicit targets, verbs, maxCost, fields, bounds⟩ ≠
-      (scopeStream kind).encode ⟨.under room, verbs', maxCost', fields', bounds'⟩ := by
+    (scopeStream kind).encode ⟨.explicit targets, verbs, perRequestBytes, fields, bounds⟩ ≠
+      (scopeStream kind).encode ⟨.under room, verbs', perRequestBytes', fields', bounds'⟩ := by
   intro same
   have heads := congrArg List.head? same
   rw [scope_frame_tag, scope_frame_tag] at heads

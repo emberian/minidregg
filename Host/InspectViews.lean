@@ -66,7 +66,7 @@ what it draws narrows whatever the Store's parentage is. -/
 theorem narrows_of_empty {kind : ResourceKind} {child parent : Scope kind}
     (h : child.Narrows parent Parentage.empty) (parentage : Parentage) :
     child.Narrows parent parentage := by
-  refine ⟨?_, h.verbs, h.maxCost, h.fields, h.maxDelta⟩
+  refine ⟨?_, h.verbs, h.perRequestBytes, h.fields, h.maxDelta⟩
   have t := h.targets
   revert t
   cases ct : child.targets <;> cases pt : parent.targets <;>

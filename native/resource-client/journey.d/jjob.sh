@@ -165,7 +165,7 @@ def propose_submit(ws, pid, request):
     except Exception: outcome = None
     return r2, outcome
 invite = {"type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": "lab", "recipient": "21",
-          "verbs": ["observe", "mutate"], "maxCost": "500000", "room": True}
+          "verbs": ["observe", "mutate"], "perRequestBytes": "500000", "room": True}
 r, outcome = propose_submit(A, "invite-p", invite)
 r3 = run(MINI, "workspace", "--action", "publish-delegation", "--dir", A, "--proposal-id", "invite-p",
          "--attempt", os.path.join(A, "attempts", "invite-p"))

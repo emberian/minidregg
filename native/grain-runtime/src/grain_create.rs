@@ -62,7 +62,7 @@ struct Capabilities {
 struct Budgets {
     parent: String,
     tool: String,
-    witness_max_cost: String,
+    witness_per_request_bytes: String,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -240,7 +240,7 @@ impl Spec {
             (&self.capabilities.tool_observe, "capabilities.toolObserve"),
             (&self.capabilities.tool_control, "capabilities.toolControl"),
             (&self.budgets.parent, "budgets.parent"), (&self.budgets.tool, "budgets.tool"),
-            (&self.budgets.witness_max_cost, "budgets.witnessMaxCost"),
+            (&self.budgets.witness_per_request_bytes, "budgets.witnessPerRequestBytes"),
             (&self.worker.reserve, "worker.reserve"), (&self.worker.charge, "worker.charge"),
             (&self.tool_charges.reserve, "toolCharges.reserve"), (&self.tool_charges.charge, "toolCharges.charge"),
         ] {
@@ -705,7 +705,7 @@ fn delegate_witness(spec: &Spec, work: &Path, owner_ws: &Path, id: &str, recipie
         if !request.exists() {
             write_private_new(&request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
                 "name":"parent","recipient":recipient,"verbs":["observe","mutate"],
-                "maxCost":spec.budgets.witness_max_cost}).to_string().as_bytes())?;
+                "perRequestBytes":spec.budgets.witness_per_request_bytes}).to_string().as_bytes())?;
         }
         run(Command::new(&spec.mini).args(["workspace", "--action", "propose", "--dir"]).arg(owner_ws)
             .arg("--request").arg(&request).args(["--proposal-id", id]), &format!("propose {id}"))?;
@@ -882,7 +882,7 @@ mod tests {
             "workerKey":{"key":"/w","subject":"9","noPrerotation":true},
             "task":"8751","toolTask":"8752",
             "capabilities":{"parentObserve":"8761","parentControl":"8762","toolObserve":"8771","toolControl":"8772"},
-            "budgets":{"parent":"100","tool":"50","witnessMaxCost":"50000"},
+            "budgets":{"parent":"100","tool":"50","witnessPerRequestBytes":"50000"},
             "worker":{"launcher":"/l/bwrap","runtimeRoot":"/rt","workspace":"/ws","network":"none",
                 "wallTimeSeconds":600,"reserve":"3","charge":"1"},
             "toolCharges":{"reserve":"2","charge":"1"}})

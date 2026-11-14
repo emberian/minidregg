@@ -188,7 +188,7 @@ for j in 1 2 3 4 5 6; do
     --fields 0-15
   row "job$j" "A creates $n under the 45-clause job law" "created" "rc=$(cat "$D/create-$j.rc")" "$(cat "$D/create-$j.rc")"
   jq -n --arg r "$B" --arg n "$n" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,
-    recipient:$r,verbs:["observe","mutate"],maxCost:"500000"}' >"$D/req/grant-$j.json"
+    recipient:$r,verbs:["observe","mutate"],perRequestBytes:"500000"}' >"$D/req/grant-$j.json"
   run "grant-$j-propose" "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/grant-$j.json" --proposal-id "jjob1-grant-$j"
   run "grant-$j-submit" "$MINI" workspace --action submit --dir "$WS_A" --intent "$WS_A/proposals/jjob1-grant-$j/intent.json" \
     --attempt "$WS_A/attempts/jjob1-grant-$j"

@@ -266,7 +266,7 @@ operator redeleg "the newcomer imports its invite" \
   "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name lab3c --from-ref "$SD/nc-ref.json"
 # (to the sponsor: a grant to dave here would keep dave a member after bob's kick)
 jq -n --arg s "$SPONSOR_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"lab3c",
-  recipient:$s,verbs:["observe"],maxCost:"100",room:true}' >"$SD/nc-redeleg.json"
+  recipient:$s,verbs:["observe"],perRequestBytes:"100",room:true}' >"$SD/nc-redeleg.json"
 raw redeleg newcomer "re-delegates its invite to the sponsor (own namespace)" ok \
   "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$SD/nc-redeleg.json" --proposal-id k10c-nc
 raw redeleg newcomer "submits the re-delegation" ok \

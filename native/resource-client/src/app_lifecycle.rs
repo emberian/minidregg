@@ -182,7 +182,7 @@ fn prepare_phase(
         parent["observeCapability"] = json!(member(selected, "operationCapability")?);
         let (cap, _, _) = signed_view(root, workspace, &parent, "capability")?;
         json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":name,
-            "recipient":member(decl,"manager")?,"verbs":["observe","mutate"],"maxCost":member(&cap["head"],"maxCost")?})
+            "recipient":member(decl,"manager")?,"verbs":["observe","mutate"],"perRequestBytes":member(&cap["head"],"perRequestBytes")?})
     };
     retain(&request_path, &request)?;
     let suffix = random_nonce()?;

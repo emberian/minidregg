@@ -651,7 +651,7 @@ private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) 
   -- K-FIELDS: optional `fields` (absent = every field) and `maxDelta`
   -- (absent = no per-field bound).
   let optionalKeys := ["fields", "maxDelta"].filter fun key => (raw.get? key).isSome
-  let names := ["id", "root", "parent", "issuer", "holder", targetKey, "verbs", "maxCost",
+  let names := ["id", "root", "parent", "issuer", "holder", targetKey, "verbs", "perRequestBytes",
     "notBefore", "notAfter", "issuerEpoch", "policyId", "policyEpoch", "ancestors", "channels"] ++
     optionalKeys
   let obj ← exactObject path names json
@@ -686,7 +686,7 @@ private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) 
     issuer := ⟨← nat (path ++ ".issuer") (← field path "issuer" obj)⟩
     holder := ← holder (path ++ ".holder") (← field path "holder" obj)
     scope := ⟨targets, verbs.toFinset,
-      ← nat (path ++ ".maxCost") (← field path "maxCost" obj), fields, bounds⟩
+      ← nat (path ++ ".perRequestBytes") (← field path "perRequestBytes" obj), fields, bounds⟩
     notBefore := ← nat (path ++ ".notBefore") (← field path "notBefore" obj)
     notAfter := ← nat (path ++ ".notAfter") (← field path "notAfter" obj)
     issuerEpoch := ← nat (path ++ ".issuerEpoch") (← field path "issuerEpoch" obj)

@@ -56,7 +56,7 @@ structure TokenWire where
   holderSubject : Nat
   targetId : Nat
   verbTag : Nat
-  maxCost : Nat
+  perRequestBytes : Nat
   notBefore : Nat
   notAfter : Nat
   issuerEpoch : Nat
@@ -92,13 +92,13 @@ def tokenTupleStream : StreamCodec TokenTuple :=
 def TokenWire.toTuple (token : TokenWire) : TokenTuple :=
   (token.codecVersion, token.authorityRoot, token.capabilityId, token.rootId,
     token.parentId, token.issuerId, token.holderSubject, token.targetId,
-    token.verbTag, token.maxCost, token.notBefore, token.notAfter,
+    token.verbTag, token.perRequestBytes, token.notBefore, token.notAfter,
     token.issuerEpoch, token.policyId, token.policyEpoch, token.channelId,
     token.requestDigest)
 
 def TokenWire.ofTuple : TokenTuple -> TokenWire
   | (codecVersion, authorityRoot, capabilityId, rootId, parentId, issuerId,
-      holderSubject, targetId, verbTag, maxCost, notBefore, notAfter,
+      holderSubject, targetId, verbTag, perRequestBytes, notBefore, notAfter,
       issuerEpoch, policyId, policyEpoch, channelId, requestDigest) =>
     { codecVersion
       authorityRoot
@@ -109,7 +109,7 @@ def TokenWire.ofTuple : TokenTuple -> TokenWire
       holderSubject
       targetId
       verbTag
-      maxCost
+      perRequestBytes
       notBefore
       notAfter
       issuerEpoch
@@ -250,7 +250,7 @@ def canonicalToken : TokenWire where
   holderSubject := useRequest.subject.value
   targetId := useRequest.target.value
   verbTag := AuthorizationDeclaration.verbTag useRequest.verb
-  maxCost := childCapability.scope.maxCost
+  perRequestBytes := childCapability.scope.perRequestBytes
   notBefore := childCapability.notBefore
   notAfter := childCapability.notAfter
   issuerEpoch := childCapability.issuerEpoch
@@ -591,11 +591,11 @@ theorem first_use_semantic_join :
 /-! ## Executable rejection teeth -/
 
 def widenedToken : TokenWire :=
-  { canonicalToken with maxCost := rootCapability.scope.maxCost }
+  { canonicalToken with perRequestBytes := rootCapability.scope.perRequestBytes }
 
 theorem widenedToken_ne : widenedToken ≠ canonicalToken := by
   intro equal
-  have costEqual := congrArg TokenWire.maxCost equal
+  have costEqual := congrArg TokenWire.perRequestBytes equal
   norm_num [widenedToken, canonicalToken, rootCapability, rootScope,
     childCapability, childScope] at costEqual
 

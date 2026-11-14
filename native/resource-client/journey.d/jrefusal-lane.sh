@@ -94,7 +94,7 @@ run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name jrl --st
 for who in a b; do
   subject=$A; [ "$who" = b ] && subject=$B
   jq -n --arg r "$subject" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"jrl",
-    recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/delegate-$who.json"
+    recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$D/req/delegate-$who.json"
   run "dprop-$who" "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/delegate-$who.json" \
     --proposal-id "jrl-grant-$who" || die "delegate $who: $(tail -1 "$D/dprop-$who.err")"
   run "dsub-$who" "$MINI" workspace --action submit --dir "$SPONSOR_WS" \

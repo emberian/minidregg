@@ -608,9 +608,9 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
                 return Err(format!("{name} is private (devnet quality; privacy not audited): name the invitee's signed key declaration (its `room-key --op recipient-record` output, or @FILE in HOME/requests), or the 32-byte key id `whoami` prints if the invitee already published its record (`room register`)"));
             }
             let verbs: Vec<&str> = p.flag("--verbs").flatten().unwrap_or("observe,place").split(',').collect();
-            let max_cost = p.flag("--max-cost").flatten().unwrap_or("50000");
+            let per_request_bytes = p.flag("--per-request-bytes").flatten().unwrap_or("50000");
             let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-                "name":name,"recipient":invitee,"verbs":verbs,"maxCost":max_cost,"room":true});
+                "name":name,"recipient":invitee,"verbs":verbs,"perRequestBytes":per_request_bytes,"room":true});
             scope_narrowing(&mut request, p.flag("--fields").flatten(), p.flag("--max-delta").flatten())?;
             match enc {
                 None => proposal(session, id, &request),
@@ -1843,18 +1843,18 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let p = crate::shell_grammar::parse(&crate::shell_grammar::DELEGATE, &w)?;
             let verbs: Vec<&str> = p.arg(3).split(',').collect();
             // A read is judged with a cost (its encoded intent's length), and a grant covers it only
-            // while cost <= MAX-COST: an observe grant at 0 covers no read, so its holder is refused
+            // while cost <= PER-REQUEST-BYTES: an observe grant at 0 covers no read, so its holder is refused
             // `no-grant` on everything. Named here so the trap cannot be typed (the publish form's
-            // ceiling is deploy/demo-seed/public-read-max-cost).
+            // ceiling is deploy/demo-seed/public-read-request-bytes).
             if verbs.contains(&"observe") && p.arg(4).bytes().all(|b| b == b'0') {
-                return Err("a ceiling of 0 covers no read: an observe grant needs a MAX-COST above 0 (every signed read costs its encoded length); give a MAX-COST at or above the value in deploy/demo-seed/public-read-max-cost".into());
+                return Err("a ceiling of 0 covers no read: an observe grant needs a PER-REQUEST-BYTES above 0 (every signed read costs its encoded length); give a PER-REQUEST-BYTES at or above the value in deploy/demo-seed/public-read-request-bytes".into());
             }
             let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-                "name":p.arg(1),"recipient":p.arg(2),"verbs":verbs,"maxCost":p.arg(4)});
+                "name":p.arg(1),"recipient":p.arg(2),"verbs":verbs,"perRequestBytes":p.arg(4)});
             if let Some(Some(height)) = p.flag("--until") {
                 request["notAfter"] = json!(height);
             }
-            // MAX-COST is a ceiling on a request's cost (its encoded size, or a fee), never on
+            // PER-REQUEST-BYTES is a ceiling on one signed request's encoded size, never on
             // the value a transfer moves. The value bound of a spend grant is
             // `--max-delta balance:ASSET=N` (the gross debit of one turn), with `--fields`
             // naming which balances it may move at all.
@@ -3373,7 +3373,7 @@ mod tests {
         assert!(call.1.contains(&("fund".into(),"purse".into())));
         assert!(call.1.contains(&("max-compute-credits".into(),"12".into())));
         for bad in ["instance call close poll close --fund purse", "instance call close poll close --max-compute-credits 12",
-          "instance call close poll close --fund purse --fund other", "instance call close poll close --max-cost 12"] {
+          "instance call close poll close --fund purse --fund other", "instance call close poll close --per-request-bytes 12"] {
             assert!(plan(&s,bad).is_err(),"{bad}");
         }
         let program=client(plan(&s,r#"program create close {"jam":"02","abi":{}} open --in lab"#).unwrap());
@@ -3738,7 +3738,7 @@ mod tests {
         assert_eq!(
             request,
             json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"shared",
-                "recipient":"182","verbs":["observe","mutate"],"maxCost":"50000"})
+                "recipient":"182","verbs":["observe","mutate"],"perRequestBytes":"50000"})
         );
         let (_, _, writes) = client(
             plan(&s, r#"law board-law shared "any [ field 2 monotone, not (verb == write) ]; any [ field 2 in {0,1,2}, not (verb == write) ]""#)
@@ -4204,11 +4204,11 @@ mod tests {
         assert!(plan(&s, "delegate d0 lab 12 observe,mutate 000").is_err());
         assert!(plan(&s, "delegate d1 lab 12 observe 50000").is_ok());
         assert!(plan(&s, "delegate d2 lab 12 mutate 0").is_ok());
-        // A spend grant's value bound is `--max-delta balance:ASSET=N`, not MAX-COST.
+        // A spend grant's value bound is `--max-delta balance:ASSET=N`, not PER-REQUEST-BYTES.
         let (_, request) = request_of(plan(&s,
             "delegate d3 lab 12 transfer 3 --fields balance:0 --max-delta balance:0=5").unwrap());
         assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-            "name":"lab","recipient":"12","verbs":["transfer"],"maxCost":"3",
+            "name":"lab","recipient":"12","verbs":["transfer"],"perRequestBytes":"3",
             "fields":["balance:0"],"maxDelta":[{"field":"balance:0","max":"5"}]}));
         let refused = plan(&s, "delegate d4 lab 12 transfer 3 --max-delta balance:0").err().unwrap();
         assert!(refused.contains("--max-delta is FIELD=N"), "{refused}");
@@ -4217,7 +4217,7 @@ mod tests {
         assert!(request.get("maxDelta").is_none() && request.get("fields").is_none());
         let (_, request) = request_of(plan(&s, "room invite i1 lab 12").unwrap());
         assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-            "name":"lab","recipient":"12","verbs":["observe","place"],"maxCost":"50000","room":true}));
+            "name":"lab","recipient":"12","verbs":["observe","place"],"perRequestBytes":"50000","room":true}));
         let (_, request) = request_of(plan(&s,
             "room invite i2 lab 12 --verbs observe,place,delegate --fields 1,annotations --max-delta 7=50").unwrap());
         assert_eq!(request["verbs"], json!(["observe","place","delegate"]));
@@ -4312,7 +4312,7 @@ mod tests {
             ("past", "true")]));
         let request: Value = serde_json::from_str(&writes[0].1).unwrap();
         assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-            "name":"lab","recipient":"12","verbs":["observe","place","append"],"maxCost":"50000","room":true}));
+            "name":"lab","recipient":"12","verbs":["observe","place","append"],"perRequestBytes":"50000","room":true}));
         fs::create_dir_all(s.home.join("requests")).unwrap();
         fs::write(s.home.join("requests").join("bob.enc"), format!("{enc}\n")).unwrap();
         let (_, flags, _) = client(plan(&s, "room invite i2 lab 12 @bob.enc --i-know").unwrap());

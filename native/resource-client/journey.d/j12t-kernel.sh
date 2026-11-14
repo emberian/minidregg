@@ -96,7 +96,7 @@ invoke() { # NAME WS TARGETS-JSON  (propose + submit)
 content() { jq -n --arg r "$1" --argjson a "$2" '[{name:$r,payload:{type:"content",actions:$a}}]'; }
 delegate() { # NAME FROM-WS RESOURCE RECIPIENT-SUBJECT VERBS-JSON TO-WS LOCALNAME
   jq -n --arg n "$3" --arg r "$4" --argjson v "$5" \
-    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,maxCost:"50000"}' \
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,perRequestBytes:"50000"}' \
     >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$2" --request "$D/req/$1.json" --proposal-id "$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$2" \

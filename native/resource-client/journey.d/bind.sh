@@ -36,7 +36,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
   --predicate "$D/req/permit-all.json" --fields 301-310 >"$D/create-n.out" 2>"$D/create-n.err" \
   || { echo "sponsor could not create bind-n: $(tail -1 "$D/create-n.err")" >&2; exit 1; }
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"bind-n",
-  recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/delegate.json"
+  recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$D/req/delegate.json"
 "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/delegate.json" \
   --proposal-id bind-grant >"$D/grant.propose.out" 2>"$D/grant.propose.err" \
   || { echo "delegate propose failed: $(tail -1 "$D/grant.propose.err")" >&2; exit 1; }

@@ -80,7 +80,7 @@ invoke() { # NAME WS RESOURCE ACTIONS-JSON
 }
 delegate() { # NAME FROM-WS RESOURCE RECIPIENT-SUBJECT VERBS-JSON TO-WS LOCALNAME
   jq -n --arg n "$3" --arg r "$4" --argjson v "$5" \
-    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,maxCost:"50000"}' \
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,perRequestBytes:"50000"}' \
     >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$2" --request "$D/req/$1.json" --proposal-id "m-$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$2" \
@@ -126,7 +126,7 @@ invoke a-writes-target "$SPONSOR_WS" mtarget "$(jq -n --arg a "$(hexof 'the targ
 # R's two capabilities: observe (whole cell) and mutate scoped to annotations.
 grant() { # NAME VERBS-JSON EXTRA-JSON
   jq -n --arg r "$R_SUBJECT" --argjson v "$2" --argjson x "$3" \
-    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"mpaper",recipient:$r,verbs:$v,maxCost:"50000"} + $x' \
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"mpaper",recipient:$r,verbs:$v,perRequestBytes:"50000"} + $x' \
     >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$1.json" --proposal-id "m-$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$SPONSOR_WS" \

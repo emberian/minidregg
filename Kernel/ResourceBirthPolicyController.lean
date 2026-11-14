@@ -494,7 +494,7 @@ def RootGrantShape (template : CanonicalRuntimeProfile.FactoryTemplate)
   grant.capability.ancestry = [] ∧
   BirthWindow template height grant ∧
   grant.capability.head.notAfter = grant.capability.head.notBefore + template.lifetime ∧
-  grant.capability.head.scope.maxCost = template.ownerBudget
+  grant.capability.head.scope.perRequestBytes = template.ownerBudget
 
 def NativeOwnerGrant (grant : AuthorityGrant) (item : BirthItem Registry) : Prop :=
   grant.NativeForBirth item ∧

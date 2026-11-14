@@ -22,7 +22,7 @@ SUBJECT=${NEWPARTICIPANT_SPONSOR_SUBJECT:-7}
 for value in "$DOMAIN" "$SUBJECT"; do
   case $value in ""|0?*|*[!0-9]*) echo "domain and sponsor subject must be canonical decimal" >&2; exit 2;; esac
 done
-# The template owner budget (every owner capability's maxCost). A birth intent's
+# The template owner budget (every owner capability's perRequestBytes). A birth intent's
 # observation costs its byte length, so a fixture that births a Nock program
 # (J-NOCK-2b, ~566 KB) raises it; the default is unchanged.
 OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-100000}

@@ -833,7 +833,9 @@ theorem CellField.withinBounds_of_narrows {child parent : Finset (CellField × N
 structure Scope (kind : ResourceKind) where
   targets : TargetSet kind
   verbs : Finset (Verb kind)
-  maxCost : Nat
+  /-- A ceiling on one request's `cost`, which is the encoded length in bytes of what the
+  request commits. It bounds no value: `maxDelta` on a balance field does. -/
+  perRequestBytes : Nat
   /-- The fields of each covered cell this scope may write and read; `none`
   is every field. -/
   fields : Option (Finset CellField) := none
@@ -845,15 +847,15 @@ structure Scope.Covers {kind : ResourceKind} (scope : Scope kind)
     (parentage : Parentage) (request : Request kind) : Prop where
   target : scope.targets.Covers parentage request.target
   verb : request.verb.AllowedBy scope.verbs
-  cost : request.cost ≤ scope.maxCost
+  cost : request.cost ≤ scope.perRequestBytes
 
 /-- `child.Narrows parent parentage` is the authority preorder at one parent
-projection: fewer targets, fewer verbs, and no larger budget. -/
+projection: fewer targets, fewer verbs, and no larger request size. -/
 structure Scope.Narrows {kind : ResourceKind} (child parent : Scope kind)
     (parentage : Parentage) : Prop where
   targets : child.targets.Narrows parent.targets parentage
   verbs : child.verbs ⊆ parent.verbs
-  maxCost : child.maxCost ≤ parent.maxCost
+  perRequestBytes : child.perRequestBytes ≤ parent.perRequestBytes
   fields : CellField.SetNarrows child.fields parent.fields
   maxDelta : CellField.BoundsNarrow child.maxDelta parent.maxDelta
 
@@ -861,7 +863,7 @@ theorem Scope.covers_iff_components {kind : ResourceKind} (scope : Scope kind)
     (parentage : Parentage) (request : Request kind) :
     scope.Covers parentage request ↔
       scope.targets.Covers parentage request.target ∧ request.verb.AllowedBy scope.verbs ∧
-        request.cost ≤ scope.maxCost :=
+        request.cost ≤ scope.perRequestBytes :=
   ⟨fun covers => ⟨covers.target, covers.verb, covers.cost⟩,
     fun ⟨target, verb, cost⟩ => ⟨target, verb, cost⟩⟩
 
@@ -874,9 +876,9 @@ theorem Scope.narrows_iff_components {kind : ResourceKind} (child parent : Scope
     (parentage : Parentage) :
     child.Narrows parent parentage ↔
       child.targets.Narrows parent.targets parentage ∧ child.verbs ⊆ parent.verbs ∧
-        child.maxCost ≤ parent.maxCost ∧ CellField.SetNarrows child.fields parent.fields ∧
+        child.perRequestBytes ≤ parent.perRequestBytes ∧ CellField.SetNarrows child.fields parent.fields ∧
           CellField.BoundsNarrow child.maxDelta parent.maxDelta :=
-  ⟨fun narrows => ⟨narrows.targets, narrows.verbs, narrows.maxCost, narrows.fields,
+  ⟨fun narrows => ⟨narrows.targets, narrows.verbs, narrows.perRequestBytes, narrows.fields,
       narrows.maxDelta⟩,
     fun ⟨targets, verbs, cost, fields, bounds⟩ => ⟨targets, verbs, cost, fields, bounds⟩⟩
 
@@ -893,7 +895,7 @@ theorem Scope.Narrows.trans {kind : ResourceKind} {young middle old : Scope kind
     {parentage : Parentage} (first : young.Narrows middle parentage)
     (second : middle.Narrows old parentage) : young.Narrows old parentage :=
   ⟨first.targets.trans second.targets, Finset.Subset.trans first.verbs second.verbs,
-    le_trans first.maxCost second.maxCost, first.fields.trans second.fields,
+    le_trans first.perRequestBytes second.perRequestBytes, first.fields.trans second.fields,
     first.maxDelta.trans second.maxDelta⟩
 
 theorem Scope.covers_of_narrows {kind : ResourceKind}
@@ -902,7 +904,7 @@ theorem Scope.covers_of_narrows {kind : ResourceKind}
     parent.Covers parentage request :=
   { target := TargetSet.covers_of_narrows hn.targets hc.target
     verb := hc.verb.mono hn.verbs
-    cost := le_trans hc.cost hn.maxCost }
+    cost := le_trans hc.cost hn.perRequestBytes }
 
 theorem Scope.covers_mono {kind : ResourceKind} {scope : Scope kind}
     {first second : Parentage} (grows : ∀ c p, first c = some p → second c = some p)
@@ -1094,7 +1096,7 @@ theorem Attenuates.mono {kind : ResourceKind} {child parent : Capability kind}
   { ha with
     scopeNarrows :=
       ⟨TargetSet.narrows_mono grows ha.scopeNarrows.targets, ha.scopeNarrows.verbs,
-        ha.scopeNarrows.maxCost, ha.scopeNarrows.fields, ha.scopeNarrows.maxDelta⟩ }
+        ha.scopeNarrows.perRequestBytes, ha.scopeNarrows.fields, ha.scopeNarrows.maxDelta⟩ }
 
 /-- Full semantic monotonicity.  Holder delegation is intentionally explicit:
 the caller must show that the parent holder covers the presented subject.  All
@@ -1191,7 +1193,7 @@ theorem Scope.narrows_stable {kind : ResourceKind} {state₁ state₂ : AuthStat
     (grows : ∀ c p, state₁.parent c = some p → state₂.parent c = some p)
     (narrows : child.Narrows parent state₁.parent) :
     child.Narrows parent state₂.parent :=
-  ⟨TargetSet.narrows_mono grows narrows.targets, narrows.verbs, narrows.maxCost,
+  ⟨TargetSet.narrows_mono grows narrows.targets, narrows.verbs, narrows.perRequestBytes,
     narrows.fields, narrows.maxDelta⟩
 
 /-! ## §4. Explicit verifier portals and request-indexed evidence. -/
@@ -1477,7 +1479,7 @@ def demoRequest : Request .object where
 def demoScope : Scope .object where
   targets := .explicit {demoTarget}
   verbs := {.mutateObject}
-  maxCost := 8
+  perRequestBytes := 8
 
 def demoCapability : Capability .object where
   id := ⟨20⟩

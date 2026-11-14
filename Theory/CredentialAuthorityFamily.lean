@@ -366,7 +366,7 @@ exactly the request's budget.  It cannot silently authorize a wider effect. -/
 def exactRequestScope {kind : ResourceKind} (request : Request kind) : Scope kind where
   targets := .explicit {request.target}
   verbs := {request.verb}
-  maxCost := request.cost
+  perRequestBytes := request.cost
 
 theorem exactRequestScope_covers {kind : ResourceKind} (request : Request kind)
     (parentage : Parentage) : (exactRequestScope request).Covers parentage request := by
@@ -564,7 +564,7 @@ theorem AcceptedCredential.reject_over_budget
     {scheme : RequestDigestScheme} {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (accepted : AcceptedCredential scheme portal state request)
-    (overBudget : accepted.authorization.evidence.authorityScope.maxCost < request.cost) : False := by
+    (overBudget : accepted.authorization.evidence.authorityScope.perRequestBytes < request.cost) : False := by
   exact (Nat.not_lt_of_ge accepted.effect_scope_and_budget.cost) overBudget
 
 /-- Negative tooth shared by every carrier: stale policy selection is

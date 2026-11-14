@@ -97,7 +97,7 @@ content() { # NAME ACTION-JSON
 delegate() {
   local ws=$1 id=$2
   jq -n --arg n "$3" --arg r "$4" --argjson v "$5" --argjson x "$6" \
-    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,maxCost:"50000"} + $x' \
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,perRequestBytes:"50000"} + $x' \
     >"$D/req/$id.json"
   run "$id-propose" "$MINI" workspace --action propose --dir "$ws" --request "$D/req/$id.json" --proposal-id "$id"
   if [ "$(cat "$D/$id-propose.rc")" != 0 ]; then echo "propose-error"; return; fi

@@ -178,7 +178,7 @@ private def capJson {kind : ResourceKind} (cap : Capability kind) : List (String
   [("holder", holderText cap.holder),
    ("targets", targetsJson cap.scope.targets),
    ("verbs", .arr <| (verbNames cap.scope.verbs).toArray.map Json.str),
-   ("maxCost", decimal cap.scope.maxCost), ("notBefore", decimal cap.notBefore),
+   ("perRequestBytes", decimal cap.scope.perRequestBytes), ("notBefore", decimal cap.notBefore),
    ("notAfter", decimal cap.notAfter), ("root", decimal cap.root.value),
    ("parent", cap.parent.map (fun p => decimal p.value) |>.getD .null),
    ("issuer", decimal cap.issuer.value)]
@@ -191,7 +191,7 @@ private def nodeJson {kind : ResourceKind} (node : Node kind) : Json :=
     (match node.cap with | some cap => capJson cap | none => [])
 
 private def narrowText {kind : ResourceKind} (edge : Edge kind) : String :=
-  s!"targets ⊆, verbs ⊆, maxCost {edge.child.scope.maxCost} ≤ {edge.parent.scope.maxCost}"
+  s!"targets ⊆, verbs ⊆, perRequestBytes {edge.child.scope.perRequestBytes} ≤ {edge.parent.scope.perRequestBytes}"
 
 private def nodeLine {kind : ResourceKind} (node : Node kind) : String :=
   let flags := (if node.revoked then " REVOKED" else "") ++
@@ -203,7 +203,7 @@ private def nodeLine {kind : ResourceKind} (node : Node kind) : String :=
         | reasons => ", ".intercalate (reasons.map RefusalReason.name)
       s!"{node.id}  [not readable] ({why}){flags}"
   | some cap =>
-      s!"{node.id}  {holderText cap.holder}  targets {targetsText cap.scope.targets}  verbs {braces (verbNames cap.scope.verbs)}  maxCost {cap.scope.maxCost}  heights {cap.notBefore}..{cap.notAfter}  [{", ".intercalate (node.sources.map sourceText)}]{flags}"
+      s!"{node.id}  {holderText cap.holder}  targets {targetsText cap.scope.targets}  verbs {braces (verbNames cap.scope.verbs)}  perRequestBytes {cap.scope.perRequestBytes}  heights {cap.notBefore}..{cap.notAfter}  [{", ".intercalate (node.sources.map sourceText)}]{flags}"
 
 private partial def treeLines {kind : ResourceKind} (tree : CapTree kind) (fuel : Nat)
     (indent : String) (node : Node kind) : List String :=
@@ -480,7 +480,7 @@ private def draftLines : Draft → List String
     | some ⟨kind, command⟩ =>
         let child := command.declaration.child
         [s!"  delegate by subject {command.subject.value} on {kindName kind} {command.declaration.target.value}",
-         s!"  writes the authority cell: capability {child.id.value} for {holderText child.holder}, verbs {braces (verbNames child.scope.verbs)}, maxCost {child.scope.maxCost}, parent {child.parent.map (·.value) |>.getD 0}"]
+         s!"  writes the authority cell: capability {child.id.value} for {holderText child.holder}, verbs {braces (verbNames child.scope.verbs)}, perRequestBytes {child.scope.perRequestBytes}, parent {child.parent.map (·.value) |>.getD 0}"]
   | .install subject control bytes =>
       [s!"  install a law by subject {subject.value} under control capability {control.value} ({bytes.length}-byte declaration)",
        "  writes the authority cell: the resource's policy revision"]

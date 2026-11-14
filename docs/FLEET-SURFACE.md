@@ -33,7 +33,7 @@ In one CAS it
   authority cell is not written).
 
 The request's `cost` is the encoded command's length, as for every other
-signed command, so a grant's `maxCost` is a size ceiling. What one turn may
+signed command, so a grant's `perRequestBytes` is a size ceiling. What one turn may
 take from the account is the grant's value bound: `maxDelta` on
 `balance:ASSET`, which a delegated grant must set (see "Costs and open
 edges"). Operation identity is
@@ -262,7 +262,7 @@ load ~20, 3 stale observations + 9 stale plans at load ~45.
   `missingBalanceBound`. So a `transfer` capability delegated with
   `--max-delta balance:0=FEE`, FEE the pinned `tariff.base`, admits a fleet
   publication and refuses every turn that also moves value
-  (`maxDeltaExceeded`), through every receiver, not only this one. `maxCost`
+  (`maxDeltaExceeded`), through every receiver, not only this one. `perRequestBytes`
   is a size ceiling (the request's `cost` is the encoded command's length)
   and bounds no value. Three limits remain. The bound is per turn, not a
   running total: the holder can still spend the account down one fee at a

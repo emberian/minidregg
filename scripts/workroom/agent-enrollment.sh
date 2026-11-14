@@ -275,7 +275,7 @@ for route in $(jq -er ' .agents[].route' "$WORKROOM_AGENT_ALLOCATION"); do
           expectedTargetRoot:$root,parentId:$p,target:$t,
           child:{id:$child,root:$p,parent:$p,issuer:"5",
             holder:{type:"subject",subject:$holder},targets:[$t],
-            verbs:["observe","mutate"],maxCost:"50000",
+            verbs:["observe","mutate"],perRequestBytes:"50000",
             notBefore:"10",notAfter:"10000",issuerEpoch:"2",
             policyId:$t,policyEpoch:"0",ancestors:[$p],channels:[]}}}},
        grants:[{kind:"object",target:$t,capability:$p}]}' \

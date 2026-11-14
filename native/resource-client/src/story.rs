@@ -862,7 +862,7 @@ fn grant(session: &Session, room: &str, recipient: &str, verbs: &[&str]) -> Resu
         session,
         "grant",
         &json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":room,
-            "recipient":recipient,"verbs":verbs,"maxCost":"50000","room":true}),
+            "recipient":recipient,"verbs":verbs,"perRequestBytes":"50000","room":true}),
     )?;
     let id = done["id"].as_str().unwrap_or_default().to_owned();
     let ws = &session.workspace;

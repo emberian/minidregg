@@ -165,10 +165,10 @@ fn delegate(root:&Path,workspace:&Value,dir:&Path,stage:&Value,label:&str,name:&
     let mut reference=ws::reference(root,name)?;
     reference["observeCapability"]=reference["operationCapability"].clone();
     let (cap,_,_)=ws::signed_view(root,workspace,&reference,"capability")?;
-    let maximum=text(&cap["head"],"maxCost")?;
+    let maximum=text(&cap["head"],"perRequestBytes")?;
     let step=action(root,workspace,dir,text(stage,"namespace")?,label,json!({
         "type":"minidregg-workspace-proposal-v1","action":"delegate","name":name,
-        "recipient":stage["subject"],"verbs":if edit{json!(["observe","mutate"])}else{json!(["observe"])},"maxCost":maximum}))?;
+        "recipient":stage["subject"],"verbs":if edit{json!(["observe","mutate"])}else{json!(["observe"])},"perRequestBytes":maximum}))?;
     let proposal=text(&step,"proposal")?;
     ws::publish_delegation(root,proposal,Path::new(text(&step,"attempt")?))?;
     let mut hint=read(&root.join("proposals").join(proposal).join("recipient-reference.json"))?;

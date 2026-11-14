@@ -635,7 +635,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
    owner:{key:$hk,subject:$hs,noPrerotation:false},workerKey:{key:$tk,subject:$ts,noPrerotation:false},
    task:$pt,toolTask:$tt,
    capabilities:{parentObserve:"9870011",parentControl:"9870012",toolObserve:"9870013",toolControl:"9870014"},
-   budgets:{parent:"20000",tool:"20000",witnessMaxCost:"50000"},
+   budgets:{parent:"20000",tool:"20000",witnessPerRequestBytes:"50000"},
    worker:{launcher:$l,runtimeRoot:$rt,workspace:$ww,network:"none",wallTimeSeconds:($pass|tonumber),reserve:"3",charge:"1"},
    toolCharges:{reserve:"2",charge:"1"},
    provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:"9870015",controlCapability:"9870016",

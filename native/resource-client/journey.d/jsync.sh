@@ -30,8 +30,9 @@ if [ -e "$DIR" ]; then echo "jsync: refusing to reuse $DIR" >&2; exit 2; fi
 mkdir -p "$DIR"
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 W="$DIR/world"
-# A run claim's proofWork charge is checked against the owner capability's
-# maxCost (the template ownerBudget), so this world's budget covers 10^6 steps.
+# The owner capability's perRequestBytes (the template ownerBudget) is a ceiling on a signed
+# request's encoded size. A run's funding credits are a Book debit and are not judged against
+# it; this world's ceiling is simply far above any request the step signs.
 NEWPARTICIPANT_OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-1000000000000} \
   sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \
   >"$DIR/bootstrap.out" 2>"$DIR/bootstrap.err" || { echo "jsync: bootstrap failed: $(tail -1 "$DIR/bootstrap.err")" >&2; exit 1; }

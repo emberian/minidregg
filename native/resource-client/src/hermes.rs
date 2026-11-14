@@ -505,7 +505,7 @@ fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Va
 /// carry a balance bound; `role` refuses a template without one).
 fn grant_request(name: &str, recipient: &str, doc: &RoleDoc) -> Value {
     let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":name,
-        "recipient":recipient,"verbs":doc.verbs,"maxCost":"50000"});
+        "recipient":recipient,"verbs":doc.verbs,"perRequestBytes":"50000"});
     if let Some(fields) = &doc.fields {
         request["fields"] = fields.clone();
     }
