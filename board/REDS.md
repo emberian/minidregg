@@ -1,17 +1,21 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `3677dd8f2626` (effects: the member patch is the declaration's; thin consent reads it by one rule). Round finished 2026-11-14T15:46Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-3677dd8f`.
+Tip: `cd0501b8c090` (builder: REDS.md for 3677dd8f2626 (3 red)). Round finished 2026-11-14T15:55Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-cd0501b8`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | ratchets | rc=1 see /home/hbox/lanes/integ/logs/ratchets.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/ratchets.log |
-| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-3677dd/journey.log |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-cd0501/journey.log |
 
-Suspect commits since green (`git log 788dfb51fb5a..3677dd8f2626`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..cd0501b8c090`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `cd0501b8` builder: REDS.md for 3677dd8f2626 (3 red) (owner: build-loop)
+- `97ebc52b` docs(agreement): what `rebase` meeting `Rebased` rests on
+- `cd0438bb` agreement(kernel): `ghost_start`, and the native agreement document says what is proved and what rem
+- `ba86bee7` agreement(kernel): moving the origin keeps a replica's side of the trail (`ghost_rebase`)
+- `b900d90c` agreement(kernel): one `step` against the floor it started from, and the trail of a run of relative 
 - `3677dd8f` effects: the member patch is the declaration's; thin consent reads it by one rule (owner: apps-hermes, bytes-repr)
 - `9967213b` builder: REDS.md for 884450e985c8 (5 red) (owner: build-loop)
 - `884450e9` builder: REDS.md for 16ff33ac3aa2 (3 red) (owner: build-loop)
@@ -47,20 +51,15 @@ Suspect commits since green (`git log 788dfb51fb5a..3677dd8f2626`), newest first
 - `c1dbafe3` the Host's held index trie follows every verified suffix: a certify no longer slows the session's la (owner: apps-hermes)
 - `e11c5f90` agreement(docs): the native adoption of the running replica, as one change in six parts
 - `3cc1805a` agreement(kernel)!: a COMMIT is signed over the chain's length and running digest, log format 10 (owner: read-path)
-- `ffced202` agreement(kernel): support above a commit extends it; the running replicas' statement is on the abst
-- `9c34ae47` agreement: restore the twelve Simplex files that e5725f727 reverted
-- `255d3e24` board: build-loop's builder section is the 2026-11-14 restore's present state
-- `b21b685f` effects: content's declaration moves upstream of the registry, over the registry's context; `Effect.
-- `dafce5e7` restore the registry lane's landed work that e5725f727 put back to its 9d6ae8aac text (owner: apps-hermes)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.157 | 0.197 | 1.257 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 33.649 | 89.568 | 2.662 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_cpu_ms | 0.118 | 0.201 | 1.707 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 13.023 | 59.171 | 4.543 | 1.590 | host-execution, store-retained |
-| flatness-get | FAIL | get_cpu_ms | 0.382 | 0.747 | 1.958 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 156.315 | 270.044 | 1.728 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-3677dd8f/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.184 | 0.214 | 1.162 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 35.278 | 65.774 | 1.864 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.156 | 0.200 | 1.284 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 20.353 | 56.197 | 2.761 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.439 | 0.335 | 0.763 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 158.302 | 151.003 | 0.954 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-cd0501b8/flatness.log | - | - | - | - | host-execution, store-retained |
