@@ -1,17 +1,19 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `1b5666369348` (agreement(native): four participants run end to end in the gate; tip validation, a running). Round finished 2026-11-14T14:12Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-1b566636`.
+Tip: `e9dc4c0be201` (builder: REDS.md for 1b5666369348 (3 red)). Round finished 2026-11-14T14:26Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-e9dc4c0b`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | ratchets | rc=1 see /home/hbox/lanes/integ/logs/ratchets.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/ratchets.log |
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-1b5666/journey.log |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-e9dc4c/journey.log |
 
-Suspect commits since green (`git log 788dfb51fb5a..1b5666369348`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..e9dc4c0be201`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `e9dc4c0b` builder: REDS.md for 1b5666369348 (3 red) (owner: build-loop)
+- `83d19700` effects: the content read and the kind read are bound at codes 3 and 7; their hand arms are deleted (owner: apps-hermes)
 - `1b566636` agreement(native): four participants run end to end in the gate; tip validation, a running history d (owner: apps-hermes)
 - `1936e8c1` builder: REDS.md for a64bbd6e9e09 (3 red) (owner: build-loop)
 - `a64bbd6e` effects: the hand-written content handler is deleted; its poles are over the derived one
@@ -50,17 +52,15 @@ Suspect commits since green (`git log 788dfb51fb5a..1b5666369348`), newest first
 - `10b3ed1c` thin consent: a registered observation is displayed without a served view
 - `4a8e4524` kernel: an unread payload tag is refused by name at the receiver; a registered refusal prints its de (owner: apps-hermes)
 - `93f35b64` effects: `RegistryKeystone`, `RegistryAccepted` and `RegistryTeeth` are proved
-- `9d6ae8aa` effects: the Hosted Revival lifecycle follows the engine (`select` and `pack` take the context, a re
-- `daa0a798` fleet plan and submit on the light opening; the audit resumed at an anchor; the client pages op 180  (owner: apps-hermes)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.193 | 0.207 | 1.071 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 27.823 | 64.965 | 2.335 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.131 | 0.184 | 1.402 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 22.925 | 53.799 | 2.347 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.440 | 0.453 | 1.028 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 169.362 | 132.407 | 0.782 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-1b566636/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.172 | 0.213 | 1.236 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 24.404 | 60.624 | 2.484 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.132 | 0.189 | 1.433 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 13.057 | 51.354 | 3.933 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.623 | 0.373 | 0.599 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 176.907 | 136.405 | 0.771 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-e9dc4c0b/flatness.log | - | - | - | - | host-execution, store-retained |
