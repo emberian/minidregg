@@ -1,17 +1,27 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `87b77ef2c594` (builder: REDS.md for 120e113e9c73 (3 red)). Round finished 2026-11-14T10:31Z.
-green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-87b77ef2`.
+Tip: `1a7fcf5b3429` (builder: REDS.md for 87b77ef2c594 (3 red)). Round finished 2026-11-14T10:53Z.
+green: `788dfb51fb5a`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-1a7fcf5b`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | ratchets | rc=1 see /home/hbox/lanes/integ/logs/ratchets.log | - | yes | suspects' owners | /home/hbox/lanes/integ/logs/ratchets.log |
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
-| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-87b77e/journey.log |
+| gate:j14-apps | j14-apps FAIL | not rerun | yes | apps-hermes | rc=1; /ci/j-1a7fcf/journey.log |
 
-Suspect commits since green (`git log 788dfb51fb5a..87b77ef2c594`), newest first; owners are the seats whose
+Suspect commits since green (`git log 788dfb51fb5a..1a7fcf5b3429`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `1a7fcf5b` builder: REDS.md for 87b77ef2c594 (3 red) (owner: build-loop)
+- `27025da1` effects: a refusal's detail and thin consent's shown operation are `ByteArray`
+- `c1dbafe3` the Host's held index trie follows every verified suffix: a certify no longer slows the session's la (owner: apps-hermes)
+- `e11c5f90` agreement(docs): the native adoption of the running replica, as one change in six parts
+- `3cc1805a` agreement(kernel)!: a COMMIT is signed over the chain's length and running digest, log format 10 (owner: read-path)
+- `ffced202` agreement(kernel): support above a commit extends it; the running replicas' statement is on the abst
+- `9c34ae47` agreement: restore the twelve Simplex files that e5725f727 reverted
+- `255d3e24` board: build-loop's builder section is the 2026-11-14 restore's present state
+- `b21b685f` effects: content's declaration moves upstream of the registry, over the registry's context; `Effect.
+- `dafce5e7` restore the registry lane's landed work that e5725f727 put back to its 9d6ae8aac text (owner: apps-hermes)
 - `87b77ef2` builder: REDS.md for 120e113e9c73 (3 red) (owner: build-loop)
 - `54dee83b` fixtures: native runs re-recorded from candidate a4472f3f65b2 (accepted stale, doc-write stale)
 - `99e9e84c` journeys: what the first Host run of the light fleet line showed (owner: apps-hermes)
@@ -42,25 +52,15 @@ Suspect commits since green (`git log 788dfb51fb5a..87b77ef2c594`), newest first
 - `962efddf` `Scope.maxCost` is `Scope.perRequestBytes` (owner: apps-hermes, bytes-repr, read-path)
 - `a3987eba` Request cost is an encoded length everywhere: birth, Book effect and resource-transaction legs (owner: apps-hermes)
 - `9372f1f6` agreement(kernel)!: idle timer and view window, log format 7 (owner: read-path)
-- `aba2c4d7` agreement(verify): the jump-starvation control runs against the current step again
-- `9f7f404a` agreement(kernel)!: the checked set is retained and a committed payload leaves the offers
-- `7db8a63a` builder: REDS.md for e97b99da1fa7 (1 red) (owner: build-loop)
-- `9be139da` kernel: `Payload.registered`, the open payload constructor; the cited read is one declaration and it (owner: apps-hermes)
-- `e97b99da` builder: REDS.md for aac9eba601a1 (1 red) (owner: build-loop)
-- `787333fc` laws: the sheet law requires its cited rooms' birth; a verdict law and a land that cites it; the hea (owner: apps-hermes, read-path)
-- `9b711740` kernel: `fieldRead`, an observe-only read of a declared cell bound by value; a joint participant's i (owner: apps-hermes)
-- `881ceb8e` kernel: a declared cell's law state is built for the slots the law reads; a cited footprint refuses  (owner: apps-hermes)
-- `aac9eba6` agreement(kernel)!: erasable commit floor (`forget`, `liveStep`, floor evidence relay), log format 6 (owner: read-path)
-- `77539c37` builder: REDS.md for 578fdbf35ab3 (1 red) (owner: build-loop)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.208 | 0.237 | 1.136 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 38.897 | 84.844 | 2.181 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.167 | 0.235 | 1.406 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 23.688 | 64.811 | 2.736 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.502 | 0.304 | 0.606 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 471.578 | 136.604 | 0.290 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-87b77ef2/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.243 | 0.230 | 0.946 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 46.453 | 98.394 | 2.118 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.198 | 0.261 | 1.320 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 29.505 | 89.480 | 3.033 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.694 | 0.375 | 0.540 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 190.228 | 205.897 | 1.082 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-1a7fcf5b/flatness.log | - | - | - | - | host-execution, store-retained |
