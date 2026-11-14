@@ -2129,6 +2129,55 @@ theorem exitEach_posts {height record : Nat} :
         exact ⟨p.seq q none', by simp [seqBatch, none rfl, none'],
           fun reachable => reach (Reachable.admit height _ _ reachable hstep)⟩
 
+/-- **Closing a seat debits only that seat's account**: every operation of the closing batch
+is a payout sourced at the seat's own account. -/
+theorem closeSeat_sources {world next : World} {seat : Seat} {batch : Batch}
+    (closed : closeSeat world seat = .ok (next, batch)) :
+    ∀ operation ∈ batch.operations, operation.posting.source = seat.account := by
+  unfold closeSeat at closed
+  split at closed
+  · cases closed
+  · cases closed
+    intro operation member
+    simp only [closeBatch, opsOf, List.mem_map] at member
+    obtain ⟨transfer, paid, rfl⟩ := member
+    exact payout_sources transfer paid
+
+/-- **The end of an activity debits only the seats it exits**: every operation `exitEach`
+posts is sourced at one of the listed seat accounts. No other account is debited by an
+activity's end, whoever signed the turn that ended it. -/
+theorem exitEach_sources {height record : Nat} :
+    ∀ {world next : World} {accounts : List AccountId} {batch : Batch},
+      exitEach height record world accounts = .ok (next, batch) →
+      ∀ operation ∈ batch.operations, operation.posting.source ∈ accounts
+  | world, next, [], batch, ran => by
+    simp only [exitEach] at ran
+    cases ran
+    intro operation member
+    simp [noPostings] at member
+  | world, next, account :: rest, batch, ran => by
+    simp only [exitEach] at ran
+    split at ran
+    · cases ran
+    · rename_i middle posted hstep
+      split at ran
+      · cases ran
+      · rename_i later hrest
+        cases ran
+        intro operation member
+        simp only [seqBatch, List.mem_append] at member
+        rcases member with first | second
+        · obtain ⟨seat, _, same, _, closed⟩ := exit_spec hstep
+          exact List.mem_cons.mpr (Or.inl ((closeSeat_sources closed operation first).trans same))
+        · exact List.mem_cons_of_mem _ (exitEach_sources hrest operation second)
+
+/-- `closeHeld` debits only the open seats the ending activity holds. -/
+theorem closeHeld_sources {world next : World} {height record : Nat} {batch : Batch}
+    (ended : closeHeld world height record = .ok (next, batch)) :
+    ∀ operation ∈ batch.operations,
+      operation.posting.source ∈ (heldOpen world height record).map Seat.account :=
+  exitEach_sources ended
+
 /-- An admitted exit removes the seat from the world. -/
 theorem step_exit_closes {world next : World} {height : Nat} {actor : Actor} {account : AccountId}
     {batch : Batch} (admitted : step world height actor (.exit account) = .ok (next, batch)) :
