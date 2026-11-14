@@ -1381,6 +1381,17 @@ def moneyConsentJson (consent : Minidregg.Kernel.ResourceMoneyWire.Consent) : Le
        ("expectedPayerBalance", signedDecimal funding.expectedPayerBalance),
        ("expectedBookRoot", decimal funding.expectedBookRoot.value)]).getD .null)]
 
+/-- A registered effect's payload, read by its declaration's own JSON face (`Effect.ofJson`);
+a `type` no declaration bears is refused naming what the registry binds. -/
+private def registeredPayload (path tag : String) (json : Lean.Json) :
+    Result DeclaredResourceController.Payload :=
+  match Minidregg.Kernel.DeclaredResourceController.effectNamed tag with
+  | some code =>
+      ((Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).ofJson path json).map fun op =>
+        DeclaredResourceController.Payload.registered code op
+  | none => failAt (path ++ ".type")
+      s!"expected scalar, content, append, read, kindRead, world, kindDefinition, moneyConsent, computeFunding or a registered effect ({", ".intercalate Minidregg.Kernel.DeclaredResourceController.effectNames})"
+
 private def targetPayload (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Payload := do
   let (tag, _) ← tagged path json
@@ -1425,24 +1436,7 @@ private def targetPayload (path : String) (json : Lean.Json) :
   | "kindRead" =>
       let _ ← exactObject path ["type"] json
       pure .kindRead
-  | "fieldRead" =>
-      let obj ← exactObject path ["type", "reads"] json
-      let reads ← list (path ++ ".reads") (fun path json => do
-        let read ← exactObject path ["key", "observed"] json
-        let keyObj ← exactObject (path ++ ".key") ["type", "resource", "field"]
-          (← field path "key" read)
-        let keyType ← string (path ++ ".key.type") (← field (path ++ ".key") "type" keyObj)
-        let resource ← nat (path ++ ".key.resource") (← field (path ++ ".key") "resource" keyObj)
-        let fieldId ← nat (path ++ ".key.field") (← field (path ++ ".key") "field" keyObj)
-        unless keyType = "object" ∨ keyType = "program" do
-          throw s!"{path}.key.type: expected object or program"
-        let key := if keyType = "program"
-          then Minidregg.Theory.EffectDeclaration.StateKey.programCode ⟨resource⟩
-          else Minidregg.Theory.EffectDeclaration.StateKey.objectField ⟨resource⟩ ⟨fieldId⟩
-        let observed ← optional (path ++ ".observed") int (← field path "observed" read)
-        pure (key, observed)) (← field path "reads" obj)
-      pure (.fieldRead reads)
-  | _ => failAt (path ++ ".type") "expected scalar, content, append, read, kindRead, fieldRead, world, kindDefinition, moneyConsent or computeFunding"
+  | other => registeredPayload path other json
 
 private def audienceRosterEntry (path : String) (json : Lean.Json) :
     Result Minidregg.Theory.ObjectAudienceRoster.Entry := do

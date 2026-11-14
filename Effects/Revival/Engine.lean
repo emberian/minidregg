@@ -78,6 +78,13 @@ def storeSubstrate (L : Layout.{0, 0, 0}) : Substrate where
 
 /-! ## §2. `EffectSpec` — the widened declaration. -/
 
+/-- Where an operation lands: its signer and the cell.  Beside the operation and the two
+states, this is all a law's view may read; the transaction's context (`Ctx`) is not the
+view's. -/
+structure Site where
+  subject : SubjectId
+  target : Nat
+
 /-- **One effect, one declaration.**  `Ctx` is what the effect consumes of its
 transaction (for the live controller: author, operation id, height, source reads);
 `O` is the operation payload, syntactic by construction because it carries a canonical
@@ -92,8 +99,10 @@ codec; `R` the refusals it may name.
   write.
 * `accepts`/`version` are the role and schema version the live header checks.
 * `verb` is the authority demand (the verb a capability must allow); `view` is what the
-  cell's committed law reads (`targetProjection`).  The law itself is the cell's, not the
-  effect's.
+  cell's committed law reads (`targetProjection`) of the operation at its `Site`.  The law
+  itself is the cell's, not the effect's.
+* `refusalDetail` is the structured payload a refusal carries beside its name, as canonical
+  bytes (a cited read's moved keys); the dispatcher returns it untouched.  Default: none.
 * `commutes` marks the operations whose admission does not pin the whole cell: they are
   computed at the current cell whatever root the plan observed (an append-only content
   command, `ContentResource.Command.commutes`).  The dispatcher's freshness refusal is
@@ -111,16 +120,18 @@ structure EffectSpec (Ctx : Type) (S : Substrate) (O R : Type) where
   amount : (loc : S.Loc) → S.Obs loc → Int
   frame : O → Finset CellField
   verb : (kind : ResourceKind) → O → Verb kind
-  view : O → S.State → S.State → List (String × Int)
+  view : Site → O → S.State → S.State → List (String × Int)
   commutes : O → Bool := fun _ => false
+  refusalDetail : R → List UInt8 := fun _ => []
 
 /-- Every refusal the dispatcher can return.  `refused` carries the declaration's own
-name for its refusal; the rest are the dispatcher's, each naming the code. -/
+name for its refusal and that refusal's structured detail (canonical bytes, empty when the
+declaration states none); the rest are the dispatcher's, each naming the code. -/
 inductive DispatchRefusal where
   | unregistered (code : Nat)
   | malformed (code : Nat)
   | wrongRole (code : Nat)
-  | refused (code : Nat) (name : String)
+  | refused (code : Nat) (name : String) (detail : List UInt8)
   | outOfFrame (code : Nat)
   | guardFailed (code : Nat)
   | unsupportedVersion (code : Nat)
@@ -150,7 +161,7 @@ instance (op : O) (ps : List S.Prim) : Decidable (E.InFrame op ps) := by
 for the live content arm (`ContentResource.prepareCell_ok_of_run`). -/
 def exec (code : Nat) (ctx : Ctx) (op : O) (s : S.State) : Except DispatchRefusal S.State :=
   match E.sem ctx op s with
-  | .error r => .error (.refused code (E.refusalName r))
+  | .error r => .error (.refused code (E.refusalName r) (E.refusalDetail r))
   | .ok ps =>
     if E.InFrame op (ps ++ E.rotate ctx s) then
       match S.run s (ps ++ E.rotate ctx s) with
@@ -166,6 +177,11 @@ def Complete : Prop :=
     E.InFrame op (ps ++ E.rotate ctx s) ∧ (S.run s (ps ++ E.rotate ctx s)).isSome
 
 end EffectSpec
+
+/-- Reindex a declaration's context (a declaration reads less than the dispatch carries). -/
+def EffectSpec.comap {C C' : Type} {S : Substrate} {O R : Type} (f : C' → C)
+    (E : EffectSpec C S O R) : EffectSpec C' S O R :=
+  { E with sem := fun c => E.sem (f c), rotate := fun c => E.rotate (f c) }
 
 /-! ## §3. The registry and the one dispatcher. -/
 
@@ -183,15 +199,29 @@ structure Handler (Ctx Cell : Type) : Type 1 where
   spec : EffectSpec Ctx S O R
   header : Ctx → Cell → Except DispatchRefusal Unit
   fresh : Ctx → Cell → Bool := fun _ _ => true
-  select : Cell → Option S.State
-  pack : S.State → Cell
+  select : Ctx → Cell → Option S.State
+  pack : Ctx → S.State → Cell
 
-/-- Sound: `select` and `pack` are inverse both ways (a selected cell IS the packing of
-its selection, so nothing outside the selection can be rewritten unseen), and the
-substrate is framed. -/
+/-- Reindex a handler's context (the registry's handlers read less than a host dispatch
+carries). -/
+def Handler.comap {C C' Cell : Type} (f : C' → C) (e : Handler C Cell) : Handler C' Cell where
+  S := e.S
+  O := e.O
+  R := e.R
+  spec := e.spec.comap f
+  header c := e.header (f c)
+  fresh c := e.fresh (f c)
+  select c := e.select (f c)
+  pack c := e.pack (f c)
+
+/-- Sound: under every context, `select` and `pack` are inverse both ways (a selected cell
+IS the packing of its selection, so nothing outside the selection can be rewritten unseen),
+and the substrate is framed.  Both read the context because a cell universe may hold one
+typed state under several roles (a declared cell is an object's, an account's or a
+program's), and the role is the transaction's. -/
 def Handler.Sound {Ctx Cell : Type} (e : Handler Ctx Cell) : Prop :=
-  (∀ s, e.select (e.pack s) = some s) ∧
-  (∀ cell s, e.select cell = some s → e.pack s = cell) ∧
+  (∀ ctx s, e.select ctx (e.pack ctx s) = some s) ∧
+  (∀ ctx cell s, e.select ctx cell = some s → e.pack ctx s = cell) ∧
   e.S.Framed
 
 /-- The derived gate before selection: the handler's header, then freshness.  A stale
@@ -209,9 +239,9 @@ def Handler.fire {Ctx Cell : Type} (e : Handler Ctx Cell) (code : Nat) (ctx : Ct
   match e.admits code ctx op cell with
   | .error r => .error r
   | .ok () =>
-    match e.select cell with
+    match e.select ctx cell with
     | none => .error (.wrongRole code)
-    | some s => (e.spec.exec code ctx op s).map e.pack
+    | some s => (e.spec.exec code ctx op s).map (e.pack ctx)
 
 /-- Lawful: sound and complete. -/
 def Handler.Lawful {Ctx Cell : Type} (e : Handler Ctx Cell) : Prop :=
@@ -261,7 +291,7 @@ structure Dispatches {Ctx Cell : Type} (R : Registry Ctx Cell) (legacy : List Na
   frame : ∀ code e, R.lookup code = some e → ∀ bytes ctx cell cell',
     d code bytes ctx cell = .ok cell' →
       ∃ (op : e.O) (s s' : e.S.State), e.spec.opStream.toLawful.decode bytes = some op ∧
-        e.select cell = some s ∧ e.select cell' = some s' ∧
+        e.select ctx cell = some s ∧ e.select ctx cell' = some s' ∧
         ∀ loc, e.spec.rotated loc = false → e.spec.field loc ∉ e.spec.frame op →
           e.S.read s' loc = e.S.read s loc
 
@@ -279,9 +309,9 @@ own declared names. -/
 def CompletenessKeystone (Ctx Cell : Type) : Prop :=
   ∀ (L : LawfulRegistry Ctx Cell) code e, L.entries.lookup code = some e →
     ∀ (op : e.O) (ctx : Ctx) (s : e.S.State) (r : DispatchRefusal),
-      e.admits code ctx op (e.pack s) = .ok () →
-      dispatch L.entries code (e.spec.opStream.encode op) ctx (e.pack s) = .error r →
-        ∃ x : e.R, r = .refused code (e.spec.refusalName x)
+      e.admits code ctx op (e.pack ctx s) = .ok () →
+      dispatch L.entries code (e.spec.opStream.encode op) ctx (e.pack ctx s) = .error r →
+        ∃ x : e.R, r = .refused code (e.spec.refusalName x) (e.spec.refusalDetail x)
 
 /-! ### The pole data: a two-field toy cell and two entries. -/
 
@@ -333,7 +363,7 @@ def entryASpec : EffectSpec Unit ToySubstrate Nat ToyRefusal where
   amount := fun _ _ => 0
   frame := fun _ => {.slot 0}
   verb := fun kind _ => toyVerb kind
-  view := fun _ _ _ => []
+  view := fun _ _ _ _ => []
 
 /-- Entry B (code 1): `true` writes field `true` (in its declared frame `{slot 1}`),
 `false` writes field `false` — OUT of its frame.  The dispatcher must refuse the latter. -/
@@ -349,7 +379,7 @@ def entryBSpec : EffectSpec Unit ToySubstrate Bool ToyRefusal where
   amount := fun _ _ => 0
   frame := fun _ => {.slot 1}
   verb := fun kind _ => toyVerb kind
-  view := fun _ _ _ => []
+  view := fun _ _ _ _ => []
 
 /-- The ghost of entry A: it reads the same operation as `n + 1`. -/
 def ghostASpec : EffectSpec Unit ToySubstrate Nat ToyRefusal :=
@@ -361,8 +391,8 @@ def toyEntry {O R : Type} (spec : EffectSpec Unit ToySubstrate O R) : Handler Un
   R := R
   spec := spec
   header := fun _ _ => .ok ()
-  select c := some c
-  pack s := s
+  select _ c := some c
+  pack _ s := s
 
 /-- **The two-entry pole.** -/
 def toyPole : Registry Unit ToyStore := [(0, toyEntry entryASpec), (1, toyEntry entryBSpec)]
@@ -390,15 +420,15 @@ def dispatchUnframed {Ctx Cell : Type} (R : Registry Ctx Cell) (code : Nat)
       match e.admits code ctx op cell with
       | .error r => .error r
       | .ok () =>
-      match e.select cell with
+      match e.select ctx cell with
       | none => .error (.wrongRole code)
       | some s =>
         match e.spec.sem ctx op s with
-        | .error r => .error (.refused code (e.spec.refusalName r))
+        | .error r => .error (.refused code (e.spec.refusalName r) (e.spec.refusalDetail r))
         | .ok ps =>
           match e.S.run s (ps ++ e.spec.rotate ctx s) with
           | none => .error (.guardFailed code)
-          | some s' => .ok (e.pack s')
+          | some s' => .ok (e.pack ctx s')
 
 /-! ### The engine keystone's ATLAS fields. -/
 
@@ -431,7 +461,7 @@ refusal surfaces under its own name. -/
 def CompletenessSatisfiable : Prop :=
   (toyEntry entryASpec).Lawful ∧
   dispatch [(0, toyEntry entryASpec)] 0 (StreamCodec.nat.encode 12) () toyEmpty =
-    .error (.refused 0 "tooLarge")
+    .error (.refused 0 "tooLarge" [])
 
 /-- **Teeth.**  Entry B is not lawful: its out-of-frame operation (refused `outOfFrame`
 in `EngineSatisfiable`) keeps it out of every `LawfulRegistry`. -/

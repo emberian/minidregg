@@ -109,16 +109,6 @@ theorem jointTargetKey_ne_jointIndexKey (m n : Nat) (s t : String) :
   have li : "joint/index/".toList = ['j', 'o', 'i', 'n', 't', '/', 'i', 'n', 'd', 'e', 'x', '/'] := by decide
   simp [jointTargetKey, jointIndexKey, String.toList_append, lt, li] at h'
 
-/-- The first character of a key; every joint key begins with `j`. -/
-def Unjoint (xs : List (String × Int)) : Prop := ∀ p ∈ xs, p.1.toList.head? ≠ some 'j'
-
-theorem head_append (stem rest : String) (c : Char) (h : stem.toList.head? = some c) :
-    (stem ++ rest).toList.head? = some c := by
-  simp only [String.toList_append]
-  cases hs : stem.toList with
-  | nil => simp [hs] at h
-  | cons d ds => simp [hs] at h ⊢; exact h
-
 theorem jointTargetKey_head (m : Nat) (s : String) : (jointTargetKey m s).toList.head? = some 'j' := by
   unfold jointTargetKey; simp only [String.append_assoc]; exact head_append _ _ _ (by decide)
 
@@ -243,12 +233,6 @@ theorem jointSlots_target (targets : List Target) (slots : Fin targets.length �
       exact jointTargetKey_ne_jointIndexKey _ _ _ _ e.symm)
   rw [get_append, hb, hn, Option.or_none]
 
-theorem unjoint_append (xs ys : List (String × Int)) (hx : Unjoint xs) (hy : Unjoint ys) :
-    Unjoint (xs ++ ys) := by
-  intro p hp; rcases List.mem_append.mp hp with h | h
-  · exact hx p h
-  · exact hy p h
-
 theorem bytesSlots_unjoint (stem : String) (c : Char) (hc : stem.toList.head? = some c) (ne : c ≠ 'j') :
     ∀ (offset : Nat) (bytes : List UInt8), Unjoint (ResourceAuthorityProjection.bytesSlots stem offset bytes)
   | _, [] => by intro p hp; simp [ResourceAuthorityProjection.bytesSlots] at hp
@@ -268,39 +252,6 @@ theorem requestSlots_unjoint {kind : ResourceKind} (request : Request kind) :
   intro p hp
   simp only [CanonicalRuntimeProfile.requestSlots, List.mem_cons, List.not_mem_nil, or_false] at hp
   rcases hp with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> dsimp only <;> decide
-
-theorem scalarSlots_unjoint (before after : DeclaredResourceProjection.Values) :
-    Unjoint (DeclaredResourceProjection.scalarSlots before after) := by
-  have field : ∀ n v, (DeclaredResourceProjection.fieldName n v).toList.head? ≠ some 'j' := by
-    intro n v
-    show ("resource/field/" ++ toString n ++ "/" ++ v).toList.head? ≠ some 'j'
-    simp only [String.append_assoc]
-    rw [head_append _ _ 'r' (by decide)]; decide
-  have pair : ∀ a b, (DeclaredResourceProjection.pairName a b).toList.head? ≠ some 'j' := by
-    intro a b
-    show ("resource/pair/" ++ toString a ++ "/" ++ toString b ++ "/delta").toList.head? ≠ some 'j'
-    simp only [String.append_assoc]
-    rw [head_append _ _ 'r' (by decide)]; decide
-  intro p hp
-  unfold DeclaredResourceProjection.scalarSlots at hp
-  rcases List.mem_append.mp hp with hp | hp
-  rcases List.mem_append.mp hp with hp | hp
-  rcases List.mem_append.mp hp with hp | hp
-  · obtain ⟨q, _, rfl⟩ := List.mem_map.mp hp; exact field _ _
-  · obtain ⟨q, _, rfl⟩ := List.mem_map.mp hp; exact field _ _
-  · obtain ⟨q, _, h⟩ := List.mem_filterMap.mp hp
-    obtain ⟨old, _, rfl⟩ := Option.map_eq_some_iff.mp h
-    exact field _ _
-  · obtain ⟨a, _, hp⟩ := List.mem_flatMap.mp hp
-    obtain ⟨b, _, h⟩ := List.mem_filterMap.mp hp
-    cases ha : DeclaredResourceProjection.get before a.1 with
-    | none => simp [ha] at h
-    | some oldA =>
-      cases hb : DeclaredResourceProjection.get before b.1 with
-      | none => simp [ha, hb] at h
-      | some oldB =>
-        simp only [ha, hb, Option.bind_some, Option.some.injEq, bind, pure] at h
-        subst h; exact pair _ _
 
 theorem contentProject_unjoint (before after : ContentResource.ContentStore) (command : ContentResource.Command) :
     Unjoint (ContentResource.project before after command) := by

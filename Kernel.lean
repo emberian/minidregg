@@ -113,6 +113,9 @@ import Kernel.ContentRunEdit
 import Kernel.AgentGrain
 import Kernel.CapabilityRevocationReceiver
 import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability it holds (signature first, then Theory.Renounce.gateAt)
+import Kernel.ResourceEffect  -- a declared-resource effect as ONE declaration (Effect): typed cell, EffectSpec, JSON face and display; the derived computation, patch and engine handler
+import Kernel.CitedRead  -- the cited read DECLARED (registry code 9): citedRead, citedProject, its refusals with their detail, its faces, citedEffect
+import Kernel.ResourceEffectRegistry  -- liveEffects: wire code ↦ declaration; effectAt; the engine registry
 import Kernel.ResourceTransactionAudit
 import Kernel.World  -- docs/DATAMODEL.md §3.3, §5 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn (creates carry their ROM image, T3b), admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, rom_cell_immutable_after_birth, poles
 import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)
@@ -197,6 +200,7 @@ import Kernel.EffectsRevival.ActivityProofs  -- the two refusal levels PROVED of
 import Kernel.EffectsRevival.HostTeethProofs  -- HostTeeth PROVED: the twin half by noTwin, the ghost half at a blinded cell (the dispatch's post blinding is a ratchet step, the ghost's unchanged), kernel-checked except ratchet_moves, a cSHAKE256 fact on concrete bytes, by native_decide (#assert_compiled)
 import Kernel.EffectsRevival.PrepareProofs  -- PrepareFactors contentSpec PROVED: the deployed prepareTarget of a content target (post packed, refusals named) IS the content handler's registry dispatch followed by the payload-blind genericChecks; the migration commit's gate
 import Kernel.EffectsRevival.CommutingProofs  -- commuting appends through the declaration: a line over a moved root lands at the blinded cell (HostMovedRootAccepted), commutes is fixed from both sides (ContentCommuteTeeth), and CommutingPrepare
+import Kernel.EffectsRevival.RegistryProofs  -- the registry keystone's poles PROVED: every declaration's handler is lawful (RegistryPremise, for any Effect), the live legacy census and its teeth, noTwin and the refusal by name; RegistryKeystone's agreement and frame clauses are OWED
 import Kernel.PrivateCellScope  -- a reader's scope is a bounded union of visibility-class prefixes of the private index (body covers its atoms)
 import Kernel.PrivateCellView  -- a reader's class openings of the private index answer exactly its narrowPacked view, or a scoped collision
 import Kernel.PrivateCellReceiver  -- the private cell's receiving state machine: gated store, kept index, one insert or erase walk per write, kept root = private root

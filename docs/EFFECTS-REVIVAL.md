@@ -8,6 +8,52 @@ proof, no migration, no change under `Kernel/` in this lane.
 The owner's ruling this answers: hand-written kernel effects are not acceptable.  A new kernel
 effect comes out of a declaration, and the hand arm it replaces is deleted in the same commit.
 
+## 0. Present state (lane `registry-effects`, 2026-11-13)
+
+The open constructor exists and one effect lives on it. §1 to §8 below are the October design
+and its continuation; where they disagree with this section, this section is the tree.
+
+* **`Payload.registered (code : UInt8) (op : (effectAt code.toNat).O)`**
+  (`Kernel/ResourceTransaction.lean`). `effectAt` reads `liveEffects`
+  (`Kernel/ResourceEffectRegistry.lean`): wire code ↦ declaration. An unbound code's operation
+  type is `Empty`, so no payload can carry it. The payload decoder asks the registry first and
+  hands a bound tag to its declaration's own prefix decoder; only an unbound tag reaches the hand
+  decoder (`legacyPayloadDecode`). Binding a tag a hand arm still owns does not build
+  (`legacy_unbound` is what `payloadStream`'s round-trip reads).
+* **`Effect`** (`Kernel/ResourceEffect.lean`) is the declaration: typed cell (`L`, `wire`, `pack`,
+  `unpack`), `spec : EffectSpec`, the JSON face (`name`, `toJson`, `ofJson`), the display, and its
+  obligations as proof fields (`unpack_pack`, `pack_unpack`, `observes_silent`, `complete`,
+  `view_unjoint`). Derived from it: `compute` (header from `accepts`/`version`/`commutes`, then
+  the engine's `exec`), `patch` (the emitted descriptor), `observeOnly` (the verb is the observe
+  verb under every role), `handler` (the engine handler). `EffectCtx` holds no schema version and
+  no expected root, so a semantics cannot compare a root by hand.
+* **Engine changes** (`Effects/Revival/Engine.lean`): `DispatchRefusal.refused code name detail`
+  and `EffectSpec.refusalDetail` (canonical bytes beside the name); `EffectSpec.view` takes a
+  `Site` (signer, cell id); `Handler.select`/`pack` take the context (a declared cell is an
+  object's, an account's or a program's, and the role is the transaction's); `Handler.comap`.
+* **The cited read is declared** (`Kernel/CitedRead.lean`, `citedEffect`, code 9, JSON
+  `fieldRead`). `Payload.fieldRead`, `Reject.citedKey`/`citedStale` and every hand arm of it are
+  deleted. Wire bytes of code 9 are unchanged (tag octet 9, then the list of reads). Its refusals
+  surface as `Reject.effect (.refused 9 name detail)`; `citedStale`'s detail is the moved keys
+  (`citedStale_detail`).
+* **Statements** (`Kernel/EffectsRevival/Statements.lean` §7b): `RegistryKeystone`
+  (`Dispatches hostRegistry liveLegacy liveTargetDispatch`, with `liveLegacy = [0..8]`),
+  `RegistryPremise`, `RegistryAccepted`, `RegistryTeeth`, `LiveLegacyCensus`,
+  `LiveLegacyCensusTeeth`. **Proved** (`RegistryProofs.lean`): the premise for any `Effect`, the
+  census and its teeth, `noTwin`, `unregistered`, the name clauses of the teeth. **Owed**: the
+  `agreement` and `frame` clauses, `RegistryAccepted`, the ghost clause of the teeth.
+  `HostKeystone` (content, code 1) is unchanged and still false: content is still a hand arm.
+* **The census is a script**: `scripts/effect-arm-census.py` (hand arms per payload kind, read
+  from the `Payload` inductive). At `787333fc3` `fieldRead` had 32 hand arms in 9 Lean files by
+  that script; it now has none, and a declared kind cannot have one.
+
+**Next** (in order): prove `RegistryKeystone` (show the deployed dispatch of a registered payload
+as `Effect`-level terms, then case on selection and the computation); content (code 1) onto
+`Effect` (its context needs the operation id and the source reads, as lazily computed fields of
+`EffectCtx`); then the remaining codes, cheapest first: `read` (3), `kindRead` (7), `scalar` (0),
+`computeFunding` (6), `moneyConsent` (8), `world` (4), `kindDefinition` (5), `append` (2, needs a
+fresh-cell output).
+
 ## 1. What one effect costs by hand today (counted from the tree at `02ee34e8a`)
 
 ### 1a. One more declared-resource payload kind

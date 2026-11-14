@@ -580,13 +580,7 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
     | kindDefinition _ => exact WorldKindProjection.definitionProject_unjoint _ _
     | kindRead => exact WorldPrototypeConstruction.observeProject_unjoint _
     | read => exact contentProject_unjoint _ _ _
-    | fieldRead reads =>
-        show Unjoint (citedProject id reads before)
-        unfold citedProject
-        refine unjoint_append _ _ (scalarSlots_unjoint _ _) ?_
-        intro p hp
-        simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
-        rcases hp with rfl | rfl <;> dsimp only <;> decide
+    | registered code op => exact (effectAt code.toNat).view_unjoint ⟨subject, id⟩ op before after
 
 /-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
 `run/fuel`) are not joint keys. -/
@@ -1522,8 +1516,8 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | moneyConsent _ => exact fun _ => .body
     -- An observe-only read writes nothing; its addresses are content addresses.
     | read => exact fun address => ResourceObservationAdmission.contentFieldAt address
-    -- A cited read writes nothing; its addresses are declared state keys.
-    | fieldRead _ => exact fun address => ResourceObservationAdmission.declaredField address.2
+    -- A registered effect's field classification is its declaration's.
+    | registered code _ => exact (effectAt code.toNat).spec.field
 
 def targetAmount (target : Target) :
     (address : Address target.layout) → target.layout.Value address.1 → Int := by
@@ -1533,8 +1527,9 @@ def targetAmount (target : Target) :
     | scalar _ => exact fun _ value => value
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
-    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | read | fieldRead _ =>
+    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | read =>
         exact fun _ _ => 0
+    | registered code _ => exact fun address value => (effectAt code.toNat).spec.amount address (some value)
 
 /-- The address the kernel's blinding ratchet writes on every leg of a
 blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
@@ -1548,8 +1543,9 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
     | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
     | read => exact fun _ => false
-    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ | fieldRead _ =>
+    | world _ | kindDefinition _ | kindRead | computeFunding _ | moneyConsent _ =>
         exact fun _ => false
+    | registered code _ => exact (effectAt code.toNat).spec.rotated
 
 /-- What one write changed, but the ratchet's address. -/
 def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
@@ -1592,11 +1588,11 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩ pre post)
         (targetField ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .read, observe, audienceEpoch, audienceRoster⟩) pre post
-    | fieldRead reads =>
+    | registered code op =>
       exact ResourceObservationAdmission.footprintOf
-        (changedEffect ⟨kind, id, capability, version, root, .fieldRead reads, observe, audienceEpoch, audienceRoster⟩ pre post)
-        (targetField ⟨kind, id, capability, version, root, .fieldRead reads, observe, audienceEpoch, audienceRoster⟩)
-        (targetAmount ⟨kind, id, capability, version, root, .fieldRead reads, observe, audienceEpoch, audienceRoster⟩) pre post
+        (changedEffect ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩ pre post)
+        (targetField ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩)
+        (targetAmount ⟨kind, id, capability, version, root, .registered code op, observe, audienceEpoch, audienceRoster⟩) pre post
 
 /-- Dynamic inner stores share the footprint engine. Existing roles scan their
 actual patch writes and exclude the hiding ratchet. -/
@@ -1945,7 +1941,8 @@ def entryWrites (prepared : PreparedInvocation deployment profile ambient ground
 /-- An observe-only read target is read, not written. -/
 def Target.isRead (target : Target) : Bool :=
   match target.payload with
-  | .read | .kindRead | .fieldRead _ | .computeFunding _ | .moneyConsent _ => true
+  | .read | .kindRead | .computeFunding _ | .moneyConsent _ => true
+  | .registered code op => (effectAt code.toNat).observeOnly op
   | _ => false
 
 /-- A read target enters as a read guard on its cell's current root, as the

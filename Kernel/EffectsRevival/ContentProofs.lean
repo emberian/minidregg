@@ -551,7 +551,8 @@ theorem contentNarrowed_incomplete : ¬ contentNarrowed.Complete := by
 /-- `Payload.content` still carries code 1: the census is refuted until the migration
 deletes that constructor. -/
 theorem hostLegacyCensusRefutedToday : HostLegacyCensusRefutedToday := fun census =>
-  census (.content ⟨[]⟩) (by simp [payloadTag, DeclaredResourceController.payloadStream])
+  census (.content ⟨[]⟩) (by simp [payloadTag, DeclaredResourceController.payloadStream,
+    DeclaredResourceController.payloadEncode])
 
 /-! ## `ContentAgreement contentSpec`: the deployed content arm IS the declaration. -/
 
@@ -881,17 +882,23 @@ theorem contentPrefixAgreement : ContentPrefixAgreement := by
   cases decoded : ContentResource.commandStream.decodePrefix rest with
   | none =>
     simp [payloadPrefix, readPrefix, DeclaredResourceController.payloadStream, decoded,
+      DeclaredResourceController.payloadEncode,
+      DeclaredResourceController.legacyPayloadDecode, DeclaredResourceController.legacy_unbound.2.1,
       contentHandler, contentHandlerOf, EffectSpec.comap, contentSpec, List.lookup]
   | some pair =>
     obtain ⟨command, suffix⟩ := pair
     simp [payloadPrefix, readPrefix, DeclaredResourceController.payloadStream, decoded, payloadTag,
+      DeclaredResourceController.payloadEncode,
+      DeclaredResourceController.legacyPayloadDecode, DeclaredResourceController.legacy_unbound.2.1,
       contentHandler, contentHandlerOf, EffectSpec.comap, contentSpec, List.lookup]
 
 theorem contentPrefixAccepts : ContentPrefixAccepts :=
   ⟨⟨[]⟩, [], by
     have decoded := ContentResource.commandStream.decodePrefix_encode ⟨[]⟩ []
     simp only [List.append_nil] at decoded
-    simp [payloadPrefix, DeclaredResourceController.payloadStream, payloadTag, decoded]⟩
+    simp [payloadPrefix, DeclaredResourceController.payloadStream, payloadTag, decoded,
+      DeclaredResourceController.payloadEncode,
+      DeclaredResourceController.legacyPayloadDecode, DeclaredResourceController.legacy_unbound.2.1]⟩
 
 theorem contentPrefixTeeth : ContentPrefixTeeth := by
   intro same

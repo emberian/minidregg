@@ -1,7 +1,7 @@
 /-
 # Assurance.CitedLand — a verdict cell, and a land that cites it
 
-The first consumer of cited reads (`citedRead`, `Payload.fieldRead` in `Kernel/ResourceTransaction.lean`) and of a
+The first consumer of cited reads (`citedRead` in `Kernel/CitedRead.lean`, registry code 9) and of a
 joint participant's identity (`DeclaredResourceController.identitySlots`). Two law templates under
 `native/resource-client/templates/fleet`, embedded here as `Pred` terms by `scripts/gen-sheetlaw.py`
 (§2 is generated; `--check` compares it with the JSON):
@@ -224,7 +224,7 @@ theorem citedRead_decided (snapshot : AuthoritySnapshot) (id : Nat) (capability 
     (keys : (reads.all fun read =>
       DeclaredActionLowering.writableKeyCheck (⟨id⟩ : ResourceId .object) read.1) = true)
     (granted : citedScope snapshot .object capability reads = none) :
-    citedRead snapshot .object id capability 1 (some capability) false reads store =
+    citedRead snapshot .object id capability (some capability) false reads store =
       if citedMoved store reads = [] then .ok store
       else .error (.citedStale (citedMoved store reads)) := by
   unfold citedRead
@@ -292,13 +292,13 @@ fields move it is refused naming both, and after one moves naming that one; afte
 back it is admitted again, at a store that is not the first one. No refusal carries a value. -/
 theorem land_footprint_scenario (snapshot : AuthoritySnapshot) (capability : CapabilityId)
     (granted : citedScope snapshot .object capability footprint = none) :
-    citedRead snapshot .object base capability 1 (some capability) false footprint read0 =
+    citedRead snapshot .object base capability (some capability) false footprint read0 =
         .ok read0 ∧
-      citedRead snapshot .object base capability 1 (some capability) false footprint movedBoth =
+      citedRead snapshot .object base capability (some capability) false footprint movedBoth =
         .error (.citedStale [field 0, field 1]) ∧
-      citedRead snapshot .object base capability 1 (some capability) false footprint movedOne =
+      citedRead snapshot .object base capability (some capability) false footprint movedOne =
         .error (.citedStale [field 1]) ∧
-      citedRead snapshot .object base capability 1 (some capability) false footprint movedBack =
+      citedRead snapshot .object base capability (some capability) false footprint movedBack =
         .ok movedBack ∧
       movedBack ≠ read0 := by
   have keys : (footprint.all fun read =>
