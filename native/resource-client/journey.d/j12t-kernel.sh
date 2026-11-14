@@ -306,7 +306,7 @@ row jwall-transclude-admitted installed "$(outcome c-transcludes-jwall)" "$(deta
 # A command that only reads makes no transition: refused readOnlyCommand at preparation, by name.
 invoke c-lone-read-jwall "$CW" '[{"name":"jwall","payload":{"type":"read"}}]'
 lone=$(outcome c-lone-read-jwall)
-[ "$lone" = refused ] && ! grep -q readOnlyCommand "$D/c-lone-read-jwall.err" && lone=refused-not-readOnlyCommand
+[ "$lone" = refused ] && ! refusal_text c-lone-read-jwall | grep -q 'Reject\.readOnlyCommand' && lone=refused-not-readOnlyCommand
 row jwall-lone-read-readOnlyCommand refused "$lone" "$(detail c-lone-read-jwall)"
 run b-import-jwall "$MINI" workspace --action import --dir "$TW" --name tjwall --kind object \
   --target "$jwall" --observe-capability "$(jq -r .observeCapability "$TW/refs/tpage.json")"; ok b-import-jwall
