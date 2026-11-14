@@ -19,8 +19,9 @@ computation is the deleted hand arm's expression.
 `ScalarPreparedHeader` (proved: `scalarPreparedHeader`): every prepared scalar target passed the
 four checks whose order moved when scalar actions were bound at code 0 (schema version, root,
 ordinary role, some action), so none of those refusals has a preparation to charge.
-The scalar ghost (the member patch that shows "no change") is refuted by execution
-(`Assurance/MemberPatchPoles.lean`): at the sample write the semantics emits one operation.
+`ScalarMemberGhostRefuted` (proved: `scalarMember_ghost_refuted`): wherever the scalar semantics
+admits a write, the member patch that shows "no change" fails `MemberExact`; the admitted write
+that inhabits the premise is executed (`Assurance/MemberPatchPoles.lean`).
 
 The other two teeth do not need a sample and are proved beside the keystone
 (`MemberPatchUnstatedRefused`, `MemberPatchCommutingRefused`).
@@ -267,6 +268,34 @@ def scalarStore : Store EffectDeclaration.effectLayout :=
 /-- One write: field 2 is created holding 7. -/
 def scalarWrite : List DeclaredActionLowering.Action := [.create (.objectField ⟨41⟩ ⟨2⟩) 7]
 
+/-- **Teeth at the scalar declaration.** Wherever the scalar semantics admits a write, the
+declaration with the member patch that shows "no change" fails `MemberExact`. The premise is
+inhabited by execution (`Assurance/MemberPatchPoles.lean`, the sample write): the kernel's
+`decide` does not reduce the core on a concrete store. -/
+def ScalarMemberGhostRefuted : Prop :=
+  ∀ (ctx : EffectCtx) (actions : List DeclaredActionLowering.Action)
+    (store : Store EffectDeclaration.effectLayout) (ps : Patch EffectDeclaration.effectLayout),
+    scalarSpec.sem ctx actions store = .ok ps →
+    ¬ MemberExact scalarSpec (fun _ _ _ => some [])
+
+/-- An admitted scalar write is never the empty patch: there is an action and every action
+lowers to at least one guarded operation. -/
+theorem scalarSem_writes {ctx : EffectCtx} {actions : List DeclaredActionLowering.Action}
+    {store : Store EffectDeclaration.effectLayout} {ps : Patch EffectDeclaration.effectLayout}
+    (admitted : scalarSpec.sem ctx actions store = .ok ps) : ps ≠ [] := by
+  obtain ⟨_, present, core⟩ := scalarSem_ok admitted
+  have value := (DeclaredResourceScalar.prepareStore_ok core).1
+  subst value
+  cases actions with
+  | nil => exact absurd rfl present
+  | cons action rest =>
+    cases action <;>
+      simp [DeclaredResourceScalar.actionsPatch, DeclaredActionLowering.Action.ops]
+
+theorem scalarMember_ghost_refuted : ScalarMemberGhostRefuted := by
+  intro ctx actions store ps admitted exact
+  exact scalarSem_writes admitted (exact ctx actions store ps [] rfl admitted)
+
 theorem memberPatch_ghost_refuted : MemberPatchGhostRefuted := by
   intro exact
   have sem : kindDefinitionSpec.sem
@@ -277,6 +306,6 @@ theorem memberPatch_ghost_refuted : MemberPatchGhostRefuted := by
   cases same
 
 #assert_axioms memberPatch_satisfiable memberPatch_ghost_refuted sampleNext_valid sample_prepared
-#assert_axioms computeTarget_world_arm scalarPreparedHeader
+#assert_axioms computeTarget_world_arm scalarPreparedHeader scalarMember_ghost_refuted
 
 end Minidregg.Kernel.NativeThinConsent

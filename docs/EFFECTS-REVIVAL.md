@@ -335,8 +335,9 @@ string arms in 12 files before, 94 + 3 in 10 after).
 * The member patch is the actions' own patch (`actionsPatch`), `memberReadsStore := false`, so a
   member whose view seals fields is still shown the post of a write to the fields it names.
   `scalar_member_complete` (proved): where the semantics admits, the member is shown exactly its
-  patch. The "no change" ghost is refuted by execution: at the sample write the semantics emits
-  one operation, so `fun _ _ _ => some []` is not `MemberExact`. `KernelOwned` for a scalar target is now the declaration's `rotated` (the
+  patch. `ScalarMemberGhostRefuted` (proved): wherever the semantics admits a write, the "no
+  change" member patch `fun _ _ _ => some []` is not `MemberExact` (an admitted patch is never
+  empty, `scalarSem_writes`); the admitted write that inhabits the premise is executed. `KernelOwned` for a scalar target is now the declaration's `rotated` (the
   same one address).
 * Two `Effect` fields changed shape: `viewDemand` takes the `leads` gate of a declared cell's
   pair deltas (`viewDemand_eq` under `sound`), and `runWrites` takes the target's cell id.
