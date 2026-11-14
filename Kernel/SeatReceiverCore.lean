@@ -51,7 +51,7 @@ module
 public import Kernel.CapabilityRevocationController
 public import Kernel.ResourceBirthController
 public import Kernel.SeatStore
-public import Kernel.PayAssignmentOwner
+public import Kernel.AccountGrant
 public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -317,7 +317,7 @@ def accountHolder (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient)
   | none => false
   | some capability =>
     let stored := readCapability snapshot.cell .account capability
-    decide (PayAssignmentReceiver.OwnerGrant stored command.subject account) &&
+    decide (AccountGrant.Held stored command.subject account) &&
       match stored with
       | none => false
       | some stored =>

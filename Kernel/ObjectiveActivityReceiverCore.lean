@@ -31,8 +31,9 @@ kernel's: a birth on a cell without a record is refused `notAnObject`, under
 another package than the pinned one `pinMismatch` (`native_birth_on_pinned_object`),
 and a write the object's law refuses `objectWrite` with the failing clause.
 A turn that spends credit, or names a payer, names a Book account and a
-capability on it and is admitted only for the account's owner (`accountHolder`:
-the owner grant and an admissible `transfer`), else refused `notAccountOwner`.
+capability on it and is admitted only for a holder of a grant on that account
+(`accountHolder`: `AccountGrant.Held` and an admissible `transfer`; the owner, or a delegate
+whose grant bounds the balance), else refused `notAccountOwner`.
 Exhaustion and abandonment are anyone's (the kernel decides whether the await
 exhausted or is past its deadline plus grace); an added envelope needs the
 account owner.
@@ -70,7 +71,7 @@ public import Kernel.ActivitySeatEnd
 public import Kernel.ObjectiveAdmittedTurn
 public import Kernel.ObjectiveKernelConfig
 public import Kernel.ObjectiveBendNativeAdmission
-public import Kernel.PayAssignmentOwner
+public import Kernel.AccountGrant
 public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -757,11 +758,11 @@ def objectHolder (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) 
       | ⟨.object, request⟩ => AuthorizationDeclaration.capabilityAdmissibleCheck stored.head snapshot.authState request
       | _ => false
 
-/-- The signer owns `account` and may spend it. -/
+/-- The signer holds a grant on `account` itself and may spend it (owner or delegate). -/
 def accountHolder (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
     (account : Nat) (capability : CapabilityId) (preRoot outcome : Digest) : Bool :=
   let stored := readCapability snapshot.cell .account capability
-  decide (PayAssignmentReceiver.OwnerGrant stored command.subject account) &&
+  decide (AccountGrant.Held stored command.subject account) &&
     match stored with
     | none => false
     | some stored =>

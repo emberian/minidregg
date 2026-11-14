@@ -202,6 +202,6 @@ import Kernel.PrivateCellView  -- a reader's class openings of the private index
 import Kernel.PrivateCellReceiver  -- the private cell's receiving state machine: gated store, kept index, one insert or erase walk per write, kept root = private root
 import Kernel.PrivateCellMaterializer  -- the private kinds' persistent structure: the kept index and blinding bytes, one walk per write, the root read from it
 import Kernel.PrivateCellOpening  -- the selective opening's relation: exact against the committed store's view, cell and version, or a fixed collision
-import Kernel.OwnerGrantDelegated  -- a delegated child of an owner grant passes `OwnerGrant` (holder, targets, policy id; never the lineage), beside the root-only variant it fails
+import Kernel.AccountGrant  -- the two facts asked of a presented account capability: `Held` (a grant on the account itself; a delegated child passes) and `RootOwner` (parentless; a child never passes)
 import Kernel.ResourceMoneyValueBound  -- the resource-transaction gross-debit footprint against `Theory.CapabilityValueBound`'s: they agree under `Covered` (stated, with witnesses; proof owed), and differ without it
 import Kernel.ObjectiveActivityPayerBound  -- per spending activity turn: the declared amount against the account's gross debit; an invocation's debit exceeds its declared envelope price by the run's postage
