@@ -14,8 +14,8 @@ record from which every one of those arms is read.
   version, the semantics (a guarded patch or a named refusal), the kernel's rotate, the field
   classification, the declared frame, the verb, the law's view and whether the operation commutes
   are all there;
-* its faces: `name` (the JSON `type`), `toJson`, `ofJson` and `display` (what a member is shown
-  before signing, and what `mini inspect` prints).
+* its faces: `name` (the JSON `type`), `toJson`, `ofJson`, `display` (what a member is shown
+  before signing, and what `mini inspect` prints) and `refusalText` (a refusal's detail in words).
 
 Derived here, with nothing authored per effect: the computation (`compute`: the header the
 declaration's `accepts`/`version`/`commutes` determine, then the engine's checked executor
@@ -169,6 +169,9 @@ structure Effect : Type 1 where
   ofJson : String → Lean.Json → Except String O
   /-- What the operation is shown as before it is signed: one line per fact it commits to. -/
   display : O → List String
+  /-- A refusal's structured detail in words: `detail` is `spec.refusalDetail`'s bytes of the
+  refusal `name`. Empty when the name says it all. -/
+  refusalText : String → List UInt8 → String := fun _ _ => ""
   unpack_pack : ∀ kind cell, unpack kind (pack kind cell) = some cell
   pack_unpack : ∀ kind packed cell, unpack kind packed = some cell → pack kind cell = packed
   /-- An effect authorized as an observation emits nothing: no write, no rotate. -/

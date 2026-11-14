@@ -116,6 +116,7 @@ import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability i
 import Kernel.ResourceEffect  -- a declared-resource effect as ONE declaration (Effect): typed cell, EffectSpec, JSON face and display; the derived computation, patch and engine handler
 import Kernel.CitedRead  -- the cited read DECLARED (registry code 9): citedRead, citedProject, its refusals with their detail, its faces, citedEffect
 import Kernel.ResourceEffectRegistry  -- liveEffects: wire code ↦ declaration; effectAt; the engine registry
+import Kernel.ResourcePayloadTag  -- a command whose payload tag nothing reads is refused by name
 import Kernel.ResourceTransactionAudit
 import Kernel.World  -- docs/DATAMODEL.md §3.3, §5 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn (creates carry their ROM image, T3b), admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, rom_cell_immutable_after_birth, poles
 import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)
