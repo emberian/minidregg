@@ -17,6 +17,8 @@ private def check (name : String) (cause : Reject) (bound : Nat) : IO Unit := do
     throw (IO.userError s!"{name}: typed cause changed")
   unless rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList ++ bytes) |>.isNone do
     throw (IO.userError s!"{name}: old codec edition loaded")
+  unless rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ bytes) |>.isNone do
+    throw (IO.userError s!"{name}: v2 codec edition loaded")
   let source : StableEvent := ⟨1, ⟨1⟩, ⟨2⟩, [1, 2, 3]⟩
   let stored := failedEvent source cause
   let some (recovered, disposition) := recordedDisposition stored

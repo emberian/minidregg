@@ -565,6 +565,11 @@ inductive Reject where
   | notObjectHolder
   /-- The signer does not own the Book account the turn spends or names as payer. -/
   | notAccountOwner
+  /-- The grant a paying turn names on its payer does not bound the declared payment
+  (`Theory.CapabilityValueBound.strictCheck`): the credit balance is not named, a bound on it
+  is below the payment, or the grant is delegated and sets no bound on it. Decided at the
+  gate, before anything runs, and uncharged. -/
+  | valueBound (reason : CapabilityValueBound.Refusal)
   /-- The turn decided an outcome other than the one its signer signed (`claimed`): its plan went
   stale. Like a reverted transaction's gas, a paying turn is CHARGED for the attempt (a
   charged failure, `Failed`); the signer re-plans on that receipt. -/
@@ -838,8 +843,8 @@ def presentedGrant (snapshot : Snapshot) (capability : CapabilityId) :
 /-- **The value bound, before the run.** The grant a paying turn names on its payer must bound
 the turn's declared payment (`payment`: the public price of the declared envelope plus what
 the turn moves out of the account), read as one posting from the payer in the credit asset
-(`Theory.CapabilityValueBound.presentedCheck`). Refused `notAccountOwner`, before anything is
-decided and uncharged. -/
+(`Theory.CapabilityValueBound.presentedCheck`). Refused `valueBound`, by name, before anything
+is decided and uncharged (`notAccountOwner` when the capability is not stored). -/
 def granted (config : Config) (snapshot : Snapshot) (command : Command) : Except Reject Unit :=
   match payment config command, paymentCapability command with
   | some (account, price), some capability =>
@@ -847,7 +852,8 @@ def granted (config : Config) (snapshot : Snapshot) (command : Command) : Except
           [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
           account with
       | .ok () => .ok ()
-      | .error _ => .error .notAccountOwner
+      | .error none => .error .notAccountOwner
+      | .error (some reason) => .error (.valueBound reason)
   | _, _ => .ok ()
 
 theorem granted_ok {config : Config} {snapshot : Snapshot} {command : Command}
@@ -862,6 +868,7 @@ theorem granted_ok {config : Config} {snapshot : Snapshot} {command : Command}
   simp only at ok
   split at ok
   next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
   next => cases ok
 
 /-- A command that passed the gate, for the outcome its signer claims: the loaded authority,
@@ -1072,6 +1079,7 @@ def chargedCause : Reject → Bool
   -- decided before anything runs (decoding, authority, capabilities, the signature)
   | .malformedIngress | .directoryUnavailable | .authorityUnavailable | .staleAuthority | .replayedMarker
   | .physicalPreparation | .inputUndecodable | .staleAwait | .notObjectHolder | .notAccountOwner | .signature _ => false
+  | .valueBound _ => false
   -- a message delivery is not yet a paying turn (`failureRequest`; cv 01a11680-f2a6)
   | .message _ => false
 
@@ -2168,8 +2176,25 @@ private def signatureRejectStream : StreamCodec (CredentialSignatureAdmission.Re
     )
     (by intro value; cases value <;> rfl)
 
+/-- A value-bound refusal: the asset, and for an exceeded bound the gross debit. -/
+def valueRefusalStream : StreamCodec CapabilityValueBound.Refusal :=
+  StreamCodec.xmap
+    (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat) StreamCodec.nat))
+    (fun value => match value with
+      | .fieldNotNamed asset => .inl asset
+      | .maxDeltaExceeded asset debited => .inr (.inl (asset, debited))
+      | .missingBalanceBound asset => .inr (.inr asset))
+    (fun wire => match wire with
+      | .inl asset => .fieldNotNamed asset
+      | .inr (.inl (asset, debited)) => .maxDeltaExceeded asset debited
+      | .inr (.inr asset) => .missingBalanceBound asset)
+    (by intro value; cases value <;> rfl)
+
 /-- Typed byte representation: constructor tags, concatenated fields and
-length-prefixed lists. No payload or recursive layer is a paired Nat code. -/
+length-prefixed lists. No payload or recursive layer is a paired Nat code.
+Edition v3: the `notAccountOwner` leaf of v2 is a two-way sum, `notAccountOwner` then
+`valueBound`; every other constructor keeps its v2 tag path. -/
 def rejectStream : StreamCodec (Reject) :=
   StreamCodec.xmap
     (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
@@ -2185,7 +2210,7 @@ def rejectStream : StreamCodec (Reject) :=
       (StreamCodec.sum messageRefusalStream
       unitStream))
       (StreamCodec.sum (StreamCodec.sum unitStream
-      unitStream)
+      (StreamCodec.sum unitStream valueRefusalStream))
       (StreamCodec.sum (StreamCodec.product digestStream digestStream)
       signatureRejectStream))))
     (fun value => match value with
@@ -2202,7 +2227,8 @@ def rejectStream : StreamCodec (Reject) :=
       | .message reason => (.inr (.inl (.inr (.inl reason))))
       | .staleAwait => (.inr (.inl (.inr (.inr ()))))
       | .notObjectHolder => (.inr (.inr (.inl (.inl ()))))
-      | .notAccountOwner => (.inr (.inr (.inl (.inr ()))))
+      | .notAccountOwner => (.inr (.inr (.inl (.inr (.inl ())))))
+      | .valueBound reason => (.inr (.inr (.inl (.inr (.inr reason)))))
       | .outcomeMoved claimed decided => (.inr (.inr (.inr (.inl (claimed, decided)))))
       | .signature reason => (.inr (.inr (.inr (.inr reason))))
     )
@@ -2220,14 +2246,15 @@ def rejectStream : StreamCodec (Reject) :=
       | (.inr (.inl (.inr (.inl reason)))) => .message reason
       | (.inr (.inl (.inr (.inr ())))) => .staleAwait
       | (.inr (.inr (.inl (.inl ())))) => .notObjectHolder
-      | (.inr (.inr (.inl (.inr ())))) => .notAccountOwner
+      | (.inr (.inr (.inl (.inr (.inl ()))))) => .notAccountOwner
+      | (.inr (.inr (.inl (.inr (.inr reason))))) => .valueBound reason
       | (.inr (.inr (.inr (.inl (claimed, decided))))) => .outcomeMoved claimed decided
       | (.inr (.inr (.inr (.inr reason)))) => .signature reason
     )
     (by intro value; cases value <;> rfl)
 
 def rejectCodec : LawfulCodec Reject :=
-  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList rejectStream
+  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/REJECT/v3".toUTF8.toList rejectStream
 
 @[simp] theorem rejectCodec_roundtrip (cause : Reject) :
     rejectCodec.decode (rejectCodec.encode cause) = some cause :=
@@ -2254,8 +2281,21 @@ theorem rejectCodec_v1_refuses (body : List UInt8) :
   | some value =>
     have canon := ObjectiveActivityWire.framed_canonical found
     have cut := congrArg (List.take "DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList.length) canon
-    change ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++
+    change ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v3".toUTF8.toList ++
       _).take _ = ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList ++ body).take _ at cut
+    rw [List.take_append_of_le_length (by decide +kernel), List.take_left' rfl] at cut
+    exact absurd cut (by decide +kernel)
+
+/-- The v2 edition (no `valueBound` cause, `notAccountOwner` one tag shorter) refuses too. -/
+theorem rejectCodec_v2_refuses (body : List UInt8) :
+    rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ body) = none := by
+  cases found : rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ body) with
+  | none => rfl
+  | some value =>
+    have canon := ObjectiveActivityWire.framed_canonical found
+    have cut := congrArg (List.take "DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList.length) canon
+    change ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v3".toUTF8.toList ++
+      _).take _ = ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ body).take _ at cut
     rw [List.take_append_of_le_length (by decide +kernel), List.take_left' rfl] at cut
     exact absurd cut (by decide +kernel)
 

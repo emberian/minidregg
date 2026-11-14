@@ -132,7 +132,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev fn_selected_source_event_v1 : String := "DREGG/FN/SELECTED-SOURCE-EVENT/v1"
 @[persisted_codec_tag] abbrev application_dispatch_no_record_refusal_v1 : String := "DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1"
 @[persisted_codec_tag] abbrev native_host_log_record_v1 : String := "DREGG/NATIVE-HOST/LOG-RECORD/v1"
-@[persisted_codec_tag] abbrev objective_activity_reject_v2 : String := "DREGG/OBJECTIVE/ACTIVITY/REJECT/v2"
+@[persisted_codec_tag] abbrev objective_activity_reject_v3 : String := "DREGG/OBJECTIVE/ACTIVITY/REJECT/v3"
 @[persisted_codec_tag] abbrev application_agent_lifetime_issue_spec_v1 : String := "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v5"
 @[persisted_codec_tag] abbrev fleet_turn_signed_v1 : String := "DREGG/FLEET/TURN/SIGNED/v2"
 @[persisted_codec_tag] abbrev runtime_content_full_document_tree_revisioned_atoms_marks_transcl_2e227868b68b93a4 : String := "DREGG.RUNTIME.CONTENT.FULL-DOCUMENT-TREE-REVISIONED-ATOMS-MARKS-TRANSCLUSION-HISTORY-LINKS.STORE-CELL.LIVE-SHARED-NAME-UNIQUENESS.NO-HIDING-KEY-PROJECTION/v5"

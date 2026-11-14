@@ -49,7 +49,9 @@ remain in place.
 
 Changed greenfield payloads have explicit editions:
 
-- `DREGG/OBJECTIVE/ACTIVITY/REJECT/v2` replaces the paired-natural v1 cause.
+- `DREGG/OBJECTIVE/ACTIVITY/REJECT/v3` replaces v2 (which replaced the paired-natural v1 cause):
+  it adds the `valueBound` cause beside `notAccountOwner`, whose tag path grows by one sum tag;
+  every other cause keeps its v2 path.
 - `DREGG/OBJECTIVE/ACTIVITY/RECORDED-FAILURE/v2` replaces its v1 charged-record
   envelope. The outer activity event still has `codecVersion = 2` and repeats
   the original successful ingress event/domain/event id.
