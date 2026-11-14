@@ -86,6 +86,26 @@ def AdmittedTurn.posts {rootBytes : Bytes → Digest} {config : Config} {snapsho
   | .registerDomain _ registered => registered.posts
   | .failed _ charged => charged.posts
 
+/-- **The Book operations a turn posts**: the operations of the one batch its kernel turn
+admitted on the loaded Book (`Postings.batch`), and none for a turn that posts no batch
+(a publication, a creation, a resolution). A rebirth's are its birth's. -/
+def AdmittedTurn.operations {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} : AdmittedTurn config snapshot height → List Theory.CanonicalResourceKernel.Operation
+  | .publish _ _ | .create _ _ | .resolve _ _ => []
+  | .birth _ _ born => born.posted.batch.operations
+  | .deliver _ delivery => delivery.posted.batch.operations
+  | .topUp _ topped => topped.posted.batch.operations
+  | .exhaust _ exhausted => exhausted.posted.batch.operations
+  | .abandon _ abandoned => abandoned.posted.batch.operations
+  | .invoke _ invoked => invoked.posted.batch.operations
+  | .deliverMessage _ delivered => delivered.posted.batch.operations
+  | .adopt _ adopted => adopted.posted.batch.operations
+  | .migrate _ migrated => migrated.posted.batch.operations
+  | .abortDrained _ aborted => aborted.posted.batch.operations
+  | .rebirth _ reborn => reborn.born.posted.batch.operations
+  | .registerDomain _ registered => registered.posted.batch.operations
+  | .failed _ charged => charged.posted.batch.operations
+
 /-- The one intent a turn commits under a receiver's sealing. -/
 def AdmittedTurn.intent {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} (sealing : Seal) : AdmittedTurn config snapshot height → DataIntent rootBytes

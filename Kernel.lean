@@ -204,3 +204,4 @@ import Kernel.PrivateCellMaterializer  -- the private kinds' persistent structur
 import Kernel.PrivateCellOpening  -- the selective opening's relation: exact against the committed store's view, cell and version, or a fixed collision
 import Kernel.OwnerGrantDelegated  -- a delegated child of an owner grant passes `OwnerGrant` (holder, targets, policy id; never the lineage), beside the root-only variant it fails
 import Kernel.ResourceMoneyValueBound  -- the resource-transaction gross-debit footprint against `Theory.CapabilityValueBound`'s: they agree under `Covered` (stated, with witnesses; proof owed), and differ without it
+import Kernel.ObjectiveActivityPayerBound  -- per spending activity turn: the declared amount against the account's gross debit; an invocation's debit exceeds its declared envelope price by the run's postage

@@ -828,11 +828,39 @@ def funding (config : Config) (durable : Durable) (command : Command) : Except R
       let available := (Theory.CanonicalResourceKernel.logicalBook book.logical).balance account config.asset
       if (price : Int) ≤ available then .ok () else .error (.kernel (.unfunded available price))
 
-/-- The capability a paying turn names on its payer account. -/
-def paymentCapability (command : Command) : Option CapabilityId :=
+/-- **What a spending turn declares**: the account it spends, the capability it names on it,
+and the amount the command itself fixes: the public price of a declared or added envelope, a
+birth's deposit, a top-up's amount. A migration names its account but its fee is the pending
+upgrade's (read from the Store), so it declares nothing here and is judged on its decided
+batch (`decidedBound`). A publication or a creation names a payer and posts nothing. -/
+def spend (config : Config) (command : Command) : Option (Nat × CapabilityId × Nat) :=
   match command.turn with
-  | .birth _ _ _ capability _ _ _ _ _ _ => some capability
-  | .invoke _ _ _ _ _ _ _ _ _ capability => some capability
+  | .birth _ _ account capability _ _ envelope _ _ deposit =>
+      some (account, capability, config.tariff.workOf envelope + deposit)
+  | .invoke _ _ _ _ _ envelope _ _ account capability =>
+      some (account, capability, config.tariff.workOf envelope)
+  | .adopt _ _ _ _ _ _ _ _ _ envelope _ account capability =>
+      some (account, capability, config.tariff.workOf envelope)
+  | .topUp _ account capability amount => some (account, capability, amount)
+  | .deliver _ _ extra account capability | .exhaust _ _ extra account capability
+  | .abortDrained _ _ extra account capability =>
+      if extra = zeroCapacity then none else some (account, capability, config.tariff.workOf extra)
+  | .registerDomain _ _ payer capability envelope =>
+      some (payer, capability, config.tariff.workOf envelope)
+  | _ => none
+
+/-- The account a turn names as the one it spends or charges, with the capability it names on
+it: exactly the accounts `authorized` requires a capability for. -/
+def payerOf (command : Command) : Option (Nat × CapabilityId) :=
+  match command.turn with
+  | .publish _ _ payer capability | .create _ _ _ _ _ _ _ payer capability
+  | .registerDomain _ _ payer capability _ => some (payer, capability)
+  | .birth _ _ account capability _ _ _ _ _ _ | .invoke _ _ _ _ _ _ _ _ account capability
+  | .adopt _ _ _ _ _ _ _ _ _ _ _ account capability | .topUp _ account capability _
+  | .migrate _ account capability => some (account, capability)
+  | .deliver _ _ extra account capability | .exhaust _ _ extra account capability
+  | .abortDrained _ _ extra account capability =>
+      if extra = zeroCapacity then none else some (account, capability)
   | _ => none
 
 /-- An account capability, as stored. -/
@@ -840,31 +868,64 @@ def presentedGrant (snapshot : Snapshot) (capability : CapabilityId) :
     Option (Capability .account × Unit) :=
   (readCapability snapshot.cell .account capability).map fun stored => (stored.head, ())
 
-/-- **The value bound, before the run.** The grant a paying turn names on its payer must bound
-the turn's declared payment (`payment`: the public price of the declared envelope plus what
-the turn moves out of the account), read as one posting from the payer in the credit asset
-(`Theory.CapabilityValueBound.presentedCheck`). Refused `valueBound`, by name, before anything
-is decided and uncharged (`notAccountOwner` when the capability is not stored). -/
+/-- **The value bound, before the run.** The grant a spending turn names on its account must
+bound the amount the command declares (`spend`), read as one posting from the account in the
+credit asset (`Theory.CapabilityValueBound.presentedCheck`). Refused `valueBound`, by name,
+before anything is decided and uncharged (`notAccountOwner` when the capability is not
+stored). It is the cheap early refusal; what an accepted turn actually posts is judged by
+`decidedBound`. -/
 def granted (config : Config) (snapshot : Snapshot) (command : Command) : Except Reject Unit :=
-  match payment config command, paymentCapability command with
-  | some (account, price), some capability =>
+  match spend config command with
+  | some (account, capability, price) =>
       match CapabilityValueBound.presentedCheck (presentedGrant snapshot capability)
           [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
           account with
       | .ok () => .ok ()
       | .error none => .error .notAccountOwner
       | .error (some reason) => .error (.valueBound reason)
-  | _, _ => .ok ()
+  | none => .ok ()
 
 theorem granted_ok {config : Config} {snapshot : Snapshot} {command : Command}
     (ok : granted config snapshot command = .ok ()) {account price : Nat}
-    {capability : CapabilityId} (paid : payment config command = some (account, price))
-    (named : paymentCapability command = some capability) :
+    {capability : CapabilityId} (declared : spend config command = some (account, capability, price)) :
     CapabilityValueBound.Presented (presentedGrant snapshot capability)
       [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
       account := by
   unfold granted at ok
-  rw [paid, named] at ok
+  rw [declared] at ok
+  simp only at ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
+
+/-- **The value bound on what the turn decided.** The grant a turn names on the account it
+spends (`payerOf`) must bound the account's gross debit in the Book operations the decided
+turn posts (`AdmittedTurn.operations`), whatever the turn kind. A turn whose debit the command
+fixes was already refused at the gate; this is the bound for a debit the run decides (an
+invocation's postage, a migration's fee). It is raised after the decision, so a paying turn is
+charged for it (`chargedCause`), within the bound the gate checked. -/
+def decidedBound {rootBytes : List UInt8 → Digest} {config : Config} {data : DataSnapshot rootBytes}
+    {height : Nat} (snapshot : Snapshot) (command : Command)
+    (decided : Decided config data height command) : Except Reject Unit :=
+  match payerOf command with
+  | none => .ok ()
+  | some (account, capability) =>
+      match CapabilityValueBound.presentedCheck (presentedGrant snapshot capability)
+          (ObjectiveActivity.AdmittedTurn.operations decided) account with
+      | .ok () => .ok ()
+      | .error none => .error .notAccountOwner
+      | .error (some reason) => .error (.valueBound reason)
+
+theorem decidedBound_ok {rootBytes : List UInt8 → Digest} {config : Config}
+    {data : DataSnapshot rootBytes} {height : Nat} {snapshot : Snapshot} {command : Command}
+    {decided : Decided config data height command}
+    (ok : decidedBound snapshot command decided = .ok ()) {account : Nat}
+    {capability : CapabilityId} (named : payerOf command = some (account, capability)) :
+    CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      (ObjectiveActivity.AdmittedTurn.operations decided) account := by
+  unfold decidedBound at ok
+  rw [named] at ok
   simp only at ok
   split at ok
   next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
@@ -954,6 +1015,8 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   outcome : Digest
   outcomeExact : outcome = outcomeDigest final.1
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot outcome = .ok ()
+  /-- The grant named on the spent account bounds what the decided turn posts from it. -/
+  boundedExact : decidedBound authority.snapshot command decided = .ok ()
 theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
     {command : Command} (prepared : Prepared deployment profile ambient durable command) :
@@ -973,14 +1036,30 @@ def prepare {F : Type} [Field F] {deployment : Deployment}
   match decidedExact : decideTurn gated.config durable.snapshot ambient.height command with
   | .error reason => .error reason
   | .ok decided =>
+    match boundedExact : decidedBound gated.authority.snapshot command decided with
+    | .error reason => .error reason
+    | .ok () =>
     match finalExact : ActivitySeatEnd.finish gated.config durable.snapshot ambient.height decided with
     | .error (.seats reason) => .error (.seats reason)
     | .error (.kernel reason) => .error (.kernel reason)
     | .ok final =>
       if same : claimed = outcomeDigest final.1 then
         .ok ⟨gated.authority, gated.config, gated.configExact, decided, decidedExact,
-          gated.preRoot, gated.preRootExact, final, finalExact, claimed, same, gated.authorizedExact⟩
+          gated.preRoot, gated.preRootExact, final, finalExact, claimed, same, gated.authorizedExact,
+          boundedExact⟩
       else .error (.outcomeMoved claimed (outcomeDigest final.1))
+
+/-- **An accepted turn's postings are within the grant on the account it spends.** Whatever
+the turn kind, the grant the command names on its account (`payerOf`) names every balance the
+decided turn's Book operations take from that account, each gross debit is within every bound
+the grant sets, and a delegated grant set that bound itself. -/
+theorem Prepared.payer_bounded {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : Prepared deployment profile ambient durable command)
+    {account : Nat} {capability : CapabilityId} (named : payerOf command = some (account, capability)) :
+    CapabilityValueBound.Presented (presentedGrant prepared.authority.snapshot capability)
+      (ObjectiveActivity.AdmittedTurn.operations prepared.decided) account :=
+  decidedBound_ok prepared.boundedExact named
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
@@ -1079,7 +1158,9 @@ def chargedCause : Reject → Bool
   -- decided before anything runs (decoding, authority, capabilities, the signature)
   | .malformedIngress | .directoryUnavailable | .authorityUnavailable | .staleAuthority | .replayedMarker
   | .physicalPreparation | .inputUndecodable | .staleAwait | .notObjectHolder | .notAccountOwner | .signature _ => false
-  | .valueBound _ => false
+  -- reaches here only from `decidedBound`, after the decision (the gate's own `valueBound`
+  -- returns before the signature and is never asked this)
+  | .valueBound _ => true
   -- a message delivery is not yet a paying turn (`failureRequest`; cv 01a11680-f2a6)
   | .message _ => false
 
@@ -2534,7 +2615,8 @@ theorem Failed.sound [DecidableEq F] {ingress : DecodedIngress}
 turn named on its payer bounds the one posting a charged failure makes. -/
 theorem Failed.value_bounded [DecidableEq F] {ingress : DecodedIngress}
     (failed : Failed deployment profile ambient durable ingress) :
-    ∃ capability, paymentCapability ingress.command = some capability ∧
+    ∃ capability price, spend failed.gated.config ingress.command =
+        some (failed.request.account, capability, price) ∧
       CapabilityValueBound.Presented (presentedGrant failed.gated.authority.snapshot capability)
         (ObjectiveActivity.failureBatch failed.gated.config failed.request).operations
         failed.request.account := by
@@ -2545,18 +2627,17 @@ theorem Failed.value_bounded [DecidableEq F] {ingress : DecodedIngress}
   | birth object objectCapability account accountCapability a5 a6 envelope a8 a9 deposit =>
       rw [turn] at req
       have same := Option.some.inj req
-      refine ⟨accountCapability, by simp [paymentCapability, turn], ?_⟩
+      refine ⟨accountCapability, _, by rw [← same]; simp [spend, turn]; rfl, ?_⟩
       rw [← same]
       exact (granted_ok ok
         (price := failed.gated.config.tariff.workOf envelope + deposit)
-        (by simp [payment, turn]) (by simp [paymentCapability, turn])).fee_mono
-        (Nat.le_add_right _ _)
+        (by simp [spend, turn])).fee_mono (Nat.le_add_right _ _)
   | invoke object objectCapability a3 a4 a5 envelope a7 a8 account accountCapability =>
       rw [turn] at req
       have same := Option.some.inj req
-      refine ⟨accountCapability, by simp [paymentCapability, turn], ?_⟩
+      refine ⟨accountCapability, _, by rw [← same]; simp [spend, turn]; rfl, ?_⟩
       rw [← same]
-      exact granted_ok ok (by simp [payment, turn]) (by simp [paymentCapability, turn])
+      exact granted_ok ok (by simp [spend, turn])
   | _ =>
       rw [turn] at req
       cases req
