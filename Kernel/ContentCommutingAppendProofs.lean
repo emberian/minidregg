@@ -8,6 +8,7 @@ proves all of them.  `CommutingPrepare`'s accepting pole over the Effects declar
 module
 
 public import Kernel.ContentCommutingAppend
+public import Kernel.ResourcePreparePacked
 public import Theory.AssertAxioms
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -157,11 +158,31 @@ theorem childrenOf_ratchet (S pre : ContentResource.ContentStore) (height : Nat)
 
 /-! ## The receiver's preparation, the witness and two appenders -/
 
-/-! `CommutingPrepare` (the whole preparation of a commuting command is the same at every planned
-root) is OWED since content became a registered effect. Its proof walked `prepareTarget` of the two
-targets branch by branch with the content arm's selection unfolded; the selection is now the
-declaration's (`Effect.select`), and that walk no longer splits. The computation half,
-`commutingAppend`, is proved above and is what the preparation reads the planned root through. -/
+set_option backward.isDefEq.respectTransparency false in
+/-- **`CommutingPrepare`.** What `prepareTarget` answers is `receive` of the slot, the selection,
+the computation and `afterTarget` (`prepareTarget_packed`). Of those only the computation reads
+the planned root, and for a commuting command it is the same at every planned root
+(`commutingAppend`). -/
+theorem commutingPrepare : CommutingPrepare := by
+  intro deployment directory snapshot semantics ambient command kind id capability version root root'
+    content observe epoch roster commutes
+  have same : computeTarget snapshot semantics ambient command
+        (contentTarget kind id capability version root content observe epoch roster) =
+      computeTarget snapshot semantics ambient command
+        (contentTarget kind id capability version root' content observe epoch roster) :=
+    funext fun pre => commutingAppend snapshot semantics ambient command kind id capability version
+      root root' content observe epoch roster pre commutes
+  rw [prepareTarget_packed, prepareTarget_packed]
+  exact congrArg (fun compute => receive (directory.slots id)
+    (selectTarget deployment
+      (contentTarget kind id capability version root content observe epoch roster))
+    compute
+    (fun before pre post => afterTarget deployment directory snapshot
+      (contentTarget kind id capability version root content observe epoch roster).materializer
+      (packTarget (contentTarget kind id capability version root content observe epoch roster))
+      id epoch before pre
+      (targetPatch snapshot semantics ambient command
+        (contentTarget kind id capability version root content observe epoch roster) pre) post)) same
 
 set_option backward.isDefEq.respectTransparency false in
 /-- **`MovedRootAccepted`** on the witness document: a line planned over a root the cell does not
@@ -367,6 +388,7 @@ theorem twoAppendersOneObservation : TwoAppendersOneObservation := by
 #assert_axioms commutesExactly
 #assert_axioms admittedConsumesMarker
 #assert_axioms replayRefused
+#assert_axioms commutingPrepare
 #assert_axioms movedRootAccepted
 #assert_axioms twoAppendersOneObservation
 

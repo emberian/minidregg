@@ -127,12 +127,11 @@ everything else), with `sampleWrongRole` and `sampleRole_teeth` on the sample ce
    Its proof used that selection implies the role. Proved now at every non-object role
    (`prepareFactors_wrongRole`); owed at the object role. Restate it for every bound code over
    `hostRegistry` and prove it from `effect_dispatch_fire`.
-2. `CommutingPrepare` (`Kernel/ContentCommutingAppend.lean`): its proof walked `prepareTarget`
-   of two targets branch by branch and no longer splits over `Effect.select`. Proved at every
-   non-object role (`commutingPrepare_wrongRole`) and at the computation (`commutingAppend`,
-   `sampleAtom_moved_computed`); owed for the whole preparation at the object role. A lemma that
-   `prepareTarget` reads the planned root only through `computeTarget`, for any registered
-   target, would give it for every commuting effect at once.
+2. `CommutingPrepare` is proved again (`commutingPrepare`), from `prepareTarget_packed`
+   (`Kernel/ResourcePreparePacked.lean`): what `prepareTarget` answers, for every target, is
+   `receive` of the slot, the selection, the computation and `afterTarget`, and of those only the
+   computation reads the planned root. Any statement about the receiver at two targets, or
+   against a dispatcher, is to be proved over that reading, not by walking `prepareTarget`.
 3. The hand-written `contentHandler`/`contentHeader`/`contentFresh` in `Statements.lean` §7 are a
    spec-side twin of `contentEffect.handler 1`: `HostTeeth` and the poles are still stated over
    them. Restate those over `hostRegistry` and delete the three.
