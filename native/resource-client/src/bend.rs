@@ -1453,7 +1453,7 @@ mod tests {
     #[test]
     fn a_hosts_ending_is_not_a_client_error() {
         let _ = take_command_ending();
-        assert!(ending("refused: op210: notAccountOwner".into()).is_ok());
+        assert!(ending("refused: op210: notAccountHolder".into()).is_ok());
         assert_eq!(take_command_ending().unwrap().render().0, 3);
         assert!(ending("bend: no workspace".into()).is_err());
         assert!(ending_for("tally", "bend: no workspace".into()).is_err());

@@ -19,6 +19,7 @@ extern crate mini_streams;
 mod app_interface;
 mod attempt_state;
 mod bounds;
+mod refusal_text;
 mod fsio;
 pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json};
 #[cfg(unix)]
@@ -912,7 +913,7 @@ usage:
   mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
   mini fleet --action receipt --dir WORKSPACE (--transaction ID|--head-of NAME)
   mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
-  mini fleet --action incoming --dir WORKSPACE --account NAME [--topic TOPIC] [--since HEIGHT] [--limit N]
+  mini fleet --action incoming --dir WORKSPACE --account NAME [--topic TOPIC] [--since HEIGHT|--after-seq SEQUENCE] [--limit N]
   mini credit --action balance|room|tariff|pay|topup|renew|status|ledger|install|adopt --dir WORKSPACE [--room REF] … (PLACE §2.10; `mini shell` spells them credit / pay ROOM week / tariff / topup / room status|renew|concierge)
     pay, topup and refund keep one operation record per request (or --operation-record PATH): a rerun
     recovers it and never pays twice; --again true pays once more after a decided one

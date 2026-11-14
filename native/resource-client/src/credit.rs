@@ -103,7 +103,7 @@ fn refund_within_grant(reference: &Value, asset: &str, amount: &str, base: &str)
         return Err(format!("this grant sets no limit on {field}, so it cannot refund asset {asset}: the till's owner refunds it, or issues a grant bounded on {field}"));
     };
     if need > *limit {
-        return Err(format!("a refund of {amount} plus the fee {base} takes {need} of {field} from the till, over this grant's limit of {limit} a turn: the till's owner refunds it, or installs the concierge again with a larger --refund-limit"));
+        return Err(format!("a refund of {amount} plus the fee {base} takes {need} of {field} from the till, over this grant's limit of {limit} a turn: the till holder must receive the renewed grant after `tariff ROOM set week PRICE`; for a payment above that price, the owner runs `mini credit --action refund --dir WORKSPACE --account TILL --to PAYER --amount AMOUNT --memo REASON`"));
     }
     Ok(())
 }
@@ -589,6 +589,51 @@ pub(crate) fn renew(
     Ok(window)
 }
 
+fn renew_till_grant(state: &Value, name: &str, mut submit: impl FnMut(&str, &Value) -> Result<Value>) -> Result<Value> {
+    let id = workspace::member(&state["pending"], "id")?;
+    let revoke = json!({"type":"minidregg-workspace-proposal-v1", "action":"revoke",
+        "name":format!("{name}-till"), "recipient":state["concierge"], "capability":state["reference"]["capability"]});
+    submit(&format!("{id}-revoke"), &revoke)?;
+    submit(id, &state["pending"]["grant"])
+}
+
+/// Refreshing a price must never leave the old spending authority live after
+/// the replacement is published. The pending record pins both exact attempts,
+/// so a lost reply resumes the same revocation/delegation instead of issuing twice.
+fn refresh_till(root: &Path, ws: &Value, name: &str, price: &str) -> Result<()> {
+    let state_path = root.join("sources").join(format!("concierge-{name}.json"));
+    if !state_path.exists() {
+        return Err(format!("concierge renewal metadata missing: run room concierge {name} with its subject before setting the price"));
+    }
+    let mut state = workspace::bounded_json(&state_path)?;
+    let (base, asset) = crate::fleet::tariff(&crate::fleet::agent(root)?)?;
+    let desired = till_grant(&format!("{name}-till"), workspace::member(&state, "concierge")?, &asset, price, &base)?;
+    if state.get("pending").is_none() && state["grant"] == desired { return Ok(()) }
+    if state.get("pending").is_none() {
+        state["pending"] = json!({"id":format!("till-renew-{}", workspace::random_nonce()?), "grant":desired});
+        workspace::replace_private_file(&state_path, &serde_json::to_vec(&state).map_err(|e| e.to_string())?)?;
+    }
+    let grant = state["pending"]["grant"].clone();
+    let reference = renew_till_grant(&state, name, |id, request| {
+        let attempt = propose_and_submit(root, ws, id, request)?;
+        if request["action"] == "delegate" {
+            workspace::publish_delegation(root, id, &attempt)?;
+            workspace::bounded_json(&root.join("proposals").join(id).join("recipient-reference.json"))
+        } else { Ok(Value::Null) }
+    })?;
+    let destination = PathBuf::from(workspace::member(&state, "outbox")?);
+    workspace::replace_private_file(&destination, &serde_json::to_vec(&reference).map_err(|e| e.to_string())?)?;
+    state["reference"] = reference;
+    state["grant"] = grant;
+    state.as_object_mut().unwrap().remove("pending");
+    workspace::replace_private_file(&state_path, &serde_json::to_vec(&state).map_err(|e| e.to_string())?)?;
+    // A pending renewal may have been for the preceding price. Complete it
+    // before starting the next, so every superseded grant is revoked.
+    if state["grant"] != desired { return refresh_till(root, ws, name, price) }
+    println!("till grant renewed for price {price}; deliver {} to the concierge inbox", destination.display());
+    Ok(())
+}
+
 // ---------------------------------------------------------------- install (room concierge)
 
 /// The founder installs a concierge for room `name`: births the till `A_R`
@@ -608,10 +653,32 @@ fn install(
     outbox: &Path,
     program: &Path,
 ) -> Result<()> {
+    workspace::validate_name(name)?;
+    let _lock = mini_sdk::lock::Lease::acquire(&root.join("sources").join(format!("concierge-{name}.lock")),
+        mini_sdk::lock::Create::Yes, mini_sdk::lock::Wait::No).map_err(|e| e.to_string())?;
     decimal(concierge, "concierge subject")?;
     number(period, "period")?;
     decimal(fund, "runner funding")?;
     let me = workspace::member(ws, "subject")?.to_owned();
+    let state_path = root.join("sources").join(format!("concierge-{name}.json"));
+    let reads = format!("{name}-till-concierge");
+    let prior = root.join("proposals").join(&reads).join("recipient-reference.json");
+    if program.exists() && prior.exists() {
+        // Upgrade an installation made before renewal metadata existed using
+        // its retained authored grant, never a guessed capability or limit.
+        if !state_path.exists() {
+            let grant = workspace::bounded_json(&root.join("sources").join(format!("credit-{reads}.request.json")))?;
+            if grant["recipient"] != concierge { return Err("installed concierge differs".into()) }
+            write_json(&state_path, &json!({"concierge":concierge,"grant":grant,
+                "reference":workspace::bounded_json(&prior)?,
+                "outbox":outbox.join(concierge).join(format!("{name}-till.json"))}))?;
+        }
+        let state = workspace::bounded_json(&state_path)?;
+        if state["concierge"] != concierge { return Err("installed concierge differs".into()) }
+        let current = room(root, ws, name)?;
+        refresh_till(root, ws, name, refund_limit.unwrap_or(current.get("week").unwrap_or("0")))?;
+        return print_json(&workspace::bounded_json(program)?);
+    }
     let permit = root.join("sources").join("credit-permit-all.json");
     write_json(&permit, &json!({"type":"all","predicates":[]}))?;
     let till_name = format!("{name}-till");
@@ -679,6 +746,10 @@ fn install(
         &outbox.join(concierge).join(format!("{till_name}.json")),
         &workspace::bounded_json(&root.join("proposals").join(&reads).join("recipient-reference.json"))?,
     )?;
+    let reference = workspace::bounded_json(&root.join("proposals").join(&reads).join("recipient-reference.json"))?;
+    write_json(&root.join("sources").join(format!("concierge-{name}.json")),
+        &json!({"concierge":concierge,"grant":request,"reference":reference,
+            "outbox":outbox.join(concierge).join(format!("{till_name}.json"))}))?;
     let value = json!({"type":"minidregg-concierge-program-v1","roomName":name,
         "room":current.target,"founder":me,"concierge":concierge,"till":till_target,
         "runner":runner_target,"topic":RENEW_TOPIC,"memberVerbs":MEMBER_VERBS,
@@ -689,19 +760,48 @@ fn install(
     print_json(&value)
 }
 
-/// Import every reference file in `inbox` this workspace does not hold yet,
-/// under the file's stem: delegated references addressed to me, and account
-/// handoffs naming me as owner.
+/// An account grant may replace an older grant for the same account and holder.
+/// The caller must prove a signed read through the replacement before saving it.
+fn renewed_till_reference(old: &Value, next: &Value, me: &str) -> Result<Option<Value>> {
+    if next["type"] != "minidregg-delegated-reference-v1" || next["recipient"] != me
+        || old["kind"] != "account" || next["kind"] != old["kind"] || next["target"] != old["target"]
+        || old["provenance"]["recipient"] != me || next["receipt"]["type"] != "confirmed"
+        || !matches!(next["receipt"]["confirmation"].as_str(), Some("installed" | "replayed")) {
+        return Ok(None);
+    }
+    let count = |v: &Value| number(workspace::member(&v["receipt"], "acceptedCount")?, "receipt count");
+    if count(next)? <= count(&old["provenance"])? { return Ok(None) }
+    let capability = workspace::member(next, "capability")?;
+    decimal(capability, "capability")?;
+    let mut updated = old.clone();
+    updated["observeCapability"] = json!(capability);
+    updated["operationCapability"] = json!(capability);
+    updated["provenance"] = next.clone();
+    Ok(Some(updated))
+}
+
+/// Import addressed references and handoffs; adopt newer account grants only
+/// after their observation authority has been checked by the Host.
 fn adopt(root: &Path, ws: &Value, inbox: &Path) -> Result<()> {
     let me = workspace::member(ws, "subject")?;
     let mut adopted = Vec::new();
     for entry in fs::read_dir(inbox).map_err(|error| format!("{}: {error}", inbox.display()))? {
         let path = entry.map_err(|error| error.to_string())?.path();
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else { continue };
-        if path.extension().and_then(|e| e.to_str()) != Some("json") || ref_exists(root, &stem) {
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
         let value = workspace::bounded_json(&path)?;
+        if ref_exists(root, &stem) {
+            let old = workspace::reference(root, &stem)?;
+            if let Some(updated) = renewed_till_reference(&old, &value, me)? {
+                workspace::signed_view(root, ws, &updated, "resource")?;
+                workspace::replace_private_file(&root.join("refs").join(format!("{}.json", workspace::ref_file(&stem))),
+                    &serde_json::to_vec(&updated).map_err(|e| e.to_string())?)?;
+                adopted.push(stem);
+            }
+            continue;
+        }
         match value.get("type").and_then(Value::as_str) {
             Some("minidregg-delegated-reference-v1") => {
                 if workspace::member(&value, "recipient")? != me {
@@ -822,6 +922,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let set = opt(&mut args, "set")?;
             let value = opt(&mut args, "value")?;
             args.finish()?;
+            workspace::validate_ref_name(&name)?;
+            let _lock = if set.is_some() {
+                Some(mini_sdk::lock::Lease::acquire(&root.join("sources").join(format!("concierge-{}.lock", workspace::ref_file(&name))),
+                    mini_sdk::lock::Create::Yes, mini_sdk::lock::Wait::No).map_err(|e| e.to_string())?)
+            } else { None };
             let current = room(&root, &ws, &name)?;
             match (set, value) {
                 (None, None) => {
@@ -835,7 +940,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                             SETTABLE.join(", ")
                         ));
                     }
-                    set_fields(&root, &ws, &name, &current, &[(field.as_str(), value.clone())])?;
+                    if current.get(&field) != Some(value.as_str()) {
+                        set_fields(&root, &ws, &name, &current, &[(field.as_str(), value.clone())])?;
+                    }
+                    if field == "week" && current.get("concierge").is_some() {
+                        refresh_till(&root, &ws, &name, &value).map_err(|e|
+                            format!("price is {value}; till renewal incomplete: {e}; retry `tariff {name} set week {value}`"))?;
+                    }
                     println!("tariff {name}: {field} = {value}");
                     Ok(())
                 }
@@ -1120,6 +1231,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dep_concierge_renewal_revokes_before_delegating_and_reuses_attempt_ids() {
+        for price in ["100", "200", "50", "0"] {
+            let grant = till_grant("lab-till", "9", "0", price, "3").unwrap();
+            let state = json!({"concierge":"9","reference":{"capability":"71"},
+                "pending":{"id":"renew-1","grant":grant}});
+            for _ in 0..2 {
+                let mut calls = Vec::new();
+                renew_till_grant(&state, "lab", |id, request| {
+                    calls.push((id.to_owned(), request.clone())); Ok(json!({"capability":"72"}))
+                }).unwrap();
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].0, "renew-1-revoke");
+                assert_eq!(calls[0].1["action"], "revoke");
+                assert_eq!(calls[0].1["capability"], "71");
+                assert_eq!(calls[1], ("renew-1".into(), grant.clone()));
+                refund_within_grant(&json!({"provenance":grant}), "0", price, "3").unwrap();
+            }
+            let mut calls = 0;
+            assert!(renew_till_grant(&state, "lab", |_, _| {
+                calls += 1; Err("reply unknown".into())
+            }).is_err());
+            assert_eq!(calls, 1, "no replacement before revocation confirms");
+        }
+    }
+
+    #[test]
+    fn dep_concierge_adopts_only_newer_same_account_reference() {
+        let prior = json!({"type":"minidregg-delegated-reference-v1","recipient":"9","kind":"account",
+            "target":"80","capability":"71","receipt":{"type":"confirmed","confirmation":"installed","acceptedCount":"10"}});
+        let old = json!({"kind":"account","target":"80","observeCapability":"71","operationCapability":"71","provenance":prior});
+        let mut next = prior.clone();
+        next["capability"] = json!("72"); next["receipt"]["acceptedCount"] = json!("11");
+        next["maxDelta"] = till_grant("lab-till", "9", "0", "100", "3").unwrap()["maxDelta"].clone();
+        let adopted = renewed_till_reference(&old, &next, "9").unwrap().unwrap();
+        assert_eq!(adopted["operationCapability"], "72");
+        assert_eq!(adopted["provenance"]["maxDelta"][0]["max"], "103");
+        assert!(renewed_till_reference(&adopted, &prior, "9").unwrap().is_none());
+        for (key, value) in [("target", "81"), ("recipient", "10"), ("kind", "object")] {
+            let mut wrong = next.clone(); wrong[key] = json!(value);
+            assert!(renewed_till_reference(&old, &wrong, "9").unwrap().is_none());
+        }
+        next["receipt"]["type"] = json!("refused");
+        assert!(renewed_till_reference(&old, &next, "9").unwrap().is_none());
+    }
+
+    #[test]
     fn the_till_grant_bounds_one_refund_and_its_fee() {
         let request = till_grant("lab-till", "9", "0", "40", "3").unwrap();
         assert_eq!(request["verbs"], json!(["observe", "transfer"]));
@@ -1138,7 +1295,7 @@ mod tests {
         let reference = json!({"provenance":{"type":"minidregg-delegated-reference-v1","maxDelta":grant["maxDelta"]}});
         refund_within_grant(&reference, "0", "40", "3").unwrap();
         let over = refund_within_grant(&reference, "0", "41", "3").unwrap_err();
-        assert!(over.contains("over this grant's limit of 43") && over.contains("--refund-limit"), "{over}");
+        assert!(over.contains("over this grant's limit of 43") && over.contains("mini credit --action refund"), "{over}");
         let other = refund_within_grant(&reference, "5", "1", "3").unwrap_err();
         assert!(other.contains("sets no limit on balance:5"), "{other}");
         // The owner's own reference carries no limits: the Host decides.

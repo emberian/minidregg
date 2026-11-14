@@ -33,7 +33,7 @@ and a write the object's law refuses `objectWrite` with the failing clause.
 A turn that spends credit, or names a payer, names a Book account and a
 capability on it and is admitted only for a holder of a grant on that account
 (`accountHolder`: `AccountGrant.Held` and an admissible `transfer`; the owner, or a delegate
-whose grant bounds the balance), else refused `notAccountOwner`.
+whose grant bounds the balance), else refused `notAccountHolder`.
 Exhaustion and abandonment are anyone's (the kernel decides whether the await
 exhausted or is past its deadline plus grace); an added envelope needs the
 account owner.
@@ -565,7 +565,7 @@ inductive Reject where
   /-- The signer holds no capability admissible for mutating the object. -/
   | notObjectHolder
   /-- The signer does not own the Book account the turn spends or names as payer. -/
-  | notAccountOwner
+  | notAccountHolder
   /-- The grant a paying turn names on its payer does not bound the declared payment
   (`Theory.CapabilityValueBound.strictCheck`): the credit balance is not named, a bound on it
   is below the payment, or the grant is delegated and sets no bound on it. Decided at the
@@ -776,7 +776,7 @@ def authorized (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (c
   let object (o : Nat) (c : CapabilityId) : Except Reject Unit :=
     if objectHolder snapshot semantics ambient command o c preRoot outcome then .ok () else .error .notObjectHolder
   let account (a : Nat) (c : CapabilityId) : Except Reject Unit :=
-    if accountHolder snapshot semantics ambient command a c preRoot outcome then .ok () else .error .notAccountOwner
+    if accountHolder snapshot semantics ambient command a c preRoot outcome then .ok () else .error .notAccountHolder
   match command.turn with
   | .resolve _ _ | .abandon _ _ | .deliverMessage _ _ _ | .rebirth _ _ _ => .ok ()
   | .adopt o oc _ _ _ _ _ _ _ _ _ a ac => do object o oc; account a ac
@@ -872,7 +872,7 @@ def presentedGrant (snapshot : Snapshot) (capability : CapabilityId) :
 /-- **The value bound, before the run.** The grant a spending turn names on its account must
 bound the amount the command declares (`spend`), read as one posting from the account in the
 credit asset (`Theory.CapabilityValueBound.presentedCheck`). Refused `valueBound`, by name,
-before anything is decided and uncharged (`notAccountOwner` when the capability is not
+before anything is decided and uncharged (`notAccountHolder` when the capability is not
 stored). It is the cheap early refusal; what an accepted turn actually posts is judged by
 `decidedBound`. -/
 def grantedFor (config : Config) (snapshot : Snapshot) :
@@ -882,7 +882,7 @@ def grantedFor (config : Config) (snapshot : Snapshot) :
           [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
           account with
       | .ok () => .ok ()
-      | .error none => .error .notAccountOwner
+      | .error none => .error .notAccountHolder
       | .error (some reason) => .error (.valueBound reason)
   | none => .ok ()
 
@@ -974,7 +974,7 @@ def decidedBound {rootBytes : List UInt8 → Digest} {config : Config} {data : D
       match CapabilityValueBound.presentedCheck (presentedGrant snapshot capability)
           (ObjectiveActivity.AdmittedTurn.operations decided) account with
       | .ok () => .ok ()
-      | .error none => .error .notAccountOwner
+      | .error none => .error .notAccountHolder
       | .error (some reason) => .error (.valueBound reason)
 
 theorem decidedBound_ok {rootBytes : List UInt8 → Digest} {config : Config}
@@ -1223,7 +1223,7 @@ def chargedCause : Reject → Bool
   | .outcomeMoved _ _ => true
   -- decided before anything runs (decoding, authority, capabilities, the signature)
   | .malformedIngress | .directoryUnavailable | .authorityUnavailable | .staleAuthority | .replayedMarker
-  | .physicalPreparation | .inputUndecodable | .staleAwait | .notObjectHolder | .notAccountOwner | .signature _ => false
+  | .physicalPreparation | .inputUndecodable | .staleAwait | .notObjectHolder | .notAccountHolder | .signature _ => false
   -- reaches here only from `decidedBound`, after the decision (the gate's own `valueBound`
   -- returns before the signature and is never asked this)
   | .valueBound _ => true
@@ -2340,7 +2340,7 @@ def valueRefusalStream : StreamCodec CapabilityValueBound.Refusal :=
 
 /-- Typed byte representation: constructor tags, concatenated fields and
 length-prefixed lists. No payload or recursive layer is a paired Nat code.
-Edition v3: the `notAccountOwner` leaf of v2 is a two-way sum, `notAccountOwner` then
+Edition v3: the `notAccountHolder` leaf of v2 is a two-way sum, `notAccountHolder` then
 `valueBound`; every other constructor keeps its v2 tag path. -/
 def rejectStream : StreamCodec (Reject) :=
   StreamCodec.xmap
@@ -2374,7 +2374,7 @@ def rejectStream : StreamCodec (Reject) :=
       | .message reason => (.inr (.inl (.inr (.inl reason))))
       | .staleAwait => (.inr (.inl (.inr (.inr ()))))
       | .notObjectHolder => (.inr (.inr (.inl (.inl ()))))
-      | .notAccountOwner => (.inr (.inr (.inl (.inr (.inl ())))))
+      | .notAccountHolder => (.inr (.inr (.inl (.inr (.inl ())))))
       | .valueBound reason => (.inr (.inr (.inl (.inr (.inr reason)))))
       | .outcomeMoved claimed decided => (.inr (.inr (.inr (.inl (claimed, decided)))))
       | .signature reason => (.inr (.inr (.inr (.inr reason))))
@@ -2393,7 +2393,7 @@ def rejectStream : StreamCodec (Reject) :=
       | (.inr (.inl (.inr (.inl reason)))) => .message reason
       | (.inr (.inl (.inr (.inr ())))) => .staleAwait
       | (.inr (.inr (.inl (.inl ())))) => .notObjectHolder
-      | (.inr (.inr (.inl (.inr (.inl ()))))) => .notAccountOwner
+      | (.inr (.inr (.inl (.inr (.inl ()))))) => .notAccountHolder
       | (.inr (.inr (.inl (.inr (.inr reason))))) => .valueBound reason
       | (.inr (.inr (.inr (.inl (claimed, decided))))) => .outcomeMoved claimed decided
       | (.inr (.inr (.inr (.inr reason)))) => .signature reason
@@ -2433,7 +2433,7 @@ theorem rejectCodec_v1_refuses (body : List UInt8) :
     rw [List.take_append_of_le_length (by decide +kernel), List.take_left' rfl] at cut
     exact absurd cut (by decide +kernel)
 
-/-- The v2 edition (no `valueBound` cause, `notAccountOwner` one tag shorter) refuses too. -/
+/-- The v2 edition (no `valueBound` cause, `notAccountHolder` one tag shorter) refuses too. -/
 theorem rejectCodec_v2_refuses (body : List UInt8) :
     rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ body) = none := by
   cases found : rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ body) with
