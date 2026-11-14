@@ -1602,6 +1602,7 @@ theorem stepSourcedLoaded_holds (config : Config) (prior : Opened config) (durab
   have kept : ∀ cellId, cellId ∉ written.map (·.value) →
       durable.snapshot.canonicalBytes ⟨cellId⟩ = prior.durable.snapshot.canonicalBytes ⟨cellId⟩ :=
     fun cellId unwritten => moved ⟨cellId⟩ fun member => unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)
+  unfold stepAffectedLoaded at checked
   exact policiesSourced_step config prior.directory.directory loaded.directory
     prior.authority.snapshot.logical authority.snapshot.logical (written.map (·.value))
     (CredentialAuthorityLayout.changedAddresses prior.durable.snapshot.canonicalBytes

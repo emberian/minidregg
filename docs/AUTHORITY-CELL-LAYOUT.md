@@ -172,6 +172,41 @@ codec encodes an identifier as a variable-length natural.
 - The legacy Store2 carry (`NeutralPolicyCarry`) converts the source's one authority cell whole
   and lowers it to a head and one entry per address.
 
-## Build state
+## Build state (exactly, at the commit that carries this file)
 
-See the lane's last report for the current list. This file is rewritten at each boundary.
+Everything in the worktree is committed and pushed to `lane/authority-cells`; nothing is
+local-only. hbox tree `/home/hbox/pool/t2` is leased to `authority-cells` and holds the warm
+build of whole-build pass seven (log `/home/hbox/lanes/authority-cells-scratch/whole-7.log`).
+
+- **Builds (pass seven, `swarm-build lake build Minidregg`)**: every module except
+  `Kernel.NativeHostContext` and what imports it. That includes the registry, the entry and
+  layout modules, `CredentialAuthorityDomainReceiver`, `CredentialAuthorityServed`, `ServedBasis`,
+  `ReceivingLaw`, `AuthoritySpaceGate`, `NeutralPolicyCarry`, every receiver that does not import
+  the Host context, `ResourceBirthReceiver` (the tie), `PolicyInstallReceiver`,
+  `NativeObservationController`.
+- **Red: one module, one cause.** `Kernel/NativeHostContext.lean`, `stepSourcedLoaded_holds`: the
+  `checked` hypothesis is stated through `stepAffectedLoaded` and did not unify. The fix in this
+  commit (`unfold stepAffectedLoaded at checked`, and the same line in
+  `NativeHostServed.stepSourced_holds`) is NOT yet built. Everything above the Host context
+  (`NativeHostServed`, `NativeHostLight`, `NativeHost`, `NativeHostReplay`, `Host/*`, `Fixtures/*`,
+  `Verify/*`, the `ReceivingLawFixture` pole added after pass six) has never been compiled against
+  the flipped registry: expect further reds there (the adopt callbacks lost their fourth argument
+  in about forty places by a scripted edit; `NativeHostReplay` passes
+  `{ durable with headTag := _ }` to `loadDeployment`; fixtures and probes that pin roots or build
+  an authority cell by hand, for example `scripts/probe-canonical-cell-registry.lean`).
+- **bytes-repr is 5031 against 4961 on main** (the alias and dropped ascriptions are undone; the
+  rise is statement binders and the `List UInt8` signatures of `encodeCell`, `decodeCell`,
+  `natOfBytes`, `entryId`, the gate). Per file: `CredentialAuthorityLayout` +55,
+  `CredentialAuthorityEntry` +6, `AuthoritySpaceGate` +6, `NativeObservationController` +3,
+  `NativeHostContext` +2, `ProtectedCell` +1, `ObjectiveActivityGate` +1, `CapabilityRenounce` +1,
+  `CredentialAuthorityServed` -1, `CredentialAuthorityDomainReceiver` -4. The coordinator raises
+  the ceiling or the cell-bytes path moves to `ByteArray`; `DataWrite.canonicalPostBytes` and the
+  registry codecs are `List UInt8` today, so the second is a larger change.
+- **Not run**: a green whole build; `lane-check` of `Host/Main.lean` and
+  `Host/ClientConsentCore.lean`; the native Host; the tour J0..J8 and THIN; the Simplex gate.
+  `check-import-boundary.sh` passes on the worktree.
+- **Owed measurements**: the largest write and the authority bytes at heights 1, 40, 120 and 200
+  (`append-flatness` now prints `authority N B in M writes` and judges two raw bounds); the cost of
+  the Host following its own written cells (`stepCell`) where it used to be handed the post cell.
+- **Next step**: `whole.sh` in the lane scratchpad (sync, whole build, red list), fix the Host
+  layer, then the validation batch above, then the four numbers.

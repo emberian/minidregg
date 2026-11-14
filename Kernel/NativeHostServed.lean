@@ -450,6 +450,7 @@ theorem stepSourced_holds (config : Config) {earlier store : StoreIdentity}
       served.canonicalBytes ⟨cellId⟩ = prior.served.canonicalBytes ⟨cellId⟩ :=
     fun cellId unwritten => moved.keeps ⟨cellId⟩ fun member =>
       unwritten (List.mem_map.mpr ⟨_, member, rfl⟩)
+  unfold stepAffected at checked
   exact policiesSourced_step config prior.directory.directory loaded.directory
     prior.authority.cell.logical authority.cell.logical (written.map (·.value))
     (CredentialAuthorityLayout.changedAddresses prior.served.canonicalBytes served.canonicalBytes
