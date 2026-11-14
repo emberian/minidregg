@@ -337,7 +337,7 @@ what the client generates now. -/
 section Poles
 
 /-- Player `S` = 7; a write of the player's own cell. -/
-def mv (post : Values) : Turn := ⟨2, 7, none, [], post⟩
+def mv (post : Values) : Turn := ⟨2, 7, none, [], post, []⟩
 
 /-- `(scene, turn, carries/key)`. -/
 def cell (scene turn key : Int) : Values := [(0, scene), (1, turn), (2, key)]
@@ -390,14 +390,14 @@ theorem drop_refused : admits L (cell 1 2 1) (mv (cell 1 3 0)) = false := by dec
 
 /-- Refused: another subject (9) moving player 7's cell (clause 1, `mover`). -/
 theorem other_player_refused :
-    admits L (cell 0 0 0) ⟨2, 9, none, [], cell 1 1 0⟩ = false := by decide
+    admits L (cell 0 0 0) ⟨2, 9, none, [], cell 1 1 0, []⟩ = false := by decide
 
 /-- Refused: an installation on the cell (clause 0, `management`), by anyone. -/
 theorem install_refused :
-    admits L (cell 0 0 0) ⟨4, 7, none, [], cell 0 0 0⟩ = false := by decide
+    admits L (cell 0 0 0) ⟨4, 7, none, [], cell 0 0 0, []⟩ = false := by decide
 
 /-- Admitted: a read. -/
-theorem read_admitted : admits L (cell 1 1 0) ⟨1, 9, none, [], cell 1 1 0⟩ = true := by decide
+theorem read_admitted : admits L (cell 1 1 0) ⟨1, 9, none, [], cell 1 1 0, []⟩ = true := by decide
 
 /-- The sealed table: a read admitted, the author's edit and a re-law refused. -/
 theorem table_read_admitted : eval tableSealed ⟨[("request/verb", 1)]⟩ ⟨[("request/verb", 1)]⟩ = true := by

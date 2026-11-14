@@ -841,7 +841,7 @@ structure JobTurn where
   post : Values
 
 /-- The LawView turn with no joint participants. -/
-def JobTurn.base (t : JobTurn) : Turn := ⟨t.verb, t.subject, t.now, [], t.post⟩
+def JobTurn.base (t : JobTurn) : Turn := ⟨t.verb, t.subject, t.now, [], t.post, []⟩
 
 def ranSlots (p : Params) : Option Int → List (String × Int)
   | none => []
@@ -958,9 +958,11 @@ theorem view_delta_none (t : Turn) (pre post : Values) (N : Nat) (hpre : get pre
   open Minidregg.Kernel.LawView in
   have hjoint := find_none (k := fieldName N "delta") (l := jointSlots t.joint)
     (fun q hq => joint_ne_field hq N _)
+  have hid := find_none (k := fieldName N "delta") (l := Minidregg.Kernel.LawView.identitySlots t.identity)
+    (fun q hq => Minidregg.Kernel.LawView.identity_ne_field hq N _)
   open Minidregg.Kernel.LawView in
   simp only [view, state_get, scalarSlots_split, List.find?_append, hreq, hbef, haft, hdel, hpair,
-    hclock, hjoint, Option.or_none, Option.map_none]
+    hclock, hjoint, hid, Option.or_none, Option.map_none]
 
 theorem jget_delta_none (p : Params) (fr : p.Fresh) (t : JobTurn) (pre post : Values) (N : Nat)
     (hN : N ∈ F.all) (hpre : get pre N = none) :

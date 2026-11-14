@@ -106,6 +106,14 @@ def jointName (i n : Nat) (v : String) : String := s!"joint/index/{i}/resource/f
 def jointSlots (j : List (Nat × Nat × String × Int)) : List (String × Int) :=
   j.map fun q => (jointName q.1 q.2.1 q.2.2.1, q.2.2.2)
 
+/-- The controller's identity slot of the cell at joint position `i` (`id`, `kind`, `law`,
+`parent`: `DeclaredResourceController.identitySlots`), as `render.py` spells it. It is the
+authority cell's record, never a field of the cited cell. -/
+def identityName (i : Nat) (name : String) : String := s!"joint/index/{i}/cell/{name}"
+
+def identitySlots (xs : List (Nat × String × Int)) : List (String × Int) :=
+  xs.map fun q => (identityName q.1 q.2.1, q.2.2)
+
 /-- One mutate or observe on the cell: who, which verb, the clock and joint slots the step exposes
 (empty on this branch), and the post-state of the declared fields. -/
 structure Turn where
@@ -114,9 +122,12 @@ structure Turn where
   now : Option Int
   joint : List (Nat × Nat × String × Int)
   post : Values
+  /-- The identity slots the step exposes for its joint positions: position, name, value. -/
+  identity : List (Nat × String × Int)
 
 def view (t : Turn) (pre post : Values) : State :=
-  ⟨request t.verb t.subject ++ scalarSlots pre post ++ clockSlots t.now ++ jointSlots t.joint⟩
+  ⟨request t.verb t.subject ++ scalarSlots pre post ++ clockSlots t.now ++ jointSlots t.joint ++
+    identitySlots t.identity⟩
 
 /-- The law's verdict on a turn from `pre`. -/
 def admits (law : Pred) (pre : Values) (t : Turn) : Bool :=
@@ -154,6 +165,9 @@ theorem jointName_def (i n : Nat) (v : String) :
     jointName i n v = "joint/index/" ++ toString i ++ "/resource/field/" ++ toString n ++ "/" ++ v :=
   rfl
 
+theorem identityName_def (i : Nat) (name : String) :
+    identityName i name = "joint/index/" ++ toString i ++ "/cell/" ++ name := rfl
+
 theorem lastc_fieldName (N : Nat) (v : String) (h : v.toList ≠ []) :
     lastc (fieldName N v) = lastc v := by
   rw [fieldName_def]; exact lastc_append _ _ h
@@ -172,6 +186,10 @@ theorem headc_fieldName (N : Nat) (v : String) : headc (fieldName N v) = some 'r
   rw [headc_append _ _ (by decide)]; decide
 theorem headc_jointName (i n : Nat) (v : String) : headc (jointName i n v) = some 'j' := by
   rw [jointName_def]; simp only [String.append_assoc]
+  rw [headc_append _ _ (by decide)]; decide
+
+theorem headc_identityName (i : Nat) (name : String) : headc (identityName i name) = some 'j' := by
+  rw [identityName_def]; simp only [String.append_assoc]
   rw [headc_append _ _ (by decide)]; decide
 
 /-- The kernel's field names are injective in the field number. -/
@@ -245,6 +263,12 @@ theorem mem_joint {j : List (Nat × Nat × String × Int)} {q : String × Int} (
   obtain ⟨r, -, rfl⟩ := h
   exact ⟨_, _, _, rfl⟩
 
+theorem mem_identity {xs : List (Nat × String × Int)} {q : String × Int} (h : q ∈ identitySlots xs) :
+    ∃ i name, q.1 = identityName i name := by
+  simp only [identitySlots, List.mem_map] at h
+  obtain ⟨r, -, rfl⟩ := h
+  exact ⟨_, _, rfl⟩
+
 theorem mem_clock {c : Option Int} {q : String × Int} (h : q ∈ clockSlots c) : q.1 = "clock/now" := by
   cases c <;> simp [clockSlots] at h
   rw [h]
@@ -274,6 +298,13 @@ theorem joint_ne_field {j : List (Nat × Nat × String × Int)} {q : String × I
   obtain ⟨i, n, v, e⟩ := mem_joint h
   apply ne_of_headc
   rw [e, headc_jointName, headc_fieldName]
+  decide
+
+theorem identity_ne_field {xs : List (Nat × String × Int)} {q : String × Int}
+    (h : q ∈ identitySlots xs) (N : Nat) (w : String) : q.1 ≠ fieldName N w := by
+  obtain ⟨i, name, e⟩ := mem_identity h
+  apply ne_of_headc
+  rw [e, headc_identityName, headc_fieldName]
   decide
 
 /-- **The new-view `after` slot is the post-state's field.** -/
@@ -310,8 +341,10 @@ theorem get_after (t : Turn) (pre post : Values) (N : Nat) :
     (fun q hq => clock_ne_field hq N _ hw (by decide))
   have hjoint := find_none (k := fieldName N "after") (l := jointSlots t.joint)
     (fun q hq => joint_ne_field hq N _)
+  have hid := find_none (k := fieldName N "after") (l := Minidregg.Kernel.LawView.identitySlots t.identity)
+    (fun q hq => Minidregg.Kernel.LawView.identity_ne_field hq N _)
   simp only [view, state_get, scalarSlots_split, List.find?_append, hreq, hbef, haft, hdel, hpair,
-    hclock, hjoint, Option.none_or, Option.or_none, Option.map_map]
+    hclock, hjoint, hid, Option.none_or, Option.or_none, Option.map_map]
   rfl
 
 /-- **The `before` slot is the pre-state's field** (in either view). -/
@@ -348,8 +381,10 @@ theorem get_before (t : Turn) (pre post : Values) (N : Nat) :
     (fun q hq => clock_ne_field hq N _ hw (by decide))
   have hjoint := find_none (k := fieldName N "before") (l := jointSlots t.joint)
     (fun q hq => joint_ne_field hq N _)
+  have hid := find_none (k := fieldName N "before") (l := Minidregg.Kernel.LawView.identitySlots t.identity)
+    (fun q hq => Minidregg.Kernel.LawView.identity_ne_field hq N _)
   simp only [view, state_get, scalarSlots_split, List.find?_append, hreq, hbef, haft, hdel, hpair,
-    hclock, hjoint, Option.none_or, Option.or_none, Option.map_map]
+    hclock, hjoint, hid, Option.none_or, Option.or_none, Option.map_map]
   rfl
 
 /-- **The `delta` slot is post − pre** when the pre-state has the field. -/
@@ -396,8 +431,10 @@ theorem get_delta (t : Turn) (pre post : Values) (N : Nat) (o : Int) (hpre : get
     (fun q hq => clock_ne_field hq N _ hw (by decide))
   have hjoint := find_none (k := fieldName N "delta") (l := jointSlots t.joint)
     (fun q hq => joint_ne_field hq N _)
+  have hid := find_none (k := fieldName N "delta") (l := Minidregg.Kernel.LawView.identitySlots t.identity)
+    (fun q hq => Minidregg.Kernel.LawView.identity_ne_field hq N _)
   simp only [view, state_get, scalarSlots_split, List.find?_append, hreq, hbef, haft, hdel, hpair,
-    hclock, hjoint, Option.none_or, Option.or_none, Option.map_map]
+    hclock, hjoint, hid, Option.none_or, Option.or_none, Option.map_map]
   simp only [Minidregg.Kernel.DeclaredResourceProjection.get, Option.map_map]
   rfl
 
@@ -428,8 +465,11 @@ theorem get_clock (t : Turn) (pre post : Values) : (view t pre post).get "clock/
   have hjoint := find_none (k := "clock/now") (l := jointSlots t.joint) (fun q hq => by
     obtain ⟨i, n, v, e⟩ := mem_joint hq
     rw [e]; exact ne_of_headc (by rw [headc_jointName]; decide))
+  have hid := find_none (k := "clock/now") (l := identitySlots t.identity) (fun q hq => by
+    obtain ⟨i, name, e⟩ := mem_identity hq
+    rw [e]; exact ne_of_headc (by rw [headc_identityName]; decide))
   cases hc : t.now with
-  | none => simp [view, state_get, List.find?_append, hreq, hscalar, hjoint, hc, clockSlots]
+  | none => simp [view, state_get, List.find?_append, hreq, hscalar, hjoint, hid, hc, clockSlots]
   | some x => simp [view, state_get, List.find?_append, hreq, hscalar, hc, clockSlots]
 
 end Lookup
