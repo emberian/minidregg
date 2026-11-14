@@ -157,6 +157,21 @@ structure EffectCtx where
   reads one there: what a write that cites that cell's content is checked against. -/
   sourceRead : Nat → Option CapabilityId
 
+/-- **What a member signs of an effect's context**: the signer and nonce of the command, and
+the target's role, id and capability. Every field is in the signed command; none is the
+receiver's (no authority snapshot, no height, no operation id, no other cell). A declaration's
+member patch (`Effect.member`) reads this and nothing else of its transaction. -/
+structure MemberCtx where
+  subject : SubjectId
+  nonce : Nat
+  kind : ResourceKind
+  target : Nat
+  capability : CapabilityId
+
+/-- The signed part of an effect's context. -/
+def EffectCtx.signed (ctx : EffectCtx) : MemberCtx :=
+  ⟨ctx.subject, ctx.nonce, ctx.kind, ctx.target, ctx.capability⟩
+
 /-- **One declared-resource effect.** Every arm the controller, the compilers and the Host run
 for a registered payload is read from this record (`Payload.registered`). -/
 structure Effect : Type 1 where
@@ -190,6 +205,33 @@ structure Effect : Type 1 where
     fun want site op before after => (spec.view site op before after).filter fun slot => want slot.1
   viewDemand_eq : ∀ want site op before after, viewDemand want site op before after =
     (spec.view site op before after).filter fun slot => want slot.1 := by intros; rfl
+  /-- **The member patch**: the operation's patch as a member computes it before signing, from
+  the signed part of the context and the store the Host served at the signed root. `none` (the
+  default) says this effect's patch reads something that is neither signed nor served (a
+  content write reads the authority's policy coordinates and the height); a member is then never
+  shown a post for it. `some f` with `f … = none` says the operation does not apply to that
+  store. `member_exact` holds it to the semantics. -/
+  member : Option (MemberCtx → O → Store L → Option (Patch L)) := none
+  /-- Whether the member patch reads the store. One that does is computed only from a served
+  store that hides no entry (`member_blind` is what `false` asserts). -/
+  memberReadsStore : Bool := true
+  /-- The member patch is the semantics' patch wherever both answer: a member is never shown a
+  patch the receiver would not emit. -/
+  member_exact : ∀ f, member = some f → ∀ (ctx : EffectCtx) (op : O) (s : Store L)
+      (ps patch : Patch L), f ctx.signed op s = some patch → spec.sem ctx op s = .ok ps →
+      ps = patch := by
+    intro _ stated; cases stated
+  /-- What the kernel appends to a member patch (the rotate) writes only rotated addresses. -/
+  member_tail : ∀ f, member = some f → ∀ (ctx : EffectCtx) (s store : Store L)
+      (address : Address L), spec.rotated address = false →
+      Patch.run store (spec.rotate ctx s) address = store address := by
+    intro _ stated; cases stated
+  /-- A member patch declared not to read the store is the same over any two stores. -/
+  member_blind : memberReadsStore = false → ∀ f, member = some f →
+      ∀ (ctx : MemberCtx) (op : O) (left right : Store L), f ctx op left = f ctx op right := by
+    first
+      | (intro reads; cases reads)
+      | (intro _ _ stated; cases stated)
   unpack_pack : ∀ kind cell, unpack kind (pack kind cell) = some cell
   pack_unpack : ∀ kind packed cell, unpack kind packed = some cell → pack kind cell = packed
   /-- An effect authorized as an observation emits nothing: no write, no rotate. -/
@@ -342,6 +384,114 @@ theorem compute_pinned {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Di
   by_cases moved : e.spec.commutes op = false ∧ root ≠ pre.root
   · rw [if_pos moved] at ok; cases ok
   · exact Decidable.not_not.mp fun ne => moved ⟨pinned, ne⟩
+
+/-- The kernel's rotate, as a patch of the effect's layout. -/
+abbrev rotate (ctx : EffectCtx) (s : Store e.L) : Patch e.L := e.spec.rotate ctx s
+
+/-- Why no member patch is shown for an operation. -/
+inductive MemberRefusal where
+  /-- The declaration states no member patch: its patch has an input that is neither signed nor
+  served. -/
+  | unstated
+  /-- The operation commutes: its header compares no root, so the member signs no pre-state a
+  post could be displayed at. -/
+  | commutes
+  /-- The member patch does not apply to the served store. -/
+  | inapplicable
+  deriving DecidableEq, Repr
+
+/-- **The one rule of what a member is shown.** An operation is displayed from its served store
+exactly when its declaration states a member patch and the operation pins its root. -/
+def memberPatch (ctx : MemberCtx) (op : e.O) (pre : Store e.L) :
+    Except MemberRefusal (Patch e.L) :=
+  match e.member with
+  | none => .error .unstated
+  | some f =>
+    if e.spec.commutes op = true then .error .commutes
+    else
+      match f ctx op pre with
+      | some patch => .ok patch
+      | none => .error .inapplicable
+
+/-- What an accepted member patch is: the declaration states one, the operation pins its root,
+and the stated function answered it. -/
+theorem memberPatch_ok {ctx : MemberCtx} {op : e.O} {pre : Store e.L} {patch : Patch e.L}
+    (shown : e.memberPatch ctx op pre = .ok patch) :
+    e.spec.commutes op = false ∧ ∃ f, e.member = some f ∧ f ctx op pre = some patch := by
+  unfold memberPatch at shown
+  cases stated : e.member with
+  | none => rw [stated] at shown; cases shown
+  | some f =>
+    rw [stated] at shown
+    dsimp only at shown
+    by_cases free : e.spec.commutes op = true
+    · rw [if_pos free] at shown; cases shown
+    · rw [if_neg free] at shown
+      cases answered : f ctx op pre with
+      | none => rw [answered] at shown; cases shown
+      | some found =>
+        rw [answered] at shown
+        cases shown
+        exact ⟨by simpa using free, f, rfl, answered⟩
+
+/-- A stated member patch that answers at a root-pinning operation is what is shown. -/
+theorem memberPatch_of {f : MemberCtx → e.O → Store e.L → Option (Patch e.L)}
+    (stated : e.member = some f) {op : e.O} (pinned : e.spec.commutes op = false)
+    {ctx : MemberCtx} {pre : Store e.L} {patch : Patch e.L} (answered : f ctx op pre = some patch) :
+    e.memberPatch ctx op pre = .ok patch := by
+  unfold memberPatch
+  rw [stated]
+  dsimp only
+  rw [if_neg (by simp [pinned]), answered]
+
+/-- A declaration without a member patch shows none, at every operation and store. -/
+theorem memberPatch_unstated (unstated : e.member = none) (ctx : MemberCtx) (op : e.O)
+    (pre : Store e.L) : e.memberPatch ctx op pre = .error .unstated := by
+  unfold memberPatch; rw [unstated]
+
+/-- A commuting operation is shown no member patch, whatever its declaration states. -/
+theorem memberPatch_commuting {op : e.O} (free : e.spec.commutes op = true) (ctx : MemberCtx)
+    (pre : Store e.L) : ∃ refusal, e.memberPatch ctx op pre = .error refusal ∧
+      (refusal = .unstated ∨ refusal = .commutes) := by
+  unfold memberPatch
+  cases e.member with
+  | none => exact ⟨_, rfl, .inl rfl⟩
+  | some f => exact ⟨.commutes, by simp [free], .inr rfl⟩
+
+/-- A member patch that does not read the store is shown the same over any two stores. -/
+theorem memberPatch_blind (blind : (e.member.isSome && e.memberReadsStore) = false)
+    (ctx : MemberCtx) (op : e.O) (left right : Store e.L) :
+    e.memberPatch ctx op left = e.memberPatch ctx op right := by
+  unfold memberPatch
+  cases stated : e.member with
+  | none => rfl
+  | some f =>
+    have unread : e.memberReadsStore = false := by simpa [stated] using blind
+    dsimp only
+    rw [e.member_blind unread f stated ctx op left right]
+
+/-- **The member patch against the derived computation.** Wherever the declaration's computation
+admits the operation at a loaded cell and the member was shown a patch from that cell's store
+under the signed part of the same context: the derived patch is the shown one followed by the
+kernel's rotate, the loaded root is the signed one, and the rotate writes only rotated
+addresses. -/
+theorem member_split {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Digest} {op : e.O}
+    {pre : e.Cell} {post : Store e.L} {shown : Patch e.L}
+    (computed : e.compute code ctx version root op pre = .ok post)
+    (member : e.memberPatch ctx.signed op pre.logical = .ok shown) :
+    e.patch ctx op pre.logical = shown ++ e.rotate ctx pre.logical ∧
+      root = pre.root ∧
+      ∀ (store : Store e.L) (address : Address e.L), e.spec.rotated address = false →
+        Patch.run store (e.rotate ctx pre.logical) address = store address := by
+  obtain ⟨pinned, f, stated, answered⟩ := e.memberPatch_ok member
+  obtain ⟨_, _, ps, sem, _⟩ := e.compute_ok computed
+  have exact := e.member_exact f stated ctx op pre.logical ps shown answered sem
+  subst exact
+  refine ⟨?_, e.compute_pinned computed pinned, fun store address unrotated =>
+    e.member_tail f stated ctx pre.logical store address unrotated⟩
+  unfold patch Revival.EffectSpec.emitted
+  rw [sem]
+  rfl
 
 /-- **The engine handler of a declaration**, over the controller's cell universe: what
 `Effects.Revival.Dispatches` is stated over. Its header is the live order: selection (role and

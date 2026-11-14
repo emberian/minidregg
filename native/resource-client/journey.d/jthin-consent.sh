@@ -26,6 +26,13 @@
 #       one, and the turn commits
 #   DF  a Host proposing the slot of a delegation over ANOTHER parent: refused
 #       headerMismatch before anything is signed (the plant is asserted first)
+#   KR  a whole kind definition read beside a write: checked by its served opening, shown as a
+#       read, signed; the Host lying about the kind read's view alone is refused before signing
+#   SR  a write the Host's semantics refuses (it creates a field the cell did not declare) is
+#       refused when the Host prepares the plan: no plan reaches the consent provider, nothing is
+#       shown, nothing is signed, nothing commits. The Host runs the semantics before it proposes
+#       anything to sign, so a member is shown a post only for an operation the semantics has
+#       admitted at the signed root
 #   M   (only with THIN_MUTANT_PROVIDER: a provider built with the served-root
 #       comparison removed) the mutant accepts a view of another state, shows a
 #       post that differs from the one that commits; the real provider refused
@@ -293,6 +300,32 @@ check kr-lie-planted grep -q 'view-last: replaced' "$D/proxy-tc-kr2.log"
 [ "$RC" != 0 ] || fail kr-lie-refused refused 0 x "thin consent signed a kind read over a view of another cell"
 check kr-lie-nothing-signed test ! -e "$SPONSOR_WS/attempts/tc-kr2/transaction-signatures.json"
 row kr-lie-refused "$(grep -m1 -o 'thin consent refused: [A-Za-z.]* *[A-Za-z]*' "$D/log/tc-kr2-submit.err" | cut -c1-70)" "$RC" PASS
+
+# ---- SR: refused by the Host's semantics at prepare; nothing shown, nothing signed, nothing commits.
+# tc-note declared field 2 alone at birth. Creating field 3 is a patch that applies to the served
+# store (the address is fresh), so the member patch alone would show a post. The Host's semantics
+# refuses it (K-FIELD-CLOSURE) when it prepares the plan, before any plan is proposed for consent.
+sr_request() { # ID FIELD: propose a create of FIELD on tc-note
+  jq -nc --arg f "$2" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[
+    {name:"tc-note",payload:{type:"scalar",actions:[{type:"create",key:{type:"object",field:$f},value:"1"}]}}]}' >"$D/req/$1.json"
+  "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$1.json" --proposal-id "$1" \
+    >"$D/log/$1-propose.out" 2>"$D/log/$1-propose.err" || fail "$1-propose" 0 1 x "$(tail -3 "$D/log/$1-propose.err")"
+}
+sr_request tc-sr 3
+: >"$D/proxy-tc-sr.log"
+RC=0; env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+  THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-tc-sr.log" \
+  "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/tc-sr/intent.json" \
+  --attempt "$SPONSOR_WS/attempts/tc-sr" >"$D/log/tc-sr-submit.out" 2>"$D/log/tc-sr-submit.err" || RC=$?
+[ "$RC" != 0 ] || fail sr-refused undeclared-field 0 x "the Host admitted a write of a field the cell did not declare"
+grep -q 'undeclared-field 3 (phase prepare)' "$D/log/tc-sr-submit.err" || fail sr-refused undeclared-field "$RC" x "$(tail -3 "$D/log/tc-sr-submit.err")"
+row sr-refused-at-prepare undeclared-field "$RC" PASS
+check sr-no-plan-consent sh -c "! grep -q 'frame 232' '$D/proxy-tc-sr.log'"
+check sr-nothing-shown test ! -e "$SPONSOR_WS/attempts/tc-sr/thin-display.json"
+check sr-nothing-signed test ! -e "$SPONSOR_WS/attempts/tc-sr/transaction-signatures.json"
+# Nothing committed: the next proposal, authored from a fresh signed read, names the root tc-sr named.
+sr_request tc-sr2 3
+check sr-nothing-committed test "$(proposal_root tc-sr)" = "$(proposal_root tc-sr2)"
 
 if [ -n "${THIN_MUTANT_PROVIDER:-}" ]; then
   check m-is-mutant sh -c "[ \"\$(sha256sum < '$THIN_MUTANT_PROVIDER')\" != \"\$(sha256sum < '$REAL')\" ]"

@@ -112,6 +112,18 @@ def readEffect : Effect where
   toJson := fun _ => []
   ofJson := unitOfJson
   display := fun _ => ["authenticated read; no resource write"]
+  member := some fun _ _ _ => some []
+  memberReadsStore := false
+  member_exact := by
+    intro f stated ctx op store ps patch answered sem
+    cases stated
+    cases answered
+    exact (readSem_ok (show readSem ctx op store = .ok ps from sem)).1
+  member_tail := fun _ _ _ _ _ _ _ => rfl
+  member_blind := by
+    intro _ f stated ctx op left right
+    cases stated
+    rfl
   viewDemand := fun want _ _ before after => ContentResource.projectDemand want before after ⟨[]⟩
   viewDemand_eq := fun want _ _ before after => ContentResource.projectDemand_eq want before after ⟨[]⟩
   unpack_pack := fun _ _ => rfl
@@ -140,6 +152,15 @@ def readEffect : Effect where
   view_unjoint := fun _ _ before after => JointSlots.contentProject_unjoint before after ⟨[]⟩
 
 theorem read_observeOnly (op : Unit) : readEffect.observeOnly op = true := rfl
+
+/-- **The content read's member patch is complete**: wherever the semantics admits the read, the
+member is shown exactly its patch (the empty one). The read pins its root at every operation. -/
+theorem read_member_complete (ctx : EffectCtx) (op : Unit) (store : Store Hyperdocument.layout)
+    (ps : Patch Hyperdocument.layout) (admitted : readEffect.spec.sem ctx op store = .ok ps) :
+    readEffect.spec.commutes op = false ∧ readEffect.memberPatch ctx.signed op store = .ok ps := by
+  have empty := (readSem_ok (show readSem ctx op store = .ok ps from admitted)).1
+  subst empty
+  exact ⟨rfl, rfl⟩
 
 /-! ## The whole kind definition read -/
 
@@ -223,6 +244,18 @@ def kindReadEffect : Effect where
   toJson := fun _ => []
   ofJson := unitOfJson
   display := fun _ => ["authenticated whole kind definition read; no resource write"]
+  member := some fun _ _ _ => some []
+  memberReadsStore := false
+  member_exact := by
+    intro f stated ctx op store ps patch answered sem
+    cases stated
+    cases answered
+    exact (kindReadSem_ok (show kindReadSem ctx op store = .ok ps from sem)).1
+  member_tail := fun _ _ _ _ _ _ _ => rfl
+  member_blind := by
+    intro _ f stated ctx op left right
+    cases stated
+    rfl
   unpack_pack := fun _ _ => rfl
   pack_unpack := by
     intro kind packed cell selected
@@ -249,5 +282,16 @@ def kindReadEffect : Effect where
   view_unjoint := fun _ _ before _ => WorldPrototypeConstruction.observeProject_unjoint before
 
 theorem kindRead_observeOnly (op : Unit) : kindReadEffect.observeOnly op = true := rfl
+
+/-- **The kind read's member patch is complete**: wherever the semantics admits the read, the
+member is shown exactly its patch (the empty one). The read pins its root at every operation. -/
+theorem kindRead_member_complete (ctx : EffectCtx) (op : Unit)
+    (store : Store WorldKindCell.definitionLayout) (ps : Patch WorldKindCell.definitionLayout)
+    (admitted : kindReadEffect.spec.sem ctx op store = .ok ps) :
+    kindReadEffect.spec.commutes op = false ∧
+      kindReadEffect.memberPatch ctx.signed op store = .ok ps := by
+  have empty := (kindReadSem_ok (show kindReadSem ctx op store = .ok ps from admitted)).1
+  subst empty
+  exact ⟨rfl, rfl⟩
 
 end Minidregg.Kernel.DeclaredResourceController

@@ -431,6 +431,8 @@ footprint is never compared). -/
 def citedGhost : DeclaredResourceController.Effect :=
   { DeclaredResourceController.citedEffect with
     spec := { DeclaredResourceController.citedSpec with sem := fun _ _ _ => .ok [] }
+    member := none
+    member_exact := by intro _ stated; cases stated
     observes_silent := by
       intro ctx op s ps _ emitted
       exact (Except.ok.inj emitted).symm

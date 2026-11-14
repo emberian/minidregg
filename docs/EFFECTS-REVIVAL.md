@@ -157,18 +157,70 @@ either); `sourceReadOf` and an opening's source still find the read by `payload 
   (`PrepareProofs.lean`) says it of every registered effect at every role its declaration does
   not accept, `ReadRoles` that the two reads accept an object and nothing else.
 * Thin consent: a registered observation is displayed view-less only when it commutes
-  (`registeredRead`). One that pins its root has the empty member patch and goes through
-  `checkOpened` at the signed root like every hand arm (`memberPatch`, `Supported`,
-  `computeTarget_root` by `Effect.compute_pinned`); `pinned_read_not_viewless` names the two.
-  A member signing a `read` or a `kindRead` is shown what it was shown before.
+  (`registeredRead`). One that pins its root goes through `checkOpened` at the signed root like
+  every hand arm; `pinned_read_not_viewless` names the two. A member signing a `read` or a
+  `kindRead` is shown what it was shown before.
 * `Host/SourceAgreementJson.lean` reads `kindRead` now (through the registry), as it came to
   read `fieldRead`.
 
-**Next**, the remaining codes: `kindDefinition` (5), `append` (2, needs a fresh-cell output),
-`world` (4), `scalar` (0), `computeFunding` (6), `moneyConsent` (8). The three writes thin consent
-displays today (`scalar`, `world`, `kindDefinition`) need the declaration to say which part of
-its patch the member can compute from the signed operation and the served store, so that
-`memberPatch` reads it from the registry: that field is the next change to `Effect`.
+**The member patch is the declaration's** (`Effect.member`, `Kernel/ResourceEffect.lean`). What
+thin consent shows for a registered operation is read from its declaration by ONE rule; thin
+consent has no per-effect arm.
+
+* `MemberCtx` is the signed part of `EffectCtx` (signer, nonce, the target's role, id and
+  capability); `EffectCtx.signed` projects it. No snapshot, no height, no operation id, no other
+  cell.
+* `Effect.member : Option (MemberCtx → O → Store L → Option (Patch L))`, default `none`. Outer
+  `none`: the effect's patch reads something neither signed nor served (content: the authority's
+  policy coordinates and the height); thin consent refuses it by name (`unsupportedPayload`).
+  Inner `none`: the operation does not apply to the served store (`patchRefused`).
+* Two laws on the declaration, vacuous at `none`: `member_exact` (wherever the member patch and
+  the semantics both answer, they answer the same patch) and `member_tail` (the rotate writes
+  only `rotated` addresses).
+* `Effect.memberReadsStore` (default `true`) with `member_blind`: a member patch declared not to
+  read the store is the same over any two stores. Thin consent computes one that does read it
+  only from a view that seals nothing (`patchReadsPre`); the design message did not have this
+  field, and the reads need it (they are signed under field-scoped grants).
+* **The rule** (`Effect.memberPatch`): shown iff the declaration states a member patch and the
+  operation pins its root (`commutes op = false`). `NativeThinConsent.memberPatch`, `Supported`,
+  `KernelOwned` (a registered target's kernel-owned addresses are its `rotated` ones) and
+  `patchReadsPre` read it. `read` and `kindRead` state `some fun _ _ _ => some []` and lost
+  their special case; a commuting observation stays view-less.
+* **`MemberPatchKeystone`** (`Kernel/NativeThinConsent.lean`, proved; it replaces
+  `targetPatch_split`): for every target, hand arm or registered, whenever
+  `computeTarget … = .ok post` and `memberPatch command target pre.logical = .ok patch`, there is
+  a tail with `targetPatch … = patch ++ tail` that writes only `KernelOwned` addresses. The new
+  premise is the receiver's admission: a patch derived from a semantics exists only where the
+  semantics answers. `opened_display_is_commit` consumes it with the prepared target's own
+  evidence. Generic half: `Effect.member_split`.
+* **Shown, then refused, is intended.** A member patch may answer where the receiver's semantics
+  refuses (a semantics may read the authority cell or the height; no member is served either).
+  Nothing commits then. What a member consents to is "this post, or no change".
+  On the deployed Host this order is rare: the Host runs the semantics when it PREPARES the plan,
+  before it proposes anything to sign, and the signed root pins the cell. So a member is shown a
+  post only for an operation the semantics already admitted at that root, and a later refusal by
+  the semantics needs an input outside the pinned cell to move between prepare and admission
+  (the authority cell, the height). Journey THIN row SR exercises the common order: a scalar
+  write that creates an undeclared field is refused at prepare (`undeclared-field`, phase
+  prepare), no plan reaches the consent provider, nothing is shown or signed, and the next
+  proposal names the same root. A row for the rare order (a sealed call whose authority input
+  moves before it is retried) does not exist; S1 is its header analogue (the root moves:
+  `stale-target`).
+* Teeth: `MemberPatchUnstatedRefused` (no stated patch: refused under the declaration's name at
+  every store; content is one), `MemberPatchCommutingRefused` (a commuting operation is refused
+  whatever it states), both proved; executed in `Assurance/MemberPatchPoles.lean` (a commuting
+  ghost of the content read that states the read's member patch is refused `commutes`).
+  Premise inhabitation: `targetCtx_signed` (the member's context is the signed part of the
+  receiver's, by `rfl`).
+* Each declaration that states a member patch has a completeness theorem beside it, so the
+  patch cannot be safe by answering `none`: `read_member_complete`, `kindRead_member_complete`
+  (where the semantics admits, the member is shown exactly its patch).
+* No refusal text moved. One is new and unreachable on today's registry: "… a commuting
+  operation signs no root to display a post at" (an effect that states a member patch and
+  commutes).
+
+**Next**, the remaining codes: `kindDefinition` (5), `world` (4), `scalar` (0), `append` (2, needs
+a fresh-cell output), `computeFunding` (6), `moneyConsent` (8).
 
 **The payload's JSON has one reader** (`Kernel/ResourcePayloadJson.lean`, `payloadOfJson`). The
 grammar of the hand-armed payloads (`action`, `streamRef`, the world descriptor, definition and

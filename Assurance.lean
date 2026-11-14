@@ -135,6 +135,7 @@ import Assurance.SheetLaw  -- docs/MUD.md §5 item 6: the literal law.sheet as a
 import Assurance.ItemLaw  -- docs/MUD.md §5 item 6: no_dupe_unique over the literal law.item (holder or referee writes; the referee never moves a held item; a holder who never writes keeps it, by induction over the accepted log), kernel_holder_or_referee over CheckedLeg; the law alone admits two concurrent gives, the durable CAS refuses the second
 import Assurance.CitedLand  -- the first consumer of cited reads and joint identity: the fleet verdict law (written once, signer = producer, a result needs a red control) and the branch law (a head moves only citing a passing verdict born under the verdict room under the verdict law, whose read set is the cited footprint's digest); land_footprint_scenario on `citedRead`: admitted, refused naming every moved field, admitted again after the values move back
 import Assurance.RegistryRefusalPoles  -- executed: command bytes with an unread payload tag are refused by that tag's name; a cited read's `citedStale` prints the fields that moved
+import Assurance.MemberPatchPoles  -- executed: the member patch rule on the deployed declarations: the two root-pinning reads are shown the empty patch, content and the cited read are refused `unstated`, a commuting ghost of the read stating a member patch is refused `commutes`
 import Assurance.KeyPreRotationAudit
 
 -- Current member-admin / delegated-manager contracts and executable authoring poles.

@@ -30,12 +30,25 @@ salted opening of its root (one item per entry, an opened entry or a sealed leaf
 recomputes the root from the opening alone and checks it is the root the signed command
 names (refusing `servedRootMismatch` otherwise), checks the packed cell is exactly the store
 of the opened entries (`openingMismatch`), and runs `memberPatch` on that store. That is the
-part of `targetPatch` whose inputs are all signed or served (`targetPatch_split`). A payload
+part of `targetPatch` whose inputs are all signed or served (`MemberPatchKeystone`). A payload
 whose patch has any other input (content, which reads the authority snapshot's policy
 coordinates and the height; a stream append, which records the height; money and compute
 legs, which write the shared Book) is refused by name. It is not displayed with a default.
 The full-peer provider still covers those. World and kind-definition payloads, whose patches
 read the pre-state, require an opening that seals nothing (a full-scope view).
+
+A registered effect has no arm here. Its declaration says whether a member can compute its
+patch (`Effect.member`), and ONE rule reads it: a registered operation is displayed from its
+served view iff its declaration states a member patch and the operation pins its root
+(`Effect.memberPatch`). No stated patch is refused by name (`MemberPatchUnstatedRefused`); a
+commuting operation signs no root and is refused whatever it states
+(`MemberPatchCommutingRefused`); a commuting observation is displayed without a view
+(`registeredRead`). The two root-pinning reads state the empty patch.
+
+A member patch may be shown where the receiver's semantics then refuses (the semantics may read
+the authority cell or the height, which no member is served). That is intended: nothing commits,
+and `MemberPatchKeystone` says so by its premise instead of defaulting a refused patch to the
+empty one.
 
 ## Theorem
 
@@ -136,8 +149,23 @@ inductive Refusal where
   | openingMismatch (target : Nat)
   deriving DecidableEq, Repr
 
+/-- What a member signs of a registered effect's context (`MemberCtx`): the command's signer
+and nonce, the target's role, id and capability. -/
+def memberCtxOf (command : Command) (target : Target) : MemberCtx :=
+  ⟨command.subject, command.nonce, target.kind, target.target, target.capability⟩
+
+/-- **Premise inhabitation of the member patch.** The context a member computes its patch under
+is the signed part of the context the receiver's semantics runs under, for every snapshot,
+profile and height: no receiver-side input reaches a member patch. -/
+theorem targetCtx_signed (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) :
+    (targetCtx snapshot semantics ambient command target.kind target.target target.capability
+      target.observeCapability target.audienceEpoch target.audienceRoster).signed =
+      memberCtxOf command target := rfl
+
 /-- The part of a target's patch that the member authored: every input is the
-signed command or the served pre-state. -/
+signed command or the served pre-state. A registered operation's is its declaration's
+(`Effect.memberPatch`: the declaration states a member patch and the operation pins its root). -/
 def memberPatch (command : Command) (target : Target) (pre : Store target.layout) :
     Except Refusal (Patch target.layout) := by
   cases target with
@@ -156,36 +184,99 @@ def memberPatch (command : Command) (target : Target) (pre : Store target.layout
           | some patch => .ok patch
           | none => .error (.patchRefused id)
     | registered code op =>
-        -- A registered observation that pins its root (the content read, the kind read) is
-        -- displayed from its served opening and writes nothing. One that commutes is displayed
-        -- without a view (`registeredRead`) and never reaches here; a registered write has no
-        -- member patch here yet.
-        exact if (effectAt code.toNat).observeOnly op = true ∧
-            (effectAt code.toNat).spec.commutes op = false then .ok []
-          else .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
+        -- The one rule: displayed from the served view iff the declaration states a member
+        -- patch and the operation pins its root. An observation that commutes is displayed
+        -- without a view (`registeredRead`) and never reaches here.
+        exact match (effectAt code.toNat).memberPatch ⟨command.subject, command.nonce, kind, id, capability⟩ op pre with
+          | .ok patch => .ok patch
+          | .error .unstated => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
+          | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
+          | .error .inapplicable => .error (.patchRefused id)
     | append _ => exact .error (.unsupportedPayload id "append: records the admission height")
     | computeFunding _ => exact .error (.unsupportedPayload id "compute funding: writes the shared Book")
     | moneyConsent _ => exact .error (.unsupportedPayload id "money: writes the shared Book")
 
+/-- A registered target's member patch is its declaration's, refusals renamed. -/
+theorem memberPatch_registered_ok {command : Command} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {root : Digest} {code : UInt8}
+    {op : (effectAt code.toNat).O} {observe : Option CapabilityId} {audienceEpoch : Option Nat}
+    {audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster}
+    {pre : Store (effectAt code.toNat).L} {patch : Patch (effectAt code.toNat).L}
+    (member : memberPatch command ⟨kind, id, capability, version, root, .registered code op,
+      observe, audienceEpoch, audienceRoster⟩ pre = .ok patch) :
+    (effectAt code.toNat).memberPatch ⟨command.subject, command.nonce, kind, id, capability⟩ op pre =
+      .ok patch := by
+  change (match (effectAt code.toNat).memberPatch ⟨command.subject, command.nonce, kind, id, capability⟩ op pre with
+    | .ok patch => Except.ok patch
+    | .error .unstated => .error (Refusal.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
+    | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
+    | .error .inapplicable => .error (.patchRefused id)) = .ok patch at member
+  cases answered : (effectAt code.toNat).memberPatch ⟨command.subject, command.nonce, kind, id, capability⟩ op pre with
+  | ok found => rw [answered] at member; exact congrArg _ (Except.ok.inj member)
+  | error refusal => rw [answered] at member; cases refusal <;> cases member
+
 /-- The addresses the kernel writes from an input the member did not sign: a
-scalar target's blinding ratchet (admission height). -/
+scalar target's blinding ratchet (admission height), a registered effect's rotated addresses
+(`EffectSpec.rotated`: where its declaration's rotate may write). -/
 def KernelOwned (target : Target) (address : Address target.layout) : Prop := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar _ => exact address = DeclaredEffectCell.blinding.address
+    | registered code _ => exact (effectAt code.toNat).spec.rotated address = true
     | _ => exact False
 
-/-- **The split.** Whatever the authority snapshot and admission height, a
-supported target's patch is the member patch followed by a tail that writes only
-kernel-owned addresses. -/
-theorem targetPatch_split (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
-    (command : Command) (target : Target) (pre : TargetCell target) (patch : Patch target.layout)
-    (member : memberPatch command target pre.logical = .ok patch) :
+/-- **Keystone: the member patch is the receiver's patch.** For every target, hand arm or
+registered: whenever the receiver's computation admits the target at a loaded cell and the member
+patch answers at that cell's store, the receiver's patch is the member's followed by a tail that
+writes only kernel-owned addresses, whatever the authority snapshot and admission height.
+
+The first premise is what a patch derived from a semantics needs: a semantics may refuse where
+the member patch answers (its refusals may read what the member does not: the authority cell,
+the height). Then nothing commits. A member who is shown a post and signs it has consented to
+that post or to no change; a refusal is never a different post. -/
+def MemberPatchKeystone : Prop :=
+  ∀ (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) (post : target.Outcome)
+    (patch : Patch target.layout),
+    computeTarget snapshot semantics ambient command target pre = .ok post →
+    memberPatch command target pre.logical = .ok patch →
     ∃ tail : Patch target.layout,
       targetPatch snapshot semantics ambient command target pre = patch ++ tail ∧
       ∀ (store : Store target.layout) (address : Address target.layout),
-        ¬ KernelOwned target address → Patch.run store tail address = store address := by
+        ¬ KernelOwned target address → Patch.run store tail address = store address
+
+/-- **Teeth, by name.** A registered operation whose declaration states no member patch is
+refused `unsupportedPayload` under its declaration's name at every store and every command,
+never displayed with a default; the content write (code 1) is one. -/
+def MemberPatchUnstatedRefused : Prop :=
+  (∀ (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+      (version : Nat) (root : Digest) (code : UInt8) (op : (effectAt code.toNat).O)
+      (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+      (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+      (pre : Store (effectAt code.toNat).L),
+    (effectAt code.toNat).member = none →
+    memberPatch command ⟨kind, id, capability, version, root, .registered code op, observe,
+        audienceEpoch, audienceRoster⟩ pre =
+      .error (.unsupportedPayload id ((effectAt code.toNat).name ++
+        ": a registered write is not displayed from a served view"))) ∧
+  (effectAt contentCode.toNat).member = none
+
+/-- **Teeth, the root.** A registered operation that commutes is refused `unsupportedPayload`
+at every store, whether or not its declaration states a member patch: a display is a post at a
+signed root, and a commuting operation signs none. -/
+def MemberPatchCommutingRefused : Prop :=
+  ∀ (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (version : Nat) (root : Digest) (code : UInt8) (op : (effectAt code.toNat).O)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : Store (effectAt code.toNat).L),
+    (effectAt code.toNat).spec.commutes op = true →
+    ∃ what, memberPatch command ⟨kind, id, capability, version, root, .registered code op, observe,
+        audienceEpoch, audienceRoster⟩ pre = .error (.unsupportedPayload id what)
+
+theorem memberPatchKeystone : MemberPatchKeystone := by
+  intro snapshot semantics ambient command target pre post patch computed member
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
@@ -216,20 +307,48 @@ theorem targetPatch_split (snapshot : AuthoritySnapshot) (semantics : Digest) (a
           exact (List.append_nil _).symm
         · cases member
     | registered code op =>
-        simp only [memberPatch] at member
-        split at member
-        · rename_i pinned
-          simp only [Except.ok.injEq] at member
-          subst member
-          refine ⟨[], ?_, fun _ _ _ => rfl⟩
-          rw [targetPatch_observeOnly snapshot semantics ambient command _ pre pinned.1]
-          rfl
-        · cases member
+        have computed' : ((effectAt code.toNat).compute code.toNat
+            (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+              audienceRoster) version root op pre).mapError Reject.ofDispatch = .ok post := computed
+        cases dispatched : (effectAt code.toNat).compute code.toNat
+            (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+              audienceRoster) version root op pre with
+        | error refusal => rw [dispatched] at computed'; cases computed'
+        | ok computedPost =>
+          obtain ⟨split, _, frame⟩ := (effectAt code.toNat).member_split dispatched
+            (memberPatch_registered_ok member)
+          exact ⟨_, split, fun store address owned =>
+            frame store address (Bool.eq_false_iff.mpr owned)⟩
     | append _ => simp [memberPatch] at member
     | computeFunding _ => simp [memberPatch] at member
     | moneyConsent _ => simp [memberPatch] at member
 
-#assert_axioms targetPatch_split
+theorem memberPatch_unstated_refused : MemberPatchUnstatedRefused := by
+  refine ⟨?_, rfl⟩
+  intro command kind id capability version root code op observe audienceEpoch audienceRoster pre
+    unstated
+  change (match (effectAt code.toNat).memberPatch ⟨command.subject, command.nonce, kind, id, capability⟩ op pre with
+    | .ok patch => Except.ok patch
+    | .error .unstated => .error (Refusal.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
+    | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
+    | .error .inapplicable => .error (.patchRefused id)) = _
+  rw [(effectAt code.toNat).memberPatch_unstated unstated]
+
+theorem memberPatch_commuting_refused : MemberPatchCommutingRefused := by
+  intro command kind id capability version root code op observe audienceEpoch audienceRoster pre
+    free
+  obtain ⟨refusal, refused, which⟩ := (effectAt code.toNat).memberPatch_commuting free
+    ⟨command.subject, command.nonce, kind, id, capability⟩ pre
+  change ∃ what, (match (effectAt code.toNat).memberPatch ⟨command.subject, command.nonce, kind, id, capability⟩ op pre with
+    | .ok patch => Except.ok patch
+    | .error .unstated => .error (Refusal.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
+    | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
+    | .error .inapplicable => .error (.patchRefused id)) = .error (.unsupportedPayload id what)
+  rw [refused]
+  rcases which with rfl | rfl <;> exact ⟨_, rfl⟩
+
+#assert_axioms memberPatchKeystone memberPatch_unstated_refused memberPatch_commuting_refused
+#assert_axioms targetCtx_signed memberPatch_registered_ok
 
 /-- **A payload with an unsigned input is refused by name, never displayed
 with a default.** -/
@@ -249,7 +368,7 @@ def Supported (target : Target) : Prop :=
   match target.payload with
   | .scalar _ | .world _ | .kindDefinition _ => True
   | .registered code op =>
-      (effectAt code.toNat).observeOnly op = true ∧ (effectAt code.toNat).spec.commutes op = false
+      (effectAt code.toNat).spec.commutes op = false ∧ (effectAt code.toNat).member.isSome = true
   | _ => False
 
 theorem memberPatch_supported (command : Command) (target : Target) (store : Store target.layout)
@@ -259,11 +378,9 @@ theorem memberPatch_supported (command : Command) (target : Target) (store : Sto
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | registered code op =>
-        simp only [memberPatch] at member
-        split at member
-        · rename_i pinned
-          exact pinned
-        · cases member
+        obtain ⟨pinned, f, stated, _⟩ :=
+          (effectAt code.toNat).memberPatch_ok (memberPatch_registered_ok member)
+        exact ⟨pinned, by rw [stated]; rfl⟩
     | _ => simp_all [memberPatch, Supported]
 
 /-- **The executor binds the signed root.** Every payload thin consent displays
@@ -301,7 +418,7 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
             (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
               audienceRoster) version root op pre with
         | error refusal => rw [dispatched] at computed'; cases computed'
-        | ok computedPost => exact Effect.compute_pinned _ dispatched supported.2
+        | ok computedPost => exact Effect.compute_pinned _ dispatched supported.1
     | append _ => exact supported.elim
     | computeFunding _ => exact supported.elim
     | moneyConsent _ => exact supported.elim
@@ -359,13 +476,16 @@ def servedOpening (target : Target) (view : List UInt8) :
   | some (_, packedBytes, _, (frame, items), _) => .ok (packedBytes, frame, items)
 
 /-- Payloads whose member patch is computed from the pre-state (`WorldKindCell.preparePatch`,
-`prepareDefinition`). World and kind-definition payloads require an opening that seals nothing
+`prepareDefinition`; a registered effect whose declaration states a member patch that reads the
+store, `Effect.memberReadsStore`). They require an opening that seals nothing
 (a full-scope view): a member cannot check a patch computed from entries it cannot see, so a
 grant narrowed by field scope is refused for them (`pre_reading_sealed_refused`). Every other
 payload's member patch is the command's alone (`memberPatch_pre_independent`). -/
 def patchReadsPre (target : Target) : Bool :=
   match target.payload with
   | .world _ | .kindDefinition _ => true
+  | .registered code _ =>
+      (effectAt code.toNat).member.isSome && (effectAt code.toNat).memberReadsStore
   | _ => false
 
 /-- **Thin consent's check of one served view.** The frame is the target's store frame; the
@@ -779,7 +899,20 @@ theorem memberPatch_pre_independent (command : Command) (target : Target)
     memberPatch command target right = memberPatch command target left := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
-    cases payload <;> simp_all [patchReadsPre, memberPatch]
+    cases payload with
+    | registered code op =>
+        change (match (effectAt code.toNat).memberPatch ⟨command.subject, command.nonce, kind, id, capability⟩ op right with
+          | .ok patch => Except.ok patch
+          | .error .unstated => .error (Refusal.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
+          | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
+          | .error .inapplicable => .error (.patchRefused id)) =
+          (match (effectAt code.toNat).memberPatch ⟨command.subject, command.nonce, kind, id, capability⟩ op left with
+          | .ok patch => Except.ok patch
+          | .error .unstated => .error (Refusal.unsupportedPayload id ((effectAt code.toNat).name ++ ": a registered write is not displayed from a served view"))
+          | .error .commutes => .error (.unsupportedPayload id ((effectAt code.toNat).name ++ ": a commuting operation signs no root to display a post at"))
+          | .error .inapplicable => .error (.patchRefused id))
+        rw [(effectAt code.toNat).memberPatch_blind reads _ op right left]
+    | _ => simp_all [patchReadsPre, memberPatch]
 
 theorem entries_keys_nodup {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) :
     ((StoreCodec.entries wire store).map Sigma.fst).Nodup := by
@@ -982,7 +1115,8 @@ theorem opened_display_is_commit : OpenedDisplayIsCommitStatement := by
       rw [← same]
       exact member
   obtain ⟨tail, split, frameTail⟩ :=
-    targetPatch_split snapshot semantics ambient command target prepared.pre patch memberActual
+    memberPatchKeystone snapshot semantics ambient command target prepared.pre prepared.post patch
+      prepared.candidate.modeEvidence.down memberActual
   have actualValid : Patch.ValidFrom prepared.pre.logical patch := by
     have whole := prepared.candidate.validated.valid
     change Patch.ValidFrom prepared.pre.logical
@@ -1306,7 +1440,7 @@ theorem honest_content_read_view_accepted : HonestContentReadViewAcceptedStateme
     exact materialize_logical _ _
   refine ⟨Patch.run narrowed.logical [], ?_⟩
   rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
-    (decode_narrowed fields _) selected ?opened (by simp [patchReadsPre, target])]
+    (decode_narrowed fields _) selected ?opened (by rw [show patchReadsPre target = false from rfl]; simp)]
   · show (if Patch.ValidFrom narrowed.logical [] then _ else _) = _
     rw [if_pos (show Patch.ValidFrom narrowed.logical [] from trivial)]
   · show (StoreCodec.entries HyperdocumentCell.contentWire narrowed.logical).map
@@ -1331,7 +1465,7 @@ theorem honest_kind_read_view_accepted : HonestKindReadViewAcceptedStatement := 
     exact materialize_logical _ _
   refine ⟨Patch.run narrowed.logical [], ?_⟩
   rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
-    (decode_narrowed fields _) selected ?opened (by simp [patchReadsPre, target])]
+    (decode_narrowed fields _) selected ?opened (by rw [show patchReadsPre target = false from rfl]; simp)]
   · show (if Patch.ValidFrom narrowed.logical [] then _ else _) = _
     rw [if_pos (show Patch.ValidFrom narrowed.logical [] from trivial)]
   · show (StoreCodec.entries WorldKindCell.definitionWire narrowed.logical).map
@@ -1354,7 +1488,7 @@ theorem honest_content_stream_write_named : HonestContentStreamWriteNamedStateme
       rw [← Option.some.inj selected]
       exact materialize_logical _ _
     rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
-      (decode_narrowed fields _) selected ?openedContent (by simp [patchReadsPre, target])]
+      (decode_narrowed fields _) selected ?openedContent (by rw [show patchReadsPre target = false from rfl]; simp)]
     · exact ⟨_, rfl⟩
     · show (StoreCodec.entries HyperdocumentCell.contentWire narrowed.logical).map
           (StoreCodec.entryBytes HyperdocumentCell.contentWire) =
