@@ -1646,12 +1646,16 @@ def checkInvokeThin (deployment : Deployment) (semantics : Digest) (federation :
   let marker := operationMarker domain semantics command
   let targets := command.targets
   let observeCount := if command.requiresObservation then targets.length else 0
-  unless plan.slots.length = targets.length + observeCount + 1 do .error .slotShape
+  unless plan.slots.length = command.signedTargetCount + observeCount + 1 do .error .slotShape
   unless views.length = targets.length do .error (.viewMissing (targets.length))
   let indexed := (List.range targets.length).zip targets
-  -- write and read legs: role 4, then observation legs: role 8, then the authority leg: role 1
+  -- write legs: role 4, one per target that is not an observe-only read, at the target's own
+  -- index (an observe-only read signs its observation leg alone: the Host's plan lays no role 4
+  -- slot for it, `NativeHost` and `Command.signedTargetCount`); then observation legs: role 8,
+  -- one per target; then the authority leg: role 1
   let expected : List (Nat × Nat × Σ kind, Request kind) :=
-    indexed.map (fun (i, target) => (4, i, ⟨target.kind, legValues domain semantics federation command target⟩)) ++
+    (indexed.filter fun (_, target) => !target.observeOnly).map
+      (fun (i, target) => (4, i, ⟨target.kind, legValues domain semantics federation command target⟩)) ++
     (if command.requiresObservation then
       indexed.map (fun (i, target) => (8, i, ⟨target.kind, observeValues domain semantics federation command target⟩))
     else []) ++
