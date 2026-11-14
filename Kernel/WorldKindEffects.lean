@@ -370,7 +370,7 @@ def worldEffect : Effect where
   member_tail := fun _ _ _ _ _ _ _ => rfl
   footprint := some fun pre post =>
     (WorldKindProjection.footprint pre post).getD ⟨{.body}, fun _ => 0⟩
-  runWrites := some fun pre program index actions => WorldKindMethods.writes pre program index actions
+  runWrites := some fun pre program index _ actions => WorldKindMethods.writes pre program index actions
   authors := fun actions => !actions.isEmpty
   unpack_pack := fun _ _ => rfl
   pack_unpack := by

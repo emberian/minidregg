@@ -124,8 +124,8 @@ def readEffect : Effect where
     intro _ f stated ctx op left right
     cases stated
     rfl
-  viewDemand := fun want _ _ before after => ContentResource.projectDemand want before after ⟨[]⟩
-  viewDemand_eq := fun want _ _ before after => ContentResource.projectDemand_eq want before after ⟨[]⟩
+  viewDemand := fun want _ _ _ before after => ContentResource.projectDemand want before after ⟨[]⟩
+  viewDemand_eq := fun want _ _ _ _ before after => ContentResource.projectDemand_eq want before after ⟨[]⟩
   unpack_pack := fun _ _ => rfl
   pack_unpack := by
     intro kind packed cell selected

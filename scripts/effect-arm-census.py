@@ -14,6 +14,14 @@ that returns one). Inside such a declaration an arm on a STRING equal to a const
 (`| "scalar" =>`, the JSON `type` a request decoder dispatches on) is a hand arm too, counted in
 its own column.
 
+A registered kind may have a PATTERN: a `@[match_pattern] abbrev Payload.<name>` of
+`.registered <code> _` (`Payload.scalar`, `Payload.content`), for code that reads particular
+data out of a signed operation of that one kind (a provider generation out of scalar actions).
+An arm on a pattern is a READER when its match names no other payload kind (it answers for that
+kind and falls through for every other), and a DISPATCH ARM when its match also names another
+kind: that is a function by cases over payload kinds, which a bound code must not have. The
+table lists both per pattern; the dispatch column of a bound code is zero.
+
 `registered` is the open constructor: its arms are the registry's (each reads the declaration
 `effectAt code`), counted on their own line and never as a kind's hand arms. A kind with no
 constructor (a declared effect, as the cited read) has no hand arm by construction; the table
@@ -28,6 +36,7 @@ sites = "--sites" in sys.argv
 src = open(os.path.join(root, "Kernel/ResourceTransaction.lean")).read()
 m = re.search(r"^inductive Payload where\n(.*?)^\s*deriving", src, re.S | re.M)
 ctors = re.findall(r"^\s*\|\s*(\w+)", m.group(1), re.M)
+patterns = re.findall(r"^@\[match_pattern\] abbrev Payload\.(\w+)", src, re.M)
 
 head = re.compile(r"(\bcases\b[^\n]*\bpayload\b)|(\bmatch\b[^\n]*\bpayload\b[^\n]*\bwith\b)|(:\s*\(?[^\n]*\bPayload\b\s*→)|(→\s*Payload\s*→)|(\bPayload\b\s*(:=|where)\s*(do)?\s*$)")
 arm = re.compile(r"^\s*\|")
@@ -35,6 +44,8 @@ decl = re.compile(r"^(?:@\[[^\]]*\]\s*)?(?:private |protected |noncomputable )*(
 
 counts = {c: [] for c in ctors}
 strings = {c: [] for c in ctors}
+readers = {p: [] for p in patterns}
+dispatch = {p: [] for p in patterns}
 for top in ("Kernel", "Compiler", "Host", "Assurance"):
     for dirpath, _, names in os.walk(os.path.join(root, top)):
         for name in names:
@@ -56,6 +67,7 @@ for top in ("Kernel", "Compiler", "Host", "Assurance"):
                     continue
                 # `cases payload <;> tac` splits without naming a constructor
                 j = i + 1 if not arm.match(line) else i
+                kinds, hits = set(), []
                 while j < len(lines):
                     text = lines[j]
                     if decl.match(text) or text.startswith("/-") or text.startswith("end ") or text.startswith("namespace "):
@@ -69,7 +81,15 @@ for top in ("Kernel", "Compiler", "Host", "Assurance"):
                                 strings[c].append((rel, j + 1))
                             elif re.search(r"(?<![\w.\"])\.?" + c + r"\b(?!\s*:=)(?!\")", pattern):
                                 counts[c].append((rel, j + 1))
+                                if c != "registered":
+                                    kinds.add(c)
+                        for p in patterns:
+                            if re.search(r"(?<![\w.\"])\.?" + p + r"\b(?!\s*:=)(?!\")", pattern):
+                                kinds.add(p)
+                                hits.append((p, rel, j + 1))
                     j += 1
+                for p, f, n in hits:
+                    (readers if kinds == {p} else dispatch)[p].append((f, n))
                 i = max(j, i + 1)
 
 legacy = [c for c in ctors if c != "registered"]
@@ -89,7 +109,14 @@ if "registered" in counts:
         bound = re.search(r"def liveEffects[^\n]*:=\s*\[(.*?)\]", open(reg).read(), re.S)
         for code, decl_name in re.findall(r"\((\d+),\s*(\w+)\)", bound.group(1) if bound else ""):
             print(f"{'code ' + code:<16}{0:>10}{0:>12}{0:>7}   (declared: {decl_name}; no constructor, no hand arm)")
+for p in patterns:
+    print(f"{'pattern ' + p:<16}{len(dispatch[p]):>10}{'':>12}{len({f for f, _ in dispatch[p]}):>7}   (dispatch arms on the pattern; {len(readers[p])} reader arms in {len({f for f, _ in readers[p]})} files)")
 if sites:
+    for p in patterns:
+        for f, n in dispatch[p]:
+            print(f"pattern-dispatch {p}\t{f}:{n}")
+        for f, n in readers[p]:
+            print(f"pattern-reader {p}\t{f}:{n}")
     for c in ctors:
         for f, n in counts[c]:
             print(f"{c}\t{f}:{n}")

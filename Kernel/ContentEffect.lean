@@ -695,9 +695,9 @@ def contentEffect : Effect where
   ofJson := ContentJson.contentOfJson
   display := ContentJson.contentDisplay
   opens := contentOpens
-  viewDemand := fun want _ command before after =>
+  viewDemand := fun want _ _ command before after =>
     ContentResource.projectDemand want before after command
-  viewDemand_eq := fun want _ command before after =>
+  viewDemand_eq := fun want _ _ _ command before after =>
     ContentResource.projectDemand_eq want before after command
   unpack_pack := fun _ _ => rfl
   pack_unpack := by

@@ -3482,10 +3482,10 @@ theorem invokeRejection_eq_audienceTransition (reason : DeclaredResourceControll
   split <;> simp_all
 
 /-- Whether an invocation refusal is a moved target: the executor's
-`computeTarget` (`staleTarget`) or the scalar leg's `prepareCell`. -/
+`computeTarget` (`staleTarget`, the header's refusal for every registered effect and every hand
+arm that pins a root). -/
 def isStaleTarget : DeclaredResourceController.Reject → Bool
   | .staleTarget => true
-  | .scalar .staleTarget => true
   | _ => false
 
 /-- The first target of `command` whose loaded cell's logical root is no longer

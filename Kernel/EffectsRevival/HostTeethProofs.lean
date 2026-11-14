@@ -144,7 +144,7 @@ theorem Handler.unrotated_fire {Ctx Cell : Type} (h : Handler Ctx Cell) {code : 
   have samePack : h.unrotated.pack = h.pack := rfl
   have sameCommutes : h.unrotated.spec.commutes op = h.spec.commutes op := rfl
   rw [sameHeader, sameFresh, sameSelect, samePack, sameCommutes] at ghost
-  cases header : h.header ctx cell with
+  cases header : h.header ctx op cell with
   | error r => rw [header] at fired; cases fired
   | ok u =>
     cases u

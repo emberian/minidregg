@@ -200,12 +200,24 @@ structure Effect : Type 1 where
   cell the transaction must read observe-only and what must hold of that cell as loaded; the
   controller refuses a command one of whose openings does not hold (`openingsRefusal`). -/
   opens : O → List (Nat × (PackedCell Registry → Bool)) := fun _ => []
+  /-- **The fields the operation's guards read**, when its guards are reads the authorizing
+  capability must name: a guard tells its requester whether the guarded field holds the value it
+  named, so a guard over a field the capability does not name would be an equality oracle on
+  that field. `some fields`: the dispatcher's header refuses, before the schema version and the
+  root and before any guard runs, a capability the authority cell does not hold
+  (`capabilityRejected`) and one whose scope does not name every field (`fieldNotNamed`);
+  `Effect.scopeRefusal`. `none` (the default): the header asks nothing of the capability. -/
+  guardFields : O → Option (List CellField) := fun _ => none
   /-- The law's view restricted to the slots a demand names. A declaration whose view is costly
-  computes only what is named (a content cell's summaries); the default filters the whole view. -/
-  viewDemand : (String → Bool) → Revival.Site → O → Store L → Store L → List (String × Int) :=
-    fun want site op before after => (spec.view site op before after).filter fun slot => want slot.1
-  viewDemand_eq : ∀ want site op before after, viewDemand want site op before after =
-    (spec.view site op before after).filter fun slot => want slot.1 := by intros; rfl
+  computes only what is named (a content cell's summaries; a declared cell's pair deltas, which
+  `leads` gates by their leading field); the default filters the whole view. -/
+  viewDemand : (String → Bool) → (Nat → Bool) → Revival.Site → O → Store L → Store L →
+      List (String × Int) :=
+    fun want _ site op before after => (spec.view site op before after).filter fun slot => want slot.1
+  viewDemand_eq : ∀ (want : String → Bool) (leads : Nat → Bool),
+    (∀ a b, want (DeclaredResourceProjection.pairName a b) = true → leads a = true) →
+    ∀ site op before after, viewDemand want leads site op before after =
+      (spec.view site op before after).filter fun slot => want slot.1 := by intros; rfl
   /-- **The member patch**: the operation's patch as a member computes it before signing, from
   the signed part of the context and the store the Host served at the signed root. `none` (the
   default) says this effect's patch reads something that is neither signed nor served (a
@@ -239,9 +251,10 @@ structure Effect : Type 1 where
   `spec.amount`. -/
   footprint : Option (Store L → Store L → Footprint) := none
   /-- **What a run may claim of this operation** (K-RAN): the field writes a re-executed program's
-  product must name, from the loaded store, the program and the target's index. `none` (the
-  default): one write at coordinate 0 holding the operation's canonical bytes. -/
-  runWrites : Option (Store L → Digest → Nat → O → Option (List Eval.FieldWrite)) := none
+  product must name, from the loaded store, the program, the target's index in the command and
+  the target's cell id. `none` (the default): one write at coordinate 0 holding the operation's
+  canonical bytes. -/
+  runWrites : Option (Store L → Digest → Nat → Nat → O → Option (List Eval.FieldWrite)) := none
   /-- Whether the operation authors anything: a world write without actions is admitted and
   changes nothing, and is no one's publication. -/
   authors : O → Bool := fun _ => true
@@ -349,15 +362,82 @@ theorem run_eq_exec (code : Nat) (ctx : EffectCtx) (op : e.O) (s : Store e.L) :
     rw [if_pos (e.complete ctx op s ps sem).1]
     cases (Revival.storeSubstrate e.L).run s (ps ++ e.spec.rotate ctx s) <;> rfl
 
-/-- **The derived computation.** The header (role, schema version, and the expected root unless
-the operation commutes), then the engine's checked executor: the declaration's semantics, the
-frame check and the guarded replay. -/
+/-- **The header's scope gate.** For an operation whose guards are reads (`guardFields`): the
+authorizing capability must be held in the authority cell and its scope must name every field a
+guard reads. It reads the authority cell, the role, the capability and the operation; never the
+target cell, so its answer is the same at every loaded store. -/
+def scopeRefusal (code : Nat) (ctx : EffectCtx) (op : e.O) : Option Revival.DispatchRefusal :=
+  match e.guardFields op with
+  | none => none
+  | some fields =>
+    match CredentialAuthorityState.readCapability ctx.snapshot.cell ctx.kind ctx.capability with
+    | none => some (.capabilityRejected code)
+    | some stored =>
+      if fields.all fun field => decide (CellField.NamedBy stored.head.scope.fields field)
+      then none else some (.fieldNotNamed code)
+
+/-- The scope gate's two refusals, under the code it was asked at. -/
+theorem scopeRefusal_named {code : Nat} {ctx : EffectCtx} {op : e.O}
+    {refusal : Revival.DispatchRefusal} (refused : e.scopeRefusal code ctx op = some refusal) :
+    refusal = .capabilityRejected code ∨ refusal = .fieldNotNamed code := by
+  unfold scopeRefusal at refused
+  split at refused
+  · cases refused
+  · split at refused
+    · exact .inl (Option.some.inj refused).symm
+    · split at refused
+      · cases refused
+      · exact .inr (Option.some.inj refused).symm
+
+theorem scopeRefusal_unscoped {op : e.O} (unscoped : e.guardFields op = none) (code : Nat)
+    (ctx : EffectCtx) : e.scopeRefusal code ctx op = none := by
+  unfold scopeRefusal; rw [unscoped]
+
+/-- **The derived computation.** The header (role, the scope of the operation's guards, schema
+version, and the expected root unless the operation commutes), then the engine's checked
+executor: the declaration's semantics, the frame check and the guarded replay. -/
 def compute (code : Nat) (ctx : EffectCtx) (version : Nat) (root : Digest) (op : e.O)
     (pre : e.Cell) : Except Revival.DispatchRefusal (Store e.L) :=
   if e.spec.accepts ctx.kind = false then .error (.wrongRole code)
-  else if version ≠ e.spec.version then .error (.unsupportedVersion code)
-  else if e.spec.commutes op = false ∧ root ≠ pre.root then .error (.staleTarget code)
-  else e.run code ctx op pre.logical
+  else match e.scopeRefusal code ctx op with
+    | some refusal => .error refusal
+    | none =>
+      if version ≠ e.spec.version then .error (.unsupportedVersion code)
+      else if e.spec.commutes op = false ∧ root ≠ pre.root then .error (.staleTarget code)
+      else e.run code ctx op pre.logical
+
+/-- The computation of an operation the scope gate passes: the role, the schema version, the
+root, the executor. -/
+theorem compute_scoped {code : Nat} {ctx : EffectCtx} {op : e.O}
+    (passed : e.scopeRefusal code ctx op = none) (version : Nat) (root : Digest) (pre : e.Cell) :
+    e.compute code ctx version root op pre =
+      if e.spec.accepts ctx.kind = false then .error (.wrongRole code)
+      else if version ≠ e.spec.version then .error (.unsupportedVersion code)
+      else if e.spec.commutes op = false ∧ root ≠ pre.root then .error (.staleTarget code)
+      else e.run code ctx op pre.logical := by
+  unfold compute; rw [passed]
+
+/-- A scope the gate refuses is refused under an accepted role at every schema version, root and
+loaded cell. -/
+theorem compute_scope_refused {code : Nat} {ctx : EffectCtx} {op : e.O}
+    {refusal : Revival.DispatchRefusal} (accepted : e.spec.accepts ctx.kind = true)
+    (refused : e.scopeRefusal code ctx op = some refusal) (version : Nat) (root : Digest)
+    (pre : e.Cell) : e.compute code ctx version root op pre = .error refusal := by
+  unfold compute
+  rw [if_neg (by rw [accepted]; decide), refused]
+
+/-- An admitted computation passed the scope gate. -/
+theorem compute_ok_scoped {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Digest}
+    {op : e.O} {pre : e.Cell} {post : Store e.L}
+    (ok : e.compute code ctx version root op pre = .ok post) :
+    e.scopeRefusal code ctx op = none := by
+  unfold compute at ok
+  by_cases accepted : e.spec.accepts ctx.kind = false
+  · rw [if_pos accepted] at ok; cases ok
+  rw [if_neg accepted] at ok
+  cases scope : e.scopeRefusal code ctx op with
+  | none => rfl
+  | some refusal => rw [scope] at ok; cases ok
 
 /-- **The derived patch**: the emitted descriptor (the operation's patch, then the rotate). -/
 def patch (ctx : EffectCtx) (op : e.O) (pre : Store e.L) : Patch e.L :=
@@ -381,7 +461,7 @@ theorem compute_ok {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Digest
     e.spec.accepts ctx.kind = true ∧ version = e.spec.version ∧
       ∃ ps, e.spec.sem ctx op pre.logical = .ok ps ∧
         (Revival.storeSubstrate e.L).run pre.logical (ps ++ e.spec.rotate ctx pre.logical) = some post := by
-  unfold compute at ok
+  rw [e.compute_scoped (e.compute_ok_scoped ok)] at ok
   by_cases accepted : e.spec.accepts ctx.kind = false
   · rw [if_pos accepted] at ok; cases ok
   rw [if_neg accepted] at ok
@@ -400,7 +480,7 @@ theorem compute_pinned {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Di
     {pre : e.Cell} {post : Store e.L}
     (ok : e.compute code ctx version root op pre = .ok post)
     (pinned : e.spec.commutes op = false) : root = pre.root := by
-  unfold compute at ok
+  rw [e.compute_scoped (e.compute_ok_scoped ok)] at ok
   by_cases accepted : e.spec.accepts ctx.kind = false
   · rw [if_pos accepted] at ok; cases ok
   rw [if_neg accepted] at ok
@@ -521,19 +601,23 @@ theorem member_split {code : Nat} {ctx : EffectCtx} {version : Nat} {root : Dige
 
 /-- **The engine handler of a declaration**, over the controller's cell universe: what
 `Effects.Revival.Dispatches` is stated over. Its header is the live order: selection (role and
-cell law), the accepted role, the schema version; its freshness is the expected root. -/
+cell law), the accepted role, the scope of the operation's guards, the schema version; its
+freshness is the expected root. -/
 def handler (code : Nat) : Revival.Handler DispatchCtx (PackedCell Registry) where
   S := Revival.storeSubstrate e.L
   O := e.O
   R := e.R
   spec := e.spec.comap DispatchCtx.toEffectCtx
-  header ctx packed :=
+  header ctx op packed :=
     match e.select ctx.deployment ctx.target ctx.kind packed with
     | none => .error (.wrongRole code)
     | some _ =>
       if e.spec.accepts ctx.kind = false then .error (.wrongRole code)
-      else if ctx.version ≠ e.spec.version then .error (.unsupportedVersion code)
-      else .ok ()
+      else match e.scopeRefusal code ctx.toEffectCtx op with
+        | some refusal => .error refusal
+        | none =>
+          if ctx.version ≠ e.spec.version then .error (.unsupportedVersion code)
+          else .ok ()
   fresh ctx packed :=
     match e.select ctx.deployment ctx.target ctx.kind packed with
     | none => true

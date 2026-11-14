@@ -298,6 +298,8 @@ def ofReject (code : Nat) : DeclaredResourceController.Reject → DispatchRefusa
   | .wrongRole => .wrongRole code
   | .unsupportedVersion => .unsupportedVersion code
   | .staleTarget => .staleTarget code
+  | .capabilityRejected => .capabilityRejected code
+  | .fieldNotNamed => .fieldNotNamed code
   | .effect refusal => refusal
   | r => .host code (reprStr r)
 
@@ -328,8 +330,9 @@ def hostTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell :
 
 `Payload` has an open constructor, `registered code op`, whose every arm reads the declaration
 `effectAt code` (`Kernel/ResourceEffectRegistry.lean`). The cited read is bound at code 9 and
-has no constructor and no hand arm, nor has the content write at code 1; codes 0 and 2 to 8 are
-still hand arms.
+has no constructor and no hand arm, nor have the scalar actions at code 0, the content write at
+code 1, the reads at 3 and 7, a world instance's actions at 4 and the kind definition revision at
+5; codes 2, 6 and 8 are still hand arms.
 
 `RegistryKeystone` is `Dispatches` of the DEPLOYED functions (`payloadStream`'s decode,
 `selectTarget`, `computeTarget`, the `targetPatch` validation, `packTarget`, exactly
@@ -354,7 +357,7 @@ def hostRegistry : Registry HostCtx HostCell :=
   DeclaredResourceController.liveRegistry.map fun entry => (entry.1, entry.2.comap dispatchCtxOf)
 
 /-- The payload codes that are still hand arms. -/
-def liveLegacy : List Nat := [0, 2, 6, 8]
+def liveLegacy : List Nat := [2, 6, 8]
 
 /-- **The deployed target dispatch.** A code neither bound nor a hand arm is refused by name;
 every other code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,

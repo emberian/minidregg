@@ -15,6 +15,7 @@ module
 public import Kernel.CitedRead
 public import Kernel.ContentEffect
 public import Kernel.ReadEffects
+public import Kernel.ScalarEffect
 public import Kernel.WorldKindEffects
 
 @[expose] public section
@@ -28,8 +29,8 @@ open Minidregg.Theory.CellRegistry
 set_option autoImplicit false
 
 /-- **The registry**: wire code ↦ declaration. -/
-def liveEffects : List (Nat × Effect) := [(1, contentEffect), (3, readEffect), (4, worldEffect), (5, kindDefinitionEffect),
-  (7, kindReadEffect), (9, citedEffect)]
+def liveEffects : List (Nat × Effect) := [(0, scalarEffect), (1, contentEffect), (3, readEffect),
+  (4, worldEffect), (5, kindDefinitionEffect), (7, kindReadEffect), (9, citedEffect)]
 
 /-- Whether a code is bound. -/
 def registeredCode (code : Nat) : Bool := (liveEffects.lookup code).isSome
@@ -79,6 +80,8 @@ def dispatchRefusalText : Revival.DispatchRefusal → String
   | .guardFailed code => s!"Effect.{effectTitle code}.guardFailed"
   | .unsupportedVersion code => s!"Effect.{effectTitle code}.unsupportedVersion"
   | .staleTarget code => s!"Effect.{effectTitle code}.staleTarget"
+  | .capabilityRejected code => s!"Effect.{effectTitle code}.capabilityRejected"
+  | .fieldNotNamed code => s!"Effect.{effectTitle code}.fieldNotNamed"
   | .host code name => s!"Effect.{effectTitle code}.host {name}"
 
 /-- The one `Repr` of a dispatch refusal: the registry's reading. The Host commits a refusal's
@@ -103,8 +106,7 @@ theorem effectAt_content : effectAt contentCode.toNat = contentEffect := rfl
 
 /-- The legacy payload tags are unbound (what `payloadStream`'s round-trip reads). -/
 theorem legacy_unbound :
-    registeredOctet 0 = false ∧ registeredOctet 2 = false ∧
-    registeredOctet 6 = false ∧ registeredOctet 8 = false := by
+    registeredOctet 2 = false ∧ registeredOctet 6 = false ∧ registeredOctet 8 = false := by
   decide
 
 /-- The content read's payload tag. -/
@@ -117,6 +119,11 @@ abbrev kindReadCode : UInt8 := 7
 
 theorem effectAt_kindRead : effectAt kindReadCode.toNat = kindReadEffect := rfl
 
+/-- The scalar actions' payload tag. -/
+abbrev scalarCode : UInt8 := 0
+
+theorem effectAt_scalar : effectAt scalarCode.toNat = scalarEffect := rfl
+
 /-- The world actions' payload tag. -/
 abbrev worldCode : UInt8 := 4
 
@@ -128,6 +135,8 @@ abbrev kindDefinitionCode : UInt8 := 5
 theorem effectAt_kindDefinition : effectAt kindDefinitionCode.toNat = kindDefinitionEffect := rfl
 
 example : (effectAt citedCode.toNat).O = List FieldRead := rfl
+example : (effectAt scalarCode.toNat).O = List DeclaredActionLowering.Action := rfl
+example : (effectAt scalarCode.toNat).L = EffectDeclaration.effectLayout := rfl
 example : (effectAt kindDefinitionCode.toNat).O = WorldKindCell.Definition := rfl
 example : (effectAt readCode.toNat).O = Unit := rfl
 example : (effectAt kindReadCode.toNat).L = WorldKindCell.definitionLayout := rfl

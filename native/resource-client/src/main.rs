@@ -4406,10 +4406,11 @@ mod tests {
         );
         // A Host that names the clause: the line carries it, the committed detail stays in the JSON.
         let clause = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
-            "clause":"declared-resource-scalar: guard-rejected 0","detail":hex(b"DeclaredResourceScalar.Reject.guardRejected 0")});
+            "clause":"declared-resource-controller: effect: scalar: guard-rejected 0",
+            "detail":hex(b"DeclaredResourceController.Reject.effect (Effect.Scalar.guardRejected 0)")});
         assert_eq!(
             refusal_line(&clause).unwrap(),
-            "refused: operation-rejected: declared-resource-scalar: guard-rejected 0 (phase prepare)"
+            "refused: operation-rejected: declared-resource-controller: effect: scalar: guard-rejected 0 (phase prepare)"
         );
         let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
         assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));

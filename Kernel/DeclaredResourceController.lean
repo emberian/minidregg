@@ -565,7 +565,6 @@ theorem targetProjection_unjoint (subject : SubjectId) (target : Target) (before
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact scalarSlots_unjoint _ _
     | computeFunding funding => exact fundingProject_unjoint funding
     | moneyConsent consent =>
         apply unjoint_append
@@ -1495,7 +1494,7 @@ attribute [irreducible] legPortal portals
 /-! ## Fields (K-FIELDS): a write's footprint against the authorizing scope
 
 A scalar target's fields are its declared state keys' coordinates and its
-values are integers; a content target's fields are `body`/`annotations`, or
+values are integers (`scalarEffect`'s `field` and `amount`); a content target's fields are `body`/`annotations`, or
 `atomsOf low` for an atom (a sub-field of `body`), and it moves no number.  The footprint is computed from the loaded pre-state and the
 computed post-state of the leg, never from the request or the command. -/
 
@@ -1503,7 +1502,6 @@ def targetField (target : Target) : Address target.layout → CellField := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
     | append _ => exact fun _ => .body
     | computeFunding funding => exact fun _ => .balance funding.asset
     | moneyConsent _ => exact fun _ => .body
@@ -1515,7 +1513,6 @@ def targetAmount (target : Target) :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact fun _ value => value
     | append _ => exact fun _ _ => 0
     | computeFunding _ | moneyConsent _ =>
         exact fun _ _ => 0
@@ -1529,7 +1526,6 @@ def targetRatchet (target : Target) : Address target.layout → Bool := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
     | append _ => exact fun _ => false
     | computeFunding _ | moneyConsent _ =>
         exact fun _ => false
@@ -1549,10 +1545,6 @@ def targetFullFootprint (target : Target) (pre post : Store target.layout) : Foo
     | computeFunding funding =>
         exact ⟨if funding.credits = 0 then ∅ else {.balance funding.asset},
           fun field => if field = .balance funding.asset then -(Int.ofNat funding.credits) else 0⟩
-    | scalar actions =>
-      exact ResourceObservationAdmission.footprintOf
-        (changedEffect ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre post)
-        (targetField ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) (targetAmount ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) pre post
     | append action =>
       exact ResourceObservationAdmission.footprintOf
         (changedEffect ⟨kind, id, capability, version, root, .append action, observe, audienceEpoch, audienceRoster⟩ pre post)

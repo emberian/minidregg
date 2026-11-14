@@ -73,21 +73,28 @@ abbrev ComputeFunding := ResourceMoneyWire.FundingConsent
 abbrev computeFundingStream := ResourceMoneyWire.fundingStream
 abbrev MoneyConsent := ResourceMoneyWire.Consent
 
-/-- A target's payload: declared scalar actions, one stream append (the entry's bytes; the
-receiver derives its sequence position and digest), or an operation of a registered effect (a
-content command is the registered operation at code 1, `Payload.content`). -/
+/-- A target's payload: one stream append (the entry's bytes; the receiver derives its sequence
+position and digest), a funding or money consent, or an operation of a registered effect
+(declared scalar actions are the registered operation at code 0, `Payload.scalar`; a content
+command the one at code 1, `Payload.content`). -/
 inductive Payload where
-  | scalar (actions : List DeclaredActionLowering.Action)
   | append (request : StreamCell.Append)
   | computeFunding (funding : ComputeFunding)
   | moneyConsent (consent : MoneyConsent)
   /-- An operation of a registered effect (`Kernel/ResourceEffectRegistry.lean`): the wire code
   and that code's declared operation. Every arm of every function over a payload reads this
   constructor from the declaration `effectAt code`; an unbound code has no operation, so no
-  payload carries one. The content write is code 1, the content read 3, a world instance's
+  payload carries one. Declared scalar actions are code 0, the content write is code 1, the content read 3, a world instance's
   actions 4, the kind definition revision 5, the whole kind definition read 7, the cited read 9. -/
   | registered (code : UInt8) (op : (effectAt code.toNat).O)
   deriving DecidableEq
+
+/-- **Declared scalar actions**: the registered operation at code 0, whose operand is the list of
+guarded field actions (`scalarEffect`). It has no constructor and no dispatch arm; it is a
+pattern for the code that reads particular actions out of a signed scalar operation (a provider
+generation, a grain's four coordinates). -/
+@[match_pattern] abbrev Payload.scalar (actions : List DeclaredActionLowering.Action) : Payload :=
+  .registered 0 actions
 
 /-- **A content payload**: the registered operation at the content write's code. It has no
 constructor and no arm of its own; this names the payload for the code that builds one or reads
@@ -116,7 +123,6 @@ abbrev Payload.kindDefinition (definition : WorldKindCell.Definition) : Payload 
 /-- A registered operation shows as its declaration's name and its canonical bytes. -/
 instance : Repr Payload where
   reprPrec payload prec := match payload with
-    | .scalar actions => Repr.addAppParen ("Payload.scalar " ++ reprArg actions) prec
     | .append request => Repr.addAppParen ("Payload.append " ++ reprArg request) prec
     | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
     | .moneyConsent consent => Repr.addAppParen ("Payload.moneyConsent " ++ reprArg consent) prec
@@ -199,7 +205,6 @@ def Command.requiresObservation (command : Command) : Bool :=
 /-- The payload's bytes: its tag octet, then the operation. A registered payload's tag is its
 code and its operation is encoded by its declaration's own codec. -/
 def payloadEncode : Payload → List UInt8
-  | .scalar actions => 0 :: (StreamCodec.list DeclaredResourceScalar.actionStream).encode actions
   | .append request => 2 :: StreamCell.appendStream.encode request
   | .computeFunding funding => 6 :: computeFundingStream.encode funding
   | .moneyConsent consent => 8 :: ResourceMoneyWire.consentStream.encode consent
@@ -207,9 +212,6 @@ def payloadEncode : Payload → List UInt8
 
 /-- The hand arms' decoder: the payload tags no declaration binds yet. -/
 def legacyPayloadDecode : List UInt8 → Option (Payload × List UInt8)
-  | 0 :: bytes => do
-      let (actions, rest) ← (StreamCodec.list DeclaredResourceScalar.actionStream).decodePrefix bytes
-      some (.scalar actions, rest)
   | 2 :: bytes => do
       let (request, rest) ← StreamCell.appendStream.decodePrefix bytes
       some (.append request, rest)
@@ -240,13 +242,13 @@ def payloadStream : StreamCodec Payload where
       else legacyPayloadDecode (tag :: bytes)
   decodePrefix_encode := by
     intro payload suffix
-    obtain ⟨u0, u2, u6, u8⟩ := legacy_unbound
+    obtain ⟨u2, u6, u8⟩ := legacy_unbound
     cases payload with
     | registered code op =>
         by_cases bound : registeredOctet code = true
         · simp [payloadEncode, bound, StreamCodec.decodePrefix_encode]
         · exact (unbound_elim (by simpa using bound) op).elim
-    | _ => simp [payloadEncode, legacyPayloadDecode, u0, u2, u6, u8,
+    | _ => simp [payloadEncode, legacyPayloadDecode, u2, u6, u8,
         StreamCodec.decodePrefix_encode]
   encode_decodePrefix := by
     intro bytes value suffix decoded
@@ -598,7 +600,6 @@ def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambie
 inductive Reject where
   | malformedCommand | emptyTargets | duplicateTargets | emptyActions | unsupportedVersion
   | missingTarget | wrongRole | staleTarget
-  | scalar (reason : DeclaredResourceScalar.Reject)
   | patchValidation | invalidPost | authorityUnavailable | directoryUnavailable
   | nullifierUsed
   /-- The request did not declare the operation marker's replay nullifier, so
@@ -675,22 +676,24 @@ inductive Reject where
   | refusalLane
   deriving Repr
 
-/-- A registered dispatch's refusal in the controller's vocabulary: the three header refusals
-are the controller's own names, every other one is carried whole. -/
+/-- A registered dispatch's refusal in the controller's vocabulary: the header's refusals (the
+role, the scope of the operation's guards, the schema version, the root) are the controller's
+own names, every other one is carried whole. -/
 def Reject.ofDispatch : Effects.Revival.DispatchRefusal → Reject
   | .wrongRole _ => .wrongRole
   | .unsupportedVersion _ => .unsupportedVersion
   | .staleTarget _ => .staleTarget
+  | .capabilityRejected _ => .capabilityRejected
+  | .fieldNotNamed _ => .fieldNotNamed
   | refusal => .effect refusal
 
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
   | none => .error reason | some value => .ok value
 
-/-- The store layout of the target's role: a declared-effect cell for scalar
-actions, a hyperdocument content cell for a content read, its declaration's for a registered
-effect. -/
+/-- The store layout of the target's role: a declared-effect cell for a funding or money
+consent, a stream head for an append, its declaration's for a registered effect. -/
 @[reducible] def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
-  | .scalar _ | .computeFunding _ | .moneyConsent _ => EffectDeclaration.effectLayout
+  | .computeFunding _ | .moneyConsent _ => EffectDeclaration.effectLayout
   | .registered code _ => (effectAt code.toNat).L
   | .append _ => StreamCell.headLayout
 
@@ -698,7 +701,7 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.materializer
+    | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.materializer
     | registered code _ => exact (effectAt code.toNat).materializer
     | append _ => exact StreamCell.headMaterializer
 
@@ -714,7 +717,6 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact DeclaredResourceScalar.packDeclared kind cell
     | registered code _ => exact (effectAt code.toNat).pack kind cell
     | computeFunding _ | moneyConsent _ => exact ⟨.accountMetadata, cell⟩
     | append _ => exact ⟨.stream, cell⟩
@@ -724,7 +726,6 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact CanonicalCellRegistry.selectDeclared deployment id kind cell
     | registered code _ => exact (effectAt code.toNat).select deployment id kind cell
     | computeFunding _ | moneyConsent _ => exact if kind = .account then
         CanonicalCellRegistry.selectDeclared deployment id .account cell else none
@@ -733,11 +734,6 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
           match cell with | ⟨.stream, value⟩ => some value | _ => none
         else none
       else none
-
-def scalarCommand (command : Command) (target : Target)
-    (actions : List DeclaredActionLowering.Action) : DeclaredResourceScalar.Command :=
-  ⟨target.kind, target.target, command.subject, target.capability,
-    target.schemaVersion, target.expectedTargetRoot, command.nonce, actions⟩
 
 def contentAuthor (command : Command) (target : Target) : Hyperdocument.PrincipalRef :=
   ⟨command.subject, target.kind, target.capability⟩
@@ -765,39 +761,6 @@ def contentContext (snapshot : AuthoritySnapshot) (ambient : Ambient) (command :
   ⟨ambient.height, fun source =>
     (sourceReadOf command source).map fun capability => ⟨capability, sourcePolicy snapshot source⟩⟩
 
-/-- The state keys an action's guards read: `Action.ops` is one guarded set per key, and its
-guard is the key's exact expected value (`guardedSet_enabled_iff`). -/
-def guardKeys : DeclaredActionLowering.Action → List EffectDeclaration.StateKey
-  | .create key _ | .write key _ _ => [key]
-  | .move source destination resource _ _ _ =>
-      [.accountBalance source resource, .accountBalance destination resource]
-
-/-- A scalar leg's guards read only fields its stored capability names. A guard is a read: a
-refusal `guardRejected` (or a passed guard) tells the requester whether the guarded field
-holds the value it named, so a guard over a field the capability does not name would be an
-equality oracle on that field, decided before admission (where `fieldsCheck` names it).
-`none` names the capability the authority cell does not hold: refused `capabilityRejected`,
-the name admission gives it, before any guard runs. -/
-def scalarScope (snapshot : AuthoritySnapshot) (kind : ResourceKind)
-    (capability : CapabilityId) (actions : List DeclaredActionLowering.Action) : Option Reject :=
-  match CredentialAuthorityState.readCapability snapshot.cell kind capability with
-  | none => some .capabilityRejected
-  | some stored =>
-      if actions.all fun action => (guardKeys action).all fun key =>
-          decide (CellField.NamedBy stored.head.scope.fields (ResourceObservationAdmission.declaredField key))
-      then none else some .fieldNotNamed
-
-/-- A scalar leg's computation once its scope is checked: the source operation's guarded patch
-at the loaded cell, then the blinding ratchet. -/
-def scalarLeg (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
-    (command : Command) (target : Target) (actions : List DeclaredActionLowering.Action)
-    (pre : DeclaredResourceScalar.EffectCell) : Except Reject (Store EffectDeclaration.effectLayout) :=
-  match DeclaredResourceScalar.prepareCell snapshot semantics ambient pre
-      (scalarCommand command target actions) with
-  | .error reason => .error (.scalar reason)
-  | .ok prepared => .ok (Patch.run prepared.post
-      (DeclaredEffectCell.blinding.patch pre.logical ambient.height))
-
 /-- What a registered effect's semantics is given of this command and target (`EffectCtx`):
 never the target's schema version or expected root, which are the dispatcher's. -/
 def targetCtx (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -810,26 +773,19 @@ def targetCtx (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Amb
 
 /-- The only target computation. It invokes source-owned typed operations,
 never a host supplied post. Every branch returns the post store the source
-operation computed at the loaded cell; a scalar write then advances
-the cell's blinding ratchet one link at the admission height
-(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE).  A stream append has no blinding.
-Every hand arm refuses `staleTarget` when the loaded root is not the root its plan
-names; a registered effect's computation is its declaration's (`Effect.compute`: the header its
-`accepts`, `version` and `commutes` determine, then its semantics and the guarded replay with
-its rotate). A content command is one (`computeTarget_content`). -/
+operation computed at the loaded cell.  A stream append has no blinding.
+Every hand arm but the append's refuses `staleTarget` when the loaded root is not the root its
+plan names; a registered effect's computation is its declaration's (`Effect.compute`: the header
+its `accepts`, `guardFields`, `version` and `commutes` determine, then its semantics and the
+guarded replay with its rotate: a scalar write advances the cell's blinding ratchet one link at
+the admission height, `StoreCodec.Blinding.patch`, K-HIDE-ROTATE). A scalar write is one
+(`computeTarget_scalar`), a content command another (`computeTarget_content`). -/
 def computeTarget (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (command : Command) (target : Target)
     (pre : TargetCell target) : Except Reject target.Outcome := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions =>
-      -- A guard over a field the capability does not name is refused before any guard runs.
-      exact match scalarScope snapshot kind capability actions with
-        | some reason => .error reason
-        | none => scalarLeg snapshot semantics ambient command
-            ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩
-            actions pre
     | computeFunding _ => exact do
         if kind != .account then throw .wrongRole
         if version != 1 then throw .unsupportedVersion
@@ -868,16 +824,14 @@ def computeTarget (snapshot : AuthoritySnapshot)
 
 
 /-- The target's one guarded patch, generated by its source operation from the
-loaded store: the scalar declaration's own lowering followed by the kernel's ratchet of the cell's blinding (guarded at the
-pre blinding, so a source patch that moved it refuses). -/
+loaded store: a registered effect's is its declaration's emitted descriptor (a scalar write's
+is the actions' own lowering followed by the kernel's ratchet of the cell's blinding, guarded at
+the pre blinding, so a source patch that moved it refuses). -/
 def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (target : Target) (pre : TargetCell target) : Patch target.layout := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions =>
-        exact DeclaredResourceScalar.cellPatch (scalarCommand command ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ actions) ++
-          DeclaredEffectCell.blinding.patch pre.logical ambient.height
     | append request =>
         exact match StreamCell.headOf pre.logical with
           | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
@@ -1230,7 +1184,7 @@ def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient :
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ | registered _ _ => exact none
+    | computeFunding _ | moneyConsent _ | registered _ _ => exact none
     | append request =>
         exact (StreamCell.headOf pre.logical).map fun head =>
           StreamCell.appendEntry id head (streamRecord snapshot semantics ambient command request)
@@ -1285,6 +1239,19 @@ theorem PreparedTarget.bound {deployment : Deployment}
         (packTarget target prepared.candidate.post) :=
   ⟨prepared.present, prepared.selected, prepared.postLaw⟩
 
+/-- The registered arm at code 0 is the scalar declaration's derived computation. -/
+theorem computeTarget_scalar_compute (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (actions : List DeclaredActionLowering.Action) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : Materialized DeclaredEffectCell.materializer) :
+    computeTarget snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+      (scalarEffect.compute 0 (targetCtx snapshot semantics ambient command kind id capability
+        observe audienceEpoch audienceRoster) version root actions pre).mapError Reject.ofDispatch :=
+  rfl
+
 /-- **A guard never reads a field outside the requester's capability** (JDISCLOSE
 narrow-guess). A scalar leg any of whose guards reads a field its stored capability does not
 name is refused `fieldNotNamed` before any guard runs, at EVERY loaded cell: the refusal is
@@ -1305,14 +1272,24 @@ theorem computeTarget_scalar_unnamed_refused (snapshot : AuthoritySnapshot) (sem
     computeTarget snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
       .error .fieldNotNamed := by
-  have check : scalarScope snapshot kind capability actions = some .fieldNotNamed := by
-    have notAll : (actions.all fun action => (guardKeys action).all fun key =>
-        decide (CellField.NamedBy stored.head.scope.fields
-          (ResourceObservationAdmission.declaredField key))) = false := by
-      simp only [List.all_eq_false]
-      exact ⟨action, member, by simpa [List.all_eq_false] using ⟨key, guarded, unnamed⟩⟩
-    simp only [scalarScope, found, notAll, Bool.false_eq_true, if_false]
-  simp only [computeTarget, check]
+  have notAll : (actions.all fun action => (guardKeys action).all fun key =>
+      decide (CellField.NamedBy stored.head.scope.fields
+        (ResourceObservationAdmission.declaredField key))) = false := by
+    simp only [List.all_eq_false]
+    exact ⟨action, member, by simpa [List.all_eq_false] using ⟨key, guarded, unnamed⟩⟩
+  have found' : CredentialAuthorityState.readCapability
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).snapshot.cell
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).kind
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).capability = some stored := found
+  have refused : scalarEffect.scopeRefusal 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) actions = some (.fieldNotNamed 0) := by
+    rw [scalar_scopeRefusal, found']
+    simp only [notAll, Bool.false_eq_true, if_false]
+  exact congrArg (Except.mapError Reject.ofDispatch)
+    (scalarEffect.compute_scope_refused (code := 0) rfl refused version root pre)
 
 /-- **No guard runs for a capability the authority cell does not hold.** Refused
 `capabilityRejected` at every loaded cell, so a requester with no grant learns nothing of
@@ -1327,30 +1304,94 @@ theorem computeTarget_scalar_unheld_refused (snapshot : AuthoritySnapshot) (sema
     computeTarget snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
       .error .capabilityRejected := by
-  have check : scalarScope snapshot kind capability actions = some .capabilityRejected := by
-    simp only [scalarScope, unheld]
-  simp only [computeTarget, check]
+  have unheld' : CredentialAuthorityState.readCapability
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).snapshot.cell
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).kind
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).capability = none := unheld
+  have refused : scalarEffect.scopeRefusal 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) actions = some (.capabilityRejected 0) := by
+    rw [scalar_scopeRefusal, unheld']
+  exact congrArg (Except.mapError Reject.ofDispatch)
+    (scalarEffect.compute_scope_refused (code := 0) rfl refused version root pre)
 
 /- Owed (audit pass 25, A2; not claimed here): the confinement of the remaining checks of a
 scoped leg, `computeTarget … pre = .error e → e = .staleTarget ∨ e = f (namedPart pre)
 declaration command` for one `f` fixed across `pre`. The root check is the one whole-cell bit
 RefusalReason's header concedes; preLaw, admissionCheck, FieldClosure and postLaw remain. -/
 
-/-- The accepting pole: a scalar leg under a held capability whose guards read only named
-fields is computed exactly as before (`scalarLeg`, the arm's whole former body). -/
-theorem computeTarget_scalar_named_as_before (snapshot : AuthoritySnapshot) (semantics : Digest)
+/-- **The scalar computation, in the receiver's own terms.** Under a held capability whose scope
+names every field a guard reads: the schema version, then the root, then the declaration's
+semantics (an account role, an empty action list, then the root-free core
+`DeclaredResourceScalar.prepareStore`), a refusal carried under the declaration's name, an
+answer replayed with the blinding ratchet at the admission height. -/
+theorem computeTarget_scalar (snapshot : AuthoritySnapshot) (semantics : Digest)
     (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
     (capability : CapabilityId) (version : Nat) (root : Digest)
     (actions : List DeclaredActionLowering.Action) (observe : Option CapabilityId)
     (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
-    (named : scalarScope snapshot kind capability actions = none)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) :
+    (named : scalarEffect.scopeRefusal 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) actions = none)
+    (pre : Materialized DeclaredEffectCell.materializer) :
     computeTarget snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
-      scalarLeg snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩
-        actions pre := by
-  simp only [computeTarget, named]
+      if version ≠ 1 then .error .unsupportedVersion
+      else if root ≠ pre.root then .error .staleTarget
+      else match scalarSem (targetCtx snapshot semantics ambient command kind id capability
+          observe audienceEpoch audienceRoster) actions pre.logical with
+        | .error reason => .error (.effect (.refused 0 (scalarRefusalName reason) .empty))
+        | .ok patch => .ok (Patch.run pre.logical
+            (patch ++ DeclaredEffectCell.blinding.patch pre.logical ambient.height)) := by
+  refine (congrArg (Except.mapError Reject.ofDispatch)
+    (scalarEffect.compute_scoped named version root pre)).trans ?_
+  show (if (true = false) then _ else if version ≠ 1 then _
+    else if (false = false ∧ root ≠ pre.root) then _ else _ :
+      Except Effects.Revival.DispatchRefusal _).mapError Reject.ofDispatch = _
+  rw [if_neg (by decide : ¬ (true = false))]
+  by_cases versioned : version ≠ 1
+  · rw [if_pos versioned, if_pos versioned]
+    rfl
+  rw [if_neg versioned, if_neg versioned]
+  by_cases moved : root ≠ pre.root
+  · rw [if_pos ⟨rfl, moved⟩, if_pos moved]
+    rfl
+  rw [if_neg (fun both => moved both.2), if_neg moved]
+  rw [scalar_run]
+  cases scalarSem (targetCtx snapshot semantics ambient command kind id capability observe
+    audienceEpoch audienceRoster) actions pre.logical <;> rfl
+
+/-- **An admitted scalar write's patch is its actions' followed by the ratchet.** -/
+theorem targetPatch_scalar_ok {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {root : Digest}
+    {actions : List DeclaredActionLowering.Action} {observe : Option CapabilityId}
+    {audienceEpoch : Option Nat} {audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster}
+    {pre : Materialized DeclaredEffectCell.materializer}
+    {post : Store EffectDeclaration.effectLayout}
+    (computed : computeTarget snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+        .ok post) :
+    targetPatch snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+      DeclaredResourceScalar.actionsPatch actions ++
+        DeclaredEffectCell.blinding.patch pre.logical ambient.height := by
+  have computed' : (scalarEffect.compute 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) version root actions pre).mapError
+        Reject.ofDispatch = .ok post := computed
+  cases dispatched : scalarEffect.compute 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) version root actions pre with
+  | error refusal => rw [dispatched] at computed'; cases computed'
+  | ok computedPost =>
+    obtain ⟨split, _, _⟩ := scalarEffect.member_split dispatched
+      (scalar_member_complete _ actions pre.logical _
+        (by
+          obtain ⟨_, _, ps, sem, _⟩ := scalarEffect.compute_ok dispatched
+          have same := (DeclaredResourceScalar.prepareStore_ok (scalarSem_ok sem).2.2).1
+          subst same
+          exact sem))
+    exact split
 
 /-- An observe-only content read computes only when its named capability is its
 observe capability: the read's one authorization is its observation. -/
@@ -1480,7 +1521,10 @@ theorem PreparedTarget.scalar_ratchets {deployment : Deployment}
     StoreCodec.blindingKey DeclaredEffectCell.wire prepared.post =
       some (DeclaredEffectCell.blinding.step ambient.height key) := by
   rw [← prepared.postExact]
-  exact DeclaredEffectCell.blinding.run_leg_blinding prepared.pre.logical _ ambient.height blinded
+  exact (congrArg (fun patch => StoreCodec.blindingKey DeclaredEffectCell.wire
+      (Patch.run prepared.pre.logical patch))
+    (targetPatch_scalar_ok prepared.candidate.modeEvidence.down)).trans
+    (DeclaredEffectCell.blinding.run_leg_blinding prepared.pre.logical _ ambient.height blinded)
 
 /-- **An admitted content write advances the target's blinding ratchet**
 (K-HIDE-ROTATE), as for a scalar write. -/
@@ -1645,7 +1689,6 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact DeclaredResourceProjection.project id before after
     | computeFunding funding => exact fundingProject funding
     | moneyConsent consent => exact
         [("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
@@ -1655,21 +1698,21 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
 
 /-- `targetProjection` filtered by `want`, a content cell's summaries computed only when named
 (`ContentResource.projectDemand`) and a declared cell's slots built only as named
-(`DeclaredResourceProjection.projectDemand`, with `leads` gating its pair deltas);
+(`DeclaredResourceProjection.projectDemand`, with `leads` gating its pair deltas), each by its
+declaration's `Effect.viewDemand`;
 `targetProjectionDemand_eq`. -/
 def targetProjectionDemand (want : String → Bool) (leads : Nat → Bool) (subject : SubjectId)
     (target : Target) (before after : Store target.layout) : List (String × Int) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact DeclaredResourceProjection.projectDemand want leads id before after
     | computeFunding funding => exact (fundingProject funding).filter fun slot => want slot.1
     | moneyConsent consent => exact
         ([("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
           (consent.funding.map fundingProject).getD []).filter fun slot => want slot.1
     | append request => exact (streamSlots request before).filter fun slot => want slot.1
     | registered code op =>
-        exact (effectAt code.toNat).viewDemand want ⟨subject, id⟩ op before after
+        exact (effectAt code.toNat).viewDemand want leads ⟨subject, id⟩ op before after
 
 theorem targetProjectionDemand_eq (want : String → Bool) (leads : Nat → Bool)
     (sound : ∀ a b, want (DeclaredResourceProjection.pairName a b) = true → leads a = true)
@@ -1679,8 +1722,8 @@ theorem targetProjectionDemand_eq (want : String → Bool) (leads : Nat → Bool
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact DeclaredResourceProjection.projectDemand_eq want leads sound id before after
-    | registered code op => exact (effectAt code.toNat).viewDemand_eq want ⟨subject, id⟩ op before after
+    | registered code op =>
+        exact (effectAt code.toNat).viewDemand_eq want leads sound ⟨subject, id⟩ op before after
     | _ => rfl
 
 /-- The participant slot a sample reads: target `i`'s projection of its loaded
@@ -1720,14 +1763,6 @@ theorem programSampleRead_outside {command : Command}
     programSampleRead command pre (some fundingIndex) i slot = none := by
   simp [programSampleRead, Nat.not_lt.mpr outside]
 
-/-- One action as a field write of the command's `i`-th target, when it is one. -/
-def actionWrite (i target : Nat) : DeclaredActionLowering.Action → Option Eval.FieldWrite
-  | .write (.objectField object field) _ value =>
-      if object.value = target then some ⟨i, field.value, value⟩ else none
-  | .create (.objectField object field) value =>
-      if object.value = target then some ⟨i, field.value, value⟩ else none
-  | _ => none
-
 /-- The actual pre-state supplies world method bindings. Output coordinates are
 program-local names, never substitutes for capability semantic field IDs. -/
 def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
@@ -1736,16 +1771,16 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions => exact actions.mapM (actionWrite i id)
     | append request => exact some [⟨i, 0,
         WorldPrototypeConstruction.bytesValue (StreamCell.appendStream.encode request)⟩]
     | registered code op =>
         -- A registered effect's claimed writes are its declaration's (`Effect.runWrites`: a world
-        -- instance's are its method's bound outputs), by default the operation's canonical bytes;
+        -- instance's are its method's bound outputs, a scalar operation's are its actions' field
+        -- writes of this target), by default the operation's canonical bytes;
         -- an observing one writes nothing.
         exact if (effectAt code.toNat).observeOnly op then some [] else
           match (effectAt code.toNat).runWrites with
-          | some claimed => claimed pre program i op
+          | some claimed => claimed pre program i id op
           | none => some [⟨i, 0,
               WorldPrototypeConstruction.bytesValue ((effectAt code.toNat).spec.opStream.encode op)⟩]
     | computeFunding _ => exact if kind = .account ∧ validatedFundingIndex = some i then some [] else none
@@ -2212,7 +2247,7 @@ theorem prepare_refuses_lone_read {F : Type} [Field F] (deployment : Deployment)
 #assert_axioms computeTarget_read_observe
 #assert_axioms computeTarget_scalar_unnamed_refused
 #assert_axioms computeTarget_scalar_unheld_refused
-#assert_axioms computeTarget_scalar_named_as_before
+#assert_axioms computeTarget_scalar targetPatch_scalar_ok
 #assert_axioms PreparedTarget.read_names_observe_capability
 #assert_axioms targetPatch_observeOnly
 

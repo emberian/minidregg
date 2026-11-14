@@ -338,7 +338,7 @@ r, outcome = propose_submit(A, "undeclared-j1", {"type": "minidregg-workspace-pr
         {"type": "create", "key": {"type": "object", "field": "16"}, "value": "1"}]}}]})
 why = (outcome or {}).get("explain") or (outcome or {}).get("reason") or (outcome or {}).get("detail") or last_line(r)
 row("j1", "A creates field 16 on the CLOSED job (a field the cell never declared; K-FIELD-CLOSURE)",
-    "refused by name: undeclaredField 16", f"rc={r.returncode} {why}", r.returncode != 0 and "undeclaredField 16" in str(why), time.time() - t)
+    "refused by name: effect: scalar: undeclared-field 16", f"rc={r.returncode} {why}", r.returncode != 0 and "effect: scalar: undeclared-field 16" in str(why), time.time() - t)
 
 # ================================================================ j2: a wrong answer
 rc, out, err, secs = post("j2", 7)

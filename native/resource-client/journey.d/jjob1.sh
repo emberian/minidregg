@@ -241,8 +241,8 @@ deny job1 close-plain "close 3 -> 6 by an ordinary write (no payout)" 44 "$WS_B"
 jadmit job1 close "close 3 -> 6: settle pays B price + bond (money turn)" "$WS_B" settle --name jjob1-1
 deny job1 reopen "re-open the closed job (6 -> 3)" 2 "$WS_A" jjob1-1 "$(u 0 6 3)"
 attempt "$WS_A" job1-undeclared jjob1-1 "$(c 16 1)"; rund=$?; whyd=$(refusal "$WS_A" job1-undeclared)
-row job1 "A creates field 16 on the CLOSED job (a field the cell never declared)" "refused by name: undeclaredField 16" \
-  "$([ $rund = 0 ] && echo admitted || echo "[$whyd]")" "$([ $rund != 0 ] && [[ "$whyd" == *"undeclaredField 16"* ]]; echo $?)"
+row job1 "A creates field 16 on the CLOSED job (a field the cell never declared)" "refused by name: effect: scalar: undeclared-field 16" \
+  "$([ $rund = 0 ] && echo admitted || echo "[$whyd]")" "$([ $rund != 0 ] && [[ "$whyd" == *"effect: scalar: undeclared-field 16"* ]]; echo $?)"
 
 # ---- job3: void
 admit job3 o-a "order" "$WS_A" jjob1-3 "${ORDER[@]}"

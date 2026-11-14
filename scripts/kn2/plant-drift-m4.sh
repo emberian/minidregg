@@ -13,8 +13,8 @@ drift_replace 'create shared declared {"type":"all","predicates":[]} 2' \
 grep -Fx 'step J2 0 sponsor '\''create shared declared {"type":"all","predicates":[]}'\''' "$COPY/$DRIVER"
 drift_red
 grep -F 'm4 J4 submit first-action expected=0 got=3:' "$EVIDENCE/row.err"
-grep -F 'Minidregg.Kernel.DeclaredResourceScalar.Reject.undeclaredField 2' "$EVIDENCE/log/38-J4-newcomer.stderr"
-echo 'RED fields: m4 J4 submit first-action expected=0 got=3: undeclaredField 2'
+grep -F 'effect: scalar: undeclared-field 2' "$EVIDENCE/log/38-J4-newcomer.stderr"
+echo 'RED fields: m4 J4 submit first-action expected=0 got=3: undeclared-field 2'
 
 drift_copy consent native/resource-client/shell-journey.sh
 drift_replace 'step J5 1 stranger "read stolen"' 'step J5 3 stranger "read stolen"'

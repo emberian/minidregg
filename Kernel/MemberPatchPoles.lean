@@ -16,6 +16,12 @@ whose declaration states a member patch (the kind definition revision, code 5):
 `ComputeTargetWorldArm` (proved: `computeTarget_world_arm`): the world actions' registered
 computation is the deleted hand arm's expression.
 
+`ScalarPreparedHeader` (proved: `scalarPreparedHeader`): every prepared scalar target passed the
+four checks whose order moved when scalar actions were bound at code 0 (schema version, root,
+ordinary role, some action), so none of those refusals has a preparation to charge.
+The scalar ghost (the member patch that shows "no change") is refuted by execution
+(`Assurance/MemberPatchPoles.lean`): at the sample write the semantics emits one operation.
+
 The other two teeth do not need a sample and are proved beside the keystone
 (`MemberPatchUnstatedRefused`, `MemberPatchCommutingRefused`).
 -/
@@ -217,6 +223,50 @@ theorem computeTarget_world_arm : ComputeTargetWorldArm := by
     · rw [if_neg valid, if_neg valid]
       rfl
 
+/-! ## Scalar actions (code 0) -/
+
+/-- **The scalar header's refusals are pre-admission.** Every prepared scalar target has schema
+version 1, the loaded root for its signed root, an ordinary role and some action. So a scalar
+target that fails any of the four (`unsupportedVersion`, `staleTarget`, `accountRequiresBook`,
+`emptyActions`), in whatever order the computation names them, has no `PreparedTarget`, and so
+no preparation of a command that holds it (`PreparedOn.targets`): the compute plan and the money
+plan are fields of a preparation, and there is none to install. The four were fields of the
+deleted arm's evidence too (`DeclaredResourceScalar.CellMode`: `versionExact`, `rootExact`,
+`ordinary`, `actionsPresent`), so the same held before the binding. -/
+def ScalarPreparedHeader : Prop :=
+  ∀ (deployment : Deployment) (directory : CellRegistry.Directory Nat Registry)
+    (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (actions : List DeclaredActionLowering.Action) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch,
+        audienceRoster⟩),
+    version = 1 ∧ root = prepared.pre.root ∧ kind ≠ .account ∧ actions ≠ []
+
+set_option backward.isDefEq.respectTransparency false in
+theorem scalarPreparedHeader : ScalarPreparedHeader := by
+  intro deployment directory snapshot semantics ambient command kind id capability version root
+    actions observe audienceEpoch audienceRoster prepared
+  have computed : (scalarEffect.compute 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) version root actions prepared.pre).mapError
+        Reject.ofDispatch = .ok prepared.post := prepared.candidate.modeEvidence.down
+  cases dispatched : scalarEffect.compute 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) version root actions prepared.pre with
+  | error refusal => rw [dispatched] at computed; cases computed
+  | ok post =>
+    obtain ⟨_, versioned, ps, sem, _⟩ := scalarEffect.compute_ok dispatched
+    obtain ⟨ordinary, present, _⟩ := scalarSem_ok sem
+    exact ⟨versioned, scalarEffect.compute_pinned dispatched rfl, ordinary, present⟩
+
+/-- A declared object cell 41 that declares field 2 and holds nothing else. -/
+def scalarStore : Store EffectDeclaration.effectLayout :=
+  Store.set 0 (EffectDeclaration.StateKey.fieldDeclared ⟨41⟩ ⟨2⟩).address (some 1)
+
+/-- One write: field 2 is created holding 7. -/
+def scalarWrite : List DeclaredActionLowering.Action := [.create (.objectField ⟨41⟩ ⟨2⟩) 7]
+
 theorem memberPatch_ghost_refuted : MemberPatchGhostRefuted := by
   intro exact
   have sem : kindDefinitionSpec.sem
@@ -227,6 +277,6 @@ theorem memberPatch_ghost_refuted : MemberPatchGhostRefuted := by
   cases same
 
 #assert_axioms memberPatch_satisfiable memberPatch_ghost_refuted sampleNext_valid sample_prepared
-#assert_axioms computeTarget_world_arm
+#assert_axioms computeTarget_world_arm scalarPreparedHeader
 
 end Minidregg.Kernel.NativeThinConsent

@@ -70,44 +70,10 @@ private def ascii (label : String) (bytes : List UInt8) : Except String String :
     | throw s!"{label} is not UTF-8"
   pure value
 
-private def keyJson : Minidregg.Theory.EffectDeclaration.StateKey → Json
-  | .objectField resource field => .mkObj
-      [("type", toJson "object"), ("resource", number resource.value),
-       ("field", number field.value)]
-  | .accountBalance account resource => .mkObj
-      [("type", toJson "account"), ("resource", number account.value),
-       ("field", number resource.value)]
-  | .blinding => .mkObj [("type", "blinding")]
-  | .programCode program => .mkObj
-      [("type", toJson "program"), ("resource", number program.value)]
-  | .fieldDeclared object field => .mkObj
-      [("type", toJson "declared"), ("resource", number object.value),
-       ("declares", number field.value)]
-  | .fieldsOpen object => .mkObj
-      [("type", toJson "open"), ("resource", number object.value)]
-  | .fieldsFrom object => .mkObj
-      [("type", toJson "from"), ("resource", number object.value)]
-
-private def actionJson : Minidregg.Theory.DeclaredActionLowering.Action → Json
-  | .create key value => .mkObj
-      [("type", toJson "create"), ("key", keyJson key), ("value", signed value)]
-  | .write key before after => .mkObj
-      [("type", toJson "write"), ("key", keyJson key),
-       ("expected", before.map signed |>.getD Json.null), ("replacement", signed after)]
-  | .move source destination resource expectedSource expectedDestination amount => .mkObj
-      [("type", toJson "move"), ("source", number source.value),
-       ("destination", number destination.value), ("resource", number resource.value),
-       ("expectedSource", expectedSource.map signed |>.getD Json.null),
-       ("expectedDestination", expectedDestination.map signed |>.getD Json.null),
-       ("amount", signed amount)]
-
 private def targetJson (target : DeclaredResourceController.Target) : Json :=
   let kind := match target.kind with
     | .object => "object" | .account => "account" | .program => "program"
   let payload := match target.payload with
-    | .scalar actions => .mkObj
-        [("type", toJson "scalar"),
-         ("actions", .arr (actions.toArray.map actionJson))]
     | .append request => .mkObj
         [("type", toJson "append"), ("topicBytes", number request.topic.length),
          ("payloadBytes", number request.payload.length)]

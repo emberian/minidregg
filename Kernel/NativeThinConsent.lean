@@ -173,10 +173,6 @@ def memberPatch (command : Command) (target : Target) (pre : Store target.layout
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions =>
-        exact .ok (DeclaredResourceScalar.cellPatch (scalarCommand command
-          ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩
-          actions))
     | registered code op =>
         -- The one rule: displayed from the served view iff the declaration states a member
         -- patch and the operation pins its root. An observation that commutes is displayed
@@ -226,14 +222,13 @@ theorem memberPatch_registered_of {command : Command} {kind : ResourceKind} {id 
     | .error .inapplicable => .error (.patchRefused id)) = .ok patch
   rw [shown]
 
-/-- The addresses the kernel writes from an input the member did not sign: a
-scalar target's blinding ratchet (admission height), a registered effect's rotated addresses
-(`EffectSpec.rotated`: where its declaration's rotate may write). -/
+/-- The addresses the kernel writes from an input the member did not sign: a registered
+effect's rotated addresses (`EffectSpec.rotated`: where its declaration's rotate may write; a
+scalar target's blinding ratchet, which reads the admission height). -/
 def KernelOwned (target : Target) (address : Address target.layout) : Prop := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact address = DeclaredEffectCell.blinding.address
     | registered code _ => exact (effectAt code.toNat).spec.rotated address = true
     | _ => exact False
 
@@ -291,12 +286,6 @@ theorem memberPatchKeystone : MemberPatchKeystone := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions =>
-        simp only [memberPatch, Except.ok.injEq] at member
-        subst member
-        refine ⟨DeclaredEffectCell.blinding.patch pre.logical ambient.height, rfl, ?_⟩
-        intro store address owned
-        exact DeclaredEffectCell.blinding.run_patch_frame store pre.logical ambient.height address owned
     | registered code op =>
         have computed' : ((effectAt code.toNat).compute code.toNat
             (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
@@ -357,7 +346,6 @@ theorem memberPatch_money_refused (command : Command) (kind : ResourceKind) (id 
 /-- The payloads whose committed post thin consent can display. -/
 def Supported (target : Target) : Prop :=
   match target.payload with
-  | .scalar _ => True
   | .registered code op =>
       (effectAt code.toNat).spec.commutes op = false ∧ (effectAt code.toNat).member.isSome = true
   | _ => False
@@ -385,12 +373,6 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions =>
-        simp only [computeTarget, scalarLeg] at computed
-        repeat' split at computed
-        all_goals first
-          | (rename_i cell _; exact cell.candidate.modeEvidence.rootExact)
-          | cases computed
     | registered code op =>
         have computed' : ((effectAt code.toNat).compute code.toNat
             (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
@@ -438,7 +420,7 @@ def targetWire (target : Target) : StoreCodec.Wire target.layout := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.wire
+    | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.wire
     | registered code _ => exact (effectAt code.toNat).wire
     | append _ => exact StreamCell.headWire
 
@@ -608,7 +590,7 @@ def HonestScalarViewAcceptedStatement : Prop :=
     selectTarget deployment target
         (ResourceObservationAdmission.narrowPacked fields ⟨.declaredObject, payload⟩) =
       some narrowed →
-    Patch.ValidFrom narrowed.logical (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)) →
+    Patch.ValidFrom narrowed.logical (DeclaredResourceScalar.actionsPatch actions) →
     ∃ shown, checkOpened deployment command target
       (NativeObservationController.resourceViewCodec.encode
         (NativeObservationController.resourceView fields ⟨.declaredObject, payload⟩ balances quote)) =
@@ -629,7 +611,7 @@ def HonestAccountScalarViewAcceptedStatement : Prop :=
     selectTarget deployment target
         (ResourceObservationAdmission.narrowPacked fields ⟨.accountMetadata, payload⟩) =
       some narrowed →
-    Patch.ValidFrom narrowed.logical (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)) →
+    Patch.ValidFrom narrowed.logical (DeclaredResourceScalar.actionsPatch actions) →
     ∃ shown, checkOpened deployment command target
       (NativeObservationController.resourceViewCodec.encode
         (NativeObservationController.resourceView fields ⟨.accountMetadata, payload⟩ balances quote)) =
@@ -1194,13 +1176,16 @@ theorem honest_scalar_view_accepted : HonestScalarViewAcceptedStatement := by
     (wire := DeclaredEffectCell.wire) rfl
   have narrowedLogical : narrowed.logical =
       Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .declaredObject) payload.logical := by
-    simp only [target, selectTarget, CanonicalCellRegistry.selectDeclared,
-      ResourceObservationAdmission.narrowPacked] at selected
-    split at selected
-    · cases kind <;> simp at selected
-      rw [← selected]
+    have declared : CanonicalCellRegistry.selectDeclared deployment id kind
+        (ResourceObservationAdmission.narrowPacked fields ⟨.declaredObject, payload⟩) = some narrowed :=
+      selected
+    simp only [CanonicalCellRegistry.selectDeclared,
+      ResourceObservationAdmission.narrowPacked] at declared
+    split at declared
+    · cases kind <;> simp at declared
+      rw [← declared]
       exact materialize_logical _ _
-    · cases selected
+    · cases declared
   have served : servedOpening target (NativeObservationController.resourceViewCodec.encode
       (NativeObservationController.resourceView fields ⟨.declaredObject, payload⟩ balances quote)) =
       .ok (CellRegistry.PackedCell.bytes CanonicalCellRegistry.registry
@@ -1224,7 +1209,7 @@ theorem honest_scalar_view_accepted : HonestScalarViewAcceptedStatement := by
       some (ResourceObservationAdmission.narrowPacked fields ⟨.declaredObject, payload⟩) :=
     CanonicalCellRegistry.cellCodec.decode_encode _
   refine ⟨Patch.run narrowed.logical
-    (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)), ?_⟩
+    (DeclaredResourceScalar.actionsPatch actions), ?_⟩
   unfold checkOpened
   rw [served]
   dsimp only
@@ -1235,9 +1220,12 @@ theorem honest_scalar_view_accepted : HonestScalarViewAcceptedStatement := by
   rw [selected]
   dsimp only
   rw [if_pos narrowedEntries]
-  rw [if_neg (show ¬ (patchReadsPre target && _) = true by simp [patchReadsPre, target])]
+  rw [if_neg (show ¬ (patchReadsPre target && _) = true by
+    have unread : patchReadsPre target = false := rfl
+    rw [unread]
+    simp)]
   show (if Patch.ValidFrom narrowed.logical
-      (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)) then _ else _) = _
+      (DeclaredResourceScalar.actionsPatch actions) then _ else _) = _
   rw [if_pos valid]
 
 /-- The parts of the honest Host's view that thin consent reads. -/
@@ -1314,19 +1302,25 @@ theorem honest_account_scalar_view_accepted : HonestAccountScalarViewAcceptedSta
     (wire := DeclaredEffectCell.wire) rfl
   have narrowedLogical : narrowed.logical =
       Minidregg.Theory.SparseMap.filterKeys (ResourceObservationAdmission.Visible fields .accountMetadata) payload.logical := by
-    simp only [target, selectTarget, CanonicalCellRegistry.selectDeclared,
-      ResourceObservationAdmission.narrowPacked] at selected
-    split at selected
-    · cases kind <;> simp at selected
-      rw [← selected]
+    have declared : CanonicalCellRegistry.selectDeclared deployment id kind
+        (ResourceObservationAdmission.narrowPacked fields ⟨.accountMetadata, payload⟩) = some narrowed :=
+      selected
+    simp only [CanonicalCellRegistry.selectDeclared,
+      ResourceObservationAdmission.narrowPacked] at declared
+    split at declared
+    · cases kind <;> simp at declared
+      rw [← declared]
       exact materialize_logical _ _
-    · cases selected
+    · cases declared
   refine ⟨Patch.run narrowed.logical
-    (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)), ?_⟩
+    (DeclaredResourceScalar.actionsPatch actions), ?_⟩
   rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
-    (decode_narrowed fields _) selected ?opened (by simp [patchReadsPre, target])]
+    (decode_narrowed fields _) selected ?opened (by
+      have unread : patchReadsPre target = false := rfl
+      rw [unread]
+      simp)]
   · show (if Patch.ValidFrom narrowed.logical
-      (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)) then _ else _) = _
+      (DeclaredResourceScalar.actionsPatch actions) then _ else _) = _
     rw [if_pos valid]
   · show (StoreCodec.entries DeclaredEffectCell.wire narrowed.logical).map
         (StoreCodec.entryBytes DeclaredEffectCell.wire) =

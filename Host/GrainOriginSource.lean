@@ -163,7 +163,6 @@ def render (packageBytes : List UInt8) (verifiedReceipt : Receipt)
   unless publications.any (fun target => target.kind == .object &&
       target.target == selection.publicationTarget &&
       match target.payload with
-      | .scalar actions => !actions.isEmpty
       | .append _ => true
       | .registered code op =>
           !(Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).observeOnly op &&

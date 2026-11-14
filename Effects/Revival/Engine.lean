@@ -138,6 +138,11 @@ inductive DispatchRefusal where
   | guardFailed (code : Nat)
   | unsupportedVersion (code : Nat)
   | staleTarget (code : Nat)
+  /-- The header's scope gate: the operation's guards are reads, and the authorizing capability
+  is not held. -/
+  | capabilityRejected (code : Nat)
+  /-- The header's scope gate: a guard reads a field the authorizing capability does not name. -/
+  | fieldNotNamed (code : Nat)
   /-- Any other refusal of the live controller, by its `Reject` name. -/
   | host (code : Nat) (name : String)
   deriving DecidableEq
@@ -189,8 +194,8 @@ def EffectSpec.comap {C C' : Type} {S : Substrate} {O R : Type} (f : C' → C)
 
 /-- A registered declaration over a common cell universe `Cell`: its substrate, its
 declaration, the role/version header it checks against the cell (generic per controller:
-for the live controller, `selectTarget`'s role and cell law and `computeTarget`'s version,
-in that order), whether the plan's observed root is the cell's (`fresh`; for the live
+for the live controller, `selectTarget`'s role and cell law, the scope of the operation's guards
+and `computeTarget`'s version, in that order; it reads the operation for the scope alone), whether the plan's observed root is the cell's (`fresh`; for the live
 controller, `computeTarget`'s root comparison), and how its typed state is read from and
 written back to a cell.  The header states no freshness refusal: `admits` derives it from
 `fresh` and the declaration's `commutes`. -/
@@ -199,7 +204,7 @@ structure Handler (Ctx Cell : Type) : Type 1 where
   O : Type
   R : Type
   spec : EffectSpec Ctx S O R
-  header : Ctx → Cell → Except DispatchRefusal Unit
+  header : Ctx → O → Cell → Except DispatchRefusal Unit
   fresh : Ctx → Cell → Bool := fun _ _ => true
   select : Ctx → Cell → Option S.State
   pack : Ctx → S.State → Cell
@@ -230,7 +235,7 @@ def Handler.Sound {Ctx Cell : Type} (e : Handler Ctx Cell) : Prop :=
 plan (`fresh` false) is refused `staleTarget` unless its operation commutes. -/
 def Handler.admits {Ctx Cell : Type} (e : Handler Ctx Cell) (code : Nat) (ctx : Ctx) (op : e.O)
     (cell : Cell) : Except DispatchRefusal Unit :=
-  match e.header ctx cell with
+  match e.header ctx op cell with
   | .error r => .error r
   | .ok () => if e.spec.commutes op || e.fresh ctx cell then .ok () else .error (.staleTarget code)
 
@@ -392,7 +397,7 @@ def toyEntry {O R : Type} (spec : EffectSpec Unit ToySubstrate O R) : Handler Un
   O := O
   R := R
   spec := spec
-  header := fun _ _ => .ok ()
+  header := fun _ _ _ => .ok ()
   select _ c := some c
   pack _ s := s
 

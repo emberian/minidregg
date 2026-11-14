@@ -206,11 +206,10 @@ theorem liveLegacyCensusTeeth : LiveLegacyCensusTeeth := by
   rw [if_neg (by rw [unbound]; exact Bool.false_ne_true)]
   have ne : ∀ k : UInt8, k.toNat ∈ liveLegacy → tag ≠ k :=
     fun k member same => outside (same ▸ member)
-  have h0 := ne 0 (by decide)
   have h2 := ne 2 (by decide)
   have h6 := ne 6 (by decide)
   have h8 := ne 8 (by decide)
-  simp [DeclaredResourceController.legacyPayloadDecode, h0, h2, h6, h8]
+  simp [DeclaredResourceController.legacyPayloadDecode, h2, h6, h8]
 
 /-! ## The registry keystone: the deployed dispatch IS the engine's, at every bound code.
 
@@ -227,7 +226,7 @@ set_option backward.isDefEq.respectTransparency false
 theorem Handler.fire_eq {Ctx Cell : Type} (h : Handler Ctx Cell) (code : Nat) (ctx : Ctx) (op : h.O)
     (cell : Cell) :
     h.fire code ctx op cell =
-      match h.header ctx cell with
+      match h.header ctx op cell with
       | .error r => .error r
       | .ok () =>
         if h.spec.commutes op || h.fresh ctx cell then
@@ -236,7 +235,7 @@ theorem Handler.fire_eq {Ctx Cell : Type} (h : Handler Ctx Cell) (code : Nat) (c
           | some s => (h.spec.exec code ctx op s).map (h.pack ctx)
         else .error (.staleTarget code) := by
   unfold Handler.fire Handler.admits
-  cases h.header ctx cell with
+  cases h.header ctx op cell with
   | error r => rfl
   | ok u =>
     cases u
@@ -355,17 +354,21 @@ theorem effect_run_agrees (e : DeclaredResourceController.Effect) (code : Nat)
       else .error (.guardFailed code)) = Except.ok _
     exact if_pos valid
 
-/-- A declaration's handler fired on a selected cell: the header (role, version), the expected
-root unless the operation commutes, then the executor, packed. -/
+/-- A declaration's handler fired on a selected cell: the header (role, the scope of the
+operation's guards, version), the expected root unless the operation commutes, then the
+executor, packed. -/
 theorem effect_fire_some (e : DeclaredResourceController.Effect) (code : Nat)
     (d : DeclaredResourceController.DispatchCtx) (op : e.O) (cell : HostCell) (pre : e.Cell)
     (selected : e.select d.deployment d.target d.kind cell = some pre) :
     (e.handler code).fire code d op cell =
       if e.spec.accepts d.kind = false then .error (.wrongRole code)
-      else if d.version ≠ e.spec.version then .error (.unsupportedVersion code)
-      else if e.spec.commutes op = false ∧ d.root ≠ pre.root then .error (.staleTarget code)
-      else (e.spec.exec code d.toEffectCtx op pre.logical).map fun s =>
-        e.pack d.kind (CellState.materialize e.materializer s) := by
+      else match e.scopeRefusal code d.toEffectCtx op with
+        | some refusal => .error refusal
+        | none =>
+          if d.version ≠ e.spec.version then .error (.unsupportedVersion code)
+          else if e.spec.commutes op = false ∧ d.root ≠ pre.root then .error (.staleTarget code)
+          else (e.spec.exec code d.toEffectCtx op pre.logical).map fun s =>
+            e.pack d.kind (CellState.materialize e.materializer s) := by
   have unpacked : e.unpack d.kind cell = some pre := by
     unfold DeclaredResourceController.Effect.select at selected
     split at selected
@@ -374,16 +377,22 @@ theorem effect_fire_some (e : DeclaredResourceController.Effect) (code : Nat)
   rw [Handler.fire_eq]
   simp only [DeclaredResourceController.Effect.handler, selected, unpacked, Option.map_some,
     EffectSpec.exec_comap, EffectSpec.commutes_comap]
-  cases commuting : e.spec.commutes op <;> by_cases current : d.root = pre.root <;>
-    by_cases refusedRole : e.spec.accepts d.kind = false <;>
-    by_cases versioned : d.version = e.spec.version <;>
-    simp [refusedRole, versioned, current] <;> rfl
+  by_cases refusedRole : e.spec.accepts d.kind = false
+  · simp [refusedRole]
+  cases scope : e.scopeRefusal code d.toEffectCtx op with
+  | some refusal => simp [refusedRole]
+  | none =>
+    cases commuting : e.spec.commutes op <;> by_cases current : d.root = pre.root <;>
+      by_cases versioned : d.version = e.spec.version <;>
+      simp [refusedRole, versioned, current] <;> rfl
 
 /-- The same, with the header and freshness discharged. -/
 theorem effect_fire_admitted (e : DeclaredResourceController.Effect) (code : Nat)
     (d : DeclaredResourceController.DispatchCtx) (op : e.O) (cell : HostCell) (pre : e.Cell)
     (selected : e.select d.deployment d.target d.kind cell = some pre)
-    (accepted : e.spec.accepts d.kind = true) (versioned : d.version = e.spec.version)
+    (accepted : e.spec.accepts d.kind = true)
+    (passed : e.scopeRefusal code d.toEffectCtx op = none)
+    (versioned : d.version = e.spec.version)
     (current : e.spec.commutes op = true ∨ d.root = pre.root) :
     (e.handler code).fire code d op cell =
       (e.spec.exec code d.toEffectCtx op pre.logical).map fun s =>
@@ -393,10 +402,12 @@ theorem effect_fire_admitted (e : DeclaredResourceController.Effect) (code : Nat
   have fresh : ¬ (e.spec.commutes op = false ∧ d.root ≠ pre.root) := fun both =>
     current.elim (fun commuting => by rw [commuting] at both; exact absurd both.1 (by decide))
       (fun same => both.2 same)
-  rw [effect_fire_some e code d op cell pre selected, if_neg role, if_neg version, if_neg fresh]
+  rw [effect_fire_some e code d op cell pre selected, if_neg role, passed]
+  dsimp only
+  rw [if_neg version, if_neg fresh]
 
 /-- The deployed computation of a registered target and its patch validation, against the
-handler's header and executor: the same four-way decision. -/
+handler's header and executor: the same decision. -/
 theorem effect_compute_agrees (e : DeclaredResourceController.Effect) (code : Nat)
     (d : DeclaredResourceController.DispatchCtx) (op : e.O) (pre : e.Cell) :
     (match (e.compute code d.toEffectCtx d.version d.root op pre).mapError
@@ -407,15 +418,26 @@ theorem effect_compute_agrees (e : DeclaredResourceController.Effect) (code : Na
           .ok (e.pack d.kind (CellState.materialize e.materializer post))
         else .error (.guardFailed code) : Except DispatchRefusal HostCell) =
       if e.spec.accepts d.kind = false then .error (.wrongRole code)
-      else if d.version ≠ e.spec.version then .error (.unsupportedVersion code)
-      else if e.spec.commutes op = false ∧ d.root ≠ pre.root then .error (.staleTarget code)
-      else (e.spec.exec code d.toEffectCtx op pre.logical).map fun s =>
-        e.pack d.kind (CellState.materialize e.materializer s) := by
-  unfold DeclaredResourceController.Effect.compute
-  rw [DeclaredResourceController.Effect.run_eq_exec]
+      else match e.scopeRefusal code d.toEffectCtx op with
+        | some refusal => .error refusal
+        | none =>
+          if d.version ≠ e.spec.version then .error (.unsupportedVersion code)
+          else if e.spec.commutes op = false ∧ d.root ≠ pre.root then .error (.staleTarget code)
+          else (e.spec.exec code d.toEffectCtx op pre.logical).map fun s =>
+            e.pack d.kind (CellState.materialize e.materializer s) := by
   by_cases refusedRole : e.spec.accepts d.kind = false
-  · rw [if_pos refusedRole, if_pos refusedRole] <;> rfl
-  · rw [if_neg refusedRole, if_neg refusedRole]
+  · unfold DeclaredResourceController.Effect.compute
+    rw [if_pos refusedRole, if_pos refusedRole] <;> rfl
+  have accepted : e.spec.accepts d.kind = true := by simpa using refusedRole
+  rw [if_neg refusedRole]
+  cases scope : e.scopeRefusal code d.toEffectCtx op with
+  | some refusal =>
+    rw [e.compute_scope_refused accepted scope]
+    rcases e.scopeRefusal_named scope with rfl | rfl <;> rfl
+  | none =>
+    rw [e.compute_scoped scope, if_neg refusedRole,
+      DeclaredResourceController.Effect.run_eq_exec]
+    dsimp only
     by_cases moved : d.version ≠ e.spec.version
     · rw [if_pos moved, if_pos moved] <;> rfl
     · rw [if_neg moved, if_neg moved]
@@ -656,7 +678,7 @@ theorem cited_dispatch (reads : List DeclaredResourceController.FieldRead) :
       citedCell).trans
     (effect_fire_admitted DeclaredResourceController.citedEffect 9 (dispatchCtxOf citedCtx) reads
       citedCell (materialize DeclaredEffectCell.materializer citedStore)
-      (citedCell_selected _ rfl) rfl rfl (Or.inl rfl))
+      (citedCell_selected _ rfl) rfl rfl rfl (Or.inl rfl))
 
 theorem cited_admitted :
     liveTargetDispatch 9
@@ -713,7 +735,7 @@ theorem registryTeeth_ghost :
     [(citedKey, some 1)] citedCtx citedCell
   have fired := effect_fire_admitted citedGhost 9 (dispatchCtxOf citedCtx) [(citedKey, some 1)]
     citedCell (materialize DeclaredEffectCell.materializer citedStore) (citedCell_selected _ rfl)
-    rfl rfl (Or.inl rfl)
+    rfl rfl rfl (Or.inl rfl)
   have executed : citedGhost.spec.exec 9 (dispatchCtxOf citedCtx).toEffectCtx [(citedKey, some 1)]
       citedStore = .ok citedStore :=
     EffectSpec.exec_silent citedGhost.complete rfl rfl

@@ -120,7 +120,7 @@ def handler (rules : List Rule) : Handler Context State where
   O := Operation
   R := Refusal
   spec := spec rules
-  header := fun _ _ => .ok ()
+  header := fun _ _ _ => .ok ()
   select := fun _ cell => some cell
   pack := fun _ state => state
 

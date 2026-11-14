@@ -24,8 +24,8 @@ and its continuation; where they disagree with this section, this section is the
   `unpack`), `spec : EffectSpec`, the JSON face (`name`, `toJson`, `ofJson`), the display, the
   refusal text (`refusalText`: a refusal's detail in words), and its
   obligations as proof fields (`unpack_pack`, `pack_unpack`, `observes_silent`, `complete`,
-  `view_unjoint`). Derived from it: `compute` (header from `accepts`/`version`/`commutes`, then
-  the engine's `exec`), `patch` (the emitted descriptor), `observeOnly` (the verb is the observe
+  `view_unjoint`). Derived from it: `compute` (header from `accepts`/`guardFields`/`version`/
+  `commutes`, then the engine's `exec`), `patch` (the emitted descriptor), `observeOnly` (the verb is the observe
   verb under every role), `handler` (the engine handler). `EffectCtx` holds no schema version and
   no expected root, so a semantics cannot compare a root by hand.
 * **Engine changes** (`Effects/Revival/Engine.lean`): `DispatchRefusal.refused code name detail`
@@ -309,81 +309,85 @@ What moved, and what did not:
   Until then the claim "the admitted set did not move" rests on reading `worldSem` against the
   deleted arm, the executed poles, and the journeys.
 
+**Scalar actions are bound** (`scalarEffect`, `Kernel/ScalarEffect.lean`): code 0, JSON `scalar`.
+`liveLegacy = [2, 6, 8]`. The `Payload.scalar` constructor, `Reject.scalar`, `scalarScope`,
+`scalarLeg`, `scalarCommand` and every hand arm of the kind are deleted (arm census 126 + 4
+string arms in 12 files before, 94 + 3 in 10 after).
+
+* The semantics is `scalarSem`: an account role (`accountRequiresBook`) and an empty action list
+  (`emptyActions`) are refused by name, then the root-free core of the scalar receiver,
+  `DeclaredResourceScalar.prepareStore` (the cell law, the scoped admission of every action,
+  every guard in sequence, field closure, the cell law at the post). `prepareCell` keeps its own
+  header and calls the same core; the purse and job receivers still call it. The rotate is the
+  blinding ratchet at `ctx.ambient.height`; `rotated` is the blinding's address;
+  `complete` is `prepareStore_ok` and `prepareStore_ratchet_valid`.
+* **The scope gate is the header's** (`Effect.guardFields`, `Effect.scopeRefusal`): for an
+  operation whose guards are reads, the capability must be held in the authority cell and its
+  scope must name every field a guard reads. It sits in `Effect.compute` and in the engine
+  handler's header (`Handler.header` now takes the operation), after the role and before the
+  schema version and the root, and its two refusals are `DispatchRefusal.capabilityRejected` and
+  `fieldNotNamed`, which `Reject.ofDispatch` carries to the controller's own `capabilityRejected`
+  and `fieldNotNamed`. It is not a check in `computeTarget` beside the dispatch, as first
+  planned: `RegistryKeystone` and `PrepareFactors` say the receiver IS the registry's dispatch at
+  every bound code, and a check outside the handler would falsify both at code 0. No refusal
+  identity, text or order moved for scope (scalar accepts every role, so the role check before
+  it never fires). `computeTarget_scalar_unnamed_refused` and `_unheld_refused` stand as stated.
+* The member patch is the actions' own patch (`actionsPatch`), `memberReadsStore := false`, so a
+  member whose view seals fields is still shown the post of a write to the fields it names.
+  `scalar_member_complete` (proved): where the semantics admits, the member is shown exactly its
+  patch. The "no change" ghost is refuted by execution: at the sample write the semantics emits
+  one operation, so `fun _ _ _ => some []` is not `MemberExact`. `KernelOwned` for a scalar target is now the declaration's `rotated` (the
+  same one address).
+* Two `Effect` fields changed shape: `viewDemand` takes the `leads` gate of a declared cell's
+  pair deltas (`viewDemand_eq` under `sound`), and `runWrites` takes the target's cell id.
+* `computeTarget_scalar` (proved) is the registered computation in the receiver's terms: under a
+  passing scope, the version, the root, `scalarSem`, then the replay with the ratchet.
+  `targetPatch_scalar_ok` (proved): an admitted write's patch is the actions' followed by the
+  ratchet.
+
+What moved:
+
+* **Order.** The hand arm named, in order: scope, `accountRequiresBook`, `unsupportedVersion`,
+  `emptyActions`, `staleTarget`, then the core. The declaration: scope, `unsupportedVersion`,
+  `staleTarget`, `accountRequiresBook`, `emptyActions`, then the core. Exactly three pairs
+  change: an account with a wrong version (was `accountRequiresBook`, is `unsupportedVersion`),
+  an account with a stale root (was `accountRequiresBook`, is `staleTarget`), no action with a
+  stale root (was `emptyActions`, is `staleTarget`). No action with a wrong version and an
+  account with no action keep theirs. Each is executed in `Assurance/MemberPatchPoles.lean`,
+  after against `computeTarget` and before against `prepareCell` (the receiver the deleted arm
+  called) at the same inputs. All four refusals are pre-admission and uncharged on both sides:
+  `ScalarPreparedHeader` (`Kernel/MemberPatchPoles.lean`, proved) says every prepared scalar
+  target passed all four, so a target that fails one has no `PreparedTarget` and no command
+  preparation carries it; the deleted arm's evidence (`CellMode`) held the same four as fields.
+* **Refusal text.** A core refusal was `Reject.scalar (DeclaredResourceScalar.Reject.x)` and is
+  `Reject.effect (Effect.Scalar.x)`; rendered, `…declared-resource-controller: scalar:
+  declared-resource-scalar: guard-rejected 0` is `…declared-resource-controller: effect: scalar:
+  guard-rejected 0`. The suffixes (`guard-rejected N`, `undeclared-field N`, `inadmissible-action`,
+  `invalid-post`, `wrong-role`, `account-requires-book`, `empty-actions`) are as before. The two
+  header refusals lose their scalar prefix: a scalar `staleTarget` was
+  `Reject.scalar (….staleTarget)` and is the controller's `Reject.staleTarget`, and likewise
+  `unsupportedVersion` (`NativeHost.isStaleTarget` has one arm now).
+  The unknown-`type` refusal reads "expected append, moneyConsent, computeFunding or a registered
+  effect (scalar, content, …)". Moved with it in the same commit: `scripts/kn2/plant-drift-m4.sh`,
+  the fixture in `native/resource-client/src/main.rs`, and `jclosure.sh`, `jjob1.sh`, `jjob.sh`,
+  which grepped the raw constructor `undeclaredField N` that the client stopped printing when the
+  Host began naming clauses.
+* `targetPatch` of a scalar target the receiver REFUSES is now `[]`, where the hand arm gave the
+  actions' patch and the ratchet whether or not it admitted them. Nothing reads the patch of a
+  refused target; where the computation is admitted it is the actions' followed by the ratchet
+  (`targetPatch_scalar_ok`).
+* Not moved: wire bytes of code 0 (tag octet 0, then the action list); the request JSON
+  (`{"type": "scalar", "actions": […]}`, `ResourceGrammarJson.action`); the inbox JSON (each
+  action whole, `scalarToJson`); the inspect lines (`scalarDisplay`); the scope refusals; the
+  footprint (the generic one over `field`/`amount` is the hand arm's expression).
+* `Payload.scalar` is a `@[match_pattern]` abbreviation of `.registered 0 actions`, as
+  `Payload.content` is. Four arms read particular actions out of a signed scalar operation
+  (`NativeHostReplay` twice, `NativeProviderHistory` twice); `scripts/effect-arm-census.py` tells
+  a reader (its match names no other payload kind) from a dispatch arm (its match names another)
+  and counts zero dispatch arms on both patterns.
+
 **Next**, the remaining codes, in the order of what each needs:
 
-* `scalar` (0). What exists (`Kernel/DeclaredResourceScalar.lean`, proved):
-  `prepareStore kind target actions store` is the root-free core of a scalar preparation (the
-  role's cell law, the scoped admission of every action, every guard in sequence, field closure,
-  the cell law at the post); it answers the actions' patch (`actionsPatch`, which a command's
-  `cellPatch` is whatever its version, root and nonce: `cellPatch_actions`). `prepareCell` IS its
-  own header (an ordinary role, schema version 1, some action, the loaded root) followed by
-  that core, so there is one body; the purse and job receivers call `prepareCell` and are
-  unchanged. `prepareCell_factors` states the factoring of its answer. `prepareStore_ok` gives
-  what an answer means; `admitted_writes_no_blinding` and `prepareStore_ratchet_valid` say an
-  answered patch followed by the kernel's ratchet is valid from the loaded store at every height
-  (the declaration's `complete`, proved as a fact about the receiver).
-
-  The binding, as ruled (coordinator, 2026-11-14):
-  1. `scalarEffect` (a new `Kernel/ScalarEffect.lean`; `citedEffect` is the template on the same
-     cell: `EffectDeclaration.effectLayout`, `DeclaredEffectCell.wire`, `packDeclared`,
-     `unpackDeclared` and their two laws). `R := DeclaredResourceScalar.Reject`;
-     `accepts := fun _ => true`; `version := 1`;
-     `sem ctx actions store := if ctx.kind = .account then accountRequiresBook else if actions = []
-     then emptyActions else prepareStore ctx.kind ctx.target actions store`;
-     `rotate ctx s := DeclaredEffectCell.blinding.patch s ctx.ambient.height`;
-     `rotated := fun a => match a.2 with | .blinding => true | _ => false` (today's
-     `targetRatchet`); `field := fun a => declaredField a.2`; `amount := fun _ v => v` (today's
-     `targetAmount`); `frame actions := (Patch.writeFootprint (actionsPatch actions)).image
-     (declaredField ·.2)`; `verb := ordinaryVerb`; `view site _ := DeclaredResourceProjection.project
-     site.target`; `member := some fun _ actions _ => some (actionsPatch actions)` with
-     `memberReadsStore := false` (what lets a field-scoped member sign a write, THIN row N1).
-     `complete` is `prepareStore_ok` for the frame and `prepareStore_ratchet_valid` for the
-     replay (content's proof in `Kernel/ContentEffect.lean` is the shape); `member_tail` is
-     `Patch.run_frame` off the ratchet's one write.
-  2. The scope check stays the controller's, before the header, so `Reject.capabilityRejected`
-     and `Reject.fieldNotNamed` keep their identity and order: `Effect` gets
-     `guardFields : O → Option (List CellField)` (the fields the operation's guards read; `none`
-     by default; scalar states `some` of `guardKeys` mapped through `declaredField`), and the
-     registered arm of `computeTarget` runs today's `scalarScope` on it first.
-  3. Two more fields change shape: `Effect.viewDemand` takes the `leads` gate
-     (`DeclaredResourceProjection.projectDemand want leads`; `viewDemand_eq` under `sound`), and
-     `Effect.runWrites` takes the target id (`actionWrite i id`).
-  4. `Payload.scalar` becomes a `@[match_pattern]` abbrev of `.registered 0 actions`, as
-     `Payload.content` is: `NativeHostReplay` (3024, 5262), `NativeProviderHistory` (122, 131) and
-     `AgentGrain` read particular actions out of a scalar operation. Those are data readers. The
-     arm census must count zero dispatch arms on it; teach `scripts/effect-arm-census.py` the
-     difference if it cannot tell.
-  5. Precedence that moves, each needing an executed pole and a proof or check that the refusal
-     is pre-admission and uncharged before and after: today's order is `accountRequiresBook`,
-     `unsupportedVersion`, `emptyActions`, `staleTarget`; the declaration's is
-     `unsupportedVersion`, `staleTarget`, `accountRequiresBook`, `emptyActions`. Exactly three
-     pairs change order (not four): an account with a wrong version, an account with a stale
-     root, and no action with a stale root. No action with a wrong version, and an account
-     with no action, keep their order; execute one of them as the control.
-  6. Text that moves: `Reject.scalar (DeclaredResourceScalar.Reject.x)` becomes
-     `Reject.effect (Effect.Scalar.x)`; rendered, `declared-resource-scalar: guard-rejected 0`
-     becomes `effect: scalar: guard-rejected 0`. `refusalDetail` carries the index of
-     `guardRejected` and the field of `undeclaredField`, and `refusalText` prints it, so the
-     suffixes every journey greps (`guard-rejected N`, `undeclaredField N`) stay. Two places
-     spell the old prefix and move in the same commit: `scripts/kn2/plant-drift-m4.sh` line 16
-     and the fixture in `native/resource-client/src/main.rs` (about lines 4409-4412).
-  7. The hand arms to delete (`scripts/effect-arm-census.py --sites`): `ResourceTransaction`
-     (`Repr`, payload bytes, `Target.layout`, `Target.materializer`, `packTarget`,
-     `selectTarget`, `computeTarget` with `scalarLeg`, `targetPatch`, `appendedEntry`,
-     `targetProjection`, `targetProjectionDemand` and its `_eq`, `targetWrites`),
-     `DeclaredResourceController` (`targetProjection_unjoint`, `targetField`, `targetAmount`,
-     `targetRatchet`, `targetFullFootprint`), `NativeThinConsent` (six, with `KernelOwned`,
-     which becomes the generic `rotated`), `NativeObservationController` 1103, the Host's
-     `FnInboxView` 108 (its `actionJson` and `keyJson` become the declaration's `toJson`),
-     `InspectRender` 465 (`actionText` becomes `display`), `GrainOriginSource` 166
-     (`authors := fun actions => !actions.isEmpty`), and the `"scalar"` string arm of
-     `ResourcePayloadJson`. `Reject.scalar` goes with them.
-  8. Run J0..J8 with THIN, K12T, J12, J12W, KF, P7KR, JSLK, plus KCL, JDISCLOSE, JJOB1 and
-     JPAY6, which read the scalar clauses.
-
-  A build note: bare `lean` on `Kernel/DeclaredResourceScalar.lean` reports a private-constructor
-  error that `lake build Kernel.DeclaredResourceScalar` does not (the unmodified file does the
-  same); check that module through lake.
 * `computeFunding` (6) and `moneyConsent` (8): the cell is unchanged; what they do is outside the
   target (the shared Book), so `member = none`. Their footprint is the monetary one
   (`Effect.footprint` now exists for it).

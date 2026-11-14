@@ -444,13 +444,6 @@ def addressText : AuthAddress → String
   | ⟨.registered, key⟩ => s!"registration of {revocationText key}"
   | ⟨.parent, cell⟩ => "room parent of cell " ++ Nat.repr cell
 
-private def actionText : DeclaredActionLowering.Action → String
-  | .create (.objectField _ f) v => s!"create field {f.value} = {v}"
-  | .create key v => s!"create {repr key} = {v}"
-  | .write (.objectField _ f) e v => s!"write field {f.value} := {v} (expected {e.map toString |>.getD "absent"})"
-  | .write key _ v => s!"write {repr key} := {v}"
-  | .move src dst _ _ _ amount => s!"move {amount} from {src.value} to {dst.value}"
-
 private def draftLines : Draft → List String
   | .invoke bytes => match DeclaredResourceController.commandCodec.decode bytes with
     | none => ["  invoke: noncanonical command"]
@@ -462,7 +455,6 @@ private def draftLines : Draft → List String
           s!"  {access} cell {kindName target.kind} {target.target} (via capability {target.capability.value}; read at root {target.expectedTargetRoot.value})" ::
             match target.payload with
             | .registered code op => ((Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).display op).map fun line => "    " ++ line
-            | .scalar actions => actions.map (fun a => "    " ++ actionText a)
             | .append _ => ["    stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]
             | .moneyConsent consent =>
                 [s!"    canonical Book batch: {(consent.batch.map fun batch => batch.operations.length).getD 0} operations carried; {consent.positions.length} signed source positions; {(consent.funding.map fun funding => funding.credits).getD 0} compute credits"]
