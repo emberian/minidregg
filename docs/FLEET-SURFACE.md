@@ -32,9 +32,10 @@ In one CAS it
 - consumes its operation marker as the Store's durable nullifier (the
   authority cell is not written).
 
-The request's `cost` is fee + transferred amount, so a spend grant's
-`maxCost` caps what one fleet turn can move. It caps nothing through other
-receivers, whose `cost` is a byte count or a fee (see "Costs and open
+The request's `cost` is the encoded command's length, as for every other
+signed command, so a grant's `maxCost` is a size ceiling. What one turn may
+take from the account is the grant's value bound: `maxDelta` on
+`balance:ASSET`, which a delegated grant must set (see "Costs and open
 edges"). Operation identity is
 `(subject, paying account, nonce)`: an exact repeat replays the original
 receipt; a changed command under the same identity is a transaction conflict,
@@ -252,31 +253,32 @@ load ~20, 3 stale observations + 9 stale plans at load ~45.
   inspection (authoring and inspection are Lean's, so the client never
   decodes a binary itself): 2.1 s for send or transfer uncontended on the
   final run.
-- **Speaking needs the `transfer` verb; confining it to speaking is the account law's job.** Appending to an
+- **Speaking needs the `transfer` verb; confining it to speaking is the grant's value bound.** Appending to an
   account's topic requires `transfer` on it, because every turn pays from it.
-  A request's cost is its fee plus the amount it moves (`FleetTurn.context`),
-  and a capability covers a request only when that cost is at most its
-  `maxCost` (`Scope.Covers.cost`). So a `transfer` capability delegated with
-  `maxCost` equal to the pinned `tariff.base` admits a fleet publication and
-  refuses every fleet turn that moves value. That is not a spend ceiling:
-  `cost` is priced per receiver (a Book transfer leg's cost is its fee debit,
-  0 for an ordinary transfer; a resource transaction's is its command
-  length), so the same capability presented to another receiver, such as a
-  birth's funding leg naming this account as source, is not bounded by it.
-  The control that holds is the account's law: the fleet receiver alone
-  projects `fleet/operation/turn` and `fleet/transfer/amount`, and an atom on
-  an absent slot is false, so a clause admitting the seat's subject only when
-  `fleet/operation/turn == 1` and `fleet/transfer/amount == 0` confines it to
-  fee-only fleet turns, with no new verb and no dependence on the tariff. Two
-  limits remain. The holder can still spend the account down one fee at a
-  time: fund the account with the role's budget. And a capability on an
-  account covers every topic of that account.
+  What a grant lets one turn take from the account is its value bound
+  (`Theory.CapabilityValueBound`): `maxDelta` on `balance:ASSET`, gross and
+  fees included, checked by every receiver that debits an account. A
+  delegated grant must set one, or its debits are refused
+  `missingBalanceBound`. So a `transfer` capability delegated with
+  `--max-delta balance:0=FEE`, FEE the pinned `tariff.base`, admits a fleet
+  publication and refuses every turn that also moves value
+  (`maxDeltaExceeded`), through every receiver, not only this one. `maxCost`
+  is a size ceiling (the request's `cost` is the encoded command's length)
+  and bounds no value. Three limits remain. The bound is per turn, not a
+  running total: the holder can still spend the account down one fee at a
+  time, so fund the account with the role's budget. A tariff change strands
+  a grant bounded at the old fee: it is re-issued. And a capability on an
+  account covers every topic of that account. An account law can say the
+  same thing independently of the tariff: the fleet receiver alone projects
+  `fleet/operation/turn` and `fleet/transfer/amount`, so a clause admitting
+  the seat's subject only when `fleet/transfer/amount == 0` confines it to
+  fee-only fleet turns.
   Roles are therefore accounts: a stream is `H(domain, account, topic)` and
   belongs to its payer (`fleet_stream_is_payers`), so `verdict` on a
   reviewer's account and `verdict` on a lander's are different streams, and a
   reader identifies a record by (author account, topic). No `mini fleet`
-  action performs that delegation yet; it is a `workspace --action propose`
-  delegate with a `MAX-COST`.
+  action performs that delegation yet; it is the shell's
+  `delegate ... --max-delta balance:0=FEE` (`workspace --action propose`).
 
 ## Operator duties
 
