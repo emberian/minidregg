@@ -207,6 +207,20 @@ about 15,000 in both). Heights 40, 120 and 200 seal a checkpoint.
 
 (The 1,731 at height 200 is one height's sample; 199 and its neighbours read 1,002.)
 
+## Fixed: the root cache's digest and the turn's deltas (`7b331ceb3`)
+
+Two more `@[csimp]` equalities, each for every input, no statement moved:
+- `worldDig = worldDigFast` (`Kernel/WorldRoot.lean`): the customization absorbed once, the
+  node's bytes written into a byte array, the output read as a number in one pass, as the
+  index's `dig`. `digestOfArray` moved there from `Compiler/DurableIndex.lean`.
+- `turnOf = turnOfOnce` (`Kernel/TurnOfIntent.lean`, by `rfl`): the writes' deltas derived once
+  where the definition names them five times.
+
+At `7b331ceb3` the fixture executable builds and its flat row passes; in that one run, on a
+loaded box (derive 16,035 at height 199 against 15,232), the root cache's advance reads 807
+against 1,092 and `Turn.ofIntent` 261 against 349. The whole build, the gate's three runs and the
+journeys at this head are OWED; until they are reported, `31271d5d4` is the last head with them.
+
 ## Measured, not fixed
 
 - **The index rows are 2.3 ms of the 7.1.** 14 keys at about 165 each. Per the bench above a
@@ -216,18 +230,16 @@ about 15,000 in both). Heights 40, 120 and 200 seal a checkpoint.
   levels under them again (about 530 digests an append where the union of the paths is about
   220). A batched `setAll` (keys sorted, each touched node verified and rebuilt once) needs its
   equality to the sequential definition proved; it is the largest single step left.
-- **`Loaded.extend` is 2.8 ms**, split at height 199: the root cache's advance 1,092 (13 slots,
-  each one path of the kept trie: `worldDig` still hashes a node from a list, the index's `dig`
-  does not); the World's turn 860 (`Turn.ofIntent` 348, charge 20, pins 55, `admitPinned` 437),
-  level; engine install, presence, links, ids and transaction index 150, growing slowly; the
-  rest, about 650, is the record encoded and hashed again (next bullet).
+- **`Loaded.extend`**, split at height 199 before `7b331ceb3` (2.8 ms): the root cache's advance
+  1,092 (13 slots, each one path of the kept trie); the World's turn 860 (`Turn.ofIntent` 348,
+  charge 20, pins 55, `admitPinned` 437), level; engine install, presence, links, ids and
+  transaction index 150, growing slowly; the rest, about 650, is the record encoded and hashed
+  again (next bullet).
 - **One append encodes and hashes its record several times.** `Loaded.extend` computes
   `chainStep` (the record's turn digest) and, for the frontier, `leafDigest` over
   `recordFrame.encode record`; `prepareAppend` computes `loaded.chainAfterIntent`, the record's
   bytes, the leaf digest, `Frontier.push` and `completedNodes` (the frontier's node digests a
   third time) again. Each is O(record), about 5 KB; none grows with history.
-- **`Turn.ofIntent` derives the writes' deltas five times** (`createsOf`, `legsOf`, `retiresOf`,
-  and the first two again for the charge), each a decode of every written cell's post bytes.
 - **The entry is its node rows**: 263 at the first birth, 616 at the two hundredth, for 60 to
   150 index rows encoded as lists (`appendNodes`: `rowKey`, `rowStream.encode`, two digests
   spelled base 255 each). `NodeWrite` holds its key and value as lists, and the node cache packs
@@ -311,22 +323,13 @@ ran in the gate, built from the tree, and in its unit test
 
 ## Next, in this order
 
-1. Written and not built (a patch over `31271d5d4`, not on the branch:
-   `/private/tmp/claude-501/-Users-ember-dev-minidregg/25283063-688e-44a8-aca1-3f12f82237f5/scratchpad/append-growth/next-worlddig-turnof.patch`;
-   `Kernel/WorldRoot.lean` and `Kernel/TurnOfIntent.lean` each pass `lake env lean` alone, the
-   tree was not built under them): `worldDig` compiled as the index's
-   `dig` is (`Kernel/WorldRoot.lean`: `worldDigFast`, `worldDig_eq_fast`, with `digestOfArray`
-   moved there from `Compiler/DurableIndex.lean`), expected to take 350 to 400 off the root
-   cache's 1,092; `turnOf` deriving the deltas once (`Kernel/TurnOfIntent.lean`: `turnOfOnce`,
-   `turnOf_eq_once`), expected to take about 200 off `Turn.ofIntent`'s 348. Both are `@[csimp]`
-   equalities for every input; the whole tree rebuilds under them.
-2. The batched index apply (the first bullet of "Measured, not fixed"): about 1.2 ms.
-3. The record encoded and hashed once per append (thread the bytes, the chain and the leaf from
+1. The batched index apply (the first bullet of "Measured, not fixed"): about 1.2 ms.
+2. The record encoded and hashed once per append (thread the bytes, the chain and the leaf from
    `prepareAppend` into the extension); `NodeWrite` with packed key and value and the rows encoded
    into byte arrays. About 0.6 ms together, and the bytes ratchet falls.
-4. The read-back's second preparation (`ExactReadback.ofAppended`, 2.6 to 3.6 ms, outside the
+3. The read-back's second preparation (`ExactReadback.ofAppended`, 2.6 to 3.6 ms, outside the
    store phase).
-5. The checkpoint as rows, stage A then stage B: with the owner. The design and the coordinator's
+4. The checkpoint as rows, stage A then stage B: with the owner. The design and the coordinator's
    five conditions are in the session's messages (no periodic seal; the tag is the head; cells as
    node rows; the system store as index families; `journal` and `spent` are already the index's
    transaction and nullifier families). Before its first commit: read `DurableFastForwardSpec`
@@ -335,8 +338,8 @@ ran in the gate, built from the tree, and in its unit test
    command with a test on a tour-built world; the retention Prop and refusal name; Store bytes per
    record before and after; the cold open at 1,000 and 10,000 records. Move the two root choices
    above (digests as fixed octets, the family's place in the path) in the same re-genesis: they
-   are what bounds a digest at 3.6 and with it items 1 and 2.
-6. The Book split, the same move.
+   are what bounds a digest at 3.6 and with it item 1 and the root cache.
+5. The Book split, the same move.
 
 ## Left on hbox for the successor
 
