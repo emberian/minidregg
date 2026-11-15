@@ -207,7 +207,7 @@ about 15,000 in both). Heights 40, 120 and 200 seal a checkpoint.
 
 (The 1,731 at height 200 is one height's sample; 199 and its neighbours read 1,002.)
 
-## Fixed: the root cache's digest and the turn's deltas (`7b331ceb3`)
+## Written, not gated, not to land: the root cache's digest and the turn's deltas (`7b331ceb3`)
 
 Two more `@[csimp]` equalities, each for every input, no statement moved:
 - `worldDig = worldDigFast` (`Kernel/WorldRoot.lean`): the customization absorbed once, the
@@ -216,10 +216,13 @@ Two more `@[csimp]` equalities, each for every input, no statement moved:
 - `turnOf = turnOfOnce` (`Kernel/TurnOfIntent.lean`, by `rfl`): the writes' deltas derived once
   where the definition names them five times.
 
-At `7b331ceb3` the fixture executable builds and its flat row passes; in that one run, on a
-loaded box (derive 16,035 at height 199 against 15,232), the root cache's advance reads 807
-against 1,092 and `Turn.ofIntent` 261 against 349. The whole build, the gate's three runs and the
-journeys at this head are OWED; until they are reported, `31271d5d4` is the last head with them.
+Commit `7b331ceb3` is on the lane branch above the last gated head. At it the fixture executable
+built and its flat row passed once; in that run, on a loaded box (derive 16,035 at height 199
+against 15,232), the root cache's advance read 807 against 1,092 and `Turn.ofIntent` 261 against
+349. Its whole build was stopped at job 10,272 with no error so far; the gate and the journeys
+were never run at it. The owner ruled this line of work not worth continuing: do not land
+`7b331ceb3`. The same change as a patch over `31271d5d4`:
+`/private/tmp/claude-501/-Users-ember-dev-minidregg/25283063-688e-44a8-aca1-3f12f82237f5/scratchpad/append-growth/next-worlddig-turnof.patch`.
 
 ## Measured, not fixed
 
@@ -230,11 +233,12 @@ journeys at this head are OWED; until they are reported, `31271d5d4` is the last
   levels under them again (about 530 digests an append where the union of the paths is about
   220). A batched `setAll` (keys sorted, each touched node verified and rebuilt once) needs its
   equality to the sequential definition proved; it is the largest single step left.
-- **`Loaded.extend`**, split at height 199 before `7b331ceb3` (2.8 ms): the root cache's advance
+- **`Loaded.extend` is 2.8 ms**, split at height 199: the root cache's advance
   1,092 (13 slots, each one path of the kept trie); the World's turn 860 (`Turn.ofIntent` 348,
   charge 20, pins 55, `admitPinned` 437), level; engine install, presence, links, ids and
   transaction index 150, growing slowly; the rest, about 650, is the record encoded and hashed
-  again (next bullet).
+  again (next bullet). `Turn.ofIntent` derives the writes' deltas five times, and `worldDig`
+  hashes a node from a list (the section above is the unlanded change for both).
 - **One append encodes and hashes its record several times.** `Loaded.extend` computes
   `chainStep` (the record's turn digest) and, for the frontier, `leafDigest` over
   `recordFrame.encode record`; `prepareAppend` computes `loaded.chainAfterIntent`, the record's
@@ -321,7 +325,14 @@ candidate's (`native-loop` overlays the Host and the consent provider only): the
 ran in the gate, built from the tree, and in its unit test
 `durable_nodes_are_written_with_their_entry_and_read_by_version`.
 
-## Next, in this order
+## Next
+
+The owner ruled (2026-11-14) that this line of per-append optimisation stops here. What is
+gated and reported for landing: `5e4a89d6d` (the hand-over, the holder's invariant, the gate's
+`serve` row and its plant) and `31271d5d4` (the Store's node insert, the NODES file, the holder
+trie), with the docs commit `bda9c55da` above it. What is only written: `7b331ceb3` (above) and
+the list below, kept as the attribution of what an append still pays, in the order it would be
+taken if the work resumes.
 
 1. The batched index apply (the first bullet of "Measured, not fixed"): about 1.2 ms.
 2. The record encoded and hashed once per append (thread the bytes, the chain and the leaf from
@@ -341,11 +352,9 @@ ran in the gate, built from the tree, and in its unit test
    are what bounds a digest at 3.6 and with it item 1 and the root cache.
 5. The Book split, the same move.
 
-## Left on hbox for the successor
+## Left on hbox
 
-Tree `t2`, leased as `append-growth`, with its own package copy, built at `31271d5d4`. One
-candidate, `/home/hbox/pool/lanes/append-growth/candidates/c53118cb30eb`.
-`/ci/lane-appendgrowth/flat-fix1`: a product bench world whose
-`w/deployment/operator-config.json` is the configuration `store-bench index N` runs with. Logs in
-`/home/hbox/lanes/append-growth-scratch`: `before-5e4a89d6d-flat.log` and `h2-1-flat.log` are the
-flat rows the table above is read from (`scratchpad/append-growth/phase-table.sh FILE`).
+Nothing of this lane: no candidate, no world, no log, no cargo target; tree `t2` is released.
+The flat-row logs the tables above were read from are removed with the rest. Seen and not
+touched (no PID file of this lane): about thirty `history-index-2` world processes whose working
+directory is the pooled tree `t2`.
