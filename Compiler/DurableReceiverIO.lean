@@ -182,6 +182,9 @@ structure PreparedAppend {rootBytes : List UInt8 → Digest} (loaded : Loaded ro
   extended : Loaded rootBytes
   extendedImage : extended.image = loaded.image.append intent
   indexAfter : Digest
+  /-- The index rows the append writes, decoded: handed to the transport's holder once the entry
+  is confirmed, so the next append walks them and reads no index row from the Store. -/
+  indexWrites : List (List Bool × DurableIndex.Row)
 
 def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     (loaded : Loaded rootBytes) {intent : DataIntent rootBytes}
@@ -237,7 +240,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     discard <| IO.mkRef (leafDigest height recordBytes chain extended.worldRoot)
     let a5 ← IO.monoNanosNow
     IO.eprintln s!"store extend us at height {height}: engine-install {(a1-a0)/1000} presence {(a2-a1)/1000} links {(a3-a2)/1000} ids-txs {(a4-a3)/1000} leaf-digest {(a5-a4)/1000}; the rest of extend is the root cache and the World's turn"
-  return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter⟩
+  return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter, indexWrites⟩
 
 
 /-- What the receiving loop does after the append's observation: confirm by
@@ -258,6 +261,7 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
         return (false, .ordinary (.uncertain "append attempted; entry absent on readback"))
     | .ok (some stored) =>
         if stored = entry then
+          transport.holdIndexRows height true prepared.indexWrites
           let t1 ← IO.monoNanosNow
           let tagged := { extended with headTag := some entry.tag }
           let checkpointStored ←

@@ -132,12 +132,15 @@ structure Decoded where
   height : Nat
   rows : Std.TreeMap (List Bool) DurableIndex.Row pathCmp
 
-initialize decoded : IO.Ref (Option (String × Decoded)) ← IO.mkRef none
+/-- The decoded rows held, by Store root: a process that appends to several Stores (the four
+sources of one fixture process) holds each one's rows, where one slot made every append evict
+the others' and read its rows from the Store again. -/
+initialize decoded : IO.Ref (Std.HashMap String Decoded) ← IO.mkRef {}
 
 /-- The decoded rows held for `root` at `height`. -/
 def heldIndexRows (root : String) (height : Nat) : IO (Option (List Bool → Option DurableIndex.Row)) := do
-  let some (root', held) ← decoded.get | return none
-  if root' = root ∧ held.height = height then
+  let some held := (← decoded.get)[root]? | return none
+  if held.height = height then
     let rows := held.rows
     return some fun path => rows.get? path
   else return none
@@ -146,18 +149,18 @@ def heldIndexRows (root : String) (height : Nat) : IO (Option (List Bool → Opt
 when they were not there); rows read join the set at their height, or start one above it. -/
 def holdIndexRows (root : String) (height : Nat) (appended : Bool)
     (rows : List (List Bool × DurableIndex.Row)) : IO Unit :=
-  let onto (base : Std.TreeMap (List Bool) DurableIndex.Row pathCmp) : Option (String × Decoded) :=
-    some (root, ⟨height, rows.foldl (init := base) fun map row => map.insert row.1 row.2⟩)
-  -- One match that moves the held map, so an insert updates it in place.
-  decoded.modify fun current =>
-    match current with
-    | some (root', held) =>
-        if root' ≠ root then onto {}
-        else if appended then onto (if held.height + 1 = height then held.rows else {})
-        else if held.height = height then onto held.rows
-        else if held.height > height then some (root', held)
-        else onto {}
-    | none => onto {}
+  let onto (base : Std.TreeMap (List Bool) DurableIndex.Row pathCmp) : Option Decoded :=
+    some ⟨height, rows.foldl (init := base) fun map row => map.insert row.1 row.2⟩
+  -- One `alter` that moves the held map, so an insert updates it in place.
+  decoded.modify fun all =>
+    all.alter root fun current =>
+      match current with
+      | some held =>
+          if appended then onto (if held.height + 1 = height then held.rows else {})
+          else if held.height = height then onto held.rows
+          else if held.height > height then some held
+          else onto {}
+      | none => onto {}
 
 /-- `transport` with its node rows held for `root` (`history`, `append`), and its decoded index
 rows (`heldIndexRows`, `holdIndexRows`). -/
