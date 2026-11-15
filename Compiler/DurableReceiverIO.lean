@@ -242,6 +242,19 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     discard <| IO.mkRef (loaded.roots.writeAll (recordSlots height chain record))
     let a6 ← IO.monoNanosNow
     IO.eprintln s!"store extend us at height {height}: engine-install {(a1-a0)/1000} presence {(a2-a1)/1000} links {(a3-a2)/1000} ids-txs {(a4-a3)/1000} leaf-digest {(a5-a4)/1000} root-cache {(a6-a5)/1000} ({record.writes.length + 1} slots)"
+    -- The parts of the entry, each on an argument the preparation did not use (so none is shared
+    -- with a value already computed): the leaf digest, the tag, the node rows, the NODES file.
+    let e1 ← IO.monoNanosNow
+    discard <| IO.mkRef (leafDigest (height + 1) recordBytes chain extended.worldRoot)
+    let e2 ← IO.monoNanosNow
+    discard <| IO.mkRef (trailer key (height + 1)
+      ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩)
+    let e3 ← IO.monoNanosNow
+    discard <| IO.mkRef (appendNodes [] indexWrites)
+    let e4 ← IO.monoNanosNow
+    discard <| IO.mkRef (encodeNodesArray nodes)
+    let e5 ← IO.monoNanosNow
+    IO.eprintln s!"store entry us at height {height}: leaf-digest {(e2-e1)/1000} tag {(e3-e2)/1000} node-rows {(e4-e3)/1000} ({indexWrites.length}) nodes-file {(e5-e4)/1000}"
     -- The World's turn (`WorldTrack.advance`), its three steps.
     if let .held w _ := loaded.track then
       let b0 ← IO.monoNanosNow

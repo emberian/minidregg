@@ -295,6 +295,47 @@ def encodeNodes (nodes : List NodeWrite) : List UInt8 :=
   u64Bytes nodes.length ++ nodes.flatMap fun node =>
     u64Bytes node.space ++ blobBytes node.key ++ blobBytes node.value
 
+/-- Eight octets of a number, most significant first, pushed onto a byte array. -/
+private def pushU64 (out : ByteArray) (value : Nat) : ByteArray :=
+  (((((((out.push (value / 256 ^ 7 % 256).toUInt8).push (value / 256 ^ 6 % 256).toUInt8).push
+    (value / 256 ^ 5 % 256).toUInt8).push (value / 256 ^ 4 % 256).toUInt8).push
+    (value / 256 ^ 3 % 256).toUInt8).push (value / 256 ^ 2 % 256).toUInt8).push
+    (value / 256 ^ 1 % 256).toUInt8).push (value / 256 ^ 0 % 256).toUInt8
+
+private theorem pushU64_data (out : ByteArray) (value : Nat) :
+    (pushU64 out value).data.toList = out.data.toList ++ u64Bytes value := by
+  have indices : (List.range 8).reverse = [7, 6, 5, 4, 3, 2, 1, 0] := by decide
+  simp only [pushU64, u64Bytes, indices, List.map_cons, List.map_nil,
+    Sp800185Cshake256.Fast.push_data, List.append_assoc, List.cons_append, List.nil_append]
+
+/-- One node of the NODES file pushed onto a byte array. -/
+private def pushNode (out : ByteArray) (node : NodeWrite) : ByteArray :=
+  Sp800185Cshake256.Fast.pushList (pushU64
+    (Sp800185Cshake256.Fast.pushList (pushU64 (pushU64 out node.space) node.key.length) node.key)
+    node.value.length) node.value
+
+/-- The NODES file written into one byte array: an append of a hundred and fifty node rows no
+longer builds its thirteen thousand octets as a list (and each of its `u64`s as a mapped range). -/
+def encodeNodesArray (nodes : List NodeWrite) : ByteArray :=
+  nodes.foldl pushNode (pushU64 ByteArray.empty nodes.length)
+
+/-- **The array is the NODES file**: its octets are `encodeNodes`. -/
+theorem encodeNodesArray_data (nodes : List NodeWrite) :
+    (encodeNodesArray nodes).data.toList = encodeNodes nodes := by
+  have folded : ∀ (rest : List NodeWrite) (out : ByteArray),
+      (rest.foldl pushNode out).data.toList = out.data.toList ++ rest.flatMap fun node =>
+        u64Bytes node.space ++ blobBytes node.key ++ blobBytes node.value := by
+    intro rest
+    induction rest with
+    | nil => intro out; simp
+    | cons node rest ih =>
+        intro out
+        rw [List.foldl_cons, ih, List.flatMap_cons]
+        simp only [pushNode, Sp800185Cshake256.Fast.pushList_data, pushU64_data, blobBytes,
+          List.append_assoc]
+  rw [encodeNodesArray, folded, pushU64_data]
+  rfl
+
 def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
     (nodes : List NodeWrite) (crashAt : Option String := none) : IO CasObservation :=
   try
@@ -305,7 +346,7 @@ def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
           "mem:record", "mem:tag", "mem:nodes", phase]
     let (output, _) ← runNativeMemory config arguments
       [("record", entry.record), ("tag", entry.tag.toByteArray),
-        ("nodes", (encodeNodes nodes).toByteArray)]
+        ("nodes", encodeNodesArray nodes)]
     return parseCasOutput output
   catch error => pure (.uncertain s!"native append unavailable: {error}")
 

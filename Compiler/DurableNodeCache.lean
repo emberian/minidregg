@@ -22,7 +22,6 @@ another process appends to keeps reading the Store.
 module
 
 public import Compiler.DurableReceiverCore
-import Std.Data.TreeMap.Lemmas
 
 @[expose] public section
 
@@ -117,13 +116,54 @@ decoded. An index answer at that height walks them directly
 cannot verify falls back to the Store read. The same height discipline as the node rows: an
 append at `h + 1` writes exactly the rows that change, so every other row held at `h` stands. -/
 
-/-- Decoded index rows at `height`, in a persistent tree: a request's lookup function
-(`heldIndexRows`) still holds the rows when its own append hands over the rows it wrote, so an
-insert must not copy the set. A hash map shared that way was copied whole on every `op 2` (the
-preloaded trie: ~20 ms at ~6,000 records, until an append from elsewhere reset it to a small set). -/
+/-- Decoded index rows by bit prefix: a persistent binary trie over the prefixes themselves. A
+lookup or an insert follows the prefix's bits and compares no key (an ordered map of bit lists
+compared a dozen whole prefixes per row, three hundred rows an append). Persistent: a request's
+lookup function (`heldIndexRows`) still holds the rows when its own append hands over the rows it
+wrote, so an insert must not copy the set. A hash map shared that way was copied whole on every
+`op 2` (the preloaded trie: ~20 ms at ~6,000 records, until an append from elsewhere reset it to
+a small set). -/
+inductive Held where
+  | empty
+  | node (row : Option DurableIndex.Row) (left right : Held)
+
+/-- The row held at a prefix. -/
+def Held.get? : Held → List Bool → Option DurableIndex.Row
+  | .empty, _ => none
+  | .node row _ _, [] => row
+  | .node _ left right, bit :: rest => if bit then right.get? rest else left.get? rest
+
+/-- Hold `row` at a prefix (over the row held there). -/
+def Held.insert : Held → List Bool → DurableIndex.Row → Held
+  | .empty, [], row => .node (some row) .empty .empty
+  | .node _ left right, [], row => .node (some row) left right
+  | .empty, bit :: rest, row =>
+      if bit then .node none .empty (Held.empty.insert rest row)
+      else .node none (Held.empty.insert rest row) .empty
+  | .node held left right, bit :: rest, row =>
+      if bit then .node held left (right.insert rest row) else .node held (left.insert rest row) right
+
+theorem Held.get?_insert : ∀ (held : Held) (path : List Bool) (row : DurableIndex.Row)
+    (other : List Bool),
+    (held.insert path row).get? other = if path = other then some row else held.get? other
+  | .empty, [], _, [] => by simp [Held.insert, Held.get?]
+  | .empty, [], _, _ :: _ => by simp [Held.insert, Held.get?]
+  | .node _ _ _, [], _, [] => by simp [Held.insert, Held.get?]
+  | .node _ _ _, [], _, _ :: _ => by simp [Held.insert, Held.get?]
+  | .empty, bit :: _, _, [] => by cases bit <;> simp [Held.insert, Held.get?]
+  | .node _ _ _, bit :: _, _, [] => by cases bit <;> simp [Held.insert, Held.get?]
+  | .empty, bit :: rest, row, b :: others => by
+      have ih := Held.get?_insert .empty rest row others
+      cases bit <;> cases b <;> simp [Held.insert, Held.get?, ih]
+  | .node _ left right, bit :: rest, row, b :: others => by
+      have ihl := Held.get?_insert left rest row others
+      have ihr := Held.get?_insert right rest row others
+      cases bit <;> cases b <;> simp [Held.insert, Held.get?, ihl, ihr]
+
+/-- Decoded index rows at `height`. -/
 structure Decoded where
   height : Nat
-  rows : Std.TreeMap (List Bool) DurableIndex.Row compare
+  rows : Held
 
 /-- The holder after `rows` are handed to it at `height` (the step `holdIndexRows` makes on one
 Store's holder). An append's writes (`appended`) move the held rows from `height - 1`, and start
@@ -132,15 +172,15 @@ above it, and are dropped below it. Among `rows` the first of a prefix wins, as 
 `DurableIndex.overlay`, the Store's view after an append in every index statement. -/
 def Decoded.hold (current : Option Decoded) (height : Nat) (appended : Bool)
     (rows : List (List Bool × DurableIndex.Row)) : Option Decoded :=
-  let onto (base : Std.TreeMap (List Bool) DurableIndex.Row compare) : Option Decoded :=
+  let onto (base : Held) : Option Decoded :=
     some ⟨height, rows.foldr (fun row map => map.insert row.1 row.2) base⟩
   match current with
   | some held =>
-      if appended then onto (if held.height + 1 = height then held.rows else {})
+      if appended then onto (if held.height + 1 = height then held.rows else .empty)
       else if held.height = height then onto held.rows
       else if held.height > height then some held
-      else onto {}
-  | none => onto {}
+      else onto .empty
+  | none => onto .empty
 
 /-! ### The holder's invariant
 
@@ -157,7 +197,7 @@ what makes the holder answer, not what makes an answer sound. -/
 
 /-- Every row held is the Store's row at the held height. -/
 def Decoded.Faithful (store : Nat → List Bool → Option DurableIndex.Row) (held : Decoded) : Prop :=
-  ∀ path row, held.rows[path]? = some row → store held.height path = some row
+  ∀ path row, held.rows.get? path = some row → store held.height path = some row
 
 /-- A holder (or none) is faithful. -/
 def HeldFaithful (store : Nat → List Bool → Option DurableIndex.Row) (held : Option Decoded) : Prop :=
@@ -165,17 +205,16 @@ def HeldFaithful (store : Nat → List Bool → Option DurableIndex.Row) (held :
 
 /-- Handing rows onto a set is `DurableIndex.overlay` over it. -/
 theorem foldr_insert_eq_overlay (rows : List (List Bool × DurableIndex.Row))
-    (base : Std.TreeMap (List Bool) DurableIndex.Row compare) (path : List Bool) :
-    (rows.foldr (fun row map => map.insert row.1 row.2) base)[path]? =
-      DurableIndex.overlay (fun p => base[p]?) rows path := by
+    (base : Held) (path : List Bool) :
+    (rows.foldr (fun row map => map.insert row.1 row.2) base).get? path =
+      DurableIndex.overlay (fun p => base.get? p) rows path := by
   induction rows with
   | nil => simp [DurableIndex.overlay]
   | cons first rest ih =>
-      rw [List.foldr_cons, Std.TreeMap.getElem?_insert]
+      rw [List.foldr_cons, Held.get?_insert]
       by_cases same : first.1 = path
       · simp [DurableIndex.overlay, same]
-      · have differ : compare first.1 path ≠ .eq := fun eq => same (Std.LawfulEqCmp.eq_of_compare eq)
-        simp only [differ, ↓reduceIte]
+      · simp only [same, ↓reduceIte]
         rw [ih]
         simp [DurableIndex.overlay, same]
 
@@ -198,14 +237,14 @@ theorem Decoded.hold_appended {store : Nat → List Bool → Option DurableIndex
     (rows : List (List Bool × DurableIndex.Row))
     (installed : store (height + 1) = DurableIndex.overlay (store height) rows) :
     HeldFaithful store (Decoded.hold current (height + 1) true rows) := by
-  have fresh : HeldFaithful store (some ⟨height + 1, rows.foldr (fun row map => map.insert row.1 row.2) {}⟩) := by
+  have fresh : HeldFaithful store (some ⟨height + 1, rows.foldr (fun row map => map.insert row.1 row.2) .empty⟩) := by
     intro decoded eq path row held
     cases Option.some.inj eq
     rw [foldr_insert_eq_overlay] at held
     show store (height + 1) path = some row
     rw [installed]
-    exact overlay_part (base := fun p => (∅ : Std.TreeMap (List Bool) DurableIndex.Row compare)[p]?)
-      (fun p r h => by simp at h) rows path row held
+    exact overlay_part (base := fun p => Held.empty.get? p)
+      (fun p r h => by simp [Held.get?] at h) rows path row held
   cases current with
   | none => exact fresh
   | some held =>
@@ -227,8 +266,8 @@ theorem Decoded.hold_read {store : Nat → List Bool → Option DurableIndex.Row
     (rows : List (List Bool × DurableIndex.Row))
     (read : ∀ entry ∈ rows, store height entry.1 = some entry.2) :
     HeldFaithful store (Decoded.hold current height false rows) := by
-  have onto : ∀ base : Std.TreeMap (List Bool) DurableIndex.Row compare,
-      (∀ path row, base[path]? = some row → store height path = some row) →
+  have onto : ∀ base : Held,
+      (∀ path row, base.get? path = some row → store height path = some row) →
       HeldFaithful store (some ⟨height, rows.foldr (fun row map => map.insert row.1 row.2) base⟩) := by
     intro base part decoded eq path row found
     cases Option.some.inj eq
@@ -243,7 +282,7 @@ theorem Decoded.hold_read {store : Nat → List Bool → Option DurableIndex.Row
         cases Option.some.inj found
         simpa [here] using stored
     · exact part path row found
-  have fresh := onto {} (fun p r h => by simp at h)
+  have fresh := onto .empty (fun p r h => by simp [Held.get?] at h)
   cases current with
   | none => exact fresh
   | some held =>
@@ -302,10 +341,10 @@ rows, whenever the held rows lack no row on `k`'s walk. -/
 theorem lookupRows_eq_of_faithful {store : Nat → List Bool → Option DurableIndex.Row}
     {held : Decoded} (faithful : held.Faithful store) (root : Minidregg.Theory.TypedAuthorization.Digest)
     (k : DurableIndex.IndexKey)
-    (complete : walkMisses (fun path => held.rows[path]?) (DurableIndex.bitsOf k) 521 [] root = false) :
-    DurableIndex.lookupRows (fun path => held.rows[path]?) root k =
+    (complete : walkMisses (fun path => held.rows.get? path) (DurableIndex.bitsOf k) 521 [] root = false) :
+    DurableIndex.lookupRows (fun path => held.rows.get? path) root k =
       DurableIndex.lookupRows (store held.height) root k := by
-  have same : DurableIndex.openingOf (fun path => held.rows[path]?) root k =
+  have same : DurableIndex.openingOf (fun path => held.rows.get? path) root k =
       DurableIndex.openingOf (store held.height) root k :=
     walk_eq_of_part faithful _ 521 [] root [] complete
   unfold DurableIndex.lookupRows
@@ -314,7 +353,7 @@ theorem lookupRows_eq_of_faithful {store : Nat → List Bool → Option DurableI
 /-- **Satisfiable**: a holder that holds a row is faithful to a Store that installed it. -/
 theorem faithful_inhabited (row : DurableIndex.Row) :
     ∃ (store : Nat → List Bool → Option DurableIndex.Row) (held : Option Decoded),
-      HeldFaithful store held ∧ ∃ decoded, held = some decoded ∧ decoded.rows[([] : List Bool)]? = some row := by
+      HeldFaithful store held ∧ ∃ decoded, held = some decoded ∧ decoded.rows.get? [] = some row := by
   let store : Nat → List Bool → Option DurableIndex.Row := fun height =>
     if height = 0 then fun _ => none else DurableIndex.overlay (fun _ => none) [([], row)]
   refine ⟨store, Decoded.hold none 1 true [([], row)],
@@ -333,11 +372,10 @@ theorem Decoded.hold_unconfirmed_wrong (k : DurableIndex.IndexKey) (root : Minid
       Decoded.hold none 1 true [([], .leaf k [])] = some decoded ∧
       store 1 ≠ DurableIndex.overlay (store 0) [([], .leaf k [])] ∧
       ¬ decoded.Faithful store ∧
-      (DurableIndex.openingOf (fun path => decoded.rows[path]?) root k).claims k = some [] ∧
+      (DurableIndex.openingOf (fun path => decoded.rows.get? path) root k).claims k = some [] ∧
       (DurableIndex.openingOf (store decoded.height) root k).claims k = none := by
   have held : (([([], DurableIndex.Row.leaf k [])] : List (List Bool × DurableIndex.Row)).foldr
-      (fun row map => map.insert row.1 row.2)
-      (∅ : Std.TreeMap (List Bool) DurableIndex.Row compare))[([] : List Bool)]? = some (.leaf k []) := by
+      (fun row map => map.insert row.1 row.2) Held.empty).get? [] = some (.leaf k []) := by
     rw [foldr_insert_eq_overlay]
     simp [DurableIndex.overlay]
   refine ⟨fun _ _ => none, _, (fun _ eq => by cases eq), rfl, ?_, ?_, ?_, ?_⟩
@@ -356,7 +394,7 @@ theorem Decoded.hold_unconfirmed_wrong (k : DurableIndex.IndexKey) (root : Minid
     unfold DurableIndex.walk
     simp [nonEmpty, DurableIndex.Opening.claims]
 
-#assert_axioms foldr_insert_eq_overlay Decoded.hold_appended Decoded.hold_read walk_eq_of_part
+#assert_axioms Held.get?_insert foldr_insert_eq_overlay Decoded.hold_appended Decoded.hold_read walk_eq_of_part
   lookupRows_eq_of_faithful faithful_inhabited Decoded.hold_unconfirmed_wrong
 
 /-- The decoded rows held, by Store root: a process that appends to several Stores (the four
@@ -369,7 +407,7 @@ def heldIndexRows (root : String) (height : Nat) : IO (Option (List Bool → Opt
   let some held := (← decoded.get)[root]? | return none
   if held.height = height then
     let rows := held.rows
-    return some fun path => rows[path]?
+    return some fun path => rows.get? path
   else return none
 
 /-- Hold rows for `root` (`Decoded.hold` on that Store's holder). An append's rows are handed
