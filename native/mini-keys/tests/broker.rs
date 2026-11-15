@@ -476,8 +476,25 @@ fn a_member_account_cannot_take_the_slots_or_force_a_large_frame_and_the_host_is
 }
 
 /// B-F7: an operation the audit log cannot record does not run.
+///
+/// RLIMIT_FSIZE is process-wide and the other tests in this binary write files on
+/// their own threads, so the limited part runs in a child copy of this binary; putting
+/// the old limit back after the call would not do, since those writes land in the window.
 #[test]
 fn an_operation_that_cannot_be_audited_is_refused_and_has_no_effect() {
+    const NAME: &str = "an_operation_that_cannot_be_audited_is_refused_and_has_no_effect";
+    const CHILD: &str = "MINI_TEST_AUDIT_LIMITED_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "limited child failed ({}):\n{text}", out.status);
+        assert!(text.contains("test result: ok. 1 passed"), "limited child ran no test:\n{text}");
+        return;
+    }
     let f = Fixture::new("audit");
     let b = f.start(f.config_json(f.all_roles(), true)).unwrap();
     // Every later write by this process (the broker's audit appends among them) fails EFBIG.
