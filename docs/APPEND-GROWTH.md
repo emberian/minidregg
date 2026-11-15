@@ -118,22 +118,49 @@ index apply is 283 / 376 / 1,091 (minimum, median, maximum) over 103 appends; it
 2,400. On the four-source fixture's births (14 keys) it is 5,331 / 7,336 / 7,912 / 8,409 at
 heights 1 / 40 / 120 / 200 (11,505 / 14,424 / 18,271 / 18,597 before), and that is NOT the trie:
 
-## Found, fixed on the lane after the landed head, and RED: the receiving loop reads its index rows from the Store on every append
+## Fixed: the receiving loop read its index rows from the Store on every append
 
 `store index ... held true` only says a holder exists after the read. In `receiveCandidateWithFresh`
-nothing hands the appended rows to the holder (`DurableServed.receiveServed` does), so the holder
-is one height behind and every append reads its keys' prefixes from the Store (about 1,350 row
+nothing handed the appended rows to the holder (`DurableServed.receiveServed` does), so the holder
+was one height behind and every append read its keys' prefixes from the Store (about 1,350 row
 keys for a birth); and `DurableNodeCache.decoded` was one slot per process, so the fixture's four
-Stores evicted one another. Commit "receiver: an append hands the index rows it wrote to the
-holder; the holder is keyed by Store root" (the lane's head, after the landed commit) does both.
-With it the fixture's index apply is 2,170 / 2,717 / 2,512 at heights 40 / 120 / 200 and the
-flat row's median hand-off 32,647 over the first 8 births and 39,170 over the last 8; its whole
-build is green (13,080 jobs); but the Simplex gate's row `four-source-serve` FAILS with it
-("uncaught exception: partial source completion", after "AWAIT second confirmed by 3 of 4
-identical receipts"), and passes without it. Not diagnosed. First suspects: the holder moved at
-a confirmation that was `alreadyPresent` or recovered; a Store reopened in the same process under
-the same root string finding rows of its earlier life. Do not land that commit before the row
-passes.
+Stores evicted one another. Now `PreparedAppend.indexWrites` carries the decoded rows,
+`publishAfter` hands them over when the Store installed the entry from this call, and the holder
+is kept per Store root. The fixture's index apply is 1,423 / 2,038 / 2,521 / 2,533 at heights
+2 / 41 / 121 / 200 (5,331 to 8,409 before).
+
+The holder's step is the pure `DurableNodeCache.Decoded.hold`, and its invariant is stated and
+proved there. The Store's index rows are modelled by height, an installed append being
+`DurableIndex.overlay` of its rows (the form `SetPreserves` and `maintained_apply` use):
+- `Decoded.Faithful store held`: every row held is the Store's row at the held height. The
+  holder is a part of the Store's rows (rows read join it), never more.
+- `Decoded.hold_appended`: handing over the rows of an append the Store installed at `h + 1`
+  keeps it (moved from `h`, or started fresh). `Decoded.hold_read`: so do rows read at a height.
+- `lookupRows_eq_of_faithful`: a verified lookup through a faithful holder that lacks no row on
+  the key's walk (`walkMisses = false`) IS the lookup through the Store's rows.
+- `faithful_inhabited` (a holder that holds a row, faithful); `Decoded.hold_unconfirmed_wrong`
+  (teeth: a holder handed the rows of an append the Store did not install is not faithful, and
+  its walk claims the key present where the Store's finds nothing).
+Among handed rows the first of a prefix wins, as in `overlay`; no proof that `IndexRows.apply`
+writes a prefix once is needed. Not proved in Lean: that the Store's helper installs exactly the
+node rows it is given (the transport's contract, Rust). `DurableServed.receiveServed` (the
+Host's path, not touched here) hands over on any confirmed read-back, also one the Store held
+already; its premise then rests on every writer of the Store computing its rows by
+`IndexRows.apply`. Every use of held rows stays verified against the authenticated root.
+
+### The red row was the gate's, not the hand-over's
+
+`four-source-serve` failed with "partial source completion" (or "partial completion retained"
+when replica 0 was the late one). `scripts/gates/check-generic-simplex`'s `serve` awaited a
+quorum of three receipts and then stopped all four replicas, and the lookup after it requires
+the record in all four Stores. The fourth replica is 10 to 100 ms behind the third (it is still
+validating when the others append); when the client's 200 ms poll fell in that window the row
+stopped it before its append. Measured on hbox by running the row alone with its replica logs
+kept: 5 of 30 with the hand-over, 2 of 30 with a fixture built before it (`d597a8582`), none
+of 12 when the stop waits 3 s. The late replica's log never reaches `store index`: no changed
+code ran in it. `serve` now waits for all four (`await-call --all`, as `serve_down` does) before
+it stops them. The plant `quorum-lookup` keeps the lookup's teeth: replica 3 stopped, a birth
+answered by three, the replicas stopped, and the lookup of all four must refuse.
 
 ## Measured, not fixed
 
@@ -197,10 +224,9 @@ in the run's short socket directory, were stopped by PID file by the runner.
 
 ## Next, in this order
 
-1. Make `four-source-serve` pass with the holder hand-over, then land that commit.
-2. Split and fix `Loaded.extend`: the root cache's advance and the World's turn (2.3 ms a birth),
-   then the Store's append call (0.4 to 1.8 ms) and the read-back's second preparation.
-3. The checkpoint as rows, stage A then stage B: the design and the coordinator's five conditions
+1. Split and fix `Loaded.extend`: the root cache's advance and the World's turn, then the
+   Store's append call and the read-back's second preparation.
+2. The checkpoint as rows, stage A then stage B: the design and the coordinator's five conditions
    are in the session's messages (no periodic seal; the tag is the head; cells as node rows;
    the system store as index families; `journal` and `spent` are already the index's transaction
    and nullifier families). Before its first commit: read `DurableFastForwardSpec` whole, the fn
@@ -209,7 +235,7 @@ in the run's short socket directory, were stopped by PID file by the runner.
    a test on a tour-built world; the retention Prop and refusal name; Store bytes per record
    before and after; the cold open at 1,000 and 10,000 records. Move the two root choices above
    in the same re-genesis.
-4. The Book split, the same move.
+3. The Book split, the same move.
 
 ## Left on hbox for the successor
 

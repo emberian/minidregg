@@ -91,8 +91,24 @@ def apply {config : Config} {target : Durable} (old : Verified config target)
           | .error _ => false
         let c ← IO.monoNanosNow
         IO.eprintln s!"store judge us at height {old.opened.durable.height + 1}: execute {(b-a)/1000} ({ready}) gates {(c-b)/1000} ({judged}) writes {derived.intent.writes.length}"
+      -- With `MINI_STORE_PHASES=1` the Store's append call and the holder's hand-over are timed
+      -- alone (the receiving loop's own lines time the preparation and the read-back).
+      let transport := orderedTransport derived
+      let transport := if (← IO.getEnv "MINI_STORE_PHASES") == some "1" then
+          { transport with
+            append := fun height entry nodes => do
+              let a ← IO.monoNanosNow
+              let observed ← transport.append height entry nodes
+              IO.eprintln s!"store append us at height {height}: call {((← IO.monoNanosNow)-a)/1000} nodes {nodes.length}"
+              return observed
+            holdIndexRows := fun height appended rows => do
+              let a ← IO.monoNanosNow
+              transport.holdIndexRows height appended rows
+              if appended then
+                IO.eprintln s!"store hold us at height {height}: hand-over {((← IO.monoNanosNow)-a)/1000} rows {rows.length}" }
+        else transport
       let t2 ← IO.monoNanosNow
-      match ← DurableReceiverIO.receiveLoadedDetailed (orderedTransport derived)
+      match ← DurableReceiverIO.receiveLoadedDetailed transport
           ResourceBirthCodec.rootBytes old.opened.durable derived.intent with
       | .ordinary result => return .ordinary result
       | .exact _ appended =>

@@ -182,8 +182,8 @@ structure PreparedAppend {rootBytes : List UInt8 → Digest} (loaded : Loaded ro
   extended : Loaded rootBytes
   extendedImage : extended.image = loaded.image.append intent
   indexAfter : Digest
-  /-- The index rows the append writes, decoded: handed to the transport's holder once the entry
-  is confirmed, so the next append walks them and reads no index row from the Store. -/
+  /-- The index rows the append writes, decoded: handed to the transport's holder once the Store
+  installed them, so the next append walks them and reads no index row from the Store. -/
   indexWrites : List (List Bool × DurableIndex.Row)
 
 def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
@@ -239,7 +239,24 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     let a4 ← IO.monoNanosNow
     discard <| IO.mkRef (leafDigest height recordBytes chain extended.worldRoot)
     let a5 ← IO.monoNanosNow
-    IO.eprintln s!"store extend us at height {height}: engine-install {(a1-a0)/1000} presence {(a2-a1)/1000} links {(a3-a2)/1000} ids-txs {(a4-a3)/1000} leaf-digest {(a5-a4)/1000}; the rest of extend is the root cache and the World's turn"
+    discard <| IO.mkRef (loaded.roots.writeAll (recordSlots height chain record))
+    let a6 ← IO.monoNanosNow
+    IO.eprintln s!"store extend us at height {height}: engine-install {(a1-a0)/1000} presence {(a2-a1)/1000} links {(a3-a2)/1000} ids-txs {(a4-a3)/1000} leaf-digest {(a5-a4)/1000} root-cache {(a6-a5)/1000} ({record.writes.length + 1} slots)"
+    -- The World's turn (`WorldTrack.advance`), its three steps.
+    if let .held w _ := loaded.track then
+      let b0 ← IO.monoNanosNow
+      match TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent with
+      | .error _ => IO.eprintln s!"store turn at height {height}: the intent is not a turn"
+      | .ok t =>
+          let b1 ← IO.monoNanosNow
+          discard <| IO.mkRef (DeployedCharge.mismatch t.charge intent.exactCharge)
+          let b2 ← IO.monoNanosNow
+          discard <| IO.mkRef (Minidregg.Kernel.World.pinCheckFromBy (snapPinFails loaded.snapshot w) 0 t.pins)
+          let b3 ← IO.monoNanosNow
+          discard <| IO.mkRef (Minidregg.Kernel.World.World.admitPinned DeployedHistory.history
+            (Minidregg.Kernel.World.pinCheckFromBy (snapPinFails loaded.snapshot w) 0 t.pins) w t)
+          let b4 ← IO.monoNanosNow
+          IO.eprintln s!"store turn us at height {height}: of-intent {(b1-b0)/1000} charge {(b2-b1)/1000} pins {(b3-b2)/1000} ({t.pins.length}) admit-with-pins {(b4-b3)/1000} (legs {t.legs.length} creates {t.creates.length} nullifiers {t.nullifiers.length})"
   return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter, indexWrites⟩
 
 
@@ -261,7 +278,11 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
         return (false, .ordinary (.uncertain "append attempted; entry absent on readback"))
     | .ok (some stored) =>
         if stored = entry then
-          transport.holdIndexRows height true prepared.indexWrites
+          -- The holder moves only by rows the Store installed from this call
+          -- (`DurableNodeCache.Decoded.hold_appended`'s premise). An entry already present or
+          -- recovered after an uncertain response leaves it a height behind: the next append
+          -- reads its rows from the Store and the holder starts again there.
+          if installed then transport.holdIndexRows height true prepared.indexWrites
           let t1 ← IO.monoNanosNow
           let tagged := { extended with headTag := some entry.tag }
           let checkpointStored ←

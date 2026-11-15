@@ -53,6 +53,8 @@
 #   four-source-fixture rejoin --plant silent-rejoin  the restarted replica never tells its peers its height
 #   all-receipts                                 a client that waits for all four receipts (`await-call --all`)
 #                                                while replica 3 is stopped is left uncertain
+#   quorum-lookup                                a row that reads all four Stores after a quorum's answer, replica 3
+#                                                stopped: the lookup refuses (three receipts are not four appends)
 set -uo pipefail
 bin=${1:-.lake/build/bin}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -102,15 +104,21 @@ serve() {  # NAME
   local i
   "$fixture" author-birth "$tmp/$1" "$store" "$verifier" "$agreement" "$signer" 7002 72 "$tmp/$1-call2.bin" || return 1
   for i in 0 1 2 3; do stand "$1" $i; done
-  "$fixture" await-call "$tmp/$1" "$tmp/$1-call2.bin" "$tmp/$1-outcome2.bin" 30 second 1; local rc=$?
+  "$fixture" await-call "$tmp/$1" "$tmp/$1-call2.bin" "$tmp/$1-outcome2.bin" 30 second 1 || { stop_serving; return 1; }
+  # The client's answer is a quorum of three; the lookup below reads all four Stores. The fourth replica is
+  # tens of milliseconds behind the third as a rule, so stopping here stopped it before its append in about
+  # one run in eight ("partial source completion"). Wait for all four, as `serve_down` does.
+  "$fixture" await-call "$tmp/$1" "$tmp/$1-call2.bin" "$tmp/$1-outcome2.bin" 30 second 1 --all; local rc=$?
   stop_serving; sleep 1
   [[ $rc == 0 ]] && "$fixture" lookup-all-call "$tmp/$1" "$store" "$verifier" "$agreement" "$tmp/$1-call2.bin" "$tmp/$1-look2.bin"
 }
 # Replica 3 stopped: a third birth is answered by the other three receipts. With `all`, the client instead
-# waits for all four (the plant) and is left uncertain. Otherwise replica 3 is then restarted and, with no
-# further call, must hold the record too (`await-call --all` on the same request).
-serve_down() {  # NAME [all]
-  local i n=3; [[ ${2:-} == all ]] && n=4
+# waits for all four (the plant) and is left uncertain. With `quorum` (the plant), the row stops at the
+# quorum's answer and reads all four Stores, as `serve` once did: the lookup refuses the Store that lacks
+# the record. Otherwise replica 3 is then restarted and, with no further call, must hold the record too
+# (`await-call --all` on the same request).
+serve_down() {  # NAME [all|quorum]
+  local i n=3; [[ ${2:-} == all ]] && n=4; [[ ${2:-} == quorum ]] && n=5
   "$fixture" author-birth "$tmp/$1" "$store" "$verifier" "$agreement" "$signer" $((7000+n)) $((70+n)) "$tmp/$1-call$n.bin" || return 1
   for i in 0 1 2; do stand "$1" $i; done
   if [[ ${2:-} == all ]]; then
@@ -118,6 +126,10 @@ serve_down() {  # NAME [all]
     stop_serving; sleep 1; return $rc
   fi
   "$fixture" await-call "$tmp/$1" "$tmp/$1-call$n.bin" "$tmp/$1-outcome$n.bin" 30 down$n 0 || { stop_serving; return 1; }
+  if [[ ${2:-} == quorum ]]; then
+    stop_serving; sleep 1
+    "$fixture" lookup-all-call "$tmp/$1" "$store" "$verifier" "$agreement" "$tmp/$1-call$n.bin" "$tmp/$1-look$n.bin"; return
+  fi
   stand "$1" 3
   "$fixture" await-call "$tmp/$1" "$tmp/$1-call$n.bin" "$tmp/$1-outcome$n.bin" 30 down$n 0 --all; local rc=$?
   stop_serving; sleep 1
@@ -180,5 +192,7 @@ plant silent-rejoin 'rejoin: the restarted replica stayed behind' \
   rejoin rejoin-bad --plant silent-rejoin
 plant all-receipts 'AWAIT down4 uncertain' \
   serve_down ok-run all
+plant quorum-lookup 'partial source completion' \
+  serve_down ok-run quorum
 echo "GENERIC-SIMPLEX wall=$(( $(date +%s) - start ))s status=$status"
 exit $status
