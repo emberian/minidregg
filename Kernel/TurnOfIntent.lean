@@ -761,6 +761,27 @@ def turnOf (B : Bridge R D) (H : History R TransactionId StableEvent D)
     pins := pinsOf B intent
     credit := intent.credit }
 
+/-- `turnOf` as compiled: the writes' deltas (each a decode of the written cell's post bytes) are
+derived once, where the definition names them through `createsOf`, `legsOf` and `retiresOf`
+(five derivations: the creates and the legs twice more for the charge). -/
+def turnOfOnce (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) : DTurn R D :=
+  let ds := deltas B.codec cells intent.writes
+  let creates := ds.filterMap fun d => d.2.create? d.1
+  let legs := ds.filterMap fun d => d.2.leg? B.codec d.1
+  { txId := intent.transactionId
+    creates := creates
+    legs := legs
+    retires := ds.filterMap fun d => d.2.retire? d.1
+    event := intent.event
+    nullifiers := intent.nullifiers.map B.key
+    charge := chargeOf H creates legs intent.event intent.exactCharge
+    subject := intent.subject
+    pins := pinsOf B intent
+    credit := intent.credit }
+
+@[csimp] theorem turnOf_eq_once : @turnOf = @turnOfOnce := rfl
+
 /-- The derived turn carries the intent's meter credit (M2). -/
 theorem turnOf_credit (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :

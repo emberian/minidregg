@@ -67,6 +67,7 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory.AuthTrie (NodeIn Collision CollisionAmong TreeNode ClimbNode WF entries tree)
 open Minidregg.Theory.KeyedModel (Model)
+open Minidregg.Kernel.WorldRoot (byteArray_eq_of_toList digestOfArray digestOfArray_eq)
 
 set_option autoImplicit false
 
@@ -260,9 +261,6 @@ def dig (node : NodeIn IndexKey (List UInt8) Digest) : Digest :=
 The customization is absorbed once and every node finishes from it; a node's bytes are written
 straight into a byte array; the empty node's digest is a constant. -/
 
-theorem byteArray_eq_of_toList {a b : ByteArray} (same : a.data.toList = b.data.toList) : a = b :=
-  ByteArray.ext (Array.ext' same)
-
 def nodeMidstate : ByteArray :=
   Sp800185Cshake256.Midstate.cshake256AbsorbKernel
     (Sp800185Cshake256.Native.bytesOfList nodeCustomization) (Sp800185Cshake256.Native.bytesOfList [])
@@ -300,18 +298,6 @@ theorem nodeArray_data (node : NodeIn IndexKey (List UInt8) Digest) :
   | branch l r =>
       rw [nodeArray, pushDigest_data, pushDigest_data, push_data]
       rfl
-
-def digestOfArray (out : ByteArray) : Digest :=
-  if fits : 0 + 32 ≤ out.size then ⟨fixedValueAt out 0 32 fits⟩
-  else Sp800185Cshake256.digestOfBytesLE out.data.toList
-
-theorem digestOfArray_eq (out : ByteArray) (len : out.data.toList.length = 32) :
-    digestOfArray out = Sp800185Cshake256.digestOfBytesLE out.data.toList := by
-  unfold digestOfArray
-  split
-  · rw [fixedValueAt_eq, List.drop_zero, List.take_of_length_le (by omega)]
-    rfl
-  · rfl
 
 def digFast : NodeIn IndexKey (List UInt8) Digest → Digest
   | .empty => emptyDigestConst

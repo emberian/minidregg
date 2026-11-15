@@ -39,6 +39,7 @@ public import Theory.AuthTrieCache
 public import Kernel.World
 public import Compiler.Tower256ConcreteBackend
 public import Compiler.PersistedCodecTags.Core
+public import Theory.Sp800185Cshake256Midstate
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -512,6 +513,71 @@ theorem worldDig_eq : ∀ n : Node, worldDig n = deployedHash (nodeBytes n)
   | .empty => rfl
   | .leaf .. => rfl
   | .branch .. => rfl
+
+/-! ### The node digest, compiled
+
+The customization is absorbed once and every node finishes from it; a node's bytes are written
+straight into a byte array; the 32 output octets are read as a number in one pass. No statement
+moves: `worldDig` stays the definition, and `worldDig_eq_fast` holds for every node. -/
+
+theorem byteArray_eq_of_toList {a b : ByteArray} (same : a.data.toList = b.data.toList) : a = b :=
+  ByteArray.ext (Array.ext' same)
+
+/-- A 32-octet hash output read as a digest. -/
+def digestOfArray (out : ByteArray) : Digest :=
+  if fits : 0 + 32 ≤ out.size then ⟨fixedValueAt out 0 32 fits⟩
+  else digestOfBytesLE out.data.toList
+
+theorem digestOfArray_eq (out : ByteArray) (len : out.data.toList.length = 32) :
+    digestOfArray out = digestOfBytesLE out.data.toList := by
+  unfold digestOfArray
+  split
+  · rw [fixedValueAt_eq, List.drop_zero, List.take_of_length_le (by omega)]
+    rfl
+  · rfl
+
+/-- The world-root customization, absorbed once. -/
+def worldMidstate : ByteArray :=
+  Midstate.cshake256AbsorbKernel (Native.bytesOfList worldCustomization) (Native.bytesOfList [])
+
+/-- A node's hash input, written into one byte array. -/
+def nodeArray : Node → ByteArray
+  | .empty => ByteArray.empty.push 0
+  | .leaf k v => StreamCodec.encodeNatInto (pushOctets (ByteArray.empty.push 1) (keyBytes k)) v.value
+  | .branch l r =>
+      StreamCodec.encodeNatInto (StreamCodec.encodeNatInto (ByteArray.empty.push 2) l.value) r.value
+
+theorem nodeArray_data (node : Node) : (nodeArray node).data.toList = nodeBytes node := by
+  cases node with
+  | empty => rfl
+  | leaf k v =>
+      rw [nodeArray, StreamCodec.encodeNatInto_data, pushOctets_data, push_data]
+      rfl
+  | branch l r =>
+      rw [nodeArray, StreamCodec.encodeNatInto_data, StreamCodec.encodeNatInto_data, push_data]
+      rfl
+
+theorem deployedHash_eq_finished (node : Node) :
+    deployedHash (nodeBytes node) =
+      digestOfArray (Midstate.cshake256FinishKernel worldMidstate (nodeArray node)) := by
+  have array : nodeArray node = Native.bytesOfList (nodeBytes node) :=
+    byteArray_eq_of_toList (by rw [nodeArray_data, Native.bytesOfList_toList])
+  have cached := Midstate.cshake256_cached worldCustomization [] (nodeBytes node)
+  rw [List.nil_append] at cached
+  rw [array, worldMidstate, digestOfArray_eq _ (by rw [cached]; exact cshake256Bytes_length _ _), cached]
+  rfl
+
+/-- `worldDig` as compiled: one finish from the absorbed customization per leaf and per branch. -/
+def worldDigFast : Node → Digest
+  | .empty => emptyDigest
+  | node => digestOfArray (Midstate.cshake256FinishKernel worldMidstate (nodeArray node))
+
+@[csimp] theorem worldDig_eq_fast : @worldDig = @worldDigFast := by
+  funext node
+  cases node with
+  | empty => rfl
+  | leaf k v => exact deployedHash_eq_finished _
+  | branch l r => exact deployedHash_eq_finished _
 
 /-- A node collision is a collision of the deployed hash on two distinct inputs. -/
 theorem worldDig_collision (h : AuthTrie.Collision worldDig) :
