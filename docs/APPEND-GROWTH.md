@@ -1,8 +1,11 @@
 # What an append costs as history grows
 
-State on `lane/append-growth`. One cause of growth is fixed (the allocation check); the others
-are measured, attributed to the code that does them, and not fixed. "Next" at the end is the
-order of work. Numbers are from hbox, a shared box, one replica of the four-source fixture
+State on `lane/append-growth`. Fixed: the allocation check, the journal index's compiled half,
+the index rows read back on every append, the Store's node insert, the NODES file, the holder's
+hand-over. Measured, attributed to the code that does it and not fixed: the rest ("Measured, not
+fixed"); "Next" at the end is the order of work. The store phase of a birth off a checkpoint
+height is 4.1 ms at the first birth and 7.1 ms at the two hundredth (the target, under 4 ms and
+flat, is not met). Numbers are from hbox, a shared box, one replica of the four-source fixture
 unless a line says otherwise; times are microseconds.
 
 ## How to measure
@@ -13,7 +16,15 @@ unless a line says otherwise; times are microseconds.
   `Loaded.extend`, entry; record bytes and node rows), `store confirm` (read-back, checkpoint),
   `birth admit` (the parts of the native birth admission) and `birth prepare` (the parts of
   `prepareBirth`, run once more to be timed: a run with this flag pays the preparation twice, so
-  its hand-off times are not the row's).
+  its hand-off times are not the row's). Also `store extend` (the parts of `Loaded.extend`,
+  with the root cache's advance), `store turn` (the World's turn: derivation, charge, pins,
+  admission), `store entry` (leaf digest, tag, node rows, NODES file), `store append` (the
+  Store's append call alone) and `store hold` (the holder's hand-over). Every part is run once
+  more to be timed, so `ordered append ... store` under this flag is about 3 ms above the sum of
+  the parts.
+- hbox has co-tenants: compare runs only when `ordered append ... derive` (the signature
+  verification, constant work) agrees between them. The tables below take, per field, the minimum
+  over the four replicas and three neighbouring heights.
 - `MINI_APPEND_TIMING=1` prints the ordered receiver's five phases; `MINI_APPLY_PHASES=1` the
   hand-off's.
 - `scripts/gates/check-generic-simplex BIN` with `GENERIC_SIMPLEX_FLAT_HEIGHTS=200` and
@@ -126,7 +137,8 @@ was one height behind and every append read its keys' prefixes from the Store (a
 keys for a birth); and `DurableNodeCache.decoded` was one slot per process, so the fixture's four
 Stores evicted one another. Now `PreparedAppend.indexWrites` carries the decoded rows,
 `publishAfter` hands them over when the Store installed the entry from this call, and the holder
-is kept per Store root. The fixture's index apply is 1,423 / 2,038 / 2,521 / 2,533 at heights
+is kept per Store root, as a persistent binary trie over the bit prefixes (`DurableNodeCache.Held`:
+a lookup or an insert follows the bits and compares no key; `Held.get?_insert`). The fixture's index apply is 1,423 / 2,038 / 2,521 / 2,533 at heights
 2 / 41 / 121 / 200 (5,331 to 8,409 before).
 
 The holder's step is the pure `DurableNodeCache.Decoded.hold`, and its invariant is stated and
@@ -162,15 +174,74 @@ code ran in it. `serve` now waits for all four (`await-call --all`, as `serve_do
 it stops them. The plant `quorum-lookup` keeps the lookup's teeth: replica 3 stopped, a birth
 answered by three, the replicas stopped, and the lookup of all four must refuse.
 
+## Fixed: the Store's append call, the NODES file, the holder's hand-over
+
+- The Store helper prepared `INSERT INTO durable_node` once per node row (62 rows at the first
+  birth, 150 at the two hundredth); it prepares it once per append and resets it per row.
+- `NativeConfig.append` built the NODES file as a list of octets; `encodeNodesArray` writes it
+  into one byte array (`encodeNodesArray_data`: its octets are `encodeNodes`).
+- The holder's ordered map of bit lists made the hand-over grow with the rows held; the prefix
+  trie above does not.
+
+The store phase by part, before (`5e4a89d6d`) and after (`31271d5d4`), same box state (derive
+about 15,000 in both). Heights 40, 120 and 200 seal a checkpoint.
+
+| part | | 2 | 40 | 41 | 120 | 199 | 200 |
+|---|---|---|---|---|---|---|---|
+| index rows (`applyIndex`) | before | 1,373 | 2,096 | 2,045 | 2,510 | 2,459 | 2,480 |
+| | after | 1,376 | 2,021 | 1,897 | 2,180 | 2,286 | 2,306 |
+| `Loaded.extend` | before | 1,855 | 2,375 | 2,288 | 2,811 | 2,761 | 2,741 |
+| | after | 1,878 | 2,296 | 2,295 | 2,621 | 2,809 | 2,759 |
+| entry (leaf, frontier, tag, node rows) | before | 335 | 586 | 535 | 737 | 709 | 687 |
+| | after | 325 | 599 | 515 | 653 | 675 | 679 |
+| the Store's append call | before | 647 | 1,053 | 1,097 | 1,632 | 1,579 | 1,661 |
+| | after | 245 | 624 | 639 | 780 | 1,002 | 1,731 |
+| read-back and hand-over | before | 111 | 334 | 376 | 550 | 572 | 502 |
+| | after | 94 | 180 | 142 | 169 | 178 | 230 |
+| of it the hand-over | before | 31 | 199 | 228 | 385 | 430 | 410 |
+| | after | 14 | 38 | 38 | 54 | 67 | 71 |
+| checkpoint seal and put | before | 0 | 4,917 | 1 | 23,424 | 1 | 52,510 |
+| | after | 0 | 4,673 | 0 | 21,694 | 1 | 51,550 |
+| sum of the parts, with judge 80, index root 60, counts 55 | before | 4,509 | | 6,537 | | 8,277 | |
+| | after | 4,106 | | 5,679 | | 7,148 | |
+
+(The 1,731 at height 200 is one height's sample; 199 and its neighbours read 1,002.)
+
 ## Measured, not fixed
 
-- **`Loaded.extend` and the World's turn**: 1,848 to 2,966 per birth. Of it (`store extend`
-  line): the engine's install 11 to 43, the presence index 6 to 49, links 22, cell ids and
-  transaction index 3 to 46 (these three grow slowly with height), the leaf digest 0. The rest,
-  about 2.3 ms, is the world-root cache's advance over the record's 12 written cells and the
-  World's turn (`WorldTrack.advance`: `Turn.ofIntent`, the charge comparison, `admitPinned`);
-  those two are not split yet.
-
+- **The index rows are 2.3 ms of the 7.1.** 14 keys at about 165 each. Per the bench above a
+  `set` is two digests a level (the verification's and the rebuild's) and a digest is mostly the
+  base-255 spelling of its children. Twelve of the fourteen keys are last-write keys of one
+  family: each walks, verifies and rebuilds the family's eight one-sided levels and the shared
+  levels under them again (about 530 digests an append where the union of the paths is about
+  220). A batched `setAll` (keys sorted, each touched node verified and rebuilt once) needs its
+  equality to the sequential definition proved; it is the largest single step left.
+- **`Loaded.extend` is 2.8 ms**, split at height 199: the root cache's advance 1,092 (13 slots,
+  each one path of the kept trie: `worldDig` still hashes a node from a list, the index's `dig`
+  does not); the World's turn 860 (`Turn.ofIntent` 348, charge 20, pins 55, `admitPinned` 437),
+  level; engine install, presence, links, ids and transaction index 150, growing slowly; the
+  rest, about 650, is the record encoded and hashed again (next bullet).
+- **One append encodes and hashes its record several times.** `Loaded.extend` computes
+  `chainStep` (the record's turn digest) and, for the frontier, `leafDigest` over
+  `recordFrame.encode record`; `prepareAppend` computes `loaded.chainAfterIntent`, the record's
+  bytes, the leaf digest, `Frontier.push` and `completedNodes` (the frontier's node digests a
+  third time) again. Each is O(record), about 5 KB; none grows with history.
+- **`Turn.ofIntent` derives the writes' deltas five times** (`createsOf`, `legsOf`, `retiresOf`,
+  and the first two again for the charge), each a decode of every written cell's post bytes.
+- **The entry is its node rows**: 263 at the first birth, 616 at the two hundredth, for 60 to
+  150 index rows encoded as lists (`appendNodes`: `rowKey`, `rowStream.encode`, two digests
+  spelled base 255 each). `NodeWrite` holds its key and value as lists, and the node cache packs
+  them again.
+- **The Store's append call still grows**, 245 to 1,002: the rows (62 to 150) and the row
+  table's B-tree, where an append's rows land on as many pages. The row keys are the bit prefixes,
+  so they scatter by construction.
+- **The fixture forks to sign.** By `perf`, 29 % of the fixture process's samples are in `execve`:
+  `Verify/NativeJointSourceFixture.lean` runs the test signer by `IO.Process.output`, five times a
+  birth, and each fork copies the page tables of a growing process. It is in the row's wall time
+  and not in the hand-off the row judges.
+- **The flat row is a ratio of wall times in one run.** A co-tenant's 19-core job starting in the
+  middle of a run fails it (one of four gate runs at `31271d5d4`: derive 14,656 at height 2 and
+  34,624 at height 199 in that run, every phase 2.3 times its usual).
 
 - **The checkpoint seals the whole state.** `storeCheckpoint` encodes and MACs the whole `State`
   and the World's system store (`DurableCheckpointCodec.sealedBytesAt`) at every height that is
@@ -222,28 +293,56 @@ K10C finds the world's socket closed and fails 147 rows at its first `enroll`: a
 the earlier runs never made, not read further.) JPAY4's two Hosts and two residents, which live
 in the run's short socket directory, were stopped by PID file by the runner.
 
+## What ran for the holder and the append call (`5e4a89d6d`, `31271d5d4`)
+
+At each head, on hbox: `swarm-build lake build Minidregg Host.Main Host.ClientConsentCore
+Host.ClientConsentSession Host.ClientConsentSpecializedSession minidregg-host` with the fixture
+and the three gate executables, rc 0, 13,075 jobs; `check-import-boundary.sh` OK;
+`check-bytes-repr.sh` 5056, the ceiling (nothing added). The Simplex gate at 200 heights:
+at `5e4a89d6d` three runs, at `31271d5d4` four, every row passing and all eleven plants red in
+each but the second at `31271d5d4`, whose flat row failed under the co-tenant's load described
+above. Native candidates over the builder's `9ac0425a6` (`d799cecc1ba3`, then `c53118cb30eb`);
+through `lane-journey`: J0 to J8 and THIN pass, KW 20/20, J12 139 rows in its own world. (J12 run
+after KW in one world fails at its first `enroll`, "cannot connect to world.sock": the same order
+of steps that failed K10C after KW before.) The candidate's Store helper is the base
+candidate's (`native-loop` overlays the Host and the consent provider only): the changed helper
+ran in the gate, built from the tree, and in its unit test
+`durable_nodes_are_written_with_their_entry_and_read_by_version`.
+
 ## Next, in this order
 
-1. Split and fix `Loaded.extend`: the root cache's advance and the World's turn, then the
-   Store's append call and the read-back's second preparation.
-2. The checkpoint as rows, stage A then stage B: the design and the coordinator's five conditions
-   are in the session's messages (no periodic seal; the tag is the head; cells as node rows;
-   the system store as index families; `journal` and `spent` are already the index's transaction
-   and nullifier families). Before its first commit: read `DurableFastForwardSpec` whole, the fn
-   archive journal's anchoring, and list every place an index root leaves the Host; name what
-   each reader that starts from a checkpoint starts from instead; the migration as a command with
-   a test on a tour-built world; the retention Prop and refusal name; Store bytes per record
-   before and after; the cold open at 1,000 and 10,000 records. Move the two root choices above
-   in the same re-genesis.
-3. The Book split, the same move.
+1. Written and not built (a patch over `31271d5d4`, not on the branch:
+   `/private/tmp/claude-501/-Users-ember-dev-minidregg/25283063-688e-44a8-aca1-3f12f82237f5/scratchpad/append-growth/next-worlddig-turnof.patch`;
+   `Kernel/WorldRoot.lean` and `Kernel/TurnOfIntent.lean` each pass `lake env lean` alone, the
+   tree was not built under them): `worldDig` compiled as the index's
+   `dig` is (`Kernel/WorldRoot.lean`: `worldDigFast`, `worldDig_eq_fast`, with `digestOfArray`
+   moved there from `Compiler/DurableIndex.lean`), expected to take 350 to 400 off the root
+   cache's 1,092; `turnOf` deriving the deltas once (`Kernel/TurnOfIntent.lean`: `turnOfOnce`,
+   `turnOf_eq_once`), expected to take about 200 off `Turn.ofIntent`'s 348. Both are `@[csimp]`
+   equalities for every input; the whole tree rebuilds under them.
+2. The batched index apply (the first bullet of "Measured, not fixed"): about 1.2 ms.
+3. The record encoded and hashed once per append (thread the bytes, the chain and the leaf from
+   `prepareAppend` into the extension); `NodeWrite` with packed key and value and the rows encoded
+   into byte arrays. About 0.6 ms together, and the bytes ratchet falls.
+4. The read-back's second preparation (`ExactReadback.ofAppended`, 2.6 to 3.6 ms, outside the
+   store phase).
+5. The checkpoint as rows, stage A then stage B: with the owner. The design and the coordinator's
+   five conditions are in the session's messages (no periodic seal; the tag is the head; cells as
+   node rows; the system store as index families; `journal` and `spent` are already the index's
+   transaction and nullifier families). Before its first commit: read `DurableFastForwardSpec`
+   whole, the fn archive journal's anchoring, and list every place an index root leaves the Host;
+   name what each reader that starts from a checkpoint starts from instead; the migration as a
+   command with a test on a tour-built world; the retention Prop and refusal name; Store bytes per
+   record before and after; the cold open at 1,000 and 10,000 records. Move the two root choices
+   above (digests as fixed octets, the family's place in the path) in the same re-genesis: they
+   are what bounds a digest at 3.6 and with it items 1 and 2.
+6. The Book split, the same move.
 
 ## Left on hbox for the successor
 
-Tree `t2`, leased as `append-growth`, with its own package copy; its build is of the landed
-index commit (the candidate's source). One candidate,
-`/home/hbox/pool/lanes/append-growth/candidates/501f0a28513c` (the landed index commit over the
-builder's `f264ccfdc`; J0 to J8 and THIN pass on it through `lane-journey`).
+Tree `t2`, leased as `append-growth`, with its own package copy, built at `31271d5d4`. One
+candidate, `/home/hbox/pool/lanes/append-growth/candidates/c53118cb30eb`.
 `/ci/lane-appendgrowth/flat-fix1`: a product bench world whose
-`w/deployment/operator-config.json` is the configuration `store-bench index N` runs with. Build
-and gate logs in `/home/hbox/lanes/append-growth-scratch` (`simplex-11.log` and
-`rows/four-source-serve.log` are the failing row's).
+`w/deployment/operator-config.json` is the configuration `store-bench index N` runs with. Logs in
+`/home/hbox/lanes/append-growth-scratch`: `before-5e4a89d6d-flat.log` and `h2-1-flat.log` are the
+flat rows the table above is read from (`scratchpad/append-growth/phase-table.sh FILE`).
