@@ -263,11 +263,20 @@ exact sdk-custody            mini-sdk --lib --features native -- \
   custody::tests::unknown_confirmation_words_and_malformed_receipts_are_undecided \
   custody::tests::classification_confirmation_wins_then_newest_refusal \
   custody::tests::delivery_unknown_is_resolved_only_by_evidence_never_by_resending \
+  custody::tests::a_destination_refusal_returns_to_a_startable_state_after_its_backoff \
+  custody::tests::delivery_binding_id_canonicalizes_nested_objects_and_exact_numbers \
+  custody::tests::delivery_binding_id_refuses_unsupported_numbers_without_rounding \
+  custody::tests::delivery_attempt_count_exhaustion_refuses_without_wrapping \
   custody::tests::delivery_a_lost_reply_resent_resolves_to_the_first_outcome_and_never_a_second_effect \
   custody::tests::delivery_changed_bytes_under_the_same_record_conflict \
   custody::tests::delivery_a_declined_answer_is_terminal_for_its_binding \
   custody::tests::delivery_observed_completion_overrides_prior_decline_but_never_restarts \
   custody::tests::standing_is_the_words_alone_while_classify_also_wants_the_receipt
+# Downstream feature unification must not change canonical binding or intent identity.
+exact sdk-binding-json       mini-sdk --lib --features native,serde_json/preserve_order -- \
+  contracts::tests::the_integer_rule_is_by_value_exact_and_bounded \
+  custody::tests::delivery_binding_id_canonicalizes_nested_objects_and_exact_numbers \
+  custody::tests::delivery_binding_id_refuses_unsupported_numbers_without_rounding
 # The ssh:DEST operator route (cv 01a104fe-958e): named certainly-unsent refusals before the channel
 # opens, uncertain and never resent after the write. Stand-in rows; the real-sshd + real-Host rows are
 # tests/ssh-e2e.sh (an unprivileged sshd it starts itself, throwaway keys, a scratch Store; needs a

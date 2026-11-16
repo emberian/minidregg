@@ -319,6 +319,9 @@ impl Delivery {
     }
 
     /// A deterministic lowercase hex identifier of this delivery's binding (`SHA-256(canonical_json(binding))`).
+    /// Object keys are strings, sorted by UTF-8 bytes at every depth. Numbers must denote exact
+    /// integers of magnitude at most 2^53; equivalent spellings hash alike, and unsupported
+    /// numbers return an error. Use decimal strings for larger integers or fractional values.
     /// Callers persisting delivery records should key storage by this binding identifier rather than raw
     /// target names alone, ensuring distinct expected preconditions (such as `old` in a compare-and-set)
     /// never overwrite or collide with one another.
@@ -347,9 +350,11 @@ impl Delivery {
         match self.state() {
             DeliveryState::Unknown => {
                 let record = self.record.as_ref().expect("an unknown delivery has a record");
+                let attempts = record["attempts"].as_u64().unwrap_or(0)
+                    .checked_add(1).ok_or("delivery attempt count exhausted")?;
                 Ok(json!({"binding":self.binding,"phase":"refused","request":record["request"].clone(),
                     "evidence":evidence,"at":at,"notBefore":not_before,
-                    "attempts":record["attempts"].as_u64().unwrap_or(0) + 1}))
+                    "attempts":attempts}))
             }
             _ => Err("only a started delivery can be refused by its destination".into()),
         }
@@ -363,8 +368,10 @@ impl Delivery {
         match self.state() {
             DeliveryState::Unknown => {
                 let record = self.record.as_ref().expect("an unknown delivery has a record");
+                let attempts = record["attempts"].as_u64().unwrap_or(0)
+                    .checked_add(1).ok_or("delivery attempt count exhausted")?;
                 Ok(json!({"binding":self.binding,"phase":"declined","request":record["request"].clone(),
-                    "evidence":evidence,"at":at,"attempts":record["attempts"].as_u64().unwrap_or(0) + 1}))
+                    "evidence":evidence,"at":at,"attempts":attempts}))
             }
             _ => Err("only a started delivery can be declined by its destination".into()),
         }
@@ -530,6 +537,50 @@ mod tests {
     /// is the whole frame, so the expected old value is part of what the effect IS.
     fn ref_binding(old: &str, new: &str) -> Value {
         json!({"subject":"refs/heads/main","lane":"lane/x","old":old,"new":new})
+    }
+
+    #[test]
+    fn delivery_binding_id_canonicalizes_nested_objects_and_exact_numbers() {
+        // Reverse insertion order at both depths, including non-ASCII keys. This also runs
+        // with serde_json/preserve_order to exercise downstream Cargo feature unification.
+        let first = r#"{"é":"雪","z":-0.0,"n":900719925474099200e-2,"a":[{"z":1e1,"a":true},null,"line\n"]}"#;
+        let second = r#"{"a":[{"a":true,"z":10},null,"line\n"],"n":9007199254740992,"z":0,"é":"雪"}"#;
+        let id = |text: &str| Delivery::open(serde_json::from_str(text).unwrap(), None).unwrap().binding_id().unwrap();
+        let expected = "29b6d1da1a851f3f65b23022a80dabef770208965c26ca403c0753a3e23c6767";
+        assert_eq!(id(first), expected);
+        assert_eq!(id(second), expected);
+        assert_ne!(id("[1,2]"), id("[2,1]"));
+        assert_ne!(id("1"), id(r#""1""#));
+        assert_ne!(id("null"), id("false"));
+        // Value objects can only have string keys. Serde's integer-key conversion happens
+        // before this API; it cannot give the resulting JSON object a different identity.
+        let keys = std::collections::BTreeMap::from([(1u8, "one")]);
+        let binding = serde_json::to_value(keys).unwrap();
+        assert_eq!(Delivery::open(binding, None).unwrap().binding_id().unwrap(), id(r#"{"1":"one"}"#));
+        assert!(serde_json::from_str::<Value>("{1:2}").is_err());
+    }
+
+    #[test]
+    fn delivery_binding_id_refuses_unsupported_numbers_without_rounding() {
+        for literal in ["1.5", "1.0000000000000000001", "9007199254740993",
+            "-9007199254740993", "1e400", "1e-9223372036854775808", "1e9223372036854775807"] {
+            let binding: Value = serde_json::from_str(&format!(r#"{{"nested":[{literal}]}}"#)).unwrap();
+            let delivery = Delivery::open(binding, None).unwrap();
+            assert!(delivery.binding_id().unwrap_err().0.contains("canonical JSON"), "{literal}");
+            assert_eq!(delivery.state(), DeliveryState::Fresh);
+        }
+    }
+
+    #[test]
+    fn delivery_attempt_count_exhaustion_refuses_without_wrapping() {
+        let binding = ref_binding("a1", "b2");
+        let record = json!({"binding":binding,"phase":"started","request":1,"at":10,"attempts":u64::MAX});
+        let delivery = Delivery::open(binding, Some(record.clone())).unwrap();
+        assert!(delivery.refused(json!({}), 11, 12).unwrap_err().0.contains("exhausted"));
+        assert!(delivery.declined(json!({}), 11).unwrap_err().0.contains("exhausted"));
+        assert_eq!(delivery.record, Some(record));
+        assert_eq!(delivery.state(), DeliveryState::Unknown);
+        assert!(delivery.complete(json!({"delivered":true}), 12).is_ok());
     }
 
     #[test]

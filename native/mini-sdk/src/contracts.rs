@@ -291,9 +291,12 @@ pub fn canonical_json(value: &Value) -> Result<String> {
                 out.push(']');
             }
             Value::Object(o) => {
-                // serde_json's Map (no `preserve_order`) is a BTreeMap: keys iterate in byte order.
+                // Cargo features are additive: a downstream crate can enable serde_json's
+                // `preserve_order`. Sort explicitly so identity never depends on that feature.
+                let mut entries: Vec<_> = o.iter().collect();
+                entries.sort_unstable_by(|(a, _), (b, _)| a.as_bytes().cmp(b.as_bytes()));
                 out.push('{');
-                for (i, (k, x)) in o.iter().enumerate() {
+                for (i, (k, x)) in entries.into_iter().enumerate() {
                     if i > 0 {
                         out.push(',');
                     }
