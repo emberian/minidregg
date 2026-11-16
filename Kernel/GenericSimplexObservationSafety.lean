@@ -42,10 +42,9 @@ returned delivered blocks are backed by retained commit outputs on the same
 reachable global trace. No output-provenance premise is supplied by the caller. -/
 theorem actual_audit_refinement {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
-    (reachable : Reachable c faulty checked time net)
-    (size : c.parties = 3*c.faults+1) : AuditRefinement c faulty net := by
+    (reachable : Reachable c faulty checked time net) : AuditRefinement c faulty net := by
   have projected := reachable_projected (structuralAuditLaws c) reachable
-  refine ⟨actual_local_faithful reachable size, ?_, ?_⟩
+  refine ⟨actual_local_faithful reachable, ?_, ?_⟩
   · intro party view block enrolled honest committed
     exact local_commit_is_committed projected enrolled honest
       ((reachable_output_history reachable party).committed view block committed)
@@ -56,26 +55,26 @@ theorem actual_audit_refinement {c : Config} {faulty : Finset Nat}
 theorem actual_state_commits_compatible {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
     (reachable : Reachable c faulty checked time net)
-    (size : c.parties = 3*c.faults+1) (faultBound : faulty.card ≤ c.faults)
+    (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     {p q v w : Nat} {a b : Block}
     (pm : p<c.parties) (qm : q<c.parties) (ph : p∉faulty) (qh : q∉faulty)
     (left : (viewAt (net.localState p) v).committed = some a)
     (right : (viewAt (net.localState q) w).committed = some b) :
     a.IsPrefix b ∨ b.IsPrefix a :=
-  refined_engine_commits_compatible (actual_audit_refinement reachable size) size faultBound pm qm ph qh left right
+  refined_engine_commits_compatible (actual_audit_refinement reachable) admitted faultBound pm qm ph qh left right
 
 theorem actual_delivered_blocks_compatible {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
     (reachable : Reachable c faulty checked time net)
-    (size : c.parties = 3*c.faults+1) (faultBound : faulty.card ≤ c.faults)
+    (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     {p q : Nat} {a b : Block}
     (pm : p<c.parties) (qm : q<c.parties) (ph : p∉faulty) (qh : q∉faulty)
     (left : a∈(net.localState p).delivered) (right : b∈(net.localState q).delivered) :
     a.IsPrefix b ∨ b.IsPrefix a := by
-  have audit := actual_audit_refinement reachable size
+  have audit := actual_audit_refinement reachable
   obtain ⟨v, committedA⟩ := audit.delivered p a pm ph left
   obtain ⟨w, committedB⟩ := audit.delivered q b qm qh right
-  exact actual_committed_prefix_consistency reachable size faultBound committedA committedB
+  exact actual_committed_prefix_consistency reachable admitted faultBound committedA committedB
 
 /-! ## Named poles for the hypothesis ledger
 
@@ -90,6 +89,7 @@ networks and traces that violate exactly one field each. -/
 def poleConfig : Config := { parties := 4, faults := 1, timeout := 1 }
 
 theorem poleConfig_size : poleConfig.parties = 3 * poleConfig.faults + 1 := by decide
+theorem poleConfig_admitted : 3 * poleConfig.faults + 1 ≤ poleConfig.parties := by decide
 
 theorem poleConfig_wellFormed : poleConfig.wellFormed = true := by decide
 
@@ -192,13 +192,13 @@ theorem auditExtension_real_step :
 /-- `AuditRefinement` holds at a network reached by real `step`s in which a block IS
 committed and delivered (so its two observation clauses are exercised, not vacuous). -/
 theorem auditRefinement_committed_run : AuditRefinement poleConfig poleFaulty poleNet :=
-  actual_audit_refinement poleNet_reachable poleConfig_size
+  actual_audit_refinement poleNet_reachable
 
 /-- `LocalFaithful` holds on the audit trace of that same run. -/
 theorem localFaithful_committed_run :
     LocalFaithful (auditTrace poleNet) (Finset.range poleConfig.parties) poleFaulty
       poleConfig.faults :=
-  actual_local_faithful poleNet_reachable poleConfig_size
+  (actual_local_faithful poleNet_reachable).toLegacy (config_quorum_legacy poleConfig_size)
 
 /-- The refinement's commit clause turns the reported commit into an honest commit
 output at view 1 (the genesis disjunct is false there). -/
@@ -209,7 +209,7 @@ theorem poleNet_commit_attested : CommittedAt (auditTrace poleNet) poleFaulty 1 
 prefix-compatible. -/
 theorem poleNet_commits_compatible :
     ([[1]] : Block).IsPrefix [[1]] ∨ ([[1]] : Block).IsPrefix [[1]] :=
-  refined_engine_commits_compatible auditRefinement_committed_run poleConfig_size
+  refined_engine_commits_compatible auditRefinement_committed_run poleConfig_admitted
     poleFaulty_bound (p := 0) (q := 0) (v := 1) (w := 1) (by decide) (by decide)
     (by decide) (by decide) poleNet_commits poleNet_commits
 
@@ -292,7 +292,7 @@ theorem globalEventSupported_committed_run :
   have mem : Minidregg.Kernel.GenericSimplex.AuditEvent.send ⟨1, 1, .commit, some [[1]]⟩
       ∈ poleNet.audit := by decide +kernel
   obtain ⟨index, found⟩ := List.mem_iff_getElem?.mp mem
-  exact ⟨index, (reachable_emission_invariants poleNet_reachable poleConfig_size).2 index _ 1
+  exact ⟨index, (reachable_emission_invariants poleNet_reachable).2 index _ 1
     found rfl (by decide)⟩
 
 /-- A COMMIT send with no vote quorum before it is unsupported. -/
@@ -393,6 +393,7 @@ theorem not_localCommitAttestations_two_signers :
 #assert_axioms globalEventSupported_committed_run
 #assert_axioms not_globalEventSupported_unvoted_commit
 #assert_axioms poleConfig_size
+#assert_axioms poleConfig_admitted
 #assert_axioms poleConfig_wellFormed
 #assert_axioms poleFaulty_bound
 #assert_axioms allowedB_sound

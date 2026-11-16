@@ -246,7 +246,7 @@ def placeRequest (directory : System.FilePath) (name : String) (call : Bytes) : 
   writeAtomic path call.toByteArray
 
 /-- Place the exact original call at the proposer and a watch at every other replica, then
-wait for a quorum of the replicas' receipts (all but `faults` of `3 * faults + 1`) and for
+wait for a quorum of the replicas' receipts (all but `faults` of the `parties ≥ 3 * faults + 1`) and for
 every receipt present to be one receipt.
 
 A replica writes a receipt only for a record its source holds, and its source takes a record

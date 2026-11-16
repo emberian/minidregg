@@ -38,6 +38,46 @@ theorem verifiedCommit_attributed {tr : Trace} {faulty : Finset Nat}
   · intro party member honest
     exact honestOrigin party (List.mem_toFinset.mp member) honest
 
+/-- Any roster size: the native verifier's own `Config.quorum = n - f` signer count
+is the certificate quorum, with no `n = 3f + 1` premise. `block` is the caller's chain,
+under the same origin and digest premises as `verifiedCommit_attributed`. -/
+theorem verifiedCommit_attributed_at {tr : Trace} {faulty : Finset Nat}
+    {context : GenericSimplexCodec.Context}
+    (certificate : GenericSimplexIO.VerifiedCommit context)
+    (block : Minidregg.Kernel.GenericSimplex.Block)
+    (honestOrigin : ∀ party ∈ certificate.signerIds, party ∉ faulty →
+      ∃ time, Sent tr time party certificate.view .commit (some block)) :
+    AttributedCommitSendsAt tr (Finset.range context.config.parties) faulty
+      context.config.quorum certificate.view block := by
+  refine ⟨certificate.signerIds.toFinset, ?_, ?_, ?_⟩
+  · intro party member
+    exact Finset.mem_range.mpr
+      (certificate.signers_members party (List.mem_toFinset.mp member))
+  · rw [List.toFinset_card_of_nodup certificate.signers_distinct]
+    exact certificate.quorum_size
+  · intro party member honest
+    exact honestOrigin party (List.mem_toFinset.mp member) honest
+
+/-- Exact consumer join for any roster size whose thresholds satisfy `Thresholds`. -/
+theorem ordered_next_payload_unique_at {tr : Trace} {roster faulty : Finset Nat}
+    {f q c r : Nat} {context : GenericSimplexCodec.Context} {loaded : Durable}
+    {leftIntent rightIntent : DataIntent ResourceBirthCodec.rootBytes}
+    (rules : LocalFaithfulAt tr roster faulty f q c r)
+    (th : Minidregg.Kernel.GenericSimplexQuorum.Thresholds roster.card f q c r)
+    (faultBound : faulty.card ≤ f)
+    (left : JointReceiver.Ordered context loaded leftIntent)
+    (right : JointReceiver.Ordered context loaded rightIntent)
+    (leftBlock rightBlock : Minidregg.Kernel.GenericSimplex.Block)
+    (leftReads : sourceHistory leftBlock = left.history)
+    (rightReads : sourceHistory rightBlock = right.history)
+    (leftOrigin : AttributedCommitSendsAt tr roster faulty q
+      left.commitment.view leftBlock)
+    (rightOrigin : AttributedCommitSendsAt tr roster faulty q
+      right.commitment.view rightBlock) :
+    JointReceiver.sourcePayload leftIntent = JointReceiver.sourcePayload rightIntent := by
+  exact certified_next_record_unique_at rules th faultBound leftOrigin rightOrigin
+    (leftReads ▸ left.sourceOrdered) (rightReads ▸ right.sourceOrdered)
+
 /-- Exact consumer join for two currently ordered native source records at the
 same durable source prefix. Attribution MUST be produced by the signature origin
 and actual engine refinement; the opaque VerifiedCommit alone does not supply it.
@@ -74,17 +114,18 @@ theorem ordered_next_payload_at_index {context : GenericSimplexCodec.Context}
 
 open Minidregg.Kernel.GeneralSimplexReachability
 open Minidregg.Kernel.GenericSimplexEngineSafety
-/-- Actual executable reachability supplies the consensus contract. The
-signature-specific premises are the origin of the verifier's actual honest signers (the
-chain each sent its COMMIT for) and that each token's history is that chain's application
-history. -/
+/-- Actual executable reachability supplies the consensus contract, for every admitted
+roster `n ≥ 3f + 1`: the certificate quorum is the native verifier's own `Config.quorum`
+(`verifiedCommit_attributed_at`). The signature-specific premises are the origin of the
+verifier's actual honest signers (the chain each sent its COMMIT for) and that each token's
+history is that chain's application history. -/
 theorem actual_ordered_next_payload_unique {faulty : Finset Nat}
     {context : GenericSimplexCodec.Context} {loaded : Durable}
     {checked : Network → Nat → Minidregg.Kernel.GenericSimplex.Block → Prop}
     {initialTime : Nat} {net : Network}
     {leftIntent rightIntent : DataIntent ResourceBirthCodec.rootBytes}
     (reachable : Reachable context.config faulty checked initialTime net)
-    (size : context.config.parties = 3 * context.config.faults + 1)
+    (admitted : 3 * context.config.faults + 1 ≤ context.config.parties)
     (faultBound : faulty.card ≤ context.config.faults)
     (left : JointReceiver.Ordered context loaded leftIntent)
     (right : JointReceiver.Ordered context loaded rightIntent)
@@ -96,13 +137,15 @@ theorem actual_ordered_next_payload_unique {faulty : Finset Nat}
     (rightOrigin : ∀ party ∈ right.commitment.signerIds, party ∉ faulty →
       ∃ time, Sent (auditTrace net) time party right.commitment.view .commit (some rightBlock)) :
     JointReceiver.sourcePayload leftIntent = JointReceiver.sourcePayload rightIntent :=
-  actual_certified_next_record_unique reachable size faultBound
-    (verifiedCommit_attributed left.commitment leftBlock size leftOrigin)
-    (verifiedCommit_attributed right.commitment rightBlock size rightOrigin)
+  actual_certified_next_record_unique reachable admitted faultBound
+    (verifiedCommit_attributed_at left.commitment leftBlock leftOrigin)
+    (verifiedCommit_attributed_at right.commitment rightBlock rightOrigin)
     (leftReads ▸ left.sourceOrdered) (rightReads ▸ right.sourceOrdered)
 
 #assert_axioms actual_ordered_next_payload_unique
 #assert_axioms verifiedCommit_attributed
 #assert_axioms ordered_next_payload_unique
 #assert_axioms ordered_next_payload_at_index
+#assert_axioms verifiedCommit_attributed_at
+#assert_axioms ordered_next_payload_unique_at
 end Minidregg.Kernel.GenericSimplexReceiverSafety

@@ -25,8 +25,7 @@ set_option autoImplicit false
 Every local and global emission cause is constructed; none is a safety premise. -/
 theorem reachable_emission_invariants {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
-    (reachable : Reachable c faulty checked time net)
-    (size : c.parties = 3*c.faults+1) :
+    (reachable : Reachable c faulty checked time net) :
     NetworkJustified c faulty net ∧ SupportedTrace c faulty net := by
   induction reachable with
   | initial =>
@@ -44,40 +43,45 @@ theorem reachable_emission_invariants {c : Config} {faulty : Finset Nat}
     have available : InputAvailable external input := by
       have supported := allowed_input_backed projected party input allowed
       cases input <;> exact supported
-    have nextJustified := step_emission c external (before.localState party) input size
+    have nextJustified := step_emission c external (before.localState party) input
       (reachable_scoped prior party allowed.1) backed old available
     exact ⟨advance_network_justified ih.1 party input nextJustified,
       advance_supported_from_local prior ih.2 party input allowed nextJustified⟩
 
 /-- The previously abstract local protocol contract is derived from actual
-executable reachability. Authentication is in AllowedInput; no synchrony or
-fault bound is needed for local fidelity. -/
+executable reachability, at the executable guards (`c.quorum = n - f` for VOTE/COMMIT,
+`2f + 1` for CANDIDATE→READY and READY→clear) for every configuration: no roster size
+is assumed. Authentication is in AllowedInput; no synchrony or fault bound is needed
+for local fidelity. -/
 theorem actual_local_faithful {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
-    (reachable : Reachable c faulty checked time net)
-    (size : c.parties = 3*c.faults+1) :
-    LocalFaithful (auditTrace net) (Finset.range c.parties) faulty c.faults :=
-  localFaithful_of_supported reachable size (reachable_emission_invariants reachable size).2
+    (reachable : Reachable c faulty checked time net) :
+    LocalFaithfulAt (auditTrace net) (Finset.range c.parties) faulty c.faults
+      c.quorum (2 * c.faults + 1) (2 * c.faults + 1) :=
+  localFaithful_of_supported reachable (reachable_emission_invariants reachable).2
 
+/-- Committed-prefix safety of the actual engine for every admitted roster `n ≥ 3f + 1`. -/
 theorem actual_committed_prefix_consistency {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
     {v w : Nat} {a b : Block} (reachable : Reachable c faulty checked time net)
-    (size : c.parties = 3*c.faults+1) (faultBound : faulty.card ≤ c.faults)
+    (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (left : CommittedAt (auditTrace net) faulty v a)
     (right : CommittedAt (auditTrace net) faulty w b) :
     a.IsPrefix b ∨ b.IsPrefix a :=
-  committed_prefix_consistency (actual_local_faithful reachable size)
-    (by simpa using size) faultBound left right
+  committed_prefix_consistency_at (actual_local_faithful reachable)
+    (config_thresholds admitted) faultBound left right
 
+/-- Certificates of `c.quorum` COMMIT senders (the native verifier's own count,
+`verifiedCommit_attributed_at`) are prefix-consistent for every admitted roster. -/
 theorem actual_certificates_prefix_consistent {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
     {v w : Nat} {a b : Block} (reachable : Reachable c faulty checked time net)
-    (size : c.parties = 3*c.faults+1) (faultBound : faulty.card ≤ c.faults)
-    (left : AttributedCommitSends (auditTrace net) (Finset.range c.parties) faulty c.faults v a)
-    (right : AttributedCommitSends (auditTrace net) (Finset.range c.parties) faulty c.faults w b) :
+    (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
+    (left : AttributedCommitSendsAt (auditTrace net) (Finset.range c.parties) faulty c.quorum v a)
+    (right : AttributedCommitSendsAt (auditTrace net) (Finset.range c.parties) faulty c.quorum w b) :
     a.IsPrefix b ∨ b.IsPrefix a :=
-  attributed_commit_sends_prefix_consistent (actual_local_faithful reachable size)
-    (by simpa using size) faultBound left right
+  attributed_commit_sends_prefix_consistent_at (actual_local_faithful reachable)
+    (config_thresholds admitted) faultBound left right
 
 /-- Exact receiver catch-up: two original full descendant certificates cannot
 cover different next records after the same installed source prefix. -/
@@ -85,26 +89,26 @@ theorem actual_certified_next_record_unique {c : Config} {faulty : Finset Nat}
     {checked : Network → Nat → Block → Prop} {time : Nat} {net : Network}
     {v w : Nat} {a b sourcePrefix : Block} {left right : Bytes}
     (reachable : Reachable c faulty checked time net)
-    (size : c.parties = 3*c.faults+1) (faultBound : faulty.card ≤ c.faults)
-    (certA : AttributedCommitSends (auditTrace net) (Finset.range c.parties) faulty c.faults v a)
-    (certB : AttributedCommitSends (auditTrace net) (Finset.range c.parties) faulty c.faults w b)
+    (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
+    (certA : AttributedCommitSendsAt (auditTrace net) (Finset.range c.parties) faulty c.quorum v a)
+    (certB : AttributedCommitSendsAt (auditTrace net) (Finset.range c.parties) faulty c.quorum w b)
     (coveredA : (sourcePrefix ++ [left]).IsPrefix (sourceHistory a))
     (coveredB : (sourcePrefix ++ [right]).IsPrefix (sourceHistory b)) : left = right :=
-  certified_next_record_unique (actual_local_faithful reachable size)
-    (by simpa using size) faultBound certA certB coveredA coveredB
+  certified_next_record_unique_at (actual_local_faithful reachable)
+    (config_thresholds admitted) faultBound certA certB coveredA coveredB
 
 open Minidregg.Kernel.GenericSimplexWitnesses
 /-- A real four-party execution with a silent faulty participant inhabits the
 contract and commits. The concrete schedule is kernel evaluated. -/
 theorem honest_execution_faithful :
     LocalFaithful (auditTrace honestRun) (Finset.range config.parties) honestFaulty config.faults :=
-  actual_local_faithful honest_run_reachable (by decide)
+  (actual_local_faithful honest_run_reachable).toLegacy (by decide)
 
 /-- Fidelity does not hide the fault bound. The same executable engine remains
 locally faithful in the checked f+1-fault execution with conflicting commits. -/
 theorem overfault_execution_faithful :
     LocalFaithful (auditTrace hostileRun) (Finset.range config.parties) excessFaulty config.faults :=
-  actual_local_faithful hostile_run_reachable (by decide)
+  (actual_local_faithful hostile_run_reachable).toLegacy (by decide)
 
 /-- The timeout-backoff departure (fix C) is confined to the view deadline.
 With `backoffCap = 0` the timer is the paper's fixed `timeout`; otherwise it

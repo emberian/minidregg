@@ -39,9 +39,9 @@ structure Tracked (c : Config) (h : ChainDigest) (faulty : Finset Nat) (net : Re
 
 /-- **A tracked network has its own trace of the model.** -/
 theorem faithful_of_tracked {c : Config} {h : ChainDigest} {faulty : Finset Nat} {net : RelNetwork}
-    {trail : List Event} (tracked : Tracked c h faulty net trail)
-    (size : c.parties = 3 * c.faults + 1) : Faithful c faulty net (localTrace trail) := by
-  refine ⟨good_faithful tracked.good size, ?_, ?_, ?_⟩
+    {trail : List Event} (tracked : Tracked c h faulty net trail) :
+    Faithful c faulty net (localTrace trail) := by
+  refine ⟨good_faithful tracked.good, ?_, ?_, ?_⟩
   · intro p pm ph
     obtain ⟨base, G, side, _⟩ := tracked.sides p pm ph
     exact ⟨base, side.ghost.committed⟩
@@ -91,7 +91,7 @@ theorem reads_of_decode {h : ChainDigest} {r : Replica} {w : WireMessage} {m : M
 /-- **The reading lemma.** `entry` is what the sender wrote, if it is correct. -/
 theorem read_covered {c : Config} {h : ChainDigest} {faulty : Finset Nat} {occurs : Block → Prop}
     (free : h.CollisionFreeOn occurs) {trail : List Event} (good : Good c faulty trail)
-    (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     {base : Nat} {chain : Block} {r : Replica}
     (committed : CommittedAt (localTrace trail) faulty base chain)
     (height : r.height = chain.length) (digest : r.digest = h.of chain)
@@ -111,8 +111,8 @@ theorem read_covered {c : Config} {h : ChainDigest} {faulty : Finset Nat} {occur
   rcases authentic with bad | ⟨entry, own, signed, rel⟩
   · exact absurd bad byz
   left
-  have rules := good_faithful good size
-  have roster : (Finset.range c.parties).card = 3 * c.faults + 1 := by simpa using size
+  have rules := good_faithful good
+  have th := config_thresholds admitted
   by_cases commit : w.kind = .commit
   · rw [if_pos commit] at rel
     obtain ⟨eSender, eKind, eView, eStatement⟩ := rel
@@ -164,7 +164,7 @@ theorem read_covered {c : Config} {h : ChainDigest} {faulty : Finset Nat} {occur
         rw [wv] at s
         exact s
       obtain ⟨time, output⟩ := member_trace sentX
-      have ext := support_extends_commit rules roster faultBound committed
+      have ext := support_extends_commit_at rules th faultBound committed
         (by rw [← view]; exact above) byz (kind ▸ kindOK) output
       have lenS : (e1.take e2.height).length = e2.height := by
         rw [List.length_take]; exact Nat.min_eq_left own.1
@@ -234,7 +234,7 @@ theorem step_shape (c : Config) (h : ChainDigest) (r : Replica) (input : WireInp
 theorem side_handled {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base : Nat} {G : State}
     {trail : List Event} {durable chain : Block} {sent : List (Block × WireMessage)} {r : Replica}
     (side : Side c h faulty p base G trail durable chain sent r) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (input : WireInput)
     (covered : ∀ w, (input = .delivery w ∨ ∃ now, input = .deliveryAt now w) →
       ∀ m, decode h r w = some m → Covered faulty base chain trail m) :
@@ -252,26 +252,26 @@ theorem side_handled {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p bas
   cases input with
   | delivery w =>
     unfold handled
-    exact side_deliver side good honest size faultBound _ w (covered w (Or.inl rfl))
+    exact side_deliver side good honest admitted faultBound _ w (covered w (Or.inl rfl))
   | deliveryAt now w =>
     unfold handled
-    exact side_deliver side good honest size faultBound _ w (covered w (Or.inr ⟨now, rfl⟩))
+    exact side_deliver side good honest admitted faultBound _ w (covered w (Or.inr ⟨now, rfl⟩))
   | tick now =>
     unfold handled
-    exact side_live side good honest size faultBound (.tick now)
+    exact side_live side good honest admitted faultBound (.tick now)
       (fun m => none m (fun _ => by simp) (fun _ _ => by simp))
   | offer payload =>
     unfold handled
-    exact side_live side good honest size faultBound (.offer payload)
+    exact side_live side good honest admitted faultBound (.offer payload)
       (fun m => none m (fun _ => by simp) (fun _ _ => by simp))
   | poll =>
     unfold handled
-    exact side_live side good honest size faultBound .poll
+    exact side_live side good honest admitted faultBound .poll
       (fun m => none m (fun _ => by simp) (fun _ _ => by simp))
   | checked height records =>
     simp only [handled]
     split
-    · exact side_live side good honest size faultBound (.checked _)
+    · exact side_live side good honest admitted faultBound (.checked _)
         (fun m => none m (fun _ => by simp) (fun _ _ => by simp))
     · refine ⟨[], base, G, by simp, by rw [List.append_nil]; exact good, ?_⟩
       rw [List.append_nil, ← side.wire.pending]
@@ -354,7 +354,7 @@ theorem side_drain {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base 
 theorem tracked_advance {c : Config} {h : ChainDigest} {faulty : Finset Nat}
     {checked : Nat → Block → Prop} {net : RelNetwork} {trail : List Event} {party : Nat}
     {input : WireInput} (tracked : Tracked c h faulty net trail)
-    (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (free : h.CollisionFreeOn (Occurs c h faulty (relAdvance c h net party input)))
     (allowed : RelAllowed c faulty checked net party input) :
     ∃ trail', Tracked c h faulty (relAdvance c h net party input) trail' := by
@@ -400,7 +400,7 @@ theorem tracked_advance {c : Config} {h : ChainDigest} {faulty : Finset Nat}
       (w.kind = .commit → w ∈ (relAdvance c h net party input).seen party) →
       decode h r w = some m → Covered faulty base' chain' trail' m := by
     intro trail' good' grows base' chain' r committed height digest held w m authentic seen decoded
-    refine read_covered free good' size faultBound committed height digest decoded ?_
+    refine read_covered free good' admitted faultBound committed height digest decoded ?_
       (fun commit block value => Or.inr ⟨party, pm, ph, w, seen commit, chain', held,
         reads_of_decode decoded commit value height digest⟩)
     obtain ⟨wm, bad | ⟨entry, member, rel⟩⟩ := authentic
@@ -417,7 +417,7 @@ theorem tracked_advance {c : Config} {h : ChainDigest} {faulty : Finset Nat}
             eKind, dv⟩, rel⟩
   obtain ⟨more, grown⟩ := release_committed c h (handled c h (net.replica party) input)
   obtain ⟨extra1, base1, G1, senders1, good1, side1⟩ :=
-    side_handled side tracked.good ph size faultBound input (fun w named m decoded =>
+    side_handled side tracked.good ph admitted faultBound input (fun w named m decoded =>
       cover tracked.good (fun _ e => e) side.ghost.committed side.wire.height side.wire.digest
         (by rw [fChain]; exact List.prefix_append _ _) (auth w named) (seenIn w named) decoded)
   have far1 := handled_far c h (net.replica party) input
@@ -429,7 +429,7 @@ theorem tracked_advance {c : Config} {h : ChainDigest} {faulty : Finset Nat}
       exact ⟨seenGrows _ w inSeen, commit, a⟩
     · exact ⟨seenIn w named commit, commit, auth w named⟩
   obtain ⟨extra2, base2, G2, senders2, good2, side2⟩ :=
-    side_release side1 good1 ph size faultBound (fun w inFar m decoded =>
+    side_release side1 good1 ph admitted faultBound (fun w inFar m decoded =>
       cover good1 (fun _ e => List.mem_append.mpr (Or.inl e)) side1.ghost.committed
         side1.wire.height side1.wire.digest
         (by rw [fChain, grown, ← List.append_assoc]; exact List.prefix_append _ _)
@@ -477,24 +477,24 @@ start audits, one after another; each member's side is `ghost_start` and its sta
 It needs, of `GenericSimplex.start`, that nothing is committed and nothing is owed. -/
 def TrackedInitial : Prop :=
   ∀ (c : Config) (h : ChainDigest) (faulty : Finset Nat) (time : Nat),
-    c.parties = 3 * c.faults + 1 → faulty.card ≤ c.faults →
+    3 * c.faults + 1 ≤ c.parties → faulty.card ≤ c.faults →
     ∃ trail, Tracked c h faulty (relInitial c h time) trail
 
 /-- **`RelativeFaithful`, from the initial network.** Every reachable network of running
 replicas is tracked, by induction on the run. -/
 theorem relative_faithful (initial : TrackedInitial) : RelativeFaithful := by
-  intro c h faulty checked time net reachable free size faultBound
+  intro c h faulty checked time net reachable free admitted faultBound
   have tracked : ∃ trail, Tracked c h faulty net trail := by
     revert free
     induction reachable with
-    | initial => intro _; exact initial c h faulty time size faultBound
+    | initial => intro _; exact initial c h faulty time admitted faultBound
     | next prior party input allowed ih =>
       intro free
       obtain ⟨trail, tracked⟩ := ih (fun a b oa ob same =>
         free a b (occurs_mono party input oa) (occurs_mono party input ob) same)
-      exact tracked_advance tracked size faultBound free allowed
+      exact tracked_advance tracked admitted faultBound free allowed
   obtain ⟨trail, tracked⟩ := tracked
-  exact ⟨localTrace trail, faithful_of_tracked tracked size⟩
+  exact ⟨localTrace trail, faithful_of_tracked tracked⟩
 
 theorem relative_agreement (initial : TrackedInitial) : RelativeAgreement :=
   relative_agreement_of_faithful (relative_faithful initial)

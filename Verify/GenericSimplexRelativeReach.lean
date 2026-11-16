@@ -10,10 +10,11 @@ the specification's.
   from). Authentication (`RelAuthentic`) is the specification's, on wire messages.
 * `RelativeFaithful` (statement; proved from the initial network in
   `Verify/GenericSimplexRelativeFaithful.lean`): every reachable network of running replicas has
-  a trace of the abstract model (`LocalFaithful`) that is its own: its correct members'
+  a trace of the abstract model (`LocalFaithfulAt` at the executable guards) that is its own: its correct members'
   sends are exactly the durable record and each correct replica's chain is a commit of it.
 * `relative_agreement_of_faithful` (proved): with that, the abstract model's agreement
-  theorem (`committed_prefix_consistency`) is the running replicas' (`RelativeAgreement`).
+  theorem (`committed_prefix_consistency_at`) is the running replicas' (`RelativeAgreement`), for
+  every admitted roster `n ≥ 3f + 1`.
 * Witnesses: `relNet_reachable` (premise inhabitation: a reachable `RelNetwork` whose
   correct replicas have committed), `relNet_faithful` (the conclusion holds there, with the
   trace of the specification's run of the same operation), `conflict_not_agreement` (teeth: the conclusion refuses a network of two conflicting
@@ -122,7 +123,7 @@ def RelativeAgreement : Prop :=
   ∀ {c : Config} {h : ChainDigest} {faulty : Finset Nat} {checked : Nat → Block → Prop} {time : Nat}
     {net : RelNetwork}, RelReachable c h faulty checked time net →
     h.CollisionFreeOn (Occurs c h faulty net) →
-    c.parties = 3 * c.faults + 1 → faulty.card ≤ c.faults → Agrees c faulty net
+    3 * c.faults + 1 ≤ c.parties → faulty.card ≤ c.faults → Agrees c faulty net
 
 /-- What it is for a trace of the abstract model to be this network's. `rules`: the trace
 meets every local obligation of the model the specification's safety theorem is proved on.
@@ -131,7 +132,8 @@ messages of correct members the trace is exactly the durable record, read as who
 (`denote`), so the trace cannot give a correct member a message it did not send, or omit
 one it did. -/
 structure Faithful (c : Config) (faulty : Finset Nat) (net : RelNetwork) (tr : Trace) : Prop where
-  rules : LocalFaithful tr (Finset.range c.parties) faulty c.faults
+  rules : LocalFaithfulAt tr (Finset.range c.parties) faulty c.faults
+    c.quorum (2 * c.faults + 1) (2 * c.faults + 1)
   commits : ∀ p, p < c.parties → p ∉ faulty → ∃ view, CommittedAt tr faulty view (net.chain p)
   sends : ∀ p, p < c.parties → p ∉ faulty → ∀ entry ∈ net.sent p, entry.2.sender = p →
     ∃ t, tr t = .send (denote entry.1 entry.2)
@@ -152,7 +154,7 @@ a committed view strictly extends the commit, so `decode` reads the chain the se
 by `above_denotes` and `rebase` drops nothing a correct member sent by `strip_conflict`) and
 `conflicting_count_small` (a tombstone's value is counted for at most `faults` members).
 What remains is the local half: each event of one `liveStep` on relative blocks, read
-through `denote`, meets its `LocalFaithful` obligation from the messages the replica holds.
+through `denote`, meets its `LocalFaithfulAt` obligation from the messages the replica holds.
 
 The digest must have no collision among the chains that occur in the run
 (`ChainDigest.CollisionFreeOn`, `Occurs`; inhabited for every run by
@@ -168,15 +170,15 @@ def RelativeFaithful : Prop :=
   ∀ {c : Config} {h : ChainDigest} {faulty : Finset Nat} {checked : Nat → Block → Prop} {time : Nat}
     {net : RelNetwork}, RelReachable c h faulty checked time net →
     h.CollisionFreeOn (Occurs c h faulty net) →
-    c.parties = 3 * c.faults + 1 → faulty.card ≤ c.faults → ∃ tr, Faithful c faulty net tr
+    3 * c.faults + 1 ≤ c.parties → faulty.card ≤ c.faults → ∃ tr, Faithful c faulty net tr
 
 /-- The abstract model's agreement theorem is the running replicas'. -/
 theorem relative_agreement_of_faithful (faithful : RelativeFaithful) : RelativeAgreement := by
-  intro c h faulty checked time net reachable free size faultBound p q pm qm ph qh
-  obtain ⟨tr, own⟩ := faithful reachable free size faultBound
+  intro c h faulty checked time net reachable free admitted faultBound p q pm qm ph qh
+  obtain ⟨tr, own⟩ := faithful reachable free admitted faultBound
   obtain ⟨v, left⟩ := own.commits p pm ph
   obtain ⟨w, right⟩ := own.commits q qm qh
-  exact committed_prefix_consistency own.rules (by simpa using size) faultBound left right
+  exact committed_prefix_consistency_at own.rules (config_thresholds admitted) faultBound left right
 
 /-! ## Witnesses -/
 
@@ -342,7 +344,7 @@ theorem relNet_faithful : RelReachable poleConfig plain poleFaulty (fun _ _ => T
     have small : p < 4 := member
     have : p ≠ 3 := by simpa [poleFaulty] using honest
     omega
-  refine ⟨relNet_reachable.1, actual_local_faithful specNet_reachable poleConfig_size, ?_, ?_, ?_⟩
+  refine ⟨relNet_reachable.1, actual_local_faithful specNet_reachable, ?_, ?_, ?_⟩
   · intro p member honest
     have chain : relNet.chain p = [[7]] := relNet_reachable.2 p (by
       rcases correct p member honest with rfl | rfl | rfl <;> decide)
@@ -413,7 +415,7 @@ open Minidregg.Kernel.GenericSimplexSupportExtends in
 /-- Premise inhabitation for `reachable_support_extends`: a correct replica has committed
 `[[7]]` in view 1 and a correct member has sent COMMIT for `[[7], [8]]` in view 2. -/
 theorem support_extends_inhabited : StrictlyExtends [[7]] [[7], [8]] :=
-  reachable_support_extends twoNet_reachable poleConfig_size poleFaulty_bound
+  reachable_support_extends twoNet_reachable poleConfig_admitted poleFaulty_bound
     (p := 1) (q := 0) (w := 1) (v := 2) (kind := .commit) (by decide) (by decide)
     twoNet_run.2.1 (by decide) (by decide) (by decide) (List.contains_iff_mem.mp twoNet_run.2.2.2.2.1)
 
@@ -431,7 +433,7 @@ open Minidregg.Kernel.GenericSimplexSupportExtends in
 /-- Premise inhabitation for `reachable_counted_extends`: three members are counted for
 `[[7], [8]]` in view 2, above the commit of `[[7]]`. -/
 theorem counted_extends_inhabited : StrictlyExtends [[7]] [[7], [8]] :=
-  reachable_counted_extends twoNet_reachable poleConfig_size poleFaulty_bound
+  reachable_counted_extends twoNet_reachable poleConfig_admitted poleFaulty_bound
     (p := 0) (q := 0) (w := 1) (v := 2) (kind := .vote) (by decide) (by decide) (by decide) (by decide)
     twoNet_run.2.1 (by decide) (by decide) (by rw [twoNet_run.2.2.2.2.2.1]; decide)
 
@@ -446,7 +448,7 @@ theorem conflicting_count_tight :
   have conflict : ¬ StrictlyExtends [[7], [8]] [[9]] := fun extends_ => by
     have := extends_.2; simp at this
   exact ⟨conflict, twoNet_run.2.2.2.2.2.2,
-    conflicting_count_small twoNet_reachable poleConfig_size poleFaulty_bound
+    conflicting_count_small twoNet_reachable poleConfig_admitted poleFaulty_bound
       (p := 0) (q := 0) (w := 2) (v := 3) (kind := .vote) (by decide) (by decide) (by decide) (by decide)
       twoNet_run.2.2.1 (by decide) (by decide) conflict⟩
 

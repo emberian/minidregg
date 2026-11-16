@@ -10,7 +10,8 @@ the trace the abstract model's safety theorem is about, without changing the rep
 
 * `liftEvent chain`: a replica's event, with every block read as `chain ++ block`.
 * `Good`: what a list of whole-chain events must meet, event by event against the strict
-  prefix before it, to be a trace of the model (`good_faithful`: it gives `LocalFaithful`).
+  prefix before it, to be a trace of the model (`good_faithful`: it gives `LocalFaithfulAt` at
+  the executable guards `c.quorum`, `2f + 1`, `2f + 1`, for any roster size).
 * `Ghost`: one correct replica's side of the bargain. `G` is a state of the specification
   whose audit is retained; the replica's own state is `forget G`. Every event of `G`'s audit
   and every message it has received is in the trail, read through `chain`.
@@ -122,11 +123,12 @@ theorem evidence_support {trail : List Event} {roster : Finset Nat} {time view t
   · exact impossible.elim
   · exact member_before sent
 
-/-- **A good list of events is a trace of the abstract model.** -/
+/-- **A good list of events is a trace of the abstract model**, at the executable guards
+(`c.quorum`, `2f + 1`, `2f + 1`), for any roster size. -/
 theorem good_faithful {c : Config} {faulty : Finset Nat} {trail : List Event}
-    (good : Good c faulty trail) (size : c.parties = 3 * c.faults + 1) :
-    LocalFaithful (localTrace trail) (Finset.range c.parties) faulty c.faults := by
-  have quorum : c.quorum = 2 * c.faults + 1 := by unfold Config.quorum; omega
+    (good : Good c faulty trail) :
+    LocalFaithfulAt (localTrace trail) (Finset.range c.parties) faulty c.faults
+      c.quorum (2 * c.faults + 1) (2 * c.faults + 1) := by
   have at_ : ∀ {time : Nat} {event : Event} (owner : Nat), event ≠ .idle →
       localTrace trail time = event → eventOwner event = some owner → owner ∉ faulty →
       EventGood c (trail.take time) event := by
@@ -139,7 +141,7 @@ theorem good_faithful {c : Config} {faulty : Finset Nat} {trail : List Event}
     exact good.voteOnce p v x y honest (trace_member (by simp) first) (trace_member (by simp) second)
   · intro t p v x honest sent
     have cause := (at_ p (by simp) sent rfl honest).1
-    simp only [EventSupported, quorum] at cause
+    simp only [EventSupported] at cause
     exact evidence_support cause
   · intro t u p v x a honest first second
     exact good.lock p v x a honest (trace_member (by simp) first) (trace_member (by simp) second)
@@ -149,19 +151,19 @@ theorem good_faithful {c : Config} {faulty : Finset Nat} {trail : List Event}
     exact evidence_support cause
   · intro t p v a honest sent
     have cause := (at_ p (by simp) sent rfl honest).1
-    simp only [EventSupported, quorum] at cause
+    simp only [EventSupported] at cause
     exact cause.imp evidence_support evidence_support
   · intro t p v x honest output
     have cause := (at_ p (by simp) output rfl honest).1
-    simp only [EventSupported, quorum] at cause
+    simp only [EventSupported] at cause
     exact cause.imp evidence_support (fun rest => rest.imp evidence_support evidence_support)
   · intro t p v honest output
     have cause := (at_ p (by simp) output rfl honest).1
-    simp only [EventSupported, quorum] at cause
+    simp only [EventSupported] at cause
     exact evidence_support cause
   · intro t p v x honest output
     have cause := (at_ p (by simp) output rfl honest).1
-    simp only [EventSupported, quorum] at cause
+    simp only [EventSupported] at cause
     exact evidence_support cause
   · intro t p v x honest sent
     have cause := (at_ p (by simp) sent rfl honest).2.1
@@ -453,7 +455,7 @@ theorem ingest_readable (c : Config) (external : Message → Prop) (s : State)
     | emission_basic_step
 
 theorem step_readable (c : Config) (external : Message → Prop) (s : State) (input : Input)
-    (size : c.parties = 3 * c.faults + 1) (old : EmissionInvariant c external s)
+    (old : EmissionInvariant c external s)
     (available : Readable external s.lastCommitted input) :
     EmissionInvariant c external (step c s input) := by
   cases input with
@@ -462,17 +464,17 @@ theorem step_readable (c : Config) (external : Message → Prop) (s : State) (in
     dsimp only
     split
     · emission_basic_chain
-    · exact pump_invariant c external _ _ size (ingest_readable c external s message old available)
+    · exact pump_invariant c external _ _ (ingest_readable c external s message old available)
   | deliveryAt now message =>
     unfold step
     dsimp only
     split
     · emission_basic_chain
-    · apply pump_invariant c external _ _ size
+    · apply pump_invariant c external _ _
       apply ingest_readable
       · simpa only [emission_record] using old
       · exact available
-  | _ => exact step_invariant c external s _ size old True.intro
+  | _ => exact step_invariant c external s _ old True.intro
 
 /-- `G` is a specification state with its audit retained, read through `chain`; the
 replica's own state is `forget G`. `base` is the view in which `chain` was committed.
@@ -525,7 +527,7 @@ trail. -/
 theorem ghost_step {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Block}
     {trail : List Event} {G : State} (input : Input)
     (ghost : Ghost c faulty p base chain trail G) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (available : Readable (fun m => (.send (liftMessage chain m) : Event) ∈ trail) G.lastCommitted input) :
     ∃ fresh : List Event, (step c G input).audit = G.audit ++ fresh ∧
       Ghost c faulty p base chain (trail ++ fresh.map (liftEvent chain)) (step c G input) ∧
@@ -537,8 +539,8 @@ theorem ghost_step {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Bl
         (.send (liftMessage chain m) : Event) ∈ trail ++ fresh.map (liftEvent chain)) := by
   obtain ⟨⟨sameSelf, ⟨fresh, audit⟩⟩, ownedStep⟩ := step_preserves c G input
   refine ⟨fresh, audit.symm, ?_⟩
-  have rules := good_faithful good size
-  have roster : (Finset.range c.parties).card = 3 * c.faults + 1 := by simpa using size
+  have rules := good_faithful good
+  have th := config_thresholds admitted
   have self1 : (step c G input).self = p := sameSelf.trans ghost.self
   have backed : Backed (fun m => (.send (liftMessage chain m) : Event) ∈ trail) G :=
     fun view stored m received => Or.inl (ghost.received view stored m received)
@@ -558,7 +560,7 @@ theorem ghost_step {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Bl
     rcases sent party member with impossible | inside
     · exact impossible.elim
     · exact Or.inl (List.mem_of_mem_take inside)
-  have emission := step_readable c _ G input size ⟨ghost.scope, backed, oldEmission⟩ available
+  have emission := step_readable c _ G input ⟨ghost.scope, backed, oldEmission⟩ available
   have causal1 := step_causal c G input ghost.causal
   have origin1 := step_origin c G input ⟨ghost.history, ghost.origins⟩
   have positive1 := step_positive c G input ghost.positive
@@ -679,7 +681,7 @@ theorem ghost_step {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Bl
                           have := ghost.baseLe
                           omega
                     obtain ⟨time, output⟩ := member_trace inTrail
-                    exact committed_not_disabled rules roster faultBound ghost.committed honest output
+                    exact committed_not_disabled_at rules th faultBound ghost.committed honest output
                 rw [genesis, empty]
                 rfl
               · exact Or.inr (lifts _ stored)
@@ -775,9 +777,9 @@ theorem start_facts (c : Config) (p time : Nat) :
     have configOK : c.wellFormed = true := by
       cases formed : c.wellFormed <;> simp_all
     have formed := configOK
-    simp only [Config.wellFormed, Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq] at formed
+    simp only [Config.wellFormed, Bool.and_eq_true, decide_eq_true_eq] at formed
     have enrolled : p < c.parties := by simpa [configOK] using admitted
-    refine ⟨(pump_invariant c (fun _ => False) _ _ formed.1.1
+    refine ⟨(pump_invariant c (fun _ => False) _ _
       (enterView_invariant c (fun _ => False) _ 1
         (initial_invariant c (fun _ => False) p time (time + c.timeout) [] [] enrolled))).backed,
       Minidregg.Kernel.GenericSimplexErasure.pump_above c c.pumpBudget _ (Or.inl formed.2),

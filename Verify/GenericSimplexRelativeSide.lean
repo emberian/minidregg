@@ -185,14 +185,14 @@ theorem ran_floor {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Blo
 /-- **One more step of the run.** -/
 theorem ran_step {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Block}
     {trail trail1 : List Event} {G G1 : State} (ran : Ran c faulty p base chain trail G trail1 G1)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (input : Input)
     (available : Readable (fun m => (.send (liftMessage chain m) : Event) ∈ trail1)
       G1.lastCommitted input) :
     ∃ fresh : List Event,
       Ran c faulty p base chain trail G (trail1 ++ fresh.map (liftEvent chain)) (step c G1 input) := by
   obtain ⟨fresh, audit, ghost2, good2, owners, sendsOut, outboxSrc⟩ :=
-    ghost_step input ran.ghost ran.good honest size faultBound available
+    ghost_step input ran.ghost ran.good honest admitted faultBound available
   have floorLe := ran_floor ran
   have old : ∀ e ∈ trail1, e ∈ trail1 ++ fresh.map (liftEvent chain) :=
     fun e member => List.mem_append.mpr (Or.inl member)
@@ -503,7 +503,7 @@ if the map failed). -/
 theorem side_rebase {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base : Nat} {G : State}
     {trail : List Event} {durable chain : Block} {sent : List (Block × WireMessage)} {r : Replica}
     (side : Side c h faulty p base G trail durable chain sent r) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults) :
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults) :
     ∃ extra base' G', (∀ m, (.send m : Event) ∈ extra → m.sender ∈ faulty) ∧
       Good c faulty (trail ++ extra) ∧
       Side c h faulty p base' G' (trail ++ extra) durable (durable ++ (rebase c h r).committed) sent
@@ -541,7 +541,7 @@ theorem side_rebase {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base
         (G.checked.filterMap (strip (applicationHistory G.committedTip)))
         side.ghost.causal.viewsUnique side.floor side.tipped empty mapped
       obtain ⟨extra, faultyOnly, ghost', good'⟩ :=
-        ghost_rebase side.ghost good honest size faultBound rebased
+        ghost_rebase side.ghost good honest admitted faultBound rebased
       refine ⟨extra, G.lastCommitted, ghostAfter G views
         (G.checked.filterMap (strip (applicationHistory G.committedTip))), faultyOnly, good', ?_⟩
       have grown := wire_grow side.wire (fun _ member => List.mem_append.mpr (Or.inl member))
@@ -570,7 +570,7 @@ theorem side_finish {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base
     {trail trail1 : List Event} {durable chain : Block} {sent : List (Block × WireMessage)}
     {r : Replica} (side : Side c h faulty p base G trail durable chain sent r)
     (ran : Ran c faulty p base chain trail G trail1 G1)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults) :
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults) :
     ∃ extra base' G', (∀ m, (.send m : Event) ∈ extra → m.sender = p ∨ m.sender ∈ faulty) ∧
       Good c faulty (trail ++ extra) ∧
       Side c h faulty p base' G' (trail ++ extra) durable
@@ -587,7 +587,7 @@ theorem side_finish {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base
       wire := wire_emit side.wire side.quiet floorOf ran window }
   obtain ⟨extra1, named, senders⟩ := ran.grows
   obtain ⟨extra2, base', G', faultyOnly, good', side'⟩ :=
-    side_rebase emitted ran.good honest size faultBound
+    side_rebase emitted ran.good honest admitted faultBound
   refine ⟨extra1 ++ extra2, base', G', ?_, ?_, ?_⟩
   · intro m member
     rcases List.mem_append.mp member with first | second
@@ -613,19 +613,19 @@ theorem ran_ahead {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Blo
 theorem side_idle {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base : Nat} {G : State}
     {trail : List Event} {durable chain : Block} {sent : List (Block × WireMessage)} {r : Replica}
     (side : Side c h faulty p base G trail durable chain sent r) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults) :
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults) :
     ∃ extra base' G', (∀ m, (.send m : Event) ∈ extra → m.sender = p ∨ m.sender ∈ faulty) ∧
       Good c faulty (trail ++ extra) ∧
       Side c h faulty p base' G' (trail ++ extra) durable
         (durable ++ (finish c h r r.core).committed) sent (finish c h r r.core) := by
   rw [side.core]
-  exact side_finish side (ran_refl side.ghost good side.floor side.tipped) honest size faultBound
+  exact side_finish side (ran_refl side.ghost good side.floor side.tipped) honest admitted faultBound
 
 /-- `finish` after noting a member ahead. -/
 theorem side_noted {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base : Nat} {G : State}
     {trail : List Event} {durable chain : Block} {sent : List (Block × WireMessage)} {r : Replica}
     (side : Side c h faulty p base G trail durable chain sent r) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (sender view : Nat) :
     ∃ extra base' G', (∀ m, (.send m : Event) ∈ extra → m.sender = p ∨ m.sender ∈ faulty) ∧
       Good c faulty (trail ++ extra) ∧
@@ -634,7 +634,7 @@ theorem side_noted {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base 
         (finish c h r (noteAhead r.core sender view)) := by
   rw [side.core, noteAhead_forget]
   exact side_finish side (ran_ahead side.ghost good side.floor side.tipped sender view)
-    honest size faultBound
+    honest admitted faultBound
 
 /-- A delivery the trail covers: what `ingest` can record of it is a SEND of the trail, or
 its sender is faulty. -/
@@ -673,7 +673,7 @@ theorem side_faulty {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base
 theorem side_live {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base : Nat} {G : State}
     {trail : List Event} {durable chain : Block} {sent : List (Block × WireMessage)} {r : Replica}
     (side : Side c h faulty p base G trail durable chain sent r) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (input : Input)
     (covered : ∀ m, (input = .delivery m ∨ ∃ now, input = .deliveryAt now m) →
       Covered faulty base chain trail m) :
@@ -708,8 +708,8 @@ theorem side_live {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base :
     | deliveryAt now m => exact one m (Or.inr ⟨now, rfl⟩)
     | _ => exact True.intro
   obtain ⟨fresh, ran⟩ := ran_step (ran_refl side0.ghost good0 side0.floor side0.tipped)
-    honest size faultBound input readable
-  obtain ⟨extra, base', G', senders, good', side'⟩ := side_finish side0 ran honest size faultBound
+    honest admitted faultBound input readable
+  obtain ⟨extra, base', G', senders, good', side'⟩ := side_finish side0 ran honest admitted faultBound
   refine ⟨faultySends faulty chain messages ++ extra, base', G', ?_, ?_, ?_⟩
   · intro m member
     rcases List.mem_append.mp member with first | second
@@ -830,7 +830,7 @@ theorem deliver_far (c : Config) (h : ChainDigest) (r : Replica) (now : Option N
 theorem side_deliver {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base : Nat} {G : State}
     {trail : List Event} {durable chain : Block} {sent : List (Block × WireMessage)} {r : Replica}
     (side : Side c h faulty p base G trail durable chain sent r) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (now : Option Nat) (w : WireMessage)
     (covered : ∀ m, decode h r w = some m → Covered faulty base chain trail m) :
     ∃ extra base' G', (∀ m, (.send m : Event) ∈ extra → m.sender = p ∨ m.sender ∈ faulty) ∧
@@ -854,18 +854,18 @@ theorem side_deliver {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p bas
     subst coreA
     split
     · split
-      · exact side_noted (held _) good honest size faultBound _ _
-      · exact side_idle sideA good honest size faultBound
+      · exact side_noted (held _) good honest admitted faultBound _ _
+      · exact side_idle sideA good honest admitted faultBound
     · rename_i m decoded
       split
-      · exact side_noted (held _) good honest size faultBound _ _
+      · exact side_noted (held _) good honest admitted faultBound _ _
       · cases now with
         | none =>
-          exact side_live sideA good honest size faultBound (.delivery m) (fun x named => by
+          exact side_live sideA good honest admitted faultBound (.delivery m) (fun x named => by
             rcases named with same | ⟨_, same⟩ <;> cases same
             exact covered m decoded)
         | some time =>
-          exact side_live sideA good honest size faultBound (.deliveryAt time m) (fun x named => by
+          exact side_live sideA good honest admitted faultBound (.deliveryAt time m) (fun x named => by
             rcases named with same | ⟨_, same⟩ <;> cases same
             exact covered m decoded)
 
@@ -934,7 +934,7 @@ theorem fold_forget (c : Config) (batch : List (WireMessage × Message)) (G : St
 
 theorem ran_fold {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Block}
     {trail : List Event} {G : State}
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults) :
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults) :
     ∀ (batch : List (WireMessage × Message)) {trail1 : List Event} {G1 : State},
       Ran c faulty p base chain trail G trail1 G1 →
       (∀ x ∈ batch, x.2.kind ≠ .propose → base < x.2.view →
@@ -947,7 +947,7 @@ theorem ran_fold {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Bloc
   | nil => intro trail1 G1 ran _; exact ⟨trail1, ran⟩
   | cons head rest ih =>
     intro trail1 G1 ran avail
-    obtain ⟨fresh, ran2⟩ := ran_step ran honest size faultBound (.delivery head.2)
+    obtain ⟨fresh, ran2⟩ := ran_step ran honest admitted faultBound (.delivery head.2)
       (fun kindOK above valued => avail head (by simp) kindOK
         (Nat.lt_of_le_of_lt ran.ghost.baseLe above) valued)
     exact ih ran2 (fun x member a b d =>
@@ -957,7 +957,7 @@ theorem ran_fold {c : Config} {faulty : Finset Nat} {p base : Nat} {chain : Bloc
 theorem side_release {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p base : Nat} {G : State}
     {trail : List Event} {durable chain : Block} {sent : List (Block × WireMessage)} {r : Replica}
     (side : Side c h faulty p base G trail durable chain sent r) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (covered : ∀ w ∈ r.far, ∀ m, decode h r w = some m → Covered faulty base chain trail m) :
     ∃ extra base' G', (∀ m, (.send m : Event) ∈ extra → m.sender = p ∨ m.sender ∈ faulty) ∧
       Good c faulty (trail ++ extra) ∧
@@ -970,7 +970,7 @@ theorem side_release {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p bas
     exact ⟨side.ghost, side.floor, side.tipped, side.core, side.quiet, side.wire⟩
   · obtain ⟨side0, good0, bad⟩ :=
       side_faulty side good honest ((releaseBatch c h r).map (·.2))
-    obtain ⟨trail2, ran⟩ := ran_fold honest size faultBound (releaseBatch c h r)
+    obtain ⟨trail2, ran⟩ := ran_fold honest admitted faultBound (releaseBatch c h r)
       (ran_refl side0.ghost good0 side0.floor side0.tipped) (fun x member a b d => by
         obtain ⟨held, decoded⟩ := batch_mem c h r x member
         rcases covered x.1 held x.2 decoded a b d with inside | byz
@@ -985,7 +985,7 @@ theorem side_release {c : Config} {h : ChainDigest} {faulty : Finset Nat} {p bas
       (r := { r with far := (r.far.filter fun w => r.core.lastCommitted < w.view).filter fun w =>
           !((releaseBatch c h r).any fun (held, _) => held == w) })
       ⟨side0.ghost, side0.floor, side0.tipped, side0.core, side0.quiet, side0.wire⟩
-      ran honest size faultBound
+      ran honest admitted faultBound
     refine ⟨faultySends faulty chain ((releaseBatch c h r).map (·.2)) ++ extra, base', G', ?_, ?_, ?_⟩
     · intro m member
       rcases List.mem_append.mp member with first | second

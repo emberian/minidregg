@@ -183,7 +183,8 @@ def Pending (e : Execution c faulty checked) (i : Nat) (payload : Bytes) : Prop 
       validBlock (e.state j p) (bestParent (e.state j p) ++ [payload]) = true
 
 /-- STATEMENT `eventual_commit` (no proof). Scope, all in the statement: a static committee
-of n = 3f+1 with at most f faulty; delays at most `delta` after `gst`; the capped timer at
+admitted by `Config.wellFormed` (solo `n = 1, f = 0`, or `f > 0, n ≥ 3f+1`), with at most
+f faulty; delays at most `delta` after `gst`; the capped timer at
 least `7 * delta`; commit-evidence transfer; relay and repeat transfer (a replica keeps
 no record above its horizon, so one that fell behind recovers only through its repeated
 CANDIDATE(⊥) and the peers' answers in `relay`); the payload kept offered and checked. Then

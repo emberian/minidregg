@@ -12,20 +12,21 @@ open Minidregg.Kernel.GenericSimplexEmissionSupport
 set_option autoImplicit false
 abbrev EmissionEvent := Minidregg.Kernel.GenericSimplex.AuditEvent
 
-/-- Same local emission obligations expressed over the actual global trace.
-The threshold remains executable c.quorum until the configuration-size join. -/
+/-- Same local emission obligations expressed over the actual global trace, at the
+executable thresholds (`c.quorum` for VOTE/COMMIT, `2 * c.faults + 1` for
+CANDIDATE→READY and READY→clear) for any roster size. -/
 def GlobalEventSupported (c : Config) (tr : Trace) (roster : Finset Nat)
     (time : Nat) : EmissionEvent → Prop
   | .send message => match message.kind, message.value with
       | .commit, some block => Support tr roster time message.view .vote (some block) c.quorum
       | .candidate, some block => Support tr roster time message.view .vote (some block) (c.faults + 1)
-      | .ready, arg => Support tr roster time message.view .candidate arg c.quorum ∨
+      | .ready, arg => Support tr roster time message.view .candidate arg (2 * c.faults + 1) ∨
           Support tr roster time message.view .ready arg (c.faults + 1)
       | _, _ => True
   | .prepare _ view block => Support tr roster time view .vote (some block) c.quorum ∨
-      Support tr roster time view .ready (some block) c.quorum ∨
+      Support tr roster time view .ready (some block) (2 * c.faults + 1) ∨
       Support tr roster time view .commit (some block) c.quorum
-  | .disable _ view => Support tr roster time view .ready none c.quorum
+  | .disable _ view => Support tr roster time view .ready none (2 * c.faults + 1)
   | .commit _ view block => Support tr roster time view .commit (some block) c.quorum
   | .idle => True
 
