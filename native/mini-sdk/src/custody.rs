@@ -24,7 +24,11 @@
 //!
 //! [`Delivery`] is the same discipline for an EXTERNAL destination (a webhook post): a started
 //! delivery that did not complete is `Unknown` and is resolved only by destination evidence,
-//! never by re-sending. Destination custody is not Mini custody.
+//! never by re-sending. Destination custody is not Mini custody. A destination answers a started
+//! send in one of three ways: it took it (`Completed`), it did not take it this time and a later
+//! send may (`Refused`, with a backoff), or it decided against this binding for good
+//! (`Declined`: a compare-and-set whose expected value the destination no longer holds, a policy
+//! refusal). A declined binding is never started again; a new effect is a new binding.
 use serde_json::{json, Value};
 
 use crate::contracts::{Dec, InvocationId};
@@ -253,10 +257,14 @@ pub enum DeliveryState {
     /// nothing was delivered, so a new send may start. `attempts` sends were refused so far;
     /// `not_before` is the caller's backoff, retained with the refusal.
     Refused { attempts: u64, not_before: u64 },
+    /// The destination answered the started send with a decision that holds for this binding
+    /// whatever is resent (its evidence is retained): terminal, like a Host refusal for an
+    /// attempt. Nothing was delivered, and the same binding never starts again.
+    Declined(Value),
     Completed(Value),
 }
 
-/// A delivery record's JSON: `{"binding", "phase": "started"|"refused"|"completed", "request", "at",
+/// A delivery record's JSON: `{"binding", "phase": "started"|"refused"|"declined"|"completed", "request", "at",
 /// "evidence"?, "attempts"?, "notBefore"?}`.
 /// `binding` is what the effect IS (known before it starts, so a later open can check it);
 /// `request` is the identity of this one send (a nonce, a message id) that the destination can be
@@ -269,12 +277,14 @@ pub struct Delivery {
 
 impl Delivery {
     /// Read a record for `binding`; a record bound to anything else refuses.
+    /// Callers should key storage by the binding digest (see [`binding_id`](Self::binding_id))
+    /// so records under changed preconditions (such as `old` in a compare-and-set) never collide.
     pub fn open(binding: Value, record: Option<Value>) -> Result<Self> {
         if let Some(r) = &record {
             if r.get("binding") != Some(&binding) {
                 return Err("delivery record is bound to another source or destination".into());
             }
-            if !matches!(r.get("phase").and_then(Value::as_str), Some("started" | "refused" | "completed")) {
+            if !matches!(r.get("phase").and_then(Value::as_str), Some("started" | "refused" | "declined" | "completed")) {
                 return Err("delivery record has no readable phase".into());
             }
         }
@@ -285,6 +295,7 @@ impl Delivery {
         match &self.record {
             None => DeliveryState::Fresh,
             Some(r) if r["phase"] == "completed" => DeliveryState::Completed(r["evidence"].clone()),
+            Some(r) if r["phase"] == "declined" => DeliveryState::Declined(r["evidence"].clone()),
             Some(r) if r["phase"] == "refused" => DeliveryState::Refused {
                 attempts: r["attempts"].as_u64().unwrap_or(1),
                 not_before: r["notBefore"].as_u64().unwrap_or(0),
@@ -302,14 +313,27 @@ impl Delivery {
                 "phase":"started","request":request,"at":at,"attempts":attempts})),
             DeliveryState::Refused { not_before, .. } => Err(format!("delivery refused by the destination; backing off until {not_before}").into()),
             DeliveryState::Unknown => Err("delivery UNKNOWN: inspect the destination and resolve before continuing; never re-sent automatically".into()),
+            DeliveryState::Declined(_) => Err("delivery declined by the destination; terminal for this binding: a new effect needs a new binding".into()),
             DeliveryState::Completed(_) => Err("delivery already completed".into()),
         }
     }
 
+    /// A deterministic lowercase hex identifier of this delivery's binding (`SHA-256(canonical_json(binding))`).
+    /// Callers persisting delivery records should key storage by this binding identifier rather than raw
+    /// target names alone, ensuring distinct expected preconditions (such as `old` in a compare-and-set)
+    /// never overwrite or collide with one another.
+    pub fn binding_id(&self) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        let canonical = crate::contracts::canonical_json(&self.binding)?;
+        Ok(crate::hex::encode(&Sha256::digest(canonical.as_bytes())))
+    }
+
     /// The record after destination evidence (a 2xx, or an operator's destination lookup).
+    /// Allowed from `Unknown`, or from `Declined`: observed destination reality dominates prior
+    /// local decline (matching `Attempt`'s confirmation-wins semantics).
     pub fn complete(&self, evidence: Value, at: u64) -> Result<Value> {
         match self.state() {
-            DeliveryState::Unknown => Ok(json!({"binding":self.binding,"phase":"completed",
+            DeliveryState::Unknown | DeliveryState::Declined(_) => Ok(json!({"binding":self.binding,"phase":"completed",
                 "request":self.record.as_ref().map_or(Value::Null, |r| r["request"].clone()),"evidence":evidence,"at":at})),
             DeliveryState::Fresh | DeliveryState::Refused { .. } => Err("cannot complete a delivery that was never started".into()),
             DeliveryState::Completed(_) => Err("delivery already completed".into()),
@@ -328,6 +352,21 @@ impl Delivery {
                     "attempts":record["attempts"].as_u64().unwrap_or(0) + 1}))
             }
             _ => Err("only a started delivery can be refused by its destination".into()),
+        }
+    }
+
+    /// The record after the destination ANSWERED the started send with a decision that holds for
+    /// this binding (a compare-and-set whose expected value it no longer holds, a policy
+    /// refusal): terminal. Only from `Unknown`; a send whose answer was lost stays `Unknown`, and
+    /// is resolved by destination evidence first.
+    pub fn declined(&self, evidence: Value, at: u64) -> Result<Value> {
+        match self.state() {
+            DeliveryState::Unknown => {
+                let record = self.record.as_ref().expect("an unknown delivery has a record");
+                Ok(json!({"binding":self.binding,"phase":"declined","request":record["request"].clone(),
+                    "evidence":evidence,"at":at,"attempts":record["attempts"].as_u64().unwrap_or(0) + 1}))
+            }
+            _ => Err("only a started delivery can be declined by its destination".into()),
         }
     }
 }
@@ -485,5 +524,84 @@ mod tests {
         let twice = Delivery::open(binding.clone(), Some(again.refused(json!({"http":429}), 71, 200).unwrap())).unwrap();
         assert_eq!(twice.state(), DeliveryState::Refused { attempts: 2, not_before: 200 });
         assert!(Delivery::open(binding, None).unwrap().refused(json!({}), 1, 2).is_err());
+    }
+
+    /// A compare-and-set of a named ref at a destination we do not run (a git forge): the binding
+    /// is the whole frame, so the expected old value is part of what the effect IS.
+    fn ref_binding(old: &str, new: &str) -> Value {
+        json!({"subject":"refs/heads/main","lane":"lane/x","old":old,"new":new})
+    }
+
+    #[test]
+    fn delivery_a_lost_reply_resent_resolves_to_the_first_outcome_and_never_a_second_effect() {
+        let binding = ref_binding("a1", "b2");
+        let started = Delivery::open(binding.clone(), None).unwrap().start(json!({"attempt":1}), 10).unwrap();
+        // The reply is lost: the caller dies with only the started record on disk. A resend of the same
+        // bytes reopens it, and it may not start a second send; only destination evidence resolves it.
+        let resent = Delivery::open(binding.clone(), Some(started)).unwrap();
+        assert_eq!(resent.state(), DeliveryState::Unknown);
+        assert!(resent.start(json!({"attempt":2}), 11).unwrap_err().0.contains("never re-sent"));
+        let done = resent.complete(json!({"targetReads":"b2"}), 12).unwrap();
+        assert_eq!(done["request"], json!({"attempt":1}), "the receipt names the first send, not the resend");
+        // Every later resend of the same bytes reads that first outcome and starts nothing.
+        let again = Delivery::open(binding, Some(done)).unwrap();
+        assert_eq!(again.state(), DeliveryState::Completed(json!({"targetReads":"b2"})));
+        assert!(again.start(json!({"attempt":3}), 13).is_err());
+    }
+
+    #[test]
+    fn delivery_changed_bytes_under_the_same_record_conflict() {
+        let first = Delivery::open(ref_binding("a1", "b2"), None).unwrap().start(json!({"attempt":1}), 10).unwrap();
+        // The same record presented with another frame: the target moved and the caller rebuilt it, or
+        // another writer reused the key. Neither may read or resolve the first send's record.
+        for other in [ref_binding("c3", "b2"), ref_binding("a1", "d4")] {
+            assert!(Delivery::open(other, Some(first.clone())).unwrap_err().0.contains("bound to another"));
+        }
+        let b1 = Delivery::open(ref_binding("a1", "b2"), None).unwrap();
+        let b2 = Delivery::open(ref_binding("c3", "b2"), None).unwrap();
+        assert_ne!(b1.binding_id().unwrap(), b2.binding_id().unwrap());
+    }
+
+    #[test]
+    fn delivery_a_declined_answer_is_terminal_for_its_binding() {
+        let binding = ref_binding("a1", "b2");
+        let started = Delivery::open(binding.clone(), None).unwrap().start(json!({"attempt":1}), 10).unwrap();
+        let unknown = Delivery::open(binding.clone(), Some(started)).unwrap();
+        let declined = unknown.declined(json!({"targetReads":"c3","why":"moved"}), 11).unwrap();
+        let declined = Delivery::open(binding.clone(), Some(declined)).unwrap();
+        assert_eq!(declined.state(), DeliveryState::Declined(json!({"targetReads":"c3","why":"moved"})));
+        // No backoff ends it, it cannot restart, and it is never refused-then-retried or declined again.
+        assert!(declined.start(json!({"attempt":2}), u64::MAX).unwrap_err().0.contains("terminal"));
+        assert!(declined.refused(json!({}), 12, 13).is_err());
+        assert!(declined.declined(json!({}), 12).is_err());
+        assert!(Delivery::open(binding, None).unwrap().declined(json!({}), 1).is_err(), "never from Fresh");
+        // A new effect is a new binding (here the frame against the target's new value), in a record of its own.
+        let next = Delivery::open(ref_binding("c3", "e5"), None).unwrap();
+        assert_eq!(next.state(), DeliveryState::Fresh);
+        assert!(next.start(json!({"attempt":1}), 12).is_ok());
+    }
+
+    #[test]
+    fn delivery_observed_completion_overrides_prior_decline_but_never_restarts() {
+        let binding = ref_binding("a1", "b2");
+        let started = Delivery::open(binding.clone(), None).unwrap().start(json!({"attempt":1}), 10).unwrap();
+        let unknown = Delivery::open(binding.clone(), Some(started)).unwrap();
+        let declined = unknown.declined(json!({"targetReads":"c3","why":"ambiguous failure"}), 11).unwrap();
+        let d = Delivery::open(binding.clone(), Some(declined)).unwrap();
+        assert_eq!(d.state(), DeliveryState::Declined(json!({"targetReads":"c3","why":"ambiguous failure"})));
+
+        // Declined cannot restart, refuse, or decline again
+        assert!(d.start(json!({"attempt":2}), 20).unwrap_err().0.contains("terminal"));
+        assert!(d.refused(json!({}), 20, 25).is_err());
+        assert!(d.declined(json!({}), 20).is_err());
+
+        // Observed destination reality dominates prior local decline:
+        // if a later destination check proves the exact binding did take effect, complete() succeeds.
+        let done = d.complete(json!({"targetReads":"b2"}), 22).unwrap();
+        assert_eq!(done["request"], json!({"attempt":1}));
+        let completed = Delivery::open(binding.clone(), Some(done)).unwrap();
+        assert_eq!(completed.state(), DeliveryState::Completed(json!({"targetReads":"b2"})));
+        assert!(completed.start(json!({"attempt":3}), 30).is_err());
+        assert!(completed.complete(json!({}), 30).is_err());
     }
 }
