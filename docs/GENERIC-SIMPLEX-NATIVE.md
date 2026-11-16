@@ -9,7 +9,8 @@ controller, participant, serve and native modules build through the executables 
 and reconfiguration (`Kernel/GenericSimplexReconfig`) build only in the opt-in `ResearchWip`
 library.
 
-The model is a fixed committee of n ≥ 3f + 1 (`Config.wellFormed`) with at most f
+The model is a fixed committee admitted by `Config.wellFormed`: either solo n = 1, f = 0,
+or f > 0 and n ≥ 3f + 1. It has at most f
 cumulatively Byzantine members, authenticated reliable delivery and partial synchrony.
 VOTE/COMMIT quorums are n - f (`Config.quorum`); the CANDIDATE→READY and READY→clear
 guards are 2f + 1 and the relay guards f + 1. The configured

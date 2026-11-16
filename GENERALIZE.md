@@ -1,9 +1,8 @@
 # Generic Simplex safety beyond n = 3f + 1
 
-Ledger row: task/12305 (simbi). Lane `lane/quorum-n-ge-3f1-upstream`, built on emberian/minidregg
-main `5d607d21d` (a port of akapug `lane/quorum-n-ge-3f1` @ `7bfcc0db`). That first slice changes
-Lean proofs only. The second slice (task/12332, below) widens the oracle's `Config.wellFormed` to
-`n ≥ 3f + 1`; it changes no Rust and no behaviour at `n = 3f + 1`.
+Mini now admits solo Simplex (`n = 1, f = 0`) and committees with
+`f > 0, n ≥ 3f + 1`. The safety proofs follow the executable thresholds;
+liveness remains an unproved statement. No Rust implementation changes here.
 
 ## What changed
 
@@ -57,10 +56,10 @@ are unchanged.
     `ordered_next_payload_unique`, it takes `leftBlock`/`rightBlock` and the `leftReads`/`rightReads`
     history equalities.
 
-Every old `n = 3f + 1` statement keeps its name and signature. Each is now a one-line
-corollary built with `thresholds_legacy size`, or is left unchanged where it never used
-`size`. The downstream modules (EngineSafety, ObservationSafety, ActualFaithful, Trail,
-SupportExtends, RebaseGhost, AgreementEvidenceRegime, SimplexQualification, Verify) are untouched.
+The legacy abstract safety and certificate interfaces keep their names and signatures,
+using `thresholds_legacy size` where needed. The executable refinement and its consumers
+are generalized as described below; their signatures now use the executable thresholds
+and an admission inequality instead of an exact roster size.
 
 Every new theorem carries `#assert_axioms`. That check fails on `sorryAx`, on a declared
 axiom, and on `native_decide`'s compiler trust.
@@ -73,9 +72,9 @@ axiom, and on `native_decide`'s compiler trust.
 - The `2f + 1` VOTE/COMMIT support in `LocalFaithful` became `q`. The CANDIDATE→READY
   support became `c`. The READY→prepare/disable support became `r`.
 
-## The oracle and its refinement (lane `lane/quorum-oracle-n-ge-3f1`, task/12332)
+## The executable engine and its refinement
 
-This second slice widens the executable oracle and re-proves the refinement layer.
+The executable admission rule and the refinement layer use the same threshold profile.
 
 - `Kernel/GenericSimplex.lean` `Config.wellFormed` admits `(faults == 0 && parties == 1) || (0 < faults && 3 * faults + 1 ≤ parties)`
   (was `parties == 3 * faults + 1`). Solo Simplex `(parties = 1, faults = 0)` is preserved because `quorum = 1` and `2f + 1 = 1`
@@ -107,11 +106,14 @@ This second slice widens the executable oracle and re-proves the refinement laye
   and `config_quorum_legacy` keep the `n = 3f + 1` witness statements
   (`honest_execution_faithful`, `localFaithful_committed_run`) as they were.
 
-## What is still n = 3f + 1 only
+## Scope and remaining obligations
 
 - `JumpReach.SettledBelowFrontier`, an unproved statement, keeps its `n = 3f + 1` premise.
   `EventualCommit` reads `wellFormed` and so now ranges over every admitted roster; it is
-  unproved as before.
+  unproved as before. It still requires an infinite admitted execution, a fault bound,
+  partial synchrony, a capped timer at least `7 * delta`, commit-evidence transfer,
+  relay transfer, repeat transfer, and a payload kept offered and source-checked.
+  The widening of admission establishes no liveness theorem.
 - The legacy abstract theorems (`committed_prefix_consistency`, `verifiedCommit_attributed`,
   `ordered_next_payload_unique`, `local_output_attestations_*`, …) keep their names and
   `n = 3f + 1` signatures; their `_at` forms cover any roster.
@@ -119,9 +121,10 @@ This second slice widens the executable oracle and re-proves the refinement laye
   simplifies directly to `n > f + 2f'` (`churnSafe_iff`, proved). Under legacy `n = 3f + 1` growing to `f' = f + 1`,
   `f + 2f' = 3f + 2 > n`, so every growth under legacy fails the bound and requires the readiness rule
   (`growth_needs_readiness`). Widening `n` beyond `3f + 1` allows committees satisfying `n > f + 2f'` (e.g. `n ≥ 3f + 3`
-  for `f' = f + 1`) to be churn-safe without readiness or state transfer. Full dynamic reconfiguration remains ungeneralized.
+  for `f' = f + 1`) to satisfy this arithmetic bound. Its interpretation assumes a growing
+  committee retaining the old members; it does not prove arbitrary membership replacement
+  safe. Full dynamic reconfiguration and `ReadinessSafety` remain unproved.
 - Liveness is proved for no roster size.
-- Re-pinning the oracle SHA in clockdag's `crates/mesh-simplex/PROVENANCE.txt` is a separate step.
 
 ## Stretch: the smaller quorum q = ⌈(n + f + 1) / 2⌉
 
@@ -130,9 +133,10 @@ safety theorem applies to it:
 
 - VOTE/COMMIT quorum `q = (n + f + 2) / 2`. At `n = 6, f = 1` that is 4, against 5 for `n - f`.
   At `n = 600, f = 199` it is 400, against 401.
-  **Crash resilience trade-off:** Under standard `q = n - f, c = r = 2f + 1`, `(n = 6, f = 1)` tolerates
-  only `n - q = 1` crashed node, even if 0 Byzantine faults occur. By contrast, `thresholds_small_quorum`
-  (`q = c = 4` at `n = 6, f = 1`) tolerates 2 crashes at 0 Byzantine faults (or 1 Byzantine fault + 1 crash).
+  At `(n = 6, f = 1)`, the standard quorum of 5 cannot be reached with two unavailable
+  members. The smaller quorum of 4 and candidate threshold of 4 can be reached by the
+  remaining four members. This is threshold arithmetic, not a crash-liveness proof;
+  the executable still uses the standard quorum.
 - **The CANDIDATE→READY guard must rise** from `2f + 1` to `c = n + f + 1 - q = ⌊(n + f + 1) / 2⌋`.
   That is 4 instead of 3 at `n = 6`, and 400 instead of 399 at `n = 600`. Safety needs
   `q + c ≥ n + f + 1`: a committed block's `q` COMMIT senders must meet any `c` CANDIDATE
@@ -145,30 +149,3 @@ safety theorem applies to it:
   and `q ≥ 2f + 1` lets a vote quorum's honest voters (at least `q - f ≥ f + 1`) drive every
   honest party to CANDIDATE(x). Both hold for `n ≥ 3f + 1`. A real liveness proof is a
   separate obligation.
-
-## Fabric evidence
-
-All Lean builds ran on the Fabric. None ran on the laptop hub.
-
-- First slice (proofs only), tip `196483847`: `job_ca862d2a921ffc0f59d745e1`, green
-  (`build-mini-kernels.sh && lake build` of 42 GenericSimplex/Verify targets). This is the baseline
-  of the second slice: `0a3dd1ea8` differs from it only in this file.
-- Second slice, tip `3f8d2c293`: `job_49ad6b4e61ede340e73a68b8`, red. `ghost_rebase` still called
-  four legacy lemmas; fixed in `c2b145d86`.
-- Second slice, tip `c2b145d86`: `job_0876b468f59aec1013a3ba8e`, green (2468 jobs; the 42 targets
-  plus `Kernel.GenericSimplex`, `Erasure`, `Window`, `Relative`, `NativeHostContext`,
-  `Compiler.GenericSimplexServe`, `Compiler.GenericSimplexIO` and five more `Verify.GenericSimplex*`
-  and fixture modules).
-- Second slice, tip `a5d81d7c2`: `job_9a51e2dd7d8ca6d282e4d5d0`, `lake build` of every module
-  that imports a changed module (382 library modules). Red only in seven targets, all inherited:
-  `TokenCensus` and six modules that only the opt-in `ResearchWip` imports
-  (`Compiler.PrivateCircuitAllocationFast`, `Compiler.PortableJointCustodyIO`,
-  `Kernel.RunComputeActivation`, `Kernel.JointReservationFunding`,
-  `Kernel.JointProtectedGateProofs`, `Kernel.RoomReleaseCurrent`). The same seven targets on the
-  base `0a3dd1ea8` (`job_f12e374c6521956b4069ef88`) fail with the identical 34 error lines.
-- Second slice, tip `a5d81d7c2`: `job_cf6b7f7b947e574481cd2fcd`, the `generic-simplex-harness` and
-  `generic-simplex-log-reopen` executables both pass (exit 0).
-- Second slice, tip `a5d81d7c2`: `job_c355a45cd66dc4bf5236c74b`, an uncommitted probe runs the
-  oracle (`Timed.runUntil`) at `(n, f)` = `(4,1)`, `(5,1)`, `(6,1)`, `(7,2)`, `(10,3)`,
-  each with no fault and with member `n - 1` silent. Every run is admitted (quorum `n - f`), every
-  live replica commits the block and `timedSafe` holds; `(3,1)` is refused (`start` fails).

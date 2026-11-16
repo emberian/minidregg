@@ -382,6 +382,9 @@ theorem covered_next_at_exact_index {sourcePrefix history : Block} {record : Byt
 #assert_axioms attributed_commit_sends_prefix_consistent
 #assert_axioms certified_source_histories_compatible
 #assert_axioms certificate_honest_send_at
+#assert_axioms certificate_honest_send
+#assert_axioms certificate_candidate_same
+#assert_axioms certificate_ready_same
 #assert_axioms certificate_vote_core_at
 #assert_axioms certificate_safe_origin_at
 #assert_axioms certificate_positive_at

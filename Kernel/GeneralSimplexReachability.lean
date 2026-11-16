@@ -345,6 +345,8 @@ theorem local_output_attestations_prefix_consistent {tr : Trace} {roster faulty 
 #assert_axioms committed_prefix_consistency
 #assert_axioms refined_engine_commits_compatible
 #assert_axioms known_zero
+#assert_axioms known_eq_committed
+#assert_axioms committed_not_disabled
 #assert_axioms known_eq_committed_at
 #assert_axioms committed_not_disabled_at
 #assert_axioms known_parent_at

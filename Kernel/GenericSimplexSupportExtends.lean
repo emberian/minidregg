@@ -181,6 +181,8 @@ theorem thresholds_above_faults (c : Config) (admitted : 3 * c.faults + 1 ≤ c.
   omega
 
 #assert_axioms support_has_honest_vote_at
+#assert_axioms support_has_honest_vote
+#assert_axioms vote_extends_commit
 #assert_axioms vote_extends_commit_at
 #assert_axioms support_extends_commit_at
 #assert_axioms reachable_support_extends
