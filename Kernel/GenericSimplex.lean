@@ -56,11 +56,14 @@ structure Config where
   /-- Exponent cap for the view-timeout backoff; 0 keeps the fixed timer. -/
   backoffCap : Nat := 0
   deriving DecidableEq, BEq, Repr, Inhabited
-/-- An admitted committee: `n ≥ 3f + 1` parties tolerating `f` faults (any `n`, not only
-`n = 3f + 1`). The VOTE/COMMIT quorum is `n - f` (`Config.quorum`); the CANDIDATE→READY and
-READY→clear guards stay `2f + 1` and the relay guards `f + 1`. -/
+/-- An admitted committee: either solo Simplex (`parties = 1, faults = 0`) where `quorum = 2f + 1 = 1`,
+or any multi-node committee `n ≥ 3f + 1` with `f > 0`. At `n > 1` zero faults is refused: `2f + 1 = 1`
+would let a single timeout CANDIDATE(⊥) unilaterally disable a view while COMMIT demands `n` votes.
+The VOTE/COMMIT quorum is `n - f` (`Config.quorum`); the CANDIDATE→READY and READY→clear guards stay
+`2f + 1` and the relay guards `f + 1`. -/
 def Config.wellFormed (c : Config) : Bool :=
-  3 * c.faults + 1 ≤ c.parties && c.timeout > 0 && c.pumpBudget > 0
+  ((c.faults == 0 && c.parties == 1) || (0 < c.faults && 3 * c.faults + 1 ≤ c.parties)) &&
+    c.timeout > 0 && c.pumpBudget > 0
 def Config.quorum (c : Config) : Nat := c.parties - c.faults
 def Config.leader (c : Config) (view : Nat) : Nat := (view - 1) % c.parties
 /-- How far above its own view (or floor) a replica keeps a record for a view a member

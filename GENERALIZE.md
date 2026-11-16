@@ -77,12 +77,14 @@ axiom, and on `native_decide`'s compiler trust.
 
 This second slice widens the executable oracle and re-proves the refinement layer.
 
-- `Kernel/GenericSimplex.lean` `Config.wellFormed` admits `3 * faults + 1 ≤ parties` (was
-  `parties == 3 * faults + 1`). `Config.quorum` stays `parties - faults`; every guard of
-  `valueRules`/`argumentRules`/`wantsOut` is unchanged (`n - f`, `2f + 1`, `f + 1`).
-  At `n = 3f + 1` the new admission computes the old one (`wellFormed_at_legacy`, proved),
-  so `start`/`step` compute the same states there; a config with `n > 3f + 1` used to fail
-  at `start`/`step` and now runs.
+- `Kernel/GenericSimplex.lean` `Config.wellFormed` admits `(faults == 0 && parties == 1) || (0 < faults && 3 * faults + 1 ≤ parties)`
+  (was `parties == 3 * faults + 1`). Solo Simplex `(parties = 1, faults = 0)` is preserved because `quorum = 1` and `2f + 1 = 1`
+  coincide. For `n > 1`, `faults = 0` is refused: at `faults = 0` and `n = 5`, `2f + 1 = 1` while `quorum = 5`, meaning 1 timeout
+  `CANDIDATE(⊥)` would unilaterally disable a view while `COMMIT` demands all 5 votes. For multi-node committees `n > 1`,
+  `0 < faults` and `3f + 1 ≤ n` are required.
+  `Config.quorum` stays `parties - faults`; every guard of `valueRules`/`argumentRules`/`wantsOut` is unchanged (`n - f`, `2f + 1`, `f + 1`).
+  At `n = 3f + 1` the new admission computes the old one (`wellFormed_at_legacy`, proved), so `start`/`step` compute the same
+  states there; a config with `n > 3f + 1` (and `f > 0`) used to fail at `start`/`step` and now runs.
 - `EmissionSupport.EventSupported` and `GlobalEmission.GlobalEventSupported` record the
   READY-core, READY-prepare and disable supports at `2 * c.faults + 1`, the guard the
   executable reads, instead of `c.quorum`. `argumentRules_invariant` then needs no size,
@@ -113,7 +115,11 @@ This second slice widens the executable oracle and re-proves the refinement laye
 - The legacy abstract theorems (`committed_prefix_consistency`, `verifiedCommit_attributed`,
   `ordered_next_payload_unique`, `local_output_attestations_*`, …) keep their names and
   `n = 3f + 1` signatures; their `_at` forms cover any roster.
-- `GenericSimplexReconfig` (churn) is not generalized.
+- `GenericSimplexReconfig` (churn): `ChurnSafe n f n' f'` (`f' < (n - f) + (n' - f') - (n' - n) - n`)
+  simplifies directly to `n > f + 2f'` (`churnSafe_iff`, proved). Under legacy `n = 3f + 1` growing to `f' = f + 1`,
+  `f + 2f' = 3f + 2 > n`, so every growth under legacy fails the bound and requires the readiness rule
+  (`growth_needs_readiness`). Widening `n` beyond `3f + 1` allows committees satisfying `n > f + 2f'` (e.g. `n ≥ 3f + 3`
+  for `f' = f + 1`) to be churn-safe without readiness or state transfer. Full dynamic reconfiguration remains ungeneralized.
 - Liveness is proved for no roster size.
 - Re-pinning the oracle SHA in clockdag's `crates/mesh-simplex/PROVENANCE.txt` is a separate step.
 
@@ -124,6 +130,9 @@ safety theorem applies to it:
 
 - VOTE/COMMIT quorum `q = (n + f + 2) / 2`. At `n = 6, f = 1` that is 4, against 5 for `n - f`.
   At `n = 600, f = 199` it is 400, against 401.
+  **Crash resilience trade-off:** Under standard `q = n - f, c = r = 2f + 1`, `(n = 6, f = 1)` tolerates
+  only `n - q = 1` crashed node, even if 0 Byzantine faults occur. By contrast, `thresholds_small_quorum`
+  (`q = c = 4` at `n = 6, f = 1`) tolerates 2 crashes at 0 Byzantine faults (or 1 Byzantine fault + 1 crash).
 - **The CANDIDATE→READY guard must rise** from `2f + 1` to `c = n + f + 1 - q = ⌊(n + f + 1) / 2⌋`.
   That is 4 instead of 3 at `n = 6`, and 400 instead of 399 at `n = 600`. Safety needs
   `q + c ≥ n + f + 1`: a committed block's `q` COMMIT senders must meet any `c` CANDIDATE

@@ -336,6 +336,14 @@ theorem growth_needs_readiness (f : Nat) : ¬ ChurnSafe (3 * f + 1) f (3 * (f + 
 theorem fixed_committee_churn_safe (f : Nat) : ChurnSafe (3 * f + 1) f (3 * f + 1) f := by
   unfold ChurnSafe; push_cast; omega
 
+/-- The generalized no-state-transfer churn condition: `f' < (n - f) + (n' - f') - (n' - n) - n`
+simplifies directly to `n > f + 2f'`. Under legacy `n = 3f + 1` growing to `f' = f + 1`,
+`f + 2f' = 3f + 2 > n`, so every growth under legacy fails churn-safety without readiness.
+With `n` widened beyond `3f + 1`, any committee satisfying `n > f + 2f'` is churn-safe without readiness. -/
+theorem churnSafe_iff (n f n' f' : Nat) :
+    ChurnSafe n f n' f' ↔ (f + 2 * f' < n) := by
+  unfold ChurnSafe; omega
+
 #assert_axioms streamEncode_injective
 #assert_axioms commitmentBytes_binds_config
 #assert_axioms commitmentBytes_binds_block
@@ -355,5 +363,6 @@ theorem fixed_committee_churn_safe (f : Nat) : ChurnSafe (3 * f + 1) f (3 * f + 
 #assert_axioms four_to_seven_unsafe
 #assert_axioms growth_needs_readiness
 #assert_axioms fixed_committee_churn_safe
+#assert_axioms churnSafe_iff
 
 end Minidregg.Kernel.GenericSimplexReconfig

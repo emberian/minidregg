@@ -251,7 +251,15 @@ so `start` and `step`, which read the configuration's size only through `wellFor
 `quorum` and the unchanged guards, behave exactly as before on every such roster. -/
 theorem wellFormed_at_legacy (c : Config) (size : c.parties = 3 * c.faults + 1) :
     c.wellFormed = (c.parties == 3 * c.faults + 1 && c.timeout > 0 && c.pumpBudget > 0) := by
-  simp [Config.wellFormed, size]
+  rcases c with ⟨parties, faults, timeout, pumpBudget, backoffCap⟩
+  dsimp only at size
+  cases faults with
+  | zero =>
+    have hp : parties = 1 := by omega
+    simp [Config.wellFormed, hp]
+  | succ f =>
+    have hpos : 0 < f + 1 := by omega
+    simp [Config.wellFormed, hpos, size]
 
 /-- At `n = 3f + 1` the executable VOTE/COMMIT quorum is the legacy `2f + 1`. -/
 theorem config_quorum_legacy {c : Config} (size : c.parties = 3 * c.faults + 1) :
