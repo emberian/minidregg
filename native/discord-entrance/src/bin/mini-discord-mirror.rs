@@ -283,6 +283,8 @@ impl Mirror {
                 match delivery.state() {
                     DeliveryState::Completed(_)=>{}
                     DeliveryState::Unknown=>return Err(format!("publication {cell}:{seq} UNKNOWN; inspect Discord and resolve before continuing")),
+                    // The mirror never records one; a record that says so holds the entries after it, as UNKNOWN does.
+                    DeliveryState::Declined(_)=>return Err(format!("publication {cell}:{seq} declined; terminal for this entry, resolve before continuing")),
                     // Order is kept: a refused entry holds the entries after it until it posts.
                     DeliveryState::Refused{not_before,..} if now_s()<not_before=>return Ok(posted),
                     DeliveryState::Fresh|DeliveryState::Refused{..}=>{

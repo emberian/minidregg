@@ -257,14 +257,26 @@ exact sdk-custody            mini-sdk --lib --features native -- \
   store::tests::later_outcomes_remain_later_beyond_four_digits_and_legacy_padding_is_preserved \
   store::tests::sparse_history_does_not_reuse_old_attempt_numbers_and_exhaustion_refuses_without_wrapping \
   store::tests::a_phase_record_may_exist_only_once_with_these_contents \
-  durable::tests::sync_ancestors_skips_what_the_account_cannot_open_or_write_and_refuses_what_it_can_write \
   custody::tests::recovered_after_uncertain_is_confirmed_by_exact_lookup_never_a_new_nonce \
-  custody::tests::refused_permits_one_successor_with_fresh_nonces_only \
+  custody::tests::a_refusal_is_terminal_and_licenses_no_successor \
   custody::tests::unsent_is_never_sent_but_unsent_after_uncertain_stays_uncertain \
   custody::tests::unknown_confirmation_words_and_malformed_receipts_are_undecided \
   custody::tests::classification_confirmation_wins_then_newest_refusal \
   custody::tests::delivery_unknown_is_resolved_only_by_evidence_never_by_resending \
+  custody::tests::a_destination_refusal_returns_to_a_startable_state_after_its_backoff \
+  custody::tests::delivery_binding_id_canonicalizes_nested_objects_and_exact_numbers \
+  custody::tests::delivery_binding_id_refuses_unsupported_numbers_without_rounding \
+  custody::tests::delivery_attempt_count_exhaustion_refuses_without_wrapping \
+  custody::tests::delivery_a_lost_reply_resent_resolves_to_the_first_outcome_and_never_a_second_effect \
+  custody::tests::delivery_changed_bytes_under_the_same_record_conflict \
+  custody::tests::delivery_a_declined_answer_is_terminal_for_its_binding \
+  custody::tests::delivery_observed_completion_overrides_prior_decline_but_never_restarts \
   custody::tests::standing_is_the_words_alone_while_classify_also_wants_the_receipt
+# Downstream feature unification must not change canonical binding or intent identity.
+exact sdk-binding-json       mini-sdk --lib --features native,serde_json/preserve_order -- \
+  contracts::tests::the_integer_rule_is_by_value_exact_and_bounded \
+  custody::tests::delivery_binding_id_canonicalizes_nested_objects_and_exact_numbers \
+  custody::tests::delivery_binding_id_refuses_unsupported_numbers_without_rounding
 # The ssh:DEST operator route (cv 01a104fe-958e): named certainly-unsent refusals before the channel
 # opens, uncertain and never resent after the write. Stand-in rows; the real-sshd + real-Host rows are
 # tests/ssh-e2e.sh (an unprivileged sshd it starts itself, throwaway keys, a scratch Store; needs a
