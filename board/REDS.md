@@ -1,15 +1,27 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `2eb32b5103d4` (Record integrated custody broker-test and Simplex takeover evidence). Round finished 2026-11-16T07:09Z.
-green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-2eb32b51`.
+Tip: `0f9749114269` (Merge origin/main into main (integrating zkml, vfhe & selvage certificate waves)). Round finished 2026-11-21T14:02Z.
+green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-0f974911`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
+| ratchets | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| rust-check | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| host | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 053906870674..2eb32b5103d4`), newest first; owners are the seats whose
+Suspect commits since green (`git log 053906870674..0f9749114269`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `0f974911` Merge origin/main into main (integrating zkml, vfhe & selvage certificate waves)
+- `c83b3193` theory, compiler & prover: add VerifiedAstTransducer, PolicyAstTransducerEmit, and private-witness T
+- `2bc33e18` selvage & prover: add ContentCertificate/CertificateComposition (P1-P8, W4) and native Gruen EinSumc
+- `99dfbf0e` vfhe & zkml: add BfvHoistedRescale (Hole B), ZkmlDeltaNet WY, and ZkmlGruenSumcheck
+- `d58330d9` zkml: add EinSumcheck 6-block contraction metatheory and cubic sumcheck assurance
+- `5c8ce467` builder: REDS.md for 2eb32b5103d4 (1 red) (owner: build-loop)
 - `2eb32b51` Record integrated custody broker-test and Simplex takeover evidence
 - `cf404cbc` Integrate generalized Simplex safety and executable admission guards
 - `3f2968ea` Integrate child-isolated broker audit-limit test
@@ -44,21 +56,3 @@ Suspect commits since green (`git log 053906870674..2eb32b5103d4`), newest first
 - `3fbeca33` docs(append-growth): the product row as its own section; what compiled outside the umbrella; what is
 - `362c2f8d` docs: what an append costs as history grows, measured and attributed
 - `c0f71943` directory: `used` is the set's characteristic function; the private index evaluates a path once (owner: apps-hermes, read-path)
-- `bd134ef4` receiver: `MINI_STORE_PHASES=1` prints where one durable append spends its time
-- `c6081864` builder: REDS.md for 74d6535141c7 (1 red) (owner: build-loop)
-- `74d65351` ratchet(bytes-repr): the ceiling is the measured count after the authority layout (owner: bytes-repr)
-- `6b6c219d` docs(authority): the sixteen authority-writing journeys on this head
-- `f21515be` docs(authority): the trie cost found and cut, the step and hand-off numbers, what ran on this head; 
-- `2a95c410` fixtures: the accepted Objective call and the document write are re-recorded on the hashed-bits-firs
-
-## Flatness (published, does not gate `green`)
-
-| row | verdict | metric | early | late | ratio | bound | owner |
-|---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.162 | 0.213 | 1.315 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 23.597 | 92.682 | 3.928 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.145 | 0.222 | 1.533 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 15.799 | 80.977 | 5.125 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.488 | 0.307 | 0.629 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 619.797 | 136.375 | 0.220 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-2eb32b51/flatness.log | - | - | - | - | host-execution, store-retained |
