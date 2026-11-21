@@ -154,3 +154,4 @@ import Compiler.FnWireConsumer  -- fn consumer / identity reply frames (--frame)
 import Compiler.FnWirePinned  -- the vendored file at a pinned fn revision: digest, 1028 vectors, teeth
 import Compiler.DurableFastForwardSpec  -- HOT-PATH §2(h): the fast-forward open (checkpoint v4) stated before proof
 import Compiler.DurableFastForwardProofs  -- HOT-PATH §2(h): proofs toward the fast-forward Spec
+import Compiler.Tower256AlgebraicCert  -- zero-byte-leakage GF(2^256) algebraic DFA content certificates: GF(2^32)^x multiplicative counter subgroup, half-cube witness blinding (1/2^256 uniform), non-Boolean disjoint coset NTT, 4-column CharP R 2 degree-4 sumcheck mask, theta-weighted LogUp256, and interleaved (d+1)-round [ZCF23] BaseFold opening
