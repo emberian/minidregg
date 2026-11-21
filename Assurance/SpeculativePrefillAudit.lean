@@ -8,13 +8,13 @@ Zero `sorry`, zero custom `axiom`, zero `native_decide`, zero `#guard`.
 
 ## What this file proves
 
-Modern `80–110 tok/s` float serving engines (e.g. Apple Metal `llama.cpp` on `Qwen3.8-27B`) emit an
-untrusted `T`-token draft `draft : List Tok` fast in hardware float, while exact-integer `zkML`
-trajectory verification (`BabyBear Ext4` `Gruen` Mode-2 + `IntWY` + `D1b` LogUp) is `12×–35×`
-faster per token in **batched parallel prefill (`1 × T`)** than in **sequential autoregressive
-decode (`T × 1`)**. Meanwhile, 2026 depth-looped MoE architectures (`thinkingmachines/Inkling-2-Mini`:
-middle layers `6..18` looped `R = 3` times with shared weights `W`) apply the same committed weight
-matrix across `R` sequential passes.
+Modern float serving engines (e.g. Apple Metal `llama.cpp` on `Qwen3.8-27B`: `80–111 tok/s` prefill,
+`7.3–8.2 tok/s` decode) emit an untrusted `T`-token draft `draft : List Tok` in hardware float, while
+exact-integer `zkML` gate-projection proving (`BabyBear Ext4` `Gruen` Mode-2 + `D1b` LogUp) amortizes
+committed weight openings `18×–58×` faster in **batched parallel prefill (`1 × T`)** than in
+**per-token sequential proving (`T × 1`)**. Meanwhile, depth-looped MoE architectures (motivated by
+`thinkingmachines/Inkling-2-Mini`'s `R = 3` looped middle layers sharing weights `W`) apply the same
+committed weight matrix across `R` sequential passes.
 
 Two AFP-grade theorem families establish exact soundness and completeness of both primitives:
 
@@ -419,16 +419,18 @@ theorem isGreedyDom_iff_tieBrokenGap_nonneg {Tok : Type*} [LinearOrder Tok]
     · have hnv : ¬ v < y := not_lt_of_ge hv
       have h2 := hgap v; simp [hnv] at h2; omega
 
-/-- **Modular `ZMod p` → Exact `ℤ` Soundness Bridge (`zmod_gap_range_implies_isGreedyDom`):**
-If every true integer gap satisfies `-(p - B : ℤ) < tieBrokenGap logits y v < p` (e.g. bounded
-`i16` logits with `B = 2^16`, `p = 2013265921` BabyBear) and the prover exhibits `[0, B)` range-checked
-witnesses `w : Tok → ℕ` (`w v < B`, discharged via `D1b` LogUp-GKR) matching `tieBrokenGap` modulo `p`,
+/-- **One-Sided Modular `ZMod p` → Exact `ℤ` Soundness Bridge
+(`zmod_gap_range_implies_isGreedyDom_oneSided`):**
+If every true integer gap satisfies the single lower headroom bound
+`-(p - B : ℤ) < tieBrokenGap logits y v` (e.g. bounded `i16` logits with `B = 2^16`,
+`p = 2013265921` BabyBear; no upper bound `< p` is needed because `w - gap = p * k` with `w < B`
+and `gap > -(p - B)` already forces `k ≤ 0` and hence `gap = w - p * k ≥ w ≥ 0`!) and the prover
+exhibits `[0, B)` range-checked witnesses `w : Tok → ℕ` (`w v < B`) matching `tieBrokenGap` mod `p`,
 then `IsGreedyDom logits y` holds **over `ℤ` with zero modular wraparound**! -/
-theorem zmod_gap_range_implies_isGreedyDom {Tok : Type*} [LinearOrder Tok]
+theorem zmod_gap_range_implies_isGreedyDom_oneSided {Tok : Type*} [LinearOrder Tok]
     {p B : ℕ} (logits : Tok → ℤ) (y : Tok) (w : Tok → ℕ)
     (hRange : ∀ v, w v < B)
     (hHeadroomLo : ∀ v, -((p : ℤ) - (B : ℤ)) < tieBrokenGap logits y v)
-    (hHeadroomHi : ∀ v, tieBrokenGap logits y v < (p : ℤ))
     (hMod : ∀ v, ((w v : ℤ) : ZMod p) = (tieBrokenGap logits y v : ZMod p)) :
     IsGreedyDom logits y := by
   rw [isGreedyDom_iff_tieBrokenGap_nonneg]
@@ -439,21 +441,29 @@ theorem zmod_gap_range_implies_isGreedyDom {Tok : Type*} [LinearOrder Tok]
   have hw_lt : (w v : ℤ) < (B : ℤ) := Int.ofNat_lt.mpr (hRange v)
   have hw_nonneg : (0 : ℤ) ≤ (w v : ℤ) := Int.natCast_nonneg (w v)
   have hlo := hHeadroomLo v
-  have hhi := hHeadroomHi v
-  have hp_pos : (0 : ℤ) < (p : ℤ) := by omega
-  have hk0 : k = 0 := by
-    by_contra hk_ne
-    rcases lt_or_gt_of_ne hk_ne with hneg | hpos
-    · have hkp : (p : ℤ) * k ≤ -(p : ℤ) := by
-        have hk1 : k ≤ -1 := by omega
-        nlinarith
+  by_cases hp0 : p = 0
+  · subst hp0
+    simp at hk
+    omega
+  · have hp_pos : (0 : ℤ) < (p : ℤ) := by omega
+    have hk_le0 : k ≤ 0 := by
+      by_contra hk_gt
+      have hk1 : 1 ≤ k := by omega
+      have hkp : (p : ℤ) ≤ (p : ℤ) * k := by nlinarith
       omega
-    · have hkp : (p : ℤ) ≤ (p : ℤ) * k := by
-        have hk1 : 1 ≤ k := by omega
-        nlinarith
-      omega
-  rw [hk0, mul_zero] at hk
-  omega
+    have hpk_nonpos : (p : ℤ) * k ≤ 0 :=
+      mul_nonpos_of_nonneg_of_nonpos (le_of_lt hp_pos) hk_le0
+    omega
+
+/-- Two-sided compatibility wrapper around `zmod_gap_range_implies_isGreedyDom_oneSided`. -/
+theorem zmod_gap_range_implies_isGreedyDom {Tok : Type*} [LinearOrder Tok]
+    {p B : ℕ} (logits : Tok → ℤ) (y : Tok) (w : Tok → ℕ)
+    (hRange : ∀ v, w v < B)
+    (hHeadroomLo : ∀ v, -((p : ℤ) - (B : ℤ)) < tieBrokenGap logits y v)
+    (_hHeadroomHi : ∀ v, tieBrokenGap logits y v < (p : ℤ))
+    (hMod : ∀ v, ((w v : ℤ) : ZMod p) = (tieBrokenGap logits y v : ZMod p)) :
+    IsGreedyDom logits y :=
+  zmod_gap_range_implies_isGreedyDom_oneSided logits y w hRange hHeadroomLo hMod
 
 /-- Naive weak greedy dominance WITHOUT index tie-breaking (`logits v ≤ logits y` for all `v`). -/
 def NaiveWeakGreedyDom {Tok L : Type*} [LE L] (logits : Tok → L) (y : Tok) : Prop :=
@@ -497,8 +507,13 @@ theorem causal_prefill_positive_witness :
     greedyRollout demoCausalTransducer prompt 3 = honestDraft ∧
     PrefillDominates demoCausalTransducer prompt honestDraft ∧
     (∃ tStar : Fin steeredDraft.length,
+      tStar.1 = 1 ∧
+      ¬ IsGreedyDom (demoCausalTransducer (prompt ++ steeredDraft.dropLast)
+          (prompt.length - 1 + tStar.1)) (steeredDraft.get tStar) ∧
       steeredDraft.take tStar.1 =
         (greedyRollout demoCausalTransducer prompt 3).take tStar.1 ∧
+      greedyTok (demoCausalTransducer (prompt ++ steeredDraft.dropLast)
+        (prompt.length - 1 + tStar.1)) = (3 : Fin 4) ∧
       steeredDraft.take tStar.1 ++
         [greedyTok (demoCausalTransducer (prompt ++ steeredDraft.dropLast)
           (prompt.length - 1 + tStar.1))] =
@@ -507,9 +522,19 @@ theorem causal_prefill_positive_witness :
   have hP : ([1] : List (Fin 4)) ≠ [] := by decide
   have hSteerNe : ([2, 1, 0] : List (Fin 4)) ≠ greedyRollout demoCausalTransducer [1] 3 := by decide
   rcases speculativePrefill_firstDivergence hC hP (T := 3) rfl hSteerNe with
-    ⟨tStar, _, _, hTake, _, _, hBonus⟩
+    ⟨tStar, hPrev, hFail, hTake, _, _, hBonus⟩
+  have ht1 : tStar.1 = 1 := by
+    fin_cases tStar
+    · exfalso; revert hFail; decide
+    · rfl
+    · exfalso
+      have h1 := hPrev ⟨1, by decide⟩ (by decide)
+      revert h1; decide
+  have hCorr3 : greedyTok (demoCausalTransducer ([1] ++ ([2, 1, 0] : List (Fin 4)).dropLast)
+      (([1] : List (Fin 4)).length - 1 + tStar.1)) = (3 : Fin 4) := by
+    rw [ht1]; decide
   exact ⟨hC, by decide, (speculativePrefill_iff_greedyRollout hC hP rfl).mp (by decide),
-    ⟨tStar, hTake, hBonus⟩⟩
+    ⟨tStar, ht1, hFail, hTake, hCorr3, hBonus⟩⟩
 
 /-- **Falsifier Tooth 2 (`nonCausal_lookahead_breaks_prefill_iff`):**
 Dropping `Causal F` breaks `speculativePrefill_iff_greedyRollout`: a transducer `badLookaheadF`
@@ -784,10 +809,11 @@ theorem loopFold_postChallenge_forgery_tooth {α : Type} [CommRing α] {T K N : 
     ring
 
 /-- **Sequential Depth-Looped Layer Trajectory (`loopTrajectory`):**
-Models `thinkingmachines/Inkling-2-Mini`'s true recurrent depth loop (`X^{(0)} = X₀`,
-`X^{(r + 1)} = stepPost (X^{(r)}) (contract (X^{(r)}) W)`, where `stepPost` applies residual
-addition + RMSNorm/activation between loop passes) and proves `loopedPass_eq_stackedEinsum`
-applies directly to the coupled `R`-step recurrent trajectory! -/
+Models a recurrent depth loop (`X^{(0)} = X₀`, `X^{(r + 1)} = stepPost (X^{(r)}) (contract (X^{(r)}) W)`)
+and specializes `loopedPass_eq_stackedEinsum`'s linear contraction fold to the resulting sequence
+`X_seq r := loopTrajectory X₀ W stepPost r.1` (note: verifying the inter-pass transition
+`X^{(r + 1)} = stepPost X^{(r)} Y^{(r)}` itself requires separate transition constraints beyond
+the standalone weight-contraction fold). -/
 def loopTrajectory {α : Type} [Semiring α] {T K N : ℕ}
     (X₀ : Fin T → Fin K → α) (W : Fin K → Fin N → α)
     (stepPost : (Fin T → Fin K → α) → (Fin T → Fin N → α) → (Fin T → Fin K → α)) :
@@ -834,6 +860,8 @@ end LoopedWeightCollapse
 #guard_msgs (whitespace := lax) in #print axioms speculativePrefill_firstDivergence
 /-- info: 'Minidregg.Assurance.SpeculativePrefillAudit.isGreedyDom_iff_tieBrokenGap_nonneg' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms isGreedyDom_iff_tieBrokenGap_nonneg
+/-- info: 'Minidregg.Assurance.SpeculativePrefillAudit.zmod_gap_range_implies_isGreedyDom_oneSided' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms zmod_gap_range_implies_isGreedyDom_oneSided
 /-- info: 'Minidregg.Assurance.SpeculativePrefillAudit.zmod_gap_range_implies_isGreedyDom' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms zmod_gap_range_implies_isGreedyDom
 /-- info: 'Minidregg.Assurance.SpeculativePrefillAudit.tieBreak_omission_admits_canberra_drift' depends on axioms: [propext, Classical.choice, Quot.sound] -/

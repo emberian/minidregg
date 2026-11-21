@@ -127,7 +127,7 @@ theorem satisfiesClaim_boundToClaim_eq (b : AutomatonBound) (w : List UInt8) :
   | maxHits d hi =>
       simp only [boundToClaim, AutomatonBound.dfa, AutomatonBound.holds,
         Dfaops.satisfiesClaim, Dfaops.claimDecide, dfaSpec_runCount_eq_hitCount,
-        Nat.zero_le, decide_true, Bool.true_and]
+        Nat.zero_le, true_and]
   | exactHits d n =>
       simp only [boundToClaim, AutomatonBound.dfa, AutomatonBound.holds,
         Dfaops.satisfiesClaim, Dfaops.claimDecide, dfaSpec_runCount_eq_hitCount, beq_eq_decide]
@@ -269,6 +269,23 @@ def checkDelegatedCapChain {NT SemOp Val : Type}
        checkCapEdges chain)
   | _, _ => false
 
+theorem checkCapEdges_getElem {NT SemOp Val : Type}
+    [DecidableEq NT] [DecidableEq SemOp]
+    {sem : AttrSemantics SemOp Val}
+    (parentage : Parentage) :
+    ∀ (xs : List (DelegatedGrammarHop NT sem)) (i : Nat) (h1 : i + 1 < xs.length),
+      checkDelegatedCapChain.checkCapEdges parentage xs = true →
+      checkCapEdge parentage (xs[i]'(Nat.lt_of_succ_lt h1)).capability (xs[i + 1]'h1).capability = true
+  | [], _, h1, _ => absurd h1 (Nat.not_lt_zero _)
+  | [_], _, h1, _ => by simp at h1
+  | _ :: _ :: _, 0, _, h => by
+      simp only [checkDelegatedCapChain.checkCapEdges, Bool.and_eq_true] at h
+      exact h.1
+  | _ :: c :: rest, i + 1, h1, h => by
+      simp only [checkDelegatedCapChain.checkCapEdges, Bool.and_eq_true] at h
+      have h1' : i + 1 < (c :: rest).length := by simp at h1 ⊢; omega
+      exact checkCapEdges_getElem parentage (c :: rest) i h1' h.2
+
 /-- Optional succinct `PrivateReceipt` guard proof for an `AutomatonBound` over `saltedPatchRoot`. -/
 structure SuccinctGuardBundle (ell m fq : Nat) where
   bound   : AutomatonBound
@@ -387,15 +404,26 @@ theorem verifySealedHyperdocPatch_sound_or_collision {NT SemOp Val : Type}
        AttrReplay stmt.rootPolicy.cfg rs' wNamed ast' →
        ast' = stmt.claimedAst ∧ rs' = wit.ruleSeq) ∧
      (∀ hop ∈ wit.chain,
+       hop.capability.policyId = stmt.policyId ∧
        hop.capability.policyEpoch = stmt.expectedPolicyEpoch ∧
        hop.capability.issuerEpoch = stmt.expectedIssuerEpoch ∧
-       RevocationKey.capability hop.capability.id ∉ stmt.revoked) ∧
+       RevocationKey.capability hop.capability.id ∉ stmt.revoked ∧
+       (∀ anc ∈ hop.capability.ancestors, RevocationKey.capability anc ∉ stmt.revoked) ∧
+       (∀ ch ∈ hop.capability.channels, RevocationKey.channel ch ∉ stmt.revoked)) ∧
+     (∀ (i : Nat) (h1 : i + 1 < wit.chain.length),
+       checkCapEdge parentage
+         (wit.chain[i]'(Nat.lt_of_succ_lt h1)).capability
+         (wit.chain[i + 1]'h1).capability = true) ∧
      (∃ rootHop leafHop,
        wit.chain.head? = some rootHop ∧
        wit.chain.getLast? = some leafHop ∧
        rootHop.capability.id = stmt.expectedRootCapId ∧
        rootHop.capability.issuer = stmt.expectedIssuer ∧
        rootHop.capability.parent = none ∧
+       leafHop.capability.id = stmt.author.capabilityId ∧
+       leafHop.capability.holder = .subject stmt.author.subject ∧
+       leafHop.capability.notBefore ≤ stmt.height ∧
+       stmt.height ≤ leafHop.capability.notAfter ∧
        leafHop.capability.scope.targets.Covers parentage ⟨stmt.documentId.digest.value⟩ ∧
        (Verb.mutateObject).AllowedBy leafHop.capability.scope.verbs ∧
        stmt.patchLen ≤ leafHop.capability.scope.perRequestBytes) ∧
@@ -426,6 +454,10 @@ theorem verifySealedHyperdocPatch_sound_or_collision {NT SemOp Val : Type}
             have hrootId : rootHop.capability.id = stmt.expectedRootCapId := by tauto
             have hrootIss : rootHop.capability.issuer = stmt.expectedIssuer := by tauto
             have hrootPar : rootHop.capability.parent = none := by tauto
+            have hleafId : leafHop.capability.id = stmt.author.capabilityId := by tauto
+            have hleafHold : leafHop.capability.holder = .subject stmt.author.subject := by tauto
+            have hleafWin : leafHop.capability.notBefore ≤ stmt.height ∧
+                stmt.height ≤ leafHop.capability.notAfter := by tauto
             have hcovTgt : leafHop.capability.scope.targets.Covers parentage ⟨stmt.documentId.digest.value⟩ := by tauto
             have hcovVerb : (Verb.mutateObject).AllowedBy leafHop.capability.scope.verbs := by tauto
             have hcovCost : stmt.patchLen ≤ leafHop.capability.scope.perRequestBytes := by tauto
@@ -434,6 +466,7 @@ theorem verifySealedHyperdocPatch_sound_or_collision {NT SemOp Val : Type}
                 checkCapFreshUnrevoked stmt.revoked stmt.policyId
                   stmt.expectedPolicyEpoch stmt.expectedIssuerEpoch hop.capability = true := by tauto
             have hpolChain : policyChainAttenuates (wit.chain.map DelegatedGrammarHop.policy) = true := by tauto
+            have hedges : checkDelegatedCapChain.checkCapEdges parentage wit.chain = true := by tauto
             have hpolHead : (wit.chain.map DelegatedGrammarHop.policy).head? = some rootHop.policy := by
               simp [List.head?_map, hhead]
             have hpolLast : (wit.chain.map DelegatedGrammarHop.policy).getLast? = some leafHop.policy := by
@@ -443,7 +476,9 @@ theorem verifySealedHyperdocPatch_sound_or_collision {NT SemOp Val : Type}
               grammarPolicyAttenuates_sound hrootAtt hadmRootHop
             have hpostSeal := checkSealedAtomEdit_post_sealed hseal
             refine ⟨rfl, rfl, hadmRoot, ?_, ?_, hlangRoot, huniqRoot, ?_,
-              ⟨rootHop, leafHop, hhead, hlast, hrootId, hrootIss, hrootPar, hcovTgt, hcovVerb, hcovCost⟩,
+              fun i h1 => checkCapEdges_getElem parentage wit.chain i h1 hedges,
+              ⟨rootHop, leafHop, rfl, rfl, hrootId, hrootIss, hrootPar, hleafId, hleafHold,
+                hleafWin.1, hleafWin.2, hcovTgt, hcovVerb, hcovCost⟩,
               hpostSeal.1⟩
             · intro rt hrt
               have habsW := habsRoot rt hrt
@@ -456,7 +491,7 @@ theorem verifySealedHyperdocPatch_sound_or_collision {NT SemOp Val : Type}
               have hf := hallFresh hop hhop
               unfold checkCapFreshUnrevoked at hf
               simp only [Bool.and_eq_true, decide_eq_true_eq] at hf
-              exact ⟨by tauto, by tauto, by tauto⟩
+              exact ⟨by tauto, by tauto, by tauto, by tauto, by tauto, by tauto⟩
       · exact Or.inr (saltedCollision_is_framedXofCollision hcol)
 
 /-- **Root-Only Observer Succinct Guard Theorem (`succinctGuardBundle_sound_or_miss_or_collision`):**
@@ -632,7 +667,7 @@ theorem demo_sealedHyperdocGate_verified :
     change checkDelegatedCapChain demoParentage demoStmt demoChain = true
     unfold checkDelegatedCapChain
     have hch := threeHop_delegation_verified.2.2.1
-    have hrr : grammarPolicyAttenuates rootCapPolicy rootCapPolicy = true :=
+    have hrr : grammarPolicyAttenuates rootCapPolicy demoStmt.rootPolicy = true :=
       grammarPolicyAttenuates_refl (by decide)
     have hat1 : checkCapEdge demoParentage demoRootCap demoServiceCap = true := by decide
     have hat2 : checkCapEdge demoParentage demoServiceCap demoSubagentCap = true := by decide
@@ -658,19 +693,38 @@ revoking `demoServiceCap.id` (`⟨101⟩`) immediately rejects the downstream su
 theorem demo_refuses_revoked_intermediate :
     verifySealedHyperdocPatch demoParentage
       { demoStmt with revoked := {RevocationKey.capability ⟨101⟩} } demoWitness = false := by
-  have hbad : checkCapFreshUnrevoked {RevocationKey.capability ⟨101⟩} ⟨42⟩ 3 7 demoServiceCap = false := by
+  let s := { demoStmt with revoked := {RevocationKey.capability ⟨101⟩} }
+  have hbad : checkCapFreshUnrevoked s.revoked s.policyId s.expectedPolicyEpoch s.expectedIssuerEpoch demoServiceCap = false := by
     decide
-  unfold verifySealedHyperdocPatch checkDelegatedCapChain
-  simp [demoWitness, demoChain, hbad]
+  have hch : checkDelegatedCapChain demoParentage s demoWitness.chain = false := by
+    change checkDelegatedCapChain demoParentage s demoChain = false
+    unfold checkDelegatedCapChain
+    simp only [demoChain, List.head?_cons, List.getLast?_cons_cons, List.getLast?_singleton,
+      List.all_cons, hbad, Bool.and_false, Bool.false_and]
+  have hlast : demoWitness.chain.getLast? = some ⟨demoSubagentCap, subagentToolCapPolicy⟩ := rfl
+  change verifySealedHyperdocPatch demoParentage s demoWitness = false
+  unfold verifySealedHyperdocPatch
+  rw [hlast]
+  simp only [hch, Bool.and_false, Bool.false_and]
 
 /-- **Assurance Refusal Tooth 2 (Stale Policy Epoch Rejected):**
 rotating `expectedPolicyEpoch` from `3` to `4` immediately rejects the patch! -/
 theorem demo_refuses_stale_policy_epoch :
     verifySealedHyperdocPatch demoParentage
       { demoStmt with expectedPolicyEpoch := 4 } demoWitness = false := by
-  have hbad : checkCapFreshUnrevoked ∅ ⟨42⟩ 4 7 demoRootCap = false := by decide
-  unfold verifySealedHyperdocPatch checkDelegatedCapChain
-  simp [demoWitness, demoChain, hbad]
+  let s := { demoStmt with expectedPolicyEpoch := 4 }
+  have hbad : checkCapFreshUnrevoked s.revoked s.policyId s.expectedPolicyEpoch s.expectedIssuerEpoch demoRootCap = false := by
+    decide
+  have hch : checkDelegatedCapChain demoParentage s demoWitness.chain = false := by
+    change checkDelegatedCapChain demoParentage s demoChain = false
+    unfold checkDelegatedCapChain
+    simp only [demoChain, List.head?_cons, List.getLast?_cons_cons, List.getLast?_singleton,
+      List.all_cons, hbad, Bool.and_false, Bool.false_and]
+  have hlast : demoWitness.chain.getLast? = some ⟨demoSubagentCap, subagentToolCapPolicy⟩ := rfl
+  change verifySealedHyperdocPatch demoParentage s demoWitness = false
+  unfold verifySealedHyperdocPatch
+  rw [hlast]
+  simp only [hch, Bool.and_false, Bool.false_and]
 
 /-- **Assurance Refusal Tooth 3 (Cleartext Leak in Durable `Hyperdocument` Atom Rejected):**
 any non-empty cleartext `payload` on a `.sealedObject` atom is refused by `checkSealedAtomEdit`! -/
@@ -767,7 +821,7 @@ private def emitGrammarCapConformance (path : System.FilePath) : IO Unit := do
 
 /-! ## §6. Axiom Audit (`#guard_msgs` Pins) -/
 
-/-- info: 'Minidregg.Assurance.SealedHyperdocGrammarGate.satisfiesClaim_boundToClaim_eq' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Assurance.SealedHyperdocGrammarGate.satisfiesClaim_boundToClaim_eq' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms satisfiesClaim_boundToClaim_eq
 
 /-- info: 'Minidregg.Assurance.SealedHyperdocGrammarGate.verifySealedHyperdocPatch_sound_or_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/

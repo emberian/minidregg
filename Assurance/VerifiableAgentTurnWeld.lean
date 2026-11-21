@@ -17,24 +17,27 @@ shared byte-for-byte with the native Rust exact-integer `Qwen3.5-0.8B` agent run
 
 ## Core Results (`0 sorry`, `0` custom `axiom`, `0 native_decide`, `0 #guard`)
 
-- **`decodeTurnStmt_encodeTurnStmt`, `encodeTurnStmt_injective`,
-  `decodeTurnReceipt_encodeTurnReceipt`, `encodeTurnReceipt_injective`:**
+- **`decodeTurnStmt_encodeTurnStmt`, `encodeTurnStmt_injective`, `trailing_stmt_bytes_refused`,
+  `decodeTurnReceipt_encodeTurnReceipt`, `encodeTurnReceipt_injective`, `trailing_wire_bytes_refused`:**
   Canonical `StreamCodec` round-trip, injectivity, and trailing-byte refusal on `VASTMT01` & `VAGENT01`.
-- **`u1TurnHead_eq_or_collision`:**
-  Full inductive `cSHAKE256` hash-chain collision extraction: two boundary chains producing the same
-  32-byte `turnChainRoot` agree on `weightRoot`, `promptLength`, `promptRoot`, every intermediate
-  layer boundary `boundaryRoots[0 .. L]`, `u1ProofDigest`, `rawLength`, and `rawRoot` — or exhibit
-  an explicit `FramedXofCollision cshakeC`.
-- **`verifyAgentTurnBytes_sound_or_collision`:**
+- **`u1TurnHead_eq_or_collision` (`U1TurnHeadCollision`):**
+  Full inductive `cSHAKE256` hash-chain collision extraction with deterministic input-pinned `Frames`
+  (`u1TurnHeadCollisionFrames` — never an existential over the suite): two boundary chains producing
+  the same 32-byte `turnChainRoot` agree on `weightRoot`, `promptLength`, `promptRoot`, every
+  intermediate layer boundary `boundaryRoots[0 .. L]`, `u1ProofDigest`, `rawLength`, and `rawRoot` —
+  or collide at the exact computed `Frames`.
+- **`verifyAgentTurnBytes_sound_or_collision` (`AgentTurnWeldCollision`):**
   End-to-end byte-verifier soundness welding canonical wire decoding, `U1` boundary-chain commitment,
   `wClean = redactBytes defaultSecretRules wRaw` + universal `Regex.paddedComplement` secret absence,
-  and unique LL(1) `MiniValue` AST extraction, up to explicit `FramedXofCollision cshakeC`.
-- **`verifiableAgentTurn_produced_and_cert_weld`:**
-  Query-indexed straightline composition instantiating `CertificateComposition.cert_produced_weld`
-  (`P8`) + `CertificateComposition.cert_and` (`P5`).
-- **Premise inhabitation, `TK` prompt/boundary mismatch falsifiers, unredacted CoT rejection,
-  duplicate-key JSON splice refusal, and `#eval` cross-verification on live 24-layer `Qwen3.5-0.8B`
-  `VASTMT01` (`236 B`) & `VAGENT01` (`1,415 B`) wire bytes.**
+  and unique LL(1) `MiniValue` AST + rule-sequence extraction, up to input-pinned `AgentTurnWeldCollision`.
+- **`verifyAgentTurnBytes_certSound` & `verifiableAgentTurn_produced_weld`:**
+  Concrete `CertSound` discharge of `verifyAgentTurnBytes` over `lengthRootScheme` (`ε_cert = 0`,
+  non-trivial `CertifiedSanitizedTurn` with `certifiedSanitizedTurn_empty_false`) welded directly to
+  any `U1` model-production verifier `V_u1` via `CertificateComposition.cert_produced_weld` (`P8`).
+- **Premise inhabitation, concrete & universal `TK` prompt/boundary mismatch falsifiers, universal
+  `dirty_clean_bytes_refused` (`¬ AbsentPlain`), universal `duplicate_key_splice_refused` on
+  `ambigSplicePayload`, and `#eval` cross-verification on live 24-layer `Qwen3.5-0.8B` `VASTMT01`
+  (`236 B`) & `VAGENT01` (`1,415 B`) wire bytes.**
 -/
 
 import Theory.StreamCodec
@@ -56,7 +59,7 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.Tower256CshakeMerkleController (Cshake256 MerkleDomains cubeRoot)
 open Minidregg.Compiler.Tower256CshakeMerkleBinding (FramedXofCollision)
 open Minidregg.Compiler.Tower256CoordinateMerkle (cshakeC merkleDomainsC codecC)
-open Minidregg.Compiler.Tower256ContentCert (contentCommit DenseCollision)
+open Minidregg.Compiler.Tower256ContentCert (contentCommit DenseCollision Frames)
 open Minidregg.Compiler.PolicyAstTransducerEmit
   (contentCommit_eq_or_denseCollision redactBytes_scrubs_padded_complement
    redactBytes_preserves_clean_plain)
@@ -446,6 +449,19 @@ theorem encodeTurnReceipt_injective : Function.Injective encodeTurnReceipt := by
   have h := congrArg decodeTurnReceipt heq
   rwa [decodeTurnReceipt_encodeTurnReceipt, decodeTurnReceipt_encodeTurnReceipt, Option.some.injEq] at h
 
+/-- Appending any non-empty trailing byte suffix to a `VASTMT01` statement is strictly refused. -/
+theorem trailing_stmt_bytes_refused (s : VerifiableAgentTurnStmt) (extra : List UInt8)
+    (hne : extra ≠ []) :
+    decodeTurnStmt (encodeTurnStmt s ++ extra) = none := by
+  cases hdec : decodeTurnStmt (encodeTurnStmt s ++ extra) with
+  | none => rfl
+  | some s' =>
+      have henc := (decodeTurnStmt_eq_some_iff _ s').mp hdec
+      have h1 := turnStmtStream.decodePrefix_encode s' []
+      have h2 : turnStmtStream.encode s' = turnStmtStream.encode s ++ extra := henc
+      rw [List.append_nil, h2, turnStmtStream.decodePrefix_encode s extra] at h1
+      simp [hne] at h1
+
 /-- Appending any non-empty trailing byte suffix to a `VAGENT01` receipt is strictly refused. -/
 theorem trailing_wire_bytes_refused (r : VerifiableAgentTurnReceipt) (extra : List UInt8)
     (hne : extra ≠ []) :
@@ -597,75 +613,164 @@ theorem u1StepLoop_append_singleton (idx : Nat) (acc : Digest256)
       have hadd : idx + 1 + bs.length = idx + (bs.length + 1) := by omega
       rw [hadd]
 
-private theorem list_snoc_of_ne_nil {α : Type} (xs : List α) (hne : xs ≠ []) :
-    ∃ pre last, xs = pre ++ [last] := by
-  induction xs with
-  | nil => exact False.elim (hne rfl)
-  | cons x rest ih =>
-      by_cases hr : rest = []
-      · exact ⟨[], x, by simp [hr]⟩
-      · rcases ih hr with ⟨pre, last, rfl⟩
-        exact ⟨x :: pre, last, rfl⟩
+theorem u1ChainFold_append_singleton (w p : Digest256) (pl : Nat)
+    (bs : List Digest256) (bLast : Digest256) :
+    u1ChainFold w p pl (bs ++ [bLast]) = u1StepAcc (u1ChainFold w p pl bs) bs.length bLast := by
+  simp [u1ChainFold, u1StepLoop_append_singleton]
+
+/-- Deterministic reverse-step collision finder for `u1ChainFold`: walks backward from the final
+boundary step and returns the exact `u1StepCustomization` frame pair where two chains first diverge. -/
+def u1ChainCollisionRev (w₁ p₁ : Digest256) (pl₁ : Nat) :
+    List Digest256 → (w₂ p₂ : Digest256) → (pl₂ : Nat) → List Digest256 → Frames
+  | [], w₂, p₂, pl₂, _ =>
+      ⟨u1StepCustomization,
+       u1StepFrameCodec.encode (0, w₁, pl₁, p₁),
+       u1StepFrameCodec.encode (0, w₂, pl₂, p₂)⟩
+  | last₁ :: revPre₁, w₂, p₂, pl₂, last₂ :: revPre₂ =>
+      let pre₁ := revPre₁.reverse
+      let pre₂ := revPre₂.reverse
+      let f₁ := u1StepFrameCodec.encode (1, u1ChainFold w₁ p₁ pl₁ pre₁, pre₁.length, last₁)
+      let f₂ := u1StepFrameCodec.encode (1, u1ChainFold w₂ p₂ pl₂ pre₂, pre₂.length, last₂)
+      if f₁ = f₂ then
+        u1ChainCollisionRev w₁ p₁ pl₁ revPre₁ w₂ p₂ pl₂ revPre₂
+      else
+        ⟨u1StepCustomization, f₁, f₂⟩
+  | last₁ :: revPre₁, w₂, p₂, pl₂, [] =>
+      ⟨u1StepCustomization,
+       u1StepFrameCodec.encode (1, u1ChainFold w₁ p₁ pl₁ revPre₁.reverse, revPre₁.length, last₁),
+       u1StepFrameCodec.encode (0, w₂, pl₂, p₂)⟩
+
+/-- Input-pinned collision frames between two `u1ChainFold` evaluations. -/
+def u1ChainCollisionFrames
+    (w₁ p₁ : Digest256) (pl₁ : Nat) (bs₁ : List Digest256)
+    (w₂ p₂ : Digest256) (pl₂ : Nat) (bs₂ : List Digest256) : Frames :=
+  u1ChainCollisionRev w₁ p₁ pl₁ bs₁.reverse w₂ p₂ pl₂ bs₂.reverse
+
+/-- Input-pinned collision event for `u1ChainFold`. -/
+def U1ChainCollision
+    (w₁ p₁ : Digest256) (pl₁ : Nat) (bs₁ : List Digest256)
+    (w₂ p₂ : Digest256) (pl₂ : Nat) (bs₂ : List Digest256) : Prop :=
+  let f := u1ChainCollisionFrames w₁ p₁ pl₁ bs₁ w₂ p₂ pl₂ bs₂
+  FramedXofCollision cshakeC f.customization f.left f.right
+
+private theorem u1ChainCollisionRev_sound
+    (w₁ p₁ : Digest256) (pl₁ : Nat) (rev₁ : List Digest256)
+    (w₂ p₂ : Digest256) (pl₂ : Nat) (rev₂ : List Digest256) :
+    rev₁.length = rev₂.length →
+    u1ChainFold w₁ p₁ pl₁ rev₁.reverse = u1ChainFold w₂ p₂ pl₂ rev₂.reverse →
+    (w₁ = w₂ ∧ pl₁ = pl₂ ∧ p₁ = p₂ ∧ rev₁ = rev₂) ∨
+      let f := u1ChainCollisionRev w₁ p₁ pl₁ rev₁ w₂ p₂ pl₂ rev₂
+      FramedXofCollision cshakeC f.customization f.left f.right := by
+  induction rev₁ generalizing rev₂ with
+  | nil =>
+      intro hlen hchain
+      cases rev₂ with
+      | cons _ _ => simp at hlen
+      | nil =>
+          simp only [List.reverse_nil, u1ChainFold, u1StepLoop, u1InitAcc] at hchain
+          rcases cshake256D256_eq_or_collision _ _ _ hchain with hfr | hcol
+          · have hinj := streamCodec_encode_injective u1StepFrameCodec hfr
+            simp only [Prod.mk.injEq, true_and] at hinj
+            exact Or.inl ⟨hinj.1, hinj.2.1, hinj.2.2, rfl⟩
+          · exact Or.inr hcol
+  | cons last₁ revPre₁ ih =>
+      intro hlen hchain
+      cases rev₂ with
+      | nil => simp at hlen
+      | cons last₂ revPre₂ =>
+          have hpreLen : revPre₁.length = revPre₂.length := by
+            simp only [List.length_cons] at hlen
+            omega
+          rw [List.reverse_cons, List.reverse_cons,
+            u1ChainFold_append_singleton, u1ChainFold_append_singleton] at hchain
+          unfold u1StepAcc at hchain
+          change (w₁ = w₂ ∧ pl₁ = pl₂ ∧ p₁ = p₂ ∧ last₁ :: revPre₁ = last₂ :: revPre₂) ∨
+            let f := u1ChainCollisionRev w₁ p₁ pl₁ (last₁ :: revPre₁) w₂ p₂ pl₂ (last₂ :: revPre₂)
+            FramedXofCollision cshakeC f.customization f.left f.right
+          simp only [u1ChainCollisionRev]
+          by_cases hfeq :
+              u1StepFrameCodec.encode (1, u1ChainFold w₁ p₁ pl₁ revPre₁.reverse, revPre₁.reverse.length, last₁) =
+              u1StepFrameCodec.encode (1, u1ChainFold w₂ p₂ pl₂ revPre₂.reverse, revPre₂.reverse.length, last₂)
+          · simp only [hfeq, ↓reduceIte]
+            have hinj := streamCodec_encode_injective u1StepFrameCodec hfeq
+            simp only [Prod.mk.injEq, true_and] at hinj
+            rcases hinj with ⟨hacc, _, hlast⟩
+            subst hlast
+            rcases ih revPre₂ hpreLen hacc with ⟨hw, hpl, hp, hrev⟩ | hcolPre
+            · exact Or.inl ⟨hw, hpl, hp, congrArg (List.cons last₁) hrev⟩
+            · exact Or.inr hcolPre
+          · simp only [hfeq, ↓reduceIte]
+            rcases cshake256D256_eq_or_collision _ _ _ hchain with hfr | hcol
+            · exact False.elim (hfeq hfr)
+            · exact Or.inr hcol
 
 /-- Inductive unrolling of `u1ChainFold`: equal chain roots over equal-length boundary lists either
-force identical `(weightRoot, promptLen, promptRoot, boundaryRoots)` or expose a `FramedXofCollision`. -/
+force identical `(weightRoot, promptLen, promptRoot, boundaryRoots)` or collide at the exact frames
+`u1ChainCollisionFrames` computes from the two chains. -/
 theorem u1ChainFold_eq_or_collision
     (w₁ p₁ : Digest256) (pl₁ : Nat) (bs₁ : List Digest256)
     (w₂ p₂ : Digest256) (pl₂ : Nat) (bs₂ : List Digest256)
     (hlen : bs₁.length = bs₂.length)
     (hchain : u1ChainFold w₁ p₁ pl₁ bs₁ = u1ChainFold w₂ p₂ pl₂ bs₂) :
     (w₁ = w₂ ∧ pl₁ = pl₂ ∧ p₁ = p₂ ∧ bs₁ = bs₂) ∨
-    ∃ cust left right, FramedXofCollision cshakeC cust left right := by
-  induction bs₁ using List.reverseRecOn generalizing bs₂ with
-  | nil =>
-      have hbs₂ : bs₂ = [] := List.eq_nil_of_length_eq_zero hlen.symm
-      subst hbs₂
-      simp only [u1ChainFold, u1StepLoop, u1InitAcc] at hchain
-      rcases cshake256D256_eq_or_collision _ _ _ hchain with hfr | hcol
-      · have hinj := streamCodec_encode_injective u1StepFrameCodec hfr
-        simp only [Prod.mk.injEq, true_and] at hinj
-        exact Or.inl ⟨hinj.1, hinj.2.1, hinj.2.2, rfl⟩
-      · exact Or.inr ⟨_, _, _, hcol⟩
-  | append_singleton pre₁ last₁ ih =>
-      have hne₂ : bs₂ ≠ [] := by
-        intro hnil
-        rw [hnil] at hlen
-        simp at hlen
-      rcases list_snoc_of_ne_nil bs₂ hne₂ with ⟨pre₂, last₂, rfl⟩
-      have hpreLen : pre₁.length = pre₂.length := by
-        simp only [List.length_append, List.length_singleton] at hlen
-        omega
-      simp only [u1ChainFold, u1StepLoop_append_singleton, Nat.zero_add, u1StepAcc] at hchain
-      rcases cshake256D256_eq_or_collision _ _ _ hchain with hfr | hcol
-      · have hinj := streamCodec_encode_injective u1StepFrameCodec hfr
-        simp only [Prod.mk.injEq, true_and] at hinj
-        rcases hinj with ⟨hacc, _, hlast⟩
-        subst hlast
-        rcases ih pre₂ hpreLen hacc with ⟨hw, hpl, hp, hpre⟩ | hcolPre
-        · exact Or.inl ⟨hw, hpl, hp, congrArg (· ++ [last₁]) hpre⟩
-        · exact Or.inr hcolPre
-      · exact Or.inr ⟨_, _, _, hcol⟩
+    U1ChainCollision w₁ p₁ pl₁ bs₁ w₂ p₂ pl₂ bs₂ := by
+  have hrevLen : bs₁.reverse.length = bs₂.reverse.length := by simp [hlen]
+  have hrevChain : u1ChainFold w₁ p₁ pl₁ bs₁.reverse.reverse =
+      u1ChainFold w₂ p₂ pl₂ bs₂.reverse.reverse := by
+    simpa [List.reverse_reverse] using hchain
+  rcases u1ChainCollisionRev_sound w₁ p₁ pl₁ bs₁.reverse w₂ p₂ pl₂ bs₂.reverse
+      hrevLen hrevChain with ⟨hw, hpl, hp, hrevEq⟩ | hcol
+  · exact Or.inl ⟨hw, hpl, hp, List.reverse_inj.mp hrevEq⟩
+  · exact Or.inr hcol
+
+/-- Input-pinned collision frames between two `u1TurnHead` evaluations. -/
+def u1TurnHeadCollisionFrames
+    (w₁ p₁ : Digest256) (pl₁ : Nat) (bs₁ : List Digest256) (pf₁ : Digest256) (rl₁ : Nat) (rr₁ : Digest256)
+    (w₂ p₂ : Digest256) (pl₂ : Nat) (bs₂ : List Digest256) (pf₂ : Digest256) (rl₂ : Nat) (rr₂ : Digest256) :
+    Frames :=
+  let out₁ := u1OutFrameCodec.encode (u1ChainFold w₁ p₁ pl₁ bs₁, bs₁.length, pf₁, rl₁, rr₁)
+  let out₂ := u1OutFrameCodec.encode (u1ChainFold w₂ p₂ pl₂ bs₂, bs₂.length, pf₂, rl₂, rr₂)
+  if out₁ = out₂ then
+    u1ChainCollisionFrames w₁ p₁ pl₁ bs₁ w₂ p₂ pl₂ bs₂
+  else
+    ⟨u1OutCustomization, out₁, out₂⟩
+
+/-- Input-pinned collision event for `u1TurnHead` (never an existential over `cshakeC`). -/
+def U1TurnHeadCollision
+    (w₁ p₁ : Digest256) (pl₁ : Nat) (bs₁ : List Digest256) (pf₁ : Digest256) (rl₁ : Nat) (rr₁ : Digest256)
+    (w₂ p₂ : Digest256) (pl₂ : Nat) (bs₂ : List Digest256) (pf₂ : Digest256) (rl₂ : Nat) (rr₂ : Digest256) :
+    Prop :=
+  let f := u1TurnHeadCollisionFrames w₁ p₁ pl₁ bs₁ pf₁ rl₁ rr₁ w₂ p₂ pl₂ bs₂ pf₂ rl₂ rr₂
+  FramedXofCollision cshakeC f.customization f.left f.right
 
 /-- **Full `U1` Turn-Head Collision Extraction (`u1TurnHead_eq_or_collision`):**
 Two `U1` boundary chains hashing to one `turnChainRoot` agree on `weightRoot`, `promptLen`,
 `promptRoot`, every intermediate layer boundary `boundaryRoots[0 .. L]`, `u1ProofDigest`, `rawLen`,
-and `rawRoot` — OR constructively exhibit a `FramedXofCollision cshakeC`! -/
+and `rawRoot` — OR collide at the exact input-pinned frames `u1TurnHeadCollisionFrames` computes! -/
 theorem u1TurnHead_eq_or_collision
     (w₁ p₁ : Digest256) (pl₁ : Nat) (bs₁ : List Digest256) (pf₁ : Digest256) (rl₁ : Nat) (rr₁ : Digest256)
     (w₂ p₂ : Digest256) (pl₂ : Nat) (bs₂ : List Digest256) (pf₂ : Digest256) (rl₂ : Nat) (rr₂ : Digest256)
     (hhead : u1TurnHead w₁ p₁ pl₁ bs₁ pf₁ rl₁ rr₁ = u1TurnHead w₂ p₂ pl₂ bs₂ pf₂ rl₂ rr₂) :
     (w₁ = w₂ ∧ pl₁ = pl₂ ∧ p₁ = p₂ ∧ bs₁ = bs₂ ∧ pf₁ = pf₂ ∧ rl₁ = rl₂ ∧ rr₁ = rr₂) ∨
-    ∃ cust left right, FramedXofCollision cshakeC cust left right := by
+    U1TurnHeadCollision w₁ p₁ pl₁ bs₁ pf₁ rl₁ rr₁ w₂ p₂ pl₂ bs₂ pf₂ rl₂ rr₂ := by
   unfold u1TurnHead at hhead
-  rcases cshake256D256_eq_or_collision _ _ _ hhead with hfr | hcol
-  · have hinj := streamCodec_encode_injective u1OutFrameCodec hfr
+  unfold U1TurnHeadCollision u1TurnHeadCollisionFrames
+  dsimp only
+  by_cases hout :
+      u1OutFrameCodec.encode (u1ChainFold w₁ p₁ pl₁ bs₁, bs₁.length, pf₁, rl₁, rr₁) =
+      u1OutFrameCodec.encode (u1ChainFold w₂ p₂ pl₂ bs₂, bs₂.length, pf₂, rl₂, rr₂)
+  · simp only [hout, ↓reduceIte]
+    have hinj := streamCodec_encode_injective u1OutFrameCodec hout
     simp only [Prod.mk.injEq] at hinj
     rcases hinj with ⟨hchain, hlen, hpf, hrl, hrr⟩
     rcases u1ChainFold_eq_or_collision w₁ p₁ pl₁ bs₁ w₂ p₂ pl₂ bs₂ hlen hchain with
       ⟨hw, hpl, hp, hbs⟩ | hcolChain
     · exact Or.inl ⟨hw, hpl, hp, hbs, hpf, hrl, hrr⟩
     · exact Or.inr hcolChain
-  · exact Or.inr ⟨_, _, _, hcol⟩
+  · simp only [hout, ↓reduceIte]
+    rcases cshake256D256_eq_or_collision _ _ _ hhead with hfr | hcol
+    · exact False.elim (hout hfr)
+    · exact Or.inr hcol
 
 /-! ## §4. Executable Byte-Stream Turn Verifier & End-to-End Soundness Theorem -/
 
@@ -729,16 +834,32 @@ def CommitsAgentTurnChain (stmt : VerifiableAgentTurnStmt)
   namedClean.length = stmt.cleanLength ∧
   contentCommit namedClean = ofDigest256 stmt.cleanRoot
 
+/-- Input-pinned collision disjunct for `verifyAgentTurnBytes_sound_or_collision`: names the exact
+pair of `cSHAKE256` Merkle trees or `U1` hash-chain frames where `rcpt` and the named trace collide
+(never an existential over `cshakeC`, which pigeonhole would inhabit). -/
+def AgentTurnWeldCollision
+    (stmt : VerifiableAgentTurnStmt) (rcpt : VerifiableAgentTurnReceipt)
+    (namedPrompt : List UInt8) (namedBoundaries : List Digest256)
+    (namedProofDigest : Digest256) (namedRaw namedClean : List UInt8) : Prop :=
+  DenseCollision (namedPrompt.map UInt8.toNat) (rcpt.promptBytes.map UInt8.toNat) ∨
+  U1TurnHeadCollision
+    stmt.weightRoot stmt.promptRoot stmt.promptLength
+    namedBoundaries namedProofDigest stmt.rawLength stmt.rawRoot
+    stmt.weightRoot stmt.promptRoot stmt.promptLength
+    rcpt.boundaryRoots rcpt.u1ProofDigest stmt.rawLength stmt.rawRoot ∨
+  DenseCollision (namedRaw.map UInt8.toNat) (rcpt.wRaw.map UInt8.toNat) ∨
+  DenseCollision (namedClean.map UInt8.toNat) (rcpt.wClean.map UInt8.toNat)
+
 /-- **Capstone Theorem (`verifyAgentTurnBytes_sound_or_collision`):**
 Whenever `verifyAgentTurnBytes stmtBytes receiptBytes = true`:
 1. `stmtBytes` and `receiptBytes` decode uniquely to canonical `(stmt, rcpt)` (`encodeTurnStmt stmt = stmtBytes`,
    `encodeTurnReceipt rcpt = receiptBytes`), AND
 2. For **every** named `(namedPrompt, namedBoundaries, namedProofDigest, namedRaw, namedClean)`
    matching `stmt`'s public commitments (`CommitsAgentTurnChain`), EITHER:
-   - **(a) `U1` Model-Production & Layer-Boundary Weld (`Produced` `P8`):**
+   - **(a) `U1` Boundary-Chain & Prompt/Output Commitment Weld:**
      `namedPrompt = rcpt.promptBytes`, `namedBoundaries = rcpt.boundaryRoots`,
      `namedProofDigest = rcpt.u1ProofDigest`, `namedRaw = rcpt.wRaw`, `namedClean = rcpt.wClean`,
-     `0 < stmt.numLayers`, `namedBoundaries.length = stmt.numLayers + 1`, VRF-selected
+     `0 < stmt.numLayers`, `namedBoundaries.length = stmt.numLayers + 1`,
      `rcpt.auditedLayer < stmt.numLayers` equals `u1VrfSelectLayer ...`, and `namedBoundaries`
      matches `(rcpt.auditedBInRoot, rcpt.auditedBOutRoot)` at `(auditedLayer, auditedLayer + 1)`;
    - **(b) Canonical Secret Sanitization & Universal Padded-Complement Absence:**
@@ -746,10 +867,9 @@ Whenever `verifyAgentTurnBytes stmtBytes receiptBytes = true`:
      every `rt ∈ defaultSecretRules` satisfies `AbsentPlain namedClean rt.pat` AND
      `MatchesRegex namedClean (Regex.paddedComplement (Regex.literal rt.pat))`, and clean raw
      inputs suffer zero mangling (`(∀ r ∈ defaultSecretRules, AbsentPlain namedRaw r.pat) → namedClean = namedRaw`);
-   - **(c) Unique LL(1) `MiniValue` AST Extraction:**
-     `∃ rs, resolveRuleIndices miniJsonCfg.rules rcpt.ruleIndices = some rs ∧ AttrReplay miniJsonCfg rs namedClean stmt.claimedAst ∧ namedClean ∈ miniJsonCfg.toCfg.language`,
-     AND for EVERY `rs'` and `ast'`, `AttrReplay miniJsonCfg rs' namedClean ast' → ast' = stmt.claimedAst` —
-   **OR** an explicit `cSHAKE256` `FramedXofCollision cshakeC` exists! -/
+   - **(c) Unique LL(1) `MiniValue` AST & Parse Extraction:**
+     `∃ rs, resolveRuleIndices miniJsonCfg.rules rcpt.ruleIndices = some rs ∧ AttrReplay miniJsonCfg rs namedClean stmt.claimedAst ∧ namedClean ∈ miniJsonCfg.toCfg.language ∧ ∀ rs' ast', AttrReplay miniJsonCfg rs' namedClean ast' → ast' = stmt.claimedAst ∧ rs' = rs` —
+   **OR** the input-pinned `AgentTurnWeldCollision` holds! -/
 theorem verifyAgentTurnBytes_sound_or_collision
     (stmtBytes receiptBytes : List UInt8)
     (hver : verifyAgentTurnBytes stmtBytes receiptBytes = true) :
@@ -772,9 +892,7 @@ theorem verifyAgentTurnBytes_sound_or_collision
           rcpt.auditedLayer =
             u1VrfSelectLayer stmt.weightRoot namedBoundaries stmt.cleanRoot stmt.numLayers ∧
           namedBoundaries[rcpt.auditedLayer]? = some rcpt.auditedBInRoot ∧
-          namedBoundaries[rcpt.auditedLayer + 1]? = some rcpt.auditedBOutRoot ∧
-          u1TurnHead stmt.weightRoot stmt.promptRoot stmt.promptLength
-            namedBoundaries namedProofDigest stmt.rawLength stmt.rawRoot = stmt.turnChainRoot) ∧
+          namedBoundaries[rcpt.auditedLayer + 1]? = some rcpt.auditedBOutRoot) ∧
          (namedClean = redactBytes defaultSecretRules namedRaw ∧
           RedactsTo defaultSecretRules namedRaw namedClean ∧
           (∀ rt ∈ defaultSecretRules,
@@ -782,12 +900,13 @@ theorem verifyAgentTurnBytes_sound_or_collision
             MatchesRegex namedClean (Regex.paddedComplement (Regex.literal rt.pat)) ∧
             Regex.derives namedClean (Regex.paddedComplement (Regex.literal rt.pat)) = true) ∧
           ((∀ r ∈ defaultSecretRules, AbsentPlain namedRaw r.pat) → namedClean = namedRaw)) ∧
-         ((∃ rs, resolveRuleIndices miniJsonCfg.rules rcpt.ruleIndices = some rs ∧
+         (∃ rs, resolveRuleIndices miniJsonCfg.rules rcpt.ruleIndices = some rs ∧
             AttrReplay miniJsonCfg rs namedClean stmt.claimedAst ∧
-            namedClean ∈ miniJsonCfg.toCfg.language) ∧
-          (∀ (rs' : List (AttrRule UInt8 MiniNT MiniOp)) (ast' : MiniValue),
-            AttrReplay miniJsonCfg rs' namedClean ast' → ast' = stmt.claimedAst))) ∨
-        ∃ cust left right, FramedXofCollision cshakeC cust left right := by
+            namedClean ∈ miniJsonCfg.toCfg.language ∧
+            (∀ (rs' : List (AttrRule UInt8 MiniNT MiniOp)) (ast' : MiniValue),
+              AttrReplay miniJsonCfg rs' namedClean ast' →
+                ast' = stmt.claimedAst ∧ rs' = rs))) ∨
+        AgentTurnWeldCollision stmt rcpt namedPrompt namedBoundaries namedProofDigest namedRaw namedClean := by
   unfold verifyAgentTurnBytes at hver
   cases hs : decodeTurnStmt stmtBytes with
   | none => simp [hs] at hver
@@ -826,69 +945,223 @@ theorem verifyAgentTurnBytes_sound_or_collision
                       subst hpEq hbEq hpfEq hrEq hcEq
                       have hrep : AttrReplay miniJsonCfg rs rcpt.wClean stmt.claimedAst :=
                         (execAttrReplay_iff miniJsonCfg rs rcpt.wClean stmt.claimedAst).mp hexec
-                      refine ⟨⟨rfl, rfl, rfl, rfl, rfl, hLpos, hbLen, haLt, haVrf, hbIn, hbOut, hturnHead⟩,
+                      refine ⟨⟨rfl, rfl, rfl, rfl, rfl, hLpos, hbLen, haLt, haVrf, hbIn, hbOut⟩,
                         ⟨hred, hred ▸ redactsTo_redactBytes defaultSecretRules rcpt.wRaw, ?_,
                           fun hcl => hred.trans (redactBytes_preserves_clean_plain defaultSecretRules rcpt.wRaw hcl)⟩,
-                        ⟨⟨rs, rfl, hrep, attrReplay_mem_language hrep⟩,
-                          fun rs' ast' hrep' => (attrReplay_unique_of_ll1 miniJsonCfg hll1 hrep' hrep).1⟩⟩
+                        ⟨rs, rfl, hrep, attrReplay_mem_language hrep,
+                          fun rs' ast' hrep' => attrReplay_unique_of_ll1 miniJsonCfg hll1 hrep' hrep⟩⟩
                       intro rt hrt
                       have hsc := redactBytes_scrubs_padded_complement defaultSecretRules hsafe rt hrt rcpt.wRaw
                       rwa [← hred] at hsc
-                    · exact Or.inr ⟨_, _, _, hcCol⟩
-                  · exact Or.inr ⟨_, _, _, hrCol⟩
-                · exact Or.inr hu1Col
-              · exact Or.inr ⟨_, _, _, hpCol⟩
+                    · exact Or.inr (Or.inr (Or.inr (Or.inr hcCol)))
+                  · exact Or.inr (Or.inr (Or.inr (Or.inl hrCol)))
+                · exact Or.inr (Or.inr (Or.inl hu1Col))
+              · exact Or.inr (Or.inl hpCol)
 
-/-! ## §5. Query-Indexed `CertificateComposition` (`P8` `Produced` + `P5` `cert_and`) Weld -/
+/-! ## §5. Concrete `CertificateComposition` (`P8` `Produced`) Weld Grounded on `verifyAgentTurnBytes` -/
 
-/--Sanitized secret-absence predicate on raw model output `wRaw`. -/
-def SanitizedSecretAbsent (wRaw : List UInt8) : Prop :=
-  ∀ rt ∈ defaultSecretRules,
-    AbsentPlain (redactBytes defaultSecretRules wRaw) rt.pat ∧
-    MatchesRegex (redactBytes defaultSecretRules wRaw) (Regex.paddedComplement (Regex.literal rt.pat))
+/-- Concrete `(length, contentCommit)` content scheme over SP 800-185 `cSHAKE256`. -/
+def lengthRootScheme (bindAdv : Nat → ℝ) (hnn : ∀ q, 0 ≤ bindAdv q) :
+    ContentScheme UInt8 (Nat × Digest) (List UInt8) where
+  commit w := (w.length, contentCommit w)
+  openAt w _ := w
+  openLen w := w
+  verifyOpen c i v w := decide (w.length = c.1 ∧ contentCommit w = c.2 ∧ w[i]? = some v)
+  verifyLen c n w := decide (w.length = c.1 ∧ contentCommit w = c.2 ∧ n = c.1)
+  complete w i hi := by simp [List.getElem?_eq_getElem hi]
+  completeLen w := by simp
+  bindAdv := bindAdv
+  bindAdv_nonneg := hnn
 
-/-- Unique LL(1) `miniJsonCfg` AST predicate on sanitized `redactBytes defaultSecretRules wRaw`. -/
-def ExtractsUniqueAst (claimedAst : MiniValue) (wRaw : List UInt8) : Prop :=
-  (∃ rs, AttrReplay miniJsonCfg rs (redactBytes defaultSecretRules wRaw) claimedAst) ∧
-  (∀ rs' ast', AttrReplay miniJsonCfg rs' (redactBytes defaultSecretRules wRaw) ast' → ast' = claimedAst)
+/-- Non-trivial raw-output policy predicate discharged by `verifyAgentTurnBytes`:
+`wClean := redactBytes defaultSecretRules wRaw` matches `(stmt.cleanLength, stmt.cleanRoot)`, is
+provably free of all 5 secret classes (`AbsentPlain` + `Regex.paddedComplement`), and parses
+uniquely to `stmt.claimedAst` under `miniJsonCfg`. -/
+def CertifiedSanitizedTurn (stmt : VerifiableAgentTurnStmt) (wRaw : List UInt8) : Prop :=
+  let wClean := redactBytes defaultSecretRules wRaw
+  wClean.length = stmt.cleanLength ∧
+  contentCommit wClean = ofDigest256 stmt.cleanRoot ∧
+  (∀ rt ∈ defaultSecretRules,
+    AbsentPlain wClean rt.pat ∧
+    MatchesRegex wClean (Regex.paddedComplement (Regex.literal rt.pat))) ∧
+  (∃ rs, AttrReplay miniJsonCfg rs wClean stmt.claimedAst ∧
+    ∀ (rs' : List (AttrRule UInt8 MiniNT MiniOp)) (ast' : MiniValue),
+      AttrReplay miniJsonCfg rs' wClean ast' → ast' = stmt.claimedAst ∧ rs' = rs)
 
-/-- **`P8` + `P5` Query-Indexed Straightline Composition (`verifiableAgentTurn_produced_and_cert_weld`):**
-Instantiates `Assurance.CertificateComposition.cert_and` (`P5`) to conjoin secret-absence (`V_san`)
-and unique LL(1) AST extraction (`V_ast`) over `S_raw`, and welds them to `U1` model-production
-(`ProducedSound E S_raw IsQwenTurnOutput V_u1 ε_u1`) via `cert_produced_weld` (`P8`) +
-`bridgeSound_same_scheme` at total soundness error
-`ε_u1 q + (ε_san q + ε_ast q + S_raw.bindAdv q) + S_raw.bindAdv q`. -/
-theorem verifiableAgentTurn_produced_and_cert_weld
-    {Model PromptDigest DigestRaw OpRaw U1Proof SanProof AstProof : Type}
-    [DecidableEq DigestRaw]
-    {E : QueryEnv UInt8}
-    (S_raw : ContentScheme UInt8 DigestRaw OpRaw)
-    {IsQwenTurnOutput : Model → PromptDigest → List UInt8 → Prop}
-    {V_u1 : Model → PromptDigest → DigestRaw → U1Proof → Bool}
-    {V_san : DigestRaw → SanProof → Bool}
-    {V_ast : DigestRaw → AstProof → Bool}
-    (claimedAst : MiniValue)
-    {ε_u1 ε_san ε_ast : Nat → ℝ}
-    (hu1 : ProducedSound E S_raw IsQwenTurnOutput V_u1 ε_u1)
-    (hsan : CertSound E S_raw V_san SanitizedSecretAbsent ε_san)
-    (hast : CertSound E S_raw V_ast (ExtractsUniqueAst claimedAst) ε_ast)
-    (hbind : BindSound E S_raw) :
-    ∃ ext_out : Model → PromptDigest → DigestRaw → U1Proof → E.Log → List UInt8,
-      ∀ (q : Nat) (m : E.Coins q → Model) (cin : E.Coins q → PromptDigest)
-        (cout cout' : E.Coins q → DigestRaw)
-        (πu1 : E.Coins q → U1Proof) (πc : E.Coins q → SanProof × AstProof)
-        (_πb : E.Coins q → Unit) (log : E.Coins q → E.Log),
+/-- Adapter binding `verifyAgentTurnBytes` to raw commitment `cRaw : Nat × Digest`. -/
+def verifyTurnBytesAtRaw (stmt : VerifiableAgentTurnStmt)
+    (cRaw : Nat × Digest) (receiptBytes : List UInt8) : Bool :=
+  decide (cRaw = (stmt.rawLength, ofDigest256 stmt.rawRoot)) &&
+  verifyAgentTurnBytes (encodeTurnStmt stmt) receiptBytes
+
+/-- Straightline extractor reading `rcpt.wRaw` directly from a decoded `VAGENT01` receipt. -/
+def extractTurnRaw {Log : Type} (_ : Nat × Digest) (receiptBytes : List UInt8) (_ : Log) :
+    List UInt8 :=
+  match decodeTurnReceipt receiptBytes with
+  | some rcpt => rcpt.wRaw
+  | none => []
+
+/-- Straightline receipt-witness grounding in query environment `E`:
+whenever `verifyTurnBytesAtRaw stmt (c ω) (π ω) = true`, the decoded receipt witness
+`extractTurnRaw (c ω) (π ω) (log ω)` is grounded in `log ω` up to error `ε_ground q`
+(e.g., `ε_ground = 0` on preimage-logged transcripts or `unrestrictedEnv`, and `2^{-256}` in ROM). -/
+def TurnReceiptGrounded (E : QueryEnv UInt8) (stmt : VerifiableAgentTurnStmt)
+    (ε_ground : Nat → ℝ) : Prop :=
+  ∀ (q : Nat) (c : E.Coins q → Nat × Digest) (π : E.Coins q → List UInt8)
+    (log : E.Coins q → E.Log),
+    E.ValidLog q log →
+    BindingGame.prob (fun ω =>
+      verifyTurnBytesAtRaw stmt (c ω) (π ω) = true ∧
+      ¬ E.Grounded (log ω) (extractTurnRaw (c ω) (π ω) (log ω)))
+      ≤ ε_ground q
+
+theorem turnReceiptGrounded_unrestricted (stmt : VerifiableAgentTurnStmt) :
+    TurnReceiptGrounded (unrestrictedEnv UInt8) stmt (fun _ => 0) := by
+  intro q c π log _
+  have hfalse : ∀ ω : (unrestrictedEnv UInt8).Coins q,
+      ¬ (verifyTurnBytesAtRaw stmt (c ω) (π ω) = true ∧
+          ¬ (unrestrictedEnv UInt8).Grounded (log ω) (extractTurnRaw (c ω) (π ω) (log ω))) :=
+    fun _ ⟨_, hng⟩ => hng trivial
+  rw [prob_eq_zero_of_false hfalse]
+
+/-- Deterministic witness soundness of `verifyTurnBytesAtRaw`: any accepted `VAGENT01` byte stream
+commits to `cRaw` under `lengthRootScheme` and satisfies `CertifiedSanitizedTurn stmt`. -/
+theorem verifyTurnBytesAtRaw_sound_det
+    (stmt : VerifiableAgentTurnStmt) (cRaw : Nat × Digest) (receiptBytes : List UInt8)
+    {Log : Type} (l : Log)
+    (bindAdv : Nat → ℝ) (hnn : ∀ q, 0 ≤ bindAdv q)
+    (hv : verifyTurnBytesAtRaw stmt cRaw receiptBytes = true) :
+    (lengthRootScheme bindAdv hnn).commit (extractTurnRaw cRaw receiptBytes l) = cRaw ∧
+    CertifiedSanitizedTurn stmt (extractTurnRaw cRaw receiptBytes l) := by
+  unfold verifyTurnBytesAtRaw at hv
+  rw [Bool.and_eq_true, decide_eq_true_eq] at hv
+  rcases hv with ⟨hcEq, hverB⟩
+  unfold verifyAgentTurnBytes at hverB
+  rw [decodeTurnStmt_encodeTurnStmt] at hverB
+  cases hr : decodeTurnReceipt receiptBytes with
+  | none => simp [hr] at hverB
+  | some rcpt =>
+      simp only [hr] at hverB
+      unfold verifyAgentTurn verifyAgentTurnWithCfg at hverB
+      cases hres : resolveRuleIndices miniJsonCfg.rules rcpt.ruleIndices with
+      | none => simp [hres] at hverB
+      | some rs =>
+          rw [hres] at hverB
+          simp only [Bool.and_eq_true, decide_eq_true_eq] at hverB
+          rcases hverB with ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨_, _⟩, _⟩, _⟩, _⟩, _⟩,
+            _⟩, _⟩, _⟩, hll1⟩, hsafe⟩, hrLen⟩, hrRoot⟩, hcLen⟩, hcRoot⟩,
+            hred⟩, hexec⟩
+          have hrep : AttrReplay miniJsonCfg rs rcpt.wClean stmt.claimedAst :=
+            (execAttrReplay_iff miniJsonCfg rs rcpt.wClean stmt.claimedAst).mp hexec
+          simp only [extractTurnRaw, hr, lengthRootScheme, CertifiedSanitizedTurn]
+          refine ⟨Prod.ext hrLen hrRoot |>.trans hcEq.symm, ?_⟩
+          rw [← hred]
+          refine ⟨hcLen, hcRoot, ?_, ⟨rs, hrep,
+            fun rs' ast' hrep' => attrReplay_unique_of_ll1 miniJsonCfg hll1 hrep' hrep⟩⟩
+          intro rt hrt
+          have hsc := redactBytes_scrubs_padded_complement defaultSecretRules hsafe rt hrt rcpt.wRaw
+          rw [← hred] at hsc
+          exact ⟨hsc.1, hsc.2.1⟩
+
+/-- **`verifyAgentTurnBytes_certSound` (`QueryEnv`-parametric):** for **every** `E : QueryEnv UInt8`,
+`verifyTurnBytesAtRaw stmt` is a genuine straightline `CertSound` verifier over `lengthRootScheme`
+at error `ε_ground` for `CertifiedSanitizedTurn stmt`. -/
+theorem verifyAgentTurnBytes_certSound
+    (E : QueryEnv UInt8)
+    (stmt : VerifiableAgentTurnStmt)
+    (bindAdv ε_ground : Nat → ℝ) (hnn : ∀ q, 0 ≤ bindAdv q)
+    (hground : TurnReceiptGrounded E stmt ε_ground) :
+    CertSound E (lengthRootScheme bindAdv hnn)
+      (verifyTurnBytesAtRaw stmt) (CertifiedSanitizedTurn stmt) ε_ground := by
+  refine ⟨extractTurnRaw, fun q c π log hlog => ?_⟩
+  have hsub : BindingGame.prob (fun ω =>
+      verifyTurnBytesAtRaw stmt (c ω) (π ω) = true ∧
+        ¬ (E.Grounded (log ω) (extractTurnRaw (c ω) (π ω) (log ω)) ∧
+            (lengthRootScheme bindAdv hnn).commit (extractTurnRaw (c ω) (π ω) (log ω)) = c ω ∧
+            CertifiedSanitizedTurn stmt (extractTurnRaw (c ω) (π ω) (log ω)))) ≤
+      BindingGame.prob (fun ω =>
+        verifyTurnBytesAtRaw stmt (c ω) (π ω) = true ∧
+        ¬ E.Grounded (log ω) (extractTurnRaw (c ω) (π ω) (log ω))) := by
+    apply BindingGame.prob_mono
+    intro ω ⟨hv, hbad⟩
+    have hdet := verifyTurnBytesAtRaw_sound_det stmt (c ω) (π ω) (log ω) bindAdv hnn hv
+    exact ⟨hv, fun hg => hbad ⟨hg, hdet.1, hdet.2⟩⟩
+  exact le_trans hsub (hground q c π log hlog)
+
+/-- **`P8` Grounded End-to-End Turn Weld (`verifiableAgentTurn_produced_weld`):**
+Parameterized over **arbitrary `E : QueryEnv UInt8`** (eliminating `unrestrictedEnv` 33-byte pigeonhole!)
+and explicitly binding model identity `stmt.weightRoot` and prompt commitment
+`(stmt.promptLength, ofDigest256 stmt.promptRoot)` between `V_u1` and `verifyTurnBytesAtRaw stmt`
+via `CertificateComposition.cert_produced_weld` (`P8`) at sharp error `ε_u1 q + ε_cert q + bindAdv q`! -/
+theorem verifiableAgentTurn_produced_weld
+    {U1Proof : Type}
+    (E : QueryEnv UInt8)
+    (stmt : VerifiableAgentTurnStmt)
+    (bindAdv ε_cert : Nat → ℝ) (hnn : ∀ q, 0 ≤ bindAdv q)
+    {IsQwenTurnOutput : Digest256 → (Nat × Digest) → List UInt8 → Prop}
+    {V_u1 : Digest256 → (Nat × Digest) → (Nat × Digest) → U1Proof → Bool}
+    {ε_u1 : Nat → ℝ}
+    (hu1 : ProducedSound E (lengthRootScheme bindAdv hnn)
+      IsQwenTurnOutput V_u1 ε_u1)
+    (hcert : CertSound E (lengthRootScheme bindAdv hnn)
+      (verifyTurnBytesAtRaw stmt) (CertifiedSanitizedTurn stmt) ε_cert)
+    (hbind : BindSound E (lengthRootScheme bindAdv hnn)) :
+    ∃ ext_out : Digest256 → (Nat × Digest) → (Nat × Digest) → U1Proof → E.Log → List UInt8,
+      ∀ (q : Nat)
+        (cout cout' : E.Coins q → Nat × Digest)
+        (πu1 : E.Coins q → U1Proof) (πrcpt : E.Coins q → List UInt8)
+        (log : E.Coins q → E.Log),
         E.ValidLog q log →
+        let mStmt := stmt.weightRoot
+        let cPrompt := (stmt.promptLength, ofDigest256 stmt.promptRoot)
         BindingGame.prob (fun ω =>
-          (V_u1 (m ω) (cin ω) (cout ω) (πu1 ω) &&
-           (V_san (cout' ω) (πc ω).1 && V_ast (cout' ω) (πc ω).2) &&
+          (V_u1 mStmt cPrompt (cout ω) (πu1 ω) &&
+           verifyTurnBytesAtRaw stmt (cout' ω) (πrcpt ω) &&
            decide (cout ω = cout' ω)) = true ∧
-          ¬ (E.Grounded (log ω) (ext_out (m ω) (cin ω) (cout ω) (πu1 ω) (log ω)) ∧
-              IsQwenTurnOutput (m ω) (cin ω) (ext_out (m ω) (cin ω) (cout ω) (πu1 ω) (log ω)) ∧
-              (SanitizedSecretAbsent (ext_out (m ω) (cin ω) (cout ω) (πu1 ω) (log ω)) ∧
-               ExtractsUniqueAst claimedAst (ext_out (m ω) (cin ω) (cout ω) (πu1 ω) (log ω)))))
-          ≤ ε_u1 q + (ε_san q + ε_ast q + S_raw.bindAdv q) + S_raw.bindAdv q :=
-  cert_produced_weld hu1 (cert_and S_raw hsan hast hbind) (bridgeSound_same_scheme S_raw hbind)
+          ¬ (E.Grounded (log ω) (ext_out mStmt cPrompt (cout ω) (πu1 ω) (log ω)) ∧
+              IsQwenTurnOutput mStmt cPrompt (ext_out mStmt cPrompt (cout ω) (πu1 ω) (log ω)) ∧
+              CertifiedSanitizedTurn stmt (ext_out mStmt cPrompt (cout ω) (πu1 ω) (log ω))))
+          ≤ ε_u1 q + ε_cert q + bindAdv q := by
+  rcases cert_produced_weld hu1 hcert
+      (bridgeSound_same_scheme (lengthRootScheme bindAdv hnn) hbind) with ⟨ext_out, hprob⟩
+  refine ⟨ext_out, fun q cout cout' πu1 πrcpt log hlog => ?_⟩
+  dsimp only
+  have hb := hprob q (fun _ => stmt.weightRoot)
+    (fun _ => (stmt.promptLength, ofDigest256 stmt.promptRoot))
+    cout cout' πu1 πrcpt (fun _ => ()) log hlog
+  exact le_trans hb (by simp [lengthRootScheme])
+
+/-- Direct `TurnReceiptGrounded` corollary of `verifiableAgentTurn_produced_weld`. -/
+theorem verifiableAgentTurn_produced_weld_of_grounded
+    {U1Proof : Type}
+    (E : QueryEnv UInt8)
+    (stmt : VerifiableAgentTurnStmt)
+    (bindAdv ε_ground : Nat → ℝ) (hnn : ∀ q, 0 ≤ bindAdv q)
+    {IsQwenTurnOutput : Digest256 → (Nat × Digest) → List UInt8 → Prop}
+    {V_u1 : Digest256 → (Nat × Digest) → (Nat × Digest) → U1Proof → Bool}
+    {ε_u1 : Nat → ℝ}
+    (hu1 : ProducedSound E (lengthRootScheme bindAdv hnn)
+      IsQwenTurnOutput V_u1 ε_u1)
+    (hground : TurnReceiptGrounded E stmt ε_ground)
+    (hbind : BindSound E (lengthRootScheme bindAdv hnn)) :
+    ∃ ext_out : Digest256 → (Nat × Digest) → (Nat × Digest) → U1Proof → E.Log → List UInt8,
+      ∀ (q : Nat)
+        (cout cout' : E.Coins q → Nat × Digest)
+        (πu1 : E.Coins q → U1Proof) (πrcpt : E.Coins q → List UInt8)
+        (log : E.Coins q → E.Log),
+        E.ValidLog q log →
+        let mStmt := stmt.weightRoot
+        let cPrompt := (stmt.promptLength, ofDigest256 stmt.promptRoot)
+        BindingGame.prob (fun ω =>
+          (V_u1 mStmt cPrompt (cout ω) (πu1 ω) &&
+           verifyTurnBytesAtRaw stmt (cout' ω) (πrcpt ω) &&
+           decide (cout ω = cout' ω)) = true ∧
+          ¬ (E.Grounded (log ω) (ext_out mStmt cPrompt (cout ω) (πu1 ω) (log ω)) ∧
+              IsQwenTurnOutput mStmt cPrompt (ext_out mStmt cPrompt (cout ω) (πu1 ω) (log ω)) ∧
+              CertifiedSanitizedTurn stmt (ext_out mStmt cPrompt (cout ω) (πu1 ω) (log ω))))
+          ≤ ε_u1 q + ε_ground q + bindAdv q :=
+  verifiableAgentTurn_produced_weld E stmt bindAdv ε_ground hnn hu1
+    (verifyAgentTurnBytes_certSound E stmt bindAdv ε_ground hnn hground) hbind
 
 /-! ## §6. Honest Completeness, Premise Inhabitation, & Soundness Falsifiers -/
 
@@ -984,9 +1257,6 @@ theorem verifyAgentTurnBytes_complete
   have haLt1 : u1VrfSelectLayer weightRoot boundaryRoots
       (contentCommit256 (redactBytes defaultSecretRules wRaw)) numLayers < boundaryRoots.length := by
     omega
-  have _haLt2 : u1VrfSelectLayer weightRoot boundaryRoots
-      (contentCommit256 (redactBytes defaultSecretRules wRaw)) numLayers + 1 < boundaryRoots.length := by
-    omega
   have hres : resolveRuleIndices miniJsonCfg.rules (rs.map miniJsonCfg.rules.idxOf) = some rs :=
     resolveRuleIndices_map_idxOf miniJsonCfg.rules rs
       (attrStackReplay_rules_mem hrep)
@@ -1052,10 +1322,175 @@ theorem verifyAgentTurnBytes_premises_inhabited :
     pBytes, bnds, zD, sampleQwenTurnRaw, redactBytes defaultSecretRules sampleQwenTurnRaw,
     hcomp.1, decodeTurnStmt_encodeTurnStmt pair.1, hcomp.2, hne, rfl⟩
 
-/-- **Falsifier 1 (`TK` Prompt Splice Refused or Collision):**
-Any accepted receipt whose `promptBytes` differs from the honest `namedPrompt` committed at
-`(stmt.promptLength, stmt.promptRoot)` either fails length immediately (`verifyAgentTurnBytes = false`)
-or constructively exhibits a `cSHAKE256` `FramedXofCollision`. -/
+/-- Concrete query-log environment over `[sampleQwenTurnRaw, sampleQwenTurnClean]` (`91` B & `95` B,
+both `> 33` B): avoids `unrestrictedEnv` 33-byte pigeonhole and satisfies `BindSound` at `bindAdv = 0 < 1`! -/
+@[reducible] def loggedSampleTurnEnv : QueryEnv UInt8 where
+  Coins := fun _ => Unit
+  Log := List (List UInt8)
+  coinsFintype := fun _ => inferInstance
+  coinsNonempty := fun _ => ⟨()⟩
+  ValidLog := fun _ log => log () = [sampleQwenTurnRaw, sampleQwenTurnClean]
+  Grounded := fun l w => w ∈ l
+
+theorem loggedSampleTurnEnv_bindSound :
+    BindSound loggedSampleTurnEnv (lengthRootScheme (fun _ => 0) (fun _ => le_rfl)) := by
+  intro q log hlog w₁ w₂
+  have hfalse : ∀ ω : loggedSampleTurnEnv.Coins q,
+      ¬ (loggedSampleTurnEnv.Grounded (log ω) (w₁ ω) ∧
+          loggedSampleTurnEnv.Grounded (log ω) (w₂ ω) ∧
+          (lengthRootScheme (fun _ => 0) (fun _ => le_rfl)).commit (w₁ ω) =
+            (lengthRootScheme (fun _ => 0) (fun _ => le_rfl)).commit (w₂ ω) ∧
+          w₁ ω ≠ w₂ ω) := by
+    rintro ⟨⟩ ⟨h₁, h₂, hcomm, hne⟩
+    change w₁ () ∈ log () at h₁
+    change w₂ () ∈ log () at h₂
+    rw [hlog] at h₁ h₂
+    have hlen : (w₁ ()).length = (w₂ ()).length := congrArg Prod.fst hcomm
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at h₁ h₂
+    rcases h₁ with h₁ | h₁ <;> rcases h₂ with h₂ | h₂
+    · exact hne (h₁.trans h₂.symm)
+    · rw [h₁, h₂] at hlen; exact absurd hlen (by decide)
+    · rw [h₁, h₂] at hlen; exact absurd hlen (by decide)
+    · exact hne (h₁.trans h₂.symm)
+  rw [prob_eq_zero_of_false hfalse]
+  exact le_rfl
+
+private theorem buildHonestAgentTurn_raw_fields
+    (weightRoot : Digest256) (promptBytes : List UInt8)
+    (numLayers : Nat) (boundaryRoots : List Digest256) (u1ProofDigest : Digest256)
+    (wRaw : List UInt8) (rs : List (AttrRule UInt8 MiniNT MiniOp)) (ast : MiniValue) :
+    let p := buildHonestAgentTurn weightRoot promptBytes numLayers
+      boundaryRoots u1ProofDigest wRaw rs ast
+    p.1.rawLength = wRaw.length ∧
+    ofDigest256 p.1.rawRoot = contentCommit wRaw ∧
+    p.2.wRaw = wRaw :=
+  ⟨rfl, ofDigest256_contentCommit256 wRaw, rfl⟩
+
+set_option maxRecDepth 30000 in
+/-- **Non-Vacuous `< 1` Joint Inhabitation of `verifiableAgentTurn_produced_weld`:**
+On `loggedSampleTurnEnv` (`91`-byte `sampleQwenTurnRaw` + `95`-byte `sampleQwenTurnClean`),
+ALL THREE premises `(ProducedSound, CertSound, BindSound)` of `verifiableAgentTurn_produced_weld`
+hold simultaneously over `lengthRootScheme` at **`ε_u1 = 0`, `ε_cert = 0`, `bindAdv = 0` (`0 + 0 + 0 = 0 < 1`)**,
+AND the welded byte-verifier accepts the honest 24-layer `VAGENT01` receipt! -/
+theorem verifiableAgentTurn_produced_weld_nonvacuous :
+    ∃ (stmt : VerifiableAgentTurnStmt) (rcptBytes : List UInt8)
+      (IsOut : Digest256 → (Nat × Digest) → List UInt8 → Prop)
+      (V_u1 : Digest256 → (Nat × Digest) → (Nat × Digest) → Unit → Bool)
+      (ext_out : Digest256 → (Nat × Digest) → (Nat × Digest) → Unit → List (List UInt8) → List UInt8),
+      let S0 := lengthRootScheme (fun _ => 0) (fun _ => le_rfl)
+      let cPrompt := (stmt.promptLength, ofDigest256 stmt.promptRoot)
+      let cRaw := (stmt.rawLength, ofDigest256 stmt.rawRoot)
+      ProducedSound loggedSampleTurnEnv S0 IsOut V_u1 (fun _ => 0) ∧
+      CertSound loggedSampleTurnEnv S0 (verifyTurnBytesAtRaw stmt) (CertifiedSanitizedTurn stmt) (fun _ => 0) ∧
+      BindSound loggedSampleTurnEnv S0 ∧
+      (V_u1 stmt.weightRoot cPrompt cRaw () &&
+       verifyTurnBytesAtRaw stmt cRaw rcptBytes &&
+       decide (cRaw = cRaw)) = true ∧
+      ∀ (q : Nat)
+        (cout cout' : Unit → Nat × Digest)
+        (πu1 : Unit → Unit) (πrcpt : Unit → List UInt8)
+        (log : Unit → List (List UInt8)),
+        loggedSampleTurnEnv.ValidLog q log →
+        BindingGame.prob (fun ω =>
+          (V_u1 stmt.weightRoot cPrompt (cout ω) (πu1 ω) &&
+           verifyTurnBytesAtRaw stmt (cout' ω) (πrcpt ω) &&
+           decide (cout ω = cout' ω)) = true ∧
+          ¬ (loggedSampleTurnEnv.Grounded (log ω) (ext_out stmt.weightRoot cPrompt (cout ω) (πu1 ω) (log ω)) ∧
+              IsOut stmt.weightRoot cPrompt (ext_out stmt.weightRoot cPrompt (cout ω) (πu1 ω) (log ω)) ∧
+              CertifiedSanitizedTurn stmt (ext_out stmt.weightRoot cPrompt (cout ω) (πu1 ω) (log ω))))
+          ≤ 0 := by
+  have hred : redactBytes defaultSecretRules sampleQwenTurnRaw = sampleQwenTurnClean := by decide
+  have hrepClean : AttrReplay miniJsonCfg sampleQwenTurnRules sampleQwenTurnClean sampleQwenTurnAst := by
+    rw [← execAttrReplay_iff]; decide
+  have hrep : AttrReplay miniJsonCfg sampleQwenTurnRules
+      (redactBytes defaultSecretRules sampleQwenTurnRaw) sampleQwenTurnAst := by
+    rwa [hred]
+  let zD : Digest256 := ⟨0, by positivity⟩
+  let bnds : List Digest256 := List.replicate 25 zD
+  let pBytes : List UInt8 := asciiBytes "KEY=sk-proj-9f8a7b6c5d4e TARGET=vault_prod AMT=64"
+  have hfields := buildHonestAgentTurn_raw_fields zD pBytes 24 bnds zD
+    sampleQwenTurnRaw sampleQwenTurnRules sampleQwenTurnAst
+  have hcomp := verifyAgentTurnBytes_complete zD pBytes 24 bnds zD
+    sampleQwenTurnRaw sampleQwenTurnRules sampleQwenTurnAst
+    (by decide) (by decide) hrep
+  dsimp only at hfields hcomp
+  rcases hpair : buildHonestAgentTurn zD pBytes 24 bnds zD
+      sampleQwenTurnRaw sampleQwenTurnRules sampleQwenTurnAst with ⟨stmt, rcpt⟩
+  rw [hpair] at hfields hcomp
+  rcases hfields with ⟨hrLen, hrRoot, hrcptW⟩
+  dsimp only at hrLen hrRoot hrcptW hcomp
+  let S0 := lengthRootScheme (fun _ => 0) (fun _ => le_rfl)
+  let cPrompt : Nat × Digest := (stmt.promptLength, ofDigest256 stmt.promptRoot)
+  let cRaw : Nat × Digest := (stmt.rawLength, ofDigest256 stmt.rawRoot)
+  have hcRawEq : S0.commit sampleQwenTurnRaw = cRaw :=
+    Prod.ext hrLen.symm hrRoot.symm
+  have hvAtRaw : verifyTurnBytesAtRaw stmt cRaw (encodeTurnReceipt rcpt) = true := by
+    unfold verifyTurnBytesAtRaw
+    rw [decide_eq_true (rfl : cRaw = cRaw), Bool.true_and]
+    exact hcomp.1
+  have hextr : extractTurnRaw cRaw (encodeTurnReceipt rcpt) () = sampleQwenTurnRaw := by
+    simp only [extractTurnRaw, decodeTurnReceipt_encodeTurnReceipt, hrcptW]
+  have hcertRaw : CertifiedSanitizedTurn stmt sampleQwenTurnRaw := by
+    have hd := (verifyTurnBytesAtRaw_sound_det stmt cRaw (encodeTurnReceipt rcpt) ()
+      (fun _ => 0) (fun _ => le_rfl) hvAtRaw).2
+    rwa [hextr] at hd
+  let IsOut : Digest256 → (Nat × Digest) → List UInt8 → Prop :=
+    fun m cin out => m = stmt.weightRoot ∧ cin = cPrompt ∧ out = sampleQwenTurnRaw
+  let V_u1 : Digest256 → (Nat × Digest) → (Nat × Digest) → Unit → Bool :=
+    fun m cin cout _ => decide (m = stmt.weightRoot ∧ cin = cPrompt ∧ cout = cRaw)
+  have hu1 : ProducedSound loggedSampleTurnEnv S0 IsOut V_u1 (fun _ => 0) := by
+    refine ⟨fun _ _ _ _ _ => sampleQwenTurnRaw, fun q m cin cout _ log hlog => ?_⟩
+    have hfalse : ∀ ω : loggedSampleTurnEnv.Coins q,
+        ¬ (V_u1 (m ω) (cin ω) (cout ω) () = true ∧
+            ¬ (loggedSampleTurnEnv.Grounded (log ω) sampleQwenTurnRaw ∧
+                IsOut (m ω) (cin ω) sampleQwenTurnRaw ∧
+                S0.commit sampleQwenTurnRaw = cout ω)) := by
+      rintro ⟨⟩ ⟨hv, hbad⟩
+      simp only [V_u1, decide_eq_true_eq] at hv
+      have hmem : sampleQwenTurnRaw ∈ log () := by rw [hlog]; exact List.mem_cons_self ..
+      exact hbad ⟨hmem, ⟨hv.1, hv.2.1, rfl⟩, hcRawEq.trans hv.2.2.symm⟩
+    rw [prob_eq_zero_of_false hfalse]
+  have hcert : CertSound loggedSampleTurnEnv S0 (verifyTurnBytesAtRaw stmt)
+      (CertifiedSanitizedTurn stmt) (fun _ => 0) := by
+    refine ⟨fun _ _ _ => sampleQwenTurnRaw, fun q c π log hlog => ?_⟩
+    have hfalse : ∀ ω : loggedSampleTurnEnv.Coins q,
+        ¬ (verifyTurnBytesAtRaw stmt (c ω) (π ω) = true ∧
+            ¬ (loggedSampleTurnEnv.Grounded (log ω) sampleQwenTurnRaw ∧
+                S0.commit sampleQwenTurnRaw = c ω ∧
+                CertifiedSanitizedTurn stmt sampleQwenTurnRaw)) := by
+      rintro ⟨⟩ ⟨hv, hbad⟩
+      unfold verifyTurnBytesAtRaw at hv
+      rw [Bool.and_eq_true, decide_eq_true_eq] at hv
+      have hmem : sampleQwenTurnRaw ∈ log () := by rw [hlog]; exact List.mem_cons_self ..
+      exact hbad ⟨hmem, hcRawEq.trans hv.1.symm, hcertRaw⟩
+    rw [prob_eq_zero_of_false hfalse]
+  rcases verifiableAgentTurn_produced_weld loggedSampleTurnEnv stmt
+      (fun _ => 0) (fun _ => 0) (fun _ => le_rfl) hu1 hcert loggedSampleTurnEnv_bindSound
+      with ⟨ext_out, hweld⟩
+  refine ⟨stmt, encodeTurnReceipt rcpt, IsOut, V_u1, ext_out, hu1, hcert,
+    loggedSampleTurnEnv_bindSound, ?_, ?_⟩
+  · dsimp only [V_u1]
+    rw [decide_eq_true ⟨rfl, rfl, rfl⟩, Bool.true_and, hvAtRaw, Bool.true_and]
+    exact decide_eq_true rfl
+  · intro q cout cout' πu1 πrcpt log hlog
+    have hb := hweld q cout cout' πu1 πrcpt log hlog
+    exact le_trans hb (by norm_num)
+
+/-- **Falsifier 1a (Prompt Length Mismatch Rejected Unconditionally):**
+Any receipt whose `promptBytes.length ≠ stmt.promptLength` is rejected (`= false`) unconditionally. -/
+theorem tk_prompt_length_mismatch_refused
+    (stmt : VerifiableAgentTurnStmt) (rcpt : VerifiableAgentTurnReceipt)
+    (hlen : rcpt.promptBytes.length ≠ stmt.promptLength) :
+    verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) = false := by
+  unfold verifyAgentTurnBytes
+  rw [decodeTurnStmt_encodeTurnStmt, decodeTurnReceipt_encodeTurnReceipt]
+  dsimp only
+  unfold verifyAgentTurn verifyAgentTurnWithCfg
+  simp [hlen]
+
+/-- **Falsifier 1b (`TK` Equal-Length Prompt Splice Refused or Input-Pinned `DenseCollision`):**
+Any receipt with `rcpt.promptBytes ≠ namedPrompt` against `(stmt.promptLength, stmt.promptRoot)`
+is either rejected (`= false`) or collides at the input-pinned `DenseCollision` frames. -/
 theorem tk_prompt_mismatch_falsifier
     (stmt : VerifiableAgentTurnStmt) (rcpt : VerifiableAgentTurnReceipt)
     (namedPrompt : List UInt8)
@@ -1063,7 +1498,7 @@ theorem tk_prompt_mismatch_falsifier
     (hnpRoot : contentCommit namedPrompt = ofDigest256 stmt.promptRoot)
     (hdiff : rcpt.promptBytes ≠ namedPrompt) :
     verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) = false ∨
-    ∃ cust left right, FramedXofCollision cshakeC cust left right := by
+    DenseCollision (rcpt.promptBytes.map UInt8.toNat) (namedPrompt.map UInt8.toNat) := by
   cases hver : verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) with
   | false => exact Or.inl rfl
   | true =>
@@ -1082,12 +1517,11 @@ theorem tk_prompt_mismatch_falsifier
           rcases contentCommit_eq_or_denseCollision
               (hpLen.trans hnpLen.symm) (hpRoot.trans hnpRoot.symm) with heq | hcol
           · exact False.elim (hdiff heq)
-          · exact ⟨_, _, _, hcol⟩
+          · exact hcol
 
-/-- **Falsifier 2 (`TK` Intermediate Boundary Splice Refused or Collision):**
-Splicing ANY intermediate layer boundary (`rcpt.boundaryRoots ≠ namedBoundaries`, e.g. mutating
-`boundaryRoots[3]`) against a fixed `stmt` either causes `verifyAgentTurnBytes` to reject (`= false`)
-or constructively yields a `cSHAKE256` `FramedXofCollision` from `u1TurnHead`. -/
+/-- **Falsifier 2 (`TK` Intermediate Boundary Splice Refused or Input-Pinned `U1TurnHeadCollision`):**
+Splicing ANY intermediate layer boundary (`rcpt.boundaryRoots ≠ namedBoundaries`) against a fixed
+`stmt` either rejects (`= false`) or collides at the input-pinned `U1TurnHeadCollision` frames. -/
 theorem tk_boundary_mismatch_falsifier
     (stmt : VerifiableAgentTurnStmt) (rcpt : VerifiableAgentTurnReceipt)
     (namedBoundaries : List Digest256) (namedProofDigest : Digest256)
@@ -1095,7 +1529,11 @@ theorem tk_boundary_mismatch_falsifier
       namedBoundaries namedProofDigest stmt.rawLength stmt.rawRoot = stmt.turnChainRoot)
     (hdiff : rcpt.boundaryRoots ≠ namedBoundaries) :
     verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) = false ∨
-    ∃ cust left right, FramedXofCollision cshakeC cust left right := by
+    U1TurnHeadCollision
+      stmt.weightRoot stmt.promptRoot stmt.promptLength
+      rcpt.boundaryRoots rcpt.u1ProofDigest stmt.rawLength stmt.rawRoot
+      stmt.weightRoot stmt.promptRoot stmt.promptLength
+      namedBoundaries namedProofDigest stmt.rawLength stmt.rawRoot := by
   cases hver : verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) with
   | false => exact Or.inl rfl
   | true =>
@@ -1120,37 +1558,137 @@ theorem tk_boundary_mismatch_falsifier
           · exact False.elim (hdiff hbEq)
           · exact hcol
 
+/-- **Falsifier 3a (Universal Secret-Bearing `wClean` Rejection):**
+For **every** `stmt`, **every** `rcpt` (regardless of `rcpt.wRaw`), and **every** `rt ∈ defaultSecretRules`,
+if `¬ AbsentPlain rcpt.wClean rt.pat`, then `verifyAgentTurnBytes` rejects (`= false`) unconditionally! -/
+theorem dirty_clean_bytes_refused
+    (stmt : VerifiableAgentTurnStmt) (rcpt : VerifiableAgentTurnReceipt)
+    (rt : RedactRule UInt8) (hrt : rt ∈ defaultSecretRules)
+    (hdirty : ¬ AbsentPlain rcpt.wClean rt.pat) :
+    verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) = false := by
+  cases hver : verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) with
+  | false => rfl
+  | true =>
+      exfalso
+      unfold verifyAgentTurnBytes at hver
+      rw [decodeTurnStmt_encodeTurnStmt, decodeTurnReceipt_encodeTurnReceipt] at hver
+      dsimp only at hver
+      unfold verifyAgentTurn verifyAgentTurnWithCfg at hver
+      cases hres : resolveRuleIndices miniJsonCfg.rules rcpt.ruleIndices with
+      | none => simp [hres] at hver
+      | some rs =>
+          rw [hres] at hver
+          simp only [Bool.and_eq_true, decide_eq_true_eq] at hver
+          rcases hver with ⟨⟨_, hred⟩, _⟩
+          have habs := (redactBytes_scrubs_padded_complement defaultSecretRules
+            defaultSecretRules_allSafe rt hrt rcpt.wRaw).1
+          rw [← hred] at habs
+          exact hdirty habs
+
 set_option maxRecDepth 30000 in
-/-- **Falsifier 3 (Unredacted `sk-proj-...` CoT Rejected Unconditionally):**
-Supplying unredacted `sampleQwenTurnRaw` as `rcpt.wClean` fails `verifyAgentTurnBytes` unconditionally
-for **every** `stmt` and **every** receipt! -/
+/-- **Falsifier 3b (Unredacted `sampleQwenTurnRaw` Rejected for EVERY `rcpt.wRaw`):**
+Supplying unredacted `sampleQwenTurnRaw` (`"sk-proj-demo01"`) as `rcpt.wClean` fails `verifyAgentTurnBytes`
+unconditionally for **every** `stmt` and **every** `rcpt` (without restricting `rcpt.wRaw`)! -/
 theorem unredacted_cot_secret_falsifier
     (stmt : VerifiableAgentTurnStmt) (rcpt : VerifiableAgentTurnReceipt)
-    (hraw : rcpt.wRaw = sampleQwenTurnRaw) (hclean : rcpt.wClean = sampleQwenTurnRaw) :
+    (hclean : rcpt.wClean = sampleQwenTurnRaw) :
     verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) = false := by
-  have hne : sampleQwenTurnRaw ≠ redactBytes defaultSecretRules sampleQwenTurnRaw := by decide
-  unfold verifyAgentTurnBytes
-  rw [decodeTurnStmt_encodeTurnStmt, decodeTurnReceipt_encodeTurnReceipt]
-  dsimp only
-  unfold verifyAgentTurn verifyAgentTurnWithCfg
-  rw [hraw, hclean]
-  simp [hne]
+  let skRule : RedactRule UInt8 :=
+    ⟨"api_key", asciiBytes "sk-", isApiKeyBodyByte, asciiBytes "[REDACTED_API_KEY]"⟩
+  have hmem : skRule ∈ defaultSecretRules := List.mem_cons_self ..
+  have hnotAbsW : ¬ AbsentW sampleQwenTurnRaw skRule.pat := by decide
+  have hnotPlain : ¬ AbsentPlain rcpt.wClean skRule.pat := by
+    rw [hclean, ← Minidregg.Compiler.PolicyAstTransducerEmit.absentW_iff_plain]
+    exact hnotAbsW
+  exact dirty_clean_bytes_refused stmt rcpt skRule hmem hnotPlain
 
-/-- **Falsifier 4 (Duplicate-Key JSON Splice & Ambiguous Grammar Refused):**
-1. `verifyAgentTurnWithCfg` unconditionally rejects `ambigMiniJsonCfg` (`= false`),
-2. `ll1Parse miniJsonCfg ambigSplicePayload = none` (duplicate-key splice payload refused), AND
-3. Unlike `ambigMiniJsonCfg` (which yields `ambigBenignAst ≠ ambigDestructiveAst` on `ambigSplicePayload`),
-   `miniJsonCfg` forbids any two distinct ASTs on any transcript `w`. -/
+/-- Exhaustive fuel-bounded stack refuter for `miniJsonCfg` (`true` => no `AttrStackReplay` exists). -/
+def mustFailStack : Nat → List UInt8 → List (WorkItem UInt8 MiniNT MiniOp) → Bool
+  | 0, _, _ => false
+  | _ + 1, [], [] => false
+  | _ + 1, _ :: _, [] => true
+  | _ + 1, [], .sym (.terminal _) :: _ => true
+  | fuel + 1, b :: w, .sym (.terminal t) :: cstk =>
+      if b = t then mustFailStack fuel w cstk else true
+  | fuel + 1, w, .reduce _ _ :: cstk =>
+      mustFailStack fuel w cstk
+  | fuel + 1, w, .sym (.nonterminal A) :: cstk =>
+      miniJsonCfg.rules.all fun r =>
+        if r.lhs = A then
+          mustFailStack fuel w (r.rhs.map .sym ++ .reduce r.op r.rhs.length :: cstk)
+        else true
+
+private theorem mustFailStack_sound :
+    ∀ (fuel : Nat) {rs : List (AttrRule UInt8 MiniNT MiniOp)}
+      {w : List UInt8} {cstk : List (WorkItem UInt8 MiniNT MiniOp)}
+      {vstk : List MiniValue} {ast : MiniValue},
+      AttrStackReplay miniJsonCfg rs w cstk vstk ast →
+      mustFailStack fuel w cstk = false := by
+  intro fuel
+  induction fuel with
+  | zero => intros; rfl
+  | succ fuel ih =>
+      intro rs w cstk vstk ast hrep
+      cases hrep with
+      | done _ => rfl
+      | term _ hnext => simp [mustFailStack, ih hnext]
+      | reduce _ _ _ hnext => cases w <;> exact ih hnext
+      | @rule r _ _ _ _ _ hr hnext =>
+          simp only [mustFailStack, Bool.eq_false_iff, ne_eq, List.all_eq_true]
+          intro hall
+          have hm := hall r hr
+          simp [ih hnext] at hm
+
+/-- Non-triviality of `CertifiedSanitizedTurn`: the empty byte string `[]` never satisfies it. -/
+theorem certifiedSanitizedTurn_empty_false (stmt : VerifiableAgentTurnStmt) :
+    ¬ CertifiedSanitizedTurn stmt [] := by
+  rintro ⟨_, _, _, rs, hrep, _⟩
+  have hcleanEmpty : redactBytes defaultSecretRules [] = [] := by decide
+  rw [hcleanEmpty] at hrep
+  have hf := mustFailStack_sound 10 hrep
+  have ht : mustFailStack 10 [] [.sym (.nonterminal miniJsonCfg.initial)] = true := by decide
+  exact absurd (hf.symm.trans ht) Bool.false_ne_true
+
+set_option maxRecDepth 60000 in
+/-- Kernel-proved impossibility of ANY `AttrReplay` on `ambigSplicePayload` in `miniJsonCfg`. -/
+theorem ambigSplicePayload_no_miniJson_replay
+    (rs : List (AttrRule UInt8 MiniNT MiniOp)) (ast : MiniValue) :
+    ¬ AttrReplay miniJsonCfg rs ambigSplicePayload ast := by
+  intro hrep
+  have hf := mustFailStack_sound 80 hrep
+  have ht : mustFailStack 80 ambigSplicePayload [.sym (.nonterminal miniJsonCfg.initial)] = true := by
+    decide
+  exact absurd (hf.symm.trans ht) Bool.false_ne_true
+
+/-- **Falsifier 4 (Duplicate-Key JSON Splice Refused Unconditionally on `verifyAgentTurnBytes`):**
+1. For **every** `stmt` and **every** `rcpt` (including any forged `rcpt.ruleIndices`!) with
+   `rcpt.wClean = ambigSplicePayload`, `verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) = false`!
+2. Furthermore, `verifyAgentTurnWithCfg` unconditionally rejects `ambigMiniJsonCfg` (`= false`). -/
 theorem duplicate_key_splice_refused
-    (stmt : VerifiableAgentTurnStmt) (rcpt : VerifiableAgentTurnReceipt) :
-    verifyAgentTurnWithCfg ambigMiniJsonCfg stmt rcpt = false ∧
-    ll1Parse miniJsonCfg ambigSplicePayload = none ∧
-    (∀ (w : List UInt8) (rs₁ rs₂ : List (AttrRule UInt8 MiniNT MiniOp)) (ast₁ ast₂ : MiniValue),
-      AttrReplay miniJsonCfg rs₁ w ast₁ → AttrReplay miniJsonCfg rs₂ w ast₂ → ast₁ = ast₂) := by
-  have hambig : ll1Deterministic ambigMiniJsonCfg = false := ambigMiniJsonCfg_splice_attack.1
-  refine ⟨?_, ambigMiniJsonCfg_splice_attack.2.2.2.2.2, fun w rs₁ rs₂ ast₁ ast₂ h₁ h₂ =>
-    (attrReplay_unique_of_ll1 miniJsonCfg miniJsonCfg_is_ll1 h₁ h₂).1⟩
-  simp [verifyAgentTurnWithCfg, hambig]
+    (stmt : VerifiableAgentTurnStmt) (rcpt : VerifiableAgentTurnReceipt)
+    (hsplice : rcpt.wClean = ambigSplicePayload) :
+    verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) = false ∧
+    verifyAgentTurnWithCfg ambigMiniJsonCfg stmt rcpt = false := by
+  refine ⟨?_, ?_⟩
+  · cases hver : verifyAgentTurnBytes (encodeTurnStmt stmt) (encodeTurnReceipt rcpt) with
+    | false => rfl
+    | true =>
+        exfalso
+        unfold verifyAgentTurnBytes at hver
+        rw [decodeTurnStmt_encodeTurnStmt, decodeTurnReceipt_encodeTurnReceipt] at hver
+        dsimp only at hver
+        unfold verifyAgentTurn verifyAgentTurnWithCfg at hver
+        cases hres : resolveRuleIndices miniJsonCfg.rules rcpt.ruleIndices with
+        | none => simp [hres] at hver
+        | some rs =>
+            rw [hres] at hver
+            simp only [Bool.and_eq_true, decide_eq_true_eq] at hver
+            have hexec := hver.2
+            rw [hsplice] at hexec
+            have hrep := (execAttrReplay_iff miniJsonCfg rs ambigSplicePayload stmt.claimedAst).mp hexec
+            exact ambigSplicePayload_no_miniJson_replay rs stmt.claimedAst hrep
+  · have hambig : ll1Deterministic ambigMiniJsonCfg = false := ambigMiniJsonCfg_splice_attack.1
+    simp [verifyAgentTurnWithCfg, hambig]
 
 /-! ## §7. Live 24-Layer `Qwen3.5-0.8B` `VASTMT01` / `VAGENT01` Cross-Language `#eval` Check -/
 
@@ -1175,11 +1713,11 @@ def mustDecodeHex (s : String) : List UInt8 :=
 
 /-- Exact `236`-byte `VASTMT01` statement emitted by the live 24-layer integer `Qwen3.5-0.8B` agent CLI. -/
 def liveQwen35StmtHex : String :=
-  "564153544d543031d1515a4686f04277fe1eeb478ad7354cc6293437ad521e74bf5cb4c27d3e0c6d96ff8beab9071d6766c0e64795a41a280f7f6d1935abd8f0fbaba44a3b1fd5ac8d5018ffb8a13e59b477c79c7107623299e507da911b92a3f015a80d6f58e3aaa5aa244c5bff5ec49615e87f2f585d607e9e09289d87bc3c72d21fcf18e432a4ac7add9df2315fff44ebafea4337c7f55169e3dd79d546e713b733c990b0a19c71d7d2f5941e05a80522ff4b6579205b52454441435445445f4150495f4b45595d206f6e2064625f737461676509ff61756469745f63666708ff64625f737461676540ff"
+  "564153544d5430314aa1ef57d119e840c4e848c638027fbc85373fb8bcc2610e4e7c04a4ebc9e30e96ff8beab9071d6766c0e64795a41a280f7f6d1935abd8f0fbaba44a3b1fd5ac8d5018ff54e83b3c1f8d3ad0d4d46c9739ebcadd36a497219ddacd46a5b669cf4c1c46d95bff5ec49615e87f2f585d607e9e09289d87bc3c72d21fcf18e432a4ac7add9df2315fff44ebafea4337c7f55169e3dd79d546e713b733c990b0a19c71d7d2f5941e05a80522ff4b6579205b52454441435445445f4150495f4b45595d206f6e2064625f737461676509ff61756469745f63666708ff64625f737461676540ff"
 
 /-- Exact `1,415`-byte `VAGENT01` receipt emitted by the live 24-layer integer `Qwen3.5-0.8B` agent CLI. -/
 def liveQwen35ReceiptHex : String :=
-  "564147454e54303196ff20414d543d31300a7b22636f74223a224b657920736b2d70726f6a2d64656d6f3031206f6e2064625f7374616765222c22746f6f6c223a2261756469745f636667222c22746172676574223a2264625f7374616765222c22616d6f756e74223a31307d0a4b45593d736b2d70726f6a2d396638613762366335643465205441524745543d7661756c745f70726f6420414d543d36340a19fffde6cfaa7947052de6c22cf1ecd0601d5d45e75be48389686d2a9f08d55303f571d33f6ab9b656c0b9888b9ad5623d9165e83000521e67c036eb96b85adcdb8f0cd3688bce8c2bbfe5351c654e05dbfab8389ce981421801b45e7a4049eb132cd9e80d6d4024b2cf98fc6e4eae3910047858626a6132a304a35137827cff745cc51cdc17e71a3da8b996f236d50ceed8d656bb9c8a6fd3c272732cb6795b625885d622128c2eb892997f4bec51888eb9881668565dbe467d62b46a534cf5722072e56d2ef17e02fe095fb932cc8147a9d0b55cb77f2f6f9802dd9595dbba187fa9adc7f45393eebd202a3242897bd66fe17b2ebcd89bdbe04406ffed0830c77062a9da8275a501eb02e47526239cf53f6217e87fdfbf27e31222663b64401b14d324c03e8485e2c3c1da3ffa6672ffac2776a68c90cb211691e45e98e94c62bbe028adb08460416da08ee8e366eafdc40be1feae3026ae88833db9cbe327daa1c6217a0570334eec77f4b8c280a73fd0110766f6eeb05efb4deb7d157efe6bca408fd87d9bff4759545afe85021861c7536aeb80d0bde1a591b39316ca321a4886ca37ec6a2bcd9c83df0530826ff20cc4f611103fa1878eea9940d61d044114b7efd9ee2681b9b20b2707ccf4fcfd0fded3c12b4e34d3d11f522211b3630c8a411f563e919e5e673972f2709088ffa66b5280b5aca45bbc92568c1e5552dc496190bd106d1abc8aef03fa07dff530d46e2503124199c9d3caa8774fedd8c65036cc76d667e36efbb9321c245e5e88f47daf96d0d67212aa45635d544c45529f83d7c5cbc9201fdf8320d846e80d92b9e4ec6a9ff1744bc067f417fd762ebb93432b4ddb3300b377c6fa599afcf24e22cb67e362b31f6941e71dc6fdae5c93e74f66e92e382d8344b7ab3a4974f7d90da5c5779bbdd1fbf6f2c017126dde3f4d06466c2cb03bfb737c7e0e066c6ed22c4c17bd69df6a1afb74373ac5860a6a62ebbe33f96cf948d5105a2bea14bf2b1ecfab5d516bac6051d89eb897f94c2e0563855ac19b707f8b79a61bd990705e83453d52cd14a18f45609bde53918c7612c2f77ba96cf6c707fee8808f4d8030741c3ccfc028cd078ddc2e642103e0923d0cff408fd87d9bff4759545afe85021861c7536aeb80d0bde1a591b39316ca321a4886ca37ec6a2bcd9c83df0530826ff20cc4f611103fa1878eea9940d61d04411464d484a50735730a892cfa618eb936aa4cc945492f63003bcee016d803310cae5bff7b22636f74223a224b657920736b2d70726f6a2d64656d6f3031206f6e2064625f7374616765222c22746f6f6c223a2261756469745f636667222c22746172676574223a2264625f7374616765222c22616d6f756e74223a36347d5fff7b22636f74223a224b6579205b52454441435445445f4150495f4b45595d206f6e2064625f7374616765222c22746f6f6c223a2261756469745f636667222c22746172676574223a2264625f7374616765222c22616d6f756e74223a36347d52ffff0fff01ff0fff04ff06ff0fff0fff10ff58ff71ff85ff2eff68ff5fff52ff51ff4eff50ff61ff52ff51ff6bff4eff5dff56ff6bff58ff52ff66ff69ff2eff7bff7aff2eff70ff6eff6bff7fff80ff6dff73ff71ff12ff0fff0fff0fff0fff10ff6dff81ff70ff75ff80ff6bff6fff72ff73ff12ff0fff0fff0fff0fff10ff70ff6eff6bff7fff80ff6dff73ff71ff12ff0fff0fff0fff0fff20ff28ff1aff0fff0fff"
+  "564147454e54303196ff20414d543d31300a7b22636f74223a224b657920736b2d70726f6a2d64656d6f3031206f6e2064625f7374616765222c22746f6f6c223a2261756469745f636667222c22746172676574223a2264625f7374616765222c22616d6f756e74223a31307d0a4b45593d736b2d70726f6a2d396638613762366335643465205441524745543d7661756c745f70726f6420414d543d36340a19ff22decdef6148e011dd175981a367d4fddca29e0157a710c5dc2c802f695af937d6e162c4eaae5a56f8bdf21e6ac071c4ccfeaa3c88a6d5498fc1692fc185ccbd886ee8f08098feb23561a77683f2386d3930f1312e2c84f06b653386ac4b5b1c52c456af885c057015a61c0a2f41043fe472b8ccbd832910b1f34488efb33939bd0c08190f2bd921c86928a97aed202e7e6568c9ef158d4ee33d57edcc3561e05f9e7d4a4781f0d7bd48bfe9703d66f974c656345ee784354811518224507a41c7045daf4e22261fb02201baf5e7465341601e7da36734dfd2ee209862ed63cd0826cc2b77e1e36f9faab8a1ad3543b187377205192edad6c82facc8b391fc79416ae2f2eab16db92f617ea26d0c5bc7d79ea845411aa9ea6952e255db7ef8a2e557326c98c2c1eda785e832b86bb33f86d43f757748503eef30d770fcbc27823cf3c4a4cc8cdc15da993d27d43fb04255dac05578c0fc99e61bc172199a974309f96c5b98a2a0b87a02d93d802b95ca4d23c10027c37b308000410477ed2cb580eae28dc18943706d043ebe6854a60ade55490aad012bd72f844e7caebd5d3eed6d3044f2833679da44013f2087824855d36d235a5e518f7dff5bbf46caf4fe3da8c6014bcc5b124e77241df4e7319f527f9de0389aa60d933a4de668a354bfb5c9c0e57b267b7d06cb78f7ec4be292b9a7add7770ce79b4019beca38ae4eb2f36d05a38a8485a03f91a368a2c3c875d21267bb731ce147abcdc626d9960de4e222be16a4d7619c3f23232fea6ca1335528cedb714272cfc9c09230183d79edaa998efac085544bae4f2921aa807c58fff6ef8e918e23d0cd84137ab30c70dc382a8ed947cd8f258b45ac8e2f350840f0b91acf0a44cc2e25b22751b9df442c7df1a74db70883b13e0d5b30d3819eba53d3c1af587c41f2022e51df08e95d8f7872c721a7f1843ba3b787e689cf75a6b4bbfa597a9477ea9d925c211b4622d4fa6da961f404786088df97e808be391ec9225b0992ea5fb94647d8710bf5290c859f5206175de1866bf8ad0d1d45a7611cb74ae003936a078580f0cfeb881a3be25b841b2e4cf2725a42acf764a4c07b0a496d7c6e18b425b0cadad3f2d80c9209ffe557326c98c2c1eda785e832b86bb33f86d43f757748503eef30d770fcbc27823cf3c4a4cc8cdc15da993d27d43fb04255dac05578c0fc99e61bc172199a974373c98e4d9b2aa1b2c78988a53868f97d283abdc7448f10db8bae11b8774a2e115bff7b22636f74223a224b657920736b2d70726f6a2d64656d6f3031206f6e2064625f7374616765222c22746f6f6c223a2261756469745f636667222c22746172676574223a2264625f7374616765222c22616d6f756e74223a36347d5fff7b22636f74223a224b6579205b52454441435445445f4150495f4b45595d206f6e2064625f7374616765222c22746f6f6c223a2261756469745f636667222c22746172676574223a2264625f7374616765222c22616d6f756e74223a36347d52ffff0fff01ff0fff04ff06ff0fff0fff10ff58ff71ff85ff2eff68ff5fff52ff51ff4eff50ff61ff52ff51ff6bff4eff5dff56ff6bff58ff52ff66ff69ff2eff7bff7aff2eff70ff6eff6bff7fff80ff6dff73ff71ff12ff0fff0fff0fff0fff10ff6dff81ff70ff75ff80ff6bff6fff72ff73ff12ff0fff0fff0fff0fff10ff70ff6eff6bff7fff80ff6dff73ff71ff12ff0fff0fff0fff0fff20ff28ff1aff0fff0fff"
 
 def liveQwen35StmtBytes : List UInt8 := mustDecodeHex liveQwen35StmtHex
 def liveQwen35ReceiptBytes : List UInt8 := mustDecodeHex liveQwen35ReceiptHex
@@ -1201,7 +1739,7 @@ def verifyLiveQwen35Vectors : IO Unit := do
       stmt.rawLength == 91 &&
       stmt.cleanLength == 95 &&
       stmt.claimedAst == sampleQwenTurnAst &&
-      rcpt.auditedLayer == 12 &&
+      rcpt.auditedLayer == 9 &&
       rcpt.boundaryRoots.length == 25 &&
       rcpt.wRaw == sampleQwenTurnRaw &&
       rcpt.wClean == sampleQwenTurnClean do
@@ -1262,6 +1800,8 @@ def verifyLiveQwen35Vectors : IO Unit := do
 #guard_msgs (whitespace := lax) in #print axioms decodeTurnStmt_encodeTurnStmt
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.encodeTurnStmt_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms encodeTurnStmt_injective
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.trailing_stmt_bytes_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms trailing_stmt_bytes_refused
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.decodeTurnReceipt_encodeTurnReceipt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms decodeTurnReceipt_encodeTurnReceipt
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.encodeTurnReceipt_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -1272,18 +1812,34 @@ def verifyLiveQwen35Vectors : IO Unit := do
 #guard_msgs (whitespace := lax) in #print axioms u1TurnHead_eq_or_collision
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.verifyAgentTurnBytes_sound_or_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms verifyAgentTurnBytes_sound_or_collision
-/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.verifiableAgentTurn_produced_and_cert_weld' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms verifiableAgentTurn_produced_and_cert_weld
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.verifyAgentTurnBytes_certSound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms verifyAgentTurnBytes_certSound
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.verifiableAgentTurn_produced_weld' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms verifiableAgentTurn_produced_weld
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.verifiableAgentTurn_produced_weld_of_grounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms verifiableAgentTurn_produced_weld_of_grounded
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.loggedSampleTurnEnv_bindSound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms loggedSampleTurnEnv_bindSound
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.verifiableAgentTurn_produced_weld_nonvacuous' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms verifiableAgentTurn_produced_weld_nonvacuous
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.certifiedSanitizedTurn_empty_false' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms certifiedSanitizedTurn_empty_false
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.verifyAgentTurnBytes_complete' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms verifyAgentTurnBytes_complete
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.verifyAgentTurnBytes_premises_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms verifyAgentTurnBytes_premises_inhabited
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.tk_prompt_length_mismatch_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tk_prompt_length_mismatch_refused
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.tk_prompt_mismatch_falsifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms tk_prompt_mismatch_falsifier
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.tk_boundary_mismatch_falsifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms tk_boundary_mismatch_falsifier
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.dirty_clean_bytes_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms dirty_clean_bytes_refused
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.unredacted_cot_secret_falsifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms unredacted_cot_secret_falsifier
+/-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.ambigSplicePayload_no_miniJson_replay' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms ambigSplicePayload_no_miniJson_replay
 /-- info: 'Minidregg.Assurance.VerifiableAgentTurnWeld.duplicate_key_splice_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms duplicate_key_splice_refused
 

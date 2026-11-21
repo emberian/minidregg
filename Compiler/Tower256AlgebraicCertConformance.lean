@@ -20,7 +20,7 @@ open Minidregg.Compiler.Tower256CoordinateMerkle (encodeC)
 open Minidregg.Compiler.Tower256FinalPolynomialCheck (C8)
 open Minidregg.Compiler.Tower256ContentCert (ClaimData DfaTable bytesOf)
 open Minidregg.Compiler.Tower256SuccinctReceiptCodec (receiptCodec)
-open Minidregg.Compiler.Tower256PrivateContentCert (Dfaops noSkDash countAB)
+open Minidregg.Compiler.Tower256PrivateContentCert
 open Minidregg.Compiler.Tower256AlgebraicCert
 open Lean (Json ToJson toJson)
 
@@ -62,6 +62,9 @@ private def dfaJson (t : DfaTable) : Json :=
 private def polyDeg4Json (p : PolyDeg4) : Json :=
   Json.arr #[toJson (c8Hex p.c0), toJson (c8Hex p.c1), toJson (c8Hex p.c2),
              toJson (c8Hex p.c3), toJson (c8Hex p.c4)]
+
+private def polyDeg2Json (p : PolyDeg2) : Json :=
+  Json.arr #[toJson (c8Hex p.c0), toJson (c8Hex p.c1), toJson (c8Hex p.c2)]
 
 private def emitOneAlgVector (name : String) (seed : Nat) (t : DfaTable)
     (text : String) (claim : ClaimData) (cubeDim friEll friQueries : Nat) : IO Json := do
@@ -110,6 +113,8 @@ private def emitOneAlgVector (name : String) (seed : Nat) (t : DfaTable)
      ("phase3_root", toJson (digestHex receipt.phase3Root)),
      ("sumcheck_polys", Json.arr (receipt.sumcheckPolys.map polyDeg4Json)),
      ("col_evals_at_r", Json.arr (receipt.colEvalsAtR.map (toJson ∘ c8Hex))),
+     ("bf_polys", Json.arr (receipt.bfPolys.map polyDeg2Json)),
+     ("bf_final_coeff", toJson (c8Hex receipt.bfFinalCoeff)),
      ("eval_fold_roots", Json.arr (receipt.evalFoldRoots.map (toJson ∘ digestHex))),
      ("fri_initial_root", toJson (digestHex receipt.friInitialRoot)),
      ("fri_receipt_hex", toJson (hexBytes friBytes)),

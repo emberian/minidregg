@@ -5,20 +5,21 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use minidregg_prover::grammar_capability::{
-    automaton_bound_entails, check_dfa_sublanguage, check_policy_attenuation,
-    decode_public_sealed_patch_bundle, dfa_accept_all, dfa_complement, dfa_count_op_brace,
-    dfa_intersection, dfa_no_shell_sub, dfa_no_sql_drop, encode_public_sealed_patch_bundle,
-    grammar_policy_attenuates, make_cap_cfg, policy_chain_attenuates,
-    prove_public_sealed_patch_bundle, root_cap_policy, root_cap_policy_with_max_ops,
-    rule_dup_key_first_wins, rule_dup_key_last_wins, rule_tool_wipe_prod,
-    seal_hyperdoc_fragment_bytes, service_cap_policy, service_cap_policy_with_max_ops,
-    subagent_tool_cap_policy, subagent_tool_cap_policy_with_max_ops, verify_policy_admits,
-    verify_public_sealed_patch_bundle, verify_reachability_cert, verify_sealed_hyperdoc_patch,
-    AttenuationRefusal, AutomatonBound, CapNT, CapOp, CapabilityMeta, CompiledLeafVerifier,
-    DelegatedGrammarHop, GateRejection, GrammarPolicy, RevocationKey, SealedAtomEdit,
-    SealedHyperdocPatchStmt, SealedHyperdocPatchWitness, SublanguageResult, CAP_SEMANTICS_ID,
+    automaton_bound_entails, cap_term_val_fn, check_dfa_sublanguage, check_policy_attenuation,
+    decode_public_sealed_patch_bundle, derive_hyperdoc_cell_salts, dfa_accept_all, dfa_complement,
+    dfa_count_op_brace, dfa_intersection, dfa_no_shell_sub, dfa_no_sql_drop,
+    encode_public_sealed_patch_bundle, fast_salted_content_commit, grammar_policy_attenuates,
+    make_cap_policy, policy_chain_attenuates, prove_public_sealed_patch_bundle, root_cap_policy,
+    root_cap_policy_with_max_ops, rule_dup_key_first_wins, rule_dup_key_last_wins,
+    rule_tool_wipe_prod, seal_hyperdoc_fragment_bytes, service_cap_policy,
+    service_cap_policy_with_max_ops, subagent_tool_cap_policy, subagent_tool_cap_policy_with_max_ops,
+    unseal_and_verify_hyperdoc_fragment, verify_policy_admits, verify_public_sealed_patch_bundle,
+    verify_reachability_cert, verify_sealed_hyperdoc_patch, AttenuationRefusal, AutomatonBound,
+    CapNT, CapOp, CapabilityMeta, CompiledLeafVerifier, DelegatedGrammarHop, GateRejection,
+    GrammarPolicy, RevocationKey, SealedAtomEdit, SealedHyperdocPatchStmt,
+    SealedHyperdocPatchWitness, SemanticsHandle, SublanguageResult, CAP_SEMANTICS_ID,
 };
-use minidregg_prover::policy_transducer::{AttrCfg, ExactNat, MiniValue};
+use minidregg_prover::policy_transducer::{ExactNat, MiniValue};
 use minidregg_prover::tower256_private_cert::{
     automaton_commit, expand_randomness, salted_content_commit, scan_receipt_for_document_slices,
     DfaTable, Digest, Salt248,
@@ -146,9 +147,9 @@ fn lean_json_conformance_and_four_escalation_teeth() {
     let sub_pol = subagent_tool_cap_policy();
 
     // 1. Exact rule-count & DFA commitment root agreement with Lean 4.35.0:
-    assert_eq!(root_pol.grammar.rules.len(), doc.root_rule_count);
-    assert_eq!(svc_pol.grammar.rules.len(), doc.service_rule_count);
-    assert_eq!(sub_pol.grammar.rules.len(), doc.subagent_rule_count);
+    assert_eq!(root_pol.grammar().rules.len(), doc.root_rule_count);
+    assert_eq!(svc_pol.grammar().rules.len(), doc.service_rule_count);
+    assert_eq!(sub_pol.grammar().rules.len(), doc.subagent_rule_count);
 
     assert_eq!(
         automaton_commit(&DfaTable::no_sk_dash()),
@@ -167,22 +168,24 @@ fn lean_json_conformance_and_four_escalation_teeth() {
         unhex_exact::<32>(&doc.count_brace_automaton_root)
     );
 
-    // 2. Sub-millisecond (`< 1 ms`) 3-hop capability chain attenuation benchmark:
+    // 2. Conformance agreement + sub-millisecond (`< 1 ms`) 3-hop capability chain attenuation benchmark:
+    assert_eq!(
+        grammar_policy_attenuates(&sub_pol, &svc_pol),
+        doc.subagent_attenuates_service
+    );
+    assert_eq!(
+        grammar_policy_attenuates(&svc_pol, &root_pol),
+        doc.service_attenuates_root
+    );
+    assert_eq!(
+        policy_chain_attenuates(&[&root_pol, &svc_pol, &sub_pol]),
+        doc.three_hop_chain_valid
+    );
+
     let t_att = Instant::now();
-    let iters = 20usize;
+    let iters = 50usize;
     for _ in 0..iters {
-        assert_eq!(
-            grammar_policy_attenuates(&sub_pol, &svc_pol),
-            doc.subagent_attenuates_service
-        );
-        assert_eq!(
-            grammar_policy_attenuates(&svc_pol, &root_pol),
-            doc.service_attenuates_root
-        );
-        assert_eq!(
-            policy_chain_attenuates(&[&root_pol, &svc_pol, &sub_pol]),
-            doc.three_hop_chain_valid
-        );
+        assert!(policy_chain_attenuates(&[&root_pol, &svc_pol, &sub_pol]));
     }
     let att_ms = t_att.elapsed().as_secs_f64() * 1000.0 / (iters as f64);
     println!(
@@ -233,11 +236,10 @@ fn lean_json_conformance_and_four_escalation_teeth() {
     // Multi-guard intersection counterexample synthesis: if child has BOTH `no_sql_drop` AND
     // `MustReject(no_shell_sub)` (so child ONLY accepts words containing `"$("` without `"DROP "`),
     // dropping `no_sk_dash` synthesizes the exact 5-byte shortest counterexample `"$(sk-"`!
-    let multi_guard_child = GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: make_cap_cfg(svc_pol.grammar.rules.clone()),
-        redact_rules: svc_pol.redact_rules.clone(),
-        bounds: vec![
+    let multi_guard_child = make_cap_policy(
+        svc_pol.grammar().rules.clone(),
+        svc_pol.redact_rules.clone(),
+        vec![
             AutomatonBound::MustAccept(dfa_no_sql_drop()),
             AutomatonBound::MustReject(dfa_no_shell_sub()),
             AutomatonBound::RangeHits {
@@ -246,7 +248,7 @@ fn lean_json_conformance_and_four_escalation_teeth() {
                 hi: 5,
             },
         ],
-    };
+    );
     assert_eq!(
         check_policy_attenuation(&multi_guard_child, &svc_pol),
         Err(AttenuationRefusal::UnentailedParentBound {
@@ -256,22 +258,19 @@ fn lean_json_conformance_and_four_escalation_teeth() {
     );
     assert!(dfa_complement(&dfa_no_shell_sub()).accepts(b"$(sk-"));
 
-    // Semantics function-pointer tampering with spoofed `CAP_SEMANTICS_ID` is refused:
+    // Semantics tampering with a spoofed `SemanticsHandle` claiming `CAP_SEMANTICS_ID` is refused:
     fn spoofed_eval_op(_op: &CapOp, _vs: &[MiniValue]) -> MiniValue {
         MiniValue::Unit
     }
-    let tampered_sem_child = GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: AttrCfg {
-            initial: sub_pol.grammar.initial,
-            rules: sub_pol.grammar.rules.clone(),
-            term_val: sub_pol.grammar.term_val,
-            eval_op: spoofed_eval_op,
-            eval_in_place: None,
-        },
-        redact_rules: sub_pol.redact_rules.clone(),
-        bounds: sub_pol.bounds.clone(),
-    };
+    let spoofed_sem =
+        SemanticsHandle::register(CAP_SEMANTICS_ID, cap_term_val_fn, spoofed_eval_op, None);
+    let tampered_sem_child = GrammarPolicy::new(
+        &spoofed_sem,
+        sub_pol.grammar().initial,
+        sub_pol.grammar().rules.clone(),
+        sub_pol.redact_rules.clone(),
+        sub_pol.bounds.clone(),
+    );
     assert!(matches!(
         check_policy_attenuation(&tampered_sem_child, &svc_pol),
         Err(AttenuationRefusal::SemanticsMismatch { .. })
@@ -293,11 +292,10 @@ fn lean_json_conformance_and_four_escalation_teeth() {
     );
 
     // Tooth (ii): dropping `Absent("sk-")` guard -> synthesizes shortest counterexample `"sk-"`!
-    let dropped_sk = GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: make_cap_cfg(svc_pol.grammar.rules.clone()),
-        redact_rules: svc_pol.redact_rules.clone(),
-        bounds: vec![
+    let dropped_sk = make_cap_policy(
+        svc_pol.grammar().rules.clone(),
+        svc_pol.redact_rules.clone(),
+        vec![
             AutomatonBound::MustAccept(dfa_no_sql_drop()),
             AutomatonBound::RangeHits {
                 dfa: dfa_count_op_brace(),
@@ -305,7 +303,7 @@ fn lean_json_conformance_and_four_escalation_teeth() {
                 hi: 5,
             },
         ],
-    };
+    );
     assert_eq!(
         !grammar_policy_attenuates(&dropped_sk, &svc_pol),
         doc.tooth_drop_sk_refused
@@ -319,14 +317,13 @@ fn lean_json_conformance_and_four_escalation_teeth() {
     );
 
     // Tooth (iii): adding unauthorized `"wipe_prod"` production
-    let mut wipe_rules = sub_pol.grammar.rules.clone();
+    let mut wipe_rules = sub_pol.grammar().rules.clone();
     wipe_rules.push(rule_tool_wipe_prod());
-    let wipe_pol = GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: make_cap_cfg(wipe_rules),
-        redact_rules: sub_pol.redact_rules.clone(),
-        bounds: sub_pol.bounds.clone(),
-    };
+    let wipe_pol = make_cap_policy(
+        wipe_rules,
+        sub_pol.redact_rules.clone(),
+        sub_pol.bounds.clone(),
+    );
     assert_eq!(
         !grammar_policy_attenuates(&wipe_pol, &svc_pol),
         doc.tooth_wipe_prod_refused
@@ -337,30 +334,28 @@ fn lean_json_conformance_and_four_escalation_teeth() {
     ));
 
     // Tooth (iv): injecting duplicate-key ambiguity (`ll1_deterministic == false`)
-    let mut dup_parent_rules = root_pol.grammar.rules.clone();
+    let mut dup_parent_rules = root_pol.grammar().rules.clone();
     dup_parent_rules.extend([
         rule_tool_wipe_prod(),
         rule_dup_key_first_wins(),
         rule_dup_key_last_wins(),
     ]);
-    let dup_parent = GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: make_cap_cfg(dup_parent_rules),
-        redact_rules: root_pol.redact_rules.clone(),
-        bounds: root_pol.bounds.clone(),
-    };
-    let mut dup_child_rules = sub_pol.grammar.rules.clone();
+    let dup_parent = make_cap_policy(
+        dup_parent_rules,
+        root_pol.redact_rules.clone(),
+        root_pol.bounds.clone(),
+    );
+    let mut dup_child_rules = sub_pol.grammar().rules.clone();
     dup_child_rules.extend([
         rule_tool_wipe_prod(),
         rule_dup_key_first_wins(),
         rule_dup_key_last_wins(),
     ]);
-    let dup_child = GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: make_cap_cfg(dup_child_rules),
-        redact_rules: sub_pol.redact_rules.clone(),
-        bounds: sub_pol.bounds.clone(),
-    };
+    let dup_child = make_cap_policy(
+        dup_child_rules,
+        sub_pol.redact_rules.clone(),
+        sub_pol.bounds.clone(),
+    );
     assert_eq!(
         !grammar_policy_attenuates(&dup_child, &dup_parent),
         doc.tooth_dup_key_refused
@@ -398,9 +393,9 @@ fn lean_json_conformance_and_four_escalation_teeth() {
     let root_rule_indices: Vec<usize> = parsed_rules
         .iter()
         .map(|&idx| {
-            let r = &sub_pol.grammar.rules[idx];
+            let r = &sub_pol.grammar().rules[idx];
             root_pol
-                .grammar
+                .grammar()
                 .rules
                 .iter()
                 .position(|pr| pr == r)
@@ -452,7 +447,7 @@ fn synthesize_4kib_subagent_batch_patch() -> Vec<u8> {
 fn four_kib_blinded_hyperdoc_patch_gate_bench_and_zero_leakage_audit() {
     let root_pol = root_cap_policy_with_max_ops(100);
     let svc_pol = service_cap_policy_with_max_ops(64);
-    let sub_pol = subagent_tool_cap_policy_with_max_ops(48);
+    let sub_pol = subagent_tool_cap_policy_with_max_ops(56);
 
     // 1. Sub-millisecond 3-hop chain check on batch-capable policies:
     let t0 = Instant::now();
@@ -468,11 +463,23 @@ fn four_kib_blinded_hyperdoc_patch_gate_bench_and_zero_leakage_audit() {
     let atom_id = 501u64;
     let op_id = 9001u64;
 
-    let (salts_4k, masks_sk) = expand_randomness(&[0x42u8; 32], patch_4k.len());
+    let salts_4k = derive_hyperdoc_cell_salts(
+        &cell_blinding_key,
+        doc_id,
+        atom_id,
+        &schema,
+        op_id,
+        patch_4k.len(),
+    );
+    let (_, masks_sk) = expand_randomness(&[0x42u8; 32], patch_4k.len());
     let (_, masks_sql) = expand_randomness(&[0x43u8; 32], patch_4k.len());
     let (_, masks_shell) = expand_randomness(&[0x44u8; 32], patch_4k.len());
     let (_, masks_brace) = expand_randomness(&[0x45u8; 32], patch_4k.len());
     let salted_root = salted_content_commit(&patch_4k, &salts_4k).unwrap();
+    assert_eq!(
+        fast_salted_content_commit(&patch_4k, &salts_4k).unwrap(),
+        salted_root
+    );
 
     let leaf_verifier =
         CompiledLeafVerifier::compile(&sub_pol, CapNT::COUNT, CapNT::to_id).unwrap();
@@ -552,7 +559,23 @@ fn four_kib_blinded_hyperdoc_patch_gate_bench_and_zero_leakage_audit() {
         patch_salts: salts_4k.clone(),
         rule_indices: rule_indices.clone(),
         succinct_guards: Vec::new(),
+        cell_blinding_key: Some(cell_blinding_key),
     };
+
+    // Verify authenticated decryption + `salted_patch_root` binding on `ciphertext`/`wrapping`:
+    let recovered_pt = unseal_and_verify_hyperdoc_fragment(
+        &cell_blinding_key,
+        doc_id,
+        atom_id,
+        &schema,
+        op_id,
+        &salted_root,
+        &ciphertext,
+        &wrapping,
+        None,
+    )
+    .expect("honest sealed fragment must authenticate, decrypt, and match salted_patch_root");
+    assert_eq!(recovered_pt, patch_4k);
 
     // Warmup + measure `< 20 ms` 4 KiB blinded patch gate verification:
     verify_sealed_hyperdoc_patch(&stmt, &wit).expect("honest 4 KiB sealed patch must verify");
@@ -642,10 +665,12 @@ fn four_kib_blinded_hyperdoc_patch_gate_bench_and_zero_leakage_audit() {
         patch_salts: salts_4k.clone(),
         rule_indices: rule_indices.clone(),
         succinct_guards: Vec::new(),
+        cell_blinding_key: Some(cell_blinding_key),
     };
     let mut fourth_stmt = SealedHyperdocPatchStmt {
         author_subject: 99,
         author_capability_id: 103,
+        revoked: HashSet::new(),
         claimed_ast: claimed_ast.clone(),
         edit: SealedAtomEdit {
             author_subject: 99,
@@ -665,6 +690,46 @@ fn four_kib_blinded_hyperdoc_patch_gate_bench_and_zero_leakage_audit() {
         verify_sealed_hyperdoc_patch(&fourth_stmt, &wit),
         Err(GateRejection::RootAuthorityAnchorMismatch)
     );
+
+    // (f) Bait-and-switch attack (`#112`): proving `salted_patch_root` on benign `patch_4k` while
+    // encrypting evil bytes of equal length into `ciphertext` is rejected by BOTH custodian gate
+    // (`CiphertextSealMismatch`) and decryptor (`unseal_and_verify_hyperdoc_fragment`)!
+    let mut evil_plain = vec![b'X'; patch_4k.len()];
+    evil_plain[..24].copy_from_slice(b"{\"tool\":\"wipe_prod\"}    ");
+    let (evil_ct, evil_wrap) = seal_hyperdoc_fragment_bytes(
+        &cell_blinding_key,
+        doc_id,
+        atom_id,
+        &schema,
+        op_id,
+        &salted_root,
+        &evil_plain,
+    );
+    let bait_stmt = SealedHyperdocPatchStmt {
+        claimed_ast: claimed_ast.clone(),
+        edit: SealedAtomEdit {
+            ciphertext: evil_ct.clone(),
+            wrapping: evil_wrap.clone(),
+            ..stmt.edit.clone()
+        },
+        ..stmt
+    };
+    assert_eq!(
+        verify_sealed_hyperdoc_patch(&bait_stmt, &wit),
+        Err(GateRejection::CiphertextSealMismatch)
+    );
+    assert!(unseal_and_verify_hyperdoc_fragment(
+        &cell_blinding_key,
+        doc_id,
+        atom_id,
+        &schema,
+        op_id,
+        &salted_root,
+        &evil_ct,
+        &evil_wrap,
+        None,
+    )
+    .is_err());
 
     // 4. Public Observer Zero-Leakage Bundle (`Tower256` `PrivateReceipt`s + `cSHAKE256` sealed atom):
     let leaf_guard_bounds = sub_pol.bounds.clone();

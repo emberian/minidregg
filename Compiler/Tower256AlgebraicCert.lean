@@ -230,28 +230,324 @@ def zeta5 : Coordinate 5 := Coord.ofNat 5 65541
 /-- Embedded generator `zetaC = leafOfNat 65541` of multiplicative order `2^32 - 1` in `C8`. -/
 def zetaC : C8 := embed5To8 zeta5
 
-/-- Multiplicative inverse `ζ^(2^32 - 2)` of `zetaC`. -/
-def zetaInv5 : Coordinate 5 := powCoord 5 zeta5 (2 ^ 32 - 2)
+/-- Multiplicative inverse `ζ^(2^32 - 2) = 848205651` of `zeta5` in `Coordinate 5`. -/
+def zetaInv5 : Coordinate 5 := Coord.ofNat 5 848205651
 def zetaInvC : C8 := embed5To8 zetaInv5
 
 noncomputable abbrev zetaF : Tower256 := toField zetaC
 
-/-- Kernel-verified order-`(2^32 - 1)` check and Fermat-prime cofactor disequalities in `Coordinate 5`. -/
+/-- Stepwise certified MSB-to-LSB power-chain verifier on `Coordinate 5`. -/
+def verifyPowChain5 (base : Coordinate 5) :
+    Nat → Coordinate 5 → List (Bool × Nat × Nat) → Option (Nat × Coordinate 5)
+  | curExp, curVal, [] => some (curExp, curVal)
+  | curExp, curVal, (bit, sqNat, nextNat) :: rest =>
+      let sqC := Coord.ofNat 5 sqNat
+      let nextC := Coord.ofNat 5 nextNat
+      if Coordinate.mul 5 curVal curVal == sqC then
+        let stepOk : Bool :=
+          if bit then Coordinate.mul 5 sqC base == nextC
+          else sqNat == nextNat
+        if stepOk then
+          verifyPowChain5 base (if bit then 2 * curExp + 1 else 2 * curExp) nextC rest
+        else none
+      else none
+
+private theorem verifyPowChain5_append (base : Coordinate 5) :
+    ∀ (l₁ l₂ : List (Bool × Nat × Nat)) (e₀ : Nat) (v₀ : Coordinate 5)
+      (e₁ : Nat) (v₁ : Coordinate 5) (e₂ : Nat) (v₂ : Coordinate 5),
+      verifyPowChain5 base e₀ v₀ l₁ = some (e₁, v₁) →
+      verifyPowChain5 base e₁ v₁ l₂ = some (e₂, v₂) →
+      verifyPowChain5 base e₀ v₀ (l₁ ++ l₂) = some (e₂, v₂)
+  | [], l₂, e₀, v₀, e₁, v₁, e₂, v₂, h₁, h₂ => by
+      simp only [List.nil_append, verifyPowChain5, Option.some.injEq, Prod.mk.injEq] at h₁ ⊢
+      rcases h₁ with ⟨rfl, rfl⟩
+      exact h₂
+  | (bit, sqNat, nextNat) :: rest, l₂, e₀, v₀, e₁, v₁, e₂, v₂, h₁, h₂ => by
+      simp only [List.cons_append]
+      unfold verifyPowChain5 at h₁ ⊢
+      dsimp only at h₁ ⊢
+      cases bit
+      · simp only [Bool.false_eq_true, ↓reduceIte] at h₁ ⊢
+        split at h₁
+        · rename_i hsq
+          simp only [hsq, ↓reduceIte]
+          split at h₁
+          · rename_i hst
+            simp only [hst, ↓reduceIte]
+            exact verifyPowChain5_append base rest l₂ _ _ e₁ v₁ e₂ v₂ h₁ h₂
+          · simp at h₁
+        · simp at h₁
+      · simp only [↓reduceIte] at h₁ ⊢
+        split at h₁
+        · rename_i hsq
+          simp only [hsq, ↓reduceIte]
+          split at h₁
+          · rename_i hst
+            simp only [hst, ↓reduceIte]
+            exact verifyPowChain5_append base rest l₂ _ _ e₁ v₁ e₂ v₂ h₁ h₂
+          · simp at h₁
+        · simp at h₁
+
+private theorem verifyPowChain5_sound (base : Coordinate 5) :
+    ∀ (steps : List (Bool × Nat × Nat)) (curExp : Nat) (curVal : Coordinate 5)
+      (finalExp : Nat) (finalVal : Coordinate 5),
+      toField (embed5To8 curVal) = (toField (embed5To8 base)) ^ curExp →
+      verifyPowChain5 base curExp curVal steps = some (finalExp, finalVal) →
+      toField (embed5To8 finalVal) = (toField (embed5To8 base)) ^ finalExp
+  | [], curExp, curVal, finalExp, finalVal, hcur, hok => by
+      simp only [verifyPowChain5, Option.some.injEq, Prod.mk.injEq] at hok
+      rcases hok with ⟨rfl, rfl⟩
+      exact hcur
+  | (bit, sqNat, nextNat) :: rest, curExp, curVal, finalExp, finalVal, hcur, hok => by
+      unfold verifyPowChain5 at hok
+      dsimp only at hok
+      cases bit
+      · simp only [Bool.false_eq_true, ↓reduceIte] at hok
+        split at hok
+        · rename_i hsqB
+          have hsq : Coordinate.mul 5 curVal curVal = Coord.ofNat 5 sqNat := beq_iff_eq.mp hsqB
+          split at hok
+          · rename_i hstepB
+            have hstep : sqNat = nextNat := beq_iff_eq.mp hstepB
+            refine verifyPowChain5_sound base rest _ _ finalExp finalVal ?_ hok
+            rw [← hstep, ← hsq, ← embed5To8_mul, toField_mulC, hcur, ← pow_add, ← two_mul]
+          · simp at hok
+        · simp at hok
+      · simp only [↓reduceIte] at hok
+        split at hok
+        · rename_i hsqB
+          have hsq : Coordinate.mul 5 curVal curVal = Coord.ofNat 5 sqNat := beq_iff_eq.mp hsqB
+          split at hok
+          · rename_i hstepB
+            have hstep : Coordinate.mul 5 (Coord.ofNat 5 sqNat) base = Coord.ofNat 5 nextNat :=
+              beq_iff_eq.mp hstepB
+            refine verifyPowChain5_sound base rest _ _ finalExp finalVal ?_ hok
+            rw [← hstep, ← embed5To8_mul, toField_mulC, ← hsq, ← embed5To8_mul, toField_mulC,
+              hcur, ← pow_add, ← two_mul, ← pow_succ]
+          · simp at hok
+        · simp at hok
+
+private def ordChunk1 : List (Bool × Nat × Nat) :=
+  [(true, 16777225, 352846083), (true, 235148365, 4048442330), (true, 1099422088, 262906593),
+   (true, 3787462966, 577221175), (true, 914104830, 165909309)]
+private def ordChunk2 : List (Bool × Nat × Nat) :=
+  [(true, 794845600, 3623836320), (true, 1651201468, 1923607280), (true, 2533511666, 3094286920),
+   (true, 622700888, 3458459291), (true, 714030102, 1029231064)]
+private def ordChunk3 : List (Bool × Nat × Nat) :=
+  [(true, 557380452, 4239617605), (true, 2188841315, 3301168904), (true, 2278532280, 2441824857),
+   (true, 2519829254, 1147535158), (true, 1953119546, 1832028822)]
+private def ordChunk4 : List (Bool × Nat × Nat) :=
+  [(true, 273064875, 4100775823), (true, 1627856121, 1754937924), (true, 1673940569, 3515724357),
+   (true, 717985425, 3540131326), (true, 2986053505, 3665417630)]
+private def ordChunk5 : List (Bool × Nat × Nat) :=
+  [(true, 2409349178, 663502695), (true, 4009555070, 131834845), (true, 2595256727, 4238195074),
+   (true, 1282898668, 2189582444), (true, 4187300622, 3671021204)]
+private def ordChunk6a : List (Bool × Nat × Nat) :=
+  [(true, 1352353204, 2346551302), (true, 234168504, 201174371), (true, 2739947909, 2359717944)]
+private def ordChunk6b : List (Bool × Nat × Nat) :=
+  [(true, 54884201, 229777718), (true, 1727048851, 1572187599), (true, 848205651, 1)]
+
+private def traceOrder : List (Bool × Nat × Nat) :=
+  ordChunk1 ++ ordChunk2 ++ ordChunk3 ++ ordChunk4 ++ ordChunk5 ++ ordChunk6a ++ ordChunk6b
+private def traceCof65537 : List (Bool × Nat × Nat) :=
+  ordChunk1 ++ ordChunk2 ++ ordChunk3
+
+private def cof3Chunk1 : List (Bool × Nat × Nat) :=
+  [(false, 16777225, 16777225), (true, 1074794503, 1142362130), (false, 1550511849, 1550511849),
+   (true, 3248381315, 443764721), (false, 1355087540, 1355087540), (true, 2826844594, 1799052260)]
+private def cof3Chunk2 : List (Bool × Nat × Nat) :=
+  [(false, 1994836017, 1994836017), (true, 2677194092, 1120469481), (false, 2395658856, 2395658856),
+   (true, 2809523830, 1140438610), (false, 1289361381, 1289361381), (true, 4246351459, 365059173)]
+private def cof3Chunk3 : List (Bool × Nat × Nat) :=
+  [(false, 4093942320, 4093942320), (true, 201811692, 2866969372), (false, 1420413903, 1420413903),
+   (true, 1844371834, 3070654658), (false, 970825477, 970825477), (true, 3735570726, 3711831311)]
+private def cof3Chunk4 : List (Bool × Nat × Nat) :=
+  [(false, 220977980, 220977980), (true, 1995471871, 2613665716), (false, 2893139923, 2893139923),
+   (true, 537499391, 3185317709), (false, 312322439, 312322439), (true, 817118613, 3124285068)]
+private def cof3Chunk5 : List (Bool × Nat × Nat) :=
+  [(false, 103654142, 103654142), (true, 2896197920, 3092025088), (false, 3827136558, 3827136558),
+   (true, 2726543768, 3260356533), (false, 4218379146, 4218379146), (true, 331868577, 2)]
+private def traceCof3 : List (Bool × Nat × Nat) :=
+  cof3Chunk1 ++ cof3Chunk2 ++ cof3Chunk3 ++ cof3Chunk4 ++ cof3Chunk5
+
+private def cof5Chunk1 : List (Bool × Nat × Nat) :=
+  [(true, 16777225, 352846083), (false, 235148365, 235148365), (false, 969983210, 969983210),
+   (true, 3517474805, 132293600), (true, 514881950, 957365633)]
+private def cof5Chunk2a : List (Bool × Nat × Nat) :=
+  [(false, 799576094, 799576094), (false, 1955376390, 1955376390), (true, 832748522, 1058121918),
+   (true, 1309184389, 1020099424)]
+private def cof5Chunk2b : List (Bool × Nat × Nat) :=
+  [(false, 2133346873, 2133346873), (false, 2096253130, 2096253130), (true, 1204967438, 3164848595),
+   (true, 1972224527, 1611976585)]
+private def cof5Chunk3a : List (Bool × Nat × Nat) :=
+  [(false, 1773545857, 1773545857), (false, 4007066144, 4007066144), (true, 3385005118, 2286457906),
+   (true, 2480235616, 387706533)]
+private def cof5Chunk3b : List (Bool × Nat × Nat) :=
+  [(false, 2369058722, 2369058722), (false, 1448440371, 1448440371), (true, 3755924650, 731132946),
+   (true, 1478247440, 2333312332)]
+private def cof5Chunk4a : List (Bool × Nat × Nat) :=
+  [(false, 4277522665, 4277522665), (false, 3779566721, 3779566721), (true, 2919482064, 2322666723),
+   (true, 3622170894, 3150025444)]
+private def cof5Chunk4b : List (Bool × Nat × Nat) :=
+  [(false, 1010641934, 1010641934), (false, 52987073, 52987073), (true, 1142953319, 1015225426),
+   (true, 3676851325, 6)]
+private def traceCof5 : List (Bool × Nat × Nat) :=
+  cof5Chunk1 ++ cof5Chunk2a ++ cof5Chunk2b ++ cof5Chunk3a ++ cof5Chunk3b ++ cof5Chunk4a ++ cof5Chunk4b
+
+private def cof17Chunk1 : List (Bool × Nat × Nat) :=
+  [(true, 16777225, 352846083), (true, 235148365, 4048442330), (true, 1099422088, 262906593)]
+private def cof17Chunk2a : List (Bool × Nat × Nat) :=
+  [(false, 3787462966, 3787462966), (false, 4060342029, 4060342029), (false, 1738998852, 1738998852),
+   (false, 2651231831, 2651231831)]
+private def cof17Chunk2b : List (Bool × Nat × Nat) :=
+  [(true, 3203494126, 3675627232), (true, 2878044885, 3793192803), (true, 3324196416, 3190370803),
+   (true, 3871172064, 1368956589)]
+private def cof17Chunk3a : List (Bool × Nat × Nat) :=
+  [(false, 242130808, 242130808), (false, 1473261916, 1473261916), (false, 3234731577, 3234731577),
+   (false, 677346242, 677346242)]
+private def cof17Chunk3b : List (Bool × Nat × Nat) :=
+  [(true, 591159027, 2133566067), (true, 2129800031, 1332467574), (true, 2839171423, 1376398526),
+   (true, 2605638394, 2360377602)]
+private def cof17Chunk4a : List (Bool × Nat × Nat) :=
+  [(false, 1212543193, 1212543193), (false, 1200233930, 1200233930), (false, 3309977157, 3309977157),
+   (false, 2531247989, 2531247989)]
+private def cof17Chunk4b : List (Bool × Nat × Nat) :=
+  [(true, 1468100217, 3360368290), (true, 657441547, 3163068454), (true, 3012418643, 3582875650),
+   (true, 2287686913, 94)]
+private def traceCof17 : List (Bool × Nat × Nat) :=
+  cof17Chunk1 ++ cof17Chunk2a ++ cof17Chunk2b ++ cof17Chunk3a ++ cof17Chunk3b ++ cof17Chunk4a ++ cof17Chunk4b
+
+private def cof257Chunk1 : List (Bool × Nat × Nat) :=
+  [(true, 16777225, 352846083), (true, 235148365, 4048442330), (true, 1099422088, 262906593),
+   (true, 3787462966, 577221175)]
+private def cof257Chunk2 : List (Bool × Nat × Nat) :=
+  [(true, 914104830, 165909309), (true, 794845600, 3623836320), (true, 1651201468, 1923607280)]
+private def cof257Chunk3 : List (Bool × Nat × Nat) :=
+  [(false, 2533511666, 2533511666), (false, 2811363208, 2811363208), (false, 3445165736, 3445165736),
+   (false, 2242871169, 2242871169), (false, 354801590, 354801590), (false, 3255070697, 3255070697),
+   (false, 309270953, 309270953), (false, 1337217265, 1337217265)]
+private def cof257Chunk4 : List (Bool × Nat × Nat) :=
+  [(true, 440026348, 3272263457), (true, 1602195663, 1320447947), (true, 1512725733, 2400440626),
+   (true, 1583722023, 2130812871)]
+private def cof257Chunk5 : List (Bool × Nat × Nat) :=
+  [(true, 3119649737, 3376080449), (true, 1296010465, 693642794), (true, 1747763236, 216520833),
+   (true, 3336588246, 7943)]
+private def traceCof257 : List (Bool × Nat × Nat) :=
+  cof257Chunk1 ++ cof257Chunk2 ++ cof257Chunk3 ++ cof257Chunk4 ++ cof257Chunk5
+
+private theorem ord_c1 : verifyPowChain5 zeta5 1 zeta5 ordChunk1 = some (63, Coord.ofNat 5 165909309) := by decide
+private theorem ord_c2 : verifyPowChain5 zeta5 63 (Coord.ofNat 5 165909309) ordChunk2 = some (2047, Coord.ofNat 5 1029231064) := by decide
+private theorem ord_c3 : verifyPowChain5 zeta5 2047 (Coord.ofNat 5 1029231064) ordChunk3 = some (65535, Coord.ofNat 5 1832028822) := by decide
+private theorem ord_c4 : verifyPowChain5 zeta5 65535 (Coord.ofNat 5 1832028822) ordChunk4 = some (2097151, Coord.ofNat 5 3665417630) := by decide
+private theorem ord_c5 : verifyPowChain5 zeta5 2097151 (Coord.ofNat 5 3665417630) ordChunk5 = some (67108863, Coord.ofNat 5 3671021204) := by decide
+private theorem ord_c6a : verifyPowChain5 zeta5 67108863 (Coord.ofNat 5 3671021204) ordChunk6a = some (536870911, Coord.ofNat 5 2359717944) := by decide
+private theorem ord_c6b : verifyPowChain5 zeta5 536870911 (Coord.ofNat 5 2359717944) ordChunk6b = some (2 ^ 32 - 1, Coordinate.one 5) := by decide
+
+private theorem cof3_c1 : verifyPowChain5 zeta5 1 zeta5 cof3Chunk1 = some (85, Coord.ofNat 5 1799052260) := by decide
+private theorem cof3_c2 : verifyPowChain5 zeta5 85 (Coord.ofNat 5 1799052260) cof3Chunk2 = some (5461, Coord.ofNat 5 365059173) := by decide
+private theorem cof3_c3 : verifyPowChain5 zeta5 5461 (Coord.ofNat 5 365059173) cof3Chunk3 = some (349525, Coord.ofNat 5 3711831311) := by decide
+private theorem cof3_c4 : verifyPowChain5 zeta5 349525 (Coord.ofNat 5 3711831311) cof3Chunk4 = some (22369621, Coord.ofNat 5 3124285068) := by decide
+private theorem cof3_c5 : verifyPowChain5 zeta5 22369621 (Coord.ofNat 5 3124285068) cof3Chunk5 = some ((2 ^ 32 - 1) / 3, Coord.ofNat 5 2) := by decide
+
+private theorem cof5_c1 : verifyPowChain5 zeta5 1 zeta5 cof5Chunk1 = some (51, Coord.ofNat 5 957365633) := by decide
+private theorem cof5_c2a : verifyPowChain5 zeta5 51 (Coord.ofNat 5 957365633) cof5Chunk2a = some (819, Coord.ofNat 5 1020099424) := by decide
+private theorem cof5_c2b : verifyPowChain5 zeta5 819 (Coord.ofNat 5 1020099424) cof5Chunk2b = some (13107, Coord.ofNat 5 1611976585) := by decide
+private theorem cof5_c3a : verifyPowChain5 zeta5 13107 (Coord.ofNat 5 1611976585) cof5Chunk3a = some (209715, Coord.ofNat 5 387706533) := by decide
+private theorem cof5_c3b : verifyPowChain5 zeta5 209715 (Coord.ofNat 5 387706533) cof5Chunk3b = some (3355443, Coord.ofNat 5 2333312332) := by decide
+private theorem cof5_c4a : verifyPowChain5 zeta5 3355443 (Coord.ofNat 5 2333312332) cof5Chunk4a = some (53687091, Coord.ofNat 5 3150025444) := by decide
+private theorem cof5_c4b : verifyPowChain5 zeta5 53687091 (Coord.ofNat 5 3150025444) cof5Chunk4b = some ((2 ^ 32 - 1) / 5, Coord.ofNat 5 6) := by decide
+
+private theorem cof17_c1 : verifyPowChain5 zeta5 1 zeta5 cof17Chunk1 = some (15, Coord.ofNat 5 262906593) := by decide
+private theorem cof17_c2a : verifyPowChain5 zeta5 15 (Coord.ofNat 5 262906593) cof17Chunk2a = some (240, Coord.ofNat 5 2651231831) := by decide
+private theorem cof17_c2b : verifyPowChain5 zeta5 240 (Coord.ofNat 5 2651231831) cof17Chunk2b = some (3855, Coord.ofNat 5 1368956589) := by decide
+private theorem cof17_c3a : verifyPowChain5 zeta5 3855 (Coord.ofNat 5 1368956589) cof17Chunk3a = some (61680, Coord.ofNat 5 677346242) := by decide
+private theorem cof17_c3b : verifyPowChain5 zeta5 61680 (Coord.ofNat 5 677346242) cof17Chunk3b = some (986895, Coord.ofNat 5 2360377602) := by decide
+private theorem cof17_c4a : verifyPowChain5 zeta5 986895 (Coord.ofNat 5 2360377602) cof17Chunk4a = some (15790320, Coord.ofNat 5 2531247989) := by decide
+private theorem cof17_c4b : verifyPowChain5 zeta5 15790320 (Coord.ofNat 5 2531247989) cof17Chunk4b = some ((2 ^ 32 - 1) / 17, Coord.ofNat 5 94) := by decide
+
+private theorem cof257_c1 : verifyPowChain5 zeta5 1 zeta5 cof257Chunk1 = some (31, Coord.ofNat 5 577221175) := by decide
+private theorem cof257_c2 : verifyPowChain5 zeta5 31 (Coord.ofNat 5 577221175) cof257Chunk2 = some (255, Coord.ofNat 5 1923607280) := by decide
+private theorem cof257_c3 : verifyPowChain5 zeta5 255 (Coord.ofNat 5 1923607280) cof257Chunk3 = some (65280, Coord.ofNat 5 1337217265) := by decide
+private theorem cof257_c4 : verifyPowChain5 zeta5 65280 (Coord.ofNat 5 1337217265) cof257Chunk4 = some (1044495, Coord.ofNat 5 2130812871) := by decide
+private theorem cof257_c5 : verifyPowChain5 zeta5 1044495 (Coord.ofNat 5 2130812871) cof257Chunk5 = some ((2 ^ 32 - 1) / 257, Coord.ofNat 5 7943) := by decide
+
+private theorem zeta5_trace_cof65537_ok :
+    verifyPowChain5 zeta5 1 zeta5 traceCof65537 = some ((2 ^ 32 - 1) / 65537, Coord.ofNat 5 1832028822) :=
+  verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+    (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _ ord_c1 ord_c2) ord_c3
+
+private theorem zeta5_trace_order_ok :
+    verifyPowChain5 zeta5 1 zeta5 traceOrder = some (2 ^ 32 - 1, Coordinate.one 5) :=
+  verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+    (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+      (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+        (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _ zeta5_trace_cof65537_ok ord_c4) ord_c5) ord_c6a) ord_c6b
+
+private theorem zeta5_trace_cof3_ok :
+    verifyPowChain5 zeta5 1 zeta5 traceCof3 = some ((2 ^ 32 - 1) / 3, Coord.ofNat 5 2) :=
+  verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+    (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+      (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+        (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _ cof3_c1 cof3_c2) cof3_c3) cof3_c4) cof3_c5
+
+private theorem zeta5_trace_cof5_ok :
+    verifyPowChain5 zeta5 1 zeta5 traceCof5 = some ((2 ^ 32 - 1) / 5, Coord.ofNat 5 6) :=
+  verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+    (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+      (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+        (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+          (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+            (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _ cof5_c1 cof5_c2a) cof5_c2b)
+          cof5_c3a) cof5_c3b) cof5_c4a) cof5_c4b
+
+private theorem zeta5_trace_cof17_ok :
+    verifyPowChain5 zeta5 1 zeta5 traceCof17 = some ((2 ^ 32 - 1) / 17, Coord.ofNat 5 94) :=
+  verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+    (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+      (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+        (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+          (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+            (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _ cof17_c1 cof17_c2a) cof17_c2b)
+          cof17_c3a) cof17_c3b) cof17_c4a) cof17_c4b
+
+private theorem zeta5_trace_cof257_ok :
+    verifyPowChain5 zeta5 1 zeta5 traceCof257 = some ((2 ^ 32 - 1) / 257, Coord.ofNat 5 7943) :=
+  verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+    (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+      (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _
+        (verifyPowChain5_append zeta5 _ _ _ _ _ _ _ _ cof257_c1 cof257_c2) cof257_c3) cof257_c4) cof257_c5
+
+private theorem zeta5_aux_checks :
+    Coord.ofNat 5 2 ≠ Coordinate.one 5 ∧
+    Coord.ofNat 5 6 ≠ Coordinate.one 5 ∧
+    Coord.ofNat 5 94 ≠ Coordinate.one 5 ∧
+    Coord.ofNat 5 7943 ≠ Coordinate.one 5 ∧
+    Coord.ofNat 5 1832028822 ≠ Coordinate.one 5 ∧
+    Coordinate.mul 5 zeta5 zetaInv5 = Coordinate.one 5 := by decide
+
+/-- Kernel-verified order-`(2^32 - 1)` trace certificates and Fermat-prime cofactor disequalities. -/
 theorem zeta5_order_checks :
-    powCoord 5 zeta5 (2 ^ 32 - 1) = Coordinate.one 5 ∧
-    powCoord 5 zeta5 ((2 ^ 32 - 1) / 3) ≠ Coordinate.one 5 ∧
-    powCoord 5 zeta5 ((2 ^ 32 - 1) / 5) ≠ Coordinate.one 5 ∧
-    powCoord 5 zeta5 ((2 ^ 32 - 1) / 17) ≠ Coordinate.one 5 ∧
-    powCoord 5 zeta5 ((2 ^ 32 - 1) / 257) ≠ Coordinate.one 5 ∧
-    powCoord 5 zeta5 ((2 ^ 32 - 1) / 65537) ≠ Coordinate.one 5 ∧
-    Coordinate.mul 5 zeta5 zetaInv5 = Coordinate.one 5 := by
-  decide
+    verifyPowChain5 zeta5 1 zeta5 traceOrder = some (2 ^ 32 - 1, Coordinate.one 5) ∧
+    verifyPowChain5 zeta5 1 zeta5 traceCof3 = some ((2 ^ 32 - 1) / 3, Coord.ofNat 5 2) ∧
+    verifyPowChain5 zeta5 1 zeta5 traceCof5 = some ((2 ^ 32 - 1) / 5, Coord.ofNat 5 6) ∧
+    verifyPowChain5 zeta5 1 zeta5 traceCof17 = some ((2 ^ 32 - 1) / 17, Coord.ofNat 5 94) ∧
+    verifyPowChain5 zeta5 1 zeta5 traceCof257 = some ((2 ^ 32 - 1) / 257, Coord.ofNat 5 7943) ∧
+    verifyPowChain5 zeta5 1 zeta5 traceCof65537 = some ((2 ^ 32 - 1) / 65537, Coord.ofNat 5 1832028822) ∧
+    Coord.ofNat 5 2 ≠ Coordinate.one 5 ∧
+    Coord.ofNat 5 6 ≠ Coordinate.one 5 ∧
+    Coord.ofNat 5 94 ≠ Coordinate.one 5 ∧
+    Coord.ofNat 5 7943 ≠ Coordinate.one 5 ∧
+    Coord.ofNat 5 1832028822 ≠ Coordinate.one 5 ∧
+    Coordinate.mul 5 zeta5 zetaInv5 = Coordinate.one 5 :=
+  ⟨zeta5_trace_order_ok, zeta5_trace_cof3_ok, zeta5_trace_cof5_ok,
+   zeta5_trace_cof17_ok, zeta5_trace_cof257_ok, zeta5_trace_cof65537_ok,
+   zeta5_aux_checks⟩
 
 theorem zetaC_eq_leafOfNat : zetaC = leafOfNat 65541 := by
   decide
 
 theorem zetaC_mul_zetaInvC : mulC zetaC zetaInvC = Coordinate.one 8 := by
-  rw [zetaC, zetaInvC, embed5To8_mul, zeta5_order_checks.2.2.2.2.2.2, embed5To8_one]
+  rw [zetaC, zetaInvC, embed5To8_mul, zeta5_order_checks.2.2.2.2.2.2.2.2.2.2.2, embed5To8_one]
 
 theorem zetaF_mul_zetaInvF : zetaF * toField zetaInvC = 1 := by
   rw [zetaF, ← toField_mulC, zetaC_mul_zetaInvC, coordinateFieldEquiv_one]
@@ -274,23 +570,31 @@ private theorem prime_dvd_fermat_prod {p : Nat} (hp : p.Prime)
 /-- **`orderOf zetaF = 2^32 - 1`**: `zetaC` generates an exact cyclic subgroup of size `4,294,967,295`
 inside `Tower256^×`, giving wraparound-free integer counting up to `4.29B` in characteristic 2. -/
 theorem orderOf_zetaF : orderOf zetaF = 2 ^ 32 - 1 := by
+  have hc := zeta5_order_checks
+  have hbase : toField (embed5To8 zeta5) = (toField (embed5To8 zeta5)) ^ 1 := (pow_one _).symm
   apply orderOf_eq_of_pow_and_pow_div_prime (by norm_num)
-  · rw [zetaF, ← toField_powC8 _ _ (by norm_num), zetaC, embed5To8_powCoord, zeta5_order_checks.1,
-      embed5To8_one, coordinateFieldEquiv_one]
+  · have h1 := verifyPowChain5_sound zeta5 traceOrder 1 zeta5 _ _ hbase hc.1
+    rw [embed5To8_one, coordinateFieldEquiv_one] at h1
+    exact h1.symm
   · intro p hp hdvd heq
-    have hlt : (2 ^ 32 - 1) / p < 2 ^ 64 :=
-      lt_of_le_of_lt (Nat.div_le_self _ _) (by norm_num)
-    have hpow : powCoord 5 zeta5 ((2 ^ 32 - 1) / p) = Coordinate.one 5 := by
+    have hnot1 : ∀ c : Coordinate 5, c ≠ Coordinate.one 5 →
+        toField (embed5To8 c) ≠ 1 := by
+      intro c hne h1
+      apply hne
       apply embed5To8_injective
       apply toField.injective
-      rw [← embed5To8_powCoord, ← zetaC, toField_powC8 _ _ hlt, embed5To8_one, coordinateFieldEquiv_one]
-      exact heq
+      rw [h1, embed5To8_one, coordinateFieldEquiv_one]
     rcases prime_dvd_fermat_prod hp hdvd with rfl | rfl | rfl | rfl | rfl
-    · exact zeta5_order_checks.2.1 hpow
-    · exact zeta5_order_checks.2.2.1 hpow
-    · exact zeta5_order_checks.2.2.2.1 hpow
-    · exact zeta5_order_checks.2.2.2.2.1 hpow
-    · exact zeta5_order_checks.2.2.2.2.2.1 hpow
+    · have hp3 := verifyPowChain5_sound zeta5 traceCof3 1 zeta5 _ _ hbase hc.2.1
+      exact hnot1 _ hc.2.2.2.2.2.2.1 (hp3.trans heq)
+    · have hp5 := verifyPowChain5_sound zeta5 traceCof5 1 zeta5 _ _ hbase hc.2.2.1
+      exact hnot1 _ hc.2.2.2.2.2.2.2.1 (hp5.trans heq)
+    · have hp17 := verifyPowChain5_sound zeta5 traceCof17 1 zeta5 _ _ hbase hc.2.2.2.1
+      exact hnot1 _ hc.2.2.2.2.2.2.2.2.1 (hp17.trans heq)
+    · have hp257 := verifyPowChain5_sound zeta5 traceCof257 1 zeta5 _ _ hbase hc.2.2.2.2.1
+      exact hnot1 _ hc.2.2.2.2.2.2.2.2.2.1 (hp257.trans heq)
+    · have hp65537 := verifyPowChain5_sound zeta5 traceCof65537 1 zeta5 _ _ hbase hc.2.2.2.2.2.1
+      exact hnot1 _ hc.2.2.2.2.2.2.2.2.2.2.1 (hp65537.trans heq)
 
 /-- **Injectivity of `k ↦ zetaF ^ k` on `[0, 2^32 - 1)`**: distinct integer counts below `2^32 - 1`
 map to distinct elements of `Tower256`. -/
@@ -378,12 +682,14 @@ theorem mle_update_corner {F : Type*} [CommRing F] {d : Nat}
   rw [Finset.sum_add_distrib]
   simp
 
+private theorem finite_tower256 : Finite Tower256 :=
+  Nat.finite_of_card_ne_zero (by rw [Minidregg.Theory.BinaryTowerFanPaarCodec.cardinality]; positivity)
+
 noncomputable instance : Fintype Tower256 :=
-  Fintype.ofEquiv C8 toField
+  @Fintype.ofFinite Tower256 finite_tower256
 
 theorem card_tower256 : Fintype.card Tower256 = 2 ^ 256 := by
-  rw [Fintype.card_congr toField.symm, Fintype.card_congr (coordinateFinEquiv 8),
-    Fintype.card_fin, capacity_eight]
+  rw [← Nat.card_eq_fintype_card, Minidregg.Theory.BinaryTowerFanPaarCodec.cardinality]
 
 theorem card_tower256_real : (Fintype.card Tower256 : ℝ) = (2 : ℝ) ^ 256 := by
   rw [card_tower256]
@@ -584,7 +890,7 @@ theorem coset_theta_last_not_boolean {ell : Nat} (hell : ell + 1 ≤ 256)
   let B'pad : Nat → Tower256 := fun n => if hn : n < ell + 1 then B' ⟨n, hn⟩ else 0
   have hB'padInd : LinearIndependent (ZMod 2) (fun j : Fin (ell + 1) => B'pad j.val) := by
     have hfun : (fun j : Fin (ell + 1) => B'pad j.val) = B' := by
-      funext j; simp [B'pad, j.isLt]
+      funext j; simp only [B'pad, j.isLt, ↓reduceDIte]
     rw [hfun]
     exact hB'ind
   have hB'rev : ∀ t < ell, additiveReverseBasis (ell + 1) B'pad t =
@@ -660,8 +966,8 @@ theorem coset_theta_last_not_boolean {ell : Nat} (hell : ell + 1 ≤ 256)
       unfold additiveTowerPoint additiveTowerRawPoint domainPoint
       simp only [cZero, zero_smul, Finset.sum_const_zero, add_zero]
       exact hMapZero r
-    have hinj := additiveTowerPoint_injective (ell + 1) B'pad 0 hB'padInd r (by omega)
-      (show r + (ell + 1 - r) = ell + 1 by omega) (hPt0.trans hPtZero.symm)
+    have hinj := additiveTowerPoint_injective (ell + 1) B'pad 0 hB'padInd r (ell + 1 - r)
+      (show r + (ell + 1 - r) ≤ ell + 1 by omega) (hPt0.trans hPtZero.symm)
     have hbit0 := congrFun hinj ⟨0, by omega⟩
     simp [c', cZero] at hbit0
   · intro hdomPiv
@@ -675,9 +981,9 @@ theorem coset_theta_last_not_boolean {ell : Nat} (hell : ell + 1 ≤ 256)
       rw [Fintype.sum_eq_single idxP]
       · have hlt1 : ell - r < ell + 1 := by omega
         have hlt0 : ell - 1 - r < ell := by omega
-        simp only [cPiv, idxP, ↓reduceIte, one_smul, B'pad, hlt1, ↓reduceDIte, hlt0]
+        simp only [cPiv, idxP, ↓reduceIte, one_smul, B'pad, hlt1, ↓reduceDIte]
         have hfin : (⟨ell - r, hlt1⟩ : Fin (ell + 1)) = (⟨ell - 1 - r, hlt0⟩ : Fin ell).succ :=
-          Fin.ext (by omega)
+          Fin.ext (show ell - r = (ell - 1 - r) + 1 by omega)
         rw [hfin]
         simp only [B', Fin.cons_succ, betaF, hlt0, ↓reduceDIte]
       · intro j hj
@@ -695,8 +1001,8 @@ theorem coset_theta_last_not_boolean {ell : Nat} (hell : ell + 1 ≤ 256)
         rfl
       rw [← h2]
       exact hdomPiv
-    have hinj := additiveTowerPoint_injective (ell + 1) B'pad 0 hB'padInd r (by omega)
-      (show r + (ell + 1 - r) = ell + 1 by omega) hEqPts
+    have hinj := additiveTowerPoint_injective (ell + 1) B'pad 0 hB'padInd r (ell + 1 - r)
+      (show r + (ell + 1 - r) ≤ ell + 1 by omega) hEqPts
     have hbit0 := congrFun hinj ⟨0, by omega⟩
     have hne0 : (0 : Nat) ≠ ell - r := by omega
     simp [c', cPiv, hne0] at hbit0
@@ -820,9 +1126,12 @@ theorem foldAtBitC_expandStepC (ell s : Nat) (hell : ell ≤ 256) (hs : s < ell)
     funext i; simp [hi, i.isLt]
   have hloBit : lo ⟨ell - (s + 1), by omega⟩ = 0 := by simp [lo]
   have hhiBit : hi ⟨ell - (s + 1), by omega⟩ = 1 := by simp [hi]
-  have hhiNe0 : hi ⟨ell - (s + 1), by omega⟩ ≠ 0 := by rw [hhiBit]; decide
-  have hdLoEq : (fun i : Fin (ell - s) =>
-      if h : i.val < ell - (s + 1) then k ⟨i.val, h⟩ else 0) = lo := rfl
+  have hdLo1 : (fun i : Fin (ell - s) =>
+      if h : i.val < ell - (s + 1) then lo ⟨i.val, by omega⟩ else 0) = lo := by
+    funext i; dsimp only [lo]; split <;> simp
+  have hdHi1 : (fun i : Fin (ell - s) =>
+      if h : i.val < ell - (s + 1) then hi ⟨i.val, by omega⟩ else 0) = lo := by
+    funext i; dsimp only [hi, lo]; split <;> simp
   set piv := pivotC (unitBasis ell) s
   set pivInv := Minidregg.Compiler.Tower256SuccinctHonestRun.invC piv
   set dLo := domC (unitBasis ell) (cosetOffset ell) s lo
@@ -831,13 +1140,15 @@ theorem foldAtBitC_expandStepC (ell s : Nat) (hell : ell ≤ 256) (hs : s < ell)
   have hExpLo : expandStepC ell s pivInv ev od lo =
       addC (ev k) (mulC (mulC dLo pivInv) (od k)) := by
     unfold expandStepC
-    dsimp only
-    simp only [hs, ↓reduceDIte, htailLo, hdLoEq, hloBit, ↓reduceIte]
+    dsimp only [dLo]
+    simp only [hs, ↓reduceDIte, hloBit, ↓reduceIte, htailLo, hdLo1]
   have hExpHi : expandStepC ell s pivInv ev od hi =
       addC (addC (ev k) (mulC (mulC dLo pivInv) (od k))) (od k) := by
     unfold expandStepC
-    dsimp only
-    simp only [hs, ↓reduceDIte, htailHi, hdLoEq, hhiNe0, ↓reduceIte]
+    dsimp only [dLo]
+    simp only [hs, ↓reduceDIte, htailHi, hdHi1]
+    rw [hhiBit]
+    simp only [one_ne_zero, ↓reduceIte]
   change toField (addC (expandStepC ell s pivInv ev od lo)
     (mulC (mulC (addC dLo (if bit then piv else Coordinate.zero 8))
       (addC (expandStepC ell s pivInv ev od lo) (expandStepC ell s pivInv ev od hi))) pivInv)) =
@@ -1179,12 +1490,31 @@ theorem gamma_pole_guard (t : DfaTable) (α : Tower256) :
       ((t.states * 256 : Nat) : ℝ) / (2 ^ 256 : ℝ) ∧
     (∀ (γ gInv : Tower256) (k : Nat), gInv * (γ + dfaTableEncF t α k) = 1 →
       γ + dfaTableEncF t α k ≠ 0) := by
+  classical
   refine ⟨?_, fun γ gInv k hmul hzero => by rw [hzero, mul_zero] at hmul; exact zero_ne_one hmul⟩
-  have hconv : (fun γ : Tower256 => ∃ k : Fin (t.states * 256), γ + dfaTableEncF t α k = 0) =
-      (fun γ : Tower256 => ∃ k : Fin (t.states * 256), γ - dfaTableEncF t α k = 0) := by
-    funext γ; simp [CharTwo.sub_eq_add]
-  rw [hconv, ← card_tower256_real]
-  simpa using logup_denominator_zero_prob_le (fun k : Fin (t.states * 256) => dfaTableEncF t α k)
+  calc
+    uniformProb Tower256 (fun γ => ∃ k : Fin (t.states * 256), γ + dfaTableEncF t α k = 0)
+      ≤ ∑ k : Fin (t.states * 256), uniformProb Tower256 (fun γ => γ + dfaTableEncF t α k = 0) :=
+        uniformProb_exists_le _
+    _ ≤ ∑ _k : Fin (t.states * 256), ((1 : Nat) : ℝ) / (2 ^ 256 : ℝ) := by
+        refine Finset.sum_le_sum fun k _ => ?_
+        let p : Polynomial Tower256 := X + C (dfaTableEncF t α k)
+        have hpNe : p ≠ 0 := by
+          intro hp0
+          have hc1 := congrArg (fun q => q.coeff 1) hp0
+          simp [p] at hc1
+        have hpDeg : p.natDegree ≤ 1 := by
+          dsimp only [p]
+          compute_degree!
+        have hconv : uniformProb Tower256 (fun γ => γ + dfaTableEncF t α k = 0) =
+            uniformProb Tower256 (fun γ => p.eval γ = 0) := by
+          refine uniformProb_congr fun γ => ?_
+          simp [p]
+        rw [hconv, ← card_tower256_real]
+        exact uniformProb_poly_eval_eq_zero_le p hpNe hpDeg
+    _ = ((t.states * 256 : Nat) : ℝ) / (2 ^ 256 : ℝ) := by
+        rw [Finset.sum_const, Finset.card_univ, Fintype.card_fin, nsmul_eq_mul]
+        ring
 
 /-- **Deterministic Row-to-DFA Equivalence (`algebraicRowValid_iff_dfaRun`)**:
 over `Tower256` (`d ≤ 23`), an `AlgebraicTraceWitness` satisfies `AlgebraicRowValid` if and only if
@@ -1307,13 +1637,23 @@ theorem algebraicRowValid_iff_dfaRun (t : DfaTable) (ht : t.WellFormed) (htPos :
       rw [hCLast, hHLast, hRunEq, stepFactor_of_natHit _ hhit01, ← pow_add, hCntEq]
     cases claim with
     | accept b =>
-        simp only [AlgebraicTerminalValid] at hTerm
+        unfold AlgebraicTerminalValid at hTerm
+        dsimp only at hTerm
         rw [Dfaops.satisfiesClaim_accept_iff]
         unfold DfaTable.accepts
         rw [hHLast, hRunEq] at hTerm
         unfold Dfaops.stepHit at hTerm
-        cases hacc : t.accepting.getD (t.run w) false <;> cases b <;>
-          simp [hacc, natField_zero, natField_one, ofBool_false, ofBool_true] at hTerm ⊢
+        cases hacc : t.accepting.getD (t.run w) false
+        · rw [hacc] at hTerm
+          cases b
+          · rfl
+          · simp only [Bool.false_eq_true, ↓reduceIte, natField_zero, ofBool_true] at hTerm
+            exact absurd hTerm zero_ne_one
+        · rw [hacc] at hTerm
+          cases b
+          · simp only [↓reduceIte, natField_one, ofBool_false] at hTerm
+            exact absurd hTerm one_ne_zero
+          · rfl
     | count n =>
         simp only [AlgebraicTerminalValid] at hTerm
         obtain ⟨hnLe, hpowEq⟩ := hTerm
@@ -1488,6 +1828,7 @@ theorem algebraicRowValid_iff_dfaRun (t : DfaTable) (ht : t.WellFormed) (htPos :
       have hmod : k % 256 = w[i].toNat := by have := w[i].toNat_lt; omega
       dsimp only [wit, dfaTableTupleF, DfaTable.step]
       simp only [hi, ↓reduceIte, ↓reduceDIte, hdiv, hmod]
+      rfl
     · -- Terminal claim verification on `wit`
       have hLastLt : w.length - 1 < w.length := by omega
       have hwSplit : w = w.take (w.length - 1) ++ [w[w.length - 1]] := by
@@ -1541,7 +1882,7 @@ theorem algebraicRowValid_iff_dfaRun (t : DfaTable) (ht : t.WellFormed) (htPos :
           have hcntCap : Dfaops.runCount t w ≤ Nat.min hi w.length := Nat.le_min.mpr ⟨hcntHi, hCntLe⟩
           have hdPowLt : 2 ^ d < 2 ^ (d + 1) := Nat.pow_lt_pow_right (by norm_num) (Nat.lt_succ_self d)
           have hd1Lt : delta1 < 2 ^ (d + 1) :=
-            lt_of_le_of_lt (Nat.sub_le _ _) (lt_of_le_of_lt hd hdPowLt)
+            lt_of_le_of_lt (le_trans (Nat.sub_le _ _) hCntLe) (lt_of_le_of_lt hd hdPowLt)
           have hd2Lt : delta2 < 2 ^ (d + 1) := by
             have hcapLe : Nat.min hi w.length ≤ w.length := Nat.min_le_right hi w.length
             exact lt_of_le_of_lt (le_trans (Nat.sub_le _ _) hcapLe) (lt_of_le_of_lt hd hdPowLt)
@@ -1560,9 +1901,11 @@ theorem algebraicRowValid_iff_dfaRun (t : DfaTable) (ht : t.WellFormed) (htPos :
               rw [Nat.mod_mod_of_dvd x (dvd_mul_right pk 2), hdiv] at hrem
               rcases hlt2 with h0 | h1
               · simp only [h0, show (0 = 1) = False by decide, decide_false, Bool.false_eq_true, ↓reduceIte]
-                linarith
+                simp only [h0, mul_zero, zero_add] at hrem
+                omega
               · simp only [h1, decide_true, ↓reduceIte]
-                linarith
+                simp only [h1, mul_one] at hrem
+                omega
             rw [hmod, pow_add]
             cases x.testBit k
             · simp
@@ -1592,7 +1935,7 @@ theorem algebraicRowValid_iff_dfaRun (t : DfaTable) (ht : t.WellFormed) (htPos :
             dsimp only [wit]
             simp only [hk1, hk0, ↓reduceIte]
             refine ⟨?_, ?_⟩
-            · rw [pow_add, pow_add, mul_assoc, hbitStep]
+            · rw [pow_add zetaF loBase, pow_add zetaF loBase, mul_assoc, hbitStep]
             · rw [mul_assoc, hbitStep]
           · have hdLt : d < d + 1 := Nat.lt_succ_self d
             dsimp only [wit]
@@ -1739,15 +2082,22 @@ theorem logup_stage_prob_bounds (t : DfaTable) (L d : Nat) (hd : L ≤ 2 ^ d)
       _ ≤ ∑ _k : Fin (t.states * 256), (3 : ℝ) / (2 ^ 256 : ℝ) := by
           refine Finset.sum_le_sum fun k _ => ?_
           rcases heq_tup : dfaTableTupleF t k.val with ⟨tb, ts, tnx, th⟩
-          let p : Polynomial Tower256 :=
-            C (wit.byte cur - tb) + C (wit.state cur - ts) * X +
-              C (wit.next cur - tnx) * X ^ 2 + C (wit.hit cur - th) * X ^ 3
+          let d0 : Tower256 := wit.byte cur - tb
+          let d1 : Tower256 := wit.state cur - ts
+          let d2 : Tower256 := wit.next cur - tnx
+          let d3 : Tower256 := wit.hit cur - th
+          let p : Polynomial Tower256 := C d0 + C d1 * X + C d2 * X ^ 2 + C d3 * X ^ 3
           have hpNe : p ≠ 0 := by
             intro hp0
-            have h0 : wit.byte cur = tb := sub_eq_zero.mp (by simpa [p] using congrArg (fun q => q.coeff 0) hp0)
-            have h1 : wit.state cur = ts := sub_eq_zero.mp (by simpa [p] using congrArg (fun q => q.coeff 1) hp0)
-            have h2 : wit.next cur = tnx := sub_eq_zero.mp (by simpa [p] using congrArg (fun q => q.coeff 2) hp0)
-            have h3 : wit.hit cur = th := sub_eq_zero.mp (by simpa [p] using congrArg (fun q => q.coeff 3) hp0)
+            have hc0 := congrArg (fun q => q.coeff 0) hp0
+            have hc1 := congrArg (fun q => q.coeff 1) hp0
+            have hc2 := congrArg (fun q => q.coeff 2) hp0
+            have hc3 := congrArg (fun q => q.coeff 3) hp0
+            simp [p, coeff_add, coeff_C_mul, coeff_X_pow, coeff_X, coeff_C] at hc0 hc1 hc2 hc3
+            have h0 : wit.byte cur = tb := sub_eq_zero.mp hc0
+            have h1 : wit.state cur = ts := sub_eq_zero.mp hc1
+            have h2 : wit.next cur = tnx := sub_eq_zero.mp hc2
+            have h3 : wit.hit cur = th := sub_eq_zero.mp hc3
             apply hbad k.val k.isLt
             rw [heq_tup, h0, h1, h2, h3]
           have hpDeg : p.natDegree ≤ 3 := by
@@ -1775,12 +2125,15 @@ theorem logup_stage_prob_bounds (t : DfaTable) (L d : Nat) (hd : L ≤ 2 ^ d)
     have hpNe : pTheta ≠ 0 := by
       intro h0
       have hc := congrArg (fun q => q.coeff iStar.val) h0
-      simp only [pTheta, finset_sum_coeff, coeff_zero] at hc
+      simp only [pTheta, Polynomial.finsetSum_coeff, coeff_zero] at hc
       rw [Fintype.sum_eq_single iStar] at hc
-      · simp at hc
+      · simp only [↓reduceIte, coeff_X_pow_self] at hc
+        exact one_ne_zero hc
       · intro j hji
-        have hjv : j.val ≠ iStar.val := fun e => hji (Fin.ext e)
-        split <;> simp [coeff_X_pow, hjv]
+        have hjv : ¬ (iStar.val = j.val) := fun e => hji (Fin.ext e.symm)
+        split
+        · simp only [coeff_X_pow, hjv, ↓reduceIte]
+        · simp only [coeff_zero]
     have hpDeg : pTheta.natDegree ≤ L - 1 := by
       apply Polynomial.natDegree_sum_le_of_forall_le
       intro j _
@@ -1836,13 +2189,16 @@ theorem logup_stage_prob_bounds (t : DfaTable) (L d : Nat) (hd : L ≤ 2 ^ d)
       have hexpNe : expected (iMap iStar) ≠ 0 := by
         simp only [expected, logupPushforward]
         rw [Finset.sum_filter]
-        convert hWNe using 2
-        ext j
-        by_cases hje : eAt j = eAt iStar
-        · have hm : iMap j = iMap iStar := Subtype.ext hje
-          simp [hje, hm]
-        · have hm : iMap j ≠ iMap iStar := fun h => hje (congrArg Subtype.val h)
-          simp [hje, hm]
+        have hcongr : (∑ x : Fin L, if iMap x = iMap iStar then θ ^ x.val else 0) =
+            ∑ j : Fin L, if eAt j = eAt iStar then θ ^ j.val else 0 := by
+          refine Finset.sum_congr rfl fun j _ => ?_
+          by_cases hje : eAt j = eAt iStar
+          · have hm : iMap j = iMap iStar := Subtype.ext hje
+            simp only [hm, hje, ↓reduceIte]
+          · have hm : ¬ (iMap j = iMap iStar) := fun h => hje (congrArg Subtype.val h)
+            simp only [hm, hje, ↓reduceIte]
+        rw [hcongr]
+        exact hWNe
       exact hexpNe (hv.symm.trans hcl0)
     have hbound := logup_wrong_rational_accept_prob_le J hJinj hne
     rw [← card_tower256_real]
@@ -2149,6 +2505,9 @@ structure AlgebraicContentCert where
   deriving DecidableEq, Repr
 
 instance : Inhabited C8 := ⟨Coordinate.zero 8⟩
+instance : Inhabited Digest := ⟨⟨0⟩⟩
+instance : Inhabited CPairOpening := ⟨⟨Coordinate.zero 8, Coordinate.zero 8, []⟩⟩
+instance : Inhabited FastCubeTree := ⟨⟨0, #[]⟩⟩
 
 /-- Univariate polynomial of degree `≤ 4` (`c0 + c1 X + c2 X² + c3 X³ + c4 X⁴`) over `C8`. -/
 structure PolyDeg4 where
@@ -2168,6 +2527,22 @@ def PolyDeg4.sumBoolC (p : PolyDeg4) : C8 :=
 def PolyDeg4.encodeBytes (p : PolyDeg4) : List UInt8 :=
   encodeC p.c0 ++ encodeC p.c1 ++ encodeC p.c2 ++ encodeC p.c3 ++ encodeC p.c4
 
+/-- Univariate polynomial of degree `≤ 2` (`c0 + c1 X + c2 X²`) over `C8` for interleaved BaseFold rounds. -/
+structure PolyDeg2 where
+  c0 : C8
+  c1 : C8
+  c2 : C8
+  deriving DecidableEq, Repr, Inhabited
+
+def PolyDeg2.evalC (p : PolyDeg2) (x : C8) : C8 :=
+  evalCoeffs [p.c0, p.c1, p.c2] x
+
+def PolyDeg2.sumBoolC (p : PolyDeg2) : C8 :=
+  addC (p.evalC (Coordinate.zero 8)) (p.evalC (Coordinate.one 8))
+
+def PolyDeg2.encodeBytes (p : PolyDeg2) : List UInt8 :=
+  encodeC p.c0 ++ encodeC p.c1 ++ encodeC p.c2
+
 /-- Level-0 pair opening of the 8 Phase-1 columns (`state, next, hit, cntPow, accLo, bitLo, accHi, bitHi`). -/
 structure Phase1PairOpening where
   leftCols  : Array C8
@@ -2175,7 +2550,7 @@ structure Phase1PairOpening where
   pairPath  : List Digest
   deriving DecidableEq, Repr, Inhabited
 
-/-- Level-0 pair opening of the 6 Phase-3 columns (`traceInv, tabInv, scMaskLin, scMaskA, scMaskB, friMask`). -/
+/-- Level-0 pair opening of the 8 Phase-3 columns (`traceInv, tabInv, scMaskLin, scMaskU1, scMaskU2, scMaskU3, bfMask, friMask`). -/
 structure Phase3PairOpening where
   leftCols  : Array C8
   rightCols : Array C8
@@ -2191,6 +2566,8 @@ structure AlgebraicPrivateReceipt (ell friRounds fq : Nat) where
   phase3Root     : Digest
   sumcheckPolys  : Array PolyDeg4
   colEvalsAtR    : Array C8
+  bfPolys        : Array PolyDeg2
+  bfFinalCoeff   : C8
   evalFoldRoots  : Array Digest
   friInitialRoot : Digest
   friReceipt     : CReceipt ell friRounds fq
@@ -2214,6 +2591,8 @@ def algSumcheckChalCust : List UInt8 :=
   0x16 :: Tower256ConcreteBackend.utf8 "MINIDREGG/TOWER256/ALGCERT/SCCHAL/V1"
 def algBatchChalCust : List UInt8 :=
   0x17 :: Tower256ConcreteBackend.utf8 "MINIDREGG/TOWER256/ALGCERT/BATCH/V1"
+def algBfChalCust : List UInt8 :=
+  0x18 :: Tower256ConcreteBackend.utf8 "MINIDREGG/TOWER256/ALGCERT/BFCHAL/V1"
 
 /-- Compress a fixed-width `C8` tuple into a single `C8` Merkle leaf under `cust`. -/
 def vecLeafC (cust : List UInt8) (vs : List C8) : C8 :=
@@ -2300,11 +2679,47 @@ def algBatchTranscript (r3Bytes : List UInt8) (scPolys : Array PolyDeg4) (colEva
     envelope (scPolys.toList.flatMap PolyDeg4.encodeBytes) ++
     envelope (colEvals.toList.flatMap encodeC)
 
-def algFullFriStmtBytes (batchBytes : List UInt8) (evalFoldRoots : Array Digest) : List UInt8 :=
-  batchBytes ++ envelope (evalFoldRoots.toList.flatMap (fun d => envelope (cshakeC.digestCodec.encode d)))
+/-- Characteristic-2 multilinear equality kernel `∏_{k < m} ((1 + r_k) + s_k)` over `C8`. -/
+def eqPointC (m : Nat) (r s : Array C8) : C8 := Id.run do
+  let one := Coordinate.one 8
+  let zero := Coordinate.zero 8
+  let mut acc := one
+  for k in [0:m] do
+    let rk := r.getD k zero
+    let sk := s.getD k zero
+    acc := mulC acc (addC (addC one rk) sk)
+  return acc
 
-def algFriPins (batchBytes : List UInt8) (evalFoldRoots : Array Digest) : TranscriptPins :=
-  { bootstrapPins with statementBytes := algFullFriStmtBytes batchBytes evalFoldRoots }
+/-- Interleaved `(d + 1)`-round BaseFold (`ZCF23`) evaluation-opening sumcheck + folding verifier:
+in each round `j = 0 .. d`, verifies `q_j(0) + q_j(1) = claim`, absorbs `(j, q_j)`, squeezes fresh
+fold challenge `s_j` (`s_j ≠ 1 + r_j`), updates `claim := q_j(s_j)`, and for `j < d` absorbs
+`evalFoldRoots[j]` BEFORE round `j + 1` (so every folded oracle `w_{j+1}` is root-pinned prior to
+`s_{j+1}`), finishing with `claim = eq(rFull, sBF) * bfFinalCoeff`! -/
+def runBasefoldVerifier (d : Nat) (batchBytes : List UInt8) (rFull : Array C8)
+    (bfPolys : Array PolyDeg2) (evalFoldRoots : Array Digest) (bfFinalCoeff : C8)
+    (initClaim : C8) : Option (Array C8 × List UInt8) := Id.run do
+  if bfPolys.size != d + 1 || evalFoldRoots.size != d then return none
+  let one := Coordinate.one 8
+  let zero := Coordinate.zero 8
+  let mut claim := initClaim
+  let mut sAcc : Array C8 := #[]
+  let mut tr := batchBytes
+  for j in [0:d + 1] do
+    let q := bfPolys[j]!
+    if q.sumBoolC != claim then return none
+    tr := tr ++ envelope (natCoordBytes j) ++ envelope q.encodeBytes
+    let sj := digestTowerC (cshakeC.xofDigest algBfChalCust tr)
+    if sj == addC one (rFull.getD j zero) then return none
+    sAcc := sAcc.push sj
+    claim := q.evalC sj
+    if j < d then
+      tr := tr ++ envelope (cshakeC.digestCodec.encode evalFoldRoots[j]!)
+  if claim != mulC (eqPointC (d + 1) rFull sAcc) bfFinalCoeff then return none
+  tr := tr ++ envelope (encodeC bfFinalCoeff)
+  return some (sAcc, tr)
+
+def algFriPins (bfStmtBytes : List UInt8) : TranscriptPins :=
+  { bootstrapPins with statementBytes := bfStmtBytes }
 
 def algDegreeSchedule (cubeDim : Nat) (j : Nat) : Nat :=
   Nat.max 1 (2 ^ (cubeDim + 1 - j))
@@ -2321,12 +2736,13 @@ def algFriStatementOf {ell friRounds : Nat} (stmt : AlgebraicContentCert) (friIn
 
 /-! ### Unified Pointwise Constraint Evaluator (`evalCombinedPhiC`) -/
 
-/-- Evaluate the unified batched constraint + HVZK-mask polynomial `Φ` over `C8` at a point where
-all public weights on `{0, 1}^d` and all 15 witness/mask columns `(y0..y14)` are supplied. -/
+/-- Evaluate the unified batched constraint + full-rank 4-column HVZK-mask polynomial `Φ` over `C8`
+at a point where all public weights on `{0, 1}^d`, the characteristic-2 vanishing sumcheck mask
+evaluators `(zetaDp1, pLinZ, z2Val, z3Val)`, and all 16 witness/mask columns `(y0..y15)` are supplied. -/
 def evalCombinedPhiC
     (claim : ClaimData) (L d : Nat) (initField : C8)
     (α γ β ρLin : C8)
-    (x0Val xdVal : C8)
+    (xdVal zetaDp1 pLinZ z2Val z3Val : C8)
     (chi0 chiLast chiD pLtS pLm1S pLtC pLm1C pLtD pTabGammaD pTabD pLtTheta pTabOne : C8)
     (pBitD pBitC pBitPrevC pStep1 pStep2 : C8)
     (ys : Array C8) : C8 :=
@@ -2345,8 +2761,9 @@ def evalCombinedPhiC
   let yHInv := ys.getD 10 zero
   let yGInv := ys.getD 11 zero
   let yMlin := ys.getD 12 zero
-  let yUA := ys.getD 13 zero
-  let yUB := ys.getD 14 zero
+  let yU1 := ys.getD 13 zero
+  let yU2 := ys.getD 14 zero
+  let yU3 := ys.getD 15 zero
   let α2 := mulC α α
   let α3 := mulC α2 α
   let eTup := addC (addC yB (mulC α yS)) (addC (mulC α2 yNX) (mulC α3 yH))
@@ -2384,9 +2801,9 @@ def evalCombinedPhiC
   let eqs : List C8 := [e0, e1, e2, e3, e4, e5, e6, e7, e8, e9, e10]
   let witBatch := evalCoeffs eqs β
   let witTerm := mulC (addC one xdVal) witBatch
-  let maskLin := mulC ρLin yMlin
-  let maskQuad := mulC (addC (mulC x0Val x0Val) x0Val) (mulC yUA yUB)
-  addC witTerm (addC maskLin maskQuad)
+  let p1Full := addC pLinZ (mulC zetaDp1 xdVal)
+  let maskBody := addC (addC yMlin (mulC p1Full yU1)) (addC (mulC z2Val yU2) (mulC z3Val yU3))
+  addC witTerm (mulC ρLin maskBody)
 
 /-- Evaluate the terminal sumcheck identity `Φ(r; colEvalsAtR)` at `r : Array C8` (`size = d + 1`). -/
 def evalTerminalPhiC (stmt : AlgebraicContentCert) (t : DfaTable)
@@ -2397,8 +2814,25 @@ def evalTerminalPhiC (stmt : AlgebraicContentCert) (t : DfaTable)
   let L := stmt.recordLength
   let mTab := t.states * 256
   let rCube := rFull.extract 0 d
-  let x0Val := rFull.getD 0 zero
   let xdVal := rFull.getD d zero
+  let (zetaDp1, pLinZ, z2Val, z3Val) := Id.run do
+    let mut zPow := zetaC
+    let mut accP1 := zero
+    let mut accZ2 := zero
+    let mut accZ3 := zero
+    for k in [0:d] do
+      let rk := rFull.getD k zero
+      let rk2 := mulC rk rk
+      let rk3 := mulC rk2 rk
+      accP1 := addC accP1 (mulC zPow rk)
+      accZ2 := addC accZ2 (mulC zPow (addC rk2 rk))
+      accZ3 := addC accZ3 (mulC zPow (addC rk3 rk2))
+      zPow := mulC zPow zetaC
+    let rd2 := mulC xdVal xdVal
+    let rd3 := mulC rd2 xdVal
+    accZ2 := addC accZ2 (mulC zPow (addC rd2 xdVal))
+    accZ3 := addC accZ3 (mulC zPow (addC rd3 rd2))
+    return (zPow, accP1, accZ2, accZ3)
   let chi0 := chiAtNatC d 0 rCube
   let chiLast := chiAtNatC d (L - 1) rCube
   let chiD := chiAtNatC d d rCube
@@ -2452,7 +2886,8 @@ def evalTerminalPhiC (stmt : AlgebraicContentCert) (t : DfaTable)
           return (acc1, acc2)
         (bD, bC, bPrev, s1, s2)
     | _ => (zero, zero, zero, zero, zero)
-  evalCombinedPhiC stmt.claim L d (leafOfNat t.initial) α γ β ρLin x0Val xdVal
+  evalCombinedPhiC stmt.claim L d (leafOfNat t.initial) α γ β ρLin
+    xdVal zetaDp1 pLinZ z2Val z3Val
     chi0 chiLast chiD pLtS pLm1S pLtC pLm1C pLtD pTabGammaD pTabD pLtTheta pTabOne
     pBitD pBitC pBitPrevC pStep1 pStep2 ys
 
@@ -2475,123 +2910,226 @@ def runSumcheckVerifier (d : Nat) (r3Bytes : List UInt8) (polys : Array PolyDeg4
   if rd == Coordinate.zero 8 || rd == Coordinate.one 8 then return none
   return some (rAcc, claim)
 
-/-- Verify a pair opening `(leftLeaf, rightLeaf, pairPath)` at level `j` and index `k < 2^(ell - j - 1)`. -/
+/-- Sibling address obtained by setting the top bit of a left-half Boolean address to `true`. -/
+def flipLastBit : {k : Nat} → (Fin (k + 1) → Bool) → (Fin (k + 1) → Bool)
+  | 0, _ => fun _ => true
+  | _ + 1, addr => Fin.cases (addr 0) (fun i => flipLastBit (fun j => addr j.succ) i)
+
+/-- Verify a pair opening `(leftLeaf, rightLeaf, pairPath)` at level `j` and left-half index `k < 2^(ell - j - 1)`. -/
 def verifyPairAtLevel (ell j : Nat) (root : Digest) (k : Nat)
     (leftLeaf rightLeaf : C8) (pairPath : List Digest) : Bool :=
-  if h : k < 2 ^ (ell - j) then
-    let fullPath := pairPath ++ [merkleDomainsC.hashLeaf codecC rightLeaf]
-    decide (recompute merkleDomainsC (merkleDomainsC.hashLeaf codecC leftLeaf)
-      (binaryAddressBits (ell - j) ⟨k, h⟩) fullPath = some root)
+  if hpos : 0 < ell - j then
+    if h : k < 2 ^ (ell - j) then
+      let addr := binaryAddressBits (ell - j) ⟨k, h⟩
+      let fullPath := pairPath ++ [merkleDomainsC.hashLeaf codecC rightLeaf]
+      !(addr ⟨ell - j - 1, Nat.sub_lt hpos Nat.one_pos⟩) &&
+      decide (recompute merkleDomainsC (merkleDomainsC.hashLeaf codecC leftLeaf) addr fullPath = some root)
+    else false
   else false
 
+private theorem recompute_flipLastBit_pair :
+    ∀ {k : Nat} (leafL leafR : Digest) (addr : Fin (k + 1) → Bool) (pairPath : List Digest),
+      addr ⟨k, Nat.lt_succ_self k⟩ = false →
+      recompute merkleDomainsC leafR (flipLastBit addr) (pairPath ++ [leafL]) =
+        recompute merkleDomainsC leafL addr (pairPath ++ [leafR])
+  | 0, leafL, leafR, addr, pairPath, hlast => by
+      cases pairPath with
+      | nil =>
+          have h0 : addr 0 = false := hlast
+          simp [flipLastBit, recompute, h0]
+      | cons s rest =>
+          cases rest <;> simp [recompute]
+  | k + 1, leafL, leafR, addr, pairPath, hlast => by
+      cases pairPath with
+      | nil => simp [recompute]
+      | cons sib rest =>
+          have hlast' : (fun j : Fin (k + 1) => addr j.succ) ⟨k, Nat.lt_succ_self k⟩ = false := hlast
+          have ih := recompute_flipLastBit_pair leafL leafR (fun j => addr j.succ) rest hlast'
+          have htail : (fun i : Fin (k + 1) => flipLastBit addr i.succ) =
+              flipLastBit (fun j => addr j.succ) := by
+            funext i; rfl
+          have hhead : flipLastBit addr 0 = addr 0 := rfl
+          rw [List.cons_append, List.cons_append, recompute, recompute, htail, hhead, ih]
+
+/-- **Pair-Opening Merkle Binding Reduction (`verifyPairAtLevel_succ_eq_or_collision`)**:
+an accepted level-0 pair opening against `cubeRoot merkleDomainsC codecC col` authenticates **both**
+`leftLeaf = col addrL` and `rightLeaf = col (flipLastBit addrL)`, or exposes an input-pinned
+`MerkleCollision merkleDomainsC codecC`. -/
+theorem verifyPairAtLevel_succ_eq_or_collision {m : Nat}
+    (col : (Fin (m + 1) → Bool) → C8) (k : Nat) (leftLeaf rightLeaf : C8) (pairPath : List Digest)
+    (hok : verifyPairAtLevel (m + 1) 0 (cubeRoot merkleDomainsC codecC col) k leftLeaf rightLeaf pairPath = true) :
+    (∃ hk : k < 2 ^ (m + 1),
+      let addrL := binaryAddressBits (m + 1) ⟨k, hk⟩
+      leftLeaf = col addrL ∧ rightLeaf = col (flipLastBit addrL)) ∨
+    MerkleCollision merkleDomainsC codecC := by
+  unfold verifyPairAtLevel at hok
+  have hpos : 0 < (m + 1) - 0 := Nat.zero_lt_succ m
+  simp only [hpos, ↓reduceDIte] at hok
+  split at hok
+  · rename_i hk
+    simp only [Bool.and_eq_true, Bool.not_eq_true', decide_eq_true_eq] at hok
+    rcases hok with ⟨hlast, hrecL⟩
+    let addrL : Fin (m + 1) → Bool := binaryAddressBits (m + 1) ⟨k, hk⟩
+    have hlast' : addrL ⟨m, Nat.lt_succ_self m⟩ = false := hlast
+    have hrecR : recompute merkleDomainsC (merkleDomainsC.hashLeaf codecC rightLeaf)
+        (flipLastBit addrL) (pairPath ++ [merkleDomainsC.hashLeaf codecC leftLeaf]) =
+        some (cubeRoot merkleDomainsC codecC col) :=
+      (recompute_flipLastBit_pair _ _ addrL pairPath hlast').trans hrecL
+    have htrueL := recompute_cubePath merkleDomainsC codecC col addrL
+    have htrueR := recompute_cubePath merkleDomainsC codecC col (flipLastBit addrL)
+    rcases recompute_equal_root_implies_leaf_eq_or_node_collision merkleDomainsC
+        _ _ addrL _ _ _ hrecL htrueL with hleafL | hnodeL
+    · rcases recompute_equal_root_implies_leaf_eq_or_node_collision merkleDomainsC
+          _ _ (flipLastBit addrL) _ _ _ hrecR htrueR with hleafR | hnodeR
+      · by_cases hl : leftLeaf = col addrL
+        · by_cases hr : rightLeaf = col (flipLastBit addrL)
+          · exact Or.inl ⟨hk, hl, hr⟩
+          · right; left
+            refine ⟨rightLeaf, col (flipLastBit addrL), ?_, ?_⟩
+            · exact fun heq => hr (leafInput_injective codecC heq)
+            · simpa only [hashLeaf_eq_xof] using hleafR
+        · right; left
+          refine ⟨leftLeaf, col addrL, ?_, ?_⟩
+          · exact fun heq => hl (leafInput_injective codecC heq)
+          · simpa only [hashLeaf_eq_xof] using hleafL
+      · exact Or.inr (Or.inr hnodeR)
+    · exact Or.inr (Or.inr hnodeL)
+  · simp at hok
+
+/-- Verify one query `a : Fin fq` across all 4 committed coset roots, the level-0 FRI batch leaf,
+and all `d + 1` rounds of interleaved BaseFold (`sBF`) down to `r.bfFinalCoeff`. -/
+def checkSingleQueryWeld {ell friRounds fq : Nat} (hfrPos : 0 < friRounds) (d : Nat)
+    (stmt : AlgebraicContentCert) (r : AlgebraicPrivateReceipt ell friRounds fq)
+    (sBF : Array C8) (η ρBf ρFri : C8) (a : Fin fq) : Bool :=
+  let seed := (r.friReceipt.querySeed a).val
+  let half0 := 2 ^ (ell - 1)
+  let k0 := seed % half0
+  let cOp := r.contentOps[a.val]!
+  let p1Op := r.phase1Ops[a.val]!
+  let mOp := r.multOps[a.val]!
+  let p3Op := r.phase3Ops[a.val]!
+  let friOp0 := r.friReceipt.opening ⟨0, hfrPos⟩ a
+  decide (p1Op.leftCols.size = 8 ∧ p1Op.rightCols.size = 8 ∧
+          p3Op.leftCols.size = 8 ∧ p3Op.rightCols.size = 8) &&
+  verifyPairAtLevel ell 0 stmt.contentRoot k0 cOp.left cOp.right cOp.pairPath &&
+  verifyPairAtLevel ell 0 r.phase1Root k0
+    (vecLeafC algPhase1LeafCust p1Op.leftCols.toList)
+    (vecLeafC algPhase1LeafCust p1Op.rightCols.toList) p1Op.pairPath &&
+  verifyPairAtLevel ell 0 r.multRoot k0 mOp.left mOp.right mOp.pairPath &&
+  verifyPairAtLevel ell 0 r.phase3Root k0
+    (vecLeafC algPhase3LeafCust p3Op.leftCols.toList)
+    (vecLeafC algPhase3LeafCust p3Op.rightCols.toList) p3Op.pairPath &&
+  (let leftAll16 : List C8 :=
+      cOp.left :: (p1Op.leftCols.toList ++ [mOp.left] ++ (p3Op.leftCols.extract 0 6).toList)
+   let rightAll16 : List C8 :=
+      cOp.right :: (p1Op.rightCols.toList ++ [mOp.right] ++ (p3Op.rightCols.extract 0 6).toList)
+   let leftBfMask := p3Op.leftCols[6]!
+   let rightBfMask := p3Op.rightCols[6]!
+   let leftFriMask := p3Op.leftCols[7]!
+   let rightFriMask := p3Op.rightCols[7]!
+   let expectedFriL := addC leftFriMask (mulC ρFri (evalCoeffs leftAll16 ρFri))
+   let expectedFriR := addC rightFriMask (mulC ρFri (evalCoeffs rightAll16 ρFri))
+   let h0L := addC leftBfMask (mulC ρBf (evalCoeffs leftAll16 η))
+   let h0R := addC rightBfMask (mulC ρBf (evalCoeffs rightAll16 η))
+   decide (friOp0.left = expectedFriL ∧ friOp0.right = expectedFriR) &&
+   (List.range (d + 1)).all fun j =>
+     let halfJ := 2 ^ (ell - j - 1)
+     let kJ := seed % halfJ
+     let (curL, curR, pathOk) :=
+       if j = 0 then (h0L, h0R, true)
+       else
+         let rowOps := r.evalFoldOps[j - 1]!
+         if rowOps.size != fq then (Coordinate.zero 8, Coordinate.zero 8, false)
+         else
+           let opJ := rowOps[a.val]!
+           (opJ.left, opJ.right,
+            verifyPairAtLevel ell j r.evalFoldRoots[j - 1]! kJ opJ.left opJ.right opJ.pairPath)
+     let nextVal : C8 :=
+       if j + 1 < d + 1 then
+         let nextRow := r.evalFoldOps[j]!
+         if nextRow.size != fq then Coordinate.zero 8
+         else
+           let nextOp := nextRow[a.val]!
+           let topBit := (kJ / (2 ^ (ell - (j + 1) - 1))) % 2
+           if topBit = 0 then nextOp.left else nextOp.right
+       else r.bfFinalCoeff
+     let pivJ := pivotC (unitBasis ell) j
+     let domLo := domC (unitBasis ell) (cosetOffset ell) j
+       ((additiveFriLevelEquivPowerTwo ell j).symm ⟨kJ % 2 ^ (ell - j), Nat.mod_lt _ (by positivity)⟩)
+     let alphaEval := mulC pivJ sBF[j]!
+     pathOk &&
+     decide (mulC (addC nextVal curL) pivJ =
+       mulC (addC domLo alphaEval) (addC curL curR)))
+
+/-- Verify all `fq` coherent coset + interleaved BaseFold query welds. -/
+def checkQueryWelds {ell friRounds fq : Nat} (hfrPos : 0 < friRounds) (d : Nat)
+    (stmt : AlgebraicContentCert) (r : AlgebraicPrivateReceipt ell friRounds fq)
+    (sBF : Array C8) (η ρBf ρFri : C8) : Bool :=
+  (List.finRange fq).all (checkSingleQueryWeld hfrPos d stmt r sBF η ρBf ρFri)
+
 /-- **Executable Zero-Byte-Leakage Algebraic Certificate Verifier (`checkAlgebraic`)**:
-verifies statement/claim guards, authenticates `r.dfa` against `stmt.automatonRoot`, checks the
-`(d + 1)`-round degree-`≤ 4` sumcheck + terminal `Φ(r)` identity, runs `Tower256SuccinctCheck.check`
-on `r.friReceipt` (`offset = cosetOffset ell`), and checks all `friQueries` level-0 coset welds +
-coherent `(d + 1)`-round `evalFold` chains to `v_batch` (`0` field inversions!). -/
+verifies statement/claim guards (including `10 ≤ cubeDim`, `2 * friQueries + 1 ≤ 2^cubeDim`, and
+`ell = stmt.friEll`), authenticates `r.dfa` against `stmt.automatonRoot`, checks the `(d + 1)`-round
+degree-`≤ 4` HVZK sumcheck + terminal `Φ(r)` identity, runs the interleaved `(d + 1)`-round BaseFold
+evaluation-opening sumcheck (`runBasefoldVerifier`), runs `Tower256SuccinctCheck.check` on
+`r.friReceipt` (`offset = cosetOffset ell`), and checks all `friQueries` level-0 coset welds +
+coherent `(d + 1)`-round BaseFold chains to `r.bfFinalCoeff` (`0` field inversions!). -/
 def checkAlgebraic {ell friRounds fq : Nat} (stmt : AlgebraicContentCert)
     (r : AlgebraicPrivateReceipt ell friRounds fq) : Bool :=
   let d := stmt.cubeDim
-  if hm : friRounds ≤ ell then
-    if hell24 : ell ≤ 24 then
-      let hell256 : ell ≤ 256 := le_trans hell24 (by norm_num)
-      let claimPublicOk : Bool := match stmt.claim with
-        | .accept _ => true
-        | .count n => decide (n ≤ stmt.recordLength)
-        | .bound lo hi => decide (lo ≤ hi ∧ lo ≤ stmt.recordLength)
-      decide (friRounds = d + 1 ∧ fq = stmt.friQueries) &&
-      decide (2 ≤ d ∧ d ≤ 22 ∧ d + 2 ≤ ell) &&
-      decide (0 < stmt.recordLength ∧ stmt.recordLength ≤ 2 ^ d) &&
-      decide (1 ≤ stmt.friQueries ∧ stmt.friQueries ≤ 4096) &&
-      claimPublicOk &&
-      decide (0 < r.dfa.states ∧ r.dfa.WellFormed ∧ r.dfa.states * 256 ≤ 2 ^ d) &&
-      decide (automatonCommit r.dfa = stmt.automatonRoot) &&
-      decide (r.colEvalsAtR.size = 15 ∧ r.evalFoldRoots.size = d) &&
-      decide (r.contentOps.size = fq ∧ r.phase1Ops.size = fq ∧
-              r.multOps.size = fq ∧ r.phase3Ops.size = fq ∧
-              r.evalFoldOps.size = d) &&
-      (let r1Bytes := algRound1Transcript stmt r.phase1Root
-       let α := deriveChalAt algRound1ChalCust r1Bytes 0
-       let θ := deriveChalAt algRound1ChalCust r1Bytes 1
-       let r2Bytes := algRound2Transcript stmt r.phase1Root r.multRoot
-       let γ := deriveChalAt algRound2ChalCust r2Bytes 0
-       let r3Bytes := algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root
-       let β := deriveChalAt algRound3ChalCust r3Bytes 0
-       let τS := deriveChalAt algRound3ChalCust r3Bytes 1
-       let τC := deriveChalAt algRound3ChalCust r3Bytes 2
-       let τD := deriveChalAt algRound3ChalCust r3Bytes 3
-       let ρLin := deriveChalAt algRound3ChalCust r3Bytes 4
-       match runSumcheckVerifier d r3Bytes r.sumcheckPolys with
-       | none => false
-       | some (rFull, scFinalClaim) =>
-           let phiVal := evalTerminalPhiC stmt r.dfa α θ γ β τS τC τD ρLin rFull r.colEvalsAtR
-           let batchBytes := algBatchTranscript r3Bytes r.sumcheckPolys r.colEvalsAtR
-           let η := deriveChalAt algBatchChalCust batchBytes 0
-           let ρ := deriveChalAt algBatchChalCust batchBytes 1
-           let vBatch := evalCoeffs r.colEvalsAtR.toList η
-           let sFri := algFriStatementOf stmt r.friInitialRoot hm hell256
-           let pins := algFriPins batchBytes r.evalFoldRoots
-           decide (phiVal = scFinalClaim) &&
-           Tower256SuccinctCheck.check sFri pins r.friReceipt &&
-           (List.finRange fq).all fun a =>
-             let seed := (r.friReceipt.querySeed a).val
-             let half0 := 2 ^ (ell - 1)
-             let k0 := seed % half0
-             let cOp := r.contentOps[a.val]!
-             let p1Op := r.phase1Ops[a.val]!
-             let mOp := r.multOps[a.val]!
-             let p3Op := r.phase3Ops[a.val]!
-             let friOp0 := r.friReceipt.opening ⟨0, by omega⟩ a
-             decide (p1Op.leftCols.size = 8 ∧ p1Op.rightCols.size = 8 ∧
-                     p3Op.leftCols.size = 6 ∧ p3Op.rightCols.size = 6) &&
-             verifyPairAtLevel ell 0 stmt.contentRoot k0 cOp.left cOp.right cOp.pairPath &&
-             verifyPairAtLevel ell 0 r.phase1Root k0
-               (vecLeafC algPhase1LeafCust p1Op.leftCols.toList)
-               (vecLeafC algPhase1LeafCust p1Op.rightCols.toList) p1Op.pairPath &&
-             verifyPairAtLevel ell 0 r.multRoot k0 mOp.left mOp.right mOp.pairPath &&
-             verifyPairAtLevel ell 0 r.phase3Root k0
-               (vecLeafC algPhase3LeafCust p3Op.leftCols.toList)
-               (vecLeafC algPhase3LeafCust p3Op.rightCols.toList) p3Op.pairPath &&
-             (let leftAll15 : List C8 :=
-                cOp.left :: (p1Op.leftCols.toList ++ [mOp.left] ++ (p3Op.leftCols.extract 0 5).toList)
-              let rightAll15 : List C8 :=
-                cOp.right :: (p1Op.rightCols.toList ++ [mOp.right] ++ (p3Op.rightCols.extract 0 5).toList)
-              let leftFriMask := p3Op.leftCols[5]!
-              let rightFriMask := p3Op.rightCols[5]!
-              let expectedFriL := addC leftFriMask (mulC ρ (evalCoeffs leftAll15 ρ))
-              let expectedFriR := addC rightFriMask (mulC ρ (evalCoeffs rightAll15 ρ))
-              let h0L := evalCoeffs leftAll15 η
-              let h0R := evalCoeffs rightAll15 η
-              decide (friOp0.left = expectedFriL ∧ friOp0.right = expectedFriR) &&
-              -- Check all `d + 1` coherent `evalFold` equations from `(h0L, h0R)` to `vBatch`!
-              (List.range (d + 1)).all fun j =>
-                let halfJ := 2 ^ (ell - j - 1)
-                let kJ := seed % halfJ
-                let (curL, curR, pathOk) :=
-                  if j = 0 then (h0L, h0R, true)
-                  else
-                    let rowOps := r.evalFoldOps[j - 1]!
-                    if rowOps.size != fq then (Coordinate.zero 8, Coordinate.zero 8, false)
-                    else
-                      let opJ := rowOps[a.val]!
-                      (opJ.left, opJ.right,
-                       verifyPairAtLevel ell j r.evalFoldRoots[j - 1]! kJ opJ.left opJ.right opJ.pairPath)
-                let nextVal : C8 :=
-                  if j + 1 < d + 1 then
-                    let nextRow := r.evalFoldOps[j]!
-                    if nextRow.size != fq then Coordinate.zero 8
-                    else
-                      let nextOp := nextRow[a.val]!
-                      let topBit := (kJ / (2 ^ (ell - (j + 1) - 1))) % 2
-                      if topBit = 0 then nextOp.left else nextOp.right
-                  else vBatch
-                let pivJ := pivotC (unitBasis ell) j
-                let domLo := domC (unitBasis ell) (cosetOffset ell) j
-                  ((additiveFriLevelEquivPowerTwo ell j).symm ⟨kJ % 2 ^ (ell - j), Nat.mod_lt _ (by positivity)⟩)
-                let alphaEval := mulC pivJ rFull[j]!
-                pathOk &&
-                decide (mulC (addC nextVal curL) pivJ =
-                  mulC (addC domLo alphaEval) (addC curL curR))))
+  if hShape : friRounds = d + 1 ∧ ell = stmt.friEll ∧ fq = stmt.friQueries then
+    if hm : friRounds ≤ ell then
+      if hell24 : ell ≤ 24 then
+        let hell256 : ell ≤ 256 := le_trans hell24 (by norm_num)
+        let hfrPos : 0 < friRounds := by omega
+        let claimPublicOk : Bool := match stmt.claim with
+          | .accept _ => true
+          | .count n => decide (n ≤ stmt.recordLength)
+          | .bound lo hi => decide (lo ≤ hi ∧ lo ≤ stmt.recordLength)
+        decide (10 ≤ d ∧ d ≤ 22 ∧ d + 2 ≤ ell) &&
+        decide (0 < stmt.recordLength ∧ stmt.recordLength ≤ 2 ^ d) &&
+        decide (1 ≤ stmt.friQueries ∧ 2 * stmt.friQueries + 1 ≤ 2 ^ d) &&
+        claimPublicOk &&
+        decide (0 < r.dfa.states ∧ r.dfa.WellFormed ∧ r.dfa.states * 256 ≤ 2 ^ d) &&
+        decide (automatonCommit r.dfa = stmt.automatonRoot) &&
+        decide (r.colEvalsAtR.size = 17 ∧ r.bfPolys.size = d + 1 ∧ r.evalFoldRoots.size = d) &&
+        decide (r.contentOps.size = fq ∧ r.phase1Ops.size = fq ∧
+                r.multOps.size = fq ∧ r.phase3Ops.size = fq ∧
+                r.evalFoldOps.size = d) &&
+        (let r1Bytes := algRound1Transcript stmt r.phase1Root
+         let α := deriveChalAt algRound1ChalCust r1Bytes 0
+         let θ := deriveChalAt algRound1ChalCust r1Bytes 1
+         let r2Bytes := algRound2Transcript stmt r.phase1Root r.multRoot
+         let γ := deriveChalAt algRound2ChalCust r2Bytes 0
+         let r3Bytes := algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root
+         let β := deriveChalAt algRound3ChalCust r3Bytes 0
+         let τS := deriveChalAt algRound3ChalCust r3Bytes 1
+         let τC := deriveChalAt algRound3ChalCust r3Bytes 2
+         let τD := deriveChalAt algRound3ChalCust r3Bytes 3
+         let ρLin := deriveChalAt algRound3ChalCust r3Bytes 4
+         if ρLin == Coordinate.zero 8 then false
+         else
+           match runSumcheckVerifier d r3Bytes r.sumcheckPolys with
+           | none => false
+           | some (rFull, scFinalClaim) =>
+               let phiVal := evalTerminalPhiC stmt r.dfa α θ γ β τS τC τD ρLin rFull r.colEvalsAtR
+               let batchBytes := algBatchTranscript r3Bytes r.sumcheckPolys r.colEvalsAtR
+               let η := deriveChalAt algBatchChalCust batchBytes 0
+               let ρBf := deriveChalAt algBatchChalCust batchBytes 1
+               let ρFri := deriveChalAt algBatchChalCust batchBytes 2
+               if ρBf == Coordinate.zero 8 || ρFri == Coordinate.zero 8 then false
+               else
+                 let vBatch := evalCoeffs (r.colEvalsAtR.extract 0 16).toList η
+                 let vBfClaimed := addC r.colEvalsAtR[16]! (mulC ρBf vBatch)
+                 match runBasefoldVerifier d batchBytes rFull r.bfPolys r.evalFoldRoots r.bfFinalCoeff vBfClaimed with
+                 | none => false
+                 | some (sBF, bfStmtBytes) =>
+                     let sFri := algFriStatementOf stmt r.friInitialRoot hm hell256
+                     let pins := algFriPins bfStmtBytes
+                     decide (phiVal = scFinalClaim) &&
+                     Tower256SuccinctCheck.check sFri pins r.friReceipt &&
+                     checkQueryWelds hfrPos d stmt r sBF η ρBf ρFri)
+      else false
     else false
   else false
 
@@ -2612,29 +3150,171 @@ def AlgebraicPrivateHolds (stmt : AlgebraicContentCert) (t : DfaTable)
     (w : List UInt8) (contentMask : List C8) : Prop :=
   CommitsAlgebraic stmt t w contentMask ∧ w ≠ [] ∧ Dfaops.satisfiesClaim t stmt.claim w = true
 
-/-- Prover's committed unmasked witness + LogUp columns `wit` together with its committed coset
-evaluation columns (for `phase1Root`, `multRoot`, `phase3Root`). -/
-structure CommittedAlgebraicStrategy (ell d : Nat) (w : List UInt8) (contentMask : List C8) where
-  wit        : AlgebraicTraceWitness d
-  phase1Cols : (Fin ell → Bool) → List C8
-  multCol    : (Fin ell → Bool) → C8
-  phase3Cols : (Fin ell → Bool) → List C8
-  byteLinked : ∀ (hd : w.length ≤ 2 ^ d) (i : Nat) (h : i < w.length),
+/-- Half-cube table on `{0, 1}^{d+1}` for Phase-1 witness column `c : Fin 8`. -/
+noncomputable def phase1ColTable (d : Nat) (wit : AlgebraicTraceWitness d)
+    (p1Masks : Fin 8 → (Fin d → Bool) → C8) (c : Fin 8) : (Fin (d + 1) → Bool) → C8 :=
+  let colF : Fin (2 ^ d) → Tower256 := match c.val with
+    | 0 => wit.state
+    | 1 => wit.next
+    | 2 => wit.hit
+    | 3 => wit.cntPow
+    | 4 => wit.accLo
+    | 5 => wit.bitLo
+    | 6 => wit.accHi
+    | _ => wit.bitHi
+  halfCubeExtend (fun b => toField.symm (colF (binaryCubeIndexEquiv d b))) (p1Masks c)
+
+/-- Compressed Phase-1 leaf column on `Ω_0` (`2^ell` leaves). -/
+noncomputable def phase1LeafCol (ell d : Nat) (wit : AlgebraicTraceWitness d)
+    (p1Masks : Fin 8 → (Fin d → Bool) → C8) : (Fin ell → Bool) → C8 :=
+  fun addr =>
+    vecLeafC algPhase1LeafCust
+      ((List.finRange 8).map fun c => cosetMerkleCol ell (d + 1) (phase1ColTable d wit p1Masks c) addr)
+
+noncomputable def phase1Commit (ell d : Nat) (wit : AlgebraicTraceWitness d)
+    (p1Masks : Fin 8 → (Fin d → Bool) → C8) : Digest :=
+  cubeRoot merkleDomainsC codecC (phase1LeafCol ell d wit p1Masks)
+
+/-- Half-cube table on `{0, 1}^{d+1}` for Phase-2 `LogUp256` multiplicity column. -/
+noncomputable def multColTable (d : Nat) (wit : AlgebraicTraceWitness d)
+    (multMask : (Fin d → Bool) → C8) : (Fin (d + 1) → Bool) → C8 :=
+  halfCubeExtend (fun b => toField.symm (wit.tabMult (binaryCubeIndexEquiv d b))) multMask
+
+noncomputable def multCommit (ell d : Nat) (wit : AlgebraicTraceWitness d)
+    (multMask : (Fin d → Bool) → C8) : Digest :=
+  cubeRoot merkleDomainsC codecC (cosetMerkleCol ell (d + 1) (multColTable d wit multMask))
+
+/-- `(d + 1)`-variable table on `{0, 1}^{d+1}` for Phase-3 column `c : Fin 8`. -/
+noncomputable def phase3ColTable (d : Nat) (wit : AlgebraicTraceWitness d)
+    (hMask gMask : (Fin d → Bool) → C8)
+    (mLin u1 u2 u3 bfMask friMask : (Fin (d + 1) → Bool) → C8) (c : Fin 8) : (Fin (d + 1) → Bool) → C8 :=
+  match c.val with
+  | 0 => halfCubeExtend (fun b => toField.symm (wit.traceInv (binaryCubeIndexEquiv d b))) hMask
+  | 1 => halfCubeExtend (fun b => toField.symm (wit.tabInv (binaryCubeIndexEquiv d b))) gMask
+  | 2 => mLin
+  | 3 => u1
+  | 4 => u2
+  | 5 => u3
+  | 6 => bfMask
+  | _ => friMask
+
+/-- Compressed Phase-3 leaf column on `Ω_0` (`2^ell` leaves). -/
+noncomputable def phase3LeafCol (ell d : Nat) (wit : AlgebraicTraceWitness d)
+    (hMask gMask : (Fin d → Bool) → C8)
+    (mLin u1 u2 u3 bfMask friMask : (Fin (d + 1) → Bool) → C8) : (Fin ell → Bool) → C8 :=
+  fun addr =>
+    vecLeafC algPhase3LeafCust
+      ((List.finRange 8).map fun c =>
+        cosetMerkleCol ell (d + 1) (phase3ColTable d wit hMask gMask mLin u1 u2 u3 bfMask friMask c) addr)
+
+noncomputable def phase3Commit (ell d : Nat) (wit : AlgebraicTraceWitness d)
+    (hMask gMask : (Fin d → Bool) → C8)
+    (mLin u1 u2 u3 bfMask friMask : (Fin (d + 1) → Bool) → C8) : Digest :=
+  cubeRoot merkleDomainsC codecC (phase3LeafCol ell d wit hMask gMask mLin u1 u2 u3 bfMask friMask)
+
+/-- Prover's committed unmasked witness + `LogUp256` columns `wit` and blinding masks, pinned
+directly to the receipt's `(phase1Root, multRoot, phase3Root)` commitments. -/
+structure CommittedAlgebraicStrategy (ell d : Nat) (rPhase1 rMult rPhase3 : Digest)
+    (w : List UInt8) (contentMask : List C8) where
+  wit           : AlgebraicTraceWitness d
+  p1Masks       : Fin 8 → (Fin d → Bool) → C8
+  multMask      : (Fin d → Bool) → C8
+  hMask         : (Fin d → Bool) → C8
+  gMask         : (Fin d → Bool) → C8
+  mLin          : (Fin (d + 1) → Bool) → C8
+  u1            : (Fin (d + 1) → Bool) → C8
+  u2            : (Fin (d + 1) → Bool) → C8
+  u3            : (Fin (d + 1) → Bool) → C8
+  bfMask        : (Fin (d + 1) → Bool) → C8
+  friMask       : (Fin (d + 1) → Bool) → C8
+  byteLinked    : ∀ (hd : w.length ≤ 2 ^ d) (i : Nat) (h : i < w.length),
     wit.byte ⟨i, lt_of_lt_of_le h hd⟩ = toField (halfCubeByteTable d w contentMask
       (Fin.snoc (binaryAddressBits d ⟨i, lt_of_lt_of_le h hd⟩) false))
+  phase1Root_eq : phase1Commit ell d wit p1Masks = rPhase1
+  multRoot_eq   : multCommit ell d wit multMask = rMult
+  phase3Root_eq : phase3Commit ell d wit hMask gMask mLin u1 u2 u3 bfMask friMask = rPhase3
 
-/-- **Explicit Challenge-Pinned Algebraic / Sumcheck / Fold Escape Event (`AlgebraicEscapeEvent`)**:
-never `¬ PrivateHolds` — every disjunct is a concrete polynomial root or fold-laundering event:
+/-- Unified 17-column table (`cols 0..16`, `col 16 = bfMask`) committed by `(w, contentMask, strat)`. -/
+noncomputable def stratCol17Table {ell d : Nat} {rP1 rM rP3 : Digest}
+    (w : List UInt8) (contentMask : List C8)
+    (strat : CommittedAlgebraicStrategy ell d rP1 rM rP3 w contentMask)
+    (c : Fin 17) : (Fin (d + 1) → Bool) → C8 :=
+  if _h0 : c.val = 0 then
+    halfCubeByteTable d w contentMask
+  else if _h8 : c.val ≤ 8 then
+    phase1ColTable d strat.wit strat.p1Masks ⟨c.val - 1, by omega⟩
+  else if _h9 : c.val = 9 then
+    multColTable d strat.wit strat.multMask
+  else
+    phase3ColTable d strat.wit strat.hMask strat.gMask strat.mLin strat.u1 strat.u2 strat.u3
+      strat.bfMask strat.friMask ⟨c.val - 10, by omega⟩
+
+/-- True multilinear extension evaluations at `rFull` of all 17 committed witness/BaseFold-mask columns. -/
+noncomputable def stratColEvalsAtR {ell d : Nat} {rP1 rM rP3 : Digest}
+    (w : List UInt8) (contentMask : List C8)
+    (strat : CommittedAlgebraicStrategy ell d rP1 rM rP3 w contentMask)
+    (rFull : Array C8) : Array C8 :=
+  Array.ofFn fun c : Fin 17 =>
+    toField.symm (mle (fun b => toField (stratCol17Table w contentMask strat c b))
+      (fun j : Fin (d + 1) => toField (rFull.getD j.val (Coordinate.zero 8))))
+
+/-- Exact coset-opening agreement at all `fq` Fiat–Shamir `querySeed`s between the receipt's
+opened pairs `(contentOps, phase1Ops, multOps, phase3Ops)` and the committed coset encodings of
+`(w, contentMask, strat)`. -/
+def AllQueryOpsMatchCommitted :
+    {ell friRounds fq : Nat} → {rP1 rM rP3 : Digest} → (d : Nat) → (w : List UInt8) → (contentMask : List C8) →
+    CommittedAlgebraicStrategy ell d rP1 rM rP3 w contentMask →
+    AlgebraicPrivateReceipt ell friRounds fq → Prop
+  | 0, _, _, _, _, _, _, _, _, _, _ => False
+  | m + 1, _, fq, _, _, _, d, w, contentMask, strat, r =>
+      ∀ a : Fin fq,
+        let k0 := (r.friReceipt.querySeed a).val % 2 ^ m
+        ∃ hk : k0 < 2 ^ (m + 1),
+          let addrL := binaryAddressBits (m + 1) ⟨k0, hk⟩
+          let addrR := flipLastBit addrL
+          let cOp := r.contentOps[a.val]!
+          let p1Op := r.phase1Ops[a.val]!
+          let mOp := r.multOps[a.val]!
+          let p3Op := r.phase3Ops[a.val]!
+          cOp.left = cosetMerkleCol (m + 1) (d + 1) (halfCubeByteTable d w contentMask) addrL ∧
+          cOp.right = cosetMerkleCol (m + 1) (d + 1) (halfCubeByteTable d w contentMask) addrR ∧
+          p1Op.leftCols.toList = (List.finRange 8).map
+            (fun c => cosetMerkleCol (m + 1) (d + 1) (phase1ColTable d strat.wit strat.p1Masks c) addrL) ∧
+          p1Op.rightCols.toList = (List.finRange 8).map
+            (fun c => cosetMerkleCol (m + 1) (d + 1) (phase1ColTable d strat.wit strat.p1Masks c) addrR) ∧
+          mOp.left = cosetMerkleCol (m + 1) (d + 1) (multColTable d strat.wit strat.multMask) addrL ∧
+          mOp.right = cosetMerkleCol (m + 1) (d + 1) (multColTable d strat.wit strat.multMask) addrR ∧
+          p3Op.leftCols.toList = (List.finRange 8).map
+            (fun c => cosetMerkleCol (m + 1) (d + 1)
+              (phase3ColTable d strat.wit strat.hMask strat.gMask strat.mLin strat.u1 strat.u2 strat.u3
+                strat.bfMask strat.friMask c) addrL) ∧
+          p3Op.rightCols.toList = (List.finRange 8).map
+            (fun c => cosetMerkleCol (m + 1) (d + 1)
+              (phase3ColTable d strat.wit strat.hMask strat.gMask strat.mLin strat.u1 strat.u2 strat.u3
+                strat.bfMask strat.friMask c) addrR)
+
+/-- Explicit compressed-leaf XOF collision on `algPhase1LeafCust` or `algPhase3LeafCust`. -/
+def PhaseLeafCollision : Prop :=
+  (∃ l₁ l₂, FramedXofCollision cshakeC algPhase1LeafCust l₁ l₂) ∨
+  (∃ l₁ l₂, FramedXofCollision cshakeC algPhase3LeafCust l₁ l₂)
+
+/-- **Explicit Challenge-Pinned Algebraic / Sumcheck / BaseFold Escape Event (`AlgebraicEscapeEvent`)**:
+never `¬ PrivateHolds` — every disjunct is a concrete polynomial root or authenticated BaseFold escape:
 1. `LogupEscapeAt` (`α` cubic tuple collision, `θ` weight root, or `γ` `LogUp` defect root), OR
-2. `StepSystemViolatedYetAccepted`: `wit` violates `AlgebraicStepSystem` at `(α, θ, γ)`, yet the
-   `(β, τ_s, τ_c, τ_d, ρ_lin)` batched `(d + 1)`-round degree-`≤ 4` sumcheck + `(η, ρ)` `evalFold`
-   chains accepted at `rFull`. -/
-def AlgebraicEscapeEvent {ell friRounds fq : Nat} (stmt : AlgebraicContentCert)
+2. `SumcheckTerminalEscape`: `strat.wit` violates `AlgebraicStepSystem` at `(α, θ, γ)` AND
+   `r.colEvalsAtR` equals the true MLE evaluations `stratColEvalsAtR w contentMask strat rFull`,
+   yet `runSumcheckVerifier` + `evalTerminalPhiC = scFinalClaim` accepted at `rFull`, OR
+3. `BasefoldOpeningEscape`: `r.colEvalsAtR ≠ stratColEvalsAtR w contentMask strat rFull`, yet
+   `ρBf ≠ 0`, `runBasefoldVerifier` accepted across all `d + 1` root-interleaved rounds down to
+   `eq(rFull, sBF) * r.bfFinalCoeff`, all `fq` coset openings match the true committed coset tables
+   (`AllQueryOpsMatchCommitted`), AND `checkQueryWelds` passed at post-root challenges `sBF`! -/
+def AlgebraicEscapeEvent {ell friRounds fq : Nat} (hfrPos : 0 < friRounds)
+    (stmt : AlgebraicContentCert)
     (r : AlgebraicPrivateReceipt ell friRounds fq) (t : DfaTable) (w : List UInt8) (contentMask : List C8)
     (hL : 0 < w.length) (hd : w.length ≤ 2 ^ stmt.cubeDim)
     (hdp1 : stmt.cubeDim + 1 ≤ 2 ^ stmt.cubeDim)
     (hTab : t.states * 256 ≤ 2 ^ stmt.cubeDim)
-    (strat : CommittedAlgebraicStrategy ell stmt.cubeDim w contentMask) : Prop :=
+    (strat : CommittedAlgebraicStrategy ell stmt.cubeDim r.phase1Root r.multRoot r.phase3Root w contentMask) : Prop :=
   let r1Bytes := algRound1Transcript stmt r.phase1Root
   let α := toField (deriveChalAt algRound1ChalCust r1Bytes 0)
   let θ := toField (deriveChalAt algRound1ChalCust r1Bytes 1)
@@ -2649,22 +3329,39 @@ def AlgebraicEscapeEvent {ell friRounds fq : Nat} (stmt : AlgebraicContentCert)
   LogupEscapeAt t w.length stmt.cubeDim hd hTab strat.wit α θ γ ∨
   (¬ AlgebraicStepSystem t stmt.claim w stmt.cubeDim hL hd hdp1 hTab α θ γ strat.wit ∧
     ∃ rFull scFinalClaim,
+      r.colEvalsAtR = stratColEvalsAtR w contentMask strat rFull ∧
       runSumcheckVerifier stmt.cubeDim r3Bytes r.sumcheckPolys = some (rFull, scFinalClaim) ∧
       evalTerminalPhiC stmt t
         (deriveChalAt algRound1ChalCust r1Bytes 0)
         (deriveChalAt algRound1ChalCust r1Bytes 1)
         (deriveChalAt algRound2ChalCust r2Bytes 0)
-        β τS τC τD ρLin rFull r.colEvalsAtR = scFinalClaim)
+        β τS τC τD ρLin rFull r.colEvalsAtR = scFinalClaim) ∨
+  (∃ rFull scFinalClaim sBF bfStmtBytes,
+    let batchBytes := algBatchTranscript r3Bytes r.sumcheckPolys r.colEvalsAtR
+    let η := deriveChalAt algBatchChalCust batchBytes 0
+    let ρBf := deriveChalAt algBatchChalCust batchBytes 1
+    let ρFri := deriveChalAt algBatchChalCust batchBytes 2
+    let vBatch := evalCoeffs (r.colEvalsAtR.extract 0 16).toList η
+    let vBfClaimed := addC r.colEvalsAtR[16]! (mulC ρBf vBatch)
+    r.colEvalsAtR ≠ stratColEvalsAtR w contentMask strat rFull ∧
+    ρBf ≠ Coordinate.zero 8 ∧
+    runSumcheckVerifier stmt.cubeDim r3Bytes r.sumcheckPolys = some (rFull, scFinalClaim) ∧
+    runBasefoldVerifier stmt.cubeDim batchBytes rFull r.bfPolys r.evalFoldRoots
+      r.bfFinalCoeff vBfClaimed = some (sBF, bfStmtBytes) ∧
+    AllQueryOpsMatchCommitted stmt.cubeDim w contentMask strat r ∧
+    checkQueryWelds hfrPos stmt.cubeDim stmt r sBF η ρBf ρFri = true)
 
 /-- **Input-Pinned `cSHAKE256` Collision Bundle (`AlgebraicCertCollision`)**:
 every collision names exact left/right `cSHAKE256` inputs (`AutomatonCollision`, `DenseCollision`,
-`FinalCollision`, `ReceiptCollision`, or `pathCollision`), immune to pigeonhole vacuity. -/
+`MerkleCollision`, `PhaseLeafCollision`, `FinalCollision`, or `ReceiptCollision`). -/
 def AlgebraicCertCollision {ell friRounds fq : Nat} (stmt : AlgebraicContentCert)
     (r : AlgebraicPrivateReceipt ell friRounds fq) (hm : friRounds ≤ ell) (hell : ell ≤ 256)
     (t : DfaTable) (T : RawTranscript (rawPcs ell)) : Prop :=
   let sFri := algFriStatementOf stmt r.friInitialRoot hm hell
   AutomatonCollision r.dfa t ∨
   DenseCollision r.dfa.delta t.delta ∨
+  MerkleCollision merkleDomainsC codecC ∨
+  PhaseLeafCollision ∨
   FinalCollision (rawPcs ell) sFri.denote (r.friReceipt.denote sFri) T ∨
   ReceiptCollision (rawPcs ell) (toRawStatement sFri.denote T) (r.friReceipt.denote sFri).toRaw
 
@@ -2683,13 +3380,80 @@ theorem algebraic_escape_prob_lt_two_pow_neg_230
   rw [hpow]
   constructor <;> gcongr <;> exact_mod_cast (by assumption)
 
+private theorem checkQueryWelds_matches_committed_or_collision
+    {m friRounds fq : Nat} (hfrPos : 0 < friRounds)
+    (stmt : AlgebraicContentCert)
+    (r : AlgebraicPrivateReceipt (m + 1) friRounds fq)
+    (w : List UInt8) (contentMask : List C8)
+    (hcRoot : maskedContentCommit (m + 1) stmt.cubeDim w contentMask = stmt.contentRoot)
+    (strat : CommittedAlgebraicStrategy (m + 1) stmt.cubeDim r.phase1Root r.multRoot r.phase3Root w contentMask)
+    (sBF : Array C8) (η ρBf ρFri : C8)
+    (hWelds : checkQueryWelds hfrPos stmt.cubeDim stmt r sBF η ρBf ρFri = true) :
+    AllQueryOpsMatchCommitted stmt.cubeDim w contentMask strat r ∨
+    MerkleCollision merkleDomainsC codecC ∨
+    PhaseLeafCollision := by
+  classical
+  by_cases hAll : AllQueryOpsMatchCommitted stmt.cubeDim w contentMask strat r
+  · exact Or.inl hAll
+  · dsimp only [AllQueryOpsMatchCommitted] at hAll
+    obtain ⟨a, haNot⟩ := Classical.not_forall.mp hAll
+    have haOk : checkSingleQueryWeld hfrPos stmt.cubeDim stmt r sBF η ρBf ρFri a = true :=
+      List.all_eq_true.mp hWelds a (List.mem_finRange a)
+    unfold checkSingleQueryWeld at haOk
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at haOk
+    obtain ⟨⟨⟨⟨⟨⟨hp1L, hp1R, hp3L, hp3R⟩, hcV⟩, hp1V⟩, hmV⟩, hp3V⟩, _⟩ := haOk
+    rw [← hcRoot, maskedContentCommit] at hcV
+    rw [← strat.phase1Root_eq, phase1Commit] at hp1V
+    rw [← strat.multRoot_eq, multCommit] at hmV
+    rw [← strat.phase3Root_eq, phase3Commit] at hp3V
+    rcases verifyPairAtLevel_succ_eq_or_collision _ _ _ _ _ hcV with ⟨hkC, hcL, hcR⟩ | hmc
+    · rcases verifyPairAtLevel_succ_eq_or_collision _ _ _ _ _ hp1V with ⟨hk1, hp1LeafL, hp1LeafR⟩ | hmc
+      · rcases verifyPairAtLevel_succ_eq_or_collision _ _ _ _ _ hmV with ⟨hkM, hmL, hmR⟩ | hmc
+        · rcases verifyPairAtLevel_succ_eq_or_collision _ _ _ _ _ hp3V with ⟨hk3, hp3LeafL, hp3LeafR⟩ | hmc
+          · have hlen1L : (r.phase1Ops[a.val]!).leftCols.toList.length =
+                ((List.finRange 8).map fun c =>
+                  cosetMerkleCol (m + 1) (stmt.cubeDim + 1) (phase1ColTable stmt.cubeDim strat.wit strat.p1Masks c)
+                    (binaryAddressBits (m + 1) ⟨_, hkC⟩)).length := by simp [hp1L]
+            have hlen1R : (r.phase1Ops[a.val]!).rightCols.toList.length =
+                ((List.finRange 8).map fun c =>
+                  cosetMerkleCol (m + 1) (stmt.cubeDim + 1) (phase1ColTable stmt.cubeDim strat.wit strat.p1Masks c)
+                    (flipLastBit (binaryAddressBits (m + 1) ⟨_, hkC⟩))).length := by simp [hp1R]
+            have hlen3L : (r.phase3Ops[a.val]!).leftCols.toList.length =
+                ((List.finRange 8).map fun c =>
+                  cosetMerkleCol (m + 1) (stmt.cubeDim + 1)
+                    (phase3ColTable stmt.cubeDim strat.wit strat.hMask strat.gMask strat.mLin strat.u1 strat.u2 strat.u3
+                      strat.bfMask strat.friMask c)
+                    (binaryAddressBits (m + 1) ⟨_, hkC⟩)).length := by simp [hp3L]
+            have hlen3R : (r.phase3Ops[a.val]!).rightCols.toList.length =
+                ((List.finRange 8).map fun c =>
+                  cosetMerkleCol (m + 1) (stmt.cubeDim + 1)
+                    (phase3ColTable stmt.cubeDim strat.wit strat.hMask strat.gMask strat.mLin strat.u1 strat.u2 strat.u3
+                      strat.bfMask strat.friMask c)
+                    (flipLastBit (binaryAddressBits (m + 1) ⟨_, hkC⟩))).length := by simp [hp3R]
+            rcases vecLeafC_eq_or_collision algPhase1LeafCust _ _ hlen1L hp1LeafL with hp1EqL | hcol1L
+            · rcases vecLeafC_eq_or_collision algPhase1LeafCust _ _ hlen1R hp1LeafR with hp1EqR | hcol1R
+              · rcases vecLeafC_eq_or_collision algPhase3LeafCust _ _ hlen3L hp3LeafL with hp3EqL | hcol3L
+                · rcases vecLeafC_eq_or_collision algPhase3LeafCust _ _ hlen3R hp3LeafR with hp3EqR | hcol3R
+                  · exfalso
+                    exact haNot ⟨hkC, hcL, hcR, hp1EqL, hp1EqR, hmL, hmR, hp3EqL, hp3EqR⟩
+                  · exact Or.inr (Or.inr (Or.inr ⟨_, _, hcol3R⟩))
+                · exact Or.inr (Or.inr (Or.inr ⟨_, _, hcol3L⟩))
+              · exact Or.inr (Or.inr (Or.inl ⟨_, _, hcol1R⟩))
+            · exact Or.inr (Or.inr (Or.inl ⟨_, _, hcol1L⟩))
+          · exact Or.inr (Or.inl hmc)
+        · exact Or.inr (Or.inl hmc)
+      · exact Or.inr (Or.inl hmc)
+    · exact Or.inr (Or.inl hmc)
+
 /-- **Main Soundness Theorem (`checkAlgebraic_sound_or_collision`)**:
 for any accepted `AlgebraicPrivateReceipt` (`checkAlgebraic stmt r = true`), any named
-`(t, w, contentMask)` committed by `stmt`, any committed algebraic strategy `strat`, and any
-root-consistent FRI transcript `T`:
+`(t, w, contentMask)` committed by `stmt`, any root-bound `CommittedAlgebraicStrategy` `strat`, and
+any root-consistent FRI transcript `T`:
 1. **`AlgebraicPrivateHolds stmt t w contentMask`** (`.accept`, `.count`, or `.bound`) **AND**
    Selvage's **`IdealAccept`** holds on `T`, **OR**
-2. **`AlgebraicEscapeEvent`** holds (explicit `LogUp256` / sumcheck / fold escape event), **OR**
+2. **`AlgebraicEscapeEvent`** holds (explicit `LogUp256` escape, `SumcheckTerminalEscape` tied to
+   `stratColEvalsAtR`, or `BasefoldOpeningEscape` retaining `runBasefoldVerifier`,
+   `AllQueryOpsMatchCommitted`, and `checkQueryWelds` at post-root challenges `sBF`), **OR**
 3. **`AlgebraicCertCollision`** holds (explicit input-pinned `cSHAKE256` collision). -/
 theorem checkAlgebraic_sound_or_collision {ell friRounds fq : Nat}
     (stmt : AlgebraicContentCert)
@@ -2697,12 +3461,12 @@ theorem checkAlgebraic_sound_or_collision {ell friRounds fq : Nat}
     (accepted : checkAlgebraic stmt r = true)
     (t : DfaTable) (w : List UInt8) (contentMask : List C8)
     (named : CommitsAlgebraic stmt t w contentMask)
-    (strat : CommittedAlgebraicStrategy ell stmt.cubeDim w contentMask)
+    (strat : CommittedAlgebraicStrategy ell stmt.cubeDim r.phase1Root r.multRoot r.phase3Root w contentMask)
     (T : RawTranscript (rawPcs ell))
     (hcons : ∀ (hm : friRounds ≤ ell) (hell : ell ≤ 256),
       let sFri := algFriStatementOf stmt r.friInitialRoot hm hell
       Consistent sFri.denote (r.friReceipt.denote sFri) T) :
-    ∃ (hm : friRounds ≤ ell) (hell : ell ≤ 256)
+    ∃ (hfrPos : 0 < friRounds) (hm : friRounds ≤ ell) (hell : ell ≤ 256)
       (hL : 0 < w.length) (hd : w.length ≤ 2 ^ stmt.cubeDim)
       (hdp1 : stmt.cubeDim + 1 ≤ 2 ^ stmt.cubeDim)
       (hTab : r.dfa.states * 256 ≤ 2 ^ stmt.cubeDim),
@@ -2710,104 +3474,163 @@ theorem checkAlgebraic_sound_or_collision {ell friRounds fq : Nat}
       let chals := (r.friReceipt.denote sFri).challenges
       (AlgebraicPrivateHolds stmt t w contentMask ∧
         ∃ seeds, IdealAccept (toRawStatement sFri.denote T) chals seeds) ∨
-      AlgebraicEscapeEvent stmt r r.dfa w contentMask hL hd hdp1 hTab strat ∨
+      AlgebraicEscapeEvent hfrPos stmt r r.dfa w contentMask hL hd hdp1 hTab strat ∨
       AlgebraicCertCollision stmt r hm hell t T := by
   unfold checkAlgebraic at accepted
+  dsimp only at accepted
   split at accepted
-  · rename_i hm
+  · rename_i hShape
+    rcases hShape with ⟨hfrEq, hellEq, hfqEq⟩
     split at accepted
-    · rename_i hell24
-      have hell : ell ≤ 256 := le_trans hell24 (by norm_num)
-      have hsplit : ∃ (h1 : (friRounds = stmt.cubeDim + 1 ∧ fq = stmt.friQueries) ∧
-          (2 ≤ stmt.cubeDim ∧ stmt.cubeDim ≤ 22 ∧ stmt.cubeDim + 2 ≤ ell) ∧
-          (0 < stmt.recordLength ∧ stmt.recordLength ≤ 2 ^ stmt.cubeDim) ∧
-          (1 ≤ stmt.friQueries ∧ stmt.friQueries ≤ 4096) ∧
-          r.dfa.WellFormed ∧ r.dfa.states * 256 ≤ 2 ^ stmt.cubeDim ∧
-          automatonCommit r.dfa = stmt.automatonRoot)
-          (rFull : Array C8) (scFinalClaim : C8),
-          runSumcheckVerifier stmt.cubeDim
-            (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root) r.sumcheckPolys =
-            some (rFull, scFinalClaim) ∧
-          evalTerminalPhiC stmt r.dfa
-            (deriveChalAt algRound1ChalCust (algRound1Transcript stmt r.phase1Root) 0)
-            (deriveChalAt algRound1ChalCust (algRound1Transcript stmt r.phase1Root) 1)
-            (deriveChalAt algRound2ChalCust (algRound2Transcript stmt r.phase1Root r.multRoot) 0)
-            (deriveChalAt algRound3ChalCust (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root) 0)
-            (deriveChalAt algRound3ChalCust (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root) 1)
-            (deriveChalAt algRound3ChalCust (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root) 2)
-            (deriveChalAt algRound3ChalCust (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root) 3)
-            (deriveChalAt algRound3ChalCust (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root) 4)
-            rFull r.colEvalsAtR = scFinalClaim ∧
-          Tower256SuccinctCheck.check
-            (algFriStatementOf stmt r.friInitialRoot hm hell)
-            (algFriPins
-              (algBatchTranscript (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root)
-                r.sumcheckPolys r.colEvalsAtR) r.evalFoldRoots)
-            r.friReceipt = true := by
-        simp only [Bool.and_eq_true, decide_eq_true_eq] at accepted
-        obtain ⟨⟨⟨⟨⟨⟨⟨⟨⟨hfr, hdim⟩, hrec⟩, hfq⟩, _⟩, ⟨_, hdfawf, hdfatab⟩⟩, hauto⟩, _⟩, _⟩, hrest⟩ := accepted
-        cases hsc : runSumcheckVerifier stmt.cubeDim
-            (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root) r.sumcheckPolys with
-        | none => rw [hsc] at hrest; simp at hrest
-        | some pair =>
-            rw [hsc] at hrest
-            simp only [Bool.and_eq_true, decide_eq_true_eq] at hrest
-            exact ⟨⟨hfr, hdim, hrec, hfq, hdfawf, hdfatab, hauto⟩, pair.1, pair.2, rfl,
-              hrest.1.1, hrest.1.2⟩
-      obtain ⟨⟨_, ⟨hdGe2, hdLe22, _⟩, ⟨hrecPos, hrecLe⟩, _, rDfaWf, hTab, rAutoEq⟩,
-              rFull, scFinalClaim, hscRun, hphiEq, hfriCheck⟩ := hsplit
-      obtain ⟨htPos, htWf, htAuto, hwLen, hmLen, hcRoot⟩ := named
-      have hL : 0 < w.length := hwLen ▸ hrecPos
-      have hd : w.length ≤ 2 ^ stmt.cubeDim := hwLen ▸ hrecLe
-      have hdp1 : stmt.cubeDim + 1 ≤ 2 ^ stmt.cubeDim := by
-        have haux : ∀ k : Nat, 2 ≤ k → k + 1 ≤ 2 ^ k := by
-          intro k hk
-          induction k, hk using Nat.le_induction with
-          | base => norm_num
-          | succ n hn ih =>
-              have h2 : 2 ≤ 2 ^ n := le_trans (by norm_num) (Nat.pow_le_pow_right (by norm_num) hn)
-              have : 2 ^ (n + 1) = 2 ^ n + 2 ^ n := by ring
-              omega
-        exact haux stmt.cubeDim hdGe2
-      refine ⟨hm, hell, hL, hd, hdp1, hTab, ?_⟩
-      rcases automatonCommit_eq_or_collision r.dfa t rDfaWf htWf (rAutoEq.trans htAuto.symm) with
-        rDfaEq | hAutoCol | hDeltaCol
-      · subst rDfaEq
-        let sFri := algFriStatementOf stmt r.friInitialRoot hm hell
-        let r3Bytes := algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root
-        let pins := algFriPins (algBatchTranscript r3Bytes r.sumcheckPolys r.colEvalsAtR) r.evalFoldRoots
-        have hSucc := (Tower256SuccinctCheck.check_iff sFri pins r.friReceipt).mp hfriCheck
-        rcases succinct_accepts_ideal_or_collision (rawPcs ell) sFri.denote pins
-            (r.friReceipt.denote sFri) T (hcons hm hell) hSucc with
-          friFinalCol | friRecCol | hIdeal
-        · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl friFinalCol))))
-        · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr friRecCol))))
-        · by_cases hSat : Dfaops.satisfiesClaim r.dfa stmt.claim w = true
-          · left
-            have hwNe : w ≠ [] := by
-              intro hnil; rw [hnil] at hL; simp at hL
-            exact ⟨⟨⟨htPos, htWf, htAuto, hwLen, hmLen, hcRoot⟩, hwNe, hSat⟩, hIdeal⟩
-          · right; left
-            let r1Bytes := algRound1Transcript stmt r.phase1Root
-            let α := toField (deriveChalAt algRound1ChalCust r1Bytes 0)
-            let θ := toField (deriveChalAt algRound1ChalCust r1Bytes 1)
-            let r2Bytes := algRound2Transcript stmt r.phase1Root r.multRoot
-            let γ := toField (deriveChalAt algRound2ChalCust r2Bytes 0)
-            by_cases hSys : AlgebraicStepSystem r.dfa stmt.claim w stmt.cubeDim hL hd hdp1 hTab α θ γ strat.wit
-            · rcases (algebraicStepCheck_iff_dfaRun r.dfa htWf htPos stmt.claim w stmt.cubeDim
-                hL hd (le_trans hdLe22 (by norm_num)) hdp1 hTab α θ γ).2 strat.wit hSys with hOk | hEsc
-              · exact absurd hOk hSat
-              · exact Or.inl hEsc
-            · exact Or.inr ⟨hSys, rFull, scFinalClaim, hscRun, hphiEq⟩
-      · exact Or.inr (Or.inr (Or.inl hAutoCol))
-      · exact Or.inr (Or.inr (Or.inr (Or.inl hDeltaCol)))
+    · rename_i hm
+      split at accepted
+      · rename_i hell24
+        have hell : ell ≤ 256 := le_trans hell24 (by norm_num)
+        have hfrPos : 0 < friRounds := by omega
+        have hsplit : ∃ (h1 : (10 ≤ stmt.cubeDim ∧ stmt.cubeDim ≤ 22 ∧ stmt.cubeDim + 2 ≤ ell) ∧
+            (0 < stmt.recordLength ∧ stmt.recordLength ≤ 2 ^ stmt.cubeDim) ∧
+            (1 ≤ stmt.friQueries ∧ 2 * stmt.friQueries + 1 ≤ 2 ^ stmt.cubeDim) ∧
+            r.dfa.WellFormed ∧ r.dfa.states * 256 ≤ 2 ^ stmt.cubeDim ∧
+            automatonCommit r.dfa = stmt.automatonRoot)
+            (rFull : Array C8) (scFinalClaim : C8) (sBF : Array C8) (bfStmtBytes : List UInt8),
+            let r3Bytes := algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root
+            let batchBytes := algBatchTranscript r3Bytes r.sumcheckPolys r.colEvalsAtR
+            let η := deriveChalAt algBatchChalCust batchBytes 0
+            let ρBf := deriveChalAt algBatchChalCust batchBytes 1
+            let ρFri := deriveChalAt algBatchChalCust batchBytes 2
+            let vBatch := evalCoeffs (r.colEvalsAtR.extract 0 16).toList η
+            let vBfClaimed := addC r.colEvalsAtR[16]! (mulC ρBf vBatch)
+            ρBf ≠ Coordinate.zero 8 ∧
+            runSumcheckVerifier stmt.cubeDim r3Bytes r.sumcheckPolys = some (rFull, scFinalClaim) ∧
+            runBasefoldVerifier stmt.cubeDim batchBytes rFull r.bfPolys r.evalFoldRoots
+              r.bfFinalCoeff vBfClaimed = some (sBF, bfStmtBytes) ∧
+            evalTerminalPhiC stmt r.dfa
+              (deriveChalAt algRound1ChalCust (algRound1Transcript stmt r.phase1Root) 0)
+              (deriveChalAt algRound1ChalCust (algRound1Transcript stmt r.phase1Root) 1)
+              (deriveChalAt algRound2ChalCust (algRound2Transcript stmt r.phase1Root r.multRoot) 0)
+              (deriveChalAt algRound3ChalCust r3Bytes 0)
+              (deriveChalAt algRound3ChalCust r3Bytes 1)
+              (deriveChalAt algRound3ChalCust r3Bytes 2)
+              (deriveChalAt algRound3ChalCust r3Bytes 3)
+              (deriveChalAt algRound3ChalCust r3Bytes 4)
+              rFull r.colEvalsAtR = scFinalClaim ∧
+            Tower256SuccinctCheck.check
+              (algFriStatementOf stmt r.friInitialRoot hm hell)
+              (algFriPins bfStmtBytes)
+              r.friReceipt = true ∧
+            checkQueryWelds hfrPos stmt.cubeDim stmt r sBF η ρBf ρFri = true := by
+          simp only [Bool.and_eq_true, decide_eq_true_eq] at accepted
+          obtain ⟨⟨⟨⟨⟨⟨⟨⟨hdim, hrec⟩, hfq⟩, _⟩, ⟨_, hdfawf, hdfatab⟩⟩, hauto⟩, _⟩, _⟩, hrest⟩ := accepted
+          split at hrest
+          · simp at hrest
+          · cases hsc : runSumcheckVerifier stmt.cubeDim
+                (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root) r.sumcheckPolys with
+            | none => rw [hsc] at hrest; simp at hrest
+            | some pair =>
+                rcases pair with ⟨rFull, scFinalClaim⟩
+                rw [hsc] at hrest
+                dsimp only at hrest
+                split at hrest
+                · simp at hrest
+                · rename_i hRhoNz
+                  have hRhoBfNe : deriveChalAt algBatchChalCust
+                      (algBatchTranscript (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root)
+                        r.sumcheckPolys r.colEvalsAtR) 1 ≠ Coordinate.zero 8 := by
+                    intro hz
+                    apply hRhoNz
+                    simp [hz]
+                  cases hbf : runBasefoldVerifier stmt.cubeDim
+                      (algBatchTranscript (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root)
+                        r.sumcheckPolys r.colEvalsAtR)
+                      rFull r.bfPolys r.evalFoldRoots r.bfFinalCoeff
+                      (addC r.colEvalsAtR[16]!
+                        (mulC (deriveChalAt algBatchChalCust
+                          (algBatchTranscript (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root)
+                            r.sumcheckPolys r.colEvalsAtR) 1)
+                          (evalCoeffs (r.colEvalsAtR.extract 0 16).toList
+                            (deriveChalAt algBatchChalCust
+                              (algBatchTranscript (algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root)
+                                r.sumcheckPolys r.colEvalsAtR) 0)))) with
+                  | none => rw [hbf] at hrest; simp at hrest
+                  | some bfPair =>
+                      rcases bfPair with ⟨sBF, bfStmtBytes⟩
+                      rw [hbf] at hrest
+                      simp only [Bool.and_eq_true, decide_eq_true_eq] at hrest
+                      exact ⟨⟨hdim, hrec, hfq, hdfawf, hdfatab, hauto⟩, rFull, scFinalClaim,
+                        sBF, bfStmtBytes, hRhoBfNe, hsc, hbf, hrest.1.1, hrest.1.2, hrest.2⟩
+        obtain ⟨⟨⟨hdGe10, hdLe22, hdEll⟩, ⟨hrecPos, hrecLe⟩, _, rDfaWf, hTab, rAutoEq⟩,
+                rFull, scFinalClaim, sBF, bfStmtBytes, hRhoBfNe, hscRun, hbfRun, hphiEq, hfriCheck, hWelds⟩ := hsplit
+        obtain ⟨htPos, htWf, htAuto, hwLen, hmLen, hcRoot⟩ := named
+        have hL : 0 < w.length := hwLen ▸ hrecPos
+        have hd : w.length ≤ 2 ^ stmt.cubeDim := hwLen ▸ hrecLe
+        have hdp1 : stmt.cubeDim + 1 ≤ 2 ^ stmt.cubeDim := by
+          have haux : ∀ k : Nat, 2 ≤ k → k + 1 ≤ 2 ^ k := by
+            intro k hk
+            induction k, hk using Nat.le_induction with
+            | base => norm_num
+            | succ n hn ih =>
+                have h2 : 2 ≤ 2 ^ n := le_trans (by norm_num) (Nat.pow_le_pow_right (by norm_num) hn)
+                have : 2 ^ (n + 1) = 2 ^ n + 2 ^ n := by ring
+                omega
+          exact haux stmt.cubeDim (le_trans (by norm_num) hdGe10)
+        refine ⟨hfrPos, hm, hell, hL, hd, hdp1, hTab, ?_⟩
+        rcases automatonCommit_eq_or_collision r.dfa t rDfaWf htWf (rAutoEq.trans htAuto.symm) with
+          rDfaEq | hAutoCol | hDeltaCol
+        · subst rDfaEq
+          let sFri := algFriStatementOf stmt r.friInitialRoot hm hell
+          let r3Bytes := algRound3Transcript stmt r.phase1Root r.multRoot r.phase3Root
+          let batchBytes := algBatchTranscript r3Bytes r.sumcheckPolys r.colEvalsAtR
+          let pins := algFriPins bfStmtBytes
+          have hSucc := (Tower256SuccinctCheck.check_iff sFri pins r.friReceipt).mp hfriCheck
+          rcases succinct_accepts_ideal_or_collision (rawPcs ell) sFri.denote pins
+              (r.friReceipt.denote sFri) T (hcons hm hell) hSucc with
+            friFinalCol | friRecCol | hIdeal
+          · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl friFinalCol))))))
+          · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr friRecCol))))))
+          · by_cases hSat : Dfaops.satisfiesClaim r.dfa stmt.claim w = true
+            · left
+              have hwNe : w ≠ [] := by
+                intro hnil; rw [hnil] at hL; simp at hL
+              exact ⟨⟨⟨htPos, htWf, htAuto, hwLen, hmLen, hcRoot⟩, hwNe, hSat⟩, hIdeal⟩
+            · cases ell with
+              | zero => omega
+              | succ m =>
+                  have hcRootEll : maskedContentCommit (m + 1) stmt.cubeDim w contentMask = stmt.contentRoot := by
+                    simpa [← hellEq] using hcRoot
+                  rcases checkQueryWelds_matches_committed_or_collision hfrPos stmt r w contentMask
+                      hcRootEll strat sBF
+                      (deriveChalAt algBatchChalCust batchBytes 0)
+                      (deriveChalAt algBatchChalCust batchBytes 1)
+                      (deriveChalAt algBatchChalCust batchBytes 2)
+                      hWelds with hOpsMatch | hMerkleCol | hLeafCol
+                  · right; left
+                    classical
+                    by_cases hEvalsEq : r.colEvalsAtR = stratColEvalsAtR w contentMask strat rFull
+                    · let r1Bytes := algRound1Transcript stmt r.phase1Root
+                      let α := toField (deriveChalAt algRound1ChalCust r1Bytes 0)
+                      let θ := toField (deriveChalAt algRound1ChalCust r1Bytes 1)
+                      let r2Bytes := algRound2Transcript stmt r.phase1Root r.multRoot
+                      let γ := toField (deriveChalAt algRound2ChalCust r2Bytes 0)
+                      by_cases hSys : AlgebraicStepSystem r.dfa stmt.claim w stmt.cubeDim hL hd hdp1 hTab α θ γ strat.wit
+                      · rcases (algebraicStepCheck_iff_dfaRun r.dfa htWf htPos stmt.claim w stmt.cubeDim
+                          hL hd (le_trans hdLe22 (by norm_num)) hdp1 hTab α θ γ).2 strat.wit hSys with hOk | hEsc
+                        · exact absurd hOk hSat
+                        · exact Or.inl hEsc
+                      · exact Or.inr (Or.inl ⟨hSys, rFull, scFinalClaim, hEvalsEq, hscRun, hphiEq⟩)
+                    · exact Or.inr (Or.inr ⟨rFull, scFinalClaim, sBF, bfStmtBytes,
+                        hEvalsEq, hRhoBfNe, hscRun, hbfRun, hOpsMatch, hWelds⟩)
+                  · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hMerkleCol))))
+                  · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hLeafCol)))))
+        · exact Or.inr (Or.inr (Or.inl hAutoCol))
+        · exact Or.inr (Or.inr (Or.inr (Or.inl hDeltaCol)))
+      · simp at accepted
     · simp at accepted
   · simp at accepted
 
 /-- **Premise Inhabitation (`checkAlgebraic_premises_inhabited`)**:
 for any well-formed `DfaTable` (`0 < t.states`), any non-empty word `w` (`w.length ≤ 2^d`), any
-`contentMask` of length `2^d`, and any `RawTranscript`, there exist concrete `stmt`, `strat`, and
-receipt fields jointly inhabiting `CommitsAlgebraic`, `CommittedAlgebraicStrategy`, and `Consistent`. -/
+`contentMask` of length `2^d`, and any `RawTranscript`, there exist concrete `stmt`, root-bound
+`strat`, and receipt roots jointly inhabiting `CommitsAlgebraic`, `CommittedAlgebraicStrategy`, and `Consistent`. -/
 theorem checkAlgebraic_premises_inhabited {ell friRounds fq d : Nat}
     (hm : friRounds ≤ ell) (hell : ell ≤ 256)
     (t : DfaTable) (ht : t.WellFormed) (htPos : 0 < t.states)
@@ -2833,11 +3656,12 @@ theorem checkAlgebraic_premises_inhabited {ell friRounds fq d : Nat}
         querySeed := seeds
         opening := ops
         finalCoeffs := [] }
-    ∃ strat : CommittedAlgebraicStrategy ell stmt.cubeDim w contentMask,
+    ∃ (rP1 rM rP3 : Digest)
+      (strat : CommittedAlgebraicStrategy ell stmt.cubeDim rP1 rM rP3 w contentMask),
       CommitsAlgebraic stmt t w contentMask ∧
       Consistent sFri.denote (crecp.denote sFri) T ∧
       strat.wit.byte ⟨0, lt_of_lt_of_le (List.length_pos_of_ne_nil hwNe) hwBound⟩ =
-        natField w[0].toNat := by
+        natField (w[0]'(List.length_pos_of_ne_nil hwNe)).toNat := by
   intro stmt chalsF root0 sFri crecp
   let wit0 : AlgebraicTraceWitness d :=
     { byte := fun idx => if h : idx.val < w.length then natField w[idx.val].toNat else 0
@@ -2852,17 +3676,33 @@ theorem checkAlgebraic_premises_inhabited {ell friRounds fq d : Nat}
       tabMult := fun _ => 0
       traceInv := fun _ => 0
       tabInv := fun _ => 0 }
-  let strat : CommittedAlgebraicStrategy ell d w contentMask :=
+  let zHalf : (Fin d → Bool) → C8 := fun _ => Coordinate.zero 8
+  let zFull : (Fin (d + 1) → Bool) → C8 := fun _ => Coordinate.zero 8
+  let p1M : Fin 8 → (Fin d → Bool) → C8 := fun _ => zHalf
+  let rP1 := phase1Commit ell d wit0 p1M
+  let rM := multCommit ell d wit0 zHalf
+  let rP3 := phase3Commit ell d wit0 zHalf zHalf zFull zFull zFull zFull zFull zFull
+  let strat : CommittedAlgebraicStrategy ell d rP1 rM rP3 w contentMask :=
     { wit := wit0
-      phase1Cols := fun _ => []
-      multCol := fun _ => Coordinate.zero 8
-      phase3Cols := fun _ => []
+      p1Masks := p1M
+      multMask := zHalf
+      hMask := zHalf
+      gMask := zHalf
+      mLin := zFull
+      u1 := zFull
+      u2 := zFull
+      u3 := zFull
+      bfMask := zFull
+      friMask := zFull
       byteLinked := fun hd i h => by
         simp only [wit0, h, ↓reduceDIte, halfCubeByteTable, halfCubeExtend,
           Fin.snoc_last, Bool.false_eq_true, ↓reduceIte, Fin.init_snoc,
           binaryAddressBits, Equiv.apply_symm_apply]
-        rfl }
-  refine ⟨strat, ⟨htPos, ht, rfl, rfl, hmLen, rfl⟩, fun n hn => rfl, ?_⟩
+        rfl
+      phase1Root_eq := rfl
+      multRoot_eq := rfl
+      phase3Root_eq := rfl }
+  refine ⟨rP1, rM, rP3, strat, ⟨htPos, ht, rfl, rfl, hmLen, rfl⟩, fun n hn => rfl, ?_⟩
   have h0lt : 0 < w.length := List.length_pos_of_ne_nil hwNe
   simp [strat, wit0, h0lt]
 
@@ -3044,20 +3884,22 @@ def evalHornerF (t : Tables) (cs : Array F256) (x : F256) : F256 := Id.run do
     acc := addF c (mulF t x acc)
   return acc
 
-/-- Montgomery batch inversion over `F256` (`1` `invF` + `3 n` `mulF`s). -/
-def batchInvF (t : Tables) (xs : Array F256) (activeLen : Nat) : Array F256 := Id.run do
+/-- Montgomery batch inversion over `F256` (`1` `invF` + `3 n` `mulF`s), returning `none` if any
+active denominator is `0` (`acc == 0`). -/
+def batchInvF (t : Tables) (xs : Array F256) (activeLen : Nat) : Option (Array F256) := Id.run do
   let mut pref : Array F256 := Array.mkEmpty activeLen
   let mut acc := oneF
   for i in [0:activeLen] do
     pref := pref.push acc
     acc := mulF t acc xs[i]!
+  if isZeroF acc then return none
   let mut invAcc := invF t acc
-  let mut out := Array.mkArray xs.size zeroF
+  let mut out := Array.replicate xs.size zeroF
   for k in [0:activeLen] do
     let i := activeLen - 1 - k
     out := out.set! i (mulF t pref[i]! invAcc)
     invAcc := mulF t invAcc xs[i]!
-  return out
+  return some out
 
 /-- Tabulate `domC (unitBasis ell) (cosetOffset ell) round` across `0 .. 2^(ell - round) - 1`. -/
 def tabulateCosetDomF (t : Tables) (ell round : Nat) (pivs : Array F256) : Array F256 := Id.run do
@@ -3111,7 +3953,7 @@ def cosetFromCoeffsF (t : Tables) (ell mVars : Nat) (pivs pivInvs : Array F256)
     (coeffs : Array F256) : Array F256 := Id.run do
   let baseTail := 2 ^ (ell - mVars)
   let mut dp : Array (Array F256) := Array.ofFn fun u : Fin (2 ^ mVars) =>
-    Array.mkArray baseTail coeffs[u.val]!
+    Array.replicate baseTail coeffs[u.val]!
   for rev in [0:mVars] do
     let s := mVars - 1 - rev
     let half := 2 ^ (ell - s - 1)
@@ -3122,7 +3964,7 @@ def cosetFromCoeffsF (t : Tables) (ell mVars : Nat) (pivs pivInvs : Array F256)
     dp := Array.ofFn fun u : Fin (2 ^ s) => Id.run do
       let ev := prev[u.val]!
       let od := prev[u.val + 2 ^ s]!
-      let mut arr := Array.mkArray (2 * half) zeroF
+      let mut arr := Array.replicate (2 * half) zeroF
       for k in [0:half] do
         let loVal := addF ev[k]! (mulF t thetas[k]! od[k]!)
         arr := arr.set! k loVal
@@ -3143,7 +3985,7 @@ def vandermondeInv5 : Array (Array UInt64) :=
     #[6, 14, 4, 15, 3]]
 
 def interpolateDeg4F (t : Tables) (evals5 : Array F256) : PolyDeg4 := Id.run do
-  let mut cs : Array F256 := Array.mkArray 5 zeroF
+  let mut cs : Array F256 := Array.replicate 5 zeroF
   for i in [0:5] do
     let row := vandermondeInv5[i]!
     let mut acc := zeroF
@@ -3156,7 +3998,7 @@ def interpolateDeg4F (t : Tables) (evals5 : Array F256) : PolyDeg4 := Id.run do
 
 def evalPhiFast (t : Tables)
     (claim : ClaimData) (L d : Nat) (initF zetaFast zetaInvFast : F256)
-    (α γ β ρLin : F256) (x0Val xdVal : F256)
+    (α γ β ρLin : F256) (xdVal zetaDp1 pLinZ z2Val z3Val : F256)
     (chi0 chiLast chiD pLtS pLm1S pLtC pLm1C pLtD pTabGammaD pTabD pLtTheta pTabOne : F256)
     (pBitD pBitC pBitPrevC pStep1 pStep2 : F256)
     (ys : Array F256) : F256 :=
@@ -3173,8 +4015,9 @@ def evalPhiFast (t : Tables)
   let yHInv := ys[10]!
   let yGInv := ys[11]!
   let yMlin := ys[12]!
-  let yUA := ys[13]!
-  let yUB := ys[14]!
+  let yU1 := ys[13]!
+  let yU2 := ys[14]!
+  let yU3 := ys[15]!
   let α2 := mulF t α α
   let α3 := mulF t α2 α
   let eTup := addF (addF yB (mulF t α yS)) (addF (mulF t α2 yNX) (mulF t α3 yH))
@@ -3211,9 +4054,9 @@ def evalPhiFast (t : Tables)
         (c5, c6, c7, c8, c9, c10)
   let witBatch := evalHornerF t #[e0, e1, e2, e3, e4, e5, e6, e7, e8, e9, e10] β
   let witTerm := mulF t (addF oneF xdVal) witBatch
-  let maskLin := mulF t ρLin yMlin
-  let maskQuad := mulF t (addF (mulF t x0Val x0Val) x0Val) (mulF t yUA yUB)
-  addF witTerm (addF maskLin maskQuad)
+  let p1Full := addF pLinZ (mulF t zetaDp1 xdVal)
+  let maskBody := addF (addF yMlin (mulF t p1Full yU1)) (addF (mulF t z2Val yU2) (mulF t z3Val yU3))
+  addF witTerm (mulF t ρLin maskBody)
 
 /-- Expand deterministic CSPRNG randomness from a 32-byte seed for reproducible conformance vectors. -/
 def expandSeedC8 (custStr : String) (seed : Nat) (count : Nat) : Array C8 := Id.run do
@@ -3226,8 +4069,9 @@ def expandSeedC8 (custStr : String) (seed : Nat) (count : Nat) : Array C8 := Id.
 
 end FastProver
 
+open FastProver in
 /-- **Executable Honest Algebraic Prover (`proveAlgebraic`)**:
-builds all 16 half-cube-masked / HVZK polynomials over `Tower256`, commits `contentRoot`,
+builds all 17 half-cube-masked / full-rank HVZK polynomials over `Tower256`, commits `contentRoot`,
 `phase1Root`, `multRoot`, `phase3Root`, runs the `(d + 1)`-round degree-`≤ 4` sumcheck, runs
 `Tower256SuccinctCheck`-compatible coset FRI (`offset = cosetOffset ell`, `finalDegree = 1`),
 and extracts all `friQueries` coherent coset + `evalFold` pair openings! -/
@@ -3239,9 +4083,10 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
   if hm : friRounds ≤ friEll then
     if hell24 : friEll ≤ 24 then
       let hell : friEll ≤ 256 := le_trans hell24 (by norm_num)
-      if w.isEmpty || !(2 ≤ d && d ≤ 22 && d + 2 ≤ friEll) ||
+      if w.isEmpty || !(0 < dfa.states) || !decide dfa.WellFormed ||
+          !(10 ≤ d && d ≤ 22 && d + 2 ≤ friEll) ||
           !(w.length ≤ 2 ^ d) || !(dfa.states * 256 ≤ 2 ^ d) ||
-          !(1 ≤ friQueries && friQueries ≤ 4096) ||
+          !(1 ≤ friQueries && 2 * friQueries + 1 ≤ 2 ^ d) ||
           !Dfaops.satisfiesClaim dfa claim w then
         return none
       let tbl := FastProver.mkTables
@@ -3260,9 +4105,23 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
       let pivs := FastProver.computePivotsF tbl friEll (d + 1)
       let pivInvs := pivs.map invF
 
+      -- Precompute `zetaPows[k] = ζ^{k+1}` (`0 ≤ k ≤ d`) and `pubLinZ` on `{0, 1}^d`
+      let mut zetaPows : Array F256 := Array.mkEmpty (d + 1)
+      let mut zCur := zetaFast
+      for _ in [0:d + 1] do
+        zetaPows := zetaPows.push zCur
+        zCur := mulF zCur zetaFast
+      let zetaDp1 := zetaPows[d]!
+      let mut pubLinZInit : Array F256 := Array.replicate nHalf zeroF
+      for k in [0:d] do
+        let zk := zetaPows[k]!
+        let step := 2 ^ k
+        for low in [0:step] do
+          pubLinZInit := pubLinZInit.set! (low + step) (addF pubLinZInit[low]! zk)
+
       -- 1. Content column (`col 0`)
       let contentMaskC := FastProver.expandSeedC8 "MINIDREGG/ALGCERT/CMASK/V1" seed nHalf
-      let mut col0 := Array.mkArray nFull zeroF
+      let mut col0 := Array.replicate nFull zeroF
       let wArr := w.toArray
       for i in [0:L] do
         col0 := col0.set! i (FastProver.ofU64 wArr[i]!.toUInt64)
@@ -3274,7 +4133,7 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
 
       -- 2. Phase-1 columns (`cols 1..8`: `state, next, hit, cntPow, accLo, bitLo, accHi, bitHi`)
       let p1Masks := FastProver.expandSeedC8 "MINIDREGG/ALGCERT/P1MASK/V1" seed (8 * nHalf)
-      let mut p1Tabs : Array (Array F256) := Array.mkArray 8 (Array.mkArray nFull zeroF)
+      let mut p1Tabs : Array (Array F256) := Array.replicate 8 (Array.replicate nFull zeroF)
       for c in [0:8] do
         let mut arr := p1Tabs[c]!
         for i in [0:nHalf] do
@@ -3348,7 +4207,7 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
       let θ := FastProver.ofC8 θC
 
       let mMask := FastProver.expandSeedC8 "MINIDREGG/ALGCERT/MMASK/V1" seed nHalf
-      let mut mTabCol := Array.mkArray nFull zeroF
+      let mut mTabCol := Array.replicate nFull zeroF
       let mut thPow := oneF
       for i in [0:L] do
         let k := rowKeys[i]!
@@ -3361,22 +4220,22 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
       let mTree := buildFastCubeTree friEll mCosetC
       let mRoot := mTree.root
 
-      -- 4. Round-2 challenge (`γ`) + Phase-3 columns (`cols 10..15`)
+      -- 4. Round-2 challenge (`γ`) + Phase-3 columns (`cols 10..15` + `friMask`)
       let r2Bytes := algRound2Transcript stmt p1Root mRoot
       let γC := deriveChalAt algRound2ChalCust r2Bytes 0
       let γ := FastProver.ofC8 γC
       let α2 := mulF α α
       let α3 := mulF α2 α
 
-      let mut trDenoms := Array.mkArray L oneF
+      let mut trDenoms := Array.replicate L oneF
       for i in [0:L] do
         let e := addF (addF col0[i]! (mulF α (p1Tabs[0]!)[i]!))
           (addF (mulF α2 (p1Tabs[1]!)[i]!) (mulF α3 (p1Tabs[2]!)[i]!))
         trDenoms := trDenoms.set! i (addF γ e)
-      let trInvs := FastProver.batchInvF tbl trDenoms L
+      let some trInvs := FastProver.batchInvF tbl trDenoms L
+        | return none
 
-      let mut tabEncs := Array.mkArray mTab zeroF
-      let mut tabDenoms := Array.mkArray mTab oneF
+      let mut tabDenoms := Array.replicate mTab oneF
       for k in [0:mTab] do
         let s := k / 256
         let b := k % 256
@@ -3384,66 +4243,83 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
         let hit := if accArr.getD nx false then 1 else 0
         let tk := addF (addF (FastProver.ofU64 b.toUInt64) (mulF α (FastProver.ofU64 s.toUInt64)))
           (addF (mulF α2 (FastProver.ofU64 nx.toUInt64)) (mulF α3 (FastProver.ofU64 hit.toUInt64)))
-        tabEncs := tabEncs.set! k tk
         tabDenoms := tabDenoms.set! k (addF γ tk)
-      let tabInvs := FastProver.batchInvF tbl tabDenoms mTab
+      let some tabInvs := FastProver.batchInvF tbl tabDenoms mTab
+        | return none
 
-      let p3Rand := FastProver.expandSeedC8 "MINIDREGG/ALGCERT/P3MASK/V1" seed (2 * nHalf + 4 * nFull)
-      let mut hCol := Array.mkArray nFull zeroF
+      let p3Rand := FastProver.expandSeedC8 "MINIDREGG/ALGCERT/P3MASK/V1" seed (2 * nHalf + 6 * nFull)
+      let mut hCol := Array.replicate nFull zeroF
       for i in [0:L] do hCol := hCol.set! i trInvs[i]!
       for i in [0:nHalf] do hCol := hCol.set! (nHalf + i) (FastProver.ofC8 p3Rand[i]!)
 
-      let mut gCol := Array.mkArray nFull zeroF
+      let mut gCol := Array.replicate nFull zeroF
       for k in [0:mTab] do gCol := gCol.set! k tabInvs[k]!
       for i in [0:nHalf] do gCol := gCol.set! (nHalf + i) (FastProver.ofC8 p3Rand[nHalf + i]!)
 
       let offBase := 2 * nHalf
-      -- `scMaskLin`: zero-sum over `{0, 1}^{d+1}` via top Möbius coefficient `c_{nFull - 1} = 0`!
-      let mLinCoeffs : Array F256 := Array.ofFn fun idx : Fin nFull =>
-        if idx.val + 1 == nFull then zeroF else FastProver.ofC8 p3Rand[offBase + idx.val]!
-      -- Evaluate `mLin` on `{0, 1}^{d+1}` (Boolean Möbius is an involution in char 2!)
-      let mLinTab := FastProver.mobiusF (d + 1) mLinCoeffs
-      let uATab : Array F256 := Array.ofFn fun idx : Fin nFull =>
+      let u1Tab : Array F256 := Array.ofFn fun idx : Fin nFull =>
         FastProver.ofC8 p3Rand[offBase + nFull + idx.val]!
-      let uBTab : Array F256 := Array.ofFn fun idx : Fin nFull =>
+      let u2Tab : Array F256 := Array.ofFn fun idx : Fin nFull =>
         FastProver.ofC8 p3Rand[offBase + 2 * nFull + idx.val]!
-      let friMaskCoeffs : Array F256 := Array.ofFn fun idx : Fin nFull =>
+      let u3Tab : Array F256 := Array.ofFn fun idx : Fin nFull =>
         FastProver.ofC8 p3Rand[offBase + 3 * nFull + idx.val]!
+      let bfMaskTab : Array F256 := Array.ofFn fun idx : Fin nFull =>
+        FastProver.ofC8 p3Rand[offBase + 4 * nFull + idx.val]!
+      let friMaskTab : Array F256 := Array.ofFn fun idx : Fin nFull =>
+        FastProver.ofC8 p3Rand[offBase + 5 * nFull + idx.val]!
 
-      let p3Tabs : Array (Array F256) := #[hCol, gCol, mLinTab, uATab, uBTab]
-      let p3Cosets04 := p3Tabs.map (FastProver.cosetEncodeF tbl friEll (d + 1) pivs pivInvs)
-      let friMaskCoset := FastProver.cosetFromCoeffsF tbl friEll (d + 1) pivs pivInvs friMaskCoeffs
-      let p3Cosets := p3Cosets04.push friMaskCoset
+      -- Set `mLinTab[nFull - 1]` so `∑_{x ∈ {0,1}^{d+1}} (mLinTab(x) + P_1(x) * u1Tab(x)) = 0`!
+      let mut mLinTab : Array F256 := Array.replicate nFull zeroF
+      let mut sumM := zeroF
+      for idx in [0:nFull - 1] do
+        let v := FastProver.ofC8 p3Rand[offBase + idx]!
+        mLinTab := mLinTab.set! idx v
+        sumM := addF sumM v
+      let mut sumP1U1 := zeroF
+      for i in [0:nHalf] do
+        let p0 := pubLinZInit[i]!
+        let p1 := addF p0 zetaDp1
+        sumP1U1 := addF sumP1U1 (addF (mulF p0 u1Tab[i]!) (mulF p1 u1Tab[nHalf + i]!))
+      mLinTab := mLinTab.set! (nFull - 1) (addF sumM sumP1U1)
+
+      let p3Tabs : Array (Array F256) :=
+        #[hCol, gCol, mLinTab, u1Tab, u2Tab, u3Tab, bfMaskTab, friMaskTab]
+      let p3Cosets := p3Tabs.map (FastProver.cosetEncodeF tbl friEll (d + 1) pivs pivInvs)
+      let bfMaskCoset := p3Cosets[6]!
+      let friMaskCoset := p3Cosets[7]!
       let p3CosetsC := p3Cosets.map (fun w => w.map FastProver.toC8)
       let p3Leaves : Array C8 := Array.ofFn fun idx : Fin cosetLen =>
-        vecLeafC algPhase3LeafCust ((List.range 6).map fun c => (p3CosetsC[c]!)[idx.val]!)
+        vecLeafC algPhase3LeafCust ((List.range 8).map fun c => (p3CosetsC[c]!)[idx.val]!)
       let p3Tree := buildFastCubeTree friEll p3Leaves
       let p3Root := p3Tree.root
 
       -- 5. Round-3 challenges (`β, τ_s, τ_c, τ_d, ρ_lin`) & linear-time `(d + 1)`-round Sumcheck!
       let r3Bytes := algRound3Transcript stmt p1Root mRoot p3Root
+      let ρLinC := deriveChalAt algRound3ChalCust r3Bytes 4
+      if ρLinC == Coordinate.zero 8 then return none
       let β := FastProver.ofC8 (deriveChalAt algRound3ChalCust r3Bytes 0)
       let τS := FastProver.ofC8 (deriveChalAt algRound3ChalCust r3Bytes 1)
       let τC := FastProver.ofC8 (deriveChalAt algRound3ChalCust r3Bytes 2)
       let τD := FastProver.ofC8 (deriveChalAt algRound3ChalCust r3Bytes 3)
-      let ρLin := FastProver.ofC8 (deriveChalAt algRound3ChalCust r3Bytes 4)
+      let ρLin := FastProver.ofC8 ρLinC
 
-      -- Assemble the 15 witness/mask tables (`cols 0..14`, each length `nFull`)
-      let mut curCols : Array (Array F256) :=
+      -- Assemble the 16 witness/mask tables (`cols 0..15`, each length `nFull`)
+      let initCols16 : Array (Array F256) :=
         #[col0, p1Tabs[0]!, p1Tabs[1]!, p1Tabs[2]!, p1Tabs[3]!, p1Tabs[4]!, p1Tabs[5]!,
-          p1Tabs[6]!, p1Tabs[7]!, mTabCol, hCol, gCol, mLinTab, uATab, uBTab]
+          p1Tabs[6]!, p1Tabs[7]!, mTabCol, hCol, gCol, mLinTab, u1Tab, u2Tab, u3Tab]
+      let mut curCols : Array (Array F256) := initCols16
 
-      -- Assemble the 17 public weight tables on `{0, 1}^d` (each length `nHalf`)
+      -- Assemble the 18 public weight tables on `{0, 1}^d` (each length `nHalf`, `pubTabs[17] = pubLinZ`)
       let mkPowPrefix (bound : Nat) (base : F256) (scale : F256) : Array F256 := Id.run do
-        let mut arr := Array.mkArray nHalf zeroF
+        let mut arr := Array.replicate nHalf zeroF
         let mut p := scale
         for i in [0:bound] do
           arr := arr.set! i p
           p := mulF p base
         return arr
-      let pub0 := (Array.mkArray nHalf zeroF).set! 0 oneF
-      let pubLast := (Array.mkArray nHalf zeroF).set! (L - 1) oneF
-      let pubD := (Array.mkArray nHalf zeroF).set! d oneF
+      let pub0 := (Array.replicate nHalf zeroF).set! 0 oneF
+      let pubLast := (Array.replicate nHalf zeroF).set! (L - 1) oneF
+      let pubD := (Array.replicate nHalf zeroF).set! d oneF
       let pubLtS := mkPowPrefix L τS oneF
       let pubLm1S := mkPowPrefix (L - 1) τS τS
       let pubLtC := mkPowPrefix L τC oneF
@@ -3452,18 +4328,18 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
       let pubTabD := mkPowPrefix mTab τD oneF
       let pubLtTheta := mkPowPrefix L θ oneF
       let pubTabOne := mkPowPrefix mTab oneF oneF
-      let mut pubTabGammaD := Array.mkArray nHalf zeroF
+      let mut pubTabGammaD := Array.replicate nHalf zeroF
       let mut tdCur := oneF
       for k in [0:mTab] do
         pubTabGammaD := pubTabGammaD.set! k (mulF tdCur tabDenoms[k]!)
         tdCur := mulF tdCur τD
 
-      let isBound := match claim with | .bound _ _ => true | _ => false
-      let pubBitD := if isBound then mkPowPrefix (d + 1) τD oneF else Array.mkArray nHalf zeroF
-      let pubBitC := if isBound then mkPowPrefix (d + 1) τC oneF else Array.mkArray nHalf zeroF
-      let pubBitPrevC := if isBound then mkPowPrefix d τC τC else Array.mkArray nHalf zeroF
-      let mut pubStep1 := Array.mkArray nHalf zeroF
-      let mut pubStep2 := Array.mkArray nHalf zeroF
+      let isBound : Bool := match claim with | .bound _ _ => true | _ => false
+      let pubBitD := if isBound then mkPowPrefix (d + 1) τD oneF else Array.replicate nHalf zeroF
+      let pubBitC := if isBound then mkPowPrefix (d + 1) τC oneF else Array.replicate nHalf zeroF
+      let pubBitPrevC := if isBound then mkPowPrefix d τC τC else Array.replicate nHalf zeroF
+      let mut pubStep1 := Array.replicate nHalf zeroF
+      let mut pubStep2 := Array.replicate nHalf zeroF
       if isBound then
         let mut tcCur := τC
         let mut z1 := zetaFast
@@ -3478,26 +4354,30 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
       let mut pubTabs : Array (Array F256) :=
         #[pub0, pubLast, pubD, pubLtS, pubLm1S, pubLtC, pubLm1C, pubLtD,
           pubTabGammaD, pubTabD, pubLtTheta, pubTabOne,
-          pubBitD, pubBitC, pubBitPrevC, pubStep1, pubStep2]
+          pubBitD, pubBitC, pubBitPrevC, pubStep1, pubStep2, pubLinZInit]
 
       let pts5 : Array F256 := #[zeroF, oneF, FastProver.ofU64 2, FastProver.ofU64 3, FastProver.ofU64 4]
       let initF := FastProver.ofU64 dfa.initial.toUInt64
       let mut scPolys : Array PolyDeg4 := #[]
-      let mut rFullC : Array C8 := #[]
       let mut rFullF : Array F256 := #[]
       let mut scTr := r3Bytes
+      let mut z2Prefix := zeroF
+      let mut z3Prefix := zeroF
 
       -- Rounds `0 .. d - 1` (folding `{0, 1}^d` coordinates; `x_d ∈ {0, 1}` summed explicitly!)
       for j in [0:d] do
         let halfCube := 2 ^ (d - 1 - j)
-        let mut evals5 := Array.mkArray 5 zeroF
+        let zj := zetaPows[j]!
+        let mut evals5 := Array.replicate 5 zeroF
         for pIdx in [0:5] do
           let tPt := pts5[pIdx]!
-          let x0Pt := if j == 0 then tPt else rFullF[0]!
+          let t2 := mulF tPt tPt
+          let t3 := mulF t2 tPt
+          let z2Pt := addF z2Prefix (mulF zj (addF t2 tPt))
+          let z3Pt := addF z3Prefix (mulF zj (addF t3 t2))
           let mut sumPt := zeroF
           for tail in [0:halfCube] do
             let idx0 := 2 * tail
-            let idx1 := 2 * tail + 1
             let lineAt (arr : Array F256) (base : Nat) : F256 :=
               let v0 := arr[base]!
               let v1 := arr[base + 1]!
@@ -3506,16 +4386,18 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
             let ys0 : Array F256 := curCols.map fun arr => lineAt arr idx0
             let ps : Array F256 := pubTabs.map fun arr => lineAt arr idx0
             let vHalf0 := FastProver.evalPhiFast tbl claim L d initF zetaFast zetaInvFast
-              α γ β ρLin x0Pt zeroF
+              α γ β ρLin zeroF zetaDp1 ps[17]! z2Pt z3Pt
               ps[0]! ps[1]! ps[2]! ps[3]! ps[4]! ps[5]! ps[6]! ps[7]! ps[8]! ps[9]! ps[10]! ps[11]!
               ps[12]! ps[13]! ps[14]! ps[15]! ps[16]! ys0
-            -- `x_d = 1` half: `1 + x_d = 0`, only HVZK mask (`cols 12, 13, 14`) contributes!
+            -- `x_d = 1` half: `1 + x_d = 0`, only full-rank HVZK mask (`cols 12..15`) contributes!
             let baseHi := 2 * halfCube + idx0
             let mLin1 := lineAt curCols[12]! baseHi
-            let uA1 := lineAt curCols[13]! baseHi
-            let uB1 := lineAt curCols[14]! baseHi
-            let vHalf1 := addF (mulF ρLin mLin1)
-              (mulF (addF (mulF x0Pt x0Pt) x0Pt) (mulF uA1 uB1))
+            let u1_1 := lineAt curCols[13]! baseHi
+            let u2_1 := lineAt curCols[14]! baseHi
+            let u3_1 := lineAt curCols[15]! baseHi
+            let p1Hi := addF ps[17]! zetaDp1
+            let maskBody1 := addF (addF mLin1 (mulF p1Hi u1_1)) (addF (mulF z2Pt u2_1) (mulF z3Pt u3_1))
+            let vHalf1 := mulF ρLin maskBody1
             sumPt := addF sumPt (addF vHalf0 vHalf1)
           evals5 := evals5.set! pIdx sumPt
         let poly := FastProver.interpolateDeg4F tbl evals5
@@ -3523,8 +4405,11 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
         scTr := scTr ++ envelope (natCoordBytes j) ++ envelope poly.encodeBytes
         let rjC := digestTowerC (cshakeC.xofDigest algSumcheckChalCust scTr)
         let rjF := FastProver.ofC8 rjC
-        rFullC := rFullC.push rjC
         rFullF := rFullF.push rjF
+        let rj2 := mulF rjF rjF
+        let rj3 := mulF rj2 rjF
+        z2Prefix := addF z2Prefix (mulF zj (addF rj2 rjF))
+        z3Prefix := addF z3Prefix (mulF zj (addF rj3 rj2))
         -- Fold `curCols` (size `4 * halfCube -> 2 * halfCube`) and `pubTabs` (`2 * halfCube -> halfCube`)
         curCols := curCols.map fun arr =>
           Array.ofFn fun tail : Fin (2 * halfCube) =>
@@ -3539,16 +4424,19 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
 
       -- Round `d` (final sumcheck round over `x_d`: `pubTabs` have size `1`, `curCols` have size `2`!)
       let psFinal := pubTabs.map fun arr => arr[0]!
-      let x0Fixed := rFullF[0]!
-      let mut evalsLast := Array.mkArray 5 zeroF
+      let mut evalsLast := Array.replicate 5 zeroF
       for pIdx in [0:5] do
         let tPt := pts5[pIdx]!
+        let t2 := mulF tPt tPt
+        let t3 := mulF t2 tPt
+        let z2Pt := addF z2Prefix (mulF zetaDp1 (addF t2 tPt))
+        let z3Pt := addF z3Prefix (mulF zetaDp1 (addF t3 t2))
         let ysPt := curCols.map fun arr =>
           let v0 := arr[0]!
           let v1 := arr[1]!
           addF v0 (mulF tPt (addF v0 v1))
         let val := FastProver.evalPhiFast tbl claim L d initF zetaFast zetaInvFast
-          α γ β ρLin x0Fixed tPt
+          α γ β ρLin tPt zetaDp1 psFinal[17]! z2Pt z3Pt
           psFinal[0]! psFinal[1]! psFinal[2]! psFinal[3]! psFinal[4]! psFinal[5]! psFinal[6]!
           psFinal[7]! psFinal[8]! psFinal[9]! psFinal[10]! psFinal[11]!
           psFinal[12]! psFinal[13]! psFinal[14]! psFinal[15]! psFinal[16]! ysPt
@@ -3559,56 +4447,124 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
       let rdC := digestTowerC (cshakeC.xofDigest algSumcheckChalCust scTr)
       if rdC == Coordinate.zero 8 || rdC == Coordinate.one 8 then return none
       let rdF := FastProver.ofC8 rdC
-      rFullC := rFullC.push rdC
       rFullF := rFullF.push rdF
 
-      -- Fold `curCols` one final time at `rdF` to obtain `colEvalsAtR` (`15` `C8`s)!
-      let colEvalsF : Array F256 := curCols.map fun arr =>
+      -- Tabulate `eq(rFull, ·)` on `{0, 1}^{d+1}`, evaluate `bfMaskTab(rFull)`, and form `colEvalsAtR` (`17` `C8`s)!
+      let mut eqCur : Array F256 := #[oneF]
+      for j in [0:d + 1] do
+        let rj := rFullF[j]!
+        let r0 := addF oneF rj
+        let prev := eqCur
+        let n := prev.size
+        eqCur := Array.ofFn fun idx : Fin (2 * n) =>
+          if idx.val < n then mulF prev[idx.val]! r0
+          else mulF prev[idx.val - n]! rj
+
+      let mut bfMaskAtR := zeroF
+      for idx in [0:nFull] do
+        bfMaskAtR := addF bfMaskAtR (mulF eqCur[idx]! bfMaskTab[idx]!)
+
+      let colEvals16F : Array F256 := curCols.map fun arr =>
         addF arr[0]! (mulF rdF (addF arr[0]! arr[1]!))
+      let colEvalsF : Array F256 := colEvals16F.push bfMaskAtR
       let colEvalsC : Array C8 := colEvalsF.map FastProver.toC8
 
-      -- 6. Batching challenges (`η`, `ρ`), `evalFold` trees (`j = 1 .. d`), & `F_fri`!
+      -- 6. Batching challenges (`η`, `ρ_bf`, `ρ_fri`), interleaved `(d + 1)`-round BaseFold, & coset FRI!
       let batchBytes := algBatchTranscript r3Bytes scPolys colEvalsC
-      let η := FastProver.ofC8 (deriveChalAt algBatchChalCust batchBytes 0)
-      let ρ := FastProver.ofC8 (deriveChalAt algBatchChalCust batchBytes 1)
+      let ηC := deriveChalAt algBatchChalCust batchBytes 0
+      let ρBfC := deriveChalAt algBatchChalCust batchBytes 1
+      let ρFriC := deriveChalAt algBatchChalCust batchBytes 2
+      if ρBfC == Coordinate.zero 8 || ρFriC == Coordinate.zero 8 then return none
+      let η := FastProver.ofC8 ηC
+      let ρBf := FastProver.ofC8 ρBfC
+      let ρFri := FastProver.ofC8 ρFriC
 
-      let all15Cosets : Array (Array F256) :=
+      let all16Cosets : Array (Array F256) :=
         #[coset0, p1Cosets[0]!, p1Cosets[1]!, p1Cosets[2]!, p1Cosets[3]!,
           p1Cosets[4]!, p1Cosets[5]!, p1Cosets[6]!, p1Cosets[7]!,
-          mCoset, p3Cosets[0]!, p3Cosets[1]!, p3Cosets[2]!, p3Cosets[3]!, p3Cosets[4]!]
+          mCoset, p3Cosets[0]!, p3Cosets[1]!, p3Cosets[2]!, p3Cosets[3]!, p3Cosets[4]!, p3Cosets[5]!]
 
+      let mut hTabCur : Array F256 := Array.ofFn fun idx : Fin nFull =>
+        let witEta := FastProver.evalHornerF tbl (initCols16.map fun col => col[idx.val]!) η
+        addF bfMaskTab[idx.val]! (mulF ρBf witEta)
       let mut hCur : Array F256 := Array.ofFn fun idx : Fin cosetLen =>
-        FastProver.evalHornerF tbl (all15Cosets.map fun col => col[idx.val]!) η
+        let witEta := FastProver.evalHornerF tbl (all16Cosets.map fun col => col[idx.val]!) η
+        addF bfMaskCoset[idx.val]! (mulF ρBf witEta)
+
+      let mut bfPolys : Array PolyDeg2 := #[]
       let mut evalWordsC : Array (Array C8) := #[]
       let mut evalTrees : Array FastCubeTree := #[]
       let mut evalRoots : Array Digest := #[]
-      for j in [0:d] do
+      let mut bfTr := batchBytes
+
+      for j in [0:d + 1] do
+        let halfTab := 2 ^ (d - j)
+        let mut c0 := zeroF
+        let mut c1 := zeroF
+        let mut c2 := zeroF
+        for tail in [0:halfTab] do
+          let e0 := eqCur[2 * tail]!
+          let e1 := eqCur[2 * tail + 1]!
+          let h0 := hTabCur[2 * tail]!
+          let h1 := hTabCur[2 * tail + 1]!
+          let de := addF e0 e1
+          let dh := addF h0 h1
+          let p0 := mulF e0 h0
+          let p1 := mulF e1 h1
+          let p2 := mulF de dh
+          c0 := addF c0 p0
+          c1 := addF c1 (addF (addF p0 p1) p2)
+          c2 := addF c2 p2
+        let qPoly : PolyDeg2 :=
+          ⟨FastProver.toC8 c0, FastProver.toC8 c1, FastProver.toC8 c2⟩
+        bfPolys := bfPolys.push qPoly
+        bfTr := bfTr ++ envelope (natCoordBytes j) ++ envelope qPoly.encodeBytes
+        let sjC := digestTowerC (cshakeC.xofDigest algBfChalCust bfTr)
+        let sjF := FastProver.ofC8 sjC
+        if sjF == addF oneF rFullF[j]! then return none
+
+        let prevEq := eqCur
+        eqCur := Array.ofFn fun tail : Fin halfTab =>
+          let e0 := prevEq[2 * tail.val]!
+          let e1 := prevEq[2 * tail.val + 1]!
+          addF e0 (mulF sjF (addF e0 e1))
+        let prevHTab := hTabCur
+        hTabCur := Array.ofFn fun tail : Fin halfTab =>
+          let h0 := prevHTab[2 * tail.val]!
+          let h1 := prevHTab[2 * tail.val + 1]!
+          addF h0 (mulF sjF (addF h0 h1))
+
         let halfJ := 2 ^ (friEll - j - 1)
         let domLo := FastProver.tabulateCosetDomF tbl friEll j pivs
         let pivJ := pivs[j]!
         let pinvJ := pivInvs[j]!
-        let alphaJ := mulF pivJ rFullF[j]!
+        let alphaJ := mulF pivJ sjF
         let prev := hCur
         hCur := Array.ofFn fun k : Fin halfJ =>
           let lo := prev[k.val]!
           let hi := prev[k.val + halfJ]!
           addF lo (mulF (mulF (addF domLo[k.val]! alphaJ) (addF lo hi)) pinvJ)
-        let wC := hCur.map FastProver.toC8
-        let tr := buildFastCubeTree (friEll - (j + 1)) wC
-        evalWordsC := evalWordsC.push wC
-        evalTrees := evalTrees.push tr
-        evalRoots := evalRoots.push tr.root
+        if j < d then
+          let wC := hCur.map FastProver.toC8
+          let tr := buildFastCubeTree (friEll - (j + 1)) wC
+          evalWordsC := evalWordsC.push wC
+          evalTrees := evalTrees.push tr
+          evalRoots := evalRoots.push tr.root
+          bfTr := bfTr ++ envelope (cshakeC.digestCodec.encode tr.root)
+
+      let bfFinalCoeffC := FastProver.toC8 hTabCur[0]!
+      bfTr := bfTr ++ envelope (encodeC bfFinalCoeffC)
 
       -- Build `F_fri` (`word0`) and run `(d + 1)`-round coset FRI (`finalDegree = 1`)!
       let friWord0F : Array F256 := Array.ofFn fun idx : Fin cosetLen =>
-        let batchRho := FastProver.evalHornerF tbl (all15Cosets.map fun col => col[idx.val]!) ρ
-        addF friMaskCoset[idx.val]! (mulF ρ batchRho)
+        let batchRho := FastProver.evalHornerF tbl (all16Cosets.map fun col => col[idx.val]!) ρFri
+        addF friMaskCoset[idx.val]! (mulF ρFri batchRho)
       let friWord0C := friWord0F.map FastProver.toC8
       let friTree0 := buildFastCubeTree friEll friWord0C
       let friRoot0 := friTree0.root
 
       let sFri := algFriStatementOf stmt friRoot0 hm hell
-      let pins := algFriPins batchBytes evalRoots
+      let pins := algFriPins bfTr
       let zeroSeeds : Fin friQueries → PowerTwoFriLevels friEll 1 := fun _ => ⟨0, by positivity⟩
       let mut friWordsF : Array (Array F256) := #[friWord0F]
       let mut friWordsC : Array (Array C8) := #[friWord0C]
@@ -3641,7 +4597,7 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
       let finalCoeffC : C8 := (friWordsC[friRounds]!)[0]!
       let finalCoeffs : List C8 := [finalCoeffC]
       let lastSize := 2 ^ (friEll - friRounds)
-      let lastTree := buildFastCubeTree (friEll - friRounds) (Array.mkArray lastSize finalCoeffC)
+      let lastTree := buildFastCubeTree (friEll - friRounds) (Array.replicate lastSize finalCoeffC)
       friRoots := friRoots.push lastTree.root
       let stubSeeds := Tower256SuccinctProver.stubReceipt friRoots friChalsC finalCoeffs zeroSeeds
       let mid := queryMidstate sFri pins stubSeeds
@@ -3677,8 +4633,8 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
         { left := mCosetC[k0]!, right := mCosetC[k0 + half0]!, pairPath := (mTree.path k0).dropLast }
       let p3Ops : Array Phase3PairOpening := Array.ofFn fun a : Fin friQueries =>
         let k0 := (seeds a).val % half0
-        { leftCols := Array.ofFn fun c : Fin 6 => (p3CosetsC[c.val]!)[k0]!
-          rightCols := Array.ofFn fun c : Fin 6 => (p3CosetsC[c.val]!)[k0 + half0]!
+        { leftCols := Array.ofFn fun c : Fin 8 => (p3CosetsC[c.val]!)[k0]!
+          rightCols := Array.ofFn fun c : Fin 8 => (p3CosetsC[c.val]!)[k0 + half0]!
           pairPath := (p3Tree.path k0).dropLast }
       let efOps : Array (Array CPairOpening) := Array.ofFn fun j : Fin d =>
         let wC := evalWordsC[j.val]!
@@ -3695,6 +4651,8 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
           phase3Root := p3Root
           sumcheckPolys := scPolys
           colEvalsAtR := colEvalsC
+          bfPolys := bfPolys
+          bfFinalCoeff := bfFinalCoeffC
           evalFoldRoots := evalRoots
           friInitialRoot := friRoot0
           friReceipt := friRec
@@ -3708,6 +4666,9 @@ def proveAlgebraic (dfa : DfaTable) (w : List UInt8) (claim : ClaimData)
   else return none
 
 /-! ## §7. Axiom Pins (`#guard_msgs` + `#print axioms`) -/
+
+/-- info: 'Minidregg.Compiler.Tower256AlgebraicCert.verifyPairAtLevel_succ_eq_or_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms verifyPairAtLevel_succ_eq_or_collision
 
 /-- info: 'Minidregg.Compiler.Tower256AlgebraicCert.orderOf_zetaF' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms orderOf_zetaF

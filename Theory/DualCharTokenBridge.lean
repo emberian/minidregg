@@ -56,8 +56,11 @@ import Mathlib.Data.ZMod.Basic
 import Mathlib.Algebra.Field.ZMod
 import Mathlib.Tactic.Ring
 import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.NormNum.Prime
 import Theory.IntegerFingerprint
 import Theory.VerifiedAstTransducer
+import Theory.BinaryTowerTrace
 
 namespace Minidregg.Theory.DualCharTokenBridge
 
@@ -654,6 +657,140 @@ theorem colliding_root_branch_inhabited :
         ([1, 5] : List UInt8).length - 1 := by
   decide
 
+local instance : Fact (Nat.Prime 257) := ⟨by norm_num⟩
+
+/-- **In-Class `256 ≤ ringChar F` Tightness Witness (`zmod257_colliding_root_inhabited`).**
+Over `ZMod 257` (`256 ≤ ringChar (ZMod 257)`, so `Nat.cast` is genuinely injective across **all**
+`256` `UInt8` byte values via `natCast_uint8_injective_of_ringChar`), `[1, 5]` and `[2, 3]`
+collide at `B = (2 : ZMod 257)` (`1·2 + 5 = 7 = 2·2 + 3`) and achieve exact bad-base count
+`#bad = 1 = L - 1` across `Finset.univ : Finset (ZMod 257)`. -/
+theorem zmod257_colliding_root_inhabited :
+    256 ≤ ringChar (ZMod 257) ∧
+    Function.Injective (fun b : UInt8 => (b.toNat : ZMod 257)) ∧
+    evalBytesBase (2 : ZMod 257) [1, 5] = evalBytesBase (2 : ZMod 257) [2, 3] ∧
+    ((Finset.univ : Finset (ZMod 257)).filter
+      (fun B => evalBytesBase B [1, 5] = evalBytesBase B [2, 3])).card =
+        ([1, 5] : List UInt8).length - 1 := by
+  have hchar : 256 ≤ ringChar (ZMod 257) := by
+    rw [ZMod.ringChar_zmod_n]
+    norm_num
+  have hinj : Function.Injective (fun b : UInt8 => (b.toNat : ZMod 257)) :=
+    natCast_uint8_injective_of_ringChar (Or.inr hchar)
+  have hcol : evalBytesBase (2 : ZMod 257) [1, 5] = evalBytesBase (2 : ZMod 257) [2, 3] := by
+    change (((0 : ZMod 257) * 2 + ((1 : UInt8).toNat : ZMod 257)) * 2 + ((5 : UInt8).toNat : ZMod 257)) =
+      (((0 : ZMod 257) * 2 + ((2 : UInt8).toNat : ZMod 257)) * 2 + ((3 : UInt8).toNat : ZMod 257))
+    norm_num
+  have hle : ((Finset.univ : Finset (ZMod 257)).filter
+      (fun B => evalBytesBase B [1, 5] = evalBytesBase B [2, 3])).card ≤ 1 :=
+    card_colliding_bases_le hinj Finset.univ (bs₁ := [1, 5]) (bs₂ := [2, 3]) rfl (by decide)
+  have hge : 1 ≤ ((Finset.univ : Finset (ZMod 257)).filter
+      (fun B => evalBytesBase B [1, 5] = evalBytesBase B [2, 3])).card :=
+    Finset.one_le_card.mpr ⟨2, Finset.mem_filter.mpr ⟨Finset.mem_univ _, hcol⟩⟩
+  exact ⟨hchar, hinj, hcol, le_antisymm hle hge⟩
+
+/-- Embed a single bit into `GF(2) = binaryTower 0`. -/
+noncomputable def bitToTower0 (b : Bool) : Minidregg.Theory.binaryTower 0 :=
+  if b then 1 else 0
+
+theorem bitToTower0_injective : Function.Injective bitToTower0 := by
+  intro a b h
+  cases a <;> cases b <;> simp [bitToTower0] at h ⊢
+
+/-- 2-bit Fan–Paar packing into `GF(4) = binaryTower 1`. -/
+noncomputable def bits2ToTower1 (p : Bool × Bool) : Minidregg.Theory.binaryTower 1 :=
+  Minidregg.Theory.towerPack 0 (bitToTower0 p.1, bitToTower0 p.2)
+
+theorem bits2ToTower1_injective : Function.Injective bits2ToTower1 := by
+  intro p q h
+  have hp := (Minidregg.Theory.towerMulFull_holds 0).1 h
+  rcases p with ⟨p1, p2⟩; rcases q with ⟨q1, q2⟩
+  simp only [Prod.mk.injEq] at hp
+  exact Prod.ext (bitToTower0_injective hp.1) (bitToTower0_injective hp.2)
+
+/-- 4-bit Fan–Paar nibble packing into `GF(16) = binaryTower 2`. -/
+noncomputable def bits4ToTower2 (p : (Bool × Bool) × (Bool × Bool)) :
+    Minidregg.Theory.binaryTower 2 :=
+  Minidregg.Theory.towerPack 1 (bits2ToTower1 p.1, bits2ToTower1 p.2)
+
+theorem bits4ToTower2_injective : Function.Injective bits4ToTower2 := by
+  intro p q h
+  have hp := (Minidregg.Theory.towerMulFull_holds 1).1 h
+  rcases p with ⟨p1, p2⟩; rcases q with ⟨q1, q2⟩
+  simp only [Prod.mk.injEq] at hp
+  exact Prod.ext (bits2ToTower1_injective hp.1) (bits2ToTower1_injective hp.2)
+
+/-- Extract the 8 little-endian bits of `u : UInt8` as nested Fan–Paar pairs. -/
+def uint8BitOctet (u : UInt8) :
+    ((Bool × Bool) × (Bool × Bool)) × ((Bool × Bool) × (Bool × Bool)) :=
+  (((u.toBitVec.getLsbD 0, u.toBitVec.getLsbD 1),
+    (u.toBitVec.getLsbD 2, u.toBitVec.getLsbD 3)),
+   ((u.toBitVec.getLsbD 4, u.toBitVec.getLsbD 5),
+    (u.toBitVec.getLsbD 6, u.toBitVec.getLsbD 7)))
+
+/-- Reassemble `UInt8` from its 8 little-endian bits. -/
+def octetToUInt8 (o : ((Bool × Bool) × (Bool × Bool)) × ((Bool × Bool) × (Bool × Bool))) : UInt8 :=
+  UInt8.ofNat
+    ((if o.1.1.1 then 1 else 0) +
+     (if o.1.1.2 then 2 else 0) +
+     (if o.1.2.1 then 4 else 0) +
+     (if o.1.2.2 then 8 else 0) +
+     (if o.2.1.1 then 16 else 0) +
+     (if o.2.1.2 then 32 else 0) +
+     (if o.2.2.1 then 64 else 0) +
+     (if o.2.2.2 then 128 else 0))
+
+theorem uint8BitOctet_leftInverse : Function.LeftInverse octetToUInt8 uint8BitOctet := by
+  have h16 : ∀ hi lo : Fin 16,
+      octetToUInt8 (uint8BitOctet (UInt8.ofBitVec (BitVec.ofNat 8 (16 * hi.1 + lo.1)))) =
+        UInt8.ofBitVec (BitVec.ofNat 8 (16 * hi.1 + lo.1)) := by
+    decide
+  intro u
+  have hlt : u.toNat < 256 := u.toBitVec.isLt
+  let hi : Fin 16 := ⟨u.toNat / 16, by omega⟩
+  let lo : Fin 16 := ⟨u.toNat % 16, by omega⟩
+  have heq : UInt8.ofBitVec (BitVec.ofNat 8 (16 * hi.1 + lo.1)) = u := by
+    have hdiv : 16 * (u.toNat / 16) + u.toNat % 16 = u.toNat := Nat.div_add_mod u.toNat 16
+    change UInt8.ofBitVec (BitVec.ofNat 8 (16 * (u.toNat / 16) + u.toNat % 16)) = u
+    rw [hdiv]
+    cases u with
+    | ofBitVec bv =>
+      congr 1
+      apply BitVec.eq_of_toNat_eq
+      rw [BitVec.toNat_ofNat]
+      exact Nat.mod_eq_of_lt bv.isLt
+  rw [← heq]
+  exact h16 hi lo
+
+theorem uint8BitOctet_injective : Function.Injective uint8BitOctet :=
+  uint8BitOctet_leftInverse.injective
+
+/-- **Canonical Fan–Paar `GF(2^8) ↪ GF(2^256)` Byte Embedding (`fanPaarByteToTower256`):**
+packs `u : UInt8` into `binaryTower 3 = GF(2^8)` via 3-level Fan–Paar basis `towerPack` and embeds
+into `binaryTower 8 = GF(2^256)` via `binaryTowerEmbedChain 3 5`, matching `Tower256::from_byte_gf256`. -/
+noncomputable def fanPaarByteToTower256 (u : UInt8) : Minidregg.Theory.binaryTower 8 :=
+  Minidregg.Theory.binaryTowerEmbedChain 3 5
+    (Minidregg.Theory.towerPack 2
+      (bits4ToTower2 (uint8BitOctet u).1, bits4ToTower2 (uint8BitOctet u).2))
+
+theorem fanPaarByteToTower256_injective : Function.Injective fanPaarByteToTower256 := by
+  intro u v h
+  have h3 := Minidregg.Theory.binaryTowerEmbedChain_injective 3 5 h
+  have hp := (Minidregg.Theory.towerMulFull_holds 2).1 h3
+  simp only [Prod.mk.injEq] at hp
+  exact uint8BitOctet_injective
+    (Prod.ext (bits4ToTower2_injective hp.1) (bits4ToTower2_injective hp.2))
+
+/-- **Concrete `Tower256` (`GF(2^256)`) Schwartz–Zippel Collision Bound
+(`tower256_card_colliding_bases_le`):**
+instantiates `card_colliding_bases_le` directly on `binaryTower 8` via `fanPaarByteToTower256`. -/
+theorem tower256_card_colliding_bases_le [DecidableEq (Minidregg.Theory.binaryTower 8)]
+    (S : Finset (Minidregg.Theory.binaryTower 8)) {bs₁ bs₂ : List UInt8}
+    (hlen : bs₁.length = bs₂.length) (hne : bs₁ ≠ bs₂) :
+    (S.filter (fun B =>
+      evalBytesWith fanPaarByteToTower256 B bs₁ =
+      evalBytesWith fanPaarByteToTower256 B bs₂)).card ≤ bs₁.length - 1 :=
+  card_colliding_bases_le fanPaarByteToTower256_injective S hlen hne
+
 /-! ## §4. Fixed-Base `ℤ` Radix Injectivity & `IntegerFingerprint` Cross-Characteristic Soundness -/
 
 /-- Exact integer bounds `[0, 256^{|bs|})` for fixed-base `B = 256` evaluation over `ℤ`. -/
@@ -837,6 +974,8 @@ theorem dualChar_integer_fingerprint_inhabited :
 
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.detok_append' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms detok_append
+/-- info: 'Minidregg.Theory.DualCharTokenBridge.detok_flatten' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms detok_flatten
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.tokenLevelGuard_bypassed_by_bpe_split' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms tokenLevelGuard_bypassed_by_bpe_split
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.detok_not_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -847,6 +986,8 @@ theorem dualChar_integer_fingerprint_inhabited :
 #guard_msgs (whitespace := lax) in #print axioms detok_redactBytes_scrubs_any_split
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.evalBytesBase_append' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms evalBytesBase_append
+/-- info: 'Minidregg.Theory.DualCharTokenBridge.evalBytesWith_cons' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms evalBytesWith_cons
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.evalBytesBase_eq_sum_pow' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms evalBytesBase_eq_sum_pow
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.rollTokensWith_eq_evalBytesWith_detok' depends on axioms: [propext, Quot.sound] -/
@@ -869,6 +1010,12 @@ theorem dualChar_integer_fingerprint_inhabited :
 #guard_msgs (whitespace := lax) in #print axioms char2_natCast_alias_falsifier
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.colliding_root_branch_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms colliding_root_branch_inhabited
+/-- info: 'Minidregg.Theory.DualCharTokenBridge.zmod257_colliding_root_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms zmod257_colliding_root_inhabited
+/-- info: 'Minidregg.Theory.DualCharTokenBridge.fanPaarByteToTower256_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fanPaarByteToTower256_injective
+/-- info: 'Minidregg.Theory.DualCharTokenBridge.tower256_card_colliding_bases_le' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tower256_card_colliding_bases_le
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.evalBytesInt_injective_of_length_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms evalBytesInt_injective_of_length_eq
 /-- info: 'Minidregg.Theory.DualCharTokenBridge.tokenByteWeldRow_holdsInt_iff_detok_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/

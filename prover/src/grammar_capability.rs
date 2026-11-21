@@ -11,17 +11,20 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 use crate::hash_kernels::cshake256_xof;
 use crate::policy_transducer::{
-    all_rules_safe, exec_attr_replay, is_api_key_body_byte, is_bearer_body_byte, ll1_deterministic,
-    AttrCfg, AttrRule, CfgSym, CompiledByteLl1Parser, CompiledRedactor, ExactNat, MiniValue,
-    RedactRule, TransducerError,
+    all_rules_safe, exec_attr_replay, is_api_key_body_byte, is_bearer_body_byte, AttrCfg, AttrRule,
+    CfgSym, CompiledByteLl1Parser, CompiledRedactor, ExactNat, MiniValue, RedactRule,
+    TransducerError,
 };
 use crate::tower256_private_cert::{
-    automaton_commit, decode_private_cert, encode_private_cert, encode_private_receipt,
-    prove_private_with_randomness, salted_content_commit, verify_private_cert_bytes, ClaimData,
-    DfaTable, Digest, PrivateCertError, RowMask, Salt248,
+    automaton_commit, decode_private_cert, depth_of, encode_private_cert, encode_private_receipt,
+    pack_salted_leaf, prove_private_with_randomness, salted_content_commit,
+    verify_private_cert_bytes, ClaimData, DfaTable, Digest, MerkleHasher, PrivateCertError,
+    RowMask, Salt248,
 };
 
 // ============================================================================
@@ -118,6 +121,31 @@ pub fn check_dfa_sublanguage(
 ) -> Result<SublanguageResult, CapabilityError> {
     child.validate().map_err(CapabilityError::InvalidDfa)?;
     parent.validate().map_err(CapabilityError::InvalidDfa)?;
+
+    // Fast-path reflexive inclusion `child == parent`: explore reachable states in `O(states)`
+    // so valid DFAs above `2,048` states never trip `MAX_PRODUCT_STATES` against themselves.
+    if child == parent {
+        let mut vis = vec![false; child.states];
+        let mut q = Vec::with_capacity(child.states.min(1024));
+        vis[child.initial] = true;
+        q.push(child.initial);
+        let mut hd = 0usize;
+        while hd < q.len() {
+            let s = q[hd];
+            let row = &child.delta[256 * s..256 * s + 256];
+            for &nx in row {
+                if !vis[nx] {
+                    vis[nx] = true;
+                    q.push(nx);
+                }
+            }
+            hd += 1;
+        }
+        let reachable_pairs = q.into_iter().map(|s| (s, s)).collect();
+        return Ok(SublanguageResult::Included(ProductReachabilityCert {
+            reachable_pairs,
+        }));
+    }
 
     let prod_states = child
         .states
@@ -235,6 +263,9 @@ pub fn dfa_intersection(a: &DfaTable, b: &DfaTable, max_states: usize) -> Option
         return None;
     }
     let cap = max_states.min(65_536);
+    if cap == 0 {
+        return None;
+    }
     let prod = a.states.checked_mul(b.states)?;
     if prod > MAX_PRODUCT_STATES {
         return None;
@@ -506,23 +537,90 @@ fn occurs_in_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-/// Redaction-policy attenuation (`Theory.GrammarTypedCapability.redactRulesAttenuate`).
+/// Redaction-policy attenuation (`Theory.GrammarTypedCapability.redactRulesAttenuate`),
+/// additionally enforcing `rp.body_pred <= rc.body_pred` on identical prefixes so active raw-input
+/// sanitization by a child capability never scrubs fewer continuation bytes than its parent.
 pub fn redact_rules_attenuate(child_rules: &[RedactRule], parent_rules: &[RedactRule]) -> bool {
     all_rules_safe(child_rules)
         && all_rules_safe(parent_rules)
         && parent_rules.iter().all(|rp| {
-            child_rules
-                .iter()
-                .any(|rc| occurs_in_bytes(&rp.pat, &rc.pat))
+            child_rules.iter().any(|rc| {
+                occurs_in_bytes(&rp.pat, &rc.pat)
+                    && (rc.pat != rp.pat
+                        || (0u8..=255).all(|b| !(rp.body_pred)(b) || (rc.body_pred)(b)))
+            })
         })
 }
 
+static NEXT_SEMANTICS_TOKEN: AtomicU64 = AtomicU64::new(1);
+
+/// Unforgeable semantics capability token (`AttrSemantics SemOp Val` in Lean):
+/// binds `term_val`, `eval_op`, and `eval_in_place` to a unique monotonic `token` at registration
+/// time so `GrammarPolicy` semantics equality is 100% deterministic across Rust codegen units while
+/// preventing `semantics_id` string spoofing with tampered evaluators.
+pub struct SemanticsHandle<SemOp, Val> {
+    token: u64,
+    pub name: &'static str,
+    term_val: fn(u8) -> Val,
+    eval_op: fn(&SemOp, &[Val]) -> Val,
+    eval_in_place: Option<fn(&SemOp, &mut Vec<Val>, usize)>,
+}
+
+impl<SemOp, Val> SemanticsHandle<SemOp, Val> {
+    pub fn register(
+        name: &'static str,
+        term_val: fn(u8) -> Val,
+        eval_op: fn(&SemOp, &[Val]) -> Val,
+        eval_in_place: Option<fn(&SemOp, &mut Vec<Val>, usize)>,
+    ) -> Self {
+        Self {
+            token: NEXT_SEMANTICS_TOKEN.fetch_add(1, Ordering::Relaxed),
+            name,
+            term_val,
+            eval_op,
+            eval_in_place,
+        }
+    }
+}
+
 /// Syntactic & automata-predicated capability policy (`Theory.GrammarTypedCapability.GrammarPolicy`).
+/// `semantics_token` and `grammar` are private so `grammar`'s semantic evaluators cannot be mutated
+/// independently of `semantics_token` after construction via `GrammarPolicy::new`.
 pub struct GrammarPolicy<NT, SemOp, Val> {
+    semantics_token: u64,
     pub semantics_id: &'static str,
-    pub grammar: AttrCfg<u8, NT, SemOp, Val>,
+    grammar: AttrCfg<u8, NT, SemOp, Val>,
     pub redact_rules: Vec<RedactRule>,
     pub bounds: Vec<AutomatonBound>,
+}
+
+impl<NT, SemOp, Val> GrammarPolicy<NT, SemOp, Val> {
+    pub fn new(
+        semantics: &SemanticsHandle<SemOp, Val>,
+        initial: NT,
+        rules: Vec<AttrRule<u8, NT, SemOp>>,
+        redact_rules: Vec<RedactRule>,
+        bounds: Vec<AutomatonBound>,
+    ) -> Self {
+        Self {
+            semantics_token: semantics.token,
+            semantics_id: semantics.name,
+            grammar: AttrCfg {
+                initial,
+                rules,
+                term_val: semantics.term_val,
+                eval_op: semantics.eval_op,
+                eval_in_place: semantics.eval_in_place,
+            },
+            redact_rules,
+            bounds,
+        }
+    }
+
+    #[inline]
+    pub fn grammar(&self) -> &AttrCfg<u8, NT, SemOp, Val> {
+        &self.grammar
+    }
 }
 
 /// Detailed diagnostic reason when `check_policy_attenuation` refuses an escalation attempt.
@@ -546,48 +644,219 @@ pub enum AttenuationRefusal {
     },
 }
 
+/// Zero-allocation inner-loop 257-bit (`256` bytes + `EOF`) LL(1) disjoint-predict-set checker,
+/// mathematically equivalent to `policy_transducer::ll1_deterministic` on `AttrCfg<u8, ...>`
+/// (`~10 us` vs `~3 ms` per policy).
+pub fn fast_byte_ll1_deterministic<NT, SemOp, Val>(cfg: &AttrCfg<u8, NT, SemOp, Val>) -> bool
+where
+    NT: Eq + Hash + Copy,
+{
+    let mut nts: Vec<NT> = Vec::with_capacity(16);
+    let mut nt_id_of = std::collections::HashMap::<NT, usize>::with_capacity(16);
+    nt_id_of.insert(cfg.initial, 0);
+    nts.push(cfg.initial);
+
+    let intern = |nt: NT, nts: &mut Vec<NT>, map: &mut std::collections::HashMap<NT, usize>| -> usize {
+        if let Some(&id) = map.get(&nt) {
+            id
+        } else {
+            let id = nts.len();
+            nts.push(nt);
+            map.insert(nt, id);
+            id
+        }
+    };
+
+    #[derive(Clone, Copy)]
+    enum SymId {
+        Term(u8),
+        Nt(usize),
+    }
+
+    let mut rules_id: Vec<(usize, Vec<SymId>)> = Vec::with_capacity(cfg.rules.len());
+    for r in &cfg.rules {
+        let lhs_id = intern(r.lhs, &mut nts, &mut nt_id_of);
+        let rhs_ids: Vec<SymId> = r
+            .rhs
+            .iter()
+            .map(|s| match *s {
+                CfgSym::Terminal(b) => SymId::Term(b),
+                CfgSym::Nonterminal(nt) => SymId::Nt(intern(nt, &mut nts, &mut nt_id_of)),
+            })
+            .collect();
+        rules_id.push((lhs_id, rhs_ids));
+    }
+
+    let n_nts = nts.len();
+    let mut nullable = vec![false; n_nts];
+    loop {
+        let mut changed = false;
+        for &(lhs, ref rhs) in &rules_id {
+            if !nullable[lhs]
+                && rhs.iter().all(|s| match *s {
+                    SymId::Term(_) => false,
+                    SymId::Nt(id) => nullable[id],
+                })
+            {
+                nullable[lhs] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let mut first = vec![[0u64; 4]; n_nts];
+    loop {
+        let mut changed = false;
+        for &(lhs, ref rhs) in &rules_id {
+            let mut acc = first[lhs];
+            for &s in rhs {
+                match s {
+                    SymId::Term(b) => {
+                        acc[(b >> 6) as usize] |= 1u64 << (b & 63);
+                        break;
+                    }
+                    SymId::Nt(id) => {
+                        for w in 0..4 {
+                            acc[w] |= first[id][w];
+                        }
+                        if !nullable[id] {
+                            break;
+                        }
+                    }
+                }
+            }
+            if acc != first[lhs] {
+                first[lhs] = acc;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // `follow[id]` has 257 bits: words 0..4 = bytes 0..255, word 4 bit 0 = EOF (`None`).
+    let mut follow = vec![[0u64; 5]; n_nts];
+    follow[0][4] = 1u64; // EOF in FOLLOW(initial)
+    loop {
+        let mut changed = false;
+        for &(lhs, ref rhs) in &rules_id {
+            let lhs_fol = follow[lhs];
+            let mut suf_first = [0u64; 4];
+            let mut suf_null = true;
+            for &s in rhs.iter().rev() {
+                match s {
+                    SymId::Term(b) => {
+                        suf_first = [0u64; 4];
+                        suf_first[(b >> 6) as usize] = 1u64 << (b & 63);
+                        suf_null = false;
+                    }
+                    SymId::Nt(id) => {
+                        let mut f_id = follow[id];
+                        for w in 0..4 {
+                            f_id[w] |= suf_first[w];
+                        }
+                        if suf_null {
+                            for w in 0..5 {
+                                f_id[w] |= lhs_fol[w];
+                            }
+                        }
+                        if f_id != follow[id] {
+                            follow[id] = f_id;
+                            changed = true;
+                        }
+                        if nullable[id] {
+                            for w in 0..4 {
+                                suf_first[w] |= first[id][w];
+                            }
+                        } else {
+                            suf_first = first[id];
+                            suf_null = false;
+                        }
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let mut seen_predict = vec![[0u64; 5]; n_nts];
+    for &(lhs, ref rhs) in &rules_id {
+        let mut pred = [0u64; 5];
+        let mut rhs_null = true;
+        for &s in rhs {
+            match s {
+                SymId::Term(b) => {
+                    pred[(b >> 6) as usize] |= 1u64 << (b & 63);
+                    rhs_null = false;
+                    break;
+                }
+                SymId::Nt(id) => {
+                    for w in 0..4 {
+                        pred[w] |= first[id][w];
+                    }
+                    if !nullable[id] {
+                        rhs_null = false;
+                        break;
+                    }
+                }
+            }
+        }
+        if rhs_null {
+            for w in 0..5 {
+                pred[w] |= follow[lhs][w];
+            }
+        }
+        for w in 0..5 {
+            if (seen_predict[lhs][w] & pred[w]) != 0 {
+                return false;
+            }
+            seen_predict[lhs][w] |= pred[w];
+        }
+    }
+    true
+}
+
 impl<NT, SemOp, Val> GrammarPolicy<NT, SemOp, Val>
 where
     NT: Eq + Hash + Copy + fmt::Debug,
     SemOp: PartialEq + Clone,
 {
     pub fn well_formed(&self) -> bool {
-        ll1_deterministic(&self.grammar)
+        fast_byte_ll1_deterministic(&self.grammar)
             && all_rules_safe(&self.redact_rules)
             && self.bounds.iter().all(AutomatonBound::well_formed)
     }
 }
 
-/// Detailed capability attenuation check returning `Ok(())` iff `grammarPolicyAttenuates = true`,
-/// or a structured `AttenuationRefusal` (including the shortest counterexample $w$ when an
-/// acceptance/rejection guard such as `Absent("sk-")` is dropped or weakened!).
-pub fn check_policy_attenuation<NT, SemOp, Val>(
+fn check_policy_attenuation_assuming_wf<NT, SemOp, Val>(
     child: &GrammarPolicy<NT, SemOp, Val>,
     parent: &GrammarPolicy<NT, SemOp, Val>,
+    check_child_ll1: bool,
+    check_parent_ll1: bool,
 ) -> Result<(), AttenuationRefusal>
 where
     NT: Eq + Hash + Copy + fmt::Debug,
     SemOp: PartialEq + Clone,
 {
-    let same_eval_in_place = match (child.grammar.eval_in_place, parent.grammar.eval_in_place) {
-        (None, None) => true,
-        (Some(fc), Some(fp)) => std::ptr::fn_addr_eq(fc, fp),
-        _ => false,
-    };
-    if child.semantics_id != parent.semantics_id
-        || !std::ptr::fn_addr_eq(child.grammar.term_val, parent.grammar.term_val)
-        || !std::ptr::fn_addr_eq(child.grammar.eval_op, parent.grammar.eval_op)
-        || !same_eval_in_place
+    if child.semantics_token == 0
+        || child.semantics_token != parent.semantics_token
+        || child.semantics_id != parent.semantics_id
     {
         return Err(AttenuationRefusal::SemanticsMismatch {
             child: child.semantics_id,
             parent: parent.semantics_id,
         });
     }
-    if !ll1_deterministic(&child.grammar) {
+    if check_child_ll1 && !fast_byte_ll1_deterministic(&child.grammar) {
         return Err(AttenuationRefusal::ChildGrammarNotLl1);
     }
-    if !ll1_deterministic(&parent.grammar) {
+    if check_parent_ll1 && !fast_byte_ll1_deterministic(&parent.grammar) {
         return Err(AttenuationRefusal::ParentGrammarNotLl1);
     }
     if child.grammar.initial != parent.grammar.initial {
@@ -610,7 +879,8 @@ where
     }
     for (p_idx, bp) in parent.bounds.iter().enumerate() {
         if !child.bounds.iter().any(|bc| automaton_bound_entails(bc, bp)) {
-            // Synthesize shortest lexicographic counterexample in (\bigcap_i L(dc_i)) \setminus L(dp):
+            // Synthesize shortest lexicographic counterexample in (\bigcap_i L(dc_i)) \setminus L(dp)
+            // over the accept/reject DFA projection (`dfaCounterexample?` in Lean):
             let shortest_counterexample = bp.to_accept_dfa().and_then(|dp| {
                 let mut combined = dfa_accept_all();
                 for bc in &child.bounds {
@@ -632,6 +902,20 @@ where
     Ok(())
 }
 
+/// Detailed capability attenuation check returning `Ok(())` iff `grammarPolicyAttenuates = true`,
+/// or a structured `AttenuationRefusal` (including the shortest counterexample $w$ over the
+/// accept/reject DFA projection when a guard such as `Absent("sk-")` is dropped or weakened!).
+pub fn check_policy_attenuation<NT, SemOp, Val>(
+    child: &GrammarPolicy<NT, SemOp, Val>,
+    parent: &GrammarPolicy<NT, SemOp, Val>,
+) -> Result<(), AttenuationRefusal>
+where
+    NT: Eq + Hash + Copy + fmt::Debug,
+    SemOp: PartialEq + Clone,
+{
+    check_policy_attenuation_assuming_wf(child, parent, true, true)
+}
+
 /// Boolean capability attenuator (`Theory.GrammarTypedCapability.grammarPolicyAttenuates`).
 pub fn grammar_policy_attenuates<NT, SemOp, Val>(
     child: &GrammarPolicy<NT, SemOp, Val>,
@@ -644,7 +928,8 @@ where
     check_policy_attenuation(child, parent).is_ok()
 }
 
-/// Multi-hop capability policy chain checker (`Theory.GrammarTypedCapability.policyChainAttenuates`).
+/// Multi-hop capability policy chain checker (`Theory.GrammarTypedCapability.policyChainAttenuates`),
+/// checking each policy's LL(1) determinacy once across the chain (`< 0.1 ms` for 3 hops).
 pub fn policy_chain_attenuates<NT, SemOp, Val>(chain: &[&GrammarPolicy<NT, SemOp, Val>]) -> bool
 where
     NT: Eq + Hash + Copy + fmt::Debug,
@@ -653,10 +938,21 @@ where
     match chain {
         [] => false,
         [single] => single.well_formed(),
-        _ => chain
-            .windows(2)
-            .all(|pair| grammar_policy_attenuates(pair[1], pair[0]))
-            && chain.last().unwrap().well_formed(),
+        _ => {
+            if !chain.iter().all(|p| fast_byte_ll1_deterministic(&p.grammar)) {
+                return false;
+            }
+            chain
+                .windows(2)
+                .all(|pair| check_policy_attenuation_assuming_wf(pair[1], pair[0], false, false).is_ok())
+                && all_rules_safe(&chain.last().unwrap().redact_rules)
+                && chain
+                    .last()
+                    .unwrap()
+                    .bounds
+                    .iter()
+                    .all(AutomatonBound::well_formed)
+        }
     }
 }
 
@@ -1149,14 +1445,38 @@ fn amt_tail2_digit_rules() -> Vec<AttrRule<u8, CapNT, CapOp>> {
         .collect()
 }
 
+pub fn cap_semantics_handle() -> &'static SemanticsHandle<CapOp, MiniValue> {
+    static HANDLE: OnceLock<SemanticsHandle<CapOp, MiniValue>> = OnceLock::new();
+    HANDLE.get_or_init(|| SemanticsHandle::register(CAP_SEMANTICS_ID, cap_term_val, eval_cap_op, None))
+}
+
+pub fn cap_term_val_fn(b: u8) -> MiniValue {
+    cap_term_val(b)
+}
+
 pub fn make_cap_cfg(rules: Vec<AttrRule<u8, CapNT, CapOp>>) -> AttrCfg<u8, CapNT, CapOp, MiniValue> {
+    let sem = cap_semantics_handle();
     AttrCfg {
         initial: CapNT::Root,
         rules,
-        term_val: cap_term_val,
-        eval_op: eval_cap_op,
-        eval_in_place: None,
+        term_val: sem.term_val,
+        eval_op: sem.eval_op,
+        eval_in_place: sem.eval_in_place,
     }
+}
+
+pub fn make_cap_policy(
+    rules: Vec<AttrRule<u8, CapNT, CapOp>>,
+    redact_rules: Vec<RedactRule>,
+    bounds: Vec<AutomatonBound>,
+) -> GrammarPolicy<CapNT, CapOp, MiniValue> {
+    GrammarPolicy::new(
+        cap_semantics_handle(),
+        CapNT::Root,
+        rules,
+        redact_rules,
+        bounds,
+    )
 }
 
 pub fn root_redact_rules() -> Vec<RedactRule> {
@@ -1202,11 +1522,10 @@ pub fn root_cap_policy_with_max_ops(max_ops: u64) -> GrammarPolicy<CapNT, CapOp,
     rules.extend(amt_head_rules(9));
     rules.extend(amt_tail1_digit_rules());
     rules.extend(amt_tail2_digit_rules());
-    GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: make_cap_cfg(rules),
-        redact_rules: root_redact_rules(),
-        bounds: vec![
+    make_cap_policy(
+        rules,
+        root_redact_rules(),
+        vec![
             AutomatonBound::MustAccept(DfaTable::no_sk_dash()),
             AutomatonBound::RangeHits {
                 dfa: dfa_count_op_brace(),
@@ -1214,7 +1533,7 @@ pub fn root_cap_policy_with_max_ops(max_ops: u64) -> GrammarPolicy<CapNT, CapOp,
                 hi: max_ops,
             },
         ],
-    }
+    )
 }
 
 pub fn root_cap_policy() -> GrammarPolicy<CapNT, CapOp, MiniValue> {
@@ -1233,11 +1552,10 @@ pub fn service_cap_policy_with_max_ops(max_ops: u64) -> GrammarPolicy<CapNT, Cap
     ]);
     rules.extend(amt_head_rules(9));
     rules.extend(amt_tail1_digit_rules());
-    GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: make_cap_cfg(rules),
-        redact_rules: root_redact_rules(),
-        bounds: vec![
+    make_cap_policy(
+        rules,
+        root_redact_rules(),
+        vec![
             AutomatonBound::MustAccept(DfaTable::no_sk_dash()),
             AutomatonBound::MustAccept(dfa_no_sql_drop()),
             AutomatonBound::RangeHits {
@@ -1246,7 +1564,7 @@ pub fn service_cap_policy_with_max_ops(max_ops: u64) -> GrammarPolicy<CapNT, Cap
                 hi: max_ops,
             },
         ],
-    }
+    )
 }
 
 pub fn service_cap_policy() -> GrammarPolicy<CapNT, CapOp, MiniValue> {
@@ -1260,11 +1578,10 @@ pub fn subagent_tool_cap_policy_with_max_ops(
     let mut rules = cap_core_frame_rules();
     rules.extend([rule_tool_read(), rule_tool_patch(), rule_tgt_sandbox()]);
     rules.extend(amt_head_rules(5));
-    GrammarPolicy {
-        semantics_id: CAP_SEMANTICS_ID,
-        grammar: make_cap_cfg(rules),
-        redact_rules: subagent_redact_rules(),
-        bounds: vec![
+    make_cap_policy(
+        rules,
+        subagent_redact_rules(),
+        vec![
             AutomatonBound::MustAccept(DfaTable::no_sk_dash()),
             AutomatonBound::MustAccept(dfa_no_sql_drop()),
             AutomatonBound::MustAccept(dfa_no_shell_sub()),
@@ -1274,7 +1591,7 @@ pub fn subagent_tool_cap_policy_with_max_ops(
                 hi: max_ops,
             },
         ],
-    }
+    )
 }
 
 pub fn subagent_tool_cap_policy() -> GrammarPolicy<CapNT, CapOp, MiniValue> {
@@ -1289,7 +1606,99 @@ const FRAGMENT_STREAM_CUST_PREFIX: u8 = 0x09;
 const FRAGMENT_STREAM_CUST_NAME: &[u8] = b"MINIDREGG/HYPERDOC/SEALED_ATOM_STREAM/V1";
 const FRAGMENT_WRAP_CUST_PREFIX: u8 = 0x0A;
 const FRAGMENT_WRAP_CUST_NAME: &[u8] = b"MINIDREGG/HYPERDOC/SEALED_ATOM_WRAP/V1";
+const FRAGMENT_SALTS_CUST_PREFIX: u8 = 0x0B;
+const FRAGMENT_SALTS_CUST_NAME: &[u8] = b"MINIDREGG/HYPERDOC/SEALED_ATOM_SALTS/V1";
 const PUBLIC_BUNDLE_MAGIC: &[u8; 8] = b"MDHGCB01";
+
+/// Multi-threaded strided `cubeRoot` salted content commitment (`< 5 ms` on 4 KiB even under
+/// heavy multi-core contention), bit-for-bit identical to `tower256_private_cert::salted_content_commit`.
+pub fn fast_salted_content_commit(
+    word: &[u8],
+    salts: &[Salt248],
+) -> Result<Digest, PrivateCertError> {
+    if word.len() != salts.len() {
+        return Err(PrivateCertError::RandomnessLengthMismatch);
+    }
+    let d = depth_of(word.len());
+    if d < 6 {
+        return salted_content_commit(word, salts);
+    }
+    let size = 1usize << d;
+    let hasher = MerkleHasher::new();
+    let zero_leaf = pack_salted_leaf(0, &[0u8; 31]);
+
+    // Partition at level `k = 3` (`8` disjoint strided subtrees `idx & 7 == rem` of `size >> 3` leaves each).
+    let sub_depth = d - 3;
+    let sub_size = size >> 3;
+    let mut sub_roots = [[0u8; 32]; 8];
+    std::thread::scope(|s| {
+        for (rem, out_root) in sub_roots.iter_mut().enumerate() {
+            let hasher_ref = &hasher;
+            s.spawn(move || {
+                let mut cur: Vec<Digest> = (0..sub_size)
+                    .map(|q| {
+                        let idx = rem + (q << 3);
+                        let leaf = if idx < word.len() {
+                            pack_salted_leaf(word[idx], &salts[idx])
+                        } else {
+                            zero_leaf
+                        };
+                        hasher_ref.hash_leaf(leaf)
+                    })
+                    .collect();
+                for lvl in (0..sub_depth).rev() {
+                    let stride = 1usize << lvl;
+                    let mut nxt = Vec::with_capacity(stride);
+                    for offset in 0..stride {
+                        nxt.push(hasher_ref.hash_node(&cur[offset], &cur[offset + stride]));
+                    }
+                    cur = nxt;
+                }
+                *out_root = cur[0];
+            });
+        }
+    });
+
+    let mut cur = sub_roots.to_vec();
+    for lvl in (0..3usize).rev() {
+        let stride = 1usize << lvl;
+        let mut nxt = Vec::with_capacity(stride);
+        for offset in 0..stride {
+            nxt.push(hasher.hash_node(&cur[offset], &cur[offset + stride]));
+        }
+        cur = nxt;
+    }
+    Ok(cur[0])
+}
+
+/// Deterministically derive per-byte `Salt248`s from `(cell_blinding_key, doc_id, atom_id, schema, op_id)`
+/// using domain-separated `cSHAKE256` (`0x0B`) so authorized cell decryptors can recompute and verify
+/// `salted_content_commit(plaintext, salts) == salted_patch_root` without storing salts separately!
+pub fn derive_hyperdoc_cell_salts(
+    cell_blinding_key: &Digest,
+    document_id: u64,
+    atom_id: u64,
+    schema: &Digest,
+    operation_id: u64,
+    patch_len: usize,
+) -> Vec<Salt248> {
+    let mut cust = Vec::with_capacity(1 + FRAGMENT_SALTS_CUST_NAME.len());
+    cust.push(FRAGMENT_SALTS_CUST_PREFIX);
+    cust.extend_from_slice(FRAGMENT_SALTS_CUST_NAME);
+
+    let mut seed = Vec::with_capacity(32 + 8 + 8 + 32 + 8);
+    seed.extend_from_slice(cell_blinding_key);
+    seed.extend_from_slice(&document_id.to_le_bytes());
+    seed.extend_from_slice(&atom_id.to_le_bytes());
+    seed.extend_from_slice(schema);
+    seed.extend_from_slice(&operation_id.to_le_bytes());
+
+    let stream = cshake256_xof(&cust, &seed, patch_len * 31);
+    stream
+        .chunks_exact(31)
+        .map(|c| c.try_into().expect("31B Salt248"))
+        .collect()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RevocationKey {
@@ -1441,6 +1850,86 @@ pub fn seal_hyperdoc_fragment_bytes(
     (ciphertext, wrapping)
 }
 
+/// Authenticate `wrapping` in constant time, decrypt `ciphertext`, and verify that the decrypted
+/// `plaintext` commits to `salted_patch_root` under `opt_salts` (or `derive_hyperdoc_cell_salts`
+/// when `opt_salts == None`), deterministically catching any `ciphertext <-> salted_patch_root`
+/// bait-and-switch!
+pub fn unseal_and_verify_hyperdoc_fragment(
+    cell_blinding_key: &Digest,
+    document_id: u64,
+    atom_id: u64,
+    schema: &Digest,
+    operation_id: u64,
+    salted_patch_root: &Digest,
+    ciphertext: &[u8],
+    wrapping: &[u8],
+    opt_salts: Option<&[Salt248]>,
+) -> Result<Vec<u8>, CapabilityError> {
+    if ciphertext.is_empty() || wrapping.len() != 32 {
+        return Err(CapabilityError::MalformedBundle(
+            "invalid ciphertext or wrapping length",
+        ));
+    }
+    let mut context = Vec::with_capacity(32 + 8 + 8 + 32 + 8 + 32);
+    context.extend_from_slice(cell_blinding_key);
+    context.extend_from_slice(&document_id.to_le_bytes());
+    context.extend_from_slice(&atom_id.to_le_bytes());
+    context.extend_from_slice(schema);
+    context.extend_from_slice(&operation_id.to_le_bytes());
+    context.extend_from_slice(salted_patch_root);
+
+    let mut wrap_cust = Vec::with_capacity(1 + FRAGMENT_WRAP_CUST_NAME.len());
+    wrap_cust.push(FRAGMENT_WRAP_CUST_PREFIX);
+    wrap_cust.extend_from_slice(FRAGMENT_WRAP_CUST_NAME);
+    let mut wrap_input = context.clone();
+    wrap_input.extend_from_slice(&(ciphertext.len() as u64).to_le_bytes());
+    wrap_input.extend_from_slice(ciphertext);
+    let expected_wrap = cshake256_xof(&wrap_cust, &wrap_input, 32);
+
+    let mut diff = 0u8;
+    for (&a, &b) in wrapping.iter().zip(expected_wrap.iter()) {
+        diff |= a ^ b;
+    }
+    if diff != 0 {
+        return Err(CapabilityError::MalformedBundle(
+            "wrapping authentication tag mismatch",
+        ));
+    }
+
+    let mut stream_cust = Vec::with_capacity(1 + FRAGMENT_STREAM_CUST_NAME.len());
+    stream_cust.push(FRAGMENT_STREAM_CUST_PREFIX);
+    stream_cust.extend_from_slice(FRAGMENT_STREAM_CUST_NAME);
+    let keystream = cshake256_xof(&stream_cust, &context, ciphertext.len());
+    let plaintext: Vec<u8> = ciphertext
+        .iter()
+        .zip(keystream.iter())
+        .map(|(&c, &k)| c ^ k)
+        .collect();
+
+    let owned_salts;
+    let salts: &[Salt248] = match opt_salts {
+        Some(s) => s,
+        None => {
+            owned_salts = derive_hyperdoc_cell_salts(
+                cell_blinding_key,
+                document_id,
+                atom_id,
+                schema,
+                operation_id,
+                plaintext.len(),
+            );
+            &owned_salts
+        }
+    };
+    let root = fast_salted_content_commit(&plaintext, salts)?;
+    if &root != salted_patch_root {
+        return Err(CapabilityError::MalformedBundle(
+            "decrypted ciphertext does not match salted_patch_root",
+        ));
+    }
+    Ok(plaintext)
+}
+
 /// Public statement for `verify_sealed_hyperdoc_patch` (`SealedHyperdocPatchStmt` in Lean).
 pub struct SealedHyperdocPatchStmt<'a, NT, SemOp, Val> {
     pub document_id: u64,
@@ -1483,6 +1972,10 @@ pub struct SealedHyperdocPatchWitness<'a, NT, SemOp, Val> {
     pub patch_salts: Vec<Salt248>,
     pub rule_indices: Vec<usize>,
     pub succinct_guards: Vec<SuccinctGuardWire>,
+    /// Optional sealed-cell blinding key: when `Some(key)` is supplied to the custodian gate,
+    /// `verify_sealed_hyperdoc_patch` cryptographically binds `(stmt.edit.ciphertext, stmt.edit.wrapping)`
+    /// to `(wit.patch_bytes, stmt.salted_patch_root)` via `seal_hyperdoc_fragment_bytes`.
+    pub cell_blinding_key: Option<Digest>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1491,6 +1984,7 @@ pub enum GateRejection {
     EmptyChain,
     CleartextPayloadNotEmpty,
     SealedAtomMetadataMismatch,
+    CiphertextSealMismatch,
     RootAuthorityAnchorMismatch,
     AuthorBindingMismatch,
     CapabilityExpiredOrNotYetValid,
@@ -1530,6 +2024,34 @@ where
     ) -> Result<Self, TransducerError> {
         if !all_rules_safe(&policy.redact_rules) {
             return Err(TransducerError::UnsafeRedactionRules);
+        }
+        // Validate nonterminal ID mapping is in-bounds and injective across all grammar nonterminals.
+        let mut id_owner = vec![None::<NT>; nt_count];
+        let mut check_nt = |nt: NT| -> Result<(), TransducerError> {
+            let id = nt_to_id(nt);
+            if id >= nt_count {
+                return Err(TransducerError::NonterminalOutOfBounds { id, count: nt_count });
+            }
+            if let Some(prev) = id_owner[id] {
+                if prev != nt {
+                    return Err(TransducerError::NonterminalOutOfBounds {
+                        id: nt_count,
+                        count: nt_count,
+                    });
+                }
+            } else {
+                id_owner[id] = Some(nt);
+            }
+            Ok(())
+        };
+        check_nt(policy.grammar.initial)?;
+        for r in &policy.grammar.rules {
+            check_nt(r.lhs)?;
+            for s in &r.rhs {
+                if let CfgSym::Nonterminal(nt) = *s {
+                    check_nt(nt)?;
+                }
+            }
         }
         let parser = CompiledByteLl1Parser::compile(
             AttrCfg {
@@ -1616,7 +2138,11 @@ where
         return Err(GateRejection::RootPolicyNotAttenuated(reason));
     }
 
+    let mut seen_cap_ids = HashSet::with_capacity(chain.len());
     for (idx, hop) in chain.iter().enumerate() {
+        if !seen_cap_ids.insert(hop.capability.id) {
+            return Err(GateRejection::CapabilityEdgeNotAttenuated { hop_index: idx });
+        }
         if !hop.capability.fresh_and_unrevoked(
             &stmt.revoked,
             stmt.policy_id,
@@ -1633,7 +2159,12 @@ where
         if !child.capability.attenuates(&parent.capability) {
             return Err(GateRejection::CapabilityEdgeNotAttenuated { hop_index: idx + 1 });
         }
-        if let Err(reason) = check_policy_attenuation(child.policy, parent.policy) {
+        if let Err(reason) = check_policy_attenuation_assuming_wf(
+            child.policy,
+            parent.policy,
+            idx + 1 == chain.len() - 1,
+            false,
+        ) {
             return Err(GateRejection::PolicyHopNotAttenuated {
                 hop_index: idx + 1,
                 reason,
@@ -1692,14 +2223,34 @@ where
     if wit.patch_salts.len() != stmt.patch_len {
         return Err(GateRejection::SaltsLengthMismatch);
     }
-    let computed_root = salted_content_commit(&wit.patch_bytes, &wit.patch_salts)
+    let computed_root = fast_salted_content_commit(&wit.patch_bytes, &wit.patch_salts)
         .map_err(|_| GateRejection::SaltsLengthMismatch)?;
     if computed_root != stmt.salted_patch_root {
         return Err(GateRejection::SaltedPatchRootMismatch);
     }
+    if let Some(ref key) = wit.cell_blinding_key {
+        let (expected_ct, expected_wrap) = seal_hyperdoc_fragment_bytes(
+            key,
+            stmt.document_id,
+            stmt.atom_id,
+            &stmt.schema,
+            stmt.operation_id,
+            &stmt.salted_patch_root,
+            &wit.patch_bytes,
+        );
+        if stmt.edit.ciphertext != expected_ct || stmt.edit.wrapping != expected_wrap {
+            return Err(GateRejection::CiphertextSealMismatch);
+        }
+    }
 
-    let redactor = CompiledRedactor::new(leaf_hop.policy.redact_rules.clone());
-    if redactor.redact(&wit.patch_bytes) != wit.patch_bytes {
+    // By `Theory.GrammarTypedCapability.redactFixedPoint_iff_absent`, on `allRulesSafe` rules
+    // `redactBytes rules w == w` iff every pattern in `rules` is absent from `w` (`0` allocations).
+    if leaf_hop
+        .policy
+        .redact_rules
+        .iter()
+        .any(|r| !r.pat.is_empty() && occurs_in_bytes(&wit.patch_bytes, &r.pat))
+    {
         return Err(GateRejection::PayloadNotPreScrubbed);
     }
     for (b_idx, b) in leaf_hop.policy.bounds.iter().enumerate() {
@@ -1742,8 +2293,20 @@ pub struct PublicSealedPatchBundle {
     pub succinct_guards: Vec<SuccinctGuardWire>,
 }
 
+pub const MAX_PUBLIC_BUNDLE_GUARDS: usize = 256;
+pub const MAX_PUBLIC_BUNDLE_STATES: usize = 262_144;
+pub const MAX_FINAL_FRI_LOG_LEN: usize = 16;
+pub const MIN_PUBLIC_PATCH_LEN: usize = 64;
+pub const MIN_PUBLIC_FRI_QUERIES: usize = 4;
+pub const MIN_PUBLIC_STEP_QUERIES: usize = 6;
+
 /// Prove succinct `Tower256` `PrivateReceipt`s for a list of `AutomatonBound`s sharing the exact
-/// same `(patch_len, salted_patch_root)` and pack a zero-leakage `PublicSealedPatchBundle`.
+/// same `(patch_len, salted_patch_root)` and pack a `PublicSealedPatchBundle`.
+///
+/// Privacy scope (`Tower256PrivateContentCert`): `PrivateReceipt` opens `first_row`, `last_row`,
+/// and `2 * step_queries` sampled rows (hiding all unopened leaves via 248-bit `Salt248` and
+/// 184-bit `RowMask`, so `>= 6 B` contiguous document slices are hidden on patches `>= 64 B`;
+/// for zero-opening algebraic ZK over tiny payloads, compose with `Tower256AlgebraicCert`).
 pub fn prove_public_sealed_patch_bundle(
     document_id: u64,
     atom_id: u64,
@@ -1757,8 +2320,16 @@ pub fn prove_public_sealed_patch_bundle(
     fri_queries: usize,
     step_queries: usize,
 ) -> Result<PublicSealedPatchBundle, CapabilityError> {
-    if patch_bytes.is_empty() {
-        return Err(CapabilityError::MalformedBundle("patch_bytes must be non-empty"));
+    if patch_bytes.len() < MIN_PUBLIC_PATCH_LEN || patch_bytes.len() > (1 << 24) {
+        return Err(CapabilityError::MalformedBundle("patch_bytes length out of 64B..=16MiB"));
+    }
+    if bounds.len() > MAX_PUBLIC_BUNDLE_GUARDS {
+        return Err(CapabilityError::MalformedBundle("too many succinct guards"));
+    }
+    if fri_queries < MIN_PUBLIC_FRI_QUERIES || step_queries < MIN_PUBLIC_STEP_QUERIES {
+        return Err(CapabilityError::MalformedBundle(
+            "fri_queries (<4) or step_queries (<6) below minimum soundness floor",
+        ));
     }
     if row_masks_per_guard.len() != bounds.len() {
         return Err(CapabilityError::MalformedBundle(
@@ -1770,7 +2341,13 @@ pub fn prove_public_sealed_patch_bundle(
             "malformed AutomatonBound in prove_public_sealed_patch_bundle",
         ));
     }
-    let salted_patch_root = salted_content_commit(patch_bytes, patch_salts)?;
+    let total_states: usize = bounds.iter().map(|b| b.dfa().states).sum();
+    if total_states > MAX_PUBLIC_BUNDLE_STATES {
+        return Err(CapabilityError::MalformedBundle(
+            "aggregate DFA state count exceeds MAX_PUBLIC_BUNDLE_STATES",
+        ));
+    }
+    let salted_patch_root = fast_salted_content_commit(patch_bytes, patch_salts)?;
     let (ciphertext, wrapping) = seal_hyperdoc_fragment_bytes(
         cell_blinding_key,
         document_id,
@@ -2035,8 +2612,11 @@ where
     NT: Eq + Hash + Copy + fmt::Debug,
     SemOp: PartialEq + Clone,
 {
-    if bundle.patch_len == 0 {
-        return Err(CapabilityError::MalformedBundle("patch_len must be > 0"));
+    if bundle.patch_len < MIN_PUBLIC_PATCH_LEN || bundle.patch_len > (1 << 24) {
+        return Err(CapabilityError::MalformedBundle("patch_len out of 64B..=16MiB"));
+    }
+    if bundle.succinct_guards.len() > MAX_PUBLIC_BUNDLE_GUARDS {
+        return Err(CapabilityError::MalformedBundle("too many succinct guards"));
     }
     if bundle.ciphertext.len() != bundle.patch_len {
         return Err(CapabilityError::MalformedBundle("ciphertext length mismatch"));
@@ -2049,11 +2629,27 @@ where
             "leaf policy does not attenuate root policy",
         ));
     }
+    let mut total_states = 0usize;
     for g in &bundle.succinct_guards {
         if !g.bound.well_formed() {
             return Err(CapabilityError::MalformedBundle("malformed guard DFA"));
         }
+        total_states = total_states.saturating_add(g.bound.dfa().states);
+        if total_states > MAX_PUBLIC_BUNDLE_STATES {
+            return Err(CapabilityError::MalformedBundle(
+                "aggregate DFA state count exceeds MAX_PUBLIC_BUNDLE_STATES",
+            ));
+        }
         let cert = decode_private_cert(&g.cert_bytes)?;
+        if cert.fri_queries < MIN_PUBLIC_FRI_QUERIES
+            || cert.step_queries < MIN_PUBLIC_STEP_QUERIES
+            || cert.fri_rounds > cert.fri_ell
+            || (cert.fri_ell - cert.fri_rounds) > MAX_FINAL_FRI_LOG_LEN
+        {
+            return Err(CapabilityError::MalformedBundle(
+                "succinct guard parameters out of supported verifier bounds",
+            ));
+        }
         if cert.content_root != bundle.salted_patch_root
             || cert.record_length != bundle.patch_len
             || cert.automaton_root != automaton_commit(g.bound.dfa())
@@ -2082,6 +2678,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy_transducer::ll1_deterministic;
 
     #[test]
     fn bfs_shortest_lexicographic_counterexamples_exact() {
@@ -2110,5 +2707,33 @@ mod tests {
             }
             SublanguageResult::Counterexample(w) => panic!("unexpected cex: {w:?}"),
         }
+        assert!(dfa_intersection(&no_sk, &no_sql, 0).is_none());
+    }
+
+    #[test]
+    fn fast_byte_ll1_agrees_with_reference_ll1() {
+        for pol in [
+            root_cap_policy(),
+            service_cap_policy(),
+            subagent_tool_cap_policy(),
+        ] {
+            assert_eq!(
+                fast_byte_ll1_deterministic(&pol.grammar),
+                ll1_deterministic(&pol.grammar)
+            );
+            assert!(fast_byte_ll1_deterministic(&pol.grammar));
+        }
+        let mut ambig_rules = subagent_tool_cap_policy().grammar.rules;
+        ambig_rules.extend([
+            rule_tool_wipe_prod(),
+            rule_dup_key_first_wins(),
+            rule_dup_key_last_wins(),
+        ]);
+        let ambig_cfg = make_cap_cfg(ambig_rules);
+        assert_eq!(
+            fast_byte_ll1_deterministic(&ambig_cfg),
+            ll1_deterministic(&ambig_cfg)
+        );
+        assert!(!fast_byte_ll1_deterministic(&ambig_cfg));
     }
 }

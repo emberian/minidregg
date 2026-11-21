@@ -324,24 +324,25 @@ structure WhirFiberOpening (F OpCur OpNext : Type*) (k : ℕ) where
   nextVal    : F
   nextPath   : OpNext
 
-/-- Verifier predicate for one authenticated $2^k$-ary `WHIR` fiber-and-shift query at `b : β`. -/
+/-- Verifier predicate for one authenticated $2^k$-ary `WHIR` fiber-and-shift query at `b : β`,
+allowing position-dependent coset interpolation weights `foldCombine b : (Fin (2 ^ k) → F) → F`. -/
 def OpenedWhirFiberQuery {F β ιNext RootCur RootNext OpCur OpNext : Type*} {k : ℕ}
     (Scur : OpeningScheme RootCur F (β × Fin (2 ^ k)) OpCur)
     (Snext : OpeningScheme RootNext F ιNext OpNext)
-    (foldCombine : (Fin (2 ^ k) → F) → F)
+    (foldCombine : β → (Fin (2 ^ k) → F) → F)
     (shiftIdx : β → ιNext)
     (rtCur : RootCur) (rtNext : RootNext) (b : β)
     (o : WhirFiberOpening F OpCur OpNext k) : Prop :=
   (∀ c : Fin (2 ^ k), Scur.verifyOpen rtCur (b, c) (o.fiberVals c) (o.fiberPaths c)) ∧
   Snext.verifyOpen rtNext (shiftIdx b) o.nextVal o.nextPath ∧
-  foldCombine o.fiberVals = o.nextVal
+  foldCombine b o.fiberVals = o.nextVal
 
 /-- Binding pins an accepted $2^k$-ary fiber opening to the exact equation between the folded
 current word and the shifted next word. -/
 theorem openedWhirFiberQuery_pins {F β ιNext RootCur RootNext OpCur OpNext : Type*} {k : ℕ}
     (Scur : BindingCommitment RootCur F (β × Fin (2 ^ k)) OpCur)
     (Snext : BindingCommitment RootNext F ιNext OpNext)
-    (foldCombine : (Fin (2 ^ k) → F) → F)
+    (foldCombine : β → (Fin (2 ^ k) → F) → F)
     (shiftIdx : β → ιNext)
     {curWord : β × Fin (2 ^ k) → F} {nextWord : ιNext → F}
     {rtCur : RootCur} {rtNext : RootNext}
@@ -350,7 +351,7 @@ theorem openedWhirFiberQuery_pins {F β ιNext RootCur RootNext OpCur OpNext : T
     {b : β} {o : WhirFiberOpening F OpCur OpNext k}
     (hopen : OpenedWhirFiberQuery Scur.toOpeningScheme Snext.toOpeningScheme
       foldCombine shiftIdx rtCur rtNext b o) :
-    foldCombine (fun c => curWord (b, c)) = nextWord (shiftIdx b) := by
+    foldCombine b (fun c => curWord (b, c)) = nextWord (shiftIdx b) := by
   rcases hopen with ⟨hfiber, hnext, heq⟩
   have hfibEq : o.fiberVals = fun c => curWord (b, c) := by
     funext c
@@ -366,9 +367,9 @@ theorem openedWhirFiberQuery_pins {F β ιNext RootCur RootNext OpCur OpNext : T
 
 /-- **Concrete $2^k$-ary Fiber Query-Miss Bound (`whir_fiberQuery_miss_prob_le`):**
 on *any* joint sample space `Ω` factoring via `split : Ω ≃ Ω_prefix × (Fin t → β)` (capturing
-adaptive prefix-dependent words and challenges!), the `BindingGame.prob` that the folded word and
-shifted next word are `δ`-far (`δ ≤ relDist`) while all `t` authenticated $2^k$-ary fiber queries
-accept is **at most `(1 - δ)^t`**. -/
+adaptive prefix-dependent words, challenges, and coset-dependent `foldCombine p b` weights!), the
+`BindingGame.prob` that the folded word and shifted next word are `δ`-far (`δ ≤ relDist`) while all
+`t` authenticated $2^k$-ary fiber queries accept is **at most `(1 - δ)^t`**. -/
 theorem whir_fiberQuery_miss_prob_le
     {Ω Ω_prefix F β ιNext RootCur RootNext OpCur OpNext : Type}
     [Fintype Ω] [Fintype Ω_prefix] [Nonempty Ω_prefix]
@@ -377,14 +378,14 @@ theorem whir_fiberQuery_miss_prob_le
     (split : Ω ≃ Ω_prefix × (Fin t → β))
     (Scur : BindingCommitment RootCur F (β × Fin (2 ^ k)) OpCur)
     (Snext : BindingCommitment RootNext F ιNext OpNext)
-    (foldCombine : Ω_prefix → (Fin (2 ^ k) → F) → F)
+    (foldCombine : Ω_prefix → β → (Fin (2 ^ k) → F) → F)
     (shiftIdx : Ω_prefix → β → ιNext)
     (curWord : Ω_prefix → β × Fin (2 ^ k) → F)
     (nextWord : Ω_prefix → ιNext → F) :
     prob (fun ω : Ω =>
       let p := (split ω).1
       let q := (split ω).2
-      δ ≤ relDist (fun b => foldCombine p (fun c => curWord p (b, c)))
+      δ ≤ relDist (fun b => foldCombine p b (fun c => curWord p (b, c)))
                   (fun b => nextWord p (shiftIdx p b)) ∧
       ∃ op : Fin t → WhirFiberOpening F OpCur OpNext k,
         ∀ a : Fin t,
@@ -397,7 +398,7 @@ theorem whir_fiberQuery_miss_prob_le
   have hsimp : (fun x : Ω_prefix × (Fin t → β) =>
       let p := (split (split.symm x)).1
       let q := (split (split.symm x)).2
-      δ ≤ relDist (fun b => foldCombine p (fun c => curWord p (b, c)))
+      δ ≤ relDist (fun b => foldCombine p b (fun c => curWord p (b, c)))
                   (fun b => nextWord p (shiftIdx p b)) ∧
       ∃ op : Fin t → WhirFiberOpening F OpCur OpNext k,
         ∀ a : Fin t,
@@ -406,7 +407,7 @@ theorem whir_fiberQuery_miss_prob_le
             (Scur.commit (curWord p)) (Snext.commit (nextWord p))
             (q a) (op a)) =
     (fun x : Ω_prefix × (Fin t → β) =>
-      δ ≤ relDist (fun b => foldCombine x.1 (fun c => curWord x.1 (b, c)))
+      δ ≤ relDist (fun b => foldCombine x.1 b (fun c => curWord x.1 (b, c)))
                   (fun b => nextWord x.1 (shiftIdx x.1 b)) ∧
       ∃ op : Fin t → WhirFiberOpening F OpCur OpNext k,
         ∀ a : Fin t,
@@ -418,7 +419,7 @@ theorem whir_fiberQuery_miss_prob_le
   rw [hsimp]
   apply prob_prod_le
   intro p
-  set g : β → F := fun b => foldCombine p (fun c => curWord p (b, c))
+  set g : β → F := fun b => foldCombine p b (fun c => curWord p (b, c))
   set w : β → F := fun b => nextWord p (shiftIdx p b)
   by_cases hfar : δ ≤ relDist g w
   · have himp : ∀ q : Fin t → β,
@@ -459,7 +460,7 @@ theorem whir_concreteRound_stepSound
     (Cnext : Submodule F (ιNext → F))
     (Scur : BindingCommitment RootCur F (β × Fin (2 ^ k)) OpCur)
     (Snext : BindingCommitment RootNext F ιNext OpNext)
-    (foldCombine : (Fin (2 ^ k) → F) → F)
+    (foldCombine : β → (Fin (2 ^ k) → F) → F)
     (shiftIdx : β → ιNext)
     (curWord : β × Fin (2 ^ k) → F)
     (nextWord : ιNext → F)
@@ -467,7 +468,7 @@ theorem whir_concreteRound_stepSound
     {FoldBad OodBad : Prop}
     (hbridge : ¬ close δCur Ccur curWord → ¬ FoldBad → ¬ OodBad →
       close δNext Cnext nextWord →
-        δCur ≤ relDist (fun b => foldCombine (fun c => curWord (b, c)))
+        δCur ≤ relDist (fun b => foldCombine b (fun c => curWord (b, c)))
                        (fun b => nextWord (shiftIdx b)))
     (hfar : ¬ close δCur Ccur curWord)
     (hopen : ∃ op : Fin t → WhirFiberOpening F OpCur OpNext k,
@@ -475,7 +476,7 @@ theorem whir_concreteRound_stepSound
         OpenedWhirFiberQuery Scur.toOpeningScheme Snext.toOpeningScheme
           foldCombine shiftIdx (Scur.commit curWord) (Snext.commit nextWord) (q a) (op a)) :
     (FoldBad ∨ OodBad ∨
-      (δCur ≤ relDist (fun b => foldCombine (fun c => curWord (b, c)))
+      (δCur ≤ relDist (fun b => foldCombine b (fun c => curWord (b, c)))
                       (fun b => nextWord (shiftIdx b)) ∧
        ∃ op : Fin t → WhirFiberOpening F OpCur OpNext k,
          ∀ a : Fin t,
@@ -751,7 +752,7 @@ def exactWordCommitment (F ι : Type*) : BindingCommitment (ι → F) F ι Unit 
 
 section PremiseInhabitationAndTeeth
 
-instance : Fact (Nat.Prime 17) := ⟨by decide⟩
+local instance : Fact (Nat.Prime 17) := ⟨by decide⟩
 
 /-- Concrete 2-round `WHIR` schedule (`M = 2`):
 - Round `0`: `k₀ = 2` (`4`-ary fold), `N₀ = 16`, `t₀ = 4` fiber queries, `u₀ = 1`, `δ₀ = 1/2`,
@@ -898,14 +899,14 @@ def concreteTwoRoundExec : WhirExecution ConcreteWhirOmega 2 where
             OpenedWhirFiberQuery
               (exactWordCommitment (ZMod 17) (Fin 4 × Fin 4)).toOpeningScheme
               (exactWordCommitment (ZMod 17) (Fin 2 × Fin 2)).toOpeningScheme
-              concreteSumFold4 rsShift0 rsWord0 rsWord1 (ω.1 a) (op a)
+              (fun _ => concreteSumFold4) rsShift0 rsWord0 rsWord1 (ω.1 a) (op a)
     | ⟨1, _⟩ =>
         ∃ op : Fin 4 → WhirFiberOpening (ZMod 17) Unit Unit 1,
           ∀ a : Fin 4,
             OpenedWhirFiberQuery
               (exactWordCommitment (ZMod 17) (Fin 2 × Fin 2)).toOpeningScheme
               (exactWordCommitment (ZMod 17) (Fin 2)).toOpeningScheme
-              concreteSumFold2 id rsWord1 rsWord2 (ω.2 a) (op a)
+              (fun _ => concreteSumFold2) id rsWord1 rsWord2 (ω.2 a) (op a)
   FinalCheck _ := rsWord2 ∈ reedSolomonCode domRS2 1
   FoldBad _ _ := False
   OodBad _ _ := False
@@ -920,7 +921,7 @@ def concreteTwoRoundExec : WhirExecution ConcreteWhirOmega 2 where
             OpenedWhirFiberQuery
               (exactWordCommitment (ZMod 17) (Fin 2 × Fin 2)).toOpeningScheme
               (exactWordCommitment (ZMod 17) (Fin 2)).toOpeningScheme
-              concreteSumFold2 id rsWord1 rsWord2 (ω.2 a) (op a)
+              (fun _ => concreteSumFold2) id rsWord1 rsWord2 (ω.2 a) (op a)
 
 /-- **Zero-Shortcut Reed–Solomon Premise Inhabitation (`whir_concrete_twoRound_inhabited`):**
 every hypothesis of `whir_multiRound_soundness_le` holds simultaneously on genuine `reedSolomonCode`
@@ -961,7 +962,7 @@ theorem whir_concrete_twoRound_inhabited :
         split1
         (exactWordCommitment (ZMod 17) (Fin 2 × Fin 2))
         (exactWordCommitment (ZMod 17) (Fin 2))
-        (fun _ => concreteSumFold2)
+        (fun _ _ => concreteSumFold2)
         (fun _ => id)
         (fun _ => rsWord1)
         (fun _ => rsWord2)
@@ -970,6 +971,60 @@ theorem whir_concrete_twoRound_inhabited :
   have hmain := whir_multiRound_soundness_sum_le concreteTwoRoundSched concreteTwoRoundExec
     hstep hterm hFold hOod hQuery
   rwa [concreteTwoRoundSched_totalError] at hmain
+
+/-- **Exact Non-Zero Acceptance Probability on `concreteTwoRoundExec`
+(`whir_concrete_twoRound_exact_prob`):**
+proves `prob (¬ CloseAt 0 ∧ VerifierAccepts) = 1 / 16 > 0` (`256 / 4096` accepting query schedules),
+ruling out vacuous non-acceptance (`VerifierAccepts = False`) in `whir_concrete_twoRound_inhabited`! -/
+theorem whir_concrete_twoRound_exact_prob :
+    prob (fun ω : ConcreteWhirOmega =>
+      ¬ concreteTwoRoundExec.CloseAt 0 ω ∧ concreteTwoRoundExec.VerifierAccepts ω) = 1 / 16 := by
+  have hr0_fold : ∀ b : Fin 4, concreteSumFold4 (fun c => rsWord0 (b, c)) = rsWord1 (rsShift0 b) := by
+    decide
+  have hr1_iff : ∀ b : Fin 2,
+      (concreteSumFold2 (fun c => rsWord1 (b, c)) = rsWord2 b) ↔ b = 0 := by
+    decide
+  have heq : ∀ ω : ConcreteWhirOmega,
+      (¬ concreteTwoRoundExec.CloseAt 0 ω ∧ concreteTwoRoundExec.VerifierAccepts ω) ↔
+      (∀ a : Fin 4, ω.2 a = 0) := by
+    intro ω
+    constructor
+    · rintro ⟨_, hrounds, _⟩ a
+      rcases hrounds ⟨1, by decide⟩ with ⟨op, hop⟩
+      have hpin := openedWhirFiberQuery_pins (k := 1)
+        (exactWordCommitment (ZMod 17) (Fin 2 × Fin 2))
+        (exactWordCommitment (ZMod 17) (Fin 2))
+        (fun _ => concreteSumFold2) id
+        (curWord := rsWord1) (nextWord := rsWord2)
+        rfl rfl (hop a)
+      exact (hr1_iff (ω.2 a)).mp hpin
+    · intro hall0
+      refine ⟨not_close_rsWord0, fun i => ?_, rsWord2_mem_reedSolomon⟩
+      fin_cases i
+      · refine ⟨fun a => ⟨fun c => rsWord0 (ω.1 a, c), fun _ => (), rsWord1 (rsShift0 (ω.1 a)), ()⟩,
+          fun a => ⟨fun _ => rfl, rfl, hr0_fold (ω.1 a)⟩⟩
+      · refine ⟨fun a => ⟨fun c => rsWord1 (ω.2 a, c), fun _ => (), rsWord2 (ω.2 a), ()⟩,
+          fun a => ⟨fun _ => rfl, rfl, (hr1_iff (ω.2 a)).mpr (hall0 a)⟩⟩
+  have hfn : (fun ω : ConcreteWhirOmega =>
+      ¬ concreteTwoRoundExec.CloseAt 0 ω ∧ concreteTwoRoundExec.VerifierAccepts ω) =
+      (fun ω : ConcreteWhirOmega => ∀ a : Fin 4, ω.2 a = 0) := by
+    funext ω; exact propext (heq ω)
+  rw [hfn, prob_eq_card_filter_div]
+  have hprod : (Finset.univ.filter fun ω : ConcreteWhirOmega => ∀ a : Fin 4, ω.2 a = 0) =
+      (Finset.univ : Finset (Fin 4 → Fin 4)) ×ˢ
+      (Finset.univ.filter fun q2 : Fin 4 → Fin 2 => ∀ a : Fin 4, q2 a = 0) := by
+    ext ⟨q1, q2⟩
+    simp
+  have hq2 : (Finset.univ.filter fun q2 : Fin 4 → Fin 2 => ∀ a : Fin 4, q2 a = 0).card = 1 := by
+    decide
+  have hq1 : (Finset.univ : Finset (Fin 4 → Fin 4)).card = 256 := by
+    rw [Finset.card_univ, Fintype.card_fun, Fintype.card_fin]
+    norm_num
+  have htot : Fintype.card ConcreteWhirOmega = 4096 := by
+    rw [Fintype.card_prod, Fintype.card_fun, Fintype.card_fun, Fintype.card_fin, Fintype.card_fin]
+    norm_num
+  rw [hprod, Finset.card_product, hq1, hq2, htot]
+  norm_num
 
 /-! ### Unpinned Query-Count / Zero-Shift Falsifier Teeth (`VERDICTS.md` §2 `num_queries` pin) -/
 
@@ -1011,7 +1066,7 @@ def zeroQueryForgeryExec : WhirExecution (Fin 0 → Fin 4) 1 where
         OpenedWhirFiberQuery
           (exactWordCommitment (ZMod 17) (Fin 4 × Fin 4)).toOpeningScheme
           (exactWordCommitment (ZMod 17) (Fin 2 × Fin 2)).toOpeningScheme
-          concreteSumFold4 rsShift0 rsWord0 0 (ω a) (op a)
+          (fun _ => concreteSumFold4) rsShift0 rsWord0 0 (ω a) (op a)
   FinalCheck _ := (0 : Fin 2 × Fin 2 → ZMod 17) ∈ reedSolomonCode domRS1 1
   FoldBad _ _ := False
   OodBad _ _ := False
@@ -1040,7 +1095,8 @@ theorem whir_zero_queries_forgery_prob_one :
     exact prob_true
 
 /-- Concrete initial word on `Fin 4 × Fin 4` (`16` points over `ZMod 17`) with `2` nonzero fibers
-and `2` zero fibers, exhibiting exact `(1 - δ₀)^1 = 1/2` 1-query acceptance probability. -/
+and `2` zero fibers, whose 4-ary fold `[4, 4, 0, 0]` has exact relative distance `δ₀ = 1/2` from
+the all-zero next word `0`, exhibiting exact `(1 - δ₀)^1 = 1/2` 1-query acceptance probability. -/
 def concreteHalfZeroWord0 : Fin 4 × Fin 4 → ZMod 17 :=
   fun p => if (p.1 : ℕ) < 2 then 1 else 0
 
@@ -1048,8 +1104,8 @@ def concreteHalfZeroWord0 : Fin 4 × Fin 4 → ZMod 17 :=
 `VERDICTS.md` §2 `num_queries` pin `52e1fab`):**
 even if `t ≥ 1` is enforced (`t = 0` rejected), reading `queryCount` from an untrusted proof
 without pinning `queryCount = configuredQueries` lets an attacker submit `t = 1` on
-`concreteHalfZeroWord0` (`δ₀ = 1/2`), succeeding on fibers `2, 3` with **exact probability `1 / 2`**
-and refuting every target soundness budget `ε < 1 / 2`! -/
+`concreteHalfZeroWord0` (fold-vs-next relative distance `1/2`), succeeding on fibers `2, 3` with
+**exact probability `1 / 2`** and refuting every target soundness budget `ε < 1 / 2`! -/
 theorem whir_unpinned_one_query_exact_prob :
     prob (fun q : Fin 1 → Fin 4 =>
       ∃ op : Fin 1 → WhirFiberOpening (ZMod 17) Unit Unit 2,
@@ -1057,14 +1113,14 @@ theorem whir_unpinned_one_query_exact_prob :
           OpenedWhirFiberQuery
             (exactWordCommitment (ZMod 17) (Fin 4 × Fin 4)).toOpeningScheme
             (exactWordCommitment (ZMod 17) (Fin 4)).toOpeningScheme
-            concreteSumFold4 id concreteHalfZeroWord0 (fun _ => 0) (q a) (op a)) = 1 / 2 := by
+            (fun _ => concreteSumFold4) id concreteHalfZeroWord0 (fun _ => 0) (q a) (op a)) = 1 / 2 := by
   have heq : ∀ q : Fin 1 → Fin 4,
       (∃ op : Fin 1 → WhirFiberOpening (ZMod 17) Unit Unit 2,
         ∀ a : Fin 1,
           OpenedWhirFiberQuery
             (exactWordCommitment (ZMod 17) (Fin 4 × Fin 4)).toOpeningScheme
             (exactWordCommitment (ZMod 17) (Fin 4)).toOpeningScheme
-            concreteSumFold4 id concreteHalfZeroWord0 (fun _ => 0) (q a) (op a)) ↔
+            (fun _ => concreteSumFold4) id concreteHalfZeroWord0 (fun _ => 0) (q a) (op a)) ↔
       2 ≤ (q 0 : ℕ) := by
     intro q
     constructor
@@ -1072,7 +1128,7 @@ theorem whir_unpinned_one_query_exact_prob :
       have hpin := openedWhirFiberQuery_pins (k := 2)
         (exactWordCommitment (ZMod 17) (Fin 4 × Fin 4))
         (exactWordCommitment (ZMod 17) (Fin 4))
-        concreteSumFold4 id
+        (fun _ => concreteSumFold4) id
         (curWord := concreteHalfZeroWord0) (nextWord := fun _ => 0)
         rfl rfl (hop 0)
       change concreteSumFold4 (fun c => concreteHalfZeroWord0 (q 0, c)) = 0 at hpin
@@ -1092,7 +1148,7 @@ theorem whir_unpinned_one_query_exact_prob :
           OpenedWhirFiberQuery
             (exactWordCommitment (ZMod 17) (Fin 4 × Fin 4)).toOpeningScheme
             (exactWordCommitment (ZMod 17) (Fin 4)).toOpeningScheme
-            concreteSumFold4 id concreteHalfZeroWord0 (fun _ => 0) (q a) (op a)) =
+            (fun _ => concreteSumFold4) id concreteHalfZeroWord0 (fun _ => 0) (q a) (op a)) =
       (fun q : Fin 1 → Fin 4 => 2 ≤ (q 0 : ℕ)) := by
     funext q; exact propext (heq q)
   rw [hfn]
@@ -1111,7 +1167,7 @@ theorem whir_unpinned_one_query_refutes {ε : ℝ} (hε : ε < 1 / 2) :
             OpenedWhirFiberQuery
               (exactWordCommitment (ZMod 17) (Fin 4 × Fin 4)).toOpeningScheme
               (exactWordCommitment (ZMod 17) (Fin 4)).toOpeningScheme
-              concreteSumFold4 id concreteHalfZeroWord0 (fun _ => 0) (q a) (op a)) ≤ ε) := by
+              (fun _ => concreteSumFold4) id concreteHalfZeroWord0 (fun _ => 0) (q a) (op a)) ≤ ε) := by
   rw [whir_unpinned_one_query_exact_prob]
   linarith
 
@@ -1138,6 +1194,7 @@ end PremiseInhabitationAndTeeth
 #assert_axioms not_close_rsWord0
 #assert_axioms not_close_rsWord1
 #assert_axioms whir_concrete_twoRound_inhabited
+#assert_axioms whir_concrete_twoRound_exact_prob
 #assert_axioms whir_zero_queries_term_eq_one
 #assert_axioms whir_zero_queries_vacuous_bound
 #assert_axioms whir_zero_queries_forgery_prob_one
@@ -1185,6 +1242,9 @@ end PremiseInhabitationAndTeeth
 
 /-- info: 'Minidregg.Selvage.WhirMultiRoundSoundness.whir_concrete_twoRound_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms whir_concrete_twoRound_inhabited
+
+/-- info: 'Minidregg.Selvage.WhirMultiRoundSoundness.whir_concrete_twoRound_exact_prob' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms whir_concrete_twoRound_exact_prob
 
 /-- info: 'Minidregg.Selvage.WhirMultiRoundSoundness.whir_zero_queries_term_eq_one' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms whir_zero_queries_term_eq_one

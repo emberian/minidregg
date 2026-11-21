@@ -839,7 +839,7 @@ theorem retroactive_unlearn_three_episode_witness :
   refine ⟨?_, ?_, by decide, by decide, by decide, by decide, by decide⟩
   · intro a b
     fin_cases a <;> fin_cases b <;> decide
-  · refine ⟨?_, trivial, ?_, trivial⟩ <;> (intro a; fin_cases a <;> decide)
+  · refine ⟨?_, ?_, trivial⟩ <;> (intro a; fin_cases a <;> decide)
 
 /-- **Unit-Norm Pythagorean Falsifier over BabyBear (`gdnErase_noncomm_unit_babybear`):**
 Isolates non-orthogonality alone (with BOTH keys strictly unit-norm `k · k = 1`!):

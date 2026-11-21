@@ -701,7 +701,8 @@ abbrev MaskSpace (ℓ d : ℕ) (R : Type*) := Fin ℓ → RoundPoly d R
 def evalMask {R : Type*} [Semiring R] {ℓ d : ℕ} (g : MaskSpace ℓ d R) (x : Fin ℓ → R) : R :=
   ∑ j : Fin ℓ, evalRoundPoly (g j) (x j)
 
-/-- Canonical `R`-linear embedding of `MaskSpace ℓ d R` into Mathlib's `MvPolynomial (Fin ℓ) R`. -/
+/-- Canonical `R`-linear map from `MaskSpace ℓ d R` into Mathlib's `MvPolynomial (Fin ℓ) R`
+(whose `(ℓ - 1)`-dimensional kernel consists of zero-sum constant shifts `∑_j c_j = 0`). -/
 noncomputable def separableMaskToMvPolynomial {R : Type*} [CommSemiring R] {ℓ d : ℕ} :
     MaskSpace ℓ d R →ₗ[R] MvPolynomial (Fin ℓ) R where
   toFun g :=
@@ -1613,6 +1614,106 @@ theorem rhoZero_scaledMask_not_gapAtMost {R : Type*} [CommRing R] [DecidableEq R
     rw [maskedTranscriptScaled, zero_smul, add_zero]
     exact decide_eq_false hdiff.symm
 
+/-- Deployed `GMask` verifier view `(G, tr)` pairing the clear mask hypercube sum
+`G = cubeSum (evalMask g)` with the `ρ`-scaled transcript `maskedTranscriptScaled r ρ P g`
+(matching `gmask.rs`, `GMask61`, and `GMaskExt4`, where the verifier checks `tr.1 = S_pub + ρ * G`). -/
+abbrev PublicGMaskView (ℓ d : ℕ) (R : Type*) := R × RawTranscript ℓ d R
+
+/-- Construct the public-sum `GMask` view `(cubeSum (evalMask g), maskedTranscriptScaled r ρ P g)`. -/
+def publicGMaskScaledView {R : Type*} [CommRing R] {ℓ d : ℕ}
+    (r : Fin ℓ → R) (ρ : R) (P : TargetPoly ℓ d R) (g : MaskSpace ℓ d R) :
+    PublicGMaskView ℓ d R :=
+  (cubeSum (evalMask g), maskedTranscriptScaled r ρ P g)
+
+/-- **Deployed `GMask` Clear-`G` Zero `FiniteTapeGap` (`hvzkSumcheck_publicGMask_scaled_gapAtMost_zero`):**
+when two witnesses `P₀, P₁` share the same public claimed sum `cubeSum P₀ = cubeSum P₁` and `ρ ≠ 0`,
+revealing `G = cubeSum (evalMask g)` in the clear alongside `maskedTranscriptScaled r ρ P g`
+achieves **exact zero distinguishing gap** over the full uniform `MaskSpace ℓ d F`. -/
+theorem hvzkSumcheck_publicGMask_scaled_gapAtMost_zero {F : Type*} [Field F] [Fintype F]
+    {ℓ d tapes den : ℕ} (h2 : (2 : F) ≠ 0) (hℓ : 1 ≤ ℓ) (hden : 0 < den)
+    {ρ : F} (hρ : ρ ≠ 0)
+    (r : Fin ℓ → F) (P₀ P₁ : TargetPoly ℓ d F)
+    (hpub : cubeSum (evalTargetPoly P₀) = cubeSum (evalTargetPoly P₁))
+    (enum : Fin tapes ≃ MaskSpace ℓ d F)
+    (D : PublicGMaskView ℓ d F → Bool) :
+    GapAtMost tapes 0 den
+      (fun t => D (publicGMaskScaledView r ρ P₀ (enum t)))
+      (fun t => D (publicGMaskScaledView r ρ P₁ (enum t))) := by
+  have htapes : 0 < tapes := by
+    rw [← Fintype.card_fin tapes, Fintype.card_congr enum]
+    exact Fintype.card_pos
+  let diffView : ConsistentTranscript (d := d) hℓ r :=
+    ⟨honestTranscript r P₀, honestTranscript_mem_consistent hℓ r P₀⟩ -
+    ⟨honestTranscript r P₁, honestTranscript_mem_consistent hℓ r P₁⟩
+  let gDeltaRaw : MaskSpace ℓ d F := (maskTranscriptLinearEquiv h2 hℓ r).symm (diffView, 0)
+  have hgDeltaRaw : maskToRawTranscript r gDeltaRaw = honestTranscript r P₀ - honestTranscript r P₁ := by
+    have h := congrArg Prod.fst
+      ((maskTranscriptLinearEquiv h2 hℓ r).apply_symm_apply (diffView, 0))
+    exact congrArg Subtype.val h
+  have hgDeltaSum : cubeSum (evalMask gDeltaRaw) = 0 := by
+    have hfst := congrArg Prod.fst hgDeltaRaw
+    simp only [maskToRawTranscript, honestTranscript, Prod.fst_sub, LinearMap.coe_mk,
+      AddHom.coe_mk, hpub, sub_self] at hfst
+    exact hfst
+  let shift : MaskSpace ℓ d F ≃ MaskSpace ℓ d F := Equiv.addRight (ρ⁻¹ • gDeltaRaw)
+  let relabel : Equiv.Perm (Fin tapes) := enum.trans (shift.trans enum.symm)
+  have hcomp : ((fun t => D (publicGMaskScaledView r ρ P₁ (enum t))) ∘ relabel) =
+      (fun t => D (publicGMaskScaledView r ρ P₀ (enum t))) := by
+    funext t
+    simp only [Function.comp_apply, relabel, Equiv.trans_apply, Equiv.apply_symm_apply]
+    congr 1
+    have hsh : shift (enum t) = enum t + ρ⁻¹ • gDeltaRaw := rfl
+    rw [hsh]
+    ext1
+    · have hfst := congrArg Prod.fst (map_add (maskToRawTranscript r) (enum t) (ρ⁻¹ • gDeltaRaw))
+      have hsmul := congrArg Prod.fst (map_smul (maskToRawTranscript r) ρ⁻¹ gDeltaRaw)
+      simp only [publicGMaskScaledView, maskToRawTranscript, LinearMap.coe_mk, AddHom.coe_mk,
+        Prod.fst_add, Prod.smul_fst, smul_eq_mul] at hfst hsmul ⊢
+      rw [hfst, hsmul, hgDeltaSum, mul_zero, add_zero]
+    · simp only [publicGMaskScaledView, maskedTranscriptScaled]
+      rw [map_add, map_smul, smul_add, smul_inv_smul₀ hρ, hgDeltaRaw]
+      abel
+  rw [← hcomp]
+  exact GapAtMost.zero_of_perm htapes hden _ relabel
+
+/-- **Clear `G` Sum-Revelation Falsifier Tooth (`clearMaskSum_reveals_cubeSum_not_gapAtMost`):**
+if two witnesses have distinct hypercube sums `cubeSum P₀ ≠ cubeSum P₁`, sending `G = cubeSum g`
+in the clear alongside `maskedTranscriptScaled r ρ P g` lets the verifier recover
+`tr.1 - ρ * G = cubeSum P` deterministically (separating `P₀` from `P₁` with advantage `1`, proving
+that hiding the sum itself requires keeping `G` inside a committed/blinded opening). -/
+theorem clearMaskSum_reveals_cubeSum_not_gapAtMost {R : Type*} [CommRing R] [DecidableEq R]
+    {ℓ d tapes num den : ℕ} (hsmall : num < den)
+    (r : Fin ℓ → R) (ρ : R) (P₀ P₁ : TargetPoly ℓ d R)
+    (hne : cubeSum (evalTargetPoly P₀) ≠ cubeSum (evalTargetPoly P₁))
+    (maskAt : Fin tapes → MaskSpace ℓ d R) :
+    let D : PublicGMaskView ℓ d R → Bool :=
+      fun v => decide (v.2.1 - ρ * v.1 = cubeSum (evalTargetPoly P₀))
+    ¬ GapAtMost tapes num den
+      (fun t => D (publicGMaskScaledView r ρ P₀ (maskAt t)))
+      (fun t => D (publicGMaskScaledView r ρ P₁ (maskAt t))) := by
+  intro D
+  apply not_gapAtMost_of_separating hsmall
+  · intro t
+    have hfst : (publicGMaskScaledView r ρ P₀ (maskAt t)).2.1 -
+        ρ * (publicGMaskScaledView r ρ P₀ (maskAt t)).1 = cubeSum (evalTargetPoly P₀) := by
+      simp only [publicGMaskScaledView, maskedTranscriptScaled, honestTranscript,
+        maskToRawTranscript, Prod.fst_add, Prod.smul_fst, LinearMap.coe_mk, AddHom.coe_mk,
+        smul_eq_mul]
+      ring
+    dsimp only [D]
+    rw [hfst]
+    exact decide_eq_true rfl
+  · intro t
+    have hfst : (publicGMaskScaledView r ρ P₁ (maskAt t)).2.1 -
+        ρ * (publicGMaskScaledView r ρ P₁ (maskAt t)).1 = cubeSum (evalTargetPoly P₁) := by
+      simp only [publicGMaskScaledView, maskedTranscriptScaled, honestTranscript,
+        maskToRawTranscript, Prod.fst_add, Prod.smul_fst, LinearMap.coe_mk, AddHom.coe_mk,
+        smul_eq_mul]
+      ring
+    dsimp only [D]
+    rw [hfst]
+    exact decide_eq_false hne.symm
+
 /-! ## §4. Under-Degree Leakage Tooth & Concrete `ZMod 2` / `ZMod 7` Keystones -/
 
 /-- Embed an under-degree separable mask `MaskSpace ℓ (d - 1) R` into `MaskSpace ℓ d R` by setting
@@ -1712,6 +1813,42 @@ theorem zmod2_ell2_separableMask_not_gapAtMost_concrete {num den : ℕ} (hsmall 
     rw [(zmod2_ell2_separableMask_leaks.2 (enum16 t)).2]
     decide
 
+/-- On `ZMod 2` at `ℓ = 3, d = 1`, `P_tail(x₀, x₁, x₂) = x₁ · x₂` has boolean hypercube sum
+`1 + 1 = 0`, matching `0 : TargetPoly 3 1 (ZMod 2)` (**equal public sum**), while its round-`0`
+constant term `s₀(0) = ∑_{x₁,x₂} x₁ x₂ = 1 ≠ 0` is completely unmasked by every separable mask
+because `charTwo_maskRoundPoly_eq_zero_of_lt` zeroes round `0` (`0 + 2 < 3`)! -/
+def zmod2Ell3TailAnd : TargetPoly 3 1 (ZMod 2) :=
+  fun e => if e 0 = 0 ∧ e 1 = 1 ∧ e 2 = 1 then 1 else 0
+
+theorem zmod2_ell3_equalSum_separableMask_leaks :
+    cubeSum (evalTargetPoly zmod2Ell3TailAnd) =
+      cubeSum (evalTargetPoly (0 : TargetPoly 3 1 (ZMod 2))) ∧
+    ∀ g : MaskSpace 3 1 (ZMod 2),
+      (maskedTranscript (fun _ => 0) zmod2Ell3TailAnd g).2 0 0 = 1 ∧
+      (maskedTranscript (fun _ => 0) (0 : TargetPoly 3 1 (ZMod 2)) g).2 0 0 = 0 := by
+  refine ⟨by decide, fun g => ?_⟩
+  have hz : maskRoundPoly (fun _ : Fin 3 => (0 : ZMod 2)) g 0 = 0 :=
+    charTwo_maskRoundPoly_eq_zero_of_lt (fun _ => 0) g 0 (by decide)
+  have h1 : honestRoundPoly (fun _ : Fin 3 => (0 : ZMod 2)) zmod2Ell3TailAnd 0 0 = 1 := by decide
+  have h0 : honestRoundPoly (fun _ : Fin 3 => (0 : ZMod 2)) (0 : TargetPoly 3 1 (ZMod 2)) 0 0 = 0 := by
+    decide
+  simp only [maskedTranscript, honestTranscript, maskToRawTranscript, Prod.snd_add, Pi.add_apply,
+    LinearMap.coe_mk, AddHom.coe_mk, hz]
+  exact ⟨h1, h0⟩
+
+theorem zmod2_ell3_equalSum_not_gapAtMost {tapes num den : ℕ} (hsmall : num < den)
+    (maskAt : Fin tapes → MaskSpace 3 1 (ZMod 2)) :
+    ¬ GapAtMost tapes num den
+      (fun t => decide ((maskedTranscript (fun _ => 0) zmod2Ell3TailAnd (maskAt t)).2 0 0 = 1))
+      (fun t => decide ((maskedTranscript (fun _ => 0) (0 : TargetPoly 3 1 (ZMod 2)) (maskAt t)).2 0 0 = 1)) := by
+  apply not_gapAtMost_of_separating hsmall
+  · intro t
+    rw [(zmod2_ell3_equalSum_separableMask_leaks.2 (maskAt t)).1]
+    rfl
+  · intro t
+    rw [(zmod2_ell3_equalSum_separableMask_leaks.2 (maskAt t)).2]
+    decide
+
 /-- On `ZMod 7` (`d = 2`, quadratic Gruen sumcheck), `P_quad(X₀, X₁) = X₀²` and `P_lin(X₀, X₁) = X₀`
 agree on *every* boolean vertex (`b² = b`), hence share the **exact same hypercube sum**! -/
 def zmod7QuadTarget : TargetPoly 2 2 (ZMod 7) :=
@@ -1765,7 +1902,7 @@ theorem zmod7_quadratic_affineMask_not_gapAtMost {tapes num den : ℕ} (hsmall :
   rw [htop] at h
   exact h
 
-instance : Fact (Nat.Prime 7) := ⟨by decide⟩
+local instance : Fact (Nat.Prime 7) := ⟨by decide⟩
 
 /-- **Positive Pole on `ZMod 7` (`ℓ = 2, d = 2`, full degree-`2` separable mask):**
 on the *exact same* pair `(zmod7QuadTarget, zmod7LinTarget)`, upgrading `d_mask` from `1` to `2`
@@ -1812,9 +1949,13 @@ end ConcreteKeystones
 #assert_axioms hvzkSumcheck_gapAtMost_zero
 #assert_axioms hvzkSumcheck_scaled_gapAtMost_zero
 #assert_axioms rhoZero_scaledMask_not_gapAtMost
+#assert_axioms hvzkSumcheck_publicGMask_scaled_gapAtMost_zero
+#assert_axioms clearMaskSum_reveals_cubeSum_not_gapAtMost
 #assert_axioms underDegreeMask_distinguishes
 #assert_axioms zmod2_ell2_separableMask_leaks
 #assert_axioms zmod2_ell2_separableMask_not_gapAtMost_concrete
+#assert_axioms zmod2_ell3_equalSum_separableMask_leaks
+#assert_axioms zmod2_ell3_equalSum_not_gapAtMost
 #assert_axioms zmod7_affineMask_evalDiff_kernel
 #assert_axioms zmod7_quadratic_affineMask_not_gapAtMost
 #assert_axioms zmod7_quadratic_deg2Mask_fiber_and_gap_zero
@@ -1875,6 +2016,18 @@ end ConcreteKeystones
 
 /-- info: 'Minidregg.Theory.SumcheckHvzkMask.rhoZero_scaledMask_not_gapAtMost' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms rhoZero_scaledMask_not_gapAtMost
+
+/-- info: 'Minidregg.Theory.SumcheckHvzkMask.hvzkSumcheck_publicGMask_scaled_gapAtMost_zero' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms hvzkSumcheck_publicGMask_scaled_gapAtMost_zero
+
+/-- info: 'Minidregg.Theory.SumcheckHvzkMask.clearMaskSum_reveals_cubeSum_not_gapAtMost' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms clearMaskSum_reveals_cubeSum_not_gapAtMost
+
+/-- info: 'Minidregg.Theory.SumcheckHvzkMask.zmod2_ell3_equalSum_separableMask_leaks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms zmod2_ell3_equalSum_separableMask_leaks
+
+/-- info: 'Minidregg.Theory.SumcheckHvzkMask.zmod2_ell3_equalSum_not_gapAtMost' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms zmod2_ell3_equalSum_not_gapAtMost
 
 /-- info: 'Minidregg.Theory.SumcheckHvzkMask.underDegreeMask_distinguishes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms underDegreeMask_distinguishes
