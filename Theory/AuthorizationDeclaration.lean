@@ -423,7 +423,7 @@ def scopeCoversCheck {kind : ResourceKind} (scope : Scope kind)
     (parentage : Parentage) (request : Request kind) : Bool :=
   decide (scope.targets.Covers parentage request.target) &&
     (decide (request.verb.AllowedBy scope.verbs) &&
-      decide (request.cost ≤ scope.maxCost))
+      decide (request.cost ≤ scope.perRequestBytes))
 
 @[simp] theorem scopeCoversCheck_eq_true_iff {kind : ResourceKind}
     (scope : Scope kind) (parentage : Parentage) (request : Request kind) :
@@ -588,8 +588,7 @@ def evalCheck {portal : Portal} {state : AuthState}
       | _ => false
   | .issuer => match presentation.evidence with
       | .capability capPresentation =>
-          portal.verifyIssuer capPresentation.cap.issuer
-            capPresentation.cap.issuerEpoch capPresentation.commitment
+          portal.verifyIssuer capPresentation.cap capPresentation.commitment
             capPresentation.issuerWitness
       | _ => false
   | .selfNonRevocation => match presentation.evidence with

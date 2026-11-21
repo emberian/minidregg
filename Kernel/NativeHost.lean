@@ -19,6 +19,7 @@ public import Compiler.DurableHistoryStore
 public import Kernel.FnConsumerProgressHistory
 public import Kernel.PreparedInvocationDiagnostics
 public import Kernel.NativeHostLight
+public import Theory.JournalSequencePage
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -77,11 +78,12 @@ def openExisting (config : Config) : IO (Except String (Opened config)) := do
 by its real native receiver at its original prefix height, compared with the
 stored history record for record (formerly the request path's `verifyLoaded`).
 Returns the receipts the re-admission recomputed, one per accepted record in
-order, and the presence and link indexes of the re-admitted history
-(`NativeHostReplay.Verified.index_from_replay` and
-`Verified.linkIndex_from_replay`: they are the stored log's indexes). -/
+order, and the opening the re-admission ended on: its presence and link indexes
+are the stored log's (`NativeHostReplay.Verified.index_from_replay` and
+`Verified.linkIndex_from_replay`), and its height, chain and world root are the
+anchor a later `audit --from` resumes at (`ConsentAnchor.Anchor.ofOpened`). -/
 private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
-    IO (Except String (List NativeHostCodec.Receipt × PresenceIndex.Index × LinkIndex.Index)) := do
+    IO (Except String (List NativeHostCodec.Receipt × Opened config)) := do
   match ← AuditTiming.measure timing (fun _ => "load")
       (DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes) with
   | .error detail => return .error detail
@@ -94,13 +96,12 @@ private def auditWithTiming (config : Config) (timing : AuditTiming.Handle) :
       match ← NativeHostReplay.verifyLoaded config reader durable timing with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
-      | .ok verified => return .ok (verified.receipts, verified.opened.durable.index,
-          verified.opened.durable.links)
+      | .ok verified => return .ok (verified.receipts, verified.opened)
 
 /-- Timing is opt-in operator output only; the profile, durable image and
 all receiving judgments are exactly the same arguments as ordinary audit. -/
 def audit (config : Config) :
-    IO (Except String (List NativeHostCodec.Receipt × PresenceIndex.Index × LinkIndex.Index)) := do
+    IO (Except String (List NativeHostCodec.Receipt × Opened config)) := do
   let timing ← AuditTiming.fromEnvironment
   let result ← try auditWithTiming config timing catch error =>
     AuditTiming.report timing "exception"
@@ -1734,33 +1735,42 @@ def provisionSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened
 
 /-- The finalized command fills exactly two draft fields: the pinned base
 tariff and, when the draft's publication position is zero, the stream's next
-position on this image. Every other field is the draft's. -/
-def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.Command) :
-    FleetTurn.Command :=
+position in the directory it is given. Every other field is the draft's. -/
+def fleetFinalize (config : Config) (tariff : CreationTariff)
+    (directory : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
+    (draft : FleetTurn.Command) : FleetTurn.Command :=
   let publication := draft.publication.map fun publication =>
     if publication.sequence = 0 then
-      let head := FleetTurn.streamHead config.deployment opened.directory.directory
+      let head := FleetTurn.streamHead config.deployment directory
         (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
       { publication with sequence := head.nextSeq }
     else publication
-  { draft with fee := opened.pins.tariff.base, publication := publication }
+  { draft with fee := tariff.base, publication := publication }
 
-def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetTurn.Command) :
+/-- The signing plan of a finalized command on a ground: the light basis that declares the
+command's operation marker (`fleetPlanKeys`), at logical height `height`. -/
+def fleetPlanOn (config : Config) (tariff : CreationTariff)
+    (ground : ServedBasis.Ground config.deployment) (height : Nat) (command : FleetTurn.Command) :
     Except String FleetTurn.SigningPlan := do
-  let ambient : FleetTurn.Ambient := ⟨config.federation, logicalHeight config opened.durable⟩
-  let prepared ← (FleetTurn.prepare config.deployment config.profile opened.pins.tariff ambient
-    opened.durable command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
-  let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
+  let ambient : FleetTurn.Ambient := ⟨config.federation, height⟩
+  let _prepared ← (FleetTurn.prepare config.deployment config.profile tariff ambient
+    ground command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
+  let selected ← (CredentialSignatureAdmission.signingHeader ground.authority
     (FleetTurn.marker config.deployment.domain config.profile.semantics command)
-    ⟨.account, FleetTurn.request prepared.authority.snapshot config.profile.semantics ambient
+    ⟨.account, FleetTurn.request ground.authority config.profile.semantics ambient
       command⟩).mapError (fun reason => s!"fleet turn signer key: {repr reason}")
   pure ⟨config.deployment.domain, config.profile.semantics, FleetTurn.commandCodec.encode command,
     CredentialSignedEnvelopeController.headerCodec.encode selected⟩
 
+/-- The one key a plan reads beyond the state: the command's operation marker. -/
+def fleetPlanKeys (config : Config) (command : FleetTurn.Command) : DurableView.Keys :=
+  ⟨[], [CredentialAuthorityReplay.nullifier config.deployment.domain
+    (FleetTurn.marker config.deployment.domain config.profile.semantics command)]⟩
+
 /-- Planning reads the paying account's balance and topic head, so it is
 released only behind a current signed observation of that account by the
 turn's own signer. -/
-def fleetObservedAccount (config : Config) (opened : Opened config)
+def fleetObservedOn (config : Config) (ground : ServedBasis.Ground config.deployment)
     (signedObservationBytes : List UInt8) : IO (Except Refusal (SubjectId × Nat)) := do
   let some signed := NativeObservationCodec.signedCodec.decode signedObservationBytes
     | return .error (.of .malformed)
@@ -1768,25 +1778,70 @@ def fleetObservedAccount (config : Config) (opened : Opened config)
   | .query query =>
       if query.kind != .account || query.view != .resource then
         return .error (.of .malformed)
-      match ← NativeObservationController.authorize config.signature
-          (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority) config.profile config.federation
+      match ← NativeObservationController.authorize config.signature ground config.profile config.federation
           config.genesisHeight signed with
       | .error refusal => return .error refusal
       | .ok _ => return .ok (signed.challenge.intent.subject, query.target)
   | .prepare _ => return .error (.of .malformed)
 
-def fleetPlanAuthorizedLoaded (config : Config) (opened : Opened config)
-    (signedObservationBytes draftBytes : List UInt8) :
-    IO (Except Refusal FleetTurn.SigningPlan) := do
+def fleetObservedAccount (config : Config) (opened : Opened config)
+    (signedObservationBytes : List UInt8) : IO (Except Refusal (SubjectId × Nat)) :=
+  fleetObservedOn config (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
+    signedObservationBytes
+
+/-- The observed account on a light opening: the served state alone (a basis declaring no
+key), no journal read. -/
+def fleetObservedLight (config : Config) (light : NativeHostLight.Light config)
+    (signedObservationBytes : List UInt8) : IO (Except Refusal (SubjectId × Nat)) := do
+  match ← light.basis ⟨[], []⟩ with
+  | .error detail => return .error { reason := .operationRejected, detail := detail }
+  | .ok basis => fleetObservedOn config (.ofBasis basis) signedObservationBytes
+
+/-- Op 96 over what it is given: the observed (signer, account), the tariff and directory
+the draft is finalized from, and the ground (with its logical height) the finalized command
+is prepared on. One program for the session's light opening and for a full peer's image. -/
+def fleetPlanAuthorizedWith (config : Config) (tariff : CreationTariff)
+    (directory : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
+    (observed : IO (Except Refusal (SubjectId × Nat)))
+    (groundOf : FleetTurn.Command → IO (Except Refusal (ServedBasis.Ground config.deployment × Nat)))
+    (draftBytes : List UInt8) : IO (Except Refusal FleetTurn.SigningPlan) := do
   let some draft := FleetTurn.commandCodec.decode draftBytes
     | return .error { reason := .malformed, detail := "noncanonical fleet turn draft" }
-  match ← fleetObservedAccount config opened signedObservationBytes with
+  match ← observed with
   | .error refusal => return .error refusal
   | .ok (subject, account) =>
       if subject != draft.subject || account != draft.payer then
         return .error (.of .malformed)
-      return ((fleetPlanLoaded config opened (fleetFinalize config opened draft)).mapError
-        fun detail => { reason := .operationRejected, detail := detail })
+      let command := fleetFinalize config tariff directory draft
+      match ← groundOf command with
+      | .error refusal => return .error refusal
+      | .ok (ground, height) =>
+          return ((fleetPlanOn config tariff ground height command).mapError
+            fun detail => { reason := .operationRejected, detail := detail })
+
+/-- Op 96 on the session's light opening: the observation is authorized on the served state,
+the draft finalized from the held directory, and the plan prepared on a basis declaring the
+command's marker (one index read). No full image. -/
+def fleetPlanLight (config : Config) (light : NativeHostLight.Light config)
+    (signedObservationBytes draftBytes : List UInt8) :
+    IO (Except Refusal FleetTurn.SigningPlan) :=
+  fleetPlanAuthorizedWith config light.opened.pins.tariff light.opened.directory.directory
+    (fleetObservedLight config light signedObservationBytes)
+    (fun command => do
+      match ← light.basis (fleetPlanKeys config command) with
+      | .error detail => return .error { reason := .operationRejected, detail := detail }
+      | .ok basis => return .ok (.ofBasis basis, config.genesisHeight + basis.height))
+    draftBytes
+
+/-- Op 96 recomputed by a full peer on the image it admitted (the consent provider's check of
+the plan it is asked to sign). -/
+def fleetPlanAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes draftBytes : List UInt8) :
+    IO (Except Refusal FleetTurn.SigningPlan) :=
+  fleetPlanAuthorizedWith config opened.pins.tariff opened.directory.directory
+    (fleetObservedAccount config opened signedObservationBytes)
+    (fun _ => pure (.ok (opened.ground, logicalHeight config opened.durable)))
+    draftBytes
 
 def fleetAssemble (plan : FleetTurn.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do
@@ -1798,19 +1853,20 @@ def fleetAssemble (plan : FleetTurn.SigningPlan) (signature : List UInt8) :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (FleetTurn.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-/-- `confirm` seals the original receipt from the image the caller already
-tracks (a session refreshes by the appended delta); it never substitutes a
-different admission. -/
-def fleetSubmitLoaded (config : Config) (opened : Opened config)
+/-- Op 98 on the session's light opening (`FleetTurnReceiver.receiveServed`): the turn's
+keys read into a basis, admission on its ground, the commit on the opening. `confirm` seals
+the original receipt; it never substitutes a different admission. -/
+def fleetSubmitLight (config : Config) (light : NativeHostLight.Light config)
     (bytes : List UInt8)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) :
     IO Outcome := do
-  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile opened.pins.tariff
-      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-      config.transport opened.durable bytes with
+  match ← FleetTurnReceiver.receiveServed config.deployment config.profile light.opened.pins.tariff
+      config.federation config.genesisHeight config.signature config.transport light.opening
+      (light.basisVia config.transport) bytes adopt with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-  -- The signed header names an authority root older than the loaded one: the
-  -- plan was made against an earlier image and nothing moved. That is the
+  -- The signed header names an authority root older than the served one: the
+  -- plan was made against an earlier state and nothing moved. That is the
   -- typed contention outcome (re-plan against the new state), decided from the
   -- header's root before any signature is examined.
   | .rejected (.signature (.envelope .staleAuthority)) => return .contention
@@ -1828,22 +1884,6 @@ def provisionLookupLoaded (config : Config) (opened : Opened config)
   | none => refused .malformed "provision-factory-observe" "noncanonical signed ingress"
   | some ingress =>
     match ParticipantFactoryProvisioningReceiver.replay config.deployment.domain
-        config.profile.semantics opened.durable ingress with
-    | some (.ok receipt) =>
-        match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
-        | some original => .confirmed .replayed original
-        | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
-    | some (.error _) => refused .conflict "replay" "transaction identity conflict"
-    | none => .absent
-
-/-- Receipt-only historical lookup of one retained ingress. Absence never
-submits fresh work. -/
-def fleetLookupLoaded (config : Config) (opened : Opened config)
-    (bytes : List UInt8) : Outcome :=
-  match FleetTurn.decodeIngress bytes with
-  | none => refused .malformed "fleet-turn" "noncanonical signed ingress"
-  | some ingress =>
-    match FleetTurnReceiver.replay config.deployment.domain
         config.profile.semantics opened.durable ingress with
     | some (.ok receipt) =>
         match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
@@ -1946,6 +1986,31 @@ def operatorAcceptedLog (config : Config) (opened : Opened config) :
     IO (List DurableReceiver.IntentRecord) :=
   operatorAcceptedLogOfDurable config opened.durable
 
+/-- Receipt-only historical lookup of one retained fleet ingress (op 99) on a light opening:
+its transaction id read from the authenticated history into a basis, the replay verdict on
+that ground, and the original receipt sealed through the Reader. Absence never submits
+fresh work. -/
+def fleetLookupLight (config : Config) (light : NativeHostLight.Light config)
+    (bytes : List UInt8) : IO Outcome := do
+  match FleetTurn.decodeIngress bytes with
+  | none => return refused .malformed "fleet-turn" "noncanonical signed ingress"
+  | some ingress =>
+      let transaction := FleetTurnReceiver.transactionId config.deployment.domain
+        config.profile.semantics ingress
+      match ← light.basis ⟨[transaction], []⟩ with
+      | .error detail => return .unavailable detail.toUTF8.toList
+      | .ok basis =>
+          match FleetTurnReceiver.replayOn config.deployment.domain config.profile.semantics
+              (deployment := config.deployment) (.ofBasis basis) ingress with
+          | .undeclared => return refused .operationRejected "replay" "transaction identity undeclared"
+          | .fresh => return .absent
+          | .conflict => return refused .conflict "replay" "transaction identity conflict"
+          | .original receipt =>
+              match ← historicalReceiptLight config light receipt.transactionId receipt.eventId with
+              | .error refusal => return .unavailable refusal.detail.toUTF8.toList
+              | .ok none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
+              | .ok (some original) => return .confirmed .replayed original
+
 /-- One topic event as a reader sees it. `height` is the admission height,
 unique per accepted record on one Host: K authors' streams of one topic merge
 into one ordered feed by `(height, sequence)`. A poll carries no receipt: a
@@ -1977,8 +2042,8 @@ structure FleetPollView where
 /-- The signed ingress of an accepted fleet turn, read by transaction id through
 the Reader (`byTx`: the spent map's opening, then the record at that height,
 each verified at use). -/
-def fleetJournalTurn {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store) (transactionId : Digest) :
+def fleetJournalTurn {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (transactionId : Digest) :
     IO (Except Refusal (Option FleetTurn.DecodedIngress)) := do
   match ← reader.byTx transactionId with
   | .error refusal => return .error (historyRefusal refusal)
@@ -1986,8 +2051,8 @@ def fleetJournalTurn {rootBytes : List UInt8 → Digest} {store : DurableHistory
   | .ok (.present found) =>
       return .ok (FleetTurn.decodeIngress found.read.record.event.canonicalBytes)
 
-def fleetPolledEvent {rootBytes : List UInt8 → Digest} {store : DurableHistory.StoreIdentity}
-    (reader : DurableHistoryReader.Reader rootBytes store)
+def fleetPolledEvent {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
     (item : Nat × StreamCell.Entry) : IO (Except Refusal FleetPolledEvent) := do
   let (sequence, entry) := item
   let record := entry.record
@@ -2005,30 +2070,29 @@ def fleetPollMax : Nat := 64
 
 /-- Events of `(observed account, topic)` strictly after `cursor`, behind a
 current signed observation of that account. Reading an account's topics is
-the account's own observe grant; a topic label confers nothing. -/
-def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
+the account's own observe grant; a topic label confers nothing. Served from the light
+opening: the topic's stream cells in the held directory, then at most `fleetPollMax`
+payloads, one `byTx` each. -/
+def fleetPollLight (config : Config) (light : NativeHostLight.Light config)
     (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
     IO (Except Refusal FleetPollView) := do
   if topic.isEmpty || topic.length > FleetTurn.maxTopicBytes then
     return .error { reason := .malformed, detail := "fleet topic must be 1..64 bytes" }
-  match ← fleetObservedAccount config opened signedObservationBytes with
+  match ← fleetObservedLight config light signedObservationBytes with
   | .error refusal => return .error refusal
   | .ok (subject, payer) =>
       let stream := FleetTurn.streamDigest config.deployment.domain payer topic
-      let directory := opened.directory.directory
+      let directory := light.opened.directory.directory
       let entries := FleetTurn.eventsSince config.deployment directory stream cursor
         (min limit fleetPollMax)
       let head := FleetTurn.streamHead config.deployment directory stream
-      -- One Reader per request; at most `fleetPollMax` events, one `byTx` each.
-      match ← historyReader config opened with
-      | .error refusal => return .error refusal
-      | .ok ⟨_, reader⟩ =>
-          let mut events : Array FleetPolledEvent := #[]
-          for item in entries do
-            match ← fleetPolledEvent reader item with
-            | .error refusal => return .error refusal
-            | .ok event => events := events.push event
-          return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail, events.toList⟩
+      let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+      let mut events : Array FleetPolledEvent := #[]
+      for item in entries do
+        match ← fleetPolledEvent reader item with
+        | .error refusal => return .error refusal
+        | .ok event => events := events.push event
+      return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail, events.toList⟩
 
 structure FleetHeadView where
   subject : SubjectId
@@ -2037,21 +2101,48 @@ structure FleetHeadView where
   turns : Nat
   head : Option (Digest × Receipt)
 
-/-- The newest accepted fleet turn paid by the observed account. This is a
-scan of the accepted journal, decoding each retained ingress exactly. -/
-def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)
+/-- A refusal for an index row the journal does not bear out: never an empty answer. -/
+def journalIndexRefusal (detail : String) : Refusal :=
+  { reason := .operationRejected, detail := s!"journal index: {detail}" }
+
+/-- The record at a height a sequence row names, required to carry the sequence's name: an
+index that lists a record which does not belong is refused by name. -/
+def sequenceMember {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (name : JournalIndex.Name) (height : Nat) :
+    IO (Except Refusal (DurableHistoryReader.Record reader.head height)) := do
+  match ← reader.atHeight height with
+  | .error refusal => return .error (historyRefusal refusal)
+  | .ok read =>
+      if name ∈ JournalIndex.names read.record then return .ok read
+      else return .error (journalIndexRefusal s!"the record at height {height} is not a member of the sequence that lists it")
+
+/-- The newest accepted fleet turn paid by the observed account and how many there are
+(op 101), from the payer's journal sequence (`JournalIndex.Name.fleetPayer`): its count
+row, the row at that position, and the one record at the height it names. No scan. -/
+def fleetHeadLight (config : Config) (light : NativeHostLight.Light config)
     (signedObservationBytes : List UInt8) : IO (Except Refusal FleetHeadView) := do
-  match ← fleetObservedAccount config opened signedObservationBytes with
+  match ← fleetObservedLight config light signedObservationBytes with
   | .error refusal => return .error refusal
   | .ok (subject, payer) =>
-      let paid := opened.durable.image.accepted.filter fun record =>
-        match FleetTurn.decodeIngress record.event.canonicalBytes with
-        | some ingress => ingress.command.payer == payer
-        | none => false
-      let head := paid.getLast?.bind fun record =>
-        (historicalReceipt config opened.durable record.transactionId record.event.eventId).map
-          fun receipt => (record.transactionId, receipt)
-      return .ok ⟨subject, payer, paid.length, head⟩
+      let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+      let name := JournalIndex.Name.fleetPayer payer
+      match ← reader.seqCount name.id with
+      | .error refusal => return .error (historyRefusal refusal)
+      | .ok counted =>
+          match counted.value with
+          | none => return .ok ⟨subject, payer, 0, none⟩
+          | some turns =>
+              match ← reader.seqItem name.id turns with
+              | .error refusal => return .error (historyRefusal refusal)
+              | .ok item =>
+                  match item.value with
+                  | none => return .error (journalIndexRefusal "a sequence names no member at its count")
+                  | some height =>
+                      match ← sequenceMember reader name height with
+                      | .error refusal => return .error refusal
+                      | .ok read =>
+                          return .ok ⟨subject, payer, turns,
+                            some (read.record.transactionId, receiptOfRecord read)⟩
 /-! ## The incoming ledger of an account (op 180)
 
 A fleet turn's topic belongs to the PAYING account (`FleetTurn`, module doc),
@@ -2195,30 +2286,120 @@ theorem fleetIncomingFrom_complete {account : Nat} {topic : List UInt8} {after :
       simp only [fleetIncomingFrom, List.mem_append]
       exact Or.inr next
 
+/-- How a reader names where it resumes the ledger: a logical height (every payment above
+it), or a position in the account's sequence (every payment after that member). -/
+inductive FleetCursor where
+  | height (logical : Nat)
+  | position (after : Nat)
+
 structure FleetIncomingView where
   subject : SubjectId
   account : Nat
   topic : List UInt8
-  cursor : Nat
+  /-- The height cursor the request gave, if it gave one. -/
+  cursor : Option Nat
   /-- The current logical height (`logicalHeight`): the next record takes `tip + 1`. -/
   tip : Nat
+  /-- The position the page was read after (the request's, or the height cursor's). -/
+  after : Nat
+  /-- What the page is: rows, the tip, a named gap, or an oversize member
+  (`Theory.JournalSequences.Page`). Never an empty page of rows. -/
+  page : Theory.JournalSequences.Page
+  /-- The entries of a page of rows, in sequence order from position `after + 1`. -/
   entries : List FleetIncomingEntry
 
-/-- Payments to the observed account above `cursor`, at most `limit`
-(bounded by `fleetPollMax`), behind a current signed observation of that
-account by its reader. -/
-def fleetIncomingAuthorizedLoaded (config : Config) (opened : Opened config)
-    (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
+/-- The byte budget of a ledger page whose request names none. -/
+def fleetPageBytes : Nat := 262144
+
+/-- The height at or below which this Store no longer holds records. The deployed Store
+retires nothing, so no read answers a gap today; a Store that retires a prefix or opens from
+a checkpoint alone names its horizon here, and the page read (`sequencePage`) then answers
+`Theory.JournalSequences.Page.gap` for members below it. -/
+def journalRetired : Nat := 0
+
+/-- A sequence's count and position rows as effectful reads of the Store's index. -/
+def sequenceRows {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (seq : Digest256) :
+    ExceptT Refusal IO Nat × (Nat → ExceptT Refusal IO (Option Nat)) :=
+  (ExceptT.mk do
+      match ← reader.seqCount seq with
+      | .error refusal => return .error (historyRefusal refusal)
+      | .ok counted => return .ok (counted.value.getD 0),
+    fun position => ExceptT.mk do
+      match ← reader.seqItem seq position with
+      | .error refusal => return .error (historyRefusal refusal)
+      | .ok item => return .ok item.value)
+
+/-- The position of a height cursor: how many members are at or below `height`, by the
+bisection `Theory.JournalSequences.belowM` (`belowM_pure`, `below_spec`). -/
+def sequencePosition {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (seq : Digest256) (height : Nat) :
+    IO (Except Refusal Nat) :=
+  let (count, rows) := sequenceRows reader seq
+  ExceptT.run do
+    let counted ← count
+    Theory.JournalSequences.belowM rows height (Theory.JournalSequences.belowFuel counted) 0 counted
+
+/-- One page of a sequence above position `after`: `Theory.JournalSequences.pageM` over the
+Store's rows, each member's size given by `size`. Over rows that answer as the journal's
+recomputation does it is `Theory.JournalSequences.page` (`pageM_pure`): rows in order within
+both limits, the tip, a named gap, or an oversize member (`page_rows`, `page_tip`,
+`page_gap`, `page_oversize`). A row missing inside the count refuses. -/
+def sequencePage {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) (seq : Digest256)
+    (size : Nat → ExceptT Refusal IO Nat) (retired after limit budget : Nat) :
+    IO (Except Refusal Theory.JournalSequences.Page) := do
+  let (count, rows) := sequenceRows reader seq
+  match ← (Theory.JournalSequences.pageM count rows size retired after limit budget).run with
+  | .error refusal => return .error refusal
+  | .ok (.absent position) =>
+      return .error (journalIndexRefusal s!"a sequence names no member at position {position} within its count")
+  | .ok page => return .ok page
+
+/-- Payments to the observed account, one page (op 180), behind a current signed
+observation of that account by its reader. Read from the account's incoming sequence
+(`JournalIndex.Name.fleetIncoming account topic`): the cursor's position (a height cursor is
+bisected to one), then `sequencePage`: at most `limit` (bounded by `fleetPollMax`) members
+whose signed ingress bytes fit `budget`, each the one record at the height its row names.
+The answer is never an empty page of rows: it is rows, the tip, a named gap or an oversize
+member. Heights on the wire are logical (`genesisHeight` plus the Store's). -/
+def fleetIncomingLight (config : Config) (light : NativeHostLight.Light config)
+    (signedObservationBytes topic : List UInt8) (cursor : FleetCursor) (limit budget : Nat) :
     IO (Except Refusal FleetIncomingView) := do
   if topic.length > FleetTurn.maxTopicBytes then
     return .error { reason := .malformed, detail := "fleet topic must be 0..64 bytes" }
-  match ← fleetObservedAccount config opened signedObservationBytes with
+  match ← fleetObservedLight config light signedObservationBytes with
   | .error refusal => return .error refusal
   | .ok (subject, account) =>
-      let entries := fleetIncomingFrom account topic cursor (config.genesisHeight + 1)
-        opened.durable.image.accepted
-      return .ok ⟨subject, account, topic, cursor, logicalHeight config opened.durable,
-        entries.take (min limit fleetPollMax)⟩
+      let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+      let name := JournalIndex.Name.fleetIncoming account topic
+      let after ← match cursor with
+        | .position after => pure after
+        | .height logical =>
+            match ← sequencePosition reader name.id (logical - config.genesisHeight) with
+            | .error refusal => return .error refusal
+            | .ok position => pure position
+      let read ← IO.mkRef (#[] : Array FleetIncomingEntry)
+      let size : Nat → ExceptT Refusal IO Nat := fun height => ExceptT.mk do
+        match ← sequenceMember reader name height with
+        | .error refusal => return .error refusal
+        | .ok member =>
+            match fleetIncomingEntry? account topic (config.genesisHeight + height) member.record with
+            | some entry =>
+                read.modify (·.push entry)
+                return .ok member.record.event.canonicalBytes.length
+            | none => return .error (journalIndexRefusal s!"the record at height {height} is not a payment to the account")
+      match ← sequencePage reader name.id size journalRetired after (min limit fleetPollMax) budget with
+      | .error refusal => return .error refusal
+      | .ok page =>
+          let delivered := match page with
+            | .rows _ heights => heights.length
+            | _ => 0
+          let logical := match cursor with
+            | .height logical => some logical
+            | .position _ => none
+          return .ok ⟨subject, account, topic, logical, config.genesisHeight + light.opening.head.height,
+            after, page, (← read.get).toList.take delivered⟩
 
 #assert_axioms fleetIncomingEntry?_sound
 #assert_axioms fleetIncomingEntry?_other_destination
@@ -3247,7 +3428,7 @@ def submitRenounceLight (transport : DurableReceiverIO.Transport)
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt opening := fun _ _ _ _ => pure ()) :
+    (adopt : NativeHostLight.Adopt opening := fun _ _ _ => pure ()) :
     IO (Outcome × Disclosure) := do
   let domain := deployment.domain
   let some ingress := CapabilityRenounce.decodeIngress bytes
@@ -3272,7 +3453,7 @@ def submitRenounceLight (transport : DurableReceiverIO.Transport)
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (CapabilityRenounce.intent accepted) with
               | .appended kind next _ _ _ _ moved =>
-                  adopt next _ moved none
+                  adopt next _ moved
                   return (← confirm kind receipt.transactionId receipt.eventId, .uniform)
               | .replayed _ => return (← confirm .replayed receipt.transactionId receipt.eventId, .uniform)
               | .rejected reason => return (durableRefusal reason, .uniform)
@@ -3301,10 +3482,10 @@ theorem invokeRejection_eq_audienceTransition (reason : DeclaredResourceControll
   split <;> simp_all
 
 /-- Whether an invocation refusal is a moved target: the executor's
-`computeTarget` (`staleTarget`) or the scalar leg's `prepareCell`. -/
+`computeTarget` (`staleTarget`, the header's refusal for every registered effect and every hand
+arm that pins a root). -/
 def isStaleTarget : DeclaredResourceController.Reject → Bool
   | .staleTarget => true
-  | .scalar .staleTarget => true
   | _ => false
 
 /-- The first target of `command` whose loaded cell's logical root is no longer
@@ -3354,7 +3535,7 @@ def submitInstallLight {F : Type} [Field F] [DecidableEq F] (transport : Durable
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt opening := fun _ _ _ _ => pure ()) : IO Outcome := do
+    (adopt : NativeHostLight.Adopt opening := fun _ _ _ => pure ()) : IO Outcome := do
   let domain := deployment.domain
   let some ingress := PolicyInstallReceiver.decodeIngress bytes
     | return refused .operationRejected "install" s!"{repr PolicyInstallReceiver.Reject.malformedIngress}"
@@ -3376,7 +3557,7 @@ def submitInstallLight {F : Type} [Field F] [DecidableEq F] (transport : Durable
               let receipt := PolicyInstallReceiver.receipt domain ingress
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (PolicyInstallReceiver.intent accepted) with
-              | .appended kind next _ _ _ _ moved => do adopt next _ moved none; confirm kind receipt.transactionId receipt.eventId
+              | .appended kind next _ _ _ _ moved => do adopt next _ moved; confirm kind receipt.transactionId receipt.eventId
               | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
               | .rejected reason => return durableRefusal reason
               | .contention => return .contention
@@ -3394,7 +3575,7 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt opening := fun _ _ _ _ => pure ()) : IO Outcome := do
+    (adopt : NativeHostLight.Adopt opening := fun _ _ _ => pure ()) : IO Outcome := do
   let domain := deployment.domain
   let semantics := profile.semantics
   let some ingress := CapabilityRevocationReceiver.decodeIngress bytes
@@ -3417,7 +3598,7 @@ def submitRevokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
               let receipt := CapabilityRevocationReceiver.receipt domain semantics ingress
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (CapabilityRevocationReceiver.intent accepted) with
-              | .appended kind next _ _ _ _ moved => do adopt next _ moved none; confirm kind receipt.transactionId receipt.eventId
+              | .appended kind next _ _ _ _ moved => do adopt next _ moved; confirm kind receipt.transactionId receipt.eventId
               | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
               | .rejected reason => return durableRefusal reason
               | .contention => return .contention
@@ -3435,7 +3616,7 @@ def submitDelegateLight {F : Type} [Field F] [DecidableEq F] (transport : Durabl
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt opening := fun _ _ _ _ => pure ()) : IO Outcome := do
+    (adopt : NativeHostLight.Adopt opening := fun _ _ _ => pure ()) : IO Outcome := do
   let domain := deployment.domain
   let semantics := profile.semantics
   let some ingress := CapabilityDelegationReceiver.decodeIngress bytes
@@ -3458,7 +3639,7 @@ def submitDelegateLight {F : Type} [Field F] [DecidableEq F] (transport : Durabl
               let receipt := CapabilityDelegationReceiver.receipt domain semantics ingress
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening
                   (CapabilityDelegationReceiver.intent accepted) with
-              | .appended kind next _ _ _ _ moved => do adopt next _ moved none; confirm kind receipt.transactionId receipt.eventId
+              | .appended kind next _ _ _ _ moved => do adopt next _ moved; confirm kind receipt.transactionId receipt.eventId
               | .replayed _ => confirm .replayed receipt.transactionId receipt.eventId
               | .rejected reason => return durableRefusal reason
               | .contention => return .contention
@@ -3480,7 +3661,7 @@ def submitInvokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
     (basisOf : DurableView.Keys → IO (Except String (ServedBasis.Basis deployment opening.store)))
     (signed : DeclaredResourceController.SignedCommand)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt opening := fun _ _ _ _ => pure ()) : IO Outcome := do
+    (adopt : NativeHostLight.Adopt opening := fun _ _ _ => pure ()) : IO Outcome := do
   match DeclaredResourceController.commandCodec.decode signed.commandBytes with
   | none => return refused .malformed "invoke" "noncanonical command"
   | some command =>
@@ -3502,7 +3683,7 @@ def submitInvokeLight {F : Type} [Field F] [DecidableEq F] (transport : DurableR
               if (FnConsumerProgress.recognizedLegacyIntentAnyGateway? domain semantics intent).isSome then
                 return stale ground command .physicalPreparation
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes opening intent with
-              | .appended kind next _ _ _ _ moved => do adopt next _ moved none; confirm kind transactionId eventId
+              | .appended kind next _ _ _ _ moved => do adopt next _ moved; confirm kind transactionId eventId
               | .replayed _ => confirm .replayed transactionId eventId
               | .rejected (.durable .insufficientBudget) =>
                   return refused .operationRejected "durable"
@@ -3526,7 +3707,7 @@ factory pins are the served state's (`OpenedServed.pins`). -/
 def submitBirthLight (transport : DurableReceiverIO.Transport) (config : Config)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) :
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) :
     IO Outcome := do
   if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
     match ← GrainResourceBirthReceiver.receiveServed config.profile config.deployment light.opened.pins
@@ -3553,7 +3734,7 @@ authenticated history, its admission on that basis's ground, its commit by
 def submitLightVia (transport : DurableReceiverIO.Transport) (config : Config)
     (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) : IO Outcome :=
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) : IO Outcome :=
   match call with
   | .renounce bytes => do
       return (← submitRenounceLight transport config.deployment config.profile.semantics config.federation
@@ -3680,7 +3861,7 @@ every other call uniformly. -/
 def submitDisclosedSession (config : Config)
     (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) :
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) :
     IO (Outcome × Disclosure) := do
   match call with
   | .renounce bytes =>

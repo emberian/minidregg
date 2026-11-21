@@ -934,6 +934,31 @@ instance cellListValidDecidable (config : Config)
   unfold CellListValid
   infer_instance
 
+/-- The genesis authority cells: the head holding the store's logical root, and one entry cell
+per genesis authority entry at that entry's own coordinate. -/
+def authorityCells (authorityCellId : Nat) (root : Digest)
+    (records : List (Store.Entry CredentialAuthorityState.layout)) :
+    List (Nat × PackedCell CanonicalCellRegistry.registry) :=
+  (authorityCellId, CredentialAuthorityLayout.packedCell (CredentialAuthorityEntry.headCell root)) ::
+    records.map fun record =>
+      (CredentialAuthorityEntry.entryCellId record.1,
+        CredentialAuthorityLayout.packedCell
+          (CredentialAuthorityEntry.entryCell record.1 (some record.2)))
+
+/-- A genesis seed holds no bytes outside its cells. -/
+theorem seed_support (cells : List (Nat × PackedCell CanonicalCellRegistry.registry))
+    (allowance : ResourceCost.Charge) (cellId : Nat) (outside : cellId ∉ cells.map Prod.fst) :
+    ((⟨[], physicalCells cells, allowance⟩ : DurableReceiver.Seed).snapshot
+      ResourceBirthCodec.rootBytes).canonicalBytes ⟨cellId⟩ = [] := by
+  show (DurableReceiver.Seed.lookup (physicalCells cells) ⟨cellId⟩).getD [] = []
+  rw [DurableReceiver.Seed.lookup_missing]
+  · rfl
+  · intro member
+    apply outside
+    simp only [physicalCells, List.map_map, List.mem_map, Function.comp_def] at member ⊢
+    obtain ⟨row, inCells, same⟩ := member
+    exact ⟨row, inCells, congrArg Digest.value same⟩
+
 attribute [local irreducible] ResourceBirthCodec.rootBytes
 
 set_option genSizeOf false in
@@ -1003,12 +1028,13 @@ def build {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
       throw .authorityEntries
     let authorityCell := materialize CredentialAuthorityCell.materializer (authorityStore profile config)
     let cells := baseCells profile config ++
-      [(config.deployment.authorityCellId,
-        CredentialAuthorityDomainReceiver.packedCell authorityCell)]
+      authorityCells config.deployment.authorityCellId authorityCell.root (entries profile config)
     if cellLaws : CellListValid config cells then
       let seed : DurableReceiver.Seed := ⟨[], physicalCells cells, config.meterAllowance⟩
-      let authority ← match CredentialAuthorityDomainReceiver.loadDeployment config.deployment
-          (seed.snapshot ResourceBirthCodec.rootBytes) with
+      let authority ← match CredentialAuthorityDomainReceiver.loadAt config.deployment
+          (seed.snapshot ResourceBirthCodec.rootBytes) (cells.map Prod.fst)
+          (seed_support cells config.meterAllowance)
+          (CredentialAuthorityDomainReceiver.clockOf (seed.snapshot ResourceBirthCodec.rootBytes)) rfl with
         | none => .error .physicalAuthority
         | some authority => .ok authority
       .ok ⟨valid, cells, cellLaws, seed, rfl, authority⟩

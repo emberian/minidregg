@@ -46,6 +46,9 @@ def defaultBirthSlack : Nat := 64
 still be admitted (`ResourceBirthPolicyController.Concrete.BirthWindow`). -/
 structure FactoryTemplate where
   issuer : IssuerId
+  /-- The `perRequestBytes` of every root grant a birth issues
+  (`ResourceBirthPolicyController.Concrete.RootGrantShape`): a size ceiling in bytes on each
+  request the owner signs. It is not a credit budget and bounds no value. -/
   ownerBudget : Nat
   lifetime : Nat
   birthSlack : Nat := defaultBirthSlack

@@ -1759,9 +1759,9 @@ theorem foreign_preserves {rootBytes : Bytes → Digest} {config : Config} {snap
     RecordCellsTyped config ((execute schedule snapshot intent).storeAfter snapshot) := by
   intro cell record read located
   have recordKept := ObjectiveActivityGate.ordinary_execute_protected schedule snapshot admitted
-    (cell := cell) (by rw [located]; exact ObjectiveActivityCell.coordinate_reserved _ _ _)
+    (cell := cell) (by rw [located]; exact ObjectiveActivityGate.coordinate_protected ObjectiveActivityCell.spec _ _ _)
   have packageKept := ObjectiveActivityGate.ordinary_execute_protected schedule snapshot admitted
-    (cell := packageCell config.domain record.pin) (ObjectiveActivityCell.coordinate_reserved _ _ _)
+    (cell := packageCell config.domain record.pin) (ObjectiveActivityGate.coordinate_protected ObjectiveActivityCell.spec _ _ _)
   rw [readRecord_eq, recordKept] at read
   unfold PackageBody
   rw [packageKept]

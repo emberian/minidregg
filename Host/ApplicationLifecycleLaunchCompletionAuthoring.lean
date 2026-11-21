@@ -308,7 +308,7 @@ inductive StopResult where
 controlGroup, and volumeCustody, and commit via `DurableServed.receiveServed`. -/
 def receiveStopLight (config : Config) (transport : DurableReceiverIO.Transport)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) : IO StopResult := do
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) : IO StopResult := do
   let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes
     | return .rejected "noncanonical checked lifecycle completion ingress"
   unless ingress.source.originalBegin.base.source.kind == .stop do
@@ -341,7 +341,7 @@ def receiveStopLight (config : Config) (transport : DurableReceiverIO.Transport)
   | some none =>
       match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening intent with
       | .appended kind next _ _ _ _ moved =>
-          adopt next _ moved none
+          adopt next _ moved
           return .confirmed kind intent.transactionId intent.event.eventId
       | .replayed _ => return .rejected "checked lifecycle completion transaction identity already used"
       | .rejected _ => return .rejected "durable checked lifecycle completion refused"

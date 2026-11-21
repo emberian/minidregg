@@ -7,6 +7,7 @@ public import Kernel.GenericSimplexVAInvariant
 namespace Minidregg.Kernel.GeneralSimplexReachability
 open Minidregg.Kernel.GenericSimplex
 open Minidregg.Kernel.GenericSimplexVAInvariant
+open Minidregg.Kernel.GenericSimplexQuorum
 set_option autoImplicit false
 
 /-- Includes genesis. Unlike a single-value prepare invariant, this permits
@@ -23,8 +24,9 @@ theorem committed_known {tr : Trace} {faulty : Finset Nat} {v : Nat} {b : Block}
   · exact Or.inl genesis
   · exact Or.inr ⟨t, p, honest, Or.inr committed⟩
 
-theorem known_zero {tr : Trace} {roster faulty : Finset Nat} {f : Nat} {b : Block}
-    (rules : LocalFaithful tr roster faulty f) (known : KnownValue tr faulty 0 b) : b = [] := by
+theorem known_zero {tr : Trace} {roster faulty : Finset Nat} {f q c r : Nat} {b : Block}
+    (rules : LocalFaithfulAt tr roster faulty f q c r) (known : KnownValue tr faulty 0 b) :
+    b = [] := by
   rcases known with ⟨_, empty⟩ | ⟨t, p, honest, prepared | committed⟩
   · exact empty
   · have bad := rules.preparePositive t p 0 b honest prepared
@@ -32,33 +34,47 @@ theorem known_zero {tr : Trace} {roster faulty : Finset Nat} {f : Nat} {b : Bloc
   · have bad := rules.commitPositive t p 0 b honest committed
     omega
 
-theorem known_eq_committed {tr : Trace} {roster faulty : Finset Nat}
-    {f v : Nat} {b c : Block} (rules : LocalFaithful tr roster faulty f)
-    (size : roster.card = 3 * f + 1) (faultBound : faulty.card ≤ f)
-    (known : KnownValue tr faulty v b) (commit : CommittedAt tr faulty v c) : b = c := by
+theorem known_eq_committed_at {tr : Trace} {roster faulty : Finset Nat}
+    {f q c r v : Nat} {b d : Block} (rules : LocalFaithfulAt tr roster faulty f q c r)
+    (th : Thresholds roster.card f q c r) (faultBound : faulty.card ≤ f)
+    (known : KnownValue tr faulty v b) (commit : CommittedAt tr faulty v d) : b = d := by
   rcases commit with ⟨zero, empty⟩ | ⟨t, p, hp, committed⟩
   · subst v
     exact (known_zero rules known).trans empty.symm
-  · rcases known with ⟨zero, _⟩ | ⟨u, q, hq, prepared | otherCommit⟩
-    · have pos := rules.commitPositive t p v c hp committed
+  · rcases known with ⟨zero, _⟩ | ⟨u, p', hq, prepared | otherCommit⟩
+    · have pos := rules.commitPositive t p v d hp committed
       omega
-    · exact committed_excludes_other_prepare rules size faultBound hp hq committed prepared
-    · exact (committed_unique rules size faultBound hp hq committed otherCommit).symm
+    · exact committed_excludes_other_prepare_at rules th faultBound hp hq committed prepared
+    · exact (committed_unique_at rules th faultBound hp hq committed otherCommit).symm
+
+theorem known_eq_committed {tr : Trace} {roster faulty : Finset Nat}
+    {f v : Nat} {b c : Block} (rules : LocalFaithful tr roster faulty f)
+    (size : roster.card = 3 * f + 1) (faultBound : faulty.card ≤ f)
+    (known : KnownValue tr faulty v b) (commit : CommittedAt tr faulty v c) : b = c :=
+  known_eq_committed_at rules (thresholds_legacy size) faultBound known commit
+
+theorem committed_not_disabled_at {tr : Trace} {roster faulty : Finset Nat}
+    {f q c r v t p : Nat} {d : Block} (rules : LocalFaithfulAt tr roster faulty f q c r)
+    (th : Thresholds roster.card f q c r) (faultBound : faulty.card ≤ f)
+    (commit : CommittedAt tr faulty v d) (hp : p ∉ faulty)
+    (disabled : tr t = .disable p v) : False := by
+  rcases commit with ⟨zero, _⟩ | ⟨u, p', hq, committed⟩
+  · have pos := rules.disablePositive t p v hp disabled
+    omega
+  · exact committed_excludes_disable_at rules th faultBound hq hp committed disabled
 
 theorem committed_not_disabled {tr : Trace} {roster faulty : Finset Nat}
     {f v t p : Nat} {c : Block} (rules : LocalFaithful tr roster faulty f)
     (size : roster.card = 3 * f + 1) (faultBound : faulty.card ≤ f)
     (commit : CommittedAt tr faulty v c) (hp : p ∉ faulty)
-    (disabled : tr t = .disable p v) : False := by
-  rcases commit with ⟨zero, _⟩ | ⟨u, q, hq, committed⟩
-  · have pos := rules.disablePositive t p v hp disabled
-    omega
-  · exact committed_excludes_disable rules size faultBound hq hp committed disabled
+    (disabled : tr t = .disable p v) : False :=
+  committed_not_disabled_at rules (thresholds_legacy size) faultBound commit hp disabled
 
 /-- A real earlier safe vote supplies a prepared parent and every skipped-view
 clear. This closes the catch-up-vote cycle through well-founded event causality. -/
-theorem known_parent {tr : Trace} {roster faulty : Finset Nat}
-    {f v : Nat} {b : Block} (rules : LocalFaithful tr roster faulty f)
+theorem known_parent_at {tr : Trace} {roster faulty : Finset Nat}
+    {f q c r v : Nat} {b : Block} (rules : LocalFaithfulAt tr roster faulty f q c r)
+    (quorumHonest : f + 1 ≤ q) (candidateHonest : f + 1 ≤ c) (readyHonest : f + 1 ≤ r)
     (faultBound : faulty.card ≤ f) (positive : 0 < v)
     (known : KnownValue tr faulty v b) :
     ∃ previous < v, KnownValue tr faulty previous b.dropLast ∧
@@ -66,23 +82,62 @@ theorem known_parent {tr : Trace} {roster faulty : Finset Nat}
         ∃ t p, p ∉ faulty ∧ tr t = .disable p skipped := by
   rcases known with ⟨zero, _⟩ | ⟨t, p, hp, output⟩
   · omega
-  · have voter : ∃ q, q ∉ faulty ∧ ∃ earlier < t, Sent tr earlier q v .vote (some b) := by
+  · have voter : ∃ w, w ∉ faulty ∧ ∃ earlier < t, Sent tr earlier w v .vote (some b) := by
       rcases output with prepared | committed
-      · exact prepared_has_honest_vote rules faultBound hp prepared
+      · exact prepared_has_honest_vote_at rules quorumHonest candidateHonest readyHonest
+          faultBound hp prepared
       · have cc := rules.commitOutput t p v b hp committed
-        obtain ⟨ct, clt, votes⟩ := commit_core_has_vote_core rules faultBound cc
-        obtain ⟨q, _, hq, vt, vlt, sent⟩ := support_honest faultBound (by omega) votes
-        exact ⟨q, hq, vt, by omega, sent⟩
-    obtain ⟨q, hq, vt, _, sent⟩ := voter
-    obtain ⟨st, _, r, hr, _, previous, prevLt, parent, skipped⟩ :=
-      honest_vote_has_safe_origin rules faultBound vt q v b hq sent
+        obtain ⟨ct, clt, votes⟩ := commit_core_has_vote_core_at rules quorumHonest faultBound cc
+        obtain ⟨w, _, hw, vt, vlt, sent⟩ := support_honest faultBound quorumHonest votes
+        exact ⟨w, hw, vt, by omega, sent⟩
+    obtain ⟨w, hw, vt, _, sent⟩ := voter
+    obtain ⟨st, _, w', hw', _, previous, prevLt, parent, skipped⟩ :=
+      honest_vote_has_safe_origin_at rules quorumHonest candidateHonest readyHonest
+        faultBound vt w v b hw sent
     refine ⟨previous, prevLt, ?_, ?_⟩
     · rcases parent with genesis | ⟨pt, _, prepared⟩
       · exact Or.inl genesis
-      · exact Or.inr ⟨pt, r, hr, Or.inl prepared⟩
-    · intro w low high
-      obtain ⟨dt, _, disabled⟩ := skipped w low high
-      exact ⟨dt, r, hr, disabled⟩
+      · exact Or.inr ⟨pt, w', hw', Or.inl prepared⟩
+    · intro u low high
+      obtain ⟨dt, _, disabled⟩ := skipped u low high
+      exact ⟨dt, w', hw', disabled⟩
+
+theorem known_parent {tr : Trace} {roster faulty : Finset Nat}
+    {f v : Nat} {b : Block} (rules : LocalFaithful tr roster faulty f)
+    (faultBound : faulty.card ≤ f) (positive : 0 < v)
+    (known : KnownValue tr faulty v b) :
+    ∃ previous < v, KnownValue tr faulty previous b.dropLast ∧
+      ∀ skipped, previous < skipped → skipped < v →
+        ∃ t p, p ∉ faulty ∧ tr t = .disable p skipped :=
+  known_parent_at rules (by omega) (by omega) (by omega) faultBound positive known
+
+/-- Global outer-prefix theorem over the same executable-event audit obligations,
+for any roster size whose thresholds satisfy `Thresholds`.
+No assumption says that committed blocks are compatible. -/
+theorem committed_ancestor_of_later_at {tr : Trace} {roster faulty : Finset Nat}
+    {f q c r : Nat} (rules : LocalFaithfulAt tr roster faulty f q c r)
+    (th : Thresholds roster.card f q c r) (faultBound : faulty.card ≤ f)
+    (v : Nat) : ∀ previous b d,
+      KnownValue tr faulty v b → CommittedAt tr faulty previous d → previous ≤ v →
+      d.IsPrefix b := by
+  induction v using Nat.strong_induction_on with
+  | h v ih =>
+    intro previous b d known commit order
+    by_cases same : previous = v
+    · subst previous
+      have eq := known_eq_committed_at rules th faultBound known commit
+      subst b
+      exact List.prefix_refl d
+    · have before : previous < v := by omega
+      obtain ⟨parentView, parentLt, parent, skipped⟩ :=
+        known_parent_at rules th.quorumHonest th.candidateHonest th.readyHonest
+          faultBound (by omega) known
+      have lower : previous ≤ parentView := by
+        by_contra bad
+        obtain ⟨t, p, hp, disabled⟩ := skipped previous (by omega) before
+        exact committed_not_disabled_at rules th faultBound commit hp disabled
+      have ancestor := ih parentView parentLt previous b.dropLast d parent commit lower
+      exact ancestor.trans (List.dropLast_prefix b)
 
 /-- Global outer-prefix theorem over the same executable-event audit obligations.
 No assumption says that committed blocks are compatible. -/
@@ -91,35 +146,38 @@ theorem committed_ancestor_of_later {tr : Trace} {roster faulty : Finset Nat} {f
     (size : roster.card = 3 * f + 1) (faultBound : faulty.card ≤ f)
     (v : Nat) : ∀ previous b c,
       KnownValue tr faulty v b → CommittedAt tr faulty previous c → previous ≤ v →
-      c.IsPrefix b := by
-  induction v using Nat.strong_induction_on with
-  | h v ih =>
-    intro previous b c known commit order
-    by_cases same : previous = v
-    · subst previous
-      have eq := known_eq_committed rules size faultBound known commit
-      subst b
-      exact List.prefix_refl c
-    · have before : previous < v := by omega
-      obtain ⟨parentView, parentLt, parent, skipped⟩ :=
-        known_parent rules faultBound (by omega) known
-      have lower : previous ≤ parentView := by
-        by_contra bad
-        obtain ⟨t, p, hp, disabled⟩ := skipped previous (by omega) before
-        exact committed_not_disabled rules size faultBound commit hp disabled
-      have ancestor := ih parentView parentLt previous b.dropLast c parent commit lower
-      exact ancestor.trans (List.dropLast_prefix b)
+      c.IsPrefix b :=
+  committed_ancestor_of_later_at rules (thresholds_legacy size) faultBound v
+
+/-- Committed-prefix safety for ANY roster size: `Thresholds` holds for the kernel's
+own `n - f` / `2f + 1` guards whenever `3f + 1 ≤ n` (`thresholds_standard`). -/
+theorem committed_prefix_consistency_at {tr : Trace} {roster faulty : Finset Nat}
+    {f q c r v w : Nat} {b d : Block} (rules : LocalFaithfulAt tr roster faulty f q c r)
+    (th : Thresholds roster.card f q c r) (faultBound : faulty.card ≤ f)
+    (left : CommittedAt tr faulty v b) (right : CommittedAt tr faulty w d) :
+    b.IsPrefix d ∨ d.IsPrefix b := by
+  rcases Nat.le_total v w with order | order
+  · exact Or.inl (committed_ancestor_of_later_at rules th faultBound w v d b
+      (committed_known right) left order)
+  · exact Or.inr (committed_ancestor_of_later_at rules th faultBound v w b d
+      (committed_known left) right order)
+
+/-- The kernel's own guards (`n - f` VOTE/COMMIT, `2f + 1` CANDIDATE/READY) are
+safe at every admitted roster `n ≥ 3f + 1`, not only `n = 3f + 1`. -/
+theorem committed_prefix_consistency_admitted {tr : Trace} {roster faulty : Finset Nat}
+    {f v w : Nat} {b d : Block}
+    (rules : LocalFaithfulAt tr roster faulty f (roster.card - f) (2 * f + 1) (2 * f + 1))
+    (admitted : 3 * f + 1 ≤ roster.card) (faultBound : faulty.card ≤ f)
+    (left : CommittedAt tr faulty v b) (right : CommittedAt tr faulty w d) :
+    b.IsPrefix d ∨ d.IsPrefix b :=
+  committed_prefix_consistency_at rules (thresholds_standard admitted) faultBound left right
 
 theorem committed_prefix_consistency {tr : Trace} {roster faulty : Finset Nat}
     {f v w : Nat} {b c : Block} (rules : LocalFaithful tr roster faulty f)
     (size : roster.card = 3 * f + 1) (faultBound : faulty.card ≤ f)
     (left : CommittedAt tr faulty v b) (right : CommittedAt tr faulty w c) :
-    b.IsPrefix c ∨ c.IsPrefix b := by
-  rcases Nat.le_total v w with order | order
-  · exact Or.inl (committed_ancestor_of_later rules size faultBound w v c b
-      (committed_known right) left order)
-  · exact Or.inr (committed_ancestor_of_later rules size faultBound v w b c
-      (committed_known left) right order)
+    b.IsPrefix c ∨ c.IsPrefix b :=
+  committed_prefix_consistency_at rules (thresholds_legacy size) faultBound left right
 
 /- Actual executable authenticated-event reachability. This deliberately uses
 GenericSimplex.start/step rather than a second protocol. Authentication is an
@@ -178,13 +236,46 @@ inductive Reachable (c : Config) (faulty : Finset Nat)
       (allowed : AllowedInput c faulty sourceChecked net party input) :
       Reachable c faulty sourceChecked initialTime (advance c faulty net party input)
 
+/-- The executable guards of an admitted configuration (`3f + 1 ≤ n`, `Config.wellFormed`)
+satisfy `Thresholds`: VOTE/COMMIT at `Config.quorum = n - f`, CANDIDATE→READY and
+READY→clear at `2f + 1`. -/
+theorem config_thresholds {c : Config} (admitted : 3 * c.faults + 1 ≤ c.parties) :
+    Thresholds (Finset.range c.parties).card c.faults c.quorum
+      (2 * c.faults + 1) (2 * c.faults + 1) := by
+  have card : (Finset.range c.parties).card = c.parties := by simp
+  rw [card]
+  exact thresholds_standard admitted
+
+/-- At `n = 3f + 1` the widened admission computes the old one (`parties == 3 * faults + 1`),
+so `start` and `step`, which read the configuration's size only through `wellFormed`,
+`quorum` and the unchanged guards, behave exactly as before on every such roster. -/
+theorem wellFormed_at_legacy (c : Config) (size : c.parties = 3 * c.faults + 1) :
+    c.wellFormed = (c.parties == 3 * c.faults + 1 && c.timeout > 0 && c.pumpBudget > 0) := by
+  rcases c with ⟨parties, faults, timeout, pumpBudget, backoffCap⟩
+  dsimp only at size
+  cases faults with
+  | zero =>
+    have hp : parties = 1 := by omega
+    simp [Config.wellFormed, hp]
+  | succ f =>
+    have hpos : 0 < f + 1 := by omega
+    simp [Config.wellFormed, hpos, size]
+
+/-- At `n = 3f + 1` the executable VOTE/COMMIT quorum is the legacy `2f + 1`. -/
+theorem config_quorum_legacy {c : Config} (size : c.parties = 3 * c.faults + 1) :
+    c.quorum = 2 * c.faults + 1 := by
+  unfold Config.quorum
+  omega
+
 /-- Executable observation refinement, constructed from actual Reachable by
 GenericSimplexObservationSafety.actual_audit_refinement. Local fidelity is
-proved from real start/step and retained audit causes; committed and delivered
+proved from real start/step and retained audit causes, at the executable guards
+(`c.quorum`, `2f + 1`, `2f + 1`) for any roster size; committed and delivered
 observations are joined through the actual output-history invariant.
 Cryptographic signature origin and liveness remain separate obligations. -/
 structure AuditRefinement (c : Config) (faulty : Finset Nat) (net : Network) where
-  faithful : LocalFaithful (auditTrace net) (Finset.range c.parties) faulty c.faults
+  faithful : LocalFaithfulAt (auditTrace net) (Finset.range c.parties) faulty c.faults
+    c.quorum (2 * c.faults + 1) (2 * c.faults + 1)
   commits : ∀ party view block, party < c.parties → party ∉ faulty →
     (viewAt (net.localState party) view).committed = some block →
     CommittedAt (auditTrace net) faulty view block
@@ -195,13 +286,13 @@ structure AuditRefinement (c : Config) (faulty : Finset Nat) (net : Network) whe
 /-- Conditional join target for source export. It is intentionally named as a
 refinement consequence, never as an unconditional property of VerifiedCommit. -/
 theorem refined_engine_commits_compatible {c : Config} {faulty : Finset Nat} {net : Network}
-    (audit : AuditRefinement c faulty net) (size : c.parties = 3 * c.faults + 1)
+    (audit : AuditRefinement c faulty net) (admitted : 3 * c.faults + 1 ≤ c.parties)
     (faultBound : faulty.card ≤ c.faults) {p q v w : Nat} {b d : Block}
     (pm : p < c.parties) (qm : q < c.parties) (ph : p ∉ faulty) (qh : q ∉ faulty)
     (left : (viewAt (net.localState p) v).committed = some b)
     (right : (viewAt (net.localState q) w).committed = some d) :
     b.IsPrefix d ∨ d.IsPrefix b := by
-  exact committed_prefix_consistency audit.faithful (by simpa using size) faultBound
+  exact committed_prefix_consistency_at audit.faithful (config_thresholds admitted) faultBound
     (audit.commits p v b pm ph left) (audit.commits q w d qm qh right)
 
 /-- Historical local-output attestation consequence; NOT the production portable
@@ -253,4 +344,16 @@ theorem local_output_attestations_prefix_consistent {tr : Trace} {roster faulty 
 #assert_axioms committed_ancestor_of_later
 #assert_axioms committed_prefix_consistency
 #assert_axioms refined_engine_commits_compatible
+#assert_axioms known_zero
+#assert_axioms known_eq_committed
+#assert_axioms committed_not_disabled
+#assert_axioms known_eq_committed_at
+#assert_axioms committed_not_disabled_at
+#assert_axioms known_parent_at
+#assert_axioms committed_ancestor_of_later_at
+#assert_axioms committed_prefix_consistency_at
+#assert_axioms committed_prefix_consistency_admitted
+#assert_axioms config_thresholds
+#assert_axioms wellFormed_at_legacy
+#assert_axioms config_quorum_legacy
 end Minidregg.Kernel.GeneralSimplexReachability

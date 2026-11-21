@@ -97,7 +97,7 @@ q alice "invoke v-c2 vault create 2 4242"; q alice "submit v-c2" || die "field 2
 q alice "law v-law vault \"any [ not (verb == write), field 2 <= 3 ]\""; q alice "submit v-law" || die "vault law"
 mkdir -p -m 700 "$H/alice/requests"
 grant() {  # grant ID SUBJECT VERBS-JSON [CELL [FIELDS-JSON]] : one delegate by alice, by default on vault narrowed to field 1
-  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"%s","verbs":[%s],"maxCost":"50000","fields":[%s]}\n' \
+  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"%s","verbs":[%s],"perRequestBytes":"50000","fields":[%s]}\n' \
     "${4:-vault}" "$2" "$3" "${5:-\"1\"}" >"$H/alice/requests/jd-$1.json"
   q alice "propose $1 @jd-$1.json" || die "propose $1: $(refused)"
 }
@@ -135,10 +135,11 @@ row narrow-owner "the owner is told the clause and the value" "$R" "$([[ $R == *
 # Law 10: every refusal a requester can see names its clause, in words. A write whose expected
 # value is wrong is refused by the cell's controller at prepare (operation-rejected); the line and
 # `why` carry the clause path (`guard-rejected N`), never the constructor's source spelling.
-q alice "invoke v-wg vault write 1 1 7"; q alice "submit v-wg"; RC=$(refused); q alice "why"; WC=$(tr '\n' ' ' <"$LAST")
+# (`RC` is `q`'s return code, rewritten by every line: the refusal line has its own name.)
+q alice "invoke v-wg vault write 1 1 7"; q alice "submit v-wg"; RG=$(refused); q alice "why"; WC=$(tr '\n' ' ' <"$LAST")
 row refusal-names-clause "operation-rejected line and why name guard-rejected; law-denied names its clause; no raw constructor" \
-  "${RC:0:140} | ${WC:0:140} | ${R:0:80}" \
-  "$([[ $RC == *"operation-rejected"* && $RC == *"guard-rejected"* && $RC != *guardRejected* && $RC != *"Reject."* \
+  "${RG:0:140} | ${WC:0:140} | ${R:0:80}" \
+  "$([[ $RG == *"operation-rejected"* && $RG == *"guard-rejected"* && $RG != *guardRejected* && $RG != *"Reject."* \
       && $WC == *"clause: "*"guard-rejected"* && $R == *"field 2 <= 3"* ]] && echo 1 || echo 0)"
 
 # ------------------------------------------------ B. authentication before any target is read
@@ -203,7 +204,7 @@ row d8-sibling-not-stale "a delegation authored before an unrelated authority wr
 q alice "create stale declared open 1" || die "create stale"
 grant h-carl "$CARL" '"observe","delegate"' stale '"1"'; share alice carl h-carl stale
 mkdir -p -m 700 "$H/carl/requests"
-printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"stale","recipient":"%s","verbs":["observe"],"maxCost":"50000","fields":["1"]}\n' \
+printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"stale","recipient":"%s","verbs":["observe"],"perRequestBytes":"50000","fields":["1"]}\n' \
   "$EVE" >"$H/carl/requests/jd-st-eve.json"
 q carl "propose st-eve @jd-st-eve.json" || die "carl propose st-eve: $(refused)"
 q alice "revoke rv-carl stale $CARL" || die "revoke rv-carl: $(refused)"; q alice "submit rv-carl" || die "submit rv-carl: $(refused)"

@@ -423,6 +423,11 @@ def Prepared.authorityPost (prepared : Prepared deployment profile ambient groun
     CredentialAuthorityDomain.Cell :=
   prepared.validated.apply
 
+/-- The update the lowering takes: the post cell with the patch's write footprint and its frame. -/
+def Prepared.authorityUpdate (prepared : Prepared deployment profile ambient ground command) :
+    Minidregg.Compiler.CredentialAuthorityLayout.Update ground.authority.cell :=
+  Minidregg.Compiler.CredentialAuthorityLayout.Update.ofValidated prepared.validated
+
 def layout (prepared : Prepared deployment profile ambient ground command) : CellLayout Unit where
   storeLayout _ := CredentialAuthorityState.layout
   materializer _ := AuthorityMaterializer

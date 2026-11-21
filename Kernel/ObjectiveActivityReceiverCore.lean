@@ -31,8 +31,9 @@ kernel's: a birth on a cell without a record is refused `notAnObject`, under
 another package than the pinned one `pinMismatch` (`native_birth_on_pinned_object`),
 and a write the object's law refuses `objectWrite` with the failing clause.
 A turn that spends credit, or names a payer, names a Book account and a
-capability on it and is admitted only for the account's owner (`accountHolder`:
-the owner grant and an admissible `transfer`), else refused `notAccountOwner`.
+capability on it and is admitted only for a holder of a grant on that account
+(`accountHolder`: `AccountGrant.Held` and an admissible `transfer`; the owner, or a delegate
+whose grant bounds the balance), else refused `notAccountHolder`.
 Exhaustion and abandonment are anyone's (the kernel decides whether the await
 exhausted or is past its deadline plus grace); an added envelope needs the
 account owner.
@@ -70,7 +71,8 @@ public import Kernel.ActivitySeatEnd
 public import Kernel.ObjectiveAdmittedTurn
 public import Kernel.ObjectiveKernelConfig
 public import Kernel.ObjectiveBendNativeAdmission
-public import Kernel.PayAssignmentOwner
+public import Kernel.AccountGrant
+public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -563,7 +565,12 @@ inductive Reject where
   /-- The signer holds no capability admissible for mutating the object. -/
   | notObjectHolder
   /-- The signer does not own the Book account the turn spends or names as payer. -/
-  | notAccountOwner
+  | notAccountHolder
+  /-- The grant a paying turn names on its payer does not bound the declared payment
+  (`Theory.CapabilityValueBound.strictCheck`): the credit balance is not named, a bound on it
+  is below the payment, or the grant is delegated and sets no bound on it. Decided at the
+  gate, before anything runs, and uncharged. -/
+  | valueBound (reason : CapabilityValueBound.Refusal)
   /-- The turn decided an outcome other than the one its signer signed (`claimed`): its plan went
   stale. Like a reverted transaction's gas, a paying turn is CHARGED for the attempt (a
   charged failure, `Failed`); the signer re-plans on that receipt. -/
@@ -751,11 +758,11 @@ def objectHolder (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) 
       | ⟨.object, request⟩ => AuthorizationDeclaration.capabilityAdmissibleCheck stored.head snapshot.authState request
       | _ => false
 
-/-- The signer owns `account` and may spend it. -/
+/-- The signer holds a grant on `account` itself and may spend it (owner or delegate). -/
 def accountHolder (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
     (account : Nat) (capability : CapabilityId) (preRoot outcome : Digest) : Bool :=
   let stored := readCapability snapshot.cell .account capability
-  decide (PayAssignmentReceiver.OwnerGrant stored command.subject account) &&
+  decide (AccountGrant.Held stored command.subject account) &&
     match stored with
     | none => false
     | some stored =>
@@ -769,7 +776,7 @@ def authorized (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (c
   let object (o : Nat) (c : CapabilityId) : Except Reject Unit :=
     if objectHolder snapshot semantics ambient command o c preRoot outcome then .ok () else .error .notObjectHolder
   let account (a : Nat) (c : CapabilityId) : Except Reject Unit :=
-    if accountHolder snapshot semantics ambient command a c preRoot outcome then .ok () else .error .notAccountOwner
+    if accountHolder snapshot semantics ambient command a c preRoot outcome then .ok () else .error .notAccountHolder
   match command.turn with
   | .resolve _ _ | .abandon _ _ | .deliverMessage _ _ _ | .rebirth _ _ _ => .ok ()
   | .adopt o oc _ _ _ _ _ _ _ _ _ a ac => do object o oc; account a ac
@@ -822,6 +829,169 @@ def funding (config : Config) (durable : Durable) (command : Command) : Except R
       let available := (Theory.CanonicalResourceKernel.logicalBook book.logical).balance account config.asset
       if (price : Int) ≤ available then .ok () else .error (.kernel (.unfunded available price))
 
+/-- **What a spending turn declares**: the account it spends, the capability it names on it,
+and the amount the command itself fixes: the public price of a declared or added envelope, a
+birth's deposit, a top-up's amount. A migration names its account but its fee is the pending
+upgrade's, so it declares nothing here: the gate reads that fee from the Store
+(`migrationSpend`, `migrationGranted`), and the decided batch is judged again (`decidedBound`). A publication or a creation names a payer and posts nothing. -/
+def spend (config : Config) (command : Command) : Option (Nat × CapabilityId × Nat) :=
+  match command.turn with
+  | .birth _ _ account capability _ _ envelope _ _ deposit =>
+      some (account, capability, config.tariff.workOf envelope + deposit)
+  | .invoke _ _ _ _ _ envelope _ _ account capability =>
+      some (account, capability, config.tariff.workOf envelope)
+  | .adopt _ _ _ _ _ _ _ _ _ envelope _ account capability =>
+      some (account, capability, config.tariff.workOf envelope)
+  | .topUp _ account capability amount => some (account, capability, amount)
+  | .deliver _ _ extra account capability | .exhaust _ _ extra account capability
+  | .abortDrained _ _ extra account capability =>
+      if extra = zeroCapacity then none else some (account, capability, config.tariff.workOf extra)
+  | .registerDomain _ _ payer capability envelope =>
+      some (payer, capability, config.tariff.workOf envelope)
+  | _ => none
+
+/-- The account a turn names as the one it spends or charges, with the capability it names on
+it: exactly the accounts `authorized` requires a capability for. -/
+def payerOf (command : Command) : Option (Nat × CapabilityId) :=
+  match command.turn with
+  | .publish _ _ payer capability | .create _ _ _ _ _ _ _ payer capability
+  | .registerDomain _ _ payer capability _ => some (payer, capability)
+  | .birth _ _ account capability _ _ _ _ _ _ | .invoke _ _ _ _ _ _ _ _ account capability
+  | .adopt _ _ _ _ _ _ _ _ _ _ _ account capability | .topUp _ account capability _
+  | .migrate _ account capability => some (account, capability)
+  | .deliver _ _ extra account capability | .exhaust _ _ extra account capability
+  | .abortDrained _ _ extra account capability =>
+      if extra = zeroCapacity then none else some (account, capability)
+  | _ => none
+
+/-- An account capability, as stored. -/
+def presentedGrant (snapshot : Snapshot) (capability : CapabilityId) :
+    Option (Capability .account × Unit) :=
+  (readCapability snapshot.cell .account capability).map fun stored => (stored.head, ())
+
+/-- **The value bound, before the run.** The grant a spending turn names on its account must
+bound the amount the command declares (`spend`), read as one posting from the account in the
+credit asset (`Theory.CapabilityValueBound.presentedCheck`). Refused `valueBound`, by name,
+before anything is decided and uncharged (`notAccountHolder` when the capability is not
+stored). It is the cheap early refusal; what an accepted turn actually posts is judged by
+`decidedBound`. -/
+def grantedFor (config : Config) (snapshot : Snapshot) :
+    Option (Nat × CapabilityId × Nat) → Except Reject Unit
+  | some (account, capability, price) =>
+      match CapabilityValueBound.presentedCheck (presentedGrant snapshot capability)
+          [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
+          account with
+      | .ok () => .ok ()
+      | .error none => .error .notAccountHolder
+      | .error (some reason) => .error (.valueBound reason)
+  | none => .ok ()
+
+theorem grantedFor_ok {config : Config} {snapshot : Snapshot} {account price : Nat}
+    {capability : CapabilityId}
+    (ok : grantedFor config snapshot (some (account, capability, price)) = .ok ()) :
+    CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
+      account := by
+  unfold grantedFor at ok
+  simp only at ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
+
+def granted (config : Config) (snapshot : Snapshot) (command : Command) : Except Reject Unit :=
+  grantedFor config snapshot (spend config command)
+
+theorem granted_ok {config : Config} {snapshot : Snapshot} {command : Command}
+    (ok : granted config snapshot command = .ok ()) {account price : Nat}
+    {capability : CapabilityId} (declared : spend config command = some (account, capability, price)) :
+    CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset price]
+      account := by
+  unfold granted at ok
+  rw [declared] at ok
+  exact grantedFor_ok ok
+
+/-- **What a migration will take from its account**, read from the Store before anything
+runs: the fee of the upgrade pending on the object (`ObjectiveActivity.migrateFee`), the same
+record and phase the decision reads (`Migrated.recordExact`, `Migrated.draining`). `none` for
+any other turn, and for a migration the decision will refuse without running (no object, not
+draining). -/
+def migrationSpend (config : Config) (durable : Durable) (command : Command) :
+    Option (Nat × CapabilityId × Nat) :=
+  match command.turn with
+  | .migrate object account capability =>
+      match ObjectiveActivity.readObject config durable.snapshot ⟨object⟩ with
+      | .ok (some record) =>
+          match record.phase with
+          | .draining next _ => some (account, capability, ObjectiveActivity.migrateFee config next)
+          | _ => none
+      | _ => none
+  | _ => none
+
+/-- **A migration's fee is bounded before the migration runs.** The grant the migration names
+on its account must bound the pending upgrade's fee, or the turn is refused `valueBound` at
+the gate: before the signature, before the migration term is evaluated, uncharged. Charging
+it instead would debit the very account the grant does not let this signer debit that far. -/
+def migrationGranted (config : Config) (durable : Durable) (snapshot : Snapshot)
+    (command : Command) : Except Reject Unit :=
+  grantedFor config snapshot (migrationSpend config durable command)
+
+theorem migrationGranted_ok {config : Config} {durable : Durable} {snapshot : Snapshot}
+    {command : Command} (ok : migrationGranted config durable snapshot command = .ok ())
+    {account fee : Nat} {capability : CapabilityId}
+    (pending : migrationSpend config durable command = some (account, capability, fee)) :
+    CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset fee]
+      account := by
+  unfold migrationGranted at ok
+  rw [pending] at ok
+  exact grantedFor_ok ok
+
+/-- Teeth: a migration whose pending fee the named grant does not bound has no gate verdict
+`ok`. -/
+theorem migrationGranted_refuses {config : Config} {durable : Durable} {snapshot : Snapshot}
+    {command : Command} {account fee : Nat} {capability : CapabilityId}
+    (pending : migrationSpend config durable command = some (account, capability, fee))
+    (unbounded : ¬ CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      [Theory.CanonicalResourceKernel.Operation.fee account config.collector config.asset fee]
+      account) :
+    migrationGranted config durable snapshot command ≠ .ok () := fun ok =>
+  unbounded (migrationGranted_ok ok pending)
+
+/-- **The value bound on what the turn decided.** The grant a turn names on the account it
+spends (`payerOf`) must bound the account's gross debit in the Book operations the decided
+turn posts (`AdmittedTurn.operations`), whatever the turn kind. A turn whose debit the command
+fixes was already refused at the gate; this is the bound for a debit the run decides (an
+invocation's postage, a migration's fee). It is raised after the decision, so a paying turn is
+charged for it (`chargedCause`), within the bound the gate checked. -/
+def decidedBound {rootBytes : List UInt8 → Digest} {config : Config} {data : DataSnapshot rootBytes}
+    {height : Nat} (snapshot : Snapshot) (command : Command)
+    (decided : Decided config data height command) : Except Reject Unit :=
+  match payerOf command with
+  | none => .ok ()
+  | some (account, capability) =>
+      match CapabilityValueBound.presentedCheck (presentedGrant snapshot capability)
+          (ObjectiveActivity.AdmittedTurn.operations decided) account with
+      | .ok () => .ok ()
+      | .error none => .error .notAccountHolder
+      | .error (some reason) => .error (.valueBound reason)
+
+theorem decidedBound_ok {rootBytes : List UInt8 → Digest} {config : Config}
+    {data : DataSnapshot rootBytes} {height : Nat} {snapshot : Snapshot} {command : Command}
+    {decided : Decided config data height command}
+    (ok : decidedBound snapshot command decided = .ok ()) {account : Nat}
+    {capability : CapabilityId} (named : payerOf command = some (account, capability)) :
+    CapabilityValueBound.Presented (presentedGrant snapshot capability)
+      (ObjectiveActivity.AdmittedTurn.operations decided) account := by
+  unfold decidedBound at ok
+  rw [named] at ok
+  simp only at ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
+
 /-- A command that passed the gate, for the outcome its signer claims: the loaded authority,
 the configuration, the capabilities over the claim, and the funds. Built only by `gate`; the
 decision (`prepare`) takes one, so nothing is decided for a command that did not pass it. -/
@@ -836,6 +1006,10 @@ structure Gated {F : Type} [Field F] (deployment : Deployment)
   preRootExact : preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot claimed = .ok ()
   funded : funding config durable command = .ok ()
+  /-- The payer's grant bounds the declared payment. -/
+  grantedExact : granted config authority.snapshot command = .ok ()
+  /-- A migration's grant bounds the pending upgrade's fee. -/
+  migrationExact : migrationGranted config durable authority.snapshot command = .ok ()
 theorem Gated.sound {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
     {command : Command} {claimed : Digest} (gated : Gated deployment profile ambient durable command claimed) :
@@ -848,7 +1022,7 @@ theorem Gated.sound {F : Type} [Field F] {deployment : Deployment}
 def gate {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) (claimed : Digest) : Except Reject (Gated deployment profile ambient durable command claimed) := do
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (readDeployment deployment durable)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot ≠ snapshot.cell.root then throw .staleAuthority
   if snapshot.spent (marker snapshot.domain profile.semantics command) then throw .replayedMarker
@@ -861,7 +1035,15 @@ def gate {F : Type} [Field F] (deployment : Deployment)
     | .ok () =>
       match funded : funding config durable command with
       | .error reason => throw reason
-      | .ok () => pure ⟨authority, config, configExact, preRoot, rfl, authorizedExact, funded⟩
+      | .ok () =>
+        match grantedExact : granted config snapshot command with
+        | .error reason => throw reason
+        | .ok () =>
+          match migrationExact : migrationGranted config durable snapshot command with
+          | .error reason => throw reason
+          | .ok () =>
+            pure ⟨authority, config, configExact, preRoot, rfl, authorizedExact, funded, grantedExact,
+              migrationExact⟩
 
 /-- The signed request a gated command's signature must cover: over the CLAIMED outcome. -/
 def Gated.request {F : Type} [Field F] {deployment : Deployment}
@@ -899,6 +1081,8 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   outcome : Digest
   outcomeExact : outcome = outcomeDigest final.1
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot outcome = .ok ()
+  /-- The grant named on the spent account bounds what the decided turn posts from it. -/
+  boundedExact : decidedBound authority.snapshot command decided = .ok ()
 theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
     {command : Command} (prepared : Prepared deployment profile ambient durable command) :
@@ -918,14 +1102,30 @@ def prepare {F : Type} [Field F] {deployment : Deployment}
   match decidedExact : decideTurn gated.config durable.snapshot ambient.height command with
   | .error reason => .error reason
   | .ok decided =>
+    match boundedExact : decidedBound gated.authority.snapshot command decided with
+    | .error reason => .error reason
+    | .ok () =>
     match finalExact : ActivitySeatEnd.finish gated.config durable.snapshot ambient.height decided with
     | .error (.seats reason) => .error (.seats reason)
     | .error (.kernel reason) => .error (.kernel reason)
     | .ok final =>
       if same : claimed = outcomeDigest final.1 then
         .ok ⟨gated.authority, gated.config, gated.configExact, decided, decidedExact,
-          gated.preRoot, gated.preRootExact, final, finalExact, claimed, same, gated.authorizedExact⟩
+          gated.preRoot, gated.preRootExact, final, finalExact, claimed, same, gated.authorizedExact,
+          boundedExact⟩
       else .error (.outcomeMoved claimed (outcomeDigest final.1))
+
+/-- **An accepted turn's postings are within the grant on the account it spends.** Whatever
+the turn kind, the grant the command names on its account (`payerOf`) names every balance the
+decided turn's Book operations take from that account, each gross debit is within every bound
+the grant sets, and a delegated grant set that bound itself. -/
+theorem Prepared.payer_bounded {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : Prepared deployment profile ambient durable command)
+    {account : Nat} {capability : CapabilityId} (named : payerOf command = some (account, capability)) :
+    CapabilityValueBound.Presented (presentedGrant prepared.authority.snapshot capability)
+      (ObjectiveActivity.AdmittedTurn.operations prepared.decided) account :=
+  decidedBound_ok prepared.boundedExact named
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
@@ -940,7 +1140,7 @@ before verifying or deciding anything, whatever the command's content or the out
 The same op id with a different call is refused here; the same call is answered first by `replay`. -/
 theorem gate_spent_refused
     {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot} {claimed : Digest}
-    (auth : loadDeployment deployment durable.snapshot = some authority)
+    (auth : readDeployment deployment durable = some authority)
     (current : command.expectedAuthorityRoot = authority.snapshot.cell.root)
     (spent : authority.snapshot.spent (marker authority.snapshot.domain profile.semantics command) = true) :
     gate deployment profile ambient durable command claimed = .error .replayedMarker := by
@@ -1023,7 +1223,10 @@ def chargedCause : Reject → Bool
   | .outcomeMoved _ _ => true
   -- decided before anything runs (decoding, authority, capabilities, the signature)
   | .malformedIngress | .directoryUnavailable | .authorityUnavailable | .staleAuthority | .replayedMarker
-  | .physicalPreparation | .inputUndecodable | .staleAwait | .notObjectHolder | .notAccountOwner | .signature _ => false
+  | .physicalPreparation | .inputUndecodable | .staleAwait | .notObjectHolder | .notAccountHolder | .signature _ => false
+  -- reaches here only from `decidedBound`, after the decision (the gate's own `valueBound`
+  -- returns before the signature and is never asked this)
+  | .valueBound _ => true
   -- a message delivery is not yet a paying turn (`failureRequest`; cv 01a11680-f2a6)
   | .message _ => false
 
@@ -2085,7 +2288,7 @@ private def signatureRejectStream : StreamCodec (CredentialSignatureAdmission.Re
       (StreamCodec.sum signatureFailureStream
       unitStream))
       (StreamCodec.sum (StreamCodec.sum unitStream
-      (StreamCodec.list StreamCodec.byte))
+      (StreamCodec.list (StreamCodec.list StreamCodec.byte)))
       (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat)
       unitStream))))
     (fun value => match value with
@@ -2120,8 +2323,25 @@ private def signatureRejectStream : StreamCodec (CredentialSignatureAdmission.Re
     )
     (by intro value; cases value <;> rfl)
 
+/-- A value-bound refusal: the asset, and for an exceeded bound the gross debit. -/
+def valueRefusalStream : StreamCodec CapabilityValueBound.Refusal :=
+  StreamCodec.xmap
+    (StreamCodec.sum StreamCodec.nat
+      (StreamCodec.sum (StreamCodec.product StreamCodec.nat StreamCodec.nat) StreamCodec.nat))
+    (fun value => match value with
+      | .fieldNotNamed asset => .inl asset
+      | .maxDeltaExceeded asset debited => .inr (.inl (asset, debited))
+      | .missingBalanceBound asset => .inr (.inr asset))
+    (fun wire => match wire with
+      | .inl asset => .fieldNotNamed asset
+      | .inr (.inl (asset, debited)) => .maxDeltaExceeded asset debited
+      | .inr (.inr asset) => .missingBalanceBound asset)
+    (by intro value; cases value <;> rfl)
+
 /-- Typed byte representation: constructor tags, concatenated fields and
-length-prefixed lists. No payload or recursive layer is a paired Nat code. -/
+length-prefixed lists. No payload or recursive layer is a paired Nat code.
+Edition v3: the `notAccountHolder` leaf of v2 is a two-way sum, `notAccountHolder` then
+`valueBound`; every other constructor keeps its v2 tag path. -/
 def rejectStream : StreamCodec (Reject) :=
   StreamCodec.xmap
     (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum (StreamCodec.sum unitStream
@@ -2137,7 +2357,7 @@ def rejectStream : StreamCodec (Reject) :=
       (StreamCodec.sum messageRefusalStream
       unitStream))
       (StreamCodec.sum (StreamCodec.sum unitStream
-      unitStream)
+      (StreamCodec.sum unitStream valueRefusalStream))
       (StreamCodec.sum (StreamCodec.product digestStream digestStream)
       signatureRejectStream))))
     (fun value => match value with
@@ -2154,7 +2374,8 @@ def rejectStream : StreamCodec (Reject) :=
       | .message reason => (.inr (.inl (.inr (.inl reason))))
       | .staleAwait => (.inr (.inl (.inr (.inr ()))))
       | .notObjectHolder => (.inr (.inr (.inl (.inl ()))))
-      | .notAccountOwner => (.inr (.inr (.inl (.inr ()))))
+      | .notAccountHolder => (.inr (.inr (.inl (.inr (.inl ())))))
+      | .valueBound reason => (.inr (.inr (.inl (.inr (.inr reason)))))
       | .outcomeMoved claimed decided => (.inr (.inr (.inr (.inl (claimed, decided)))))
       | .signature reason => (.inr (.inr (.inr (.inr reason))))
     )
@@ -2172,14 +2393,15 @@ def rejectStream : StreamCodec (Reject) :=
       | (.inr (.inl (.inr (.inl reason)))) => .message reason
       | (.inr (.inl (.inr (.inr ())))) => .staleAwait
       | (.inr (.inr (.inl (.inl ())))) => .notObjectHolder
-      | (.inr (.inr (.inl (.inr ())))) => .notAccountOwner
+      | (.inr (.inr (.inl (.inr (.inl ()))))) => .notAccountHolder
+      | (.inr (.inr (.inl (.inr (.inr reason))))) => .valueBound reason
       | (.inr (.inr (.inr (.inl (claimed, decided))))) => .outcomeMoved claimed decided
       | (.inr (.inr (.inr (.inr reason)))) => .signature reason
     )
     (by intro value; cases value <;> rfl)
 
 def rejectCodec : LawfulCodec Reject :=
-  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList rejectStream
+  ObjectiveActivityWire.framed "DREGG/OBJECTIVE/ACTIVITY/REJECT/v3".toUTF8.toList rejectStream
 
 @[simp] theorem rejectCodec_roundtrip (cause : Reject) :
     rejectCodec.decode (rejectCodec.encode cause) = some cause :=
@@ -2206,8 +2428,21 @@ theorem rejectCodec_v1_refuses (body : List UInt8) :
   | some value =>
     have canon := ObjectiveActivityWire.framed_canonical found
     have cut := congrArg (List.take "DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList.length) canon
-    change ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++
+    change ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v3".toUTF8.toList ++
       _).take _ = ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList ++ body).take _ at cut
+    rw [List.take_append_of_le_length (by decide +kernel), List.take_left' rfl] at cut
+    exact absurd cut (by decide +kernel)
+
+/-- The v2 edition (no `valueBound` cause, `notAccountHolder` one tag shorter) refuses too. -/
+theorem rejectCodec_v2_refuses (body : List UInt8) :
+    rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ body) = none := by
+  cases found : rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ body) with
+  | none => rfl
+  | some value =>
+    have canon := ObjectiveActivityWire.framed_canonical found
+    have cut := congrArg (List.take "DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList.length) canon
+    change ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v3".toUTF8.toList ++
+      _).take _ = ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ body).take _ at cut
     rw [List.take_append_of_le_length (by decide +kernel), List.take_left' rfl] at cut
     exact absurd cut (by decide +kernel)
 
@@ -2441,6 +2676,37 @@ theorem Failed.sound [DecidableEq F] {ingress : DecodedIngress}
       prepare failed.gated = .error failed.cause ∧ chargedCause failed.cause = true ∧
       failureRequest deployment.domain profile.semantics ingress.command = some failed.request :=
   ⟨failed.envelopeExact, failed.causeExact, failed.charged, failed.requestExact⟩
+
+/-- **A charged failure's fee is within the payer grant's value bound**: the grant the failed
+turn named on its payer bounds the one posting a charged failure makes. -/
+theorem Failed.value_bounded [DecidableEq F] {ingress : DecodedIngress}
+    (failed : Failed deployment profile ambient durable ingress) :
+    ∃ capability price, spend failed.gated.config ingress.command =
+        some (failed.request.account, capability, price) ∧
+      CapabilityValueBound.Presented (presentedGrant failed.gated.authority.snapshot capability)
+        (ObjectiveActivity.failureBatch failed.gated.config failed.request).operations
+        failed.request.account := by
+  have req := failed.requestExact
+  have ok := failed.gated.grantedExact
+  unfold failureRequest at req
+  cases turn : ingress.command.turn with
+  | birth object objectCapability account accountCapability a5 a6 envelope a8 a9 deposit =>
+      rw [turn] at req
+      have same := Option.some.inj req
+      refine ⟨accountCapability, _, by rw [← same]; simp [spend, turn]; rfl, ?_⟩
+      rw [← same]
+      exact (granted_ok ok
+        (price := failed.gated.config.tariff.workOf envelope + deposit)
+        (by simp [spend, turn])).fee_mono (Nat.le_add_right _ _)
+  | invoke object objectCapability a3 a4 a5 envelope a7 a8 account accountCapability =>
+      rw [turn] at req
+      have same := Option.some.inj req
+      refine ⟨accountCapability, _, by rw [← same]; simp [spend, turn]; rfl, ?_⟩
+      rw [← same]
+      exact granted_ok ok (by simp [spend, turn])
+  | _ =>
+      rw [turn] at req
+      cases req
 
 /-- What admission decides for a signed ingress: an accepted turn, or a charged failure. -/
 inductive Verdict [DecidableEq F] (deployment : Deployment)
@@ -2820,7 +3086,7 @@ way. -/
 def verifyRetry (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig) (durable : Durable)
     (ingress : DecodedIngress) : IO (Except Reject Unit) := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := readDeployment deployment durable
     | return .error .authorityUnavailable
   let command := ingress.command
   let claimed := marker authority.snapshot.domain profile.semantics command
@@ -2925,8 +3191,8 @@ theorem retry_unverified_refused (reason : Reject) (prior : Receipt)
 /-- Repeating the same gate has one result; signature proof identity is irrelevant. -/
 theorem Gated.unique {claimed : Digest}
     (left right : Gated deployment profile ambient durable command claimed) : left = right := by
-  rcases left with ⟨la, lc, lce, lr, lre, lh, lf⟩
-  rcases right with ⟨ra, rc, rce, rr, rre, rh, rf⟩
+  rcases left with ⟨la, lc, lce, lr, lre, lh, lf, lg, lm⟩
+  rcases right with ⟨ra, rc, rce, rr, rre, rh, rf, rg, rm⟩
   cases CredentialAuthorityDomainReceiver.Loaded.unique la ra
   have cfg : lc = rc := Except.ok.inj (lce.symm.trans rce)
   cases cfg

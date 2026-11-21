@@ -384,7 +384,7 @@ theorem decode_canonical {encoded : List UInt8} {image : LifecycleImage registry
 
 def view (directory : Directory Nat registry) (cellId : Nat) : LifecycleImage registry :=
   match directory.slots cellId with
-  | .absent => if cellId ∈ directory.used then .retired else .fresh
+  | .absent => if directory.used cellId then .retired else .fresh
   | .present cell => .live cell
 
 def slot : LifecycleImage registry -> CellSlot registry
@@ -403,18 +403,18 @@ theorem view_slot (directory : Directory Nat registry) (cellId : Nat) :
   | present cell => rfl
 
 theorem view_used (directory : Directory Nat registry) (cellId : Nat) :
-    everUsed registry (view registry directory cellId) = true ↔ cellId ∈ directory.used := by
+    everUsed registry (view registry directory cellId) = directory.used cellId := by
   unfold view
   cases current : directory.slots cellId with
-  | absent => by_cases used : cellId ∈ directory.used <;> simp [used, everUsed]
+  | absent => cases used : directory.used cellId <;> simp [everUsed]
   | present cell => simp [everUsed, directory.present_used current]
 
 theorem view_fresh_iff (directory : Directory Nat registry) (cellId : Nat) :
     view registry directory cellId = .fresh ↔
-      directory.slots cellId = .absent ∧ cellId ∉ directory.used := by
+      directory.slots cellId = .absent ∧ directory.used cellId = false := by
   unfold view
   cases current : directory.slots cellId with
-  | absent => by_cases used : cellId ∈ directory.used <;> simp [used]
+  | absent => cases used : directory.used cellId <;> simp
   | present cell => simp
 
 theorem view_live_iff (directory : Directory Nat registry) (cellId : Nat)
@@ -432,7 +432,7 @@ theorem view_insert (directory : Directory Nat registry) (cellId : Nat)
   simp [view, Directory.insert]
 
 theorem view_retire (directory : Directory Nat registry) (cellId : Nat)
-    (used : cellId ∈ directory.used) :
+    (used : directory.used cellId = true) :
     view registry (Directory.retire registry directory cellId) cellId = .retired := by
   simp [view, Directory.retire, used]
 
@@ -447,7 +447,9 @@ theorem accepted_fresh_before (before after : Directory Nat registry)
   refine ⟨?_, fresh⟩
   cases current : before.slots request.cellId with
   | absent => rfl
-  | present cell => exact False.elim (fresh (before.present_used current))
+  | present cell =>
+      rw [before.present_used current] at fresh
+      cases fresh
 
 theorem accepted_live_after (before after : Directory Nat registry)
     (requests : List (CreateRequest (CellId := Nat) registry))
@@ -651,84 +653,39 @@ private theorem lookup_of_member {rows : Rows registry}
         have differentBool : (id == key) = false := by simp [different]
         simpa only [List.lookup_cons, differentBool] using induction pieces.2 inRest
 
-def used (rows : Rows registry) : Finset Nat :=
-  ((rows.filter fun row => LifecycleImage.everUsed registry row.2).map Prod.fst).toFinset
-
 /-- This is the existing Directory constructor over decoded observations. No
-allocation, retirement or resource operation is interpreted here. -/
+allocation, retirement or resource operation is interpreted here. An identifier
+is used exactly when its row's image ever was: one lookup, no set beside the rows. -/
 def ofRows (rows : Rows registry) : Directory Nat registry where
   slots id := LifecycleImage.slot registry ((rows.lookup id).getD .fresh)
-  used := used registry rows
+  used id := LifecycleImage.everUsed registry ((rows.lookup id).getD .fresh)
   present_used := by
     intro id cell present
     cases found : rows.lookup id with
     | none => simp [found, LifecycleImage.slot] at present
     | some image =>
-        cases image with
-        | fresh => simp [found, LifecycleImage.slot] at present
-        | retired => simp [found, LifecycleImage.slot] at present
-        | live payload =>
-            have member := lookup_member registry found
-            simp only [used, List.mem_toFinset, List.mem_map]
-            refine ⟨(id, .live payload), ?_, rfl⟩
-            exact List.mem_filter.mpr ⟨member, rfl⟩
+        cases image <;> simp [found, LifecycleImage.slot, LifecycleImage.everUsed] at present ⊢
 
 theorem ofRows_view (rows : Rows registry)
-    (unique : (rows.map Prod.fst).Nodup) (id : Nat) :
+    (_unique : (rows.map Prod.fst).Nodup) (id : Nat) :
     LifecycleImage.view registry (ofRows registry rows) id =
       (rows.lookup id).getD .fresh := by
   cases found : rows.lookup id with
-  | none =>
-      have unused : id ∉ used registry rows := by
-        intro member
-        obtain ⟨⟨key, image⟩, inFiltered, same⟩ := List.mem_map.mp
-          (List.mem_toFinset.mp member)
-        have inRows := (List.mem_filter.mp inFiltered).1
-        have lookup := lookup_of_member registry unique inRows
-        simp only at same
-        subst key
-        rw [found] at lookup
-        contradiction
-      simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot, unused]
+  | none => simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot, LifecycleImage.everUsed]
   | some image =>
-      have member := lookup_member registry found
-      have used_exact : id ∈ used registry rows ↔ LifecycleImage.everUsed registry image = true := by
-        constructor
-        · intro present
-          obtain ⟨⟨key, other⟩, inFiltered, same⟩ := List.mem_map.mp
-            (List.mem_toFinset.mp present)
-          have inRows := (List.mem_filter.mp inFiltered).1
-          have isUsed := (List.mem_filter.mp inFiltered).2
-          have lookup := lookup_of_member registry unique inRows
-          simp only at same
-          subst key
-          rw [found] at lookup
-          cases Option.some.inj lookup
-          exact isUsed
-        · intro isUsed
-          simp only [used, List.mem_toFinset, List.mem_map]
-          exact ⟨(id, image), List.mem_filter.mpr ⟨member, isUsed⟩, rfl⟩
-      cases image with
-      | fresh =>
-          have unused : id ∉ used registry rows := by simpa [LifecycleImage.everUsed] using used_exact
-          simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot, unused]
-      | retired =>
-          have wasUsed : id ∈ used registry rows := used_exact.mpr rfl
-          simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot, wasUsed]
-      | live cell => simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot]
+      cases image <;>
+        simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot, LifecycleImage.everUsed]
 
 /-- `ofRows` as compiled: the rows are hashed into an identifier table once, so
-a slot read is a table probe instead of a `List.lookup` over every row, and the
-used set is a hashed dedup instead of `List.toFinset`'s quadratic one. -/
+a slot read and a used-set question are each a table probe instead of a
+`List.lookup` over every row. -/
 def ofRowsVia (rows : Rows registry) (table : Std.HashMap Nat (LifecycleImage registry))
     (exact : ∀ id, table[id]? = rows.lookup id) : Directory Nat registry where
   slots id := LifecycleImage.slot registry (table[id]?.getD .fresh)
-  used := CompiledListOps.usedSet
-    ((rows.filter fun row => LifecycleImage.everUsed registry row.2).map Prod.fst)
+  used id := LifecycleImage.everUsed registry (table[id]?.getD .fresh)
   present_used := by
     intro id cell present
-    rw [exact] at present
-    rw [CompiledListOps.usedSet_eq]
+    rw [exact] at present ⊢
     exact (ofRows registry rows).present_used present
 
 def ofRowsFast (rows : Rows registry) : Directory Nat registry :=
@@ -740,8 +697,8 @@ def ofRowsFast (rows : Rows registry) : Directory Nat registry :=
   congr 1
   · funext id
     rw [CompiledListOps.rowTable_get?]
-  · rw [CompiledListOps.usedSet_eq]
-    rfl
+  · funext id
+    rw [CompiledListOps.rowTable_get?]
 
 def decodeRows : List (Nat × List UInt8) -> Option (Rows registry)
   | [] => some []

@@ -117,9 +117,61 @@ pub fn is_under(prefix: &str, app_relative: &str) -> bool {
             .is_some_and(|relative| route(prefix, relative).as_deref() == Ok(app_relative))
 }
 
+/// The app-relative target of a DAV `Destination` sent on the API route. WebDAV writes the header as
+/// an absolute path, and an API caller may also give it relative to the signed prefix like the request
+/// path. Both forms pass the one rule, `route`: the relative form directly, the absolute form (`/` and
+/// then the app-relative path) only when it is exactly what `route` emits for some relative path, so
+/// it lies under the signed prefix and equals the relative form's result. No URI form: an API session
+/// has no origin to compare one with. Nothing is decoded, collapsed or repaired.
+pub fn destination(prefix: &str, value: &str) -> Result<String, &'static str> {
+    match value.strip_prefix('/') {
+        Some(app_relative) if is_under(prefix, app_relative) => Ok(app_relative.to_owned()),
+        Some(_) => Err("absolute API destination is not canonical under the signed prefix"),
+        None => route(prefix, value),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_absolute_destination_is_the_relative_one_or_refused() {
+        for (prefix, relative, absolute) in [
+            ("/", "dav/run/moved.bin", "/dav/run/moved.bin"),
+            ("/dav/", "notes/new.txt", "/dav/notes/new.txt"),
+            ("/dav/", "", "/dav/"),
+            ("/pub", "x", "/pubx"),
+        ] {
+            let routed = route(prefix, relative).unwrap();
+            assert_eq!(destination(prefix, relative), Ok(routed.clone()), "{prefix} {relative}");
+            assert_eq!(destination(prefix, absolute), Ok(routed), "{prefix} {absolute}");
+        }
+        for (prefix, refused) in [
+            ("/dav/", "/elsewhere"),
+            ("/dav/", "/davx/a"),
+            ("/dav/", "/dav"),
+            ("/dav/", "/dav/../etc"),
+            ("/dav/", "/dav/a/../b"),
+            ("/dav/", "/dav//a"),
+            ("/dav/", "//dav/a"),
+            ("/dav/", "/dav/a/"),
+            ("/dav/", "/dav/a%2fb"),
+            ("/dav/", "/dav/a%2Fb"),
+            ("/dav/", "/dav/%2e%2e/b"),
+            ("/dav/", "/dav/a?x"),
+            ("/dav/", "/dav/a#x"),
+            ("/", "//a"),
+            ("/", "/../a"),
+            ("/", "/a/./b"),
+            ("/dav/", "https://elsewhere/dav/a"),
+            ("/dav/", "../escape"),
+            ("/dav/", "a//b"),
+            ("/dav/", "a/%2e%2e/b"),
+        ] {
+            assert!(destination(prefix, refused).is_err(), "{prefix} {refused}");
+        }
+    }
 
     #[test]
     fn git_and_root_profiles_preserve_exact_paths() {

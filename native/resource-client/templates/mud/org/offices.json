@@ -1,6 +1,6 @@
 {
   "type": "mud-org-offices-v1",
-  "shapeRead": "native/resource-client/src/shell.rs:480-487 (the delegate request); workspace.rs:728-734 requires EXACTLY type, action, name, recipient, verbs, maxCost -- a request carrying maxDelta or fields is refused by the client today",
+  "shapeRead": "native/resource-client/src/shell.rs:480-487 (the delegate request); workspace.rs:728-734 requires EXACTLY type, action, name, recipient, verbs, perRequestBytes -- a request carrying maxDelta or fields is refused by the client today",
   "placeholders": {
     "{REALM}": "realm name",
     "{G}": "org number",
@@ -19,7 +19,7 @@
           "verbs": [
             "observe"
           ],
-          "maxCost": "50000"
+          "perRequestBytes": "50000"
         }
       ],
       "needs": {
@@ -51,7 +51,7 @@
             "mutate",
             "delegate"
           ],
-          "maxCost": "50000"
+          "perRequestBytes": "50000"
         }
       ],
       "needs": {
@@ -88,7 +88,7 @@
             "observe",
             "mutate"
           ],
-          "maxCost": "50000"
+          "perRequestBytes": "50000"
         }
       ],
       "needs": {
@@ -110,7 +110,7 @@
           "verbs": [
             "transfer"
           ],
-          "maxCost": "{RATE}",
+          "perRequestBytes": "{RATE}",
           "why": "MUD \u00a72.7 taxes are consent in the capability: the member delegates transfer on their own account"
         }
       }

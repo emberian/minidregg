@@ -63,8 +63,8 @@ def attestationsVerdict (verify : SigVerify) (expected : Context) (bytes : Bytes
 
 /-- The verdict of `verifyCertificate` as a function of public data. -/
 def certificateVerdict (verify : SigVerify) (expected : Context) (cert : Certificate) : Bool :=
-  !(cert.context != expected || cert.view == 0 || cert.block.isEmpty) &&
-    attestationsVerdict verify expected (commitmentBytes expected cert.view cert.block) cert.signers
+  !(cert.context != expected || cert.view == 0 || cert.length == 0) &&
+    attestationsVerdict verify expected (commitStatementBytes expected cert.view cert.length cert.digest) cert.signers
 
 /-- `pure`-then-`bind` in `IO` is definitional (Lean 4.30 ships no `LawfulMonad IO` instance). -/
 theorem io_pure_bind {α β : Type} (a : α) (f : α → IO β) : (pure a >>= f) = f a := rfl
@@ -189,7 +189,8 @@ def sampleContext : Context where
 def sampleCertificate : Certificate where
   context := sampleContext
   view := 1
-  block := [[7]]
+  length := 1
+  digest := [7]
   signers := (List.range 3).map fun i => ⟨i, List.replicate 3309 0⟩
 
 /-- With a stand-in verifier that accepts every signature (the premise inhabitant, not a claim

@@ -538,12 +538,13 @@ fn dav_parameter(
         }
         "lock-token" => dav.lock_token = Some(value.to_owned()),
         "destination" => {
-            // Browser Destination has HTTP origin semantics; API Destination is an
-            // exact relative path under the already verified signed package prefix.
+            // Browser Destination has HTTP origin semantics. API Destination is a path under the
+            // already verified signed package prefix, relative to it or absolute (WebDAV's own form);
+            // both pass the one signed-path rule.
             let routed;
             let path = match route {
                 Route::Api { signed_path } => {
-                    routed = minidregg_signed_api_path::route(signed_path, value)
+                    routed = minidregg_signed_api_path::destination(signed_path, value)
                         .map_err(invalid)?;
                     routed.as_str()
                 }
@@ -732,6 +733,20 @@ mod tests {
             assert!(dav_parameter(&mut DavArgs::default(), "destination", destination,
                 Route::Api { signed_path: "/dav/" }, "").is_err());
         }
+        let mut absolute = DavArgs::default();
+        dav_parameter(&mut absolute, "destination", "/dav/notes/new.txt",
+            Route::Api { signed_path: "/dav/" }, "").unwrap();
+        assert_eq!(absolute.destination, args.destination, "the absolute form is the relative one");
+        for destination in ["/dav/../notes/new.txt", "/dav//new.txt", "/dav/notes%2fnew.txt", "/davnotes/new.txt", "//dav/notes/new.txt"] {
+            assert!(dav_parameter(&mut DavArgs::default(), "destination", destination,
+                Route::Api { signed_path: "/dav/" }, "").is_err(), "{destination}");
+        }
+        // Davros as the typed interface calls it: root signed prefix, MOVE with WebDAV's absolute Destination.
+        let headers = vec![("destination".to_owned(), "/dav/run/moved.bin".to_owned()), ("overwrite".to_owned(), "F".to_owned())];
+        let http = HttpProjection { method: "MOVE", path_and_query: "dav/run/sample.bin", ordered_headers: &headers, body: b"", route: Route::Api { signed_path: "/" } };
+        let parts = project_http(&call_for("MOVE").unwrap(), &http, "Friend", "friend", "").unwrap();
+        assert_eq!(parts.dav.destination.as_deref(), Some("dav/run/moved.bin"));
+        assert!(parts.dav.no_overwrite);
         assert!(!crate::host_operations::dav_header_allowed("MOVE", "depth", "1"));
         assert!(!crate::host_operations::dav_header_allowed("PROPFIND", "overwrite", "T"));
     }

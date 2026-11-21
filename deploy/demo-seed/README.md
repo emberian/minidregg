@@ -30,7 +30,7 @@ Requires `/usr/local/lib/mini/infra/lib.sh` (`C`, `NODE`, `S`, `LIB`, `TENANT_GR
 
 ## Seeded state
 
-- **Documents** (published to `public` with `observe` max-cost from `public-read-max-cost`):
+- **Documents** (published to `public` with `observe` per-request bytes from `public-read-request-bytes`):
   `welcome`, `what-is-mini`, `a-refusal-explains-itself`, `the-lost-reply`,
   `the-lamplighters-note`, `house-rules`, `field-notes`.
   - Headings, bold, italic, code, and cross-document `link` marks are applied via `doc mark`.

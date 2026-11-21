@@ -49,9 +49,9 @@ row "incoming: B's ledger holds exactly A's transfer" "one entry: amount 25, the
   "$([ "$RC" = 0 ] && [ -n "$TX" ] && jq -e --arg t "$TX" '(.entries | length) == 1 and .entries[0].amount == "25" and .entries[0].transactionId == $t' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
 
 run overdraw FS transfer --profile "$PB" --to "$A" --amount 100000
-row "transfer: B overdrawing its account is refused by the Host's book" "rc != 0 naming bookRefused or not admitted, nothing committed" \
+row "transfer: B overdrawing its account is refused by the Host's book" "rc != 0 naming the book refusal (book-refused) or not admitted, nothing committed" \
   "rc $RC, $(tail -1 "$ERR" | cut -c1-140)" \
-  "$([ "$RC" != 0 ] && grep -Eq 'bookRefused|not admitted' "$ERR" && ! grep -q '"committed"' "$OUT" && echo 1 || echo 0)"
+  "$([ "$RC" != 0 ] && grep -Eq 'bookRefused|book-refused|not admitted' "$ERR" && ! grep -q '"committed"' "$OUT" && echo 1 || echo 0)"
 run in2 FS incoming --profile "$PB"
 row "incoming: the refused overdraw left B's ledger as it was" "still one entry, amount 25" \
   "rc $RC, $(jq -c '[.entries[] | {amount,transactionId}]' "$OUT" 2>/dev/null | cut -c1-140)" \
@@ -74,6 +74,28 @@ run in5 FS incoming --profile "$PB" --since "${CUR:-0}"
 row "incoming --since the returned cursor: nothing newer" "no entries" \
   "rc $RC, cursor '${CUR:-none}', $(jq -c '(.entries|length)' "$OUT" 2>/dev/null) entries" \
   "$([ "$RC" = 0 ] && [ -n "$CUR" ] && [ "$CUR" != 0 ] && jq -e '(.entries | length) == 0' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+
+SEQ=$(jq -r '.resumeSeq // empty' "$D/log/in4.out" 2>/dev/null)
+run in6 FS incoming --profile "$PB" --after-seq 0 --limit 1
+row "incoming --after-seq 0 --limit 1: one page of rows from the first position" "page.state rows, firstSeq 1, one entry (25), resumeSeq 1" \
+  "rc $RC, $(jq -c '{page,resumeSeq,amounts:[.entries[] | .amount]}' "$OUT" 2>/dev/null | cut -c1-160)" \
+  "$([ "$RC" = 0 ] && jq -e '.page.state == "rows" and .page.firstSeq == "1" and .resumeSeq == "1" and [.entries[] | .amount] == ["25"]' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+run in7 FS incoming --profile "$PB" --after-seq 1
+row "incoming --after-seq 1: the page resumes at the next payment, none repeated" "page.state rows, firstSeq 2, one entry (3), resumeSeq 2" \
+  "rc $RC, $(jq -c '{page,resumeSeq,amounts:[.entries[] | .amount]}' "$OUT" 2>/dev/null | cut -c1-160)" \
+  "$([ "$RC" = 0 ] && jq -e '.page.state == "rows" and .page.firstSeq == "2" and .resumeSeq == "2" and [.entries[] | .amount] == ["3"]' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+run in8 FS incoming --profile "$PB" --after-seq "${SEQ:-0}"
+row "incoming --after-seq the returned resumeSeq: the tip, named" "page.state tip with count 2, no entries" \
+  "rc $RC, resumeSeq '${SEQ:-none}', $(jq -c '{page,n:(.entries|length)}' "$OUT" 2>/dev/null | cut -c1-120)" \
+  "$([ "$RC" = 0 ] && [ "$SEQ" = 2 ] && jq -e '.page.state == "tip" and .page.count == "2" and (.entries | length) == 0' "$OUT" >/dev/null 2>&1 && echo 1 || echo 0)"
+run in9 FS incoming --profile "$PB" --after-seq 1 --max-bytes 1
+row "incoming --max-bytes 1: a payment larger than the budget refuses by name, not skipped" "rc != 0 naming incomingOversize at position 2, no entries printed" \
+  "rc $RC, $(tail -1 "$ERR" | cut -c1-140)" \
+  "$([ "$RC" != 0 ] && grep -q 'incomingOversize: the member at position 2 ' "$ERR" && ! grep -q '"entries"' "$OUT" && echo 1 || echo 0)"
+run in10 FS incoming --profile "$PB" --after-seq 0 --limit 2 --max-bytes 1
+row "incoming --limit 2 --max-bytes 1 from the start: the first payment also exceeds the budget" "rc != 0 naming incomingOversize at position 1" \
+  "rc $RC, $(tail -1 "$ERR" | cut -c1-140)" \
+  "$([ "$RC" != 0 ] && grep -q 'incomingOversize: the member at position 1 ' "$ERR" && echo 1 || echo 0)"
 
 cp "$D/log/in4.out" "$D/in4.expected"
 run shim env MINI_BIN="$MINI" "$HERE/../dregg-client-sign" incoming --profile "$PB"

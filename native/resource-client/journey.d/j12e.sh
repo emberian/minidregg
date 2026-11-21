@@ -70,7 +70,7 @@ outcome() {
 detail() { if [ "$(outcome "$1")" = refused ]; then refusal_text "$1"; else tail -1 "$D/$1.err" | cut -c1-200; fi; }
 # refused:REASON when the refusal names REASON (a ContentResource.Reject), else the outcome.
 refused_by() {
-  if [ "$(outcome "$1")" = refused ] && refusal_text "$1" | grep -q "Reject.$2"; then echo "refused:$2"
+  if [ "$(outcome "$1")" = refused ] && refusal_text "$1" | grep -Eq "(Reject|Effect\.Content)\.$2"; then echo "refused:$2"
   else echo "$(outcome "$1")"; fi
 }
 ok() { [ "$(cat "$D/$1.rc")" = 0 ] || { echo "setup $1 failed: $(tail -3 "$D/$1.err")" >&2; exit 1; }; }
@@ -87,7 +87,7 @@ invoke() {
 content() { jq -n --arg r "$1" --argjson a "$2" '[{name:$r,payload:{type:"content",actions:$a}}]'; }
 delegate() { # NAME FROM-WS RESOURCE RECIPIENT-SUBJECT VERBS-JSON TO-WS LOCALNAME
   jq -n --arg n "$3" --arg r "$4" --argjson v "$5" \
-    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,maxCost:"50000"}' \
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,perRequestBytes:"50000"}' \
     >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$2" --request "$D/req/$1.json" --proposal-id "e-$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$2" \

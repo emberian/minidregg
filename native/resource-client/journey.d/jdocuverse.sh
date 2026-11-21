@@ -192,9 +192,9 @@ grant J19 amy g-cal paper cal observe paper
 for part in read annotate; do
   case $part in
     read) jq -n --arg r "${SUBJ[rhea]}" '{type:"minidregg-workspace-proposal-v1",action:"delegate",
-            name:"paper",recipient:$r,verbs:["observe"],maxCost:"50000"}' >"${HOME_PATHS[amy]}/requests/rhea-read.json" ;;
+            name:"paper",recipient:$r,verbs:["observe"],perRequestBytes:"50000"}' >"${HOME_PATHS[amy]}/requests/rhea-read.json" ;;
     annotate) jq -n --arg r "${SUBJ[rhea]}" '{type:"minidregg-workspace-proposal-v1",action:"delegate",
-            name:"paper",recipient:$r,verbs:["observe","mutate"],maxCost:"50000",fields:["annotations"]}' >"${HOME_PATHS[amy]}/requests/rhea-annotate.json" ;;
+            name:"paper",recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000",fields:["annotations"]}' >"${HOME_PATHS[amy]}/requests/rhea-annotate.json" ;;
   esac
   ok J22 amy "propose g-rhea-$part @rhea-$part.json"
   ok J22 amy "submit g-rhea-$part"

@@ -37,6 +37,8 @@ structure Params where
   W_FOUNDER : Int
   ID : Int
   KIND : Int
+  /-- The realm cell every sheet is born under (clauses 6, 7: the dropper's and the taker's). -/
+  REALM_SHEET : Int
 
 /-! ## §2. The law, literally (`law.management.json`, then `item/law.item.json` clauses 1–7) -/
 
@@ -98,7 +100,8 @@ def itemClause6 (p : Params) : Pred :=
     .eq "resource/field/2/delta" 0,
     Pred.all [
       .eqSlots "joint/index/1/resource/field/0/after" "request/subject",
-      .eqSlots "resource/field/3/after" "joint/index/1/resource/field/1/after"]]
+      .eqSlots "resource/field/3/after" "joint/index/1/resource/field/1/after",
+      .eq "joint/index/1/cell/parent" p.REALM_SHEET]]
 
 /-- clause 7 -/
 def itemClause7 (p : Params) : Pred :=
@@ -109,7 +112,9 @@ def itemClause7 (p : Params) : Pred :=
     .eq "resource/field/3/before" 0,
     Pred.all [
       .eqSlots "joint/index/1/resource/field/0/after" "resource/field/2/after",
-      .eqSlots "joint/index/1/resource/field/1/after" "resource/field/3/before"]]
+      .eqSlots "joint/index/1/resource/field/1/after" "resource/field/3/before",
+      .eq "joint/index/1/cell/parent" p.REALM_SHEET]]
+
 
 end Law
 
@@ -198,8 +203,10 @@ theorem get_delta_absent (t : Turn) (pre post : Values) (N : Nat) (hpre : get pr
     (fun q hq => clock_ne_field hq N _ hw (by decide))
   have hjoint := find_none (k := fieldName N "delta") (l := Minidregg.Kernel.LawView.jointSlots t.joint)
     (fun q hq => joint_ne_field hq N _)
+  have hid := find_none (k := fieldName N "delta") (l := Minidregg.Kernel.LawView.identitySlots t.identity)
+    (fun q hq => Minidregg.Kernel.LawView.identity_ne_field hq N _)
   simp only [view, state_get, scalarSlots_split, List.find?_append, hreq, hbef, haft, hdel, hpair,
-    hclock, hjoint, Option.or_none]
+    hclock, hjoint, hid, Option.or_none]
   rfl
 
 /-- **One step.** An admitted mutate is by the holder, or it is the referee's and `owner` is present
@@ -316,24 +323,32 @@ end Kernel
 section Poles
 
 /-- The referee is 3, the founder 1; item 42 is a sword (kind 3, `item/fields.json` itemKinds). -/
-def realm : Params := { REF := 3, W_FOUNDER := 1, ID := 42, KIND := 3 }
+def realm : Params := { REF := 3, W_FOUNDER := 1, ID := 42, KIND := 3, REALM_SHEET := 60 }
 
 /-- Item 42 held by `o`, lying `where`, worn `w`, with `c` charges. -/
 def item (o where' w c : Int) : Values := [(0, 42), (1, 3), (2, o), (3, where'), (4, w), (5, c)]
 
 def heldBy7 : Values := item 7 0 0 5
-def giveTo8 : Turn := ⟨2, 7, none, [], item 8 0 0 5⟩
-def giveTo9 : Turn := ⟨2, 7, none, [], item 9 0 0 5⟩
-def eightGivesTo9 : Turn := ⟨2, 8, none, [], item 9 0 0 5⟩
-def strangerTakes : Turn := ⟨2, 9, none, [], item 9 0 0 5⟩
-def refereeMoves : Turn := ⟨2, 3, none, [], item 9 0 0 5⟩
-def refereeSpends : Turn := ⟨2, 3, none, [], item 7 0 0 4⟩
-def refereeRefills : Turn := ⟨2, 3, none, [], item 7 0 0 6⟩
-def holderWears : Turn := ⟨2, 7, none, [], item 7 0 1 5⟩
+def giveTo8 : Turn := ⟨2, 7, none, [], item 8 0 0 5, []⟩
+def giveTo9 : Turn := ⟨2, 7, none, [], item 9 0 0 5, []⟩
+def eightGivesTo9 : Turn := ⟨2, 8, none, [], item 9 0 0 5, []⟩
+def strangerTakes : Turn := ⟨2, 9, none, [], item 9 0 0 5, []⟩
+def refereeMoves : Turn := ⟨2, 3, none, [], item 9 0 0 5, []⟩
+def refereeSpends : Turn := ⟨2, 3, none, [], item 7 0 0 4, []⟩
+def refereeRefills : Turn := ⟨2, 3, none, [], item 7 0 0 6, []⟩
+def holderWears : Turn := ⟨2, 7, none, [], item 7 0 1 5, []⟩
 /-- 7 drops the item in room 101: owner := the referee (the floor), where := 101. Joint index 1 is
 7's sheet (id 7, at 101) under K-JOINT-INDEX. -/
-def dropWithJoint : Turn := ⟨2, 7, none, [(1, 0, "after", 7), (1, 1, "after", 101)], item 3 101 0 5⟩
-def dropWaveC : Turn := ⟨2, 7, none, [], item 3 101 0 5⟩
+def dropWithJoint : Turn :=
+  ⟨2, 7, none, [(1, 0, "after", 7), (1, 1, "after", 101)], item 3 101 0 5, [(1, "parent", 60)]⟩
+/-- The same drop citing a look-alike: a cell with 7's id standing in room 101, born under another
+cell (61) than the realm's sheet cell. -/
+def dropLookalike : Turn :=
+  ⟨2, 7, none, [(1, 0, "after", 7), (1, 1, "after", 101)], item 3 101 0 5, [(1, "parent", 61)]⟩
+/-- And citing a cell with no birth record. -/
+def dropUnborn : Turn :=
+  ⟨2, 7, none, [(1, 0, "after", 7), (1, 1, "after", 101)], item 3 101 0 5, []⟩
+def dropWaveC : Turn := ⟨2, 7, none, [], item 3 101 0 5, []⟩
 
 /-- Satisfiable: the holder's give is admitted. Refutable: a stranger's `owner := me` is refused,
 and so is the referee's move of an item a player holds. -/
@@ -367,6 +382,14 @@ theorem second_give_refused_after_first :
 theorem drop_needs_joint :
     admits (itemLaw realm) heldBy7 dropWithJoint = true ∧
       admits (itemLaw realm) heldBy7 dropWaveC = false := by
+  decide
+
+/-- **Teeth: a look-alike sheet is refused** (clause 6). The drop is admitted only when the cell at
+joint 1 was born under the realm's sheet cell; the same id and room in a cell born elsewhere, or
+with no birth record, place nothing. -/
+theorem drop_lookalike_sheet_refused :
+    admits (itemLaw realm) heldBy7 dropLookalike = false ∧
+      admits (itemLaw realm) heldBy7 dropUnborn = false := by
   decide
 
 /-- A chain of gives 7 → 8 → 9 is an accepted history; 7 → 8 then 7 → 9 is not. -/

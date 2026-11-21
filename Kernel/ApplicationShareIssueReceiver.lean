@@ -224,8 +224,7 @@ def receiveLoaded (config : NativeHost.Config) (pins : FactoryPins)
       -- The full shape's directory and authority, loaded once (this is a cold path).
       let some directory := CredentialAuthorityDomainReceiver.loadDirectory durable
         | return .rejected "app share issue refused: directory unavailable"
-      let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment
-          durable.snapshot
+      let some authority := CredentialAuthorityDomainReceiver.readDeployment config.deployment durable
         | return .rejected "app share issue refused: authority unavailable"
       match ← ApplicationShareIssueAdmission.admitNative config.profile config pins
           native (.ofLoaded durable directory authority) height bytes with

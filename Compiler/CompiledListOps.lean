@@ -12,8 +12,7 @@ equality of instances; no statement sees it.
 
 Also: `nodupNat` (a hashed one-pass `List.Nodup` decision on identifiers,
 `nodupNat_iff`), `rowTable` (an identifier table that answers `List.lookup`,
-`rowTable_get?`) and `usedSet` (a hashed dedup that is `List.toFinset`,
-`usedSet_eq`): the quadratic list forms stay the statements, these run.
+`rowTable_get?`): the quadratic list forms stay the statements, these run.
 -/
 
 module
@@ -85,26 +84,5 @@ theorem rowTable_get? {β : Type} : ∀ (rows : List (Nat × β)) (id : Nat), (r
       · subst h; simp
       · have : (id == key) = false := by simp [Ne.symm h]
         simp [h, this]
-
-def usedSet (keys : List Nat) : Finset Nat :=
-  let seen : Std.HashSet Nat := keys.foldl (fun seen key => seen.insert key) ∅
-  ⟨(seen.toList : Multiset Nat), Multiset.coe_nodup.mpr (seen.distinct_toList.imp fun h => by simpa using h)⟩
-
-theorem mem_usedSet (keys : List Nat) (key : Nat) : key ∈ usedSet keys ↔ key ∈ keys := by
-  suffices h : ∀ (seen : Std.HashSet Nat), key ∈ keys.foldl (fun seen key => seen.insert key) seen ↔ key ∈ keys ∨ key ∈ seen by
-    simp only [usedSet, Finset.mem_mk, Multiset.mem_coe, Std.HashSet.mem_toList]
-    simpa using h ∅
-  induction keys with
-  | nil => intro seen; simp
-  | cons head rest ih =>
-      intro seen
-      rw [List.foldl_cons, ih, Std.HashSet.mem_insert]
-      simp only [List.mem_cons, beq_iff_eq]
-      constructor
-      · rintro (h | h | h) <;> [exact Or.inl (Or.inr h); exact Or.inl (Or.inl h.symm); exact Or.inr h]
-      · rintro ((h | h) | h) <;> [exact Or.inr (Or.inl h.symm); exact Or.inl h; exact Or.inr (Or.inr h)]
-
-theorem usedSet_eq (keys : List Nat) : usedSet keys = keys.toFinset := by
-  ext key; rw [mem_usedSet, List.mem_toFinset]
 
 end Minidregg.Compiler.CompiledListOps

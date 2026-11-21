@@ -764,7 +764,7 @@ pub(crate) fn status(root: &Path, workspace: &Value, id: &str) -> Result<Value> 
                 "message":"No complete export is retained. This operation cannot fetch again."})),
             DeliveryState::Completed(_) => Err("the fetch completed but its retained export is missing; restore the complete workspace custody".into()),
             // This fetch never records a destination refusal; a record that says so is not its.
-            DeliveryState::Fresh | DeliveryState::Refused { .. } => Err("no export is retained for this operation".into()),
+            DeliveryState::Fresh | DeliveryState::Refused { .. } | DeliveryState::Declined(_) => Err("no export is retained for this operation".into()),
         };
     }
     let v = opened(root, workspace, id)?;

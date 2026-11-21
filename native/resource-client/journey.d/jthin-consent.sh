@@ -26,6 +26,13 @@
 #       one, and the turn commits
 #   DF  a Host proposing the slot of a delegation over ANOTHER parent: refused
 #       headerMismatch before anything is signed (the plant is asserted first)
+#   KR  a whole kind definition read beside a write: checked by its served opening, shown as a
+#       read, signed; the Host lying about the kind read's view alone is refused before signing
+#   SR  a write the Host's semantics refuses (it creates a field the cell did not declare) is
+#       refused when the Host prepares the plan: no plan reaches the consent provider, nothing is
+#       shown, nothing is signed, nothing commits. The Host runs the semantics before it proposes
+#       anything to sign, so a member is shown a post only for an operation the semantics has
+#       admitted at the signed root
 #   M   (only with THIN_MUTANT_PROVIDER: a provider built with the served-root
 #       comparison removed) the mutant accepts a view of another state, shows a
 #       post that differs from the one that commits; the real provider refused
@@ -63,7 +70,7 @@ say() {
     # (pass) would then serve every later line and no capture or plant would ever happen.
     if env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
         THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE="$mode" THIN_PROXY_LOG="$D/proxy.log" \
-        THIN_PROXY_OTHER_INTENT="${OTHER_INTENT:-}" \
+        THIN_PROXY_OTHER_INTENT="${OTHER_INTENT:-}" THIN_PROXY_SAVE_VIEW="${SAVE_VIEW:-}" \
         "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
         --workspace "$SPONSOR_WS" --home "$D/$who" --line "$line" >"$OUT" 2>"$ERR"; then RC=0; else RC=$?; fi
   else
@@ -74,7 +81,6 @@ say() {
 ok() { local step=$1; shift; say "$@"; [ "$RC" = 0 ] || fail "$step" 0 "$RC" x "$(tail -3 "$ERR")"; row "$step" 0 0 PASS; }
 check() { local step=$1; shift; if "$@"; then row "$step" true 0 PASS; else fail "$step" true 1 x "check failed: $*"; fi; }
 attempt_of() { sed -n 's/^workspace attempt: //p' "$1" | tail -1; }
-reads_of() { sed -n 's/^workspace read attempt: //p' "$1"; }
 proposal_root() { jq -r '.purpose.draft.command.targets[0].expectedTargetRoot' "$SPONSOR_WS/proposals/$1/intent.json"; }
 shown_root() { jq -r '.[0].postRoot' "$1/thin-display.json"; }
 proxy_saw() { grep -q "$1" "$D/proxy.log"; }
@@ -93,13 +99,15 @@ ok instance-create alice 'create tc-one --from tc-poll open'
 # ---- T1: honest thin consent; what it shows is what commits
 ok t1-propose-show alice 'instance show tc-one'
 ok t1-propose alice 'instance set t1 tc-one open 0 0'
-say alice 'submit t1' pass
+# The view the Host serves for this consent is saved by the proxy: the client reads it for the
+# consent alone and keeps no copy (a signed read keeps one journal line, not an attempt tree).
+SAVE_VIEW=$D/view-pre-t1.bin say alice 'submit t1' pass
 [ "$RC" = 0 ] || fail t1-submit 0 "$RC" x "$(tail -3 "$ERR")"
 row t1-submit 0 0 PASS
-T1=$(attempt_of "$ERR"); PRE_T1=$(reads_of "$ERR" | tail -1)/view.bin
+T1=$(attempt_of "$ERR")
 check t1-thin-frames proxy_saw 'frame 232'
 check t1-shown test -s "$T1/thin-display.json"
-cp "$PRE_T1" "$D/view-pre-t1.bin"
+check t1-view-served test -s "$D/view-pre-t1.bin"
 ok t1b-propose-show alice 'instance show tc-one'
 ok t1b-propose alice 'instance set t1b tc-one open 0 1'
 check t1-shown-is-committed test "$(shown_root "$T1")" = "$(proposal_root t1b)"
@@ -164,7 +172,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
   --predicate "$D/req/permit-all.json" --fields 401-405 >"$D/log/blind-create.out" 2>"$D/log/blind-create.err" \
   || fail blind-create 0 1 x "$(tail -3 "$D/log/blind-create.err")"
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"tc-blind",
-  recipient:$r,verbs:["observe","mutate"],fields:["401"],maxCost:"50000"}' >"$D/req/blind-grant.json"
+  recipient:$r,verbs:["observe","mutate"],fields:["401"],perRequestBytes:"50000"}' >"$D/req/blind-grant.json"
 "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/blind-grant.json" --proposal-id tc-blind-grant \
   >"$D/log/blind-grant.out" 2>"$D/log/blind-grant.err" || fail blind-grant 0 1 x "$(tail -3 "$D/log/blind-grant.err")"
 "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/tc-blind-grant/intent.json" \
@@ -203,14 +211,13 @@ jq --arg t "$(jq -r .target "$SPONSOR_WS/refs/tc-one.json")" '.purpose.draft.com
 : >"$D/proxy-n2.log"
 rc=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
   THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-n2.log" \
+  THIN_PROXY_SAVE_VIEW="$D/view-n2.bin" \
   "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$D/req/n2-intent.json" \
   --attempt "$NEWCOMER_WS/attempts/n2" >"$D/log/n2-submit.out" 2>"$D/log/n2-submit.err" || rc=$?
 [ "$rc" != 0 ] || fail n2-refused refused 0 x "a member without a grant signed and submitted"
 grep -q '^refused: ' "$D/log/n2-submit.err" || fail n2-refused "host refusal" "$rc" x "$(tail -3 "$D/log/n2-submit.err")"
 check n2-no-plan-consent sh -c "! grep -q 'frame 232' '$D/proxy-n2.log'"
-for read in $(reads_of "$D/log/n2-submit.err"); do
-  check n2-no-bytes-served test ! -e "$read/view.bin"
-done
+check n2-no-bytes-served test ! -e "$D/view-n2.bin"
 check n2-nothing-signed test ! -e "$NEWCOMER_WS/attempts/n2/transaction-signatures.json"
 row n2-refused "$(grep -m1 '^refused: ' "$D/log/n2-submit.err" | cut -c1-60)" "$rc" PASS
 # S2: the newcomer signs its own write over N1's post with full consent (it
@@ -257,6 +264,68 @@ grep -q 'headerMismatch' "$ERR" || fail df-refused headerMismatch "$RC" x "$(tai
 DF=$(attempt_of "$ERR")
 check df-nothing-signed test ! -e "$DF/transaction-signatures.json"
 row df-refused headerMismatch "$RC" PASS
+
+# ---- KR: a whole kind definition read (`kindRead`, registered effect code 7) beside a write.
+# The read pins the kind's root, so thin consent checks its served opening like a write's; it is
+# shown as a read with no effect lines (only a read that pins no root is shown without a view).
+# KR1: admitted and signed. KR2: the Host serves another cell's view for the kind read alone and
+# the honest view for the write: refused before signing.
+P=$D/req/permit-all.json
+printf '%s\n' '{"type":"all","predicates":[]}' >"$P"
+"$MINI" workspace --action create --dir "$SPONSOR_WS" --name tc-note --storage declared --predicate "$P" --fields 2 \
+  >"$D/log/kr-create.out" 2>"$D/log/kr-create.err" || fail kr-create 0 1 x "$(tail -3 "$D/log/kr-create.err")"
+row kr-create 0 0 PASS
+kr() { # ID ACTION-JSON MODE: a scalar write of tc-note beside a kindRead of tc-poll, submitted under thin consent
+  local id=$1 action=$2 mode=$3
+  jq -nc --argjson a "$action" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[
+    {name:"tc-note",payload:{type:"scalar",actions:[$a]}},{name:"tc-poll",payload:{type:"kindRead"}}]}' >"$D/req/$id.json"
+  "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$id.json" --proposal-id "$id" \
+    >"$D/log/$id-propose.out" 2>"$D/log/$id-propose.err" || fail "$id-propose" 0 1 x "$(tail -3 "$D/log/$id-propose.err")"
+  : >"$D/proxy-$id.log"
+  # MINI_CONSENT_RESIDENT=0: this line's own provider, so this line's proxy mode and log apply (`say`).
+  RC=0; env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+    THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE="$mode" THIN_PROXY_LOG="$D/proxy-$id.log" \
+    "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/$id/intent.json" \
+    --attempt "$SPONSOR_WS/attempts/$id" >"$D/log/$id-submit.out" 2>"$D/log/$id-submit.err" || RC=$?
+}
+kr tc-kr1 '{"type":"create","key":{"type":"object","field":"2"},"value":"1"}' pass
+[ "$RC" = 0 ] || fail kr-admitted 0 "$RC" x "$(tail -3 "$D/log/tc-kr1-submit.err")"
+check kr-thin-frames grep -q 'frame 232' "$D/proxy-tc-kr1.log"
+check kr-shown-as-read jq -e 'length == 2 and .[0].postBytes != null and .[1].read == true and (.[1] | has("effect") | not)' \
+  "$SPONSOR_WS/attempts/tc-kr1/thin-display.json"
+check kr-signed test -s "$SPONSOR_WS/attempts/tc-kr1/transaction-signatures.json"
+row kr-admitted 0 0 PASS
+kr tc-kr2 '{"type":"write","key":{"type":"object","field":"2"},"expected":"1","value":"2"}' "view-last=$D/view-pre-t1.bin"
+check kr-lie-planted grep -q 'view-last: replaced' "$D/proxy-tc-kr2.log"
+[ "$RC" != 0 ] || fail kr-lie-refused refused 0 x "thin consent signed a kind read over a view of another cell"
+check kr-lie-nothing-signed test ! -e "$SPONSOR_WS/attempts/tc-kr2/transaction-signatures.json"
+row kr-lie-refused "$(grep -m1 -o 'thin consent refused: [A-Za-z.]* *[A-Za-z]*' "$D/log/tc-kr2-submit.err" | cut -c1-70)" "$RC" PASS
+
+# ---- SR: refused by the Host's semantics at prepare; nothing shown, nothing signed, nothing commits.
+# tc-note declared field 2 alone at birth. Creating field 3 is a patch that applies to the served
+# store (the address is fresh), so the member patch alone would show a post. The Host's semantics
+# refuses it (K-FIELD-CLOSURE) when it prepares the plan, before any plan is proposed for consent.
+sr_request() { # ID FIELD: propose a create of FIELD on tc-note
+  jq -nc --arg f "$2" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[
+    {name:"tc-note",payload:{type:"scalar",actions:[{type:"create",key:{type:"object",field:$f},value:"1"}]}}]}' >"$D/req/$1.json"
+  "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$1.json" --proposal-id "$1" \
+    >"$D/log/$1-propose.out" 2>"$D/log/$1-propose.err" || fail "$1-propose" 0 1 x "$(tail -3 "$D/log/$1-propose.err")"
+}
+sr_request tc-sr 3
+: >"$D/proxy-tc-sr.log"
+RC=0; env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+  THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-tc-sr.log" \
+  "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/tc-sr/intent.json" \
+  --attempt "$SPONSOR_WS/attempts/tc-sr" >"$D/log/tc-sr-submit.out" 2>"$D/log/tc-sr-submit.err" || RC=$?
+[ "$RC" != 0 ] || fail sr-refused undeclared-field 0 x "the Host admitted a write of a field the cell did not declare"
+grep -q 'undeclared-field 3 (phase prepare)' "$D/log/tc-sr-submit.err" || fail sr-refused undeclared-field "$RC" x "$(tail -3 "$D/log/tc-sr-submit.err")"
+row sr-refused-at-prepare undeclared-field "$RC" PASS
+check sr-no-plan-consent sh -c "! grep -q 'frame 232' '$D/proxy-tc-sr.log'"
+check sr-nothing-shown test ! -e "$SPONSOR_WS/attempts/tc-sr/thin-display.json"
+check sr-nothing-signed test ! -e "$SPONSOR_WS/attempts/tc-sr/transaction-signatures.json"
+# Nothing committed: the next proposal, authored from a fresh signed read, names the root tc-sr named.
+sr_request tc-sr2 3
+check sr-nothing-committed test "$(proposal_root tc-sr)" = "$(proposal_root tc-sr2)"
 
 if [ -n "${THIN_MUTANT_PROVIDER:-}" ]; then
   check m-is-mutant sh -c "[ \"\$(sha256sum < '$THIN_MUTANT_PROVIDER')\" != \"\$(sha256sum < '$REAL')\" ]"

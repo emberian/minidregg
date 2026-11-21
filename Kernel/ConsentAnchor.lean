@@ -34,7 +34,12 @@ process boundary; neither can be established here. The chain is what makes an
 anchor a commitment: equal chains are equal prefixes, up to a collision of the
 deployed hash.
 -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+public import Compiler.DurableHistoryStore
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ConsentAnchor
 
@@ -503,6 +508,199 @@ def resume (config : Config) {store : DurableHistory.StoreIdentity}
         else
           return .error (.contradicted
             "the Store's image at the retained consent anchor does not reproduce the anchor's world root")
+
+/-! ## The audit resumed at an anchor (`mini audit --from`)
+
+An accepting audit leaves an `Anchor`: the height it reached, the genesis log start, the log
+chain after that height and the world root there. A later audit resumes AT the anchor,
+wherever the Store's checkpoints are: the state at the anchor's height is rebuilt from the
+Store (`Reader.stateAt`: an earlier checkpoint, then the records up to the anchor), must
+validate, and must BE the anchor (its height, log start, chain and world root,
+`Audited.startExact`); then every record after it is natively admitted
+(`NativeHostReplay.verifySuffixFrom`). Nothing between the anchor and the head rests on a
+checkpoint: a checkpoint only supplies the state the anchor's world root is compared with. -/
+
+/-- **An audit of `target` resumed at `anchor`**: the validated opening at the anchor's
+height is the anchor, and every later record is natively admitted from it. Constructed only
+by `auditFrom`. -/
+structure Audited (config : Config) (anchor : Anchor) (target : Durable) where
+  private mk ::
+  start : Opened config
+  /-- The start is the anchor: height, genesis log, chain and world root. -/
+  startExact : Anchor.ofOpened start = anchor
+  /-- Every record after the start, natively admitted at its original height. -/
+  suffix : NativeHostReplay.SuffixVerified config start target
+
+/-- **What an accepting resumed audit established.** The target's first `anchor.height`
+records are the start's and chain from the anchor's genesis log to the anchor's chain; the
+state they leave has the anchor's world root; and every record after them is natively
+admitted, in order, from that state to the target's exact image. -/
+theorem Audited.sound {config : Config} {anchor : Anchor} {target : Durable}
+    (audited : Audited config anchor target) :
+    audited.start.durable.image.accepted = target.image.accepted.take anchor.height ∧
+      target.logStart = anchor.logStart ∧
+      chainAfter target.logStart (target.image.accepted.take anchor.height) = anchor.chain ∧
+      audited.start.durable.worldRoot = anchor.root ∧
+      audited.suffix.opened.durable.image = target.image ∧
+      NativeHostReplay.AdmittedSuffix config audited.start
+        (target.image.accepted.drop anchor.height) audited.suffix.opened audited.suffix.receipts := by
+  have exact := audited.startExact
+  have height : audited.start.durable.image.accepted.length = anchor.height := by
+    rw [← DurableReceiverIO.Loaded.height_eq]; exact congrArg Anchor.height exact
+  have started : audited.start.durable.logStart = anchor.logStart := congrArg Anchor.logStart exact
+  have chained : audited.start.durable.chain = anchor.chain := congrArg Anchor.chain exact
+  have rooted : audited.start.durable.worldRoot = anchor.root := congrArg Anchor.root exact
+  have records : audited.start.durable.image.accepted = target.image.accepted.take anchor.height := by
+    rw [← height]; exact audited.suffix.prefixExact.symm
+  have logStart := audited.suffix.logStartExact
+  refine ⟨records, logStart.trans started, ?_, rooted, audited.suffix.exactImage, ?_⟩
+  · rw [logStart, ← records, ← audited.start.durable.chainExact]; exact chained
+  · have admitted := audited.suffix.accepted_suffix
+    rw [height] at admitted
+    exact admitted
+
+#assert_axioms Audited.sound
+
+/-- Resume an audit at `anchor` over a full open: the anchor's commitments against the Store
+(`checkStore`: genesis log, head not below the anchor, the chain at its height), the state at
+its height from the Store's history, the cut there validated and required to be the anchor,
+then native admission of every later record. -/
+def auditFrom (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (anchor : Anchor) (opened : DurableReceiverIO.Chained ResourceBirthCodec.rootBytes) :
+    IO (Except ResumeError (Audited config anchor opened.loaded)) := do
+  match checked : checkStore anchor opened.loaded opened.chains with
+  | .error detail => return .error (.contradicted detail)
+  | .ok () =>
+    have bounds := checkStore_ok opened.chainsExact checked
+    match ← reader.stateAt anchor.height with
+    | .error refusal =>
+        return .error (.contradicted s!"the Store's state at the audit anchor {anchor.height}: {refusal.message}")
+    | .ok state =>
+      match opened.cutAt anchor.height state.baseHeight state.baseState (.error "an audit cut carries no World") with
+      | .error detail => return .error (.contradicted s!"audit start at {anchor.height}: {detail}")
+      | .ok ⟨cut, imaged, logStarted, _, _⟩ =>
+        match validated : validateLoaded config cut.untracked with
+        | .error detail =>
+            return .error (.contradicted s!"the Store's image at the audit anchor {anchor.height} is invalid: {detail}")
+        | .ok start =>
+          if exact : Anchor.ofOpened start = anchor then
+            have wraps := validateLoaded_durable validated
+            have startLength : start.durable.image.accepted.length = anchor.height := by
+              rw [wraps, DurableReceiverIO.Loaded.untracked_image, imaged, DurableReceiver.Image.accepted_ofAccepted, List.length_take]
+              exact Nat.min_eq_left bounds.2.1
+            have seedExact : opened.loaded.image.seed = start.durable.image.seed := by
+              rw [wraps, DurableReceiverIO.Loaded.untracked_image, imaged, DurableReceiver.Image.ofAccepted_seed]
+            have anchorWithin : start.durable.image.accepted.length ≤ opened.loaded.image.accepted.length := by
+              rw [startLength]; exact bounds.2.1
+            have prefixExact : opened.loaded.image.accepted.take start.durable.image.accepted.length =
+                start.durable.image.accepted := by
+              rw [wraps, DurableReceiverIO.Loaded.untracked_image, imaged, DurableReceiver.Image.accepted_ofAccepted]
+              exact take_length_take _ _
+            have logStartExact : opened.loaded.logStart = start.durable.logStart := by
+              rw [wraps, DurableReceiverIO.Loaded.untracked_logStart, logStarted]
+            match ← NativeHostReplay.verifySuffixFrom config start reader opened.loaded none seedExact anchorWithin
+                prefixExact logStartExact with
+            | .error failure => return .error (.suffix failure)
+            | .ok suffix => return .ok ⟨start, exact, suffix⟩
+          else
+            return .error (.contradicted
+              "the Store's state at the audit anchor does not reproduce the anchor (its chain or its world root differ)")
+
+/-- **An accepting resumed audit leaves an anchor for the whole log**: the opening it ends on
+holds exactly the target's image, so `Anchor.ofOpened` of it is the anchor the next
+`auditFrom` resumes at. -/
+def Audited.next {config : Config} {anchor : Anchor} {target : Durable}
+    (audited : Audited config anchor target) : Anchor :=
+  Anchor.ofOpened audited.suffix.opened
+
+theorem Audited.next_height {config : Config} {anchor : Anchor} {target : Durable}
+    (audited : Audited config anchor target) :
+    audited.next.height = target.image.accepted.length := by
+  show audited.suffix.opened.durable.height = _
+  rw [DurableReceiverIO.Loaded.height_eq, audited.suffix.exactImage]
+
+#assert_axioms Audited.next_height
+
+/-- `audit --from`: the Store as it is, opened with its chain, audited from `anchor`. An
+accepting audit answers the anchor it leaves, how many records after `anchor` it admitted,
+and the opening it ended on. A Store that does not load and an anchor the Store contradicts
+are refusals (the outer error). A record after the anchor that the suffix walk does not
+admit is the inner error: not a verdict (`AuditFromSound`), the caller audits from genesis. -/
+def auditStoreFrom (config : Config) (anchor : Anchor) :
+    IO (Except String (Except NativeHostReplay.Failure (Anchor × Nat × Opened config))) := do
+  match ← DurableReceiverIO.loadChained config.transport ResourceBirthCodec.rootBytes with
+  | .error detail => return .error detail
+  | .ok opened =>
+      match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes opened.loaded with
+      | .error detail => return .error s!"audit history reader: {detail}"
+      | .ok ⟨_, reader⟩ =>
+          match ← auditFrom config reader anchor opened with
+          | .error (.contradicted detail) => return .error s!"audit --from refused the anchor: {detail}"
+          | .error (.suffix failure) => return .ok (.error failure)
+          | .ok audited =>
+              return .ok (.ok (audited.next, audited.suffix.receipts.length, audited.suffix.opened))
+
+/-- **Teeth: a rewritten prefix refuses before any record is admitted.** -/
+theorem checkStore_refuses_for_audit {anchor : Anchor}
+    (opened : DurableReceiverIO.Chained ResourceBirthCodec.rootBytes)
+    (rewritten : chainAfter opened.loaded.logStart (opened.loaded.image.accepted.take anchor.height) ≠
+      anchor.chain) :
+    ∃ detail, checkStore anchor opened.loaded opened.chains = .error detail :=
+  checkStore_refuses_rewritten opened.chainsExact rewritten
+
+/-- **Teeth: a forged world root admits no audit.** An anchor whose root is not the world
+root of the state at its height is the start of no `Audited`. -/
+theorem Audited.forged_root_empty {config : Config} {anchor : Anchor} {target : Durable}
+    (forged : ∀ start : Opened config,
+      start.durable.image.accepted = target.image.accepted.take anchor.height →
+        start.durable.worldRoot ≠ anchor.root) :
+    IsEmpty (Audited config anchor target) :=
+  ⟨fun audited => forged audited.start audited.sound.1 audited.sound.2.2.2.1⟩
+
+#assert_axioms checkStore_refuses_for_audit
+#assert_axioms Audited.forged_root_empty
+
+/-- **A resumed audit after a genesis audit covers the whole log.** When a genesis audit of
+the target's first `anchor.height` records left `anchor`, an accepting audit resumed there
+gives: every record below the anchor natively admitted from genesis, every record after it
+natively admitted from the opening the resumed audit validated, and the two openings at the
+anchor's height committed to the same anchor (height, genesis log, chain and world root). -/
+theorem Audited.after_genesis {config : Config} {anchor : Anchor} {target prior : Durable}
+    (audited : Audited config anchor target) (genesis : NativeHostReplay.Verified config prior)
+    (records : prior.image.accepted = target.image.accepted.take anchor.height)
+    (fromGenesis : genesis.start = 0) (left : Anchor.ofOpened genesis.opened = anchor) :
+    NativeHostReplay.AdmittedReplay config genesis.origin (target.image.accepted.take anchor.height)
+        genesis.opened genesis.receipts ∧
+      Anchor.ofOpened audited.start = Anchor.ofOpened genesis.opened ∧
+      NativeHostReplay.AdmittedSuffix config audited.start
+        (target.image.accepted.drop anchor.height) audited.suffix.opened audited.suffix.receipts := by
+  refine ⟨?_, audited.startExact.trans left.symm, audited.sound.2.2.2.2.2⟩
+  have admitted := genesis.accepted_history
+  rw [fromGenesis, List.drop_zero, List.drop_zero, records] at admitted
+  exact admitted
+
+#assert_axioms Audited.after_genesis
+
+/-- **The keystone, stated and owed**: an accepting audit resumed at the anchor a genesis
+audit of this log's prefix left is a genesis audit of the whole log. `Audited.after_genesis`
+is the two halves and their join by the anchor; the proof owes one `Verified` out of them:
+that the genesis walk's opening and the cut validated here, equal in image and anchor, admit
+the same suffix, and that `AdmittedSuffix` extends `AdmittedReplay`.
+
+The converse is false and is not claimed. A record whose admission reads lifecycle history
+from before the anchor (a claim of an older BEGIN) is admitted by the genesis walk, which
+carries that history, and refused by the suffix walk, which starts without it
+(`ResumeError.suffix`). So a refused suffix is not a verdict: `audit --from` then audits from
+genesis and that verdict stands. A contradicted anchor is a verdict, and one a genesis audit
+cannot give: a rewritten prefix that is consistent with itself re-admits from genesis. -/
+def AuditFromSound (config : Config) : Prop :=
+  ∀ (target prior : Durable) (anchor : Anchor) (genesis : NativeHostReplay.Verified config prior),
+    prior.image.seed = target.image.seed → prior.logStart = target.logStart →
+    prior.image.accepted = target.image.accepted.take anchor.height →
+    genesis.start = 0 → Anchor.ofOpened genesis.opened = anchor →
+    Nonempty (Audited config anchor target) →
+      ∃ whole : NativeHostReplay.Verified config target, whole.start = 0
 
 /-- What a consent provider holds for its current target: either the full
 re-admission from genesis, or native admission of the records after its start

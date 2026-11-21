@@ -155,10 +155,10 @@ finish() {
   echo "J17: $FAILED of $N rows not as expected; first: $FIRST_FAIL" >&2; exit 1
 }
 
-deliver() { # FROM-DIR TO-DIR: copy every json file not already there
+deliver() { # FROM-DIR TO-DIR: deliver current reference files, including renewed till grants
   mkdir -p -m 700 "$2"
   local f
-  for f in "$1"/*.json; do [ -e "$f" ] || continue; [ -e "$2/$(basename "$f")" ] || install -m 0600 "$f" "$2/"; done
+  for f in "$1"/*.json; do [ -e "$f" ] || continue; install -m 0600 "$f" "$2/"; done
 }
 
 room_height() { "$MINI" credit --action room --dir "$WS/alice" --room "$1" 2>/dev/null | jq -r .height; }
@@ -199,12 +199,17 @@ BACCT=$(jq -r .feePayer "$WS/bob/birth-context.json")
 FEE=$(jq -r '.tariffBase' "$CONFIG"); BIRTH=$(jq -r '.tariffPerBirth' "$CONFIG"); GRANT=$(jq -r '.tariffPerGrant' "$CONFIG")
 
 # ------------------------------------------------ the room, its tariff, its concierge
+# Setting the price renews the initially zero-bound till grant.
 ok room alice "room new lab --template workroom --concierge $CON --period $PERIOD"
 LAB=$(jq -r .target "$WS/alice/refs/lab.json")
 checkp room "the founder holds the till lab-till (an account)" jq -e '.kind == "account"' "$WS/alice/refs/lab-till.json"
 checkp room "the program names lab, its till and the concierge" \
   jq -e --arg r "$LAB" --arg c "$CON" '.room == $r and .concierge == $c and .topic == "renew"' "$H/alice/concierge/lab.json"
+INITIAL_TILL_CAP=$(jq -r .capability "$H/alice/outbox/$CON/lab-till.json")
 ok room alice "tariff lab set week $WEEK"
+checkp room "setting the price replaces the zero-bound till grant" \
+  jq -e --arg old "$INITIAL_TILL_CAP" --arg bound "$((WEEK + FEE))" --arg asset "balance:$(jq -r .asset "$CONFIG")" \
+  '.capability != $old and .maxDelta == [{field:$asset,max:$bound}]' "$H/alice/outbox/$CON/lab-till.json"
 ok room alice "tariff lab set hermes/turn 2"
 ok room alice "tariff lab"
 checkp room "tariff lab shows week $WEEK, period $PERIOD, the till and the concierge" \
@@ -290,8 +295,30 @@ restart() {
   kill -TERM "$pid"
   for i in $(seq 1 300); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
   kill -0 "$pid" 2>/dev/null && { echo "server $pid alive after TERM" >&2; return 1; }
-  "$MINI" audit --host "$HOST" --config "$CONFIG" >"$SD/audit-$1.out" 2>"$SD/audit-$1.err"
+  local t0; t0=$(date +%s%N)
+  "$MINI" audit --host "$HOST" --config "$CONFIG" --anchor-out "$SD/audit-$1.anchor" >"$SD/audit-$1.out" 2>"$SD/audit-$1.err"
   echo $? >"$SD/audit-$1.rc"
+  echo $(( ($(date +%s%N) - t0) / 1000000 )) >"$SD/audit-$1.ms"
+  # The audit resumed at the anchor the restart before left (`audit --from`), on the same closed
+  # Store: it must end on the anchor the genesis audit just wrote; an anchor with another world
+  # root, and a cut-off anchor file, refuse.
+  if [ -n "${2:-}" ] && [ -s "$SD/audit-$2.anchor" ]; then
+    t0=$(date +%s%N)
+    "$MINI" audit --host "$HOST" --config "$CONFIG" --from "$SD/audit-$2.anchor" --anchor-out "$SD/audit-$1.from.anchor" \
+      >"$SD/audit-$1.from.out" 2>"$SD/audit-$1.from.err"
+    echo $? >"$SD/audit-$1.from.rc"
+    echo $(( ($(date +%s%N) - t0) / 1000000 )) >"$SD/audit-$1.from.ms"
+    local size; size=$(stat -c %s "$SD/audit-$2.anchor")
+    # another world root, still a canonical record: one plain byte inside the last digest
+    local byte=A; [ "$(tail -c 4 "$SD/audit-$2.anchor" | head -c 1)" != A ] || byte=B
+    { head -c $((size - 4)) "$SD/audit-$2.anchor"; printf '%s' "$byte"; tail -c 3 "$SD/audit-$2.anchor"; } >"$SD/audit-$1.forged.anchor"
+    "$MINI" audit --host "$HOST" --config "$CONFIG" --from "$SD/audit-$1.forged.anchor" --anchor-out "$SD/audit-$1.forged.out.anchor" \
+      >"$SD/audit-$1.forged.out" 2>"$SD/audit-$1.forged.err"
+    echo $? >"$SD/audit-$1.forged.rc"
+    head -c $((size - 9)) "$SD/audit-$2.anchor" >"$SD/audit-$1.cut.anchor"
+    "$MINI" audit --host "$HOST" --config "$CONFIG" --from "$SD/audit-$1.cut.anchor" >"$SD/audit-$1.cut.out" 2>"$SD/audit-$1.cut.err"
+    echo $? >"$SD/audit-$1.cut.rc"
+  fi
   setsid nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     >"$W/public/serve-j17-$1.log" 2>&1 </dev/null &
   echo $! >"$pidfile"
@@ -370,6 +397,7 @@ ok race eve "import lab $REF"
 ok race eve "pay lab week"
 checkp race "eve's payment says the price and the height it read" grep -q "at the price $WEEK read at height" "$OUT"
 ok race alice "tariff lab set week 200"
+operator race "DELIVER: renewed till grant" deliver "$H/alice/outbox/$CON" "$H/con/inbox"
 concierge race lab "the founder raised the price between the payment and the pass"
 check race "eve's payment is honoured at the price it read" "issued $E" \
   "$(jq -r '.decisions[0] | "\(.decision) \(.subject)"' "$PASS" 2>/dev/null)"
@@ -378,6 +406,7 @@ operator race "DELIVER: the concierge's reference into eve's inbox" deliver "$H/
 ok race eve "room status lab"
 checkp race "room status: eve holds a member window" grep -q "my window: member until height" "$OUT"
 ok race alice "tariff lab set week $WEEK"
+operator race "DELIVER: renewed till grant" deliver "$H/alice/outbox/$CON" "$H/con/inbox"
 HQ=$(room_height lab)
 operator race "eve pays with a memo quoting a price the tariff never had (50 at $HQ)" \
   "$MINI" fleet --action send --dir "$WS/eve" --account account --topic renew \
@@ -465,8 +494,16 @@ checkp balances "room status after: the week-2 window (to $((H2 + PERIOD))) has 
   grep -q "my window: ENDED at height $((H2 + PERIOD))" "$OUT"
 
 # ------------------------------------------------ cold audit
-operator audit "stop the Host, cold audit re-admits every record, serve again" restart r2
+operator audit "stop the Host, cold audit re-admits every record, audit again from the first restart's anchor, serve again" restart r2 r1
 check audit "cold audit exit 0" 0 "$(cat "$SD/audit-r2.rc")"
+check audit "audit --from the first restart's anchor exit 0 (genesis $(cat "$SD/audit-r2.ms" 2>/dev/null) ms: $(head -1 "$SD/audit-r2.out" 2>/dev/null | cut -c1-40); from $(cat "$SD/audit-r2.from.ms" 2>/dev/null) ms: $(head -1 "$SD/audit-r2.from.out" 2>/dev/null | cut -c1-70))" 0 "$(cat "$SD/audit-r2.from.rc" 2>/dev/null)"
+checkp audit "audit --from ends on the anchor the genesis audit wrote, byte for byte" cmp -s "$SD/audit-r2.anchor" "$SD/audit-r2.from.anchor"
+checkp audit "audit --from admitted records: the first restart's anchor is below the head" \
+  grep -Eq '^audited [1-9][0-9]* accepted records after the anchor at height [0-9]+, to height [0-9]+' "$SD/audit-r2.from.out"
+checkp audit "an anchor with another world root refuses and leaves no anchor (rc $(cat "$SD/audit-r2.forged.rc" 2>/dev/null): $(tail -1 "$SD/audit-r2.forged.err" 2>/dev/null | cut -c1-110))" \
+  sh -c '[ "$(cat "$1.rc")" != 0 ] && grep -q "does not reproduce the anchor" "$1.err" && [ ! -e "$1.out.anchor" ]' sh "$SD/audit-r2.forged"
+checkp audit "a cut-off anchor file refuses (rc $(cat "$SD/audit-r2.cut.rc" 2>/dev/null): $(tail -1 "$SD/audit-r2.cut.err" 2>/dev/null | cut -c1-90))" \
+  sh -c '[ "$(cat "$1.rc")" != 0 ] && grep -q "audit --from" "$1.err"' sh "$SD/audit-r2.cut"
 named audit bob "read lab" "refused: outside-validity"
 ok audit bob "read lab-guest"
 concierge audit lab "after the cold audit"

@@ -308,7 +308,7 @@ op S "PROVISION (OPERATOR step 6): factory observation + a funded account owned 
   "$MINI" workspace --action provision --dir "$R/sponsor" --name newcomer --holder "$B_SUBJ" \
     --funding 1000 --account-predicate "$RUN/permit-all.json" --factory-ref factory
 op S "DELIVER (OPERATOR step 6): the birth context into newcomer's HOME/provision/" \
-  install -D -m 0600 "$R/sponsor/provisions/newcomer/birth-context.json" "$RUN/homes/newcomer/provision/birth-context.json"
+  bash -c "install -d -m 0700 '$RUN/homes/newcomer/provision' && install -m 0600 '$R/sponsor/provisions/newcomer/birth-context.json' '$RUN/homes/newcomer/provision/birth-context.json'"
 step S 0 newcomer "init mini.key $B_SUBJ"
 # The inspector writes fields 1 and 2; field closure requires both at birth.
 step S 0 sponsor 'create board declared {"type":"all","predicates":[]} 1,2'
@@ -317,7 +317,7 @@ check S "the differential's signed read of board answers" world_ok
 
 # ------------------------------------------------------------- C: cap trees
 
-# The J3-shaped delegation: observe+mutate (no control) to B, maxCost 50000.
+# The J3-shaped delegation: observe+mutate (no control) to B, perRequestBytes 50000.
 step C 0 sponsor "delegate wb board $B_SUBJ observe,mutate 50000"
 step C 0 sponsor "submit wb"
 step C 0 sponsor "publish wb"
@@ -332,15 +332,15 @@ echo "root $ROOT control $CONTROL child $CHILD target $TARGET" >"$LOG/ids.txt"
 
 vstep C sponsor "inspect caps board --json"
 check C "owner: the delegation is an edge root -> child" jqv --arg c "$CHILD" --arg p "$ROOT" '[.edges[] | select(.child == $c and .parent == $p)] | length == 1'
-check C "owner: the edge states its narrowing" jqv --arg c "$CHILD" '.edges[] | select(.child == $c) | .narrows | test("targets ⊆, verbs ⊆, maxCost 50000 ≤ ")'
-check C "owner: the child is B's, observe+mutate, maxCost 50000, from my delegation wb (installed)" \
-  jqv --arg c "$CHILD" --arg b "subject $B_SUBJ" '.nodes[] | select(.id == $c) | .holder == $b and .verbs == ["observe","mutate"] and .maxCost == "50000" and (.sources | index("my delegation wb, installed") != null)'
+check C "owner: the edge states its narrowing" jqv --arg c "$CHILD" '.edges[] | select(.child == $c) | .narrows | test("targets ⊆, verbs ⊆, perRequestBytes 50000 ≤ ")'
+check C "owner: the child is B's, observe+mutate, perRequestBytes 50000, from my delegation wb (installed)" \
+  jqv --arg c "$CHILD" --arg b "subject $B_SUBJ" '.nodes[] | select(.id == $c) | .holder == $b and .verbs == ["observe","mutate"] and .perRequestBytes == "50000" and (.sources | index("my delegation wb, installed") != null)'
 check C "owner: no widening drawn" jqv '.widenings == []'
 check C "owner: every node id appears exactly once" jqv '[.nodes[].id] | length == (unique | length)'
 check C "owner: the control capability is shown, not omitted (readable or [not readable])" jqv --arg k "$CONTROL" '[.nodes[] | select(.id == $k)] | length == 1'
 OWNER_CAPS=$V
 vstep C sponsor "inspect caps board"
-check C "owner text: the edge is drawn with its narrowing" grep -q '└─ narrows: targets ⊆, verbs ⊆, maxCost 50000' "$V"
+check C "owner text: the edge is drawn with its narrowing" grep -q '└─ narrows: targets ⊆, verbs ⊆, perRequestBytes 50000' "$V"
 OWNER_CAPS_TEXT=$V
 
 vstep C newcomer "inspect caps board --json"

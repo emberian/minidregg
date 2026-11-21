@@ -36,8 +36,10 @@ theorem voteOrigins_append (events : List OriginEvent) (event : OriginEvent)
 
 theorem origin_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
-    OriginInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔ OriginInvariant s := by
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    OriginInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ OriginInvariant s := by
   simp only [OriginInvariant, history_record]
 
 theorem putView_origin (s : State) (v : View) (old : OriginInvariant s)
@@ -110,6 +112,14 @@ theorem castVote_prepared_origin (s : State) (view : Nat) (block : Block) (old :
     (prepared : block ∈ (viewAt s view).prepared) : OriginInvariant (castVote s view block) :=
   castVote_origin s view block old (Or.inr (old.1.prepared view block prepared))
 
+theorem commitAt_origin (s : State) (view : Nat) (block : Block) (old : OriginInvariant s) :
+    OriginInvariant (commitAt s view block) :=
+  raiseFloor_preserves OriginInvariant
+    (fun state number evidence prior => by simpa only [origin_record] using prior)
+    _ _ _ (doCommit_origin s view block old)
+
+#assert_axioms commitAt_origin
+
 macro "origin_step" : tactic => `(tactic|
   first
     | assumption
@@ -117,6 +127,7 @@ macro "origin_step" : tactic => `(tactic|
     | with_reducible apply register_origin
     | (with_reducible apply broadcast_other_origin; rotate_left; solve | assumption | simp)
     | with_reducible apply clear_origin
+    | with_reducible apply commitAt_origin
     | with_reducible apply doCommit_origin
     | with_reducible apply sendCandidate_origin
     | with_reducible apply putView_origin
@@ -132,6 +143,7 @@ theorem origin_fold {α : Type} (action : State → α → State)
   | nil => exact old
   | cons item rest ih => exact ih _ (each state item old)
 
+set_option maxHeartbeats 1600000 in
 theorem valueRules_origin (c : Config) (s : State) (view : Nat) (block : Block)
     (old : OriginInvariant s) : OriginInvariant (valueRules c s view block) := by
   simp only [valueRules, Id.run, bind, pure]
@@ -165,6 +177,13 @@ theorem enterView_origin (c : Config) (s : State) (view : Nat) (old : OriginInva
     origin_chain
   · origin_chain
 
+theorem floorJump_origin (c : Config) (s : State) (old : OriginInvariant s) :
+    OriginInvariant (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_origin c s _ old
+  · exact old
+
 theorem progressOuter_origin (c : Config) (s : State) (old : OriginInvariant s) :
     OriginInvariant (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -179,6 +198,7 @@ theorem pass_origin (c : Config) (s : State) (old : OriginInvariant s) :
     OriginInvariant (pass c s) := by
   unfold pass
   apply progressOuter_origin
+  apply floorJump_origin
   apply origin_fold
   · intro state view invariant; exact progressView_origin c state view invariant
   · exact old
@@ -196,8 +216,14 @@ theorem pump_origin (c : Config) (fuel : Nat) (s : State) (old : OriginInvariant
 theorem ingest_origin (c : Config) (s : State) (message : Message) (old : OriginInvariant s) :
     OriginInvariant (ingest c s message) := by
   unfold ingest
-  dsimp only
-  origin_chain
+  repeat' split
+  all_goals first
+    | exact old
+    | (try unfold serveFloor
+       try unfold noteAhead
+       try unfold serveViews
+       try dsimp only
+       origin_chain)
 
 theorem step_origin (c : Config) (s : State) (input : Input) (old : OriginInvariant s) :
     OriginInvariant (step c s input) := by

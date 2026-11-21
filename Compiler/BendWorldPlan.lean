@@ -88,8 +88,9 @@ Observation and validated accounting legs are not arbitrary application writes. 
 def effectsOf (command : Command) : List Effect :=
   (List.finRange command.targets.length).filterMap fun index =>
     match command.targets[index].payload with
-    | .read | .kindRead | .computeFunding _ => none
-    | payload => some ⟨index.val, payload⟩
+    | .registered code op =>
+        if (effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting then none
+        else some ⟨index.val, .registered code op⟩
 
 def matchesCommand (plan : Plan) (command : Command) : Bool :=
   decide (plan.effects = effectsOf command) &&

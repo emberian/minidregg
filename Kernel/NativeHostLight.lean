@@ -76,15 +76,15 @@ the cells that record wrote and the proof that every other cell kept its bytes
 `validateServed`). -/
 def Light.adoptStep {config : Config} (light : Light config) (opening : Opening ResourceBirthCodec.rootBytes)
     (written : List DurableDataIntent.CellId)
-    (moved : DurableServed.Served.Moved light.opening.served opening.served written)
-    (held : Option CredentialAuthorityServed.HeldCell := none) : Except String (Light config) :=
+    (moved : DurableServed.Served.Moved light.opening.served opening.served written) :
+    Except String (Light config) :=
   have moved' : DurableServed.Served.Moved light.opened.served opening.served written := by
     rw [light.same]; exact moved
-  match checked : NativeHostServed.validateServedStep config light.opened opening.served written moved' held with
+  match checked : NativeHostServed.validateServedStep config light.opened opening.served written moved' with
   | .error detail => .error detail
   | .ok opened => .ok ⟨opening, opened,
       validateServed_served ((NativeHostServed.validateServedStep_eq config light.opened opening.served
-        written moved' held).symm.trans checked)⟩
+        written moved').symm.trans checked)⟩
 
 /-- The entries another writer appended, verified as the open verifies them; the
 advanced state validated over the cells the new records wrote (`adoptStep`, `validateServedStep`,
@@ -96,16 +96,13 @@ def Light.refresh {config : Config} (light : Light config) : IO (Except String (
       if extension.next.head.height = light.opening.head.height then return .ok light
       return light.adoptStep extension.next extension.written ⟨extension.keeps⟩
 
-/-- What a light receive on `before` hands the session: the opening it returned, the cells its
-record wrote with the proof that every other cell kept its bytes (`Received.appended`'s
-`moved`), and the authority post-cell of its write, if it wrote the authority cell. The
-authority post-cell is taken as the served authority when the stored bytes are its bytes, so
-the Host never decodes the cell it just encoded nor rebuilds its trie
-(`loadServedAuthorityHeld`). -/
+/-- What a light receive on `before` hands the session: the opening it returned and the cells
+its record wrote, with the proof that every other cell kept its bytes (`Received.appended`'s
+`moved`). The served authority of the next state is the held one followed along those cells
+(`loadServedAuthorityStep`): no cell the record did not write is read. -/
 abbrev Adopt (before : Opening ResourceBirthCodec.rootBytes) :=
   (next : Opening ResourceBirthCodec.rootBytes) → (written : List DurableDataIntent.CellId) →
-    DurableServed.Served.Moved before.served next.served written →
-    Option CredentialAuthorityServed.HeldCell → IO Unit
+    DurableServed.Served.Moved before.served next.served written → IO Unit
 
 /-- The basis of one request: the validated served state, the Store's head and
 the request's declared keys read from the authenticated history (through the

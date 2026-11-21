@@ -476,15 +476,55 @@ fn a_member_account_cannot_take_the_slots_or_force_a_large_frame_and_the_host_is
 }
 
 /// B-F7: an operation the audit log cannot record does not run.
+///
+/// RLIMIT_FSIZE is process-wide and the other tests in this binary write files on
+/// their own threads, so the limited part runs in a child copy of this binary; putting
+/// the old limit back after the call would not do, since those writes land in the window.
 #[test]
 fn an_operation_that_cannot_be_audited_is_refused_and_has_no_effect() {
+    const NAME: &str = "an_operation_that_cannot_be_audited_is_refused_and_has_no_effect";
+    const CHILD: &str = "MINI_TEST_AUDIT_LIMITED_CHILD";
+    let args = ["--exact", NAME, "--nocapture", "--test-threads=1"];
+    // An ambient marker alone must never put the parallel test harness under the limit.
+    // Only our direct child, running exactly this one test, may change process-wide state.
+    let is_child = std::env::var(CHILD).ok() == Some(unsafe { libc::getppid() }.to_string())
+        && std::env::args().skip(1).eq(args.iter().copied());
+    if !is_child {
+        let limit = || unsafe {
+            let mut value = std::mem::zeroed::<libc::rlimit>();
+            assert_eq!(libc::getrlimit(libc::RLIMIT_FSIZE, &mut value), 0);
+            (value.rlim_cur, value.rlim_max)
+        };
+        let signal_handler = || unsafe {
+            let mut action = std::mem::zeroed::<libc::sigaction>();
+            assert_eq!(libc::sigaction(libc::SIGXFSZ, std::ptr::null(), &mut action), 0);
+            action.sa_sigaction
+        };
+        let before_limit = limit();
+        let before_handler = signal_handler();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(args)
+            .env(CHILD, std::process::id().to_string())
+            .output()
+            .unwrap();
+        assert_eq!(limit(), before_limit, "the child's file limit leaked into the parent");
+        assert_eq!(signal_handler(), before_handler, "the child's signal handler leaked into the parent");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let text = format!("stdout:\n{stdout}\nstderr:\n{}", String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "limited child failed ({}):\n{text}", out.status);
+        assert!(stdout.lines().any(|line| line == format!("test {NAME} ... ok"))
+            && stdout.contains("test result: ok. 1 passed"), "limited child did not pass the named test:\n{text}");
+        return;
+    }
     let f = Fixture::new("audit");
     let b = f.start(f.config_json(f.all_roles(), true)).unwrap();
     // Every later write by this process (the broker's audit appends among them) fails EFBIG.
     unsafe {
-        libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+        assert_ne!(libc::signal(libc::SIGXFSZ, libc::SIG_IGN), libc::SIG_ERR);
         let size = std::fs::metadata(&f.audit).unwrap().len() as libc::rlim_t;
-        let limit = libc::rlimit { rlim_cur: size, rlim_max: libc::RLIM_INFINITY };
+        let mut limit = std::mem::zeroed::<libc::rlimit>();
+        assert_eq!(libc::getrlimit(libc::RLIMIT_FSIZE, &mut limit), 0);
+        limit.rlim_cur = size;
         assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
     }
     let r = b.call(&json!({"op":"pool","action":"set","provider":"poolrow","secret":POOL_SECRET}), Duration::from_secs(10)).unwrap_err();

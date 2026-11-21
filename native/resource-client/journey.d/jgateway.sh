@@ -88,7 +88,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/open-law.json"
 run create "$MINI" workspace --action create --dir "$WS_A" --name gw --storage content --predicate "$D/req/open-law.json"
 row "A (the gateway, subject $A) creates the content target gw" created "rc=$(rc create) $(tail -1 "$D/create.err" | cut -c1-160)" "$(rc create)"
 jq -n --arg r "$B" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"gw",
-  recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/grant.json"
+  recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$D/req/grant.json"
 turn "$WS_A" grant "$D/req/grant.json"; g=$?
 run grant-publish "$MINI" workspace --action publish-delegation --dir "$WS_A" --proposal-id jgw-grant \
   --attempt "$WS_A/attempts/jgw-grant"

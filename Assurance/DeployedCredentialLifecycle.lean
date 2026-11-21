@@ -154,7 +154,7 @@ def lifecyclePortal : Portal where
   verifyCapabilityCommitment := fun _ _ _ => true
   verifyCapabilityUse := fun _ _ _ _ => true
   verifyMembership := fun _ _ _ => true
-  verifyIssuer := fun _ _ _ _ => true
+  verifyIssuer := fun _ _ _ => true
   verifyNonRevocation := fun _ _ _ => true
   verifyCommittedPolicy := fun _ _ _ _ => true
 
@@ -231,12 +231,12 @@ def adminAuthorization (pre : Cell AuthorityMaterializer) (effects : Digest)
 def rootScope : Scope .object where
   targets := .explicit {⟨700⟩, ⟨701⟩}
   verbs := {.observeObject, .mutateObject}
-  maxCost := 10
+  perRequestBytes := 10
 
 def childScope : Scope .object where
   targets := .explicit {⟨700⟩}
   verbs := {.mutateObject}
-  maxCost := 4
+  perRequestBytes := 4
 
 def rootCapability : Capability .object where
   id := ⟨100⟩
@@ -296,7 +296,7 @@ theorem strict_edge :
           subst verb
           change Verb.mutateObject ∈ rootScope.verbs
           simp [rootScope]
-        maxCost := by decide
+        perRequestBytes := by decide
         fields := CellField.SetNarrows.refl _
         maxDelta := CellField.BoundsNarrow.refl _ }
   · intro subject covered

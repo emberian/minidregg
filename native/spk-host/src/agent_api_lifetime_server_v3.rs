@@ -136,6 +136,31 @@ pub(crate) fn poll_once(
     Ok(true)
 }
 
+/// The definite refusal of a dispatch whose request has no WebSession projection (a DAV parameter
+/// outside the signed prefix, a header with no mapping, a body on a bodyless method). The projection
+/// is a pure function of the request and is the one `physical_web_input` applies to the same bytes
+/// after admission, so it is asked first: no attempt directory, reserve, operation fingerprint or
+/// record exists yet, nothing was spent, and a later inspection of the operation answers `not-seen`.
+/// Refusing here is the Host's own judgement of bytes it holds, not a fabricated outcome; every
+/// failure from the reserve onward still closes the socket.
+fn unprojectable(
+    http: &HttpProjection<'_>,
+    display_name: &str,
+    preferred_handle: &str,
+    web_origin: &str,
+    operation_id: &str,
+    binding_sha256: &str,
+) -> Option<Reply> {
+    let error = crate::dispatch_web_input::preflight_web_input(http, display_name, preferred_handle, web_origin, false).err()?;
+    Some(Reply::RefusedV3 {
+        protocol: wire::PROTOCOL.into(),
+        operation_id: operation_id.to_owned(),
+        binding_sha256: binding_sha256.to_owned(),
+        operation_fingerprint: None,
+        code: error.to_string().chars().filter(|c| !c.is_control()).take(128).collect(),
+    })
+}
+
 impl ResidentLifetimeAgent<'_> {
     fn binding(&self) -> io::Result<LifetimeBinding> {
         let record = self
@@ -237,6 +262,13 @@ impl ResidentLifetimeAgent<'_> {
             },
         };
         let (app_path, _) = app_route_path(&http)?;
+        let web_origin = match &binding.route {
+            Some(crate::agent_api_lifetime_v3::HostedRoute::Web { origin }) => origin.as_str(),
+            _ => "",
+        };
+        if let Some(refusal) = unprojectable(&http, self.display_name, self.preferred_handle, web_origin, operation_id, binding_sha256) {
+            return Ok(refusal);
+        }
         private_dir(self.attempt_parent)?;
         let client_dir = self
             .attempt_parent
@@ -322,10 +354,6 @@ impl ResidentLifetimeAgent<'_> {
         )?;
         write_new(&client_dir, "op76-fresh-v3.json", b"fresh-installed-op76")?;
         let matched = matched_v3(&permit, &reserve, method, &app_path, query)?;
-        let web_origin = match &binding.route {
-            Some(crate::agent_api_lifetime_v3::HostedRoute::Web { origin }) => origin.as_str(),
-            _ => "",
-        };
         let physical =
             physical_web_input(&matched, &http, self.display_name, self.preferred_handle, web_origin)?;
         let hosted_custody=if method==crate::hosted_conversation::METHOD {
@@ -912,6 +940,33 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn an_unprojectable_dispatch_is_refused_by_name_before_any_reserve() {
+        let pin = "a".repeat(64);
+        let ask = |method: &str, headers: &[(&str, &str)], body: &[u8]| {
+            let headers: Vec<_> = headers.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect();
+            let http = HttpProjection { method, path_and_query: "dav/run/sample.bin", ordered_headers: &headers, body, route: Route::Api { signed_path: "/" } };
+            unprojectable(&http, "Friend", "friend", "", "75", &pin)
+        };
+        assert!(ask("MOVE", &[("destination", "/dav/run/moved.bin"), ("overwrite", "F")], b"").is_none());
+        assert!(ask("MOVE", &[("destination", "dav/run/moved.bin")], b"").is_none());
+        assert!(ask("PUT", &[("content-type", "application/octet-stream")], b"x").is_none());
+        for (method, headers, body, code) in [
+            ("MOVE", &[("destination", "/dav/../moved.bin")][..], &b""[..], "absolute API destination is not canonical under the signed prefix"),
+            ("MOVE", &[("destination", "dav//moved.bin")][..], &b""[..], "relative API path is not canonical"),
+            ("MOVE", &[][..], &b""[..], "COPY/MOVE without a destination"),
+            ("GET", &[("destination", "dav/a")][..], &b""[..], "DAV parameter header on a non-DAV call"),
+            ("GET", &[][..], &b"x"[..], "body/header on bodyless WebSession method"),
+        ] {
+            match ask(method, headers, body) {
+                Some(Reply::RefusedV3 { operation_id, binding_sha256, operation_fingerprint: None, code: said, .. }) => {
+                    assert_eq!((operation_id.as_str(), &binding_sha256, said.as_str()), ("75", &pin, code));
+                }
+                _ => panic!("{method} {headers:?} is not a pre-reserve refusal"),
+            }
+        }
+    }
 
     #[test]
     fn definite_http_hashes_exact_app_response_not_self_referential_json() {

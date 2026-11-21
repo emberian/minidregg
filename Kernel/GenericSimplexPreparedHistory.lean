@@ -4,6 +4,7 @@ import Kernel.GenericSimplexVAInvariant
 namespace Minidregg.Kernel.GenericSimplexPreparedHistory
 open Minidregg.Kernel.GenericSimplex
 open Minidregg.Kernel.GenericSimplexCausal
+open Minidregg.Kernel.GenericSimplexLocal
 open Minidregg.Kernel.GenericSimplexVAInvariant
 set_option autoImplicit false
 
@@ -62,7 +63,12 @@ theorem isSafe_safeAt (s : State) (block : Block) (history : HistoryInvariant s)
   obtain ⟨nonempty, candidates⟩ := Bool.and_eq_true_iff.mp safe
   obtain ⟨previous, inRange, selected⟩ := List.any_eq_true.mp candidates
   obtain ⟨prepared, skipped⟩ := Bool.and_eq_true_iff.mp selected
-  refine ⟨?_, previous, List.mem_range.mp inRange, ?_, ?_⟩
+  have before : previous < s.current := by
+    unfold parentViews at inRange
+    obtain ⟨k, small, rfl⟩ := List.mem_map.mp inRange
+    have bound := List.mem_range.mp small
+    omega
+  refine ⟨?_, previous, before, ?_, ?_⟩
   · simpa using nonempty
   · apply preparedAt_witness s previous block.dropLast history.prepared
     simpa using prepared
@@ -207,8 +213,10 @@ theorem history_same_fields (before after : State) (old : HistoryInvariant befor
 
 @[simp] theorem history_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
-    HistoryInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔ HistoryInvariant s := by
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    HistoryInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ HistoryInvariant s := by
   constructor <;> intro old <;> rcases old with ⟨prepared, disabled⟩ <;> exact ⟨prepared, disabled⟩
 
 theorem append_history (s : State) (event : GenericSimplex.AuditEvent)
@@ -232,6 +240,14 @@ theorem doCommit_history (s : State) (view : Nat) (block : Block)
   dsimp only
   split_ifs <;> first | exact old | exact clearInvariant | exact history_same_fields _ _ appended rfl rfl rfl
 
+theorem commitAt_history (s : State) (view : Nat) (block : Block)
+    (old : HistoryInvariant s) : HistoryInvariant (commitAt s view block) :=
+  raiseFloor_preserves HistoryInvariant
+    (fun state number evidence prior => by simpa only [history_record] using prior)
+    _ _ _ (doCommit_history s view block old)
+
+#assert_axioms commitAt_history
+
 macro "history_step" : tactic => `(tactic|
   first
     | assumption
@@ -239,6 +255,7 @@ macro "history_step" : tactic => `(tactic|
     | with_reducible apply register_history
     | with_reducible apply broadcast_history
     | with_reducible apply clear_history
+    | with_reducible apply commitAt_history
     | with_reducible apply doCommit_history
     | with_reducible apply putView_history
     | solve | simp_all [viewAt_number]
@@ -272,11 +289,13 @@ theorem history_fold {α : Type} (action : State → α → State)
   | nil => exact old
   | cons item rest ih => exact ih (action state item) (each state item old)
 
+set_option maxHeartbeats 1000000 in
 theorem valueRules_history (c : Config) (s : State) (view : Nat) (block : Block)
     (old : HistoryInvariant s) : HistoryInvariant (valueRules c s view block) := by
   simp only [valueRules, Id.run, bind, pure]
   history_actions
 
+set_option maxHeartbeats 1000000 in
 theorem argumentRules_history (c : Config) (s : State) (view : Nat) (arg : Argument)
     (old : HistoryInvariant s) : HistoryInvariant (argumentRules c s view arg) := by
   simp only [argumentRules, Id.run, bind, pure]
@@ -308,6 +327,13 @@ theorem enterView_history (c : Config) (s : State) (view : Nat)
     history_actions
   · history_actions
 
+theorem floorJump_history (c : Config) (s : State) (old : HistoryInvariant s) :
+    HistoryInvariant (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_history c s _ old
+  · exact old
+
 theorem progressOuter_history (c : Config) (s : State) (old : HistoryInvariant s) :
     HistoryInvariant (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -320,6 +346,7 @@ theorem pass_history (c : Config) (s : State) (old : HistoryInvariant s) :
     HistoryInvariant (pass c s) := by
   unfold pass
   apply progressOuter_history
+  apply floorJump_history
   apply history_fold
   · intro state view prior
     exact progressView_history c state view prior
@@ -341,8 +368,14 @@ theorem pump_history (c : Config) (fuel : Nat) (s : State) (old : HistoryInvaria
 theorem ingest_history (c : Config) (s : State) (message : Message)
     (old : HistoryInvariant s) : HistoryInvariant (ingest c s message) := by
   unfold ingest
-  dsimp only
-  history_actions
+  repeat' split
+  all_goals first
+    | exact old
+    | (try unfold serveFloor
+       try unfold noteAhead
+       try unfold serveViews
+       try dsimp only
+       history_actions)
 
 theorem step_history (c : Config) (s : State) (input : Input) (old : HistoryInvariant s) :
     HistoryInvariant (step c s input) := by

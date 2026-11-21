@@ -255,10 +255,24 @@ def Plan.addressUpdates (plan : Plan) : List AddressUpdate :=
 def Plan.authorityAfter (plan : Plan) : Store CredentialAuthorityState.layout :=
   updateAddresses plan.authority.logical plan.addressUpdates
 
+/-- The authority addresses the carry writes. Transformation 1 moves only the policy addresses it
+rebinds; transformation 2 crosses the layout boundary (the source held the whole store in one
+cell), so it writes every address the store holds. -/
+def Plan.authorityTouched (plan : Plan) : List (Address CredentialAuthorityState.layout) :=
+  if plan.transformation = 1 then
+    plan.addressUpdates.map fun update => ⟨.policyAddress, update.1⟩
+  else StoreCodec.sortedSupport CredentialAuthorityCell.wire plan.authorityAfter
+
+/-- Every cell the carry writes. The authority's are the head with the root of the carried store
+and the entry cell of each touched address (`CredentialAuthorityLayout`). -/
 def Plan.changes (plan : Plan) : List (CellId × List UInt8) :=
-  (⟨plan.deployment.authorityCellId⟩,
-    CredentialAuthorityDomainReceiver.cellBytes
-      (materialize CredentialAuthorityCell.materializer plan.authorityAfter)) ::
+  ((⟨plan.deployment.authorityCellId⟩,
+    CredentialAuthorityLayout.encodeCell (CredentialAuthorityEntry.headCell
+      (materialize CredentialAuthorityCell.materializer plan.authorityAfter).root)) ::
+  plan.authorityTouched.map fun address =>
+    (⟨CredentialAuthorityEntry.entryCellId address⟩,
+      CredentialAuthorityLayout.encodeCell
+        (CredentialAuthorityEntry.entryCell address (plan.authorityAfter address)))) ++
   (plan.bindings.flatMap fun binding =>
     [(binding.source.cellId, LifecycleImage.bytes registry .retired),
      (binding.targetCellId, LifecycleImage.bytes registry
@@ -345,9 +359,9 @@ def derive (deployment : CanonicalCellRegistry.Deployment)
   for (identifier, bytes) in loaded.cells do
     if !hasSourceRole bytes then checkUnchangedNonPolicy deployment identifier bytes
   let bindings ← liftSources sources targetSemantics
-  let authority ← need "carry needs the exact canonical authority cell"
-    (CredentialAuthorityDomainReceiver.decodeCell
-      (loaded.snapshot.canonicalBytes ⟨deployment.authorityCellId⟩))
+  let authority ← need "carry needs the authority store its cells realise"
+    (CredentialAuthorityLayout.readCell loaded.snapshot.canonicalBytes deployment.authorityCellId
+      (CredentialAuthorityDomainReceiver.enumerated loaded))
   finishPlan deployment bindings authority loaded [] 1
 
 
@@ -393,12 +407,17 @@ def deriveStoreV2 (deployment : CanonicalCellRegistry.Deployment)
     else if bytes == [] || bytes == [68, 82, 2, 0] then
       pure ()
     else
-      let cell ← convertLiveStoreV2 deployment identifier loaded.height bytes
-      match cell with
-      | ⟨.authority, payload⟩ =>
+      match bytes with
+      | 68 :: 82 :: 2 :: 1 :: 68 :: 82 :: 1 :: 3 :: payload =>
+          -- The source's one authority cell (role tag 3 under the live envelope), converted whole
+          -- to the logical store by the frozen source codec.
           if authority.isSome then throw "carry source has multiple authority cells"
-          authority := some payload
-      | cell =>
+          if identifier.value ≠ deployment.authorityCellId then
+            throw "carry source authority cell is not at the pinned identifier"
+          authority := some (materialize CredentialAuthorityCell.materializer
+            (← LegacyStoreCarry.decodeAuthority payload))
+      | _ =>
+          let cell ← convertLiveStoreV2 deployment identifier loaded.height bytes
           let after := LifecycleImage.bytes registry (.live cell)
           if after != bytes then changes := changes ++ [(identifier, after)]
   let sourceAuthority ← need "carry needs the exact source authority cell" authority

@@ -82,7 +82,7 @@ fn invoke(ws: &Ws, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
         Some((actual, body)) if *actual == operation && !body.is_empty() => Ok(body.to_vec()),
         Some((&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED), body)) => Err(format!(
             "refused: op{operation}: {}",
-            String::from_utf8_lossy(&body[body.len().saturating_sub(400)..]).split_whitespace().collect::<Vec<_>>().join(" ")
+            crate::refusal_text::render(body)
         )),
         _ => Err(format!("job: op{operation} returned an invalid frame")),
     }

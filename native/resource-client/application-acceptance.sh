@@ -229,7 +229,7 @@ for member in first second; do
  "expectedTargetRoot":"$root","parentId":"101","target":"6100",
  "child":{"id":"$child","root":"101","parent":"101","issuer":"5",
    "holder":{"type":"subject","subject":"$subject"},"targets":["6100"],
-   "verbs":["observe"],"maxCost":"50000","notBefore":"10","notAfter":"1000",
+   "verbs":["observe"],"perRequestBytes":"50000","notBefore":"10","notAfter":"1000",
    "issuerEpoch":"2","policyId":"6100","policyEpoch":"0",
    "ancestors":["101"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"6100","capability":"101"}]}

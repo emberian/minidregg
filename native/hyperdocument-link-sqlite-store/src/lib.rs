@@ -1265,10 +1265,13 @@ impl SqliteByteStore {
             return Err(self.database.error(SQLITE_DONE));
         }
         drop(statement);
+        // One prepared statement for every node: an append writes a hundred or more, and
+        // preparing the statement per node was most of the append (about 12 us a node).
+        let insert = self
+            .database
+            .prepare(b"INSERT INTO durable_node(space,key,height,value) VALUES(?1,?2,?3,?4)\0")?;
         for node in &proposed_nodes {
-            let insert = self.database.prepare(
-                b"INSERT INTO durable_node(space,key,height,value) VALUES(?1,?2,?3,?4)\0",
-            )?;
+            insert.reset()?;
             insert.bind_int64(1, node.space as i64)?;
             insert.bind_blob_at(2, &node.key)?;
             insert.bind_int64(3, height as i64)?;
@@ -1277,6 +1280,7 @@ impl SqliteByteStore {
                 return Err(self.database.error(SQLITE_DONE));
             }
         }
+        drop(insert);
         hook(PublishPhase::Inserted);
         transaction.commit()?;
         hook(PublishPhase::Committed);

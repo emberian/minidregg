@@ -788,7 +788,7 @@ class Journey:
                 'grants':read(Path(self.c['world'])/'sponsor-birth-context.json')['grants']},
             'template':{k:str(cfg[k]) for k in ['issuer','ownerBudget','lifetime']},'owner':role('hhost'),'workerKey':role('hermes'),
             'task':self.task('controller'),'toolTask':self.task('tool'),'capabilities':{'parentObserve':'9870011','parentControl':'9870012','toolObserve':'9870013','toolControl':'9870014'},
-            'budgets':{'parent':'20000','tool':'20000','witnessMaxCost':'50000'},
+            'budgets':{'parent':'20000','tool':'20000','witnessPerRequestBytes':'50000'},
             'worker':{'launcher':str(base/'worker/launcher/bwrap'),'runtimeRoot':str(base/'worker/runtime-root'),
                 'workspace':str(home/'worker-work'),'network':'none','wallTimeSeconds':1800,'reserve':'3','charge':'1'},
             'toolCharges':{'reserve':'5','charge':'1'},

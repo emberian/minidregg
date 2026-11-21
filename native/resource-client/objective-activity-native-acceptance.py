@@ -20,7 +20,7 @@ changes).
                 importing Tally) is published too, for the pin refusal.
   objects       a cell is an object only with a record (create): subject 40
                 cannot create one on the sponsor's resource (notObjectHolder),
-                the sponsor cannot name 40's account as payer (notAccountOwner),
+                the sponsor cannot name 40's account as payer (notAccountHolder),
                 nor pin an unpublished package (pinUnpublished); a birth on a
                 resource without a record is refused (notAnObject); the sponsor
                 creates each object, pinning Tally; a second creation of the same
@@ -340,7 +340,7 @@ check('three-distinct-pins', len({PIN, PIN2, PIN3}) == 3, {'pins': [PIN, PIN2, P
 start = watched('genesis')
 PUBLISHER = {'payer': SPONSOR_ACCOUNT, 'payerCapability': SPONSOR_SPEND}
 turn('publish-foreign-payer-refused', sponsor, dict(ARTIFACT, kind='publish', payer=SECOND, payerCapability='4002'),
-     'refused', 'notAccountOwner')
+     'refused', 'notAccountHolder')
 turn('publish-without-package-refused', sponsor, {**PUBLISHER, 'kind': 'publish', 'artifact': ARTIFACT['artifact'],
                                                   'package': ARTIFACT2['package']}, 'refused', 'packageSource')
 turn('publish', sponsor, dict(ARTIFACT, kind='publish', **PUBLISHER), 'installed')
@@ -368,7 +368,7 @@ def create(label, workspace, name, expect, detail=None, object_cap=None, payer=S
 
 create('create-stranger-refused', second, 'tally-one', 'refused', 'notObjectHolder', object_cap='4002',
        payer=SECOND, payer_cap='4002')
-create('create-foreign-payer-refused', sponsor, 'tally-one', 'refused', 'notAccountOwner', payer=SECOND,
+create('create-foreign-payer-refused', sponsor, 'tally-one', 'refused', 'notAccountHolder', payer=SECOND,
        payer_cap='4002')
 create('create-unpublished-pin-refused', sponsor, 'tally-one', 'refused', 'pinUnpublished', pin='12345')
 for name in ['tally-one', 'tally-two', 'tally-three', 'tally-four', 'tally-five', 'tally-exhaust',
@@ -486,7 +486,7 @@ birth('stranger-birth-refused', second, 'tally-one', DEPOSIT, 'refused', 'notObj
       account=SECOND, account_cap='4002', object_cap='4002')
 birth('foreign-account-refused', second, 'tally-one', DEPOSIT, 'refused', 'notObjectHolder',
       account=SPONSOR_ACCOUNT, account_cap=SPONSOR_SPEND)
-birth('foreign-payer-refused', sponsor, 'tally-one', DEPOSIT, 'refused', 'notAccountOwner',
+birth('foreign-payer-refused', sponsor, 'tally-one', DEPOSIT, 'refused', 'notAccountHolder',
       account=SECOND, account_cap='4002')
 # A deposit short of the pair is judged only after the run (the reserve includes the storage deposit of the
 # record the run yields): a CHARGED FAILURE, the envelope's price posted and nothing else (GPT-6 row E).
@@ -611,7 +611,7 @@ deliver3 = {'kind': 'deliver', 'record': REC3, 'await': await_of(f1)['id'], 'acc
 turn('deliver-awaits-funding', sponsor, deliver3, 'refused', 'awaitsFunding')
 turn('top-up-stranger-account-refused', sponsor, {'kind': 'topUp', 'record': REC3, 'account': SECOND,
                                                   'accountCapability': '4002', 'amount': str(TOP_UP)},
-     'refused', 'notAccountOwner')
+     'refused', 'notAccountHolder')
 turn('top-up', second, {'kind': 'topUp', 'record': REC3, 'account': SECOND, 'accountCapability': '4002',
                         'amount': str(TOP_UP)}, 'installed')
 turn('deliver-funded', sponsor, deliver3, 'installed')

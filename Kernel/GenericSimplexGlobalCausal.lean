@@ -23,7 +23,7 @@ theorem reachable_causal {c : Config} {faulty : Finset Nat}
     intro other
     by_cases same : other = party
     · subst other
-      simpa only [advance, if_pos rfl] using step_causal c _ input (ih party)
+      simpa only [advance, if_pos rfl, ite_true] using step_causal c _ input (ih party)
     · simpa only [advance, if_neg same] using ih other
 
 def EnrolledAudit (c : Config) (net : Network) : Prop :=

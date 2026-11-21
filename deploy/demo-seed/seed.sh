@@ -19,7 +19,7 @@ BOX=${SEED_HOST:-box}      # sponsor / house account
 SAGE=${SEED_GUEST:-sage}   # second seeded member account
 PUBLIC=$(cat /etc/mini/public-subject 2>/dev/null) || { echo "seed: /etc/mini/public-subject is missing (public account not enrolled)" >&2; exit 2; }
 BUDGET=${SEED_HERMES_BUDGET:-100}
-PUBMAX=$(tr -d '[:space:]' <"$here/public-read-max-cost") || { echo "seed: public-read-max-cost is missing" >&2; exit 2; }
+PUBMAX=$(tr -d '[:space:]' <"$here/public-read-request-bytes") || { echo "seed: public-read-request-bytes is missing" >&2; exit 2; }
 FAILS=0
 OUT=; ERR=; RC=0
 DOC_JSON='{}'

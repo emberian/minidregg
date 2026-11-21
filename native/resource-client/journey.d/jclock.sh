@@ -367,11 +367,14 @@ row "signed read of field 1 = 2^125 + 2^40 under any[verb 2, field 1 <= clock/no
 
 # A MUD sheet (native/resource-client/templates/mud/sheet): the sponsor is the sheet's subject {S} and the
 # founder; the newcomer is the referee {REF}. Every timestamp field (bal 3, eq 4, respawn 9) starts at 0.
+# This journey births no realm cell, its sheet never moves and nothing hurts it, so the realm cells the law
+# names for the cells it cites ({REALM_ROOM} clause 34, {REALM_ITEM} clauses 17 and 18, {REALM_SHEET} clause 26)
+# are bound to 0.
 MUD=$(CDPATH='' cd -- "$(dirname -- "$0")/../templates/mud" && pwd)
 S=$(jq -r .subject "$SPONSOR_WS/workspace.json"); REF=$(jq -r .subject "$NEWCOMER_WS/workspace.json")
 SHEET=tidewrack-sheet-$S
 subst() {
-  sed -e "s/{S}/$S/g" -e "s/{REF}/$REF/g" -e "s/{W_FOUNDER}/$S/g" -e "s/{REALM}/tidewrack/g" -e "s/{HOME}/$(jq -r .shrine "$MUD/tidewrack/realm.json")/g" \
+  sed -e "s/{S}/$S/g" -e "s/{REF}/$REF/g" -e "s/{W_FOUNDER}/$S/g" -e "s/{REALM}/tidewrack/g" -e "s/{REALM_ROOM}/0/g" -e "s/{REALM_ITEM}/0/g" -e "s/{REALM_SHEET}/0/g" -e "s/{HOME}/$(jq -r .shrine "$MUD/tidewrack/realm.json")/g" \
     $(jq -r '.constants | to_entries[] | select(.key != "derivation") | "-e s/{\(.key)}/\(.value)/g"' "$MUD/tidewrack/realm.json")
 }
 subst <"$MUD/law.management.json" >"$REQ/sheet-mgmt.json"
@@ -381,7 +384,7 @@ jq -n --slurpfile m "$MUD/law.management.json" --slurpfile s "$MUD/sheet/law.she
 subst <"$MUD/sheet/init.sheet.json" >"$REQ/sheet-init.json"
 run screate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "$SHEET" --storage declared --predicate "$REQ/sheet-mgmt.json" --fields 0-14
 turn "$SPONSOR_WS" sheet-init "$REQ/sheet-init.json"; si=$?
-jq -n --arg r "$REF" --arg n "$SHEET" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$REQ/sheet-grant.json"
+jq -n --arg r "$REF" --arg n "$SHEET" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$REQ/sheet-grant.json"
 turn "$SPONSOR_WS" sheet-grant "$REQ/sheet-grant.json"; sg=$?
 run sheet-publish "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --proposal-id clock-sheet-grant --attempt "$SPONSOR_WS/attempts/clock-sheet-grant"
 run sheet-import "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name "$SHEET" --from-ref "$SPONSOR_WS/proposals/clock-sheet-grant/recipient-reference.json"

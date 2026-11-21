@@ -136,7 +136,7 @@ default). The processor remains the only writer of identities.
 ## 7. What "publish" means for a member
 
 On a document page the member presses **Publish to the public reader**: the body runs
-`delegate ID DOC PUBLIC-SUBJECT observe MAX` (MAX from `deploy/demo-seed/public-read-max-cost`, the cost ceiling of one read; 0 covers no read and every visitor is refused `no-grant`), `submit ID`, `publish ID` as the member (the same
+`delegate ID DOC PUBLIC-SUBJECT observe MAX` (MAX from `deploy/demo-seed/public-read-request-bytes`, the cost ceiling of one read; 0 covers no read and every visitor is refused `no-grant`), `submit ID`, `publish ID` as the member (the same
 three lines the shell takes; `/verb/delegate` is the general form). The helper's sweep delivers
 the reference within a minute; the public reader imports it at its next render; every visitor then
 reads the document as the public reader does, under the author's grant. **Unpublish** runs

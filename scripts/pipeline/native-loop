@@ -13,6 +13,9 @@
 #   - MINIDREGG_NATIVE_OBJECT_CACHE (the box's, keyed by C content and path) reuses every unchanged object.
 # The candidate is LANE_DIR/candidates/<12-hex id> (lane-build.sh overlay: whole host+consent family re-pinned
 # in manifest.json, SHA256SUMS and provenance.json .overlay); a gate phase stands a world up from it.
+# The lane keeps that one: the candidates and source archives before it are removed at the end
+# (`scripts/pipeline/lane-candidates prune`; LANE_CANDIDATES_KEEP=N keeps more). Run journey steps on it with
+# `scripts/pipeline/lane-journey`, which tears down what it starts.
 # Commit first: lane-build refuses a tree with uncommitted tracked changes. Run it detached with a PID file.
 set -euo pipefail
 lane=${1:?LANE}; base=${2:?BASE_CANDIDATE}; label=${3:?LABEL}
@@ -42,3 +45,6 @@ step host "${wrap[@]}" deploy/candidate/lane-build.sh host
 step consent "${wrap[@]}" deploy/candidate/lane-build.sh consent
 step overlay deploy/candidate/lane-build.sh overlay "$base" "$LANE_DIR/candidates" "$label" host consent
 echo "native-loop: $(jq -r .candidate "$LANE_DIR/logs/overlay-$label.json") in $(( $(date +%s) - t0 )) s"
+# A lane keeps one candidate (LANE_CANDIDATES_KEEP): the ones before this are removed now, except any a live
+# process still uses, which is named and left.
+scripts/pipeline/lane-candidates prune --keep "${LANE_CANDIDATES_KEEP:-1}" "$LANE_DIR" || true

@@ -323,7 +323,7 @@ def capability : Capability .object where
   scope :=
     { targets := .explicit {request.target}
       verbs := {.observeObject}
-      maxCost := 1 }
+      perRequestBytes := 1 }
   notBefore := 0
   notAfter := 100
   issuerEpoch := 0
@@ -482,7 +482,7 @@ def capability : Capability .object where
   scope :=
     { targets := .explicit {request.target}
       verbs := {.observeObject}
-      maxCost := 1 }
+      perRequestBytes := 1 }
   notBefore := 0
   notAfter := 100
   issuerEpoch := 0

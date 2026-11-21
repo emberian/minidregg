@@ -139,7 +139,7 @@ def share_delegation(x,c):
     budget=x.authority['template']['ownerBudget']
     request=x.fresh('share-delegation-request.json')
     save(request,{'type':'minidregg-workspace-proposal-v1','action':'delegate','name':name,'recipient':delegation['manager'],
-        'verbs':['observe','mutate','delegate','append','place'],'maxCost':str(budget)})
+        'verbs':['observe','mutate','delegate','append','place'],'perRequestBytes':str(budget)})
     mini=x.m['mini']['path'];attempt=workspace/'attempts'/pid;proposal=workspace/'proposals'/pid
     reference=proposal/'recipient-reference.json'
     if not reference.exists():

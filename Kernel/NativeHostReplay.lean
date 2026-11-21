@@ -1401,7 +1401,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (ParticipantFactoryProvisioningReceiver.intent accepted)
   | fleetTurn {ingress : FleetTurn.DecodedIngress}
       (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile opened.pins.tariff
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground ingress) :
       NativeAdmission config opened (FleetTurnReceiver.intent accepted)
   | payBook {ingress : PayBookReceiver.DecodedIngress}
       (accepted : PayBookReceiver.AcceptedChange config.deployment config.profile
@@ -2584,7 +2584,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok reserved => return .ok (Derived.ofJointReserve reserved)
   if let some ingress := FleetTurn.decodeIngress bytes then
     match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile opened.pins.tariff
-        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+        ⟨config.federation, height⟩ opened.ground config.signature ingress with
     | .error reason => return .error s!"fleet turn refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨FleetTurnReceiver.intent accepted,
@@ -3426,10 +3426,10 @@ theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : 
     simpa only [Option.map_map, Function.comp_def, lawfulSame] using mapped
   have core := validateCore_map config durable.image.seed durable.logStart
     (CredentialAuthorityDomainReceiver.loadDirectory durable)
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable)
     (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
     (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable)
     (·.directory) (·.snapshot.logical)
     (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
     (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)
@@ -4101,11 +4101,18 @@ def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
       match judged : derived.judge with
       | .error reason => .error s!"appended intent fails the tail law: {repr reason}"
       | .ok certificate =>
-        match incremental : validateLoadedFrom config old.opened (exactCandidate old derived ready appended.entry.tag) with
+        -- The successor is one `extend` of the verified image (its head tag aside), so it is
+        -- validated over the cells this record wrote (`validateLoadedStep`), as the walk does:
+        -- the cost of an append does not depend on how many cells the image holds.
+        have moved : LoadedMoved old.opened.durable (exactCandidate old derived ready appended.entry.tag)
+            (derived.intent.writes.map DurableDataIntent.DataWrite.cellId) :=
+          fun cellId unwritten => LoadedMoved.extend old.opened.durable ready cellId unwritten
+        match incremental : validateLoadedStep config old.opened
+            (exactCandidate old derived ready appended.entry.tag) _ moved with
         | .error detail => .error s!"post-image validation: {detail}"
         | .ok after =>
           have validated : validateLoaded config (exactCandidate old derived ready appended.entry.tag) = .ok after :=
-            (validateLoadedFrom_eq config old.opened (exactCandidate old derived ready appended.entry.tag)).symm.trans incremental
+            (validateLoadedStep_eq config old.opened (exactCandidate old derived ready appended.entry.tag) _ moved).symm.trans incremental
           .ok ⟨⟨derived, ready, prepared, certificate, judged, appended, after, validated⟩, rfl⟩
 
 /-- The verifier-minted old trace plus the same admitted command's exact

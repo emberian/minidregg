@@ -358,14 +358,16 @@ structure RootBindingPremise {Root : Type uRoot}
 
 /-! ## Monotone identifier directory -/
 
-/-- `used` records every identifier ever allocated.  Present cells must be in
-that set; absent used identifiers are retired and cannot be resurrected. -/
+/-- `used` answers whether an identifier was ever allocated: the set of used identifiers as its
+characteristic function, like `slots`, so asking costs one evaluation and an allocation adds one
+case, whatever the number of identifiers used before.  Present cells must be used; absent used
+identifiers are retired and cannot be resurrected. -/
 structure Directory (CellId : Type uCell) [DecidableEq CellId]
     {Root : Type uRoot} (registry : TypeRegistry Root) where
   slots : CellId -> CellSlot registry
-  used : Finset CellId
+  used : CellId -> Bool
   present_used : forall {cellId cell},
-    slots cellId = .present cell -> cellId ∈ used
+    slots cellId = .present cell -> used cellId = true
 
 namespace Directory
 
@@ -375,7 +377,7 @@ variable (registry : TypeRegistry Root)
 /-- A genuinely fresh empty directory. -/
 def empty : Directory CellId registry where
   slots := fun _ => .absent
-  used := ∅
+  used := fun _ => false
   present_used := by simp
 
 @[simp] theorem empty_slot (cellId : CellId) :
@@ -383,15 +385,15 @@ def empty : Directory CellId registry where
   rfl
 
 @[simp] theorem empty_unused (cellId : CellId) :
-    cellId ∉ (empty registry : Directory CellId registry).used := by
-  simp [empty]
+    (empty registry : Directory CellId registry).used cellId = false :=
+  rfl
 
 /-- Exact logical insertion.  Admission below is the only public operation
 which should call it; this constructor exposes its post-state for proofs. -/
 def insert (before : Directory CellId registry) (cellId : CellId)
     (cell : PackedCell registry) : Directory CellId registry where
   slots := Function.update before.slots cellId (.present cell)
-  used := before.used ∪ {cellId}
+  used := fun other => other = cellId || before.used other
   present_used := by
     intro other presentCell presentAt
     by_cases same : other = cellId
@@ -399,7 +401,7 @@ def insert (before : Directory CellId registry) (cellId : CellId)
       simp
     · have oldPresent : before.slots other = .present presentCell := by
         simpa [Function.update, same] using presentAt
-      exact Finset.mem_union_left {cellId} (before.present_used oldPresent)
+      simp [before.present_used oldPresent]
 
 /-- Exact logical deletion.  The slot becomes absent, while `used` is retained
 unchanged. -/
@@ -429,7 +431,14 @@ theorem insert_slot_other (before : Directory CellId registry)
 
 @[simp] theorem insert_used (before : Directory CellId registry)
     (cellId : CellId) (cell : PackedCell registry) :
-    cellId ∈ (Directory.insert registry before cellId cell).used := by
+    (Directory.insert registry before cellId cell).used cellId = true := by
+  simp [Directory.insert]
+
+/-- An insertion uses its identifier and keeps every other answer. -/
+theorem insert_used_iff (before : Directory CellId registry)
+    (cellId other : CellId) (cell : PackedCell registry) :
+    (Directory.insert registry before cellId cell).used other = true ↔
+      other = cellId ∨ before.used other = true := by
   simp [Directory.insert]
 
 @[simp] theorem retire_slot (before : Directory CellId registry)
@@ -482,7 +491,7 @@ def create (before : Directory CellId registry)
   match before.slots request.cellId with
   | .present _ => .error .duplicateCreate
   | .absent =>
-      if request.cellId ∈ before.used then
+      if before.used request.cellId then
         .error .retiredIdentifier
       else if request.expectedPreRoot = CellSlot.root registry .absent then
         .ok (Directory.insert registry before request.cellId request.cell)
@@ -510,7 +519,7 @@ theorem create_of_fresh
     (before : Directory CellId registry)
     (request : CreateRequest (CellId := CellId) registry)
     (absent : before.slots request.cellId = .absent)
-    (fresh : request.cellId ∉ before.used)
+    (fresh : before.used request.cellId = false)
     (rootExact : request.expectedPreRoot = CellSlot.root registry .absent) :
     create registry before request =
       .ok (Directory.insert registry before request.cellId request.cell) := by
@@ -542,7 +551,7 @@ theorem stale_create_rejected
     (before : Directory CellId registry)
     (request : CreateRequest (CellId := CellId) registry)
     (absent : before.slots request.cellId = .absent)
-    (fresh : request.cellId ∉ before.used)
+    (fresh : before.used request.cellId = false)
     (stale : request.expectedPreRoot ≠ CellSlot.root registry .absent) :
     create registry before request = .error .stalePreRoot := by
   have staleExact : request.expectedPreRoot ≠
@@ -570,8 +579,8 @@ omit [DecidableEq Root] in
 /-- Deletion cannot erase the permanent allocation bit. -/
 theorem retired_identifier_remains_used
     (before : Directory CellId registry) (cellId : CellId)
-    (used : cellId ∈ before.used) :
-    cellId ∈ (Directory.retire registry before cellId).used := by
+    (used : before.used cellId = true) :
+    (Directory.retire registry before cellId).used cellId = true := by
   simpa using used
 
 /-- The central resurrection tooth: create, then retire, then attempt to create
@@ -591,7 +600,7 @@ theorem recreate_after_retire_rejected
   have absent : after.slots second.cellId = CellSlot.absent := by
     rw [sameId]
     simp [after]
-  have used : second.cellId ∈ after.used := by
+  have used : after.used second.cellId = true := by
     rw [sameId]
     simp [after, Directory.insert, Directory.retire]
   simp [create, absent, used]

@@ -23,7 +23,7 @@ theorem reachable_origin {c : Config} {faulty : Finset Nat}
     intro other
     by_cases same : other = party
     · subst other
-      simpa only [advance, if_pos rfl] using step_origin c _ input (ih party)
+      simpa only [advance, if_pos rfl, ite_true] using step_origin c _ input (ih party)
     · simpa only [advance, if_neg same] using ih other
 
 /-- The actual VOTE came from an executable isSafe check or a preparation

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# scripts/pipeline/lane-journey-selftest SCRATCH_DIR -- does lane-journey stop and remove what a step leaves in
+# the short socket directory, outside NEW_ROOT? (Linux: world-reap reads /proc.)
+#
+# A stand-in for journey.sh (LANE_JOURNEY_RUNNER) does what JPAY4 did on 2026-11-14: it makes jm.XXXXXX under
+# JOURNEY_RUNTIME_BASE, starts a process there that outlives it, and records the PID in a PID file there. Asserts:
+#   (1) JOURNEY_RUNTIME_BASE was a fresh directory of this run, recorded in NEW_ROOT/runtime-base;
+#   (2) after lane-journey exits (rc 0) the left process is gone;
+#   (3) the short directory and NEW_ROOT are removed.
+# SCRATCH_DIR must not exist; it is removed at the end. Exit 0 only when all three hold.
+set -u
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+S=${1:?SCRATCH_DIR}; [ ! -e "$S" ] || { echo "lane-journey-selftest: refusing existing $S" >&2; exit 64; }
+case $S in /*/*) ;; *) echo "lane-journey-selftest: SCRATCH_DIR must be absolute, two levels deep" >&2; exit 64 ;; esac
+mkdir -p "$S/cand" || exit 64
+echo '{}' > "$S/cand/manifest.json"
+cat > "$S/runner.sh" <<'RUNNER'
+#!/usr/bin/env bash
+# the stand-in step: a world in the short directory, one process left running there
+d=$(mktemp -d "$JOURNEY_RUNTIME_BASE/jm.XXXXXX") || exit 70
+mkdir -p "$d/world/pid"
+(cd "$d/world" && exec setsid sleep 600) > /dev/null 2>&1 < /dev/null &
+echo $! > "$d/world/pid/left.pid"
+printf '%s\n%s\n' "$JOURNEY_RUNTIME_BASE" "$!" > "$SELFTEST_NOTE"
+echo "J0 PASS stand-in"
+exit 0
+RUNNER
+fail=0; say() { echo "lane-journey-selftest: $*"; }
+SELFTEST_NOTE=$S/note LANE_JOURNEY_RUNNER=$S/runner.sh "$here/lane-journey" "$S/cand" "$S/w/root/r1" J0 > "$S/out.log" 2>&1; rc=$?
+[ "$rc" = 0 ] || { say "FAIL lane-journey rc=$rc"; sed 's/^/  /' "$S/out.log"; fail=1; }
+base=$(sed -n 1p "$S/note" 2>/dev/null); pid=$(sed -n 2p "$S/note" 2>/dev/null)
+case $base in */lj.??????) say "ok (1) the run had its own short directory $base" ;; *) say "FAIL (1) JOURNEY_RUNTIME_BASE was '$base'"; fail=1 ;; esac
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then say "FAIL (2) process $pid left by the step still runs (stop it: kill $pid)"; fail=1
+else say "ok (2) the process the step left ($pid) is stopped"; fi
+if [ -n "$base" ] && [ -e "$base" ]; then say "FAIL (3) $base still exists"; fail=1
+elif [ -e "$S/w/root/r1" ]; then say "FAIL (3) the root still exists"; fail=1
+else say "ok (3) the short directory and the root are removed"; fi
+[ "$fail" = 0 ] && rm -rf -- "$S"
+exit "$fail"

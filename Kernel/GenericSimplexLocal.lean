@@ -244,6 +244,55 @@ theorem doCommit_audit_prefix (s : State) (number : Nat) (block : Block) :
   dsimp only
   split_ifs <;> simp_all [putView,List.append_assoc]
 
+theorem raiseFloor_cases (s : State) (number : Nat) (block : Block) :
+    raiseFloor s number block = s ∨ ∃ evidence, raiseFloor s number block =
+      { s with lastCommitted := number, served := [], floorEvidence := evidence } := by
+  unfold raiseFloor
+  dsimp only
+  split
+  · exact Or.inr ⟨_, rfl⟩
+  · exact Or.inl rfl
+
+theorem raiseFloor_self (s : State) (number : Nat) (block : Block) :
+    (raiseFloor s number block).self = s.self := by
+  rcases raiseFloor_cases s number block with same | ⟨_, same⟩ <;> rw [same]
+theorem raiseFloor_audit (s : State) (number : Nat) (block : Block) :
+    (raiseFloor s number block).audit = s.audit := by
+  rcases raiseFloor_cases s number block with same | ⟨_, same⟩ <;> rw [same]
+theorem raiseFloor_views (s : State) (number : Nat) (block : Block) :
+    (raiseFloor s number block).views = s.views := by
+  rcases raiseFloor_cases s number block with same | ⟨_, same⟩ <;> rw [same]
+
+/-- Whatever survives a change of the floor fields survives `raiseFloor`. -/
+theorem raiseFloor_preserves (P : State → Prop)
+    (raised : ∀ state number evidence, P state →
+      P { state with lastCommitted := number, served := [], floorEvidence := evidence })
+    (s : State) (number : Nat) (block : Block) (old : P s) : P (raiseFloor s number block) := by
+  rcases raiseFloor_cases s number block with same | ⟨evidence, same⟩ <;> rw [same]
+  · exact old
+  · exact raised s number evidence old
+
+theorem commitAt_self (s : State) (number : Nat) (block : Block) :
+    (commitAt s number block).self = s.self :=
+  (raiseFloor_self (doCommit s number block) number block).trans (doCommit_self s number block)
+
+theorem commitAt_audit (s : State) (number : Nat) (block : Block) :
+    (commitAt s number block).audit = (doCommit s number block).audit :=
+  raiseFloor_audit (doCommit s number block) number block
+
+theorem commitAt_owned (s : State) (number : Nat) (block : Block)
+    (owned : OwnedAudit s) : OwnedAudit (commitAt s number block) :=
+  raiseFloor_preserves OwnedAudit (fun _ _ _ prior => prior) _ _ _ (doCommit_owned s number block owned)
+
+theorem commitAt_audit_prefix (s : State) (number : Nat) (block : Block) :
+    s.audit <+: (commitAt s number block).audit := by
+  rw [commitAt_audit]
+  exact doCommit_audit_prefix s number block
+
+#assert_axioms raiseFloor_preserves
+#assert_axioms commitAt_owned
+#assert_axioms commitAt_audit_prefix
+
 theorem sendCandidate_self (s : State) (number : Nat) (arg : Argument) :
     (sendCandidate s number arg).self = s.self := by
   unfold sendCandidate

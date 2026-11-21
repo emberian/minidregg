@@ -60,7 +60,7 @@ rate-limited command is not how the row becomes green.
 
 `ApplicationDispatchPending.chargeOf` measures the exact ordinary intent plus
 its four protected observations and ingress bytes. `ownerBudget` provides a
-capability ceiling; route/enrollment `maxCost` is a per-request constraint.
+capability ceiling; route/enrollment `perRequestBytes` is a per-request constraint.
 Neither is a countdown consumed by these GETs. The pending write updates the
 session, not the member's purse. Each admitted dispatch does advance history.
 

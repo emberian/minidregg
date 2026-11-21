@@ -182,7 +182,7 @@ theorem delete_succeeds :
   simp [afterDelete]
 
 @[simp] theorem deleted_identifier_used :
-    cellId ∈ afterDelete.used := by
+    afterDelete.used cellId = true := by
   simp [afterDelete, afterCreate]
 
 theorem duplicate_create_rejected :

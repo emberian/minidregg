@@ -276,8 +276,9 @@ def VoteOnceAudit (s : State) : Prop := ∀ number first second,
 theorem voteOnce_unchanged_audit (before after : State)
     (sameSelf : after.self = before.self) (sameAudit : after.audit = before.audit)
     (once : VoteOnceAudit before) : VoteOnceAudit after := by
-  unfold VoteOnceAudit
-  simpa only [sameSelf, sameAudit] using once
+  intro number first second
+  rw [sameSelf, sameAudit]
+  exact once number first second
 
 theorem putView_voteOnce (s : State) (v : View) (once : VoteOnceAudit s) :
     VoteOnceAudit (putView s v) := once
@@ -619,8 +620,10 @@ structure CausalInvariant (s : State) : Prop where
 
 @[simp] theorem causal_record (s : State) (current deadline now : Nat)
     (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
-    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔ CausalInvariant s := by
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    CausalInvariant { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ CausalInvariant s := by
   constructor <;> intro old <;> rcases old with ⟨unique, votes, once, candidates, commits, locked⟩ <;>
     exact ⟨unique, votes, once, candidates, commits, locked⟩
 
@@ -699,10 +702,10 @@ theorem append_commit_causal (s : State) (view : Nat) (block : Block)
     CausalInvariant {s with audit := s.audit ++ [.commit s.self view block]} := by
   constructor
   · exact old.viewsUnique
-  · simpa [VoteRecorded] using old.voteRecorded
+  · simpa [VoteRecorded, viewAt] using old.voteRecorded
   · simpa [VoteOnceAudit] using old.voteOnce
-  · simpa [CandidateRecorded] using old.candidateRecorded
-  · simpa [CommitRecorded] using old.commitRecorded
+  · simpa [CandidateRecorded, viewAt] using old.candidateRecorded
+  · simpa [CommitRecorded, viewAt] using old.commitRecorded
   · exact old.commitLock
 
 theorem doCommit_causal (s : State) (view : Nat) (block : Block)
@@ -742,12 +745,12 @@ theorem sendCandidate_causal (s : State) (view : Nat) (arg : Argument)
     · apply broadcast_nonvote_voteRecorded _ view .candidate arg (by decide)
       apply putView_voteRecorded _ _ _ old.voteRecorded
       simp [viewAt_number]
-    · simpa only [sendCandidate, guard, if_false] using once
-    · simpa only [sendCandidate, guard, if_false] using candidate
+    · simpa only [sendCandidate, guard, Bool.false_eq_true, if_false] using once
+    · simpa only [sendCandidate, guard, Bool.false_eq_true, if_false] using candidate
     · apply broadcast_other_commitRecorded _ view .candidate arg (by decide)
       apply putView_commitRecorded _ _ _ old.commitRecorded
       simp [viewAt_number]
-    · simpa only [sendCandidate, guard, if_false] using locked
+    · simpa only [sendCandidate, guard, Bool.false_eq_true, if_false] using locked
 
 #assert_axioms register_unique
 #assert_axioms sendCandidate_causal
@@ -820,12 +823,13 @@ theorem causal_fold {α : Type} (action : State → α → State)
 
 theorem ingest_causal (c : Config) (s : State) (message : Message)
     (old : CausalInvariant s) : CausalInvariant (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   split_ifs
   all_goals first
     | exact old
     | exact register_causal s message old
+    | simpa only [causal_record] using old
     | apply putView_passive_causal _ _ old <;> simp [viewAt_number]
 
 #assert_axioms putView_passive_causal
@@ -849,12 +853,22 @@ theorem drain_causal (s : State) (invariant : CausalInvariant s) :
     CausalInvariant (drainOutbox s).2 :=
   causal_same_fields s (drainOutbox s).2 invariant rfl rfl rfl
 
+/-- The floor commit keeps every guard: raising the floor touches no view. -/
+theorem commitAt_causal (s : State) (view : Nat) (block : Block)
+    (old : CausalInvariant s) : CausalInvariant (commitAt s view block) :=
+  raiseFloor_preserves CausalInvariant
+    (fun state number evidence prior => by simpa only [causal_record] using prior)
+    _ _ _ (doCommit_causal s view block old)
+
+#assert_axioms commitAt_causal
+
 macro "causal_step" : tactic => `(tactic|
   first
     | assumption
     | fail_if_no_progress simp only [causal_record]
     | with_reducible apply commit_send_causal
     | with_reducible apply clear_causal
+    | with_reducible apply commitAt_causal
     | with_reducible apply doCommit_causal
     | with_reducible apply sendCandidate_causal
     | with_reducible apply castVote_causal
@@ -904,6 +918,13 @@ theorem enterView_causal (c : Config) (s : State) (view : Nat)
     causal_chain
   · causal_chain
 
+theorem floorJump_causal (c : Config) (s : State) (old : CausalInvariant s) :
+    CausalInvariant (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_causal c s _ old
+  · exact old
+
 theorem progressOuter_causal (c : Config) (s : State) (old : CausalInvariant s) :
     CausalInvariant (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -916,6 +937,7 @@ theorem pass_causal (c : Config) (s : State) (old : CausalInvariant s) :
     CausalInvariant (pass c s) := by
   unfold pass
   apply progressOuter_causal
+  apply floorJump_causal
   apply causal_fold
   · intro state view prior
     exact progressView_causal c state view prior

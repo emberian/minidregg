@@ -188,7 +188,7 @@ for j in 1 2 3 4 5 6; do
     --fields 0-15
   row "job$j" "A creates $n under the 45-clause job law" "created" "rc=$(cat "$D/create-$j.rc")" "$(cat "$D/create-$j.rc")"
   jq -n --arg r "$B" --arg n "$n" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,
-    recipient:$r,verbs:["observe","mutate"],maxCost:"500000"}' >"$D/req/grant-$j.json"
+    recipient:$r,verbs:["observe","mutate"],perRequestBytes:"500000"}' >"$D/req/grant-$j.json"
   run "grant-$j-propose" "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/grant-$j.json" --proposal-id "jjob1-grant-$j"
   run "grant-$j-submit" "$MINI" workspace --action submit --dir "$WS_A" --intent "$WS_A/proposals/jjob1-grant-$j/intent.json" \
     --attempt "$WS_A/attempts/jjob1-grant-$j"
@@ -241,8 +241,8 @@ deny job1 close-plain "close 3 -> 6 by an ordinary write (no payout)" 44 "$WS_B"
 jadmit job1 close "close 3 -> 6: settle pays B price + bond (money turn)" "$WS_B" settle --name jjob1-1
 deny job1 reopen "re-open the closed job (6 -> 3)" 2 "$WS_A" jjob1-1 "$(u 0 6 3)"
 attempt "$WS_A" job1-undeclared jjob1-1 "$(c 16 1)"; rund=$?; whyd=$(refusal "$WS_A" job1-undeclared)
-row job1 "A creates field 16 on the CLOSED job (a field the cell never declared)" "refused by name: undeclaredField 16" \
-  "$([ $rund = 0 ] && echo admitted || echo "[$whyd]")" "$([ $rund != 0 ] && [[ "$whyd" == *"undeclaredField 16"* ]]; echo $?)"
+row job1 "A creates field 16 on the CLOSED job (a field the cell never declared)" "refused by name: effect: scalar: undeclared-field 16" \
+  "$([ $rund = 0 ] && echo admitted || echo "[$whyd]")" "$([ $rund != 0 ] && [[ "$whyd" == *"effect: scalar: undeclared-field 16"* ]]; echo $?)"
 
 # ---- job3: void
 admit job3 o-a "order" "$WS_A" jjob1-3 "${ORDER[@]}"

@@ -292,13 +292,12 @@ def validate {L : Layout.{u, v, w}} {Root : Type y} [DecidableEq Root]
   else
     .rejected .stalePreRoot
 
-/-- Application exists only on the validated type: run the patch on the
-logical pre-store; the carried structure follows the patch (`Carried.run`, one
-`set` per writing operation, never a rebuild) and the root is read from it. -/
-def ValidatedPatch.apply {L : Layout.{u, v, w}} {Root : Type y}
-    {M : Materializer L Root} {pre : Materialized M} {expectedPreRoot : Root}
-    {patch : Patch L} (_validated : ValidatedPatch M pre expectedPreRoot patch) :
-    Materialized M :=
+/-- A cell moved by a patch, run unguarded: the logical store is the patch's run and the carried
+structure follows it (`Carried.run`, one `set` per writing operation, never a rebuild). This
+admits nothing: an admission applies a patch through `ValidatedPatch.apply`; a reader that
+already holds the post state (a step load reading the cells a record wrote) follows it here. -/
+def Materialized.follow {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} (pre : Materialized M) (patch : Patch L) : Materialized M :=
   let logical := Patch.run pre.logical patch
   let bytes : Thunk (List UInt8) := Thunk.mk fun _ => M.codec.encode logical
   let carried : Thunk (CellStateAux.Carried M.aux logical) :=
@@ -306,6 +305,19 @@ def ValidatedPatch.apply {L : Layout.{u, v, w}} {Root : Type y}
   ⟨logical, bytes, rfl, carried,
     Thunk.mk fun _ => CellStateAux.Carried.rootOr M.aux carried.get (Thunk.mk fun _ => M.rootBytes bytes.get),
     CellStateAux.rootOr_eq M.aux carried.get _ rfl⟩
+
+@[simp] theorem Materialized.follow_logical {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} (pre : Materialized M) (patch : Patch L) :
+    (pre.follow patch).logical = Patch.run pre.logical patch := rfl
+
+/-- Application exists only on the validated type: the pre-cell followed along the patch
+(`Materialized.follow`), so the carried structure is moved, never rebuilt, and the root is read
+from it. -/
+def ValidatedPatch.apply {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} {pre : Materialized M} {expectedPreRoot : Root}
+    {patch : Patch L} (_validated : ValidatedPatch M pre expectedPreRoot patch) :
+    Materialized M :=
+  pre.follow patch
 
 /-- Application is the materialization of the run store (`Materialized.ext`): the carried
 structure is the only thing that differs, and it is a subsingleton. -/

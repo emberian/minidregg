@@ -384,6 +384,11 @@ inductive RejectReason
   `Kernel.ObjectiveActivityGate.ordinaryGate`). Only the kernel activity's own
   typed turns write those cells. -/
   | protectedWrite (cellId : CellId)
+  /-- **`authoritySpaceWrite`**: an intent writes, at or above the authority space's base
+  (`2^257`), something that is not a live cell of the authority kind
+  (`Kernel.AuthoritySpaceGate.gate`). Only the authority lowering writes that space: the head's
+  entries, one cell per address. -/
+  | authoritySpaceWrite (cellId : CellId)
   /-- **`overBound`**: the intent is past a static limit (`Kernel.Bounds`):
   `value` of `name` exceeds `limit`. Checked first by the durable admission
   (`DurableCheckpoint.prepare`), so neither an append nor a replay admits it. -/

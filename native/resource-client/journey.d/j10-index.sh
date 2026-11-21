@@ -84,7 +84,7 @@ child=$(jq -r .observeCapability "$NEWCOMER_WS/refs/lab.json")
 
 # A second invite: observe and mutate under lab, so B can act in the room.
 jq -n --arg r "$B" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"lab",
-  recipient:$r,verbs:["observe","mutate"],maxCost:"50000",room:true}' >"$D/req/invite-w.json"
+  recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000",room:true}' >"$D/req/invite-w.json"
 run invite-w-propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/invite-w.json" \
   --proposal-id invite-bw; ok invite-w-propose
 run invite-w-submit "$MINI" workspace --action submit --dir "$SPONSOR_WS" \

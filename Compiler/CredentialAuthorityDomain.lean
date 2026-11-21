@@ -94,21 +94,6 @@ def capabilityDigestOf (domain : Digest) {kind : ResourceKind}
         (CredentialAuthorityEntryCodec.storedCapabilityStream kind)).encode
           (domain, stored))).digest
 
-/-- One address's issued triple: a stored capability's issuer, issuer epoch and
-commitment; nothing for any other address. -/
-def issuedEntry (domain : Digest) (cell : Cell) :
-    Store.Address CredentialAuthorityState.layout → Option (IssuerId × Epoch × Digest)
-  | ⟨.capability kind, identifier⟩ =>
-      (readCapability cell kind identifier).map fun stored =>
-        (stored.head.issuer, stored.head.issuerEpoch, capabilityDigestOf domain stored)
-  | _ => none
-
-/-- **The issued index**: the issued triple of every address in the cell's support, in
-key order. Issuer evidence (`CredentialAuthorityPolicyRegistry.issuerCheck`) asks whether a
-triple is among them; computing it hashes every stored capability once per cell. -/
-def issuedOf (domain : Digest) (cell : Cell) : List (IssuerId × Epoch × Digest) :=
-  cell.logical.keys.filterMap (issuedEntry domain cell)
-
 /-- The deployment's authority domain: its domain digest, its one cell, and the
 cell's authorization projection, computed once when the snapshot is built
 (`authStateExact` pins it to `authStateOf`).  `revision` (the authority clock)
@@ -122,16 +107,11 @@ structure Snapshot where
   cell : Cell
   authState : AuthState
   authStateExact : authState = authStateOf cell
-  /-- The issued index (`issuedOf`), forced at its first use and then shared by every
-  snapshot built over the same held cell (`ServedAuthority.snapshotOn`), so issuer evidence
-  hashes the cell's capabilities once per cell, not once per check. -/
-  issued : Thunk (List (IssuerId × Epoch × Digest))
-  issuedExact : issued.get = issuedOf domain cell
 
 /-- The only constructor callers use. -/
 def Snapshot.ofCell (domain : Digest) (revision : Nat) (spent : Nat → Bool) (cell : Cell) :
     Snapshot :=
-  ⟨domain, revision, spent, cell, authStateOf cell, rfl, Thunk.mk fun _ => issuedOf domain cell, rfl⟩
+  ⟨domain, revision, spent, cell, authStateOf cell, rfl⟩
 
 /-! The projection's coordinates read the cell, whatever the snapshot's
 provenance; these are what the definitional unfolding used to give. -/
@@ -172,17 +152,13 @@ theorem Snapshot.ext_cell {left right : Snapshot} (domains : left.domain = right
     (revisions : left.revision = right.revision) (spents : left.spent = right.spent)
     (cells : left.cell = right.cell) : left = right := by
   cases left with
-  | mk leftDomain leftRevision leftSpent leftCell leftState leftExact leftIssued leftIssuedExact =>
+  | mk leftDomain leftRevision leftSpent leftCell leftState leftExact =>
       cases right with
-      | mk rightDomain rightRevision rightSpent rightCell rightState rightExact rightIssued
-          rightIssuedExact =>
+      | mk rightDomain rightRevision rightSpent rightCell rightState rightExact =>
           simp only at domains revisions spents cells
           subst domains revisions spents cells
           have states : leftState = rightState := leftExact.trans rightExact.symm
           subst states
-          have issued : leftIssued = rightIssued :=
-            Thunk.ext (leftIssuedExact.trans rightIssuedExact.symm)
-          subst issued
           rfl
 
 namespace Snapshot

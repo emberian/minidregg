@@ -100,7 +100,7 @@ def admitRun {command : Command} {durable : Durable} {ground : Ground config.dep
 /-- The full shape's ground of an image: its own decoded directory and authority. -/
 def groundAt (durable : Durable) : Option (Ground config.deployment) := do
   let directory ← CredentialAuthorityDomainReceiver.loadDirectory durable
-  let authority ← CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
+  let authority ← CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable
   pure (.full durable directory authority)
 
 def loadAt (image : Image) : Option Durable :=

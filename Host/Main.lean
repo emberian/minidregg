@@ -94,6 +94,7 @@ module
 
 public import Kernel.NativeHost
 public import Kernel.NativeHostHeld
+public import Kernel.ConsentAnchor
 public import Host.ObjectiveActivityJson
 public import Host.SeatJson
 public import Compiler.GenericSimplexSourceAnchor
@@ -1211,6 +1212,218 @@ def description (config : NativeHost.Config) : IO Lean.Json := do
   let light ← IO.ofExcept (← NativeHostLight.start config)
   return descriptionAt config light.opening.served.canonicalBytes
 
+/-- Measurement: one `set` of the authority cell's kept private index on a store of `size`
+entries, and the parts of that `set` each alone. -/
+def trieBench (size : Nat) (classLeads : Bool) : IO Unit := do
+  -- `classLeads`: the same wire under a class tag that leads the path (every entry in one class),
+  -- what a kind with a real class tag pays per class.
+  let tag : PrivateCellRoot.KeyTag Minidregg.Theory.CredentialAuthorityState.layout :=
+    if classLeads then ⟨fun _ => PrivateCellRoot.untaggedClass, fun _ => PrivateCellRoot.untaggedClass_length, true⟩
+    else PrivateCellRoot.untagged _
+  let aux := (PrivateCellRoot.materializer CredentialAuthorityCell.wire tag).aux
+  let address (i : Nat) : Minidregg.Theory.Store.Address Minidregg.Theory.CredentialAuthorityState.layout :=
+    ⟨.revoked, .channel ⟨i⟩⟩
+  let per (label : String) (count : Nat) (t0 : Nat) : IO Unit := do
+    let nanos := (← IO.monoNanosNow) - t0
+    IO.println s!"{label}: {nanos / count / 1000}.{(nanos / count % 1000) / 100} us each over {count}"
+  let t0 ← IO.monoNanosNow
+  let mut kept := (aux.build (Minidregg.Compiler.StoreCodec.fromEntries [])).1
+  for i in [0:size] do kept := aux.set kept (address i) (some ())
+  IO.println s!"built {size} entries by set in {((← IO.monoNanosNow) - t0) / 1000000} ms, root {(aux.root? kept).map (·.value)}"
+  let rounds := 200
+  let t0 ← IO.monoNanosNow
+  let mut next := kept
+  for i in [0:rounds] do next := aux.set next (address (size + i)) (some ())
+  per s!"set (new entry, store of {size}, the built index still held)" rounds t0
+  IO.println s!"root after {(aux.root? next).map (·.value)} over {(aux.root? kept).map (·.value)}"
+  kept := next
+  let t0 ← IO.monoNanosNow
+  for i in [0:rounds] do next := aux.set next (address (size + rounds + i)) (some ())
+  per s!"set (new entry, store of {size}, second batch)" rounds t0
+  IO.println s!"root after {(aux.root? next).map (·.value)} over {(aux.root? kept).map (·.value)}"
+  let t0 ← IO.monoNanosNow
+  let mut once := next
+  for i in [0:rounds] do once := aux.set next (address (size + 2 * rounds + i)) (some ())
+  per s!"set (one entry on a held index, store of {size})" rounds t0
+  IO.println s!"root after {(aux.root? once).map (·.value)}"
+  let t0 ← IO.monoNanosNow
+  let mut bits := 0
+  for i in [0:rounds] do
+    bits := bits + ((PrivateCellRoot.paths CredentialAuthorityCell.wire tag (address (size + i))).filter id).length
+  IO.println s!"path bits set {bits}"
+  per "paths (address hash and tag)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut sum := 0
+  for i in [0:rounds] do
+    sum := sum + ((PrivateCellRoot.contentDigest CredentialAuthorityCell.wire (address (size + i)) []).bytes.headD 0).toNat
+  IO.println s!"content digests {sum}"
+  per "contentDigest" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut inner := Compiler.Sp800185Cshake256.hash PrivateCellRoot.nodeCustomization [2]
+  for _ in [0:20000] do inner := PrivateCellRoot.pathDig (.branch inner inner)
+  IO.println s!"chained branch digest {inner.bytes.headD 0}"
+  per "pathDig of a branch" 20000 t0
+
+/-- Measurement: the journal index's row operations on a trie of `size` last-write keys held in
+a hash map of rows, each alone, then one batch of twelve as an append applies them. -/
+def indexBench (size : Nat) : IO Unit := do
+  let key (i : Nat) : DurableIndex.IndexKey := DurableIndex.cellKey ⟨i⟩
+  let per (label : String) (count : Nat) (t0 : Nat) : IO Unit := do
+    let nanos := (← IO.monoNanosNow) - t0
+    IO.println s!"{label}: {nanos / count / 1000}.{(nanos / count % 1000) / 100} us each over {count}"
+  let value := DurableIndex.heightValue 7
+  let mut rows : Std.HashMap (List Bool) DurableIndex.Row := {}
+  let mut root := DurableIndex.emptyDigest
+  let t0 ← IO.monoNanosNow
+  for i in [0:size] do
+    let held := rows
+    match DurableIndex.set (fun path => held.get? path) root (key i) (some value) with
+    | .error message => throw (IO.userError message)
+    | .ok (next, written) =>
+        root := next
+        rows := written.foldl (fun map row => map.insert row.1 row.2) rows
+  IO.println s!"built {size} keys by set in {((← IO.monoNanosNow) - t0) / 1000000} ms, {rows.size} rows, root {root.value % 1000000}"
+  let held := rows
+  let store : List Bool → Option DurableIndex.Row := fun path => held.get? path
+  let rounds := 200
+  let t0 ← IO.monoNanosNow
+  let mut bits := 0
+  for i in [0:rounds] do bits := bits + ((DurableIndex.bitsOf (key (size + i))).filter id).length
+  IO.println s!"bits set {bits}"
+  per "bitsOf" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut sum := 0
+  for i in [0:rounds] do sum := sum + (DurableIndex.dig (.leaf (key (size + i)) value)).value % 7
+  IO.println s!"leaf digests {sum}"
+  per "dig of a leaf" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut inner := DurableIndex.emptyDigest
+  for _ in [0:2000] do inner := DurableIndex.dig (.branch inner inner)
+  IO.println s!"chained branch digest {inner.value % 1000000}"
+  per "dig of a branch" 2000 t0
+  let t0 ← IO.monoNanosNow
+  let mut depth := 0
+  for i in [0:rounds] do
+    depth := depth + (DurableIndex.openingOf store root (key (i * (size / rounds)))).siblings.length
+  IO.println s!"opening depth sum {depth}"
+  per "openingOf (a held key)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut found := 0
+  for i in [0:rounds] do
+    match DurableIndex.lookupRows store root (key (i * (size / rounds))) with
+    | .ok answer => if answer.value.isSome then found := found + 1
+    | .error _ => pure ()
+  IO.println s!"found {found}"
+  per "lookupRows (walk and verify)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut wrote := 0
+  for i in [0:rounds] do
+    match DurableIndex.set store root (key (size + i)) (some value) with
+    | .ok (_, written) => wrote := wrote + written.length
+    | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "set (a new key)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let other := DurableIndex.heightValue 8
+  wrote := 0
+  for i in [0:rounds] do
+    match DurableIndex.set store root (key (i * (size / rounds))) (some other) with
+    | .ok (_, written) => wrote := wrote + written.length
+    | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "set (overwrite a held key)" rounds t0
+  let t0 ← IO.monoNanosNow
+  wrote := 0
+  for i in [0:20] do
+    match DurableIndex.setAll store root ((List.range 12).map fun j => (key (size + 100 * i + j), some value)) with
+    | .ok (_, written) => wrote := wrote + written.length
+    | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "setAll of twelve new keys" 20 t0
+  let t0 ← IO.monoNanosNow
+  wrote := 0
+  for i in [0:rounds] do
+    match DurableIndex.setAll store root [(key (size + 5000 + i), some value)] with
+    | .ok (_, written) => wrote := wrote + written.length
+    | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "setAll of one new key" rounds t0
+  let t0 ← IO.monoNanosNow
+  wrote := 0
+  for i in [0:20] do
+    let mut over : Std.HashMap (List Bool) DurableIndex.Row := {}
+    let mut at_ := root
+    for j in [0:12] do
+      let seen := over
+      match DurableIndex.set (fun path => match seen.get? path with | some row => some row | none => held.get? path)
+          at_ (key (size + 9000 + 100 * i + j)) (some value) with
+      | .ok (next, written) =>
+          at_ := next
+          wrote := wrote + written.length
+          over := written.foldl (fun map row => map.insert row.1 row.2) over
+      | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "twelve chained sets over a map" 20 t0
+  let openings := (List.range rounds).map fun i =>
+    let k := key (i * (size / rounds))
+    (k, DurableIndex.bitsOf k, DurableIndex.openingOf store root k)
+  let t0 ← IO.monoNanosNow
+  let mut oks := 0
+  for (k, _, opening) in openings do
+    if DurableIndex.verify root k (opening.claims k) opening then oks := oks + 1
+  IO.println s!"verified {oks}"
+  per "verify (opening given)" rounds t0
+  let t0 ← IO.monoNanosNow
+  oks := 0
+  for (k, path, opening) in openings do
+    if DurableIndex.verifyBits root k path (opening.claims k) opening (DurableIndex.dig opening.terminal.input) then
+      oks := oks + 1
+  IO.println s!"verified {oks}"
+  per "verifyBits (bits given)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut climbed := 0
+  for (_, path, opening) in openings do
+    climbed := climbed + (Theory.AuthTrie.climb DurableIndex.dig (path.take opening.siblings.length)
+      opening.siblings root).value % 3
+  IO.println s!"climbed {climbed}"
+  per "climb (siblings given)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut rebuilt := 0
+  for (_, path, opening) in openings do
+    rebuilt := rebuilt + (DurableIndex.rebuildLazy store path opening.siblings 0 (.node root) []).2.length
+  IO.println s!"rebuilt {rebuilt}"
+  per "rebuildLazy (siblings given)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut keysum := 0
+  for i in [0:rounds] do keysum := keysum + (key (size + i)).primary.val % 7
+  IO.println s!"keys {keysum}"
+  per "cellKey" rounds t0
+  let k0 := key 5
+  let t0 ← IO.monoNanosNow
+  let mut bytesum := 0
+  for i in [0:2000] do bytesum := bytesum + (DurableIndex.IndexKey.bytes { k0 with secondary := DurableIndex.seqPosition i }).length
+  IO.println s!"bytes {bytesum}"
+  per "IndexKey.bytes" 2000 t0
+  let t0 ← IO.monoNanosNow
+  let mut arr := 0
+  for i in [0:2000] do
+    arr := arr + (DurableIndex.nodeArray (.branch root ⟨root.value + i⟩)).size
+  IO.println s!"array bytes {arr}"
+  per "nodeArray of a branch" 2000 t0
+  let node := DurableIndex.nodeArray (.branch root root)
+  let t0 ← IO.monoNanosNow
+  let mut out := 0
+  for _ in [0:2000] do
+    out := out + (Compiler.Sp800185Cshake256.Midstate.cshake256FinishKernel DurableIndex.nodeMidstate node).size
+  IO.println s!"out {out}"
+  per "finish kernel" 2000 t0
+  let hashed := Compiler.Sp800185Cshake256.Midstate.cshake256FinishKernel DurableIndex.nodeMidstate node
+  let t0 ← IO.monoNanosNow
+  let mut dsum := 0
+  for i in [0:2000] do dsum := dsum + (DurableIndex.digestOfArray (hashed.push (UInt8.ofNat i) |>.extract 0 32)).value % 3
+  IO.println s!"digests {dsum}"
+  per "digestOfArray" 2000 t0
+
 /-- Measurement: time the per-state costs a request pays on this Store. -/
 def storeBench (config : NativeHost.Config) : IO Unit := do
   let timed {α : Type} (label : String) (action : IO α) : IO α := do
@@ -1250,7 +1463,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   discard <| timed "loadDeployment x10" do
     let mut n := 0
     for _ in [0:10] do
-      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).isSome then
+      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable).isSome then
         n := n + 1
     pure n
   discard <| timed "validateLoaded x10" do
@@ -1306,13 +1519,52 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
             if (NativeHostServed.validateServedStep config held opening.served written ⟨fun _ _ => by rw [same]⟩).toOption.isSome then
               n := n + 1
           pure n
+        -- The step's parts, each alone (the same state as both sides: an entry is freed and set again).
+        let moved : DurableServed.Served.Moved held.served opening.served written := ⟨fun _ _ => by rw [same]⟩
+        let ids := written.map (·.value)
+        discard <| timed "step part: directory x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            if (CredentialAuthorityServed.loadServedDirectoryStep held.directory opening.served written moved).isSome then
+              n := n + 1
+          pure n
+        discard <| timed "step part: decode written cells (stepPatch) x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            n := n + (CredentialAuthorityLayout.stepPatch held.served.canonicalBytes
+              opening.served.canonicalBytes ids).length
+          pure n
+        discard <| timed "step part: authority (stepCell) x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            if (CredentialAuthorityServed.loadServedAuthorityStep held.authority opening.served written moved).isSome then
+              n := n + 1
+          pure n
+        discard <| timed "step part: affected policies x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            n := n + (NativeHostServed.stepAffected config held opening.served written).length
+          pure n
+        if let some directory := CredentialAuthorityServed.loadServedDirectoryStep held.directory opening.served written moved then
+          discard <| timed "step part: cell law x10" do
+            let mut n := 0
+            for _ in [0:10] do
+              if NativeHostServed.cellsLawfulStep config opening.served written directory then n := n + 1
+            pure n
+          let affected := NativeHostServed.stepAffected config held opening.served written
+          discard <| timed s!"step part: sourcing check ({affected.length} policies) x10" do
+            let mut n := 0
+            for _ in [0:10] do
+              if NativeHost.sourcedStepCheck config directory.directory held.authority.cell.logical affected then
+                n := n + 1
+            pure n
   discard <| timed "root rebuild x3" do
     let mut r := 0
     for _ in [0:3] do
       r := r + (Minidregg.Kernel.WorldRootCache.RootCache.ofEntries
         (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
     pure r
-  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
+  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable
     | throw (IO.userError "no authority")
   let authorityBytes := durable.snapshot.canonicalBytes ⟨config.deployment.authorityCellId⟩
   IO.println s!"authority cell bytes {authorityBytes.length}"
@@ -1329,33 +1581,9 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   discard <| timed "authority decode+load x10" do
     let mut n := 0
     for _ in [0:10] do
-      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).isSome then
+      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable).isSome then
         n := n + authority.snapshot.cell.logical.support.card
     pure n
-  -- Issuer evidence (ledger row 27): the support search `issuerCheck` was, against the issued
-  -- index it now reads (`issuerCheck_eq_indexed`), for the LAST stored capability in key order.
-  let snapshot := authority.snapshot
-  let triples := CredentialAuthorityDomain.issuedOf snapshot.domain snapshot.cell
-  IO.println s!"authority stored capabilities {triples.length} of {snapshot.cell.logical.keys.length} addresses"
-  if let some (issuer, epoch, commitment) := triples.getLast? then
-    let searched (snapshot : CredentialAuthorityPolicyRegistry.Snapshot) : Bool :=
-      decide (Minidregg.Theory.CredentialAuthorityState.issuerEpochAt snapshot.cell issuer = epoch) &&
-        decide (∃ address ∈ snapshot.logical.support,
-          CredentialAuthorityPolicyRegistry.issuedAt snapshot issuer epoch commitment address = true)
-    discard <| timed "issuer evidence, support search x10" do
-      let mut n := 0
-      for _ in [0:10] do
-        if searched snapshot then n := n + 1
-      pure n
-    let fresh := CredentialAuthorityDomain.Snapshot.ofCell snapshot.domain snapshot.revision snapshot.spent
-      snapshot.cell
-    discard <| timed "issuer evidence, issued index (first, forces it)" do
-      pure (CredentialAuthorityPolicyRegistry.issuerCheck fresh issuer epoch commitment)
-    discard <| timed "issuer evidence, issued index x1000" do
-      let mut n := 0
-      for _ in [0:1000] do
-        if CredentialAuthorityPolicyRegistry.issuerCheck fresh issuer epoch commitment then n := n + 1
-      pure n
   -- The open's and the checkpoint turn's parts, each timed alone (`IO.lazyPure`
   -- defers each pure computation to inside its timer).
   let timedPure {α : Type} (label : String) (value : Unit → α) : IO α :=
@@ -1572,16 +1800,16 @@ def sessionFull (config : NativeHost.Config)
 /-- A light receive's own readback (`DurableServed.Received.appended`: the record it appended,
 read back exactly and verified at the new head) becomes the session's light opening
 (`Light.adoptStep`, over the cells the record wrote), so the next refresh finds the head current instead of reading, verifying and
-re-executing the entry the Host itself just wrote; the write's authority post-cell is taken as
-the served authority without a decode or a trie rebuild. Where it does not validate, the session keeps
+re-executing the entry the Host itself just wrote; the served authority is the held one followed
+along the written cells. Where it does not validate, the session keeps
 its opening and the next refresh reads the entry. -/
 def sessionAdopt (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (light : NativeHostLight.Light config) : NativeHostLight.Adopt light.opening :=
-  fun opening written moved held => do
+  fun opening written moved => do
     if let some current ← state.get then
       if opening.head.height = current.light.opening.head.height + 1 then
-        if let .ok light := light.adoptStep opening written moved held then
+        if let .ok light := light.adoptStep opening written moved then
           state.set (some { current with light, observed := none })
 
 /-- The receipt-continuity witness of the light opening's head (`ReceiptContinuity.current` of the
@@ -6931,34 +7159,86 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
       return ((71 : UInt8), ingress)
   | _ => throw (IO.userError s!"operation {op} is not a launch lifecycle operation")
 
-/-- `audit [--receipts FILE]` / `store-audit [--receipts FILE]` options. -/
-def auditOptions : List String → Option (Option String)
-  | [] => some none
-  | ["--receipts", path] => some (some path)
+/-- What `audit` and `store-audit` take: `--receipts FILE` (the recomputed receipts),
+`--from FILE` (resume at the anchor an accepting audit left), `--anchor-out FILE` (leave
+this audit's anchor). -/
+structure AuditOptions where
+  receipts : Option String := none
+  resumeFrom : Option String := none
+  anchorOut : Option String := none
+
+/-- `[--receipts FILE] [--from FILE] [--anchor-out FILE]`, each at most once, in any order. -/
+def auditOptions : List String → Option AuditOptions
+  | [] => some {}
+  | "--receipts" :: path :: rest => do
+      let options ← auditOptions rest
+      if options.receipts.isSome then none else some { options with receipts := some path }
+  | "--from" :: path :: rest => do
+      let options ← auditOptions rest
+      if options.resumeFrom.isSome then none else some { options with resumeFrom := some path }
+  | "--anchor-out" :: path :: rest => do
+      let options ← auditOptions rest
+      if options.anchorOut.isSome then none else some { options with anchorOut := some path }
   | _ => none
 
-/-- The body of the `audit` arm, shared with `store-audit`: `--receipts FILE` writes
-every receipt the re-admission recomputed, in order, each in the canonical receipt
-codec: the control that an audit-path change left every original-ingress receipt
-byte-identical. -/
+def auditUsage (verb : String) : String :=
+  s!"usage: {verb} [--receipts FILE] [--from ANCHOR] [--anchor-out ANCHOR]"
+
+/-- The body of the `audit` arm, shared with `store-audit`.
+
+Without `--from` it is the genesis re-admission of every accepted record. With `--from
+ANCHOR` it resumes at the anchor an earlier accepting audit left (`--anchor-out`): the
+Store must reproduce the anchor at its height (genesis log, chain and world root), then
+every record after it is re-admitted (`ConsentAnchor.auditFrom`, `Audited.sound`). An
+anchor the Store contradicts is the refusal. A later record the resumed walk does not admit
+is not: its admission may read history from before the anchor, so the audit runs again from
+genesis and that verdict stands (`ConsentAnchor.AuditFromSound`). The anchor file is the
+operator's custody: the audit checks it against the Store, never where it came from.
+
+`--receipts FILE` (genesis only) writes every receipt the re-admission recomputed, in order,
+each in the canonical receipt codec: the control that an audit-path change left every
+original-ingress receipt byte-identical. `--anchor-out FILE` writes the anchor of the
+audited head, only when the audit accepts. -/
 def auditBody (settings : Settings) (pinnedConfig : NativeHost.Config)
-    (receiptsOut : Option String) : IO UInt32 := do
-  if settings.carryRegistry.isSome && receiptsOut.isSome then
-    throw (IO.userError "audit --receipts is not available for a carried registry")
-  let (count, index, links) ← if settings.carryRegistry.isSome then do
+    (options : AuditOptions) : IO UInt32 := do
+  if settings.carryRegistry.isSome
+      && (options.receipts.isSome || options.resumeFrom.isSome || options.anchorOut.isSome) then
+    throw (IO.userError "audit --receipts, --from and --anchor-out are not available for a carried registry")
+  if options.receipts.isSome && options.resumeFrom.isSome then
+    throw (IO.userError "audit --from recomputes only the receipts after its anchor; --receipts is the genesis audit's")
+  let leave (anchor : ConsentAnchor.Anchor) : IO Unit := do
+    if let some path := options.anchorOut then
+      writeBytes path (ConsentAnchor.encode anchor)
+  let genesis : IO (String × PresenceIndex.Index × LinkIndex.Index) := do
+    let (receipts, opened) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+    if let some path := options.receipts then
+      writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
+    leave (ConsentAnchor.Anchor.ofOpened opened)
+    pure (s!"audited {receipts.length} accepted records: every signed ingress re-admitted at its original prefix",
+      opened.durable.index, opened.durable.links)
+  let (line, index, links) ← if settings.carryRegistry.isSome then do
     let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
     let registry ← loadCarryRegistry settings
     let custody ← IO.ofExcept (← RetainedSegmentInspection.validate pinnedConfig
       opened.durable registry)
     let walked ← IO.ofExcept (← CarriedNativeHostSession.start pinnedConfig opened.durable custody)
-    pure (walked.verified.opened.durable.height, walked.verified.opened.durable.index,
-       walked.verified.opened.durable.links)
-  else do
-    let (receipts, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
-    if let some path := receiptsOut then
-      writeBytes path (receipts.flatMap NativeHostCodec.receiptStream.encode)
-    pure (receipts.length, index, links)
-  IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
+    pure (s!"audited {walked.verified.opened.durable.height} accepted records: every signed ingress re-admitted at its original prefix",
+      walked.verified.opened.durable.index, walked.verified.opened.durable.links)
+  else if let some path := options.resumeFrom then do
+    let anchor ← match ConsentAnchor.decode (← readBoundedBytes path 4096) with
+      | .ok (some anchor) => pure anchor
+      | .ok none => throw (IO.userError "audit --from: the file is an anchor of another epoch; audit from genesis")
+      | .error detail => throw (IO.userError s!"audit --from: {detail}")
+    match ← IO.ofExcept (← ConsentAnchor.auditStoreFrom pinnedConfig anchor) with
+    | .ok (next, count, opened) =>
+        leave next
+        pure (s!"audited {count} accepted records after the anchor at height {anchor.height}, to height {next.height}: the Store reproduces the anchor and every later signed ingress is re-admitted at its original prefix",
+          opened.durable.index, opened.durable.links)
+    | .error failure =>
+        IO.eprintln s!"audit --from: entry {failure.index} is not admitted from the anchor at height {anchor.height} ({failure.detail}); auditing from genesis, whose verdict stands"
+        genesis
+  else genesis
+  IO.println line
   IO.println s!"index {(presenceIndexJson index).compress}"
   IO.println s!"links {(linkIndexJson links).compress}"
   pure 0
@@ -7635,9 +7915,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             return ((95 : UInt8), outcomeCodec.encode outcome)
                         | 96 =>
                             let (observationBytes, draftBytes) ← splitPair payload
-                            let opened ← sessionOpened pinnedConfig state
-                            let plan ← match ← NativeHost.fleetPlanAuthorizedLoaded
-                                pinnedConfig opened observationBytes draftBytes with
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            let plan ← match ← NativeHost.fleetPlanLight
+                                pinnedConfig light observationBytes draftBytes with
                               | .ok plan => pure plan
                               | .error refusal =>
                                   return ((255 : UInt8), refusalFrame "fleet-plan" refusal)
@@ -7654,13 +7934,13 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               throw (IO.userError "fleet turn ingress exceeds host frame bound")
                             return ((97 : UInt8), ingress)
                         | 98 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.fleetSubmitLoaded pinnedConfig opened payload
-                              (sessionConfirmed pinnedConfig state)
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            let outcome ← NativeHost.fleetSubmitLight pinnedConfig light payload
+                              (sessionConfirmed pinnedConfig state) (sessionAdopt pinnedConfig state light)
                             return ((98 : UInt8), outcomeCodec.encode outcome)
                         | 99 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            let outcome := NativeHost.fleetLookupLoaded pinnedConfig opened payload
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            let outcome ← NativeHost.fleetLookupLight pinnedConfig light payload
                             return ((99 : UInt8), outcomeCodec.encode outcome)
                         | 100 =>
                             let (observationBytes, requestBytes) ← splitPair payload
@@ -7669,15 +7949,15 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
                             let (topic, cursor, limit) ← IO.ofExcept
                               (Minidregg.Host.Json.fleetPollRequest request)
-                            let opened ← sessionOpened pinnedConfig state
-                            match ← NativeHost.fleetPollAuthorizedLoaded pinnedConfig opened
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            match ← NativeHost.fleetPollLight pinnedConfig light
                                 observationBytes topic cursor limit with
                             | .ok view => return ((100 : UInt8),
                                 (Minidregg.Host.Json.fleetPollJson view).compress.toUTF8.toList)
                             | .error refusal => return ((255 : UInt8), refusalFrame "fleet-poll" refusal)
                         | 101 =>
-                            let opened ← sessionOpened pinnedConfig state
-                            match ← NativeHost.fleetHeadAuthorizedLoaded pinnedConfig opened payload with
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            match ← NativeHost.fleetHeadLight pinnedConfig light payload with
                             | .ok view => return ((101 : UInt8),
                                 (Minidregg.Host.Json.fleetHeadJson view).compress.toUTF8.toList)
                             | .error refusal => return ((255 : UInt8), refusalFrame "fleet-head" refusal)
@@ -7686,11 +7966,11 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let some text := String.fromUTF8? requestBytes.toByteArray
                               | throw (IO.userError "fleet incoming request is not UTF-8")
                             let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
-                            let (topic, cursor, limit) ← IO.ofExcept
-                              (Minidregg.Host.Json.fleetPollRequest request)
-                            let opened ← sessionOpened pinnedConfig state
-                            match ← NativeHost.fleetIncomingAuthorizedLoaded pinnedConfig opened
-                                observationBytes topic cursor limit with
+                            let (topic, cursor, limit, budget) ← IO.ofExcept
+                              (Minidregg.Host.Json.fleetIncomingRequest request)
+                            let light := (← sessionCurrent pinnedConfig state).light
+                            match ← NativeHost.fleetIncomingLight pinnedConfig light
+                                observationBytes topic cursor limit budget with
                             | .ok view => return ((180 : UInt8),
                                 (Minidregg.Host.Json.fleetIncomingJson view).compress.toUTF8.toList)
                             | .error refusal => return ((255 : UInt8), refusalFrame "fleet-incoming" refusal)
@@ -8717,6 +8997,18 @@ def runCommandStoreBench (_arguments : List String) (_configPath _command : Stri
   | [] =>
           storeBench config
           pure 0
+  | ["trie", size] =>
+          match size.toNat? with
+          | some size => trieBench size false; pure 0
+          | none => throw (IO.userError usage)
+  | ["index", size] =>
+          match size.toNat? with
+          | some size => indexBench size; pure 0
+          | none => throw (IO.userError usage)
+  | ["trie", size, "class-leads"] =>
+          match size.toNat? with
+          | some size => trieBench size true; pure 0
+          | none => throw (IO.userError usage)
   | _ => throw (IO.userError usage)
 
 /-- `well-ledger` (dispatched by `run`). -/
@@ -8860,10 +9152,10 @@ def runCommandAudit (_arguments : List String) (_configPath _command : String) (
   match rest with
   | options =>
           match auditOptions options with
-          | none => throw (IO.userError "usage: audit [--receipts FILE]")
-          | some receiptsOut =>
+          | none => throw (IO.userError (auditUsage "audit"))
+          | some auditOptions =>
               withPinnedSignature config fun pinnedConfig =>
-                auditBody settings pinnedConfig receiptsOut
+                auditBody settings pinnedConfig auditOptions
 
 /-- `store-audit` (dispatched by `run`). -/
 def runCommandStoreAudit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
@@ -8873,12 +9165,13 @@ def runCommandStoreAudit (_arguments : List String) (_configPath _command : Stri
           -- The Store re-derived from genesis (`Compiler.DurableStoreAudit`), then
           -- exactly the `audit` body: every signed ingress re-admitted at its
           -- original prefix. A failure of the first is the verdict; the second
-          -- never runs behind a refused store.
+          -- never runs behind a refused store. `--from` resumes the second only:
+          -- the Store's own derivation is from genesis whatever the anchor.
           match auditOptions options with
           | none =>
-              (← IO.getStderr).putStrLn "usage: store-audit [--receipts FILE]"
+              (← IO.getStderr).putStrLn (auditUsage "store-audit")
               pure 2
-          | some receiptsOut =>
+          | some auditOptions =>
               withPinnedSignature config fun pinnedConfig => do
                 match ← DurableStoreAudit.audit pinnedConfig.transport ResourceBirthCodec.rootBytes with
                 | .error message =>
@@ -8886,7 +9179,7 @@ def runCommandStoreAudit (_arguments : List String) (_configPath _command : Stri
                     pure 1
                 | .ok report =>
                     IO.println report.line
-                    auditBody settings pinnedConfig receiptsOut
+                    auditBody settings pinnedConfig auditOptions
 
 /-- `checkpoint-differential` (dispatched by `run`). -/
 def runCommandCheckpointDifferential (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do

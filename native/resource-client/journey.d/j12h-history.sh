@@ -55,7 +55,7 @@ invoke() { # NAME WS ACTIONS-JSON -> prints the record's log height
 }
 delegate() { # NAME RECIPIENT-SUBJECT VERBS-JSON TO-WS
   jq -n --arg r "$2" --argjson v "$3" \
-    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"hist",recipient:$r,verbs:$v,maxCost:"50000"}' >"$D/req/$1.json"
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"hist",recipient:$r,verbs:$v,perRequestBytes:"50000"}' >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$1.json" --proposal-id "$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/$1/intent.json" --attempt "$SPONSOR_WS/attempts/$1"; ok "$1-submit"
   run "$1-publish" "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --proposal-id "$1" --attempt "$SPONSOR_WS/attempts/$1"; ok "$1-publish"

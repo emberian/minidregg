@@ -91,5 +91,14 @@ where
 #guard render "tick 3 of 5." == "tick 3 of 5."
 #guard render "Reject.descent." == "descent."
 #guard render "DeclaredResourceScalar.Reject.guardRejected 0" == "declared-resource-scalar: guard-rejected 0"
+-- A registered effect's refusal (`Kernel/ResourceEffectRegistry.dispatchRefusalText`).
+#guard render "DeclaredResourceController.Reject.effect (Effect.Scalar.guardRejected 0)" ==
+  "declared-resource-controller: effect: scalar: guard-rejected 0"
+#guard render "DeclaredResourceController.Reject.effect (Effect.Scalar.undeclaredField 7)" ==
+  "declared-resource-controller: effect: scalar: undeclared-field 7"
+#guard render "DeclaredResourceController.Reject.effect (Effect.FieldRead.citedStale [field 5, program code])" ==
+  "declared-resource-controller: effect: field-read: cited-stale [field 5, program code]"
+#guard render "DeclaredResourceController.Reject.effect (Effect.Registry.unregistered 10)" ==
+  "declared-resource-controller: effect: registry: unregistered 10"
 
 end Minidregg.Host.RefusalText

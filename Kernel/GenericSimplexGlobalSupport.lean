@@ -26,7 +26,7 @@ theorem reachable_scoped {c : Config} {faulty : Finset Nat}
     intro other member
     by_cases same : other = party
     · subst other
-      simpa only [advance, if_pos rfl] using step_scoped c _ input (ih party member)
+      simpa only [advance, if_pos rfl, ite_true] using step_scoped c _ input (ih party member)
     · simpa only [advance, if_neg same] using ih other member
 
 /-- The executable count at an actual network state yields a finite distinct

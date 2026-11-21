@@ -158,7 +158,7 @@ cat >"$ROOT/delegate-intent.json" <<EOF
  "expectedTargetRoot":"$TARGET_ROOT","parentId":"61","target":"600",
  "child":{"id":"63","root":"61","parent":"61","issuer":"5",
    "holder":{"type":"subject","subject":"$ORDINARY_SUBJECT"},"targets":["600"],
-   "verbs":["observe","mutate"],"maxCost":"$OWNER_BUDGET",
+   "verbs":["observe","mutate"],"perRequestBytes":"$OWNER_BUDGET",
    "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
    "policyId":"600","policyEpoch":"0","ancestors":["61"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"600","capability":"61"}]}

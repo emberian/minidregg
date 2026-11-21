@@ -8,6 +8,546 @@ proof, no migration, no change under `Kernel/` in this lane.
 The owner's ruling this answers: hand-written kernel effects are not acceptable.  A new kernel
 effect comes out of a declaration, and the hand arm it replaces is deleted in the same commit.
 
+## 0. Present state (lane `registry-effects-2`, 2026-11-14)
+
+`Payload` has one constructor, `registered`, and every payload kind is a declaration: there is
+no hand arm, no hand decoder and no legacy list. §1 to §8 below are the October design and its
+continuation; where they disagree with this section, this section is the tree.
+
+* **`Payload.registered (code : UInt8) (op : (effectAt code.toNat).O)`**
+  (`Kernel/ResourceTransaction.lean`). `effectAt` reads `liveEffects`
+  (`Kernel/ResourceEffectRegistry.lean`): wire code ↦ declaration. An unbound code's operation
+  type is `Empty`, so no payload can carry it. The payload decoder hands a bound tag to its
+  declaration's own prefix decoder and refuses every other tag. It is `Payload`'s only
+  constructor.
+* **`Effect`** (`Kernel/ResourceEffect.lean`) is the declaration: typed cell (`L`, `wire`, `pack`,
+  `unpack`), `spec : EffectSpec`, the JSON face (`name`, `toJson`, `ofJson`), the display, the
+  refusal text (`refusalText`: a refusal's detail in words), and its
+  obligations as proof fields (`unpack_pack`, `pack_unpack`, `observes_silent`, `complete`,
+  `view_unjoint`). Derived from it: `compute` (header from `accepts`/`guardFields`/`version`/
+  `commutes`, then the engine's `exec`), `patch` (the emitted descriptor), `observeOnly` (the verb is the observe
+  verb under every role), `handler` (the engine handler). `EffectCtx` holds no schema version and
+  no expected root, so a semantics cannot compare a root by hand.
+* **Engine changes** (`Effects/Revival/Engine.lean`): `DispatchRefusal.refused code name detail`
+  and `EffectSpec.refusalDetail` (canonical bytes beside the name); `EffectSpec.view` takes a
+  `Site` (signer, cell id); `Handler.select`/`pack` take the context (a declared cell is an
+  object's, an account's or a program's, and the role is the transaction's); `Handler.comap`.
+* **The cited read is declared** (`Kernel/CitedRead.lean`, `citedEffect`, code 9, JSON
+  `fieldRead`). `Payload.fieldRead`, `Reject.citedKey`/`citedStale` and every hand arm of it are
+  deleted. Wire bytes of code 9 are unchanged (tag octet 9, then the list of reads). Its refusals
+  surface as `Reject.effect (.refused 9 name detail)`; `citedStale`'s detail is the moved keys
+  (`citedStale_detail`), printed as `Effect.FieldRead.citedStale [field 5, …]`
+  (`dispatchRefusalText`, the one `Repr` of a dispatch refusal: it reads the declaration).
+* **An unread payload tag is refused by name at the receiver** (`Kernel/ResourcePayloadTag.lean`):
+  command bytes whose payload tag no declaration binds are answered
+  `Reject.effect (.unregistered tag)`, every other undecodable byte string `malformedCommand`.
+  `UnboundTagNamed` is proved: a named octet is bound by nothing and its bytes are not a
+  command.
+* **Statements** (`Kernel/EffectsRevival/Statements.lean` §7b), all **proved**
+  (`RegistryProofs.lean`): `RegistryKeystone` (`Dispatches hostRegistry []
+  liveTargetDispatch`: the legacy list is empty, so every code the registry does not bind is
+  refused by name), `RegistryPremise`, `RegistryAccepted` (both
+  poles of the cited read at an authority cell holding a field-scoped observe capability),
+  `RegistryTeeth`, `PayloadDecodeCensus`, `PayloadDecodeCensusTeeth` (a bound tag is read by its
+  declaration alone; an unbound one is refused by the decoder). The keystone's heart,
+  `liveTargetDispatch_registered`, is proved for an arbitrary declaration: at a bound code the
+  deployed functions are the engine's `dispatch`. Binding another code adds no proof there.
+  `HostKeystone` (content, code 1) is proved; see below.
+* **The census is a script**: `scripts/effect-arm-census.py` (hand arms per payload kind, read
+  from the `Payload` inductive; it sees arms of a structure field given by cases and the JSON
+  `type` string arms of a request decoder). At `787333fc3` `fieldRead` had 33 constructor arms and
+  one string arm in 10 Lean files; it now has none, and a declared kind cannot have one. The nine
+  other kinds had 294 constructor arms and 16 string arms in 17 files then; the census now
+  reads zero hand arms, zero string arms and zero dispatch arms.
+* **One JSON vocabulary**: `EffectJson` (`Kernel/ResourceEffect.lean`) is the strict reading both
+  a declaration's face and the Host's request decoders use; `Host/Json`'s private copies are
+  deleted. (`Host/SourceAgreementJson.lean` still carries its own copy of the request decoder,
+  payload arms included: seven of the sixteen string arms are its.)
+* **Thin consent displays a registered observation without a view**
+  (`NativeThinConsent.registeredRead`, `RegisteredReadDisplayStatement` proved): the effect's code,
+  the signed operation's canonical bytes and `Effect.display`'s lines. A registered WRITE is still
+  refused `unsupportedPayload` there.
+
+* **`Effect.run` pays no frame check** (`Kernel/ResourceEffect.lean`): what the controller runs
+  is the semantics and the guarded replay; `Effect.run_eq_exec` proves it is the engine's checked
+  executor, from the declaration's `complete`.
+* **Content's declaration is upstream of the registry and over the registry's context**
+  (`Kernel/ContentEffect.lean`): `DeclaredResourceController.contentSpec : EffectSpec EffectCtx …`,
+  with `contentSpec_complete` (frame and replay, the 450 lines that were in `ContentProofs.lean`),
+  `contentSpec_writes` and `JointSlots.contentProject_unjoint` proved there. `EffectCtx` gained
+  the two facts of the whole command a content write reads: `operation : Unit → Digest` (the
+  operation id, computed when asked) and `sourceRead` (the observe capability of a cell the
+  transaction reads observe-only). `Statements.lean`'s `contentSpec` is that declaration under
+  `liveEffectCtx` (`comap`), so `ContentAgreement`, `PrepareFactors` and the teeth are now about
+  the declaration the registry will bind. The hand arm still runs: code 1 is not bound.
+
+* **Content is bound at code 1** (`contentEffect`, `Kernel/ContentEffect.lean`; JSON `content`).
+  `Payload.content` the constructor, `Reject.content` and every content hand arm are deleted;
+  `Payload.content` is now a `@[match_pattern]` abbreviation for `.registered 1 command`, so the
+  code that builds a content payload or reads one out of a signed command (`match … | .content c`,
+  `let .content c := … | none`) stands as written. Wire bytes of code 1 are unchanged (tag octet
+  1, then `ContentResource.commandStream`).
+  * Its JSON face is `Kernel/ContentJson.lean` (the request grammar moved out of `Host/Json.lean`;
+    `Host/SourceAgreementJson.lean`'s private copy of that grammar is deleted and it now reads a
+    registered payload through the registry too).
+  * **`Effect.opens`**: what an operation claims of OTHER cells of its transaction (a list of
+    cell id and a check of that cell as loaded). `openingsRefusal` replaces `openingsCheck`: every
+    opening of every registered target names a cell the transaction reads observe-only, which
+    holds it. Content's are its transclusions (`contentOpens`); the refusal is
+    `Reject.effect (.refused 1 "staleOpening" …)`. `Target.contentStore?` is deleted.
+  * **`Effect.viewDemand`** (default: the view, filtered): content's computes only the summaries
+    a law names (`ContentResource.projectDemand`).
+  * **The bridge** (`Kernel/ResourceTransaction.lean`): `computeTarget_content` and
+    `computeTarget_content_arm` (a content target's computation is the deleted arm's expression,
+    its refusal now `Reject.effect (.refused 1 name .empty)`), `targetPatch_content[_arm]`,
+    `selectTarget_content`. The proofs written over the hand arm rewrite by these:
+    `PreparedTarget.content_ratchets`, `transclude_requires_source_coverage`, `ContentAgreement`
+    and its teeth, `HostTeeth`, the accepted and moved-root poles, `CommutingAppend`, `KeptPin`,
+    `MovedRootAccepted`, `TwoAppendersOneObservation`.
+  * **`HostKeystone` is proved** (`hostKeystone`), restated: `RegistryKeystone`, the registry's
+    entry at code 1 is the handler DERIVED from `contentEffect`, and 1 is no hand arm.
+    `liveLegacy = [0, 2, …, 8]`.
+  * Refusal text moved: `Reject.content (ContentResource.Reject.staleAtom)` is now
+    `Reject.effect (Effect.Content.staleAtom)`; the rendered clause `content-resource: stale-atom`
+    is `content: stale-atom` (journeys `j12`, `j12w`, `j12e`, `j12m` follow).
+  * A content cell is now SELECTED under any role and refused `wrongRole` by the computation
+    (the declaration's `accepts`); the hand arm refused the role at selection. Same refusal.
+  * A content write does not pass through a `List UInt8` on the registry path beyond what the
+    codec itself is (`payloadStream` decodes the command from the signed command's bytes, as
+    before); the operation is carried as `ContentResource.Command`.
+
+**After the content binding (1 and 2 were owed and are proved; 3 on are open):**
+
+The role is the one behaviour that moved place (selection no longer asks it; the computation's
+header refuses it first). `PrepareProofs.lean` proves it did not move in value:
+`ContentWrongRole` (the whole value of `prepareTarget` on a content target under a non-object
+role is `missingTarget` or `wrongRole`), `ContentWrongRoleUncharged` (no prepared target, so no
+preparation of any command holding one, so no compute or money plan), `ContentWrongRoleCommand`
+(`prepareOn`'s refusal of a one-target command is `wrongRole`, after the clock and before
+everything else), with `sampleWrongRole` and `sampleRole_teeth` on the sample cell.
+
+1. `PrepareFactors` is proved again, restated for every bound code (`prepareFactors`): at a
+   registered target whose slot is present, `prepareTarget` (post packed, refusals named under
+   the code) is `dispatch hostRegistry` of the operation's bytes, then `genericChecks`. It names
+   no effect; binding a code brings its receiver factorization with it.
+2. `CommutingPrepare` is proved again (`commutingPrepare`), from `prepareTarget_packed`
+   (`Kernel/ResourcePreparePacked.lean`): what `prepareTarget` answers, for every target, is
+   `receive` of the slot, the selection, the computation and `afterTarget`, and of those only the
+   computation reads the planned root. Any statement about the receiver at two targets, or
+   against a dispatcher, is to be proved over that reading, not by walking `prepareTarget`.
+3. The hand-written `contentHandler`/`contentHeader`/`contentFresh` (a spec-side twin of
+   `contentEffect.handler 1`) are deleted, with `hostLegacy` and `HostPremise`. `HostTeeth`,
+   `HostAccepted` and `HostMovedRootAccepted` are stated over `liveTargetDispatch` and the
+   derived handler (`contentHostHandler`); the ghost is `Handler.unrotated` of it, not a handler
+   written out. `RegistryPremise` is the premise for every bound code.
+4. Thin consent refuses a content write (`unsupportedPayload`; the text is now the registered
+   one, "content: a registered write is not displayed from a served view").
+
+**The two root-pinning reads are bound** (`Kernel/ReadEffects.lean`): `readEffect` at code 3
+(JSON `read`) and `kindReadEffect` at code 7 (JSON `kindRead`). Neither has an operand: the
+operation is `Unit`, its codec writes nothing, so the wire bytes are the tag octet alone, as
+before, and the JSON is `{"type": …}` alone, as before. `Payload.read` and `Payload.kindRead` are
+names for `.registered 3 ()` and `.registered 7 ()` (not patterns: no function has an arm for
+either); `sourceReadOf` and an opening's source still find the read by `payload = .read`.
+
+* Refusal text moved: a read whose capability is not its observe capability was
+  `Reject.observationRequired` and is `Reject.effect (Effect.Read.observationRequired)`; the kind
+  read's three (`observationRequired`, `observationRejected`, `fieldNotNamed`) are under
+  `Effect.KindRead`. The header refusals (`wrongRole`, `unsupportedVersion`, `staleTarget`) keep
+  the controller's names and their order.
+* The role moved place as it did for content, and not in value: `RegisteredWrongRole`
+  (`PrepareProofs.lean`) says it of every registered effect at every role its declaration does
+  not accept, `ReadRoles` that the two reads accept an object and nothing else.
+* Thin consent: a registered observation is displayed view-less only when it commutes
+  (`registeredRead`). One that pins its root goes through `checkOpened` at the signed root like
+  every hand arm; `pinned_read_not_viewless` names the two. A member signing a `read` or a
+  `kindRead` is shown what it was shown before.
+* `Host/SourceAgreementJson.lean` reads `kindRead` now (through the registry), as it came to
+  read `fieldRead`.
+
+**The member patch is the declaration's** (`Effect.member`, `Kernel/ResourceEffect.lean`). What
+thin consent shows for a registered operation is read from its declaration by ONE rule; thin
+consent has no per-effect arm.
+
+* `MemberCtx` is the signed part of `EffectCtx` (signer, nonce, the target's role, id and
+  capability); `EffectCtx.signed` projects it. No snapshot, no height, no operation id, no other
+  cell.
+* `Effect.member : Option (MemberCtx → O → Store L → Option (Patch L))`, default `none`. Outer
+  `none`: the effect's patch reads something neither signed nor served (content: the authority's
+  policy coordinates and the height); thin consent refuses it by name (`unsupportedPayload`).
+  Inner `none`: the operation does not apply to the served store (`patchRefused`).
+* Two laws on the declaration, vacuous at `none`: `member_exact` (wherever the member patch and
+  the semantics both answer, they answer the same patch) and `member_tail` (the rotate writes
+  only `rotated` addresses).
+* `Effect.memberReadsStore` (default `true`) with `member_blind`: a member patch declared not to
+  read the store is the same over any two stores. Thin consent computes one that does read it
+  only from a view that seals nothing (`patchReadsPre`); the design message did not have this
+  field, and the reads need it (they are signed under field-scoped grants).
+* **The rule** (`Effect.memberPatch`): shown iff the declaration states a member patch and the
+  operation pins its root (`commutes op = false`). `NativeThinConsent.memberPatch`, `Supported`,
+  `KernelOwned` (a registered target's kernel-owned addresses are its `rotated` ones) and
+  `patchReadsPre` read it. `read` and `kindRead` state `some fun _ _ _ => some []` and lost
+  their special case; a commuting observation stays view-less.
+* **`MemberPatchKeystone`** (`Kernel/NativeThinConsent.lean`, proved; it replaces
+  `targetPatch_split`): for every target, hand arm or registered, whenever
+  `computeTarget … = .ok post` and `memberPatch command target pre.logical = .ok patch`, there is
+  a tail with `targetPatch … = patch ++ tail` that writes only `KernelOwned` addresses. The new
+  premise is the receiver's admission: a patch derived from a semantics exists only where the
+  semantics answers. `opened_display_is_commit` consumes it with the prepared target's own
+  evidence. Generic half: `Effect.member_split`.
+* **Shown, then refused, is intended.** A member patch may answer where the receiver's semantics
+  refuses (a semantics may read the authority cell or the height; no member is served either).
+  Nothing commits then. What a member consents to is "this post, or no change".
+  On the deployed Host this order is rare: the Host runs the semantics when it PREPARES the plan,
+  before it proposes anything to sign, and the signed root pins the cell. So a member is shown a
+  post only for an operation the semantics already admitted at that root, and a later refusal by
+  the semantics needs an input outside the pinned cell to move between prepare and admission
+  (the authority cell, the height). Journey THIN row SR exercises the common order: a scalar
+  write that creates an undeclared field is refused at prepare (`undeclared-field`, phase
+  prepare), no plan reaches the consent provider, nothing is shown or signed, and the next
+  proposal names the same root. A row for the rare order (a sealed call whose authority input
+  moves before it is retried) does not exist; S1 is its header analogue (the root moves:
+  `stale-target`).
+* Teeth: `MemberPatchUnstatedRefused` (no stated patch: refused under the declaration's name at
+  every store; content is one), `MemberPatchCommutingRefused` (a commuting operation is refused
+  whatever it states), both proved; executed in `Assurance/MemberPatchPoles.lean` (a commuting
+  ghost of the content read that states the read's member patch is refused `commutes`).
+  Premise inhabitation: `targetCtx_signed` (the member's context is the signed part of the
+  receiver's, by `rfl`).
+* Each declaration that states a member patch has a completeness theorem beside it, so the
+  patch cannot be safe by answering `none`: `read_member_complete`, `kindRead_member_complete`
+  (where the semantics admits, the member is shown exactly its patch).
+* No refusal text moved. One is new and unreachable on today's registry: "… a commuting
+  operation signs no root to display a post at" (an effect that states a member patch and
+  commutes).
+
+**The kind definition revision is bound** (`Kernel/WorldKindEffects.lean`): `kindDefinitionEffect`
+at code 5 (JSON `kindDefinition`). `liveLegacy = [0, 2, 4, 6, 8]`. It is the first registered
+WRITE thin consent displays: its declaration states its member patch
+(`WorldKindCell.prepareDefinition` at the served store) and that the patch reads the store, so it
+is shown only from a view that seals nothing, as the hand arm was.
+
+* Wire bytes of code 5 are unchanged (tag octet 5, then `WorldKindCell.definitionStream`). The
+  request JSON is unchanged (`{"type": "kindDefinition", "definition": …}`, read by
+  `ResourceGrammarJson.worldDefinition` as the declaration's `ofJson`). The inbox JSON is
+  unchanged (`kind`, `revision`, `exactDefinitionHex`: the declaration's `toJson`). The inspect
+  line is unchanged (the declaration's `display`).
+* `Payload.kindDefinition` is a name for `.registered 5 definition` (not a pattern).
+  `Reject.kindDefinition` is deleted with the arm that threw it. Every hand arm is deleted: the
+  codec, layout, materializer, packing, selection, computation, patch, projection, footprint,
+  field, amount, ratchet and run-write arms of the controller, thin consent's member patch, wire,
+  root and `Supported` arms, the Host's inbox, inspection and publication arms, and the reader's
+  string arm.
+* Refusal text moved: a definition that is not the stored one's next revision was
+  `Reject.kindDefinition` and is `Reject.effect (Effect.KindDefinition.notNextRevision)`. An
+  unknown payload `type` is refused with a list in which `kindDefinition` is now among the
+  registered names. `repr` of a kind-definition payload is the registered form (the name and the
+  operation's canonical bytes).
+* `computeTarget_kindDefinition_arm` and `targetPatch_kindDefinition_arm` (proved) say the
+  registered computation and patch are the deleted arm's expressions with that one refusal
+  renamed. The hand arm also refused a prepared patch that did not apply; a prepared revision
+  always applies (`prepareDefinition_valid`), so that line never ran and has no successor.
+* The role moved place, not value, as for content and the reads (`RegisteredWrongRole`).
+* The run check's claimed write is the same value: `constructorWrite i definition` was coordinate
+  0 holding the jam of the definition's canonical bytes, which is what a registered write claims.
+* Member patch: `kindDefinition_member_complete` (where the semantics admits, the member is
+  shown exactly its patch) and its converse `kindDefinition_member_admitted` (the semantics
+  reads nothing the member does not, so a shown revision is refused only by the header: role,
+  schema version, moved root).
+* `MemberPatchKeystone`'s poles on it (`Kernel/MemberPatchPoles.lean`, proved):
+  `MemberPatchSatisfiable` (an admitted revision whose non-empty member patch, run on the loaded
+  store, is the receiver's post) and `MemberPatchGhostRefuted` (the kind definition's semantics
+  with the always-empty member patch fails `MemberExact`, so that record is not an `Effect`).
+  Executed in `Assurance/MemberPatchPoles.lean` on a kind with fields: the admitted revision, a
+  skipped revision refused by both sides under their own names, and a revision under an account
+  role where the member patch answers and the receiver refuses `wrongRole`.
+* `HonestKindDefinitionViewAcceptedStatement` stands as stated and proved.
+
+**World actions are bound** (`worldEffect`, `Kernel/WorldKindEffects.lean`): code 4, JSON `world`.
+`liveLegacy = [0, 2, 6, 8]`. The semantics is `WorldKindCell.preparePatch` at the loaded store,
+admitted when the patch applies and the post decodes under the same descriptor; one refusal,
+`worldKind`. The declaration states its member patch (`preparePatch` at the served store, which
+reads the store: a view that seals nothing, as before).
+
+A world instance is the first declared cell whose fields are not its addresses (its fields live
+inside the payload entry). Three things the hand arms said in their own places are now fields of
+`Effect`, each with a default every other declaration takes:
+
+* `footprint : Option (Store L → Store L → Footprint)`: the semantic footprint. `none` reads it
+  off the changed addresses by `spec.field`/`spec.amount`; world states
+  `WorldKindProjection.footprint` (the inner fields a capability's scope names).
+  `targetFullFootprint` and `targetFootprint` read it; `targetFootprint_exact` is proved for
+  both cases.
+* `runWrites : Option (Store L → Digest → Nat → O → Option (List Eval.FieldWrite))`: what a run
+  may claim (K-RAN). `none` is one write at coordinate 0 holding the operation's canonical bytes;
+  world states `WorldKindMethods.writes` (its method's bound outputs at the loaded store).
+* `authors : O → Bool` (default `true`): whether the operation authors anything. An empty world
+  action list is admitted and changes nothing; the grain-origin publication check
+  (`Host/GrainOriginSource.lean`) asked `!actions.isEmpty` of the hand arm and asks
+  `!observeOnly op && authors op` of a registered one.
+
+What moved, and what did not:
+
+* Wire bytes of code 4 are unchanged (tag octet 4, then the action list's bytes). The request
+  JSON is unchanged (`{"type": "world", "descriptor": …, "actions": […]}`; the descriptor is what
+  the actions are read against and is not part of the operation). The inbox JSON is unchanged
+  (`actionCount`, `exactActionsHex`). The inspect line is unchanged.
+* Refusal text moved: `Reject.worldKind` (deleted) is
+  `Reject.effect (Effect.World.worldKind)`; the rendered clause still ends `world-kind`. The
+  unknown-`type` refusal lists `world` among the registered names.
+* `targetPatch` of a world target the receiver REFUSES is now `[]`, where the hand arm gave the
+  prepared patch even when it did not apply or its post did not decode. Nothing reads the patch
+  of a refused target (a `PreparedTarget` exists only where the computation is admitted).
+* The role moved place, not value (`RegisteredWrongRole`).
+* `world_member_complete` is proved (where the semantics admits, the member is shown exactly its
+  patch). Its converse is false and not claimed: the semantics also refuses a patch that does
+  not apply (thin consent checks `Patch.ValidFrom` itself) or whose post does not decode.
+* `HonestWorldViewAcceptedStatement` stands as stated, proved over the declaration.
+* Executed (`Assurance/MemberPatchPoles.lean`, a poll instance): a vote is computed and shown and
+  the shown patch run is the receiver's post; a write whose guard fails is refused by both sides
+  by name; the footprint is the inner field; `authors [] = false`; the wire bytes and faces.
+* `ComputeTargetWorldArm` (`Kernel/MemberPatchPoles.lean`, proved: `computeTarget_world_arm`,
+  over `world_run`): the registered computation is the deleted arm's expression with the one
+  refusal renamed.
+  Until then the claim "the admitted set did not move" rests on reading `worldSem` against the
+  deleted arm, the executed poles, and the journeys.
+
+**Scalar actions are bound** (`scalarEffect`, `Kernel/ScalarEffect.lean`): code 0, JSON `scalar`.
+`liveLegacy = [2, 6, 8]`. The `Payload.scalar` constructor, `Reject.scalar`, `scalarScope`,
+`scalarLeg`, `scalarCommand` and every hand arm of the kind are deleted (arm census 126 + 4
+string arms in 12 files before, 94 + 3 in 10 after).
+
+* The semantics is `scalarSem`: an account role (`accountRequiresBook`) and an empty action list
+  (`emptyActions`) are refused by name, then the root-free core of the scalar receiver,
+  `DeclaredResourceScalar.prepareStore` (the cell law, the scoped admission of every action,
+  every guard in sequence, field closure, the cell law at the post). `prepareCell` keeps its own
+  header and calls the same core; the purse and job receivers still call it. The rotate is the
+  blinding ratchet at `ctx.ambient.height`; `rotated` is the blinding's address;
+  `complete` is `prepareStore_ok` and `prepareStore_ratchet_valid`.
+* **The scope gate is the header's** (`Effect.guardFields`, `Effect.scopeRefusal`): for an
+  operation whose guards are reads, the capability must be held in the authority cell and its
+  scope must name every field a guard reads. It sits in `Effect.compute` and in the engine
+  handler's header (`Handler.header` now takes the operation), after the role and before the
+  schema version and the root, and its two refusals are `DispatchRefusal.capabilityRejected` and
+  `fieldNotNamed`, which `Reject.ofDispatch` carries to the controller's own `capabilityRejected`
+  and `fieldNotNamed`. It is not a check in `computeTarget` beside the dispatch, as first
+  planned: `RegistryKeystone` and `PrepareFactors` say the receiver IS the registry's dispatch at
+  every bound code, and a check outside the handler would falsify both at code 0. No refusal
+  identity, text or order moved for scope (scalar accepts every role, so the role check before
+  it never fires). `computeTarget_scalar_unnamed_refused` and `_unheld_refused` stand as stated.
+* The member patch is the actions' own patch (`actionsPatch`), `memberReadsStore := false`, so a
+  member whose view seals fields is still shown the post of a write to the fields it names.
+  `scalar_member_complete` (proved): where the semantics admits, the member is shown exactly its
+  patch. `ScalarMemberGhostRefuted` (proved): wherever the semantics admits a write, the "no
+  change" member patch `fun _ _ _ => some []` is not `MemberExact` (an admitted patch is never
+  empty, `scalarSem_writes`); the admitted write that inhabits the premise is executed. `KernelOwned` for a scalar target is now the declaration's `rotated` (the
+  same one address).
+* Two `Effect` fields changed shape: `viewDemand` takes the `leads` gate of a declared cell's
+  pair deltas (`viewDemand_eq` under `sound`), and `runWrites` takes the target's cell id.
+* `computeTarget_scalar` (proved) is the registered computation in the receiver's terms: under a
+  passing scope, the version, the root, `scalarSem`, then the replay with the ratchet.
+  `targetPatch_scalar_ok` (proved): an admitted write's patch is the actions' followed by the
+  ratchet.
+
+What moved:
+
+* **Order.** The hand arm named, in order: scope, `accountRequiresBook`, `unsupportedVersion`,
+  `emptyActions`, `staleTarget`, then the core. The declaration: scope, `unsupportedVersion`,
+  `staleTarget`, `accountRequiresBook`, `emptyActions`, then the core. Exactly three pairs
+  change: an account with a wrong version (was `accountRequiresBook`, is `unsupportedVersion`),
+  an account with a stale root (was `accountRequiresBook`, is `staleTarget`), no action with a
+  stale root (was `emptyActions`, is `staleTarget`). No action with a wrong version and an
+  account with no action keep theirs. Each is executed in `Assurance/MemberPatchPoles.lean`,
+  after against `computeTarget` and before against `prepareCell` (the receiver the deleted arm
+  called) at the same inputs. All four refusals are pre-admission and uncharged on both sides:
+  `ScalarPreparedHeader` (`Kernel/MemberPatchPoles.lean`, proved) says every prepared scalar
+  target passed all four, so a target that fails one has no `PreparedTarget` and no command
+  preparation carries it; the deleted arm's evidence (`CellMode`) held the same four as fields.
+* **Refusal text.** A core refusal was `Reject.scalar (DeclaredResourceScalar.Reject.x)` and is
+  `Reject.effect (Effect.Scalar.x)`; rendered, `…declared-resource-controller: scalar:
+  declared-resource-scalar: guard-rejected 0` is `…declared-resource-controller: effect: scalar:
+  guard-rejected 0`. The suffixes (`guard-rejected N`, `undeclared-field N`, `inadmissible-action`,
+  `invalid-post`, `wrong-role`, `account-requires-book`, `empty-actions`) are as before. The two
+  header refusals lose their scalar prefix: a scalar `staleTarget` was
+  `Reject.scalar (….staleTarget)` and is the controller's `Reject.staleTarget`, and likewise
+  `unsupportedVersion` (`NativeHost.isStaleTarget` has one arm now).
+  The unknown-`type` refusal names what the registry binds (today "expected append or a
+  registered effect (scalar, content, …)"). Moved with it in the same commit: `scripts/kn2/plant-drift-m4.sh`,
+  the fixture in `native/resource-client/src/main.rs`, and `jclosure.sh`, `jjob1.sh`, `jjob.sh`,
+  which grepped the raw constructor `undeclaredField N` that the client stopped printing when the
+  Host began naming clauses.
+* `targetPatch` of a scalar target the receiver REFUSES is now `[]`, where the hand arm gave the
+  actions' patch and the ratchet whether or not it admitted them. Nothing reads the patch of a
+  refused target; where the computation is admitted it is the actions' followed by the ratchet
+  (`targetPatch_scalar_ok`).
+* Not moved: wire bytes of code 0 (tag octet 0, then the action list); the request JSON
+  (`{"type": "scalar", "actions": […]}`, `ResourceGrammarJson.action`); the inbox JSON (each
+  action whole, `scalarToJson`); the inspect lines (`scalarDisplay`); the scope refusals; the
+  footprint (the generic one over `field`/`amount` is the hand arm's expression).
+* `Payload.scalar` is a `@[match_pattern]` abbreviation of `.registered 0 actions`, as
+  `Payload.content` is. Four arms read particular actions out of a signed scalar operation
+  (`NativeHostReplay` twice, `NativeProviderHistory` twice); `scripts/effect-arm-census.py` tells
+  a single-kind reader (its match names exactly one payload kind) from a dispatch arm (its match
+  distinguishes two or more kinds, hand constructor or pattern) and counts zero dispatch arms
+  on both patterns.
+
+**The two money consents are declared** (`Kernel/MoneyEffects.lean`: `computeFundingEffect`,
+code 6, JSON `computeFunding`; `moneyConsentEffect`, code 8, JSON `moneyConsent`). The
+constructors `Payload.computeFunding` and `Payload.moneyConsent` and every dispatch arm on them
+are deleted (transaction module, controller, thin consent, `Compiler/BendWorldPlan.lean`,
+`Compiler/ObjectiveInvocationLayout.lean`, `Host/FnInboxView.lean`, `Host/InspectRender.lean`,
+`Host/GrainOriginSource.lean`, the payload JSON reader; `Host/Json.lean`'s `moneyConsentJson`
+and `moneyOperationJson` moved into the declaration's `toJson`). `liveLegacy = [2]`.
+
+* One spec for both (`moneySpec`, over the operation's codec and view): an account at schema
+  version 1, the root pinned, no rotate, an empty frame, the account's ordinary write verb. The
+  semantics (`moneySem`) refuses a target that carries audience fields and otherwise emits the
+  empty patch. `MoneyPreparedUnchanged` (proved, `Kernel/MemberPatchPoles.lean`): every prepared
+  money target is an account at version 1 with the signed root and no audience field, and its
+  post is the loaded store. Its poles are executed (an admitted sample of each; each refusal by
+  name, in the hand arms' order).
+* `member = none` for both: thin consent refuses them by name at every store
+  (`MemberPatchUnstatedRefused`, which is generic; `memberPatch_money_refused` is deleted as its
+  instance).
+* What `Effect` learned for them, each a field with a default:
+  `footprint` takes the operation (the funding's footprint is the debit of its credits on its
+  asset's balance; the consent's own is empty, its monetary footprint stays the admitted batch's,
+  `monetaryFootprint?`); `runWrites` takes whether the target is the account the transaction's
+  funding was validated at (a funding claims the empty list there and nothing elsewhere, a
+  consent nothing); `unchanging` with its law `unchanging_silent` (the target is never written,
+  so `Target.isRead` enters it as a read guard: `observeOnly op || unchanging`); `accounting`
+  (the funding is the kernel's accounting, so `BendWorldPlan.effectsOf` and
+  `ObjectiveInvocationLayout.step`/`verbatim`/`inert` leave it out: `observeOnly op ||
+  accounting`; a money consent is reported, as before).
+* What the transaction reads of the signed operations is the declaration's: `Effect.funding`
+  (the compute funding leg an operation consents to) and `Effect.consent` (the money consent it
+  is), each `none` by default, with two laws: `consent_funding` (a consent's funding leg is the
+  operation's) and `monetary_unchanging` (an operation that states either leaves its own cell
+  as loaded, so a writing effect cannot state one). `Payload.funding?` and `Payload.consent?`
+  ask `effectAt code`; `prepareCompute`, `moneyEntries` and the controller's
+  `moneyPolicySlots`, `moneyReadCovered`, `monetaryFootprint?`, `monetaryDebitFootprint?` and
+  `monetaryVerbs?` read those two and match on no payload kind. `Payload.computeFunding` and
+  `Payload.moneyConsent` are names for the code that builds one (not patterns).
+* Moved: the refusal of a money target with audience fields was `Reject.computeFunding` and is
+  `Reject.effect (Effect.ComputeFunding.audienceFields)` /
+  `Reject.effect (Effect.MoneyConsent.audienceFields)`; thin consent's text for them was
+  "compute funding: writes the shared Book" / "money: writes the shared Book" and is the generic
+  "<name>: a registered write is not displayed from a served view"; `spec.field` classifies a
+  money cell's addresses as `body` where `targetField` said `balance asset` for a funding (no
+  address of a money target changes, and its footprint is the declaration's, so nothing reads
+  the classification); a non-account money target is selected and then refused `wrongRole` by
+  the header, where the hand selection refused `wrongRole` itself (the same refusal).
+* Not moved: wire bytes of codes 6 and 8 (tag octet, then `fundingStream` / `consentStream`),
+  the request JSON, the inbox JSON, the inspect lines, the projection slots, the order of the
+  four refusals (all executed in `Assurance/MemberPatchPoles.lean`).
+
+**The stream append is declared** (`Kernel/AppendEffect.lean`, `appendEffect`, code 2, JSON
+`append`). The constructor `Payload.append`, the hand decoder `legacyPayloadDecode`,
+`legacy_unbound`, `legacyPayloadTags`, `liveLegacy` and every arm on the constructor are deleted
+(27 constructor arms and one string arm in 8 files: the transaction module, the controller,
+thin consent, `Host/FnInboxView.lean`, `Host/InspectRender.lean`, `Host/GrainOriginSource.lean`,
+the payload JSON reader). `Payload.append` is a `@[match_pattern]` abbreviation of
+`.registered 2 request`, read by one single-kind reader
+(`NativeObservationController.streamPayloadFrom`: the payload a stream record's append carried).
+
+* The spec (`appendSpec`): an object's stream head (`StreamCell.headLayout`, `headWire`, packed
+  `⟨.stream, cell⟩`), version `StreamCell.commandVersion`, the object's append verb, `commutes`
+  everywhere (no root is pinned), no rotate, one field (`body`). One plan (`appendPlan`) decides:
+  the two length bounds, the channel law at the loaded head, the head's presence and `room`
+  binding, the `ref` bound; the semantics is the plan's one guarded head write.
+  `appendSpec_complete`; `append_run` and `StreamResource.computeTarget_append` state the
+  computation in the plan's terms.
+* **The fresh cell is a field of `Effect`**: `born : EffectCtx → O → Store L → Option (Nat ×
+  PackedCell Registry)` (a fresh cell's id and its live content), `none` by default, with the
+  law `born_admitted : BornAdmitted spec born` (a birth is only an admitted operation's). The
+  append's is the plan's entry as an entry cell (`entryBirth`). The controller's `entryWrites`
+  is `targetBirth` (the declaration's `born`) written by `StreamWrite.freshWrite` (expected
+  absent, written live); `StreamWrite.entryWrite` is `freshWrite` of the entry cell. Statements
+  (`Kernel/MemberPatchPoles.lean`, all proved): `AppendBornExact` (a birth exactly when the
+  semantics admits), `BornGhostRefuted` (no declarable `born` answers at a request the semantics
+  refuses everywhere: an over-long topic), `AppendPreparedBirth` (every prepared append target is
+  an object at the append's version whose patch is the one head write and whose birth is that
+  same entry at the loaded head's next position). Executed in `Assurance/MemberPatchPoles.lean`:
+  an admitted sample with its birth at `entryCellId 41 1`; a refused one with none. Not a law,
+  and not provable: that the born cell differs from every existing cell (`entryCellId` is a
+  hash). What stands in for it is the receiver's refusal `Reject.physicalPreparation`:
+  `born_occupied_not_shaped` (`Kernel/DeclaredResourceController.lean`, proved) says a prepared
+  invocation one of whose births lands where the served model holds anything but the absent
+  cell's root is no `PhysicalShape`, and the receiver answers `physicalPreparation` to every
+  prepared invocation that is none. Executed: the sample birth's write expects the absent
+  cell's root, which is not its own post root.
+* `transactionMarker domain semantics subject nonce` (`Kernel/AppendEffect.lean`) is the
+  marker's body; `operationMarker domain semantics command` is it at the command's subject and
+  nonce. Its ~70 callers across the lifecycle receivers and the Host keep the command form.
+* `member = none`: the record holds the admission height.
+* Moved, refusal identity and text: `Reject.streamTopic`, `Reject.streamPayload`,
+  `Reject.streamRef` and `Reject.channel reason` are deleted; they are
+  `Reject.effect (Effect.Append.streamTopic)`, `…streamPayload`, `…streamRef` and
+  `…channel <clause>` (the clause's bare name: `Reject.effect (Effect.Append.channel epochGap)`,
+  where it was `Reject.channel (Minidregg.Kernel.DomainEpoch.Refusal.epochGap)`), rendered
+  `…declared-resource-controller: effect: append: stream-ref` and
+  `…effect: append: channel epoch-gap`. The clause is bare so the committed `repr` stays on one
+  line (with the qualified name it wrapped after `Reject.effect`; executed for the longest
+  clause). KCH reads the clause's name in the raw text (`epochGap`, `epochNotAfter`,
+  `rootCount`); no journey, client or fleet source reads `wrongRole` or a stream refusal's
+  kebab form. A stream cell without a head and a fleet
+  topic's head were refused `Reject.wrongRole`; they are `Effect.Append.headAbsent` and
+  `Effect.Append.topicHead`. A non-object role and a wrong schema version stay the controller's
+  `wrongRole` and `unsupportedVersion`. Thin consent's "append: records the admission height"
+  is "append: a registered write is not displayed from a served view". The unknown-`type`
+  refusal reads "expected a registered effect (scalar, content, append, …)".
+* Moved, order: none. The header (role, version) precedes the plan as it preceded the arm's
+  checks; the plan keeps the arm's order (executed, each by name).
+* `targetPatch` of an append the receiver REFUSES is now `[]`, where the hand arm gave the head
+  write whenever a head was loaded (nothing reads it; `StreamResource.append_footprint` and
+  `append_entry_at_next` now take the admitted plan as their premise).
+* Not moved: wire bytes of code 2 (tag octet 2, then `appendStream`), the request JSON
+  (`{"type": "append", "topic", "payload", "to", "ref"}`), the inbox JSON (`topicBytes`,
+  `payloadBytes`), the inspect line, the law's slots (`streamSlots`), a run's claim, the
+  footprint, the entry cell's id and bytes.
+* `RegistryKeystone`, `HostKeystone`, `HostTeeth`, `RegistryTeeth` are restated with the legacy
+  list written out: `[]` where it was `liveLegacy`, `[1]` and `[9]` in the twin teeth.
+  `HostKeystone` loses its third clause (`1 ∉ liveLegacy`), which the empty list makes vacuous.
+  `LiveLegacyCensus` had two clauses; the first was about the hand decoder and went with it, the
+  second is `PayloadDecodeCensus`. `UnboundTagNamed` loses `tag ∉ legacyPayloadTags`.
+  `PrepareFactors` carried no legacy exception and stands as stated.
+
+**Next**: nothing of the payload is hand-written. What remains by cases over payload kinds is
+the nine single-kind reader arms on the three patterns (`scalar` 4, `content` 4, `append` 1).
+
+**Owed on the registry line** (present state):
+
+* `operationMarker domain semantics command` keeps its command form for its ~70 callers (the
+  lifecycle receivers, the Host); the declaration reads `transactionMarker` at the context's
+  subject and nonce. Moving the callers is a rename with no statement behind it.
+* JINSPECT rows b and c are open.
+* JJOB1 and JJOB have run on no head of this lane. They need `JOB_PROGRAMS/collatz.jam` (and
+  JJOB `liar.jam` and `NOCK_RUN`); the tree holds `collatz.hoon`, `liar.hoon` and each jam's
+  provenance (the pinned `hoonc` at nockchain `cbd9298f` with two bootstrap jams by hash, mode
+  `--new --arbitrary`, then a kick at axis 2 and a minimal re-jam), but no script that produces
+  the jam, and neither a built `hoonc` nor the tool for the kick and re-jam nor the runner is on
+  the Mac or hbox (`~/dev/nockchain` holds the revision, unbuilt).
+* THIN has no row for a signed write the Host then refuses at its semantics (a member patch
+  shown while the semantics refuses is intended: nothing commits).
+* Journeys red at the append head for reasons outside the registry: K11 rows `create-gift`
+  (the journey greps `ownerNotCreator`; the refusal prints `owner-not-creator`) and `same-2`
+  (a second append planned from one read is admitted, as the append pins no root; the row
+  expects `staleTarget`), both identical on the base Host without the binding; KTPL (16 rows
+  read per-leaf birth sources `create-lab.<leaf>.json`; the client writes one
+  `create-lab.index-births.json`); JCHAT's `mirror` row needs a `fake-discord` binary no
+  candidate on hbox holds.
+
+**The payload's JSON has one reader** (`Kernel/ResourcePayloadJson.lean`, `payloadOfJson`). The
+grammar of the hand-armed payloads (`action`, `streamRef`, the world descriptor, definition and
+action, the money batch) is `Kernel/ResourceGrammarJson.lean`, upstream of the registry, so a
+declaration's `ofJson` can be one of its decoders when its code is bound. `Host/Json.lean` and
+`Host/SourceAgreementJson.lean` each held a copy of that grammar and of the payload reader; both
+are deleted. Which payloads a reader admits is its parameter (`refuses`): the Host's is empty,
+the agreement's names `moneyConsent`, which it refuses by name before reading any of it
+(executed in `Assurance/RegistryRefusalPoles.lean`). The agreement's refusal of a money consent
+used to read "expected scalar, append, …"; it reads "moneyConsent is not admitted by this
+reader". String arms: 11 before that change, 6 after it, none now.
+
 ## 1. What one effect costs by hand today (counted from the tree at `02ee34e8a`)
 
 ### 1a. One more declared-resource payload kind
@@ -155,7 +695,7 @@ so it belongs to the controller once:
 |---|---|---|---|---|
 | `EngineKeystone` | over sound handlers, `Dispatches R [] (dispatch R)` | `EngineSatisfiable`: the two-entry `toyPole` dispatches through itself, admits entry A's `5`, refuses entry B's out-of-frame `false` with `outOfFrame 1` | `EngineTeeth`: refutes the ghost reading (`toyGhostPole`), the fail-open dispatcher (`toyFailOpen`), the unframed dispatcher (`dispatchUnframed`), and a twin (`legacy = [1]`) | `EnginePremise`: every pole handler is sound |
 | `CompletenessKeystone` | through a `LawfulRegistry`, every refusal is a declared name | `CompletenessSatisfiable`: entry A lawful, its `tooLarge` surfaces as `refused 0 "tooLarge"` | `CompletenessTeeth`: entry B is not lawful | `CompletenessPremise`: a lawful registry exists |
-| `HostKeystone` = `Dispatches [(1, contentHandler)] hostLegacy hostTargetDispatch` | today's target dispatch (payload decode, `selectTarget`, `computeTarget`, patch validation, `packTarget`) dispatches through the one-entry registry, every other payload code in `hostLegacy`; `noTwin` puts code 1 out of the hand arms | `HostAccepted` (the doc-write fixture, owed) | `HostTeeth`: refutes the registry with the seal-less content handler, and code 1 kept as a hand arm too | `HostPremise`: `contentHandler.Lawful` |
+| `HostKeystone` = `RegistryKeystone` (`Dispatches hostRegistry liveLegacy liveTargetDispatch`), the registry's entry at code 1 the handler derived from `contentEffect`, and 1 not a hand arm | today's target dispatch (payload decode, `selectTarget`, `computeTarget`, patch validation, `packTarget`) dispatches through the one-entry registry, every other payload code in `hostLegacy`; `noTwin` puts code 1 out of the hand arms | `HostAccepted` (the doc-write fixture, owed) | `HostTeeth`: refutes the registry with the seal-less content handler, and code 1 kept as a hand arm too | `HostPremise`: `contentHandler.Lawful` |
 | `LiveKeystone` = `ContentAgreement contentSpec ∧ ContentComplete` | the deployed content arm (`computeTarget`, `targetPatch`, `targetField`, `targetRatchet`, `targetAmount`, `payloadVerb`, `targetProjection`) agrees with `contentSpec`; `contentSpec` keeps its declared frame (`contentActionFrame`, per action) | `ContentAccepted`: the live arm admits some content command (intended inhabitant: `Fixtures/NativeDocWriteFixture*`) | `ContentTeeth`: refutes the declaration without the blinding seal (`contentGhost`) and the frame without `annotations` (`contentNarrowed`, `annotate` writes there) | `ContentAccepted` |
 
 `Dispatches R [] (dispatch R)` is the engine's generic theorem, in the same role as the old

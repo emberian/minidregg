@@ -2761,6 +2761,50 @@ fn delegation_fields(fields: &Value) -> Result<Value> {
     ))
 }
 
+/// The kernel refuses a delegated capability's debit of a balance it sets no
+/// `maxDelta` bound on (`Theory.CapabilityValueBound.StrictBound`,
+/// `missingBalanceBound`). A delegated account grant that carries a debiting
+/// verb (`transfer`, `mintAsset` on a well, `burnAsset`) and bounds no balance
+/// could never use it, so it is refused here, before it is authored. The bound
+/// limits one turn; it is not a running total.
+pub(crate) fn transfer_grant_bounded(kind: &str, verbs: &[Value], bounds: Option<&Value>) -> Result<()> {
+    let debits = |verb: &Value| matches!(verb.as_str(), Some("transfer" | "mintAsset" | "burnAsset"));
+    if kind != "account" || !verbs.iter().any(debits) {
+        return Ok(());
+    }
+    let bounded = bounds.and_then(Value::as_array).is_some_and(|bounds| {
+        bounds.iter().any(|bound| {
+            bound.get("field").and_then(Value::as_str).is_some_and(|field| field.starts_with("balance:"))
+        })
+    });
+    if bounded {
+        return Ok(());
+    }
+    Err("a delegated `transfer`, `mintAsset` or `burnAsset` grant on an account must bound a balance: add maxDelta \
+         [{\"field\":\"balance:ASSET\",\"max\":\"N\"}] (shell: --max-delta balance:ASSET=N), the most one turn \
+         may take from the account, fees included; the Host refuses an unbounded delegated debit (missingBalanceBound)"
+        .into())
+}
+
+#[cfg(test)]
+mod grant_bound_tests {
+    use super::transfer_grant_bounded;
+    use serde_json::json;
+
+    #[test]
+    fn a_delegated_debiting_grant_needs_a_balance_bound() {
+        let bound = json!([{"field":"balance:7","max":"30"}]);
+        for verb in ["transfer", "mintAsset", "burnAsset"] {
+            let verbs = [json!("observe"), json!(verb)];
+            assert!(transfer_grant_bounded("account", &verbs, None).is_err(), "{verb} unbounded");
+            assert!(transfer_grant_bounded("account", &verbs, Some(&json!([{"field":"3","max":"1"}]))).is_err());
+            assert!(transfer_grant_bounded("account", &verbs, Some(&bound)).is_ok(), "{verb} bounded");
+        }
+        assert!(transfer_grant_bounded("account", &[json!("observe")], None).is_ok());
+        assert!(transfer_grant_bounded("object", &[json!("transfer")], None).is_ok());
+    }
+}
+
 fn delegation_bounds(bounds: &Value) -> Result<Value> {
     let bounds = bounds
         .as_array()
@@ -2782,6 +2826,67 @@ fn delegation_bounds(bounds: &Value) -> Result<Value> {
         out.push(json!({"field": field, "max": max}));
     }
     Ok(Value::Array(out))
+}
+
+/// A cited read of a declared cell (`Kernel/CitedRead`, registry code 9, JSON `fieldRead`): the fields
+/// this turn read and the value it read at each (`null`: the field was absent). The Host compares
+/// them by value with the loaded cell and refuses naming every field that moved; nothing about the
+/// cell's root is bound, so writes to its other fields do not stale the citation. The author states
+/// the observed values (a land cites what its verdict recorded); they are signed with the command.
+fn field_reads(payload: &Value, target: &str) -> Result<Value> {
+    let obj = payload.as_object().ok_or("target payload must be an object")?;
+    if obj.len() != 2 || !obj.contains_key("reads") {
+        return Err("a fieldRead payload may contain only type and reads".into());
+    }
+    let reads = payload["reads"].as_array().ok_or("fieldRead reads must be an array")?;
+    if reads.is_empty() || reads.len() > 64 {
+        return Err("a fieldRead cites 1..64 fields".into());
+    }
+    let mut lowered = Vec::new();
+    for read in reads {
+        let fields = read.as_object().ok_or("a cited read must be an object")?;
+        let key = read.get("key").and_then(Value::as_object).ok_or("a cited read needs a local key")?;
+        if fields.len() != 2 || !fields.contains_key("observed")
+            || key.len() != 2 || key.get("type").and_then(Value::as_str) != Some("object") {
+            return Err("a cited read may contain only key (type=object, field) and observed".into());
+        }
+        let field = key.get("field").and_then(Value::as_str).ok_or("a cited key lacks field")?;
+        decimal(field, "cited field")?;
+        let observed = &read["observed"];
+        if !observed.is_null() {
+            signed_decimal(observed.as_str().ok_or("observed must be null or a decimal string")?, "observed value")?;
+        }
+        lowered.push(json!({"key":{"type":"object","resource":target,"field":field},"observed":observed}));
+    }
+    Ok(json!({"type":"fieldRead","reads":lowered}))
+}
+
+#[cfg(test)]
+mod field_read_tests {
+    use super::*;
+
+    #[test]
+    fn field_read_lowers_keys_to_the_target_and_keeps_observed() {
+        let payload = json!({"type":"fieldRead","reads":[
+            {"key":{"type":"object","field":"1"},"observed":"2"},
+            {"key":{"type":"object","field":"4"},"observed":null}]});
+        assert_eq!(field_reads(&payload, "9").unwrap(), json!({"type":"fieldRead","reads":[
+            {"key":{"type":"object","resource":"9","field":"1"},"observed":"2"},
+            {"key":{"type":"object","resource":"9","field":"4"},"observed":null}]}));
+        assert_eq!(invocation_schema_version(&payload), SCALAR_COMMAND_VERSION);
+    }
+
+    #[test]
+    fn field_read_refuses_an_empty_footprint_a_foreign_key_and_a_bare_number() {
+        for bad in [
+            json!({"type":"fieldRead","reads":[]}),
+            json!({"type":"fieldRead","reads":[{"key":{"type":"object","resource":"7","field":"1"},"observed":"2"}]}),
+            json!({"type":"fieldRead","reads":[{"key":{"type":"object","field":"1"},"observed":2}]}),
+            json!({"type":"fieldRead","reads":[{"key":{"type":"object","field":"1"}}]}),
+        ] {
+            assert!(field_reads(&bad, "9").is_err(), "{bad}");
+        }
+    }
 }
 
 fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
@@ -3193,7 +3298,7 @@ fn propose_summary_once(
                 let payload_obj = payload
                     .as_object()
                     .ok_or("target payload must be an object")?;
-                let read_only = matches!(payload.get("type").and_then(Value::as_str), Some("read" | "kindRead"));
+                let read_only = matches!(payload.get("type").and_then(Value::as_str), Some("read" | "kindRead" | "fieldRead"));
                 let sealing = match if protected || read_only { None } else { sealing_room(private_room_name, root, &reference)? } {
                     // A cell that already holds sealed lines is a private room's,
                     // whatever this reference is called: refuse to write plaintext
@@ -3242,6 +3347,11 @@ fn propose_summary_once(
                     payload.clone()
                 } else if member(payload, "type")? == "kindDefinition" && sealing.is_none() {
                     world_kind::revise(payload, &view, target)?
+                } else if read_only && member(payload, "type")? == "fieldRead" {
+                    if sealing.is_some() || protected {
+                        return Err("a fieldRead cites an ordinary declared cell".into());
+                    }
+                    field_reads(payload, target)?
                 } else if read_only {
                     // An observe-only read of a content cell (K-TRANSCLUDE): the
                     // source a `transclude` of another target names.
@@ -3355,12 +3465,12 @@ fn propose_summary_once(
                 .filter(|key| obj.contains_key(**key))
                 .count();
             if obj.len() != 6 + optional_keys
-                || ["name", "recipient", "verbs", "maxCost"]
+                || ["name", "recipient", "verbs", "perRequestBytes"]
                     .iter()
                     .any(|field| !obj.contains_key(*field))
             {
                 return Err(
-                    "delegate proposal requires type, action, name, recipient, verbs, maxCost"
+                    "delegate proposal requires type, action, name, recipient, verbs, perRequestBytes"
                         .into(),
                 );
             }
@@ -3370,8 +3480,8 @@ fn propose_summary_once(
             let parent_id = member(&reference, "operationCapability")?;
             let recipient = member(&request, "recipient")?;
             decimal(recipient, "delegate recipient")?;
-            let maximum = member(&request, "maxCost")?;
-            field_decimal(maximum, "delegation maxCost")?;
+            let maximum = member(&request, "perRequestBytes")?;
+            field_decimal(maximum, "delegation perRequestBytes")?;
             let selected_verbs = request
                 .get("verbs")
                 .and_then(Value::as_array)
@@ -3434,10 +3544,10 @@ fn propose_summary_once(
                 return Err("parent capability lacks delegation verb".into());
             }
             readable_delegation_verbs(selected_verbs, parent_verbs)?;
-            let parent_max = member(head, "maxCost")?;
-            field_decimal(parent_max, "parent maxCost")?;
+            let parent_max = member(head, "perRequestBytes")?;
+            field_decimal(parent_max, "parent perRequestBytes")?;
             if !decimal_leq(maximum, parent_max) {
-                return Err("delegation maxCost exceeds parent".into());
+                return Err("delegation perRequestBytes exceeds parent".into());
             }
             let parent_before = member(head, "notBefore")?;
             let parent_after = member(head, "notAfter")?;
@@ -3515,7 +3625,7 @@ fn propose_summary_once(
             field_decimal(target_root, "delegation target root")?;
             let mut child = json!({"id":child_id,"root":member(head,"root")?,"parent":parent_id,
                 "issuer":member(head,"issuer")?,"holder":{"type":"subject","subject":recipient},
-                "targets":[target],"verbs":selected_verbs,"maxCost":maximum,
+                "targets":[target],"verbs":selected_verbs,"perRequestBytes":maximum,
                 "notBefore":child_before,"notAfter":child_after,
                 "issuerEpoch":member(head,"issuerEpoch")?,"policyId":member(head,"policyId")?,
                 "policyEpoch":member(head,"policyEpoch")?,"ancestors":ancestors,
@@ -3533,6 +3643,7 @@ fn propose_summary_once(
                 Some(bounds) => Some(delegation_bounds(bounds)?),
                 None => head.get("maxDelta").cloned(),
             };
+            transfer_grant_bounded(kind, selected_verbs, child_bounds.as_ref())?;
             {
                 let scope = child.as_object_mut().ok_or("child capability is not an object")?;
                 if let Some(fields) = child_fields {
@@ -4415,6 +4526,14 @@ pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path)
         "capability":member(delegation,"childCapability")?,
         "receipt":receipt,"proposalSha256":member(&summary,"intentSha256")?,
         "authority":"hint-only"});
+    // The grant's field set and per-turn bounds, as authored (a hint like the
+    // rest of this reference: the Host holds the capability). A holder reads
+    // its spend limit here before it submits a debit.
+    for key in ["fields", "maxDelta"] {
+        if let Some(scope) = child.get(key) {
+            value[key] = scope.clone();
+        }
+    }
     // A room invite (the child is `under` the target): the recipient's
     // reference says so, and `room list` shows it.
     if child.get("room").is_some() {
@@ -9414,7 +9533,7 @@ mod tests {
         let proposal = root.join("proposals/to-bob");
         make_private_dir(&proposal).unwrap();
         let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-            "name":"shared","recipient":"8","verbs":["observe"],"maxCost":"10"});
+            "name":"shared","recipient":"8","verbs":["observe"],"perRequestBytes":"10"});
         create_private(
             &proposal.join("request.json"),
             &serde_json::to_vec(&request).unwrap(),

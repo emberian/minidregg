@@ -42,18 +42,18 @@ set_option autoImplicit false
 
 /-- What a claim about a joint change asserts. -/
 inductive AgreementClaim where
-  /-- A quorum COMMIT certificate exists for exactly this block at this view of this
-  context: the ORDER of the change is agreed. -/
-  | ordered (context : Context) (view : Nat) (block : Block)
-  /-- The change in this block is AUTHORIZED to install in this context. -/
-  | authorized (context : Context) (block : Block)
+  /-- A quorum COMMIT certificate exists for exactly this chain (its length and running
+  digest, the signed statement) at this view of this context: the ORDER of the change is agreed. -/
+  | ordered (context : Context) (view : Nat) (length : Nat) (digest : Bytes)
+  /-- The change in the chain with this digest is AUTHORIZED to install in this context. -/
+  | authorized (context : Context) (digest : Bytes)
 
 /-- The commit-certificate verifier. `accepted` is the native verdict on the exact
 certificate. No certificate discharges an authorization claim. -/
 def certificateVerify (accepted : Certificate → Bool) : AgreementClaim → Certificate → Bool
-  | .ordered context view block, cert =>
+  | .ordered context view length digest, cert =>
       decide (cert.context = context) && decide (cert.view = view) &&
-        decide (cert.block = block) && accepted cert
+        decide (cert.length = length) && decide (cert.digest = digest) && accepted cert
   | .authorized _ _, _ => false
 
 /-- The regime's evidence instance over the native certificate type. -/
@@ -93,7 +93,7 @@ abbrev AgreementPublication.renderedOf {accepted : Certificate → Bool} {ι : T
 /-- **A COMMIT certificate never witnesses authorization**, whatever the native verifier
 accepts. -/
 theorem commit_never_witnesses_authorization (accepted : Certificate → Bool)
-    (context : Context) (block : Block) :
+    (context : Context) (block : Bytes) :
     ¬ @upheld AgreementClaim Certificate (commitEvidence accepted)
         ⟨.authorized context block⟩ := by
   rintro ⟨cert, h⟩
@@ -104,16 +104,16 @@ theorem commit_never_witnesses_authorization (accepted : Certificate → Bool)
 theorem accepted_certificate_upholds_its_order (accepted : Certificate → Bool)
     (cert : Certificate) (h : accepted cert = true) :
     @upheld AgreementClaim Certificate (commitEvidence accepted)
-      ⟨.ordered cert.context cert.view cert.block⟩ :=
+      ⟨.ordered cert.context cert.view cert.length cert.digest⟩ :=
   ⟨cert, by
-    change certificateVerify accepted (.ordered cert.context cert.view cert.block) cert = true
+    change certificateVerify accepted (.ordered cert.context cert.view cert.length cert.digest) cert = true
     simp [certificateVerify, h]⟩
 
 /-- **The authorization badge is unconstructible from agreement evidence.** Any honest
 publication of an authorization claim, whatever regime it was settled in, is not rendered
 as a witness: the honesty field would force a discharging certificate, and none exists. -/
 theorem authorization_never_rendered_as_witness {ι : Type} (accepted : Certificate → Bool)
-    (pub : AgreementPublication accepted ι) {context : Context} {block : Block}
+    (pub : AgreementPublication accepted ι) {context : Context} {block : Bytes}
     (hclaim : pub.claimOf = ⟨.authorized context block⟩) :
     pub.renderedOf ≠ Regime.witness := by
   letI := commitEvidence accepted
@@ -130,7 +130,7 @@ def orderingPublication {ι : Type} (accepted : Certificate → Bool) (ballot : 
     (cert : Certificate) (h : accepted cert = true) : AgreementPublication accepted ι :=
   letI := commitEvidence accepted
   letI := noRefutation accepted
-  { claim := ⟨.ordered cert.context cert.view cert.block⟩
+  { claim := ⟨.ordered cert.context cert.view cert.length cert.digest⟩
     observed := fun r => r.elim
     ballot := ballot
     settledIn := Regime.witness
@@ -152,7 +152,7 @@ def installByAgreement (accepted : Certificate → Bool) (cert : Certificate)
     (h : (signerBallot cert).upholds) : AgreementPublication accepted Nat :=
   letI := commitEvidence accepted
   letI := noRefutation accepted
-  { claim := ⟨.authorized cert.context cert.block⟩
+  { claim := ⟨.authorized cert.context cert.digest⟩
     observed := fun r => r.elim
     ballot := signerBallot cert
     settledIn := Regime.ballot
@@ -174,9 +174,9 @@ def config₀ : GenericSimplex.Config := { (default : GenericSimplex.Config) wit
 /-- The context. -/
 def context₀ : Context := { (default : Context) with config := config₀ }
 
-/-- The certificate: block `[[1]]` at view `1`, signed by party `0`. -/
+/-- The certificate: a chain of one payload with digest `[1]` at view `1`, signed by party `0`. -/
 def cert₀ : Certificate :=
-  { context := context₀, view := 1, block := [[1]], signers := [⟨0, []⟩] }
+  { context := context₀, view := 1, length := 1, digest := [1], signers := [⟨0, []⟩] }
 
 /-- The native verdict, stood in: accept exactly `cert₀`. -/
 def accepted₀ (cert : Certificate) : Bool := decide (cert = cert₀)
@@ -194,14 +194,14 @@ theorem publication₀_upheld :
   letI := noRefutation accepted₀
   rendered_witness_is_true publication₀ rfl
 
-/-- **Teeth (order)**: no accepted certificate orders that block at view `2`. -/
+/-- **Teeth (order)**: no accepted certificate orders that chain at view `2`. -/
 theorem other_view_not_upheld :
     ¬ @upheld AgreementClaim Certificate (commitEvidence accepted₀)
-        ⟨.ordered context₀ 2 [[1]]⟩ := by
+        ⟨.ordered context₀ 2 1 [1]⟩ := by
   rintro ⟨cert, h⟩
-  change certificateVerify accepted₀ (.ordered context₀ 2 [[1]]) cert = true at h
+  change certificateVerify accepted₀ (.ordered context₀ 2 1 [1]) cert = true at h
   simp only [certificateVerify, accepted₀, Bool.and_eq_true, decide_eq_true_eq] at h
-  obtain ⟨⟨⟨-, hview⟩, -⟩, rfl⟩ := h
+  obtain ⟨⟨⟨⟨-, hview⟩, -⟩, -⟩, rfl⟩ := h
   simp [cert₀] at hview
 
 /-- The signer ballot of `cert₀` carries (party `0` signed; quorum one). -/
@@ -217,7 +217,7 @@ strength, and its claim is NOT upheld — agreement evidence carries no authoriz
 theorem install_by_agreement_carries_no_authorization :
     ¬ @upheld AgreementClaim Certificate (commitEvidence accepted₀)
         (installByAgreement accepted₀ cert₀ signerBallot_upholds).claimOf :=
-  commit_never_witnesses_authorization accepted₀ context₀ [[1]]
+  commit_never_witnesses_authorization accepted₀ context₀ [1]
 
 /-- **And it cannot be re-badged as a witness.** -/
 theorem install_by_agreement_not_witness :

@@ -19,6 +19,7 @@ extern crate mini_streams;
 mod app_interface;
 mod attempt_state;
 mod bounds;
+mod refusal_text;
 mod fsio;
 pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json};
 #[cfg(unix)]
@@ -912,7 +913,7 @@ usage:
   mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
   mini fleet --action receipt --dir WORKSPACE (--transaction ID|--head-of NAME)
   mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
-  mini fleet --action incoming --dir WORKSPACE --account NAME [--topic TOPIC] [--since HEIGHT] [--limit N]
+  mini fleet --action incoming --dir WORKSPACE --account NAME [--topic TOPIC] [--since HEIGHT|--after-seq SEQUENCE] [--limit N]
   mini credit --action balance|room|tariff|pay|topup|renew|status|ledger|install|adopt --dir WORKSPACE [--room REF] … (PLACE §2.10; `mini shell` spells them credit / pay ROOM week / tariff / topup / room status|renew|concierge)
     pay, topup and refund keep one operation record per request (or --operation-record PATH): a rerun
     recovers it and never pays twice; --again true pays once more after a decided one
@@ -1400,33 +1401,43 @@ fn generate_key(
     Ok(signing.verifying_key().to_bytes())
 }
 
-/// The Host argv of `mini store audit`: `PINNED.json store-audit [--receipts FILE]`.
-fn store_audit_argv(config: &Path, receipts: Option<&Path>) -> Vec<OsString> {
-    let mut argv = vec![config.as_os_str().to_owned(), OsString::from("store-audit")];
-    if let Some(receipts) = receipts {
-        argv.push(OsString::from("--receipts"));
-        argv.push(receipts.as_os_str().to_owned());
+/// What `mini audit` and `mini store audit` pass to the Host's arm: the recomputed receipts,
+/// the anchor to resume at, and where to leave this audit's anchor.
+#[derive(Default)]
+struct AuditFiles {
+    receipts: Option<PathBuf>,
+    from: Option<PathBuf>,
+    anchor_out: Option<PathBuf>,
+}
+
+impl AuditFiles {
+    fn take(args: &mut Args) -> AuditFiles {
+        AuditFiles {
+            receipts: args.optional("receipts").map(path),
+            from: args.optional("from").map(path),
+            anchor_out: args.optional("anchor-out").map(path),
+        }
+    }
+}
+
+/// The Host argv of `mini audit` and `mini store audit`:
+/// `PINNED.json ARM [--receipts FILE] [--from ANCHOR] [--anchor-out ANCHOR]`.
+fn audit_argv(config: &Path, arm: &str, files: &AuditFiles) -> Vec<OsString> {
+    let mut argv = vec![config.as_os_str().to_owned(), OsString::from(arm)];
+    for (flag, file) in [("--receipts", &files.receipts), ("--from", &files.from), ("--anchor-out", &files.anchor_out)] {
+        if let Some(file) = file {
+            argv.push(OsString::from(flag));
+            argv.push(file.as_os_str().to_owned());
+        }
     }
     argv
 }
 
-/// `mini store audit --host HOST --config PINNED.json [--receipts FILE]`: runs the Host's
-/// `store-audit` arm with the Host's own stdout and stderr, and ends with its exit status
-/// (0 clean, 1 a named refusal, 2 usage). Nothing is captured or reworded.
-fn store_run(mut args: Args) -> Result<()> {
-    const STORE_USAGE: &str = "usage: mini store audit --host HOST --config PINNED.json [--receipts FILE]";
-    if args.optional("action").as_deref() != Some(OsStr::new("audit")) {
-        return Err(STORE_USAGE.to_owned());
-    }
-    if SOCKET.get().is_some() {
-        return Err("store audit requires direct Host/Main CLI".to_owned());
-    }
-    let host = path(args.required("host")?);
-    let config = path(args.required("config")?);
-    let receipts = args.optional("receipts").map(path);
-    args.finish()?;
-    let status = Command::new(&host)
-        .args(store_audit_argv(&config, receipts.as_deref()))
+/// Run the Host's audit arm with the Host's own stdout and stderr, and end with its exit
+/// status (0 clean, 1 a named refusal, 2 usage). Nothing is captured or reworded.
+fn audit_run(host: &Path, config: &Path, arm: &str, files: &AuditFiles) -> Result<()> {
+    let status = Command::new(host)
+        .args(audit_argv(config, arm, files))
         .status()
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
     match status.code() {
@@ -1436,6 +1447,25 @@ fn store_run(mut args: Args) -> Result<()> {
         }
         None => Err(format!("{} ended by signal: {status}", host.display())),
     }
+}
+
+/// `mini store audit --host HOST --config PINNED.json [--receipts FILE] [--from ANCHOR]
+/// [--anchor-out ANCHOR]`: the Host's `store-audit` arm. `--from` resumes the re-admission at
+/// the anchor an accepting audit left with `--anchor-out`; the Store's own derivation is
+/// from genesis either way.
+fn store_run(mut args: Args) -> Result<()> {
+    const STORE_USAGE: &str = "usage: mini store audit --host HOST --config PINNED.json [--receipts FILE] [--from ANCHOR] [--anchor-out ANCHOR]";
+    if args.optional("action").as_deref() != Some(OsStr::new("audit")) {
+        return Err(STORE_USAGE.to_owned());
+    }
+    if SOCKET.get().is_some() {
+        return Err("store audit requires direct Host/Main CLI".to_owned());
+    }
+    let host = path(args.required("host")?);
+    let config = path(args.required("config")?);
+    let files = AuditFiles::take(&mut args);
+    args.finish()?;
+    audit_run(&host, &config, "store-audit", &files)
 }
 
 fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
@@ -1456,13 +1486,6 @@ fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
 fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
     let mut command = Command::new(host);
     command.arg(config).args(arguments);
-    // Audit progress must survive a timeout. Keep ordinary requests and
-    // their captured error diagnostics unchanged; socket calls returned above.
-    if arguments == [OsStr::new("audit")]
-        && std::env::var_os("MINI_AUDIT_TIMING").as_deref() == Some(OsStr::new("1"))
-    {
-        command.stderr(std::process::Stdio::inherit());
-    }
     let output = command
         .output()
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
@@ -3235,11 +3258,9 @@ fn run(mut args: Args) -> Result<()> {
             }
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
+            let files = AuditFiles::take(&mut args);
             args.finish()?;
-            let output = process(&host, &config, &[OsStr::new("audit")])?;
-            mini_streams::out()
-                .write_all(&output.stdout)
-                .map_err(|e| format!("cannot print host output: {e}"))
+            audit_run(&host, &config, "audit", &files)
         }
         "profile" | "describe" => {
             let command = args.command.clone();
@@ -4166,19 +4187,15 @@ mod tests {
     }
 
     #[test]
-    fn store_audit_argv_is_the_host_arm_and_optional_receipts() {
+    fn audit_argv_is_the_host_arm_and_its_optional_files() {
         assert_eq!(
-            store_audit_argv(Path::new("/c.json"), None),
+            audit_argv(Path::new("/c.json"), "store-audit", &AuditFiles::default()),
             [OsString::from("/c.json"), OsString::from("store-audit")]
         );
+        let files = AuditFiles { receipts: Some("/r.bin".into()), from: Some("/a.anchor".into()), anchor_out: Some("/b.anchor".into()) };
         assert_eq!(
-            store_audit_argv(Path::new("/c.json"), Some(Path::new("/r.bin"))),
-            [
-                OsString::from("/c.json"),
-                OsString::from("store-audit"),
-                OsString::from("--receipts"),
-                OsString::from("/r.bin"),
-            ]
+            audit_argv(Path::new("/c.json"), "audit", &files),
+            ["/c.json", "audit", "--receipts", "/r.bin", "--from", "/a.anchor", "--anchor-out", "/b.anchor"].map(OsString::from)
         );
     }
     use ed25519_dalek::{Verifier, VerifyingKey};
@@ -4389,10 +4406,11 @@ mod tests {
         );
         // A Host that names the clause: the line carries it, the committed detail stays in the JSON.
         let clause = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
-            "clause":"declared-resource-scalar: guard-rejected 0","detail":hex(b"DeclaredResourceScalar.Reject.guardRejected 0")});
+            "clause":"declared-resource-controller: effect: scalar: guard-rejected 0",
+            "detail":hex(b"DeclaredResourceController.Reject.effect (Effect.Scalar.guardRejected 0)")});
         assert_eq!(
             refusal_line(&clause).unwrap(),
-            "refused: operation-rejected: declared-resource-scalar: guard-rejected 0 (phase prepare)"
+            "refused: operation-rejected: declared-resource-controller: effect: scalar: guard-rejected 0 (phase prepare)"
         );
         let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
         assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));

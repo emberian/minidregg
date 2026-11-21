@@ -47,6 +47,7 @@ module
 
 public import Effects.Revival.Engine
 public import Kernel.DeclaredResourceController
+public import Kernel.ContentEffect
 
 @[expose] public section
 
@@ -76,65 +77,62 @@ structure LiveCtx where
   target : Nat
   capability : CapabilityId
 
-abbrev ContentSubstrate := storeSubstrate Hyperdocument.layout
+/-- The registry's context of a target under a live context (`targetCtx`), its observe and
+audience fields absent: what the content declaration reads. -/
+def liveEffectCtx (ctx : LiveCtx) : DeclaredResourceController.EffectCtx :=
+  DeclaredResourceController.targetCtx ctx.snapshot ctx.semantics ctx.ambient ctx.command
+    ctx.kind ctx.target ctx.capability none none none
 
 abbrev ContentSpec :=
   EffectSpec LiveCtx ContentSubstrate ContentResource.Command ContentResource.Reject
 
-/-- The fields one content action may write (`ResourceObservationAdmission.contentField`:
-links, marks and annotations are `annotations`, every other namespace `body`; an atom is
-also named by `atomsOf` of its low half). -/
-def contentActionFrame : ContentResource.Action → Finset CellField
-  | .createDocument _ _ => {.body}
-  | .createAtom atom _ _ => {ResourceObservationAdmission.atomField atom.digest.value, .body}
-  | .editAtom edit => {ResourceObservationAdmission.atomField edit.atomId.digest.value}
-  | .rewrapAtom atom _ _ => {ResourceObservationAdmission.atomField atom.digest.value}
-  | .link .. => {.annotations}
-  | .createRun .. => {.body}
-  | .annotate .. => {.annotations}
-  | .rewrapAnnotation .. => {.annotations}
-  | .transclude .. => {.body, .annotations}
-  | .editElement _ => {.body}
-  | .createContainer _ => {.body}
-  | .unlink _ => {.annotations}
-  | .mark .. => {.annotations}
-  | .unmark _ => {.annotations}
-  | .insertRun .. => {.body}
+/-- **The first live declaration: the content-cell write** (`Kernel/ContentEffect.lean`,
+`DeclaredResourceController.contentSpec`), read under a live context. -/
+def contentSpec : ContentSpec := DeclaredResourceController.contentSpec.comap liveEffectCtx
 
-/-- The declared frame of a content command: the union of its actions' frames. -/
-def contentFrame (command : ContentResource.Command) : Finset CellField :=
-  command.actions.foldr (fun action acc => contentActionFrame action ∪ acc) ∅
+/-! What the declaration is under a live context, field by field (each `rfl`): the hand arm's own
+expressions, for the agreement proofs to simplify by. -/
 
-/-- The content semantics: the source-owned lowering `ContentResource.run` (REUSED), its
-patch the descriptor; an empty command refuses `emptyActions` as `prepareCell` does. -/
-def contentSem (ctx : LiveCtx) (command : ContentResource.Command)
-    (s : Store Hyperdocument.layout) : Except ContentResource.Reject (Patch Hyperdocument.layout) :=
-  if command.actions.isEmpty then .error .emptyActions
-  else (ContentResource.run ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
-      (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
-      (ContentResource.documentOf ctx.target)
-      (DeclaredResourceController.contentContext ctx.snapshot ctx.ambient ctx.command)
-      s command).map Prod.snd
+theorem contentSpec_sem (ctx : LiveCtx) (command : ContentResource.Command)
+    (s : Store Hyperdocument.layout) :
+    contentSpec.sem ctx command s =
+      if command.actions.isEmpty then .error .emptyActions
+      else (ContentResource.run ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
+          (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
+          (ContentResource.documentOf ctx.target)
+          (DeclaredResourceController.contentContext ctx.snapshot ctx.ambient ctx.command)
+          s command).map Prod.snd := rfl
 
-/-- **The first live declaration: the content-cell write.**  Wire code 1 of the target
-payload (`payloadStream`'s tag for `Payload.content`), the action grammar's codec
-(`ContentResource.commandStream`), version `ContentResource.commandVersion`. -/
-def contentSpec : ContentSpec where
-  opStream := ContentResource.commandStream
-  refusalName r := reprStr r
-  accepts kind := kind == .object
-  version := ContentResource.commandVersion
-  sem := contentSem
-  rotate ctx s := HyperdocumentCell.contentBlinding.patch s ctx.ambient.height
-  rotated := fun (loc : Address Hyperdocument.layout) => match loc.1 with
-    | .blinding => true
-    | _ => false
-  field := ResourceObservationAdmission.contentFieldAt
-  amount := fun _ _ => 0
-  frame := contentFrame
-  verb := fun kind _ => DeclaredResourceScalar.ordinaryVerb kind
-  view command before after := ContentResource.project before after command
-  commutes := ContentResource.Command.commutes
+@[simp] theorem contentSpec_accepts (kind : ResourceKind) : contentSpec.accepts kind = (kind == .object) := rfl
+
+@[simp] theorem contentSpec_version : contentSpec.version = ContentResource.commandVersion := rfl
+
+@[simp] theorem contentSpec_commutes (command : ContentResource.Command) : contentSpec.commutes command = command.commutes := rfl
+
+@[simp] theorem contentSpec_rotate (ctx : LiveCtx) (s : Store Hyperdocument.layout) :
+    contentSpec.rotate ctx s = HyperdocumentCell.contentBlinding.patch s ctx.ambient.height := rfl
+
+@[simp] theorem contentSpec_frame (command : ContentResource.Command) : contentSpec.frame command = contentFrame command := rfl
+
+@[simp] theorem contentSpec_field : contentSpec.field = ResourceObservationAdmission.contentFieldAt := rfl
+
+@[simp] theorem contentSpec_amount (a : Address Hyperdocument.layout) (v : Option (Hyperdocument.layout.Value a.1)) : contentSpec.amount a v = 0 := rfl
+
+@[simp] theorem contentSpec_verb (kind : ResourceKind) (command : ContentResource.Command) : contentSpec.verb kind command = DeclaredResourceScalar.ordinaryVerb kind := rfl
+
+@[simp] theorem contentSpec_opStream : contentSpec.opStream = ContentResource.commandStream := rfl
+
+@[simp] theorem contentSpec_refusalName (r : ContentResource.Reject) :
+    contentSpec.refusalName r = DeclaredResourceController.contentRefusalName r := rfl
+
+@[simp] theorem contentSpec_refusalDetail (r : ContentResource.Reject) : contentSpec.refusalDetail r = .empty := rfl
+
+@[simp] theorem contentSpec_rotated (loc : Address Hyperdocument.layout) :
+    contentSpec.rotated loc = (match loc.1 with | .blinding => true | _ => false) := rfl
+
+@[simp] theorem contentSpec_view (site : Site) (command : ContentResource.Command)
+    (before after : Store Hyperdocument.layout) :
+    contentSpec.view site command before after = ContentResource.project before after command := rfl
 
 /-- A content target with the given header. -/
 abbrev contentTarget (ctx : LiveCtx) (version : Nat) (root : Digest)
@@ -143,8 +141,11 @@ abbrev contentTarget (ctx : LiveCtx) (version : Nat) (root : Digest)
     DeclaredResourceController.Target :=
   ⟨ctx.kind, ctx.target, ctx.capability, version, root, .content command, observe, epoch, roster⟩
 
-/-- **LIVE KEYSTONE: the deployed content arm agrees with the declaration.**  For every
-transaction context, content command and loaded content cell:
+/-- **LIVE KEYSTONE: the deployed computation of a content target agrees with the declaration.**
+A content payload is the registered operation at code 1, so the deployed computation is
+`Effect.compute contentEffect` read through `computeTarget`; this states what that computation is
+against a declaration `E`, and its teeth (`ContentTeeth`, `ContentCommuteTeeth`) are what it is
+not. For every transaction context, content command and loaded content cell:
 
 1. header — the live arm's three header refusals are the generic ones the declaration's
    `accepts`/`version`/`commutes` determine (`wrongRole`, `unsupportedVersion`, and
@@ -153,7 +154,8 @@ transaction context, content command and loaded content cell:
    command commutes, at ANY planned root), the derived executor admits with post `p`
    exactly when the live arm computes `p` AND the live patch validates at the loaded
    store (what `prepareTarget` requires before it builds a candidate);
-3. refusal — a content refusal of the live arm is the declaration's, by name;
+3. refusal — a refusal the deployed computation names under code 1 is the declaration's, with
+   the same name and detail;
 4. descriptor — the live patch IS the declaration's descriptor followed by its rotate
    (`computeTarget`/`targetPatch` stop being twins);
 5. authority — `targetField`, `targetRatchet`, `targetAmount`, `payloadVerb` and
@@ -181,10 +183,11 @@ def ContentAgreement (E : ContentSpec) : Prop :=
           Patch.ValidFrom pre.logical
             (DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient ctx.command
               (contentTarget ctx E.version root command observe epoch roster) pre))) ∧
-    (∀ r : ContentResource.Reject,
+    (∀ (name : String) (detail : ByteArray),
       DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient ctx.command
-          (contentTarget ctx E.version root command observe epoch roster) pre = .error (.content r) →
-        E.exec 1 ctx command pre.logical = .error (.refused 1 (E.refusalName r))) ∧
+          (contentTarget ctx E.version root command observe epoch roster) pre =
+            .error (.effect (.refused 1 name detail)) →
+        E.exec 1 ctx command pre.logical = .error (.refused 1 name detail)) ∧
     (∀ ps, E.sem ctx command pre.logical = .ok ps →
       DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient ctx.command
           (contentTarget ctx E.version root command observe epoch roster) pre =
@@ -203,7 +206,7 @@ def ContentAgreement (E : ContentSpec) : Prop :=
     (∀ before after : Store Hyperdocument.layout,
       DeclaredResourceController.targetProjection ctx.command.subject
         (contentTarget ctx version root command observe epoch roster) before after =
-          E.view command before after))
+          E.view ⟨ctx.command.subject, ctx.target⟩ command before after))
 
 /-- The content declaration's own obligation: every admitted content command writes only
 its declared fields and its descriptor (with the rotate) replays. -/
@@ -254,29 +257,22 @@ def ContentCommuteTeeth : Prop :=
 /-- **The live keystone, whole.** -/
 def LiveKeystone : Prop := ContentAgreement contentSpec ∧ ContentComplete
 
-/-! ## §7. The DEPLOYED keystone: the Host's target dispatch dispatches through the registry.
+/-! ## §7. The DEPLOYED keystone: the Host's target dispatch dispatches content through the registry.
 
-`ContentAgreement` alone would license keeping the hand arm beside the declaration (the
-law-13 twin).  `HostKeystone` is the statement that closes it: today's target dispatch,
-`hostTargetDispatch` (the payload decode, `selectTarget`, `computeTarget`, the
-`targetPatch` validation and `packTarget` the controller runs per target), dispatches
-through the one-entry registry `[(1, contentHandler)]` with every other payload code in
-`hostLegacy`.  `noTwin` puts code 1 out of the hand arms.
+`ContentAgreement` alone would license keeping a hand arm beside the declaration (the law-13
+twin). `HostKeystone` closes it for content: the deployed target dispatch
+(`liveTargetDispatch`: the payload decode, `selectTarget`, `computeTarget`, the `targetPatch`
+validation and `packTarget` the controller runs per target) dispatches through the registry
+(`RegistryKeystone`, §7b), the registry binds code 1 to the handler DERIVED from the content
+declaration, and code 1 is not a hand arm. `Payload` has no content constructor, so there is
+no arm for a twin to be.
 
-**Known false today, by clause:** `unregistered`: an unknown payload tag (9-255, or a code
-of 256 and up) is refused `malformed`, not by name, and code 1 is still served by the hand
-arm, which `agreement` only matches if the arm is the declaration (`ContentAgreement` plus
-`ContentComplete`).  The migration commit makes it true by rewiring the payload decoder
-through the registry and deleting the content arms; this statement is that commit's gate.
+`hostTargetDispatch` is the controller's own arms composed per target. The poles below
+(`HostTeeth`, `HostAccepted`, `HostMovedRootAccepted`) are stated over the deployed dispatch and
+the handler the registry derives from `contentEffect`; no handler is written here.
 
 Scope: the target dispatch, not the whole of `prepareTarget` (the post law, the policy
 source, the audience freshness and the authority legs stay the controller's). -/
-
-/-- Reindex a declaration's context (the content declaration reads a `LiveCtx`; the host
-dispatch carries more). -/
-def EffectSpec.comap {C C' : Type} {S : Substrate} {O R : Type} (f : C' → C)
-    (E : EffectSpec C S O R) : EffectSpec C' S O R :=
-  { E with sem := fun c => E.sem (f c), rotate := fun c => E.rotate (f c) }
 
 /-- The host dispatch's context: the target computation's, plus the deployment and the
 target header (`selectTarget`'s cell law, the schema version, the expected root, the
@@ -302,7 +298,9 @@ def ofReject (code : Nat) : DeclaredResourceController.Reject → DispatchRefusa
   | .wrongRole => .wrongRole code
   | .unsupportedVersion => .unsupportedVersion code
   | .staleTarget => .staleTarget code
-  | .content r => .refused code (reprStr r)
+  | .capabilityRejected => .capabilityRejected code
+  | .fieldNotNamed => .fieldNotNamed code
+  | .effect refusal => refusal
   | r => .host code (reprStr r)
 
 /-- **Today's target dispatch**, as the controller runs it per target: decode the payload
@@ -328,173 +326,325 @@ def hostTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell :
             (CellState.materialize (hostTarget ctx payload).materializer post))
         else .error (.guardFailed code)
 
-/-- The content cell's header, in the live order: role and cell law and shape
-(`wrongRole`), then the schema version.  The expected root is not the header's: the
-dispatcher's gate refuses a stale plan from `contentFresh` and the declaration's
-`commutes` (`Handler.admits`). -/
-def contentHeader (ctx : HostCtx) (cell : HostCell) : Except DispatchRefusal Unit :=
-  if contentSpec.accepts ctx.kind = false ∨
-      ¬ CanonicalCellRegistry.CellLaw ctx.deployment ctx.target cell then .error (.wrongRole 1)
-  else match cell with
-    | ⟨.content, value⟩ =>
-      if ctx.version ≠ contentSpec.version then .error (.unsupportedVersion 1)
-      else .ok ()
-    | _ => .error (.wrongRole 1)
+/-! ## §7b. The REGISTRY keystone: the deployed target dispatch dispatches code 9 through the registry.
 
-/-- Whether the plan's expected root is the content cell's loaded root (a cell of another
-role is refused by the header before freshness is asked). -/
-def contentFresh (ctx : HostCtx) (cell : HostCell) : Bool :=
-  match cell with
-  | ⟨.content, value⟩ => decide (ctx.root = value.root)
-  | _ => true
+`Payload` has an open constructor, `registered code op`, whose every arm reads the declaration
+`effectAt code` (`Kernel/ResourceEffectRegistry.lean`). The cited read is bound at code 9 and
+has no constructor and no hand arm, nor has any other code: the scalar actions at 0, the
+content write at 1, the stream append at 2, the reads at 3 and 7, a world instance's actions at
+4, the kind definition revision at 5, the two money consents at 6 and 8. `registered` is
+`Payload`'s only constructor.
 
-/-- **The content handler**: `contentSpec` over the host context, the content header, the
-content cell selected and packed. -/
-def contentHandlerOf (E : ContentSpec) : Handler HostCtx HostCell where
-  S := ContentSubstrate
-  O := ContentResource.Command
-  R := ContentResource.Reject
-  spec := E.comap HostCtx.toLiveCtx
-  header := contentHeader
-  fresh := contentFresh
-  select cell := match cell with
-    | ⟨.content, value⟩ => some value.logical
-    | _ => none
-  pack s := ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer s⟩
+`RegistryKeystone` is `Dispatches` of the DEPLOYED functions (`payloadStream`'s decode,
+`selectTarget`, `computeTarget`, the `targetPatch` validation, `packTarget`, exactly
+`hostTargetDispatch`) through `hostRegistry`, every declaration's handler at its code. Its
+`agreement` clause is a refinement of the controller's registered arms against the engine's
+`Handler.fire`, at every operation, context and cell; the legacy list is empty, so `noTwin` is
+vacuous and `unregistered` is the refusal by name of every code no declaration binds.
 
-def contentHandler : Handler HostCtx HostCell := contentHandlerOf contentSpec
+By name at the receiver too: command bytes whose payload tag nothing reads fail
+`commandCodec.decode`, and the receiver answers `Reject.effect (.unregistered tag)` for them, not
+`malformedCommand` (`Kernel/ResourcePayloadTag.lean`, `UnboundTagNamed`); the JSON face names the
+type it did not find (`Host/Json.registeredPayload`). -/
 
-/-- Every payload code but content's is still a hand arm. -/
-def hostLegacy : List Nat := [0, 2, 3, 4, 5, 6, 7, 8]
+/-- The engine context of a host dispatch. -/
+def dispatchCtxOf (ctx : HostCtx) : DeclaredResourceController.DispatchCtx :=
+  { DeclaredResourceController.targetCtx ctx.snapshot ctx.semantics ctx.ambient ctx.command
+      ctx.kind ctx.target ctx.capability ctx.observe ctx.epoch ctx.roster with
+    deployment := ctx.deployment, version := ctx.version, root := ctx.root }
 
-/-- **THE DEPLOYED KEYSTONE.** -/
+/-- **The registry the Host dispatches through**: every declaration's handler, at its code. -/
+def hostRegistry : Registry HostCtx HostCell :=
+  DeclaredResourceController.liveRegistry.map fun entry => (entry.1, entry.2.comap dispatchCtxOf)
+
+/-- **The deployed target dispatch.** A code no declaration binds is refused by name; every
+bound code is today's dispatch (`hostTargetDispatch`: the deployed payload decode,
+selection, computation, patch validation and packing). -/
+def liveTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell : HostCell) :
+    Except DispatchRefusal HostCell :=
+  if DeclaredResourceController.registeredCode code = false then
+    .error (.unregistered code)
+  else hostTargetDispatch code bytes ctx cell
+
+/-- **THE REGISTRY KEYSTONE.** The deployed target dispatch dispatches through the registry
+with no hand arm: the legacy list is empty, so `Dispatches`' `unregistered` clause covers every
+code the registry does not bind. -/
+def RegistryKeystone : Prop := Dispatches hostRegistry [] liveTargetDispatch
+
+/-- **THE DEPLOYED KEYSTONE, for content.** The deployed target dispatch dispatches through the
+registry; the registry's entry at code 1 is the handler derived from the content declaration
+(`Effect.handler`, nothing authored for the dispatch). No code is a hand arm
+(`RegistryKeystone`'s legacy list is empty). -/
 def HostKeystone : Prop :=
-  Dispatches [(1, contentHandler)] hostLegacy hostTargetDispatch
+  RegistryKeystone ∧
+  hostRegistry.lookup 1 =
+    some ((DeclaredResourceController.contentEffect.handler 1).comap dispatchCtxOf)
 
-/-- **Teeth.**  The host dispatch does not dispatch through a registry whose content
-handler drops the rotate, nor through one that also keeps code 1 as a hand arm. -/
+/-- A handler with its declaration's rotate dropped: the same header, freshness, selection and
+packing, an executor that never ratchets. -/
+def Handler.unrotated {Ctx Cell : Type} (h : Handler Ctx Cell) : Handler Ctx Cell :=
+  { h with spec := { h.spec with rotate := fun _ _ => [] } }
+
+/-- The content handler the registry derives, under the Host's context. -/
+abbrev contentHostHandler : Handler HostCtx HostCell :=
+  (DeclaredResourceController.contentEffect.handler 1).comap dispatchCtxOf
+
+/-- **Teeth, for content.** The deployed dispatch does not dispatch through a registry whose
+content handler drops the rotate, nor through the registry with code 1 also kept as a hand
+arm. -/
 def HostTeeth : Prop :=
-  ¬ Dispatches [(1, contentHandlerOf contentGhost)] hostLegacy hostTargetDispatch ∧
-  ¬ Dispatches [(1, contentHandler)] (1 :: hostLegacy) hostTargetDispatch
+  ¬ Dispatches [(1, contentHostHandler.unrotated)] [] liveTargetDispatch ∧
+  ¬ Dispatches hostRegistry [1] liveTargetDispatch
 
-/-- **Premise inhabitation.**  The content handler is sound (its `select`/`pack` are
-inverse both ways, the store substrate is framed) and lawful. -/
-def HostPremise : Prop := contentHandler.Lawful
-
-/-- **Satisfiable (the accepted branch).**  Some content cell and well-encoded content
-command are admitted by the host dispatch (the doc-write fixture is the intended
-inhabitant, owed). -/
+/-- **Satisfiable (the accepted branch).** Some content cell and well-encoded content command
+are admitted by the deployed dispatch. -/
 def HostAccepted : Prop :=
   ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
-    hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
+    liveTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
 
-/-- **Satisfiable (a moved root).**  A commuting content command whose plan names a root that
-is NOT the cell's (`contentFresh` false) is admitted by the host dispatch: the accepting pole
-of `Kernel.ContentCommutingAppend.CommutingPrepare` (through `PrepareFactors`), over the blinded
-sample cell. -/
+/-- **Satisfiable (a moved root).** A commuting content command whose plan names a root that is
+NOT the cell's (the derived handler's `fresh` is false) is admitted by the deployed dispatch: the
+accepting pole of `Kernel.ContentCommutingAppend.CommutingPrepare`, over the blinded sample
+cell. -/
 def HostMovedRootAccepted : Prop :=
   ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
-    op.commutes = true ∧ contentFresh ctx cell = false ∧
-    hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
+    op.commutes = true ∧ contentHostHandler.fresh ctx cell = false ∧
+    liveTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
 
-/-! ## §8. The deployed receiver factors through the dispatcher.
+/-- **Premise inhabitation.** Every bound handler is lawful: sound (its `select` and `pack`
+are inverse both ways under every context, the store substrate is framed) and complete. -/
+def RegistryPremise : Prop := ∀ code e, hostRegistry.lookup code = some e → e.Lawful
 
-`HostKeystone` is about `hostTargetDispatch`, a wrapper this file writes; its contract alone
-is not the receiver's.  `PrepareFactors` (pass 27) states the controller's own per-target
-preparation, `ResourceTransaction.prepareTarget`, as the content handler's dispatch followed
-by `genericChecks`, which reads only the pre and post cells, the policy source and the
-audience, never the payload or the command.  The bridge's three directions (acceptance,
-acceptance up to generic refusal, refusal by name) are its corollaries, and it is the shape
-`prepareTarget` takes at the migration commit, where this is that commit's gate.
+/-- **Satisfiable (both poles of the cited read, through the deployed dispatch).** Some cited
+read is admitted and returns the cell it met; and some cited read is refused BY NAME with a
+structured detail that decodes to the one key that moved. -/
+def RegistryAccepted : Prop :=
+  (∃ (reads : List DeclaredResourceController.FieldRead) (ctx : HostCtx) (cell : HostCell),
+    reads ≠ [] ∧
+    liveTargetDispatch 9 ((StreamCodec.list DeclaredResourceController.fieldReadStream).encode reads)
+      ctx cell = .ok cell) ∧
+  (∃ (reads : List DeclaredResourceController.FieldRead) (ctx : HostCtx) (cell : HostCell)
+      (detail : ByteArray) (key : EffectDeclaration.StateKey),
+    liveTargetDispatch 9 ((StreamCodec.list DeclaredResourceController.fieldReadStream).encode reads)
+      ctx cell = .error (.refused 9 "citedStale" detail) ∧
+    DeclaredResourceController.movedStream.toLawful.decode detail.data.toList = some [key])
 
-`HostLegacyCensus` is the structural deletion check over the live legacy input type, the
-`Payload` inductive: no payload constructor at a registered code.  It is FALSE today
-(`Payload.content` has tag 1); it becomes provable exactly when the migration removes that
-constructor. -/
+/-- The ghost of the cited read: the same declaration, admitting whatever the cell holds (its
+footprint is never compared). -/
+def citedGhost : DeclaredResourceController.Effect :=
+  { DeclaredResourceController.citedEffect with
+    spec := { DeclaredResourceController.citedSpec with sem := fun _ _ _ => .ok [] }
+    member := none
+    member_exact := by intro _ stated; cases stated
+    unchanging_silent := by intro stated; cases stated
+    born_admitted := by intro _ _ _ stated; cases stated
+    observes_silent := by
+      intro ctx op s ps _ emitted
+      exact (Except.ok.inj emitted).symm
+    complete := by
+      intro ctx op s ps ok
+      have empty : ps = [] := (Except.ok.inj ok).symm
+      subst empty
+      exact ⟨fun loc member => absurd member (Finset.notMem_empty loc), rfl⟩
+    view_unjoint := DeclaredResourceController.citedEffect.view_unjoint }
 
-/-- The host context of a content target. -/
+/-- **Teeth.** The deployed dispatch does not dispatch through a registry whose code 9 never
+compares the footprint (agreement bites: the deployed arm refuses a stale read), nor through
+the registry with code 9 also kept as a hand arm (noTwin bites), nor is a code nothing binds
+read by anything (an explicit instance of the refusal by name, at a code beside the bound one
+and at one past the octet). -/
+def RegistryTeeth : Prop :=
+  ¬ Dispatches [(9, (citedGhost.handler 9).comap dispatchCtxOf)] [] liveTargetDispatch ∧
+  ¬ Dispatches hostRegistry [9] liveTargetDispatch ∧
+  (∀ bytes ctx cell, liveTargetDispatch 10 bytes ctx cell = .error (.unregistered 10)) ∧
+  (∀ bytes ctx cell, liveTargetDispatch 300 bytes ctx cell = .error (.unregistered 300))
+
+/-- **THE PAYLOAD DECODE CENSUS.** The payload decoder hands a bound tag to its declaration's
+own decoder and to nothing else: there is no hand decoder. -/
+def PayloadDecodeCensus : Prop :=
+  ∀ (tag : UInt8) bytes, DeclaredResourceController.registeredOctet tag = true →
+    DeclaredResourceController.payloadStream.decodePrefix (tag :: bytes) =
+      ((DeclaredResourceController.effectAt tag.toNat).spec.opStream.decodePrefix bytes).map
+        fun decoded => (.registered tag decoded.1, decoded.2)
+
+/-- **Census teeth**: an octet no declaration binds is refused by the payload decoder itself,
+whatever follows it. -/
+def PayloadDecodeCensusTeeth : Prop :=
+  ∀ (tag : UInt8) bytes, DeclaredResourceController.registeredOctet tag = false →
+    DeclaredResourceController.payloadStream.decodePrefix (tag :: bytes) = none
+
+/-! ## §8. The deployed receiver factors through the registry.
+
+`RegistryKeystone` is about `liveTargetDispatch`, a function this file writes out of the
+controller's arms; its contract alone is not the receiver's. `PrepareFactors` states the
+controller's own per-target preparation, `ResourceTransaction.prepareTarget`, at every target
+of a bound code: its packed post and its named refusal are the registry's dispatch of the
+operation's bytes, then `genericChecks`, which reads only the pre and post cells, the policy
+source and the audience, never the payload or the command. -/
+
+/-- The host context of a target. -/
 def hostCtxOf (ctx : LiveCtx) (deployment : DeclaredResourceController.Deployment)
     (version : Nat) (root : Digest) (observe : Option CapabilityId) (epoch : Option Nat)
     (roster : Option ObjectAudienceRoster.Roster) : HostCtx :=
   { ctx with deployment, version, root, observe, epoch, roster }
 
 /-- The receiver's checks after the effect, payload-blind by signature: the final-post law,
-the policy source, audience freshness (`prepareTarget`'s order), each refusal named. -/
-def genericChecks (deployment : DeclaredResourceController.Deployment)
+the policy source, audience freshness (`prepareTarget`'s order), each refusal named under the
+target's code. -/
+def genericChecks (code : Nat) (deployment : DeclaredResourceController.Deployment)
     (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
     (snapshot : DeclaredResourceController.AuthoritySnapshot) (target : Nat)
     (epoch : Option Nat) (before after : HostCell) : Except DispatchRefusal HostCell :=
   if CanonicalCellRegistry.FinalPostLaw deployment target before after then
     match CanonicalCellRegistry.loadPolicySource snapshot.domain directory
         (snapshot.authState.policyAddress ⟨target⟩ (snapshot.authState.policyRevision ⟨target⟩)) with
-    | none => .error (ofReject 1 .policyUnavailable)
+    | none => .error (ofReject code .policyUnavailable)
     | some source =>
       match ObjectAudience.checkFresh source.record.audience target epoch with
-      | .error reason => .error (ofReject 1 (.audience reason))
+      | .error reason => .error (ofReject code (.audience reason))
       | .ok () => .ok after
-  else .error (ofReject 1 .invalidPost)
+  else .error (ofReject code .invalidPost)
 
-/-- **THE RECEIVER FACTORIZATION.**  For a content target whose slot is present, the
-deployed preparation (its post packed, its refusals named) is the dispatch, then the
-generic checks. -/
-def PrepareFactors (E : ContentSpec) : Prop :=
+/-- **THE RECEIVER FACTORIZATION.** For a target of a bound code whose slot is present, the
+deployed preparation (its post packed, its refusals named under the code) is the registry's
+dispatch of the operation, then the generic checks. It is one statement for every declared
+effect: nothing in it names content or the cited read. -/
+def PrepareFactors : Prop :=
+  ∀ (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (ctx : LiveCtx) (tag : UInt8) (op : (DeclaredResourceController.effectAt tag.toNat).O)
+    (version : Nat) (root : Digest) (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster) (before : HostCell),
+    DeclaredResourceController.registeredCode tag.toNat = true →
+    directory.slots ctx.target = .present before →
+    ((DeclaredResourceController.prepareTarget deployment directory ctx.snapshot ctx.semantics
+        ctx.ambient ctx.command
+        (hostTarget (hostCtxOf ctx deployment version root observe epoch roster)
+          (.registered tag op))).map
+        (fun prepared => DeclaredResourceController.packTarget
+          (hostTarget (hostCtxOf ctx deployment version root observe epoch roster)
+            (.registered tag op)) prepared.candidate.post)).mapError (ofReject tag.toNat) =
+      (dispatch hostRegistry tag.toNat
+          ((DeclaredResourceController.effectAt tag.toNat).spec.opStream.encode op)
+          (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
+        genericChecks tag.toNat deployment directory ctx.snapshot ctx.target epoch before
+
+/-! ### The wrong-role pole
+
+Before content was declared, `selectTarget` at a content target asked the role first, so a
+content target under a role that is not an object was not selected and `prepareTarget` answered
+`wrongRole` there. The declaration's selection (`Effect.select`) does not read the role: a
+content cell under the cell law is selected, and the computation's header refuses `wrongRole`
+as its first check. The three statements below say the receiver answers exactly what it
+answered before, for every input, and that no preparation exists to carry a charge. -/
+
+/-- **The wrong-role pole.** A content target under a role that is not an object is refused by
+the deployed preparation whatever the loaded cell, the schema version, the planned root and the
+command: `missingTarget` when its slot is absent, `wrongRole` otherwise. That is the whole
+value of `prepareTarget` on such a target, so no other refusal (a stale root, a version, a
+content refusal, a patch or law or policy or audience refusal) can come before it; and it is the
+value the hand arm's selection gave. -/
+def ContentWrongRole : Prop :=
   ∀ (deployment : DeclaredResourceController.Deployment)
     (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
     (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
     (observe : Option CapabilityId) (epoch : Option Nat)
-    (roster : Option ObjectAudienceRoster.Roster) (before : HostCell),
-    directory.slots ctx.target = .present before →
-    ((DeclaredResourceController.prepareTarget deployment directory ctx.snapshot ctx.semantics
-        ctx.ambient ctx.command (contentTarget ctx version root command observe epoch roster)).map
-        (fun prepared => DeclaredResourceController.packTarget
-          (contentTarget ctx version root command observe epoch roster) prepared.candidate.post)).mapError
-        (ofReject 1) =
-      (dispatch [(1, contentHandlerOf E)] 1 (ContentResource.commandStream.encode command)
-          (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
-        genericChecks deployment directory ctx.snapshot ctx.target epoch before
+    (roster : Option ObjectAudienceRoster.Roster),
+    ctx.kind ≠ .object →
+    DeclaredResourceController.prepareTarget deployment directory ctx.snapshot ctx.semantics
+        ctx.ambient ctx.command (contentTarget ctx version root command observe epoch roster) =
+      match directory.slots ctx.target with
+      | .absent => .error .missingTarget
+      | .present _ => .error .wrongRole
 
-/-- The live legacy input type's tag: `payloadStream`'s tag octet. -/
-def payloadTag (payload : DeclaredResourceController.Payload) : Nat :=
-  ((DeclaredResourceController.payloadStream.encode payload).headD 0).toNat
+/-- **The wrong-role pole, for every registered effect.** A registered target under a role its
+declaration does not accept is refused by the deployed preparation whatever the loaded cell, the
+schema version, the planned root, the operation and the command: `missingTarget` when its slot
+is absent, `wrongRole` otherwise. That is the whole value of `prepareTarget` there, so no other
+refusal comes before it. A hand arm whose selection required the role answered the same: binding
+a code does not move this refusal (the content read and the kind read under an account or a
+program, `readWrongRole`). -/
+def RegisteredWrongRole : Prop :=
+  ∀ (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (snapshot : DeclaredResourceController.AuthoritySnapshot) (semantics : Digest)
+    (ambient : DeclaredResourceController.Ambient) (command : DeclaredResourceController.Command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (code : UInt8) (op : (DeclaredResourceController.effectAt code.toNat).O)
+    (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster),
+    (DeclaredResourceController.effectAt code.toNat).spec.accepts kind = false →
+    DeclaredResourceController.prepareTarget deployment directory snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .registered code op, observe, epoch, roster⟩ =
+      match directory.slots id with
+      | .absent => .error .missingTarget
+      | .present _ => .error .wrongRole
 
-/-- **THE LIVE LEGACY CENSUS** (false until the content constructor is deleted). -/
-def HostLegacyCensus : Prop := LegacyDisjoint payloadTag [(1, contentHandler)]
+/-- **The pole is inhabited at the two reads**: neither accepts an account or a program, and
+both accept an object (so the premise of `RegisteredWrongRole` is not vacuous and not total). -/
+def ReadRoles : Prop :=
+  DeclaredResourceController.readEffect.spec.accepts .account = false ∧
+  DeclaredResourceController.readEffect.spec.accepts .program = false ∧
+  DeclaredResourceController.readEffect.spec.accepts .object = true ∧
+  DeclaredResourceController.kindReadEffect.spec.accepts .account = false ∧
+  DeclaredResourceController.kindReadEffect.spec.accepts .program = false ∧
+  DeclaredResourceController.kindReadEffect.spec.accepts .object = true
 
-/-- **Census teeth, today**: the content payload still carries code 1, so the census is
-false until the migration deletes it. -/
-def HostLegacyCensusRefutedToday : Prop := ¬ HostLegacyCensus
+/-- **Nothing is prepared, so nothing is charged.** No prepared target exists for a content
+target under a role that is not an object, and so no preparation of any command that holds one
+(`PreparedOn.targets`). A command's compute plan and money plan are fields of its preparation
+(`PreparedOn.compute`, `PreparedOn.money`), built by `prepareOn` only after every target is
+prepared: there is none to install. -/
+def ContentWrongRoleUncharged : Prop :=
+  (∀ (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
+    (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster),
+    ctx.kind ≠ .object →
+    IsEmpty (DeclaredResourceController.PreparedTarget deployment directory ctx.snapshot
+      ctx.semantics ctx.ambient ctx.command
+      (contentTarget ctx version root command observe epoch roster))) ∧
+  (∀ {F : Type} [Field F] (deployment : DeclaredResourceController.Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : DeclaredResourceController.Ambient)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (authority : DeclaredResourceController.AuthoritySnapshot)
+    (cells : RunComputeBudgetDomain.Physical) (declared : Bool)
+    (command : DeclaredResourceController.Command)
+    (i : DeclaredResourceController.TargetIndex command)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (content : ContentResource.Command) (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster),
+    command.targets[i] =
+      ⟨kind, id, capability, version, root, .content content, observe, epoch, roster⟩ →
+    kind ≠ .object →
+    IsEmpty (DeclaredResourceController.PreparedOn deployment profile ambient directory authority
+      cells declared command))
 
-/-! ### The deployed payload decoder, read as a prefix (review gap 3, live).
-
-`targetStream` reads a target's payload with `payloadStream.decodePrefix` and then continues
-with the target's later fields.  `ContentPrefixAgreement` says that on content's code the
-deployed decoder consumes exactly what the registry's prefix reader consumes and hands back
-the same suffix, so routing the payload through the registry at the migration commit does
-not move a single target's bytes.  Its teeth: the agreement is not a property of every code
-(binding the content handler at the observe-only read's code 3 disagrees). -/
-
-/-- The deployed payload decoder as a prefix reader: the tag octet, the payload's bytes after
-it, the suffix. -/
-def payloadPrefix : PrefixReader := fun bytes =>
-  (DeclaredResourceController.payloadStream.decodePrefix bytes).map fun decoded =>
-    (payloadTag decoded.1, (DeclaredResourceController.payloadStream.encode decoded.1).tail, decoded.2)
-
-/-- **LIVE PREFIX AGREEMENT.**  On content's code, every byte string is read alike by the
-deployed payload decoder and by the registry's prefix reader: refused alike, or the same
-operation bytes and the same suffix. -/
-def ContentPrefixAgreement : Prop :=
-  ∀ rest, payloadPrefix (1 :: rest) = readPrefix [(1, contentHandler)] (1 :: rest)
-
-/-- **Satisfiable.**  The agreement's accepting side is inhabited: a content command's
-encoding after code 1, with any suffix, is read as that command's bytes and that suffix. -/
-def ContentPrefixAccepts : Prop :=
-  ∃ (command : ContentResource.Command) (suffix : List UInt8),
-    payloadPrefix (1 :: (ContentResource.commandStream.encode command ++ suffix)) =
-      some (1, ContentResource.commandStream.encode command, suffix)
-
-/-- **Teeth.**  At the read's code (3), the deployed decoder accepts `[3]` (an observe-only
-read, no bytes after its tag) while the content handler bound there refuses it. -/
-def ContentPrefixTeeth : Prop :=
-  payloadPrefix [3] ≠ readPrefix [(3, contentHandler)] [3]
+/-- **The command's refusal, and where it falls.** A command whose one target is a content
+target under a role that is not an object, its slot present, and which passes the gates before
+its targets (it writes, its marker is declared, the clock loads), is refused `wrongRole` by
+`prepareOn`: after the clock, at the target, before the openings, the marker, the compute plan,
+the run check and the money plan, none of which is evaluated. -/
+def ContentWrongRoleCommand : Prop :=
+  ∀ {F : Type} [Field F] (deployment : DeclaredResourceController.Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : DeclaredResourceController.Ambient)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (authority : DeclaredResourceController.AuthoritySnapshot)
+    (cells : RunComputeBudgetDomain.Physical)
+    (subject : SubjectId) (nonce : Nat) (run : Option Run.RunClaim)
+    (family : Option NativeInvocationStatement.Family)
+    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat) (root : Digest)
+    (content : ContentResource.Command) (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster)
+    (before : CellRegistry.PackedCell DeclaredResourceController.Registry)
+    (clock : ClockCellDomain.Loaded deployment cells),
+    kind ≠ .object → directory.slots id = .present before →
+    ClockCellDomain.load deployment cells = some clock →
+    (⟨subject, nonce, [⟨kind, id, capability, version, root, .content content, observe, epoch,
+        roster⟩], run, family⟩ : DeclaredResourceController.Command).writesSome = true →
+    (DeclaredResourceController.prepareOn deployment profile ambient directory authority cells true
+        ⟨subject, nonce, [⟨kind, id, capability, version, root, .content content, observe, epoch,
+          roster⟩], run, family⟩).map (fun _ => ()) = .error .wrongRole
 
 end Minidregg.Effects.Revival

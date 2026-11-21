@@ -416,14 +416,14 @@ fn resource(run: &mut Run<'_>, me: &str, name: &str, all: bool) -> Result<()> {
             }
             "delegate" => {
                 // To myself, narrowed to itself: the parent's own verbs and
-                // maxCost. When the parent record is unreadable, authoring the
+                // perRequestBytes. When the parent record is unreadable, authoring the
                 // delegation reads it, and the Host's refusal of that read is
                 // the verdict.
-                let (verbs, max_cost, what) = match parent.as_ref() {
+                let (verbs, per_request_bytes, what) = match parent.as_ref() {
                     Some(head) => {
-                        let max_cost = head["maxCost"].as_str().unwrap_or("0").to_owned();
-                        let what = format!("to myself, the parent's own verbs, maxCost {max_cost}");
-                        (head["verbs"].clone(), max_cost, what)
+                        let per_request_bytes = head["perRequestBytes"].as_str().unwrap_or("0").to_owned();
+                        let what = format!("to myself, the parent's own verbs, perRequestBytes {per_request_bytes}");
+                        (head["verbs"].clone(), per_request_bytes, what)
                     }
                     None => (
                         json!(["observe"]),
@@ -433,7 +433,7 @@ fn resource(run: &mut Run<'_>, me: &str, name: &str, all: bool) -> Result<()> {
                     ),
                 };
                 let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-                    "name":name,"recipient":me,"verbs":verbs,"maxCost":max_cost});
+                    "name":name,"recipient":me,"verbs":verbs,"perRequestBytes":per_request_bytes});
                 row(verb, &run.probe(verb, request)?, &what);
             }
             "law" => match signed_view_decided(root, workspace, &reference, "policy")? {

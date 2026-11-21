@@ -1,7 +1,7 @@
-//! `mini pay refill`: the owner of a Book account funds an AgentGrain purse
+//! `mini pay refill`: a grant holder on a Book account funds an AgentGrain purse
 //! (PAY P6). The Host authors every byte (`author pay-refill`), decides the
 //! joint turn and names the signing header (op113); Rust retains each exact
-//! frame in a fresh directory, signs the header with the owner's key, and
+//! frame in a fresh directory, signs the header with the holder's key, and
 //! submits once (op115). A retained directory is never resubmitted: an
 //! uncertain submission is resolved only by the receipt-only lookup (op116).
 use crate::agent_reserve::bounded;
@@ -13,7 +13,9 @@ const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
-        _ => Err(format!("pay refill: Host refused op{operation}; exact frame retained")),
+        [byte, body @ ..] if matches!(*byte, crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED) =>
+            Err(format!("pay refill: Host refused op{operation}: {}; exact frame retained", crate::refusal_text::render(body))),
+        _ => Err(format!("pay refill: invalid frame for op{operation}; exact frame retained")),
     }
 }
 

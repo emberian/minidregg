@@ -91,19 +91,21 @@ theorem create_success_iff
     (request : CreateRequest (CellId := CellId) registry) :
     CellRegistry.create registry before request = .ok after ↔
       before.slots request.cellId = .absent ∧
-      request.cellId ∉ before.used ∧
+      before.used request.cellId = false ∧
       request.expectedPreRoot = CellSlot.root registry .absent ∧
       after = Directory.insert registry before request.cellId request.cell := by
   cases slot : before.slots request.cellId with
   | absent =>
-      by_cases used : request.cellId ∈ before.used
-      · simp [CellRegistry.create, slot, used]
-      · by_cases root : request.expectedPreRoot = CellSlot.root registry .absent
+      cases used : before.used request.cellId
+      case true => simp [CellRegistry.create, slot, used]
+      case false =>
+        by_cases root : request.expectedPreRoot = CellSlot.root registry .absent
         · simp [CellRegistry.create, slot, used, root, eq_comm]
         · have root' : request.expectedPreRoot ≠
               registry.rootBytes ((CellSlot.codec registry).encode .absent) := root
           simp [CellRegistry.create, slot, used, root']
   | present cell => simp [CellRegistry.create, slot]
+
 
 theorem allocate_success_post
     (before after : Directory CellId registry)
@@ -126,7 +128,8 @@ theorem allocate_success_used
     (before after : Directory CellId registry)
     (requests : List (CreateRequest (CellId := CellId) registry))
     (success : allocate registry before requests = .ok after) :
-    after.used = before.used ∪ (requests.map CreateRequest.cellId).toFinset := by
+    ∀ cellId, after.used cellId =
+      (before.used cellId || decide (cellId ∈ requests.map CreateRequest.cellId)) := by
   induction requests generalizing before with
   | nil =>
       have same := Except.ok.inj success
@@ -139,9 +142,10 @@ theorem allocate_success_used
       | ok next =>
           have checks := (create_success_iff registry before next request).mp head
           have tail := induction next (by simpa [head] using success)
-          rw [tail, checks.2.2.2]
-          ext cellId
-          simp [Directory.insert]
+          intro cellId
+          rw [tail cellId, checks.2.2.2]
+          simp only [Directory.insert, List.map_cons, List.mem_cons, Bool.decide_or]
+          cases before.used cellId <;> simp
 
 /-- An accepted birth cannot change another logical slot. -/
 theorem allocate_frame
@@ -172,7 +176,7 @@ theorem allocate_success_fresh
     (before after : Directory CellId registry)
     (requests : List (CreateRequest (CellId := CellId) registry))
     (success : allocate registry before requests = .ok after) :
-    ∀ request ∈ requests, request.cellId ∉ before.used := by
+    ∀ request ∈ requests, before.used request.cellId = false := by
   induction requests generalizing before with
   | nil => simp
   | cons request rest induction =>
@@ -187,8 +191,8 @@ theorem allocate_success_fresh
           · exact checks.2.1
           · have fresh := tail candidate inRest
             rw [checks.2.2.2] at fresh
-            simp only [Directory.insert, Finset.mem_union, not_or] at fresh
-            exact fresh.1
+            simp only [Directory.insert, Bool.or_eq_false_iff] at fresh
+            exact fresh.2
 
 /-- Permanent freshness also prevents a duplicate identifier inside a batch. -/
 theorem allocate_success_distinct
@@ -211,9 +215,8 @@ theorem allocate_success_distinct
           intro member
           obtain ⟨candidate, inRest, same⟩ := List.mem_map.mp member
           have fresh := tailFresh candidate inRest
-          apply fresh
-          rw [same, checks.2.2.2]
-          simp [Directory.insert]
+          rw [same, checks.2.2.2] at fresh
+          simp [Directory.insert] at fresh
 
 /-- Each requested exact typed payload survives the complete accepted batch. -/
 theorem allocate_success_created
@@ -248,7 +251,7 @@ theorem allocate_of_fresh
     (requests : List (CreateRequest (CellId := CellId) registry))
     (distinct : (requests.map CreateRequest.cellId).Nodup)
     (fresh : ∀ request ∈ requests,
-      before.slots request.cellId = .absent ∧ request.cellId ∉ before.used)
+      before.slots request.cellId = .absent ∧ before.used request.cellId = false)
     (roots : ∀ request ∈ requests,
       request.expectedPreRoot = CellSlot.root registry .absent) :
     allocate registry before requests = .ok (inserted registry before requests) := by
@@ -261,8 +264,8 @@ theorem allocate_of_fresh
       have nextFresh : ∀ candidate ∈ rest,
           (Directory.insert registry before request.cellId request.cell).slots
               candidate.cellId = .absent ∧
-          candidate.cellId ∉
-            (Directory.insert registry before request.cellId request.cell).used := by
+          (Directory.insert registry before request.cellId request.cell).used
+            candidate.cellId = false := by
         intro candidate member
         have wasFresh := fresh candidate (by simp [member])
         have different : candidate.cellId ≠ request.cellId := by
@@ -317,7 +320,7 @@ theorem duplicate_birth_refused
     (first second : CreateRequest (CellId := CellId) registry)
     (sameId : second.cellId = first.cellId)
     (absent : before.slots first.cellId = .absent)
-    (fresh : first.cellId ∉ before.used)
+    (fresh : before.used first.cellId = false)
     (root : first.expectedPreRoot = CellSlot.root registry .absent) :
     allocate registry before [first, second] =
       .error CellRegistry.RejectReason.duplicateCreate := by
@@ -607,7 +610,17 @@ def factoryRequest {registry : TypeRegistry Digest}
   policyId := pins.policyId
   policyEpoch := oldAuthority.policyEpoch pins.policyId
   policyRevision := oldAuthority.policyRevision pins.policyId
-  cost := descriptor.fee.amount
+  cost := (encoding.codec.encode descriptor).length
+
+/-- The factory leg's `cost` is the descriptor's encoded length, the unit of every signed
+request. The fee is a Book debit, bounded by the payer grant's balance bound. -/
+@[simp] theorem factoryRequest_cost {registry : TypeRegistry Digest}
+    (pins : FactoryPins) (encoding : SourceEncoding registry)
+    (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
+    (descriptor : Descriptor registry) :
+    (factoryRequest pins encoding oldAuthority factoryPreRoot height descriptor).cost =
+      (encoding.codec.encode descriptor).length :=
+  rfl
 
 /-- Authorization is obtained before any newborn authority or account exists.
 This token binds the complete descriptor, the exact selected old factory

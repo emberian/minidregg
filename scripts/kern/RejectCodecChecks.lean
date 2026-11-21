@@ -17,6 +17,8 @@ private def check (name : String) (cause : Reject) (bound : Nat) : IO Unit := do
     throw (IO.userError s!"{name}: typed cause changed")
   unless rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v1".toUTF8.toList ++ bytes) |>.isNone do
     throw (IO.userError s!"{name}: old codec edition loaded")
+  unless rejectCodec.decode ("DREGG/OBJECTIVE/ACTIVITY/REJECT/v2".toUTF8.toList ++ bytes) |>.isNone do
+    throw (IO.userError s!"{name}: v2 codec edition loaded")
   let source : StableEvent := ⟨1, ⟨1⟩, ⟨2⟩, [1, 2, 3]⟩
   let stored := failedEvent source cause
   let some (recovered, disposition) := recordedDisposition stored
@@ -46,6 +48,6 @@ def main : IO Unit := do
     (fun reason n => ObjectiveCall.CallRefusal.extractionAccount reason (1000 + n) n) terminal
   check "long-law-and-recursive-accounts" (.call accounted ⟨100, 200, 300, 400⟩) 20000
   check "list-of-long-field-names" (.kernel (.fieldsForgotten [text, text, text])) 20000
-  check "long-signature-footprint" (.signature (.footprintStale (List.replicate 4096 255))) 10000
+  check "long-signature-footprint" (.signature (.footprintStale [List.replicate 4096 255])) 10000
   check "long-process-detail" (.signature (.envelope (.nativeVerify (.processFailed 42 text)))) 10000
   check "domain-law" (.kernel (.domainLawDenied ⟨42⟩ leaf)) 10000

@@ -18,7 +18,7 @@ The plan binds the author's authority footprint (`Theory.PlanBinding`) and reads
 nothing room-wide, so K authors writing K streams never stale each other either
 (`append_admits_disjoint_authors`).  A fleet topic's
 head is not a room stream: an `append` target naming one is refused
-`wrongRole` (`room_append_refuses_topic_head`).
+`topicHead` (`room_append_refuses_topic_head`).
 
 The per-author discipline is a law installed at birth (`authorLaw`): every
 write is by the author.  A stream born `--in R` is covered by `under R`
@@ -72,68 +72,106 @@ theorem authorLaw_admits_author (author : SubjectId) (old new : Minidregg.Pred.S
 
 variable (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
 
-/-- **`append_footprint`.** The append leg's patch touches exactly one store
-address: the stream head's, whatever the stream's length. -/
+/-- **The append's computation, in the receiver's own terms.** On an object at the append's
+schema version: the declaration's plan at the loaded head (`appendPlan`: the two length bounds,
+the channel law, the head's presence and `room` binding, the `ref` bound), a refusal carried
+under the declaration's name (`appendRefusal`), an admitted plan's entry recorded at the loaded
+head. No root is read. -/
+theorem computeTarget_append (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
+    {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
+    (pre : Materialized StreamCell.headMaterializer)
+    (object : kind = .object) (current : version = StreamCell.commandVersion) :
+    computeTarget snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
+      match appendPlan (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request pre.logical with
+      | .error reason => .error (appendRefusal reason)
+      | .ok planned => .ok (Patch.run pre.logical [StreamCell.headWriteOp planned.1 planned.2]) := by
+  subst object current
+  refine (congrArg (Except.mapError Reject.ofDispatch)
+    (appendEffect.compute_scoped (code := 2)
+      (ctx := targetCtx snapshot semantics ambient command .object id capability observe
+        audienceEpoch audienceRoster) (op := request) rfl StreamCell.commandVersion root pre)).trans ?_
+  show (if (true = false) then _
+    else if StreamCell.commandVersion ≠ StreamCell.commandVersion then _
+    else if (true = false ∧ root ≠ pre.root) then _
+    else appendEffect.run 2 (targetCtx snapshot semantics ambient command .object id capability
+      observe audienceEpoch audienceRoster) request pre.logical :
+      Except Effects.Revival.DispatchRefusal _).mapError Reject.ofDispatch = _
+  rw [if_neg (by decide : ¬ (true = false)), if_neg (fun differs => differs rfl),
+    if_neg (fun both => by cases both.1), append_run]
+  cases appendPlan (targetCtx snapshot semantics ambient command .object id capability observe
+      audienceEpoch audienceRoster) request pre.logical with
+  | error reason => rfl
+  | ok planned => rfl
+
+/-- An admitted append's patch is the one guarded write of the loaded head. -/
+theorem append_patch (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
+    {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
+    (pre : Materialized StreamCell.headMaterializer)
+    (head : StreamCell.Head) (entry : StreamCell.Entry)
+    (admitted : appendPlan (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request pre.logical = .ok (head, entry)) :
+    targetPatch snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = [StreamCell.headWriteOp head entry] :=
+  DeclaredResourceController.append_patch admitted
+
+/-- **`append_footprint`.** An admitted append's patch touches exactly one store address: the
+stream head's, whatever the stream's length. -/
 theorem append_footprint (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
     {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
-    (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head) :
-    Patch.accessFootprint (targetPatch snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre) =
+    (pre : Materialized StreamCell.headMaterializer)
+    (head : StreamCell.Head) (entry : StreamCell.Entry)
+    (admitted : appendPlan (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request pre.logical = .ok (head, entry)) :
+    Patch.accessFootprint (targetPatch snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre) =
       {StreamCell.headAddress} := by
-  change Patch.accessFootprint (match StreamCell.headOf pre.logical with
-    | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
-        (streamRecord snapshot semantics ambient command request))]
-    | none => []) = _
-  rw [loaded]
+  rw [append_patch snapshot semantics ambient command kind id capability version root request
+    observe pre head entry admitted]
   exact StreamCell.headWrite_footprint _ _
 
-/-- **`append_entry_at_next`.** The record of an append is the one entry at the
-head's next position, with the head's tail as its parent. -/
+/-- **`append_entry_at_next`.** The birth of an admitted append is the one entry cell at the
+loaded head's next position, with the head's tail as its parent. -/
 theorem append_entry_at_next (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
     {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
-    (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head) :
-    appendedEntry snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
-      some ⟨id, head.count + 1, head.tail, streamRecord snapshot semantics ambient command request⟩ := by
-  change (StreamCell.headOf pre.logical).map (fun head => StreamCell.appendEntry id head
-    (streamRecord snapshot semantics ambient command request)) = _
-  rw [loaded]
-  rfl
+    (pre : Materialized StreamCell.headMaterializer)
+    (head : StreamCell.Head) (entry : StreamCell.Entry)
+    (admitted : appendPlan (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request pre.logical = .ok (head, entry)) :
+    StreamCell.headOf pre.logical = some head ∧
+    targetBirth snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
+      some (entryBirth ⟨id, head.count + 1, head.tail, appendRecord (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request⟩) := by
+  obtain ⟨loaded, rfl⟩ := appendPlan_ok admitted
+  exact ⟨loaded, append_born admitted⟩
 
-/-- **`room_append_refuses_topic_head`.** A resource-transaction append to a
-head bound to a fleet topic is refused `wrongRole`: only the fleet receiver
-appends to a topic. -/
+/-- **`room_append_refuses_topic_head`.** A resource-transaction append to a head bound to a
+fleet topic is refused `topicHead`: only the fleet receiver appends to a topic. -/
 theorem room_append_refuses_topic_head (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
     {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
+    (pre : Materialized StreamCell.headMaterializer)
     (object : kind = .object) (current : version = StreamCell.commandVersion)
     (topicOk : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payloadOk : request.payload.length ≤ StreamCell.maxPayloadBytes)
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
     (stream : Digest) (fleet : head.binding = .topic stream)
     (channel : DomainEpoch.admitAppend pre.logical command.subject request = .ok ()) :
-    computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error .wrongRole := by
-  subst object current
-  simp [computeTarget, topicOk, payloadOk, channel, loaded, fleet]
-  rfl
+    computeTarget snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error (appendRefusal .topicHead) := by
+  have channel' : DomainEpoch.admitAppend pre.logical (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster).subject request = .ok () := channel
+  have planned : appendPlan (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request pre.logical = .error .topicHead := by
+    simp [appendPlan, topicOk, payloadOk, channel', loaded, fleet]
+  refine (computeTarget_append snapshot semantics ambient command kind id capability version root
+    request observe pre object current).trans ?_
+  rw [planned]
 
 /-- **`append_planned_root_irrelevant`.** An append's outcome (its post, or its named
-refusal) is the same whatever stream root its plan observed: the arm reads the cell it
-meets, never the planned root. Two appends planned from one read of one stream both
-compute at the head each admission meets. -/
+refusal) is the same whatever stream root its plan observed: the declaration pins no root
+(`append_commutes`), so the computation reads the cell it meets, never the planned root. Two
+appends planned from one read of one stream both compute at the head each admission meets. -/
 theorem append_planned_root_irrelevant (kind : ResourceKind) (id : Nat)
     (capability : CapabilityId) (version : Nat) (root root' : Digest) (request : StreamCell.Append)
     (observe : Option CapabilityId)
     {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩) :
-    computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
+    (pre : Materialized StreamCell.headMaterializer) :
+    computeTarget snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre =
       computeTarget snapshot semantics ambient command
         ⟨kind, id, capability, version, root', .append request, observe, audienceEpoch, audienceRoster⟩ pre :=
   rfl
@@ -145,7 +183,7 @@ could otherwise land on another entry). -/
 theorem append_ref_ahead_refused (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
     (version : Nat) (root : Digest) (request : StreamCell.Append) (observe : Option CapabilityId)
     {audienceEpoch : Option Nat} {audienceRoster : Option ObjectAudienceRoster.Roster}
-    (pre : TargetCell ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩)
+    (pre : Materialized StreamCell.headMaterializer)
     (object : kind = .object) (current : version = StreamCell.commandVersion)
     (topicOk : request.topic.length ≤ StreamCell.maxTopicBytes)
     (payloadOk : request.payload.length ≤ StreamCell.maxPayloadBytes)
@@ -153,11 +191,14 @@ theorem append_ref_ahead_refused (kind : ResourceKind) (id : Nat) (capability : 
     (head : StreamCell.Head) (loaded : StreamCell.headOf pre.logical = some head)
     (room : head.binding = .room) (sequence : Nat) (named : request.ref = some (id, sequence))
     (ahead : head.count < sequence) :
-    computeTarget snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error .streamRef := by
-  subst object current
-  simp [computeTarget, topicOk, payloadOk, channel, loaded, room, named, ahead]
-  rfl
+    computeTarget snapshot semantics ambient command ⟨kind, id, capability, version, root, .append request, observe, audienceEpoch, audienceRoster⟩ pre = .error (appendRefusal .streamRef) := by
+  have channel' : DomainEpoch.admitAppend pre.logical (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster).subject request = .ok () := channel
+  have target : (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster).target = id := rfl
+  have planned : appendPlan (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch audienceRoster) request pre.logical = .error .streamRef := by
+    simp [appendPlan, topicOk, payloadOk, channel', loaded, room, named, ahead, target]
+  refine (computeTarget_append snapshot semantics ambient command kind id capability version root
+    request observe pre object current).trans ?_
+  rw [planned]
 
 /-- One target's computed outcome at a directory: load its own cell, select
 its role, compute.  These are `prepareTarget`'s cell reads; the remaining
@@ -224,6 +265,8 @@ info: 'Minidregg.Kernel.StreamResource.authorLaw_refuses_other_writer' depends o
 #guard_msgs (whitespace := lax) in #print axioms authorLaw_refuses_other_writer
 /-- info: 'Minidregg.Kernel.StreamResource.authorLaw_admits_author' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorLaw_admits_author
+/-- info: 'Minidregg.Kernel.StreamResource.computeTarget_append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms computeTarget_append
 /-- info: 'Minidregg.Kernel.StreamResource.append_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms append_footprint
 /-- info: 'Minidregg.Kernel.StreamResource.append_entry_at_next' depends on axioms: [propext, Classical.choice, Quot.sound] -/

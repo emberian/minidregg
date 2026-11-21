@@ -112,7 +112,7 @@ def coordinatesOf (descriptor : Descriptor Registry) : BirthCoordinates where
     let owner ← descriptor.grants[2 * position]?
     let ancestors := (owner.capability.head.ancestors.image CapabilityId.value).sort (· ≤ ·)
     if ancestors.isEmpty then none else pure (placement.value, ancestors)
-  ownerBudget := (descriptor.grants.head?.map fun grant => grant.capability.head.scope.maxCost).getD 0
+  ownerBudget := (descriptor.grants.head?.map fun grant => grant.capability.head.scope.perRequestBytes).getD 0
   lifetime := (descriptor.grants.head?.map fun grant =>
     grant.capability.head.notAfter - grant.capability.head.notBefore).getD 0
   fee := descriptor.fee
@@ -151,7 +151,7 @@ def factoryValues (pins : PublicPins) (descriptor : Descriptor Registry) : Reque
   policyId := ⟨pins.factory⟩
   policyEpoch := 0
   policyRevision := 0
-  cost := descriptor.fee.amount
+  cost := (CanonicalCellRegistry.sourceEncoding.codec.encode descriptor).length
 
 /-- An allocation leg (`ResourceBirthController.allocationRequest`). -/
 def allocationValues (pins : PublicPins) (descriptor : Descriptor Registry) (cell : Nat) :
@@ -183,7 +183,7 @@ def sourceValues (pins : PublicPins) (descriptor : Descriptor Registry)
     policyId := ⟨operation.posting.source⟩
     policyEpoch := 0
     policyRevision := 0
-    cost := operation.feeDebit }
+    cost := (CanonicalCellRegistry.sourceEncoding.codec.encode descriptor).length }
 
 /-- The member's derivation of one branch request of a birth. -/
 def birthValues (pins : PublicPins) (descriptor : Descriptor Registry) :
@@ -368,7 +368,7 @@ def DisplayIsCommitStatement : Prop :=
     CanonicalCellRegistry.sourceEncoding.codec.encode (userPart d) = shown.draft ∧
     d.auxiliaryCreates = prepared.grants.auxiliaryCreates ∧
     prepared.writes = ResourceBirthController.Concrete.planWrites deployment d
-      prepared.factory.payload prepared.book.payload prepared.resources.post (ground.authorityWrites prepared.grants.post) ∧
+      prepared.factory.payload prepared.book.payload prepared.resources.post (ground.authorityWrites prepared.grants.update) ∧
     ResourceBirthController.allocationWrites d =
       (userPart d).createRequests.map ResourceBirthController.birthWrite ++
         prepared.grants.auxiliaryCreates.map ResourceBirthController.birthWrite ∧

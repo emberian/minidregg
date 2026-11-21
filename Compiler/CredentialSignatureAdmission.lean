@@ -119,8 +119,8 @@ inductive Reject where
   /-- The signed footprint does not decode as authority reads. -/
   | malformedFootprint
   /-- A value this plan read in the authority cell has changed since it was
-  signed; `address` is the canonical bytes of the first such address. -/
-  | footprintStale (address : List UInt8)
+  signed; `addresses` is the canonical bytes of every such address, in the order signed. -/
+  | footprintStale (addresses : List (List UInt8))
   /-- The admission height is past the plan's signed `validUntil`. -/
   | expired (height validUntil : Nat)
   /-- The Receiver issued no voucher for the claim the envelope admission
@@ -251,7 +251,8 @@ def signingHeader (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest
 open Minidregg.Theory.PlanBinding in
 /-- Name the staleness before the controller's byte comparison: decode the
 signed footprint and check it against the current authority cell.  A plan whose
-reads all still hold passes; one whose read moved is refused naming it. -/
+reads all still hold passes; one whose reads moved is refused naming every moved address
+(`Footprint.staleAll`) and no value (`checkFootprintDecoded_stale`). -/
 def checkFootprint (snapshot : Snapshot) (envelopeBytes : List UInt8) : Except Reject Unit :=
   match CredentialSignedEnvelopeController.envelopeCodec.decode envelopeBytes with
   | none => .ok ()
@@ -259,10 +260,10 @@ def checkFootprint (snapshot : Snapshot) (envelopeBytes : List UInt8) : Except R
       match PlanFootprintCodec.decode CredentialAuthorityCell.wire envelope.header.footprint with
       | none => .error .malformedFootprint
       | some signed =>
-          match Footprint.admit snapshot.logical signed with
+          match Footprint.admitAll snapshot.logical signed with
           | .ok () => .ok ()
-          | .error (.footprintStale address) =>
-              .error (.footprintStale (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire address))
+          | .error stale =>
+              .error (.footprintStale (stale.map (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire)))
 
 structure Prepared (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest) where
   source : Selected snapshot request
@@ -302,10 +303,36 @@ def checkFootprintDecoded (snapshot : Snapshot)
   match PlanFootprintCodec.decode CredentialAuthorityCell.wire envelope.header.footprint with
   | none => .error .malformedFootprint
   | some signed =>
-      match Footprint.admit snapshot.logical signed with
+      match Footprint.admitAll snapshot.logical signed with
       | .ok () => .ok ()
-      | .error (.footprintStale address) =>
-          .error (.footprintStale (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire address))
+      | .error stale =>
+          .error (.footprintStale (stale.map (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire)))
+
+open Minidregg.Theory.PlanBinding in
+/-- **The header's refusal is the whole stale set.** A `footprintStale` refusal names, in the
+order signed, exactly the addresses of the signed footprint whose value in the current authority
+cell is not the signed one (`Footprint.mem_staleAll`), and at least one. -/
+theorem checkFootprintDecoded_stale {snapshot : Snapshot}
+    {envelope : CredentialSignedEnvelopeController.SignedEnvelope} {names : List (List UInt8)}
+    (refused : checkFootprintDecoded snapshot envelope = .error (.footprintStale names)) :
+    ∃ signed, PlanFootprintCodec.decode CredentialAuthorityCell.wire envelope.header.footprint =
+        some signed ∧
+      names = (Footprint.staleAll snapshot.logical signed).map
+        (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire) ∧
+      Footprint.staleAll snapshot.logical signed ≠ [] := by
+  unfold checkFootprintDecoded at refused
+  cases decoded : PlanFootprintCodec.decode CredentialAuthorityCell.wire envelope.header.footprint with
+  | none => rw [decoded] at refused; cases refused
+  | some signed =>
+      rw [decoded] at refused
+      refine ⟨signed, rfl, ?_⟩
+      unfold Footprint.admitAll at refused
+      by_cases empty : (Footprint.staleAll snapshot.logical signed).isEmpty = true
+      · simp [empty] at refused
+      · have stale : (Footprint.staleAll snapshot.logical signed).map
+            (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire) = names := by
+          simpa [empty] using refused
+        exact ⟨stale.symm, fun none => empty (by rw [none]; rfl)⟩
 
 /-- `prepare` with the envelope decoded once and the controller handed its state and registry
 as values (`CredentialSignedEnvelopeController.prepare_encoded`), not encoded for the

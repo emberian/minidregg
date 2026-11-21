@@ -18,8 +18,10 @@ def Positive (s : State) : Prop :=
 
 theorem positive_record (s : State) (deadline now : Nat) (checked : List Block)
     (offers : List Bytes) (outbox : List Message) (delivered : List Block) (tip : Block)
-    (needsPoll failed : Bool) :
-    Positive {self := s.self, current := s.current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed} ↔ Positive s := Iff.rfl
+    (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    Positive {self := s.self, current := s.current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ Positive s := Iff.rfl
 
 theorem positive_new_current (s : State) (current deadline : Nat) (old : Positive s)
     (pos : 0 < current) : Positive {s with current := current, deadline := deadline} :=
@@ -124,6 +126,12 @@ theorem sendCandidate_current_positive (s : State) (arg : Argument) (old : Posit
 @[simp] theorem broadcast_current (s : State) (view : Nat) (kind : Kind) (arg : Argument) :
     (broadcast s view kind arg).current = s.current := rfl
 
+theorem commitAt_positive (s : State) (view : Nat) (block : Block)
+    (old : Positive s) (pos : 0 < view) : Positive (commitAt s view block) :=
+  raiseFloor_preserves Positive
+    (fun state number evidence prior => by simpa only [positive_record] using prior)
+    _ _ _ (doCommit_positive s view block old pos)
+
 macro "positive_step" : tactic => `(tactic|
   first
     | assumption
@@ -131,6 +139,7 @@ macro "positive_step" : tactic => `(tactic|
     | with_reducible apply broadcast_current_positive
     | (with_reducible apply broadcast_positive; rotate_left; assumption)
     | (with_reducible apply clear_positive; rotate_left; assumption)
+    | (with_reducible apply commitAt_positive; rotate_left; assumption)
     | (with_reducible apply doCommit_positive; rotate_left; assumption)
     | with_reducible apply castVote_current_positive
     | with_reducible apply sendCandidate_current_positive
@@ -186,6 +195,13 @@ theorem enterView_positive (c : Config) (s : State) (view : Nat)
 theorem enterNext_positive (c : Config) (s : State) (old : Positive s) :
     Positive (enterView c s (s.current+1)) := enterView_positive c s _ old (by omega)
 
+theorem floorJump_positive (c : Config) (s : State) (old : Positive s) :
+    Positive (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_positive c s _ old (by omega)
+  · exact old
+
 theorem progressOuter_positive (c : Config) (s : State) (old : Positive s) :
     Positive (progressOuter c s) := by
   simp only [progressOuter, Id.run, bind, pure]
@@ -207,10 +223,14 @@ theorem progressViews_positive (c : Config) (numbers : List Nat) (s : State)
 theorem pass_positive (c : Config) (s : State) (old : Positive s) : Positive (pass c s) := by
   unfold pass
   apply progressOuter_positive
+  apply floorJump_positive
   apply progressViews_positive _ _ _ old
   intro view member
-  obtain ⟨stored, inside, number⟩ := List.mem_map.mp (List.mem_eraseDups.mp member)
-  simpa only [← number] using old.2.1 stored inside
+  obtain ⟨stored, inside, number⟩ := List.mem_filterMap.mp member
+  split at number
+  · have same : stored.number = view := by simpa using number
+    simpa only [← same] using old.2.1 stored inside
+  · cases number
 
 theorem pump_positive (c : Config) (fuel : Nat) (s : State) (old : Positive s) :
     Positive (pump c fuel s) := by
@@ -224,7 +244,7 @@ theorem pump_positive (c : Config) (fuel : Nat) (s : State) (old : Positive s) :
 
 theorem ingest_positive (c : Config) (s : State) (message : Message) (old : Positive s) :
     Positive (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor noteAhead serveViews
   split
   · exact old
   · rename_i admitted

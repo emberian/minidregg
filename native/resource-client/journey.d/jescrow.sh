@@ -84,7 +84,7 @@ run wpropose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$
 run wsubmit "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/w-$RES/intent.json" --attempt "$SPONSOR_WS/attempts/w-$RES"
 want_admitted "write: field 2 := 7 is admitted" "$b" "$SPONSOR_WS"
 b=$(confirmed_count "$SPONSOR_WS")
-jq -n --arg r "${FS:-0}" --arg n "$RES" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:["observe"],maxCost:"50000"}' >"$D/req/delegate.json"
+jq -n --arg r "${FS:-0}" --arg n "$RES" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:["observe"],perRequestBytes:"50000"}' >"$D/req/delegate.json"
 run dpropose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/delegate.json" --proposal-id "g-$RES"
 run dsubmit "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/g-$RES/intent.json" --attempt "$SPONSOR_WS/attempts/g-$RES"
 want_admitted "delegate: the observe grant to the friend's subject is admitted" "$b" "$SPONSOR_WS"

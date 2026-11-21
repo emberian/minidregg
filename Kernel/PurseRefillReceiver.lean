@@ -16,7 +16,7 @@ two cells, decided by `PurseRefill.decideRefill`:
 Authorization: the owner signs a capability-mode request of kind `account`,
 target `A`, verb `transfer`, presenting the owner capability, admitted under
 `A`'s current law with the operation slot `authority/operation/purse-refill`
-(the `PayAssignmentReceiver` pattern); `decideRefill` checks the owner-grant
+(the `PayAssignmentReceiver` pattern); `decideRefill` checks the account-grant
 fact on that same stored capability.  The effect digest commits to the command
 bytes and the decided plan, so the signature binds the burn, the gain and the
 purse's pre-state.  The pay cell (the tariff's credit asset) and both laws'
@@ -361,7 +361,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
       (authority.snapshot.authState.policyRevision ⟨command.account⟩))
 
 /-- The decision, in order: the loaded cells, the pinned authority root, the pure
-`decideRefill` (tariff, owner grant, not the issuer, positive, readable purse,
+`decideRefill` (tariff, account grant, not the issuer, positive, readable purse,
 Book admission, balanced joint delta), the marker, the purse's declared-cell
 checks and patch validation, the purse's installed law with the refill slot,
 and the account law's source.  Refusals before the signature check are named
@@ -370,7 +370,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (readDeployment deployment durable)
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
   let book ← requireSome .bookUnavailable
     (ResourceBirthController.Concrete.observeCell deployment directory.directory
@@ -440,12 +440,12 @@ theorem Prepared.bookPost_exact (prepared : Prepared deployment profile ambient 
       prepared.plan.batch.apply (bookOf prepared.book) :=
   prepared.resources.post_logicalBook
 
-/-- A prepared refill holds the owner grant on the capability it presents. -/
+/-- A prepared refill holds the account grant on the capability it presents. -/
 theorem Prepared.owner (prepared : Prepared deployment profile ambient durable command) :
-    PayAssignmentReceiver.OwnerGrant
+    AccountGrant.Held
       (readCapability prepared.authority.snapshot.cell .account command.capability)
       command.subject command.account :=
-  refill_requires_owner prepared.decided
+  refill_requires_grant prepared.decided
 
 /-- A prepared refill's two legs balance at the credit coordinate. -/
 theorem Prepared.balanced (prepared : Prepared deployment profile ambient durable command) :
@@ -582,6 +582,36 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   semantic : prepared.SemanticAccepted
+  /-- The grant the refill was authorized under bounds the burn of the paying account. -/
+  bounded : CapabilityValueBound.Presented semantic.authorization.evidence.capabilityValue
+    prepared.plan.batch.operations command.account
+
+/-- **Every admitted refill's burn is within its grant's value bound**, in plain terms: the
+credit balance is named by the grant's scope and the burned amount is within every `maxDelta`
+bound the scope sets on it. -/
+theorem Accepted.value_bounded [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    ∃ cap commitment,
+      accepted.semantic.authorization.evidence.capabilityValue = some (cap, commitment) ∧
+        CellField.NamedBy cap.scope.fields (.balance prepared.plan.asset) ∧
+          ∀ bound, (CellField.balance prepared.plan.asset, bound) ∈ cap.scope.maxDelta →
+            command.amount ≤ bound := by
+  obtain ⟨cap, commitment, named, covered⟩ := accepted.bounded.gross
+  have account : prepared.plan.account = command.account :=
+    (decideRefill_ok prepared.decided).2.2.2.2.2.1
+  have amount : prepared.plan.amount = command.amount :=
+    (decideRefill_ok prepared.decided).2.2.2.2.2.2.1
+  have member : prepared.plan.asset ∈
+      CapabilityValueBound.debitAssets prepared.plan.batch.operations command.account := by
+    simp [CapabilityValueBound.debitAssets, CapabilityValueBound.debitAssetList,
+      CapabilityValueBound.debits, Plan.batch, CanonicalResourceKernel.Operation.posting, account]
+  obtain ⟨fieldNamed, within⟩ := covered _ member
+  refine ⟨cap, commitment, named, fieldNamed, fun bound listed => ?_⟩
+  have limit := within bound listed
+  simpa [CapabilityValueBound.grossDebit, CapabilityValueBound.debits, Plan.batch,
+    CanonicalResourceKernel.Operation.posting, account, amount] using limit
+
 theorem Accepted.bound [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
     (accepted : Accepted prepared ingress) :
@@ -601,7 +631,15 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
       if same : receipt.envelopeBytes = ingress.ingress.envelope then
         match authorize prepared receipt with
         | .error reason => return .error reason
-        | .ok semantic => return .ok ⟨receipt, same, semantic⟩
+        | .ok semantic =>
+            match bounded : CapabilityValueBound.presentedCheck
+                semantic.authorization.evidence.capabilityValue
+                prepared.plan.batch.operations command.account with
+            | .error none => return .error .capabilityRejected
+            | .error (some reason) => return .error (.valueBound reason)
+            | .ok () =>
+                return .ok ⟨receipt, same, semantic,
+                  (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp bounded⟩
       else return .error .capabilityRejected
 
 /-- The exact header the owner signs.  It discloses no decision: when the
@@ -610,7 +648,7 @@ loaded purse (and submission then refuses with the named reason). -/
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := readDeployment deployment durable
     | .error "authority unavailable"
   let some pay := PayCellDomain.load deployment durable.snapshot
     | .error "pay cell unavailable"

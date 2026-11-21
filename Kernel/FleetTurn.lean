@@ -27,10 +27,13 @@ and a changed command under the same identity conflicts.
 module
 
 public import Kernel.ParticipantKeyEnrollment
+public import Kernel.FleetTurnCodec
 public import Compiler.NativeHostCodec
 public import Kernel.StreamWrite
 public import Compiler.WorldKindLawDependencies
 public import Compiler.PhysicalLawResolution
+public import Theory.CapabilityValueBound
+public import Compiler.ServedBasis
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -80,107 +83,6 @@ abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
-/-- Topic labels are bytes chosen by the account holder. They name a stream
-of that account only; the same label under another account is another stream. -/
-def maxTopicBytes : Nat := 64
-/-- Payloads ride in the signed ingress; the entry cell stores only their digest. -/
-def maxPayloadBytes : Nat := 16384
-
-structure Transfer where
-  destination : Nat
-  asset : Nat
-  amount : Nat
-  deriving DecidableEq, Repr
-
-structure Publication where
-  topic : List UInt8
-  sequence : Nat
-  payload : List UInt8
-  deriving DecidableEq, Repr
-
-/-- `fee` is stated by the signer and must equal the pinned base tariff, so
-the signature is a statement about the exact debit. -/
-structure Command where
-  subject : SubjectId
-  payer : Nat
-  spend : CapabilityId
-  nonce : Nat
-  fee : Nat
-  transfer : Option Transfer
-  publication : Option Publication
-  deriving DecidableEq, Repr
-
-def transferStream : StreamCodec Transfer :=
-  StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))
-    (fun t => (t.destination, t.asset, t.amount))
-    (fun (destination, asset, amount) => ⟨destination, asset, amount⟩)
-    (by intro t; cases t; rfl)
-
-def publicationStream : StreamCodec Publication :=
-  StreamCodec.xmap
-    (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat bytesStream))
-    (fun p => (p.topic, p.sequence, p.payload))
-    (fun (topic, sequence, payload) => ⟨topic, sequence, payload⟩)
-    (by intro p; cases p; rfl)
-
-def commandStream : StreamCodec Command :=
-  StreamCodec.xmap
-    (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
-      (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product capabilityIdStream
-          (StreamCodec.product StreamCodec.nat
-            (StreamCodec.product StreamCodec.nat
-              (StreamCodec.product (StreamCodec.option transferStream)
-                (StreamCodec.option publicationStream)))))))
-    (fun c => (c.subject, c.payer, c.spend, c.nonce, c.fee, c.transfer, c.publication))
-    (fun (subject, payer, spend, nonce, fee, transfer, publication) =>
-      ⟨subject, payer, spend, nonce, fee, transfer, publication⟩)
-    (by intro c; cases c; rfl)
-
-def commandFrame : List UInt8 := "DREGG/FLEET/TURN/v1".toUTF8.toList
-
-def commandCodec : LawfulCodec Command :=
-  NativeHostCodec.framed commandFrame commandStream
-
-structure Ingress where
-  commandBytes : List UInt8
-  envelope : List UInt8
-  deriving DecidableEq, Repr
-
-def ingressStream : StreamCodec Ingress :=
-  StreamCodec.xmap (StreamCodec.product bytesStream bytesStream)
-    (fun ingress => (ingress.commandBytes, ingress.envelope))
-    (fun (command, envelope) => ⟨command, envelope⟩)
-    (by intro ingress; cases ingress; rfl)
-
-def ingressCodec : LawfulCodec Ingress :=
-  NativeHostCodec.framed "DREGG/FLEET/TURN/SIGNED/v2".toUTF8.toList ingressStream
-
-structure DecodedIngress where
-  mk ::
-  ingress : Ingress
-  command : Command
-  canonical : commandCodec.encode command = ingress.commandBytes
-  envelope : CredentialSignedEnvelopeController.SignedEnvelope
-  envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
-    some envelope
-
-def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
-  let ingress ← ingressCodec.decode bytes
-  match commandExact : commandCodec.decode ingress.commandBytes with
-  | none => none
-  | some command =>
-    match envelopeExact :
-        CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope with
-    | none => none
-    | some envelope =>
-      some ⟨ingress, command,
-        NativeHostCodec.framed_canonical commandFrame commandStream commandExact,
-        envelope, envelopeExact⟩
-
-def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
-  ingressCodec.encode ingress.ingress
 
 def Command.transferAmount (command : Command) : Nat :=
   match command.transfer with
@@ -261,8 +163,9 @@ structure Ambient where
   height : Height
 
 /-- The request is the ordinary account-spend request over the paying account,
-under that account's own installed law. Its cost is everything the turn debits,
-so a capability's `maxCost` bounds one turn's outflow. -/
+under that account's own installed law. Its cost is the encoded command's length,
+the unit every other signed command's request has, so `perRequestBytes` is a size ceiling here too.
+What the turn takes from the account is bounded by the grant's value bound (`valueBound`). -/
 def context (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) : RequestContext where
   authority :=
@@ -279,7 +182,7 @@ def context (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient)
       policyId := ⟨command.payer⟩
       policyEpoch := snapshot.authState.policyEpoch ⟨command.payer⟩
       policyRevision := snapshot.authState.policyRevision ⟨command.payer⟩
-      cost := command.fee + command.transferAmount }
+      cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
     cshake "DREGG.FLEET.TURN.ARGS/v1" (commandCodec.encode command ++ bytes)
 
@@ -324,8 +227,15 @@ inductive Reject where
   | directoryUnavailable | authorityUnavailable | bookUnavailable | bookRefused
   | topicUnavailable | sequenceTaken | sequenceGap
   | replayedMarker | validation | physicalPreparation
+  /-- The ground gives no answer for the turn's operation marker (a light basis that did not
+  declare its nullifier): refused, never read as unspent. -/
+  | undeclaredMarker
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The presented spend grant does not bound what the turn takes from the paying account
+  (`Theory.CapabilityValueBound.check`): a balance its scope does not name, or a `maxDelta`
+  bound on a balance below the fee plus the transferred amount. -/
+  | valueBound (reason : CapabilityValueBound.Refusal)
   deriving Repr
 
 def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
@@ -414,36 +324,37 @@ def planTopic (deployment : Deployment) (directory : Directory Nat Registry)
 
 /-! ## Preparation, authorization, plan -/
 
+/-- A prepared turn on a ground (`ServedBasis.Ground`): the light opening's basis for the
+turn's keys, or the full materialization. Every read is the ground's: its directory (the
+Book, the topic head, the payer's law sources), its authority cell and its answer for the
+operation marker (`Ground.markerSpent`: `some false`, so the marker is declared and unspent). -/
 structure Prepared {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (tariff : CreationTariff)
-    (ambient : Ambient) (durable : Durable) (command : Command) where
+    (ambient : Ambient) (ground : ServedBasis.Ground deployment) (command : Command) where
   private mk ::
   shape : command.shapeOk = true
   feeExact : command.fee = tariff.base
-  directory : LoadedDirectory durable
-  authority : Loaded deployment durable.snapshot
-  book : ResourceBirthController.Concrete.ObservedCell deployment directory.directory
+  book : ResourceBirthController.Concrete.ObservedCell deployment ground.directory
     deployment.resourceBookId .resourceBook
   resources : CanonicalResourceKernel.AcceptedBatch book.payload (batch tariff command)
   topic : Option TopicPlan
-  candidate : Candidate (family authority.snapshot profile.semantics ambient command)
-    authority.snapshot.cell (declaration authority.snapshot profile.semantics command) ()
-  source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
-    (authority.snapshot.authState.policyAddress ⟨command.payer⟩
-      (authority.snapshot.authState.policyRevision ⟨command.payer⟩))
+  unspent : ground.markerSpent (marker ground.authority.domain profile.semantics command) = some false
+  candidate : Candidate (family ground.authority profile.semantics ambient command)
+    ground.authority.cell (declaration ground.authority profile.semantics command) ()
+  source : CanonicalCellRegistry.LoadedPolicySource ground.authority.domain ground.directory
+    (ground.authority.authState.policyAddress ⟨command.payer⟩
+      (ground.authority.authState.policyRevision ⟨command.payer⟩))
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (tariff : CreationTariff) (ambient : Ambient)
-    (durable : Durable) (command : Command) :
-    Except Reject (Prepared deployment profile tariff ambient durable command) := do
+    (ground : ServedBasis.Ground deployment) (command : Command) :
+    Except Reject (Prepared deployment profile tariff ambient ground command) := do
   if shape : command.shapeOk = true then
     if feeExact : command.fee = tariff.base then
-      let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-      let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
       let book ← requireSome .bookUnavailable
-        (ResourceBirthController.Concrete.observeCell deployment directory.directory
+        (ResourceBirthController.Concrete.observeCell deployment ground.directory
           deployment.resourceBookId .resourceBook)
-      let snapshot := authority.snapshot
+      let snapshot := ground.authority
       let d := declaration snapshot profile.semantics command
       if admission : (batch tariff command).Admission
           (CanonicalResourceKernel.logicalBook book.payload.logical) then
@@ -451,15 +362,18 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
         let topic ← match command.publication with
           | none => pure none
           | some publication =>
-              (planTopic deployment directory.directory snapshot.domain
+              (planTopic deployment ground.directory snapshot.domain
                 command.payer publication command.subject ambient.height
                 ⟨marker snapshot.domain profile.semantics command⟩).map some
-        if snapshot.spent d.operationNullifier = false then
+        match unspent : ground.markerSpent (marker snapshot.domain profile.semantics command) with
+        | none => throw .undeclaredMarker
+        | some true => throw .replayedMarker
+        | some false =>
           match validate AuthorityMaterializer snapshot.cell snapshot.cell.root d.patch with
           | .rejected _ => throw .validation
           | .accepted validated =>
               let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
-                snapshot.domain directory.directory
+                snapshot.domain ground.directory
                 (snapshot.authState.policyAddress ⟨command.payer⟩
                   (snapshot.authState.policyRevision ⟨command.payer⟩)))
               let candidate : Candidate (family snapshot profile.semantics ambient command)
@@ -468,15 +382,14 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                   modeEvidence := ⟨rfl⟩
                   validated := validated
                   postcondition := validated.resultAt }
-              pure ⟨shape, feeExact, directory, authority, book, resources, topic, candidate, source⟩
-        else throw .replayedMarker
+              pure ⟨shape, feeExact, book, resources, topic, unspent, candidate, source⟩
       else throw .bookRefused
     else throw .feeMismatch
   else throw .malformedCommand
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {tariff : CreationTariff} {ambient : Ambient}
-  {durable : Durable} {command : Command}
+  {ground : ServedBasis.Ground deployment} {command : Command}
 
 def balanceSlot (label : String) (book : CanonicalResourceKernel.Book) (account asset : Nat) :
     String × Int :=
@@ -485,7 +398,7 @@ def balanceSlot (label : String) (book : CanonicalResourceKernel.Book) (account 
 /-- The installed account law sees the exact request, the stated debit and
 destination, the paying account's fee-asset balance before and after the Book
 leg, the complete command bytes and the presented spend grant. -/
-def project (prepared : Prepared deployment profile tariff ambient durable command)
+def project (prepared : Prepared deployment profile tariff ambient ground command)
     (logical : Store CredentialAuthorityState.layout) : Minidregg.Pred.State :=
   let before := CanonicalResourceKernel.logicalBook prepared.book.payload.logical
   let after := CanonicalResourceKernel.logicalBook prepared.resources.post.logical
@@ -495,9 +408,9 @@ def project (prepared : Prepared deployment profile tariff ambient durable comma
   let sequence := match command.publication with
     | none => 0
     | some publication => publication.sequence
-  ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory command.payer ++
+  ⟨WorldKindLawDependencies.targetSelectorSlots ground.directory command.payer ++
     CanonicalRuntimeProfile.requestSlots
-      (request prepared.authority.snapshot profile.semantics ambient command) ++
+      (request ground.authority profile.semantics ambient command) ++
     ([("fleet/operation/turn", 1), ("fleet/fee", (command.fee : Int)),
      ("fleet/transfer/destination", (destination : Int)), ("fleet/transfer/asset", (asset : Int)),
      ("fleet/transfer/amount", (amount : Int)),
@@ -509,53 +422,53 @@ def project (prepared : Prepared deployment profile tariff ambient durable comma
     ResourceAuthorityProjection.bytesSlots "command/bytes" 0 (commandCodec.encode command) ++
     ResourceAuthorityProjection.grantSlots "authority/spend" .account command.spend logical⟩
 
-def step (prepared : Prepared deployment profile tariff ambient durable command) : PolicyStepContext :=
+def step (prepared : Prepared deployment profile tariff ambient ground command) : PolicyStepContext :=
   PolicyStepContext.ofCandidate (project prepared) profile.semantics prepared.candidate
 
-def sourceStore (prepared : Prepared deployment profile tariff ambient durable command) :
+def sourceStore (prepared : Prepared deployment profile tariff ambient ground command) :
     CanonicalPolicyRegistry.PayloadStore :=
-  ⟨CanonicalCellRegistry.fetchPolicySource prepared.authority.snapshot.domain
-    prepared.directory.directory⟩
+  ⟨CanonicalCellRegistry.fetchPolicySource ground.authority.domain
+    ground.directory⟩
 
-def kindDependencies (prepared : Prepared deployment profile tariff ambient durable command) :
+def kindDependencies (prepared : Prepared deployment profile tariff ambient ground command) :
     Option WorldKindLawDependencies.Dependencies :=
-  WorldKindLawDependencies.loadTarget deployment prepared.directory.directory command.payer
+  WorldKindLawDependencies.loadTarget deployment ground.directory command.payer
 
 /-- Fleet topics are derived account metadata, not independently born room
 streams: UserShape permits only emptyRoomHead, ResourceTransaction's append
 requires binding .room, and planFrom here requires .topic of the payer-derived
 streamDigest. The payer's composed transfer law sees this exact signed command;
 Book balances and these indices are its physical settlement. -/
-def lawReadGuards (prepared : Prepared deployment profile tariff ambient durable command) :
+def lawReadGuards (prepared : Prepared deployment profile tariff ambient ground command) :
     Option (List (Nat × Digest)) := do
   let structural ← kindDependencies prepared
-  let sources ← PhysicalLawResolution.readGuards prepared.authority.snapshot
-    prepared.directory.directory profile.semantics command.payer structural.additional
+  let sources ← PhysicalLawResolution.readGuards ground.authority
+    ground.directory profile.semantics command.payer structural.additional
   pure (sources ++ structural.readGuards)
 
 def policyConfig [DecidableEq F]
-    (prepared : Prepared deployment profile tariff ambient durable command) : ComposedPolicyAdmission.Config F :=
-  PhysicalLawResolution.config profile.compilerProfile prepared.authority.snapshot
-    prepared.directory.directory
-    (sourceCapabilityPortal prepared.authority.snapshot
-      (marker prepared.authority.snapshot.domain profile.semantics command))
+    (prepared : Prepared deployment profile tariff ambient ground command) : ComposedPolicyAdmission.Config F :=
+  PhysicalLawResolution.config profile.compilerProfile ground.authority
+    ground.directory
+    (sourceCapabilityPortal ground.authority
+      (marker ground.authority.domain profile.semantics command))
     (step prepared) command.payer
     ((kindDependencies prepared).map (·.additional) |>.getD [])
 
 abbrev Prepared.SemanticAccepted [DecidableEq F]
-    (prepared : Prepared deployment profile tariff ambient durable command) :=
+    (prepared : Prepared deployment profile tariff ambient ground command) :=
   AcceptedCellEffect (portal := (policyConfig prepared).portal)
-    (authState := prepared.authority.snapshot.authState)
-    (family prepared.authority.snapshot profile.semantics ambient command)
-    (request prepared.authority.snapshot profile.semantics ambient command)
-    prepared.authority.snapshot.cell
-    (declaration prepared.authority.snapshot profile.semantics command) ()
+    (authState := ground.authority.authState)
+    (family ground.authority profile.semantics ambient command)
+    (request ground.authority profile.semantics ambient command)
+    ground.authority.cell
+    (declaration ground.authority profile.semantics command) ()
 
 def authorize [DecidableEq F]
-    (prepared : Prepared deployment profile tariff ambient durable command)
-    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
+    (prepared : Prepared deployment profile tariff ambient ground command)
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority) :
     Except Reject prepared.SemanticAccepted := do
-  let wanted := request prepared.authority.snapshot profile.semantics ambient command
+  let wanted := request ground.authority profile.semantics ambient command
   let config := policyConfig prepared
   let evidence ← requireSome .capabilityRejected
     (config.capabilityEvidenceChecked wanted command.spend () receipt () (fun _ => ())).toOption
@@ -574,15 +487,51 @@ def authorize [DecidableEq F]
   | some authorization =>
       .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
 
+/-- **The value bound of the turn's debit.** The spend grant the turn was authorized under
+must bound the gross amount the turn's Book leg (the fee, then the optional transfer) takes
+from the paying account: its `fields` name each debited balance and its `maxDelta` bounds on
+them hold, and a delegated grant sets a bound on each. This is the bound every debiting
+receiver shares, in the asset's own units; `perRequestBytes` is a size ceiling and bounds no value. -/
+def valueBound [DecidableEq F]
+    (prepared : Prepared deployment profile tariff ambient ground command)
+    (semantic : prepared.SemanticAccepted) : Except Reject Unit :=
+  match CapabilityValueBound.presentedCheck semantic.authorization.evidence.capabilityValue
+      (batch tariff command).operations command.payer with
+  | .ok () => .ok ()
+  | .error none => .error .capabilityRejected
+  | .error (some reason) => .error (.valueBound reason)
+
+theorem valueBound_ok [DecidableEq F]
+    {prepared : Prepared deployment profile tariff ambient ground command}
+    {semantic : prepared.SemanticAccepted} (ok : valueBound prepared semantic = .ok ()) :
+    ∃ cap digest, semantic.authorization.evidence.capabilityValue = some (cap, digest) ∧
+      CapabilityValueBound.StrictBound cap (batch tariff command).operations command.payer := by
+  unfold valueBound at ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
+
 structure Accepted [DecidableEq F]
-    (prepared : Prepared deployment profile tariff ambient durable command)
+    (prepared : Prepared deployment profile tariff ambient ground command)
     (ingress : DecodedIngress) where
   private mk ::
-  receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
+  receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   semantic : prepared.SemanticAccepted
+  /-- The spend grant bounds the turn's gross debit of the paying account. -/
+  bounded : valueBound prepared semantic = .ok ()
+
+/-- **Every admitted fleet turn's debit is within its spend grant's value bound.** -/
+theorem Accepted.value_bounded [DecidableEq F]
+    {prepared : Prepared deployment profile tariff ambient ground command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    ∃ cap digest,
+      accepted.semantic.authorization.evidence.capabilityValue = some (cap, digest) ∧
+        CapabilityValueBound.StrictBound cap (batch tariff command).operations command.payer :=
+  valueBound_ok accepted.bounded
 theorem Accepted.sound [DecidableEq F]
-    {prepared : Prepared deployment profile tariff ambient durable command} {ingress : DecodedIngress}
+    {prepared : Prepared deployment profile tariff ambient ground command} {ingress : DecodedIngress}
     (accepted : Accepted prepared ingress) :
     accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
     ∃ graph : PolicyComponentResolution.LoadedGraph
@@ -596,22 +545,25 @@ theorem Accepted.sound [DecidableEq F]
       Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
         (step prepared).oldState (step prepared).newState = true :=
   ⟨accepted.envelopeExact, ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
-    (request prepared.authority.snapshot profile.semantics ambient command)
+    (request ground.authority profile.semantics ambient command)
     accepted.semantic.authorization⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
-    (prepared : Prepared deployment profile tariff ambient durable command)
+    (prepared : Prepared deployment profile tariff ambient ground command)
     (ingress : DecodedIngress) : IO (Except Reject (Accepted prepared ingress)) := do
-  match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
-      (marker prepared.authority.snapshot.domain profile.semantics command)
-      (request prepared.authority.snapshot profile.semantics ambient command)
+  match ← CredentialSignatureAdmission.verifyNative native ground.authority
+      (marker ground.authority.domain profile.semantics command)
+      (request ground.authority profile.semantics ambient command)
       ingress.ingress.envelope with
   | .error reason => return .error (.signature reason)
   | .ok receipt =>
       if same : receipt.envelopeBytes = ingress.ingress.envelope then
         match authorize prepared receipt with
         | .error reason => return .error reason
-        | .ok semantic => return .ok ⟨receipt, same, semantic⟩
+        | .ok semantic =>
+            match bounded : valueBound prepared semantic with
+            | .error reason => return .error reason
+            | .ok () => return .ok ⟨receipt, same, semantic, bounded⟩
       else return .error .capabilityRejected
 
 /-- The source finalizes the draft's fee and next topic position before any
@@ -677,7 +629,7 @@ theorem fleet_send_footprint (stream : Digest) (cellId : Nat) (current : TopicRe
   split at planned <;> try cases planned
   rename_i nonzero notTaken notGap
   refine ⟨?_, rfl, rfl, rfl, by omega⟩
-  simp [TopicPlan.writes, StreamWrite.headWrite, StreamWrite.entryWrite, StreamCell.appendEntry,
+  simp [TopicPlan.writes, StreamWrite.headWrite, StreamWrite.entryWrite, StreamWrite.freshWrite, StreamCell.appendEntry,
     StreamCell.Head.nextSeq]
 
 /-- **`fleet_send_cost_independent_of_history`.** A send's plan, and therefore
@@ -751,10 +703,10 @@ whose presented grant is not a capability of the paying account — another
 account's holder, or a key the account never delegated to — is refused
 `capabilityRejected` before any law runs. -/
 theorem fleet_refuses_without_capability [DecidableEq F]
-    (prepared : Prepared deployment profile tariff ambient durable command)
-    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot)
+    (prepared : Prepared deployment profile tariff ambient ground command)
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority)
     (noGrant : ((policyConfig prepared).capabilityEvidenceChecked
-      (request prepared.authority.snapshot profile.semantics ambient command)
+      (request ground.authority profile.semantics ambient command)
       command.spend () receipt () (fun _ => ())).toOption = none) :
     authorize prepared receipt = .error .capabilityRejected := by
   unfold authorize

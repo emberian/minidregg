@@ -1,0 +1,23 @@
+-- kind: verdict
+-- A verdict: one producer's judgement of one tree, written once. Rendered by ../mud/render.py
+-- (`python3 ../mud/render.py . verdict/law.verdict branch/law.branch`); never edit the JSON by hand.
+-- Fields (fields.json): tree = the digest judged; result = 1 unread, 2 pass, 3 fail; control = what the
+-- control run (the same check without the change) did: 1 none, 2 red, 3 green; producer = the subject
+-- that wrote it; readset = the digest of the footprint the judgement was computed over
+-- (`ResourceTransaction.citedDigest`), which a land must cite again (branch/law.branch clause 1).
+-- The law has no placeholder, so every verdict cell is committed to one law address: a citing law
+-- names it as `joint I cell law == {VERDICT_LAW}`.
+-- Clause numbers count from 0 and are only ever appended to.
+
+-- 0 verbs: a verdict is observed and written; it is never delegated, re-lawed or revoked.
+any [ verb == 1, verb == 2 ];
+-- 1 signer: the writer is the producer the verdict names.
+any [ not (verb == 2), eqSlots subject field producer ];
+-- 2 once: every field is written once (first write, or the same value again).
+any [ not (verb == 2),
+      all [ field tree writeOnce, field result writeOnce, field control writeOnce,
+            field producer writeOnce, field readset writeOnce ] ];
+-- 3 codes: result and control are present and known codes after every write, so they are set at birth.
+any [ not (verb == 2), all [ field result in {1, 2, 3}, field control in {1, 2, 3} ] ];
+-- 4 control: a result other than unread needs a red control: the check failed without the change.
+any [ not (verb == 2), field result == 1, field control == 2 ]

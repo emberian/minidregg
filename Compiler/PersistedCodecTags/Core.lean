@@ -28,7 +28,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 
 @[persisted_codec_tag] abbrev clockWireVersion : Nat := 6
 @[persisted_codec_tag] abbrev world_root_v2 : String := "DREGG.WORLD-ROOT/v3"
-@[persisted_codec_tag] abbrev registry_loaded_and_final_store_cells_v17 : String := "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v18"
+@[persisted_codec_tag] abbrev registry_loaded_and_final_store_cells_v17 : String := "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v19"
 @[persisted_codec_tag] abbrev durable_checkpoint_byte_v4 : List UInt8 := "DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [5]
 @[persisted_codec_tag] abbrev clock_v4 : String := s!"DREGG/CLOCK/v{clockWireVersion}"
 @[persisted_codec_tag] abbrev native_host_system_v1 : String := "DREGG.NATIVE-HOST.SYSTEM/v2"

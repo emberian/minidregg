@@ -494,7 +494,7 @@ step_create() {
      task:$pt,toolTask:$tt,
      capabilities:{parentObserve:(($base|tonumber)+11|tostring),parentControl:(($base|tonumber)+12|tostring),
        toolObserve:(($base|tonumber)+13|tostring),toolControl:(($base|tonumber)+14|tostring)},
-     budgets:{parent:"20000",tool:"20000",witnessMaxCost:"50000"},
+     budgets:{parent:"20000",tool:"20000",witnessPerRequestBytes:"50000"},
      worker:{launcher:$l,runtimeRoot:$rt,workspace:$ww,network:"none",wallTimeSeconds:900,reserve:"3",charge:"1"},
      toolCharges:{reserve:"2",charge:"1"},
      provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:(($base|tonumber)+15|tostring),controlCapability:(($base|tonumber)+16|tostring),

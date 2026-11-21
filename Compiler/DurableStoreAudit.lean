@@ -140,10 +140,14 @@ def rebuildIndex (records : List IntentRecord) (entries : List Entry) :
   let mut root := DurableIndex.emptyDigest
   let mut keys := 0
   for (height, record, entry) in (List.range' 1 records.length).zip (records.zip entries) do
-    let recordKeys := DurableIndex.IndexRows.keys record.transactionId record.nullifiers
+    let cells := record.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId
+    let seqs := Minidregg.Kernel.JournalIndex.sequences record
+    let recordKeys := DurableIndex.IndexRows.appendKeys record.transactionId record.nullifiers cells ++
+      (Minidregg.Theory.JournalSequences.distinct seqs).flatMap fun seq =>
+        [DurableIndex.seqCountKey seq, DurableIndex.seqItemKey seq 0]
     let store := DurableIndex.overlay (fun _ => none) rows
     let (root', written) ← (DurableIndex.IndexRows.apply store root height record.transactionId
-        record.nullifiers).mapError
+        record.nullifiers cells seqs).mapError
       fun message => s!"store audit refused: index at height {height}: {message}"
     rows := written ++ rows.filter fun row => !written.any (·.1 = row.1)
     root := root'

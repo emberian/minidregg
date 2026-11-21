@@ -38,6 +38,7 @@ module
 public import Kernel.CapabilityRevocationController
 public import Kernel.ResourceBirthController
 public import Compiler.RealmWellCodec
+public import Theory.CapabilityValueBound
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -124,6 +125,10 @@ inductive Reject where
   | replayedMarker | physicalPreparation
   | policyUnavailable | noGrant | lawRefused | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The grant presented on the command's target does not bound the posting's source
+  (`Theory.CapabilityValueBound.strictCheck`): the balance is not named, a bound on it is
+  below the amount, or the grant is delegated and sets no bound on it. -/
+  | valueBound (reason : CapabilityValueBound.Refusal)
   deriving DecidableEq, Repr
 
 /-- The decision over the loaded Book, the authority's parent map (the realm of
@@ -542,7 +547,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
-  let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+  let authority ← requireSome .authorityUnavailable (readDeployment deployment durable)
   let book ← requireSome .bookUnavailable
     (ResourceBirthController.Concrete.observeCell deployment directory.directory
       deployment.resourceBookId .resourceBook)
@@ -759,6 +764,23 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.envelope
   semantic : prepared.SemanticAccepted
+  /-- The grant on the command's target bounds the posting's source: the debited account for
+  a burn, the well for a mint or a floor (`Command.target`). A floor posts amount zero, so a
+  delegated grant sets it only if it names and bounds the well's balance. -/
+  bounded : CapabilityValueBound.Presented semantic.authorization.evidence.capabilityValue
+    prepared.plan.batch.operations command.target
+
+/-- **Every admitted well command is within its grant's value bound**: the balance the
+posting takes from its source (the account a burn debits, the well a mint issues from) is named
+by the grant's scope and within every bound it sets, and a delegated grant set that bound
+itself. -/
+theorem Accepted.value_bounded [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : Ingress}
+    (accepted : Accepted prepared ingress) :
+    CapabilityValueBound.Presented accepted.semantic.authorization.evidence.capabilityValue
+      prepared.plan.batch.operations command.target :=
+  accepted.bounded
+
 theorem Accepted.bound [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {ingress : Ingress}
     (accepted : Accepted prepared ingress) :
@@ -807,7 +829,15 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
       if same : receipt.envelopeBytes = ingress.envelope then
         match authorize prepared receipt with
         | .error reason => return .error reason
-        | .ok semantic => return .ok ⟨receipt, same, semantic⟩
+        | .ok semantic =>
+            match bounded : CapabilityValueBound.presentedCheck
+                semantic.authorization.evidence.capabilityValue
+                prepared.plan.batch.operations command.target with
+            | .error none => return .error .noGrant
+            | .error (some reason) => return .error (.valueBound reason)
+            | .ok () =>
+                return .ok ⟨receipt, same, semantic,
+                  (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp bounded⟩
       else return .error .noGrant
 
 /-- The exact header the subject signs over the current image. It discloses no
@@ -815,7 +845,7 @@ decision: a refused command still receives a header. -/
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let some authority := loadDeployment deployment durable.snapshot
+  let some authority := readDeployment deployment durable
     | .error "authority unavailable"
   let some directory := loadDirectory durable
     | .error "directory unavailable"

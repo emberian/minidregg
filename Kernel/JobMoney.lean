@@ -67,7 +67,6 @@ open Minidregg.Compiler
 open Minidregg.Kernel
 open Minidregg.Kernel.PayTariff
 open Minidregg.Kernel.PayCell
-open Minidregg.Kernel.PayAssignmentReceiver (OwnerGrant)
 open Minidregg.Theory.CanonicalResourceKernel
 open Minidregg.Theory.CredentialAuthorityState
 open Minidregg.Theory.TypedAuthorization
@@ -273,7 +272,26 @@ inductive Reject where
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
+  /-- The grant a fund or claim presents on its account does not bound the deposit
+  (`Theory.CapabilityValueBound.check`): its scope does not name the credit balance, or
+  bounds it below the deposited amount. -/
+  | valueBound (reason : Theory.CapabilityValueBound.Refusal)
   deriving Repr
+
+/-- A fund's Book leg debits the paying account by exactly the deposit. -/
+theorem fund_grossDebit (asset job : Nat) (j : Job) (account amount : Nat) :
+    Theory.CapabilityValueBound.grossDebit (Plan.batch ⟨asset, job, j, .fund account amount⟩).operations
+      account asset = amount := by
+  simp [Theory.CapabilityValueBound.grossDebit, Theory.CapabilityValueBound.debits, Plan.batch,
+    Operation.posting]
+
+/-- A claim's Book leg debits the bonding account by exactly the bond. -/
+theorem claim_grossDebit (asset job : Nat) (j : Job) (provider account amount : Nat) :
+    Theory.CapabilityValueBound.grossDebit
+      (Plan.batch ⟨asset, job, j, .claim provider account amount⟩).operations
+      account asset = amount := by
+  simp [Theory.CapabilityValueBound.grossDebit, Theory.CapabilityValueBound.debits, Plan.batch,
+    Operation.posting]
 
 /-! ## The pure decisions -/
 
@@ -297,7 +315,7 @@ def decideFund (t : Tariff) (stored : Option (StoredCapability .account)) (subje
     (book : Book) (job : Nat) (j : Job) (account amount : Nat) : Except Reject Plan :=
   if j.state ≠ 0 then .error .notOpen
   else if subject.value ≠ j.caller then .error .notCaller
-  else if ¬ OwnerGrant stored subject account then .error .notOwner
+  else if ¬ AccountGrant.Held stored subject account then .error .notOwner
   else if account ≠ j.callerAcct then .error .wrongAccount
   else if account = t.asset then .error .payerIsIssuer
   else if account = job then .error .payerIsHeld
@@ -313,7 +331,7 @@ def decideClaim (t : Tariff) (stored : Option (StoredCapability .account)) (subj
   else if j.price = 0 ∨ j.escrow ≠ j.price then .error .notFunded
   else if j.provider ≠ 0 ∨ j.bond ≠ 0 then .error .alreadyClaimed
   else if subject.value = 0 then .error .noProvider
-  else if ¬ OwnerGrant stored subject account then .error .notOwner
+  else if ¬ AccountGrant.Held stored subject account then .error .notOwner
   else if account = t.asset then .error .payerIsIssuer
   else if account = job then .error .payerIsHeld
   else if amount < j.price then .error .bondBelowPrice
@@ -369,7 +387,7 @@ theorem decideFund_ok {t : Tariff} {stored : Option (StoredCapability .account)}
     {subject : SubjectId} {book : Book} {job : Nat} {j : Job} {account amount : Nat} {plan : Plan}
     (accepted : decideFund t stored subject book job j account amount = .ok plan) :
     plan = ⟨t.asset, job, j, .fund account amount⟩ ∧ j.state = 0 ∧ subject.value = j.caller ∧
-      OwnerGrant stored subject account ∧ account = j.callerAcct ∧ account ≠ t.asset ∧
+      AccountGrant.Held stored subject account ∧ account = j.callerAcct ∧ account ≠ t.asset ∧
       account ≠ job ∧ 0 < amount ∧ j.escrow = 0 ∧ j.bond = 0 ∧ job ∉ book.accounts ∧
       plan.batch.Admission book ∧ aggregateDelta book plan = 0 := by
   unfold decideFund at accepted
@@ -383,7 +401,7 @@ theorem decideClaim_ok {t : Tariff} {stored : Option (StoredCapability .account)
     (accepted : decideClaim t stored subject book job j account amount = .ok plan) :
     plan = ⟨t.asset, job, j, .claim subject.value account amount⟩ ∧ j.state = 0 ∧
       0 < j.price ∧ j.escrow = j.price ∧ j.provider = 0 ∧ j.bond = 0 ∧ subject.value ≠ 0 ∧
-      OwnerGrant stored subject account ∧ account ≠ t.asset ∧ account ≠ job ∧ j.price ≤ amount ∧
+      AccountGrant.Held stored subject account ∧ account ≠ t.asset ∧ account ≠ job ∧ j.price ≤ amount ∧
       book.balance job t.asset = Int.ofNat j.held ∧
       plan.batch.Admission book ∧ aggregateDelta book plan = 0 := by
   unfold decideClaim at accepted
@@ -728,13 +746,13 @@ theorem fund_holds_price {tariff : Option Tariff} {stored : Option (StoredCapabi
 /-! ## Who may move the money -/
 
 /-- **A fund requires the caller**: the signer is the job's caller, holds the
-owner grant on the account it pays from, and that account is the job's refund
+account grant on the account it pays from, and that account is the job's refund
 account; the job held nothing and its held account did not exist. -/
 theorem fund_requires_caller {tariff : Option Tariff} {stored : Option (StoredCapability .account)}
     {subject : SubjectId} {book : Book} {job : Nat} {jo : Option Job} {account amount : Nat}
     {plan : Plan}
     (accepted : decideMoney tariff stored subject book job jo fundAction account amount = .ok plan) :
-    ∃ j, jo = some j ∧ subject.value = j.caller ∧ OwnerGrant stored subject account ∧
+    ∃ j, jo = some j ∧ subject.value = j.caller ∧ AccountGrant.Held stored subject account ∧
       account = j.callerAcct ∧ j.held = 0 ∧ job ∉ book.accounts := by
   obtain ⟨t, j, -, -, -, rfl, -, -, -, branch⟩ := decideMoney_ok accepted
   rcases branch with ⟨-, fund⟩ | ⟨bad, -⟩ | ⟨bad, -⟩
@@ -750,7 +768,7 @@ theorem claim_requires_bond {tariff : Option Tariff} {stored : Option (StoredCap
     {plan : Plan}
     (accepted : decideMoney tariff stored subject book job jo claimAction account amount = .ok plan) :
     ∃ j, jo = some j ∧ j.state = 0 ∧ j.escrow = j.price ∧ j.provider = 0 ∧
-      OwnerGrant stored subject account ∧ j.price ≤ amount ∧
+      AccountGrant.Held stored subject account ∧ j.price ≤ amount ∧
       plan.after.provider = subject.value ∧ plan.after.providerAcct = account ∧
       plan.after.bond = amount := by
   obtain ⟨t, j, -, -, -, rfl, -, -, -, branch⟩ := decideMoney_ok accepted

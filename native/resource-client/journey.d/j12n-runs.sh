@@ -52,7 +52,7 @@ doc_append() { # NAME TEXT  (the document payload: what `doc append` sends)
 }
 delegate() { # NAME FROM-WS RESOURCE RECIPIENT-SUBJECT VERBS-JSON TO-WS LOCALNAME
   jq -n --arg n "$3" --arg r "$4" --argjson v "$5" \
-    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,maxCost:"50000"}' >"$D/req/$1.json"
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,perRequestBytes:"50000"}' >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$2" --request "$D/req/$1.json" --proposal-id "rn-$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$2" \
     --intent "$2/proposals/rn-$1/intent.json" --attempt "$2/attempts/rn-$1"; ok "$1-submit"

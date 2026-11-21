@@ -21,7 +21,7 @@
 #             read still admitted — the law decides birth, revocation decides
 #             membership.
 #   leave     (K-RENOUNCE) carl, invited to observe, tries to renounce bob's
-#             grant: refused `notHolder`. bob leaves lab (`room leave`: a renounce
+#             grant: refused `not-holder`. bob leaves lab (`room leave`: a renounce
 #             of his room grant, signed by him, no management grant): his read is
 #             refused `revoked`, his births into lab `notRoomMember`, and dave's
 #             grant (delegated from bob's) is dead too; the leave says so. alice
@@ -266,7 +266,7 @@ operator redeleg "the newcomer imports its invite" \
   "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name lab3c --from-ref "$SD/nc-ref.json"
 # (to the sponsor: a grant to dave here would keep dave a member after bob's kick)
 jq -n --arg s "$SPONSOR_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"lab3c",
-  recipient:$s,verbs:["observe"],maxCost:"100",room:true}' >"$SD/nc-redeleg.json"
+  recipient:$s,verbs:["observe"],perRequestBytes:"100",room:true}' >"$SD/nc-redeleg.json"
 raw redeleg newcomer "re-delegates its invite to the sponsor (own namespace)" ok \
   "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$SD/nc-redeleg.json" --proposal-id k10c-nc
 raw redeleg newcomer "submits the re-delegation" ok \
@@ -293,7 +293,7 @@ ok leave carl "import labc $REF"
 ok leave carl "read labc"
 # by number with its kind: carl holds no reference to bob's grant (a bare number names a reference)
 ok leave carl "renounce c-bob $BOBCAP object"
-named leave carl "submit c-bob" notHolder
+named leave carl "submit c-bob" not-holder
 ok leave bob "read lab"
 ok leave bob "room leave l-bob lab"
 check leave "the leave is a renounce of bob's own room grant, signed by bob, naming no management grant" \
@@ -318,7 +318,7 @@ check leave "room members no longer lists bob or dave; still lists alice and car
   jq -e --arg a "$A" --arg b "$B" --arg c "$C" --arg d "$D" '[.members[].subject] as $s
     | (($s | index($b)) | not) and (($s | index($d)) | not) and ($s | index($a)) and ($s | index($c))' "$OUT"
 ok leave bob "room leave l-bob2 lab"
-named leave bob "submit l-bob2" alreadyRevoked
+named leave bob "submit l-bob2" already-revoked
 ok leave bob "retry l-bob"
 check leave "the exact retry returns the original receipt (replayed, same transaction)" \
   sh -c '"$MINI" attempt-state --attempt "$1" --json | jq -e ".outcome.transactionId == .retries[0].outcome.transactionId

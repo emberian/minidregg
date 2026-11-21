@@ -67,18 +67,30 @@ theorem streamEncode_injective {α : Type} (codec : StreamCodec α) :
   exact Option.some.inj decoded
 
 /-- **The signed COMMIT statement names its configuration.** Equal signed preimages have equal
-context (hence equal configuration number), view and block: a COMMIT signature can never be
-counted under a configuration other than the one it was made in. (FDG:195 "A vote must name the
-configuration it is a vote in"; Mini already puts it inside the signed preimage.) -/
+context (hence equal configuration number), view, chain length and chain digest: a COMMIT
+signature can never be counted under a configuration other than the one it was made in.
+(FDG:195 "A vote must name the configuration it is a vote in"; Mini already puts it inside the
+signed preimage.) The statement carries the chain as its running digest, so the chains are
+equal for a digest with no collision between those two chains (`commitmentBytes_binds_block`,
+`ChainDigest.CollisionFreeOn`: the premise the deployed cSHAKE256 digest can meet). -/
 theorem commitmentBytes_binds_config {c c' : Context} {v v' : Nat} {b b' : Block}
     (h : commitmentBytes c v b = commitmentBytes c' v' b') :
-    c = c' ∧ v = v' ∧ b = b' := by
-  unfold commitmentBytes at h
+    c = c' ∧ v = v' ∧ b.length = b'.length ∧ (chainDigest c).of b = (chainDigest c').of b' := by
+  unfold commitmentBytes commitStatementBytes at h
   have h2 := List.append_cancel_left h
   have h3 := streamEncode_injective
-    (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat blockStream)) h2
+    (StreamCodec.product contextStream (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat bytesStream))) h2
   simp only [Prod.mk.injEq] at h3
-  exact ⟨h3.1, h3.2.1, h3.2.2⟩
+  exact ⟨h3.1, h3.2.1, h3.2.2.1, h3.2.2.2⟩
+
+theorem commitmentBytes_binds_block {c c' : Context} {v v' : Nat} {b b' : Block}
+    (occurs : Block → Prop) (free : (chainDigest c).CollisionFreeOn occurs)
+    (left : occurs b) (right : occurs b')
+    (h : commitmentBytes c v b = commitmentBytes c' v' b') : b = b' := by
+  obtain ⟨same, _, _, digest⟩ := commitmentBytes_binds_config h
+  subst same
+  exact free b b' left right digest
 
 theorem commitmentBytes_binds_configNumber {c c' : Context} {v v' : Nat} {b b' : Block}
     (h : commitmentBytes c v b = commitmentBytes c' v' b') : configNumber c = configNumber c' := by
@@ -135,10 +147,12 @@ theorem installPoint_certificate_determined {certified : Block → Prop}
   · rw [installPoint_extend hp hi₁] at hi₂; exact Option.some.inj hi₂
   · rw [installPoint_extend hp hi₂] at hi₁; exact (Option.some.inj hi₁).symm
 
-/-- One installation: a full COMMIT certificate of the old configuration whose block carries, at
-its install point, the command for the next configuration. -/
+/-- One installation: a full COMMIT certificate of the old configuration, and the chain it is for
+as its holder reads it (a certificate names its chain by length and digest and carries none of
+it), which carries, at its install point, the command for the next configuration. -/
 structure Install where
   certificate : Certificate
+  block : Block
   next : Context
   height : Nat
 
@@ -146,8 +160,9 @@ structure Install where
 IO layer's (`GenericSimplexIO.verifyCertificate`); this states what that check does not. -/
 def Install.Valid (old : Context) (i : Install) : Prop :=
   i.certificate.context = old ∧
-    installPoint? i.certificate.block = some i.height ∧
-    i.certificate.block[i.height - 1]? = some (reconfigPayload i.next) ∧
+    i.certificate.length = i.block.length ∧
+    installPoint? i.block = some i.height ∧
+    i.block[i.height - 1]? = some (reconfigPayload i.next) ∧
     configNumber i.next = configNumber old + 1
 
 /-- **Stated: the configuration number increments by exactly one along the install chain.** -/
@@ -166,21 +181,21 @@ def configAt : Context → List Install → Nat → Context
 /-- **The height-bound verifier rule.** Accept a certificate only under the configuration in force
 at its certified height. -/
 def acceptsAt (g : Context) (hist : List Install) (cert : Certificate) : Bool :=
-  decide (cert.context = configAt g hist cert.block.length)
+  decide (cert.context = configAt g hist cert.length)
 
 /-- **An old-configuration certificate above the install point is refused.** Refuting schedule
 (GSN:36-37 + Pastro §5): after the install at `h*`, `f+1` retired config-`k` members (keys not
 erased) complete a config-`k` COMMIT for a block of height `h*+1`; a verifier holding the install
 certificate must refuse it. -/
 theorem stale_certificate_refused (g : Context) (i : Install) (hv : i.Valid g)
-    (cert : Certificate) (hold : cert.context = g) (habove : i.height < cert.block.length) :
+    (cert : Certificate) (hold : cert.context = g) (habove : i.height < cert.length) :
     acceptsAt g [i] cert = false := by
   unfold acceptsAt configAt
   rw [if_neg (by omega)]
   simp only [configAt, hold]
   have hne : g ≠ i.next := by
     intro heq
-    have := hv.2.2.2
+    have := hv.2.2.2.2
     rw [← heq] at this
     unfold configNumber at this
     omega
@@ -189,7 +204,7 @@ theorem stale_certificate_refused (g : Context) (i : Install) (hv : i.Valid g)
 /-- **Liabilities are retained.** An old-configuration certificate at or below the install point is
 still accepted: reconfiguration does not erase what the old committee already certified. -/
 theorem liability_retained_below_install (g : Context) (i : Install) (cert : Certificate)
-    (hold : cert.context = g) (hbelow : cert.block.length ≤ i.height) :
+    (hold : cert.context = g) (hbelow : cert.length ≤ i.height) :
     acceptsAt g [i] cert = true := by
   unfold acceptsAt configAt
   rw [if_pos hbelow]
@@ -197,7 +212,7 @@ theorem liability_retained_below_install (g : Context) (i : Install) (cert : Cer
 
 /-- The new configuration is accepted above the install point. -/
 theorem new_configuration_accepted_above (g : Context) (i : Install) (cert : Certificate)
-    (hnew : cert.context = i.next) (habove : i.height < cert.block.length) :
+    (hnew : cert.context = i.next) (habove : i.height < cert.length) :
     acceptsAt g [i] cert = true := by
   unfold acceptsAt configAt
   rw [if_neg (by omega)]
@@ -216,16 +231,17 @@ def forkNew : Context :=
   { scope := [1], epoch := 1, instanceBytes := [2],
     config := { parties := 4, faults := 1, timeout := 1 }, publicKeys := [] }
 def forkInstallCert : Certificate :=
-  { context := forkOld, view := 1, block := [reconfigPayload forkNew], signers := [] }
+  { context := forkOld, view := 1, length := 1, digest := [4], signers := [] }
 def forkInstall : Install :=
-  { certificate := forkInstallCert, next := forkNew, height := 1 }
+  { certificate := forkInstallCert, block := [reconfigPayload forkNew], next := forkNew, height := 1 }
+/-- Two certificates for chains of length 2 with different digests (stand-ins `[5]`, `[6]`). -/
 def forkOldCert : Certificate :=
-  { context := forkOld, view := 2, block := [reconfigPayload forkNew, [5]], signers := [] }
+  { context := forkOld, view := 2, length := 2, digest := [5], signers := [] }
 def forkNewCert : Certificate :=
-  { context := forkNew, view := 2, block := [reconfigPayload forkNew, [6]], signers := [] }
+  { context := forkNew, view := 2, length := 2, digest := [6], signers := [] }
 
 theorem forkInstall_valid : forkInstall.Valid forkOld := by
-  refine ⟨rfl, ?_, ?_, rfl⟩
+  refine ⟨rfl, rfl, ?_, ?_, rfl⟩
   · simp [forkInstall, forkInstallCert, installPoint?, reconfigPayload_isReconfig]
   · rfl
 
@@ -235,8 +251,8 @@ naive acceptor takes both, `acceptsAt` refuses the stale one. -/
 theorem naive_acceptor_admits_fork :
     acceptsAnyHistorical forkOld [forkInstall] forkOldCert = true ∧
       acceptsAnyHistorical forkOld [forkInstall] forkNewCert = true ∧
-      forkOldCert.block.length = forkNewCert.block.length ∧
-      forkOldCert.block ≠ forkNewCert.block ∧
+      forkOldCert.length = forkNewCert.length ∧
+      forkOldCert.digest ≠ forkNewCert.digest ∧
       acceptsAt forkOld [forkInstall] forkOldCert = false ∧
       acceptsAt forkOld [forkInstall] forkNewCert = true := by
   refine ⟨by simp [acceptsAnyHistorical, forkOldCert], by simp [acceptsAnyHistorical, forkNewCert,
@@ -253,7 +269,7 @@ the install certificate; this premise is what protects a slow reader that does n
 the empty set of post-install old-key signatures. Refuting schedule: the fork above, delivered to a
 replica that has not yet received `forkInstall`. -/
 def OldKeysErased (old : Context) (installHeight : Nat) (signedAfter : List Certificate) : Prop :=
-  ∀ c ∈ signedAfter, c.context = old → c.block.length ≤ installHeight
+  ∀ c ∈ signedAfter, c.context = old → c.length ≤ installHeight
 
 theorem oldKeysErased_inhabited (old : Context) (h : Nat) : OldKeysErased old h [] := by
   intro c hc; simp at hc
@@ -267,7 +283,7 @@ abbrev Readiness := Nat → Option Block
 /-- Does this member's evidence extend the install block? -/
 def readyFor (i : Install) (ready : Readiness) (member : Nat) : Bool :=
   match ready member with
-  | some b => i.certificate.block.isPrefixOf b
+  | some b => i.block.isPrefixOf b
   | none => false
 
 /-- New-configuration signers that count: only ready ones, each once. -/
@@ -287,7 +303,7 @@ theorem unready_signer_not_counted (i : Install) (ready : Readiness) (signers : 
 
 /-- The readiness premise is inhabited: every member holds the install block itself. -/
 theorem readyFor_install_block (i : Install) (m : Nat) :
-    readyFor i (fun _ => some i.certificate.block) m = true := by
+    readyFor i (fun _ => some i.block) m = true := by
   simp [readyFor, List.isPrefixOf_iff_prefix]
 
 /-- **Stated (DZ Lemma C.9): with readiness enforced, every block the new configuration commits
@@ -298,7 +314,7 @@ that does not. -/
 def ReadinessSafety (i : Install) (ready : Readiness)
     (certifiedNew : Block → List Nat → Prop) : Prop :=
   ∀ b signers, certifiedNew b signers →
-    i.next.config.quorum ≤ countReady i ready signers → i.certificate.block <+: b
+    i.next.config.quorum ≤ countReady i ready signers → i.block <+: b
 
 /-- The no-state-transfer churn bound (DZ §III.D, derived in DYNAMIC-COMMITTEE-LITERATURE:217-241):
 an old quorum and a new quorum, from an old committee of `n` growing to `n'`, share at least
@@ -320,8 +336,19 @@ theorem growth_needs_readiness (f : Nat) : ¬ ChurnSafe (3 * f + 1) f (3 * (f + 
 theorem fixed_committee_churn_safe (f : Nat) : ChurnSafe (3 * f + 1) f (3 * f + 1) f := by
   unfold ChurnSafe; push_cast; omega
 
+/-- The generalized no-state-transfer churn condition: `f' < (n - f) + (n' - f') - (n' - n) - n`
+simplifies directly to `n > f + 2f'`. Under legacy `n = 3f + 1` growing to `f' = f + 1`,
+`f + 2f' = 3f + 2 > n`, so every growth under legacy fails churn-safety without readiness.
+With `n` widened beyond `3f + 1`, `n > f + 2f'` satisfies this arithmetic overlap bound.
+The interpretation assumes a growing committee retaining the old members; this equivalence
+alone proves neither safe membership replacement nor the unproved `ReadinessSafety` contract. -/
+theorem churnSafe_iff (n f n' f' : Nat) :
+    ChurnSafe n f n' f' ↔ (f + 2 * f' < n) := by
+  unfold ChurnSafe; omega
+
 #assert_axioms streamEncode_injective
 #assert_axioms commitmentBytes_binds_config
+#assert_axioms commitmentBytes_binds_block
 #assert_axioms commitmentBytes_binds_configNumber
 #assert_axioms reconfigPayload_isReconfig
 #assert_axioms installPoint_extend
@@ -338,5 +365,6 @@ theorem fixed_committee_churn_safe (f : Nat) : ChurnSafe (3 * f + 1) f (3 * f + 
 #assert_axioms four_to_seven_unsafe
 #assert_axioms growth_needs_readiness
 #assert_axioms fixed_committee_churn_safe
+#assert_axioms churnSafe_iff
 
 end Minidregg.Kernel.GenericSimplexReconfig

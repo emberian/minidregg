@@ -22,17 +22,17 @@ use std::process::Command;
 
 /// The cost ceiling of a publication's `observe` grant. Every signed read is judged with a cost
 /// (the encoded intent's length, `Kernel/NativeObservationController.lean` `requestAt`) and a
-/// grant covers it only while `cost <= maxCost`; a grant with ceiling 0 therefore covers no read at
+/// grant covers it only while `cost <= perRequestBytes`; a grant with ceiling 0 therefore covers no read at
 /// all and the Host answers every visitor `no-grant`. The value lives in one file, which the seed
 /// (`deploy/demo-seed/seed.sh`) reads too; it bounds one read, it is not a budget.
-pub(super) const PUBLIC_READ_MAX_COST: &str = include_str!("../../../../deploy/demo-seed/public-read-max-cost");
+pub(super) const PUBLIC_READ_REQUEST_BYTES: &str = include_str!("../../../../deploy/demo-seed/public-read-request-bytes");
 
 /// The shell's paths this body runs lines with.
 pub(super) struct Shell {
     pub host: PathBuf,
     pub config: PathBuf,
     pub home: PathBuf,
-    /// The public reader's subject: who a member publishes to (`delegate ID DOC SUBJECT observe MAX`, MAX = [`PUBLIC_READ_MAX_COST`]).
+    /// The public reader's subject: who a member publishes to (`delegate ID DOC SUBJECT observe MAX`, MAX = [`PUBLIC_READ_REQUEST_BYTES`]).
     pub public_subject: Option<String>,
     /// The published document the public reader's front page shows (`--front-doc`, from the
     /// operator's `/etc/mini/front-doc` through `mini-web-spawn`); `None`: the front page is the index.
@@ -796,7 +796,7 @@ fn grants(site: &Site) -> Page {
     }
     if !site.front.read_only {
         body.push_str(
-            "<section><h2>Delegate</h2><p class=note>Delegate verbs on a reference to another subject with a cost ceiling.</p>\
+            "<section><h2>Delegate</h2><p class=note>Delegate verbs on a reference to another subject with a ceiling on each request's size in bytes.</p>\
              <form method=\"post\" action=\"/grants/delegate\" class=\"row\">\
              <div><label for=\"d-ref\">Reference</label><input id=\"d-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"></div>\
              <div><label for=\"d-to\">Recipient subject</label><input id=\"d-to\" name=\"recipient\" type=\"text\" required pattern=\"[0-9a-z-]+\"></div>\
@@ -808,7 +808,7 @@ fn grants(site: &Site) -> Page {
              <div><label for=\"r-to\">Recipient subject</label><input id=\"r-to\" name=\"recipient\" type=\"text\" required pattern=\"[0-9a-z-]+\"></div>\
              <div><label for=\"r-cap\">Capability (optional)</label><input id=\"r-cap\" name=\"capability\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\"></div>\
              <button>Revoke</button></form></section>\n"
-                .replace("@MAX@", PUBLIC_READ_MAX_COST.trim())
+                .replace("@MAX@", PUBLIC_READ_REQUEST_BYTES.trim())
                 .as_str(),
         );
     }
@@ -1811,7 +1811,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["doc", name, "publish"] => {
             let Some(subject) = site.shell.as_ref().and_then(|s| s.public_subject.clone()) else { return simple(400, "Publish", "this box has no public reader") };
             let id = form_attempt(&form);
-            act(site, &format!("Publish {name}"), vec![format!("delegate {id} {} {subject} observe {}", quote(name), PUBLIC_READ_MAX_COST.trim()), format!("submit {id}"), format!("publish {id}")], &id, &[("the document", &format!("/doc/{name}"))])
+            act(site, &format!("Publish {name}"), vec![format!("delegate {id} {} {subject} observe {}", quote(name), PUBLIC_READ_REQUEST_BYTES.trim()), format!("submit {id}"), format!("publish {id}")], &id, &[("the document", &format!("/doc/{name}"))])
         }
         ["doc", name, "unpublish"] => {
             let Some(subject) = site.shell.as_ref().and_then(|s| s.public_subject.clone()) else { return simple(400, "Unpublish", "this box has no public reader") };

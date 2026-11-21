@@ -171,7 +171,8 @@ def Source.factoryRequest (tariff : Tariff) (source : Source)
     argsDigest := encoding.hashBytes
       ("DREGG/GRAIN-RESOURCE-BIRTH/ARGS/v5".toUTF8.toList ++ source.canonicalBytes tariff)
     effectsDigest := encoding.hashBytes
-      ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v5".toUTF8.toList ++ source.canonicalBytes tariff) }
+      ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v5".toUTF8.toList ++ source.canonicalBytes tariff)
+    cost := (source.canonicalBytes tariff).length }
 
 theorem Source.factoryRequest_subject (tariff : Tariff) (source : Source)
     (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)

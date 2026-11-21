@@ -1,0 +1,76 @@
+{
+  "type": "all",
+  "predicates": [
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/0/delta",
+          "value": "0"
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "joint/index/1/cell/parent",
+              "value": "{VERDICTS}"
+            },
+            {
+              "type": "eq",
+              "slot": "joint/index/1/cell/law",
+              "value": "{VERDICT_LAW}"
+            },
+            {
+              "type": "eq",
+              "slot": "joint/index/1/resource/field/1/after",
+              "value": "2"
+            },
+            {
+              "type": "eqSlots",
+              "left": "joint/index/1/resource/field/0/after",
+              "right": "resource/field/0/after"
+            },
+            {
+              "type": "eqSlots",
+              "left": "joint/index/1/resource/field/4/after",
+              "right": "joint/index/2/cited/digest"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/0/delta",
+          "value": "0"
+        },
+        {
+          "type": "eqSlots",
+          "left": "resource/field/1/after",
+          "right": "joint/index/1/cell/id"
+        }
+      ]
+    }
+  ]
+}

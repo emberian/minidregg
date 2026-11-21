@@ -182,6 +182,9 @@ structure PreparedAppend {rootBytes : List UInt8 → Digest} (loaded : Loaded ro
   extended : Loaded rootBytes
   extendedImage : extended.image = loaded.image.append intent
   indexAfter : Digest
+  /-- The index rows the append writes, decoded: handed to the transport's holder once the Store
+  installed them, so the next append walks them and reads no index row from the Store. -/
+  indexWrites : List (List Bool × DurableIndex.Row)
 
 def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     (loaded : Loaded rootBytes) {intent : DataIntent rootBytes}
@@ -192,16 +195,20 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   let chain := loaded.chainAfterIntent intent
   let some frontier := loaded.frontier
     | return .error "this opening carries no accumulator frontier (it was not read from the Store)"
+  -- Operator measurement control (as `MINI_APPEND_TIMING` at the ordered receiver):
+  -- MINI_STORE_PHASES=1 prints where the preparation spent its time, to stderr.
+  let timing := (← IO.getEnv "MINI_STORE_PHASES") == some "1"
+  let t0 ← IO.monoNanosNow
   -- The index after the head (MAC-verified), then this record's rows (IndexRows.changes) applied.
   let indexBefore ← match ← loaded.headIndexRoot transport key with
     | .ok root => pure root
     | .error message => return .error message
-  let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
-  let (indexAfter, indexWrites) ← match ← withIndexRows transport loaded.height keys
-      (fun rows => DurableIndex.IndexRows.apply rows indexBefore height intent.transactionId
-        intent.nullifiers) with
+  let t1 ← IO.monoNanosNow
+  let (indexAfter, indexWrites) ← match ← applyIndex transport loaded.height indexBefore height
+      (IntentRecord.ofIntent intent) with
     | .ok result => pure result
     | .error message => return .error message
+  let t2 ← IO.monoNanosNow
   -- The tag keeps this record's receipt root, the root the extended image
   -- serves, the accumulator frontier after it and the index root after it.
   let extended := loaded.extend ready
@@ -209,12 +216,61 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   -- refused here, before any byte is written (FD-1 4a).
   if let .lost reason := extended.track then
     return .error s!"not admitted by the World: {reason}"
+  let t3 ← IO.monoNanosNow
   let leaf := leafDigest height recordBytes chain extended.worldRoot
   let frontierAfter := DurableHistory.Frontier.push frontier leaf
   let nodes := appendNodes (DurableHistory.completedNodes frontier height leaf) indexWrites
   let entry : Entry := ⟨recordBytes.toByteArray, trailer key height
     ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩⟩
-  return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter⟩
+  if timing then
+    let t4 ← IO.monoNanosNow
+    IO.eprintln s!"store prepare us at height {height}: index-root {(t1-t0)/1000} index-rows {(t2-t1)/1000} extend {(t3-t2)/1000} entry {(t4-t3)/1000} bytes {entry.record.size + entry.tag.length} nodes {nodes.length}"
+    -- The parts of `Loaded.extend`, each run once more to be timed (a reference keeps each value).
+    let record := IntentRecord.ofIntent intent
+    let a0 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.engine.install rootBytes intent)
+    let a1 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.index.admit height record)
+    let a2 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.links.admit height record)
+    let a3 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.ids.admit record)
+    discard <| IO.mkRef (loaded.txs.admitAt loaded.height record)
+    let a4 ← IO.monoNanosNow
+    discard <| IO.mkRef (leafDigest height recordBytes chain extended.worldRoot)
+    let a5 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.roots.writeAll (recordSlots height chain record))
+    let a6 ← IO.monoNanosNow
+    IO.eprintln s!"store extend us at height {height}: engine-install {(a1-a0)/1000} presence {(a2-a1)/1000} links {(a3-a2)/1000} ids-txs {(a4-a3)/1000} leaf-digest {(a5-a4)/1000} root-cache {(a6-a5)/1000} ({record.writes.length + 1} slots)"
+    -- The parts of the entry, each on an argument the preparation did not use (so none is shared
+    -- with a value already computed): the leaf digest, the tag, the node rows, the NODES file.
+    let e1 ← IO.monoNanosNow
+    discard <| IO.mkRef (leafDigest (height + 1) recordBytes chain extended.worldRoot)
+    let e2 ← IO.monoNanosNow
+    discard <| IO.mkRef (trailer key (height + 1)
+      ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩)
+    let e3 ← IO.monoNanosNow
+    discard <| IO.mkRef (appendNodes [] indexWrites)
+    let e4 ← IO.monoNanosNow
+    discard <| IO.mkRef (encodeNodesArray nodes)
+    let e5 ← IO.monoNanosNow
+    IO.eprintln s!"store entry us at height {height}: leaf-digest {(e2-e1)/1000} tag {(e3-e2)/1000} node-rows {(e4-e3)/1000} ({indexWrites.length}) nodes-file {(e5-e4)/1000}"
+    -- The World's turn (`WorldTrack.advance`), its three steps.
+    if let .held w _ := loaded.track then
+      let b0 ← IO.monoNanosNow
+      match TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent with
+      | .error _ => IO.eprintln s!"store turn at height {height}: the intent is not a turn"
+      | .ok t =>
+          let b1 ← IO.monoNanosNow
+          discard <| IO.mkRef (DeployedCharge.mismatch t.charge intent.exactCharge)
+          let b2 ← IO.monoNanosNow
+          discard <| IO.mkRef (Minidregg.Kernel.World.pinCheckFromBy (snapPinFails loaded.snapshot w) 0 t.pins)
+          let b3 ← IO.monoNanosNow
+          discard <| IO.mkRef (Minidregg.Kernel.World.World.admitPinned DeployedHistory.history
+            (Minidregg.Kernel.World.pinCheckFromBy (snapPinFails loaded.snapshot w) 0 t.pins) w t)
+          let b4 ← IO.monoNanosNow
+          IO.eprintln s!"store turn us at height {height}: of-intent {(b1-b0)/1000} charge {(b2-b1)/1000} pins {(b3-b2)/1000} ({t.pins.length}) admit-with-pins {(b4-b3)/1000} (legs {t.legs.length} creates {t.creates.length} nullifiers {t.nullifiers.length})"
+  return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter, indexWrites⟩
 
 
 /-- What the receiving loop does after the append's observation: confirm by
@@ -227,6 +283,7 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
   let extended := prepared.extended
   let indexAfter := prepared.indexAfter
   let confirm := fun (installed : Bool) (kind : Confirmation) => do
+    let t0 ← IO.monoNanosNow
     match ← readBackEntry transport height with
     | .error message =>
         return (false, DetailedResult.ordinary (.uncertain s!"append attempted; readback unavailable: {message}"))
@@ -234,10 +291,19 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
         return (false, .ordinary (.uncertain "append attempted; entry absent on readback"))
     | .ok (some stored) =>
         if stored = entry then
+          -- The holder moves only by rows the Store installed from this call
+          -- (`DurableNodeCache.Decoded.hold_appended`'s premise). An entry already present or
+          -- recovered after an uncertain response leaves it a height behind: the next append
+          -- reads its rows from the Store and the holder starts again there.
+          if installed then transport.holdIndexRows height true prepared.indexWrites
+          let t1 ← IO.monoNanosNow
           let tagged := { extended with headTag := some entry.tag }
           let checkpointStored ←
             if checkpointDue transport tagged then storeCheckpoint transport rootBytes tagged indexAfter
             else pure false
+          if (← IO.getEnv "MINI_STORE_PHASES") == some "1" then
+            let t2 ← IO.monoNanosNow
+            IO.eprintln s!"store confirm us at height {height}: read-back {(t1-t0)/1000} checkpoint {(t2-t1)/1000}"
           return (installed, .exact kind
             ⟨afterCheckpoint tagged checkpointStored,
               (afterCheckpoint_image tagged checkpointStored).trans prepared.extendedImage, entry,

@@ -96,8 +96,9 @@ unsatisfiable; without the `eq` it admits a step (`Minidregg.Pred.Sat.Sample`). 
 (`native/resource-client/src/lawsat.rs`).
 
 Changed from the design: completeness is a checked certificate, not a `witness_complete`
-theorem about the solver. The rename `Scope.maxCost → perRequestBytes` and the theorem
-`step_allowance_nonincrease` are **design**.
+theorem about the solver. The scope's size ceiling is `Scope.perRequestBytes` (it was
+`maxCost`): every signed request's `cost` is an encoded length. The theorem
+`step_allowance_nonincrease` is **design**.
 
 ## 3. Cost in the types. **Partly shipped.**
 

@@ -1,0 +1,21 @@
+{
+  "type": "fleet-fields-v1",
+  "kinds": {
+    "verdict": {
+      "tree": "0",
+      "result": "1",
+      "control": "2",
+      "producer": "3",
+      "readset": "4"
+    },
+    "branch": {
+      "head": "0",
+      "verdict": "1"
+    }
+  },
+  "codes": {
+    "result": { "unread": "1", "pass": "2", "fail": "3" },
+    "control": { "none": "1", "red": "2", "green": "3" },
+    "note": "No code is 0: `writeOnce` treats a stored 0 as not yet written (Pred.eval_writeOnce_zero_rewritable)."
+  }
+}

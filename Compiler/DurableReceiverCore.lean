@@ -29,6 +29,8 @@ public import Compiler.NativeCoprocess
 public import Compiler.DurableLogTags
 public import Compiler.DurableHistory
 public import Compiler.DurableIndex
+public import Compiler.DurableIndexFast
+public import Kernel.JournalIndex
 public import Std.Data.HashMap
 public import Std.Data.HashSet
 public import Kernel.PresenceIndex
@@ -293,6 +295,47 @@ def encodeNodes (nodes : List NodeWrite) : List UInt8 :=
   u64Bytes nodes.length ++ nodes.flatMap fun node =>
     u64Bytes node.space ++ blobBytes node.key ++ blobBytes node.value
 
+/-- Eight octets of a number, most significant first, pushed onto a byte array. -/
+private def pushU64 (out : ByteArray) (value : Nat) : ByteArray :=
+  (((((((out.push (value / 256 ^ 7 % 256).toUInt8).push (value / 256 ^ 6 % 256).toUInt8).push
+    (value / 256 ^ 5 % 256).toUInt8).push (value / 256 ^ 4 % 256).toUInt8).push
+    (value / 256 ^ 3 % 256).toUInt8).push (value / 256 ^ 2 % 256).toUInt8).push
+    (value / 256 ^ 1 % 256).toUInt8).push (value / 256 ^ 0 % 256).toUInt8
+
+private theorem pushU64_data (out : ByteArray) (value : Nat) :
+    (pushU64 out value).data.toList = out.data.toList ++ u64Bytes value := by
+  have indices : (List.range 8).reverse = [7, 6, 5, 4, 3, 2, 1, 0] := by decide
+  simp only [pushU64, u64Bytes, indices, List.map_cons, List.map_nil,
+    Sp800185Cshake256.Fast.push_data, List.append_assoc, List.cons_append, List.nil_append]
+
+/-- One node of the NODES file pushed onto a byte array. -/
+private def pushNode (out : ByteArray) (node : NodeWrite) : ByteArray :=
+  Sp800185Cshake256.Fast.pushList (pushU64
+    (Sp800185Cshake256.Fast.pushList (pushU64 (pushU64 out node.space) node.key.length) node.key)
+    node.value.length) node.value
+
+/-- The NODES file written into one byte array: an append of a hundred and fifty node rows no
+longer builds its thirteen thousand octets as a list (and each of its `u64`s as a mapped range). -/
+def encodeNodesArray (nodes : List NodeWrite) : ByteArray :=
+  nodes.foldl pushNode (pushU64 ByteArray.empty nodes.length)
+
+/-- **The array is the NODES file**: its octets are `encodeNodes`. -/
+theorem encodeNodesArray_data (nodes : List NodeWrite) :
+    (encodeNodesArray nodes).data.toList = encodeNodes nodes := by
+  have folded : ∀ (rest : List NodeWrite) (out : ByteArray),
+      (rest.foldl pushNode out).data.toList = out.data.toList ++ rest.flatMap fun node =>
+        u64Bytes node.space ++ blobBytes node.key ++ blobBytes node.value := by
+    intro rest
+    induction rest with
+    | nil => intro out; simp
+    | cons node rest ih =>
+        intro out
+        rw [List.foldl_cons, ih, List.flatMap_cons]
+        simp only [pushNode, Sp800185Cshake256.Fast.pushList_data, pushU64_data, blobBytes,
+          List.append_assoc]
+  rw [encodeNodesArray, folded, pushU64_data]
+  rfl
+
 def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
     (nodes : List NodeWrite) (crashAt : Option String := none) : IO CasObservation :=
   try
@@ -303,7 +346,7 @@ def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
           "mem:record", "mem:tag", "mem:nodes", phase]
     let (output, _) ← runNativeMemory config arguments
       [("record", entry.record), ("tag", entry.tag.toByteArray),
-        ("nodes", (encodeNodes nodes).toByteArray)]
+        ("nodes", encodeNodesArray nodes)]
     return parseCasOutput output
   catch error => pure (.uncertain s!"native append unavailable: {error}")
 
@@ -1966,23 +2009,22 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
         trackOfWorld rootBytes image (DurableEngine.resume_of_resumeEngine found) world,
         chainLog, chainLogExact⟩, rfl, rfl, rfl, rfl⟩
 
-/-- **The opening cut at `height`, at or above its own base** (CONSENT-STORE): the
-base the Store's open used (its MAC-verified checkpoint, or the seed) is kept, the
-records from the base to `height` are replayed through the executor and folded as
-turns from the base's World (`Chained.baseWorld`), the chain is read off the open's
-verified prefixes and the stored roots are the verified tags'. Nothing below the base
-is executed or folded: the cost is the records between the base and `height`, at most
-the checkpoint interval when `height` is the head's checkpoint or an anchor above it. -/
-def Chained.cutAbove {rootBytes : List UInt8 → Digest} (opened : Chained rootBytes) (height : Nat) :
+/-- **The opening cut at `height`, over a base at or below it**: the image is the first
+`height` records, replayed through the executor from `base` (a state after `baseHeight`
+records: the Store's own base for `cutAbove`, or an earlier checkpoint for a cut below it,
+`Reader.stateAt`); the chain is read off the open's verified prefixes and the stored roots are
+the verified tags'. The base's authenticity is the caller's; nothing below it is executed. -/
+def Chained.cutAt {rootBytes : List UInt8 → Digest} (opened : Chained rootBytes) (height : Nat)
+    (baseHeight : Nat) (base : State) (world : Except String HostRefinesWorld.DWorld) :
     Except String {cut : Loaded rootBytes //
       cut.image = Image.ofAccepted opened.loaded.image.seed (opened.loaded.image.accepted.take height) ∧
-        cut.logStart = opened.loaded.logStart ∧ cut.baseHeight = opened.loaded.baseHeight ∧
-        cut.base = opened.loaded.base} :=
+        cut.logStart = opened.loaded.logStart ∧ cut.baseHeight = baseHeight ∧
+        cut.base = base} :=
   let loaded := opened.loaded
   if within : height ≤ loaded.height then
     have withinAccepted : height ≤ loaded.image.accepted.length := by
       simpa only [Loaded.height_eq] using within
-    if based : loaded.baseHeight ≤ height then
+    if based : baseHeight ≤ height then
       match found : opened.chains[height]? with
       | none => .error "durable chain prefix unavailable at the requested height"
       | some chain =>
@@ -1996,17 +2038,32 @@ def Chained.cutAbove {rootBytes : List UInt8 → Digest} (opened : Chained rootB
               chainPrefixes loaded.logStart (loaded.image.accepted.take height) := by
             rw [List.toList_toArray, loaded.chainLogExact,
               DurableLogTags.chainPrefixes_take _ _ _ withinAccepted]
-          let between := (loaded.image.accepted.take height).drop loaded.baseHeight
-          Loaded.build (Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height)) loaded.baseHeight
-            loaded.base (by simpa only [Image.accepted_ofAccepted, List.length_take,
+          Loaded.build (Image.ofAccepted loaded.image.seed (loaded.image.accepted.take height)) baseHeight
+            base (by simpa only [Image.accepted_ofAccepted, List.length_take,
               Nat.min_eq_left withinAccepted] using based)
             loaded.logStart chain (by simpa only [Image.accepted_ofAccepted] using chainExact)
             (loaded.rootLog.extract 0 height) (by simpa only [Image.accepted_ofAccepted] using sized)
             (loaded.chainLog.toList.take (height + 1)).toArray
             (by simpa only [Image.accepted_ofAccepted] using cutLog)
-            (opened.baseWorld.bind fun w => foldRecords rootBytes w loaded.baseHeight between)
-    else .error s!"height {height} is below the Store's base at {loaded.baseHeight}"
+            world
+    else .error s!"height {height} is below the base at {baseHeight}"
   else .error "durable log is shorter than the requested height"
+
+/-- **The opening cut at `height`, at or above its own base** (CONSENT-STORE): the
+base the Store's open used (its MAC-verified checkpoint, or the seed) is kept, the
+records from the base to `height` are replayed through the executor and folded as
+turns from the base's World (`Chained.baseWorld`), the chain is read off the open's
+verified prefixes and the stored roots are the verified tags'. Nothing below the base
+is executed or folded: the cost is the records between the base and `height`, at most
+the checkpoint interval when `height` is the head's checkpoint or an anchor above it. -/
+def Chained.cutAbove {rootBytes : List UInt8 → Digest} (opened : Chained rootBytes) (height : Nat) :
+    Except String {cut : Loaded rootBytes //
+      cut.image = Image.ofAccepted opened.loaded.image.seed (opened.loaded.image.accepted.take height) ∧
+        cut.logStart = opened.loaded.logStart ∧ cut.baseHeight = opened.loaded.baseHeight ∧
+        cut.base = opened.loaded.base} :=
+  opened.cutAt height opened.loaded.baseHeight opened.loaded.base
+    (opened.baseWorld.bind fun w => foldRecords rootBytes w opened.loaded.baseHeight
+      ((opened.loaded.image.accepted.take height).drop opened.loaded.baseHeight))
 
 /-- **A cell's bytes at log height `height`** (K-HISTORY-READ): its last write among the
 first `height` accepted records, else its seeded bytes, else the deployment's fresh image:
@@ -2312,6 +2369,37 @@ def withIndexRows {α : Type} (transport : Transport) (height : Nat) (keys : Lis
               if answer matches .ok _ then transport.holdIndexRows height false rows.toList
               return answer
 
+
+/-- **The index after an append of `record`** at `height`, from the rows at `held` (the height
+before it) under `root`: the record's transaction id and nullifiers inserted, the last-write
+row of each cell it writes overwritten, and each journal sequence it belongs to
+(`Kernel.JournalIndex.sequences`) extended. The counts of its sequences are read first: they
+name the position rows the append writes, so a transport that holds no rows reads those too.
+`IndexRows.apply` reads and verifies every count again on the rows it is given. -/
+def applyIndex (transport : Transport) (held : Nat) (root : Digest) (height : Nat) (record : IntentRecord) :
+    IO (Except String (Digest × List (List Bool × DurableIndex.Row))) := do
+  let cells := record.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId
+  let seqs := Minidregg.Theory.JournalSequences.distinct (Minidregg.Kernel.JournalIndex.sequences record)
+  -- Operator measurement control (`MINI_STORE_PHASES=1`, as at the append): the two index steps.
+  let timing := (← IO.getEnv "MINI_STORE_PHASES") == some "1"
+  let t0 ← IO.monoNanosNow
+  let mut counts : List (Tower256ConcreteBackend.Digest256 × Nat) := []
+  unless seqs.isEmpty do
+    match ← withIndexRows transport held (seqs.map DurableIndex.seqCountKey)
+        (fun rows => DurableIndex.IndexRows.seqCounts rows root seqs) with
+    | .error message => return .error message
+    | .ok read => counts := read
+  let keys := DurableIndex.IndexRows.appendKeys record.transactionId record.nullifiers cells ++
+    DurableIndex.IndexRows.seqKeys counts
+  let t1 ← IO.monoNanosNow
+  let result ← withIndexRows transport held keys fun rows =>
+    DurableIndex.IndexRows.apply rows root height record.transactionId record.nullifiers cells
+      (Minidregg.Kernel.JournalIndex.sequences record)
+  if timing then
+    let t2 ← IO.monoNanosNow
+    let holds := (← transport.heldIndexRows held).isSome
+    IO.eprintln s!"store index us at height {height}: counts {(t1-t0)/1000} ({seqs.length} sequences) apply {(t2-t1)/1000} ({keys.length} keys, {cells.length} cells, {record.nullifiers.length} nullifiers) held {holds}"
+  return result
 
 /-- Hand the holder the whole index trie at `height` (the serving Host's open, row 37 of
 docs/PERF-CLIENT.md): a breadth-first walk from the root, one Store read per level, following each

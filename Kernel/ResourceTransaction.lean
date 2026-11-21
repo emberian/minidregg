@@ -8,6 +8,7 @@ public import Compiler.NativeProtocolFrames
 public import Compiler.NativeInvocationStatement
 public import Compiler.ObjectiveInvocationClaim
 public import Kernel.DeclaredResourceScalar
+public import Theory.PlanBinding
 public import Kernel.WorldKindProjection
 public import Kernel.WorldKindMethods
 public import Kernel.WorldPrototypeConstruction
@@ -23,6 +24,8 @@ public import Kernel.RunComputeBudgetDomain
 public import Kernel.ResourceMoneyReceiver
 public import Kernel.ResourceObservationAdmission
 public import Kernel.ObjectiveWorkAccount
+public import Kernel.ResourceEffectRegistry
+public import Kernel.ContentEffect
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -58,56 +61,97 @@ open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
-abbrev Registry := CanonicalCellRegistry.registry
-abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 /-- The verified state a transaction is prepared on (`ServedBasis.Ground`): the
 light basis of a request (its declared keys answered from the authenticated
 history) or the full shape's loaded directory and authority. -/
 abbrev Ground (deployment : Deployment) := Minidregg.Compiler.ServedBasis.Ground deployment
-abbrev AuthoritySnapshot := CredentialAuthorityDomain.Snapshot
-abbrev Ambient := DeclaredResourceScalar.Ambient
 
-/-- Transaction9's explicit consent to a source-derived Book burn. Payer and
-capability are the containing signed account target, not duplicated here. -/
-abbrev ComputeFunding := ResourceMoneyWire.FundingConsent
-abbrev computeFundingStream := ResourceMoneyWire.fundingStream
-abbrev MoneyConsent := ResourceMoneyWire.Consent
-
-/-- A target's payload: declared scalar actions, a content command, or one
-stream append (the entry's bytes; the receiver derives its sequence position
-and digest). -/
+/-- A target's payload: an operation of a registered effect, and nothing else. Declared scalar
+actions are the registered operation at code 0 (`Payload.scalar`), a content command the one at
+code 1 (`Payload.content`), a stream append the one at code 2 (`Payload.append`), a compute
+funding the one at code 6 and a money consent the one at code 8. -/
 inductive Payload where
-  | scalar (actions : List DeclaredActionLowering.Action)
-  | content (command : ContentResource.Command)
-  | append (request : StreamCell.Append)
-  | world (actions : List WorldKindInstance.Action)
-  | kindDefinition (definition : WorldKindCell.Definition)
-  /-- An observe-only read of a content cell: no patch, authorized under the
-  observe verb.  A `transclude` of another target of the same command names
-  this cell as its source; this read is where the admission checks the
-  transcluder's grant and the source's own policy at this height, and its
-  loaded state is what the opening is checked against. -/
-  | read
-  /-- Whole authenticated world-kind definition, observe-only. -/
-  | kindRead
-  | computeFunding (funding : ComputeFunding)
-  | moneyConsent (consent : MoneyConsent)
+  /-- An operation of a registered effect (`Kernel/ResourceEffectRegistry.lean`): the wire code
+  and that code's declared operation. Every arm of every function over a payload reads this
+  constructor from the declaration `effectAt code`; an unbound code has no operation, so no
+  payload carries one. Declared scalar actions are code 0, the content write is code 1, the
+  stream append 2, the content read 3, a world instance's
+  actions 4, the kind definition revision 5, the compute funding 6, the whole kind definition
+  read 7, the money consent 8, the cited read 9. -/
+  | registered (code : UInt8) (op : (effectAt code.toNat).O)
   deriving DecidableEq
 
-/-- A content command shows as its canonical command bytes. -/
+/-- **Declared scalar actions**: the registered operation at code 0, whose operand is the list of
+guarded field actions (`scalarEffect`). It has no constructor and no dispatch arm; it is a
+pattern for the code that reads particular actions out of a signed scalar operation (a provider
+generation, a grain's four coordinates). -/
+@[match_pattern] abbrev Payload.scalar (actions : List DeclaredActionLowering.Action) : Payload :=
+  .registered 0 actions
+
+/-- **A content payload**: the registered operation at the content write's code. It has no
+constructor and no arm of its own; this names the payload for the code that builds one or reads
+one out of a signed command. -/
+@[match_pattern] abbrev Payload.content (command : ContentResource.Command) : Payload :=
+  .registered 1 command
+
+/-- **A stream append**: the registered operation at code 2 (`appendEffect`). It has no
+constructor and no dispatch arm; it is a pattern for the code that builds one or reads the
+signed entry out of an accepted command (the payload a stream record's append carried). -/
+@[match_pattern] abbrev Payload.append (request : StreamCell.Append) : Payload :=
+  .registered 2 request
+
+/-- **A compute funding consent**: the registered operation at code 6 (`computeFundingEffect`).
+It has no constructor and no arm anywhere; this names the payload for the code that builds
+one. What a payload funds is read from its declaration (`Payload.funding?`). -/
+abbrev Payload.computeFunding (funding : ComputeFunding) : Payload :=
+  .registered 6 funding
+
+/-- **A money consent**: the registered operation at code 8 (`moneyConsentEffect`). It has no
+constructor and no arm anywhere; this names the payload for the code that builds one. What a
+payload consents to is read from its declaration (`Payload.consent?`). -/
+abbrev Payload.moneyConsent (consent : MoneyConsent) : Payload :=
+  .registered 8 consent
+
+/-- **The funding leg a payload consents to**: its declaration's (`Effect.funding`). No payload
+kind is named: a registered operation answers by its own declaration. -/
+def Payload.funding? : Payload → Option ComputeFunding
+  | .registered code op => (effectAt code.toNat).funding op
+
+/-- **The money consent a payload is**: its declaration's (`Effect.consent`). -/
+def Payload.consent? : Payload → Option MoneyConsent
+  | .registered code op => (effectAt code.toNat).consent op
+
+/-- The two readers agree: a consent's funding leg is the payload's. -/
+theorem Payload.consent?_funding {payload : Payload} {consent : MoneyConsent}
+    (stated : payload.consent? = some consent) : payload.funding? = consent.funding := by
+  cases payload with
+  | registered code op => exact (effectAt code.toNat).consent_funding op consent stated
+
+/-- **The observe-only content read**: the registered operation at code 3, which has no
+operand (`readEffect`). Not a pattern: no function has an arm for it. -/
+abbrev Payload.read : Payload := .registered 3 ()
+
+/-- **The whole kind definition read**: the registered operation at code 7, which has no
+operand (`kindReadEffect`). Not a pattern: no function has an arm for it. -/
+abbrev Payload.kindRead : Payload := .registered 7 ()
+
+/-- **A world instance's actions**: the registered operation at code 4, whose operand is the
+list of guarded field actions (`worldEffect`). Not a pattern: no function has an arm for it. -/
+abbrev Payload.world (actions : List WorldKindInstance.Action) : Payload :=
+  .registered 4 actions
+
+/-- **A kind definition revision**: the registered operation at code 5, whose operand is the
+whole next definition (`kindDefinitionEffect`). Not a pattern: no function has an arm for it. -/
+abbrev Payload.kindDefinition (definition : WorldKindCell.Definition) : Payload :=
+  .registered 5 definition
+
+/-- A registered operation shows as its declaration's name and its canonical bytes. -/
 instance : Repr Payload where
   reprPrec payload prec := match payload with
-    | .scalar actions => Repr.addAppParen ("Payload.scalar " ++ reprArg actions) prec
-    | .content command =>
-        Repr.addAppParen ("Payload.content " ++ reprArg (ContentResource.commandCodec.encode command)) prec
-    | .append request => Repr.addAppParen ("Payload.append " ++ reprArg request) prec
-    | .world actions => Repr.addAppParen ("Payload.world " ++ reprArg actions) prec
-    | .kindDefinition definition => Repr.addAppParen ("Payload.kindDefinition " ++ reprArg definition) prec
-    | .read => "Payload.read"
-    | .kindRead => "Payload.kindRead"
-    | .computeFunding funding => Repr.addAppParen ("Payload.computeFunding " ++ reprArg funding) prec
-    | .moneyConsent consent => Repr.addAppParen ("Payload.moneyConsent " ++ reprArg consent) prec
+    | .registered code op =>
+        Repr.addAppParen ("Payload.registered " ++ (effectAt code.toNat).name ++ " " ++
+          reprArg ((effectAt code.toNat).spec.opStream.encode op)) prec
 
 structure Target where
   kind : ResourceKind
@@ -153,15 +197,15 @@ instance targetsValidDecidable (command : Command) : Decidable command.TargetsVa
 
 def Command.targetsWellFormed (command : Command) : Bool := decide command.TargetsValid
 
-/-- An observe-only read target (`read`, `kindRead`): it writes nothing, and
+/-- An observe-only read target (a registered effect whose verb is the observe verb: the
+content read, the kind read, the cited read): it writes nothing, and
 its ONLY authorization is its `ReadLeg` (the requester's observe capability,
 signed for this exact command, judged by the source's current observe policy on
 the unchanged cell). No ordinary leg runs for it. A funding or money-consent
 target is read too, but it authorizes a debit and keeps its leg. -/
 def Target.observeOnly (target : Target) : Bool :=
   match target.payload with
-  | .read | .kindRead => true
-  | _ => false
+  | .registered code op => (effectAt code.toNat).observeOnly op
 
 /-- Whether the command writes any target. A command of observe-only reads alone
 makes no transition: no law has anything to judge (a signed read is the
@@ -180,45 +224,41 @@ def Command.requiresObservation (command : Command) : Bool :=
     command.targetsWellFormed = true ↔ command.TargetsValid := by
   simp [targetsWellFormed]
 
+/-- The payload's bytes: its tag octet (its code), then the operation in its declaration's own
+codec. -/
+def payloadEncode : Payload → List UInt8
+  | .registered code op => code :: (effectAt code.toNat).spec.opStream.encode op
+
+/-- **The payload codec.** A bound tag is decoded by its declaration's own prefix decoder and by
+nothing else; a tag no declaration binds refuses. -/
 def payloadStream : StreamCodec Payload where
-  encode
-    | .scalar actions => 0 :: (StreamCodec.list DeclaredResourceScalar.actionStream).encode actions
-    | .content command => 1 :: ContentResource.commandStream.encode command
-    | .append request => 2 :: StreamCell.appendStream.encode request
-    | .read => [3]
-    | .world actions => 4 :: (StreamCodec.list WorldKindInstance.actionStream).encode actions
-    | .kindDefinition definition => 5 :: WorldKindCell.definitionStream.encode definition
-    | .computeFunding funding => 6 :: computeFundingStream.encode funding
-    | .kindRead => [7]
-    | .moneyConsent consent => 8 :: ResourceMoneyWire.consentStream.encode consent
+  encode := payloadEncode
   decodePrefix
-    | 0 :: bytes => do
-        let (actions, rest) ← (StreamCodec.list DeclaredResourceScalar.actionStream).decodePrefix bytes
-        some (.scalar actions, rest)
-    | 1 :: bytes => do
-        let (command, rest) ← ContentResource.commandStream.decodePrefix bytes
-        some (.content command, rest)
-    | 2 :: bytes => do
-        let (request, rest) ← StreamCell.appendStream.decodePrefix bytes
-        some (.append request, rest)
-    | 3 :: bytes => some (.read, bytes)
-    | 4 :: bytes => do
-        let (actions, rest) ← (StreamCodec.list WorldKindInstance.actionStream).decodePrefix bytes
-        some (.world actions, rest)
-    | 5 :: bytes => do
-        let (definition, rest) ← WorldKindCell.definitionStream.decodePrefix bytes
-        some (.kindDefinition definition, rest)
-    | 6 :: bytes => do
-        let (funding, rest) ← computeFundingStream.decodePrefix bytes
-        some (.computeFunding funding, rest)
-    | 7 :: bytes => some (.kindRead, bytes)
-    | 8 :: bytes => do
-        let (consent, rest) ← ResourceMoneyWire.consentStream.decodePrefix bytes
-        some (.moneyConsent consent, rest)
-    | _ => none
+    | [] => none
+    | tag :: bytes =>
+      if registeredOctet tag = true then
+        ((effectAt tag.toNat).spec.opStream.decodePrefix bytes).map fun decoded =>
+          (.registered tag decoded.1, decoded.2)
+      else none
   decodePrefix_encode := by
     intro payload suffix
-    cases payload <;> simp [StreamCodec.decodePrefix_encode]
+    cases payload with
+    | registered code op =>
+        by_cases bound : registeredOctet code = true
+        · simp [payloadEncode, bound, StreamCodec.decodePrefix_encode]
+        · exact (unbound_elim (by simpa using bound) op).elim
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    · by_cases bound : registeredOctet tag = true
+      · simp only [bound, if_true, Option.map_eq_some_iff] at decoded
+        obtain ⟨⟨op, rest⟩, ok, same⟩ := decoded
+        cases same
+        have canonical := (effectAt tag.toNat).spec.opStream.encode_decodePrefix _ _ _ ok
+        simp only [payloadEncode, List.cons_append, canonical]
+      · simp only [bound] at decoded
+        cases decoded
 
 def targetStream : StreamCodec Target :=
   StreamCodec.xmap
@@ -462,38 +502,21 @@ transaction10 vs transaction13); it can only collide with the original
 operation, which the exact ingress lookup refuses as a conflicting use.
 Collision resistance is a cryptographic assumption, not codec injectivity. -/
 def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.IDENTITY/v3".toUTF8.toList
-    ((StreamCodec.product digestStream (StreamCodec.product digestStream
-      (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream StreamCodec.nat))).encode
-      (domain, semantics, command.subject, command.nonce))).digest.value
+  transactionMarker domain semantics command.subject command.nonce
 
 abbrev ordinaryVerb := DeclaredResourceScalar.ordinaryVerb
 
-def observeVerb : (kind : ResourceKind) → Verb kind
-  | .object => .observeObject
-  | .account => .observeAccount
-  | .program => .observeProgram
-
-/-- The verb a target's authorization leg is checked under: `appendObject` for
-a stream append on an object, observe for an observe-only read target, the
-kind's ordinary write verb otherwise. -/
+/-- The verb a target's authorization leg is checked under: its declaration's (`appendObject`
+for a stream append on an object, observe for an observe-only read target, the kind's ordinary
+write verb otherwise). -/
 def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
-  | .object, .append _ => .appendObject
-  | kind, .read | kind, .kindRead => observeVerb kind
-  | kind, .moneyConsent _ => ordinaryVerb kind
-  | kind, _ => ordinaryVerb kind
+  | kind, .registered code op => (effectAt code.toNat).spec.verb kind op
 
 def Target.verb (target : Target) : Verb target.kind := payloadVerb target.kind target.payload
 
-/-- Payment authority is charged the exact consented credit amount; all other
-legs retain canonical command-byte cost. Structural preparation rejects a
-funding payload on any role except account. -/
-def requestCost (encodedCommand : List UInt8) (target : Target) : Nat :=
-  match target.payload with
-  | .computeFunding funding => funding.credits
-  | .moneyConsent consent => encodedCommand.length +
-      (consent.funding.map ResourceMoneyWire.FundingConsent.credits).getD 0
-  | _ => encodedCommand.length
+/-! Every leg's `cost` is the canonical command's encoded length, the unit every signed
+request has. The credits a funding or money leg moves are bounded by the presented grant's
+balance bound (`DeclaredResourceController.debitBoundCheck`), never by `cost`. -/
 
 /-- The original expression is retained as a specification for the optimized
 request construction. It is not called by the production request path. -/
@@ -514,11 +537,11 @@ def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (amb
   policyId := ⟨target.target⟩
   policyEpoch := snapshot.authState.policyEpoch ⟨target.target⟩
   policyRevision := snapshot.authState.policyRevision ⟨target.target⟩
-  cost := requestCost (commandCodec.encode command) target
+  cost := (commandCodec.encode command).length
 
 /-- Encode the canonical command and its domain/profile frame once per
 request. The same exact framed bytes feed both digest domains; the raw
-funding credits are the funding leg cost; other legs retain canonical command length. -/
+command's encoded length is every leg's cost. -/
 def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (target : Target) (preRoot : Digest) : Request target.kind :=
   let encodedCommand := commandCodec.encode command
@@ -540,7 +563,7 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
     policyId := ⟨target.target⟩
     policyEpoch := snapshot.authState.policyEpoch ⟨target.target⟩
     policyRevision := snapshot.authState.policyRevision ⟨target.target⟩
-    cost := requestCost encodedCommand target }
+    cost := encodedCommand.length }
 
 /-- For every old authority snapshot and transaction input, caching only the
 two canonical byte strings changes no request field, digest, or cost. -/
@@ -548,6 +571,14 @@ theorem requestFor_eq_reference (snapshot : AuthoritySnapshot) (semantics : Dige
     (ambient : Ambient) (command : Command) (target : Target) (preRoot : Digest) :
     requestFor snapshot semantics ambient command target preRoot =
       requestForReference snapshot semantics ambient command target preRoot := by
+  rfl
+
+/-- Every leg of a resource transaction costs the command's encoded length: a funding or money
+leg's credits are not in it. -/
+@[simp] theorem requestFor_cost (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (target : Target) (preRoot : Digest) :
+    (requestFor snapshot semantics ambient command target preRoot).cost =
+      (commandCodec.encode command).length :=
   rfl
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.requestFor_eq_reference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -560,8 +591,6 @@ def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambie
 inductive Reject where
   | malformedCommand | emptyTargets | duplicateTargets | emptyActions | unsupportedVersion
   | missingTarget | wrongRole | staleTarget
-  | scalar (reason : DeclaredResourceScalar.Reject)
-  | content (reason : ContentResource.Reject)
   | patchValidation | invalidPost | authorityUnavailable | directoryUnavailable
   | nullifierUsed
   /-- The request did not declare the operation marker's replay nullifier, so
@@ -610,21 +639,21 @@ inductive Reject where
   /-- Measured usage exceeds the signed envelope's charge. -/
   | objectiveUsage
   | observationRequired | observationRejected | clockUnavailable
-  | streamTopic | streamPayload
-  /-- A stream append's `ref` names an entry of the same stream at or beyond its head: a
-  reference points back at an existing entry, never at one still in flight. -/
-  | streamRef
-  | worldKind | kindDefinition
   | computeFunding
   | computeBudget (reason : RunComputeBudgetDomain.Reject)
   | money (reason : ResourceMoneyReceiver.Reject)
   | audience (reason : ObjectAudience.Reject)
-  /-- CH-EPOCH: a channel record's append refused by the channel law, the clause named. -/
-  | channel (reason : DomainEpoch.Refusal)
   /-- K-FIELDS: the leg changed a field its capability's scope does not name. -/
   | fieldNotNamed
+  /-- A registered effect's refusal, as its dispatch returned it: the declaration's own named
+  refusal with its structured detail (a cited read's `citedStale` carries the moved keys), or
+  one of the dispatcher's (`outOfFrame`, `guardFailed`). -/
+  | effect (refusal : Effects.Revival.DispatchRefusal)
   /-- K-FIELDS: a named field moved past a per-field bound (`maxDelta`). -/
   | maxDeltaExceeded
+  /-- A delegated capability lowered a balance on which its scope sets no `maxDelta` bound
+  (`Theory.CapabilityValueBound.DebitsBounded`). -/
+  | missingBalanceBound
   | run (reason : Run.Refusal)
   /-- The signer authenticated, but its refusal lane (`Kernel.RefusalLane`) is
   empty: its recent refused commands already cost the Host their budget. The
@@ -632,28 +661,33 @@ inductive Reject where
   | refusalLane
   deriving Repr
 
+/-- A registered dispatch's refusal in the controller's vocabulary: the header's refusals (the
+role, the scope of the operation's guards, the schema version, the root) are the controller's
+own names, every other one is carried whole. -/
+def Reject.ofDispatch : Effects.Revival.DispatchRefusal → Reject
+  | .wrongRole _ => .wrongRole
+  | .unsupportedVersion _ => .unsupportedVersion
+  | .staleTarget _ => .staleTarget
+  | .capabilityRejected _ => .capabilityRejected
+  | .fieldNotNamed _ => .fieldNotNamed
+  | refusal => .effect refusal
+
+/-- An append's own refusal, as the controller returns it: the declaration's, under code 2. -/
+def appendRefusal (reason : AppendRefusal) : Reject :=
+  .effect (.refused 2 reason.name reason.detail)
+
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
   | none => .error reason | some value => .ok value
 
-/-- The store layout of the target's role: a declared-effect cell for scalar
-actions, a hyperdocument content cell for content commands. -/
+/-- The store layout of the target's role: its declaration's. -/
 @[reducible] def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
-  | .scalar _ | .computeFunding _ | .moneyConsent _ => EffectDeclaration.effectLayout
-  | .content _ | .read => Hyperdocument.layout
-  | .append _ => StreamCell.headLayout
-  | .world _ => WorldKindCell.instanceLayout
-  | .kindDefinition _ | .kindRead => WorldKindCell.definitionLayout
+  | .registered code _ => (effectAt code.toNat).L
 
 def Target.materializer (target : Target) : Materializer target.layout Digest := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.materializer
-    | content _ => exact HyperdocumentCell.contentMaterializer
-    | append _ => exact StreamCell.headMaterializer
-    | world _ => exact WorldKindCell.instanceMaterializer
-    | kindDefinition _ | kindRead => exact WorldKindCell.definitionMaterializer
-    | read => exact HyperdocumentCell.contentMaterializer
+    | registered code _ => exact (effectAt code.toNat).materializer
 
 abbrev TargetCell (target : Target) := Materialized target.materializer
 
@@ -667,52 +701,14 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact DeclaredResourceScalar.packDeclared kind cell
-    | computeFunding _ | moneyConsent _ => exact ⟨.accountMetadata, cell⟩
-    | content _ => exact ⟨.content, cell⟩
-    | append _ => exact ⟨.stream, cell⟩
-    | world _ => exact ⟨.worldInstance, cell⟩
-    | kindDefinition _ | kindRead => exact ⟨.worldKind, cell⟩
-    | read => exact ⟨.content, cell⟩
+    | registered code _ => exact (effectAt code.toNat).pack kind cell
 
 def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell Registry) :
     Option (TargetCell target) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact CanonicalCellRegistry.selectDeclared deployment id kind cell
-    | computeFunding _ | moneyConsent _ => exact if kind = .account then
-        CanonicalCellRegistry.selectDeclared deployment id .account cell else none
-    | content _ => exact if kind = .object then
-        if CanonicalCellRegistry.CellLaw deployment id cell then
-          match cell with | ⟨.content, value⟩ => some value | _ => none
-        else none
-      else none
-    | append _ => exact if kind = .object then
-        if CanonicalCellRegistry.CellLaw deployment id cell then
-          match cell with | ⟨.stream, value⟩ => some value | _ => none
-        else none
-      else none
-    | world _ => exact if kind = .object then
-        if CanonicalCellRegistry.CellLaw deployment id cell then
-          match cell with | ⟨.worldInstance, value⟩ => some value | _ => none
-        else none
-      else none
-    | kindDefinition _ | kindRead => exact if kind = .object then
-        if CanonicalCellRegistry.CellLaw deployment id cell then
-          match cell with | ⟨.worldKind, value⟩ => some value | _ => none
-        else none
-      else none
-    | read => exact if kind = .object then
-        if CanonicalCellRegistry.CellLaw deployment id cell then
-          match cell with | ⟨.content, value⟩ => some value | _ => none
-        else none
-      else none
-
-def scalarCommand (command : Command) (target : Target)
-    (actions : List DeclaredActionLowering.Action) : DeclaredResourceScalar.Command :=
-  ⟨target.kind, target.target, command.subject, target.capability,
-    target.schemaVersion, target.expectedTargetRoot, command.nonce, actions⟩
+    | registered code _ => exact (effectAt code.toNat).select deployment id kind cell
 
 def contentAuthor (command : Command) (target : Target) : Hyperdocument.PrincipalRef :=
   ⟨command.subject, target.kind, target.capability⟩
@@ -720,18 +716,11 @@ def contentAuthor (command : Command) (target : Target) : Hyperdocument.Principa
 def contentOperation (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
     Hyperdocument.OperationId := ⟨effectsDigest snapshot.domain semantics command⟩
 
-/-- The record an append stores: the request's entry plus the signing
-subject, the admission height and the exact transaction id. -/
-def streamRecord (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
-    (command : Command) (request : StreamCell.Append) : StreamCell.StreamRecord :=
-  ⟨command.subject, ambient.height, ⟨operationMarker snapshot.domain semantics command⟩, request.entry⟩
-
-/-- The source policy identity a transclusion records: the policy id, epoch and
-revision the source cell's read leg is checked against at this height. -/
-def sourcePolicy (snapshot : AuthoritySnapshot) (source : Nat) : Digest :=
-  ContentResource.contentDigest "DREGG/CONTENT/DISCLOSURE-POLICY"
-    ((StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)).encode
-      (source, snapshot.authState.policyEpoch ⟨source⟩, snapshot.authState.policyRevision ⟨source⟩))
+/-- The observe capability of the cell a transaction reads observe-only at `source`. -/
+def sourceReadOf (command : Command) (source : Nat) : Option CapabilityId :=
+  (command.targets.find? fun target =>
+      decide (target.target = source) && decide (target.payload = .read)).bind
+    fun target => target.observeCapability
 
 /-- What a content target's actions consume of their transaction: the height,
 and for each cell the transaction reads observe-only, the observe capability
@@ -739,172 +728,51 @@ that read carries and the source's policy. -/
 def contentContext (snapshot : AuthoritySnapshot) (ambient : Ambient) (command : Command) :
     ContentResource.Context :=
   ⟨ambient.height, fun source =>
-    (command.targets.find? fun target =>
-        decide (target.target = source) && decide (target.payload = .read)).bind
-      fun target => target.observeCapability.map fun capability =>
-        ⟨capability, sourcePolicy snapshot source⟩⟩
+    (sourceReadOf command source).map fun capability => ⟨capability, sourcePolicy snapshot source⟩⟩
 
-/-- The state keys an action's guards read: `Action.ops` is one guarded set per key, and its
-guard is the key's exact expected value (`guardedSet_enabled_iff`). -/
-def guardKeys : DeclaredActionLowering.Action → List EffectDeclaration.StateKey
-  | .create key _ | .write key _ _ => [key]
-  | .move source destination resource _ _ _ =>
-      [.accountBalance source resource, .accountBalance destination resource]
+/-- What a registered effect's semantics is given of this command and target (`EffectCtx`):
+never the target's schema version or expected root, which are the dispatcher's. -/
+def targetCtx (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster) : EffectCtx :=
+  ⟨snapshot, semantics, ambient, command.subject, command.nonce, kind, id, capability, observe,
+    audienceEpoch, audienceRoster, fun _ => effectsDigest snapshot.domain semantics command,
+    sourceReadOf command⟩
 
-/-- A scalar leg's guards read only fields its stored capability names. A guard is a read: a
-refusal `guardRejected` (or a passed guard) tells the requester whether the guarded field
-holds the value it named, so a guard over a field the capability does not name would be an
-equality oracle on that field, decided before admission (where `fieldsCheck` names it).
-`none` names the capability the authority cell does not hold: refused `capabilityRejected`,
-the name admission gives it, before any guard runs. -/
-def scalarScope (snapshot : AuthoritySnapshot) (kind : ResourceKind)
-    (capability : CapabilityId) (actions : List DeclaredActionLowering.Action) : Option Reject :=
-  match CredentialAuthorityState.readCapability snapshot.cell kind capability with
-  | none => some .capabilityRejected
-  | some stored =>
-      if actions.all fun action => (guardKeys action).all fun key =>
-          decide (CellField.NamedBy stored.head.scope.fields (ResourceObservationAdmission.declaredField key))
-      then none else some .fieldNotNamed
-
-/-- A scalar leg's computation once its scope is checked: the source operation's guarded patch
-at the loaded cell, then the blinding ratchet. -/
-def scalarLeg (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
-    (command : Command) (target : Target) (actions : List DeclaredActionLowering.Action)
-    (pre : DeclaredResourceScalar.EffectCell) : Except Reject (Store EffectDeclaration.effectLayout) :=
-  match DeclaredResourceScalar.prepareCell snapshot semantics ambient pre
-      (scalarCommand command target actions) with
-  | .error reason => .error (.scalar reason)
-  | .ok prepared => .ok (Patch.run prepared.post
-      (DeclaredEffectCell.blinding.patch pre.logical ambient.height))
-
-/-- The only target computation. It invokes source-owned typed operations,
-never a host supplied post. Every branch returns the post store the source
-operation computed at the loaded cell; a scalar or content write then advances
-the cell's blinding ratchet one link at the admission height
-(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE).  A stream append has no blinding.
-Every payload is refused `staleTarget` when the loaded root is not the root its plan
-names, except a commuting content command (append-only `createAtom`s), which reads
-nothing a concurrent append moves. -/
+/-- The only target computation: the derived computation of the target's one declaration
+(`Effect.compute`: the header its `accepts`, `guardFields`, `version` and `commutes` determine,
+then its semantics and the guarded replay with its rotate). It never takes a host supplied
+post. A scalar write advances the cell's blinding ratchet one link at the admission height
+(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE; `computeTarget_scalar`); a content command is
+another (`computeTarget_content`); a stream append is computed at the head it meets and pins no
+root (`computeTarget_append`). -/
 def computeTarget (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (command : Command) (target : Target)
     (pre : TargetCell target) : Except Reject target.Outcome := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions =>
-      -- A guard over a field the capability does not name is refused before any guard runs.
-      exact match scalarScope snapshot kind capability actions with
-        | some reason => .error reason
-        | none => scalarLeg snapshot semantics ambient command
-            ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩
-            actions pre
-    | computeFunding _ => exact do
-        if kind != .account then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        if audienceEpoch.isSome || audienceRoster.isSome then throw .computeFunding
-        pure pre.logical
-    | moneyConsent _ => exact do
-        if kind != .account then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        if audienceEpoch.isSome || audienceRoster.isSome then throw .computeFunding
-        pure pre.logical
-    | content content => exact do
-        if kind != .object then throw .wrongRole
-        if version != ContentResource.commandVersion then throw .unsupportedVersion
-        -- An append-only command is computed at the cell it meets: it pins no root
-        -- (`ContentResource.Command.commutes`, `Kernel.ContentCommutingAppend`).
-        if !content.commutes && root != pre.root then throw .staleTarget
-        match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
-            (contentOperation snapshot semantics command) (ContentResource.documentOf id)
-            (contentContext snapshot ambient command) pre content with
-        | .error reason => .error (.content reason)
-        | .ok prepared => .ok (Patch.run prepared.post.logical
-            (HyperdocumentCell.contentBlinding.patch pre.logical ambient.height))
-    | append request => exact do
-        if kind != .object then throw .wrongRole
-        if version != StreamCell.commandVersion then throw .unsupportedVersion
-        -- An append is computed at the stream cell it meets: it pins no root. Its entry goes
-        -- at that cell's head, its channel is admitted at that cell (`DomainEpoch.admitAppend`),
-        -- and nothing in the signed request names the head
-        -- (`StreamResource.append_planned_root_irrelevant`).
-        if !decide (request.topic.length ≤ StreamCell.maxTopicBytes) then throw .streamTopic
-        if !decide (request.payload.length ≤ StreamCell.maxPayloadBytes) then throw .streamPayload
-        match DomainEpoch.admitAppend pre.logical command.subject request with
-        | .error reason => throw (.channel reason)
-        | .ok () => pure ()
-        let some head := StreamCell.headOf pre.logical | throw .wrongRole
-        -- A fleet topic's head is appended only by the fleet receiver.
-        if head.binding != .room then throw .wrongRole
-        if request.ref.any (fun r => r.1 == id && head.count < r.2) then throw .streamRef
-        pure ((StreamCell.headWriteOp head (StreamCell.appendEntry id head
-          (streamRecord snapshot semantics ambient command request))).apply pre.logical)
-    | read => exact do
-        if kind != .object then throw .wrongRole
-        if version != ContentResource.commandVersion then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        -- Its only authorization is its observation: the named capability is the observe one.
-        if observe != some capability then throw .observationRequired
-        pure pre.logical
+    | registered code op =>
+        -- A registered effect: the derived computation of its one declaration (`Effect.compute`).
+        exact ((effectAt code.toNat).compute code.toNat
+          (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+            audienceRoster) version root op pre).mapError Reject.ofDispatch
 
-    | kindRead => exact do
-        if kind != .object then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        -- Partial grants never receive canonical hidden defaults.
-        if observe != some capability then throw .observationRequired
-        let some stored := CredentialAuthorityState.readCapability snapshot.cell .object capability
-          | throw .observationRejected
-        if stored.head.scope.fields.isSome then throw .fieldNotNamed
-        pure pre.logical
-
-    | world actions => exact do
-        if kind != .object then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        let some patch := WorldKindCell.preparePatch pre.logical actions | throw .worldKind
-        if !decide (Patch.ValidFrom pre.logical patch) then throw .worldKind
-        let post := Patch.run pre.logical patch
-        if (WorldKindProjection.footprint pre.logical post).isNone then throw .worldKind
-        pure post
-    | kindDefinition definition => exact do
-        if kind != .object then throw .wrongRole
-        if version != 1 then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
-        let some patch := WorldKindCell.prepareDefinition pre.logical definition | throw .kindDefinition
-        if !decide (Patch.ValidFrom pre.logical patch) then throw .kindDefinition
-        pure (Patch.run pre.logical patch)
 
 /-- The target's one guarded patch, generated by its source operation from the
-loaded store: the scalar declaration's own lowering, or the content run's patch,
-each followed by the kernel's ratchet of the cell's blinding (guarded at the
-pre blinding, so a source patch that moved it refuses). -/
+loaded store: its declaration's emitted descriptor (a scalar write's
+is the actions' own lowering followed by the kernel's ratchet of the cell's blinding, guarded at
+the pre blinding, so a source patch that moved it refuses). -/
 def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (target : Target) (pre : TargetCell target) : Patch target.layout := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions =>
-        exact DeclaredResourceScalar.cellPatch (scalarCommand command ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ actions) ++
-          DeclaredEffectCell.blinding.patch pre.logical ambient.height
-    | content content =>
-        let computed := ContentResource.run ⟨command.subject, kind, capability⟩
-          (contentOperation snapshot semantics command) (ContentResource.documentOf id)
-          (contentContext snapshot ambient command) pre.logical content
-        exact match computed with
-          | .ok progress => progress.2 ++
-              HyperdocumentCell.contentBlinding.patch pre.logical ambient.height
-          | .error _ => []
-    | append request =>
-        exact match StreamCell.headOf pre.logical with
-          | some head => [StreamCell.headWriteOp head (StreamCell.appendEntry id head
-              (streamRecord snapshot semantics ambient command request))]
-          | none => []
-    | read | kindRead | computeFunding _ | moneyConsent _ => exact []
+    | registered code op =>
+        exact (effectAt code.toNat).patch (targetCtx snapshot semantics ambient command kind id
+          capability observe audienceEpoch audienceRoster) op pre.logical
 
-    | world actions => exact (WorldKindCell.preparePatch pre.logical actions).getD []
-    | kindDefinition definition => exact (WorldKindCell.prepareDefinition pre.logical definition).getD []
 
 /-- An observe-only read target's patch is empty: it writes nothing. -/
 theorem targetPatch_observeOnly (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -912,24 +780,345 @@ theorem targetPatch_observeOnly (snapshot : AuthoritySnapshot) (semantics : Dige
     targetPatch snapshot semantics ambient command target pre = [] := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
-    cases payload <;> first | rfl | simp [Target.observeOnly] at read
+    cases payload <;> first
+      | rfl
+      | exact Effect.patch_observeOnly _ (targetCtx snapshot semantics ambient command kind id
+          capability observe audienceEpoch audienceRoster) _ _ read
+      | simp [Target.observeOnly] at read
 
-/-- The entry an append target records, at the cell `entryCellId target n`:
-the loaded head's next position and tail. Scalar and content targets record none.
-The head write is the target's own patch; this entry is its one fresh cell. -/
-def appendedEntry (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
-    (command : Command) (target : Target) (pre : TargetCell target) : Option StreamCell.Entry := by
+/-! ## A content target, in the source lowering's own terms
+
+A content command is the registered operation at code 1, so what the controller runs for it is
+`Effect.compute contentEffect` and `Effect.patch contentEffect`. These are the same computation
+read as the source-owned preparation `ContentResource.prepareCell` and the run `ContentResource.run`:
+what the theorems about content writes (the blinding ratchet, the commuting append, the
+receiver's factorization) are stated and proved over. -/
+
+/-- The source preparation of a content command at a loaded cell, as the controller's outcome:
+the lowering's refusal under the content effect's name, or its post followed by the kernel's
+blinding rotation. -/
+def contentPrepared (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (content : ContentResource.Command) (pre : ContentResource.ContentCell) :
+    Except Reject (Store Hyperdocument.layout) :=
+  match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
+      (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+      (contentContext snapshot ambient command) pre content with
+  | .error reason => .error (.effect (.refused 1 (contentRefusalName reason) .empty))
+  | .ok prepared => .ok (Patch.run prepared.post.logical
+      (HyperdocumentCell.contentBlinding.patch pre.logical ambient.height))
+
+/-- The content declaration's run at a target is the source preparation. Neither of the
+dispatcher's own refusals is reachable (`contentSpec_complete`). -/
+theorem contentRun_eq (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (content : ContentResource.Command) (pre : ContentResource.ContentCell) :
+    (contentEffect.run 1 (targetCtx snapshot semantics ambient command kind id capability observe
+        audienceEpoch audienceRoster) content pre.logical).mapError Reject.ofDispatch =
+      contentPrepared snapshot semantics ambient command kind id capability content pre := by
+  have semEq : contentEffect.spec.sem (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) content pre.logical =
+      if content.actions.isEmpty then .error .emptyActions
+      else (ContentResource.run ⟨command.subject, kind, capability⟩
+          (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+          (contentContext snapshot ambient command) pre.logical content).map Prod.snd := rfl
+  unfold Effect.run contentPrepared
+  by_cases empty : content.actions.isEmpty
+  · have refused : contentEffect.spec.sem (targetCtx snapshot semantics ambient command kind id
+        capability observe audienceEpoch audienceRoster) content pre.logical = .error .emptyActions := by
+      rw [semEq]; exact if_pos empty
+    have prepared : ContentResource.prepareCell ⟨command.subject, kind, capability⟩
+        (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+        (contentContext snapshot ambient command) pre content = .error .emptyActions := by
+      unfold ContentResource.prepareCell
+      rw [dif_neg (by simpa using empty)]
+    rw [refused, prepared]
+    rfl
+  · have nonempty : content.actions ≠ [] := by simpa using empty
+    cases ran : ContentResource.run ⟨command.subject, kind, capability⟩
+        (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+        (contentContext snapshot ambient command) pre.logical content with
+    | error reason =>
+      have refused : contentEffect.spec.sem (targetCtx snapshot semantics ambient command kind id
+          capability observe audienceEpoch audienceRoster) content pre.logical = .error reason := by
+        rw [semEq, if_neg empty, ran]
+        rfl
+      have prepared : ContentResource.prepareCell ⟨command.subject, kind, capability⟩
+          (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+          (contentContext snapshot ambient command) pre content = .error reason := by
+        unfold ContentResource.prepareCell
+        rw [dif_pos nonempty]
+        split
+        · rename_i other computed
+          rw [ran] at computed
+          cases computed
+          rfl
+        · rename_i other computed
+          rw [ran] at computed
+          cases computed
+      rw [refused, prepared]
+      rfl
+    | ok progress =>
+      have emitted : contentEffect.spec.sem (targetCtx snapshot semantics ambient command kind id
+          capability observe audienceEpoch audienceRoster) content pre.logical = .ok progress.2 := by
+        rw [semEq, if_neg empty, ran]
+        rfl
+      obtain ⟨prepared, preparedOk⟩ := ContentResource.prepareCell_ok_of_run _ _ _ _ pre content
+        progress nonempty ran
+      have sameProgress : prepared.progress = progress := by
+        have computed := prepared.computed
+        rw [ran] at computed
+        injection computed with same
+        exact same.symm
+      have postExact : prepared.post.logical = Patch.run pre.logical progress.2 := by
+        rw [prepared.post_exact, sameProgress]
+        exact (ContentResource.run_executes _ _ _ _ _ content progress ran).2.symm
+      have complete := contentEffect.complete (targetCtx snapshot semantics ambient command kind id
+        capability observe audienceEpoch audienceRoster) content pre.logical progress.2 emitted
+      obtain ⟨post, replay⟩ := Option.isSome_iff_exists.mp complete.2
+      obtain ⟨_, ran'⟩ := (Effects.Revival.store_run_iff _ _ _).1 replay
+      rw [emitted, preparedOk]
+      dsimp only
+      first | rw [replay] | erw [replay]
+      show Except.ok post = Except.ok _
+      rw [postExact, ← ran']
+      erw [Patch.run_append]
+      rfl
+
+/-- **A content target's computation**: the header (an object, the content command version, and
+the planned root unless the command commutes), then the source preparation, its post followed
+by the kernel's blinding rotation. A refusal of the lowering is the content effect's, by name. -/
+theorem computeTarget_content (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (version : Nat) (root : Digest) (content : ContentResource.Command)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : ContentResource.ContentCell) :
+    computeTarget snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .content content, observe, audienceEpoch, audienceRoster⟩ pre =
+      if kind != .object then .error .wrongRole
+      else if version != ContentResource.commandVersion then .error .unsupportedVersion
+      else if !content.commutes && root != pre.root then .error .staleTarget
+      else contentPrepared snapshot semantics ambient command kind id capability content pre := by
+  rw [← contentRun_eq snapshot semantics ambient command kind id capability observe audienceEpoch
+    audienceRoster content pre]
+  show (if (kind == ResourceKind.object) = false then
+      Except.error (Effects.Revival.DispatchRefusal.wrongRole 1)
+    else if version ≠ ContentResource.commandVersion then .error (.unsupportedVersion 1)
+    else if content.commutes = false ∧ root ≠ pre.root then .error (.staleTarget 1)
+    else contentEffect.run 1 (targetCtx snapshot semantics ambient command kind id capability
+      observe audienceEpoch audienceRoster) content pre.logical).mapError Reject.ofDispatch = _
+  by_cases object : kind = .object <;>
+    by_cases versioned : version = ContentResource.commandVersion <;>
+    by_cases commuting : content.commutes = true <;>
+    by_cases same : root = pre.root <;>
+    (simp [object, versioned, commuting, same, Except.mapError, Reject.ofDispatch] <;> rfl)
+
+/-- **A content target's patch**: the source run's patch followed by the kernel's blinding
+rotation; an empty command (refused `emptyActions`) has none. -/
+theorem targetPatch_content (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (version : Nat) (root : Digest) (content : ContentResource.Command)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : ContentResource.ContentCell) :
+    targetPatch snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .content content, observe, audienceEpoch, audienceRoster⟩ pre =
+      if content.actions.isEmpty then []
+      else match ContentResource.run ⟨command.subject, kind, capability⟩
+          (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+          (contentContext snapshot ambient command) pre.logical content with
+        | .ok progress => progress.2 ++
+            HyperdocumentCell.contentBlinding.patch pre.logical ambient.height
+        | .error _ => [] := by
+  show Effect.patch contentEffect (targetCtx snapshot semantics ambient command kind id
+    capability observe audienceEpoch audienceRoster) content pre.logical = _
+  have emittedEq : contentEffect.spec.emitted (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) content pre.logical =
+      (if content.actions.isEmpty then .error .emptyActions
+      else (ContentResource.run ⟨command.subject, kind, capability⟩
+          (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+          (contentContext snapshot ambient command) pre.logical content).map Prod.snd).map
+        (· ++ HyperdocumentCell.contentBlinding.patch pre.logical ambient.height) := rfl
+  unfold Effect.patch
+  rw [emittedEq]
+  by_cases empty : content.actions.isEmpty
+  · rw [if_pos empty, if_pos empty]; rfl
+  · rw [if_neg empty, if_neg empty]
+    cases ContentResource.run ⟨command.subject, kind, capability⟩
+        (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+        (contentContext snapshot ambient command) pre.logical content <;> rfl
+
+/-- **The bridge.** A content target's computation is the expression the content arm of
+`computeTarget` was before content was declared (its refusal now the content effect's, by name):
+the proofs written over that arm rewrite by this. -/
+theorem computeTarget_content_arm (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (version : Nat) (root : Digest) (content : ContentResource.Command)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : ContentResource.ContentCell) :
+    computeTarget snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .content content, observe, audienceEpoch, audienceRoster⟩ pre =
+      (do
+        if kind != .object then throw Reject.wrongRole
+        if version != ContentResource.commandVersion then throw Reject.unsupportedVersion
+        if !content.commutes && root != pre.root then throw Reject.staleTarget
+        match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
+            (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+            (contentContext snapshot ambient command) pre content with
+        | .error reason => Except.error (Reject.effect (.refused 1 (contentRefusalName reason) .empty))
+        | .ok prepared => Except.ok (Patch.run prepared.post.logical
+            (HyperdocumentCell.contentBlinding.patch pre.logical ambient.height)) :
+        Except Reject (Store Hyperdocument.layout)) := by
+  rw [computeTarget_content]
+  unfold contentPrepared
+  generalize ContentResource.prepareCell ⟨command.subject, kind, capability⟩
+    (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+    (contentContext snapshot ambient command) pre content = result
+  by_cases role : (kind != .object) = true <;>
+    by_cases versioned : (version != ContentResource.commandVersion) = true <;>
+    by_cases stale : (!content.commutes && root != pre.root) = true <;>
+    cases result <;>
+    (simp [role, versioned, stale, bind, Except.bind, throw, throwThe, MonadExceptOf.throw, pure,
+      Except.pure] <;> rfl)
+
+/-- The bridge for the patch: a non-empty content command's patch is the run's, then the
+kernel's blinding rotation. -/
+theorem targetPatch_content_arm (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (kind : ResourceKind) (id : Nat) (capability : CapabilityId)
+    (version : Nat) (root : Digest) (content : ContentResource.Command)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : ContentResource.ContentCell) (nonempty : content.actions ≠ []) :
+    targetPatch snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .content content, observe, audienceEpoch, audienceRoster⟩ pre =
+      match ContentResource.run ⟨command.subject, kind, capability⟩
+          (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+          (contentContext snapshot ambient command) pre.logical content with
+        | .ok progress => progress.2 ++
+            HyperdocumentCell.contentBlinding.patch pre.logical ambient.height
+        | .error _ => [] := by
+  rw [targetPatch_content, if_neg (by simpa using nonempty)]
+  cases ContentResource.run ⟨command.subject, kind, capability⟩
+    (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+    (contentContext snapshot ambient command) pre.logical content <;> rfl
+
+/-- A content target's selection is the content declaration's, whatever the target's header. -/
+theorem selectTarget_content_select (deployment : Deployment) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest) (content : ContentResource.Command)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (cell : PackedCell Registry) :
+    selectTarget deployment
+        ⟨kind, id, capability, version, root, .content content, observe, audienceEpoch, audienceRoster⟩ cell =
+      Effect.select contentEffect deployment id kind cell := rfl
+
+/-- A content target selects a content cell under the deployment's cell law, whatever the role
+(a role that is not an object is refused by the computation, `wrongRole`). -/
+theorem selectTarget_content (deployment : Deployment) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest) (content : ContentResource.Command)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (cell : PackedCell Registry) :
+    selectTarget deployment
+        ⟨kind, id, capability, version, root, .content content, observe, audienceEpoch, audienceRoster⟩ cell =
+      if CanonicalCellRegistry.CellLaw deployment id cell then
+        (match cell with | ⟨.content, value⟩ => some value | _ => none)
+      else none := by
+  rcases cell with ⟨physical, value⟩
+  cases physical <;> rfl
+
+/-! ## A kind definition revision, in the deleted arm's own terms -/
+
+set_option backward.isDefEq.respectTransparency false in
+/-- **The bridge**: a kind definition target's computation is the expression the hand arm of
+`computeTarget` was before the revision was declared, its refusal now the declaration's by name
+(`Reject.kindDefinition` is deleted). The hand arm also refused a prepared patch that did not
+apply; a prepared revision always applies (`prepareDefinition_valid`), so that line never ran. -/
+theorem computeTarget_kindDefinition_arm (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (definition : WorldKindCell.Definition) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : Materialized WorldKindCell.definitionMaterializer) :
+    computeTarget snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch,
+          audienceRoster⟩ pre =
+      (if kind != .object then .error Reject.wrongRole
+        else if version != 1 then .error Reject.unsupportedVersion
+        else if root != pre.root then .error Reject.staleTarget
+        else match WorldKindCell.prepareDefinition pre.logical definition with
+          | none => .error (Reject.effect (.refused 5 "notNextRevision" .empty))
+          | some patch => .ok (Patch.run pre.logical patch) :
+        Except Reject (Store WorldKindCell.definitionLayout)) := by
+  show (kindDefinitionEffect.compute 5 (targetCtx snapshot semantics ambient command kind id
+    capability observe audienceEpoch audienceRoster) version root definition pre).mapError
+      Reject.ofDispatch = _
+  unfold Effect.compute
+  rw [kindDefinition_run]
+  have ctxKind : (targetCtx snapshot semantics ambient command kind id capability observe
+      audienceEpoch audienceRoster).kind = kind := rfl
+  have accepts : kindDefinitionEffect.spec.accepts kind = (kind == .object) := rfl
+  have current : kindDefinitionEffect.spec.version = 1 := rfl
+  have pinned : kindDefinitionEffect.spec.commutes definition = false := rfl
+  rw [ctxKind, accepts, current, pinned]
+  by_cases role : (kind == ResourceKind.object) = false
+  · have refused : (kind != ResourceKind.object) = true := by simp [bne, role]
+    rw [if_pos role, if_pos refused]
+    rfl
+  have accepted : ¬ (kind != ResourceKind.object) = true := by
+    simpa [bne] using role
+  rw [if_neg role, if_neg accepted]
+  by_cases versioned : version ≠ 1
+  · have refused : (version != 1) = true := bne_iff_ne.mpr versioned
+    rw [if_pos versioned, if_pos refused]
+    rfl
+  have current' : ¬ (version != 1) = true := fun refused => versioned (bne_iff_ne.mp refused)
+  rw [if_neg versioned, if_neg current']
+  by_cases moved : false = false ∧ root ≠ pre.root
+  · have refused : (root != pre.root) = true := bne_iff_ne.mpr moved.2
+    rw [if_pos moved, if_pos refused]
+    rfl
+  have same : ¬ (root != pre.root) = true := fun refused => moved ⟨rfl, bne_iff_ne.mp refused⟩
+  rw [if_neg moved, if_neg same]
+  cases WorldKindCell.prepareDefinition pre.logical definition <;> rfl
+
+/-- The bridge for the patch: the prepared write, or nothing where none is prepared. -/
+theorem targetPatch_kindDefinition_arm (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (definition : WorldKindCell.Definition) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : Materialized WorldKindCell.definitionMaterializer) :
+    targetPatch snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .kindDefinition definition, observe, audienceEpoch,
+          audienceRoster⟩ pre =
+      (WorldKindCell.prepareDefinition pre.logical definition).getD [] := by
+  show kindDefinitionEffect.patch _ definition pre.logical = _
+  unfold Effect.patch Effects.Revival.EffectSpec.emitted
+  cases prepared : WorldKindCell.prepareDefinition pre.logical definition with
+  | none =>
+    rw [kindDefinitionSem_none prepared]
+    rfl
+  | some patch =>
+    rw [kindDefinitionSem_some prepared]
+    exact List.append_nil patch
+
+/-- **The cell a target gives birth to**, beside the write of its own cell: its declaration's
+(`Effect.born`). A stream append's is its entry cell at `entryCellId target n`, the loaded
+head's next position; no other declaration states one. -/
+def targetBirth (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) :
+    Option (Nat × PackedCell Registry) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ => exact none
-    | content _ => exact none
-    | world _ => exact none
-    | kindDefinition _ | kindRead => exact none
-    | read => exact none
-    | append request =>
-        exact (StreamCell.headOf pre.logical).map fun head =>
-          StreamCell.appendEntry id head (streamRecord snapshot semantics ambient command request)
+    | registered code op =>
+        exact (effectAt code.toNat).born (targetCtx snapshot semantics ambient command kind id
+          capability observe audienceEpoch audienceRoster) op pre.logical
 
 /-- One declaration is the complete transaction, fixed by the receiving plan.
 The family outcome is the actual typed result; mode evidence certifies the
@@ -953,18 +1142,6 @@ def targetFamily (_deployment : Deployment) (snapshot : AuthoritySnapshot)
   DeclassificationAuthority := fun _ _ => Empty
   ReleaseAuthorization := fun _ _ _ => Empty
   DisclosureAllowed := fun _ _ decision => decision = .sealed
-
-/-- A prepared target's loaded content store, for a content or read target. -/
-def Target.contentStore? (target : Target) (cell : TargetCell target) :
-    Option ContentResource.ContentStore := by
-  cases target with
-  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
-    cases payload with
-    | scalar _ | computeFunding _ | moneyConsent _ => exact none
-    | content _ => exact some cell.logical
-    | append _ => exact none
-    | read => exact some cell.logical
-    | world _ | kindDefinition _ | kindRead => exact none
 
 structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Registry)
     (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -993,6 +1170,19 @@ theorem PreparedTarget.bound {deployment : Deployment}
         (packTarget target prepared.candidate.post) :=
   ⟨prepared.present, prepared.selected, prepared.postLaw⟩
 
+/-- The registered arm at code 0 is the scalar declaration's derived computation. -/
+theorem computeTarget_scalar_compute (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (actions : List DeclaredActionLowering.Action) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (pre : Materialized DeclaredEffectCell.materializer) :
+    computeTarget snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+      (scalarEffect.compute 0 (targetCtx snapshot semantics ambient command kind id capability
+        observe audienceEpoch audienceRoster) version root actions pre).mapError Reject.ofDispatch :=
+  rfl
+
 /-- **A guard never reads a field outside the requester's capability** (JDISCLOSE
 narrow-guess). A scalar leg any of whose guards reads a field its stored capability does not
 name is refused `fieldNotNamed` before any guard runs, at EVERY loaded cell: the refusal is
@@ -1013,14 +1203,24 @@ theorem computeTarget_scalar_unnamed_refused (snapshot : AuthoritySnapshot) (sem
     computeTarget snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
       .error .fieldNotNamed := by
-  have check : scalarScope snapshot kind capability actions = some .fieldNotNamed := by
-    have notAll : (actions.all fun action => (guardKeys action).all fun key =>
-        decide (CellField.NamedBy stored.head.scope.fields
-          (ResourceObservationAdmission.declaredField key))) = false := by
-      simp only [List.all_eq_false]
-      exact ⟨action, member, by simpa [List.all_eq_false] using ⟨key, guarded, unnamed⟩⟩
-    simp only [scalarScope, found, notAll, Bool.false_eq_true, if_false]
-  simp only [computeTarget, check]
+  have notAll : (actions.all fun action => (guardKeys action).all fun key =>
+      decide (CellField.NamedBy stored.head.scope.fields
+        (ResourceObservationAdmission.declaredField key))) = false := by
+    simp only [List.all_eq_false]
+    exact ⟨action, member, by simpa [List.all_eq_false] using ⟨key, guarded, unnamed⟩⟩
+  have found' : CredentialAuthorityState.readCapability
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).snapshot.cell
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).kind
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).capability = some stored := found
+  have refused : scalarEffect.scopeRefusal 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) actions = some (.fieldNotNamed 0) := by
+    rw [scalar_scopeRefusal, found']
+    simp only [notAll, Bool.false_eq_true, if_false]
+  exact congrArg (Except.mapError Reject.ofDispatch)
+    (scalarEffect.compute_scope_refused (code := 0) rfl refused version root pre)
 
 /-- **No guard runs for a capability the authority cell does not hold.** Refused
 `capabilityRejected` at every loaded cell, so a requester with no grant learns nothing of
@@ -1035,30 +1235,94 @@ theorem computeTarget_scalar_unheld_refused (snapshot : AuthoritySnapshot) (sema
     computeTarget snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
       .error .capabilityRejected := by
-  have check : scalarScope snapshot kind capability actions = some .capabilityRejected := by
-    simp only [scalarScope, unheld]
-  simp only [computeTarget, check]
+  have unheld' : CredentialAuthorityState.readCapability
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).snapshot.cell
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).kind
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster).capability = none := unheld
+  have refused : scalarEffect.scopeRefusal 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) actions = some (.capabilityRejected 0) := by
+    rw [scalar_scopeRefusal, unheld']
+  exact congrArg (Except.mapError Reject.ofDispatch)
+    (scalarEffect.compute_scope_refused (code := 0) rfl refused version root pre)
 
 /- Owed (audit pass 25, A2; not claimed here): the confinement of the remaining checks of a
 scoped leg, `computeTarget … pre = .error e → e = .staleTarget ∨ e = f (namedPart pre)
 declaration command` for one `f` fixed across `pre`. The root check is the one whole-cell bit
 RefusalReason's header concedes; preLaw, admissionCheck, FieldClosure and postLaw remain. -/
 
-/-- The accepting pole: a scalar leg under a held capability whose guards read only named
-fields is computed exactly as before (`scalarLeg`, the arm's whole former body). -/
-theorem computeTarget_scalar_named_as_before (snapshot : AuthoritySnapshot) (semantics : Digest)
+/-- **The scalar computation, in the receiver's own terms.** Under a held capability whose scope
+names every field a guard reads: the schema version, then the root, then the declaration's
+semantics (an account role, an empty action list, then the root-free core
+`DeclaredResourceScalar.prepareStore`), a refusal carried under the declaration's name, an
+answer replayed with the blinding ratchet at the admission height. -/
+theorem computeTarget_scalar (snapshot : AuthoritySnapshot) (semantics : Digest)
     (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
     (capability : CapabilityId) (version : Nat) (root : Digest)
     (actions : List DeclaredActionLowering.Action) (observe : Option CapabilityId)
     (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
-    (named : scalarScope snapshot kind capability actions = none)
-    (pre : TargetCell ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) :
+    (named : scalarEffect.scopeRefusal 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) actions = none)
+    (pre : Materialized DeclaredEffectCell.materializer) :
     computeTarget snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
-      scalarLeg snapshot semantics ambient command
-        ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩
-        actions pre := by
-  simp only [computeTarget, named]
+      if version ≠ 1 then .error .unsupportedVersion
+      else if root ≠ pre.root then .error .staleTarget
+      else match scalarSem (targetCtx snapshot semantics ambient command kind id capability
+          observe audienceEpoch audienceRoster) actions pre.logical with
+        | .error reason => .error (.effect (.refused 0 (scalarRefusalName reason) .empty))
+        | .ok patch => .ok (Patch.run pre.logical
+            (patch ++ DeclaredEffectCell.blinding.patch pre.logical ambient.height)) := by
+  refine (congrArg (Except.mapError Reject.ofDispatch)
+    (scalarEffect.compute_scoped named version root pre)).trans ?_
+  show (if (true = false) then _ else if version ≠ 1 then _
+    else if (false = false ∧ root ≠ pre.root) then _ else _ :
+      Except Effects.Revival.DispatchRefusal _).mapError Reject.ofDispatch = _
+  rw [if_neg (by decide : ¬ (true = false))]
+  by_cases versioned : version ≠ 1
+  · rw [if_pos versioned, if_pos versioned]
+    rfl
+  rw [if_neg versioned, if_neg versioned]
+  by_cases moved : root ≠ pre.root
+  · rw [if_pos ⟨rfl, moved⟩, if_pos moved]
+    rfl
+  rw [if_neg (fun both => moved both.2), if_neg moved]
+  rw [scalar_run]
+  cases scalarSem (targetCtx snapshot semantics ambient command kind id capability observe
+    audienceEpoch audienceRoster) actions pre.logical <;> rfl
+
+/-- **An admitted scalar write's patch is its actions' followed by the ratchet.** -/
+theorem targetPatch_scalar_ok {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {root : Digest}
+    {actions : List DeclaredActionLowering.Action} {observe : Option CapabilityId}
+    {audienceEpoch : Option Nat} {audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster}
+    {pre : Materialized DeclaredEffectCell.materializer}
+    {post : Store EffectDeclaration.effectLayout}
+    (computed : computeTarget snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+        .ok post) :
+    targetPatch snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+      DeclaredResourceScalar.actionsPatch actions ++
+        DeclaredEffectCell.blinding.patch pre.logical ambient.height := by
+  have computed' : (scalarEffect.compute 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) version root actions pre).mapError
+        Reject.ofDispatch = .ok post := computed
+  cases dispatched : scalarEffect.compute 0 (targetCtx snapshot semantics ambient command kind id
+      capability observe audienceEpoch audienceRoster) version root actions pre with
+  | error refusal => rw [dispatched] at computed'; cases computed'
+  | ok computedPost =>
+    obtain ⟨split, _, _⟩ := scalarEffect.member_split dispatched
+      (scalar_member_complete _ actions pre.logical _
+        (by
+          obtain ⟨_, _, ps, sem, _⟩ := scalarEffect.compute_ok dispatched
+          have same := (DeclaredResourceScalar.prepareStore_ok (scalarSem_ok sem).2.2).1
+          subst same
+          exact sem))
+    exact split
 
 /-- An observe-only content read computes only when its named capability is its
 observe capability: the read's one authorization is its observation. -/
@@ -1071,13 +1335,16 @@ theorem computeTarget_read_observe (snapshot : AuthoritySnapshot) (semantics : D
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     simp only at read
     subst read
-    simp only [computeTarget] at computed
-    show observe = some capability
-    repeat' split at computed
-    all_goals first
-      | (rename_i same; simpa only [bne_iff_ne, ne_eq, Decidable.not_not] using same)
-      | (exfalso; simp [throw, throwThe, MonadExceptOf.throw, Functor.map, Except.map, bind,
-          Except.bind, pure, Except.pure] at computed)
+    have computed' : (readEffect.compute readCode.toNat
+        (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+          audienceRoster) version root () pre).mapError Reject.ofDispatch = .ok post := computed
+    cases dispatched : readEffect.compute readCode.toNat
+        (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+          audienceRoster) version root () pre with
+    | error refusal => rw [dispatched] at computed'; cases computed'
+    | ok computedPost =>
+      obtain ⟨_, _, ps, sem, _⟩ := Effect.compute_ok readEffect dispatched
+      exact (readSem_ok (op := ()) (store := pre.logical) sem).2
 
 /-- **A prepared read target names its observe capability.** No observe-only
 content read is prepared, hence none accepted, whose `capability` is not its
@@ -1123,6 +1390,51 @@ def prepareTarget (deployment : Deployment) (directory : Directory Nat Registry)
             else .error .invalidPost
           else .error .invalidPost
 
+/-- A cited-read payload: the registered operation at the cited read's code. -/
+abbrev citedPayload (reads : List FieldRead) : Payload := .registered citedCode reads
+
+/-- **K1: a prepared cited read pins no root, writes nothing and advances no ratchet.** Its
+post store is its loaded store (so every field, the blinding and the root are as loaded), its
+patch is empty, its footprint holds at the loaded store, and its capability is its observe
+capability. The target's signed `expectedTargetRoot` appears nowhere in the conclusion, and the
+declaration's semantics is not given it (`EffectCtx`): any root prepares. -/
+theorem PreparedTarget.cited_unchanged {deployment : Deployment}
+    {directory : Directory Nat Registry} {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {kind : ResourceKind} {id : Nat}
+    {capability : CapabilityId} {version : Nat} {root : Digest} {reads : List FieldRead}
+    {observe : Option CapabilityId} {audienceEpoch : Option Nat}
+    {audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster}
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, citedPayload reads, observe, audienceEpoch, audienceRoster⟩) :
+    prepared.post = prepared.pre.logical ∧
+      targetPatch snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, citedPayload reads, observe, audienceEpoch, audienceRoster⟩
+        prepared.pre = [] ∧
+      PlanBinding.Footprint.Holds prepared.pre.logical (citedFootprint reads) ∧
+      observe = some capability := by
+  have computed : (citedEffect.compute citedCode.toNat
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster) version root reads prepared.pre).mapError Reject.ofDispatch =
+        .ok prepared.post :=
+    prepared.candidate.modeEvidence.down
+  cases dispatched : citedEffect.compute citedCode.toNat
+      (targetCtx snapshot semantics ambient command kind id capability observe audienceEpoch
+        audienceRoster) version root reads prepared.pre with
+  | error refusal => rw [dispatched] at computed; cases computed
+  | ok post =>
+    rw [dispatched] at computed
+    have same : post = prepared.post := Except.ok.inj computed
+    subst same
+    obtain ⟨_, _, ps, sem, ran⟩ := Effect.compute_ok citedEffect dispatched
+    have empty : ps = [] := citedSem_ok sem
+    subst empty
+    have unchanged : prepared.pre.logical = prepared.post := Option.some.inj ran
+    have ok := citedRead_ok (citedSem_read sem)
+    refine ⟨unchanged.symm, ?_, ok.2.1, ok.2.2.1⟩
+    exact Effect.patch_observeOnly citedEffect (targetCtx snapshot semantics ambient command
+      kind id capability observe audienceEpoch audienceRoster) reads prepared.pre.logical
+      (cited_observeOnly reads)
+
 /-- **An admitted scalar write advances the target's blinding ratchet**
 (K-HIDE-ROTATE): the post blinding of every prepared scalar leg of a blinded
 declared cell is one ratchet step of the pre blinding at the admission height. -/
@@ -1140,7 +1452,10 @@ theorem PreparedTarget.scalar_ratchets {deployment : Deployment}
     StoreCodec.blindingKey DeclaredEffectCell.wire prepared.post =
       some (DeclaredEffectCell.blinding.step ambient.height key) := by
   rw [← prepared.postExact]
-  exact DeclaredEffectCell.blinding.run_leg_blinding prepared.pre.logical _ ambient.height blinded
+  exact (congrArg (fun patch => StoreCodec.blindingKey DeclaredEffectCell.wire
+      (Patch.run prepared.pre.logical patch))
+    (targetPatch_scalar_ok prepared.candidate.modeEvidence.down)).trans
+    (DeclaredEffectCell.blinding.run_leg_blinding prepared.pre.logical _ ambient.height blinded)
 
 /-- **An admitted content write advances the target's blinding ratchet**
 (K-HIDE-ROTATE), as for a scalar write. -/
@@ -1164,14 +1479,28 @@ theorem PreparedTarget.content_ratchets {deployment : Deployment}
   show StoreCodec.blindingKey HyperdocumentCell.contentWire
     (Patch.run prepared.pre.logical (targetPatch snapshot semantics ambient command
       ⟨kind, id, capability, version, root, .content content, observe, audienceEpoch, audienceRoster⟩ prepared.pre)) = _
-  simp only [targetPatch]
-  split
-  · exact HyperdocumentCell.contentBlinding.run_leg_blinding prepared.pre.logical _ ambient.height
-      blinded
-  · rename_i failed
-    obtain ⟨_, ok⟩ := ran
-    rw [failed] at ok
-    cases ok
+  have nonempty : content.actions ≠ [] := by
+    intro empty
+    have computed := (computeTarget_content snapshot semantics ambient command kind id capability
+      version root content observe audienceEpoch audienceRoster prepared.pre).symm.trans
+        prepared.candidate.modeEvidence.down
+    have refused : ContentResource.prepareCell ⟨command.subject, kind, capability⟩
+        (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+        (contentContext snapshot ambient command) prepared.pre content = .error .emptyActions := by
+      unfold ContentResource.prepareCell
+      rw [dif_neg (not_not.mpr empty)]
+    unfold contentPrepared at computed
+    rw [refused] at computed
+    dsimp only at computed
+    split_ifs at computed
+  obtain ⟨progress, ok⟩ := ran
+  have patchEq := targetPatch_content snapshot semantics ambient command kind id capability version
+    root content observe audienceEpoch audienceRoster prepared.pre
+  rw [if_neg (by simpa using nonempty), ok] at patchEq
+  refine (congrArg (fun patch => StoreCodec.blindingKey HyperdocumentCell.contentWire
+    (Patch.run (L := Hyperdocument.layout) prepared.pre.logical patch)) patchEq).trans ?_
+  exact HyperdocumentCell.contentBlinding.run_leg_blinding prepared.pre.logical _ ambient.height
+    blinded
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.PreparedTarget.scalar_ratchets' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PreparedTarget.scalar_ratchets
@@ -1192,23 +1521,25 @@ def collect {α : Type} {E : Type} {P : α → Type} :
 abbrev TargetIndex (command : Command) := Fin command.targets.length
 abbrev Incidence (command : Command) := Option (TargetIndex command)
 
-/-- Every `transclude` of every content target names a cell this transaction
-reads observe-only, and that cell's loaded state (this height) holds the
-opening. -/
-def openingsCheck (command : Command)
-    (stores : TargetIndex command → Option ContentResource.ContentStore) : Bool :=
-  (List.finRange command.targets.length).all fun i =>
-    match command.targets[i].payload with
-    | .content content => content.actions.all fun action =>
-        match action with
-        | .transclude _ _ request => (List.finRange command.targets.length).any fun j =>
-            decide (command.targets[j].target = request.source) &&
-              decide (command.targets[j].payload = .read) &&
-              match stores j with
-              | some store => ContentResource.openingHolds store request
-              | none => false
-        | _ => true
-    | _ => true
+/-- One target's openings (`Effect.opens`): each names a cell this transaction reads
+observe-only, and that cell as loaded holds what the opening requires. `none` when every one
+holds; otherwise the refusal, under the target's effect. -/
+def targetOpening (command : Command) (cells : TargetIndex command → PackedCell Registry)
+    (i : TargetIndex command) : Option Effects.Revival.DispatchRefusal :=
+  match command.targets[i].payload with
+  | .registered code op =>
+      if ((effectAt code.toNat).opens op).all fun opening =>
+          (List.finRange command.targets.length).any fun j =>
+            decide (command.targets[j].target = opening.1) &&
+              decide (command.targets[j].payload = .read) && opening.2 (cells j)
+      then none else some (.refused code.toNat "staleOpening" .empty)
+
+/-- The first opening of the command that does not hold, as a refusal; `none` when every
+opening of every target holds at the loaded cells. A content command's openings are its
+transclusions (`contentOpens`). -/
+def openingsRefusal (command : Command) (cells : TargetIndex command → PackedCell Registry) :
+    Option Effects.Revival.DispatchRefusal :=
+  (List.finRange command.targets.length).findSome? (targetOpening command cells)
 
 def incidences (command : Command) : List (Incidence command) :=
   (List.finRange command.targets.length).map some ++ [none]
@@ -1256,31 +1587,6 @@ def sourceStore (domain : Digest) (directory : Directory Nat Registry) :
 
 /-! ## The run check (K-RAN, docs/NOCK.md §2.4) -/
 
-/-- The policy slots of one stream append: the entry's fields as request
-slots, so a stream law can name its author (`request/subject`), its topics
-(`request/topic/…`) or its addressee (`request/to`); plus the position. -/
-def streamSlots (request : StreamCell.Append) (before : Store StreamCell.headLayout) :
-    List (String × Int) :=
-  [("request/topic/length", Int.ofNat request.topic.length),
-   ("stream/sequence", Int.ofNat (StreamCell.nextSeqOf before))] ++
-  Minidregg.Compiler.ResourceAuthorityProjection.bytesSlots "request/topic" 0 request.topic ++
-  (match request.recipient with
-    | some subject => [("request/to", Int.ofNat subject.value)]
-    | none => []) ++
-  (match request.ref with
-    | some (cell, sequence) => [("request/ref/cell", Int.ofNat cell), ("request/ref/sequence", Int.ofNat sequence)]
-    | none => [])
-
-/-- The explicit consent's numeric view. prepareCompute binds these exact
-payer balance, Book root and credits to the loaded Book before an accepted invocation can use
-them; no arbitrary balance mutation is installed in account metadata. -/
-def fundingProject (funding : ComputeFunding) : List (String × Int) :=
-  [("compute/charge", 1),
-   ("compute/asset", Int.ofNat funding.asset),
-   ("compute/credits", Int.ofNat funding.credits),
-   ("compute/payer/before", funding.expectedPayerBalance),
-   ("compute/payer/after", funding.expectedPayerBalance - Int.ofNat funding.credits)]
-
 /-- Exact scalar/content/stream projection from the committed old and candidate
 final states. Local names remain convenient; joint names expose every declared
 participant without granting a view of unrelated cells. -/
@@ -1288,47 +1594,31 @@ def targetProjection (subject : SubjectId) (target : Target) (before after : Sto
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact DeclaredResourceProjection.project id before after
-    | computeFunding funding => exact fundingProject funding
-    | moneyConsent consent => exact
-        [("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
-          (consent.funding.map fundingProject).getD []
-    | content content => exact ContentResource.project before after content
-    | append request => exact streamSlots request before
-    | world _ => exact WorldKindProjection.project subject before after
-    | kindDefinition _ => exact WorldKindProjection.definitionProject before after
-    | kindRead => exact WorldPrototypeConstruction.observeProject before
-    | read => exact ContentResource.project before after ⟨[]⟩
+    | registered code op => exact (effectAt code.toNat).spec.view ⟨subject, id⟩ op before after
 
 /-- `targetProjection` filtered by `want`, a content cell's summaries computed only when named
-(`ContentResource.projectDemand`, `targetProjectionDemand_eq`). -/
-def targetProjectionDemand (want : String → Bool) (subject : SubjectId) (target : Target)
-    (before after : Store target.layout) : List (String × Int) := by
+(`ContentResource.projectDemand`) and a declared cell's slots built only as named
+(`DeclaredResourceProjection.projectDemand`, with `leads` gating its pair deltas), each by its
+declaration's `Effect.viewDemand`;
+`targetProjectionDemand_eq`. -/
+def targetProjectionDemand (want : String → Bool) (leads : Nat → Bool) (subject : SubjectId)
+    (target : Target) (before after : Store target.layout) : List (String × Int) := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar _ => exact (DeclaredResourceProjection.project id before after).filter fun slot => want slot.1
-    | computeFunding funding => exact (fundingProject funding).filter fun slot => want slot.1
-    | moneyConsent consent => exact
-        ([("money/consent", 1), ("money/positions", Int.ofNat consent.positions.length)] ++
-          (consent.funding.map fundingProject).getD []).filter fun slot => want slot.1
-    | content content => exact ContentResource.projectDemand want before after content
-    | append request => exact (streamSlots request before).filter fun slot => want slot.1
-    | world _ => exact (WorldKindProjection.project subject before after).filter fun slot => want slot.1
-    | kindDefinition _ => exact (WorldKindProjection.definitionProject before after).filter fun slot => want slot.1
-    | kindRead => exact (WorldPrototypeConstruction.observeProject before).filter fun slot => want slot.1
-    | read => exact ContentResource.projectDemand want before after ⟨[]⟩
+    | registered code op =>
+        exact (effectAt code.toNat).viewDemand want leads ⟨subject, id⟩ op before after
 
-theorem targetProjectionDemand_eq (want : String → Bool) (subject : SubjectId) (target : Target)
-    (before after : Store target.layout) :
-    targetProjectionDemand want subject target before after =
+theorem targetProjectionDemand_eq (want : String → Bool) (leads : Nat → Bool)
+    (sound : ∀ a b, want (DeclaredResourceProjection.pairName a b) = true → leads a = true)
+    (subject : SubjectId) (target : Target) (before after : Store target.layout) :
+    targetProjectionDemand want leads subject target before after =
       (targetProjection subject target before after).filter fun slot => want slot.1 := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | content content => exact ContentResource.projectDemand_eq want before after content
-    | read => exact ContentResource.projectDemand_eq want before after ⟨[]⟩
-    | _ => rfl
+    | registered code op =>
+        exact (effectAt code.toNat).viewDemand_eq want leads sound ⟨subject, id⟩ op before after
 
 /-- The participant slot a sample reads: target `i`'s projection of its loaded
 pre-state (before = after = pre), so a program sees only committed values. -/
@@ -1367,14 +1657,6 @@ theorem programSampleRead_outside {command : Command}
     programSampleRead command pre (some fundingIndex) i slot = none := by
   simp [programSampleRead, Nat.not_lt.mpr outside]
 
-/-- One action as a field write of the command's `i`-th target, when it is one. -/
-def actionWrite (i target : Nat) : DeclaredActionLowering.Action → Option Eval.FieldWrite
-  | .write (.objectField object field) _ value =>
-      if object.value = target then some ⟨i, field.value, value⟩ else none
-  | .create (.objectField object field) value =>
-      if object.value = target then some ⟨i, field.value, value⟩ else none
-  | _ => none
-
 /-- The actual pre-state supplies world method bindings. Output coordinates are
 program-local names, never substitutes for capability semantic field IDs. -/
 def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
@@ -1383,16 +1665,19 @@ def targetWrites (i : Nat) (target : Target) (pre : Store target.layout)
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
-    | scalar actions => exact actions.mapM (actionWrite i id)
-    | world actions => exact WorldKindMethods.writes pre program i actions
-    | content content => exact some [⟨i, 0,
-        WorldPrototypeConstruction.bytesValue (ContentResource.commandStream.encode content)⟩]
-    | append request => exact some [⟨i, 0,
-        WorldPrototypeConstruction.bytesValue (StreamCell.appendStream.encode request)⟩]
-    | kindDefinition definition => exact some [WorldPrototypeConstruction.constructorWrite i definition]
-    | read | kindRead => exact some []
-    | computeFunding _ => exact if kind = .account ∧ validatedFundingIndex = some i then some [] else none
-    | moneyConsent _ => exact none -- Nock field-write output cannot certify canonical money.
+    | registered code op =>
+        -- A registered effect's claimed writes are its declaration's (`Effect.runWrites`: a world
+        -- instance's are its method's bound outputs, a scalar operation's are its actions' field
+        -- writes of this target; a compute funding's the empty list at the validated funding
+        -- account and nothing elsewhere; a money consent's nothing: a program's field-write
+        -- output cannot certify canonical money), by default the operation's canonical bytes;
+        -- an observing one writes nothing.
+        exact if (effectAt code.toNat).observeOnly op then some [] else
+          match (effectAt code.toNat).runWrites with
+          | some claimed =>
+              claimed pre program i id (decide (kind = .account ∧ validatedFundingIndex = some i)) op
+          | none => some [⟨i, 0,
+              WorldPrototypeConstruction.bytesValue ((effectAt code.toNat).spec.opStream.encode op)⟩]
 
 /-- Merely spelling a funding payload cannot remove it from run-effect
 checking. Only prepareCompute's validated index enables the system-leg route. -/
@@ -1400,8 +1685,7 @@ theorem funding_unvalidated (index target : Nat) (capability : CapabilityId)
     (root program : Digest) (funding : ComputeFunding)
     (pre : Store EffectDeclaration.effectLayout) :
     targetWrites index ⟨.account, target, capability, 1, root,
-      .computeFunding funding, none, none, none⟩ pre program none = none := by
-  simp [targetWrites]
+      .computeFunding funding, none, none, none⟩ pre program none = none := rfl
 
 /-- Extract checked effects from every actual loaded participant. A world
 participant must bind the claimed immutable program in its retained ROM table. -/
@@ -1531,21 +1815,13 @@ def prepareCompute (deployment : Deployment) (physical : RunComputeBudgetDomain.
   let funding ← (List.finRange command.targets.length).foldlM
     (fun (selected : Option RunComputeBudgetDomain.FundingInput) i => do
       let target := command.targets[i]
-      match target.payload with
-      | .computeFunding consent =>
+      match target.payload.funding? with
+      | none => pure selected
+      | some funding =>
           if target.kind != .account || selected.isSome || i.val + 1 != command.targets.length then
             throw .computeFunding
-          pure (some ⟨i.val, target.target, target.capability, consent.asset, consent.credits,
-            consent.expectedPayerBalance, consent.expectedBookRoot⟩)
-      | .moneyConsent consent =>
-          match consent.funding with
-          | none => pure selected
-          | some funding =>
-            if target.kind != .account || selected.isSome || i.val + 1 != command.targets.length then
-              throw .computeFunding
-            pure (some ⟨i.val, target.target, target.capability, funding.asset, funding.credits,
-              funding.expectedPayerBalance, funding.expectedBookRoot⟩)
-      | _ => pure selected) none
+          pure (some ⟨i.val, target.target, target.capability, funding.asset, funding.credits,
+            funding.expectedPayerBalance, funding.expectedBookRoot⟩)) none
   match objective with
   | some claim =>
       let prepared ← (RunComputeBudgetDomain.prepare deployment physical clock command.subject
@@ -1562,9 +1838,8 @@ def prepareCompute (deployment : Deployment) (physical : RunComputeBudgetDomain.
 
 /-- The account identity is taken only from the containing signed target. -/
 def moneyEntries (command : Command) : List ResourceMoneyWire.Entry :=
-  command.targets.filterMap fun target => match target.payload with
-    | .moneyConsent consent => some ⟨target.target, consent⟩
-    | _ => none
+  command.targets.filterMap fun target =>
+    target.payload.consent?.map fun consent => ⟨target.target, consent⟩
 
 def prepareMoney (deployment : Deployment) (physical : RunComputeBudgetDomain.Physical)
     (command : Command)
@@ -1635,7 +1910,7 @@ structure PreparedOn {F : Type} [Field F]
   targets : (i : TargetIndex command) → PreparedTarget deployment directory
     authority profile.semantics ambient command command.targets[i]
   /-- Every transclusion's opening holds on its source read, at this height. -/
-  openings : openingsCheck command (fun j => command.targets[j].contentStore? (targets j).pre) = true
+  openings : openingsRefusal command (fun j => (targets j).before) = none
   marker : MarkerMode authority profile.semantics command
   compute : Option (RunComputeBudgetDomain.Prepared deployment cells command.subject)
   computeChecked : prepareCompute deployment cells clock.clock command = .ok compute
@@ -1703,8 +1978,9 @@ def prepareOn {F : Type} [Field F] (deployment : Deployment)
       let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment cells)
       let targets ← collect command.targets (prepareTarget deployment directory
         authority profile.semantics ambient command)
-      if openings : openingsCheck command
-          (fun j => command.targets[j].contentStore? (targets j).pre) = true then
+      match openings : openingsRefusal command (fun j => (targets j).before) with
+      | some refusal => .error (.effect refusal)
+      | none =>
         let marker ← prepareMarker authority profile.semantics command
         match computeChecked : prepareCompute deployment cells clock.clock command with
         | .error reason => .error reason
@@ -1720,7 +1996,6 @@ def prepareOn {F : Type} [Field F] (deployment : Deployment)
                 .ok ⟨nonempty, distinct, writes, markerDeclared, clock, targets, openings, marker,
                   compute, computeChecked, money, moneyChecked, run, checked, computeRunExact⟩
             else .error .computeFunding
-      else .error (.content .staleOpening)
       else .error .undeclaredMarker
      else .error .readOnlyCommand
     else .error .duplicateTargets
@@ -1855,7 +2130,7 @@ theorem prepare_refuses_lone_read {F : Type} [Field F] (deployment : Deployment)
 #assert_axioms computeTarget_read_observe
 #assert_axioms computeTarget_scalar_unnamed_refused
 #assert_axioms computeTarget_scalar_unheld_refused
-#assert_axioms computeTarget_scalar_named_as_before
+#assert_axioms computeTarget_scalar targetPatch_scalar_ok
 #assert_axioms PreparedTarget.read_names_observe_capability
 #assert_axioms targetPatch_observeOnly
 

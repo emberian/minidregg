@@ -123,7 +123,7 @@ theorem engineKeystone (Ctx Cell : Type) : EngineKeystone Ctx Cell := by
               · cases admitted
               · rename_i s' ran
                 cases admitted
-                refine ⟨op, s, s', rfl, selected, (sound code e found).1 s', ?_⟩
+                refine ⟨op, s, s', rfl, selected, (sound code e found).1 ctx s', ?_⟩
                 intro loc unrotated outsideFrame
                 apply Substrate.run_frame e.S (sound code e found).2.2 _ s s' ran loc
                 intro member
@@ -136,7 +136,7 @@ theorem completenessKeystone (Ctx Cell : Type) : CompletenessKeystone Ctx Cell :
   intro L code e found op ctx s r headerOk refused
   have lawful := L.lawful code e found
   simp only [dispatch, found, decode_encode_op, Handler.fire, headerOk,
-    lawful.1.1 s, EffectSpec.exec] at refused
+    lawful.1.1 ctx s, EffectSpec.exec] at refused
   split at refused
   · rename_i x _
     simp only [Except.map, Except.error.injEq] at refused
@@ -152,7 +152,7 @@ theorem completenessKeystone (Ctx Cell : Type) : CompletenessKeystone Ctx Cell :
 
 theorem toyEntry_sound {O R : Type} (spec : EffectSpec Unit ToySubstrate O R) :
     (toyEntry spec).Sound :=
-  ⟨fun _ => rfl, fun _ _ selected => (Option.some.inj selected).symm, storeSubstrate_framed toyLayout⟩
+  ⟨fun _ _ => rfl, fun _ _ _ selected => (Option.some.inj selected).symm, storeSubstrate_framed toyLayout⟩
 
 theorem enginePremise : EnginePremise := by
   intro code e found

@@ -66,11 +66,11 @@ theorem advance_globalBacked {c : Config} {faulty : Finset Nat}
   intro other member honest view inside message received
   by_cases same : other = party
   · subst other
-    have source := stepped view (by simpa only [advance, if_pos rfl] using inside) message received
+    have source := stepped view (by simpa [advance] using inside) message received
     rcases source with oldSend | ownSend
     · exact List.mem_append.mpr (Or.inl oldSend)
     · apply local_audit_in_global advancedProjection member honest
-      simpa only [advance, if_pos rfl] using ownSend
+      simpa only [advance, if_pos rfl, ite_true] using ownSend
   · have oldInside : view ∈ (net.localState other).views := by
       simpa only [advance, if_neg same] using inside
     have sent := backed other member honest view oldInside message received

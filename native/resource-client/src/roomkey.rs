@@ -2145,7 +2145,7 @@ fn resume_release(root: &Path, workspace: &Value, room_name: &str, proposal_id: 
 /// Returns its capability id.
 fn keys_grant(root: &Path, workspace: &Value, keys_ref: &str, invitee: &str, proposal_id: &str) -> Result<u64> {
     turn(root, workspace, proposal_id, &json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-        "name":keys_ref,"recipient":invitee,"verbs":["observe","mutate"],"maxCost":"50000"}))?;
+        "name":keys_ref,"recipient":invitee,"verbs":["observe","mutate"],"perRequestBytes":"50000"}))?;
     let summary = bounded_json(&root.join("proposals").join(proposal_id).join("proposal.json"))?;
     let id = summary
         .get("delegation")

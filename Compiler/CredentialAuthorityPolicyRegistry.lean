@@ -266,113 +266,62 @@ def issuedAt (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
       | none => false
   | _ => false
 
-/-- Issuer evidence is checked against an ACTUAL stored capability and the
-current complete-snapshot issuer epoch. It cannot be supplied by a base cache.
-The search ranges over the cell's finite support. -/
-def issuerCheck (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
+/-- **Issuer evidence of a capability, read at its own address.** The capability stored at this
+capability's kind and identifier was issued by its issuer at its issuer epoch and commits to
+`commitment` (the stored capability's full commitment), and that epoch is the issuer's current
+one in the complete snapshot. One point read: the caller holds the capability, so nothing is
+searched and no index of issued capabilities is kept. It cannot be supplied by a base cache. -/
+def issuerCheck (snapshot : Snapshot) {kind : ResourceKind} (capability : Capability kind)
     (commitment : Digest) : Bool :=
-  decide (issuerEpochAt snapshot.cell issuer = epoch) &&
-    decide (∃ address ∈ snapshot.logical.support,
-      issuedAt snapshot issuer epoch commitment address = true)
+  decide (issuerEpochAt snapshot.cell capability.issuer = capability.issuerEpoch) &&
+    issuedAt snapshot capability.issuer capability.issuerEpoch commitment
+      ⟨.capability kind, capability.id⟩
 
-/-- `issuerCheck` as the Host runs it: the issuer epoch, then membership of the triple in
-the snapshot's issued index (`Snapshot.issued`, computed once per held cell), instead of
-reading and hashing every address of the support per check. -/
-def issuerCheckIndexed (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
-    (commitment : Digest) : Bool :=
-  decide (issuerEpochAt snapshot.cell issuer = epoch) &&
-    (snapshot.issued.get.contains (issuer, epoch, commitment))
-
-/-- **The index answers what the support search answers** (statement first: the issuer
-evidence a portal accepts is unchanged; only how it is decided moves). -/
-theorem issuerCheck_eq_indexed (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
-    (commitment : Digest) :
-    issuerCheck snapshot issuer epoch commitment =
-      issuerCheckIndexed snapshot issuer epoch commitment := by
-  have key : (∃ address ∈ snapshot.logical.support,
-        issuedAt snapshot issuer epoch commitment address = true) ↔
-      (issuer, epoch, commitment) ∈
-        CredentialAuthorityDomain.issuedOf snapshot.domain snapshot.cell := by
-    rw [CredentialAuthorityDomain.issuedOf, List.mem_filterMap]
-    constructor
-    · rintro ⟨⟨plane, identifier⟩, present, issued⟩
-      refine ⟨⟨plane, identifier⟩, present, ?_⟩
-      cases plane with
-      | capability kind =>
-          simp only [issuedAt] at issued
-          cases read : readCapability snapshot.cell kind identifier with
-          | none => simp [read] at issued
-          | some stored =>
-              simp only [read, decide_eq_true_eq] at issued
-              obtain ⟨i, e, c⟩ := issued
-              simp only [CredentialAuthorityDomain.issuedEntry, read, Option.map_some]
-              rw [i, e, ← c]
-              rfl
-      | _ => simp [issuedAt] at issued
-    · rintro ⟨⟨plane, identifier⟩, present, entry⟩
-      refine ⟨⟨plane, identifier⟩, present, ?_⟩
-      cases plane with
-      | capability kind =>
-          simp only [CredentialAuthorityDomain.issuedEntry] at entry
-          cases read : readCapability snapshot.cell kind identifier with
-          | none => simp [read] at entry
-          | some stored =>
-              simp only [read, Option.map_some, Option.some.injEq, Prod.mk.injEq] at entry
-              obtain ⟨i, e, c⟩ := entry
-              simp only [issuedAt, read, decide_eq_true_eq]
-              exact ⟨i, e, c⟩
-      | _ => simp [CredentialAuthorityDomain.issuedEntry] at entry
-  unfold issuerCheck issuerCheckIndexed
-  rw [snapshot.issuedExact]
-  cases h : decide (issuerEpochAt snapshot.cell issuer = epoch) with
-  | false => rfl
-  | true =>
-      simp only [Bool.true_and]
-      by_cases found : (issuer, epoch, commitment) ∈
-          CredentialAuthorityDomain.issuedOf snapshot.domain snapshot.cell
-      · rw [decide_eq_true (key.mpr found), List.contains_iff_mem.mpr found]
-      · rw [decide_eq_false (fun exists_ => found (key.mp exists_))]
-        exact ((Bool.not_eq_true _).mp (fun contained => found (List.contains_iff_mem.mp contained))).symm
-
-@[csimp] theorem issuerCheck_eq_issuerCheckIndexed : @issuerCheck = @issuerCheckIndexed := by
-  funext snapshot issuer epoch commitment
-  exact issuerCheck_eq_indexed snapshot issuer epoch commitment
-
-#assert_axioms issuerCheck_eq_indexed
-
-/-- Issuer acceptance names a stored capability of that issuer and epoch. -/
-theorem issuerCheck_sound (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
-    (commitment : Digest) (accepted : issuerCheck snapshot issuer epoch commitment = true) :
-    issuerEpochAt snapshot.cell issuer = epoch ∧
-      ∃ kind identifier stored, readCapability snapshot.cell kind identifier = some stored ∧
-        stored.head.issuer = issuer ∧ stored.head.issuerEpoch = epoch ∧
+/-- Issuer acceptance names the stored capability at that kind and identifier, of that issuer
+and epoch, with that commitment; and the epoch is the issuer's current one. -/
+theorem issuerCheck_sound (snapshot : Snapshot) {kind : ResourceKind} (capability : Capability kind)
+    (commitment : Digest) (accepted : issuerCheck snapshot capability commitment = true) :
+    issuerEpochAt snapshot.cell capability.issuer = capability.issuerEpoch ∧
+      ∃ stored, readCapability snapshot.cell kind capability.id = some stored ∧
+        stored.head.issuer = capability.issuer ∧ stored.head.issuerEpoch = capability.issuerEpoch ∧
         storedCapabilityDigest snapshot stored = commitment := by
   simp only [issuerCheck, Bool.and_eq_true, decide_eq_true_eq] at accepted
-  obtain ⟨current, ⟨plane, identifier⟩, _, issued⟩ := accepted
+  obtain ⟨current, issued⟩ := accepted
   refine ⟨current, ?_⟩
-  cases plane with
-  | capability kind =>
-      simp only [issuedAt] at issued
-      cases read : readCapability snapshot.cell kind identifier with
-      | none => simp [read] at issued
-      | some stored =>
-          simp only [read, decide_eq_true_eq] at issued
-          exact ⟨kind, identifier, stored, read, issued⟩
-  | _ => simp [issuedAt] at issued
+  simp only [issuedAt] at issued
+  cases read : readCapability snapshot.cell kind capability.id with
+  | none => simp [read] at issued
+  | some stored =>
+      simp only [read, decide_eq_true_eq] at issued
+      exact ⟨stored, rfl, issued⟩
 
-/-- A stored capability of the current issuer epoch is found. -/
+/-- A stored capability of the current issuer epoch is accepted. -/
 theorem issuerCheck_complete (snapshot : Snapshot) {kind : ResourceKind}
     (stored : StoredCapability kind)
     (present : readCapability snapshot.cell kind stored.head.id = some stored)
     (current : issuerEpochAt snapshot.cell stored.head.issuer = stored.head.issuerEpoch) :
-    issuerCheck snapshot stored.head.issuer stored.head.issuerEpoch
-      (storedCapabilityDigest snapshot stored) = true := by
+    issuerCheck snapshot stored.head (storedCapabilityDigest snapshot stored) = true := by
   simp only [issuerCheck, Bool.and_eq_true, decide_eq_true_eq]
-  refine ⟨current, ⟨.capability kind, stored.head.id⟩, ?_, ?_⟩
-  · rw [Minidregg.Theory.SparseMap.mem_support_iff]
-    change readCapability snapshot.cell kind stored.head.id ≠ none
-    rw [present]; simp
-  · simp [issuedAt, present]
+  exact ⟨current, by simp [issuedAt, present]⟩
+
+/-- Teeth: no capability stored at that kind and identifier, no issuer evidence, whatever else
+the store holds (another capability of the same issuer and epoch does not vouch for this one). -/
+theorem issuerCheck_absent (snapshot : Snapshot) {kind : ResourceKind} (capability : Capability kind)
+    (commitment : Digest) (absent : readCapability snapshot.cell kind capability.id = none) :
+    issuerCheck snapshot capability commitment = false := by
+  simp [issuerCheck, issuedAt, absent]
+
+/-- Teeth: a stale issuer epoch is refused though the capability is stored. -/
+theorem issuerCheck_stale (snapshot : Snapshot) {kind : ResourceKind} (capability : Capability kind)
+    (commitment : Digest)
+    (stale : issuerEpochAt snapshot.cell capability.issuer ≠ capability.issuerEpoch) :
+    issuerCheck snapshot capability commitment = false := by
+  simp [issuerCheck, stale]
+
+#assert_axioms issuerCheck_sound
+#assert_axioms issuerCheck_complete
+#assert_axioms issuerCheck_absent
+#assert_axioms issuerCheck_stale
 
 /-- Non-revocation at the exact root: the key is registered and not revoked, both
 read from the cell's presence planes.  There is no key list beside them. -/
@@ -401,8 +350,8 @@ def domainPortal (snapshot : Snapshot) (base : Portal) : Portal where
     base.verifyCapabilityCommitment capability commitment witness &&
       capabilityCheck snapshot capability commitment
   verifyMembership := fun root address claim => decide (MembershipBound snapshot root address claim)
-  verifyIssuer := fun issuer epoch commitment witness =>
-    base.verifyIssuer issuer epoch commitment witness && issuerCheck snapshot issuer epoch commitment
+  verifyIssuer := fun capability commitment witness =>
+    base.verifyIssuer capability commitment witness && issuerCheck snapshot capability commitment
   verifyNonRevocation := fun root key witness =>
     base.verifyNonRevocation root key witness && nonRevocationCheck snapshot root key
   verifyCommittedPolicy := base.verifyCommittedPolicy
@@ -502,7 +451,7 @@ def sourcePortal (snapshot : Snapshot) (expectedNullifier : Nat) : Portal where
     capabilityCheck snapshot capability commitment
   verifyCapabilityUse := capabilityUseCheck snapshot expectedNullifier
   verifyMembership := fun root address claim => decide (MembershipBound snapshot root address claim)
-  verifyIssuer := fun issuer epoch commitment _ => issuerCheck snapshot issuer epoch commitment
+  verifyIssuer := fun capability commitment _ => issuerCheck snapshot capability commitment
   verifyNonRevocation := fun root key _ => nonRevocationCheck snapshot root key
   verifyCommittedPolicy := fun _ _ _ witness => nomatch witness
 
@@ -620,7 +569,7 @@ def capabilityEvidenceCheckedFor
         if committed : portal.verifyCapabilityCommitment capability commitment commitmentWitness = true then
           if member : portal.verifyMembership snapshot.authState.capabilityRoot commitment
               (membershipWitness capability.id) = true then
-            if issuer : portal.verifyIssuer capability.issuer capability.issuerEpoch commitment issuerWitness = true then
+            if issuer : portal.verifyIssuer capability commitment issuerWitness = true then
               if self : portal.verifyNonRevocation snapshot.authState.revocationRoot
                   (.capability capability.id) (revocationWitness (.capability capability.id)) = true then
                 if ancestors : ∀ identifier ∈ capability.ancestors,

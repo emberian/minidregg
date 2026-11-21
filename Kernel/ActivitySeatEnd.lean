@@ -121,6 +121,19 @@ theorem Joined.closes {rootBytes : Bytes → Digest} {config : Config} {snapshot
   rw [AcceptedBatch.post_logicalBook]
   exact joint.2.symm
 
+/-- **The seat closing debits only the seats the ending activity holds**: every operation the
+closing adds to the turn's batch is sourced at the account of a seat that was open and held
+by the activity. The turn's signer, and the account it named, are debited by the closing only
+if that account is such a seat. -/
+theorem Joined.held_sources {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height record : Nat} {pre : BookCell} {posted : Postings pre}
+    (joined : Joined config snapshot height record posted) :
+    ∀ operation ∈ joined.held.batch.operations,
+      operation.posting.source ∈
+        (heldOpen (joined.held.loaded.world (posted.batch.apply (logicalBook pre.logical)))
+          height record).map Seat.account :=
+  closeHeld_sources joined.held.ended
+
 /-- **An ending activity deregisters the accounts of the seats it closes**: after the joint
 batch no closed seat's account is a Book account. -/
 theorem Joined.deregisters {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -187,6 +200,29 @@ def AdmittedTurn.ending {rootBytes : Bytes → Digest} {config : Config} {snapsh
   | .abortDrained request aborted => some (request.record.value, ⟨aborted.book, aborted.posted⟩)
   | .rebirth request reborn => some (request.record.value, ⟨reborn.born.book, reborn.born.posted⟩)
   | _ => none
+
+/-- The postings an ending turn joins the seat closing to are the turn's own Book operations
+(`AdmittedTurn.operations`), the ones the receiver's value bound judged. -/
+theorem AdmittedTurn.ending_operations {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (turn : AdmittedTurn config snapshot height)
+    {record : Nat} {pre : BookCell} {posted : Postings pre}
+    (ends : AdmittedTurn.ending turn = some (record, ⟨pre, posted⟩)) :
+    turn.operations = posted.batch.operations := by
+  cases turn with
+  | birth _ _ born =>
+      simp only [AdmittedTurn.ending] at ends
+      split at ends
+      · cases ends
+      · cases ends; rfl
+  | deliver request delivery =>
+      simp only [AdmittedTurn.ending] at ends
+      split at ends
+      · cases ends
+      · cases ends; rfl
+  | abandon request abandoned => simp only [AdmittedTurn.ending] at ends; cases ends; rfl
+  | abortDrained request aborted => simp only [AdmittedTurn.ending] at ends; cases ends; rfl
+  | rebirth request reborn => simp only [AdmittedTurn.ending] at ends; cases ends; rfl
+  | _ => simp only [AdmittedTurn.ending] at ends; cases ends
 
 /-- The turn's final posts and extra guards: the kernel's own, or, when the turn
 ends an activity that holds seats, the joint turn (`Joined.rewrite`). -/

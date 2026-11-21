@@ -96,7 +96,7 @@ invoke() { # NAME WS TARGETS-JSON  (propose + submit)
 content() { jq -n --arg r "$1" --argjson a "$2" '[{name:$r,payload:{type:"content",actions:$a}}]'; }
 delegate() { # NAME FROM-WS RESOURCE RECIPIENT-SUBJECT VERBS-JSON TO-WS LOCALNAME
   jq -n --arg n "$3" --arg r "$4" --argjson v "$5" \
-    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,maxCost:"50000"}' \
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:$v,perRequestBytes:"50000"}' \
     >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$2" --request "$D/req/$1.json" --proposal-id "$1"; ok "$1-propose"
   run "$1-submit" "$MINI" workspace --action submit --dir "$2" \
@@ -306,7 +306,7 @@ row jwall-transclude-admitted installed "$(outcome c-transcludes-jwall)" "$(deta
 # A command that only reads makes no transition: refused readOnlyCommand at preparation, by name.
 invoke c-lone-read-jwall "$CW" '[{"name":"jwall","payload":{"type":"read"}}]'
 lone=$(outcome c-lone-read-jwall)
-[ "$lone" = refused ] && ! grep -q readOnlyCommand "$D/c-lone-read-jwall.err" && lone=refused-not-readOnlyCommand
+[ "$lone" = refused ] && ! refusal_text c-lone-read-jwall | grep -q 'Reject\.readOnlyCommand' && lone=refused-not-readOnlyCommand
 row jwall-lone-read-readOnlyCommand refused "$lone" "$(detail c-lone-read-jwall)"
 run b-import-jwall "$MINI" workspace --action import --dir "$TW" --name tjwall --kind object \
   --target "$jwall" --observe-capability "$(jq -r .observeCapability "$TW/refs/tpage.json")"; ok b-import-jwall

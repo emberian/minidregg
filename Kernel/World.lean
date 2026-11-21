@@ -1889,7 +1889,7 @@ theorem step_narrows_stable {w w' : World R TxId D} {t : Turn R TxId Ev D}
     {child parent : Theory.TypedAuthorization.Scope kind}
     (narrows : child.Narrows parent w.parentage) : child.Narrows parent w'.parentage :=
   ⟨Theory.TypedAuthorization.TargetSet.narrows_mono (fun _ _ recorded => step_parent_stable H h recorded)
-    narrows.targets, narrows.verbs, narrows.maxCost, narrows.fields, narrows.maxDelta⟩
+    narrows.targets, narrows.verbs, narrows.perRequestBytes, narrows.fields, narrows.maxDelta⟩
 
 /-- Retired marks are never removed by an accepted turn. -/
 theorem step_retired_stable {w w' : World R TxId D} {t : Turn R TxId Ev D}

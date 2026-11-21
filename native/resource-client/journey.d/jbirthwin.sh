@@ -49,7 +49,7 @@ installed() { [ -f "$1/attempts/create-$2/outcome.json" ] \
 must() { "$@" >>"$D/setup.out" 2>>"$D/setup.err" || { echo "setup failed: $* :: $(tail -1 "$D/setup.err")" >&2; exit 1; }; }
 must create "$SPONSOR_WS" kbw-pad "$D/pad"
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"kbw-pad",
-  recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/delegate.json"
+  recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$D/req/delegate.json"
 must "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/delegate.json" --proposal-id kbw-grant
 must "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/kbw-grant/intent.json" \
   --attempt "$SPONSOR_WS/attempts/kbw-grant"

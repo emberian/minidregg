@@ -258,7 +258,7 @@ structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : D
     (representationCreates deployment semantic.declaration) = .ok allocated
   physicalShape : PhysicalShape deployment ground
     (planWrites (representationCreates deployment semantic.declaration)
-      (ground.authorityWrites semantic.update.validated.apply))
+      (ground.authorityWrites (CredentialAuthorityLayout.Update.ofValidated semantic.update.validated)))
 theorem Prepared.sound {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {ground : Ground deployment} {federation : FederationId} {height : Height} {ingress : DecodedIngress}
     (prepared : Prepared profile deployment ground federation height ingress) :
@@ -311,7 +311,7 @@ def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployme
   | .error reason => .error (.allocation reason)
   | .ok allocated => do
       let shape ← require (PhysicalShape deployment ground
-        (planWrites creates (ground.authorityWrites semantic.update.validated.apply))) .physicalShape
+        (planWrites creates (ground.authorityWrites (CredentialAuthorityLayout.Update.ofValidated semantic.update.validated)))) .physicalShape
       .ok ⟨structural, structuralChecked.property,
         storageKind, storageKindExact.down, semantic, additionalExact.down, storageKindBound.down, declarationExact.down,
         markerExact.down, source, audience, allocated, allocationExact, shape.down⟩
@@ -328,8 +328,13 @@ def Prepared.authorityPost (prepared : Prepared profile deployment ground federa
     CredentialAuthorityDomain.Cell :=
   prepared.semantic.update.validated.apply
 
+/-- The update the lowering takes: the post cell with the patch's write footprint and its frame. -/
+def Prepared.authorityUpdate (prepared : Prepared profile deployment ground federation height ingress) :
+    Minidregg.Compiler.CredentialAuthorityLayout.Update ground.authority.cell :=
+  Minidregg.Compiler.CredentialAuthorityLayout.Update.ofValidated prepared.semantic.update.validated
+
 def Prepared.writes (prepared : Prepared profile deployment ground federation height ingress) :=
-  planWrites prepared.creates (ground.authorityWrites prepared.authorityPost)
+  planWrites prepared.creates (ground.authorityWrites prepared.authorityUpdate)
 
 def Prepared.readGuards (prepared : Prepared profile deployment ground federation height ingress) : List ReadGuard :=
   (ground.authorityReadGuards ++
@@ -359,9 +364,7 @@ theorem Prepared.write_roots_bound (prepared : Prepared profile deployment groun
   rcases List.mem_append.mp member with created | changed
   · obtain ⟨request, _, rfl⟩ := List.mem_map.mp created
     exact ResourceBirthController.birthWrite_root_bound request
-  · simp only [ServedBasis.Ground.authorityWrites, List.mem_singleton] at changed
-    subst write
-    exact ground.authorityWrite_root_bound _
+  · exact ground.authorityWrites_root_bound _ write changed
 
 theorem Prepared.readGuards_exact (prepared : Prepared profile deployment ground federation height ingress)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
@@ -693,18 +696,28 @@ theorem Prepared.fresh_before (prepared : Prepared profile deployment ground fed
   rw [← ground.bytes_exact, prepared.fresh_pre request member]
   rfl
 
-/-- The installed image holds exactly the post authority cell at the pinned
-identifier: one write, carrying the accepted installer's post. -/
+/-- The installed image realises exactly the accepted installer's post authority store: the
+head holds its logical root and each address's entry cell its value. The intent's writes are the
+successor source's birth, at an identifier never used and of the policy-source kind, and the
+lowering of the install's update. -/
 theorem installed_authority_cell (accepted : AcceptedInstall profile deployment ground federation height) :
-    (DataSnapshot.install ground.view (intent accepted)).canonicalBytes
-        (CredentialAuthorityDomainReceiver.cellIdOf deployment) =
-      CredentialAuthorityDomainReceiver.cellBytes accepted.prepared.authorityPost := by
-  have member : ground.authorityWrite accepted.prepared.authorityPost ∈
-      accepted.prepared.writes := by
-    unfold Prepared.writes planWrites ServedBasis.Ground.authorityWrites
-    exact List.mem_append_right _ (List.mem_singleton.mpr rfl)
-  exact installed_write_bytes accepted
-    (ground.authorityWrite accepted.prepared.authorityPost) member
+    CredentialAuthorityLayout.RealizesAuthority
+      (DataSnapshot.install ground.view (intent accepted)).canonicalBytes deployment.authorityCellId
+      accepted.prepared.authorityPost.logical := by
+  apply ground.authorityWrites_installed accepted.prepared.authorityUpdate (intent accepted)
+    (accepted.prepared.creates.map ResourceBirthController.birthWrite) rfl
+    accepted.prepared.physicalShape.1
+  intro write member
+  obtain ⟨request, inCreates, rfl⟩ := List.mem_map.mp member
+  refine ⟨?_, ?_⟩
+  · show CredentialAuthorityLayout.decodeCell (ground.view.canonicalBytes ⟨request.cellId⟩) = none
+    rw [accepted.prepared.fresh_before request inCreates]
+    rfl
+  · apply CredentialAuthorityLayout.decodeCell_live_other
+    simp only [Prepared.creates, representationCreates, List.mem_singleton] at inCreates
+    subst inCreates
+    intro same
+    cases same
 
 theorem no_partial_commit (accepted : AcceptedInstall profile deployment ground federation height)
     (schedule : Schedule) :

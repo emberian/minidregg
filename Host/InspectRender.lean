@@ -178,7 +178,7 @@ private def capJson {kind : ResourceKind} (cap : Capability kind) : List (String
   [("holder", holderText cap.holder),
    ("targets", targetsJson cap.scope.targets),
    ("verbs", .arr <| (verbNames cap.scope.verbs).toArray.map Json.str),
-   ("maxCost", decimal cap.scope.maxCost), ("notBefore", decimal cap.notBefore),
+   ("perRequestBytes", decimal cap.scope.perRequestBytes), ("notBefore", decimal cap.notBefore),
    ("notAfter", decimal cap.notAfter), ("root", decimal cap.root.value),
    ("parent", cap.parent.map (fun p => decimal p.value) |>.getD .null),
    ("issuer", decimal cap.issuer.value)]
@@ -191,7 +191,7 @@ private def nodeJson {kind : ResourceKind} (node : Node kind) : Json :=
     (match node.cap with | some cap => capJson cap | none => [])
 
 private def narrowText {kind : ResourceKind} (edge : Edge kind) : String :=
-  s!"targets ⊆, verbs ⊆, maxCost {edge.child.scope.maxCost} ≤ {edge.parent.scope.maxCost}"
+  s!"targets ⊆, verbs ⊆, perRequestBytes {edge.child.scope.perRequestBytes} ≤ {edge.parent.scope.perRequestBytes}"
 
 private def nodeLine {kind : ResourceKind} (node : Node kind) : String :=
   let flags := (if node.revoked then " REVOKED" else "") ++
@@ -203,7 +203,7 @@ private def nodeLine {kind : ResourceKind} (node : Node kind) : String :=
         | reasons => ", ".intercalate (reasons.map RefusalReason.name)
       s!"{node.id}  [not readable] ({why}){flags}"
   | some cap =>
-      s!"{node.id}  {holderText cap.holder}  targets {targetsText cap.scope.targets}  verbs {braces (verbNames cap.scope.verbs)}  maxCost {cap.scope.maxCost}  heights {cap.notBefore}..{cap.notAfter}  [{", ".intercalate (node.sources.map sourceText)}]{flags}"
+      s!"{node.id}  {holderText cap.holder}  targets {targetsText cap.scope.targets}  verbs {braces (verbNames cap.scope.verbs)}  perRequestBytes {cap.scope.perRequestBytes}  heights {cap.notBefore}..{cap.notAfter}  [{", ".intercalate (node.sources.map sourceText)}]{flags}"
 
 private partial def treeLines {kind : ResourceKind} (tree : CapTree kind) (fuel : Nat)
     (indent : String) (node : Node kind) : List String :=
@@ -444,39 +444,22 @@ def addressText : AuthAddress → String
   | ⟨.registered, key⟩ => s!"registration of {revocationText key}"
   | ⟨.parent, cell⟩ => "room parent of cell " ++ Nat.repr cell
 
-private def actionText : DeclaredActionLowering.Action → String
-  | .create (.objectField _ f) v => s!"create field {f.value} = {v}"
-  | .create key v => s!"create {repr key} = {v}"
-  | .write (.objectField _ f) e v => s!"write field {f.value} := {v} (expected {e.map toString |>.getD "absent"})"
-  | .write key _ v => s!"write {repr key} := {v}"
-  | .move src dst _ _ _ amount => s!"move {amount} from {src.value} to {dst.value}"
-
 private def draftLines : Draft → List String
   | .invoke bytes => match DeclaredResourceController.commandCodec.decode bytes with
     | none => ["  invoke: noncanonical command"]
     | some command => s!"  invoke by subject {command.subject.value}, nonce {command.nonce}" ::
         command.targets.flatMap fun target =>
-          let access := match target.payload with | .read | .kindRead => "reads" | _ => "writes"
+          let access := match target.payload with
+            | .registered code op => if (Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).observeOnly op then "reads" else "writes"
           s!"  {access} cell {kindName target.kind} {target.target} (via capability {target.capability.value}; read at root {target.expectedTargetRoot.value})" ::
             match target.payload with
-            | .read => ["    authenticated read; no resource write"]
-            | .kindRead => ["    authenticated whole kind definition read; no resource write"]
-            | .scalar actions => actions.map (fun a => "    " ++ actionText a)
-            | .content command => [s!"    content command ({(ContentResource.commandCodec.encode command).length} bytes)"]
-            | .append _ => ["    stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]
-            | .world actions => [s!"    world instance: {actions.length} guarded field actions"]
-            | .moneyConsent consent =>
-                [s!"    canonical Book batch: {(consent.batch.map fun batch => batch.operations.length).getD 0} operations carried; {consent.positions.length} signed source positions; {(consent.funding.map fun funding => funding.credits).getD 0} compute credits"]
-            | .computeFunding funding =>
-                [s!"    funds compute with {funding.credits} credits of asset {funding.asset}; payer pre-balance {funding.expectedPayerBalance}, Book root {funding.expectedBookRoot.value}"]
-            | .kindDefinition definition =>
-                [s!"    kind {definition.descriptor.kind}: layout revision {definition.descriptor.revision}, {definition.descriptor.fields.length} semantic fields"]
+            | .registered code op => ((Minidregg.Kernel.DeclaredResourceController.effectAt code.toNat).display op).map fun line => "    " ++ line
   | .delegate bytes => match CapabilityDelegationController.commandCodec.decode bytes with
     | none => ["  delegate: noncanonical command"]
     | some ⟨kind, command⟩ =>
         let child := command.declaration.child
         [s!"  delegate by subject {command.subject.value} on {kindName kind} {command.declaration.target.value}",
-         s!"  writes the authority cell: capability {child.id.value} for {holderText child.holder}, verbs {braces (verbNames child.scope.verbs)}, maxCost {child.scope.maxCost}, parent {child.parent.map (·.value) |>.getD 0}"]
+         s!"  writes the authority cell: capability {child.id.value} for {holderText child.holder}, verbs {braces (verbNames child.scope.verbs)}, perRequestBytes {child.scope.perRequestBytes}, parent {child.parent.map (·.value) |>.getD 0}"]
   | .install subject control bytes =>
       [s!"  install a law by subject {subject.value} under control capability {control.value} ({bytes.length}-byte declaration)",
        "  writes the authority cell: the resource's policy revision"]

@@ -97,6 +97,18 @@ bytes and root are shared by every reader. -/
   funext F _ profile deployment authority descriptor operationMarker prepared
   exact prepared.postExact.symm
 
+/-- The combined patch as an update of the loaded cell: its post cell (the prepared one) and the
+patch's write footprint. -/
+def Prepared.update (prepared : Prepared profile deployment authority descriptor operationMarker) :
+    CredentialAuthorityLayout.Update authority.cell where
+  post := prepared.post
+  touched := CredentialAuthorityLayout.patchTouched (patch authority descriptor)
+  frame := (CredentialAuthorityLayout.Update.ofValidated prepared.checked.validated).frame
+
+@[simp] theorem Prepared.update_post
+    (prepared : Prepared profile deployment authority descriptor operationMarker) :
+    prepared.update.post = prepared.post := rfl
+
 /-- Authority allocates no cells; the only auxiliary creates are the birth's
 initial policy sources. -/
 def Prepared.auxiliaryCreates

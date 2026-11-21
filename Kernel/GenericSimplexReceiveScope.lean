@@ -70,8 +70,10 @@ theorem register_scoped {c : Config} {state : State} (message : Message)
 theorem scoped_record (c : Config) (state : State)
     (current deadline now : Nat) (checked : List Block) (offers : List Bytes)
     (outbox : List Message) (audit : List AuditEvent) (delivered : List Block) (tip : Block)
-    (needsPoll failed : Bool) :
-Scoped c { self := state.self, current := current, deadline := deadline, now := now, views := state.views, checked := checked, offers := offers, outbox := outbox, audit := audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔ Scoped c state := Iff.rfl
+    (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+Scoped c { self := state.self, current := current, deadline := deadline, now := now, views := state.views, checked := checked, offers := offers, outbox := outbox, audit := audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔ Scoped c state := Iff.rfl
 
 theorem broadcast_scoped {c : Config} {state : State}
     (number : Nat) (kind : Kind) (arg : Argument) (scopeOK : Scoped c state) :
@@ -130,6 +132,13 @@ theorem sendCandidate_scoped {c : Config} {state : State}
 #assert_axioms register_scoped
 #assert_axioms broadcast_scoped
 #assert_axioms clear_scoped
+theorem commitAt_scoped {c : Config} {state : State}
+    (number : Nat) (block : Block) (scopeOK : Scoped c state) :
+    Scoped c (commitAt state number block) :=
+  raiseFloor_preserves (Scoped c) (fun _ _ _ prior => by simpa only [scoped_record] using prior)
+    _ _ _ (doCommit_scoped number block scopeOK)
+
+#assert_axioms commitAt_scoped
 #assert_axioms doCommit_scoped
 #assert_axioms castVote_scoped
 #assert_axioms sendCandidate_scoped

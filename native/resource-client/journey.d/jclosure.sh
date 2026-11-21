@@ -3,15 +3,15 @@
 #
 # A law is a Pred over named slots, so no law can say "no field other than these". The kernel
 # says it: a declared cell is born with its declaration (`--fields 2,3`, or `--fields open`), and
-# the Host refuses a write that changes any other field BY NAME (`undeclaredField N`), at
+# the Host refuses a write that changes any other field BY NAME (`undeclared-field N`), at
 # preparation, before the law runs. A cell created without `--fields` declares none.
 #
 #   board     a board of fields 2,3 under the open law; A fills it and SEALS it (a law freezing
 #             fields 2 and 3 on every write), then delegates observe+mutate to B.
 #             A moves field 2 -> refused by the seal (law-denied); B creates field 20 -> refused
-#             undeclaredField 20 (the seal alone would admit it: it names no field 20).
-#   plain     fields {2}: field 2 created; field 3 refused undeclaredField 3.
-#   default   no --fields: field 2 refused undeclaredField 2 (default-closed).
+#             undeclared-field 20 (the seal alone would admit it: it names no field 20).
+#   plain     fields {2}: field 2 created; field 3 refused undeclared-field 3.
+#   default   no --fields: field 2 refused undeclared-field 2 (default-closed).
 #   open      --fields open: field 20 created and read back (the open-kind pole).
 # Ran with the hook contract (journey.sh header): MINI, SPONSOR_WS, NEWCOMER_WS, SPONSOR_SUBJECT,
 # NEWCOMER_SUBJECT, JOURNEY_STEP_DIR exported. Exit 0 = every row matched; last stdout line = rows.tsv.
@@ -67,8 +67,8 @@ admit() {  # admit CELL ID LABEL WS NAME ACTION...
 undeclared() {  # undeclared CELL ID LABEL FIELD WS NAME ACTION...
   local cell=$1 id=$2 label=$3 f=$4 ws=$5; shift 5
   attempt "$ws" "$id" "$@"; local r=$? why; why=$(refusal "$ws" "$id")
-  row "$cell" "$label" "refused: undeclaredField $f" "$([ $r = 0 ] && echo admitted || echo "[$(printf '%s' "$why" | cut -c1-240)]")" \
-    "$([ $r != 0 ] && [[ "$why" == *"undeclaredField $f"* ]] && [[ "$why" != *law-denied* ]]; echo $?)"
+  row "$cell" "$label" "refused: effect: scalar: undeclared-field $f" "$([ $r = 0 ] && echo admitted || echo "[$(printf '%s' "$why" | cut -c1-240)]")" \
+    "$([ $r != 0 ] && [[ "$why" == *"effect: scalar: undeclared-field $f (phase prepare)"* ]] && [[ "$why" != *law-denied* ]]; echo $?)"
 }
 create() {  # create NAME LAW [FIELDS]
   local extra=(); [ -n "${3:-}" ] && extra=(--fields "$3")
@@ -105,7 +105,7 @@ row board "A seals the board (install: every write leaves fields 2 and 3 as they
   "$(attempt_answer "$WS_A/attempts/jcl-seal/outcome.json" | jq -r '.type + " " + (.confirmation // "")' 2>/dev/null)" \
   "$(attempt_answer "$WS_A/attempts/jcl-seal/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1; echo $?)"
 jq -n --arg r "$B" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"kcl-board",
-  recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/grant.json"
+  recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$D/req/grant.json"
 run grant-propose "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/grant.json" --proposal-id jcl-grant
 run grant-submit "$MINI" workspace --action submit --dir "$WS_A" --intent "$WS_A/proposals/jcl-grant/intent.json" \
   --attempt "$WS_A/attempts/jcl-grant"

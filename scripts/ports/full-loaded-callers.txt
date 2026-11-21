@@ -5,7 +5,6 @@
 # Approved diagnostic addition (ROOT 10-17): Host/WorldSim.lean, the HP-6 seeded sim comparing Host path
 # and follower over whole Worlds; reachable from no shipped executable (not in the closure of Host.Main
 # or Host.ClientConsentSession, checked with scripts/lean_imports.py).
-# Includes the fleet head/incoming ops (Kernel/NativeHost.lean, cv 01a114aa-6780).
 # Approved fixture addition: Fixtures/NativeDocWriteFixture.lean (pure in-memory loadImage fixture like Fixtures/NativeAcceptedFixture.lean; reachable from no shipped executable).
 Fixtures/NativeAcceptedFixture.lean
 Fixtures/NativeDocWriteFixture.lean

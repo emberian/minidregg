@@ -5,6 +5,7 @@ No accepted effect or durable receipt can be obtained from this token alone. -/
 module
 
 public import Kernel.ResourceMoneyWire
+public import Theory.CapabilityValueBound
 public import Compiler.ResourceAuthorityProjection
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -97,18 +98,12 @@ def Prepared.writes (prepared : Prepared deployment physical entries) : List Dat
 def Prepared.readGuards (prepared : Prepared deployment physical entries) : List ReadGuard :=
   prepared.financial.readGuards
 
-def Prepared.fundingDebit (prepared : Prepared deployment physical entries)
-    (account asset : Nat) : Nat :=
-  match prepared.loaded.funding.funding with
-  | none => 0
-  | some funding =>
-    if funding.payer = account ∧ funding.asset = asset then funding.credits else 0
-
-def Prepared.fundingAssets (prepared : Prepared deployment physical entries) (account : Nat) :
-    List AssetId :=
-  match prepared.loaded.funding.funding with
-  | none => []
-  | some funding => if funding.payer = account then [funding.asset] else []
+/-- Every operation the money leg posts to the Book: the application batch, then the
+funding burn (`RunComputeBudget.burnBatch`), when the run is funded. -/
+def Prepared.debitOperations (prepared : Prepared deployment physical entries) :
+    List CanonicalResourceKernel.Operation :=
+  prepared.batch.operations ++
+    (RunComputeBudget.burnBatch prepared.loaded.funding.funding).operations
 
 /-- Only coordinates actually consumed by this account's source/destination
 roles, including funding issuer credits, enter its native policy view. Read capability narrowing is supplied by
@@ -118,16 +113,34 @@ def Prepared.roleAssets (prepared : Prepared deployment physical entries) (accou
   (prepared.financial.coordinates.filterMap fun coordinate =>
     if coordinate.1 = account then some coordinate.2 else none).eraseDups
 
-/-- Scope bounds authorize every gross outgoing application debit plus the
-actual funding debit. A later credit never discounts reserved outgoing value. -/
-def Prepared.grossDebitFootprint (prepared : Prepared deployment physical entries) (entry : Entry) : Footprint :=
-  let assets := (ResourceMoneyWire.assets prepared.batch entry ++
-    prepared.fundingAssets entry.account).toFinset
-  { touched := assets.image CellField.balance
-    delta := fun field => match field with
-      | .balance asset => -(Int.ofNat (ResourceMoneyWire.debit prepared.batch entry asset +
-          prepared.fundingDebit entry.account asset))
-      | _ => 0 }
+/-- What a scope judges of an account's money leg: the one gross-debit footprint every
+debiting receiver uses (`CapabilityValueBound.debitFootprint`), over every operation this leg
+posts. It sums each posting whose source is `account`, whatever positions the account's
+consent lists, so a later credit never discounts outgoing value and no second reading of
+the batch exists to agree with. -/
+def Prepared.grossDebitFootprint (prepared : Prepared deployment physical entries)
+    (account : CanonicalResourceKernel.AccountId) : Footprint :=
+  CapabilityValueBound.debitFootprint prepared.debitOperations account
+
+/-- **A scope covers a money leg's gross-debit footprint exactly when it is a value bound**
+on the account over the operations the leg posts: every debited balance named, every gross
+debit within its `maxDelta`. -/
+theorem Prepared.grossDebitFootprint_covered_iff {kind : ResourceKind}
+    (prepared : Prepared deployment physical entries) (scope : Scope kind)
+    (account : CanonicalResourceKernel.AccountId) :
+    scope.FieldsCover (prepared.grossDebitFootprint account) ↔
+      CapabilityValueBound.ValueBound scope prepared.debitOperations account :=
+  Iff.rfl
+
+/-- The application batch's postings from `account` are all in the footprint: the gross
+debit it reads is at least the batch's own. -/
+theorem Prepared.grossDebit_batch_le (prepared : Prepared deployment physical entries)
+    (account : CanonicalResourceKernel.AccountId) (asset : CanonicalResourceKernel.AssetId) :
+    CapabilityValueBound.grossDebit prepared.batch.operations account asset ≤
+      CapabilityValueBound.grossDebit prepared.debitOperations account asset := by
+  simp only [Prepared.debitOperations, CapabilityValueBound.grossDebit,
+    CapabilityValueBound.debits, List.map_append, List.filter_append, List.sum_append]
+  exact Nat.le_add_right _ _
 
 /-- Preserve the existing scope contract: these are actual committed net
 changes, including destination credits. Gross debit reservation is a separate

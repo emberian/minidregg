@@ -101,7 +101,9 @@ theorem legs_enrol_cells (factory : FactoryCell deployment directory.directory) 
         (⟨deployment.factoryId⟩ : CellId) ∈ (legs.writes factory).map DataWrite.cellId ∧
         (⟨deployment.resourceBookId⟩ : CellId) ∈ (legs.writes factory).map DataWrite.cellId
   | _, .enrol _ _, _ => by
-      simp [Legs.writes, ResourceBirthController.Concrete.planWrites, Loaded.writes, Loaded.write,
+      simp [Legs.writes, ResourceBirthController.Concrete.planWrites, Loaded.writes,
+        CredentialAuthorityLayout.Update.writes, CredentialAuthorityLayout.lowerAuthority,
+        CredentialAuthorityLayout.headWrite, CredentialAuthorityLayout.cellWrite, cellIdOf,
         ResourceBirthController.Concrete.packedWrite]
   | _, .renew _ _ _ _, same => by cases same
   | _, .journal _, same => by cases same

@@ -8,7 +8,6 @@ the blinded sample cell of `ContentProofs`, and `Kernel.ContentCommutingAppend.C
 module
 
 public import Kernel.EffectsRevival.ContentProofs
-public import Kernel.EffectsRevival.PrepareProofs
 public import Kernel.ContentCommutingAppendProofs
 public import Theory.AssertAxioms
 
@@ -60,7 +59,7 @@ def sampleAtomOps : Patch Hyperdocument.layout :=
 
 theorem sampleAtom_emits_blinded_eq :
     contentSpec.sem sampleCtx sampleAtomCommand blindedStore = .ok sampleAtomOps := by
-  simp [contentSpec, contentSem, sampleAtomCommand, ContentResource.run,
+  simp [contentSpec_sem, sampleAtomCommand, ContentResource.run,
     ContentResource.step, ContentResource.allocate, ContentResource.appendLeaf,
     ContentResource.rootOf, Hyperdocument.lookup, Except.map, bind, Except.bind, pure,
     Except.pure, blindedStore, Store.set, sampleAtomOps]
@@ -106,9 +105,8 @@ theorem hostDispatch_blinded_of (op : ContentResource.Command) (root : Digest)
   have selected : DeclaredResourceController.selectTarget sampleDeployment
       (hostTarget (hostCtxOf sampleCtx sampleDeployment contentSpec.version root none none none)
         (.content op)) (⟨.content, cellOf blindedStore⟩ : HostCell) = some (cellOf blindedStore) := by
-    simp only [DeclaredResourceController.selectTarget, hostTarget, hostCtxOf]
-    have object : sampleCtx.kind = .object := rfl
-    rw [if_pos object, if_pos blindedCell_law]
+    simp only [DeclaredResourceController.selectTarget_content, hostTarget, hostCtxOf]
+    rw [if_pos blindedCell_law]
   unfold hostTargetDispatch
   rw [if_neg (by decide), decoded]
   simp only
@@ -135,9 +133,14 @@ theorem hostMovedRootAccepted : HostMovedRootAccepted := by
   obtain ⟨post, executed⟩ := exec_ok_of_complete (code := 1) contentComplete emitted
   refine ⟨sampleAtomCommand, hostCtxOf sampleCtx sampleDeployment contentSpec.version movedRoot
     none none none, ⟨.content, cellOf blindedStore⟩, _, sampleAtom_commutes, ?_,
-    hostDispatch_blinded_of sampleAtomCommand movedRoot (Or.inr sampleAtom_commutes) post executed⟩
-  simp only [contentFresh, hostCtxOf, decide_eq_false_iff_not]
-  exact movedRoot_moved
+    (liveTargetDispatch_content _ _ _).trans
+      (hostDispatch_blinded_of sampleAtomCommand movedRoot (Or.inr sampleAtom_commutes) post executed)⟩
+  show (match DeclaredResourceController.Effect.select DeclaredResourceController.contentEffect
+      sampleDeployment sampleCtx.target sampleCtx.kind (⟨.content, cellOf blindedStore⟩ : HostCell) with
+    | none => true
+    | some pre => decide (movedRoot = pre.root)) = false
+  rw [sample_selected]
+  exact decide_eq_false movedRoot_moved
 
 /-- The live arm admits the line at the blinded cell over the moved root. -/
 theorem sampleAtom_moved_computed : ∃ post,

@@ -3,8 +3,8 @@
 # existing live Store and two provisioned workspaces; no simulated Host/network.
 # Run this hook with JOURNEY_STEP_DIR, MINI, HOST, CONFIG, SOCKET, SPONSOR_WS,
 # NEWCOMER_WS and NEWCOMER_SUBJECT from a source-matched transaction9 candidate with fresh compute activation.
-# NEWCOMER must have no admitted runs on the current compute day; ownerBudget
-# must cover 1M proofWork (as in jsync.sh: NEWPARTICIPANT_OWNER_BUDGET=1000000000000).
+# NEWCOMER must have no admitted runs on the current compute day. ownerBudget is a ceiling on
+# request size only: a run's funding credits are a Book debit and are not judged against it.
 # With a placeholder pay tariff, the sponsor's factory control installs a valid one.
 # Exit zero requires useful effects, current law, actual quota/debits, and replay.
 set -euo pipefail

@@ -80,7 +80,7 @@ row a-reads-note-via-lab read
 
 # The invite: a room delegation to B.
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"lab",
-  recipient:$r,verbs:["observe"],maxCost:"50000",room:true}' >"$D/req/invite.json"
+  recipient:$r,verbs:["observe"],perRequestBytes:"50000",room:true}' >"$D/req/invite.json"
 run invite-propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/invite.json" \
   --proposal-id invite-b; ok invite-propose
 jq -e --arg lab "$lab" '.purpose.draft.command.child.room == $lab and (.purpose.draft.command.child | has("targets") | not)' \

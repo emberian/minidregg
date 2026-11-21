@@ -3,6 +3,9 @@
 -- template's (p-templates law.state). Installed as `law.management ; law.quest`.
 -- States: 0 not taken, 1 accepted, 2 the rat died after acceptance (done). `rewarded` is separate and write-once.
 -- Joint indices: accept / done: 0 = this quest cell, 1 = the rat's sheet. NEEDS K-JOINT-INDEX.
+-- [K2] The rat's sheet is a cell born under the realm's sheet cell {REALM_SHEET} (clause 5): `id` and `deaths`
+-- are fields, and a cell born anywhere with the rat's id and a death count of its maker's choosing would
+-- finish the quest.
 -- 1 writer: the player and the referee only.
 any [ not (verb == 2), subject == {S}, subject == {REF} ];
 -- 2 pinned
@@ -15,9 +18,9 @@ any [ not (verb == 2), field state monotone ];
 --   only after the rat's deaths moved past that record.
 any [ not (verb == 2), field state delta == 0,
       all [ field state before == 0, field state == 1, subject == {S},
-            joint 1 sheet id == {RAT}, eqSlots field started joint 1 sheet deaths ],
+            joint 1 sheet id == {RAT}, joint 1 cell parent == {REALM_SHEET}, eqSlots field started joint 1 sheet deaths ],
       all [ field state before == 1, field state == 2, subject == {REF},
-            joint 1 sheet id == {RAT}, not (leSlots joint 1 sheet deaths field started before) ] ];
+            joint 1 sheet id == {RAT}, joint 1 cell parent == {REALM_SHEET}, not (leSlots joint 1 sheet deaths field started before) ] ];
 -- 6 started-fixed: `started` is written only by the accept.
 any [ not (verb == 2), field started delta == 0, all [ field state before == 0, field state == 1 ] ];
 -- 7 reward [J-MUD-4 row 5]: `rewarded` rises only by the referee, only once the quest is done (REFEREED reward).

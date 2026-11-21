@@ -60,7 +60,7 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {command : Command}
 
 def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
-  prepared.authority.writes prepared.authorityPost
+  prepared.authority.writes prepared.authorityUpdate
 
 def resourceGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
   ⟨⟨deployment.factoryId⟩,
@@ -92,9 +92,7 @@ instance physicalShapeDecidable (prepared : Prepared deployment profile ambient 
 theorem writes_roots_bound (prepared : Prepared deployment profile ambient durable command)
     (write : DataWrite) (member : write ∈ writes prepared) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  simp only [writes, Loaded.writes, List.mem_singleton] at member
-  subst write
-  exact prepared.authority.write_root_bound _
+  exact prepared.authority.writes_root_bound _ write member
 
 theorem readGuards_readonly (prepared : Prepared deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :

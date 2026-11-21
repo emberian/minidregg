@@ -128,12 +128,12 @@ def rewrittenState : AuthState := { demoState with parent := rewrittenParents }
 def roomScope (room : Nat) : Scope .object where
   targets := .under room
   verbs := {.observeObject}
-  maxCost := 8
+  perRequestBytes := 8
 
 def explicitScope (cell : Nat) : Scope .object where
   targets := .explicit {⟨cell⟩}
   verbs := {.observeObject}
-  maxCost := 8
+  perRequestBytes := 8
 
 /-- An observation of cell `cell` by subject 4. -/
 def observe (cell : Nat) : Request .object :=
@@ -257,7 +257,7 @@ admissible for the delegate request. -/
 def ownerScope : Scope .object where
   targets := .under 7
   verbs := {.observeObject, .delegateObject}
-  maxCost := 8
+  perRequestBytes := 8
 
 def ownerCapability : Capability .object := { demoCapability with scope := ownerScope }
 

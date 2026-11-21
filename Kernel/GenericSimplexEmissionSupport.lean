@@ -1,5 +1,6 @@
 import Kernel.GenericSimplexCountSupport
 import Kernel.GenericSimplexReceiveProvenance
+import Kernel.GenericSimplexErasure
 import Kernel.GenericSimplexReceiveScope
 
 namespace Minidregg.Kernel.GenericSimplexEmissionSupport
@@ -39,18 +40,21 @@ theorem actual_count_evidence (c : Config) (s : State) (external : Message → P
       simp_all
     simpa only [exact] using available
 
+/-- The executable guards, exactly: VOTE/COMMIT counts at `c.quorum` (`n - f`), the
+CANDIDATE→READY and READY→clear counts at `2 * c.faults + 1`, the relays at `c.faults + 1`.
+`2 * c.faults + 1 = c.quorum` only at `n = 3f + 1`; no roster size is assumed here. -/
 def EventSupported (c : Config) (external : Message → Prop)
     (roster : Finset Nat) (priorEvents : List AuditEvent) : AuditEvent → Prop
   | .send message => match message.kind, message.value with
       | .commit, some block => EvidenceSupport external priorEvents roster message.view .vote (some block) c.quorum
       | .candidate, some block => EvidenceSupport external priorEvents roster message.view .vote (some block) (c.faults + 1)
-      | .ready, arg => EvidenceSupport external priorEvents roster message.view .candidate arg c.quorum ∨
+      | .ready, arg => EvidenceSupport external priorEvents roster message.view .candidate arg (2 * c.faults + 1) ∨
           EvidenceSupport external priorEvents roster message.view .ready arg (c.faults + 1)
       | _, _ => True
   | .prepare _ view block => EvidenceSupport external priorEvents roster view .vote (some block) c.quorum ∨
-      EvidenceSupport external priorEvents roster view .ready (some block) c.quorum ∨
+      EvidenceSupport external priorEvents roster view .ready (some block) (2 * c.faults + 1) ∨
       EvidenceSupport external priorEvents roster view .commit (some block) c.quorum
-  | .disable _ view => EvidenceSupport external priorEvents roster view .ready none c.quorum
+  | .disable _ view => EvidenceSupport external priorEvents roster view .ready none (2 * c.faults + 1)
   | .commit _ view block => EvidenceSupport external priorEvents roster view .commit (some block) c.quorum
   | .idle => True
 
@@ -167,12 +171,12 @@ theorem candidate_send_cause (c : Config) (s : State) (external : Message → Pr
 
 theorem ready_send_cause (c : Config) (s : State) (external : Message → Prop)
     (scopeOK : Scoped c s) (backed : Backed external s) (view : Nat) (arg : Argument)
-    (enough : c.quorum ≤ count (viewAt s view) .candidate arg ∨
+    (enough : 2 * c.faults + 1 ≤ count (viewAt s view) .candidate arg ∨
       c.faults + 1 ≤ count (viewAt s view) .ready arg) :
     EventSupported c external (Finset.range c.parties) s.audit
       (.send ⟨s.self, view, .ready, arg⟩) := by
   exact enough.imp
-    (actual_count_evidence c s external scopeOK backed view .candidate arg c.quorum)
+    (actual_count_evidence c s external scopeOK backed view .candidate arg (2 * c.faults + 1))
     (actual_count_evidence c s external scopeOK backed view .ready arg (c.faults + 1))
 
 #assert_axioms commit_send_cause
@@ -347,6 +351,14 @@ theorem candidate_invariant {c : Config} {external : Message → Prop} {s : Stat
   | none => exact True.intro
   | some block => exact candidate_send_cause c s external old.scopeOK old.backed view block enough
 
+theorem commitAt_invariant {c : Config} {external : Message → Prop} {s : State}
+    (view : Nat) (block : Block) (old : EmissionInvariant c external s)
+    (enough : c.quorum ≤ count (viewAt s view) .commit (some block)) :
+    EmissionInvariant c external (commitAt s view block) :=
+  raiseFloor_preserves (EmissionInvariant c external)
+    (fun _ _ _ prior => ⟨by simpa only [scoped_record] using prior.scopeOK, prior.backed, prior.emitted⟩)
+    _ _ _ (doCommit_invariant view block old enough)
+
 #assert_axioms putCopied_invariant
 #assert_axioms broadcast_invariant
 #assert_axioms clear_invariant
@@ -381,46 +393,37 @@ theorem votePhase_invariant {c : Config} {external : Message → Prop} {s : Stat
 theorem valueRules_invariant (c : Config) (external : Message → Prop) (s : State)
     (view : Nat) (block : Block) (old : EmissionInvariant c external s) :
     EmissionInvariant c external (valueRules c s view block) := by
-  let phase := if count (viewAt s view) .vote (some block) ≥ c.quorum && validBlock s block then
-        let cleared := clear s view (some block)
-        let v := viewAt cleared view
-        if v.sentCommit.isNone && v.sentCandidates.all (fun a => a == some block) then
-          broadcast (putView cleared {v with sentCommit := some block}) view .commit (some block)
-        else cleared
-      else s
-  have phaseInv : EmissionInvariant c external phase := votePhase_invariant view block old
-  let afterCommit := if count (viewAt phase view) .commit (some block) ≥ c.quorum then
-      doCommit phase view block else phase
-  have commitInv : EmissionInvariant c external afterCommit := by
-    dsimp only [afterCommit]
-    split
-    · apply doCommit_invariant view block phaseInv
-      assumption
-    · exact phaseInv
-  have equation : valueRules c s view block =
-    (if count (viewAt afterCommit view) .vote (some block) ≥ c.faults + 1 &&
-      validBlock afterCommit block then sendCandidate afterCommit view (some block) else afterCommit) := by
-    simp only [valueRules, Id.run, bind, pure, afterCommit, phase]
-    split_ifs <;> rfl
-  rw [equation]
+  rw [GenericSimplexErasure.valueRules_eq]
   split
-  next enabled =>
-    apply candidate_invariant view (some block) commitInv
-    simp only [Bool.and_eq_true_iff, decide_eq_true_eq] at enabled
-    exact enabled.1
-  · exact commitInv
+  · exact old
+  · have phaseInv : EmissionInvariant c external (GenericSimplexErasure.voteRule c s view block) :=
+      votePhase_invariant view block old
+    have candidateInv : EmissionInvariant c external
+        (GenericSimplexErasure.candidateRule c (GenericSimplexErasure.voteRule c s view block) view block) := by
+      unfold GenericSimplexErasure.candidateRule
+      split
+      next enabled =>
+        apply candidate_invariant view (some block) phaseInv
+        simp only [Bool.and_eq_true_iff, decide_eq_true_eq] at enabled
+        exact enabled.1
+      · exact phaseInv
+    unfold GenericSimplexErasure.commitRule
+    split
+    · apply commitAt_invariant view block candidateInv
+      assumption
+    · exact candidateInv
 
 #assert_axioms votePhase_invariant
 #assert_axioms valueRules_invariant
 theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : State)
-    (view : Nat) (arg : Argument) (size : c.parties = 3 * c.faults + 1)
-    (old : EmissionInvariant c external s) :
+    (view : Nat) (arg : Argument) (old : EmissionInvariant c external s) :
     EmissionInvariant c external (argumentRules c s view arg) := by
-  have quorum : c.quorum = 2 * c.faults + 1 := by
-    simp only [Config.quorum, size]
-    omega
+  by_cases dead : view ≤ s.lastCommitted
+  · rw [GenericSimplexErasure.argumentRules_eq, if_pos dead]
+    exact old
   let core := if count (viewAt s view) .candidate arg ≥ 2 * c.faults + 1 &&
-      !(viewAt s view).sentReadyCore.contains arg then
+      !(viewAt s view).sentReadyCore.contains arg &&
+      !(viewAt s view).sentReadyRelay.contains arg then
         broadcast (putView s {viewAt s view with sentReadyCore :=
           (viewAt s view).sentReadyCore ++ [arg]}) view .ready arg else s
   have coreInv : EmissionInvariant c external core := by
@@ -431,12 +434,13 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
       apply broadcast_invariant
       · exact putCopied_invariant view _ old rfl rfl
       · apply Or.inl
-        simpa only [putView_audit, quorum] using
+        simpa only [putView_audit] using
           actual_count_evidence c s external old.scopeOK old.backed view .candidate arg
-            (2 * c.faults + 1) enabled.1
+            (2 * c.faults + 1) enabled.1.1
     · exact old
   let relay := if count (viewAt core view) .ready arg ≥ c.faults + 1 &&
-      !(viewAt core view).sentReadyRelay.contains arg then
+      !(viewAt core view).sentReadyRelay.contains arg &&
+      !(viewAt core view).sentReadyCore.contains arg then
         broadcast (putView core {viewAt core view with sentReadyRelay :=
           (viewAt core view).sentReadyRelay ++ [arg]}) view .ready arg else core
   have relayInv : EmissionInvariant c external relay := by
@@ -448,18 +452,18 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
       · exact putCopied_invariant view _ coreInv rfl rfl
       · apply Or.inr
         exact actual_count_evidence c core external coreInv.scopeOK coreInv.backed
-          view .ready arg (c.faults + 1) enabled.1
+          view .ready arg (c.faults + 1) enabled.1.1
     · exact coreInv
   have equation : argumentRules c s view arg =
       (if count (viewAt relay view) .ready arg ≥ 2 * c.faults + 1 then
         clear relay view arg else relay) := by
-    simp only [argumentRules, Id.run, bind, pure, relay, core]
-    split_ifs <;> rfl
+    rw [GenericSimplexErasure.argumentRules_eq, if_neg dead]
+    rfl
   rw [equation]
   split
   next enough =>
     have support := actual_count_evidence c relay external relayInv.scopeOK relayInv.backed
-      view .ready arg c.quorum (by simpa only [quorum] using enough)
+      view .ready arg (2 * c.faults + 1) enough
     apply clear_invariant view arg relayInv
     cases arg with
     | none => exact support
@@ -469,8 +473,10 @@ theorem argumentRules_invariant (c : Config) (external : Message → Prop) (s : 
 #assert_axioms argumentRules_invariant
 @[simp] theorem emission_record (c : Config) (external : Message → Prop) (s : State)
     (current deadline now : Nat) (checked : List Block) (offers : List Bytes) (outbox : List Message)
-    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) :
-    EmissionInvariant c external { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed } ↔
+    (delivered : List Block) (tip : Block) (needsPoll failed : Bool) (lastCommitted : Nat)
+    (floorEvidence : List Message) (served : List Nat) (relay : List (Nat × Message))
+    (ahead : List (Nat × Nat)) :
+    EmissionInvariant c external { self := s.self, current := current, deadline := deadline, now := now, views := s.views, checked := checked, offers := offers, outbox := outbox, audit := s.audit, delivered := delivered, committedTip := tip, needsPoll := needsPoll, failed := failed, lastCommitted := lastCommitted, floorEvidence := floorEvidence, served := served, relay := relay, ahead := ahead } ↔
       EmissionInvariant c external s := by
   constructor <;> intro old <;> rcases old with ⟨scopeOK, backed, emitted⟩ <;>
     exact ⟨scopeOK, backed, emitted⟩
@@ -496,11 +502,11 @@ theorem emission_fold {α : Type} {c : Config} {external : Message → Prop}
   | cons item rest ih => exact ih (action s item) (each s item old)
 
 theorem progressView_invariant (c : Config) (external : Message → Prop) (s : State)
-    (view : Nat) (size : c.parties = 3 * c.faults + 1) (old : EmissionInvariant c external s) :
+    (view : Nat) (old : EmissionInvariant c external s) :
     EmissionInvariant c external (progressView c s view) := by
   simp only [progressView, Id.run, bind, pure]
   apply emission_fold
-  · intro state arg prior; exact argumentRules_invariant c external state view arg size prior
+  · intro state arg prior; exact argumentRules_invariant c external state view arg prior
   · apply emission_fold
     · intro state block prior; exact valueRules_invariant c external state view block prior
     · exact old
@@ -533,6 +539,14 @@ theorem enterView_invariant (c : Config) (external : Message → Prop) (s : Stat
     emission_basic_chain
   · emission_basic_chain
 
+theorem floorJump_invariant (c : Config) (external : Message → Prop) (s : State)
+    (old : EmissionInvariant c external s) :
+    EmissionInvariant c external (floorJump c s) := by
+  unfold floorJump
+  split
+  · exact enterView_invariant c external s _ old
+  · exact old
+
 theorem progressOuter_invariant (c : Config) (external : Message → Prop) (s : State)
     (old : EmissionInvariant c external s) :
     EmissionInvariant c external (progressOuter c s) := by
@@ -543,26 +557,27 @@ theorem progressOuter_invariant (c : Config) (external : Message → Prop) (s : 
     | emission_basic_step
 
 theorem pass_invariant (c : Config) (external : Message → Prop) (s : State)
-    (size : c.parties = 3 * c.faults + 1) (old : EmissionInvariant c external s) :
+    (old : EmissionInvariant c external s) :
     EmissionInvariant c external (pass c s) := by
   unfold pass
   apply progressOuter_invariant
+  apply floorJump_invariant
   apply emission_fold
-  · intro state view prior; exact progressView_invariant c external state view size prior
+  · intro state view prior; exact progressView_invariant c external state view prior
   · exact old
 
 theorem pump_invariant (c : Config) (external : Message → Prop) (fuel : Nat) (s : State)
-    (size : c.parties = 3 * c.faults + 1) (old : EmissionInvariant c external s) :
+    (old : EmissionInvariant c external s) :
     EmissionInvariant c external (pump c fuel s) := by
   induction fuel generalizing s with
   | zero => simpa only [pump, emission_record] using old
   | succ fuel ih =>
     simp only [pump]
     split
-    · apply pass_invariant c external _ size
+    · apply pass_invariant c external _
       simpa only [emission_record] using old
     · apply ih
-      apply pass_invariant c external _ size
+      apply pass_invariant c external _
       simpa only [emission_record] using old
 
 #assert_axioms emission_record
@@ -585,7 +600,7 @@ theorem register_invariant {c : Config} {external : Message → Prop} {s : State
 theorem ingest_invariant (c : Config) (external : Message → Prop) (s : State)
     (message : Message) (old : EmissionInvariant c external s) (available : external message) :
     EmissionInvariant c external (ingest c s message) := by
-  unfold ingest
+  unfold ingest serveFloor noteAhead serveViews
   dsimp only
   repeat' first
     | (with_reducible apply register_invariant message old <;> first | assumption | simp_all <;> omega)
@@ -596,14 +611,14 @@ def InputAvailable (external : Message → Prop) : Input → Prop
   | _ => True
 
 theorem step_invariant (c : Config) (external : Message → Prop) (s : State) (input : Input)
-    (size : c.parties = 3 * c.faults + 1) (old : EmissionInvariant c external s)
+    (old : EmissionInvariant c external s)
     (available : InputAvailable external input) :
     EmissionInvariant c external (step c s input) := by
   unfold step
   dsimp only
   split
   · emission_basic_chain
-  · apply pump_invariant c external _ _ size
+  · apply pump_invariant c external _ _
     cases input with
     | delivery message => exact ingest_invariant c external s message old available
     | deliveryAt now message =>
@@ -616,7 +631,7 @@ theorem step_invariant (c : Config) (external : Message → Prop) (s : State) (i
     | tick now =>
       dsimp only
       repeat' first
-        | with_reducible apply pump_invariant c external _ _ size
+        | with_reducible apply pump_invariant c external _ _
         | with_reducible apply candidate_invariant
         | emission_basic_step
 
@@ -639,23 +654,18 @@ theorem start_emission (c : Config) (self now : Nat) (offers : List Bytes) (chec
   next admitted =>
     have configOK : c.wellFormed = true := by
       cases h : c.wellFormed <;> simp_all
-    have size : c.parties = 3 * c.faults + 1 := by
-      have h := configOK
-      simp [Config.wellFormed] at h
-      exact h.1.1
     have enrolled : self < c.parties := by
       simpa [configOK] using admitted
-    exact (pump_invariant c (fun _ => False) _ _ size
+    exact (pump_invariant c (fun _ => False) _ _
       (enterView_invariant c (fun _ => False) _ 1
         (initial_invariant c (fun _ => False) self now (now + c.timeout) offers checked enrolled))).emitted
 
 theorem step_emission (c : Config) (external : Message → Prop) (s : State) (input : Input)
-    (size : c.parties = 3 * c.faults + 1)
     (scopeOK : Scoped c s) (backed : Backed external s)
     (old : EmissionJustified c external (Finset.range c.parties) s.audit)
     (available : InputAvailable external input) :
     EmissionJustified c external (Finset.range c.parties) (step c s input).audit :=
-  (step_invariant c external s input size ⟨scopeOK, backed, old⟩ available).emitted
+  (step_invariant c external s input ⟨scopeOK, backed, old⟩ available).emitted
 
 #assert_axioms register_invariant
 #assert_axioms ingest_invariant

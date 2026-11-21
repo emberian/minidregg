@@ -1029,43 +1029,152 @@ pub(crate) fn account_balance(root: &Path, name: &str) -> Result<(String, String
     ))
 }
 
-/// The incoming ledger of account reference `name` (Host op 180): accepted
-/// fleet turns that paid it above `since`, on `topic` (empty = every topic),
-/// behind this reader's signed observation of the account. Each entry gains
-/// `payloadText` when its payload is UTF-8.
-pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit: &str) -> Result<Value> {
-    canonical_decimal(since, "--since")?;
+/// Where an incoming-ledger read resumes: every payment above a logical height (the first
+/// read, or a reader that kept only a height), or after a position in the account's ledger
+/// (`resumeSeq` of the page before, under a byte budget).
+pub(crate) enum Resume<'a> {
+    Since(&'a str),
+    AfterSeq { after: &'a str, max_bytes: &'a str },
+}
+
+/// The page a Host answer claims, checked against its entries: `rows` is non-empty, starts
+/// right after the cursor and advances the resume position by its length; `tip`, `gap` and
+/// `oversize` carry no entries, and only a gap moves the resume position (to the last position
+/// whose record the Host does not hold). An answer with neither rows nor a named state is
+/// refused: an empty page is never a successful read.
+fn check_page(value: &Value, entries: usize, limit: u128) -> Result<&str> {
+    let number = |object: &Value, key: &str| -> Result<u128> {
+        field(object, key)?.parse().map_err(|_| format!("incoming ledger {key} out of range"))
+    };
+    let page = value.get("page").ok_or("incoming ledger names no page state")?;
+    let after = number(value, "afterSeq")?;
+    let resume = number(value, "resumeSeq")?;
+    let state = field(page, "state")?;
+    match state {
+        "rows" => {
+            let rows = number(page, "rows")?;
+            if entries == 0 || rows != entries as u128 || rows > limit.max(1) {
+                return Err("incoming ledger page does not hold the rows it counts".into());
+            }
+            if number(page, "firstSeq")? != after + 1 || resume != after + rows {
+                return Err("incoming ledger page does not start after the cursor".into());
+            }
+        }
+        "tip" | "oversize" => {
+            if entries != 0 || resume != after {
+                return Err(format!("incoming ledger {state} page carries rows or moves the cursor"));
+            }
+        }
+        "gap" => {
+            if entries != 0 || number(page, "throughSeq")? != resume || resume <= after {
+                return Err("incoming ledger gap does not name the position it runs through".into());
+            }
+        }
+        other => return Err(format!("incoming ledger page state {other} is not known")),
+    }
+    Ok(state)
+}
+
+/// The byte budget of every continuation page, and of a first page that names none.
+pub(crate) const INCOMING_PAGE_BYTES: &str = "262144";
+
+/// The incoming ledger of account reference `name` (Host op 180): the accepted fleet turns
+/// that paid it, on `topic` (empty = every topic), behind this reader's signed observation of
+/// the account. Up to `limit` entries, read as Host pages (at most 64 rows and one byte budget
+/// each) and continued by position: the first request is the caller's cursor, every later one
+/// resumes after the `resumeSeq` of the page before. The answer names where the next read
+/// resumes (`resumeSeq`, for `--after-seq`), the height of its last entry (`nextCursor`) and
+/// what stopped it (`lastPage`). Each entry gains `payloadText` when its payload is UTF-8.
+pub(crate) fn incoming(root: &Path, name: &str, topic: &str, resume: Resume, limit: &str) -> Result<Value> {
     canonical_decimal(limit, "--limit")?;
     if topic.len() > MAX_TOPIC {
         return Err("topic must be 0..64 bytes".into());
     }
+    let (request, floor) = match resume {
+        Resume::Since(since) => {
+            canonical_decimal(since, "--since")?;
+            (json!({"topic":hex(topic.as_bytes()),"cursor":since,"limit":limit}), since)
+        }
+        Resume::AfterSeq { after, max_bytes } => {
+            canonical_decimal(after, "--after-seq")?;
+            canonical_decimal(max_bytes, "--max-bytes")?;
+            (json!({"topic":hex(topic.as_bytes()),"afterSeq":after,"limit":limit,"maxBytes":max_bytes}), "0")
+        }
+    };
     let agent = agent(root)?;
     let reference = account(&agent, name)?;
     let (_, signed) = observe(&agent, &reference)?;
-    let request = serde_json::to_vec(&json!({"topic":hex(topic.as_bytes()),"cursor":since,"limit":limit}))
-        .map_err(|error| error.to_string())?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_INCOMING_LEDGER, &mini_sdk::local::pair_nonempty(&signed, &request)?)?;
-    let mut value: Value =
-        serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_INCOMING_LEDGER)?).map_err(|error| error.to_string())?;
-    if field(&value, "account")? != field(&reference, "target")? || field(&value, "topic")? != hex(topic.as_bytes()) {
-        return Err("incoming ledger answered for another account or topic".into());
+    collect_incoming_pages(field(&reference, "target")?, request, floor, limit, |request| {
+        let bytes = serde_json::to_vec(request).map_err(|error| error.to_string())?;
+        let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_INCOMING_LEDGER, &mini_sdk::local::pair_nonempty(&signed, &bytes)?)?;
+        serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_INCOMING_LEDGER)?).map_err(|error| error.to_string())
+    })
+}
+
+/// Read pages through `read` until `limit` entries are held or a page is not rows. Every page
+/// is checked (`check_page`) and must answer for this account, this topic and the position it
+/// was asked after. A gap refuses the whole read as `incomingGap`, whatever was already
+/// collected: a payment controller never acts on a batch with missing history behind it. An
+/// oversize member refuses as `incomingOversize` when it is the first thing the read meets;
+/// after rows, the read returns those rows and resumes at the member, where the next read
+/// refuses by name.
+fn collect_incoming_pages(account: &str, mut request: Value, since: &str, limit: &str,
+    mut read: impl FnMut(&Value) -> Result<Value>) -> Result<Value> {
+    let wanted: usize = limit.parse().map_err(|_| "--limit out of range")?;
+    if wanted == 0 || wanted > 4096 {
+        return Err("incoming --limit must be 1..4096".into());
     }
-    let floor: u128 = since.parse().map_err(|_| "--since out of range")?;
-    let mut previous = floor;
-    let mut entries = value["entries"].as_array().cloned().unwrap_or_default();
-    for entry in &mut entries {
-        let height: u128 = field(entry, "height")?.parse().map_err(|_| "ledger height out of range")?;
-        if height <= previous {
-            return Err("incoming ledger is not strictly ascending above the cursor".into());
+    let number = |value: &Value, key: &str| -> Result<u128> {
+        field(value, key)?.parse().map_err(|_| format!("incoming ledger {key} out of range"))
+    };
+    let mut entries: Vec<Value> = Vec::new();
+    let mut first_after = None;
+    let mut previous: u128 = since.parse().map_err(|_| "--since out of range")?;
+    loop {
+        let mut value = read(&request)?;
+        if field(&value, "account")? != account || field(&value, "topic")? != field(&request, "topic")? {
+            return Err("incoming ledger answered for another account or topic".into());
         }
-        previous = height;
-        if let Ok(text_value) = String::from_utf8(mini_sdk::hex::decode(field(entry, "payload")?).map_err(|e| e.0)?) {
-            entry["payloadText"] = json!(text_value);
+        if request.get("afterSeq").is_some_and(|asked| value["afterSeq"] != *asked) {
+            return Err("incoming ledger answered for another position".into());
         }
+        let page = value["entries"].as_array().cloned().ok_or("incoming ledger lacks entries")?;
+        let asked: u128 = field(&request, "limit")?.parse().map_err(|_| "--limit out of range")?;
+        let state = check_page(&value, page.len(), asked)?.to_owned();
+        let first = *first_after.get_or_insert(number(&value, "afterSeq")?);
+        match state.as_str() {
+            "gap" => return Err(format!(
+                "incomingGap: history is not held through position {}; nothing of this read is delivered, resume after it once reconciled",
+                field(&value["page"], "throughSeq")?)),
+            "oversize" if entries.is_empty() => return Err(format!(
+                "incomingOversize: the member at position {} exceeds the page byte budget; read it with a larger --max-bytes",
+                field(&value["page"], "seq")?)),
+            _ => {}
+        }
+        for mut entry in page {
+            let height = number(&entry, "height")?;
+            if height <= previous {
+                return Err("incoming ledger is not strictly ascending above the cursor".into());
+            }
+            previous = height;
+            if let Ok(text_value) = String::from_utf8(mini_sdk::hex::decode(field(&entry, "payload")?).map_err(|e| e.0)?) {
+                entry["payloadText"] = json!(text_value);
+            }
+            entries.push(entry);
+        }
+        if state != "rows" || entries.len() == wanted {
+            value["nextCursor"] = json!(previous.to_string());
+            value["lastPage"] = value["page"].clone();
+            value["afterSeq"] = json!(first.to_string());
+            if !entries.is_empty() {
+                value["page"] = json!({"state":"rows","firstSeq":(first + 1).to_string(),"rows":entries.len().to_string()});
+            }
+            value["entries"] = json!(entries);
+            return Ok(value);
+        }
+        request = json!({"topic":request["topic"],"afterSeq":value["resumeSeq"],
+            "limit":(wanted - entries.len()).to_string(),"maxBytes":INCOMING_PAGE_BYTES});
     }
-    value["nextCursor"] = json!(previous.to_string());
-    value["entries"] = Value::Array(entries);
-    Ok(value)
 }
 
 /// Sponsor-backed join: admit the new key, open its workspace, and have the
@@ -1308,8 +1417,18 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .map(|value| text(value, "--limit"))
                 .transpose()?
                 .unwrap_or_else(|| "64".into());
+            let after = args.optional("after-seq").map(|value| text(value, "--after-seq")).transpose()?;
+            let max_bytes = args
+                .optional("max-bytes")
+                .map(|value| text(value, "--max-bytes"))
+                .transpose()?
+                .unwrap_or_else(|| INCOMING_PAGE_BYTES.into());
             args.finish()?;
-            print_json(&incoming(&agent.root, &name, &topic, &since, &limit)?)
+            let resume = match &after {
+                Some(after) => Resume::AfterSeq { after, max_bytes: &max_bytes },
+                None => Resume::Since(&since),
+            };
+            print_json(&incoming(&agent.root, &name, &topic, resume, &limit)?)
         }
         "feed" => {
             let names = text(args.required("accounts")?, "account references")?;
@@ -1327,7 +1446,128 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn incoming_page_is_rows_or_a_named_state_never_an_empty_success() {
+        use serde_json::json;
+        let rows = json!({"afterSeq":"2","resumeSeq":"4","page":{"state":"rows","firstSeq":"3","rows":"2"}});
+        assert_eq!(super::check_page(&rows, 2, 8), Ok("rows"));
+        // The entries are not the rows it counts; a page of rows is never empty.
+        assert!(super::check_page(&rows, 1, 8).is_err());
+        let empty = json!({"afterSeq":"2","resumeSeq":"2","page":{"state":"rows","firstSeq":"3","rows":"0"}});
+        assert!(super::check_page(&empty, 0, 8).is_err());
+        // A page that skips a position, or resumes past what it delivered, is refused.
+        let skipped = json!({"afterSeq":"2","resumeSeq":"5","page":{"state":"rows","firstSeq":"4","rows":"2"}});
+        assert!(super::check_page(&skipped, 2, 8).is_err());
+        let ahead = json!({"afterSeq":"2","resumeSeq":"6","page":{"state":"rows","firstSeq":"3","rows":"2"}});
+        assert!(super::check_page(&ahead, 2, 8).is_err());
+        // More rows than the limit asked for.
+        assert!(super::check_page(&rows, 2, 1).is_err());
+        let tip = json!({"afterSeq":"4","resumeSeq":"4","page":{"state":"tip","count":"4"}});
+        assert_eq!(super::check_page(&tip, 0, 8), Ok("tip"));
+        assert!(super::check_page(&tip, 1, 8).is_err());
+        let gap = json!({"afterSeq":"0","resumeSeq":"2","page":{"state":"gap","throughSeq":"2"}});
+        assert_eq!(super::check_page(&gap, 0, 8), Ok("gap"));
+        let stuck = json!({"afterSeq":"2","resumeSeq":"2","page":{"state":"gap","throughSeq":"2"}});
+        assert!(super::check_page(&stuck, 0, 8).is_err());
+        let oversize = json!({"afterSeq":"3","resumeSeq":"3","page":{"state":"oversize","seq":"4"}});
+        assert_eq!(super::check_page(&oversize, 0, 8), Ok("oversize"));
+        // An answer without a page state (an older Host) is not read as an empty ledger.
+        assert!(super::check_page(&json!({"entries":[]}), 0, 8).is_err());
+    }
+
     use super::*;
+
+    #[test]
+    fn incoming_limits_and_a_gap_after_rows_delivers_nothing() {
+        for limit in ["0", "4097"] {
+            assert!(collect_incoming_pages("80", json!({"topic":""}), "0", limit,
+                |_| panic!("invalid limit must not read")).is_err());
+        }
+        let mut calls = 0;
+        let result = collect_incoming_pages("80", json!({"topic":"","cursor":"0","limit":"2"}), "0", "2", |_| {
+            calls += 1;
+            Ok(if calls == 1 {
+                json!({"account":"80","topic":"","afterSeq":"0","resumeSeq":"1",
+                    "page":{"state":"rows","firstSeq":"1","rows":"1"},"entries":[{"height":"10","payload":""}]})
+            } else {
+                json!({"account":"80","topic":"","afterSeq":"1","resumeSeq":"2",
+                    "page":{"state":"gap","throughSeq":"2"},"entries":[]})
+            })
+        });
+        assert!(result.unwrap_err().contains("incomingGap"));
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn incoming_continues_by_position_not_height() {
+        let mut calls = 0;
+        let result = collect_incoming_pages("80", json!({"topic":"","cursor":"100","limit":"2"}), "100", "2", |request| {
+            calls += 1;
+            if calls == 1 { assert_eq!(request["cursor"], "100"); }
+            else {
+                assert_eq!(request["afterSeq"], "5");
+                assert!(request.get("cursor").is_none());
+                assert_eq!(request["limit"], "1");
+                assert_eq!(request["maxBytes"], INCOMING_PAGE_BYTES);
+            }
+            let after = 3 + calls;
+            Ok(json!({"account":"80","topic":"","afterSeq":after.to_string(),"resumeSeq":(after+1).to_string(),
+                "page":{"state":"rows","firstSeq":(after+1).to_string(),"rows":"1"},
+                "entries":[{"height":(100 + calls*200).to_string(),"payload":"6869"}]}))
+        }).unwrap();
+        assert_eq!(calls, 2);
+        assert_eq!(result["resumeSeq"], "6");
+        assert_eq!(result["afterSeq"], "4");
+        assert_eq!(result["page"]["rows"], "2");
+        assert_eq!(result["nextCursor"], "500");
+        assert_eq!(result["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(result["entries"][0]["payloadText"], "hi");
+    }
+
+    #[test]
+    fn incoming_names_discontinuities_and_refuses_another_answer() {
+        let row = json!({"account":"80","topic":"","afterSeq":"4","resumeSeq":"5",
+            "page":{"state":"rows","firstSeq":"5","rows":"1"},
+            "entries":[{"height":"900","payload":"6869"}]});
+        let ask = || json!({"topic":"","afterSeq":"4","limit":"1","maxBytes":"9"});
+        let one = |answer: Value, request: Value| collect_incoming_pages("80", request, "0", "1", |_| Ok(answer.clone()));
+        assert_eq!(one(row.clone(), ask()).unwrap()["resumeSeq"], "5");
+        // Another position, account or topic than the one asked.
+        assert!(one(row.clone(), json!({"topic":"","afterSeq":"3","limit":"1","maxBytes":"9"})).is_err());
+        assert!(collect_incoming_pages("81", ask(), "0", "1", |_| Ok(row.clone())).is_err());
+        assert!(one(row.clone(), json!({"topic":"ff","afterSeq":"4","limit":"1","maxBytes":"9"})).is_err());
+        for pointer in ["/resumeSeq", "/page/firstSeq", "/page/rows"] {
+            let mut bad = row.clone();
+            *bad.pointer_mut(pointer).unwrap() = json!("9");
+            assert!(one(bad, ask()).is_err());
+        }
+        let stopped = |page: Value, resume: &str| {
+            let mut answer = row.clone();
+            answer["page"] = page;
+            answer["resumeSeq"] = json!(resume);
+            answer["entries"] = json!([]);
+            answer
+        };
+        assert!(one(stopped(json!({"state":"gap","throughSeq":"7"}), "7"), ask()).unwrap_err().contains("incomingGap"));
+        assert!(one(stopped(json!({"state":"oversize","seq":"5"}), "4"), ask()).unwrap_err().contains("incomingOversize"));
+        // The Host never sends `absent`; it is no page state this reader knows.
+        assert!(one(stopped(json!({"state":"absent","seq":"5"}), "4"), ask()).unwrap_err().contains("not known"));
+        let tip = one(stopped(json!({"state":"tip","count":"4"}), "4"), ask()).unwrap();
+        assert_eq!(tip["page"]["state"], "tip");
+        assert!(tip["entries"].as_array().unwrap().is_empty());
+        // Rows, then an oversize member: the rows are delivered and the read resumes at the member.
+        let mut calls = 0;
+        let partial = collect_incoming_pages("80", ask(), "0", "2", |_| {
+            calls += 1;
+            Ok(if calls == 1 { row.clone() } else {
+                json!({"account":"80","topic":"","afterSeq":"5","resumeSeq":"5",
+                    "page":{"state":"oversize","seq":"6"},"entries":[]})
+            })
+        }).unwrap();
+        assert_eq!(partial["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(partial["resumeSeq"], "5");
+        assert_eq!(partial["lastPage"]["state"], "oversize");
+    }
 
     fn draft() -> Value {
         json!({"subject":"7","payer":"7","spend":"41","nonce":"9","fee":"0",

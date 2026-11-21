@@ -11,7 +11,7 @@ aborted reopen with "Stack overflow detected": `openRestored` decided
 above ~16.7 MB overflowed.
 
 Three shapes, each 100 000 entries: a log of 100 000 appended delta frames, every
-hundredth carrying a COMMIT witness with a 32 KiB block (an image of ~34 MB,
+hundredth carrying a COMMIT witness padded to 32 KiB (an image of ~34 MB,
 above the per-byte recursion's limit, so the old reopen aborts on it); a base frame holding
 100 000 events (a converted legacy journal); and a single delta holding 100 000
 events. Each is built through the same `appendRestored`
@@ -22,6 +22,7 @@ namespace Minidregg.Verify.GenericSimplexLogReopen
 open Minidregg.Compiler.GenericSimplexCodec
 open Minidregg.Compiler.GenericSimplexIO
 open Minidregg.Kernel.GenericSimplex
+open Minidregg.Kernel.GenericSimplexRelative
 set_option autoImplicit false
 
 def entries : Nat := 100000
@@ -33,12 +34,12 @@ def context : Context :=
 
 /-- Inputs that replay without failing: polls and in-view clock ticks. -/
 def event (i : Nat) : Event :=
-  if i % 2 == 0 then encodeInput .poll else encodeInput (.tick (i % 99999))
+  if i % 2 == 0 then encodeEntry (.input .poll) else encodeEntry (.input (.tick (i % 99999)))
 
-/-- Witnesses are retained, not replayed: their size models the COMMIT
-evidence (a block carrying whole source records) a real delta carries. -/
+/-- Witnesses are retained, not replayed. A real one is a statement and a 3309-byte
+signature; these are padded so the image exceeds the old per-byte recursion's limit. -/
 def witnesses (i : Nat) : List CommitWitness :=
-  if i % 100 == 0 then [⟨i + 1, [List.replicate 32768 (UInt8.ofNat i)], ⟨1, []⟩⟩] else []
+  if i % 100 == 0 then [⟨i + 1, 1, List.replicate 32768 (UInt8.ofNat i), ⟨1, []⟩⟩] else []
 
 def require (condition : Bool) (detail : String) : IO Unit :=
   unless condition do throw (IO.userError detail)
@@ -104,7 +105,8 @@ def main (args : List String) : IO Unit := do
     | throw (IO.userError "large delta does not replay")
   reopenMatches one.log.encode one "delta-events"
   -- 4. A checkpoint of the 100 000-delta image: one base frame holding the
-  -- replayed state and every witness. It reopens to the same state without
+  -- replayed replica and the witnesses it can still use (here all: none is for a view at
+  -- or below a floor). It reopens to the same state without
   -- replaying, and later appends continue from it.
   let (cp,cpBytes) := checkpointRestored r
   require (cp.log.recent.isEmpty && cp.log.base.events.isEmpty && cp.log.base.snapshot == some r.state)
@@ -115,7 +117,8 @@ def main (args : List String) : IO Unit := do
   let some (after,frame) := appendRestored cp [event entries] []
     | throw (IO.userError "append after checkpoint refused")
   reopenMatches (cpBytes ++ frame) after "checkpoint-then-append"
-  require (after.state == (step context.config r.state ((decodeInput (event entries)).getD .poll)))
+  require (after.state == applyEntry context.config (chainDigest context) r.state
+      ((decodeEntry (event entries)).getD (.input .poll)))
     "append after checkpoint diverged from appending to the full log"
 
 end Minidregg.Verify.GenericSimplexLogReopen

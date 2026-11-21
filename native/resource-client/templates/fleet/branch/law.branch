@@ -1,0 +1,19 @@
+-- kind: branch
+-- A branch head that moves only under a current passing verdict. Composed after whatever management
+-- clause the installer chooses; clause numbers here count from 1 and are only ever appended to.
+-- Joint positions of a land (the command's 0-based target order):
+--   0 = this branch (written), 1 = the verdict (cited by `fieldRead`: tree, result, readset),
+--   2 = the cell the verdict read (cited by `fieldRead` with the footprint the verdict recorded).
+-- The kernel refuses the command when any cited field moved, naming every moved field
+-- (`ResourceTransaction.citedRead`, `Reject.citedStale`), so a land is admitted only while the values
+-- the verdict was computed over are the values the cell at position 2 holds.
+
+-- 1 land: head moves only citing a verdict cell born under {VERDICTS} and committed to the verdict law,
+--   passing, for exactly the new head, whose recorded read set is this turn's footprint over position 2.
+any [ not (verb == 2), field head delta == 0,
+      all [ joint 1 cell parent == {VERDICTS}, joint 1 cell law == {VERDICT_LAW},
+            joint 1 verdict result == 2,
+            eqSlots joint 1 verdict tree field head,
+            eqSlots joint 1 verdict readset joint 2 cited digest ] ];
+-- 2 landed-under: the branch records the verdict it moved under.
+any [ not (verb == 2), field head delta == 0, eqSlots field verdict joint 1 cell id ]

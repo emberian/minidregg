@@ -3,11 +3,11 @@
 #
 # A friend enrolls with a committed next key kept on "other media"; writes; a
 # thief holding a copy of the friend's daily key tries to rotate the subject to
-# its own key (refused: notPrecommitted) and to the committed next key signing
+# its own key (refused: not-precommitted) and to the committed next key signing
 # with the daily key (refused: unauthenticated, before the gate runs); the friend rotates with the next
 # key (admitted); the thief's next write with the old daily key is refused; the
 # friend's grant and resource still work under the new key; a second rotation
-# works; a subject enrolled --no-prerotation cannot rotate (notPrerotated), as no
+# works; a subject enrolled --no-prerotation cannot rotate (not-prerotated), as no
 # subject could before; the service restarts and the friend still signs; the
 # operator audit re-admits every record (rotations included) through
 # NativeHostReplay; and the cold audit refuses a copy of the Store with one corrupted leaf
@@ -93,7 +93,7 @@ run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name rot --st
   --predicate "$D/req/permit-all.json" --fields 2,3,4,5,6,7,8,9 \
   || die "create rot: $(tail -1 "$D/create.err")"
 jq -n --arg r "$FRIEND" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"rot",
-  recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/delegate.json"
+  recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$D/req/delegate.json"
 run dprop "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/delegate.json" \
   --proposal-id rot-grant || die "delegate propose: $(tail -1 "$D/dprop.err")"
 run dsub "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
@@ -106,7 +106,7 @@ run fimport "$MINI" workspace --action import --dir "$FW" --name rot --from-ref 
 # A second grant on the same resource, issued under the friend's FIRST key: the
 # one the friend renounces after rotating (K-RENOUNCE x K-PREROTATE).
 jq -n --arg r "$FRIEND" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"rot",
-  recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/delegate-rn.json"
+  recipient:$r,verbs:["observe","mutate"],perRequestBytes:"50000"}' >"$D/req/delegate-rn.json"
 run rnprop "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/delegate-rn.json" \
   --proposal-id rn-grant || die "second grant propose: $(tail -1 "$D/rnprop.err")"
 run rnsub "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
@@ -151,9 +151,9 @@ run timport "$MINI" workspace --action import --dir "$AW" --name rot --from-ref 
 run trnimport "$MINI" workspace --action import --dir "$AW" --name rn --from-ref "$RNREF" || die "thief import rn"
 "$MINI" keygen --secret "$D/thief.key" --public "$D/thief.pub" --no-prerotation >/dev/null 2>&1 || die "thief keygen"
 run trot1 "$MINI" rotate-key --workspace "$AW" --next-key "$D/thief.key"
-row "the thief (daily key) rotates to its own key: refused by name" "exit 3, notPrecommitted" \
+row "the thief (daily key) rotates to its own key: refused by name" "exit 3, not-precommitted" \
   "rc=$(cat "$D/trot1.rc") $(refusal trot1)" \
-  "$([ "$(cat "$D/trot1.rc")" = 3 ] && grep -q notPrecommitted "$D/trot1.err" && echo 1 || echo 0)"
+  "$([ "$(cat "$D/trot1.rc")" = 3 ] && grep -q not-precommitted "$D/trot1.err" && echo 1 || echo 0)"
 # The client refuses NEXT == its own daily key file, so the thief signs with a
 # copy of the stolen daily key. The generic Receiver verifies the one possession
 # claim (the named key over the possession frame) BEFORE the gate runs
@@ -280,9 +280,9 @@ run pstat "$MINI" key-status --workspace "$PW"
 "$MINI" keygen --secret "$D/plain-next.key" --public "$D/plain-next.pub" --no-prerotation >/dev/null 2>&1
 run prot "$MINI" rotate-key --workspace "$PW" --next-key "$D/plain-next.key"
 row "a subject enrolled --no-prerotation cannot rotate, as before (refused by name)" \
-  "prerotated false; exit 3, notPrerotated" \
+  "prerotated false; exit 3, not-prerotated" \
   "prerotated=$(jq -r .prerotated "$D/pstat.out") rc=$(cat "$D/prot.rc") $(refusal prot)" \
-  "$(jq -e '.prerotated | not' "$D/pstat.out" >/dev/null && [ "$(cat "$D/prot.rc")" = 3 ] && grep -q notPrerotated "$D/prot.err" && echo 1 || echo 0)"
+  "$(jq -e '.prerotated | not' "$D/pstat.out" >/dev/null && [ "$(cat "$D/prot.rc")" = 3 ] && grep -q not-prerotated "$D/prot.err" && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------- FIX-IDENTITY: a sponsor's next key
 # The sponsor commits a next key IT holds (and co-signs with it, so the kernel's
@@ -355,7 +355,7 @@ row "the cold audit refuses one corrupted leaf above the latest checkpoint" "exi
 
 echo "$T"
 if [ "$BAD" = 0 ]; then
-  echo "JROT: $N/$N checks; friend subject $FRIEND rotated 1->2->3; thief refused (${THIEF_REASON:-?}); plain subject notPrerotated; audit: $(tail -1 "$D/audit.out")" >&2
+  echo "JROT: $N/$N checks; friend subject $FRIEND rotated 1->2->3; thief refused (${THIEF_REASON:-?}); plain subject not-prerotated; audit: $(tail -1 "$D/audit.out")" >&2
   exit 0
 fi
 echo "JROT: $BAD of $N checks failed (see $T)" >&2

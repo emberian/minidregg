@@ -13,8 +13,8 @@ set_option backward.isDefEq.respectTransparency false in
 
  theorem sound (rules : List Rule) : (handler rules).Sound := by
   refine ⟨?_, ?_, framed⟩
-  · intro state; rfl
-  · intro cell state selected
+  · intro ctx state; rfl
+  · intro ctx cell state selected
     change some cell = some state at selected
     exact (Option.some.inj selected).symm
 

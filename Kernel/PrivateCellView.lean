@@ -98,9 +98,10 @@ theorem untagged_eq : (bitCode 256).tag none = untaggedClass := by
 
 /-- The private index tag of a registry kind: its address's field class. -/
 def kindTag (kind : CanonicalCellRegistry.Kind) : Compiler.PrivateCellRoot.KeyTag (CanonicalCellRegistry.layout kind) :=
-  ⟨fun a => (bitCode 256).tag (fieldOf kind a), fun a => bitTag_length 256 _⟩
+  ⟨fun a => (bitCode 256).tag (fieldOf kind a), fun a => bitTag_length 256 _, true⟩
 
-/-- A kind whose addresses carry no field has the untagged key paths. -/
+/-- A kind whose addresses carry no field has the untagged class tag (its paths differ from
+`untagged`'s in order: `kindTag` leads, `untagged` follows the hashed bits). -/
 theorem kindTag_untagged {kind : CanonicalCellRegistry.Kind} (none : ∀ a, fieldOf kind a = none) :
     (kindTag kind).tag = (Compiler.PrivateCellRoot.untagged _).tag := by
   funext a

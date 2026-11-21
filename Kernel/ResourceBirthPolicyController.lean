@@ -18,6 +18,8 @@ public import Compiler.CanonicalAccountView
 public import Compiler.PhysicalLawResolution
 public import Compiler.WorldKindLawDependencies
 public import Kernel.PlatformCellDomain
+public import Theory.CapabilityValueBound
+public import Kernel.BranchAdmission
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -48,6 +50,7 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
+open Minidregg.Kernel.BranchAdmission (planVerdict)
 
 set_option autoImplicit false
 
@@ -108,6 +111,10 @@ inductive Reject where
   /-- The factory pins carry a creation tariff other than that record's: the birth would be
   priced from a tariff the platform cell does not hold. -/
   | platformStale
+  /-- A source branch's presented capability does not bound the birth's gross debit of that
+  branch's account (`Theory.CapabilityValueBound.check`): a balance its scope does not name,
+  or a `maxDelta` bound on a balance below what the birth's fee and funding take from it. -/
+  | valueBound (reason : CapabilityValueBound.Refusal)
   deriving DecidableEq, Repr
 
 /-- The checkable part of the existing factory authorization. All fields
@@ -183,6 +190,38 @@ instance initialPoliciesBoundDecidable {registry : TypeRegistry Digest}
 def require (condition : Prop) [Decidable condition] (reason : Reject) :
     Except Reject (PLift condition) :=
   if accepted : condition then .ok ⟨accepted⟩ else .error reason
+
+/-- **The value bound of a debiting branch.** The capability presented for `account`'s debit
+must bound the gross amount `operations` take from `account` (`CapabilityValueBound.check`:
+its `fields` name each debited balance, its `maxDelta` bounds on them hold). No capability is
+`capability`; a failed bound is `valueBound`, naming the asset. -/
+def valueBoundCheck {kind : ResourceKind} (capability : Option (Capability kind × Digest))
+    (operations : List CanonicalResourceKernel.Operation) (account : Nat) : Except Reject Unit :=
+  match CapabilityValueBound.presentedCheck capability operations account with
+  | .ok () => .ok ()
+  | .error none => .error .capability
+  | .error (some reason) => .error (.valueBound reason)
+
+theorem valueBoundCheck_ok {kind : ResourceKind} {capability : Option (Capability kind × Digest)}
+    {operations : List CanonicalResourceKernel.Operation} {account : Nat}
+    (ok : valueBoundCheck capability operations account = .ok ()) :
+    ∃ cap digest, capability = some (cap, digest) ∧
+      CapabilityValueBound.StrictBound cap operations account := by
+  unfold valueBoundCheck at ok
+  split at ok
+  next checked => exact (CapabilityValueBound.presentedCheck_ok_iff _ _ _).mp checked
+  next => cases ok
+  next => cases ok
+
+/-- Teeth: a capability whose scope fails the bound is refused `valueBound`, never admitted. -/
+theorem valueBoundCheck_refuses {kind : ResourceKind} (cap : Capability kind) (digest : Digest)
+    (operations : List CanonicalResourceKernel.Operation) (account : Nat)
+    (unbounded : ¬ CapabilityValueBound.StrictBound cap operations account) :
+    ∃ reason, valueBoundCheck (some (cap, digest)) operations account =
+      .error (.valueBound reason) := by
+  obtain ⟨reason, refused⟩ :=
+    CapabilityValueBound.presentedCheck_refuses cap digest operations account unbounded
+  exact ⟨reason, by simp only [valueBoundCheck, refused]⟩
 
 /-- The actual metadata admission path. Failing a later check returns no
 prefix result and produces no authorization token. -/
@@ -457,7 +496,7 @@ def RootGrantShape (template : CanonicalRuntimeProfile.FactoryTemplate)
   grant.capability.ancestry = [] ∧
   BirthWindow template height grant ∧
   grant.capability.head.notAfter = grant.capability.head.notBefore + template.lifetime ∧
-  grant.capability.head.scope.maxCost = template.ownerBudget
+  grant.capability.head.scope.perRequestBytes = template.ownerBudget
 
 def NativeOwnerGrant (grant : AuthorityGrant) (item : BirthItem Registry) : Prop :=
   grant.NativeForBirth item ∧
@@ -1780,25 +1819,31 @@ structure BranchAccepted [DecidableEq F]
   modeBound : branchRequiresCapability branch = true →
     authorization.evidence.capabilityValue.isSome = true
 
-/-- The plan verdict on one resolved law: the compiler lowers it (`supported`), every input
-it reads on the configuration's step is in range (`inputsInRange`), the step's integers cast
-injectively (`castInjOn`), and the law evaluates true on that step. These are the checks
-`Pending.judgeBranch` makes after binding, in its order; the last is the law's own verdict. -/
-def planVerdict [DecidableEq F] {config : ComposedPolicyAdmission.Config F}
-    (law : ComposedPolicyAdmission.PreparedLaw config) : Bool :=
-  Minidregg.Compiler.supported config.profile.compiler law.predicate &&
-  Minidregg.Compiler.inputsInRange config.profile.compiler law.predicate
-    config.step.oldState config.step.newState &&
-  decide (Minidregg.Compiler.castInjOn F
-    (Minidregg.Compiler.intsOf law.predicate config.step.oldState config.step.newState)) &&
-  Minidregg.Pred.eval law.predicate config.step.oldState config.step.newState
+/-- The shared branch core's refusals, as this receiver names them. -/
+def Reject.ofBranch : BranchAdmission.Reject → Reject
+  | .capability => .capability
+  | .signature => .signature
+  | .credentialShape => .credentialShape
+  | .policyUnavailable => .policyUnavailable
+  | .policyBinding => .policyBinding
+  | .policyUnsupported => .policyUnsupported
+  | .policyInputRange => .policyInputRange
+  | .policyCastAlias => .policyCastAlias
+  | .policyRejected => .policyRejected
 
-/-- A branch's policy judgement, after its capability or signature evidence: epoch and
-revision current, the law resolved, the request bound to it (`ComposedPolicyAdmission.bind`,
-refused as `policyBinding`), the compiler's three verdicts on the branch's step (refused
-as `policyUnsupported`, `policyInputRange`, `policyCastAlias`), and only then the law's
-own verdict through `law.admit` (refused as `policyRejected`). The authorization is
-`law.admit`'s, unchanged. -/
+theorem Reject.ofBranch_policyRejected {α : Type} {result : Except BranchAdmission.Reject α}
+    (rejected : result.mapError Reject.ofBranch = .error .policyRejected) :
+    result = .error .policyRejected := by
+  cases result with
+  | ok _ => simp [Except.mapError] at rejected
+  | error reason =>
+      cases reason <;> first | rfl | (simp [Except.mapError, Reject.ofBranch] at rejected)
+
+/-- A branch's policy judgement, after its capability or signature evidence
+(`BranchAdmission.judge` on the branch's configuration): epoch and revision current, the law
+resolved, the request bound to it (refused as `policyBinding`), the compiler's three verdicts
+on the branch's step (refused as `policyUnsupported`, `policyInputRange`, `policyCastAlias`),
+and only then the law's own verdict through `law.admit` (refused as `policyRejected`). -/
 def Pending.judgeBranch [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
@@ -1806,33 +1851,30 @@ def Pending.judgeBranch [DecidableEq F]
       (branchRequest prepared height branch).2) :
     Except Reject (Authorized (pending.branchConfig branch).portal (oldAuthority prepared)
       (branchRequest prepared height branch).2) :=
-  let wanted := branchRequest prepared height branch
-  let config := pending.branchConfig branch
-  let old := oldAuthority prepared
-  if epoch : wanted.2.policyEpoch = old.policyEpoch wanted.2.policyId then
-    if revision : wanted.2.policyRevision = old.policyRevision wanted.2.policyId then
-      match config.resolve? with
-      | none => .error .policyUnavailable
-      | some law =>
-          match ComposedPolicyAdmission.bind config wanted.2 evidence law
-              (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
-          | none => .error .policyBinding
-          | some _ =>
-            if Minidregg.Compiler.supported config.profile.compiler law.predicate = false then
-              .error .policyUnsupported
-            else if Minidregg.Compiler.inputsInRange config.profile.compiler law.predicate
-                config.step.oldState config.step.newState = false then
-              .error .policyInputRange
-            else if ¬ Minidregg.Compiler.castInjOn F (Minidregg.Compiler.intsOf law.predicate
-                config.step.oldState config.step.newState) then
-              .error .policyCastAlias
-            else
-              match law.admit wanted.2 evidence law.witness
-                  (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
-              | none => .error .policyRejected
-              | some admitted => .ok admitted
-    else .error .policyUnavailable
-  else .error .policyUnavailable
+  (BranchAdmission.judge (pending.branchConfig branch) (branchRequest prepared height branch).2
+    evidence).mapError Reject.ofBranch
+
+/-- A Book source branch presents a capability; every other branch is the creator's signature
+and names none. -/
+def branchMode (branch : Branch descriptor) : BranchAdmission.Mode :=
+  if branchRequiresCapability branch then .required else .forbidden
+
+/-- One branch's evidence and judgement: the shared core (`BranchAdmission.admit`) on this
+branch's configuration, its refusals renamed. -/
+def Pending.branchAuthorized [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
+    (credential : BranchCredential)
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority) :
+    Except Reject (Authorized (pending.branchConfig branch).portal (oldAuthority prepared)
+      (branchRequest prepared height branch).2) :=
+  (BranchAdmission.admit profile.compilerProfile ground.authority ground.directory
+    descriptor.authorityNullifier (pending.branchStep branch)
+    (branchRequest prepared height branch).2.target.value
+    (((pending.branchDependencies branch).map
+      WorldKindLawDependencies.Dependencies.additional).getD [])
+    (branchRequest prepared height branch).2 (branchMode branch) credential.capability
+    receipt).mapError Reject.ofBranch
 
 def Pending.admitBranch [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
@@ -1842,7 +1884,6 @@ def Pending.admitBranch [DecidableEq F]
     Except Reject { accepted : BranchAccepted pending branch // accepted.credential = credential } := do
   let envelopeExact ← require (receipt.envelopeBytes = credential.envelope) .credentialShape
   let wanted := branchRequest prepared height branch
-  let config := pending.branchConfig branch
   let old := oldAuthority prepared
   let guards ← match exact : pending.branchReadGuards branch with
     | none => .error .policySourceUnavailable
@@ -1853,23 +1894,7 @@ def Pending.admitBranch [DecidableEq F]
       ground.directory (old.policyAddress wanted.2.policyId wanted.2.policyRevision) with
     | none => .error .policySourceUnavailable
     | some loaded => .ok loaded
-  let evidence : Evidence config.portal old wanted.2 ←
-    if branchRequiresCapability branch then
-        match credential.capability with
-        | none => .error .capability
-        | some identifier =>
-            match config.capabilityEvidenceChecked wanted.2 identifier () receipt () (fun _ => ()) with
-            | .error _ => .error .capability
-            | .ok evidence => .ok evidence
-    else
-        if credential.capability = none then
-          if epoch : wanted.2.subjectKeyEpoch = old.subjectKeyEpoch wanted.2.subject then
-            if verified : config.portal.verifySignature wanted.2 receipt = true then
-              .ok (.signature receipt epoch verified)
-            else .error .signature
-          else .error .signature
-        else .error .credentialShape
-  let admitted ← pending.judgeBranch branch evidence
+  let admitted ← pending.branchAuthorized branch credential receipt
   let authorization := pending.liftAuthorization branch admitted
   if modeBound : branchRequiresCapability branch = true →
       authorization.evidence.capabilityValue.isSome = true then
@@ -1945,47 +1970,6 @@ private theorem require_error {condition : Prop} [Decidable condition] {reason o
   · injection refused with same
     exact same.symm
 
-/-- **A bound request under the compiler's three verdicts is admitted when its law
-evaluates true** on the configuration's step: `law.admit` on the law's own witness then
-answers `some`. -/
-theorem admit_some_of_bind [DecidableEq F] {config : ComposedPolicyAdmission.Config F}
-    {kind : ResourceKind} {request : Request kind}
-    {evidence : Evidence config.portal config.snapshot.authState request}
-    {law : ComposedPolicyAdmission.PreparedLaw config} {membership : config.portal.MembershipWitness}
-    {epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId}
-    {revisionExact : request.policyRevision =
-      config.snapshot.authState.policyRevision request.policyId}
-    {bound : ComposedPolicyAdmission.Bound config request}
-    (bindExact : ComposedPolicyAdmission.bind config request evidence law membership
-      epochExact revisionExact = some bound)
-    (supportedExact : Minidregg.Compiler.supported config.profile.compiler law.predicate = true)
-    (rangesExact : Minidregg.Compiler.inputsInRange config.profile.compiler law.predicate
-      config.step.oldState config.step.newState = true)
-    (casts : Minidregg.Compiler.castInjOn F
-      (Minidregg.Compiler.intsOf law.predicate config.step.oldState config.step.newState))
-    (evaluated : Minidregg.Pred.eval law.predicate config.step.oldState config.step.newState = true) :
-    ∃ authorized, law.admit request evidence law.witness membership epochExact revisionExact =
-      some authorized := by
-  unfold ComposedPolicyAdmission.bind at bindExact
-  split at bindExact
-  next binding =>
-    split at bindExact
-    next addressExact =>
-      split at bindExact
-      next membershipVerified =>
-        have verified := (ComposedPolicyAdmission.Bound.verifies_iff_eval
-          (⟨evidence, law, binding, membership, epochExact, revisionExact, addressExact,
-            membershipVerified⟩ : ComposedPolicyAdmission.Bound config request)
-          supportedExact rangesExact casts).2 evaluated
-        obtain ⟨authorized, admitted⟩ := ComposedPolicyAdmission.Bound.admit_of_verifies
-          (⟨evidence, law, binding, membership, epochExact, revisionExact, addressExact,
-            membershipVerified⟩ : ComposedPolicyAdmission.Bound config request) verified
-        exact ⟨authorized, (ComposedPolicyAdmission.PreparedLaw.admit_eq law request evidence
-          law.witness membership epochExact revisionExact).trans admitted⟩
-      next => cases bindExact
-    next => cases bindExact
-  next => cases bindExact
-
 /-- **An accepted witness carries the plan verdict.** Whatever witness the compiled check
 accepts, the configuration's resolved law has all three compiler verdicts and evaluates
 true on the configuration's step. -/
@@ -2019,42 +2003,20 @@ theorem Pending.judgeBranch_policyRejected [DecidableEq F]
     (rejected : pending.judgeBranch branch evidence = .error .policyRejected) :
     ∃ law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch),
       (pending.branchConfig branch).resolve? = some law ∧ planVerdict law = false := by
-  unfold Pending.judgeBranch at rejected
-  try dsimp only at rejected
-  split at rejected
-  next =>
-    split at rejected
-    next =>
-      split at rejected
-      next => cases rejected
-      next law resolved =>
-        refine ⟨law, resolved, ?_⟩
-        split at rejected
-        next => cases rejected
-        next bound bindExact =>
-          split at rejected
-          next => cases rejected
-          next unsupported =>
-            split at rejected
-            next => cases rejected
-            next outOfRange =>
-              split at rejected
-              next => cases rejected
-              next aliased =>
-                split at rejected
-                next refusedAdmit =>
-                  cases evaluated : Minidregg.Pred.eval law.predicate
-                      (pending.branchConfig branch).step.oldState
-                      (pending.branchConfig branch).step.newState
-                  · simp only [planVerdict, evaluated, Bool.and_false]
-                  · obtain ⟨authorized, admitted⟩ := admit_some_of_bind bindExact
-                      (by simpa using unsupported) (by simpa using outOfRange)
-                      (by simpa using aliased) evaluated
-                    have contradiction := admitted.symm.trans refusedAdmit
-                    cases contradiction
-                next => cases rejected
-    next => cases rejected
-  next => cases rejected
+  exact BranchAdmission.judge_policyRejected _ _ _ (Reject.ofBranch_policyRejected rejected)
+
+/-- A branch's evidence and judgement answer `policyRejected` only from the judgement. -/
+theorem Pending.branchAuthorized_policyRejected [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
+    (credential : BranchCredential)
+    (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority)
+    (rejected : pending.branchAuthorized branch credential receipt = .error .policyRejected) :
+    ∃ evidence, pending.judgeBranch branch evidence = .error .policyRejected := by
+  unfold Pending.branchAuthorized at rejected
+  obtain ⟨presented, judged⟩ := BranchAdmission.admit_policyRejected _ _ _ _ _ _ _ _ _ _ _
+    (Reject.ofBranch_policyRejected rejected)
+  exact ⟨presented, congrArg (Except.mapError Reject.ofBranch) judged⟩
 
 /-- **`admitBranch` answers `policyRejected` only from its policy judgement**: every earlier
 refusal (envelope, source, guards, evidence) and the mode check name other constructors. -/
@@ -2070,7 +2032,7 @@ theorem Pending.admitBranch_policyRejected [DecidableEq F]
   repeat' split at rejected
   all_goals try cases rejected
   all_goals first
-    | exact ⟨_, ‹_›⟩
+    | exact pending.branchAuthorized_policyRejected branch credential receipt ‹_›
     | (rename_i early; split at early <;> cases early)
 
 /-- **An accepted branch passed the plan verdict**: the law its configuration resolves had
@@ -2091,8 +2053,9 @@ theorem BranchAccepted.planVerdict_true [DecidableEq F]
   have checks := Bool.and_eq_true_iff.mp inner
   exact planVerdict_of_verifies law _ _ checks.2
 
-#assert_axioms admit_some_of_bind planVerdict_of_verifies BranchAccepted.planVerdict_true
-#assert_axioms Pending.judgeBranch_policyRejected Pending.admitBranch_policyRejected
+#assert_axioms planVerdict_of_verifies BranchAccepted.planVerdict_true
+#assert_axioms Pending.judgeBranch_policyRejected Pending.branchAuthorized_policyRejected
+#assert_axioms Pending.admitBranch_policyRejected
 
 /-- A law mentioning `witnessed` fails the plan verdict: it is outside `supported`. -/
 theorem planVerdict_witnessed_false [DecidableEq F] {config : ComposedPolicyAdmission.Config F}
@@ -2126,24 +2089,16 @@ theorem Pending.judgeBranch_witnessed [DecidableEq F]
     (witnessed : mentionsWitnessed law.predicate = true) :
     ∃ reason, pending.judgeBranch branch evidence = .error reason ∧
       (reason = .policyUnavailable ∨ reason = .policyBinding ∨ reason = .policyUnsupported) := by
-  unfold Pending.judgeBranch
-  try dsimp only
-  split
-  next =>
-    split
-    next =>
-      split
-      next => exact ⟨_, rfl, .inl rfl⟩
-      next resolvedLaw resolvedExact =>
-        obtain rfl := Option.some.inj (resolved.symm.trans resolvedExact)
-        split
-        next => exact ⟨_, rfl, .inr (.inl rfl)⟩
-        next =>
-          rw [if_pos (unsupported_of_mentionsWitnessed
-            (pending.branchConfig branch).profile.compiler witnessed)]
-          exact ⟨_, rfl, .inr (.inr rfl)⟩
-    next => exact ⟨_, rfl, .inl rfl⟩
-  next => exact ⟨_, rfl, .inl rfl⟩
+  obtain ⟨reason, refused, which⟩ := BranchAdmission.judge_witnessed (pending.branchConfig branch)
+    (branchRequest prepared height branch).2 evidence law resolved witnessed
+  refine ⟨Reject.ofBranch reason, ?_, ?_⟩
+  · unfold Pending.judgeBranch
+    rw [refused]
+    rfl
+  · rcases which with rfl | rfl | rfl
+    · exact .inl rfl
+    · exact .inr (.inl rfl)
+    · exact .inr (.inr rfl)
 
 #assert_axioms planVerdict_witnessed_false BranchAccepted.no_witnessed Pending.judgeBranch_witnessed
 
@@ -2370,6 +2325,12 @@ structure AdmittedBundle [DecidableEq F]
     {height : Height} (pending : Pending prepared height) (bundle : CredentialBundle) : Type where
   branches : (branch : Branch descriptor) → BranchAccepted pending branch
   inputsExact : ∀ branch, bundle.forBranch branch = some (branches branch).credential
+  /-- Every source branch's capability bounds the birth's gross debit (fee and funding) of
+  that branch's account (`valueBoundCheck`). -/
+  sourcesBounded : ∀ index : Fin descriptor.resourceBatch.operations.length,
+    valueBoundCheck (branches (.source index)).authorization.evidence.capabilityValue
+      descriptor.resourceBatch.operations
+      (descriptor.resourceBatch.operations.get index).posting.source = .ok ()
 
 /-- Select one dependent branch directly from its finite index. -/
 private def directFinCases {n : Nat} {A : Fin (n + 1) → Type}
@@ -2440,12 +2401,29 @@ def Pending.admitBundleNative [DecidableEq F]
                   let sourceResults : Except Reject
                       ((index : Fin descriptor.resourceBatch.operations.length) →
                         { accepted : BranchAccepted pending (.source index) //
-                          accepted.credential = bundle.sources.get (sourceIndex index) }) ←
+                          accepted.credential = bundle.sources.get (sourceIndex index) ∧
+                          valueBoundCheck accepted.authorization.evidence.capabilityValue
+                            descriptor.resourceBatch.operations
+                            (descriptor.resourceBatch.operations.get index).posting.source = .ok () }) ←
                     sequenceFin (E := Reject) (A := fun index : Fin descriptor.resourceBatch.operations.length =>
                         { accepted : BranchAccepted pending (.source index) //
-                          accepted.credential = bundle.sources.get (sourceIndex index) })
-                      (fun index => pending.admitBranchNative (.source index) native
-                        (bundle.sources.get (sourceIndex index)))
+                          accepted.credential = bundle.sources.get (sourceIndex index) ∧
+                          valueBoundCheck accepted.authorization.evidence.capabilityValue
+                            descriptor.resourceBatch.operations
+                            (descriptor.resourceBatch.operations.get index).posting.source = .ok () })
+                      (fun index => do
+                        match ← pending.admitBranchNative (.source index) native
+                            (bundle.sources.get (sourceIndex index)) with
+                        | .error reason => return .error reason
+                        | .ok accepted =>
+                            -- The capability admitted for this debit bounds the value the
+                            -- whole batch takes from its account.
+                            match bounded : valueBoundCheck
+                                accepted.val.authorization.evidence.capabilityValue
+                                descriptor.resourceBatch.operations
+                                (descriptor.resourceBatch.operations.get index).posting.source with
+                            | .error reason => return .error reason
+                            | .ok () => return .ok ⟨accepted.val, accepted.property, bounded⟩)
                   match sourceResults with
                   | .error reason => return .error reason
                   | .ok sources =>
@@ -2467,11 +2445,56 @@ def Pending.admitBundleNative [DecidableEq F]
                                 exact List.getElem?_eq_getElem (by omega)
                             | source index =>
                                 change bundle.sources[index.val]? = some (sources index).val.credential
-                                rw [(sources index).property]
+                                rw [(sources index).property.1]
                                 simp only [List.get_eq_getElem]
-                                exact List.getElem?_eq_getElem (by omega) }
+                                exact List.getElem?_eq_getElem (by omega)
+                          sourcesBounded := fun index => (sources index).property.2 }
     else return .error .credentialShape
   else return .error .credentialShape
+
+/-- **Every debit of an admitted birth is within its capability's value bound.** For each
+Book operation of the birth (each funding transfer and the fee), the capability admitted for
+that operation's source branch names every balance the birth debits from that account and
+bounds the birth's gross debit of each, and a delegated capability sets that bound itself
+(`CapabilityValueBound.StrictBound`). -/
+theorem AdmittedBundle.source_value_bounded [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
+    {height : Height} {pending : Pending prepared height} {bundle : CredentialBundle}
+    (admitted : AdmittedBundle pending bundle)
+    (index : Fin descriptor.resourceBatch.operations.length) :
+    ∃ cap digest,
+      (admitted.branches (.source index)).authorization.evidence.capabilityValue =
+          some (cap, digest) ∧
+        CapabilityValueBound.StrictBound cap descriptor.resourceBatch.operations
+          (descriptor.resourceBatch.operations.get index).posting.source :=
+  valueBoundCheck_ok (admitted.sourcesBounded index)
+
+/-- The same, in plain terms: the debited balance is named, and the birth's gross debit of
+that account in that asset is within every `maxDelta` bound the capability sets on it. -/
+theorem AdmittedBundle.source_gross_debit_bounded [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins ground descriptor}
+    {height : Height} {pending : Pending prepared height} {bundle : CredentialBundle}
+    (admitted : AdmittedBundle pending bundle)
+    (index : Fin descriptor.resourceBatch.operations.length) :
+    ∃ cap digest,
+      (admitted.branches (.source index)).authorization.evidence.capabilityValue =
+          some (cap, digest) ∧
+        CellField.NamedBy cap.scope.fields
+          (.balance (descriptor.resourceBatch.operations.get index).posting.asset) ∧
+        ∀ bound,
+          (CellField.balance (descriptor.resourceBatch.operations.get index).posting.asset, bound) ∈
+              cap.scope.maxDelta →
+            CapabilityValueBound.grossDebit descriptor.resourceBatch.operations
+                (descriptor.resourceBatch.operations.get index).posting.source
+                (descriptor.resourceBatch.operations.get index).posting.asset ≤ bound := by
+  obtain ⟨cap, digest, named, bounded⟩ := admitted.source_value_bounded index
+  exact ⟨cap, digest, named,
+    (CapabilityValueBound.valueBound_iff _ _ _).mp bounded.1 _
+      (CapabilityValueBound.mem_debitAssets_of_mem (List.get_mem _ _))⟩
+
+#assert_axioms valueBoundCheck_ok
+#assert_axioms AdmittedBundle.source_value_bounded
+#assert_axioms AdmittedBundle.source_gross_debit_bounded
 
 /-- Owner consent has a separate purpose domain and binds the full factory
 source descriptor plus its exact birth incidence. It is not an ordinary write
@@ -2610,27 +2633,39 @@ def admitDecodedNative [DecidableEq F]
     (native : CredentialSignatureIO.NativeConfig) (ground : Ground deployment) (height : Height)
     (ingress : DecodedIngress) (sourced : List (Nat × PackedCell Registry) := []) :
     IO (Except Reject (AcceptedBirth profile deployment pins ground height)) := do
+  -- Operator measurement control (as `MINI_STORE_PHASES` at the durable append): where one
+  -- birth admission spent its time, in microseconds, to stderr.
+  let timing := (← IO.getEnv "MINI_STORE_PHASES") == some "1"
+  let t0 ← IO.monoNanosNow
   match ResourceBirthController.Concrete.prepareBirth profile.compilerProfile
       profile.disabledEvaluators deployment pins
       ground ingress.descriptor height sourced with
   | .error reason => return .error (.preparation reason)
   | .ok prepared =>
+      let t1 ← IO.monoNanosNow
       match preparePending prepared height ingress.method with
       | .error reason => return .error reason
       | .ok pending =>
           match require (pending.method = ingress.method) .credentialShape with
           | .error reason => return .error reason
           | .ok methodExact =>
+              let t2 ← IO.monoNanosNow
               match ← verifyOwnerConsentsNative prepared height native ingress.ownerConsentEnvelopes with
               | .error reason => return .error reason
               | .ok owners =>
+                  let t3 ← IO.monoNanosNow
                   match ← pending.admitBundleNative native ingress.ingress.credentials with
                   | .error reason => return .error reason
                   | .ok branches =>
+                      let t4 ← IO.monoNanosNow
                       match ResourceBirthController.Concrete.checkNamed (pending.branchStep .factory)
                           prepared.writes with
                       | .error cell => return .error (.neutralBirthUnjudged cell)
                       | .ok named =>
+                          if timing then
+                            let t5 ← IO.monoNanosNow
+                            IO.eprintln s!"birth prepare us at {height}: {← ResourceBirthController.Concrete.prepareBirthPhases profile.compilerProfile profile.disabledEvaluators deployment pins ground ingress.descriptor height sourced}"
+                            IO.eprintln s!"birth admit us at {height}: prepare {(t1-t0)/1000} pending {(t2-t1)/1000} owners {(t3-t2)/1000} bundle {(t4-t3)/1000} named {(t5-t4)/1000}"
                           return .ok ⟨ingress, prepared, pending, methodExact.down, owners, branches,
                             named.down⟩
 

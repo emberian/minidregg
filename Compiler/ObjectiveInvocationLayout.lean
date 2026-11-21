@@ -144,18 +144,18 @@ end
 /-- `effectsOf`'s per-target step, by explicit position. -/
 def step (index : Nat) (target : Target) : Option BendWorldPlan.Effect :=
   match target.payload with
-  | .read | .kindRead | .computeFunding _ => none
-  | payload => some ⟨index,payload⟩
+  | .registered code op =>
+      if (effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting then none
+      else some ⟨index, .registered code op⟩
 
 /-- Payloads `effectsOf` reports verbatim. -/
 def verbatim : Payload → Bool
-  | .read | .kindRead | .computeFunding _ => false
-  | _ => true
+  | .registered code op =>
+      !((effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting)
 
 /-- Payloads `effectsOf` never reports. -/
 def inert : Payload → Bool
-  | .read | .kindRead | .computeFunding _ => true
-  | _ => false
+  | .registered code op => (effectAt code.toNat).observeOnly op || (effectAt code.toNat).accounting
 
 theorem finRange_pairs {α : Type} (l : List α) :
     (List.finRange l.length).map (fun i => (l[i],i.val)) = l.zipIdx := by
@@ -183,13 +183,13 @@ theorem step_inert {index : Nat} {target : Target} (h : inert target.payload = t
     step index target = none := by
   unfold step
   revert h
-  cases target.payload <;> simp [inert]
+  cases target.payload <;> simp +contextual [inert]
 
 theorem step_verbatim {index : Nat} {target : Target} (h : verbatim target.payload = true) :
     step index target = some ⟨index,target.payload⟩ := by
   unfold step
   revert h
-  cases target.payload <;> simp [verbatim]
+  cases target.payload <;> simp +contextual [verbatim]
 
 theorem filterMap_verbatim (targets : List Target) (k : Nat)
     (h : ∀ t ∈ targets, verbatim t.payload = true) :
@@ -235,7 +235,7 @@ theorem effectsOf_placeholders (command : Command)
     (reads : ∀ t ∈ command.targets, t.payload = .read) :
     BendWorldPlan.effectsOf command = [] := by
   rw [effectsOf_zipIdx]
-  exact filterMap_inert command.targets 0 (fun t m => by simp [reads t m, inert])
+  exact filterMap_inert command.targets 0 (fun t m => by rw [reads t m]; rfl)
 
 /-- A draft whose roles are read placeholders cannot carry any effectful plan
 through the gate's exact comparison: the producer must lay out final payloads

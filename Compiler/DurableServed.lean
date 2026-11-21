@@ -1176,7 +1176,8 @@ nothing older. What it establishes, each refused by name:
   (`walkFrontier`), and the index root its tag carries, re-derived by inserting
   the record's transaction id and nullifiers into the index at the
   checkpoint's version (`DurableIndex.IndexRows.apply` refuses a key already present:
-  a transaction or nullifier accepted before the checkpoint);
+  a transaction or nullifier accepted before the checkpoint) and overwriting the
+  last-write row of each cell it writes;
 * the replay of those records from the checkpoint state through the executor;
 * the head: its tag's MAC under the Store's key (`Head.verify`) and the root it
   carries equal to the replayed world root.
@@ -1225,20 +1226,38 @@ private def decodeRecordsAt : Nat → List DurableReceiverIO.Entry → Except St
 /-- The index root after each record, re-derived from the trie at the base's
 version: each record's rows (`IndexRows.apply`) at its height; the root after
 each must be the one its (MAC-verified) tag carries. The rows each record writes
-are kept in a map (newest wins) laid over the Store's rows. -/
+are kept in a map (newest wins) laid over the Store's rows. It returns the rows each record
+wrote, in log order: what a holder of the trie at the base's height needs to hold it at the head
+(`holdSuffixRows`). -/
 private def checkIndex (rows : List Bool → Option DurableIndex.Row) :
     Std.HashMap (List Bool) DurableIndex.Row → Digest → Nat → List (IntentRecord × Digest) →
-      Except String Unit
-  | _, _, _, [] => .ok ()
-  | written, root, height, (record, carried) :: rest => do
+      List (List (List Bool × DurableIndex.Row)) →
+      Except String (List (List (List Bool × DurableIndex.Row)))
+  | _, _, _, [], done => .ok done.reverse
+  | written, root, height, (record, carried) :: rest, done => do
       let current := fun path => (written.get? path).or (rows path)
       let (next, writes) ← match DurableIndex.IndexRows.apply current root height record.transactionId
-          record.nullifiers with
+          record.nullifiers (record.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId)
+          (Minidregg.Kernel.JournalIndex.sequences record) with
         | .ok result => pure result
         | .error message => throw s!"durable log record at height {height}: {message}"
       if next ≠ carried then
         throw s!"the tag at height {height} carries an index root the log does not reach"
       checkIndex rows (writes.foldl (fun map row => map.insert row.1 row.2) written) next (height + 1) rest
+        (writes :: done)
+
+/-- Hand the transport's holder the index rows a verified suffix wrote, record by record: the
+trie it holds at the suffix's base moves to the head (`Transport.holdIndexRows`, an append's
+rule at each height). Without this a record the holder did not append itself (another writer's,
+or this Host's own through the full image) left the held trie one height behind for good: every
+later index read missed it and went to the Store (op 98 at 1,000 records: ~100 ms before a
+certify, ~400 ms after, until a restart). -/
+private def holdSuffixRows (transport : DurableReceiverIO.Transport) (base : Nat)
+    (suffix : List (List (List Bool × DurableIndex.Row))) : IO Unit := do
+  let mut height := base
+  for writes in suffix do
+    height := height + 1
+    transport.holdIndexRows height true writes
 
 /-- A root cache already verified for a start's enumeration. -/
 private structure CachedRoots (ids : List CellId) (entries : List (WorldRoot.Key × Digest)) where
@@ -1309,18 +1328,37 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   let carriedIndex ← match suffix.mapM fun entry => DurableHistory.trailerCarried entry.tag with
     | none => return .error "durable log tag malformed"
     | some carried => pure (carried.map (·.indexRoot))
-  let keys := records.flatMap fun record => DurableIndex.IndexRows.keys record.transactionId record.nullifiers
+  -- The journal sequences the suffix extends: each one's count at the base names the position
+  -- rows the suffix writes (one per record that belongs to it).
+  let memberships := records.map fun record =>
+    Minidregg.Theory.JournalSequences.distinct (Minidregg.Kernel.JournalIndex.sequences record)
+  let seqs := Minidregg.Theory.JournalSequences.distinct memberships.flatten
+  let mut seqCounts : List (Tower256ConcreteBackend.Digest256 × Nat) := []
+  unless seqs.isEmpty do
+    match ← DurableReceiverIO.withIndexRows transport start.height (seqs.map DurableIndex.seqCountKey)
+        (fun rows => DurableIndex.IndexRows.seqCounts rows start.indexRoot seqs) with
+    | .error message => return .error message
+    | .ok read => seqCounts := read
+  let keys := (records.flatMap fun record => DurableIndex.IndexRows.appendKeys record.transactionId
+    record.nullifiers (record.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId)) ++
+    seqCounts.flatMap fun entry =>
+      DurableIndex.seqCountKey entry.1 ::
+        (List.range (memberships.filter fun members => members.contains entry.1).length).map
+          fun offset => DurableIndex.seqItemKey entry.1 (entry.2 + 1 + offset)
   -- Rows down to 48 bits first; every prefix when what they open does not verify.
   let shallow ← match ← DurableReceiverIO.indexRows transport start.height keys 48 with
     | .error message => return .error message
     | .ok rows => pure rows
   lap "index rows read"
-  if let .error _ := checkIndex shallow {} start.indexRoot (start.height + 1) (records.zip carriedIndex) then
+  match checkIndex shallow {} start.indexRoot (start.height + 1) (records.zip carriedIndex) [] with
+  | .ok wrote => holdSuffixRows transport start.height wrote
+  | .error _ =>
     let deep ← match ← DurableReceiverIO.indexRows transport start.height keys with
       | .error message => return .error message
       | .ok rows => pure rows
-    if let .error message := checkIndex deep {} start.indexRoot (start.height + 1) (records.zip carriedIndex) then
-      return .error message
+    match checkIndex deep {} start.indexRoot (start.height + 1) (records.zip carriedIndex) [] with
+    | .error message => return .error message
+    | .ok wrote => holdSuffixRows transport start.height wrote
   lap "index"
   let headChain := chains.getLast?.getD start.chain
   match replayed : replay rootBytes start.held.toSnapshot records with
@@ -1528,6 +1566,9 @@ def Opening.reader (transport : DurableReceiverIO.Transport) (rootBytes : List U
     atHeight := DurableHistoryStore.atHeight transport opening.head
     byTx := DurableHistoryStore.byTx transport opening.head
     spent := DurableHistoryStore.spent transport opening.head
+    lastWrite := DurableHistoryStore.lastWrite transport opening.head
+    seqCount := DurableHistoryStore.seqCount transport opening.head
+    seqItem := DurableHistoryStore.seqItem transport opening.head
     range := DurableHistoryStore.range transport opening.head
     stateAt := DurableHistoryStore.stateAt transport rootBytes opening.served.seed opening.head }
 
@@ -1659,10 +1700,8 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       let recordBytes := DurableCheckpointCodec.recordFrame.encode record
       let chain := DurableCheckpointCodec.chainStep served.chain record
       -- The index after the head (MAC-verified, carried by the head's tag), this record's keys inserted.
-      let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
-      let (indexAfter, indexWrites) ← match ← DurableReceiverIO.withIndexRows transport served.height keys
-          (fun rows => DurableIndex.IndexRows.apply rows head.indexRoot height intent.transactionId
-            intent.nullifiers) with
+      let (indexAfter, indexWrites) ← match ← DurableReceiverIO.applyIndex transport served.height
+          head.indexRoot height record with
         | .ok result => pure result
         | .error message => return .unavailable message
       -- The root cache advanced by the record's slot writes.

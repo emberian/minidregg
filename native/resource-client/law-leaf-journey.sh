@@ -266,7 +266,7 @@ op S "PROVISION (OPERATOR step 6): factory observation + a funded account owned 
   "$MINI" workspace --action provision --dir "$R/sponsor" --name newcomer --holder "$B_SUBJ" \
     --funding 1000 --account-predicate "$RUN/permit-all.json" --factory-ref factory
 op S "DELIVER (OPERATOR step 6): the birth context into newcomer's HOME/provision/" \
-  install -D -m 0600 "$R/sponsor/provisions/newcomer/birth-context.json" "$RUN/homes/newcomer/provision/birth-context.json"
+  bash -c "install -d -m 0700 '$RUN/homes/newcomer/provision' && install -m 0600 '$R/sponsor/provisions/newcomer/birth-context.json' '$RUN/homes/newcomer/provision/birth-context.json'"
 step S 0 newcomer "init mini.key $B_SUBJ"
 step S 0 sponsor 'create board declared {"type":"all","predicates":[]} 2'
 step S 0 sponsor "delegate grant-b board $B_SUBJ observe,mutate 50000"

@@ -265,7 +265,7 @@ cat >"$EVIDENCE/delegate-intent.json" <<EOF
  "expectedTargetRoot":"$TARGET_ROOT","parentId":"61","target":"600",
  "child":{"id":"63","root":"61","parent":"61","issuer":"5",
    "holder":{"type":"subject","subject":"8"},"targets":["600"],
-   "verbs":["observe","mutate"],"maxCost":"50000",
+   "verbs":["observe","mutate"],"perRequestBytes":"50000",
    "notBefore":"10","notAfter":"1000","issuerEpoch":"2",
    "policyId":"600","policyEpoch":"0","ancestors":["61"],"channels":[]}}}},
  "grants":[{"kind":"object","target":"600","capability":"61"}]}

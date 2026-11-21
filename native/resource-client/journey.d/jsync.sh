@@ -30,8 +30,9 @@ if [ -e "$DIR" ]; then echo "jsync: refusing to reuse $DIR" >&2; exit 2; fi
 mkdir -p "$DIR"
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 W="$DIR/world"
-# A run claim's proofWork charge is checked against the owner capability's
-# maxCost (the template ownerBudget), so this world's budget covers 10^6 steps.
+# The owner capability's perRequestBytes (the template ownerBudget) is a ceiling on a signed
+# request's encoded size. A run's funding credits are a Book debit and are not judged against
+# it; this world's ceiling is simply far above any request the step signs.
 NEWPARTICIPANT_OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-1000000000000} \
   sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \
   >"$DIR/bootstrap.out" 2>"$DIR/bootstrap.err" || { echo "jsync: bootstrap failed: $(tail -1 "$DIR/bootstrap.err")" >&2; exit 1; }
@@ -107,7 +108,7 @@ open(path("permit-all.json"), "w").write('{"type":"all","predicates":[]}\n')
 
 GATE = bytes.fromhex("c5855fc892e320581c76e196c804d3be8ae1e3301354f7b1212bcc716ea2133b0836046ec846c321e247c3cab4003d5d98dc5919dd0b6cc1dd167cac0a")
 def slot(f, k): return {"target": "0", "slot": f"resource/field/{f}/before", "key": k, "type": "nat"}
-ABI = {"version": "2", "arm": "2", "fuel": "1000000000", "sample": [slot(2, "n"), slot(3, "c")],
+ABI = {"version": "5", "evaluator": "nock", "context": "live", "arm": "2", "fuel": "1000000000", "sample": [slot(2, "n"), slot(3, "c")],
        "outputs": [{"key": "c", "target": "0", "field": "3", "type": "nat"}], "libraries": []}
 d = subprocess.run([HOST, CONFIG, "describe"], capture_output=True, text=True)
 budget = json.loads(d.stdout).get("nockFSync") if d.returncode == 0 else None
@@ -120,7 +121,7 @@ r = mini("--action", "create", "--dir", WS, "--name", "gate", "--storage", "nock
 LAW = {"type": "any", "predicates": [{"type": "not", "predicate": {"type": "eq", "slot": "request/verb", "value": "2"}},
                                      {"type": "ran", "program": PID}]}
 for name, n in (("at", 99997), ("over", 99998)):
-    mini("--action", "create", "--dir", WS, "--name", name, "--storage", "declared", "--predicate", path("permit-all.json"))
+    mini("--action", "create", "--dir", WS, "--name", name, "--storage", "declared", "--predicate", path("permit-all.json"), "--fields", "2-3")
     rc, _ = submit("fill-" + name, scalar(name, [create(2, n), create(3, 0)]))
     json.dump({"type": "minidregg-workspace-proposal-v1", "action": "install-policy", "name": name, "predicate": LAW},
               open(path(f"law-{name}.json"), "w"))

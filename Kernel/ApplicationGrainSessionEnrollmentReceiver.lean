@@ -112,7 +112,7 @@ prefix, the enrollment admitted on the light ground of its keys
 `receiveServed`, the readback handed to `adopt`. -/
 def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
     (light : NativeHostLight.Light config) (bytes : List UInt8)
-    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ _ => pure ()) :
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) :
     IO (LightResult config light.opening) := do
   let some ingress := ingressCodec.decode bytes
     | return .rejected "noncanonical enrollment ingress"
@@ -148,7 +148,7 @@ def receiveServed (config : Config) (transport : DurableReceiverIO.Transport)
               match ← DurableServed.receiveServed transport ResourceBirthCodec.rootBytes light.opening
                   (ApplicationGrainSessionEnrollmentIntent.intent checked) with
               | .appended kind next height entry entryExact _ moved =>
-                  adopt next _ moved none
+                  adopt next _ moved
                   return .confirmed ⟨ingress, grounded, issue, event22, issueReceipt, ticketResource,
                     checked, fresh, kind, next, height, entry, entryExact⟩
               -- Recorded between the lookup and the append: the lookup answers on retry.

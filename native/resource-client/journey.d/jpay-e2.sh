@@ -421,7 +421,7 @@ host.stop()
 
 child = {"id": str(NEW_OBSERVER_CAP), "root": str(PAY_CONTROL), "parent": str(PAY_CONTROL), "issuer": "5",
          "holder": {"type": "subject", "subject": str(NEW_OBSERVER)}, "targets": [PAY_CELL],
-         "verbs": ["observePayment"], "maxCost": "50000", "notBefore": "10", "notAfter": "10000",
+         "verbs": ["observePayment"], "perRequestBytes": "50000", "notBefore": "10", "notAfter": "10000",
          "issuerEpoch": "2", "policyId": PAY_CELL, "policyEpoch": "0", "ancestors": [str(PAY_CONTROL)],
          "channels": []}
 rc, r, tail = mini_submit("delegate", {"subject": str(EMBER), "nonce": fresh(), "purpose": {"type": "prepare", "draft": {

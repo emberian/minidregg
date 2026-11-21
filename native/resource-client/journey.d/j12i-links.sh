@@ -148,7 +148,7 @@ row srcy-links installed "$(outcome srcy-links)" "$(tail -1 "$D/srcy-links.err" 
 # E: a room invite (observe) on X; references to every document, srcy's under the X grant
 # (so the oracle tries it and is refused, exactly as the old fold was).
 jq -n --arg r "$E_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"roomx",
-  recipient:$r,verbs:["observe"],maxCost:"50000",room:true}' >"$D/req/invite-x.json"
+  recipient:$r,verbs:["observe"],perRequestBytes:"50000",room:true}' >"$D/req/invite-x.json"
 publish invite-x "$SPONSOR_WS" "$D/req/invite-x.json"
 run e-import-roomx "$MINI" workspace --action import --dir "$EW" --name roomx \
   --from-ref "$SPONSOR_WS/proposals/invite-x/recipient-reference.json"; ok e-import-roomx
@@ -173,7 +173,7 @@ row oracle-e "$o" "$v" "fold over E's readable pages vs the view ($(cat "$D/orac
 
 # Control: A delegates srcy (observe) to E; the same reader now sees srcy's link.
 jq -n --arg r "$E_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"srcy",
-  recipient:$r,verbs:["observe"],maxCost:"50000"}' >"$D/req/grant-srcy.json"
+  recipient:$r,verbs:["observe"],perRequestBytes:"50000"}' >"$D/req/grant-srcy.json"
 publish grant-srcy "$SPONSOR_WS" "$D/req/grant-srcy.json"
 rm -f "$EW/refs/srcy.json"
 run e-import-srcy2 "$MINI" workspace --action import --dir "$EW" --name srcy \

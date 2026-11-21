@@ -15,7 +15,36 @@
 # AUDIT_LEVELS (default none): at each of these levels, while the Host is
 # stopped for the reopen, a cold `mini audit` (the genesis re-admission of every
 # record) runs first and is timed into audit.tsv (AUDIT_TIMEOUT seconds, default
-# 3600; rc 124 is a timeout), with the box load when it started.
+# 3600; rc 124 is a timeout), with the box load when it started. It leaves its anchor
+# (`--anchor-out`); from the second audit level on, `mini audit --from` the level before's
+# anchor runs on the same closed Store and is timed beside it (kind `from-LEVEL`; rc 90 = it
+# accepted but did not end on the genesis audit's anchor).
+#
+# The Store has a tail bound (the fixture's L, MINI_TAIL_BOUND, default 256): writes more than L
+# records past the certified head are refused. Every CERTIFY_EVERY turns (default 32) the
+# operator's certifier runs, as the deployed timer does: `mini checkpoint --action certify` in
+# the sponsor's workspace under the factory controller capability, which certifies the head when
+# the uncertified tail is at least CERTIFY_MIN_TAIL (default 64) and skips otherwise. Each run
+# is logged to certify.log; a certify that fails ends the run. A confirmed certify is a record
+# of its own, so chain_index runs ahead of the turn number.
+#
+# A certify must not make the session's later turns slower (the Host holds its index trie across
+# a record it wrote through any path). certify-cost.tsv has one row per confirmed certify with 8
+# turns on each side: the median submit time of the 8 turns before it and of the 8 after. The
+# run exits 3 when an after-median exceeds CERTIFY_COST_FACTOR (default 2) times its
+# before-median plus 0.03 s; the evidence is complete either way.
+#
+# Neither the Store's bytes per record nor a cold open may rise with the count. growth-bounds.tsv
+# compares the first and the last reopen level (it needs two): the Store bytes each record added
+# between them against the bytes per record up to the first (which carry the fixture's own
+# records, so the allowance is generous), and against STORE_BYTES_PER_RECORD_MAX (default
+# 20000); and the last level's first receipt against the first level's. The run exits 4 when
+# the later bytes per record exceed STORE_GROWTH_FACTOR (default 1.5) times the earlier or the
+# maximum, or the later first receipt exceeds OPEN_GROWTH_FACTOR (default 2) times the earlier
+# plus 0.5 s or FIRST_RECEIPT_MAX seconds (default 5).
+#
+# A reopened Host runs with its open and phase traces on (serve-LEVEL.log), so a slow first
+# receipt names its phase.
 #
 # usage: fleet-sign-growth.sh HOST MINI STORE VERIFIER NEW_PRIVATE_DIRECTORY [TURNS] [LEVELS]
 set -eu
@@ -60,11 +89,22 @@ export MINI_FLEET_HOME="$ROOT/fleet-home" MINI_FLEET_SPONSOR="$FIX/sponsor"
 "$MINI" fleet-sign join --profile bravo --fund 100 >"$OUT/join-bravo.json" 2>"$OUT/join-bravo.stderr"
 B=$(jq -er .cell "$OUT/join-bravo.json")
 
+CONTROL=$(jq -er .factoryControllerCapability "$FIX/genesis.json")
+certify() {
+  printf '== after turn %s: ' "$1" >>"$OUT/certify.log"
+  "$MINI" checkpoint --action certify --workspace "$FIX/sponsor" --control "$CONTROL" \
+    --min-tail "${CERTIFY_MIN_TAIL:-64}" >>"$OUT/certify.log" 2>&1 \
+    || { echo "certify failed after turn $1 (see $OUT/certify.log)" >&2; exit 1; }
+  printf '\n' >>"$OUT/certify.log"
+  if tail -n 2 "$OUT/certify.log" | grep -q '"certified":{'; then printf '%s\n' "$1" >>"$OUT/certified-turns"; fi
+}
+
 T="$OUT/turns.tsv"; R="$OUT/reopen.tsv"
 printf 'n\tverb\tseconds\treplans\tchain_index\tsubmit_s\tload1\tstore_bytes\n' >"$T"
 printf 'level\tchain_index\tserve_ready_s\tfirst_receipt_s\tstore_bytes\n' >"$R"
 A="$OUT/audit.tsv"
-printf 'level\tchain_index\trc\taudit_s\tload1\n' >"$A"
+printf 'level\tkind\tchain_index\trc\taudit_s\tload1\n' >"$A"
+AUDIT_ANCHOR= AUDIT_ANCHOR_LEVEL=
 n=1
 while [ "$n" -le "$TURNS" ]; do
   f="$OUT/turns/$n.json"
@@ -83,6 +123,7 @@ while [ "$n" -le "$TURNS" ]; do
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$verb" "$(elapsed "$t0" "$t1")" \
     "$(jq -r .replans "$f")" "$(jq -r .chain_index "$f")" "$submit_s" \
     "$(cut -d' ' -f1 /proc/loadavg)" "$(du -sb "$FIX/store" | cut -f1)" >>"$T"
+  [ $((n % ${CERTIFY_EVERY:-32})) -ne 0 ] || certify "$n"
   for level in $LEVELS; do
     if [ "$n" -eq "$level" ]; then
       TX=$(jq -er .turn_hash "$f")
@@ -93,13 +134,25 @@ while [ "$n" -le "$TURNS" ]; do
           t0=$(now)
           rc=0
           timeout "${AUDIT_TIMEOUT:-3600}" "$MINI" audit --host "$HOST" --config "$CONFIG" \
-            >"$OUT/audit-$level.out" 2>"$OUT/audit-$level.err" || rc=$?
-          printf '%s\t%s\t%s\t%s\t%s\n' "$level" "$(jq -r .chain_index "$f")" "$rc" \
+            --anchor-out "$OUT/audit-$level.anchor" >"$OUT/audit-$level.out" 2>"$OUT/audit-$level.err" || rc=$?
+          printf '%s\tgenesis\t%s\t%s\t%s\t%s\n' "$level" "$(jq -r .chain_index "$f")" "$rc" \
             "$(elapsed "$t0" "$(now)")" "$load" >>"$A"
+          if [ -n "$AUDIT_ANCHOR" ]; then
+            load=$(cut -d' ' -f1 /proc/loadavg)
+            t0=$(now)
+            rc=0
+            timeout "${AUDIT_TIMEOUT:-3600}" "$MINI" audit --host "$HOST" --config "$CONFIG" \
+              --from "$AUDIT_ANCHOR" --anchor-out "$OUT/audit-$level.from.anchor" \
+              >"$OUT/audit-$level.from.out" 2>"$OUT/audit-$level.from.err" || rc=$?
+            [ "$rc" -ne 0 ] || cmp -s "$OUT/audit-$level.anchor" "$OUT/audit-$level.from.anchor" || rc=90
+            printf '%s\tfrom-%s\t%s\t%s\t%s\t%s\n' "$level" "$AUDIT_ANCHOR_LEVEL" "$(jq -r .chain_index "$f")" "$rc" \
+              "$(elapsed "$t0" "$(now)")" "$load" >>"$A"
+          fi
+          AUDIT_ANCHOR="$OUT/audit-$level.anchor"; AUDIT_ANCHOR_LEVEL=$level
         fi
       done
       t0=$(now)
-      serve "$FIX/public/serve-$level.log"
+      MINI_OPEN_TIMING=1 MINIDREGG_HOST_TRACE=1 serve "$FIX/public/serve-$level.log"
       t1=$(now)
       "$MINI" fleet-sign receipt --profile alpha --turn-hash "$TX" >"$OUT/reopen-$level.json" 2>"$OUT/reopen-$level.stderr"
       t2=$(now)
@@ -115,4 +168,44 @@ printf 'control-fresh-topic\tsend\t%s\t%s\t%s\n' "$(elapsed "$t0" "$(now)")" \
   "$(jq -r .replans "$OUT/control-fresh-topic.json")" "$(jq -r .chain_index "$OUT/control-fresh-topic.json")" >>"$T"
 stop_server
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$CONFIG" >"$OUT/binaries.sha256"
+touch "$OUT/certified-turns"
+BOUNDS=0
+awk -F'\t' -v growth="${STORE_GROWTH_FACTOR:-1.5}" -v most="${STORE_BYTES_PER_RECORD_MAX:-20000}" \
+  -v opening="${OPEN_GROWTH_FACTOR:-2}" -v slowest="${FIRST_RECEIPT_MAX:-5}" '
+  FNR > 1 { rows++; if (rows == 1) { c0 = $2; o0 = $4; b0 = $5 } c1 = $2; o1 = $4; b1 = $5 }
+  END {
+    printf "measure\tfirst_level\tlast_level\tverdict\n"
+    if (rows < 2 || c1 <= c0 || c0 <= 0) exit 0
+    early = b0 / c0; late = (b1 - b0) / (c1 - c0)
+    verdict = (late > growth * early || late > most) ? "over" : "ok"; if (verdict == "over") bad = 1
+    printf "store_bytes_per_record\t%.0f\t%.0f\t%s\n", early, late, verdict
+    verdict = (o1 > opening * o0 + 0.5 || o1 > slowest) ? "over" : "ok"; if (verdict == "over") bad = 1
+    printf "first_receipt_s\t%.3f\t%.3f\t%s\n", o0, o1, verdict
+    exit bad ? 4 : 0
+  }' "$R" >"$OUT/growth-bounds.tsv" || BOUNDS=4
+awk -F'\t' -v factor="${CERTIFY_COST_FACTOR:-2}" '
+  function median(from, to,   k, m, i, j, t, v) {
+    m = 0
+    for (k = from; k <= to; k++) if (k in submit) v[++m] = submit[k]
+    if (m < 8) return -1
+    for (i = 2; i <= m; i++) { t = v[i]; for (j = i - 1; j >= 1 && v[j] > t; j--) v[j + 1] = v[j]; v[j + 1] = t }
+    return (v[4] + v[5]) / 2
+  }
+  FNR == NR { certified[++count] = $1; next }
+  FNR > 1 && $1 ~ /^[0-9]+$/ && $6 != "NA" { submit[$1 + 0] = $6 + 0 }
+  END {
+    printf "certify_turn\tbefore_median_s\tafter_median_s\tverdict\n"
+    for (c = 1; c <= count; c++) {
+      turn = certified[c]; before = median(turn - 7, turn); after = median(turn + 1, turn + 8)
+      if (before < 0 || after < 0) continue
+      verdict = (after > factor * before + 0.03) ? "slower" : "ok"
+      if (verdict == "slower") bad = 1
+      printf "%s\t%.3f\t%.3f\t%s\n", turn, before, after, verdict
+    }
+    exit bad ? 3 : 0
+  }' "$OUT/certified-turns" "$T" >"$OUT/certify-cost.tsv" || {
+    echo "a certify made later turns slower (see $OUT/certify-cost.tsv)" >&2; printf '%s\n' "$OUT"; exit 3; }
+[ "$BOUNDS" -eq 0 ] || {
+  echo "Store bytes per record or the cold open rose with the count (see $OUT/growth-bounds.tsv)" >&2
+  printf '%s\n' "$OUT"; exit 4; }
 printf '%s\n' "$OUT"
