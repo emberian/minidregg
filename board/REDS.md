@@ -1,21 +1,23 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `0f9749114269` (Merge origin/main into main (integrating zkml, vfhe & selvage certificate waves)). Round finished 2026-11-21T14:02Z.
-green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-0f974911`.
+Tip: `a6466ed72287` (builder: REDS.md for 0f9749114269 (7 red)). Round finished 2026-11-21T14:03Z.
+green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-a6466ed7`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| ratchets | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| rust-check | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| host | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| consent | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
+| ratchets | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| rust-check | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| host | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
 
-Suspect commits since green (`git log 053906870674..0f9749114269`), newest first; owners are the seats whose
+Suspect commits since green (`git log 053906870674..a6466ed72287`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `a6466ed7` builder: REDS.md for 0f9749114269 (7 red) (owner: build-loop)
+- `0ce6d9cf` checkpiont
 - `0f974911` Merge origin/main into main (integrating zkml, vfhe & selvage certificate waves)
 - `c83b3193` theory, compiler & prover: add VerifiedAstTransducer, PolicyAstTransducerEmit, and private-witness T
 - `2bc33e18` selvage & prover: add ContentCertificate/CertificateComposition (P1-P8, W4) and native Gruen EinSumc
@@ -54,5 +56,3 @@ Suspect commits since green (`git log 053906870674..0f9749114269`), newest first
 - `61a6d4ff` builder: REDS.md for f264ccfdc2bc (1 red) (owner: build-loop)
 - `f264ccfd` ratchet(bytes-repr): 5033, one binder of the private index node type (owner: bytes-repr)
 - `3fbeca33` docs(append-growth): the product row as its own section; what compiled outside the umbrella; what is
-- `362c2f8d` docs: what an append costs as history grows, measured and attributed
-- `c0f71943` directory: `used` is the set's characteristic function; the private index evaluates a path once (owner: apps-hermes, read-path)
