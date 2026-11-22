@@ -1,21 +1,28 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `a6466ed72287` (builder: REDS.md for 0f9749114269 (7 red)). Round finished 2026-11-21T14:03Z.
-green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-a6466ed7`.
+Tip: `13a1fe191b73` (feat(selvage,assurance,compiler): add GoldilocksDregg180Bridge, StreamingGdnCarryIvc, and ). Round finished 2026-11-22T18:22Z.
+green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-13a1fe19`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
-| ratchets | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| rust-check | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| host | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| consent | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| rust | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| pack | did not run | - | yes | suspects' owners | an earlier stage stopped the build |
-| umbrella-tree | did not run | - | yes | build-loop | an earlier stage stopped the build |
+| umbrella-tree | running | - | no | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 053906870674..a6466ed72287`), newest first; owners are the seats whose
+Suspect commits since green (`git log 053906870674..13a1fe191b73`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `13a1fe19` feat(selvage,assurance,compiler): add GoldilocksDregg180Bridge, StreamingGdnCarryIvc, and PocketFpga
+- `83edecc7` feat(assurance,prover): add SensoryRoiZeroKnowledge and Wave-9 wearable SHE engines (wetware duress,
+- `c283ffae` theory & assurance: add WetwareSafetyAndDuress (BT.1702 flicker/stego scrubber & duress vault) and W
+- `1ca93a7b` compiler & prover: finalize Tower256AlgebraicCert [ZCF23] BaseFold conformance vectors & zero-leakag
+- `5b6b7a90` theory: add ExactKktClearingCert (quarried fhIR-0 FHSDD001 & FHQPB001 exact SDD-to-PSD, primal-dual 
+- `1cb756f8` theory: add Tower256EndianBridge (G4 32B LE vs BE Fan-Paar GF(2^256) ring/field/Frobenius wire isomo
+- `b54b6bfe` assurance & prover: add PerSlotKeyConfinement (G7 / CAP-21 / L8 / F4 per-slot X25519+ML-KEM-768 conf
+- `ffd55433` theory & prover: add PqSelectiveBiscuit (D8 / CAP-01,10,12 root-isolated PQ ZkBiscuit selective-disc
+- `7fc423c6` assurance: add LightClientAndViewLens (25-variant ViewNode Frustum non-interference & S11 Electra/Co
+- `a6ce8854` theory: add Char2Degree4SumcheckHvzk (G8/#125 char-2 degree-4 sumcheck & BaseFold round-polynomial H
+- `f8c905fb` umbrellas & testdata: wire Wave-7A AFP/zkML/WHIR/Tower256AlgebraicCert modules into Theory, Selvage,
+- `a869a8e7` checkpoint
+- `ac619c1a` builder: REDS.md for a6466ed72287 (7 red) (owner: build-loop)
 - `a6466ed7` builder: REDS.md for 0f9749114269 (7 red) (owner: build-loop)
 - `0ce6d9cf` checkpiont
 - `0f974911` Merge origin/main into main (integrating zkml, vfhe & selvage certificate waves)
@@ -43,16 +50,15 @@ Suspect commits since green (`git log 053906870674..a6466ed72287`), newest first
 - `960f9637` docs: GENERALIZE.md maps the n >= 3f+1 safety generalization and its boundary
 - `19648384` kernel(simplex): receiver _at theorems take the caller's chain, as upstream's verifiedCommit_attribu
 - `c5ae228a` kernel(simplex): generic simplex safety for any roster n >= 3f+1 via explicit thresholds
-- `5d607d21` builder: REDS.md for b8286f686194 (1 red) (owner: build-loop)
-- `b8286f68` docs(append-growth): the store phase by part before and after; what an append still pays; the order 
-- `c9fa8ec7` append: the Store's node insert prepared once, the NODES file written as a byte array, the holder a 
-- `bbd08400` builder: REDS.md for 07eeb91a239d (1 red) (owner: build-loop)
-- `07eeb91a` holder: the invariant of the held index rows, stated and proved; the hand-over only for an installed
-- `ef8e5a8c` receiver: an append hands the index rows it wrote to the holder; the holder is keyed by Store root
-- `39689195` builder: REDS.md for 9ac0425a6f14 (1 red) (owner: build-loop)
-- `9ac0425a` ratchet(bytes-repr): 5056, the index rows compiled twins repeat existing list types (owner: bytes-repr)
-- `346b2d1a` docs(append-growth): the index after its compiled half; what the root still costs; the holder hand-o
-- `539bc23c` index: the journal index's compiled half, by `@[csimp]` equalities to the stated definitions
-- `61a6d4ff` builder: REDS.md for f264ccfdc2bc (1 red) (owner: build-loop)
-- `f264ccfd` ratchet(bytes-repr): 5033, one binder of the private index node type (owner: bytes-repr)
-- `3fbeca33` docs(append-growth): the product row as its own section; what compiled outside the umbrella; what is
+
+## Flatness (published, does not gate `green`)
+
+| row | verdict | metric | early | late | ratio | bound | owner |
+|---|---|---|---|---|---|---|---|
+| flatness-submit | PASS | submit_cpu_ms | 0.173 | 0.195 | 1.131 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 26.626 | 60.321 | 2.266 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.139 | 0.167 | 1.207 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 14.522 | 57.751 | 3.977 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.415 | 0.315 | 0.760 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 304.598 | 147.602 | 0.485 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-13a1fe19/flatness.log | - | - | - | - | host-execution, store-retained |
