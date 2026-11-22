@@ -480,3 +480,411 @@ fn bench_60fps_scrubber_and_vault() {
     let ms = t0.elapsed().as_secs_f64() * 1e3 / iters as f64;
     println!("BENCH vault N={n}: create+unlock {ms:.3} ms per vault");
 }
+
+// ---------------------------------------------------------------------------
+// Part C: RFC 7693 BLAKE2b & RFC 9106 Argon2id (v = 0x13)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn blake2b_rfc7693_kats_and_boundaries() {
+    let c = conformance();
+    for v in c["blake2b_kats"].as_array().unwrap() {
+        let input = v["input_ascii"].as_str().unwrap().as_bytes();
+        let out_len = v["out_len"].as_u64().unwrap() as usize;
+        let want = v["output_hex"].as_str().unwrap();
+        let got = blake2b(out_len, input).unwrap();
+        assert_eq!(hex(&got), want, "blake2b KAT {}", v["name"]);
+    }
+    // Exact 128-byte, 129-byte, and 256-byte block-boundary checks (Python hashlib.blake2b oracle).
+    let b128: Vec<u8> = (0u8..128).collect();
+    assert_eq!(
+        hex(&blake2b(64, &b128).unwrap()),
+        "2319e3789c47e2daa5fe807f61bec2a1a6537fa03f19ff32e87eecbfd64b7e0e8ccff439ac333b040f19b0c4ddd11a61e24ac1fe0f10a039806c5dcc0da3d115"
+    );
+    let b129: Vec<u8> = (0u8..129).collect();
+    assert_eq!(
+        hex(&blake2b(64, &b129).unwrap()),
+        "f59711d44a031d5f97a9413c065d1e614c417ede998590325f49bad2fd444d3e4418be19aec4e11449ac1a57207898bc57d76a1bcf3566292c20c683a5c4648f"
+    );
+    let b256: Vec<u8> = (0u16..256).map(|i| i as u8).collect();
+    assert_eq!(
+        hex(&blake2b(32, &b256).unwrap()),
+        "39a7eb9fedc19aabc83425c6755dd90e6f9d0c804964a1f4aaeea3b9fb599835"
+    );
+    assert_eq!(blake2b(0, b"x"), Err(DuressError::InvalidBlake2bOutLen(0)));
+    assert_eq!(blake2b(65, b"x"), Err(DuressError::InvalidBlake2bOutLen(65)));
+}
+
+#[test]
+fn argon2id_rfc9106_section_5_3_official_kat() {
+    let c = conformance();
+    let k = &c["argon2id_rfc9106_kat"];
+    let pwd = vec![k["password_byte"].as_u64().unwrap() as u8; k["password_len"].as_u64().unwrap() as usize];
+    let salt = vec![k["salt_byte"].as_u64().unwrap() as u8; k["salt_len"].as_u64().unwrap() as usize];
+    let secret = vec![k["secret_byte"].as_u64().unwrap() as u8; k["secret_len"].as_u64().unwrap() as usize];
+    let ad = vec![k["ad_byte"].as_u64().unwrap() as u8; k["ad_len"].as_u64().unwrap() as usize];
+    let params = Argon2idParams {
+        m_kib: k["m_kib"].as_u64().unwrap() as u32,
+        t_passes: k["t_passes"].as_u64().unwrap() as u32,
+        p_lanes: k["p_lanes"].as_u64().unwrap() as u32,
+    };
+    let tag_len = k["tag_len"].as_u64().unwrap() as usize;
+    let tag = argon2id_raw(&pwd, &salt, &secret, &ad, params, tag_len).unwrap();
+    assert_eq!(hex(&tag), k["tag_hex"].as_str().unwrap());
+}
+
+#[test]
+fn argon2id_edge_cases_and_parameter_validation() {
+    let salt = [0x42u8; 16];
+    // Multi-block H' output lengths (65, 96, 100 bytes) & segment_length > 128 (m=2048, p=1 => seg_len=512),
+    // plus non-aligned memory (m=39, p=4 => m'=32 != m), pinned against OpenSSL 4.1.0 `openssl kdf ARGON2ID`.
+    let p_big_seg = Argon2idParams { m_kib: 2048, t_passes: 2, p_lanes: 1 };
+    let t65 = argon2id_raw(b"pw", &salt, b"", b"", p_big_seg, 65).unwrap();
+    let t96 = argon2id_raw(b"pw", &salt, b"", b"", p_big_seg, 96).unwrap();
+    let t100 = argon2id_raw(b"pw", &salt, b"", b"", p_big_seg, 100).unwrap();
+    assert_eq!(
+        hex(&t65),
+        "750f63dde0ca50658cacec37ddcef760739e23012f4cebfb7d2d6f76e589eee1e63ddd5c6939f484ecbd8689344102c9a6ea69e5c2308d0002ca03839f9f95a5ef"
+    );
+    assert_eq!(
+        hex(&t96),
+        "8fe8489b485e9fa0302dd89549c90daa7835d10e0d8b6cf6a064b568cbd6f64135bc50b8ef608d64d8e5b8e524f0e44c5c2d9f55ef47f715e4bf35282938d04e1f3d020ad0823702ebee0de2234fe3aaac22289dec0c48477f2741cefaa4b746"
+    );
+    assert_eq!(
+        hex(&t100),
+        "30753667b67a20d19cbed98862c4b4cbd721ac9a11eaed0bb6acfbdd818d92b5a494bda6a78feb4e34b5474f2e86e401c28b92b0873e41adc84f1e206da02e0f519607a8cb6792916aab6413db1f1d4f3d3f826a6904d3084418decf3334c86b3a77dfc7"
+    );
+    let p_unaligned = Argon2idParams { m_kib: 39, t_passes: 3, p_lanes: 4 };
+    let t_unaligned = argon2id_raw(b"test", &[0x07u8; 16], b"", b"", p_unaligned, 32).unwrap();
+    assert_eq!(hex(&t_unaligned), "f9bafa6a4330d7fb4240e663509041468d155d9a6914295d0d6dc26328dd62db");
+
+    // Invalid parameter rejections.
+    assert!(argon2id_raw(b"p", &salt, b"", b"", Argon2idParams { m_kib: 32, t_passes: 1, p_lanes: 0 }, 32).is_err());
+    assert!(argon2id_raw(b"p", &salt, b"", b"", Argon2idParams { m_kib: 32, t_passes: 0, p_lanes: 1 }, 32).is_err());
+    assert!(argon2id_raw(b"p", &salt, b"", b"", Argon2idParams { m_kib: 31, t_passes: 1, p_lanes: 4 }, 32).is_err());
+    assert!(argon2id_raw(b"p", &[1u8; 7], b"", b"", ARGON2ID_TEST_FAST, 32).is_err());
+    assert!(argon2id_raw(b"p", &salt, b"", b"", ARGON2ID_TEST_FAST, 3).is_err());
+
+    // Vault root derivation sensitivity.
+    let vs1 = [0x11u8; VOLUME_SALT_BYTES];
+    let vs2 = [0x12u8; VOLUME_SALT_BYTES];
+    let r1 = derive_vault_root_argon2id(b"decoy-pass", &vs1, ARGON2ID_TEST_FAST).unwrap();
+    let r2 = derive_vault_root_argon2id(b"decoy-pass", &vs1, ARGON2ID_TEST_FAST).unwrap();
+    let r3 = derive_vault_root_argon2id(b"sovereign-pass", &vs1, ARGON2ID_TEST_FAST).unwrap();
+    let r4 = derive_vault_root_argon2id(b"decoy-pass", &vs2, ARGON2ID_TEST_FAST).unwrap();
+    assert_eq!(r1, r2);
+    assert_ne!(r1, r3);
+    assert_ne!(r1, r4);
+}
+
+// ---------------------------------------------------------------------------
+// Part D: MultiSnapshotDuressVault (write-all oblivious K-snapshot vault)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn multi_snapshot_disjoint_slot_maps_and_k_epoch_lifecycle() {
+    let mut drbg = XofDrbg::new(b"ms-lifecycle");
+    let mut vs = [0u8; VOLUME_SALT_BYTES];
+    drbg.fill(&mut vs);
+    let dk = derive_vault_root_argon2id(b"decoy-passphrase", &vs, ARGON2ID_TEST_FAST).unwrap();
+    let sk = derive_vault_root_argon2id(b"sovereign-passphrase", &vs, ARGON2ID_TEST_FAST).unwrap();
+
+    let n = 16;
+    let d_slots = derive_decoy_slots(&dk, &vs, n, 3).unwrap();
+    let s_slots = derive_sovereign_slots_disjoint(&sk, &vs, n, &d_slots, 3).unwrap();
+    assert_eq!(d_slots.len(), 3);
+    assert_eq!(s_slots.len(), 3);
+    for &ds in &d_slots {
+        assert!(!s_slots.contains(&ds), "I_decoy and I_sov must be strictly disjoint");
+    }
+    // Exact full-capacity boundary and over-capacity error.
+    let s_full = derive_sovereign_slots_disjoint(&sk, &vs, n, &d_slots, n - 3).unwrap();
+    assert_eq!(s_full.len(), n - 3);
+    assert_eq!(
+        derive_sovereign_slots_disjoint(&sk, &vs, n, &d_slots, n - 2),
+        Err(DuressError::InsufficientSlots { requested: n - 2, available: n - 3 })
+    );
+
+    let d_init = vec![
+        (d_slots[0], body("decoy:note-0")),
+        (d_slots[1], body("decoy:note-1")),
+        (d_slots[2], body("decoy:note-2")),
+    ];
+    let s_init = vec![
+        (s_slots[0], body("SOVR:seed-A")),
+        (s_slots[1], body("SOVR:seed-B")),
+    ];
+
+    let mut dual = MultiSnapshotDuressVault::create_dual(
+        vs, n, &dk, &d_init, &sk, &s_init, &mut |b| drbg.fill(b),
+    )
+    .unwrap();
+    let mut decoy_only = MultiSnapshotDuressVault::create_decoy_only(
+        vs, n, &dk, &d_init, &mut |b| drbg.fill(b),
+    )
+    .unwrap();
+
+    assert_eq!(dual.epoch, 0);
+    assert_eq!(dual.unlock(&dk), d_init);
+    assert_eq!(dual.unlock(&sk), s_init);
+    assert_eq!(dual.to_bytes().len(), MultiSnapshotDuressVault::image_len(n));
+    assert_eq!(dual.to_bytes().len(), decoy_only.to_bytes().len());
+    assert_eq!(MultiSnapshotDuressVault::from_bytes(&dual.to_bytes(), n).unwrap(), dual);
+
+    // Run K = 5 commits, capturing every historical snapshot in BOTH worlds.
+    let mut dual_snaps = vec![dual.clone()];
+    let mut decoy_snaps = vec![decoy_only.clone()];
+    for step in 1..=5u64 {
+        let d_write = vec![(d_slots[0], body(&format!("decoy:note-0-e{step}")))];
+        let s_write = if step == 2 {
+            vec![(s_slots[0], body("SOVR:seed-A-updated"))]
+        } else if step == 4 {
+            // Dynamically allocate third sovereign slot outside I_decoy.
+            vec![(s_slots[2], body("SOVR:seed-C-new"))]
+        } else {
+            vec![]
+        };
+        dual.commit_dual(&dk, &d_write, &sk, &s_write, &mut |b| drbg.fill(b)).unwrap();
+        decoy_only.commit_decoy_only(&dk, &d_write, &mut |b| drbg.fill(b)).unwrap();
+        assert_eq!(dual.epoch, step);
+        assert_eq!(decoy_only.epoch, step);
+        // Decoy view matches identically at every epoch.
+        assert_eq!(dual.unlock(&dk), decoy_only.unlock(&dk));
+        dual_snaps.push(dual.clone());
+        decoy_snaps.push(decoy_only.clone());
+    }
+
+    // Final sovereign state preserved + updated across all 5 epochs.
+    let final_sov = dual.unlock(&sk);
+    assert_eq!(final_sov.len(), 3);
+    assert!(final_sov.contains(&(s_slots[0], body("SOVR:seed-A-updated"))));
+    assert!(final_sov.contains(&(s_slots[1], body("SOVR:seed-B"))));
+    assert!(final_sov.contains(&(s_slots[2], body("SOVR:seed-C-new"))));
+
+    // Write-all forensic invariant: at EVERY epoch transition e -> e+1, ALL N blocks changed
+    // in BOTH dual and decoy-only worlds (zero static non-decoy blocks to diff!).
+    for w in dual_snaps.windows(2) {
+        for i in 0..n {
+            assert_ne!(w[0].slots[i], w[1].slots[i], "dual epoch {}->{}: slot {i} stayed static", w[0].epoch, w[1].epoch);
+        }
+    }
+    for w in decoy_snaps.windows(2) {
+        for i in 0..n {
+            assert_ne!(w[0].slots[i], w[1].slots[i], "decoy epoch {}->{}: slot {i} stayed static", w[0].epoch, w[1].epoch);
+        }
+    }
+}
+
+#[test]
+fn multi_snapshot_coercion_shred_and_collision_guards() {
+    let mut drbg = XofDrbg::new(b"ms-guards");
+    let mut vs = [0u8; VOLUME_SALT_BYTES];
+    drbg.fill(&mut vs);
+    let dk = derive_vault_root_argon2id(b"decoy", &vs, ARGON2ID_TEST_FAST).unwrap();
+    let sk = derive_vault_root_argon2id(b"sov", &vs, ARGON2ID_TEST_FAST).unwrap();
+    let wrong = derive_vault_root_argon2id(b"wrong", &vs, ARGON2ID_TEST_FAST).unwrap();
+
+    // Identical roots & colliding slots rejected.
+    assert_eq!(
+        MultiSnapshotDuressVault::create_dual(vs, 8, &dk, &[(0, body("d"))], &dk, &[(1, body("s"))], &mut |b| drbg.fill(b)),
+        Err(DuressError::IdenticalRoots)
+    );
+    assert_eq!(
+        MultiSnapshotDuressVault::create_dual(vs, 8, &dk, &[(2, body("d"))], &sk, &[(2, body("s"))], &mut |b| drbg.fill(b)),
+        Err(DuressError::SlotCollision(2))
+    );
+
+    let mut v = MultiSnapshotDuressVault::create_dual(
+        vs, 8, &dk, &[(1, body("d1"))], &sk, &[(5, body("s5"))], &mut |b| drbg.fill(b),
+    )
+    .unwrap();
+
+    // commit_dual rejects writing sovereign into a decoy slot, unowned decoy slot, or identical roots.
+    assert_eq!(
+        v.commit_dual(&dk, &[], &sk, &[(1, body("collide"))], &mut |b| drbg.fill(b)),
+        Err(DuressError::SlotCollision(1))
+    );
+    assert_eq!(
+        v.commit_dual(&dk, &[(5, body("unowned"))], &sk, &[], &mut |b| drbg.fill(b)),
+        Err(DuressError::NotOwned(5))
+    );
+    assert_eq!(
+        v.commit_dual(&dk, &[], &dk, &[], &mut |b| drbg.fill(b)),
+        Err(DuressError::IdenticalRoots)
+    );
+    // Wrong root rejected before wiping (both decoy root and mistyped sovereign root!).
+    assert_eq!(v.commit_decoy_only(&wrong, &[], &mut |b| drbg.fill(b)), Err(DuressError::NoOwnedSlots));
+    assert_eq!(
+        v.commit_dual(&dk, &[], &wrong, &[], &mut |b| drbg.fill(b)),
+        Err(DuressError::NoOwnedSovereignSlots)
+    );
+    assert_eq!(v.unlock(&sk), vec![(5, body("s5"))], "mistyped sovereign root must never wipe compartment");
+
+    // Empty compartment & oversized geometry / rollback guards.
+    assert_eq!(
+        MultiSnapshotDuressVault::create_decoy_only(vs, 8, &dk, &[], &mut |b| drbg.fill(b)),
+        Err(DuressError::EmptyCompartment)
+    );
+    assert_eq!(
+        MultiSnapshotDuressVault::from_bytes(&[], usize::MAX / SLOT_BYTES + 1),
+        Err(DuressError::TooManySlots(usize::MAX / SLOT_BYTES + 1))
+    );
+    assert_eq!(
+        MultiSnapshotDuressVault::from_bytes_min_epoch(&v.to_bytes(), 8, 1),
+        Err(DuressError::EpochRollback { got: 0, min_epoch: 1 })
+    );
+    assert_eq!(MultiSnapshotDuressVault::from_bytes_min_epoch(&v.to_bytes(), 8, 0).unwrap(), v);
+
+    // Epoch overflow guard: refuse to wrap epoch (which would reuse pads!).
+    let mut maxed = v.clone();
+    maxed.epoch = u64::MAX;
+    assert_eq!(maxed.commit_decoy_only(&dk, &[], &mut |b| drbg.fill(b)), Err(DuressError::EpochOverflow));
+    assert_eq!(maxed.commit_dual(&dk, &[], &sk, &[], &mut |b| drbg.fill(b)), Err(DuressError::EpochOverflow));
+
+    // Honest coercion availability trade-off: pure commit_decoy_only (without sk) overwrites all
+    // non-decoy slots with fresh chaff, shredding the unmounted sovereign slot while preserving
+    // decoy state and multi-snapshot deniability. Re-initializing requires init_sovereign_compartment.
+    let before = v.clone();
+    v.commit_decoy_only(&dk, &[(1, body("d1-under-duress"))], &mut |b| drbg.fill(b)).unwrap();
+    assert_eq!(v.epoch, 1);
+    assert_eq!(v.unlock(&dk), vec![(1, body("d1-under-duress"))]);
+    assert!(v.unlock(&sk).is_empty(), "pure decoy-only write-all commit shreds unmounted sovereign slots");
+    for i in 0..8 {
+        assert_ne!(before.slots[i], v.slots[i]);
+    }
+    v.init_sovereign_compartment(&dk, &sk, &[(6, body("s6-restored"))], &mut |b| drbg.fill(b)).unwrap();
+    assert_eq!(v.epoch, 2);
+    assert_eq!(v.unlock(&dk), vec![(1, body("d1-under-duress"))]);
+    assert_eq!(v.unlock(&sk), vec![(6, body("s6-restored"))]);
+}
+
+/// `#tooth` (`tooth_single_slot_update_leaks_across_two_snapshots`):
+/// v1 in-place updates leave non-touched chaff static, so `snap_0[i] != snap_1[i]` outside
+/// `I_decoy` exposes the exact hidden sovereign slot index and count.
+#[test]
+fn tooth_v1_single_slot_update_leaks_across_two_snapshots() {
+    let (mut v1_decoy_only, dk0, _) = build(b"v1-2snap", false);
+    let snap0_d = v1_decoy_only.clone();
+    v1_decoy_only.rewrite_owned(&dk0, 1, &body("decoy:edited")).unwrap();
+    let decoy_ids: Vec<usize> = v1_decoy_only.unlock(&dk0).iter().map(|x| x.0).collect();
+    let changed_decoy_world: Vec<usize> = (0..N)
+        .filter(|&i| !decoy_ids.contains(&i) && snap0_d.slots[i] != v1_decoy_only.slots[i])
+        .collect();
+    assert!(changed_decoy_world.is_empty(), "v1 decoy-only leaves all non-decoy slots static");
+
+    // Now in the dual world, user edits decoy slot 1 AND sovereign slot 3 in place:
+    let (mut v1_dual, dk, sk) = build(b"v1-2snap", true);
+    let snap0_s = v1_dual.clone();
+    v1_dual.rewrite_owned(&dk, 1, &body("decoy:edited")).unwrap();
+    v1_dual.rewrite_owned(&sk, 3, &body("SOVR:updated-secret")).unwrap();
+    let changed_dual_world: Vec<usize> = (0..N)
+        .filter(|&i| !decoy_ids.contains(&i) && snap0_s.slots[i] != v1_dual.slots[i])
+        .collect();
+    assert_eq!(changed_dual_world, vec![3], "v1 2-snapshot diff pinpoints exact modified sovereign slot!");
+}
+
+/// `#tooth` (`tooth_reused_epoch_pad_leaks_across_two_snapshots`):
+/// sealing twice at the SAME epoch reuses the exact pad (identical ciphertext for unchanged body;
+/// direct plaintext XOR for changed body).
+#[test]
+fn tooth_reused_epoch_pad_leaks() {
+    let vs = [0x77u8; VOLUME_SALT_BYTES];
+    let sk = derive_vault_root_argon2id(b"sov", &vs, ARGON2ID_TEST_FAST).unwrap();
+    let b1 = body("SOVR:secret-v1");
+    let b2 = body("SOVR:secret-v2");
+    let c1_e0 = seal_slot_epoch(&sk, &vs, 0, 3, &b1);
+    let c1_e0_reused = seal_slot_epoch(&sk, &vs, 0, 3, &b1);
+    let c2_e0_reused = seal_slot_epoch(&sk, &vs, 0, 3, &b2);
+    assert_eq!(c1_e0, c1_e0_reused, "same epoch leaks equality");
+    for k in 0..BODY_BYTES {
+        assert_eq!(c1_e0[k] ^ c2_e0_reused[k], b1[k] ^ b2[k], "same epoch leaks plaintext XOR");
+    }
+    // Advancing epoch 0 -> 1 breaks both leaks.
+    let c1_e1 = seal_slot_epoch(&sk, &vs, 1, 3, &b1);
+    assert_ne!(c1_e0, c1_e1);
+}
+
+#[test]
+fn multi_snapshot_byte_and_diff_statistics() {
+    let mut drbg = XofDrbg::new(b"ms-stats");
+    let mut vs = [0u8; VOLUME_SALT_BYTES];
+    drbg.fill(&mut vs);
+    let dk = derive_vault_root_argon2id(b"decoy-stat", &vs, ARGON2ID_TEST_FAST).unwrap();
+    let sk = derive_vault_root_argon2id(b"sov-stat", &vs, ARGON2ID_TEST_FAST).unwrap();
+    let n = 16;
+    let mut v = MultiSnapshotDuressVault::create_dual(
+        vs,
+        n,
+        &dk,
+        &[(0, body("d0")), (1, body("d1"))],
+        &sk,
+        &[(4, body("s4")), (9, body("s9"))],
+        &mut |b| drbg.fill(b),
+    )
+    .unwrap();
+    let mut hist_sov_xor = [0u64; 256];
+    let mut hist_chaff_xor = [0u64; 256];
+    let mut prev = v.slots.clone();
+    for e in 1..=200u64 {
+        v.commit_dual(&dk, &[(0, body(&format!("d0-{e}")))], &sk, &[], &mut |b| drbg.fill(b)).unwrap();
+        for i in 2..n {
+            let h = if i == 4 || i == 9 { &mut hist_sov_xor } else { &mut hist_chaff_xor };
+            for k in 0..SLOT_BYTES {
+                h[(prev[i][k] ^ v.slots[i][k]) as usize] += 1;
+            }
+        }
+        prev = v.slots.clone();
+    }
+    let chi = |h: &[u64; 256]| {
+        let total: u64 = h.iter().sum();
+        let expected = total as f64 / 256.0;
+        h.iter().map(|&c| (c as f64 - expected).powi(2) / expected).sum::<f64>()
+    };
+    let (cs, cc) = (chi(&hist_sov_xor), chi(&hist_chaff_xor));
+    println!("multi-snapshot epoch-diff chi2(sovereign)={cs:.1} chi2(chaff)={cc:.1} (255 dof; p=1e-6 crit ≈ 370)");
+    assert!(cs < 370.0 && cc < 370.0);
+}
+
+#[test]
+fn bench_argon2id_and_multi_snapshot_vault() {
+    let release = !cfg!(debug_assertions);
+    let vs = [0x99u8; VOLUME_SALT_BYTES];
+    // Always verify RFC 9106 §4 64 MiB default profile in --release; use fast profile in debug.
+    let params = if release { ARGON2ID_WEARABLE_DEFAULT } else { ARGON2ID_TEST_FAST };
+    let t0 = Instant::now();
+    let dk = derive_vault_root_argon2id(b"wearable-decoy-passphrase", &vs, params).unwrap();
+    let kdf_ms = t0.elapsed().as_secs_f64() * 1e3;
+    println!(
+        "BENCH Argon2id (m={} KiB, t={}, p={}): {:.2} ms [{}]",
+        params.m_kib,
+        params.t_passes,
+        params.p_lanes,
+        kdf_ms,
+        if release { "release" } else { "debug" }
+    );
+    let sk = derive_vault_root_argon2id(b"wearable-sov-passphrase", &vs, ARGON2ID_TEST_FAST).unwrap();
+    let mut drbg = XofDrbg::new(b"bench-ms");
+    let n = 64;
+    let mut v = MultiSnapshotDuressVault::create_dual(
+        vs,
+        n,
+        &dk,
+        &[(0, body("d0")), (1, body("d1"))],
+        &sk,
+        &[(10, body("s10")), (20, body("s20"))],
+        &mut |b| drbg.fill(b),
+    )
+    .unwrap();
+    let commits = if release { 100 } else { 5 };
+    let t1 = Instant::now();
+    for c in 0..commits {
+        v.commit_dual(&dk, &[(0, body(&format!("d0-{c}")))], &sk, &[(10, body(&format!("s10-{c}")))], &mut |b| drbg.fill(b))
+            .unwrap();
+    }
+    let commit_ms = t1.elapsed().as_secs_f64() * 1e3 / commits as f64;
+    println!(
+        "BENCH MultiSnapshotDuressVault N={n} commit_dual (write-all 64 slots): {:.3} ms/commit [{}]",
+        commit_ms,
+        if release { "release" } else { "debug" }
+    );
+}

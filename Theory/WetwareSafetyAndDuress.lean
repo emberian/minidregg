@@ -16,17 +16,23 @@ guard's internal state:
   Harding three-flash line). `scrubber_kills_subthreshold_stego` / `scrubber_zero_covert_capacity`:
   the emitted video, audio and release cadence are a function of the high bits and the cadence
   bucket alone, so an LSB or sub-tick-jitter channel through the lens carries `0` bits.
-* **Part B `DuressChaffVolume`.** A fixed-geometry `N`-slot vault: every slot is one element of
-  an additive group (deployed: 64-byte XOR blocks, `body ‖ tag` masked by a cSHAKE256 pad).
-  `duress_adversary_cannot_distinguish_sovereign_from_chaff`: for every distinguisher that
-  holds the duress key and the whole image, the acceptance count with sovereign slots present
-  equals the count with pure chaff (pointwise-equal view distributions: TVD `= 0`).
+* **Part B `DuressChaffVolume` & `MultiSnapshotDuressVault`.** A fixed-geometry `N`-slot vault
+  where every slot is one element of an additive group (deployed: 64-byte XOR blocks,
+  `(body ‖ tag) XOR pad`). Single-snapshot `duress_adversary_cannot_distinguish_sovereign_from_chaff`
+  is upgraded to `multi_snapshot_trace_indistinguishable` over arbitrary `K`-epoch snapshot
+  traces (`Fin K → Fin N → S`): when every commit advances the epoch and rewrites all `N`
+  slots with disjoint decoy/sovereign slot maps (`∀ e, Disjoint D (Sov e)`), the joint
+  distribution over all `K` snapshots is pointwise identical (`TVD = 0`) to a decoy-only
+  write-all trace. `#tooth` `tooth_single_slot_update_leaks_across_two_snapshots` refutes
+  v1 in-place single-slot updates under 2-snapshot forensics.
 
 Modeling boundary (stated, not hidden): Part B is the *ideal-XOF* model — the sovereign root's
-pads are an independent uniform vector. With deployed cSHAKE256 the advantage is bounded by a
-PRF advantage against cSHAKE256 under the sovereign root; that reduction is not mechanised here.
+per-epoch pads are an independent uniform matrix `Fin K → Fin N → S`. With deployed
+Argon2id-rooted cSHAKE256 pads the advantage is bounded by a PRF advantage against cSHAKE256
+under the sovereign root; that reduction is not mechanised here.
 The `#tooth` theorems show each premise is load-bearing (no quantization ⇒ LSBs leak; no
-hold-off ⇒ a 15 Hz strobe passes; variable-length tables or root-unseparated pads ⇒ advantage).
+hold-off ⇒ a 15 Hz strobe passes; variable-length tables, root-unseparated pads, static chaff
+across two snapshots, reused epoch pads, or colliding decoy/sovereign slots ⇒ advantage).
 -/
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Mathlib.Algebra.BigOperators.Group.Finset.Piecewise
@@ -641,6 +647,165 @@ theorem tooth_shared_salt_kdf_breaks :
       (univ.filter fun U : S2 => headerTest 0 U = true).card = 2 := by
   decide
 
+/-! ## §11b. `MultiSnapshotDuressVault`: `K`-epoch write-all oblivious duress trace -/
+
+section MultiSnapshot
+variable {K N : Nat} {S : Type*} [AddCommGroup S] [Fintype S]
+
+/-- `K`-epoch real trace (`Fin K → Fin N → S`). Every commit advances the epoch and rewrites
+all `N` slots: sovereign slots `i ∈ Sov e` hold `sealS e i + R e i`, decoy slots `i ∈ D` hold
+`decoy e i`, and remaining slots hold fresh uniform chaff `R e i`. Checking `i ∈ Sov e` first
+makes `∀ e, Disjoint D (Sov e)` load-bearing for both deniability and decoy unlock. -/
+def realTrace (D : Finset (Fin N)) (Sov : Fin K → Finset (Fin N))
+    (decoy sealS R : Fin K → Fin N → S) : Fin K → Fin N → S :=
+  fun e i => if i ∈ Sov e then sealS e i + R e i else if i ∈ D then decoy e i else R e i
+
+/-- `K`-epoch decoy-only write-all trace: at every epoch `e`, decoy slots hold `decoy e i` and
+every non-decoy slot `i ∉ D` is overwritten with fresh uniform chaff `U e i`. -/
+def chaffTrace (D : Finset (Fin N)) (decoy U : Fin K → Fin N → S) : Fin K → Fin N → S :=
+  fun e i => if i ∈ D then decoy e i else U e i
+
+def multiSovShift (Sov : Fin K → Finset (Fin N)) (sealS : Fin K → Fin N → S) :
+    (Fin K → Fin N → S) ≃ (Fin K → Fin N → S) :=
+  Equiv.piCongrRight fun e => Equiv.piCongrRight fun i =>
+    Equiv.addLeft (if i ∈ Sov e then sealS e i else 0)
+
+omit [Fintype S] in
+theorem realTrace_eq_chaffTrace_shift (D : Finset (Fin N)) (Sov : Fin K → Finset (Fin N))
+    (hdisj : ∀ e, Disjoint D (Sov e)) (decoy sealS R : Fin K → Fin N → S) :
+    realTrace D Sov decoy sealS R = chaffTrace D decoy (multiSovShift Sov sealS R) := by
+  funext e i
+  simp only [realTrace, chaffTrace, multiSovShift, Equiv.piCongrRight_apply]
+  by_cases hS : i ∈ Sov e
+  · have hD : i ∉ D := fun hd => Finset.disjoint_left.mp (hdisj e) hd hS
+    simp [hS, hD]
+  · by_cases hD : i ∈ D <;> simp [hS, hD]
+
+/-- **Multi-snapshot TVD = 0 (ideal-XOF model).** Across any sequence of `K` historical flash
+snapshots `(S_0, …, S_{K-1})`, any distinguisher `A` holding the duress root and all `K`
+snapshots simultaneously accepts the dual-sovereign write-all trace with the exact same count
+as the decoy-only write-all trace, whenever `∀ e, Disjoint D (Sov e)`. -/
+theorem multi_snapshot_trace_indistinguishable
+    (D : Finset (Fin N)) (Sov : Fin K → Finset (Fin N))
+    (hdisj : ∀ e, Disjoint D (Sov e)) (decoy sealS : Fin K → Fin N → S)
+    (A : (Fin K → Fin N → S) → Bool) :
+    (univ.filter fun R => A (realTrace D Sov decoy sealS R) = true).card =
+      (univ.filter fun U => A (chaffTrace D decoy U) = true).card :=
+  Finset.card_equiv (multiSovShift Sov sealS)
+    (by intro R; simp [realTrace_eq_chaffTrace_shift D Sov hdisj])
+
+/-- Pointwise-equal joint trace distributions across all `K` snapshots. -/
+theorem multi_snapshot_joint_distribution_equal [DecidableEq S]
+    (D : Finset (Fin N)) (Sov : Fin K → Finset (Fin N))
+    (hdisj : ∀ e, Disjoint D (Sov e)) (decoy sealS v : Fin K → Fin N → S) :
+    (univ.filter fun R => realTrace D Sov decoy sealS R = v).card =
+      (univ.filter fun U => chaffTrace D decoy U = v).card := by
+  simpa using multi_snapshot_trace_indistinguishable D Sov hdisj decoy sealS
+    (fun w => decide (w = v))
+
+end MultiSnapshot
+
+/-- Every decoy slot opens under `(dk, salt e i)` at every epoch `e` when `Disjoint D (Sov e)`. -/
+theorem multi_snapshot_duress_unlock_correct {K N : Nat} {KKey Salt B : Type*}
+    [AddCommGroup B] [DecidableEq B]
+    (sc : SlotScheme KKey Salt B) (dk : KKey) (salt : Fin K → Fin N → Salt)
+    (D : Finset (Fin N)) (Sov : Fin K → Finset (Fin N)) (hdisj : ∀ e, Disjoint D (Sov e))
+    (mD : Fin K → Fin N → B) (sealS R : Fin K → Fin N → B × B)
+    (e : Fin K) (i : Fin N) (hi : i ∈ D) :
+    sc.open_ dk (salt e i)
+      (realTrace D Sov (fun e j => sc.seal dk (salt e j) (mD e j)) sealS R e i) = some (mD e i) := by
+  have hns : i ∉ Sov e := Finset.disjoint_left.mp (hdisj e) hi
+  simp only [realTrace, hns, hi, ↓reduceIte, SlotScheme.open_seal]
+
+/-- Every sovereign slot opens under `(sk, salt e i)` at every epoch `e`. -/
+theorem multi_snapshot_sovereign_unlock_correct {K N : Nat} {KKey Salt B : Type*}
+    [AddCommGroup B] [DecidableEq B]
+    (sc : SlotScheme KKey Salt B) (sk : KKey) (salt : Fin K → Fin N → Salt)
+    (D : Finset (Fin N)) (Sov : Fin K → Finset (Fin N))
+    (decoy : Fin K → Fin N → B × B) (mS : Fin K → Fin N → B)
+    (e : Fin K) (i : Fin N) (hi : i ∈ Sov e) :
+    sc.open_ sk (salt e i)
+      (realTrace D Sov decoy (fun e j => (mS e j, sc.mac sk (salt e j) (mS e j)))
+        (fun e j => sc.xof sk (salt e j)) e i) = some (mS e i) := by
+  simp only [realTrace, hi, ↓reduceIte]
+  exact sc.open_seal sk (salt e i) (mS e i)
+
+/-- Premise inhabitation witness for `multi_snapshot_trace_indistinguishable` (`K=2, N=4`). -/
+theorem multi_snapshot_premises_inhabited :
+    ∃ (D : Finset (Fin 4)) (Sov : Fin 2 → Finset (Fin 4)),
+      D.Nonempty ∧ (∀ e, (Sov e).Nonempty) ∧ (∀ e, Disjoint D (Sov e)) :=
+  ⟨D2, fun _ => {2}, by decide, by decide, by decide⟩
+
+/-! ### `#tooth`s for multi-snapshot forensics (`[REFUTED: v1 in-place update]`, epoch reuse, collision) -/
+
+/-- v1 decoy-only 2-snapshot trace: decoy slots update, untouched chaff stays static (`U i`). -/
+def v1StaticChaffTrace (decoy0 decoy1 U : Fin 4 → S2) : Fin 2 → Fin 4 → S2 :=
+  fun e i => if i ∈ D2 then (if e = 0 then decoy0 i else decoy1 i) else U i
+
+/-- v1 in-place sovereign update on slot `2 ∉ D2` between snapshots `0` and `1`, static chaff elsewhere. -/
+def v1InPlaceSovTrace (decoy0 decoy1 U : Fin 4 → S2) (s0 s1 r0 r1 : S2) : Fin 2 → Fin 4 → S2 :=
+  fun e i =>
+    if i ∈ D2 then (if e = 0 then decoy0 i else decoy1 i)
+    else if i = 2 then (if e = 0 then s0 + r0 else s1 + r1)
+    else U i
+
+/-- 2-snapshot forensic diff test: did any non-decoy slot change between snapshot 0 and 1? -/
+def nonDecoyChanged (tr : Fin 2 → Fin 4 → S2) : Bool :=
+  decide (∃ i : Fin 4, i ∉ D2 ∧ tr 0 i ≠ tr 1 i)
+
+/-- `#tooth` (`[REFUTED: v1 in-place single-slot update under 2-snapshot forensics]`):
+with static chaff, `nonDecoyChanged` fires on `0` decoy-only traces for EVERY chaff vector `U`,
+yet fires on `12 / 16` (`3/4`) of in-place sovereign updates even with fresh independent pads
+`(r0, r1)` (and `16 / 16` if the pad is reused with `s0 ≠ s1`). -/
+theorem tooth_single_slot_update_leaks_across_two_snapshots
+    (decoy0 decoy1 : Fin 4 → S2) :
+    (∀ U : Fin 4 → S2, nonDecoyChanged (v1StaticChaffTrace decoy0 decoy1 U) = false) ∧
+      (univ.filter fun p : S2 × S2 =>
+        nonDecoyChanged (v1InPlaceSovTrace decoy0 decoy1 (fun _ => (0, 0)) (0, 0) (1, 0) p.1 p.2) = true).card = 12 := by
+  refine ⟨fun U => ?_, ?_⟩
+  · simp only [nonDecoyChanged, v1StaticChaffTrace, decide_eq_false_iff_not, not_exists, not_and, not_not]
+    intro x hx; simp [hx]
+  · have h : ∀ p : S2 × S2,
+        nonDecoyChanged (v1InPlaceSovTrace decoy0 decoy1 (fun _ => (0, 0)) (0, 0) (1, 0) p.1 p.2) =
+          decide ((0, 0) + p.1 ≠ (1, 0) + p.2) := by
+      intro p
+      simp only [nonDecoyChanged, v1InPlaceSovTrace, decide_eq_decide]
+      constructor
+      · rintro ⟨i, hi, hne⟩
+        by_cases h2 : i = 2
+        · subst h2; simpa [hi] using hne
+        · simp [hi, h2] at hne
+      · intro hne
+        exact ⟨2, by decide, by simpa [D2] using hne⟩
+    simp only [h]
+    decide
+
+/-- `#tooth`: if a write-all vault fails to advance `epoch` (reusing the same pad vector `r` at
+epochs `0` and `1` in `realTrace`), then for an unchanged sovereign payload at slot `1`,
+`tr 0 1 = tr 1 1` holds on `16/16` (`100%`) of reused-pad traces vs `64/256` (`25%`) of fresh
+`chaffTrace` pairs — advantage `3/4`. -/
+theorem tooth_reused_epoch_pad_leaks_across_two_snapshots :
+    (univ.filter fun r : Fin 2 → S2 =>
+      let tr : Fin 2 → Fin 2 → S2 := realTrace ({0} : Finset (Fin 2)) (fun _ : Fin 2 => {1})
+        (fun _ _ => (0, 0)) (fun _ _ => (1, 0)) (fun _ i => r i)
+      decide (tr 0 1 = tr 1 1) = true).card = 16 ∧
+    (univ.filter fun U : Fin 2 → Fin 2 → S2 =>
+      let tr := chaffTrace ({0} : Finset (Fin 2)) (fun _ _ => (0, 0)) U
+      decide (tr 0 1 = tr 1 1) = true).card = 64 := by
+  decide
+
+/-- `#tooth`: dropping `Disjoint D (Sov e)` (`Sov 0 = {0}` collides with `D = {0}`) breaks
+deniability (`4/16` vs `16/16`, advantage `3/4`) and clobbers decoy `open_` (second conjunct). -/
+theorem tooth_slot_collision_breaks_deniability :
+    ((univ.filter fun R : Fin 1 → Fin 2 → S2 =>
+      decide (realTrace ({0} : Finset (Fin 2)) (fun _ => {0}) (fun _ _ => (0, 0)) (fun _ _ => (1, 0)) R 0 0 = (0, 0)) = true).card = 4 ∧
+     (univ.filter fun U : Fin 1 → Fin 2 → S2 =>
+      decide (chaffTrace ({0} : Finset (Fin 2)) (fun _ _ => (0, 0)) U 0 0 = (0, 0)) = true).card = 16) ∧
+    (let sc : SlotScheme Unit Unit (Fin 2) := ⟨fun _ _ => (0, 0), fun _ _ m => m⟩
+     sc.open_ () () (realTrace ({0} : Finset (Fin 2)) (fun _ : Fin 1 => {0})
+       (fun _ _ => sc.seal () () 0) (fun _ _ => (1, 0)) (fun _ _ => (0, 0)) 0 0) = none) := by
+  decide
+
 /-! ## §12. Conformance vectors (mirrored byte-exactly by `prover/src/wetware_duress_guard.rs`) -/
 
 /-- A safe canonical triangle (half-period 12, slope 16): passes unchanged. -/
@@ -751,5 +916,23 @@ def emitted (p : ScrubParams) (p0 : Nat) (x : Nat → Nat) (n : Nat) : List Nat 
 #guard_msgs (whitespace := lax) in #print axioms tooth_variable_geometry_breaks
 /-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.tooth_shared_salt_kdf_breaks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms tooth_shared_salt_kdf_breaks
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.realTrace_eq_chaffTrace_shift' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms realTrace_eq_chaffTrace_shift
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.multi_snapshot_trace_indistinguishable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms multi_snapshot_trace_indistinguishable
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.multi_snapshot_joint_distribution_equal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms multi_snapshot_joint_distribution_equal
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.multi_snapshot_duress_unlock_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms multi_snapshot_duress_unlock_correct
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.multi_snapshot_sovereign_unlock_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms multi_snapshot_sovereign_unlock_correct
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.multi_snapshot_premises_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms multi_snapshot_premises_inhabited
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.tooth_single_slot_update_leaks_across_two_snapshots' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tooth_single_slot_update_leaks_across_two_snapshots
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.tooth_reused_epoch_pad_leaks_across_two_snapshots' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tooth_reused_epoch_pad_leaks_across_two_snapshots
+/-- info: 'Minidregg.Theory.WetwareSafetyAndDuress.tooth_slot_collision_breaks_deniability' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tooth_slot_collision_breaks_deniability
 
 end Minidregg.Theory.WetwareSafetyAndDuress
