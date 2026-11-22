@@ -122,7 +122,7 @@ private def emitOneAlgVector (name : String) (seed : Nat) (t : DfaTable)
      ("expected_run_state", toJson (t.run w)),
      ("expected_run_count", toJson (Dfaops.runCount t w))]
 
-private def emitAlgebraicConformanceVectors : IO Unit := do
+def emitAlgebraicConformanceVectors : IO Unit := do
   -- `noSkDash` has `4 * 256 = 1024 = 2^10`, `countAB` has `3 * 256 = 768 <= 2^10`, so `cubeDim = 10`, `friEll = 12`, `friQueries = 2`.
   let v1 ← emitOneAlgVector "alg_accept_true_no_sk" 1 noSkDash "ok=1" (.accept true) 10 12 2
   let v2 ← emitOneAlgVector "alg_accept_false_has_sk" 2 noSkDash "xsk-" (.accept false) 10 12 2
@@ -134,9 +134,10 @@ private def emitAlgebraicConformanceVectors : IO Unit := do
      ("vectors", Json.arr #[v1, v2, v3, v4])]
   IO.FS.writeFile "prover/testdata/tower256_algebraic_cert_conformance.json" (doc.pretty ++ "\n")
 
-#eval emitAlgebraicConformanceVectors
-
 /-- info: 'Minidregg.Compiler.Tower256AlgebraicCertConformance.conformance_alg_degree_schedule_pin' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms conformance_alg_degree_schedule_pin
 
 end Minidregg.Compiler.Tower256AlgebraicCertConformance
+
+def main : IO Unit :=
+  Minidregg.Compiler.Tower256AlgebraicCertConformance.emitAlgebraicConformanceVectors
