@@ -106,10 +106,24 @@ private theorem extend_installs {root : List UInt8 → Theory.TypedAuthorization
   advance_installs (loaded.extend_snapshot r ▸ r.executed)
     (by simp [Loaded.extend, DurableReceiver.Image.append]) loaded.track held derived charge admit
 
-/-- A real seed, full executor acceptance and a derived World step at height one
-inhabit the exact append premise, including the encoded record and installed tag. -/
-theorem host_submit_is_step_inhabited :
-    Nonempty (Appended ResourceBirthCodec.rootBytes initial freshRetirementIntent) := by
+/-- The height-one record's canonical MAC input. The authenticated index starts empty. -/
+private def firstCarried : DurableHistory.Carried :=
+  let record := DurableReceiver.IntentRecord.ofIntent freshRetirementIntent
+  let bytes := DurableCheckpointCodec.recordFrame.encode record
+  let extended := initial.extend ready
+  let leaf := DurableHistory.leafDigest 1 bytes extended.chain extended.worldRoot
+  let rows := DurableIndex.IndexRows.changes 1 record.transactionId record.nullifiers ++
+    DurableIndex.IndexRows.cellChanges 1 (record.writes.map DataWrite.cellId) ++
+    DurableIndex.IndexRows.seqChanges 1 ((Theory.JournalSequences.distinct (JournalIndex.sequences record)).map (·, 0))
+  ⟨extended.worldRoot, extended.chain, DurableHistory.frontierDigest 1 (DurableHistory.Frontier.push [] leaf),
+    DurableIndex.rootOf (DurableIndex.modelApply [] rows)⟩
+
+/-- Full executor acceptance and a derived World step inhabit the exact append premise.
+The stored height-one trailer verifies to the installed physical root. -/
+theorem host_submit_authenticated_witness (key : DurableCheckpointCodec.MacKey) :
+    ∃ append : Appended ResourceBirthCodec.rootBytes initial freshRetirementIntent,
+      DurableHistory.verifyTagged key 1 append.entry.tag firstCarried.chain firstCarried.frontier
+        firstCarried.indexRoot = .ok append.next.worldRoot := by
   have derivedOk : (Turn.ofIntent DeployedBridge.bridge DeployedHistory.history initialWorld
       freshRetirementIntent).isOk = true := by decide +kernel
   cases derived : Turn.ofIntent DeployedBridge.bridge DeployedHistory.history initialWorld
@@ -145,10 +159,33 @@ theorem host_submit_is_step_inhabited :
     have installed : extended.track.world? = some after :=
       extend_installs initial ready initial_held derived charge admits
     let entry : Entry := ⟨(DurableCheckpointCodec.recordFrame.encode
-      (DurableReceiver.IntentRecord.ofIntent freshRetirementIntent)).toByteArray, []⟩
-    exact ⟨⟨{ extended with headTag := some entry.tag },
+      (DurableReceiver.IntentRecord.ofIntent freshRetirementIntent)).toByteArray, DurableHistory.trailer key 1 firstCarried⟩
+    refine ⟨⟨{ extended with headTag := some entry.tag },
       rfl, entry, DurableHistory.toByteArray_toList _, rfl,
-      ⟨initialWorld, t, after, initial_held, installed, derived, charge, admits⟩⟩⟩
+      ⟨initialWorld, t, after, initial_held, installed, derived, charge, admits⟩⟩, ?_⟩
+    exact DurableHistory.verifyTagged_trailer key 1 firstCarried
+
+private def witnessKey : DurableCheckpointCodec.MacKey := ⟨List.replicate 32 0x31, by simp⟩
+
+theorem host_submit_is_step_inhabited :
+    Nonempty (Appended ResourceBirthCodec.rootBytes initial freshRetirementIntent) := by
+  obtain ⟨append, _⟩ := host_submit_authenticated_witness witnessKey
+  exact ⟨append⟩
+
+/-- Altering one receipt's digest gives a concrete failed root correspondence. -/
+theorem host_submit_forged_root_inhabited :
+    ∃ append : Appended ResourceBirthCodec.rootBytes initial freshRetirementIntent,
+      (⟨append.next.worldRoot.value + 1⟩ : Theory.TypedAuthorization.Digest) ≠
+        WorldRoot.deployedRoot (entriesOf append.next.image append.next.snapshot append.next.chain) := by
+  obtain ⟨append⟩ := host_submit_is_step_inhabited
+  exact ⟨append, host_submit_forged_root append fun eq =>
+    Nat.succ_ne_self _ (congrArg Theory.TypedAuthorization.Digest.value eq)⟩
+
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.SubmitWitness.host_submit_authenticated_witness' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms host_submit_authenticated_witness
+
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.SubmitWitness.host_submit_forged_root_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms host_submit_forged_root_inhabited
 
 /-- info: 'Minidregg.Kernel.HostRefinesWorld.SubmitWitness.host_submit_is_step_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms host_submit_is_step_inhabited
