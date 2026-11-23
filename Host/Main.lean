@@ -1776,13 +1776,6 @@ def sessionWalked (config : NativeHost.Config)
       state.set (some current)
       return walked
 
-def sessionSetWalked {config : NativeHost.Config}
-    (state : IO.Ref (Option (NativeHostSession.Session config)))
-    {oldTarget : NativeHost.Durable} (old : NativeHostReplay.Verified config oldTarget)
-    (readback : NativeHostReplay.ExactReadback config old) : IO Unit := do
-  if let some current ← state.get then
-    state.set (some (← current.rememberReadbackVia old readback))
-
 /-- The full image of the already refreshed session (`NativeHostSession.materialize`):
 the one it holds, or the Store opened in full now and kept. Only operations not yet
 ported to the light opening ask for it. -/
@@ -3435,8 +3428,8 @@ def serveFrame (config : NativeHost.Config)
     else if operation == 26 then
       dispatchLifecycleClaimSubmitSession config state payload.toList tracked
     else
-      let payload := payload.toList
       let started ← IO.monoMsNow
+      let payload := payload.toList
       let claims := (ratedClaims operation payload).getD []
       match ← gate.check claims started with
       | some retryAfterMs =>
