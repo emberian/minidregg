@@ -681,3 +681,42 @@ All processes started for the completed fixtures have been stopped through
 their own PID files/normal teardown. The lane's Lean REPL was stopped as well.
 No other lane's processes, files or caches were removed.
 
+### Hbox service CPU and document appends, 2026-11-23
+
+Before `32dad36c8`, the Linux collector read each process leader's scheduler clock
+and followed only that thread's children. On the published `453aba535` binaries,
+the corrected collector measured late means of 140.50 ms of submit CPU and
+36.82 ms of propose CPU in a 100-append run with 20-sample late windows.
+These are service-tree measurements. The wall clock also includes the client
+and signing work outside that tree.
+
+Two fresh worlds each began with ten documents created under the same law. Both ran 100
+confirmed 42-byte appends and reached the same height. Writing one document
+throughout took 119.80 ms per late submit and 122.81 ms per late propose.
+Round-robin writes to the ten documents took 53.73 ms and 30.59 ms. The larger
+cell accounts for substantial growth at the same admitted history size.
+
+Candidate `928f7524f` reuses the served preimage for storage charges, compares
+replayed records field by field, and renders digest decimals in 18-digit
+chunks. Two comparisons each ran four fresh worlds in the order baseline,
+candidate, candidate, baseline on CPUs 18 and 19. Each world ran the same
+100 appends with the corrected collector. The table gives baseline → candidate
+late means in milliseconds. Each pair has its own load on the shared box.
+
+| Baseline compared with `928f7524f` | Submit wall | Propose wall | Submit service CPU | Propose service CPU |
+|---|---:|---:|---:|---:|
+| Historical `453aba535` | 153.33 → 163.97 | 160.15 → 140.52 | 115.83 → 112.09 | 30.21 → 31.60 |
+| Builder repairs `a211935ea`, before the speed changes | 135.75 → 114.20 | 131.80 → 105.54 | 109.87 → 97.10 | 28.55 → 26.55 |
+
+The second comparison used the recorded Host and consent binary hashes from
+the repair build. It isolates the speed changes on the repaired tree. Both
+wall times fell in each pair. Against the historical build, propose improved
+and submit took longer in each pair.
+
+The full candidate gate stopped the append workload at 100 of 1,000 turns.
+The measured submit and propose wall ratios were 2.73 and 4.31 against the
+1.59 bound. Each write still rekeys the entry salts, and the subsequent signed
+resource view still includes the full opening. The commitment format and its
+cross-view privacy obligation are described above. All 1,000 GETs completed.
+GET wall time went from 1,330.09 to 818.68 ms and service CPU from 1,038.67
+to 687.20 ms, both within the 1.856 ratio bound. The hbox samples are under `/ci/w14-l4/{accounted,split-1,split-10,old1,new1,new2,old2,base1,opt1,opt2,base2,f2}`.
