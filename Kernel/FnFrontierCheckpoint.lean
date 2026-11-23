@@ -81,46 +81,55 @@ private def Snapshot.append (config : Config) (s : Snapshot)
   let special := if specialVersion record then (record, receipt) :: s.special else s.special
   return ⟨audit, special, s.provider.append record receipt⟩
 
-private def binding (config : Config) (height : Nat) (chain root : Digest) : List UInt8 :=
+private def binding (config : Config) (height : Nat) (chain root : Digest) : ByteArray :=
   let gate := config.fnGateway.map fun p => bytesStream.encode p.application ++
     (StreamCodec.list StreamCodec.nat).encode [p.subject.value, p.target, p.capability.value, p.policyAddress.value]
-  bytesStream.encode config.anchorIdentity.toUTF8.toList ++
+  (bytesStream.encode config.anchorIdentity.toUTF8.toList ++
     (StreamCodec.option bytesStream).encode gate ++
     (StreamCodec.option GenericSimplexCodec.contextStream).encode config.jointConsensus ++
     (StreamCodec.list StreamCodec.nat).encode
-      [DurableCheckpointCodec.foldSemantics.value, height, chain.value, root.value]
+      [DurableCheckpointCodec.foldSemantics.value, height, chain.value, root.value]).toByteArray
 
-private def tag (key : DurableCheckpointCodec.MacKey) (context body : List UInt8) : List UInt8 :=
-  Sp800185Cshake256.kmac256Bytes key.bytes "DREGG/FN/ADMITTED-FRONTIER/v1".toUTF8.toList
-    (context ++ (Sp800185Cshake256.hash "DREGG/FN/FRONTIER-BODY/v1".toUTF8.toList body).bytes)
+private def tag (key : DurableCheckpointCodec.MacKey) (context body : ByteArray) : ByteArray :=
+  let digest := Sp800185Cshake256.Native.cshake256Kernel "DREGG/FN/FRONTIER-BODY/v1".toUTF8 body
+  Sp800185Cshake256.kmac256Kernel key.bytes.toByteArray "DREGG/FN/ADMITTED-FRONTIER/v1".toUTF8
+    (context ++ digest)
 
-private def sealBody (key : DurableCheckpointCodec.MacKey) (context : List UInt8)
-    (snapshot : Snapshot) : List UInt8 :=
-  let body := snapshotStream.encode snapshot
-  (StreamCodec.product bytesStream bytesStream).encode (tag key context body, body)
+private def sealBody (key : DurableCheckpointCodec.MacKey) (context : ByteArray)
+    (snapshot : Snapshot) : ByteArray :=
+  let body := snapshotStream.encodeBytes snapshot
+  (StreamCodec.product bytesStream bytesStream).encodeBytes ((tag key context body).toList, body.toList)
 
-private def openBody (key : DurableCheckpointCodec.MacKey) (context bytes : List UInt8) :
+private def openBody (key : DurableCheckpointCodec.MacKey) (context bytes : ByteArray) :
     Option Snapshot := do
-  let (mac, body) ← (StreamCodec.product bytesStream bytesStream).toLawful.decode bytes
-  if tag key context body = mac then snapshotStream.toLawful.decode body else none
+  let (mac, body) ← (StreamCodec.product bytesStream bytesStream).decodeBytes bytes
+  let packed := body.toByteArray
+  if (tag key context packed).toList = mac then snapshotStream.decodeBytes packed else none
 
-private theorem open_seal (key : DurableCheckpointCodec.MacKey) (context : List UInt8)
+private theorem decode_written {α : Type} (codec : StreamCodec α) (value : α) :
+    codec.decodeBytes (codec.encodeBytes value) = some value := by
+  rw [StreamCodec.decodeBytes_eq, ByteArray.toList_eq_data_toList, StreamCodec.encodeBytes_data]
+  exact codec.toLawful.decode_encode value
+
+private theorem open_seal (key : DurableCheckpointCodec.MacKey) (context : ByteArray)
     (snapshot : Snapshot) : openBody key context (sealBody key context snapshot) = some snapshot := by
-  let body := snapshotStream.encode snapshot
-  let frame := (StreamCodec.product bytesStream bytesStream).toLawful
-  change (frame.decode (frame.encode (tag key context body, body)) >>= _) = _
-  rw [frame.decode_encode]
-  change (if tag key context body = tag key context body then _ else _) = _
-  simp only [ite_true]
-  exact snapshotStream.toLawful.decode_encode _
+  let body := snapshotStream.encodeBytes snapshot
+  have packed : body.toList.toByteArray = body := DurableIndex.byteArray_eq_of_toList (by
+    rw [List.toList_data_toByteArray, ByteArray.toList_eq_data_toList])
+  unfold openBody sealBody
+  rw [decode_written]
+  change (if (tag key context body.toList.toByteArray).toList = (tag key context body).toList then
+    snapshotStream.decodeBytes body.toList.toByteArray else none) = _
+  rw [packed, if_pos rfl]
+  exact decode_written _ _
 
 /-- Mint only from replay, using the MAC key of that replay's physical Store. -/
 def sealVerified {config : Config} {target : Durable} (v : NativeHostReplay.Verified config target) :
-    List UInt8 :=
+    ByteArray :=
   sealBody v.store.key (binding config target.height target.chain target.worldRoot) (ofVerified v)
 
 def restore (config : Config) (key : DurableCheckpointCodec.MacKey)
-    (height : Nat) (chain root : Digest) (bytes : List UInt8) : Option Snapshot :=
+    (height : Nat) (chain root : Digest) (bytes : ByteArray) : Option Snapshot :=
   openBody key (binding config height chain root) bytes
 
 theorem restore_verified {config : Config} {target : Durable} (v : NativeHostReplay.Verified config target) :
@@ -155,7 +164,7 @@ theorem append_replays (config : Config) (initial : Audit) (prior : List (Durabl
 
 /-- A registered gateway's subsequent legacy write leaves the registration and cursor
 bytes unchanged but poisons resolution. The refusal survives serialization. -/
-theorem restored_legacy_poison (key : DurableCheckpointCodec.MacKey) (context : List UInt8)
+theorem restored_ambiguous_cursor_refused (key : DurableCheckpointCodec.MacKey) (context : ByteArray)
     (audit : Audit) (record : DurableReceiver.IntentRecord) (transition : Transition)
     (clean : transition.key ∉ audit.ambiguous)
     (registered : audit.registrations.any (fun prior => prior.ingress.spec.key == transition.key) = true) :
@@ -164,8 +173,8 @@ theorem restored_legacy_poison (key : DurableCheckpointCodec.MacKey) (context : 
   rw [open_seal]
   exact congrArg some (registered_legacy_poisons_resolution audit record transition clean registered).2.2
 
-/-- info: 'Minidregg.Kernel.FnFrontierCheckpoint.restored_legacy_poison' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms restored_legacy_poison
+/-- info: 'Minidregg.Kernel.FnFrontierCheckpoint.restored_ambiguous_cursor_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms restored_ambiguous_cursor_refused
 
 /-- The poison theorem applies to the first legacy write after any fresh registration. -/
 theorem poison_premises (original : FnConsumerNamespaceHistory.Original) :
@@ -178,13 +187,13 @@ private def path (config : Config) (height : Nat) (chain root : Digest) :=
   config.storage.root / s!"admitted-frontier-{height}-{chain.value}-{root.value}.bin"
 
 /-- Publish the cut atomically. Competing heads have distinct destinations. -/
-private def writeCut (config : Config) (height : Nat) (chain root : Digest) (bytes : List UInt8) : IO Unit := do
+private def writeCut (config : Config) (height : Nat) (chain root : Digest) (bytes : ByteArray) : IO Unit := do
   let nonce := (← IO.getRandomBytes 16).toList.map (fun b => toString b.toNat)
   let tmp := config.storage.root / (".fn-frontier-" ++ String.intercalate "-" nonce)
   let handle ← IO.FS.Handle.mk tmp .writeNew
   try
     IO.setAccessRights tmp { user := { read := true, write := true } }
-    handle.write bytes.toByteArray
+    handle.write bytes
     handle.flush
     IO.FS.rename tmp (path config height chain root)
   finally
@@ -200,7 +209,7 @@ def loadAt (config : Config) {store : DurableHistory.StoreIdentity}
   let file := path config head.height head.chain head.root
   unless ← file.pathExists do return none
   try
-    return (restore config store.key head.height head.chain head.root (← IO.FS.readBinFile file).toList).map At.mk
+    return (restore config store.key head.height head.chain head.root (← IO.FS.readBinFile file)).map At.mk
   catch e =>
     if !(← file.pathExists) then return none else throw e
 
@@ -285,7 +294,7 @@ private def receivingTransport (config : Config) (transport : DurableReceiverIO.
       if height != previous + 1 || !(← file.pathExists) then return ← transport.append height entry nodes
       let candidate : IO Bool := do
         let key ← IO.ofExcept (← transport.key)
-        let some snapshot := restore config key previous chain root (← IO.FS.readBinFile file).toList
+        let some snapshot := restore config key previous chain root (← IO.FS.readBinFile file)
           | return false
         let some record := DurableHistory.decodeRecordBytes entry.record | return false
         let some carried := DurableHistory.trailerCarried entry.tag | return false

@@ -149,18 +149,18 @@ private def unchanged (registry : Registry) : IO Unit := do
       originIndexDigest source.durable.image != registry.edge.body.originIndex then
     throw (IO.userError "retained source changed during dispatch")
 
-private def readBounded (path : System.FilePath) (bound : Nat) : IO (List UInt8) := do
+private def readBounded (path : System.FilePath) (bound : Nat) : IO ByteArray := do
   let file ← IO.FS.Handle.mk path .read
   let mut bytes := ByteArray.empty
   while bytes.size ≤ bound do
     let part ← file.read (bound + 1 - bytes.size).toUSize
-    if part.isEmpty then return bytes.toList
+    if part.isEmpty then return bytes
     bytes := bytes ++ part
   throw (IO.userError "retained output exceeds bound")
 
 private def readJsonBounded (path : System.FilePath) : IO Json := do
   let bytes ← readBounded path maxResponse
-  let some text := String.fromUTF8? bytes.toByteArray
+  let some text := String.fromUTF8? bytes
     | throw (IO.userError "retained output is not UTF-8")
   liftResult (Json.parse text)
 
@@ -187,8 +187,8 @@ private def readExact (handle : IO.FS.Handle) (count : Nat) : IO ByteArray := do
 private def lengthBytes (length : Nat) : ByteArray :=
   [UInt8.ofNat length, UInt8.ofNat (length / 256), UInt8.ofNat (length / 65536),
     UInt8.ofNat (length / 16777216)].toByteArray
-private def frameLength (bytes : List UInt8) : Nat :=
-  bytes.foldr (fun byte rest => byte.toNat + 256 * rest) 0
+private def frameLength (bytes : ByteArray) : Nat :=
+  bytes[0]!.toNat + 256 * bytes[1]!.toNat + 65536 * bytes[2]!.toNat + 16777216 * bytes[3]!.toNat
 
 /-- The retained process exposes only this closed read-only opcode set. -/
 inductive ReadonlyOperation where
@@ -202,7 +202,7 @@ private def ReadonlyOperation.opcode : ReadonlyOperation → UInt8
   | .dispatchLookup => 35
 
 private def readonlyFrame (registry : Registry) (operation : ReadonlyOperation)
-    (payload : List UInt8) : IO (List UInt8) :=
+    (payload : ByteArray) : IO ByteArray :=
   CarriedSegmentIO.withExecutionConfig registry.capsule fun executionConfig => do
     let child ← IO.Process.spawn {
       cmd := "/usr/bin/timeout"
@@ -213,20 +213,21 @@ private def readonlyFrame (registry : Registry) (operation : ReadonlyOperation)
       stderr := .null }
     let (input, child) ← child.takeStdin
     try
-      input.write (lengthBytes (payload.length + 1) ++ (operation.opcode :: payload).toByteArray)
+      input.write ((lengthBytes (payload.size + 1)).push operation.opcode)
+      input.write payload
       input.flush
-      let size := frameLength (← readExact child.stdout 4).toList
+      let size := frameLength (← readExact child.stdout 4)
       if size < 1 || size > maxResponse + 1 then throw (IO.userError "retained readonly response bound")
-      let bytes := (← readExact child.stdout size).toList
-      if bytes.head? != some operation.opcode then throw (IO.userError "retained readonly refused")
-      return bytes.drop 1
+      let bytes ← readExact child.stdout size
+      if bytes[0]? != some operation.opcode then throw (IO.userError "retained readonly refused")
+      return bytes.extract 1 size
     finally
       child.kill
       discard child.wait
 
-private def oldContinuity (registry : Registry) (payload : List UInt8) : IO Json := do
+private def oldContinuity (registry : Registry) (payload : ByteArray) : IO Json := do
   let bytes ← readonlyFrame registry .continuity payload
-  let some text := String.fromUTF8? bytes.toByteArray
+  let some text := String.fromUTF8? bytes
     | throw (IO.userError "retained continuity is not UTF-8")
   liftResult (Json.parse text)
 
@@ -244,7 +245,7 @@ def serveContinuity (config : NativeHost.Config) (current : NativeHost.Durable)
     if request.query.target.height > registry.edge.body.cut.height then
       return .error "retained continuity exceeds original cut"
     discard <| liftResult (← validate config current registry)
-    let extension ← liftResult (ReceiptContinuity.parseExtension (← oldContinuity registry payload))
+    let extension ← liftResult (ReceiptContinuity.parseExtension (← oldContinuity registry payload.toByteArray))
     discard <| liftResult (Kernel.ReceiptContinuity.verify request.query extension)
     unchanged registry
     let result := (ReceiptContinuity.extensionJson extension).compress.toUTF8.toList
@@ -254,21 +255,21 @@ def serveContinuity (config : NativeHost.Config) (current : NativeHost.Durable)
 
 structure LookupRequest where
   origin : Identity
-  raw : List UInt8
+  raw : ByteArray
 
 /-- Four little-endian header-length bytes, at most 1024 JSON bytes, then the
 exact original SignedCall. The transport opcode counts toward maxLookupFrame. -/
-def parseLookup (payload : List UInt8) : Except String LookupRequest := do
-  if payload.length + 1 > maxLookupFrame || payload.length < 5 then throw "malformed-call"
-  let width := frameLength (payload.take 4)
-  if width == 0 || width > 1024 || 4 + width ≥ payload.length then throw "malformed-call"
-  let some text := String.fromUTF8? ((payload.drop 4).take width).toByteArray
+def parseLookup (payload : ByteArray) : Except String LookupRequest := do
+  if payload.size + 1 > maxLookupFrame || payload.size < 5 then throw "malformed-call"
+  let width := frameLength payload
+  if width == 0 || width > 1024 || 4 + width ≥ payload.size then throw "malformed-call"
+  let some text := String.fromUTF8? (payload.extract 4 (4 + width))
     | throw "malformed-call"
   let header ← (Json.parse text).mapError fun _ => "malformed-call"
   if (← stringField header "algorithm") != lookupAlgorithm then throw "malformed-call"
   let origin ← parseIdentity (← field header "originIdentity")
-  let raw := payload.drop (4 + width)
-  if raw.length > maxRawCall then throw "malformed-call"
+  let raw := payload.extract (4 + width) payload.size
+  if raw.size > maxRawCall then throw "malformed-call"
   return ⟨origin, raw⟩
 
 private def refused (reason : String) : Json :=
@@ -296,8 +297,8 @@ private def receiptMetadata (registry : Registry) (value : Json) : Except String
     ("acceptedCount", decimal count), ("worldRoot", decimal root.value)]
 
 private def lookupOutcome (config : NativeHost.Config) (current : NativeHost.Durable)
-    (registry : Registry) (request : LookupRequest) (input directory : System.FilePath) : IO Json := do
-  if request.origin != registry.edge.body.source then return refused "origin-mismatch"
+    (registry : Registry) (origin : Identity) (input directory : System.FilePath) : IO Json := do
+  if origin != registry.edge.body.source then return refused "origin-mismatch"
   if let .error _ ← validate config current registry then return refused "capsule-unavailable"
   try
     let output := directory / "outcome.bin"
@@ -319,12 +320,12 @@ state and never falls back to submit. Original receipt roots remain historical. 
 def serveLookup (config : NativeHost.Config) (current : NativeHost.Durable)
     (registry : Registry) (payload : List UInt8) : IO (Except String (List UInt8)) := do
   try
-    let request ← liftResult (parseLookup payload)
+    let request ← liftResult (parseLookup payload.toByteArray)
     IO.FS.withTempDir fun directory => do
       let input := directory / "call.bin"
-      IO.FS.writeBinFile input request.raw.toByteArray
+      IO.FS.writeBinFile input request.raw
       let callDigest ← liftResult (← RetainedArtifactIO.fileSha256 input)
-      let outcome ← lookupOutcome config current registry request input directory
+      let outcome ← lookupOutcome config current registry request.origin input directory
       let response := Json.mkObj [("algorithm", .str lookupAlgorithm),
         ("originIdentity", CarryInspection.identityJson request.origin),
         ("callDigest", .str callDigest), ("outcome", outcome)]
@@ -348,7 +349,7 @@ def serveOriginalCall (config : NativeHost.Config) (current : NativeHost.Durable
       let input := directory / "original-call.bin"
       IO.FS.writeBinFile input rawSignedCall.toByteArray
       let metadata ← lookupOutcome config current registry
-        ⟨registry.edge.body.source, rawSignedCall⟩ input directory
+        registry.edge.body.source input directory
       let kind ← liftResult (stringField metadata "type")
       if kind == "absent" then return .ok .absent
       if kind == "refused" then
@@ -376,8 +377,8 @@ def serveReceiptByTransaction (config : NativeHost.Config) (current : NativeHost
   try
     if transactionId ≥ 2^256 then return .error "retained receipt transaction exceeds digest bound"
     let custody ← liftResult (← validate config current registry)
-    let bytes ← readonlyFrame registry .receiptByTransaction (toString transactionId).toUTF8.toList
-    let some text := String.fromUTF8? bytes.toByteArray
+    let bytes ← readonlyFrame registry .receiptByTransaction (toString transactionId).toUTF8
+    let some text := String.fromUTF8? bytes
       | return .error "retained receipt response is not UTF-8"
     let response ← liftResult (Json.parse text)
     let selected := custody.source.durable.image.accepted.findIdx?
@@ -423,7 +424,7 @@ def serveDispatchLookup (config : NativeHost.Config) (current : NativeHost.Durab
       | return .error "retained dispatch original unavailable"
     IO.FS.withTempDir fun directory => do
       let outcome := directory / "dispatch-outcome.bin"
-      IO.FS.writeBinFile outcome (← readonlyFrame registry .dispatchLookup payload).toByteArray
+      IO.FS.writeBinFile outcome (← readonlyFrame registry .dispatchLookup payload.toByteArray)
       let inspected := directory / "dispatch-outcome.json"
       if !(← readonlyCli registry #["inspect", "outcome", outcome.toString, inspected.toString]) then
         return .error "retained dispatch receipt inspection refused"

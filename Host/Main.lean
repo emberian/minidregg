@@ -3623,13 +3623,13 @@ def readBoundedBytes (path : String) (limit : Nat) : IO (List UInt8) := do
 /-- Bounded records, unlimited audit inventory. One verified source image owns
 all response rows and the ledger header, regardless of retained payment count. -/
 partial def readPaidAuditLine (input : IO.FS.Handle)
-    (acc : ByteArray := ByteArray.empty) : IO (Option (List UInt8)) := do
+    (acc : ByteArray := ByteArray.empty) : IO (Option ByteArray) := do
   if acc.size > 4096 then throw (IO.userError "paid audit request exceeds byte bound")
   let byte ← input.read 1
   if byte.isEmpty then
     if acc.isEmpty then return none
     throw (IO.userError "paid audit request lacks newline")
-  if byte[0]! == 10 then return some acc.toList
+  if byte[0]! == 10 then return some acc
   readPaidAuditLine input (acc ++ byte)
 
 partial def writePaidAuditRows (config : NativeHost.Config)
@@ -3641,7 +3641,7 @@ partial def writePaidAuditRows (config : NativeHost.Config)
         ("origins", toJson (toString count))]).compress
       output.flush
   | some bytes =>
-      let some text := String.fromUTF8? bytes.toByteArray
+      let some text := String.fromUTF8? bytes
         | throw (IO.userError "paid audit request is not UTF-8")
       let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
       let result ← IO.ofExcept (Minidregg.Host.PayClaims.statusLoadedJson config opened source)
@@ -6412,14 +6412,14 @@ def runProviderContinuitySession (config : NativeHost.Config)
       outcomeBytes.length ≤ 1024 do
     throw (IO.userError "provider continuity needs bounded original call and outcome")
   let allowedFence ← if fencePair.isEmpty then
-      pure (none : Option (List UInt8 × NativeHostCodec.Receipt))
+      pure (none : Option (ByteArray × NativeHostCodec.Receipt))
     else do
       let (fenceCall, fenceOutcome) ← splitPair fencePair
       unless !fenceCall.isEmpty && !fenceOutcome.isEmpty && fenceOutcome.length ≤ 1024 do
         throw (IO.userError "provider continuity needs complete bounded fence evidence")
       let some (.confirmed _ receipt) := outcomeCodec.decode fenceOutcome
         | throw (IO.userError "provider fence outcome is not canonical confirmation")
-      pure (some (fenceCall, receipt))
+      pure (some (fenceCall.toByteArray, receipt))
   let providerResourceId ← IO.ofExcept <|
     providerFromReserveCall providerIds reserveCall
   let some (.confirmed _ anchor) := outcomeCodec.decode outcomeBytes
@@ -6430,7 +6430,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
   let checkedCount := light.opening.head.height
   let ground := ServedBasis.Ground.ofBasis (← IO.ofExcept (← light.basis ⟨[], []⟩))
   let authority := NativeReserveContinuity.authorityCellsAt config ground.authority
-  let verdict := cut.snapshot.provider.check config authority anchor reserveCall providerCell allowedFence priorChecked
+  let verdict := cut.snapshot.provider.check config authority anchor reserveCall.toByteArray providerCell allowedFence priorChecked
   let (continuous, reason) := match verdict with
     | .ok _ => (true, "")
     | .error detail => (false, detail)

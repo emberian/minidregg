@@ -293,7 +293,7 @@ private def frontierProbe (host : NativeHost.Config) (cfg : NativeHostGenesis.Co
     ((restore (opened.durable.height + 1) opened.durable.chain opened.durable.worldRoot sealed).isNone)
   require "cut rejects an altered authenticator"
     ((restore opened.durable.height opened.durable.chain opened.durable.worldRoot
-      (sealed.modify 1 (fun byte => byte ^^^ 1))).isNone)
+      (sealed.set! 1 (sealed[1]! ^^^ 1))).isNone)
   let selected : FnSelectedPollCoverage.Ingress :=
     ⟨⟨host.deployment.domain, host.profile.semantics, ⟨key,1,1,2,some progressed,[9],⟨5⟩,⟨4⟩,[1],
       registered,⟨321⟩⟩, registered, pin.subject, pin.target, pin.capability⟩, [],⟨0⟩,⟨0⟩⟩
@@ -330,13 +330,13 @@ private def frontierProbe (host : NativeHost.Config) (cfg : NativeHostGenesis.Co
     (Minidregg.Host.FnConsumerFrontierPlan.planCodec.encode next == Minidregg.Host.FnConsumerFrontierPlan.planCodec.encode planned)
   for receipt in [anchor, forged] do
     let indexed := cut.snapshot.provider.check host (NativeReserveContinuity.authorityCellsAt host ground.authority)
-      receipt anchorCall ⟨7001⟩ none none
+      receipt anchorCall.toByteArray ⟨7001⟩ none none
     require "provider continuity and exact refusal" (reprStr indexed == reprStr (check receipt))
   let prior : NativeProviderHistory.PriorChecked := ⟨anchor.acceptedCount, anchor.worldRoot⟩
   for point in [prior, { prior with worldRoot := forged.worldRoot }] do
     let historical := (NativeProviderHistory.checkPrior walked anchor.acceptedCount point).map fun _ => ()
     let indexed := cut.snapshot.provider.check host (NativeReserveContinuity.authorityCellsAt host ground.authority)
-      anchor anchorCall ⟨7001⟩ none (some point)
+      anchor anchorCall.toByteArray ⟨7001⟩ none (some point)
     require "prior checked prefix verdict" (reprStr indexed == reprStr historical)
   IO.println s!"PASS admitted frontier: prefix={prefixHeight} tail=2; registration, selected refusal, empty, plan, provider; pre-checkpoint payload reads=0"
 

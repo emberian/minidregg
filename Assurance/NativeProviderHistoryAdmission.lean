@@ -71,8 +71,8 @@ def reserveCommand : DeclaredResourceController.Command :=
 def fenceCommand : DeclaredResourceController.Command :=
   { subject := ⟨9⟩, nonce := 102,
     targets := [ProviderRoute.target .disconnect 3 8974 ⟨103⟩ ⟨11⟩ held] }
-def call (command : DeclaredResourceController.Command) : List UInt8 :=
-  callCodec.encode (.invoke ⟨DeclaredResourceController.commandCodec.encode command, [], [], []⟩)
+def call (command : DeclaredResourceController.Command) : ByteArray :=
+  (callCodec.encode (.invoke ⟨DeclaredResourceController.commandCodec.encode command, [], [], []⟩)).toByteArray
 
 theorem fence_exact : NativeProviderHistory.exactHardFence ⟨8974⟩ (call reserveCommand)
     (call fenceCommand) = true := by native_decide

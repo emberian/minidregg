@@ -83,26 +83,26 @@ def checkPrior {config : Config} (session : NativeHostSession.Walked config)
 
 /-- Exact evidence for one already admitted provider write. -/
 structure ExactWrite {config : Config} (session : NativeHostSession.Walked config)
-    (receipt : NativeHostCodec.Receipt) (call : List UInt8) (provider : CellId) where
+    (receipt : NativeHostCodec.Receipt) (call : ByteArray) (provider : CellId) where
   positive : 0 < receipt.acceptedCount
   receiptExact : session.verified.receiptAt (receipt.acceptedCount - 1) = some receipt
-  ingress : List UInt8
-  parsed : reserveIngress? config call = some ingress
+  ingress : ByteArray
+  parsed : (reserveIngress? config call.toList).map List.toByteArray = some ingress
   callExact : (session.target.image.accepted[receipt.acceptedCount - 1]?).map
-    (fun record => record.event.canonicalBytes) = some ingress
+    (fun record => record.event.canonicalBytes.toByteArray) = some ingress
   written : (session.target.image.accepted[receipt.acceptedCount - 1]?).any
     (fun record => decide (writesCell record provider)) = true
 
 def exactWrite {config : Config} (session : NativeHostSession.Walked config)
-    (receipt : NativeHostCodec.Receipt) (call : List UInt8) (provider : CellId) :
+    (receipt : NativeHostCodec.Receipt) (call : ByteArray) (provider : CellId) :
     Except String (ExactWrite session receipt call provider) := do
   if positive : 0 < receipt.acceptedCount then
     if receiptExact : session.verified.receiptAt (receipt.acceptedCount - 1) = some receipt then
-      match parsed : reserveIngress? config call with
+      match parsed : (reserveIngress? config call.toList).map List.toByteArray with
       | none => .error "history call is not a canonical signed invocation"
       | some ingress =>
           if callExact : (session.target.image.accepted[receipt.acceptedCount - 1]?).map
-              (fun record => record.event.canonicalBytes) = some ingress then
+              (fun record => record.event.canonicalBytes.toByteArray) = some ingress then
             if written : (session.target.image.accepted[receipt.acceptedCount - 1]?).any
                 (fun record => decide (writesCell record provider)) = true then
               return ⟨positive, receiptExact, ingress, parsed, callExact, written⟩
@@ -111,8 +111,8 @@ def exactWrite {config : Config} (session : NativeHostSession.Walked config)
     else .error "history receipt differs from admitted prefix"
   else .error "history receipt has zero accepted count"
 
-def command? (call : List UInt8) : Option DeclaredResourceController.Command := do
-  let .invoke signed ← NativeHostCodec.callCodec.decode call | none
+def command? (call : ByteArray) : Option DeclaredResourceController.Command := do
+  let .invoke signed ← NativeHostCodec.callCodec.decode call.toList | none
   DeclaredResourceController.commandCodec.decode signed.commandBytes
 
 /-- Read the old coordinates from the five compare-and-write actions, then
@@ -156,7 +156,7 @@ def exactHardReserve (provider : CellId) (reserve : DeclaredResourceController.C
       | none => false
   | _ => false
 
-def exactHardFence (provider : CellId) (reserveCall fenceCall : List UInt8) : Bool :=
+def exactHardFence (provider : CellId) (reserveCall fenceCall : ByteArray) : Bool :=
   match command? reserveCall, command? fenceCall with
   | some reserve, some fence =>
       match fence.targets with
@@ -188,14 +188,14 @@ theorem hardFence_preserves_hold (before : ProviderRoute.State)
 /-- The index is the absolute accepted count (one-based), not a caller's
 operation id. The sole exception must also have the exact admitted ingress. -/
 def safeAt {config : Config} (session : NativeHostSession.Walked config)
-    (provider : CellId) (fenceCount : Nat) (fenceIngress : List UInt8)
+    (provider : CellId) (fenceCount : Nat) (fenceIngress : ByteArray)
     (entry : DurableReceiver.IntentRecord × Nat) : Bool :=
-  if entry.2 = fenceCount then entry.1.event.canonicalBytes == fenceIngress
+  if entry.2 = fenceCount then entry.1.event.canonicalBytes.toByteArray == fenceIngress
   else ordinaryOther session provider entry.1
 
 theorem safeAt_other_no_write {config : Config}
     (session : NativeHostSession.Walked config) (provider : CellId)
-    (fenceCount count : Nat) (fenceIngress : List UInt8)
+    (fenceCount count : Nat) (fenceIngress : ByteArray)
     (record : DurableReceiver.IntentRecord) (other : count ≠ fenceCount)
     (safe : safeAt session provider fenceCount fenceIngress (record, count) = true) :
     ¬ writesCell record provider := by
@@ -208,7 +208,7 @@ def suffixEntries {config : Config} (session : NativeHostSession.Walked config)
   records.zip ((List.range records.length).map (fun offset => reserveCount + offset + 1))
 
 structure Continuity {config : Config} (session : NativeHostSession.Walked config)
-    (anchor fence : NativeHostCodec.Receipt) (reserveCall fenceCall : List UInt8)
+    (anchor fence : NativeHostCodec.Receipt) (reserveCall fenceCall : ByteArray)
     (provider : CellId) where
   reserveExact : ExactWrite session anchor reserveCall provider
   fenceExact : ExactWrite session fence fenceCall provider
@@ -219,7 +219,7 @@ structure Continuity {config : Config} (session : NativeHostSession.Walked confi
 
 theorem Continuity.no_other_provider_write {config : Config}
     {session : NativeHostSession.Walked config} {anchor fence : NativeHostCodec.Receipt}
-    {reserveCall fenceCall : List UInt8} {provider : CellId}
+    {reserveCall fenceCall : ByteArray} {provider : CellId}
     (checked : Continuity session anchor fence reserveCall fenceCall provider)
     (record : DurableReceiver.IntentRecord) (count : Nat)
     (member : (record, count) ∈ suffixEntries session anchor.acceptedCount)
@@ -228,7 +228,7 @@ theorem Continuity.no_other_provider_write {config : Config}
     checked.fenceExact.ingress record other ((List.all_eq_true.mp checked.suffixSafe) _ member)
 
 def check {config : Config} (session : NativeHostSession.Walked config)
-    (anchor fence : NativeHostCodec.Receipt) (reserveCall fenceCall : List UInt8)
+    (anchor fence : NativeHostCodec.Receipt) (reserveCall fenceCall : ByteArray)
     (provider : CellId) :
     Except String (Continuity session anchor fence reserveCall fenceCall provider) := do
   let reserveExact ← exactWrite session anchor reserveCall provider
@@ -271,7 +271,7 @@ theorem fence_alone_and_rewrite :
 Only signed invocation frames can equal an authored reserve or fence. -/
 structure Position where
   receipt : NativeHostCodec.Receipt
-  invocation : Option (List UInt8)
+  invocation : Option ByteArray
   written : List Nat
 
 structure Index where
@@ -288,7 +288,7 @@ def Index.append (index : Index) (record : DurableReceiver.IntentRecord) (receip
     Index :=
   let bytes := record.event.canonicalBytes
   let written := (record.writes.map (·.cellId.value)).eraseDups
-  let invocation := if (DeclaredResourceController.decodeSignedBytes bytes).isSome then some bytes else none
+  let invocation := if (DeclaredResourceController.decodeSignedBytes bytes).isSome then some bytes.toByteArray else none
   let height := receipt.acceptedCount
   let common := { index with
     positions := index.positions.push ⟨receipt, invocation, written⟩
@@ -298,13 +298,13 @@ def Index.append (index : Index) (record : DurableReceiver.IntentRecord) (receip
   | some targets => { common with targets := targets.eraseDups.foldl (mark height) index.targets }
 
 private def Index.exact (index : Index) (config : Config) (receipt : NativeHostCodec.Receipt)
-    (call : List UInt8) (cell : Nat) (fenced : Bool) : Except String Unit := do
+    (call : ByteArray) (cell : Nat) (fenced : Bool) : Except String Unit := do
   if receipt.acceptedCount = 0 then
     throw (if fenced then "history receipt has zero accepted count" else "reserve receipt has zero accepted count")
   let position := index.positions[receipt.acceptedCount - 1]?
   unless position.map (·.receipt) == some receipt do
     throw (if fenced then "history receipt differs from admitted prefix" else "confirmed reserve receipt differs from admitted prefix")
-  let some ingress := reserveIngress? config call
+  let some ingress := (reserveIngress? config call.toList).map List.toByteArray
     | throw (if fenced then "history call is not a canonical signed invocation" else "reserve call is not a canonical signed invocation")
   unless (position.bind (·.invocation)) == some ingress do
     throw (if fenced then "history call differs from admitted ingress" else "confirmed reserve call differs from admitted history")
@@ -312,8 +312,8 @@ private def Index.exact (index : Index) (config : Config) (receipt : NativeHostC
     throw (if fenced then "confirmed history call did not write the provider" else "confirmed call did not write the provider resource")
 
 def Index.check (index : Index) (config : Config) (authority : List CellId)
-    (anchor : NativeHostCodec.Receipt) (call : List UInt8) (provider : CellId)
-    (fence : Option (List UInt8 × NativeHostCodec.Receipt)) (prior : Option PriorChecked) : Except String Unit := do
+    (anchor : NativeHostCodec.Receipt) (call : ByteArray) (provider : CellId)
+    (fence : Option (ByteArray × NativeHostCodec.Receipt)) (prior : Option PriorChecked) : Except String Unit := do
   index.exact config anchor call provider.value fence.isSome
   let exception ← match fence with
     | none => pure 0
@@ -341,9 +341,15 @@ private def lastStream : StreamCodec LastTwo :=
   StreamCodec.xmap (StreamCodec.product StreamCodec.nat StreamCodec.nat)
     (fun p => (p.last, p.previous)) (fun (a,b) => ⟨a,b⟩) (by intro p; cases p; rfl)
 
+private def invocationStream : StreamCodec ByteArray :=
+  StreamCodec.xmap bytesStream ByteArray.toList List.toByteArray
+    (fun b => DurableIndex.byteArray_eq_of_toList (by
+      rw [List.toList_data_toByteArray, ByteArray.toList_eq_data_toList]))
+    DurableHistory.toByteArray_toList
+
 private def positionStream : StreamCodec Position :=
   StreamCodec.xmap (StreamCodec.product receiptStream (StreamCodec.product
-    (StreamCodec.option bytesStream) (StreamCodec.list StreamCodec.nat)))
+    (StreamCodec.option invocationStream) (StreamCodec.list StreamCodec.nat)))
     (fun p => (p.receipt, p.invocation, p.written)) (fun (r,i,w) => ⟨r,i,w⟩) (by intro p; cases p; rfl)
 
 def indexStream : StreamCodec Index :=

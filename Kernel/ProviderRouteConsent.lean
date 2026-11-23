@@ -141,7 +141,7 @@ private theorem forM_ok {α : Type} (f : α → Except String Unit) :
   | [], _, x, mem => by simp at mem
   | y :: ys, h, x, mem => by
       cases hy : f y with
-      | error e => simp [List.forM_cons, hy] at h
+      | error e => simp [List.forM_cons, hy, bind, Except.bind] at h
       | ok u =>
           simp [List.forM_cons, hy] at h
           cases mem with
