@@ -41,15 +41,24 @@ are independent moves, and only one of them hits a wall.
   map always collides, by pigeonhole.  So the obligation is **satisfiable**
   (`natChainFamily`), **refutable** (`collapsingFamily`), and **not provable** —
   the three legs a floor has to stand on.
-* `TranscriptObligation` is `[HASH-transcript-indiff]`: STATED, NOT PROVED here,
-  for any instance.  The sponge route can hope to discharge it from
-  `SpongeIndiff.SpongeIndifferentiable`; that statement is itself unproved
-  upstream (`SpongeIndiffGame`'s docstring says so).  Nothing in this file
-  narrows that gap, and nothing here should be read as if it did.
-* `absorb` is a plain function, so this file prices message collisions
-  (`AbsorbCollision`) and NOT the full indifferentiability the challenger needs.
-  Collision-freedom is strictly weaker.  It is stated as its own obligation so
-  the two are not confused.
+* `TranscriptObligation` is `[HASH-transcript-indiff]`, a bound on an advantage
+  COMPUTED from `H` (§3b): a distinguisher's queries are answered by `H.absorb`
+  in the real world and by the random oracle's coins in the ideal one.  It is
+  parametric in the distinguisher class, fixed before the assumption, and the
+  class matters: over ALL distinguishers it is false for every finite family
+  (`transcriptObligation_univ_false`, the transcript role's form of
+  `BindingFixedHash`), while over a named class it is **satisfiable** at a
+  finite digest (`charTwo_transcriptObligation`, at the random oracle's own
+  birthday price) and **refutable** (`constFamily_not_transcriptObligation`).
+  It is STATED, NOT PROVED for the deployed Poseidon2 at any class.  The sponge
+  route can hope to discharge it from `SpongeIndiff.SpongeIndifferentiable`;
+  that statement is itself unproved upstream (`SpongeIndiffGame`'s docstring
+  says so).
+* `AbsorbCollision` prices message collisions, which is strictly weaker than
+  the indistinguishability the challenger needs.  It is stated as its own
+  obligation so the two are not confused; `absorb_ne_of_transcriptObligation`
+  is the one direction that holds: Obligation 3 over a class containing a
+  collision test rules out a collision on the tested pair.
 
 ## ⚠ What is NOT in this file, and where it actually lives
 
@@ -109,16 +118,8 @@ than what Fiat–Shamir needs; stated separately so it is not mistaken for it. -
 def TranscriptCollisionObligation (H : HashFamily Block Value Digest) : Prop :=
   ¬ AbsorbCollision H
 
-/-- **`[HASH-transcript-indiff]` — Obligation 3, STATED, NOT PROVED for any
-instance in this file.**  What Fiat–Shamir actually needs: `absorb` is
-indifferentiable from a random oracle, i.e. every `q`-query distinguisher's
-advantage is at most `ε q`.  Phrased here as an abstract predicate over the
-error function because the family interface is mode-free; the sponge route's
-concrete form of this is `SpongeIndiff.SpongeIndifferentiable`, which is itself
-open upstream.  ⚠ Carrying this field does NOT discharge it. -/
-def TranscriptObligation (_H : HashFamily Block Value Digest)
-    (Advantage : ℕ → ℝ) (ε : ℕ → ℝ) : Prop :=
-  ∀ q : ℕ, Advantage q ≤ ε q
+/-! Obligation 3, `[HASH-transcript-indiff]`, is `TranscriptObligation` in §3b,
+stated over the game whose advantage it bounds. -/
 
 /-! ## §3 ⚑ THE POINT — the obligation factors through the family, not the route
 
@@ -145,6 +146,187 @@ theorem collision_of_accepted_ne (H : HashFamily Block Value Digest)
     (hne : left ≠ right) : Collision H.suite :=
   accepted_different_values_imply_collision H.suite k root index left right
     leftProof rightProof hl hr hne
+
+end HashFamily
+
+/-! ## §3b ⚑ Obligation 3 — the transcript game, its advantage COMPUTED from `H`
+
+Fiat–Shamir is proved in the ROM: the challenger's coins are the lazy-sampling
+handler's (`Selvage/FiatShamir.lean`'s `Oracle`).  Obligation 3 prices answering
+those queries with `H.absorb` instead, and the price is a function of `H` and of
+the distinguisher, never a number a caller supplies.
+
+* A distinguisher puts `q` pairwise-distinct messages (the `ROAdversary` schedule
+  `commitCR_of_RO` is proved for) and reads a verdict off the `q` answers.
+* REAL: the answers are `H.absorb` at the queries, so `realProb` is `0` or `1`.
+* IDEAL: `q` independent uniform coins, which IS the landed handler's answer
+  distribution on distinct queries (`roAnswers_eq_coins`).
+
+**Covered scope, in the same sentence as the claim**: non-adaptive query
+schedules and deterministic verdicts; the adaptive shape is
+`SpongeIndiff.Distinguisher`.
+
+⚑ **The fixed-hash wall.**  For a FIXED function the class of all distinguishers
+contains the one that asks `m` and compares the answer with the value `H.absorb m`
+it carries: advantage `1 - 1/|Digest|` with one query, for EVERY family
+(`transcriptObligation_univ_false`).  So, as `BindingFixedHash` found for binding,
+the obligation is assumed over a NAMED class (a protocol's own challenge
+schedule) fixed before the assumption, the way `BindingGame.Experiment` fixes its
+code model.  Over such a class it separates families (§6b). -/
+
+namespace HashFamily
+
+variable {Block Value Digest : Type}
+
+/-- A non-adaptive `q`-query transcript distinguisher: `q` pairwise-distinct
+messages (the `ROAdversary` schedule) and a verdict on the `q` answers. -/
+structure TranscriptDistinguisher (Block Digest : Type) (q : ℕ)
+    extends ROAdversary (List Block) q where
+  /-- The verdict, from the `q` answers. -/
+  verdict : (Fin q → Digest) → Bool
+
+/-- A distinguisher with its query count: the code model a class is drawn from. -/
+abbrev TranscriptCode (Block Digest : Type) : Type :=
+  Σ q : ℕ, TranscriptDistinguisher Block Digest q
+
+namespace TranscriptDistinguisher
+
+variable {q : ℕ}
+
+/-- REAL world: `Pr[verdict]` with every query answered by `H.absorb`. -/
+noncomputable def realProb (D : TranscriptDistinguisher Block Digest q)
+    (H : HashFamily Block Value Digest) : ℝ :=
+  if D.verdict (fun i => H.absorb (D.query i)) then 1 else 0
+
+/-- IDEAL world: `Pr[verdict]` over `q` independent uniform answers. -/
+noncomputable def idealProb [Fintype Digest] (D : TranscriptDistinguisher Block Digest q) : ℝ :=
+  uniformProb (Fin q → Digest) fun c => D.verdict c = true
+
+end TranscriptDistinguisher
+
+/-- **The transcript advantage**, computed from `H` and the distinguisher. -/
+noncomputable def transcriptAdvantage [Fintype Digest] (H : HashFamily Block Value Digest)
+    {q : ℕ} (D : TranscriptDistinguisher Block Digest q) : ℝ :=
+  |D.realProb H - D.idealProb|
+
+/-- The random oracle's own collision price on `q` distinct queries, the bound
+`birthday_bound` proves for the ideal world. -/
+noncomputable def birthdayPrice (Digest : Type) [Fintype Digest] (q : ℕ) : ℝ :=
+  (q : ℝ) * ((q : ℝ) - 1) / (2 * (Fintype.card Digest : ℝ))
+
+/-- **The two-query collision test**: put two distinct messages, accept iff the
+answers agree. -/
+def collisionTest [DecidableEq Digest] {m₁ m₂ : List Block} (h : m₁ ≠ m₂) :
+    TranscriptDistinguisher Block Digest 2 where
+  query := ![m₁, m₂]
+  query_inj := by
+    intro i j hij
+    fin_cases i <;> fin_cases j <;> simp_all
+  verdict := fun a => decide (a 0 = a 1)
+
+/-- **`[HASH-transcript-indiff]` — Obligation 3.**  The class includes a collision test on distinct
+messages. Every distinguisher of the class `𝒟` has advantage at most `ε q` against `H.absorb`, `q` its query count.
+`𝒟` is the code model, fixed before the assumption; the unrestricted class
+refutes every finite family (`transcriptObligation_univ_false`).  STATED, NOT
+PROVED for the deployed Poseidon2 at any class. -/
+def TranscriptObligation [Fintype Digest] [DecidableEq Digest] (H : HashFamily Block Value Digest)
+    (𝒟 : Set (TranscriptCode Block Digest)) (ε : ℕ → ℝ) : Prop :=
+  (∃ (m₁ m₂ : List Block) (h : m₁ ≠ m₂), ⟨2, collisionTest h⟩ ∈ 𝒟) ∧
+  ∀ D ∈ 𝒟, transcriptAdvantage H D.2 ≤ ε D.1
+
+/-- **The one-query value test**: put `m`, accept iff the answer is `d`, a value
+the code carries. -/
+def valueTest [DecidableEq Digest] (m : List Block) (d : Digest) :
+    TranscriptDistinguisher Block Digest 1 where
+  query := fun _ => m
+  query_inj := fun i j _ => Subsingleton.elim i j
+  verdict := fun a => decide (a 0 = d)
+
+/-- Two uniform answers agree with probability exactly `1/|Digest|`:
+`BirthdayExample.uniformProb_diag`, carried along `Fintype.equivFin`. -/
+theorem uniformProb_answers_agree [Fintype Digest] :
+    uniformProb (Fin 2 → Digest) (fun c => c 0 = c 1) = 1 / (Fintype.card Digest : ℝ) := by
+  classical
+  rw [← BirthdayExample.uniformProb_diag,
+    ← uniformProb_equiv (Equiv.arrowCongr (Equiv.refl (Fin 2)) (Fintype.equivFin Digest))]
+  exact uniformProb_congr fun c => by simp [Equiv.arrowCongr_apply]
+
+/-- One uniform answer hits a fixed value with probability exactly `1/|Digest|`. -/
+theorem uniformProb_answer_hits [Fintype Digest] (d : Digest) :
+    uniformProb (Fin 1 → Digest) (fun c => c 0 = d) = 1 / (Fintype.card Digest : ℝ) := by
+  classical
+  unfold uniformProb
+  have : Unique {c : Fin 1 → Digest // c 0 = d} :=
+    ⟨⟨⟨fun _ => d, rfl⟩⟩, fun c => Subtype.ext (funext fun i => by fin_cases i; exact c.2)⟩
+  rw [Nat.card_unique, Fintype.card_fun, Fintype.card_fin, pow_one, Nat.cast_one]
+
+theorem collisionTest_realProb [DecidableEq Digest] {m₁ m₂ : List Block} (h : m₁ ≠ m₂)
+    (H : HashFamily Block Value Digest) :
+    (collisionTest (Digest := Digest) h).realProb H =
+      if H.absorb m₁ = H.absorb m₂ then 1 else 0 := by
+  simp [TranscriptDistinguisher.realProb, collisionTest]
+
+theorem collisionTest_idealProb [Fintype Digest] [DecidableEq Digest] {m₁ m₂ : List Block}
+    (h : m₁ ≠ m₂) :
+    (collisionTest (Digest := Digest) h).idealProb = 1 / (Fintype.card Digest : ℝ) := by
+  rw [TranscriptDistinguisher.idealProb, ← uniformProb_answers_agree]
+  exact uniformProb_congr fun c => by simp [collisionTest]
+
+/-- The collision test's advantage, exactly: `1 - 1/|Digest|` on a colliding
+pair, `1/|Digest|` (the ideal world's own collision probability) otherwise. -/
+theorem transcriptAdvantage_collisionTest [Fintype Digest] [DecidableEq Digest]
+    [Nonempty Digest] {m₁ m₂ : List Block} (h : m₁ ≠ m₂) (H : HashFamily Block Value Digest) :
+    transcriptAdvantage H (collisionTest h) =
+      if H.absorb m₁ = H.absorb m₂ then 1 - 1 / (Fintype.card Digest : ℝ)
+      else 1 / (Fintype.card Digest : ℝ) := by
+  have hpos : (0 : ℝ) < (Fintype.card Digest : ℝ) := by exact_mod_cast Fintype.card_pos
+  have hle : 1 / (Fintype.card Digest : ℝ) ≤ 1 := by
+    rw [div_le_one hpos]
+    exact_mod_cast Fintype.card_pos
+  have hnn : (0 : ℝ) ≤ 1 / (Fintype.card Digest : ℝ) := by positivity
+  unfold transcriptAdvantage
+  rw [collisionTest_realProb, collisionTest_idealProb]
+  split_ifs
+  · rw [abs_of_nonneg (by linarith)]
+  · rw [zero_sub, abs_neg, abs_of_nonneg hnn]
+
+/-- **Obligation 3 rules out a collision on every tested pair**: over a class
+holding the collision test on `(m₁, m₂)`, with the two-query bound below
+`1 - 1/|Digest|`, the two messages absorb to different digests. -/
+theorem absorb_ne_of_transcriptObligation [Fintype Digest] [DecidableEq Digest]
+    [Nonempty Digest] {H : HashFamily Block Value Digest}
+    {𝒟 : Set (TranscriptCode Block Digest)} {ε : ℕ → ℝ} (hobl : TranscriptObligation H 𝒟 ε)
+    {m₁ m₂ : List Block} (h : m₁ ≠ m₂) (hmem : ⟨2, collisionTest h⟩ ∈ 𝒟)
+    (hε : ε 2 < 1 - 1 / (Fintype.card Digest : ℝ)) : H.absorb m₁ ≠ H.absorb m₂ := by
+  intro hcol
+  have hadv : transcriptAdvantage H (collisionTest h) ≤ ε 2 := hobl.2 _ hmem
+  rw [transcriptAdvantage_collisionTest, ite_eq_left hcol] at hadv
+  linarith
+
+/-- ⚑ **The fixed-hash wall.**  Over the class of ALL distinguishers,
+Obligation 3 fails for every family once the one-query bound is below
+`1 - 1/|Digest|`: asking `[]` and comparing the answer with `H.absorb []` wins
+with exactly that advantage.  So the obligation is only ever assumed over a
+named class. -/
+theorem transcriptObligation_univ_false [Fintype Digest] [DecidableEq Digest]
+    [Nonempty Digest] (H : HashFamily Block Value Digest) {ε : ℕ → ℝ}
+    (hε : ε 1 < 1 - 1 / (Fintype.card Digest : ℝ)) : ¬ TranscriptObligation H Set.univ ε := by
+  intro hobl
+  have hadv : transcriptAdvantage H (valueTest [] (H.absorb [])) ≤ ε 1 :=
+    hobl.2 ⟨1, valueTest [] (H.absorb [])⟩ (Set.mem_univ _)
+  have hreal : (valueTest (Block := Block) [] (H.absorb [])).realProb H = 1 := by
+    simp [TranscriptDistinguisher.realProb, valueTest]
+  have hideal : (valueTest (Block := Block) [] (H.absorb [])).idealProb =
+      1 / (Fintype.card Digest : ℝ) := by
+    rw [TranscriptDistinguisher.idealProb, ← uniformProb_answer_hits (H.absorb [])]
+    exact uniformProb_congr fun c => by simp [valueTest]
+  have hpos : (0 : ℝ) < (Fintype.card Digest : ℝ) := by exact_mod_cast Fintype.card_pos
+  have hle : 1 / (Fintype.card Digest : ℝ) ≤ 1 := by
+    rw [div_le_one hpos]
+    exact_mod_cast Fintype.card_pos
+  unfold transcriptAdvantage at hadv
+  rw [hreal, hideal, abs_of_nonneg (by linarith)] at hadv
+  linarith
 
 end HashFamily
 
@@ -286,14 +468,17 @@ def natChain : ℕ → ℕ → ℕ := fun cv block => Nat.pair cv block
 def natChainFamily : HashFamily ℕ ℕ ℕ :=
   ofChain natChain 0 Nat.pair (fun v => [v])
 
-/-! ### 5d. ⚑ The negative control — an inhabitant that FAILS the obligation -/
+/-! ### 5d. ⚑ The negative control — an inhabitant that FAILS the obligations -/
 
-/-- A family whose node map collapses everything to one digest.  It is a perfectly
-good `HashFamily`; it is not a good hash, and §6 proves the obligation sees the
+/-- The constant family: every leaf, node and message goes to `d`.  A perfectly
+good `HashFamily` and no hash at all; §6 and §6b prove both obligations see the
 difference. -/
-def collapsingFamily : HashFamily ℕ ℕ ℕ where
-  suite := { leaf := fun _ => 0, node := fun _ _ => 0 }
-  absorb := fun _ => 0
+def constFamily {Block Value Digest : Type*} (d : Digest) : HashFamily Block Value Digest where
+  suite := { leaf := fun _ => d, node := fun _ _ => d }
+  absorb := fun _ => d
+
+/-- The constant family over `ℕ`, the Merkle role's negative control. -/
+def collapsingFamily : HashFamily ℕ ℕ ℕ := constFamily 0
 
 end HashFamily
 
@@ -311,8 +496,8 @@ theorem collapsing_not_merkleObligation : ¬ MerkleObligation collapsingFamily :
   intro h
   exact h (Or.inr ⟨0, 0, 0, 1, by decide, rfl⟩)
 
-/-- The collapsing family also fails the transcript half. -/
-theorem collapsing_not_transcriptObligation :
+/-- The collapsing family also fails the transcript role's collision half. -/
+theorem collapsing_not_transcriptCollisionObligation :
     ¬ TranscriptCollisionObligation collapsingFamily := by
   intro h
   exact h ⟨[], [0], by simp, rfl⟩
@@ -370,6 +555,81 @@ theorem charTwo_not_merkleObligation : ¬ MerkleObligation spongeFamilyCharTwo :
 
 end HashFamily
 
+/-! ## §6b TEETH for Obligation 3 — satisfiable at a finite digest, and refutable
+
+`transcriptObligation_univ_false` is the third leg in its strongest form: over
+the unrestricted class Obligation 3 is not merely unprovable but false for every
+finite family.  Over a named class the obligation does work, and the witness of
+that is a finite one: the char-2 sponge of §5b meets it at the random oracle's
+own birthday price, exactly, while the constant family on the same types fails
+it. -/
+
+namespace HashFamily
+
+/-- A constant absorb wins the collision game on every distinct pair of messages. -/
+theorem constFamily_collision_realProb {Block Value Digest : Type} [DecidableEq Digest]
+    (d : Digest) {m₁ m₂ : List Block} (h : m₁ ≠ m₂) :
+    (collisionTest h).realProb (constFamily (Value := Value) d) = 1 := by
+  simp [collisionTest_realProb, constFamily]
+
+/-- Every class satisfying the public obligation contains a collision test. A constant
+family violates its two-query bound whenever that bound is below the collision advantage. -/
+theorem constFamily_not_transcriptObligation {Block Value Digest : Type} [Fintype Digest]
+    [DecidableEq Digest] [Nonempty Digest] (d : Digest) {𝒟 : Set (TranscriptCode Block Digest)}
+    {ε : ℕ → ℝ} (hε : ε 2 < 1 - 1 / (Fintype.card Digest : ℝ)) :
+    ¬ TranscriptObligation (constFamily (Value := Value) d) 𝒟 ε := by
+  intro hobl
+  obtain ⟨_, _, h, hmem⟩ := hobl.1
+  exact absorb_ne_of_transcriptObligation hobl h hmem hε rfl
+
+/-- All sixteen four-bit inputs are encoded by the same two-block schedule. -/
+def charTwoMessage (x : CharTwoRate) : List CharTwoRate := [x, 0]
+
+private theorem encoded_ne {x y : CharTwoRate} (h : x ≠ y) : charTwoMessage x ≠ charTwoMessage y := by
+  simpa [charTwoMessage] using h
+
+/-- On this schedule the sponge returns a rotation of all four input bits. -/
+theorem charTwo_encoded_injective : Function.Injective (fun x => spongeFamilyCharTwo.absorb (charTwoMessage x)) := by
+  intro x y heq
+  funext i
+  have h := congrFun heq (i - 1)
+  simpa [charTwoMessage, spongeFamilyCharTwo, ofSponge, sponge, spongeAbsorb, absorbStep, charTwoPerm] using h
+
+/-- All collision tests on distinct encoded four-bit inputs, fixed independently of the hash. -/
+def charTwoCollisionClass : Set (TranscriptCode CharTwoRate CharTwoRate) :=
+  {D | ∃ (x y : CharTwoRate) (h : x ≠ y), D = ⟨2, collisionTest (encoded_ne h)⟩}
+
+theorem card_charTwoRate : Fintype.card CharTwoRate = 16 := by
+  simp [CharTwoRate, ZMod.card]
+
+/-- **SATISFIABLE at a finite digest.**  The char-2 sponge meets Obligation 3
+over the named class at the random oracle's own birthday price, with equality:
+its advantage is the ideal world's collision probability `1/16`. -/
+theorem charTwo_transcriptObligation :
+    TranscriptObligation spongeFamilyCharTwo charTwoCollisionClass (birthdayPrice CharTwoRate) := by
+  constructor
+  · have h : (0 : CharTwoRate) ≠ 1 := by decide
+    exact ⟨charTwoMessage 0, charTwoMessage 1, encoded_ne h, 0, 1, h, rfl⟩
+  rintro D ⟨x, y, h, rfl⟩
+  change transcriptAdvantage spongeFamilyCharTwo (collisionTest (encoded_ne h)) ≤
+    birthdayPrice CharTwoRate 2
+  rw [transcriptAdvantage_collisionTest, ite_eq_right (charTwo_encoded_injective.ne h), birthdayPrice,
+    card_charTwoRate]
+  norm_num
+
+/-- ⚑ **Obligation 3 does work**: at one named class and one bound it holds for
+the char-2 sponge and fails for the constant family over the same types. -/
+theorem transcriptObligation_separates :
+    TranscriptObligation spongeFamilyCharTwo charTwoCollisionClass (birthdayPrice CharTwoRate) ∧
+      ¬ TranscriptObligation (constFamily (Block := CharTwoRate) (Value := CharTwoRate)
+          (0 : CharTwoRate)) charTwoCollisionClass (birthdayPrice CharTwoRate) :=
+  ⟨charTwo_transcriptObligation,
+    constFamily_not_transcriptObligation 0 (by
+      rw [birthdayPrice, card_charTwoRate]
+      norm_num)⟩
+
+end HashFamily
+
 /-! ## §7 The instances are genuinely different objects
 
 A guard against the failure mode where "two instances" are one instance twice. -/
@@ -380,7 +640,7 @@ namespace HashFamily
 theorem natChain_ne_collapsing : natChainFamily ≠ collapsingFamily := by
   intro h
   have : natChainFamily.suite.node 1 1 = collapsingFamily.suite.node 1 1 := by rw [h]
-  simp [natChainFamily, ofChain, collapsingFamily, Nat.pair] at this
+  simp [natChainFamily, ofChain, collapsingFamily, constFamily, Nat.pair] at this
 
 /-- The char-2 sponge instance and the chaining instance do not even share a
 digest type — recorded as the type-level statement that the interface spans
@@ -416,5 +676,32 @@ end HashFamily
 #guard_msgs (whitespace := lax) in #print axioms HashFamily.nodeCollision_of_finite_digest
 /-- info: 'Minidregg.Selvage.HashFamily.merkleObligation_not_provable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms HashFamily.merkleObligation_not_provable
+
+/-- info: 'Minidregg.Selvage.HashFamily.uniformProb_answers_agree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.uniformProb_answers_agree
+/-- info: 'Minidregg.Selvage.HashFamily.uniformProb_answer_hits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.uniformProb_answer_hits
+/-- info: 'Minidregg.Selvage.HashFamily.collisionTest_realProb' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.collisionTest_realProb
+/-- info: 'Minidregg.Selvage.HashFamily.collisionTest_idealProb' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.collisionTest_idealProb
+/-- info: 'Minidregg.Selvage.HashFamily.transcriptAdvantage_collisionTest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.transcriptAdvantage_collisionTest
+/-- info: 'Minidregg.Selvage.HashFamily.absorb_ne_of_transcriptObligation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.absorb_ne_of_transcriptObligation
+/-- info: 'Minidregg.Selvage.HashFamily.transcriptObligation_univ_false' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.transcriptObligation_univ_false
+/-- info: 'Minidregg.Selvage.HashFamily.constFamily_collision_realProb' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.constFamily_collision_realProb
+/-- info: 'Minidregg.Selvage.HashFamily.constFamily_not_transcriptObligation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.constFamily_not_transcriptObligation
+/-- info: 'Minidregg.Selvage.HashFamily.charTwo_encoded_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.charTwo_encoded_injective
+/-- info: 'Minidregg.Selvage.HashFamily.charTwo_transcriptObligation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.charTwo_transcriptObligation
+/-- info: 'Minidregg.Selvage.HashFamily.transcriptObligation_separates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.transcriptObligation_separates
+/-- info: 'Minidregg.Selvage.HashFamily.collapsing_not_transcriptCollisionObligation' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms HashFamily.collapsing_not_transcriptCollisionObligation
 
 end Minidregg.Selvage

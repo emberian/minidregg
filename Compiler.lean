@@ -84,6 +84,7 @@ import Compiler.Tower256FriNativeDeployment -- work 9104: the additive-FRI prove
 import Compiler.Tower256SuccinctProver -- the honest succinct prover at any ell, m over the unit basis (unitBasis_independent); compiled by lean_exe tower256-prover-run
 import Compiler.Tower256ContentCert -- LEAF-PROVER-DECISION §6/§6.1 ContentCert on the cube-Merkle commitment: full-disclosure instance; named_or_collision pins the equivocation to frames computed from the two trees
 import Compiler.Tower256PrivateContentCert -- private-witness salted Tower256 + cSHAKE256 content certificates (.accept, .count, .bound): saltedLeafEquiv, pathCollision, unopened_salted_leaf_rom_prob_eq, maskedCubeRoot_prob_eq, Tower256SuccinctCheck weld, checkPrivate_sound_or_collision, checkPrivate_premises_inhabited, and step_sampling_miss_prob_eq
+import Compiler.Tower256PrivateCertConformance -- private certificate vector generator and schedule pin
 import Compiler.Tower256AdditiveFriSuccinctController -- additive FRI over a public statement of roots, basis, degrees and query count: succinct_accepts_ideal_or_collision reaches the ideal predicate over any committed strategy consistent with the receipt, or a framed collision at a query path or the last level
 import Compiler.Tower256AdditiveFriRawDeployment  -- concrete raw PCS levels, statement codecs, and opaque-byte verifier witnesses inhabit the collision-retaining deployment path
 import Compiler.Ext6GateProofController -- descriptor-bound Ext6 gate transcript control over opaque bytes; PCS/LDT/ROM security remains explicit

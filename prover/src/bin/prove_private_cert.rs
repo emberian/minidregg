@@ -11,9 +11,8 @@ use std::fs;
 use std::process;
 use std::time::Instant;
 
-use minidregg_prover::binary_tower_256::Tower256;
 use minidregg_prover::tower256_private_cert::{
-    decode_private_cert, encode_private_cert, encode_private_receipt, fast_mul256, keccak_f_count,
+    decode_private_cert, encode_private_cert, encode_private_receipt, keccak_f_count,
     prove_private_document, reset_keccak_counter, scan_receipt_for_document_slices,
     synthesize_realistic_hermes_document, verify_private_cert_bytes, ClaimData, Digest, DfaTable,
 };
@@ -93,7 +92,6 @@ fn usage() -> ! {
 }
 
 fn run_bench(fri_queries: usize, step_queries: usize) -> Result<(), String> {
-    let _ = fast_mul256(Tower256::ONE, Tower256::ONE);
     let no_sk = DfaTable::no_sk_dash();
     let markers = DfaTable::count_todo_or_rule();
     let seed: Digest = [0x42u8; 32];

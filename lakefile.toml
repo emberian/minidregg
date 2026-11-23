@@ -128,6 +128,14 @@ root = "Compiler.PrivateBackendBoundaryFixture"
 name = "tower256-prover-run"
 root = "Compiler.Tower256SuccinctProverRun"
 
+# Tower256 private-certificate conformance vectors, compiled (Compiler/Tower256PrivateCertConformance.lean):
+# `--check` (the default) regenerates prover/testdata/tower256_private_cert_conformance.json and exits 1
+# unless the file holds exactly those bytes; `--write` rewrites it. Run by the merge gate's
+# private-cert-vectors row (scripts/gates/check-private-cert-vectors).
+[[lean_exe]]
+name = "tower256-private-cert-conformance"
+root = "Compiler.Tower256PrivateCertConformanceRun"
+
 [[lean_exe]]
 name = "private-circuit-plan-fixture"
 root = "Host.PrivateCircuitPlanFixture"

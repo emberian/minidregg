@@ -13,14 +13,12 @@
 //! - Exact SP 800-185 `cSHAKE256` `Keccak-f[1600]` permutation accounting.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     CShake256, CShake256Core,
 };
 
-use crate::binary_tower::TowerElem;
 use crate::binary_tower_256::Tower256;
 use crate::hash_kernels::cshake256_xof;
 
@@ -500,176 +498,20 @@ pub struct CubeMerkleTree {
     nodes_by_level: Vec<Vec<Digest>>,
 }
 
-// ---------------------------------------------------------------------------------------------
-// L1-Table Accelerated `Tower256` Fan--Paar Arithmetic (verified identical to `Tower256::mul/square`)
-
-struct FastTowerTables {
-    mul8: Box<[[u8; 256]; 256]>,
-    gen3: [u8; 256],
-    sq_byte: Box<[[[u64; 4]; 256]; 32]>,
-}
-
-static FAST_TABLES: OnceLock<FastTowerTables> = OnceLock::new();
-
-fn fast_tables() -> &'static FastTowerTables {
-    FAST_TABLES.get_or_init(|| {
-        let mut mul8 = Box::new([[0u8; 256]; 256]);
-        let mut gen3 = [0u8; 256];
-        let y2 = TowerElem::new(3, 1u64 << 4).expect("y2");
-        for a in 0..256usize {
-            let ea = TowerElem::new(3, a as u64).expect("ea");
-            gen3[a] = ea.mul(y2).expect("gen3").bits() as u8;
-            for b in 0..256usize {
-                let eb = TowerElem::new(3, b as u64).expect("eb");
-                mul8[a][b] = ea.mul(eb).expect("mul8").bits() as u8;
-            }
-        }
-        let mut sq_byte = Box::new([[[0u64; 4]; 256]; 32]);
-        for pos in 0..32usize {
-            for val in 0..256usize {
-                let mut bytes = [0u8; 32];
-                bytes[pos] = val as u8;
-                sq_byte[pos][val] = *Tower256::from_le_bytes(bytes).square().limbs();
-            }
-        }
-        FastTowerTables {
-            mul8,
-            gen3,
-            sq_byte,
-        }
-    })
-}
-
-#[inline(always)]
-fn mul_by_gen4(t: &FastTowerTables, v: u16) -> u16 {
-    let lo = (v & 0xff) as u8;
-    let hi = (v >> 8) as u8;
-    let r_hi = lo ^ t.gen3[hi as usize];
-    u16::from(hi) | (u16::from(r_hi) << 8)
-}
-
-#[inline(always)]
-fn mul_by_gen5(t: &FastTowerTables, v: u32) -> u32 {
-    let lo = (v & 0xffff) as u16;
-    let hi = (v >> 16) as u16;
-    let r_hi = lo ^ mul_by_gen4(t, hi);
-    u32::from(hi) | (u32::from(r_hi) << 16)
-}
-
-#[inline(always)]
-fn mul_by_gen6(t: &FastTowerTables, v: u64) -> u64 {
-    let lo = (v & 0xffff_ffff) as u32;
-    let hi = (v >> 32) as u32;
-    let r_hi = lo ^ mul_by_gen5(t, hi);
-    u64::from(hi) | (u64::from(r_hi) << 32)
-}
-
-#[inline(always)]
-fn mul_by_gen7(t: &FastTowerTables, v: [u64; 2]) -> [u64; 2] {
-    [v[1], v[0] ^ mul_by_gen6(t, v[1])]
-}
-
-#[inline(always)]
-fn fast_mul16(t: &FastTowerTables, a: u16, b: u16) -> u16 {
-    let a0 = (a & 0xff) as usize;
-    let a1 = (a >> 8) as usize;
-    let b0 = (b & 0xff) as usize;
-    let b1 = (b >> 8) as usize;
-    let p0 = t.mul8[a0][b0];
-    let p1 = t.mul8[a1][b1];
-    let mixed = t.mul8[a0 ^ a1][b0 ^ b1] ^ p0 ^ p1;
-    let hi = mixed ^ t.gen3[p1 as usize];
-    u16::from(p0 ^ p1) | (u16::from(hi) << 8)
-}
-
-#[inline(always)]
-fn fast_mul32(t: &FastTowerTables, a: u32, b: u32) -> u32 {
-    let a0 = (a & 0xffff) as u16;
-    let a1 = (a >> 16) as u16;
-    let b0 = (b & 0xffff) as u16;
-    let b1 = (b >> 16) as u16;
-    let p0 = fast_mul16(t, a0, b0);
-    let p1 = fast_mul16(t, a1, b1);
-    let mixed = fast_mul16(t, a0 ^ a1, b0 ^ b1) ^ p0 ^ p1;
-    let hi = mixed ^ mul_by_gen4(t, p1);
-    u32::from(p0 ^ p1) | (u32::from(hi) << 16)
-}
-
-#[inline(always)]
-fn fast_mul64(t: &FastTowerTables, a: u64, b: u64) -> u64 {
-    let a0 = (a & 0xffff_ffff) as u32;
-    let a1 = (a >> 32) as u32;
-    let b0 = (b & 0xffff_ffff) as u32;
-    let b1 = (b >> 32) as u32;
-    let p0 = fast_mul32(t, a0, b0);
-    let p1 = fast_mul32(t, a1, b1);
-    let mixed = fast_mul32(t, a0 ^ a1, b0 ^ b1) ^ p0 ^ p1;
-    let hi = mixed ^ mul_by_gen5(t, p1);
-    u64::from(p0 ^ p1) | (u64::from(hi) << 32)
-}
-
-#[inline(always)]
-fn fast_mul128(t: &FastTowerTables, a: [u64; 2], b: [u64; 2]) -> [u64; 2] {
-    let p0 = fast_mul64(t, a[0], b[0]);
-    let p1 = fast_mul64(t, a[1], b[1]);
-    let mixed = fast_mul64(t, a[0] ^ a[1], b[0] ^ b[1]) ^ p0 ^ p1;
-    [p0 ^ p1, mixed ^ mul_by_gen6(t, p1)]
-}
-
+/// Compatibility entry points for callers of the private-certificate arithmetic API.
 #[inline]
 pub fn fast_mul256(lhs: Tower256, rhs: Tower256) -> Tower256 {
-    if lhs.is_zero() || rhs.is_zero() {
-        return Tower256::ZERO;
-    }
-    let t = fast_tables();
-    let l = lhs.limbs();
-    let r = rhs.limbs();
-    let a0 = [l[0], l[1]];
-    let a1 = [l[2], l[3]];
-    let b0 = [r[0], r[1]];
-    let b1 = [r[2], r[3]];
-    let p0 = fast_mul128(t, a0, b0);
-    let p1 = fast_mul128(t, a1, b1);
-    let mixed = {
-        let m = fast_mul128(t, [a0[0] ^ a1[0], a0[1] ^ a1[1]], [b0[0] ^ b1[0], b0[1] ^ b1[1]]);
-        [m[0] ^ p0[0] ^ p1[0], m[1] ^ p0[1] ^ p1[1]]
-    };
-    let pg = mul_by_gen7(t, p1);
-    Tower256::from_limbs([
-        p0[0] ^ p1[0],
-        p0[1] ^ p1[1],
-        mixed[0] ^ pg[0],
-        mixed[1] ^ pg[1],
-    ])
+    lhs.mul(rhs)
 }
 
 #[inline]
 pub fn fast_square256(x: Tower256) -> Tower256 {
-    let t = fast_tables();
-    let bytes = x.to_le_bytes();
-    let mut acc = [0u64; 4];
-    for (pos, &b) in bytes.iter().enumerate() {
-        if b != 0 {
-            let s = &t.sq_byte[pos][b as usize];
-            acc[0] ^= s[0];
-            acc[1] ^= s[1];
-            acc[2] ^= s[2];
-            acc[3] ^= s[3];
-        }
-    }
-    Tower256::from_limbs(acc)
+    x.square()
 }
 
 #[inline]
 pub fn fast_inverse256(x: Tower256) -> Result<Tower256, PrivateCertError> {
-    if x.is_zero() {
-        return Err(PrivateCertError::SingularInterpolation);
-    }
-    let mut acc = x;
-    for _ in 1..255 {
-        acc = fast_mul256(fast_square256(acc), x);
-    }
-    Ok(fast_square256(acc))
+    x.inverse().map_err(|_| PrivateCertError::SingularInterpolation)
 }
 
 pub struct MerkleHasher {
@@ -885,7 +727,7 @@ pub fn unit_basis(ell: usize) -> Vec<Tower256> {
 #[inline]
 fn subspace_vanishing_eval(gamma: &[Tower256], mut x: Tower256) -> Tower256 {
     for &coeff in gamma {
-        x = fast_square256(x).add(fast_mul256(coeff, x));
+        x = x.square().add(coeff.mul(x));
     }
     x
 }
@@ -917,15 +759,15 @@ fn ntt_forward_rec(data: &mut [Tower256], basis: &[Tower256], gamma: &[Tower256]
         for i in 0..half {
             let low = data[i];
             let high = data[half + i];
-            data[half + i] = low.add(fast_mul256(at_right, high));
+            data[half + i] = low.add(at_right.mul(high));
         }
     } else {
         for i in 0..half {
             let low = data[i];
             let high = data[half + i];
-            let prod_l = fast_mul256(at_offset, high);
+            let prod_l = at_offset.mul(high);
             data[i] = low.add(prod_l);
-            data[half + i] = low.add(prod_l).add(fast_mul256(gamma[last], high));
+            data[half + i] = low.add(prod_l).add(gamma[last].mul(high));
         }
     }
     let right_offset = offset.add(basis[last]);
@@ -965,14 +807,14 @@ fn ntt_inverse_rec(
         for i in 0..half {
             let lv = left[i];
             let rv = right[i];
-            right[i] = fast_mul256(lv.add(rv), inv_g);
+            right[i] = lv.add(rv).mul(inv_g);
         }
     } else {
         for i in 0..half {
             let lv = left[i];
             let rv = right[i];
-            let high = fast_mul256(lv.add(rv), inv_g);
-            left[i] = lv.add(fast_mul256(at_offset, high));
+            let high = lv.add(rv).mul(inv_g);
+            left[i] = lv.add(at_offset.mul(high));
             right[i] = high;
         }
     }
@@ -999,7 +841,7 @@ pub fn ntt_inverse_in_place(
     let inv_gamma = gamma
         .iter()
         .enumerate()
-        .map(|(i, &g)| fast_inverse256(g).map_err(|_| PrivateCertError::ZeroPivot(i)))
+        .map(|(i, &g)| g.inverse().map_err(|_| PrivateCertError::ZeroPivot(i)))
         .collect::<Result<Vec<_>, _>>()?;
     ntt_inverse_rec(evals, basis, &gamma, &inv_gamma, offset);
     Ok(())
@@ -1244,7 +1086,7 @@ fn decode_fri_receipt(
 fn eval_monomial_coeffs(cs: &[Tower256], x: Tower256) -> Tower256 {
     cs.iter()
         .rev()
-        .fold(Tower256::ZERO, |acc, &c| c.add(fast_mul256(x, acc)))
+        .fold(Tower256::ZERO, |acc, &c| c.add(x.mul(acc)))
 }
 
 fn gauss_interpolate(points: &[(Tower256, Tower256)]) -> Result<Vec<Tower256>, PrivateCertError> {
@@ -1256,7 +1098,7 @@ fn gauss_interpolate(points: &[(Tower256, Tower256)]) -> Result<Vec<Tower256>, P
             let mut p = Tower256::ONE;
             for _ in 0..n {
                 row.push(p);
-                p = fast_mul256(p, x);
+                p = p.mul(x);
             }
             row.push(y);
             row
@@ -1267,16 +1109,18 @@ fn gauss_interpolate(points: &[(Tower256, Tower256)]) -> Result<Vec<Tower256>, P
             .find(|&r| !rows[r][col].is_zero())
             .ok_or(PrivateCertError::SingularInterpolation)?;
         rows.swap(p, col);
-        let inv = fast_inverse256(rows[col][col])?;
+        let inv = rows[col][col]
+            .inverse()
+            .map_err(|_| PrivateCertError::SingularInterpolation)?;
         for x in rows[col].iter_mut() {
-            *x = fast_mul256(*x, inv);
+            *x = x.mul(inv);
         }
         let pivot_row = rows[col].clone();
         for (r, row) in rows.iter_mut().enumerate() {
             if r != col && !row[col].is_zero() {
                 let f = row[col];
                 for (x, &y) in row.iter_mut().zip(pivot_row.iter()) {
-                    *x = x.add(fast_mul256(f, y));
+                    *x = x.add(f.mul(y));
                 }
             }
         }
@@ -1288,7 +1132,7 @@ fn gauss_interpolate(points: &[(Tower256, Tower256)]) -> Result<Vec<Tower256>, P
 fn apply_pivots(pivots: &[Tower256], x: Tower256) -> Tower256 {
     pivots
         .iter()
-        .fold(x, |y, &p| fast_square256(y).add(fast_mul256(p, y)))
+        .fold(x, |y, &p| y.square().add(p.mul(y)))
 }
 
 #[inline]
@@ -1409,15 +1253,15 @@ fn prove_fri_from_word0(
         let input = roots_transcript_bytes(&head, &roots, j);
         let alpha = Tower256::from_le_bytes(xof32(CHALLENGE_CUSTOMIZATION, &input));
         let pivot = apply_pivots(&pivots, beta[(ell - 1).saturating_sub(j)]);
-        let pinv = fast_inverse256(pivot).map_err(|_| PrivateCertError::ZeroPivot(j))?;
+        let pinv = pivot.inverse().map_err(|_| PrivateCertError::ZeroPivot(j))?;
         let half = 1usize << (ell - j - 1);
         let dom_lo = tabulate_subspace_domain(&beta, offset, ell - j - 1, &pivots);
         let w = &words[j];
         let mut next = Vec::with_capacity(half);
         for k in 0..half {
             let (left, right) = (w[k], w[k + half]);
-            let t1 = fast_mul256(dom_lo[k].add(alpha), left.add(right));
-            next.push(left.add(fast_mul256(t1, pinv)));
+            let t1 = dom_lo[k].add(alpha).mul(left.add(right));
+            next.push(left.add(t1.mul(pinv)));
         }
         challenges.push(alpha);
         pivots.push(pivot);
@@ -1611,11 +1455,10 @@ fn verify_fri_receipt(
                 last_word[k]
             };
             let dom_lo = dom_point(&beta, offset, ell, j, &round_pivots, k);
-            let lhs = fast_mul256(next_val.add(op.left), pivot_j);
-            let rhs = fast_mul256(
-                dom_lo.add(decoded.challenges[j]),
-                op.left.add(op.right),
-            );
+            let lhs = next_val.add(op.left).mul(pivot_j);
+            let rhs = dom_lo
+                .add(decoded.challenges[j])
+                .mul(op.left.add(op.right));
             if lhs != rhs {
                 return Err(PrivateCertError::VerificationFailed("FRI fold equation failed"));
             }
@@ -2584,26 +2427,5 @@ mod tests {
         assert_eq!(depth_of(4096), 12);
         assert_eq!(depth_of(4097), 13);
         assert_eq!(depth_of(16384), 14);
-    }
-
-    #[test]
-    fn fast_tower256_ops_agree_with_reference_tower256() {
-        for i in 1..64u64 {
-            let a = Tower256::from_limbs([
-                i.wrapping_mul(0x9e37_79b9_7f4a_7c15),
-                i.wrapping_mul(0xbf58_476d_1ce4_e5b9),
-                i.wrapping_mul(0x94d0_49bb_1331_11eb),
-                i ^ 0xdead_beef_cafe_babe,
-            ]);
-            let b = Tower256::from_limbs([
-                (i + 7).wrapping_mul(0x517c_c1b7_2722_0a95),
-                (i + 13).wrapping_mul(0x2545_f491_4f6c_dd1d),
-                (i + 29).wrapping_mul(0xd6e8_feb8_6659_fd93),
-                (i + 3).rotate_left(19),
-            ]);
-            assert_eq!(fast_mul256(a, b), a.mul(b));
-            assert_eq!(fast_square256(a), a.square());
-            assert_eq!(fast_inverse256(a).unwrap(), a.inverse().unwrap());
-        }
     }
 }

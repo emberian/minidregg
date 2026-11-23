@@ -2,9 +2,17 @@
 # Compiler.Tower256PrivateCertConformance -- Conformance Vector Emitter for `Tower256PrivateContentCert`
 
 Separated from `Compiler.Tower256PrivateContentCert` so `Compiler.lean` can import the proved
-private-certificate controller without re-running `#eval` file IO. Precomputes `PreparedAutomaton`
+private-certificate controller without running the prover. Precomputes `PreparedAutomaton`
 (`FastCubeTree`) once per DFA, verifies every honest receipt and negative mutant via `checkPrivate`,
-and writes `prover/testdata/tower256_private_cert_conformance.json` for `prover/tests/tower256_private_cert.rs`.
+and produces `prover/testdata/tower256_private_cert_conformance.json`, the vectors
+`prover/tests/tower256_private_cert.rs` replays byte for byte against the native prover.
+
+The vectors are made by a COMPILED program, `lake exe tower256-private-cert-conformance`, never at
+elaboration: an `#eval` here ran the prover in the interpreter for 1,027 s on hbox (2026-11-23), so
+no umbrella could import the module and nothing checked the vectors against the prover that makes
+them. Elaborating the module now checks only its theorem and pin. `--check` (the default) regenerates
+the vectors and exits 1 unless the file holds exactly those bytes; `--write` rewrites it. The merge
+gate's `private-cert-vectors` row runs `--check` (`scripts/gates/check-private-cert-vectors`).
 -/
 
 import Compiler.Tower256PrivateContentCert
@@ -107,7 +115,8 @@ private def emitOneVector (name : String) (seed : Nat) (pa : PreparedAutomaton) 
      ("expected_run_state", toJson (t.run w)),
      ("expected_run_count", toJson (Dfaops.runCount t w))]
 
-private def emitConformanceVectors : IO Unit := do
+/-- The conformance document, exactly as it is written to the vectors file. -/
+private def conformanceText : IO String := do
   let paNoSk := prepareAutomaton noSkDash
   let paAb := prepareAutomaton countAB
   let v1 ← emitOneVector "accept_true_no_sk" 1 paNoSk noSkDash "ok=1" (.accept true) 3 1 2 2
@@ -118,9 +127,36 @@ private def emitConformanceVectors : IO Unit := do
     [("schema", "minidregg.tower256_private_cert.v1"),
      ("source", "Compiler/Tower256PrivateCertConformance.lean"),
      ("vectors", Json.arr #[v1, v2, v3, v4])]
-  IO.FS.writeFile "prover/testdata/tower256_private_cert_conformance.json" (doc.pretty ++ "\n")
+  return doc.pretty ++ "\n"
 
-#eval emitConformanceVectors
+/-- The committed vectors, relative to the repository root. -/
+def vectorsPath : System.FilePath := "prover/testdata/tower256_private_cert_conformance.json"
+
+/-- `[--check|--write] [FILE]`, FILE defaulting to `vectorsPath`. `--check` (the default) exits 1
+unless FILE holds exactly the regenerated vectors and names the first line that differs;
+`--write` rewrites FILE. -/
+def run (args : List String) : IO UInt32 := do
+  let (mode, path) ← match args with
+    | [] => pure ("--check", vectorsPath)
+    | [mode] => pure (mode, vectorsPath)
+    | [mode, path] => pure (mode, (path : System.FilePath))
+    | _ => throw (IO.userError "usage: tower256-private-cert-conformance [--check|--write] [FILE]")
+  unless mode == "--check" || mode == "--write" do
+    throw (IO.userError s!"unknown mode {mode}: expected --check or --write")
+  if mode == "--write" then
+    IO.FS.writeFile path (← conformanceText)
+    IO.println s!"wrote {path}"
+    return 0
+  let committed ← IO.FS.readFile path
+  let text ← conformanceText
+  if committed == text then
+    IO.println s!"{path}: fresh"
+    return 0
+  let (old, new) := (committed.splitOn "\n", text.splitOn "\n")
+  let line := ((List.range (max old.length new.length)).find? fun i => old[i]? != new[i]?).getD 0
+  IO.eprintln s!"{path}: STALE at line {line + 1}: the file is not what the Lean prover produces now \
+    (rewrite it with `lake exe tower256-private-cert-conformance --write`)"
+  return 1
 
 /-- info: 'Minidregg.Compiler.Tower256PrivateCertConformance.conformance_degree_schedule_pin' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms conformance_degree_schedule_pin

@@ -8,8 +8,8 @@ use crate::binary_tower_256::Tower256 as F;
 use crate::hash_kernels::cshake256_xof;
 use crate::tower256_private_cert::{automaton_commit, DfaTable};
 use crate::tower256_private_cert::{
-    fast_inverse256, fast_mul256 as mul, fast_square256 as sq, leaf_of_u64 as small,
-    ntt_forward_in_place, ntt_inverse_in_place, unit_basis, CubeMerkleTree, Digest, MerkleHasher,
+    leaf_of_u64 as small, ntt_forward_in_place, ntt_inverse_in_place, unit_basis, CubeMerkleTree,
+    Digest, MerkleHasher,
 };
 use std::{collections::HashMap, sync::OnceLock};
 
@@ -41,11 +41,11 @@ pub fn dual_basis() -> &'static [F; 256] {
         for level in 0..8 {
             let width = 1 << level;
             let g = if level == 0 { ONE } else { beta(width / 2) };
-            let inv = fast_inverse256(g).expect("nonzero tower generator");
+            let inv = g.inverse().expect("nonzero tower generator");
             let mut next = vec![ZERO; 2 * width];
             for (j, a) in prev.into_iter().enumerate() {
-                let scaled = mul(inv, a);
-                next[j] = a.add(mul(beta(width), scaled));
+                let scaled = inv.mul(a);
+                next[j] = a.add(beta(width).mul(scaled));
                 next[width + j] = scaled;
             }
             prev = next;
@@ -55,16 +55,16 @@ pub fn dual_basis() -> &'static [F; 256] {
 }
 
 pub fn pluck_bit_via_dual(x: F, bit: u8) -> bool {
-    trace(mul(x, dual_basis()[usize::from(bit)]))
+    trace(x.mul(dual_basis()[usize::from(bit)]))
 }
 
 pub fn artin_schreier(t: F) -> F {
-    sq(t).add(t)
+    t.square().add(t)
 }
 
 fn dot(a: &[F], b: &[F]) -> F {
     assert_eq!(a.len(), b.len());
-    a.iter().zip(b).fold(ZERO, |s, (&x, &y)| s.add(mul(x, y)))
+    a.iter().zip(b).fold(ZERO, |s, (&x, &y)| s.add(x.mul(y)))
 }
 
 /// Equation (6): column l is the XOR of X_i whose C_i has bit l set.
@@ -122,7 +122,7 @@ impl ByteMap {
 fn tensor_matrix(d: &[F]) -> Vec<[F; 256]> {
     (0..256)
         .map(|l| {
-            let products: Vec<_> = d.iter().map(|&v| mul(beta(l), v)).collect();
+            let products: Vec<_> = d.iter().map(|&v| beta(l).mul(v)).collect();
             dual_coefficients(&products)
         })
         .collect()
@@ -396,13 +396,13 @@ fn bit(v: bool) -> F {
     }
 }
 fn affine(a: F, b: F, x: F) -> F {
-    a.add(mul(x, a.add(b)))
+    a.add(x.mul(a.add(b)))
 }
 fn horner(p: &[F], x: F) -> F {
-    p.iter().rev().fold(ZERO, |y, &c| mul(y, x).add(c))
+    p.iter().rev().fold(ZERO, |y, &c| y.mul(x).add(c))
 }
 fn diff(x: F) -> F {
-    sq(x).add(x)
+    x.square().add(x)
 }
 fn eq_table(point: &[F]) -> Vec<F> {
     let mut t = vec![ONE];
@@ -410,7 +410,7 @@ fn eq_table(point: &[F]) -> Vec<F> {
         let n = t.len();
         t.resize(2 * n, ZERO);
         for i in 0..n {
-            t[n + i] = mul(t[i], r);
+            t[n + i] = t[i].mul(r);
             t[i] = t[i].add(t[n + i]);
         }
     }
@@ -503,9 +503,9 @@ fn sum_rows(mut rows: Vec<[F; 3]>, aux: &[F], wire: &mut Vec<u8>, tr: &mut Trans
             let terms = if j == 0 { 3 } else { 2 };
             for u in 0..terms {
                 for w in 0..terms {
-                    let ab = mul(a[u], b[w]);
+                    let ab = a[u].mul(b[w]);
                     for (s, &valid) in v.iter().enumerate() {
-                        p[u + w + s] = p[u + w + s].add(mul(ab, valid));
+                        p[u + w + s] = p[u + w + s].add(ab.mul(valid));
                     }
                 }
             }
@@ -513,14 +513,14 @@ fn sum_rows(mut rows: Vec<[F; 3]>, aux: &[F], wire: &mut Vec<u8>, tr: &mut Trans
         send(wire, tr, &p);
         let x = tr.draw(b"sumcheck", 1)[0];
         point.push(x);
-        g = horner(&g_poly(aux, j), x).add(mul(g, x));
+        g = horner(&g_poly(aux, j), x).add(g.mul(x));
         for i in 0..rows.len() / 2 {
             let lo = rows[2 * i];
             let hi = rows[2 * i + 1];
             rows[i] = std::array::from_fn(|s| affine(lo[s], hi[s], x));
             if j == 0 {
-                rows[i][0] = rows[i][0].add(mul(diff(x), blind[0]));
-                rows[i][1] = rows[i][1].add(mul(diff(x), blind[1]));
+                rows[i][0] = rows[i][0].add(diff(x).mul(blind[0]));
+                rows[i][1] = rows[i][1].add(diff(x).mul(blind[1]));
             }
         }
         rows.truncate(rows.len() / 2);
@@ -554,7 +554,7 @@ fn sum_verify(n: usize, claim: bool, rd: &mut Reader<'_>, tr: &mut Transcript) -
         point,
         a: ab[0],
         b: ab[1],
-        g: current.add(mul(valid, mul(ab[0], ab[1]))),
+        g: current.add(valid.mul(ab[0].mul(ab[1]))),
     })
 }
 
@@ -579,7 +579,7 @@ impl Tensor {
                 let h = 1 << (j % 8);
                 let a = if dfa.left & h != 0 { mix[0] } else { ZERO };
                 let b = if dfa.right & h != 0 { mix[1] } else { ZERO };
-                mul(a.add(b), small_eq[j / 8])
+                a.add(b).mul(small_eq[j / 8])
             })
             .collect();
         Self {
@@ -594,23 +594,23 @@ impl Tensor {
 }
 fn mask_weights(end: &Closing, k: usize, mix: &[F]) -> Vec<F> {
     let mut aux_weights = vec![ZERO; k];
-    aux_weights[RA] = mul(mix[0], diff(end.point[0]));
-    aux_weights[RB] = mul(mix[1], diff(end.point[0]));
+    aux_weights[RA] = mix[0].mul(diff(end.point[0]));
+    aux_weights[RB] = mix[1].mul(diff(end.point[0]));
     let mut suffix = mix[2];
     for (j, &x) in end.point.iter().enumerate().rev() {
         let at = mask_at(j);
         aux_weights[at] = suffix;
         let mut power = x;
         for i in 2..=degree(j) {
-            power = mul(power, x);
-            aux_weights[at + i - 1] = mul(suffix, power.add(x));
+            power = power.mul(x);
+            aux_weights[at + i - 1] = suffix.mul(power.add(x));
         }
-        suffix = mul(suffix, x);
+        suffix = suffix.mul(x);
     }
     aux_weights
 }
 fn pads(aux: &[F]) -> [F; 256] {
-    let t0 = (1..256).fold(ZERO, |v, j| v.add(mul(beta(j), aux[j - 1])));
+    let t0 = (1..256).fold(ZERO, |v, j| v.add(beta(j).mul(aux[j - 1])));
     std::array::from_fn(|j| if j == 0 { t0 } else { aux[j - 1] })
 }
 fn rho_bit(x: F, j: usize) -> F {
@@ -624,7 +624,8 @@ fn masked_trace_claims(tensor: &Tensor, words: &[&[F]], aux: &[F], pad: &[F; 256
     let v = dot(&tensor.aux_weights, aux);
     let mut u: Vec<_> = (0..256)
         .map(|j| {
-            mul(dual_basis()[j], v)
+            dual_basis()[j]
+                .mul(v)
                 .add(rho_bit(tensor.y, j))
                 .add(artin_schreier(pad[j]))
         })
@@ -636,7 +637,7 @@ fn masked_trace_claims(tensor: &Tensor, words: &[&[F]], aux: &[F], pad: &[F; 256
             let w = transpose_bit_matrix_256(c, &padded).unwrap();
             for (col, &x) in mu.iter().zip(&w) {
                 for j in 0..256 {
-                    u[j] = u[j].add(mul(col[j], x));
+                    u[j] = u[j].add(col[j].mul(x));
                 }
             }
         }
@@ -645,7 +646,7 @@ fn masked_trace_claims(tensor: &Tensor, words: &[&[F]], aux: &[F], pad: &[F; 256
                 for (bits, &x) in coeff.chunks(256).zip(*words) {
                     let q = dual_coefficients(bits);
                     for j in 0..256 {
-                        u[j] = u[j].add(mul(q[j], x));
+                        u[j] = u[j].add(q[j].mul(x));
                     }
                 }
             }
@@ -659,7 +660,7 @@ struct Equation {
     value: F,
 }
 fn linear_equation(tensor: Tensor, u: &[F], delta: &[F], a: F, eta: F) -> Equation {
-    let gamma: Vec<_> = delta.iter().copied().map(sq).collect();
+    let gamma: Vec<_> = delta.iter().copied().map(F::square).collect();
     let k = tensor.aux_weights.len();
     let mut weights = match tensor.projection {
         Projection::Tensor { c, mu } => {
@@ -680,17 +681,17 @@ fn linear_equation(tensor: Tensor, u: &[F], delta: &[F], a: F, eta: F) -> Equati
         row.resize(k, ZERO);
     }
     let weight = dot(dual_basis(), &gamma);
-    let mut aux: Vec<_> = tensor.aux_weights.iter().map(|&w| mul(weight, w)).collect();
+    let mut aux: Vec<_> = tensor.aux_weights.iter().map(|&w| weight.mul(w)).collect();
     for j in 1..256 {
-        let w9 = gamma[j].add(mul(gamma[0], beta(j)));
-        let w8 = delta[j].add(mul(delta[0], beta(j)));
-        aux[j - 1] = aux[j - 1].add(w9).add(mul(eta, w8));
+        let w9 = gamma[j].add(gamma[0].mul(beta(j)));
+        let w8 = delta[j].add(delta[0].mul(beta(j)));
+        aux[j - 1] = aux[j - 1].add(w9).add(eta.mul(w8));
     }
     aux[B] = aux[B].add(ONE);
     aux[R] = aux[R].add(eta);
-    let mut value = sq(a).add(mul(eta, a));
+    let mut value = a.square().add(eta.mul(a));
     for j in 0..256 {
-        value = value.add(mul(gamma[j], u[j].add(rho_bit(tensor.y, j))));
+        value = value.add(gamma[j].mul(u[j].add(rho_bit(tensor.y, j))));
     }
     weights.push(aux);
     Equation { weights, value }
@@ -708,15 +709,15 @@ fn vanish(k: usize, size: usize, offset: F) -> Vec<F> {
 fn shifted_rem_weight(x: F, k: usize) -> F {
     let mut p = x;
     for _ in 0..k.ilog2() {
-        p = sq(p);
+        p = p.square();
     }
-    mul(p, x)
+    p.mul(x)
 }
 fn combo(v: &[F], mix: &[F], x: F, k: usize) -> F {
     let last = v.len() - 1;
     v[last]
         .add(dot(&v[..last], &mix[..last]))
-        .add(mul(mix[last], mul(shifted_rem_weight(x, k), v[last - 1])))
+        .add(mix[last].mul(shifted_rem_weight(x, k).mul(v[last - 1])))
 }
 fn pcs_polynomial(eq: &Equation, witnesses: &[&Shared], q: &[F], r: &[F]) -> Vec<F> {
     let k = eq.weights[0].len();
@@ -725,13 +726,13 @@ fn pcs_polynomial(eq: &Equation, witnesses: &[&Shared], q: &[F], r: &[F]) -> Vec
     let vh = vanish(k, size, ZERO);
     let vq = evaluate(q, size, ZERO);
     for i in 0..size {
-        s[i] = s[i].add(mul(vh[i], vq[i]));
+        s[i] = s[i].add(vh[i].mul(vq[i]));
     }
     for (weight, row) in eq.weights.iter().zip(witnesses) {
         let w = evaluate(&interpolate(weight.clone()), size, ZERO);
         let f = evaluate(&row.coeff, size, ZERO);
         for i in 0..size {
-            s[i] = s[i].add(mul(w[i], f[i]));
+            s[i] = s[i].add(w[i].mul(f[i]));
         }
     }
     let mut coeff = interpolate(s);
@@ -743,10 +744,10 @@ fn pcs_polynomial(eq: &Equation, witnesses: &[&Shared], q: &[F], r: &[F]) -> Vec
 // Each fold pairs x and x+p, then maps both to x^2+p*x. The affine
 // interpolation through that pair is evaluated at the transcript challenge.
 fn quotient(x: F, p: F) -> F {
-    mul(x, x.add(p))
+    x.mul(x.add(p))
 }
 fn folded(lo: F, hi: F, x: F, alpha: F, inv: F) -> F {
-    lo.add(mul(mul(x.add(alpha), inv), lo.add(hi)))
+    lo.add(x.add(alpha).mul(inv).mul(lo.add(hi)))
 }
 fn root_send(wire: &mut Vec<u8>, tr: &mut Transcript, root: Digest) {
     wire.extend_from_slice(&root);
@@ -803,7 +804,7 @@ fn pcs_prove(
         let alpha = tr.draw(b"basefold", 1)[0];
         let half = dom.len() / 2;
         let p = dom[0].add(dom[half]);
-        let inv = fast_inverse256(p).unwrap();
+        let inv = p.inverse().unwrap();
         let word = (0..half)
             .map(|i| folded(layer.word[i], layer.word[i + half], dom[i], alpha, inv))
             .collect();
@@ -862,7 +863,7 @@ fn pcs_verify(
         let root = root_receive(rd, tr)?;
         let alpha = tr.draw(b"basefold", 1)[0];
         let pivot = betas.pop().unwrap();
-        let inv = fast_inverse256(pivot).map_err(|_| "zero fold pivot")?;
+        let inv = pivot.inverse().map_err(|_| "zero fold pivot")?;
         layers.push((len, root, alpha, pivot, inv));
         for b in &mut betas {
             *b = quotient(*b, pivot);
@@ -883,9 +884,9 @@ fn pcs_verify(
         .collect::<Result<Vec<_>>>()?;
     for idx in queries {
         let v: Vec<_> = shares.iter().map(|row| row[&idx]).collect();
-        let mut check = mul(van[idx], v[roots.len()]).add(v[roots.len() + 1]);
+        let mut check = van[idx].mul(v[roots.len()]).add(v[roots.len() + 1]);
         for (w, &value) in weights.iter().zip(&v) {
-            check = check.add(mul(w[idx], value));
+            check = check.add(w[idx].mul(value));
         }
         if check != s[idx] {
             return Err("linear opening coset identity");
@@ -940,7 +941,7 @@ fn prove_inner(
     let words = packed(bytes);
     let f = Shared::new(&words, k, content_seed, b"content");
     let mut aux = random(b"trace and sumcheck masks", proof_seed, k);
-    aux[B] = sq(aux[R]).add(b_error);
+    aux[B] = aux[R].square().add(b_error);
     let a = Shared::new(&aux, k, proof_seed, b"aux sharing");
     let root = f.oracle.root();
     let mut tr = tr_init(bytes.len(), dfa, claim, &root, &a.oracle.root());
@@ -1254,9 +1255,9 @@ impl Circuit {
         }
         let eq = eq_table(&end.point);
         self.visit(claim, |i, left, right| {
-            let w = mul(eq[i], mix[0]);
-            let a = mul(w, checks[i / 2]);
-            let b = mul(eq[i], mix[1]);
+            let w = eq[i].mul(mix[0]);
+            let a = w.mul(checks[i / 2]);
+            let b = eq[i].mul(mix[1]);
             for (pair, weight) in [(left, a), (right, b)] {
                 for site in pair {
                     match site {
@@ -1326,7 +1327,7 @@ fn prove_dfa_trace(
         shares.push(Shared::new(row, c.k, proof_seed, &tag));
     }
     let mut aux = random(b"trace and sumcheck masks", proof_seed, c.k);
-    aux[B] = sq(aux[R]);
+    aux[B] = aux[R].square();
     shares.push(Shared::new(&aux, c.k, proof_seed, b"aux sharing"));
     let roots: Vec<_> = shares.iter().map(|s| s.oracle.root()).collect();
     let mut tr = dfa_transcript(c.n, dfa, claim, &roots);

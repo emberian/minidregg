@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# check-private-cert-vectors -- the Tower256 private-certificate vectors are what Lean proves now.
+#
+#   scripts/gates/check-private-cert-vectors [LEAN_BIN_DIR]     (default .lake/build/bin)
+#
+# prover/testdata/tower256_private_cert_conformance.json is what prover/tests/tower256_private_cert.rs
+# replays byte for byte against the native prover, and Lean is its only author: the lean_exe
+# tower256-private-cert-conformance (Compiler/Tower256PrivateCertConformance.lean) runs the Lean prover,
+# checks every honest receipt and refuses every mutant, and with `--check` exits 1 unless the file holds
+# exactly the bytes it regenerates. Until 2026-11-23 the vectors came from an elaboration-time #eval no
+# target imported, so an edit to the Lean prover left them stale with nothing to say so.
+# Control: a copy with one hex digit flipped must be refused AS STALE (exit 1 and the emitter's
+# "STALE at line" message, not any failure); a check that accepts it is not a gate.
+# Needs the exe built (the exe-roots row builds every lean_exe).
+set -euo pipefail
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+cd "$root"
+bin=${1:-.lake/build/bin}
+exe=$bin/tower256-private-cert-conformance
+vectors=prover/testdata/tower256_private_cert_conformance.json
+die() { echo "private-cert-vectors: FAIL: $*"; exit 1; }
+[ -x "$exe" ] || die "no $exe (lake build tower256-private-cert-conformance)"
+[ -f "$vectors" ] || die "no $vectors"
+"$exe" --check "$vectors" || die "$vectors is stale: lake exe tower256-private-cert-conformance --write"
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/private-cert-vectors.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
+# control: flip the first hex digit of the first content_root
+python3 - "$vectors" "$tmp/flipped.json" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+match = re.search(r'"content_root":\s*"([0-9a-f])', text)  # Json.pretty may break the line
+if match is None:
+    sys.exit("private-cert-vectors: no content_root to flip")
+flipped = "0" if match.group(1) != "0" else "1"
+open(sys.argv[2], "w").write(text[:match.start(1)] + flipped + text[match.end(1):])
+PY
+[ -s "$tmp/flipped.json" ] || die "control: could not build the flipped copy"
+rc=0
+"$exe" --check "$tmp/flipped.json" >/dev/null 2>"$tmp/control.err" || rc=$?
+[ "$rc" = 1 ] && grep -q "STALE at line" "$tmp/control.err" ||
+  die "control: a flipped content_root digit was not refused as stale (exit $rc: $(head -c 300 "$tmp/control.err"))"
+echo "private-cert-vectors: PASS ($vectors is exactly what the Lean prover emits; a flipped digit is refused)"

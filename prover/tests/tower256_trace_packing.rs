@@ -7,7 +7,6 @@ use minidregg_prover::tower256_private_cert::{ClaimData, DfaTable};
 use std::time::Instant;
 
 use minidregg_prover::binary_tower_256::Tower256 as F;
-use minidregg_prover::tower256_private_cert::{fast_mul256 as mul, fast_square256 as sq};
 use minidregg_prover::tower256_trace_pack::{
     artin_schreier, content_commitment, dual_basis, pack_32_bytes_bijective, pluck_bit_via_dual,
     prove, trace, transpose_bit_matrix_256, verify, ByteAndDfa,
@@ -134,10 +133,10 @@ fn lean_conformance_and_trace_duality() {
     let value = w
         .iter()
         .enumerate()
-        .fold(F::ZERO, |v, (l, &x)| v.add(mul(mul(basis(l), d), x)));
+        .fold(F::ZERO, |v, (l, &x)| v.add(basis(l).mul(d).mul(x)));
     assert_eq!(value, y);
     for (j, key) in [(0, "z_bit0_hex"), (128, "z_bit128_hex")] {
-        let z = mul(dual_basis()[j], value).add(if coord(y, j) { rho } else { F::ZERO });
+        let z = dual_basis()[j].mul(value).add(if coord(y, j) { rho } else { F::ZERO });
         assert_eq!(unhex(&t[key]), z);
         assert!(!trace(z));
     }
@@ -168,8 +167,9 @@ fn full_width_artin_schreier_distribution() {
             v = v.add(pivots[i]);
         }
     }
-    // fast_square256 XORs 32 byte-table contributions. Check every entry
-    // against the basis expansion before using linear rank to count fibers.
+    // x^2 + x is GF(2)-linear (squaring is the Frobenius). Check every byte
+    // position's expansion against the basis columns before using linear rank
+    // to count fibers.
     for pos in 0..32 {
         let columns: [F; 8] = std::array::from_fn(|b| artin_schreier(basis(8 * pos + b)));
         for byte in 0u8..=255 {
@@ -188,7 +188,7 @@ fn full_width_artin_schreier_distribution() {
     assert_eq!(artin_schreier(F::ONE), F::ZERO);
     let x = F::from_le_bytes([173; 32]);
     let y = F::from_le_bytes([92; 32]);
-    assert_eq!(sq(x.add(y)), sq(x).add(sq(y)));
+    assert_eq!(x.add(y).square(), x.square().add(y.square()));
     println!("AS rank={rank}, fibers=2, trace-zero image dimension=255, exact TVD=0");
 }
 

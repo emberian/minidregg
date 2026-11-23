@@ -30,8 +30,7 @@ use sha3::{
 use crate::binary_tower_256::Tower256;
 use crate::hash_kernels::cshake256_xof;
 use crate::tower256_private_cert::{
-    automaton_commit, depth_of, fast_inverse256, fast_mul256, fast_square256,
-    keccak_f_count as base_keccak_f_count, leaf_of_u64,
+    automaton_commit, depth_of, keccak_f_count as base_keccak_f_count, leaf_of_u64,
     reset_keccak_counter as reset_base_keccak_counter, unit_basis, ClaimData, CubeMerkleTree,
     DfaTable, Digest, MerkleHasher, PrivateCertError,
 };
@@ -270,9 +269,9 @@ pub fn pow_tower256(mut base: Tower256, mut exp: u64) -> Tower256 {
     let mut acc = Tower256::ONE;
     while exp > 0 {
         if (exp & 1) == 1 {
-            acc = fast_mul256(acc, base);
+            acc = acc.mul(base);
         }
-        base = fast_square256(base);
+        base = base.square();
         exp >>= 1;
     }
     acc
@@ -282,10 +281,10 @@ pub fn pow_tower256(mut base: Tower256, mut exp: u64) -> Tower256 {
 pub fn eval_horner(cs: &[Tower256], x: Tower256) -> Tower256 {
     cs.iter()
         .rev()
-        .fold(Tower256::ZERO, |acc, &c| c.add(fast_mul256(x, acc)))
+        .fold(Tower256::ZERO, |acc, &c| c.add(x.mul(acc)))
 }
 
-/// Montgomery batch inversion over `Tower256` (`1` `fast_inverse256` + `3 * n` `fast_mul256`s).
+/// Montgomery batch inversion over `Tower256` (one inverse and `3 * n` products).
 pub fn batch_inverse256(xs: &[Tower256]) -> Result<Vec<Tower256>, PrivateCertError> {
     if xs.is_empty() {
         return Ok(Vec::new());
@@ -294,13 +293,13 @@ pub fn batch_inverse256(xs: &[Tower256]) -> Result<Vec<Tower256>, PrivateCertErr
     let mut acc = Tower256::ONE;
     for &x in xs {
         pref.push(acc);
-        acc = fast_mul256(acc, x);
+        acc = acc.mul(x);
     }
-    let mut inv_acc = fast_inverse256(acc)?;
+    let mut inv_acc = acc.inverse().map_err(|_| PrivateCertError::SingularInterpolation)?;
     let mut out = vec![Tower256::ZERO; xs.len()];
     for i in (0..xs.len()).rev() {
-        out[i] = fast_mul256(pref[i], inv_acc);
-        inv_acc = fast_mul256(inv_acc, xs[i]);
+        out[i] = pref[i].mul(inv_acc);
+        inv_acc = inv_acc.mul(xs[i]);
     }
     Ok(out)
 }
@@ -325,7 +324,7 @@ pub fn mobius_in_place(m_vars: usize, table: &mut [Tower256]) {
 fn apply_pivots(pivots: &[Tower256], x: Tower256) -> Tower256 {
     pivots
         .iter()
-        .fold(x, |y, &p| fast_square256(y).add(fast_mul256(p, y)))
+        .fold(x, |y, &p| y.square().add(p.mul(y)))
 }
 
 #[inline]
@@ -398,7 +397,7 @@ fn precompute_coset_thetas(
         .map(|s| {
             let dom_lo = tabulate_subspace_domain(&beta, offset, ell - s - 1, &pivs[..s]);
             let pinv = piv_invs[s];
-            dom_lo.into_iter().map(|d| fast_mul256(d, pinv)).collect()
+            dom_lo.into_iter().map(|d| d.mul(pinv)).collect()
         })
         .collect()
 }
@@ -429,7 +428,7 @@ fn coset_from_coeffs_with_thetas(
             for k in 0..half {
                 let ev = buf[ev_off + k];
                 let od = buf[od_off + k];
-                let lo_val = ev.add(fast_mul256(thetas[k], od));
+                let lo_val = ev.add(thetas[k].mul(od));
                 scratch[dst_off + k] = lo_val;
                 scratch[dst_off + k + half] = lo_val.add(od);
             }
@@ -508,7 +507,7 @@ pub fn interpolate_deg4(evals5: &[Tower256; 5]) -> PolyDeg4 {
         for j in 0..5 {
             let c = VANDERMONDE_INV_5[i][j];
             if c != 0 {
-                acc = acc.add(fast_mul256(leaf_of_u64(c), evals5[j]));
+                acc = acc.add(leaf_of_u64(c).mul(evals5[j]));
             }
         }
         coeffs[i] = acc;
@@ -522,14 +521,14 @@ pub fn prefix_power_mle(d: usize, k: usize, tau: Tower256, r: &[Tower256]) -> To
     let mut cur = tau;
     for _ in 0..d {
         pows.push(cur);
-        cur = fast_square256(cur);
+        cur = cur.square();
     }
     fn full_cube(m: usize, pows: &[Tower256], r: &[Tower256]) -> Tower256 {
         let mut acc = Tower256::ONE;
         for j in 0..m {
             let rj = r[j];
-            let term = Tower256::ONE.add(rj).add(fast_mul256(rj, pows[j]));
-            acc = fast_mul256(acc, term);
+            let term = Tower256::ONE.add(rj).add(rj.mul(pows[j]));
+            acc = acc.mul(term);
         }
         acc
     }
@@ -548,10 +547,10 @@ pub fn prefix_power_mle(d: usize, k: usize, tau: Tower256, r: &[Tower256]) -> To
         let rm = r[m1];
         let one_plus_rm = Tower256::ONE.add(rm);
         if k <= half {
-            fast_mul256(one_plus_rm, aux(m1, k, pows, r))
+            one_plus_rm.mul(aux(m1, k, pows, r))
         } else {
-            let lo = fast_mul256(one_plus_rm, full_cube(m1, pows, r));
-            let hi = fast_mul256(fast_mul256(rm, pows[m1]), aux(m1, k - half, pows, r));
+            let lo = one_plus_rm.mul(full_cube(m1, pows, r));
+            let hi = rm.mul(pows[m1]).mul(aux(m1, k - half, pows, r));
             lo.add(hi)
         }
     }
@@ -567,7 +566,7 @@ fn chi_at_nat(d: usize, idx: usize, r: &[Tower256]) -> Tower256 {
         } else {
             Tower256::ONE.add(rj)
         };
-        acc = fast_mul256(acc, factor);
+        acc = acc.mul(factor);
     }
     acc
 }
@@ -580,10 +579,10 @@ fn tabulate_chi(d: usize, r: &[Tower256]) -> Vec<Tower256> {
         let n = prev.len();
         let mut next = Vec::with_capacity(2 * n);
         for &v in &prev {
-            next.push(fast_mul256(v, r0));
+            next.push(v.mul(r0));
         }
         for &v in &prev {
-            next.push(fast_mul256(v, rj));
+            next.push(v.mul(rj));
         }
         dp = next;
     }
@@ -695,7 +694,7 @@ fn alg_batch_transcript(
 fn eq_point(m: usize, r: &[Tower256], s: &[Tower256]) -> Tower256 {
     let mut acc = Tower256::ONE;
     for k in 0..m {
-        acc = fast_mul256(acc, Tower256::ONE.add(r[k]).add(s[k]));
+        acc = acc.mul(Tower256::ONE.add(r[k]).add(s[k]));
     }
     acc
 }
@@ -768,7 +767,7 @@ fn run_basefold_verifier(
             envelope(&mut tr, &eval_fold_roots[j]);
         }
     }
-    if claim != fast_mul256(eq_point(d + 1, r_full, &s_acc), bf_final_coeff) {
+    if claim != eq_point(d + 1, r_full, &s_acc).mul(bf_final_coeff) {
         return Err(PrivateCertError::VerificationFailed(
             "basefold terminal claim != eq(rFull, sBF) * bfFinalCoeff",
         ));
@@ -873,14 +872,14 @@ fn eval_combined_phi(
     let (y_m, y_hinv, y_ginv) = (ys[9], ys[10], ys[11]);
     let (y_mlin, y_u1, y_u2, y_u3) = (ys[12], ys[13], ys[14], ys[15]);
 
-    let alpha2 = fast_square256(alpha);
-    let alpha3 = fast_mul256(alpha2, alpha);
+    let alpha2 = alpha.square();
+    let alpha3 = alpha2.mul(alpha);
     let e_tup = y_b
-        .add(fast_mul256(alpha, y_s))
-        .add(fast_mul256(alpha2, y_nx))
-        .add(fast_mul256(alpha3, y_h));
+        .add(alpha.mul(y_s))
+        .add(alpha2.mul(y_nx))
+        .add(alpha3.mul(y_h));
     let z_plus_1 = one.add(zeta);
-    let c_step = one.add(fast_mul256(z_plus_1, y_h));
+    let c_step = one.add(z_plus_1.mul(y_h));
 
     let chi0 = ps[0];
     let chi_last = ps[1];
@@ -900,25 +899,25 @@ fn eval_combined_phi(
     let p_step1 = ps[15];
     let p_step2 = ps[16];
 
-    let e0 = fast_mul256(chi0, init_f)
-        .add(fast_mul256(p_lt_s, y_s))
-        .add(fast_mul256(p_lm1_s, y_nx));
+    let e0 = chi0.mul(init_f)
+        .add(p_lt_s.mul(y_s))
+        .add(p_lm1_s.mul(y_nx));
     let e1 = chi0
-        .add(fast_mul256(p_lt_c, y_c))
-        .add(fast_mul256(fast_mul256(p_lm1_c, y_c), c_step));
-    let e2 = fast_mul256(p_lt_d, fast_mul256(y_hinv, gamma.add(e_tup)).add(one));
-    let e3 = fast_mul256(p_tab_gamma_d, y_ginv).add(p_tab_d);
-    let e4 = fast_mul256(p_lt_theta, y_hinv).add(fast_mul256(fast_mul256(p_tab_one, y_m), y_ginv));
+        .add(p_lt_c.mul(y_c))
+        .add(p_lm1_c.mul(y_c).mul(c_step));
+    let e2 = p_lt_d.mul(y_hinv.mul(gamma.add(e_tup)).add(one));
+    let e3 = p_tab_gamma_d.mul(y_ginv).add(p_tab_d);
+    let e4 = p_lt_theta.mul(y_hinv).add(p_tab_one.mul(y_m).mul(y_ginv));
 
     let (e5, e6, e7, e8, e9, e10) = match claim {
         ClaimData::Accept(acc_b) => {
             let acc_f = if acc_b { one } else { zero };
-            (fast_mul256(chi_last, y_h.add(acc_f)), zero, zero, zero, zero, zero)
+            (chi_last.mul(y_h.add(acc_f)), zero, zero, zero, zero, zero)
         }
         ClaimData::Count(n) => {
             let zn = pow_tower256(zeta, n);
             (
-                fast_mul256(chi_last, fast_mul256(y_c, c_step).add(zn)),
+                chi_last.mul(y_c.mul(c_step).add(zn)),
                 zero,
                 zero,
                 zero,
@@ -933,38 +932,32 @@ fn eval_combined_phi(
             let two_pow_d = 1u64 << cube_dim;
             let z_last1 = one.add(pow_tower256(zeta, two_pow_d));
             let z_last2 = one.add(pow_tower256(zeta_inv, two_pow_d));
-            let c5 = fast_mul256(p_bit_d, fast_square256(y_d1).add(y_d1));
-            let c6 = fast_mul256(p_bit_d, fast_square256(y_d2).add(y_d2));
-            let c7 = fast_mul256(chi0, z_lo)
-                .add(fast_mul256(p_bit_c, y_a1))
-                .add(fast_mul256(p_bit_prev_c, y_a1))
-                .add(fast_mul256(fast_mul256(p_step1, y_a1), y_d1));
-            let c8 = fast_mul256(chi0, z_hi)
-                .add(fast_mul256(p_bit_c, y_a2))
-                .add(fast_mul256(p_bit_prev_c, y_a2))
-                .add(fast_mul256(fast_mul256(p_step2, y_a2), y_d2));
-            let c_end = fast_mul256(fast_mul256(chi_last, y_c), c_step);
-            let c9 = c_end.add(fast_mul256(
-                fast_mul256(chi_d, y_a1),
-                one.add(fast_mul256(z_last1, y_d1)),
-            ));
-            let c10 = c_end.add(fast_mul256(
-                fast_mul256(chi_d, y_a2),
-                one.add(fast_mul256(z_last2, y_d2)),
-            ));
+            let c5 = p_bit_d.mul(y_d1.square().add(y_d1));
+            let c6 = p_bit_d.mul(y_d2.square().add(y_d2));
+            let c7 = chi0.mul(z_lo)
+                .add(p_bit_c.mul(y_a1))
+                .add(p_bit_prev_c.mul(y_a1))
+                .add(p_step1.mul(y_a1).mul(y_d1));
+            let c8 = chi0.mul(z_hi)
+                .add(p_bit_c.mul(y_a2))
+                .add(p_bit_prev_c.mul(y_a2))
+                .add(p_step2.mul(y_a2).mul(y_d2));
+            let c_end = chi_last.mul(y_c).mul(c_step);
+            let c9 = c_end.add(chi_d.mul(y_a1).mul(one.add(z_last1.mul(y_d1))));
+            let c10 = c_end.add(chi_d.mul(y_a2).mul(one.add(z_last2.mul(y_d2))));
             (c5, c6, c7, c8, c9, c10)
         }
     };
 
     let eqs = [e0, e1, e2, e3, e4, e5, e6, e7, e8, e9, e10];
     let wit_batch = eval_horner(&eqs, beta);
-    let wit_term = fast_mul256(one.add(xd_val), wit_batch);
-    let p1_full = p_lin_z.add(fast_mul256(zeta_dp1, xd_val));
+    let wit_term = one.add(xd_val).mul(wit_batch);
+    let p1_full = p_lin_z.add(zeta_dp1.mul(xd_val));
     let mask_body = y_mlin
-        .add(fast_mul256(p1_full, y_u1))
-        .add(fast_mul256(z2_val, y_u2))
-        .add(fast_mul256(z3_val, y_u3));
-    wit_term.add(fast_mul256(rho_lin, mask_body))
+        .add(p1_full.mul(y_u1))
+        .add(z2_val.mul(y_u2))
+        .add(z3_val.mul(y_u3));
+    wit_term.add(rho_lin.mul(mask_body))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -997,34 +990,34 @@ fn eval_terminal_phi(
     let mut z2_val = zero;
     let mut z3_val = zero;
     for &rk in r_cube {
-        let rk2 = fast_square256(rk);
-        let rk3 = fast_mul256(rk2, rk);
-        p_lin_z = p_lin_z.add(fast_mul256(z_pow, rk));
-        z2_val = z2_val.add(fast_mul256(z_pow, rk2.add(rk)));
-        z3_val = z3_val.add(fast_mul256(z_pow, rk3.add(rk2)));
-        z_pow = fast_mul256(z_pow, zeta);
+        let rk2 = rk.square();
+        let rk3 = rk2.mul(rk);
+        p_lin_z = p_lin_z.add(z_pow.mul(rk));
+        z2_val = z2_val.add(z_pow.mul(rk2.add(rk)));
+        z3_val = z3_val.add(z_pow.mul(rk3.add(rk2)));
+        z_pow = z_pow.mul(zeta);
     }
     let zeta_dp1 = z_pow;
-    let rd2 = fast_square256(xd_val);
-    let rd3 = fast_mul256(rd2, xd_val);
-    z2_val = z2_val.add(fast_mul256(zeta_dp1, rd2.add(xd_val)));
-    z3_val = z3_val.add(fast_mul256(zeta_dp1, rd3.add(rd2)));
+    let rd2 = xd_val.square();
+    let rd3 = rd2.mul(xd_val);
+    z2_val = z2_val.add(zeta_dp1.mul(rd2.add(xd_val)));
+    z3_val = z3_val.add(zeta_dp1.mul(rd3.add(rd2)));
 
     let chi0 = chi_at_nat(d, 0, r_cube);
     let chi_last = chi_at_nat(d, l.saturating_sub(1), r_cube);
     let chi_d = chi_at_nat(d, d, r_cube);
     let p_lt_s = prefix_power_mle(d, l, tau_s, r_cube);
-    let p_lm1_s = fast_mul256(tau_s, prefix_power_mle(d, l.saturating_sub(1), tau_s, r_cube));
+    let p_lm1_s = tau_s.mul(prefix_power_mle(d, l.saturating_sub(1), tau_s, r_cube));
     let p_lt_c = prefix_power_mle(d, l, tau_c, r_cube);
-    let p_lm1_c = fast_mul256(tau_c, prefix_power_mle(d, l.saturating_sub(1), tau_c, r_cube));
+    let p_lm1_c = tau_c.mul(prefix_power_mle(d, l.saturating_sub(1), tau_c, r_cube));
     let p_lt_d = prefix_power_mle(d, l, tau_d, r_cube);
     let p_tab_d = prefix_power_mle(d, m_tab, tau_d, r_cube);
     let p_lt_theta = prefix_power_mle(d, l, theta, r_cube);
     let p_tab_one = prefix_power_mle(d, m_tab, one, r_cube);
 
     let chi_arr = tabulate_chi(d, r_cube);
-    let alpha2 = fast_square256(alpha);
-    let alpha3 = fast_mul256(alpha2, alpha);
+    let alpha2 = alpha.square();
+    let alpha3 = alpha2.mul(alpha);
     let mut p_tab_gamma_d = zero;
     let mut td_pow = one;
     for k in 0..m_tab {
@@ -1033,30 +1026,30 @@ fn eval_terminal_phi(
         let nx = dfa.delta[k];
         let hit = u64::from(dfa.accepting[nx]);
         let tk = leaf_of_u64(b)
-            .add(fast_mul256(alpha, leaf_of_u64(s)))
-            .add(fast_mul256(alpha2, leaf_of_u64(nx as u64)))
-            .add(fast_mul256(alpha3, leaf_of_u64(hit)));
-        let w = fast_mul256(fast_mul256(td_pow, gamma.add(tk)), chi_arr[k]);
+            .add(alpha.mul(leaf_of_u64(s)))
+            .add(alpha2.mul(leaf_of_u64(nx as u64)))
+            .add(alpha3.mul(leaf_of_u64(hit)));
+        let w = td_pow.mul(gamma.add(tk)).mul(chi_arr[k]);
         p_tab_gamma_d = p_tab_gamma_d.add(w);
-        td_pow = fast_mul256(td_pow, tau_d);
+        td_pow = td_pow.mul(tau_d);
     }
 
     let (p_bit_d, p_bit_c, p_bit_prev_c, p_step1, p_step2) = match stmt.claim {
         ClaimData::Bound { .. } => {
             let b_d = prefix_power_mle(d, d + 1, tau_d, r_cube);
             let b_c = prefix_power_mle(d, d + 1, tau_c, r_cube);
-            let b_prev = fast_mul256(tau_c, prefix_power_mle(d, d, tau_c, r_cube));
+            let b_prev = tau_c.mul(prefix_power_mle(d, d, tau_c, r_cube));
             let mut acc1 = zero;
             let mut acc2 = zero;
             let mut tc_pow = tau_c;
             let mut z1 = zeta;
             let mut z2 = zeta_inv;
             for &ck in chi_arr.iter().take(d) {
-                acc1 = acc1.add(fast_mul256(fast_mul256(tc_pow, one.add(z1)), ck));
-                acc2 = acc2.add(fast_mul256(fast_mul256(tc_pow, one.add(z2)), ck));
-                tc_pow = fast_mul256(tc_pow, tau_c);
-                z1 = fast_square256(z1);
-                z2 = fast_square256(z2);
+                acc1 = acc1.add(tc_pow.mul(one.add(z1)).mul(ck));
+                acc2 = acc2.add(tc_pow.mul(one.add(z2)).mul(ck));
+                tc_pow = tc_pow.mul(tau_c);
+                z1 = z1.square();
+                z2 = z2.square();
             }
             (b_d, b_c, b_prev, acc1, acc2)
         }
@@ -1423,8 +1416,8 @@ fn prove_coset_fri_degree1(
         let mut next = Vec::with_capacity(half);
         for k in 0..half {
             let (lo, hi) = (prev[k], prev[k + half]);
-            let t1 = fast_mul256(dom_lo[k].add(alpha), lo.add(hi));
-            next.push(lo.add(fast_mul256(t1, pinv)));
+            let t1 = dom_lo[k].add(alpha).mul(lo.add(hi));
+            next.push(lo.add(t1.mul(pinv)));
         }
         challenges.push(alpha);
         if j + 1 < m {
@@ -1580,8 +1573,8 @@ fn verify_coset_fri_receipt(
                 last_word[k]
             };
             let dom_lo = dom_point(&beta, offset, ell, j, &pivots[..j], k);
-            let lhs = fast_mul256(next_val.add(op.left), pivot_j);
-            let rhs = fast_mul256(dom_lo.add(decoded.challenges[j]), op.left.add(op.right));
+            let lhs = next_val.add(op.left).mul(pivot_j);
+            let rhs = dom_lo.add(decoded.challenges[j]).mul(op.left.add(op.right));
             if lhs != rhs {
                 return Err(PrivateCertError::VerificationFailed(
                     "FRI fold equation failed",
@@ -1710,7 +1703,7 @@ fn prove_algebraic_core(
     let mut z_cur = zeta;
     for _ in 0..=d {
         zeta_pows.push(z_cur);
-        z_cur = fast_mul256(z_cur, zeta);
+        z_cur = z_cur.mul(zeta);
     }
     let zeta_dp1 = zeta_pows[d];
     let mut pub_lin_z = vec![zero; n_half];
@@ -1751,7 +1744,7 @@ fn prove_algebraic_core(
         p1_tabs[3][i] = cur_cnt_pow;
         cur_cc += hit;
         if hit == 1 {
-            cur_cnt_pow = fast_mul256(cur_cnt_pow, zeta);
+            cur_cnt_pow = cur_cnt_pow.mul(zeta);
         }
         cur_s = nx;
     }
@@ -1772,13 +1765,13 @@ fn prove_algebraic_core(
             p1_tabs[6][k] = a2;
             p1_tabs[7][k] = if b2 { one } else { zero };
             if b1 {
-                a1 = fast_mul256(a1, z1);
+                a1 = a1.mul(z1);
             }
             if b2 {
-                a2 = fast_mul256(a2, z2);
+                a2 = a2.mul(z2);
             }
-            z1 = fast_square256(z1);
-            z2 = fast_square256(z2);
+            z1 = z1.square();
+            z2 = z2.square();
         }
     }
 
@@ -1823,7 +1816,7 @@ fn prove_algebraic_core(
     let mut th_pow = one;
     for &k in &row_keys {
         m_tab_col[k] = m_tab_col[k].add(th_pow);
-        th_pow = fast_mul256(th_pow, theta);
+        th_pow = th_pow.mul(theta);
     }
     m_tab_col[n_half..n_full].copy_from_slice(&masks.mult_mask);
     let m_coset = coset_encode_table_with_thetas(fri_ell, d + 1, &coset_thetas, &m_tab_col);
@@ -1833,15 +1826,15 @@ fn prove_algebraic_core(
     // 4. Round-2 challenge (`gamma`) + Phase-3 columns (`cols 10..15` + `friMask`)
     let r2_bytes = alg_round2_transcript(&r1_bytes, &m_root);
     let gamma = derive_chal_at(&chal2_cust, &r2_bytes, 0);
-    let alpha2 = fast_square256(alpha);
-    let alpha3 = fast_mul256(alpha2, alpha);
+    let alpha2 = alpha.square();
+    let alpha3 = alpha2.mul(alpha);
 
     let mut tr_denoms = Vec::with_capacity(l);
     for i in 0..l {
         let e = col0[i]
-            .add(fast_mul256(alpha, p1_tabs[0][i]))
-            .add(fast_mul256(alpha2, p1_tabs[1][i]))
-            .add(fast_mul256(alpha3, p1_tabs[2][i]));
+            .add(alpha.mul(p1_tabs[0][i]))
+            .add(alpha2.mul(p1_tabs[1][i]))
+            .add(alpha3.mul(p1_tabs[2][i]));
         tr_denoms.push(gamma.add(e));
     }
     let tr_invs = batch_inverse256(&tr_denoms)?;
@@ -1853,9 +1846,9 @@ fn prove_algebraic_core(
         let nx = dfa.delta[k];
         let hit = u64::from(dfa.accepting[nx]);
         let tk = leaf_of_u64(b)
-            .add(fast_mul256(alpha, leaf_of_u64(s)))
-            .add(fast_mul256(alpha2, leaf_of_u64(nx as u64)))
-            .add(fast_mul256(alpha3, leaf_of_u64(hit)));
+            .add(alpha.mul(leaf_of_u64(s)))
+            .add(alpha2.mul(leaf_of_u64(nx as u64)))
+            .add(alpha3.mul(leaf_of_u64(hit)));
         tab_denoms.push(gamma.add(tk));
     }
     let tab_invs = batch_inverse256(&tab_denoms)?;
@@ -1887,8 +1880,8 @@ fn prove_algebraic_core(
         let p0 = pub_lin_z[i];
         let p1 = p0.add(zeta_dp1);
         sum_p1_u1 = sum_p1_u1
-            .add(fast_mul256(p0, u1_tab[i]))
-            .add(fast_mul256(p1, u1_tab[n_half + i]));
+            .add(p0.mul(u1_tab[i]))
+            .add(p1.mul(u1_tab[n_half + i]));
     }
     m_lin_tab[n_full - 1] = sum_m.add(sum_p1_u1);
 
@@ -1961,7 +1954,7 @@ fn prove_algebraic_core(
         let mut p = scale;
         for slot in arr.iter_mut().take(bound) {
             *slot = p;
-            p = fast_mul256(p, base);
+            p = p.mul(base);
         }
         arr
     };
@@ -1983,8 +1976,8 @@ fn prove_algebraic_core(
     let mut pub_tab_gamma_d = vec![zero; n_half];
     let mut td_cur = one;
     for k in 0..m_tab {
-        pub_tab_gamma_d[k] = fast_mul256(td_cur, tab_denoms[k]);
-        td_cur = fast_mul256(td_cur, tau_d);
+        pub_tab_gamma_d[k] = td_cur.mul(tab_denoms[k]);
+        td_cur = td_cur.mul(tau_d);
     }
 
     let is_bound = matches!(claim, ClaimData::Bound { .. });
@@ -2010,11 +2003,11 @@ fn prove_algebraic_core(
         let mut z1 = zeta;
         let mut z2 = zeta_inv;
         for k in 0..d {
-            pub_step1[k] = fast_mul256(tc_cur, one.add(z1));
-            pub_step2[k] = fast_mul256(tc_cur, one.add(z2));
-            tc_cur = fast_mul256(tc_cur, tau_c);
-            z1 = fast_square256(z1);
-            z2 = fast_square256(z2);
+            pub_step1[k] = tc_cur.mul(one.add(z1));
+            pub_step2[k] = tc_cur.mul(one.add(z2));
+            tc_cur = tc_cur.mul(tau_c);
+            z1 = z1.square();
+            z2 = z2.square();
         }
     }
 
@@ -2058,17 +2051,17 @@ fn prove_algebraic_core(
         let zj = zeta_pows[j];
         let mut evals5 = [zero; 5];
         for (p_idx, &t_pt) in pts5.iter().enumerate() {
-            let t2 = fast_square256(t_pt);
-            let t3 = fast_mul256(t2, t_pt);
-            let z2_pt = z2_prefix.add(fast_mul256(zj, t2.add(t_pt)));
-            let z3_pt = z3_prefix.add(fast_mul256(zj, t3.add(t2)));
+            let t2 = t_pt.square();
+            let t3 = t2.mul(t_pt);
+            let z2_pt = z2_prefix.add(zj.mul(t2.add(t_pt)));
+            let z3_pt = z3_prefix.add(zj.mul(t3.add(t2)));
             let mut sum_pt = zero;
             for tail in 0..half_cube {
                 let idx0 = 2 * tail;
                 let line_at = |arr: &[Tower256], base: usize| -> Tower256 {
                     let v0 = arr[base];
                     let v1 = arr[base + 1];
-                    v0.add(fast_mul256(t_pt, v0.add(v1)))
+                    v0.add(t_pt.mul(v0.add(v1)))
                 };
                 let mut ys0 = [zero; 16];
                 for c in 0..16 {
@@ -2089,10 +2082,10 @@ fn prove_algebraic_core(
                 let u3_1 = line_at(&cur_cols[15], base_hi);
                 let p1_hi = ps[17].add(zeta_dp1);
                 let mask_body1 = m_lin1
-                    .add(fast_mul256(p1_hi, u1_1))
-                    .add(fast_mul256(z2_pt, u2_1))
-                    .add(fast_mul256(z3_pt, u3_1));
-                let v_half1 = fast_mul256(rho_lin, mask_body1);
+                    .add(p1_hi.mul(u1_1))
+                    .add(z2_pt.mul(u2_1))
+                    .add(z3_pt.mul(u3_1));
+                let v_half1 = rho_lin.mul(mask_body1);
                 sum_pt = sum_pt.add(v_half0).add(v_half1);
             }
             evals5[p_idx] = sum_pt;
@@ -2105,17 +2098,17 @@ fn prove_algebraic_core(
         envelope(&mut sc_tr, &p_bytes);
         let rj = Tower256::from_le_bytes(xof32_alg(&sc_chal_cust, &sc_tr));
         r_full.push(rj);
-        let rj2 = fast_square256(rj);
-        let rj3 = fast_mul256(rj2, rj);
-        z2_prefix = z2_prefix.add(fast_mul256(zj, rj2.add(rj)));
-        z3_prefix = z3_prefix.add(fast_mul256(zj, rj3.add(rj2)));
+        let rj2 = rj.square();
+        let rj3 = rj2.mul(rj);
+        z2_prefix = z2_prefix.add(zj.mul(rj2.add(rj)));
+        z3_prefix = z3_prefix.add(zj.mul(rj3.add(rj2)));
 
         for col in &mut cur_cols {
             let mut next = Vec::with_capacity(2 * half_cube);
             for tail in 0..(2 * half_cube) {
                 let v0 = col[2 * tail];
                 let v1 = col[2 * tail + 1];
-                next.push(v0.add(fast_mul256(rj, v0.add(v1))));
+                next.push(v0.add(rj.mul(v0.add(v1))));
             }
             *col = next;
         }
@@ -2124,7 +2117,7 @@ fn prove_algebraic_core(
             for tail in 0..half_cube {
                 let v0 = ptab[2 * tail];
                 let v1 = ptab[2 * tail + 1];
-                next.push(v0.add(fast_mul256(rj, v0.add(v1))));
+                next.push(v0.add(rj.mul(v0.add(v1))));
             }
             *ptab = next;
         }
@@ -2137,15 +2130,15 @@ fn prove_algebraic_core(
     }
     let mut evals_last = [zero; 5];
     for (p_idx, &t_pt) in pts5.iter().enumerate() {
-        let t2 = fast_square256(t_pt);
-        let t3 = fast_mul256(t2, t_pt);
-        let z2_pt = z2_prefix.add(fast_mul256(zeta_dp1, t2.add(t_pt)));
-        let z3_pt = z3_prefix.add(fast_mul256(zeta_dp1, t3.add(t2)));
+        let t2 = t_pt.square();
+        let t3 = t2.mul(t_pt);
+        let z2_pt = z2_prefix.add(zeta_dp1.mul(t2.add(t_pt)));
+        let z3_pt = z3_prefix.add(zeta_dp1.mul(t3.add(t2)));
         let mut ys_pt = [zero; 16];
         for c in 0..16 {
             let v0 = cur_cols[c][0];
             let v1 = cur_cols[c][1];
-            ys_pt[c] = v0.add(fast_mul256(t_pt, v0.add(v1)));
+            ys_pt[c] = v0.add(t_pt.mul(v0.add(v1)));
         }
         evals_last[p_idx] = eval_combined_phi(
             claim, l, d, init_f, zeta, zeta_inv, alpha, gamma, beta, rho_lin, t_pt, zeta_dp1,
@@ -2167,14 +2160,14 @@ fn prove_algebraic_core(
     let mut eq_cur = tabulate_chi(d + 1, &r_full);
     let mut bf_mask_at_r = zero;
     for idx in 0..n_full {
-        bf_mask_at_r = bf_mask_at_r.add(fast_mul256(eq_cur[idx], bf_mask_tab[idx]));
+        bf_mask_at_r = bf_mask_at_r.add(eq_cur[idx].mul(bf_mask_tab[idx]));
     }
 
     let mut col_evals_at_r = [zero; 17];
     for c in 0..16 {
         let v0 = cur_cols[c][0];
         let v1 = cur_cols[c][1];
-        col_evals_at_r[c] = v0.add(fast_mul256(rd, v0.add(v1)));
+        col_evals_at_r[c] = v0.add(rd.mul(v0.add(v1)));
     }
     col_evals_at_r[16] = bf_mask_at_r;
 
@@ -2214,7 +2207,7 @@ fn prove_algebraic_core(
             for c in 0..16 {
                 vals[c] = init_cols16[c][idx];
             }
-            bf_mask_tab[idx].add(fast_mul256(rho_bf, eval_horner(&vals, eta)))
+            bf_mask_tab[idx].add(rho_bf.mul(eval_horner(&vals, eta)))
         })
         .collect();
 
@@ -2224,7 +2217,7 @@ fn prove_algebraic_core(
             for c in 0..16 {
                 vals[c] = all16_cosets[c][idx];
             }
-            bf_mask_coset[idx].add(fast_mul256(rho_bf, eval_horner(&vals, eta)))
+            bf_mask_coset[idx].add(rho_bf.mul(eval_horner(&vals, eta)))
         })
         .collect();
 
@@ -2250,9 +2243,9 @@ fn prove_algebraic_core(
             let h1 = h_tab_cur[2 * tail + 1];
             let de = e0.add(e1);
             let dh = h0.add(h1);
-            let p0 = fast_mul256(e0, h0);
-            let p1 = fast_mul256(e1, h1);
-            let p2 = fast_mul256(de, dh);
+            let p0 = e0.mul(h0);
+            let p1 = e1.mul(h1);
+            let p2 = de.mul(dh);
             c0 = c0.add(p0);
             c1 = c1.add(p0.add(p1).add(p2));
             c2 = c2.add(p2);
@@ -2273,10 +2266,10 @@ fn prove_algebraic_core(
         for tail in 0..half_tab {
             let e0 = eq_cur[2 * tail];
             let e1 = eq_cur[2 * tail + 1];
-            next_eq.push(e0.add(fast_mul256(sj, e0.add(e1))));
+            next_eq.push(e0.add(sj.mul(e0.add(e1))));
             let h0 = h_tab_cur[2 * tail];
             let h1 = h_tab_cur[2 * tail + 1];
-            next_h_tab.push(h0.add(fast_mul256(sj, h0.add(h1))));
+            next_h_tab.push(h0.add(sj.mul(h0.add(h1))));
         }
         eq_cur = next_eq;
         h_tab_cur = next_h_tab;
@@ -2285,13 +2278,13 @@ fn prove_algebraic_core(
         let dom_lo = tabulate_subspace_domain(&beta_basis, offset, fri_ell - j - 1, &pivs[..j]);
         let piv_j = pivs[j];
         let pinv_j = piv_invs[j];
-        let alpha_j = fast_mul256(piv_j, sj);
+        let alpha_j = piv_j.mul(sj);
         let prev = h_cur;
         let mut next = Vec::with_capacity(half_j);
         for k in 0..half_j {
             let (lo, hi) = (prev[k], prev[k + half_j]);
-            let t1 = fast_mul256(dom_lo[k].add(alpha_j), lo.add(hi));
-            next.push(lo.add(fast_mul256(t1, pinv_j)));
+            let t1 = dom_lo[k].add(alpha_j).mul(lo.add(hi));
+            next.push(lo.add(t1.mul(pinv_j)));
         }
         if j < d {
             let tr = hasher.build_tree(&next, fri_ell - (j + 1));
@@ -2315,7 +2308,7 @@ fn prove_algebraic_core(
                 vals[c] = all16_cosets[c][idx];
             }
             let batch_rho = eval_horner(&vals, rho_fri);
-            fri_mask_coset[idx].add(fast_mul256(rho_fri, batch_rho))
+            fri_mask_coset[idx].add(rho_fri.mul(batch_rho))
         })
         .collect();
 
@@ -2629,7 +2622,7 @@ pub fn verify_algebraic_cert(
         ));
     }
     let v_batch = eval_horner(ys16, eta);
-    let v_bf_claimed = receipt.col_evals_at_r[16].add(fast_mul256(rho_bf, v_batch));
+    let v_bf_claimed = receipt.col_evals_at_r[16].add(rho_bf.mul(v_batch));
     let (s_bf, full_fri_stmt) = run_basefold_verifier(
         d,
         &batch_bytes,
@@ -2741,17 +2734,17 @@ pub fn verify_algebraic_cert(
         right_all16[10..16].copy_from_slice(&p3_op.right_cols[..6]);
 
         let expected_fri_l =
-            p3_op.left_cols[7].add(fast_mul256(rho_fri, eval_horner(&left_all16, rho_fri)));
+            p3_op.left_cols[7].add(rho_fri.mul(eval_horner(&left_all16, rho_fri)));
         let expected_fri_r =
-            p3_op.right_cols[7].add(fast_mul256(rho_fri, eval_horner(&right_all16, rho_fri)));
+            p3_op.right_cols[7].add(rho_fri.mul(eval_horner(&right_all16, rho_fri)));
         if fri_op0.left != expected_fri_l || fri_op0.right != expected_fri_r {
             return Err(PrivateCertError::VerificationFailed(
                 "level-0 FRI leaf weld mismatch",
             ));
         }
 
-        let h0_l = p3_op.left_cols[6].add(fast_mul256(rho_bf, eval_horner(&left_all16, eta)));
-        let h0_r = p3_op.right_cols[6].add(fast_mul256(rho_bf, eval_horner(&right_all16, eta)));
+        let h0_l = p3_op.left_cols[6].add(rho_bf.mul(eval_horner(&left_all16, eta)));
+        let h0_r = p3_op.right_cols[6].add(rho_bf.mul(eval_horner(&right_all16, eta)));
 
         for j in 0..=d {
             let half_j = 1usize << (ell - j - 1);
@@ -2791,9 +2784,9 @@ pub fn verify_algebraic_cert(
 
             let piv_j = pivots[j];
             let dom_lo = dom_point(&beta_basis, offset, ell, j, &pivots[..j], kj);
-            let alpha_eval = fast_mul256(piv_j, s_bf[j]);
-            let lhs = fast_mul256(next_val.add(cur_l), piv_j);
-            let rhs = fast_mul256(dom_lo.add(alpha_eval), cur_l.add(cur_r));
+            let alpha_eval = piv_j.mul(s_bf[j]);
+            let lhs = next_val.add(cur_l).mul(piv_j);
+            let rhs = dom_lo.add(alpha_eval).mul(cur_l.add(cur_r));
             if lhs != rhs {
                 return Err(PrivateCertError::VerificationFailed(
                     "basefold algebraic fold equation failed",
@@ -3529,7 +3522,7 @@ mod tests {
     fn zeta_has_exact_fermat_cofactor_disequalities_and_inverse() {
         let z = zeta_c();
         let z_inv = zeta_inv_c();
-        assert_eq!(fast_mul256(z, z_inv), Tower256::ONE);
+        assert_eq!(z.mul(z_inv), Tower256::ONE);
         let order = (1u64 << 32) - 1;
         assert_eq!(pow_tower256(z, order), Tower256::ONE);
         for p in [3u64, 5, 17, 257, 65537] {
@@ -3549,7 +3542,7 @@ mod tests {
         // `theta_d = dom / piv_d` is NEVER `0` and NEVER `1`!
         let dom_d = tabulate_subspace_domain(&beta, offset, ell - d, &pivs[..d]);
         for &dv in &dom_d {
-            let th = fast_mul256(dv, piv_invs[d]);
+            let th = dv.mul(piv_invs[d]);
             assert_ne!(th, Tower256::ZERO);
             assert_ne!(th, Tower256::ONE);
         }
@@ -3569,15 +3562,12 @@ mod tests {
         for j in 0..=d {
             let half = 1usize << (ell - j - 1);
             let dom_lo = tabulate_subspace_domain(&beta, offset, ell - j - 1, &pivs[..j]);
-            let alpha_j = fast_mul256(pivs[j], r[j]);
+            let alpha_j = pivs[j].mul(r[j]);
             let prev = word;
             word = (0..half)
                 .map(|k| {
                     let (lo, hi) = (prev[k], prev[k + half]);
-                    lo.add(fast_mul256(
-                        fast_mul256(dom_lo[k].add(alpha_j), lo.add(hi)),
-                        piv_invs[j],
-                    ))
+                    lo.add(dom_lo[k].add(alpha_j).mul(lo.add(hi)).mul(piv_invs[j]))
                 })
                 .collect();
         }
@@ -3585,7 +3575,7 @@ mod tests {
         let expected_mle = table
             .iter()
             .zip(chi.iter())
-            .fold(Tower256::ZERO, |acc, (&v, &c)| acc.add(fast_mul256(v, c)));
+            .fold(Tower256::ZERO, |acc, (&v, &c)| acc.add(v.mul(c)));
         assert!(word.iter().all(|&v| v == expected_mle));
     }
 }

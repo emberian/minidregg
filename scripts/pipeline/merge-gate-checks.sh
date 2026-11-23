@@ -83,6 +83,9 @@ builders() {
   # native/private-backend codec agreement: the two Lean fixture exes (exe-roots built them) emit the canonical
   # frames and Plan; the Rust crate must decode and re-encode them, and refuse a flipped byte.
   run private-backend-wire bash scripts/gates/check-private-backend-wire .lake/build/bin
+  # Tower256 private-certificate vectors: the compiled Lean emitter (exe-roots built it) regenerates them and the
+  # committed prover/testdata/tower256_private_cert_conformance.json must match byte for byte; a flipped digit must be refused.
+  run private-cert-vectors bash scripts/gates/check-private-cert-vectors .lake/build/bin
   # Generic Simplex (Kernel/GenericSimplex* + Verify/*): the harness, log-reopen, load and four-source-fixture
   # programs exe-roots builds, run, each with its plant red (fixed timer, split tip, flipped journal bit,
   # corrupt checkpoint segment), and four participants end to end over four native source Stores with the

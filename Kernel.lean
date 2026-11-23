@@ -87,6 +87,7 @@ import Kernel.FinalityLiveness  -- liveness as ONE carrier: PostGSTProgress bund
 import Kernel.NativeHost
 import Kernel.NativeHostServed -- KN2 2b-1: a validated served state (no history): validateServed, OpenedServed
 import Kernel.NativeHostLight -- KN2 2b-1: the validated light opening a session serves ported operations from
+import Kernel.FleetJournalExact -- ops 101 and 180 read off the journal index are the scans they replaced: incomingExact, headExact (no sequence-id collision)
 import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (opened_display_is_commit), lying Hosts refused by name
 import Kernel.MemberPatchPoles  -- MemberPatchKeystone's poles PROVED on the kind definition: an admitted revision whose non-empty member patch run is the receiver's post; the always-empty ghost fails MemberExact
 import Kernel.ContentCommutingAppend  -- appends to one document commute: a commuting content command is computed at the cell it meets (statements; the ruling of 2026-10-28)

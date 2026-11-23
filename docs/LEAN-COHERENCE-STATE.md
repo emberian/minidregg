@@ -74,7 +74,7 @@ Re-grep `∨ Collision`; the old statements are often multi-line.
   - `Kernel/WorldRoot.lean` `rootBinding_of_noCollision` (`nodes : ¬ AuthTrie.Collision dig`)
   - `Compiler/CommittedTerminalRealizer.lean` (503, 507)
   - `Selvage/BinaryMerkle.lean` (287)
-  - `Selvage/HashFamily.lean` (101, 110)
+  - `Selvage/HashFamily.lean` (110, 119)
 
 ## O19 (not started)
 

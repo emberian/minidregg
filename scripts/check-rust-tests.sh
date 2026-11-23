@@ -158,6 +158,12 @@ t verifier-protocol       10 credential-signature-verifier --test protocol -- pr
 # The crates that sat outside the workspace (unbuildable 2026-10-08..10-26, tests silently stopped):
 # prover's five Lean-vector conformance suites, and the two Lean-spawned helpers' unit tests.
 t prover-conformance      30 prover --test sumcheck_conformance --test sumcheck_cubic_conformance --test zkml_matmul_conformance --test evm_stage0_dispatch --test rank1_gradient
+# prover's GF(2^256) tower: the table-bottomed product, square and norm inverse against the verbatim
+# bit-level reference (every T_3 table entry, 100,000 random cases per operation), and the native private
+# certificate replaying the Lean-authored vectors byte for byte (their freshness is the merge gate's
+# private-cert-vectors row).
+t prover-tower256          7 prover --lib -- binary_tower_256::tests::
+t prover-private-cert      3 prover --test tower256_private_cert
 t joint-agreement          6 joint-agreement-crypto --bins
 t portable-archive         5 portable-archive --lib --bins
 
