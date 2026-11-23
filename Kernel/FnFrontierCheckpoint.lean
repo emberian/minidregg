@@ -95,6 +95,19 @@ private def tag (key : DurableCheckpointCodec.MacKey) (context body : ByteArray)
   Sp800185Cshake256.kmac256Kernel key.bytes.toByteArray "DREGG/FN/ADMITTED-FRONTIER/v1".toUTF8
     (context ++ digest)
 
+/-- The packed checkpoint authenticates the same message as the original disk format. -/
+private theorem tag_eq (key : DurableCheckpointCodec.MacKey) (context body : ByteArray) :
+    (tag key context body).toList =
+      Sp800185Cshake256.kmac256Bytes key.bytes "DREGG/FN/ADMITTED-FRONTIER/v1".toUTF8.toList
+        (context.toList ++ (Sp800185Cshake256.hash "DREGG/FN/FRONTIER-BODY/v1".toUTF8.toList
+          body.toList).bytes) := by
+  simp only [tag, ByteArray.toList_eq_data_toList, Sp800185Cshake256.kmac256Kernel,
+    Sp800185Cshake256.Native.cshake256Kernel, Sp800185Cshake256.Native.bytesOfList_toList,
+    List.toList_data_toByteArray, ByteArray.data_append, Array.toList_append,
+    Sp800185Cshake256.kmac256Fast_eq, Sp800185Cshake256.Fast.cshake256Fast_eq, Sp800185Cshake256.hash]
+
+#assert_axioms tag_eq
+
 private def sealBody (key : DurableCheckpointCodec.MacKey) (context : ByteArray)
     (snapshot : Snapshot) : ByteArray :=
   let body := snapshotStream.encodeBytes snapshot

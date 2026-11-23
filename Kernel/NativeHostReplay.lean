@@ -1582,7 +1582,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
 re-admit carries no meter credit, except a meter refill, whose intent is exactly the
 accepted refill's (`MeterRefillReceiver.intent`: no write, no charge, its marker's nullifier,
 the signed amount as credit, `MeterRefillReceiver.AcceptedRefill.sound`). Replay compares
-the complete record codec (`recordMatches`), credit included, so a committed record whose
+the complete record (`recordMatches`), credit included, so a committed record whose
 credit its arm does not reproduce is refused. -/
 theorem NativeAdmission.credit_confined {config : Config} {opened : Opened config}
     {intent : DataIntent rootBytes} (admission : NativeAdmission config opened intent) :
@@ -2966,7 +2966,7 @@ private def derive (config : Config) (opened : Opened config)
                       some ⟨command, signed, prepared, shape, accepted, rfl⟩, none, none, none, none, none, none, none, none, none, none, none, none⟩
                 else return .error "historical invocation physical shape refused"
 
-/-- Compare the complete record, by object identity first and canonical encoding otherwise. -/
+/-- Compare the complete record, including every charge and credit lane. -/
 def recordMatches (record : DurableReceiver.IntentRecord) (intent : DataIntent rootBytes) : Bool :=
   decide (record = DurableReceiver.IntentRecord.ofIntent intent)
 

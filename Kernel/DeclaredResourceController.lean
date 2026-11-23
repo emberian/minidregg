@@ -2915,7 +2915,8 @@ def storageFromDirectory (signed : SignedCommand) (ws : List DataWrite) (_guards
   rw [show HostRefinesWorld.cellsOf DeployedBridge.bridge ground.view = heldCell ground from
     funext (heldCell_exact ground)]
 
-#assert_axioms storageFrom_eq_directory
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.storageFrom_eq_directory' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms storageFrom_eq_directory
 
 def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile ambient ground command)
     (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) :
