@@ -2,6 +2,7 @@
 
 This is a benchmark harness, not a source of Mini admission decisions.
 """
+import ctypes
 import json
 import math
 import os
@@ -46,8 +47,7 @@ def assess(rows, n, lo, required):
             raise BrokenRun(f'{name}: invalid measurement')
         small = statistics.mean(r[name] for r in early)
         large = statistics.mean(r[name] for r in late)
-        # Sub-10ms operations use nanosecond /proc/<pid>/schedstat accounting,
-        # so require at least 1.0 ms across the early window.
+        # Require at least 1 ms of service CPU across the early window.
         resolution = 1.0 if name.endswith('_cpu_ms') else 0
         if small <= 0 or sum(r[name] for r in early) < resolution:
             raise BrokenRun(f'{name}: early window below measurement resolution; increase --lo')
@@ -61,13 +61,32 @@ def assess(rows, n, lo, required):
 def proc_stat(pid):
     fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
     tck = os.sysconf('SC_CLK_TCK')
-    try:
-        # High-resolution nanosecond scheduler runtime for this process.
-        self_ms = int(Path(f'/proc/{pid}/schedstat').read_text().split()[0]) / 1e6
-        reaped_ms = (int(fields[13]) + int(fields[14])) * 1000.0 / tck
-        return int(fields[19]), self_ms + reaped_ms
-    except OSError:
-        return int(fields[19]), sum(int(x) for x in fields[11:15]) * 1000.0 / tck
+    # The process clock includes every thread, even after a worker exits.
+    # /proc/PID/schedstat accounts only for the thread group leader.
+    clock_id = ctypes.c_int()
+    error = _process_clock(pid, ctypes.byref(clock_id))
+    if error:
+        if not Path(f'/proc/{pid}').exists():
+            raise ProcessLookupError(pid)
+        raise OSError(error, os.strerror(error), f'/proc/{pid}')
+    own_ms = time.clock_gettime_ns(clock_id.value) / 1e6
+    reaped_ms = (int(fields[13]) + int(fields[14])) * 1000.0 / tck
+    return int(fields[19]), own_ms + reaped_ms
+
+
+# The Linux benchmark uses the same process CPU clock as CLOCK_PROCESS_CPUTIME_ID,
+# selected for a different PID. Keep the verdict math usable on other systems.
+_process_clock = getattr(ctypes.CDLL(None), 'clock_getcpuclockid', None)
+
+
+def child_pids(pid):
+    children = set()
+    for task in Path(f'/proc/{pid}/task').iterdir():
+        try:
+            children.update(map(int, (task / 'children').read_text().split()))
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return children
 
 
 class ProcessCPU:
@@ -82,12 +101,11 @@ class ProcessCPU:
             raise BrokenRun('measured service restarted or its PID was reused')
         def cpu_ms(pid):
             _, total = proc_stat(pid)
-            children = Path(f'/proc/{pid}/task/{pid}/children').read_text().split()
-            for child in children:
+            for child in child_pids(pid):
                 try:
-                    total += cpu_ms(int(child))
-                except FileNotFoundError:
-                    # The service's waited-for time accounts for a reaped helper.
+                    total += cpu_ms(child)
+                except (FileNotFoundError, ProcessLookupError):
+                    # A reaped helper transfers to its parent's waited-for time.
                     pass
             return total
         return cpu_ms(self.pid)

@@ -108,14 +108,20 @@ open Minidregg.Kernel.NativeHost
 set_option autoImplicit false
 attribute [local irreducible] NativeHost.Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
-/-- Historical records compare by object identity first. A record selected from the verified prefix
-is normally the very object retained by its evidence; only distinct objects need the canonical
-encoding fallback (including the function-valued ten-lane charge). -/
+/-- A finite comparison of the two ten-lane functions in a durable record. -/
+private def decideChargeEq (left right : ResourceCost.Charge) : Decidable (left = right) :=
+  decidable_of_iff (ResourceCost.Lane.allCheck (fun lane => decide (left lane = right lane)) = true)
+    (by simp [funext_iff])
+
+/-- A replayed record has to agree in every field, including postimage bytes.
+Distinct records can compare their existing fields without serializing either one. -/
 local instance : DecidableEq DurableReceiver.IntentRecord := fun left right =>
-  withPtrEqDecEq left right fun _ =>
-    decidable_of_iff (DurableReceiverCodec.intentStream.encode left =
-        DurableReceiverCodec.intentStream.encode right)
-      (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful).eq_iff
+  withPtrEqDecEq left right fun _ => by
+    letI : DecidableEq ResourceCost.Charge := decideChargeEq
+    cases left
+    cases right
+    simp only [DurableReceiver.IntentRecord.mk.injEq]
+    infer_instance
 
 /-- The pay ambient prices from the opened image's platform record: the pins' creation
 tariff (the record's, `pinnedTariff`) and the factory template under the record. Without a

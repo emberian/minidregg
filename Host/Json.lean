@@ -12,6 +12,7 @@ public import Kernel.PayStarterAllowance
 public import Host.BirthRuntimeProfile
 public import Host.CapabilityInspection
 public import Host.InspectRender
+public import Host.Decimal
 public import Host.RefusalText
 public import Kernel.NativeHostGenesis
 public import Kernel.AgentGrain
@@ -71,6 +72,7 @@ meta import Kernel.PayStarterAllowance
 meta import Host.BirthRuntimeProfile
 meta import Host.CapabilityInspection
 meta import Host.InspectRender
+meta import Host.Decimal
 meta import Kernel.NativeHostGenesis
 meta import Kernel.AgentGrain
 meta import Kernel.ProviderRoute
@@ -288,7 +290,9 @@ canonical decimal strings) is the one a declared effect's JSON face is written i
 (`Kernel/ResourceEffect.lean`, `EffectJson`): one vocabulary for the Host's decoders and the
 declarations'. -/
 open Minidregg.Kernel.DeclaredResourceController.EffectJson
-  (exactObject field string nat int list optional decimal signedDecimal)
+  (exactObject field string nat int list optional signedDecimal)
+
+private def decimal (value : Nat) : Lean.Json := .str (Minidregg.Host.Decimal.render value)
 
 /-! The content grammar (a content command's actions, and the strict helpers it is written in) is
 the content declaration's JSON face (`Kernel/ContentJson.lean`); the Host's other decoders read

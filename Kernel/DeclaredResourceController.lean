@@ -2887,6 +2887,36 @@ def storageFrom (signed : SignedCommand) (ws : List DataWrite) (guards : List Re
   DeployedCharge.storageCharge ground.view ws
     (invocationEvent ground.authority.domain profile.semantics command signed)
 
+/-- The served directory already holds the decoded preimages of an invocation. -/
+private def heldCell (ground : Ground deployment) (id : Nat) : Option (World.Cell DeployedBridge.deployedR) :=
+  match ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry ground.directory id with
+  | .live cell => some (DeployedBridge.unpack cell)
+  | _ => none
+
+private theorem heldCell_exact (ground : Ground deployment) (id : Nat) :
+    HostRefinesWorld.cellsOf DeployedBridge.bridge ground.view id = heldCell ground id := by
+  change (DeployedBridge.decodeCell (ground.view.canonicalBytes ⟨id⟩)).getD none = _
+  rw [← ground.bytes_exact id]
+  unfold heldCell DeployedBridge.decodeCell
+  generalize ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry ground.directory id = image
+  rw [show (ResourceBirthCodec.LifecycleImage.codec CanonicalCellRegistry.registry).decode
+      (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry image) = some image from
+    ResourceBirthCodec.LifecycleImage.decode_encode _ image]
+  cases image <;> rfl
+
+def storageFromDirectory (signed : SignedCommand) (ws : List DataWrite) (_guards : List ReadGuard)
+    (_prepared : PreparedInvocation deployment profile ambient ground command) : Nat :=
+  DeployedCharge.storageAt (heldCell ground) ws
+    (invocationEvent ground.authority.domain profile.semantics command signed)
+
+@[csimp] theorem storageFrom_eq_directory : @storageFrom = @storageFromDirectory := by
+  funext _ _ _ _ _ ground _ _ _ _ _
+  unfold storageFrom storageFromDirectory DeployedCharge.storageCharge
+  rw [show HostRefinesWorld.cellsOf DeployedBridge.bridge ground.view = heldCell ground from
+    funext (heldCell_exact ground)]
+
+#assert_axioms storageFrom_eq_directory
+
 def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile ambient ground command)
     (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) :
     ResourceCost.Charge
