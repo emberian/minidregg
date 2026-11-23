@@ -6,7 +6,7 @@ scripts/kernel-vectors.lean -- Lean-authored conformance vectors for native/mini
 Writes the fixed rows the tree's conformance theorems pin and SEEDED rows computed by the Lean
 fast path (`cshake256Fast`, `kmac256Fast`: the proved implementation, called by name so the
 `@[csimp]` kernel attachment of `cshake256Bytes`/`kmac256Bytes` is not what produces them) at
-the rate boundaries 0, 1, 135, 136, 137, 271, 272, 273 and 4096 input bytes, with empty and
+the rate boundaries 0, 1, 134, 135, 136, 137, 271, 272, 273 and 4096 input bytes, with empty and
 non-empty customizations. The `cshake256_midstate` rows are the absorbed-prefix bodies
 (`Midstate.absorbFast`, `Midstate.finishFast`, likewise by name, not the `@[extern]` seams) at
 prefix lengths straddling the rate. `cargo test -p mini-kernels --test conformance` reads the file.
@@ -81,6 +81,13 @@ def main : IO Unit := do
       let suffix := seeded (seed + 2000) (if n % 2 == 0 then 5 else 136)
       midstate := midstate ++ [midstateRow s!"seeded-{cname}-{n}" custom pre suffix]
       seed := seed + 1
+  -- Reserve separate seeds so adding the two-byte padding case preserves every older vector.
+  for (cname, custom) in customizations do
+    let input := seeded seed 134
+    let k := seeded (seed + 1000) 32
+    cshake := cshake ++ [cshakeRow s!"seeded-{cname}-134" custom input (Fast.cshake256Fast custom input)]
+    kmac := kmac ++ [kmacRow s!"seeded-{cname}-134" k custom input (kmac256Fast k custom input)]
+    seed := seed + 1
   IO.println "{"
   IO.println "  \"source\": \"Lean-authored vectors, written by scripts/kernel-vectors.lean from the Lean fast path (cshake256Fast / kmac256Fast). The fixed rows are the constants the tree's conformance theorems pin; the seeded rows cover the rate boundaries. Regenerate with `lake env lean --run scripts/kernel-vectors.lean`.\","
   IO.println "  \"cshake256\": ["
