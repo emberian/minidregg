@@ -48,12 +48,12 @@ private def observedGuard (resource : Nat)
     (cell : PackedCell CanonicalCellRegistry.registry) : ReadGuard :=
   ⟨⟨resource⟩, ResourceBirthCodec.physicalRoot (.live cell)⟩
 
-private def purseGuard {config : Config} {opened : Opened config}
+private def purseGuard {config : Config} {ground : ServedBasis.Ground config.deployment}
     {context : ApplicationAgentLifetimeDispatchReserveContext.Context}
-    (payer : ApplicationAgentLifetimeDispatchPayer.Checked config opened context) : ReadGuard :=
+    (payer : ApplicationAgentLifetimeDispatchPayer.Checked config ground context) : ReadGuard :=
   observedGuard context.base.purseTask payer.cell
 
-structure Checked (config : Config) (opened : Opened config)
+structure Checked (config : Config) (ground : ServedBasis.Ground config.deployment)
     (ingress : Ingress) (spec : ApplicationShareIssueSource.Spec)
     (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry)
     (grant : ApplicationAgentLifetimeGrant.Grant)
@@ -64,10 +64,10 @@ structure Checked (config : Config) (opened : Opened config)
   private mk ::
   contextExact : reserved.context = ingress.reserveContext
   current : ApplicationAgentLifetimeDispatchCurrent.Checked config.deployment
-    config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-    opened.ground ingress spec descriptor grant ticketIssueIndex ticketIssueReceipt
+    config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+    ground ingress spec descriptor grant ticketIssueIndex ticketIssueReceipt
     issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot
-  payer : ApplicationAgentLifetimeDispatchPayer.Checked config opened ingress.reserveContext
+  payer : ApplicationAgentLifetimeDispatchPayer.Checked config ground ingress.reserveContext
   holdExact : payer.state = AgentGrain.reserve reserved.beforeState
     ingress.reserveContext.base.reserveAmount
   purseDistinctParent : ingress.reserveContext.base.purseTask ≠
@@ -79,7 +79,7 @@ structure Checked (config : Config) (opened : Opened config)
     (DeclaredResourceController.writes current.prepared).map DataWrite.cellId
 /-- The checked dispatch core's reserve evidence is the ingress's, and the payer's
 current hold is exactly that reserve applied to its before state. -/
-theorem Checked.reserveBound {config : Config} {opened : Opened config}
+theorem Checked.reserveBound {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     {grant : ApplicationAgentLifetimeGrant.Grant}
@@ -87,14 +87,14 @@ theorem Checked.reserveBound {config : Config} {opened : Opened config}
     {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
     {certifiedGrantRoot : Digest}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
-    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+    (checked : Checked config ground ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) :
     reserved.context = ingress.reserveContext ∧
       checked.payer.state = AgentGrain.reserve reserved.beforeState
         ingress.reserveContext.base.reserveAmount :=
   ⟨checked.contextExact, checked.holdExact⟩
 
-def checkCurrent (config : Config) (opened : Opened config)
+def checkCurrent (config : Config) (ground : ServedBasis.Ground config.deployment)
     (ingress : Ingress) (spec : ApplicationShareIssueSource.Spec)
     (descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry)
     (grant : ApplicationAgentLifetimeGrant.Grant)
@@ -102,16 +102,16 @@ def checkCurrent (config : Config) (opened : Opened config)
     (issuedIngressBytes : List UInt8) (certifiedGrantIssueIndex : Nat)
     (certifiedGrantRoot : Digest)
     (reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config) :
-    IO (Except String (Checked config opened ingress spec descriptor grant
+    IO (Except String (Checked config ground ingress spec descriptor grant
       ticketIssueIndex ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved)) := do
   if contextExact : reserved.context = ingress.reserveContext then
     match ← ApplicationAgentLifetimeDispatchCurrent.checkCurrent config.deployment
-        config.profile ⟨config.federation, logicalHeight config opened.durable⟩
-        config.signature opened.ground ingress spec descriptor grant
+        config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+        config.signature ground ingress spec descriptor grant
         ticketIssueIndex ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot with
     | .error detail => return .error detail
     | .ok current =>
-      match ← ApplicationAgentLifetimeDispatchPayer.checkCurrent config opened
+      match ← ApplicationAgentLifetimeDispatchPayer.checkCurrent config ground
           ingress.reserveContext ingress.payerCapability
           ingress.payerObserve ingress.payerSigned with
       | .error detail => return .error detail
@@ -137,7 +137,7 @@ def checkCurrent (config : Config) (opened : Opened config)
         else return .error "lifetime dispatch payer hold differs from admitted reserve"
   else return .error "lifetime dispatch reserve context differs from admitted original"
 
-def readGuards {config : Config} {opened : Opened config}
+def readGuards {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     {grant : ApplicationAgentLifetimeGrant.Grant}
@@ -145,7 +145,7 @@ def readGuards {config : Config} {opened : Opened config}
     {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
     {certifiedGrantRoot : Digest}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
-    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+    (checked : Checked config ground ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) : List ReadGuard :=
   [observedGuard ingress.dispatch.dispatch.dispatch.app.resource
       checked.current.appRead.selected.observed.before,
@@ -157,7 +157,7 @@ def readGuards {config : Config} {opened : Opened config}
     observedGuard ingress.reserveContext.grantResource checked.current.grantRead.selected.observed.before,
     purseGuard checked.payer]
 
-theorem readGuards_current {config : Config} {opened : Opened config}
+theorem readGuards_current {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     {grant : ApplicationAgentLifetimeGrant.Grant}
@@ -165,10 +165,10 @@ theorem readGuards_current {config : Config} {opened : Opened config}
     {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
     {certifiedGrantRoot : Digest}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
-    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+    (checked : Checked config ground ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved)
     (guard : ReadGuard) (member : guard ∈ readGuards checked) :
-    guard.expectedRoot = opened.durable.snapshot.model.roots guard.cellId := by
+    guard.expectedRoot = ground.view.model.roots guard.cellId := by
   simp [readGuards, observedGuard, purseGuard] at member
   rcases member with app | manifest | enrollment | ticket | grant | purse
   · subst guard; exact checked.current.appRead.current
@@ -178,7 +178,7 @@ theorem readGuards_current {config : Config} {opened : Opened config}
   · subst guard; exact checked.current.grantRead.current
   · subst guard; exact checked.payer.physicalCurrent
 
-theorem readGuards_readonly {config : Config} {opened : Opened config}
+theorem readGuards_readonly {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     {grant : ApplicationAgentLifetimeGrant.Grant}
@@ -186,7 +186,7 @@ theorem readGuards_readonly {config : Config} {opened : Opened config}
     {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
     {certifiedGrantRoot : Digest}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
-    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+    (checked : Checked config ground ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved)
     (guard : ReadGuard) (member : guard ∈ readGuards checked) :
     guard.cellId ∉ (DeclaredResourceController.writes checked.current.prepared).map
@@ -204,7 +204,7 @@ theorem readGuards_readonly {config : Config} {opened : Opened config}
 `let` under the lane binder: the compiler eta-expands a charge-returning definition, and a `let` in its
 body would re-derive the whole ordinary intent on every lane query
 (see `ApplicationDispatchPending.chargeOf`). -/
-def chargeOf {config : Config} {opened : Opened config} {ingress : Ingress}
+def chargeOf {config : Config} {ground : ServedBasis.Ground config.deployment} {ingress : Ingress}
     (ordinary : DataIntent rootBytes) : Charge :=
   fun dimension => match dimension with
     | .incidences => ordinary.exactCharge .incidences + 6
@@ -212,10 +212,10 @@ def chargeOf {config : Config} {opened : Opened config} {ingress : Ingress}
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => ordinary.exactCharge .proofWork + 6
     | .memoryTouches => ordinary.exactCharge .memoryTouches + 6
-    | .storageBytes => DeployedCharge.storageCharge opened.ground.view ordinary.writes (ApplicationAgentLifetimeDispatchIngress.event ingress)
+    | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes (ApplicationAgentLifetimeDispatchIngress.event ingress)
     | other => ordinary.exactCharge other
 
-def charge {config : Config} {opened : Opened config}
+def charge {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     {grant : ApplicationAgentLifetimeGrant.Grant}
@@ -223,15 +223,15 @@ def charge {config : Config} {opened : Opened config}
     {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
     {certifiedGrantRoot : Digest}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
-    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+    (checked : Checked config ground ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) : Charge :=
-  chargeOf (config := config) (opened := opened) (ingress := ingress)
+  chargeOf (config := config) (ground := ground) (ingress := ingress)
     (checked.current.invocation.dataIntent checked.current.shape)
 
 /-- The one CAS includes the unchanged app/session DRC writes, six current
 physical read guards, the same one-use operation key as event21, and the
 original purse reserve claim. The complete version26 carrier is retained. -/
-def candidateIntent {config : Config} {opened : Opened config}
+def candidateIntent {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     {grant : ApplicationAgentLifetimeGrant.Grant}
@@ -239,7 +239,7 @@ def candidateIntent {config : Config} {opened : Opened config}
     {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
     {certifiedGrantRoot : Digest}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
-    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+    (checked : Checked config ground ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) :
     DataIntent ResourceBirthCodec.rootBytes := by
   let ordinary := checked.current.invocation.dataIntent checked.current.shape
@@ -257,14 +257,14 @@ def candidateIntent {config : Config} {opened : Opened config}
         [ApplicationDispatchAdmissionIngress.nullifier ingress.dispatch,
           ApplicationAgentLifetimeDispatchReserveCore.claimNullifier reserved]
       exactCharge := (Charge.materialize
-        (chargeOf (config := config) (opened := opened) (ingress := ingress) ordinary)).toCharge
+        (chargeOf (config := config) (ground := ground) (ingress := ingress) ordinary)).toCharge
       event := ApplicationAgentLifetimeDispatchIngress.event ingress
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
 
 /-- The held charge is the specified charge. -/
-theorem candidateIntent_exactCharge {config : Config} {opened : Opened config}
+theorem candidateIntent_exactCharge {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     {grant : ApplicationAgentLifetimeGrant.Grant}
@@ -272,12 +272,12 @@ theorem candidateIntent_exactCharge {config : Config} {opened : Opened config}
     {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
     {certifiedGrantRoot : Digest}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
-    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+    (checked : Checked config ground ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) :
     (candidateIntent checked).exactCharge = charge checked :=
   Charge.materialize_eq _
 
-theorem candidate_event_version {config : Config} {opened : Opened config}
+theorem candidate_event_version {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     {grant : ApplicationAgentLifetimeGrant.Grant}
@@ -285,7 +285,7 @@ theorem candidate_event_version {config : Config} {opened : Opened config}
     {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
     {certifiedGrantRoot : Digest}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
-    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+    (checked : Checked config ground ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) :
     (candidateIntent checked).event.codecVersion = 26 := rfl
 

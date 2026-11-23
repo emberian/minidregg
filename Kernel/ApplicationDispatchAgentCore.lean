@@ -46,12 +46,12 @@ open Minidregg.Kernel.ApplicationDispatchAgentReserveCore
 
 set_option autoImplicit false
 
-private def purseGuard {config : Config} {opened : Opened config}
+private def purseGuard {config : Config} {ground : ServedBasis.Ground config.deployment}
     {context : Context}
-    (payer : ApplicationDispatchAgentPayer.Checked config opened context) : ReadGuard :=
+    (payer : ApplicationDispatchAgentPayer.Checked config ground context) : ReadGuard :=
   ⟨⟨context.purseTask⟩, ResourceBirthCodec.physicalRoot (.live payer.cell)⟩
 
-structure Checked (config : Config) (opened : Opened config)
+structure Checked (config : Config) (ground : ServedBasis.Ground config.deployment)
     (ingress : ApplicationDispatchAgentIngress.Ingress)
     (issued : ApplicationDispatchHistoricalCore.IssuedEvidence config)
     (reserved : ReservedEvidence config) where
@@ -60,8 +60,8 @@ structure Checked (config : Config) (opened : Opened config)
   scopeExact : matchesIngress ingress.reserveContext ingress.dispatch
     issued.spec.ticket.resource = true
   base : ApplicationDispatchHistoricalCore.CheckedCandidate config
-    opened.ground ingress.dispatch issued
-  payer : ApplicationDispatchAgentPayer.Checked config opened ingress.reserveContext
+    ground ingress.dispatch issued
+  payer : ApplicationDispatchAgentPayer.Checked config ground ingress.reserveContext
   holdExact : payer.state = AgentGrain.reserve reserved.beforeState
     ingress.reserveContext.reserveAmount
   purseDistinctParent : ingress.reserveContext.purseTask ≠
@@ -71,45 +71,45 @@ structure Checked (config : Config) (opened : Opened config)
   purseReadonly : (purseGuard payer).cellId ∉
     (ApplicationDispatchPending.candidateIntent base.checked).writes.map DataWrite.cellId
 
-theorem Checked.purseGuard_current {config : Config} {opened : Opened config}
+theorem Checked.purseGuard_current {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
     {reserved : ReservedEvidence config}
-    (checked : Checked config opened ingress issued reserved) :
+    (checked : Checked config ground ingress issued reserved) :
     (purseGuard checked.payer).expectedRoot =
-      opened.durable.snapshot.model.roots (purseGuard checked.payer).cellId :=
+      ground.view.model.roots (purseGuard checked.payer).cellId :=
   checked.payer.physicalCurrent
 
 /-- The reserve context bound by the original reserve is the ingress's, it is
-scoped to the issued ticket, and the payer purse read at `opened` holds exactly
+scoped to the issued ticket, and the payer purse read at `ground` holds exactly
 that reserve over the reserve's before-state. -/
-theorem Checked.reserve_held_at_opened {config : Config} {opened : Opened config}
+theorem Checked.reserve_held_at_opened {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
     {reserved : ReservedEvidence config}
-    (checked : Checked config opened ingress issued reserved) :
+    (checked : Checked config ground ingress issued reserved) :
     reserved.context = ingress.reserveContext ∧
       matchesIngress ingress.reserveContext ingress.dispatch
         issued.spec.ticket.resource = true ∧
       checked.payer.state = AgentGrain.reserve reserved.beforeState
         ingress.reserveContext.reserveAmount ∧
       ResourceBirthCodec.physicalRoot (.live checked.payer.cell) =
-        opened.durable.snapshot.model.roots ⟨ingress.reserveContext.purseTask⟩ :=
+        ground.view.model.roots ⟨ingress.reserveContext.purseTask⟩ :=
   ⟨checked.contextExact, checked.scopeExact, checked.holdExact, checked.payer.physicalCurrent⟩
 
-def checkCurrent (config : Config) (opened : Opened config)
+def checkCurrent (config : Config) (ground : ServedBasis.Ground config.deployment)
     (ingress : ApplicationDispatchAgentIngress.Ingress)
     (issued : ApplicationDispatchHistoricalCore.IssuedEvidence config)
     (reserved : ReservedEvidence config) :
-    IO (Except String (Checked config opened ingress issued reserved)) := do
+    IO (Except String (Checked config ground ingress issued reserved)) := do
   if contextExact : reserved.context = ingress.reserveContext then
     if scopeExact : matchesIngress ingress.reserveContext ingress.dispatch
         issued.spec.ticket.resource = true then
-      match ← ApplicationDispatchHistoricalCore.checkCurrent config opened.ground
+      match ← ApplicationDispatchHistoricalCore.checkCurrent config ground
           ingress.dispatch issued with
       | .error detail => return .error detail
       | .ok base =>
-        match ← ApplicationDispatchAgentPayer.checkCurrent config opened
+        match ← ApplicationDispatchAgentPayer.checkCurrent config ground
             ingress.reserveContext ingress.payerCapability ingress.payerObserve
             ingress.payerSigned with
         | .error detail => return .error detail
@@ -136,7 +136,7 @@ def checkCurrent (config : Config) (opened : Opened config)
 never a `let` under the lane binder: the compiler eta-expands a charge-returning definition, and a
 `let` in its body would re-derive the whole human candidate intent on every lane query
 (see `ApplicationDispatchPending.chargeOf`). -/
-def chargeOf {config : Config} {opened : Opened config}
+def chargeOf {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     (base : DataIntent rootBytes) : Charge :=
   fun dimension => match dimension with
@@ -145,27 +145,27 @@ def chargeOf {config : Config} {opened : Opened config}
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => base.exactCharge .proofWork + 1
     | .memoryTouches => base.exactCharge .memoryTouches + 1
-    | .storageBytes => DeployedCharge.storageCharge opened.ground.view
+    | .storageBytes => DeployedCharge.storageCharge ground.view
         base.writes
         (ApplicationDispatchAgentIngress.event ingress)
     | other => base.exactCharge other
 
-def charge {config : Config} {opened : Opened config}
+def charge {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
     {reserved : ReservedEvidence config}
-    (checked : Checked config opened ingress issued reserved) : Charge :=
-  chargeOf (config := config) (opened := opened) (ingress := ingress)
+    (checked : Checked config ground ingress issued reserved) : Charge :=
+  chargeOf (config := config) (ground := ground) (ingress := ingress)
     (ApplicationDispatchPending.candidateIntent checked.base.checked)
 
 /-- The app mutation is unchanged, but the event is version21, the physical
 purse read guard joins its CAS, and the original reserve receipt is claimed
 once. Replay must still certify `reserved` as a prior admitted step. -/
-def candidateIntent {config : Config} {opened : Opened config}
+def candidateIntent {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
     {reserved : ReservedEvidence config}
-    (checked : Checked config opened ingress issued reserved) :
+    (checked : Checked config ground ingress issued reserved) :
     DataIntent rootBytes := by
   let base := ApplicationDispatchPending.candidateIntent checked.base.checked
   have guarded : ∀ guard ∈ base.readGuards ++ [purseGuard checked.payer],
@@ -182,35 +182,35 @@ def candidateIntent {config : Config} {opened : Opened config}
       readGuards := base.readGuards ++ [purseGuard checked.payer]
       nullifiers := base.nullifiers ++ [claimNullifier reserved]
       exactCharge := (Charge.materialize
-        (chargeOf (config := config) (opened := opened) (ingress := ingress) base)).toCharge
+        (chargeOf (config := config) (ground := ground) (ingress := ingress) base)).toCharge
       event := ApplicationDispatchAgentIngress.event ingress
       subject := base.subject
       postRootsBound := base.postRootsBound
       guardsReadOnly := guarded }
 
 /-- The held charge is the specified charge. -/
-theorem candidateIntent_exactCharge {config : Config} {opened : Opened config}
+theorem candidateIntent_exactCharge {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
     {reserved : ReservedEvidence config}
-    (checked : Checked config opened ingress issued reserved) :
+    (checked : Checked config ground ingress issued reserved) :
     (candidateIntent checked).exactCharge = charge checked :=
   Charge.materialize_eq _
 
-theorem candidate_event_version {config : Config} {opened : Opened config}
+theorem candidate_event_version {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
     {reserved : ReservedEvidence config}
-    (checked : Checked config opened ingress issued reserved) :
+    (checked : Checked config ground ingress issued reserved) :
     (candidateIntent checked).event.codecVersion = 21 := rfl
 
 /-- A human dispatch event11 can never be mistaken for the paid agent event,
 even when the app command and HTTP operation identifier are identical. -/
-theorem candidate_event_ne_human {config : Config} {opened : Opened config}
+theorem candidate_event_ne_human {config : Config} {ground : ServedBasis.Ground config.deployment}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
     {reserved : ReservedEvidence config}
-    (checked : Checked config opened ingress issued reserved) :
+    (checked : Checked config ground ingress issued reserved) :
     (candidateIntent checked).event ≠
       ApplicationDispatchAdmissionIngress.event ingress.dispatch := by
   intro equal

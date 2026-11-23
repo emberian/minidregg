@@ -1282,7 +1282,7 @@ structure AgentDispatchAt (config : Config) (opened : Opened config)
     ingress.reserveContext.purseTask
   bound : ApplicationDispatchAgentReserveCore.ReservedEvidence config
   boundExact : reserve.raw.bindContext ingress.reserveContext = .ok bound
-  checked : ApplicationDispatchAgentCore.Checked config opened ingress
+  checked : ApplicationDispatchAgentCore.Checked config opened.ground ingress
     issue.evidence bound
 
 def AgentDispatchAt.intent {config : Config} {opened : Opened config}
@@ -1313,7 +1313,7 @@ structure LifetimeDispatchAt (config : Config) (opened : Opened config)
   reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config
   reservedExact : ApplicationAgentLifetimeDispatchReserveCore.bindContext
     reserve.raw ingress.reserveContext = .ok reserved
-  checked : ApplicationAgentLifetimeDispatchCore.Checked config opened ingress
+  checked : ApplicationAgentLifetimeDispatchCore.Checked config opened.ground ingress
     issue.evidence.spec issue.evidence.descriptor grant.ingress.spec.grant
     issue.index issue.receipt issue.evidence.ingressBytes grant.index grant.finalRoot reserved
 
@@ -2209,7 +2209,7 @@ private def admitAgentDispatchAt (config : Config) (opened : Opened config)
             match boundExact : reserve.raw.bindContext ingress.reserveContext with
             | .error detail => return .error detail
             | .ok bound =>
-              match ← ApplicationDispatchAgentCore.checkCurrent config opened ingress
+              match ← ApplicationDispatchAgentCore.checkCurrent config opened.ground ingress
                   issue.evidence bound with
               | .error detail => return .error detail
               | .ok checked =>
@@ -2250,7 +2250,7 @@ private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)
                       reserve.raw ingress.reserveContext with
                   | .error detail => return .error detail
                   | .ok reserved =>
-                    match ← ApplicationAgentLifetimeDispatchCore.checkCurrent config opened
+                    match ← ApplicationAgentLifetimeDispatchCore.checkCurrent config opened.ground
                         ingress issue.evidence.spec issue.evidence.descriptor
                         grant.ingress.spec.grant issue.index issue.receipt
                         issue.evidence.ingressBytes grant.index grant.finalRoot reserved with
@@ -3000,51 +3000,87 @@ private def issuesAfter (config : Config) (opened : Opened config)
           ⟨config.federation, logicalHeight config opened.durable⟩
           ingress accepted record recordExact⟩ :: issues
 
-/-- A compact ordinary invocation enters the reserve-eligible chronological
-context only after the caller has matched its complete record, advanced, and
-validated the successor. We retain only single-target, originally attached,
-unreserved AgentGrain-shaped cells. A later event21 must still prove that its
-full v2 context matches this actual signed command's nonce and reserve target. -/
-private def reservesAfter (config : Config) (opened : Opened config)
-    (reserves : List (PriorDispatchReserve config))
+/-- Select the reserve shape from an originally admitted ordinary invocation.
+Both the chronology and indexed selection use this exact predicate on its pre-state. -/
+private def rawReserve (config : Config) (ground : DeclaredResourceController.Ground config.deployment)
+    (command : DeclaredResourceController.Command) (signed : DeclaredResourceController.SignedCommand)
+    (prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
+      ⟨config.federation, config.genesisHeight + ground.height⟩ ground command)
+    (shape : DeclaredResourceController.PhysicalShape prepared)
+    (accepted : DeclaredResourceController.AcceptedInvocation prepared signed)
     (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
-    (derived : Derived config opened)
-    (matched : recordMatches record derived.intent = true) :
-    List (PriorDispatchReserve config) := Id.run do
-  let some ordinary := derived.ordinary | return reserves
-  let [target] := ordinary.command.targets | return reserves
-  let .object := target.kind | return reserves
-  let some observe := target.observeCapability | return reserves
-  let some cell := (match opened.directory.directory.slots target.target with
+    (recordExact : record = DurableReceiver.IntentRecord.ofIntent (accepted.dataIntent shape)) :
+    Option (ApplicationDispatchAgentReserveCore.RawEvidence config) := Id.run do
+  let [target] := command.targets | return none
+  let .object := target.kind | return none
+  let some observe := target.observeCapability | return none
+  let some cell := (match ground.directory.slots target.target with
     | .present cell => some cell
-    | _ => none) | return reserves
+    | _ => none) | return none
   let some state := ApplicationDispatchAgentPayer.stateAt target.target cell
-    | return reserves
+    | return none
   let some amount := (match target.payload with
     | .scalar actions => match actions[3]? with
       | some (Minidregg.Theory.DeclaredActionLowering.Action.write _ _ replacement) =>
           some replacement
       | _ => none
-    | _ => none) | return reserves
+    | _ => none) | return none
   unless target == AgentGrain.Operation.target (.reserve amount)
       target.target target.capability cell.payload.root state (some observe) do
-    return reserves
+    return none
   if !(state.status == 1 || state.status == 2) || state.reserved != 0 ||
       target.expectedTargetRoot != cell.payload.root then
-    return reserves
+    return none
+  if receiptTransaction : receipt.transactionId = record.transactionId then
+    if receiptEvent : receipt.eventId = record.event.eventId then
+      return some (ApplicationDispatchAgentReserveCore.RawEvidence.fromAccepted
+        config ground command signed prepared shape accepted record receipt state cell.payload.root
+        target.capability observe recordExact receiptTransaction receiptEvent)
+  return none
+
+private def reservesAfter (config : Config) (opened : Opened config)
+    (reserves : List (PriorDispatchReserve config))
+    (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
+    (derived : Derived config opened) (matched : recordMatches record derived.intent = true) :
+    List (PriorDispatchReserve config) := Id.run do
+  let some ordinary := derived.ordinary | return reserves
   let recordExact : record = DurableReceiver.IntentRecord.ofIntent
       (ordinary.accepted.dataIntent ordinary.shape) := by
     rw [← ordinary.intentExact]
     exact (recordMatches_iff record derived.intent).mp matched
-  if receiptTransaction : receipt.transactionId = record.transactionId then
-    if receiptEvent : receipt.eventId = record.event.eventId then
-      let raw := ApplicationDispatchAgentReserveCore.RawEvidence.fromAccepted
-        config opened.ground ordinary.command ordinary.signed ordinary.prepared
-        ordinary.shape ordinary.accepted record receipt state cell.payload.root
-        target.capability observe recordExact receiptTransaction receiptEvent
-      return ⟨opened.durable.height, raw⟩ :: reserves
-    else return reserves
-  else return reserves
+  let some raw := rawReserve config opened.ground ordinary.command ordinary.signed ordinary.prepared
+      ordinary.shape ordinary.accepted record receipt recordExact | return reserves
+  return ⟨opened.durable.height, raw⟩ :: reserves
+
+/-- Re-admit a single reserve on its authenticated predecessor, matching the complete
+record. The emitted evidence can be bound to a paid-dispatch context just as in the walk. -/
+def selectReserve (config : Config) {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader rootBytes store) (index : Nat) :
+    ExceptT IssueRefusal IO (ApplicationDispatchAgentReserveCore.RawEvidence config) := do
+  if index ≥ reader.head.height then throw (.refused "reserve index beyond the head")
+  let read ← ExceptT.mk ((·.mapError (fun e => IssueRefusal.history e.message)) <$> reader.atHeight (index + 1))
+  let some (domain, semantics, signed) := DeclaredResourceController.decodeSignedBytes (sourceBytes read.record)
+    | throw (.refused "reserve is not a signed invocation")
+  if domain != config.deployment.domain || semantics != config.profile.semantics then
+    throw (.refused "reserve domain/profile mismatch")
+  let some command := DeclaredResourceController.commandCodec.decode signed.commandBytes
+    | throw (.refused "noncanonical reserve command")
+  let candidate ← ExceptT.mk ((·.mapError IssueRefusal.history) <$>
+    NativeHistorySelection.select config reader reader.head.height index
+      (DeclaredResourceController.invocationKeys domain semantics command))
+  let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
+      ⟨config.federation, config.genesisHeight + candidate.ground.height⟩ candidate.ground command
+    | throw (.refused "reserve preparation refused")
+  if shape : DeclaredResourceController.PhysicalShape prepared then
+    let accepted ← ExceptT.mk ((·.mapError (fun _ => IssueRefusal.refused "reserve signatures refused")) <$>
+      DeclaredResourceController.admit config.signature prepared signed ObjectiveBendAuthenticatedInputs.oracle)
+    let matched ← (NativeHistorySelection.matchIntent candidate (accepted.dataIntent shape)).mapError IssueRefusal.refused
+    let receipt : NativeHostCodec.Receipt := ⟨candidate.read.record.transactionId, candidate.read.record.event.eventId,
+      index + 1, candidate.read.verified.root⟩
+    let some raw := rawReserve config candidate.ground command signed prepared shape accepted
+        candidate.record receipt matched.candidateRecord | throw (.refused "invocation is not a reserve")
+    return raw
+  else throw (.refused "reserve physical shape refused")
 
 /-- Only a fully matched BEGIN produces a chronological certificate. The
 replay caller inserts it after durable advance and post-image validation. -/

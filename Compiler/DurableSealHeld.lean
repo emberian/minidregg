@@ -123,7 +123,7 @@ end HeldWorld
 
 /-- `advanceWorldIntent` on a held World: the same turn, charge and admission, the system
 entries moved by the turn's system patch (`advanceHeld_world`). -/
-def advanceHeld {rootBytes : List UInt8 → Digest} (roots : CellId → Digest) (held : HeldWorld)
+def advanceHeld {rootBytes : DurableHistory.RootBytes} (roots : CellId → Digest) (held : HeldWorld)
     (height : Nat) (intent : DataIntent rootBytes) : Except String HeldWorld :=
   match TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history held.world intent with
   | .error refusal => .error s!"height {height + 1}: the record is not a turn: {repr refusal}"
@@ -137,7 +137,7 @@ def advanceHeld {rootBytes : List UInt8 → Digest} (roots : CellId → Digest) 
           | .error reason => .error s!"height {height + 1}: the World refuses the turn: {repr reason}"
           | .ok w' => .ok w'
 
-theorem advanceHeld_world {rootBytes : List UInt8 → Digest} (roots : CellId → Digest) (held : HeldWorld)
+theorem advanceHeld_world {rootBytes : DurableHistory.RootBytes} (roots : CellId → Digest) (held : HeldWorld)
     (height : Nat) (intent : DataIntent rootBytes) :
     (advanceHeld roots held height intent).map (·.world) =
       advanceWorldIntent roots held.world height intent := by
@@ -155,7 +155,7 @@ theorem advanceHeld_world {rootBytes : List UInt8 → Digest} (roots : CellId �
 
 /-- Decide the World transition before a Store write. Native transports require a
 held World. A generic byte-store probe may operate without a deployed World. -/
-def submitWorld {rootBytes : List UInt8 → Digest} (required : Bool)
+def submitWorld {rootBytes : DurableHistory.RootBytes} (required : Bool)
     (before : Option HeldWorld) (height : Nat) (intent : DataIntent rootBytes) :
     Except String (Option HeldWorld) :=
   match before with
@@ -167,7 +167,7 @@ def submitWorld {rootBytes : List UInt8 → Digest} (required : Bool)
     | .error detail => if required then .error detail else .ok none
 
 /-- A successful native light gate has the actual admitted World successor. -/
-theorem host_submit_light_is_step {rootBytes : List UInt8 → Digest}
+theorem host_submit_light_is_step {rootBytes : DurableHistory.RootBytes}
     {before after : Option HeldWorld} {height : Nat} {intent : DataIntent rootBytes}
     (accepted : submitWorld true before height intent = .ok after) :
     AdmittedSuccessor intent (before.map (·.world)) (after.map (·.world)) := by
@@ -204,7 +204,7 @@ theorem host_submit_light_is_step {rootBytes : List UInt8 → Digest}
 
 /-- `foldRecords` on a held World (`foldHeld_world`): each turn admitted by `World.admit`, the
 system entries moved by its system patch. -/
-def foldHeld (rootBytes : List UInt8 → Digest) : HeldWorld → Nat → List IntentRecord → Except String HeldWorld
+def foldHeld (rootBytes : DurableHistory.RootBytes) : HeldWorld → Nat → List IntentRecord → Except String HeldWorld
   | held, _, [] => .ok held
   | held, height, record :: rest =>
       match record.bind? rootBytes with
@@ -222,7 +222,7 @@ def foldHeld (rootBytes : List UInt8 → Digest) : HeldWorld → Nat → List In
               | .error reason => .error s!"height {height + 1}: the World refuses the turn: {repr reason}"
               | .ok w' => foldHeld rootBytes w' (height + 1) rest
 
-theorem foldHeld_world (rootBytes : List UInt8 → Digest) (held : HeldWorld) (height : Nat)
+theorem foldHeld_world (rootBytes : DurableHistory.RootBytes) (held : HeldWorld) (height : Nat)
     (records : List IntentRecord) :
     (foldHeld rootBytes held height records).map (·.world) = foldRecords rootBytes held.world height records := by
   induction records generalizing held height with

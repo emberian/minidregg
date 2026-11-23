@@ -160,29 +160,57 @@ def Attestation.withFreshTip {config : Config} {α : Type} (a : Attestation conf
   ApplicationStreamContinuity.withVerifiedFreshTip a.old
     (handoff (attestationCodec.encode (a.challenge, bindingFor a.admitted, tipFor a.old)))
 
-def receiveVerified (config : Config) {target : Durable}
-    (old : NativeHostReplay.Verified config target) (bytes : List UInt8) :
-    IO (Except String (Attestation config)) := do
+private structure SignedProbe (config : Config) where
+  challenge : Challenge
+  ingress : ApplicationDispatchAdmissionIngress.Ingress
+  namespaceExact : challenge.domain = config.deployment.domain ∧
+    challenge.semantics = config.profile.semantics
+  nonceExact : challenge.registrationNonce.length = 32
+  human : ingress.dispatch.dispatch.session.origin = .human
+  signedChallenge : ingress.dispatch.dispatch.request = probeRequest challenge
+
+private def signedProbe (config : Config) (bytes : List UInt8) : Except String (SignedProbe config) := do
   let some request := requestCodec.decode bytes
-    | return .error "noncanonical route admission request"
+    | throw "noncanonical route admission request"
   let challenge := request.challenge
   if namespaceExact : challenge.domain = config.deployment.domain ∧
       challenge.semantics = config.profile.semantics then
     if nonceExact : challenge.registrationNonce.length = 32 then
       let some ingress := ApplicationDispatchAdmissionIngress.codec.decode request.ingress
-        | return .error "noncanonical route signed ingress"
+        | throw "noncanonical route signed ingress"
       if human : ingress.dispatch.dispatch.session.origin = .human then
         if signedChallenge : ingress.dispatch.dispatch.request = probeRequest challenge then
-          let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
-            | return .error "current route authority refused"
-          if selectorExact : select (bindingFor admitted) ingress.dispatch.dispatch.session.kind = challenge.selector then
-            return .ok ⟨target, old, challenge, ingress, admitted, namespaceExact,
-              nonceExact, human, signedChallenge, selectorExact⟩
-          else return .error "route current custody or generation changed"
-        else return .error "route challenge differs from signed request"
-      else return .error "route registration requires a human session"
-    else return .error "route registration requires a 32-byte nonce"
-  else return .error "route namespace differs from pinned source"
+          return ⟨challenge, ingress, namespaceExact, nonceExact, human, signedChallenge⟩
+        else throw "route challenge differs from signed request"
+      else throw "route registration requires a human session"
+    else throw "route registration requires a 32-byte nonce"
+  else throw "route namespace differs from pinned source"
+
+def receiveVerified (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target) (bytes : List UInt8) :
+    IO (Except String (Attestation config)) := do
+  let ⟨challenge, ingress, namespaceExact, nonceExact, human, signedChallenge⟩ ← match signedProbe config bytes with
+    | .error detail => return .error detail
+    | .ok probe => pure probe
+  let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
+    | return .error "current route authority refused"
+  if selectorExact : select (bindingFor admitted) ingress.dispatch.dispatch.session.kind = challenge.selector then
+    return .ok ⟨target, old, challenge, ingress, admitted, namespaceExact,
+      nonceExact, human, signedChallenge, selectorExact⟩
+  else return .error "route current custody or generation changed"
+
+/-- The callback is available only after the signed challenge and its binding were
+re-admitted. It compares the physical tip again immediately before delivery. -/
+def receiveLight {config : Config} (light : NativeHostLight.Light config) (bytes : ByteArray) :
+    ExceptT String IO ((ByteArray → IO Unit) → IO (Except String Unit)) := do
+  let probe ← signedProbe config bytes.toList
+  let admitted ← ApplicationDispatchLight.admit config light probe.ingress
+  let tip := ApplicationStreamContinuity.lightTip light
+  let binding := ApplicationStreamContinuity.lightBinding admitted
+  if select binding probe.ingress.dispatch.dispatch.session.kind != probe.challenge.selector then
+    throw "route current custody or generation changed"
+  return fun handoff => ApplicationStreamContinuity.withLightFreshTip light
+    (handoff (attestationCodec.encode (probe.challenge, binding, tip)).toByteArray)
 
 theorem challenge_decode_encode (c : Challenge) :
     challengeCodec.decode (challengeCodec.encode c) = some c := challengeCodec.decode_encode c

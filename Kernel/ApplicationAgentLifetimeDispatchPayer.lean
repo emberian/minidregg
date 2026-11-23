@@ -24,7 +24,7 @@ open Minidregg.Kernel.ApplicationAgentLifetimeDispatchReserveContext
 
 set_option autoImplicit false
 
-structure Checked (config : Config) (opened : Opened config)
+structure Checked (config : Config) (ground : ServedBasis.Ground config.deployment)
     (context : Context) where
   private mk ::
   signed : DeclaredResourceController.SignedCommand
@@ -35,7 +35,7 @@ structure Checked (config : Config) (opened : Opened config)
   payerCapability : CapabilityId
   payerObserve : CapabilityId
   prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command
+    ⟨config.federation, config.genesisHeight + ground.height⟩ ground command
   shape : DeclaredResourceController.PhysicalShape prepared
   accepted : DeclaredResourceController.AcceptedInvocation prepared signed
   commandExact : command =
@@ -49,28 +49,28 @@ structure Checked (config : Config) (opened : Opened config)
   amountValid : 0 ≤ context.base.maximumCharge ∧
     context.base.maximumCharge ≤ context.base.reserveAmount
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live cell) =
-    opened.durable.snapshot.model.roots ⟨context.base.purseTask⟩
-/-- The payer's purse state is read from the opened image's current purse cell and
+    ground.view.model.roots ⟨context.base.purseTask⟩
+/-- The payer's purse state is read from the ground image's current purse cell and
 carries the context's generation and reserved amount. -/
-theorem Checked.sound {config : Config} {opened : Opened config} {context : Context}
-    (checked : Checked config opened context) :
+theorem Checked.sound {config : Config} {ground : ServedBasis.Ground config.deployment} {context : Context}
+    (checked : Checked config ground context) :
     ApplicationDispatchAgentPayer.stateAt context.base.purseTask checked.cell = some checked.state ∧
       ResourceBirthCodec.physicalRoot (.live checked.cell) =
-        opened.durable.snapshot.model.roots ⟨context.base.purseTask⟩ ∧
+        ground.view.model.roots ⟨context.base.purseTask⟩ ∧
       checked.state.generation = context.base.purseGeneration ∧
       checked.state.reserved = context.base.reserveAmount :=
   ⟨checked.stateExact, checked.physicalCurrent, checked.stateGeneration, checked.stateAmount⟩
 
-def checkCurrent (config : Config) (opened : Opened config)
+def checkCurrent (config : Config) (ground : ServedBasis.Ground config.deployment)
     (context : Context) (payerCapability payerObserve : CapabilityId)
     (signed : DeclaredResourceController.SignedCommand) :
-    IO (Except String (Checked config opened context)) := do
+    IO (Except String (Checked config ground context)) := do
   if context.base.domain != config.deployment.domain ||
       context.base.semantics != config.profile.semantics then
     return .error "lifetime payer domain/profile mismatch"
   let some command := DeclaredResourceController.commandCodec.decode signed.commandBytes
     | return .error "lifetime payer command malformed"
-  let some cell := (match opened.directory.directory.slots context.base.purseTask with
+  let some cell := (match ground.directory.slots context.base.purseTask with
     | .present cell => some cell
     | _ => none)
     | return .error "lifetime payer purse unavailable"
@@ -87,8 +87,8 @@ def checkCurrent (config : Config) (opened : Opened config)
                 targets := [AgentGrain.Operation.target .input context.base.purseTask
                   payerCapability cell.payload.root state (some payerObserve)] } then
             match ← DeclaredResourceController.prepareAuthenticated config.deployment config.profile
-                ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-                opened.ground command signed.authorityEnvelope with
+                ⟨config.federation, config.genesisHeight + ground.height⟩ config.signature
+                ground command signed.authorityEnvelope with
             | .error _ => return .error "lifetime payer preparation refused"
             | .ok prepared =>
               if shape : DeclaredResourceController.PhysicalShape prepared then
@@ -98,7 +98,7 @@ def checkCurrent (config : Config) (opened : Opened config)
                   if stateExact : ApplicationDispatchAgentPayer.stateAt context.base.purseTask
                       cell = some state then
                     if physicalCurrent : ResourceBirthCodec.physicalRoot (.live cell) =
-                        opened.durable.snapshot.model.roots ⟨context.base.purseTask⟩ then
+                        ground.view.model.roots ⟨context.base.purseTask⟩ then
                       return .ok ⟨signed, command, cell, state, stateExact,
                         payerCapability, payerObserve, prepared, shape, accepted,
                         commandExact, stateGeneration, stateReserved, stateAmount,

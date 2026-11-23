@@ -129,6 +129,7 @@ public import Kernel.ApplicationShareIssueGrainLookup
 public import Kernel.ApplicationGrainSessionEnrollmentReceiver
 public import Kernel.ApplicationAgentLifetimeGrantReceiver
 public import Kernel.ApplicationDispatchReceiver
+public import Kernel.ApplicationDispatchLightReceiver
 public import Kernel.ApplicationDispatchAgentReceiver
 public import Kernel.ApplicationDispatchAgentLookup
 public import Kernel.ApplicationDispatchAgentPaidAuthoring
@@ -243,6 +244,7 @@ meta import Kernel.ApplicationShareIssueGrainLookup
 meta import Kernel.ApplicationGrainSessionEnrollmentReceiver
 meta import Kernel.ApplicationAgentLifetimeGrantReceiver
 meta import Kernel.ApplicationDispatchReceiver
+meta import Kernel.ApplicationDispatchLightReceiver
 meta import Kernel.ApplicationDispatchAgentReceiver
 meta import Kernel.ApplicationDispatchAgentLookup
 meta import Kernel.ApplicationDispatchAgentPaidAuthoring
@@ -2540,8 +2542,8 @@ recover a fresh physical delivery permit or replay an external effect. -/
 def applicationAgentDispatchLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  match ApplicationDispatchAgentLookup.lookupVerified session.verified payload with
+  let light := (← sessionCurrent config state).light
+  match ← (ApplicationDispatchAgentLookup.lookupLight light payload).run with
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
@@ -2558,8 +2560,8 @@ fresh paid delivery permit. -/
 def applicationAgentLifetimeDispatchLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  match ApplicationAgentLifetimeDispatchLookup.lookupVerified session.verified payload with
+  let session ← sessionCurrent config state
+  match ← (ApplicationAgentLifetimeDispatchLookup.lookupLight session.light payload).run with
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
@@ -2737,7 +2739,7 @@ def authorHost (config : NativeHost.Config)
     ApplicationStreamContinuityInspection.authorRequest source
   else Minidregg.Host.Json.author kind source (some config) providerRoutes
 
-/-- The inspect kinds that read the admitted history (`sessionWalked`): session
+/-- The inspect kinds that read the Store through the session: session
 frames, never codec frames. -/
 def sessionInspectKind (kind : String) : Bool :=
   kind == "object-audience" || kind == "object-audience-roster"
@@ -2961,10 +2963,8 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
         | throw (RequestRefusal.malformed "noncanonical agent reserve author request")
       unless request.matchesFixed approved do
         throw (IO.userError "agent reserve request differs from operator pin")
-      let session ← sessionWalked config state
-      let plan ← IO.ofExcept <|
-        ApplicationDispatchAgentPaidAuthoring.prepareReserveVerified
-          config session.verified request
+      let light := (← sessionCurrent config state).light
+      let plan ← IO.ofExcept (← (ApplicationDispatchAgentPaidAuthoring.prepareReserveLight config light request).run)
       let bytes := ApplicationDispatchAgentPaidAuthoring.reservePlanCodec.encode plan
       unless bytes.length < FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "agent reserve plan exceeds host frame bound")
@@ -2993,10 +2993,8 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
         | throw (RequestRefusal.malformed "noncanonical paid agent dispatch author request")
       unless request.fixed.matchesFixed approved do
         throw (IO.userError "paid agent request differs from operator pin")
-      let session ← sessionWalked config state
-      let plan ← IO.ofExcept <|
-        ApplicationDispatchAgentPaidAuthoring.preparePaidVerified
-          config session.verified request
+      let light := (← sessionCurrent config state).light
+      let plan ← IO.ofExcept (← (ApplicationDispatchAgentPaidAuthoring.preparePaidLight config light request).run)
       let bytes := ApplicationDispatchAgentPaidAuthoring.paidPlanCodec.encode plan
       unless bytes.length < FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "paid agent dispatch plan exceeds host frame bound")
@@ -3036,10 +3034,9 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.decode payload
         | throw (RequestRefusal.malformed "noncanonical lifetime reserve request")
       requireOneLifetimeDispatchPin approved request.fixedSelectors
-      let session ← sessionWalked config state
-      let plan ← IO.ofExcept <|
-        ApplicationAgentLifetimeDispatchPaidAuthoring.prepareReserveVerified
-          config session.verified request
+      let session ← sessionCurrent config state
+      let plan ← IO.ofExcept (← (ApplicationAgentLifetimeDispatchPaidAuthoring.prepareReserveLight
+        config session.light request).run)
       let bytes := ApplicationAgentLifetimeDispatchPaidAuthoring.reservePlanCodec.encode plan
       unless bytes.length < FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "lifetime reserve plan exceeds host frame bound")
@@ -3068,10 +3065,9 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
           payload
         | throw (RequestRefusal.malformed "noncanonical lifetime paid dispatch request")
       requireOneLifetimeDispatchPin approved request.fixed.fixedSelectors
-      let session ← sessionWalked config state
-      let plan ← IO.ofExcept <|
-        ApplicationAgentLifetimeDispatchPaidAuthoring.preparePaidVerified
-          config session.verified request
+      let session ← sessionCurrent config state
+      let plan ← IO.ofExcept (← (ApplicationAgentLifetimeDispatchPaidAuthoring.preparePaidLight
+        config session.light request).run)
       let bytes := ApplicationAgentLifetimeDispatchPaidAuthoring.paidPlanCodec.encode plan
       unless bytes.length < FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "lifetime paid plan exceeds host frame bound")
@@ -3163,15 +3159,15 @@ def lengthBytes (length : Nat) : ByteArray :=
   [UInt8.ofNat length, UInt8.ofNat (length / 256),
     UInt8.ofNat (length / 65536), UInt8.ofNat (length / 16777216)].toByteArray
 
-def writeSessionFrame (output : IO.FS.Stream) (operation : UInt8)
-    (payload : List UInt8) : IO Unit := do
-  let response := (operation :: payload).toByteArray
-  if response.size > maxFrame then
-    throw (IO.userError "native host response exceeds frame budget")
-  -- Two writes, not a copy of the whole reply behind its length prefix.
-  output.write (lengthBytes response.size)
-  output.write response
+def writeSessionFrameArray (output : IO.FS.Stream) (operation : UInt8) (payload : ByteArray) : IO Unit := do
+  let size := payload.size + 1
+  if size > maxFrame then throw (IO.userError "native host response exceeds frame budget")
+  output.write ((lengthBytes size).push operation)
+  output.write payload
   output.flush
+
+def writeSessionFrame (output : IO.FS.Stream) (operation : UInt8) (payload : List UInt8) : IO Unit :=
+  writeSessionFrameArray output operation payload.toByteArray
 
 /-- Op34 writes a committed permit only inside the receiver's point-in-time
 physical-tip callback. This check is not a lease against later Store writes;
@@ -3179,33 +3175,20 @@ the external host must fence process generation and reconcile uncertain
 delivery without replaying an HTTP effect. Other outcomes carry no permit. -/
 def dispatchApplicationSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) (output : IO.FS.Stream) (routeBound : Bool := false) : IO Unit := do
-  let session ← sessionWalked config state
-  let result ← if routeBound then
-      ApplicationDispatchReceiver.receiveRouteBoundVerified config session.verified payload
-    else ApplicationDispatchReceiver.receiveVerified config session.verified payload
+    (payload : ByteArray) (output : IO.FS.Stream) (routeBound : Bool := false) : IO Unit := do
+  let light := (← sessionCurrent config state).light
+  let result ← ApplicationDispatchLightReceiver.receiveHuman config light payload routeBound (sessionAdopt config state light)
   match result with
   | .permitted permit =>
-      let handed ← permit.withFreshTip fun committedBytes =>
-        writeSessionFrame output 34 committedBytes
-      match handed with
-      | .ok _ => sessionSetWalked state permit.old permit.readback
-      | .error detail =>
-          writeSessionFrame output 34 <| outcomeCodec.encode <|
-            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
-  | .committed committed =>
-      -- Exact durable receipt/cache recovery never authorizes another fd3 call.
-      writeSessionFrame output 34 <| outcomeCodec.encode <|
-        .confirmed committed.confirmation committed.receipt
-      sessionSetWalked state committed.old committed.readback
-  | .historical receipt =>
-      writeSessionFrame output 34 <| outcomeCodec.encode <| .confirmed .replayed receipt
+      if let .error detail ← permit.run (writeSessionFrameArray output 34) then
+        writeSessionFrame output 34 <| outcomeCodec.encode <|
+          NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .confirmed kind receipt =>
+      writeSessionFrame output 34 <| outcomeCodec.encode <| .confirmed kind receipt
   | .noRecordRefused refusal =>
-      match ← refusal.withFreshTip (fun bytes => writeSessionFrame output 164 bytes) with
-      | .ok _ => pure ()
-      | .error detail =>
-          writeSessionFrame output 34 <| outcomeCodec.encode <|
-            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+      if let .error detail ← refusal.run (writeSessionFrameArray output 164) then
+        writeSessionFrame output 34 <| outcomeCodec.encode <|
+          NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
   -- The three outcomes the receiver decides before any permit or append go out under
   -- NO_RECORD (the grain fence settles the dispatch on this frame); only `uncertain`,
   -- which follows an attempted append, keeps the op's own frame.
@@ -3231,11 +3214,11 @@ session and emits no event or paid dispatch. A fresh physical-tip callback is
 mandatory even when no history extension was needed at session refresh. -/
 def dispatchStreamContinuitySession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionWalked config state
-  match ← ApplicationStreamContinuity.receiveVerified config session.verified payload with
-  | .ok attestation =>
-      match ← attestation.withFreshTip (fun bytes => writeSessionFrame output 152 bytes) with
+    (payload : ByteArray) (output : IO.FS.Stream) : IO Unit := do
+  let light := (← sessionCurrent config state).light
+  match ← (ApplicationStreamContinuity.receiveLight light payload).run with
+  | .ok withFreshTip =>
+      match ← withFreshTip (writeSessionFrameArray output 152) with
       | .ok _ => pure ()
       | .error detail =>
           writeSessionFrame output 152 <| outcomeCodec.encode <|
@@ -3249,11 +3232,11 @@ def dispatchStreamContinuitySession (config : NativeHost.Config)
 /-- Op154 admits a new immutable local route, never an app dispatch. -/
 def dispatchRouteAdmissionSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionWalked config state
-  match ← ApplicationRouteAdmission.receiveVerified config session.verified payload with
-  | .ok attestation =>
-      match ← attestation.withFreshTip (fun bytes => writeSessionFrame output 154 bytes) with
+    (payload : ByteArray) (output : IO.FS.Stream) : IO Unit := do
+  let light := (← sessionCurrent config state).light
+  match ← (ApplicationRouteAdmission.receiveLight light payload).run with
+  | .ok withFreshTip =>
+      match ← withFreshTip (writeSessionFrameArray output 154) with
       | .ok _ => pure ()
       | .error detail =>
           writeSessionFrame output 154 <| outcomeCodec.encode <|
@@ -3269,23 +3252,16 @@ CAS/readback and a final point-in-time physical tip check. Historical op47 is
 receipt-only; neither result is a lease across an external fd3 delivery. -/
 def dispatchAgentSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionWalked config state
-  let result ← ApplicationDispatchAgentReceiver.receiveVerified config session.verified payload
+    (payload : ByteArray) (output : IO.FS.Stream) : IO Unit := do
+  let light := (← sessionCurrent config state).light
+  let result ← ApplicationDispatchLightReceiver.receiveAgent light payload (sessionAdopt config state light)
   match result with
   | .permitted permit =>
-      let handed ← permit.withFreshTip fun committedBytes =>
-        writeSessionFrame output 46 committedBytes
-      match handed with
-      | .ok _ => sessionSetWalked state permit.old permit.readback
-      | .error detail =>
-          writeSessionFrame output 46 <| outcomeCodec.encode <|
-            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
-  | .committed committed =>
-      -- Exact receipt recovery is not another physical agent dispatch permit.
-      writeSessionFrame output 46 <| outcomeCodec.encode <|
-        .confirmed committed.confirmation committed.receipt
-      sessionSetWalked state committed.old committed.readback
+      if let .error detail ← permit.run (writeSessionFrameArray output 46) then
+        writeSessionFrame output 46 <| outcomeCodec.encode <|
+          NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .confirmed kind receipt => writeSessionFrame output 46 <| outcomeCodec.encode <| .confirmed kind receipt
+  | .noRecordRefused impossible => nomatch impossible
   | .rejected detail =>
       -- The submitter gets the uniform frame; the operator's log keeps the reason.
       let outcome : NativeHostCodec.Outcome :=
@@ -3308,19 +3284,16 @@ Historical lookup at op77 is receipt-only, so an uncertain handoff cannot
 resend a physical effect. -/
 def dispatchAgentLifetimeSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionWalked config state
-  let result ← ApplicationAgentLifetimeDispatchReceiver.receiveVerified
-    config session.verified payload
+    (payload : ByteArray) (output : IO.FS.Stream) : IO Unit := do
+  let light := (← sessionCurrent config state).light
+  let result ← ApplicationDispatchLightReceiver.receiveLifetime light payload (sessionAdopt config state light)
   match result with
   | .permitted permit =>
-      let handed ← permit.withFreshTip fun committedBytes =>
-        writeSessionFrame output 76 committedBytes
-      match handed with
-      | .ok _ => sessionSetWalked state permit.old permit.readback
-      | .error detail =>
-          writeSessionFrame output 76 <| outcomeCodec.encode <|
-            NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+      if let .error detail ← permit.run (writeSessionFrameArray output 76) then
+        writeSessionFrame output 76 <| outcomeCodec.encode <|
+          NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .confirmed kind receipt => writeSessionFrame output 76 <| outcomeCodec.encode <| .confirmed kind receipt
+  | .noRecordRefused impossible => nomatch impossible
   | .rejected detail =>
       -- The submitter gets the uniform frame; the operator's log keeps the reason.
       let outcome : NativeHostCodec.Outcome :=
@@ -3442,9 +3415,9 @@ def serveFrame (config : NativeHost.Config)
     (meteringProfile : Lean.Json)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
-    (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
+    (applicationDispatch : Bool → ByteArray → IO.FS.Stream → IO Unit)
     (gate : RateGate)
-    (operation : UInt8) (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+    (operation : UInt8) (payload : ByteArray) (output : IO.FS.Stream) : IO Unit := do
   let wrote ← IO.mkRef false
   let tracked : IO.FS.Stream :=
     { output with write := fun bytes => do wrote.set true; output.write bytes }
@@ -3460,8 +3433,9 @@ def serveFrame (config : NativeHost.Config)
     else if operation == 76 then
       dispatchAgentLifetimeSubmitSession config state payload tracked
     else if operation == 26 then
-      dispatchLifecycleClaimSubmitSession config state payload tracked
+      dispatchLifecycleClaimSubmitSession config state payload.toList tracked
     else
+      let payload := payload.toList
       let started ← IO.monoMsNow
       let claims := (ratedClaims operation payload).getD []
       match ← gate.check claims started with
@@ -3523,7 +3497,7 @@ partial def serveSession (config : NativeHost.Config)
     (meteringProfile : Lean.Json)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
-    (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
+    (applicationDispatch : Bool → ByteArray → IO.FS.Stream → IO Unit)
     (gate : RateGate)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
@@ -3556,7 +3530,7 @@ partial def serveSession (config : NativeHost.Config)
         (RequestRefusal.overBound refusal))
     | .ok () =>
       let payload ← readExactly input (length - 1)
-      serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch gate operation payload.toList output
+      serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch gate operation payload output
       -- The reply is written: now the work a write deferred past it (its due checkpoint).
       Minidregg.Compiler.DurableServed.runAfterReply
   serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch gate input output
@@ -8107,8 +8081,8 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
                               ApplicationDispatchReady.assembledReadySuffix session.verified planBytes signatures
                             else do
-                              let session ← sessionWalked pinnedConfig state
-                              ApplicationDispatchReady.assembledReadyVerified session.verified planBytes signatures
+                              let light := (← sessionCurrent pinnedConfig state).light
+                              ApplicationDispatchReady.assembledReadyLight light planBytes signatures
                             return ((193 : UInt8), ready.compress.toUTF8.toList)
                         | 194 =>
                             let (request, authenticated) ← splitPair payload
@@ -8122,8 +8096,8 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               let session ← sessionCarriedWalked pinnedConfig state carriedState settings
                               ApplicationDispatchReady.authenticatedPlanSuffix session.verified request signature reads
                             else do
-                              let session ← sessionWalked pinnedConfig state
-                              ApplicationDispatchReady.authenticatedPlanVerified session.verified request signature reads
+                              let light := (← sessionCurrent pinnedConfig state).light
+                              ApplicationDispatchReady.authenticatedPlanLight light request signature reads
                             match result with
                             | .ok plan =>
                                 let bytes := ApplicationDispatchAuthoring.planCodec.encode plan
@@ -8854,9 +8828,8 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                               (ApplicationDispatchAuthoring.prepareRequestSuffix
                                 pinnedConfig session.verified payload).run
                             else do
-                              let session ← sessionWalked pinnedConfig state
-                              pure (ApplicationDispatchAuthoring.prepareRequestVerified
-                                pinnedConfig session.verified payload)
+                              let light := (← sessionCurrent pinnedConfig state).light
+                              (ApplicationDispatchAuthoring.prepareRequestLight pinnedConfig light payload).run
                             match prepared with
                             | .ok plan => return (36, ApplicationDispatchAuthoring.planCodec.encode plan)
                             | .error detail => return (255, failure .operationRejected
@@ -8968,9 +8941,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                         else return (RequestRefusal.exceptionAnswer operation error)
                   let meteringProfile := profileDescription pinnedConfig
                     (← IO.ofExcept settings.providerServicePins)
-                  let applicationDispatch := fun routeBound payload output =>
+                  let applicationDispatch := fun routeBound (payload : ByteArray) output =>
                     if settings.carryRegistry.isSome then
-                      carriedApplicationSubmit pinnedConfig state carriedState settings routeBound payload output
+                      carriedApplicationSubmit pinnedConfig state carriedState settings routeBound payload.toList output
                     else dispatchApplicationSubmitSession pinnedConfig state payload output routeBound
                   -- This process appends to its Store: it holds the node rows it writes and reads
                   -- (`DurableNodeCache`, row 37), so an append and a footprint read no row twice.

@@ -58,6 +58,8 @@ of the keys the caller will read, verified under the same head. -/
 structure Candidate (config : Config) {store : StoreIdentity} (head : Head store) (index : Nat) where
   private mk ::
   prior : Basis config.deployment store
+  /-- Factory policy and tariff at the selected record's predecessor. -/
+  pins : Minidregg.Theory.ResourceBirth.FactoryPins
   /-- The height of the state the selection is made from: a record is only selected
   from a state that already holds it (as `accepted[index]?` of a prefix did). -/
   bound : Nat
@@ -109,7 +111,7 @@ def select (config : Config) {store : StoreIdentity}
                     let basis := opened.basis reader.head (by
                       rw [served]
                       exact Nat.le_trans (Nat.le_succ index) below) footprint
-                    return .ok ⟨basis, bound, indexBelow, read.record, read, rfl,
+                    return .ok ⟨basis, opened.pins, bound, indexBelow, read.record, read, rfl,
                       (by show opened.served.height = index; rw [served]; rfl), rfl,
                       ⟨.light basis, Ground.At.light basis⟩, rfl, ⟨_, state, served⟩⟩
    else return .error "historical record index unavailable"

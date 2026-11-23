@@ -144,11 +144,10 @@ def reservePlanCodec : LawfulCodec ReservePlan :=
 
 /-- This must run before the ordinary reserve. A caller cannot assert a
 ticket root, app/session identity, parent generation or purse generation. -/
-def prepareReserveVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (request : Request) :
-    Except String ReservePlan := do
-  let preparedBase ← ApplicationDispatchAgentAuthoring.prepareVerified config
-    verified request.base
+private def reserveCommand (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (preparedBase : ApplicationDispatchAgentAuthoring.Plan)
+    (issue : ApplicationDispatchHistoricalCore.IssuedEvidence config) (request : Request) :
+    Except String (ApplicationDispatchAgentReserveContext.Context × DeclaredResourceController.Command) := do
   let parent := preparedBase.parent
   let some unsigned := ApplicationDispatchAdmissionIngress.codec.decode
       preparedBase.signing.unsignedIngress
@@ -158,16 +157,13 @@ def prepareReserveVerified (config : Config) {target : Durable}
   if request.reserveAmount < 0 || request.maximumCharge < 0 ||
       request.maximumCharge > request.reserveAmount then
     throw "dispatch reserve/charge bounds refused"
-  let some issue := verified.issues.find? (fun issue =>
-      issue.index == request.base.base.issueIndex)
-    | throw "admitted share issue absent from reserve plan"
-  let ticket := issue.evidence.spec.ticket
-  let ticketCell ← match verified.opened.directory.directory.slots ticket.resource with
+  let ticket := issue.spec.ticket
+  let ticketCell ← match ground.directory.slots ticket.resource with
     | .present cell => pure cell
     | _ => throw "current ticket unavailable for reserve plan"
   if ticketCell.payload.root != unsigned.ticketRoot then
     throw "reserve plan ticket root differs from current dispatch"
-  let purseCell ← match verified.opened.directory.directory.slots request.purseTask with
+  let purseCell ← match ground.directory.slots request.purseTask with
     | .present cell => pure cell
     | _ => throw "current dispatch purse unavailable"
   let some purseState := ApplicationDispatchAgentPayer.stateAt
@@ -199,9 +195,33 @@ def prepareReserveVerified (config : Config) {target : Durable}
       targets := [AgentGrain.Operation.target (.reserve request.reserveAmount)
         request.purseTask request.purseCapability purseCell.payload.root
         purseState (some request.purseObserve)] }
-  let invocation ← NativeHost.prepareLoaded config verified.opened
-    (.invoke (DeclaredResourceController.commandCodec.encode command))
-  pure ⟨request, context, invocation⟩
+  return (context, command)
+
+def prepareReserveVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : Request) :
+    Except String ReservePlan := do
+  let preparedBase ← ApplicationDispatchAgentAuthoring.prepareVerified config
+    verified request.base
+  let some issue := verified.issues.find? (fun issue => issue.index == request.base.base.issueIndex)
+    | throw "admitted share issue absent from reserve plan"
+  let (context, command) ← reserveCommand config verified.opened.ground preparedBase issue.evidence request
+  let invocation ← NativeHost.prepareInvokeOn config verified.opened.ground (logicalHeight config verified.opened.durable)
+    (DeclaredResourceController.commandCodec.encode command)
+  return ⟨request, context, invocation⟩
+
+def planCommand (config : Config) (light : NativeHostLight.Light config)
+    (command : DeclaredResourceController.Command) : ExceptT String IO NativeHostCodec.SigningPlan := do
+  let keys := DeclaredResourceController.invocationKeys config.deployment.domain config.profile.semantics command
+  let basis ← ExceptT.mk (light.basis keys)
+  NativeHost.prepareInvokeOn config (.ofBasis basis) (config.genesisHeight + basis.height)
+    (DeclaredResourceController.commandCodec.encode command)
+
+def prepareReserveLight (config : Config) (light : NativeHostLight.Light config)
+    (request : Request) : ExceptT String IO ReservePlan := do
+  let (plan, issue) ← ApplicationDispatchAgentAuthoring.prepareLight config light request.base
+  let basis ← ExceptT.mk (light.basis ⟨[], []⟩)
+  let (context, command) ← reserveCommand config (.ofBasis basis) plan issue request
+  return ⟨request, context, ← planCommand config light command⟩
 
 /-- Detached reserve signatures produce the ordinary signed invocation.
 Event21 later proves that this exact native reserve entered admitted history. -/
@@ -261,39 +281,26 @@ def paidPlanCodec : LawfulCodec PaidPlan :=
 /-- After the ordinary reserve has committed, prepare two independent
 signatures at the same verified tip: the agent's app request and the payer's
 current no-op witness. The final event21 receiver rechecks all of this. -/
-def preparePaidVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target)
-    (request : PaidRequest) : Except String PaidPlan := do
+private def paidCommand (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (request : PaidRequest) (app : ApplicationDispatchAgentAuthoring.Plan)
+    (issue : ApplicationDispatchHistoricalCore.IssuedEvidence config)
+    (reserve : ApplicationDispatchAgentReserveCore.RawEvidence config) :
+    Except String DeclaredResourceController.Command := do
   if request.fixed.purseTask != request.context.purseTask ||
       request.fixed.payerSubject != request.context.payerSubject ||
       request.fixed.reserveAmount != request.context.reserveAmount ||
       request.fixed.maximumCharge != request.context.maximumCharge ||
       request.fixed.reserveOperationId != request.context.reserveOperationId then
     throw "paid dispatch fixed custodian differs from signed reserve context"
-  let app ← ApplicationDispatchAgentAuthoring.prepareVerified config verified
-    request.fixed.base
   let some unsigned := ApplicationDispatchAdmissionIngress.codec.decode
       app.signing.unsignedIngress
     | throw "noncanonical source app plan"
-  let some issue := verified.issues.find? (fun issue =>
-      issue.index == request.fixed.base.base.issueIndex)
-    | throw "agent ticket issue absent from verified history"
   if !ApplicationDispatchAgentReserveContext.matchesIngress request.context
-      unsigned issue.evidence.spec.ticket.resource then
+      unsigned issue.spec.ticket.resource then
     throw "paid dispatch context differs from current source app plan"
-  let some reserve := verified.reserves.find? (fun reserve =>
-      reserve.index == request.reserveIndex)
-    | throw "agent reserve absent from verified history"
-  let .ok bound := reserve.raw.bindContext request.context
+  let .ok bound := reserve.bindContext request.context
     | throw "agent reserve differs from source context"
-  if verified.opened.durable.image.accepted[reserve.index]?.map
-      DurableReceiverCodec.intentStream.encode !=
-      some (DurableReceiverCodec.intentStream.encode reserve.raw.record) ||
-      !decide (NativeHostReplay.dispatchPurseUntouched
-        (verified.opened.durable.image.accepted.drop (reserve.index + 1))
-        request.context.purseTask) then
-    throw "agent reserve changed after original admission"
-  let purseCell ← match verified.opened.directory.directory.slots
+  let purseCell ← match ground.directory.slots
       request.context.purseTask with
     | .present cell => pure cell
     | _ => throw "current paid dispatch purse unavailable"
@@ -308,8 +315,10 @@ def preparePaidVerified (config : Config) {target : Durable}
       targets := [AgentGrain.Operation.target .input request.context.purseTask
         request.fixed.purseCapability purseCell.payload.root purseState
         (some request.fixed.purseObserve)] }
-  let payer ← NativeHost.prepareLoaded config verified.opened
-    (.invoke (DeclaredResourceController.commandCodec.encode command))
+  return command
+
+private def compactPlan (request : PaidRequest) (app : ApplicationDispatchAgentAuthoring.Plan)
+    (payer : NativeHostCodec.SigningPlan) : PaidPlan :=
   let compactBase : ApplicationDispatchAuthoring.Request :=
     { request.fixed.base.base with
       http := compactHttp request.context.httpOperationId }
@@ -318,7 +327,42 @@ def preparePaidVerified (config : Config) {target : Durable}
   let compactRequest : PaidRequest := { request with fixed := compactFixed }
   let compactApp : ApplicationDispatchAuthoring.Plan :=
     { app.signing with request := compactBase }
-  pure ⟨compactRequest, compactApp, payer⟩
+  ⟨compactRequest, compactApp, payer⟩
+
+
+def preparePaidVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target)
+    (request : PaidRequest) : Except String PaidPlan := do
+  let app ← ApplicationDispatchAgentAuthoring.prepareVerified config verified
+    request.fixed.base
+  let some issue := verified.issues.find? (fun issue =>
+      issue.index == request.fixed.base.base.issueIndex)
+    | throw "agent ticket issue absent from verified history"
+  let some reserve := verified.reserves.find? (fun reserve =>
+      reserve.index == request.reserveIndex)
+    | throw "agent reserve absent from verified history"
+  if verified.opened.durable.image.accepted[reserve.index]?.map
+      DurableReceiverCodec.intentStream.encode !=
+      some (DurableReceiverCodec.intentStream.encode reserve.raw.record) ||
+      !decide (NativeHostReplay.dispatchPurseUntouched
+        (verified.opened.durable.image.accepted.drop (reserve.index + 1))
+        request.context.purseTask) then
+    throw "agent reserve changed after original admission"
+  let command ← paidCommand config verified.opened.ground request app issue.evidence reserve.raw
+  let payer ← NativeHost.prepareInvokeOn config verified.opened.ground (logicalHeight config verified.opened.durable)
+    (DeclaredResourceController.commandCodec.encode command)
+  return compactPlan request app payer
+
+def preparePaidLight (config : Config) (light : NativeHostLight.Light config)
+    (request : PaidRequest) : ExceptT String IO PaidPlan := do
+  let (app, issue) ← ApplicationDispatchAgentAuthoring.prepareLight config light request.fixed.base
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let reserve ← ExceptT.mk ((·.mapError (·.message)) <$> (NativeHostReplay.selectReserve config reader request.reserveIndex).run)
+  let last ← ExceptT.mk ((·.mapError (·.message)) <$> reader.lastWrite ⟨request.context.purseTask⟩)
+  if last.value.getD 0 > request.reserveIndex + 1 then throw "agent reserve changed after original admission"
+  let basis ← ExceptT.mk (light.basis ⟨[], []⟩)
+  let command ← paidCommand config (.ofBasis basis) request app issue reserve
+  return compactPlan request app (← planCommand config light command)
 
 /-- Assembly inserts detached app and payer signatures only. It is never a
 substitute for event21 same-image native admission and exact CAS readback. -/

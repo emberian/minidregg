@@ -133,71 +133,74 @@ def reservePlanCodec : LawfulCodec ReservePlan :=
     "DREGG/APPLICATION/AGENT-LIFETIME-DISPATCH-RESERVE-PLAN/v3".toUTF8.toList
     reservePlanStream
 
-private def certifiedGrant (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target)
-    (request : Request) : Except String (NativeHostReplay.PriorLifetimeGrant config) := do
-  let some grant := verified.grants.find? (fun prior =>
-      prior.index == request.grantIssueIndex)
-    | throw "lifetime grant absent from admitted history"
-  let source := grant.ingress.spec.grant
-  if source.source.resource != request.grantResource ||
-      source.participant.grantObserveCapability != request.grantObserveCapability ||
-      grant.ticket.index != request.fixed.base.base.issueIndex ||
-      grant.ticket.evidence.spec.ticket.resource != request.fixed.base.base.ticketResource ||
-      !source.matchesIssued grant.ticket.evidence.spec grant.ticket.index grant.ticket.receipt then
-    throw "lifetime grant differs from fixed custodian/original ticket"
-  pure grant
+private structure GrantView where
+  index : Nat
+  grant : ApplicationAgentLifetimeGrant.Grant
+  receipt : NativeHostCodec.Receipt
+  ticketIndex : Nat
+  ticketSpec : ApplicationShareIssueSource.Spec
+  ticketReceipt : NativeHostCodec.Receipt
+  finalRoot : Digest
 
-private def currentGrantCell (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target)
-    (grant : NativeHostReplay.PriorLifetimeGrant config) :
+private def fullGrant {config : Config} (prior : NativeHostReplay.PriorLifetimeGrant config) : GrantView :=
+  ⟨prior.index, prior.ingress.spec.grant, prior.receipt, prior.ticket.index,
+    prior.ticket.evidence.spec, prior.ticket.receipt, prior.finalRoot⟩
+
+private def selectedGrant {config : Config} {light : NativeHostLight.Light config} {index : Nat}
+    (prior : ApplicationAgentLifetimeGrantReceiver.Selected config light index) : GrantView :=
+  ⟨index, prior.ingress.spec.grant, receiptOfRecord prior.candidate.read, prior.ingress.spec.grant.source.issueIndex,
+    prior.ticket.evidence.spec, receiptOfRecord prior.ticket.candidate.read,
+    (ResourceBirthController.birthWrite prior.accepted.sourceReady.birth.create).exactPost⟩
+
+private def currentGrantCell (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (request : Request) (grant : GrantView) :
     Except String (PackedCell CanonicalCellRegistry.registry) := do
-  let resource := grant.ingress.spec.grant.source.resource
-  let cell ← match verified.opened.directory.directory.slots resource with
+  if grant.grant.source.resource != request.grantResource ||
+      grant.grant.participant.grantObserveCapability != request.grantObserveCapability ||
+      grant.ticketIndex != request.fixed.base.base.issueIndex ||
+      grant.ticketSpec.ticket.resource != request.fixed.base.base.ticketResource ||
+      !grant.grant.matchesIssued grant.ticketSpec grant.ticketIndex grant.ticketReceipt then
+    throw "lifetime grant differs from fixed custodian/original ticket"
+  let resource := grant.grant.source.resource
+  let cell ← match ground.directory.slots resource with
     | .present cell => pure cell
     | _ => throw "current lifetime grant cell unavailable"
   if ResourceBirthCodec.physicalRoot (.live cell) != grant.finalRoot ||
       ApplicationAgentLifetimeDispatchCurrent.grantAt config.deployment.domain resource cell !=
-        some grant.ingress.spec.grant then
+        some grant.grant then
     throw "current lifetime grant differs from certified installation"
   pure cell
 
-/-- Before the ordinary reserve, all current coordinates and the complete
-grant binding are derived from this verified image. Signatures are detached;
-the final event26 receiver still proves the reserve's original admission. -/
-def prepareReserveVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target) (request : Request) :
-    Except String ReservePlan := do
-  let grant ← certifiedGrant config verified request
-  let grantCell ← currentGrantCell config verified grant
+private def reserveCommand (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (grant : GrantView) (app : ApplicationDispatchAuthoring.Plan) (request : Request) :
+    Except String (DeclaredResourceController.Command ×
+      (NativeHostCodec.SigningPlan → ReservePlan)) := do
+  let grantCell ← currentGrantCell config ground request grant
   let base := request.fixed
   if base.purseTask == base.base.task || base.purseTask == request.grantResource ||
       base.reserveAmount < 0 || base.maximumCharge < 0 ||
       base.maximumCharge > base.reserveAmount then
     throw "lifetime reserve fixed amount/task bounds refused"
-  let app ← ApplicationDispatchAuthoring.prepareWithLifetimeGrant config verified
-    base.base.base request.grantIssueIndex base.base.task
-    base.base.parentCapability base.base.parentObserveCapability
   let some unsigned := ApplicationDispatchAdmissionIngress.codec.decode app.unsignedIngress
     | throw "lifetime reserve app plan is noncanonical"
-  let appCell ← match verified.opened.directory.directory.slots
+  let appCell ← match ground.directory.slots
       unsigned.dispatch.dispatch.app.resource with
     | .present cell => pure cell
     | _ => throw "current lifetime app unavailable"
   if appCell.payload.root != unsigned.dispatch.appRoot then
     throw "current lifetime app differs from source plan"
-  let sessionCell ← match verified.opened.directory.directory.slots
+  let sessionCell ← match ground.directory.slots
       unsigned.dispatch.dispatch.session.resource with
     | .present cell => pure cell
     | _ => throw "current lifetime session unavailable"
   let some parent := unsigned.parent
     | throw "lifetime reserve parent missing from source plan"
-  let parentCell ← match verified.opened.directory.directory.slots parent.task with
+  let parentCell ← match ground.directory.slots parent.task with
     | .present cell => pure cell
     | _ => throw "current lifetime parent unavailable"
   if parentCell.payload.root != parent.root then
     throw "current lifetime parent differs from source plan"
-  let purseCell ← match verified.opened.directory.directory.slots base.purseTask with
+  let purseCell ← match ground.directory.slots base.purseTask with
     | .present cell => pure cell
     | _ => throw "current lifetime purse unavailable"
   let some purseState := ApplicationDispatchAgentPayer.stateAt base.purseTask purseCell
@@ -210,7 +213,7 @@ def prepareReserveVerified (config : Config) {target : Durable}
       semantics := config.profile.semantics
       app := unsigned.dispatch.dispatch.app
       session := unsigned.dispatch.dispatch.session
-      ticketResource := grant.ticket.evidence.spec.ticket.resource
+      ticketResource := grant.ticketSpec.ticket.resource
       ticketRoot := unsigned.ticketRoot
       parentTask := parent.task
       parentGeneration := parent.state.generation
@@ -225,17 +228,15 @@ def prepareReserveVerified (config : Config) {target : Durable}
   let context : ApplicationAgentLifetimeDispatchReserveContext.Context :=
     ⟨old, request.grantResource, grant.index,
       ApplicationAgentLifetimeDispatchReserveContext.grantDigest
-        grant.ingress.spec.grant⟩
+        grant.grant⟩
   let command : DeclaredResourceController.Command :=
     { subject := base.payerSubject
       nonce := ApplicationAgentLifetimeDispatchReserveContext.reserveNonce context
       targets := [AgentGrain.Operation.target (.reserve base.reserveAmount)
         base.purseTask base.purseCapability purseCell.payload.root purseState
         (some base.purseObserve)] }
-  let invocation ← NativeHost.prepareLoaded config verified.opened
-    (.invoke (DeclaredResourceController.commandCodec.encode command))
   let bindings : SourceBindings :=
-    { originalIssueReceipt := grant.ticket.receipt
+    { originalIssueReceipt := grant.ticketReceipt
       grantIssueReceipt := grant.receipt
       grantInitializedRoot := grant.finalRoot
       grantPhysicalRoot := ResourceBirthCodec.physicalRoot (.live grantCell)
@@ -243,7 +244,39 @@ def prepareReserveVerified (config : Config) {target : Durable}
       sessionPhysicalRoot := ResourceBirthCodec.physicalRoot (.live sessionCell)
       parentPhysicalRoot := ResourceBirthCodec.physicalRoot (.live parentCell)
       pursePhysicalRoot := ResourceBirthCodec.physicalRoot (.live purseCell) }
-  pure ⟨request, context, bindings, invocation⟩
+  return (command, fun invocation => ⟨request, context, bindings, invocation⟩)
+
+private def fullSource (config : Config) {target : Durable} (verified : NativeHostReplay.Verified config target)
+    (request : Request) : Except String (GrantView × ApplicationDispatchAuthoring.Plan) := do
+  let some grant := verified.grants.find? (fun g => g.index == request.grantIssueIndex)
+    | throw "lifetime grant absent from admitted history"
+  let base := request.fixed.base
+  let app ← ApplicationDispatchAuthoring.prepareWithLifetimeGrant config verified base.base request.grantIssueIndex
+    base.task base.parentCapability base.parentObserveCapability
+  return (fullGrant grant, app)
+
+private def lightSource (config : Config) (light : NativeHostLight.Light config) (request : Request) :
+    ExceptT String IO (GrantView × ApplicationDispatchAuthoring.Plan) := do
+  let grant ← ExceptT.mk ((·.mapError (·.message)) <$>
+    (ApplicationAgentLifetimeGrantReceiver.selectGrant config light request.grantIssueIndex).run)
+  let cells ← ExceptT.mk (light.basis ⟨[], []⟩)
+  let base := request.fixed.base
+  let app ← ApplicationDispatchAuthoring.prepareWithLifetimeGrantLight config light grant (.ofBasis cells)
+    base.base base.task base.parentCapability base.parentObserveCapability
+  return (selectedGrant grant, app)
+
+def prepareReserveVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : Request) : Except String ReservePlan := do
+  let (grant, app) ← fullSource config verified request
+  let (cmd, finish) ← reserveCommand config verified.opened.ground grant app request
+  return finish (← NativeHost.prepareLoaded config verified.opened (.invoke (DeclaredResourceController.commandCodec.encode cmd)))
+
+def prepareReserveLight (config : Config) (light : NativeHostLight.Light config) (request : Request) :
+    ExceptT String IO ReservePlan := do
+  let (grant, app) ← lightSource config light request
+  let cells ← ExceptT.mk (light.basis ⟨[], []⟩)
+  let (cmd, finish) ← reserveCommand config (.ofBasis cells) grant app request
+  return finish (← ApplicationDispatchAgentPaidAuthoring.planCommand config light cmd)
 
 def assembleReserve (plan : ReservePlan) (signatures : List (List UInt8)) :
     Except String (List UInt8) := do
@@ -364,9 +397,10 @@ private def compactHttp (operationId : Nat) : ApplicationDispatchCodec.Request :
 historical grant and reserve are selected from this exact verified walk; the
 signed app, payer and grant observation plans still require fresh native
 event26 admission before any physical HTTP effect. -/
-def preparePaidVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target)
-    (request : PaidRequest) : Except String PaidPlan := do
+private def paidCommand (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (grant : GrantView) (app : ApplicationDispatchAuthoring.Plan) (request : PaidRequest)
+    (raw : ApplicationDispatchAgentReserveCore.RawEvidence config) :
+    Except String (DeclaredResourceController.Command × (NativeHostCodec.SigningPlan → PaidPlan)) := do
   let fixed := request.fixed
   let base := request.context.base
   if fixed.fixed.purseTask != base.purseTask ||
@@ -377,20 +411,16 @@ def preparePaidVerified (config : Config) {target : Durable}
       fixed.grantResource != request.context.grantResource ||
       fixed.grantIssueIndex != request.context.grantIssueIndex then
     throw "lifetime paid fixed custodian differs from reserve context"
-  let grant ← certifiedGrant config verified fixed
-  let grantCell ← currentGrantCell config verified grant
-  let app ← ApplicationDispatchAuthoring.prepareWithLifetimeGrant config verified
-    fixed.fixed.base.base fixed.grantIssueIndex fixed.fixed.base.task
-    fixed.fixed.base.parentCapability fixed.fixed.base.parentObserveCapability
+  let grantCell ← currentGrantCell config ground fixed grant
   let some unsigned := ApplicationDispatchAdmissionIngress.codec.decode app.unsignedIngress
     | throw "lifetime paid app plan is noncanonical"
-  let appCell ← match verified.opened.directory.directory.slots
+  let appCell ← match ground.directory.slots
       unsigned.dispatch.dispatch.app.resource with
     | .present cell => pure cell
     | _ => throw "current lifetime paid app unavailable"
   if appCell.payload.root != unsigned.dispatch.appRoot then
     throw "current lifetime paid app differs from source plan"
-  let sessionCell ← match verified.opened.directory.directory.slots
+  let sessionCell ← match ground.directory.slots
       unsigned.dispatch.dispatch.session.resource with
     | .present cell => pure cell
     | _ => throw "current lifetime paid session unavailable"
@@ -404,31 +434,21 @@ def preparePaidVerified (config : Config) {target : Durable}
       grantObserveCapability := fixed.grantObserveCapability
       grantObservationEnvelope := [] }
   if !ApplicationAgentLifetimeDispatchIngress.matchesRoute probe
-      grant.ingress.spec.grant grant.ticket.evidence.spec.ticket.resource grant.index then
+      grant.grant grant.ticketSpec.ticket.resource grant.index then
     throw "lifetime paid context differs from current source app/grant plan"
-  let some reserve := verified.reserves.find? (fun prior =>
-      prior.index == request.reserveIndex)
-    | throw "lifetime reserve absent from admitted history"
-  if grant.index >= reserve.index then
+  if grant.index >= request.reserveIndex then
     throw "lifetime grant must precede the reserve"
   let .ok bound := ApplicationAgentLifetimeDispatchReserveCore.bindContext
-      reserve.raw request.context
+      raw request.context
     | throw "lifetime original reserve differs from grant-bound context"
-  if verified.opened.durable.image.accepted[reserve.index]?.map
-      DurableReceiverCodec.intentStream.encode !=
-      some (DurableReceiverCodec.intentStream.encode reserve.raw.record) ||
-      !decide (NativeHostReplay.dispatchPurseUntouched
-        (verified.opened.durable.image.accepted.drop (reserve.index + 1))
-        base.purseTask) then
-    throw "lifetime reserve changed after original admission"
-  let purseCell ← match verified.opened.directory.directory.slots base.purseTask with
+  let purseCell ← match ground.directory.slots base.purseTask with
     | .present cell => pure cell
     | _ => throw "current lifetime paid purse unavailable"
   let some purseState := ApplicationDispatchAgentPayer.stateAt base.purseTask purseCell
     | throw "current lifetime paid purse state unavailable"
   let some parent := unsigned.parent
     | throw "lifetime paid parent missing from source plan"
-  let parentCell ← match verified.opened.directory.directory.slots parent.task with
+  let parentCell ← match ground.directory.slots parent.task with
     | .present cell => pure cell
     | _ => throw "current lifetime paid parent unavailable"
   if parentCell.payload.root != parent.root then
@@ -441,8 +461,6 @@ def preparePaidVerified (config : Config) {target : Durable}
       targets := [AgentGrain.Operation.target .input base.purseTask
         fixed.fixed.purseCapability purseCell.payload.root purseState
         (some fixed.fixed.purseObserve)] }
-  let payer ← NativeHost.prepareLoaded config verified.opened
-    (.invoke (DeclaredResourceController.commandCodec.encode command))
   -- The source plan is still unsigned: selectCommand reads an assembled
   -- signed command and therefore cannot select from this empty placeholder.
   -- Use the same current-image coordinates as prepareForIssue above.
@@ -454,11 +472,11 @@ def preparePaidVerified (config : Config) {target : Durable}
       .invoke (DeclaredResourceController.commandCodec.encode appCommand) then
     throw "lifetime paid app command differs from source plan"
   let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
-    ⟨config.federation, NativeHost.logicalHeight config verified.opened.durable⟩
-    verified.opened.ground appCommand
+    ⟨config.federation, config.genesisHeight + ground.height⟩
+    ground appCommand
     | throw "lifetime paid app command preparation refused"
-  let grantObservationSlot ← ApplicationDispatchAuthoring.prepareObservationSlot
-    config verified.opened unsigned selection prepared 4 fixed.grantResource
+  let grantObservationSlot ← ApplicationDispatchAuthoring.observationSlotOn
+    config ground unsigned selection prepared 4 fixed.grantResource
     fixed.grantObserveCapability grantCell.payload.root
   let compactBase : ApplicationDispatchAuthoring.Request :=
     { fixed.fixed.base.base with http := compactHttp base.httpOperationId }
@@ -469,7 +487,7 @@ def preparePaidVerified (config : Config) {target : Durable}
   let compactApp : ApplicationDispatchAuthoring.Plan :=
     { app with request := compactBase }
   let bindings : SourceBindings :=
-    { originalIssueReceipt := grant.ticket.receipt
+    { originalIssueReceipt := grant.ticketReceipt
       grantIssueReceipt := grant.receipt
       grantInitializedRoot := grant.finalRoot
       grantPhysicalRoot := ResourceBirthCodec.physicalRoot (.live grantCell)
@@ -477,9 +495,36 @@ def preparePaidVerified (config : Config) {target : Durable}
       sessionPhysicalRoot := ResourceBirthCodec.physicalRoot (.live sessionCell)
       parentPhysicalRoot := ResourceBirthCodec.physicalRoot (.live parentCell)
       pursePhysicalRoot := ResourceBirthCodec.physicalRoot (.live purseCell) }
-  pure ⟨compactRequest, compactApp, grant.ingress.spec.grant,
-    grantCell.payload.root, grantObservationSlot, bindings,
-    reserve.raw.receipt, payer⟩
+  return (command, fun payer => ⟨compactRequest, compactApp, grant.grant,
+    grantCell.payload.root, grantObservationSlot, bindings, raw.receipt, payer⟩)
+
+def preparePaidVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target) (request : PaidRequest) : Except String PaidPlan := do
+  let (grant, app) ← fullSource config verified request.fixed
+  let some reserve := verified.reserves.find? (fun prior => prior.index == request.reserveIndex)
+    | throw "lifetime reserve absent from admitted history"
+  if verified.opened.durable.image.accepted[reserve.index]?.map
+      DurableReceiverCodec.intentStream.encode !=
+      some (DurableReceiverCodec.intentStream.encode reserve.raw.record) ||
+      !decide (NativeHostReplay.dispatchPurseUntouched
+        (verified.opened.durable.image.accepted.drop (reserve.index + 1))
+        request.context.base.purseTask) then
+    throw "lifetime reserve changed after original admission"
+  let (cmd, finish) ← paidCommand config verified.opened.ground grant app request reserve.raw
+  return finish (← NativeHost.prepareLoaded config verified.opened (.invoke (DeclaredResourceController.commandCodec.encode cmd)))
+
+def preparePaidLight (config : Config) (light : NativeHostLight.Light config) (request : PaidRequest) :
+    ExceptT String IO PaidPlan := do
+  let (grant, app) ← lightSource config light request.fixed
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let raw ← ExceptT.mk ((·.mapError (·.message)) <$> (NativeHostReplay.selectReserve config reader request.reserveIndex).run)
+  let last ← ExceptT.mk ((·.mapError (·.message)) <$> reader.lastWrite ⟨request.context.base.purseTask⟩)
+  if last.value.getD 0 > request.reserveIndex + 1 then throw "lifetime reserve changed after original admission"
+  let .invoke commandBytes := app.invocation.finalizedDraft | throw "lifetime app signing plan is not an invocation"
+  let some appCommand := DeclaredResourceController.commandCodec.decode commandBytes | throw "noncanonical app command"
+  let cells ← ExceptT.mk (light.basis (DeclaredResourceController.invocationKeys config.deployment.domain config.profile.semantics appCommand))
+  let (cmd, finish) ← paidCommand config (.ofBasis cells) grant app request raw
+  return finish (← ApplicationDispatchAgentPaidAuthoring.planCommand config light cmd)
 
 /-- Assembly inserts detached app, grant-observation and payer signatures.
 The complete event26 receiver rechecks every current and historical fact. -/

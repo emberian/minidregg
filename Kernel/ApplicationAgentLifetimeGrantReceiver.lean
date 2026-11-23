@@ -11,7 +11,7 @@ initialized cell root.
 module
 
 public import Kernel.NativeHost
-public import Kernel.NativeHostLight
+public import Kernel.ApplicationDispatchLight
 
 @[expose] public section
 
@@ -60,6 +60,47 @@ def keys (config : Config) (ingress : Ingress) : DurableView.Keys :=
       ⟨[transaction config ingress, decoded.descriptor.transactionId],
         [ResourceBirthReceiver.birthNullifier config.deployment.domain decoded.descriptor.authorityNullifier]⟩
   | none => ⟨[transaction config ingress], []⟩
+
+/-- Check the selected ticket on its canonical payload, including the grant's named receipt. -/
+private opaque ticketMatches {config : Config} (ingress : Ingress)
+    (issue : ApplicationDispatchHistoricalCore.IssuedEvidence config) (receipt : NativeHostCodec.Receipt) : Bool :=
+  issue.record.event.codecVersion == 22 && receipt == ingress.spec.grant.source.issueReceipt &&
+    ingress.spec.grant.matchesIssued issue.spec ingress.spec.grant.source.issueIndex receipt
+
+/-- Event27 and its earlier event22 ticket selected under the same authenticated head. -/
+structure Selected (config : Config) (light : NativeHostLight.Light config) (index : Nat) where
+  private mk ::
+  candidate : NativeHistorySelection.Candidate config light.opening.head index
+  ingress : Ingress
+  ticket : ApplicationDispatchLight.IndexedIssue config light ingress.spec.grant.source.issueIndex
+  beforeGrant : ingress.spec.grant.source.issueIndex < index
+  lineage : ticketMatches ingress ticket.evidence (receiptOfRecord ticket.candidate.read) = true
+  accepted : ApplicationAgentLifetimeGrantAdmission.Accepted config.profile config candidate.pins
+    candidate.ground (config.genesisHeight + candidate.ground.height) ingress
+  matched : NativeHistorySelection.Matched candidate (ApplicationAgentLifetimeGrantIntentTemplate.template accepted)
+
+def selectGrant (config : Config) (light : NativeHostLight.Light config) (index : Nat) :
+    ExceptT NativeHostReplay.IssueRefusal IO (Selected config light index) := do
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  if index ≥ reader.head.height then throw (.refused "grant index beyond the head")
+  let read ← ExceptT.mk ((·.mapError (fun e => NativeHostReplay.IssueRefusal.history e.message)) <$> reader.atHeight (index + 1))
+  let some probe := ingressCodec.decode (NativeHostReplay.sourceBytes read.record)
+    | throw (.refused "selected record is not a lifetime grant")
+  let candidate : NativeHistorySelection.Candidate config light.opening.head index ← ExceptT.mk ((·.mapError NativeHostReplay.IssueRefusal.history) <$>
+    NativeHistorySelection.select config reader reader.head.height index (keys config probe))
+  let ⟨ingress, accepted⟩ ← ExceptT.mk ((·.mapError (fun _ =>
+    NativeHostReplay.IssueRefusal.refused "lifetime grant refused at its prefix")) <$>
+    ApplicationAgentLifetimeGrantAdmission.admitNative config.profile config candidate.pins config.signature
+      candidate.ground (config.genesisHeight + candidate.ground.height) (NativeHostReplay.sourceBytes candidate.record))
+  let matched ← (NativeHistorySelection.matchIntent candidate
+    (ApplicationAgentLifetimeGrantIntentTemplate.template accepted)).mapError NativeHostReplay.IssueRefusal.refused
+  if before : ingress.spec.grant.source.issueIndex < index then
+    let ticket ← ExceptT.mk ((·.mapError NativeHostReplay.IssueRefusal.history) <$>
+      (ApplicationDispatchLight.selectIssue config light ingress.spec.grant.source.issueIndex).run)
+    if lineage : ticketMatches ingress ticket.evidence (receiptOfRecord ticket.candidate.read) = true then
+      return ⟨candidate, ingress, ticket, before, lineage, accepted, matched⟩
+    throw (.refused "lifetime grant original issue or scope differs")
+  else throw (.refused "lifetime grant must follow its original issue")
 
 /-- A grant confirmed on the light route: its original event22 ticket selected from the Store's
 history at the grant's issue index and re-admitted at its own prefix, the grant within that

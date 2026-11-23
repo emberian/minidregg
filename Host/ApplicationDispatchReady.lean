@@ -43,7 +43,7 @@ private def stopped {α : Type} (clause : String) : IO (Except String α) := do
   logClause clause
   pure (.error "undisclosed")
 
-private def authorizePlan (config : Config) (opened : Opened config)
+private def authorizePlan (config : Config) (context : ServedBasis.Ground config.deployment)
     (requestBytes signature : List UInt8) (observations : List (List UInt8))
     (plan : ApplicationDispatchAuthoring.Plan) :
     IO (Except String ApplicationDispatchAuthoring.Plan) := do
@@ -52,7 +52,6 @@ private def authorizePlan (config : Config) (opened : Opened config)
   let dispatch := ingress.dispatch.dispatch
   if dispatch.session.origin != .human then return (← stopped "session origin is not human")
   if signature.length != 64 then return (← stopped "signature is not 64 bytes")
-  let context := observationContext config opened
   let key := NativeObservationController.intentKey context dispatch.session.subject
   let verdict ← match key with
     | .error _ => pure (.ok false)
@@ -80,7 +79,7 @@ private def authorizePlan (config : Config) (opened : Opened config)
     if intent.grants != [⟨.object, target, capability⟩] then
       return (← stopped s!"observation of resource {target} does not carry exactly the declared grant")
     -- Narrowed reads do not authorize disclosure of a complete app plan.
-    if (grantFields config opened intent.grants target).isSome then
+    if (grantFieldsOn config context intent.grants target).isSome then
       return (← stopped s!"observation of resource {target} is narrowed to fields")
     match ← NativeObservationController.authorize config.signature context
         config.profile config.federation config.genesisHeight signed with
@@ -94,7 +93,15 @@ def authenticatedPlanVerified {config : Config} {target : Durable}
     IO (Except String ApplicationDispatchAuthoring.Plan) := do
   let .ok plan := ApplicationDispatchAuthoring.prepareRequestVerified config old request
     | stopped "plan preparation refused"
-  authorizePlan config old.opened request signature observations plan
+  authorizePlan config old.opened.ground request signature observations plan
+
+def authenticatedPlanLight {config : Config} (light : NativeHostLight.Light config)
+    (request signature : List UInt8) (observations : List (List UInt8)) :
+    IO (Except String ApplicationDispatchAuthoring.Plan) := do
+  let .ok plan ← (ApplicationDispatchAuthoring.prepareRequestLight config light request).run
+    | stopped "plan preparation refused"
+  let .ok basis ← light.basis ⟨[], []⟩ | stopped "current observation basis unavailable"
+  authorizePlan config (.ofBasis basis) request signature observations plan
 
 def authenticatedPlanSuffix {config : Config} {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target)
@@ -102,7 +109,7 @@ def authenticatedPlanSuffix {config : Config} {anchor : Opened config} {target :
     IO (Except String ApplicationDispatchAuthoring.Plan) := do
   let .ok plan ← (ApplicationDispatchAuthoring.prepareRequestSuffix config old request).run
     | stopped "plan preparation refused"
-  authorizePlan config old.opened request signature observations plan
+  authorizePlan config old.opened.ground request signature observations plan
 
 private def refusedJson : Json := .mkObj
   [("type", "mini-application-ready-v1"), ("status", "refused"),
@@ -112,9 +119,9 @@ private def refused (clause : String) : IO Json := do
   logClause clause
   pure refusedJson
 
-private def readyJson (config : Config) (opened : Opened config)
+private def readyJson (config : Config) (height : Nat) (worldRoot : Minidregg.Theory.TypedAuthorization.Digest) (ticket : Nat)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
-    (admitted : NativeHostReplay.DispatchAt config opened ingress) : Json :=
+    : Json :=
   let dispatch := ingress.dispatch.dispatch
   let decimal := fun (n : Nat) => Json.str (toString n)
   let signedDecimal := fun (n : Int) => Json.str (toString n)
@@ -122,13 +129,13 @@ private def readyJson (config : Config) (opened : Opened config)
     ("origin", "native-current-dispatch-admission"), ("currentness", "at-observed-head"),
     ("domain", decimal config.deployment.domain.value),
     ("semantics", decimal config.profile.semantics.value),
-    ("height", decimal (logicalHeight config opened.durable)),
-    ("worldRoot", decimal opened.durable.worldRoot.value),
+    ("height", decimal height),
+    ("worldRoot", decimal worldRoot.value),
     ("app", decimal dispatch.app.resource), ("generation", signedDecimal dispatch.app.generation),
     ("session", decimal dispatch.session.resource),
     ("sessionGeneration", signedDecimal dispatch.session.generation),
     ("subject", decimal dispatch.session.subject.value),
-    ("ticket", decimal admitted.prior.evidence.spec.ticket.resource),
+    ("ticket", decimal ticket),
     ("enrollment", decimal ingress.dispatch.enrollmentResource),
     ("operation", decimal dispatch.request.operationId),
     ("physicalDispatch", .bool false)]
@@ -149,7 +156,8 @@ def readyVerified {config : Config} {target : Durable}
     return (← refused "the receiver holds no refusal at the tip for this dispatch")
   let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
     | refused "dispatch admission refused"
-  return readyJson config old.opened ingress admitted
+  return readyJson config (logicalHeight config old.opened.durable) old.opened.durable.worldRoot
+    admitted.prior.evidence.spec.ticket.resource ingress
 
 def readySuffix {config : Config} {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target) (bytes : List UInt8) : IO Json := do
@@ -167,7 +175,8 @@ def readySuffix {config : Config} {anchor : Opened config} {target : Durable}
     return (← refused "the receiver holds no refusal at the tip for this dispatch")
   let .ok admitted ← NativeHostReplay.admitDispatchSuffixVerified old ingress
     | refused "dispatch admission refused"
-  return readyJson config old.opened ingress admitted
+  return readyJson config (logicalHeight config old.opened.durable) old.opened.durable.worldRoot
+    admitted.prior.evidence.spec.ticket.resource ingress
 
 /-- Public readiness assembles the member's exact detached signatures locally;
 ordinary operator op37 remains private. Final admission always rechecks source. -/
@@ -179,6 +188,29 @@ def assembledReadyVerified {config : Config} {target : Durable}
   let .ok ingress := ApplicationDispatchAuthoring.assemble plan signatures
     | refused "the signatures do not assemble into the plan's ingress"
   readyVerified old ingress
+
+/-- The member's assembled ingress selects its original issue by signed source bytes.
+The draft's unsigned request fields do not select authority. -/
+def assembledReadyLight {config : Config} (light : NativeHostLight.Light config)
+    (planBytes : List UInt8) (signatures : List (List UInt8)) : IO Json := do
+  let some plan := ApplicationDispatchAuthoring.planCodec.decode planBytes
+    | refused "plan does not decode"
+  let .ok bytes := ApplicationDispatchAuthoring.assemble plan signatures
+    | refused "the signatures do not assemble into the plan's ingress"
+  let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes
+    | refused "dispatch ingress does not decode"
+  if ApplicationStreamContinuity.reservedProbe ingress.dispatch.dispatch.request ||
+      ingress.dispatch.dispatch.session.origin != .human then return (← refused "human dispatch required")
+  let some selection := ApplicationDispatchAdmission.selectCommand ingress
+    | refused "dispatch selection unavailable"
+  let command := ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent
+  let tx := DeclaredResourceController.transactionId ingress.dispatch.domain ingress.dispatch.semantics command
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let .ok (.absent _) ← reader.byTx tx | refused "this dispatch has no authenticated absence"
+  let .ok admitted ← (ApplicationDispatchLight.admit config light ingress).run
+    | refused "dispatch admission refused"
+  return readyJson config (config.genesisHeight + light.opening.head.height) light.opening.head.root
+    admitted.issue.evidence.spec.ticket.resource ingress
 
 def assembledReadySuffix {config : Config} {anchor : Opened config} {target : Durable}
     (old : NativeHostReplay.SuffixVerified config anchor target) (planBytes : List UInt8)

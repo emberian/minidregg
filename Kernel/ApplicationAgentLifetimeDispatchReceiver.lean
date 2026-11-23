@@ -65,7 +65,7 @@ theorem Permit.validated_successor {config : Config} (permit : Permit config) :
         permit.readback.derived permit.readback.ready permit.readback.tag) = .ok permit.readback.after :=
   ⟨permit.derivedExact, permit.readback.validated⟩
 
-private def permitCodec : LawfulCodec
+def committedCodec : LawfulCodec
     (ApplicationAgentLifetimeDispatchProjection.Paid × NativeHostCodec.Receipt) :=
   NativeHostCodec.framed
     "DREGG/APPLICATION/AGENT-LIFETIME-DISPATCH-COMMITTED-PERMIT/v3".toUTF8.toList
@@ -76,10 +76,10 @@ private def permitCodec : LawfulCodec
 returned by the private source-owned receiver. -/
 def inspectCommittedBytes (bytes : List UInt8) :
     Option (ApplicationAgentLifetimeDispatchProjection.Paid × NativeHostCodec.Receipt) :=
-  permitCodec.decode bytes
+  committedCodec.decode bytes
 
 private def Permit.canonicalBytes {config : Config} (permit : Permit config) : List UInt8 :=
-  permitCodec.encode (permit.projection, permit.receipt)
+  committedCodec.encode (permit.projection, permit.receipt)
 
 /-- Point-in-time handoff; physical worker ownership and hard-disconnect
 fences are still checked by the runtime before fd3 delivery. -/

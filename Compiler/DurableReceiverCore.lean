@@ -1002,14 +1002,14 @@ def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : Data
                 admit)
 
 /-- What the full receiver's successful World gate establishes about its two tracks. -/
-def AdmittedSuccessor {rootBytes : List UInt8 → Digest} (intent : DataIntent rootBytes)
+def AdmittedSuccessor {rootBytes : DurableHistory.RootBytes} (intent : DataIntent rootBytes)
     (before after : Option HostRefinesWorld.DWorld) : Prop :=
   ∃ w t w', before = some w ∧ after = some w' ∧
     TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent = .ok t ∧
     t.charge = intent.exactCharge ∧
     Minidregg.Kernel.World.World.admit DeployedHistory.history w t = .ok w'
 
-theorem WorldTrack.advance_sound {rootBytes : List UInt8 → Digest}
+theorem WorldTrack.advance_sound {rootBytes : DurableHistory.RootBytes}
     {snapshot next : DataSnapshot rootBytes} {height height' : Nat} {intent : DataIntent rootBytes}
     (executed : DurableDataIntent.execute .complete snapshot intent = .accepted next)
     (up : height' = height + 1) (before : WorldTrack snapshot height)
@@ -1914,7 +1914,7 @@ theorem Loaded.extend_snapshot {rootBytes : List UInt8 → Digest} (loaded : Loa
   rw [DurableReceiver.execute_accepted_install _ _ _ ready.executed, loaded.snapshotExact,
     DurableEngine.Engine.view_install]
 
-theorem Loaded.extend_admitted {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+theorem Loaded.extend_admitted {rootBytes : DurableHistory.RootBytes} (loaded : Loaded rootBytes)
     {intent : DataIntent rootBytes}
     (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
     (accepted : (loaded.extend ready).track.world?.isSome = true) :
@@ -2221,7 +2221,7 @@ def afterCheckpoint {rootBytes : List UInt8 → Digest} (loaded : Loaded rootByt
     (stored : Bool) : Loaded rootBytes :=
   if stored then loaded.rebase else loaded
 
-theorem afterCheckpoint_world {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+theorem afterCheckpoint_world {rootBytes : DurableHistory.RootBytes} (loaded : Loaded rootBytes)
     (stored : Bool) : (afterCheckpoint loaded stored).track.world? = loaded.track.world? := by
   cases stored <;> rfl
 

@@ -140,7 +140,7 @@ theorem Permit.installed_validated_successor {config : Config} (permit : Permit 
 /-- A distinct wire frame ensures the physical host cannot confuse a checked
 candidate with an actually committed dispatch permit. The host accepts this
 frame only from its fixed native process, never from client HTTP bytes. -/
-private def permitCodec : LawfulCodec
+def committedCodec : LawfulCodec
     (ApplicationDispatchProjection.Candidate × NativeHostCodec.Receipt) :=
   NativeHostCodec.framed
     ApplicationReceivingDomain.dispatchCommittedPermitFrame
@@ -152,10 +152,10 @@ does not establish CAS provenance: only `Permit.withFreshTip` may supply this
 frame to the physical host's private op34 response channel. -/
 def inspectCommittedBytes (bytes : List UInt8) :
     Option (ApplicationDispatchProjection.Candidate × NativeHostCodec.Receipt) :=
-  permitCodec.decode bytes
+  committedCodec.decode bytes
 
 private def Permit.canonicalBytes {config : Config} (permit : Permit config) : List UInt8 :=
-  permitCodec.encode (permit.projection, permit.receipt)
+  committedCodec.encode (permit.projection, permit.receipt)
 
 /-- A committed frame is offered only while a fresh physical read still equals
 the exact post-CAS bytes. The Host callback writes and flushes the native

@@ -94,13 +94,10 @@ private def stateAt (task : Nat)
 certificate retained by its chronological native replay. Status 3/4 and the
 fixed generation are the AgentGrain witness fence. A later op34 must recheck
 that old cell/root/current capability and current law; this plan is unsigned. -/
-def prepareParentVerified (config : Config) {target : Durable}
-    (verified : NativeHostReplay.Verified config target)
+private def parentOn (config : Config) (ground : ServedBasis.Ground config.deployment)
+    (issue : ApplicationDispatchHistoricalCore.IssuedEvidence config)
     (request : Request) : Except String ParentPlan := do
-  let some issue := verified.issues.find? (fun issue =>
-      issue.index == request.base.issueIndex)
-    | throw "agent share issue absent from verified prefix"
-  let ticket := issue.evidence.spec.ticket
+  let ticket := issue.spec.ticket
   if ticket.resource != request.base.ticketResource then
     throw "agent ticket differs from admitted issue"
   let generation ← match ticket.participant.origin with
@@ -108,7 +105,7 @@ def prepareParentVerified (config : Config) {target : Durable}
     | .agent task generation =>
         if task != request.task then throw "agent parent task differs from admitted ticket"
         pure generation
-  let cell ← match verified.opened.directory.directory.slots request.task with
+  let cell ← match ground.directory.slots request.task with
     | .present cell => pure cell
     | _ => throw "agent parent cell unavailable"
   let state ← NativeHost.need "agent parent state unavailable"
@@ -121,7 +118,25 @@ def prepareParentVerified (config : Config) {target : Durable}
     ⟨request.task, state, request.parentCapability,
       cell.payload.root, request.parentObserveCapability⟩
   pure ⟨request, parent, ResourceBirthCodec.physicalRoot (.live cell),
-    issue.evidence.ingressBytes⟩
+    issue.ingressBytes⟩
+
+def prepareParentVerified (config : Config) {target : Durable}
+    (verified : NativeHostReplay.Verified config target)
+    (request : Request) : Except String ParentPlan := do
+  let some issue := verified.issues.find? (fun issue =>
+      issue.index == request.base.issueIndex)
+    | throw "agent share issue absent from verified prefix"
+  parentOn config verified.opened.ground issue.evidence request
+
+def prepareLight (config : Config) (light : NativeHostLight.Light config)
+    (request : Request) : ExceptT String IO (Plan × ApplicationDispatchHistoricalCore.IssuedEvidence config) := do
+  let issue := (← ApplicationDispatchLight.selectIssue config light request.base.issueIndex).evidence
+  let basis ← ExceptT.mk (light.basis ⟨[], []⟩)
+  let ground := ServedBasis.Ground.ofBasis basis
+  let parent ← parentOn config ground issue request
+  let signing ← ApplicationDispatchAuthoring.prepareForIssueLight config light ground request.base issue
+    (some parent.parent)
+  return (⟨parent, signing⟩, issue)
 
 def prepareParentRequestVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target)

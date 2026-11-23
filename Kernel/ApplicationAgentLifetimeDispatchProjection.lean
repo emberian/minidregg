@@ -104,18 +104,23 @@ theorem canonicalBytes_injective : Function.Injective Paid.canonicalBytes := by
 /-- The source of every field is the Replay-minted event26 admission and its
 checked current image. Historical session origin is retained inside
 `dispatch`; current parent generation is projected separately. -/
-def ofLifetimeDispatchAt {config : Config} {opened : Opened config}
-    {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
-    (admitted : NativeHostReplay.LifetimeDispatchAt config opened ingress) :
+def ofChecked {config : Config} {ground : ServedBasis.Ground config.deployment}
+    {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress} (issue : ApplicationDispatchHistoricalCore.IssuedEvidence config)
+    {grant : ApplicationAgentLifetimeGrant.Grant} {ticketIndex grantIndex : Nat}
+    {ticketReceipt : NativeHostCodec.Receipt} {grantRoot : Digest}
+    {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
+    (checked : ApplicationAgentLifetimeDispatchCore.Checked config ground ingress issue.spec issue.descriptor grant
+      ticketIndex ticketReceipt issue.ingressBytes grantIndex grantRoot reserved)
+    (grantReceipt : NativeHostCodec.Receipt) (reserveIndex : Nat) (reserveReceipt : NativeHostCodec.Receipt) :
     Option Paid := do
   let dispatch := ingress.dispatch.dispatch.dispatch
-  let current := admitted.checked.current
+  let current := checked.current
   let claimed ← ingress.dispatch.parent
   let task := ingress.reserveContext.base.parentTask
   if claimed.task != task ||
       claimed.state.generation != ingress.reserveContext.base.parentGeneration ||
       !(claimed.state.status == 3 || claimed.state.status == 4) then none else
-  let cell ← match opened.directory.directory.slots task with
+  let cell ← match ground.directory.slots task with
     | .present cell => some cell
     | _ => none
   let ⟨.declaredObject, payload⟩ := cell
@@ -124,26 +129,26 @@ def ofLifetimeDispatchAt {config : Config} {opened : Opened config}
   let state ← AgentGrain.readState task page
   if state != claimed.state || payload.root != claimed.root ||
       state.remaining < 0 || state.reserved < 0 then none else
-  let pending := admitted.intent
+  let pending := ApplicationAgentLifetimeDispatchCore.candidateIntent checked
   let base : ApplicationDispatchProjection.Candidate :=
     { dispatch := dispatch
       effectiveBits := current.bits
       sessionFingerprint := ApplicationDispatchAdmission.sessionFingerprintOfKey
         (ApplicationDispatchAdmission.sessionFingerprintKeyFor
-          opened.ground.authority.cell.root current.selection
-          ingress.dispatch current.bits admitted.issue.evidence.spec.ticket.resource)
-      ticketResource := admitted.issue.evidence.spec.ticket.resource
+          ground.authority.cell.root current.selection
+          ingress.dispatch current.bits issue.spec.ticket.resource)
+      ticketResource := issue.spec.ticket.resource
       ticketRoot := ingress.dispatch.ticketRoot
       enrollmentResource := ingress.dispatch.dispatch.enrollmentResource
       enrollmentRoot := ingress.dispatch.dispatch.enrollmentRoot
-      authorityRoot := opened.ground.authority.cell.root
+      authorityRoot := ground.authority.cell.root
       appRoot := ingress.dispatch.dispatch.appRoot
       sessionRoot := current.selection.sessionRoot
-      issueTransaction := admitted.issue.evidence.transactionId
-      issueEvent := admitted.issue.evidence.eventId
+      issueTransaction := issue.transactionId
+      issueEvent := issue.eventId
       dispatchTransaction := pending.transactionId
       dispatchEvent := pending.event.eventId
-      currentWorldRoot := opened.durable.worldRoot
+      currentWorldRoot := ground.worldRoot
       physicalRequestDigest := ApplicationDispatchCodec.requestDigest dispatch.request }
   let parent : ApplicationDispatchAgentProjection.Parent :=
     ⟨task, state.generation, state.status, state.remaining, state.reserved,
@@ -151,19 +156,25 @@ def ofLifetimeDispatchAt {config : Config} {opened : Opened config}
   some
     { candidate := ⟨base, parent⟩
       context := ingress.reserveContext
-      originalIssueIndex := admitted.issue.index
-      originalIssueReceipt := admitted.issue.receipt
+      originalIssueIndex := ticketIndex
+      originalIssueReceipt := ticketReceipt
       originalIssueDescriptor := (ResourceBirthCodec.descriptorCodec
-        CanonicalCellRegistry.registry).encode admitted.issue.evidence.descriptor
-      grantIssueReceipt := admitted.grant.receipt
-      grantInitializedRoot := admitted.grant.finalRoot
+        CanonicalCellRegistry.registry).encode issue.descriptor
+      grantIssueReceipt := grantReceipt
+      grantInitializedRoot := grantRoot
       grantPhysicalRoot := ResourceBirthCodec.physicalRoot
         (.live current.grantRead.selected.observed.before)
-      reserveIndex := admitted.reserve.index
-      reserveReceipt := admitted.reserve.raw.receipt
+      reserveIndex := reserveIndex
+      reserveReceipt := reserveReceipt
       reserveNonce := ApplicationAgentLifetimeDispatchReserveContext.reserveNonce
         ingress.reserveContext
       pursePhysicalRoot := ResourceBirthCodec.physicalRoot
-        (.live admitted.checked.payer.cell) }
+        (.live checked.payer.cell) }
+
+def ofLifetimeDispatchAt {config : Config} {opened : Opened config}
+    {ingress : ApplicationAgentLifetimeDispatchIngress.Ingress}
+    (admitted : NativeHostReplay.LifetimeDispatchAt config opened ingress) :
+    Option Paid :=
+  ofChecked admitted.issue.evidence admitted.checked admitted.grant.receipt admitted.reserve.index admitted.reserve.raw.receipt
 
 end Minidregg.Kernel.ApplicationAgentLifetimeDispatchProjection

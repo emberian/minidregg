@@ -124,7 +124,7 @@ theorem Permit.installed_validated_successor {config : Config} (permit : Permit 
         permit.readback.derived permit.readback.ready permit.readback.tag) = .ok permit.readback.after :=
   ⟨permit.fresh, permit.installed, permit.toCommitted.validated_successor⟩
 
-private def permitCodec : LawfulCodec
+def committedCodec : LawfulCodec
     (ApplicationDispatchAgentProjection.Paid × NativeHostCodec.Receipt) :=
   NativeHostCodec.framed
     ApplicationReceivingDomain.agentDispatchCommittedPermitFrame
@@ -135,10 +135,10 @@ private def permitCodec : LawfulCodec
 inspect only the exact bytes received from its private op46 process. -/
 def inspectCommittedBytes (bytes : List UInt8) :
     Option (ApplicationDispatchAgentProjection.Paid × NativeHostCodec.Receipt) :=
-  permitCodec.decode bytes
+  committedCodec.decode bytes
 
 private def Permit.canonicalBytes {config : Config} (permit : Permit config) : List UInt8 :=
-  permitCodec.encode (permit.projection, permit.receipt)
+  committedCodec.encode (permit.projection, permit.receipt)
 
 /-- A point-in-time native response handoff, not a lease across the later
 physical fd3 hop. Host must also check the live parent/purse process fences. -/

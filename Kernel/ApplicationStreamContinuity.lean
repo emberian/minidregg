@@ -8,6 +8,7 @@ shape is explicitly refused by the live op34 delivery receiver.
 module
 
 public import Compiler.ApplicationReceivingDomain
+public import Kernel.ApplicationDispatchLight
 public import Kernel.ApplicationDispatchProjection
 public import Kernel.ApplicationStreamContinuityFresh
 
@@ -165,6 +166,17 @@ def bindingFor {config : Config} {opened : Opened config}
     d.session.subject.value, admitted.prior.evidence.spec.ticket.resource,
     admitted.checked.checked.sessionFingerprint⟩
 
+def lightBinding {config : Config} {light : NativeHostLight.Light config}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    (admitted : ApplicationDispatchLight.Admitted config light ingress) : Binding :=
+  let d := ingress.dispatch.dispatch
+  ⟨d.app.resource, d.app.generation, d.session.resource, d.session.generation,
+    d.session.subject.value, admitted.issue.evidence.spec.ticket.resource,
+    admitted.checked.checked.sessionFingerprint⟩
+
+def lightTip {config : Config} (light : NativeHostLight.Light config) : Tip :=
+  ⟨light.opening.head.height, light.opening.head.chain, light.opening.head.root⟩
+
 def tipFor {config : Config} {target : Durable}
     (old : NativeHostReplay.Verified config target) : Tip :=
   ⟨old.opened.durable.height, old.opened.durable.chain,
@@ -261,6 +273,24 @@ def withOpenedFreshTip {config : Config} {α : Type}
   | none => return .ok (← handoff)
   | some refusal => return .error refusal
 
+/-- Compare the complete authenticated head record and its canonical MAC trailer with
+the Store immediately before releasing a light attestation. -/
+def withLightFreshTip {config : Config} (light : NativeHostLight.Light config) {α : Type}
+    (handoff : IO α) : IO (Except String α) := do
+  let head := light.opening.head
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let .ok read ← reader.atHeight head.height | return .error "authenticated head record unavailable"
+  let tag := DurableHistory.trailer light.opening.store.key head.height
+    ⟨head.root, head.chain, DurableHistory.frontierDigest head.height head.frontier, head.indexRoot⟩
+  let held : ApplicationStreamContinuityFresh.Held :=
+    ⟨head.height, some read.verified.record, some tag, none, light.opening.store, head.chain, some head.frontier⟩
+  let physical ← match ← config.transport.read head.height false with
+    | .ok (some stored) => pure (some (⟨stored.head, stored.entries⟩ : ApplicationStreamContinuityFresh.Physical))
+    | _ => pure none
+  match ApplicationStreamContinuityFresh.gate (ApplicationStreamContinuityFresh.verdict 0 held physical) with
+  | some reason => return .error reason
+  | none => return .ok (← handoff)
+
 def withVerifiedFreshTip {config : Config} {target : Durable} {α : Type}
     (old : NativeHostReplay.Verified config target) (handoff : IO α) :
     IO (Except String α) := withOpenedFreshTip old.opened handoff
@@ -269,32 +299,60 @@ def Attestation.withFreshTip {config : Config} {α : Type} (a : Attestation conf
     (handoff : List UInt8 → IO α) : IO (Except String α) :=
   withVerifiedFreshTip a.old (handoff a.canonicalBytes)
 
-def receiveVerified (config : Config) {target : Durable}
-    (old : NativeHostReplay.Verified config target) (bytes : List UInt8) :
-    IO (Except String (Attestation config)) := do
+private structure SignedProbe (config : Config) where
+  challenge : Challenge
+  ingress : ApplicationDispatchAdmissionIngress.Ingress
+  namespaceExact : challenge.domain = config.deployment.domain ∧
+    challenge.semantics = config.profile.semantics
+  noncesExact : challenge.streamNonce.length = 32 ∧ challenge.attemptNonce.length = 32
+  humanWeb : ingress.dispatch.dispatch.session.origin = .human ∧
+    ingress.dispatch.dispatch.session.kind = .web
+  signedChallenge : ingress.dispatch.dispatch.request = probeRequest challenge
+
+private def signedProbe (config : Config) (bytes : List UInt8) : Except String (SignedProbe config) := do
   let some request := requestCodec.decode bytes
-    | return .error "noncanonical stream continuity request"
+    | throw "noncanonical stream continuity request"
   let challenge := request.challenge
   if namespaceExact : challenge.domain = config.deployment.domain ∧
       challenge.semantics = config.profile.semantics then
     if noncesExact : challenge.streamNonce.length = 32 ∧ challenge.attemptNonce.length = 32 then
       let some ingress := ApplicationDispatchAdmissionIngress.codec.decode request.ingress
-        | return .error "noncanonical continuity signed ingress"
+        | throw "noncanonical continuity signed ingress"
       if humanWeb : ingress.dispatch.dispatch.session.origin = .human ∧
           ingress.dispatch.dispatch.session.kind = .web then
         if signedChallenge : ingress.dispatch.dispatch.request = probeRequest challenge then
-          let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
-            | return .error "current stream continuation authority refused"
-          if bindingExact : bindingFor admitted = challenge.binding then
-            if minimumExact : minimumCurrent challenge (tipFor old) = true then
-              return .ok ⟨target, old, challenge, ingress, admitted, namespaceExact,
-                noncesExact, humanWeb, signedChallenge, bindingExact, minimumExact⟩
-            else return .error "continuity tip regressed below stream watermark"
-          else return .error "continuity current projection or custody changed"
-        else return .error "continuity challenge differs from signed request"
-      else return .error "continuity requires a human web stream"
-    else return .error "continuity requires two 32-byte nonces"
-  else return .error "continuity namespace differs from pinned source"
+          return ⟨challenge, ingress, namespaceExact, noncesExact, humanWeb, signedChallenge⟩
+        else throw "continuity challenge differs from signed request"
+      else throw "continuity requires a human web stream"
+    else throw "continuity requires two 32-byte nonces"
+  else throw "continuity namespace differs from pinned source"
+
+def receiveVerified (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target) (bytes : List UInt8) :
+    IO (Except String (Attestation config)) := do
+  let ⟨challenge, ingress, namespaceExact, noncesExact, humanWeb, signedChallenge⟩ ← match signedProbe config bytes with
+    | .error detail => return .error detail
+    | .ok probe => pure probe
+  let .ok admitted ← NativeHostReplay.admitDispatchVerified old ingress
+    | return .error "current stream continuation authority refused"
+  if bindingExact : bindingFor admitted = challenge.binding then
+    if minimumExact : minimumCurrent challenge (tipFor old) = true then
+      return .ok ⟨target, old, challenge, ingress, admitted, namespaceExact,
+        noncesExact, humanWeb, signedChallenge, bindingExact, minimumExact⟩
+    else return .error "continuity tip regressed below stream watermark"
+  else return .error "continuity current projection or custody changed"
+
+/-- The callback is available only after the signed challenge and its binding were
+re-admitted. It compares the physical tip again immediately before delivery. -/
+def receiveLight {config : Config} (light : NativeHostLight.Light config) (bytes : ByteArray) :
+    ExceptT String IO ((ByteArray → IO Unit) → IO (Except String Unit)) := do
+  let probe ← signedProbe config bytes.toList
+  let admitted ← ApplicationDispatchLight.admit config light probe.ingress
+  let tip := ApplicationStreamContinuity.lightTip light
+  let binding := ApplicationStreamContinuity.lightBinding admitted
+  if binding != probe.challenge.binding then throw "continuity current projection or custody changed"
+  if !minimumCurrent probe.challenge tip then throw "continuity tip regressed below stream watermark"
+  return fun handoff => withLightFreshTip light (handoff (attestationCodec.encode (probe.challenge, tip)).toByteArray)
 
 theorem challenge_decode_encode (c : Challenge) :
     challengeCodec.decode (challengeCodec.encode c) = some c := challengeCodec.decode_encode c

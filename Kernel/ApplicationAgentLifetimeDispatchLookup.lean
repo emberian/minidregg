@@ -5,6 +5,7 @@ receipt; lookup never mints another app delivery permit or resends fd3 bytes.
 module
 
 public import Kernel.ApplicationAgentLifetimeDispatchProjection
+public import Kernel.ApplicationAgentLifetimeGrantReceiver
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -36,6 +37,28 @@ inductive Error where
   | nativeHistoryUnavailable
   deriving DecidableEq, Repr
 
+private def compareReceipt {config : Config} (ingress : ApplicationAgentLifetimeDispatchIngress.Ingress)
+    (transactionId : Minidregg.Theory.TypedAuthorization.Digest) (index : Nat)
+    (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt)
+    (grant : ApplicationAgentLifetimeGrant.Grant) (grantIndex reserveIndex : Nat)
+    (raw : ApplicationDispatchAgentReserveCore.RawEvidence config) : Except Error (Option NativeHostCodec.Receipt) := do
+  let .ok bound := ApplicationAgentLifetimeDispatchReserveCore.bindContext
+      raw ingress.reserveContext
+    | .error .transactionConflict
+  let event := ApplicationAgentLifetimeDispatchIngress.event ingress
+  let operation := ApplicationDispatchAdmissionIngress.nullifier ingress.dispatch
+  let reserveClaim := ApplicationAgentLifetimeDispatchReserveCore.claimNullifier bound
+  if ApplicationAgentLifetimeDispatchReserveContext.matchesGrant
+        ingress.reserveContext grant grantIndex &&
+      decide (grantIndex < reserveIndex) &&
+      decide (reserveIndex < index) &&
+      record.event == event && record.nullifiers.contains operation &&
+      record.nullifiers.contains reserveClaim &&
+      receipt.transactionId == transactionId &&
+      receipt.eventId == event.eventId && receipt.acceptedCount == index + 1 then
+    .ok (some receipt)
+  else .error .transactionConflict
+
 def lookupVerified {config : Config} {target : Durable}
     (verified : NativeHostReplay.Verified config target) (bytes : List UInt8) :
     Except Error (Option NativeHostCodec.Receipt) := do
@@ -59,22 +82,27 @@ def lookupVerified {config : Config} {target : Durable}
   let some reserve := verified.reserves.find?
       (fun prior => prior.index == ingress.reserveIndex)
     | .error .transactionConflict
-  let .ok bound := ApplicationAgentLifetimeDispatchReserveCore.bindContext
-      reserve.raw ingress.reserveContext
-    | .error .transactionConflict
-  let event := ApplicationAgentLifetimeDispatchIngress.event ingress
-  let operation := ApplicationDispatchAdmissionIngress.nullifier ingress.dispatch
-  let reserveClaim := ApplicationAgentLifetimeDispatchReserveCore.claimNullifier bound
-  if ApplicationAgentLifetimeDispatchReserveContext.matchesGrant
-        ingress.reserveContext grant.ingress.spec.grant grant.index &&
-      decide (grant.index < reserve.index) &&
-      decide (reserve.index < index) &&
-      record.event == event && record.nullifiers.contains operation &&
-      record.nullifiers.contains reserveClaim &&
-      receipt.transactionId == transactionId &&
-      receipt.eventId == event.eventId && receipt.acceptedCount == index + 1 then
-    .ok (some receipt)
-  else .error .transactionConflict
+  compareReceipt ingress transactionId index record receipt grant.ingress.spec.grant grant.index reserve.index reserve.raw
+
+/-- Receipt-only recovery reads the original transaction, grant, ticket and reserve under one head. -/
+def lookupLight {config : Config} (light : NativeHostLight.Light config) (bytes : List UInt8) :
+    ExceptT Error IO (Option NativeHostCodec.Receipt) := do
+  let some ingress := ApplicationAgentLifetimeDispatchIngress.codec.decode bytes | throw .malformed
+  let some selection := ApplicationDispatchAdmission.selectCommand ingress.dispatch | throw .malformed
+  let command := ApplicationDispatchCommand.command ingress.dispatch.dispatch selection ingress.dispatch.parent
+  let tx := DeclaredResourceController.transactionId ingress.dispatch.dispatch.domain ingress.dispatch.dispatch.semantics command
+  let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
+  let historyError : NativeHostReplay.IssueRefusal → Error
+    | .history _ => .nativeHistoryUnavailable
+    | .refused _ => .transactionConflict
+  match ← ExceptT.mk ((·.mapError (fun _ => Error.nativeHistoryUnavailable)) <$> reader.byTx tx) with
+  | .absent _ => return none
+  | .present found =>
+    let grant ← ExceptT.mk ((·.mapError historyError) <$>
+      (ApplicationAgentLifetimeGrantReceiver.selectGrant config light ingress.reserveContext.grantIssueIndex).run)
+    let raw ← ExceptT.mk ((·.mapError historyError) <$> (NativeHostReplay.selectReserve config reader ingress.reserveIndex).run)
+    compareReceipt ingress tx (found.height - 1) found.read.record (receiptOfRecord found.read)
+      grant.ingress.spec.grant ingress.reserveContext.grantIssueIndex ingress.reserveIndex raw
 
 def lookupOriginal (config : Config) (target : Durable) (bytes : List UInt8) :
     IO (Except Error (Option NativeHostCodec.Receipt)) := do

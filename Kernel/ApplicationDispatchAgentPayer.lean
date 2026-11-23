@@ -39,7 +39,7 @@ def stateAt (task : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :
   let page := payload.logical
   AgentGrain.readState task page
 
-structure Checked (config : Config) (opened : Opened config)
+structure Checked (config : Config) (ground : ServedBasis.Ground config.deployment)
     (context : Context) where
   private mk ::
   signed : DeclaredResourceController.SignedCommand
@@ -50,7 +50,7 @@ structure Checked (config : Config) (opened : Opened config)
   payerCapability : CapabilityId
   payerObserve : CapabilityId
   prepared : DeclaredResourceController.PreparedInvocation config.deployment config.profile
-    ⟨config.federation, logicalHeight config opened.durable⟩ opened.ground command
+    ⟨config.federation, config.genesisHeight + ground.height⟩ ground command
   shape : DeclaredResourceController.PhysicalShape prepared
   accepted : DeclaredResourceController.AcceptedInvocation prepared signed
   commandExact : command =
@@ -64,21 +64,21 @@ structure Checked (config : Config) (opened : Opened config)
   amountValid : 0 ≤ context.maximumCharge ∧
     context.maximumCharge ≤ context.reserveAmount
   physicalCurrent : ResourceBirthCodec.physicalRoot (.live cell) =
-    opened.durable.snapshot.model.roots ⟨context.purseTask⟩
+    ground.view.model.roots ⟨context.purseTask⟩
 
 /-- Native admission checks the payer's current signature, capability, law,
 and exact held purse page at the same image used for app dispatch. A caller's
 `payerCapability` and `payerObserve` are selectors only. -/
-def checkCurrent (config : Config) (opened : Opened config)
+def checkCurrent (config : Config) (ground : ServedBasis.Ground config.deployment)
     (context : Context) (payerCapability payerObserve : CapabilityId)
     (signed : DeclaredResourceController.SignedCommand) :
-    IO (Except String (Checked config opened context)) := do
+    IO (Except String (Checked config ground context)) := do
   if context.domain != config.deployment.domain ||
       context.semantics != config.profile.semantics then
     return .error "dispatch payer domain/profile mismatch"
   let some command := DeclaredResourceController.commandCodec.decode signed.commandBytes
     | return .error "dispatch payer command malformed"
-  let some cell := (match opened.directory.directory.slots context.purseTask with
+  let some cell := (match ground.directory.slots context.purseTask with
     | .present cell => some cell
     | _ => none)
     | return .error "dispatch payer purse unavailable"
@@ -95,8 +95,8 @@ def checkCurrent (config : Config) (opened : Opened config)
                 targets := [AgentGrain.Operation.target .input context.purseTask
                   payerCapability cell.payload.root state (some payerObserve)] } then
             match ← DeclaredResourceController.prepareAuthenticated config.deployment config.profile
-                ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-                opened.ground command signed.authorityEnvelope with
+                ⟨config.federation, config.genesisHeight + ground.height⟩ config.signature
+                ground command signed.authorityEnvelope with
             | .error _ => return .error "dispatch payer preparation refused"
             | .ok prepared =>
               if shape : DeclaredResourceController.PhysicalShape prepared then
@@ -105,7 +105,7 @@ def checkCurrent (config : Config) (opened : Opened config)
                 | .ok accepted =>
                   if stateExact : stateAt context.purseTask cell = some state then
                     if physicalCurrent : ResourceBirthCodec.physicalRoot (.live cell) =
-                        opened.durable.snapshot.model.roots ⟨context.purseTask⟩ then
+                        ground.view.model.roots ⟨context.purseTask⟩ then
                       return .ok ⟨signed, command, cell, state, stateExact,
                         payerCapability, payerObserve, prepared, shape, accepted,
                         commandExact, stateGeneration, stateReserved, stateAmount,
