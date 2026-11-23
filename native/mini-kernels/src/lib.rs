@@ -351,22 +351,53 @@ mod framing {
                         sha3::CShake256Core::new_with_function_name(name, custom),
                     );
                     oracle.update(&input);
-                    let mut expected = [0; 32];
+                    // Two complete squeeze blocks and the first byte of the third.
+                    let mut expected = [0; 2 * RATE_BYTES + 1];
                     oracle.finalize_xof().read(&mut expected);
                     let mut sponge = named_sponge(name, custom);
                     sponge.absorb(&input);
+
                     let mut wrong_domain = sponge.clone();
                     wrong_domain.suffix ^= 1;
-                    let mut output = [0; 32];
+                    let mut output = [0; 2 * RATE_BYTES + 1];
                     wrong_domain.squeeze(&mut output);
                     assert_ne!(output, expected);
-                    sponge.squeeze(&mut output);
+
+                    // Cancel the final block's 0x80 XOR at byte 135. At len % 136
+                    // == 135 this bit shares a byte with the domain suffix.
+                    let mut missing_pad_bit = sponge.clone();
+                    missing_pad_bit.state[RATE_BYTES / 8 - 1] ^= 1u64 << 63;
+                    missing_pad_bit.squeeze(&mut output);
+                    assert_ne!(output, expected);
+                    sponge.squeeze(&mut output[..RATE_BYTES]);
+                    sponge.squeeze(&mut output[RATE_BYTES..]);
                     assert_eq!(output, expected, "len={len}, N={name:?}, |S|={}", custom.len());
                     if name.is_empty() {
-                        assert_eq!(cshake256_32(custom, &input), expected);
+                        assert_eq!(cshake256_32(custom, &input), expected[..OUTPUT_BYTES]);
                     }
                 }
             }
+        }
+    }
+
+    /// NIST cSHAKE samples 3 and 4 request 512 output bits with S="Email Signature".
+    /// https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/cSHAKE_samples.pdf
+    #[test]
+    fn nist_cshake256_full_outputs() {
+        for (len, expected) in [
+            (4, concat!("d008828e2b80ac9d2218ffee1d070c48b8e4c87bff32c9699d5b6896eee0edd1",
+                        "64020e2be0560858d9c00c037e34a96937c561a74c412bb4c746469527281c8c")),
+            (200, concat!("07dc27b11e51fbac75bc7b3c1d983e8b4b85fb1defaf218912ac864302730917",
+                          "27f42b17ed1df63e8ec118f04b23633c1dfb1574c8fb55cb45da8e25afb092bb")),
+        ] {
+            let input: Vec<u8> = (0..len).collect();
+            let mut sponge = named_sponge(b"", b"Email Signature");
+            sponge.absorb(&input);
+            let mut output = [0; 64];
+            sponge.squeeze(&mut output);
+            let actual: String = output.iter().map(|byte| format!("{byte:02x}")).collect();
+            assert_eq!(actual, expected);
+            assert_eq!(cshake256_32(b"Email Signature", &input), output[..OUTPUT_BYTES]);
         }
     }
 
