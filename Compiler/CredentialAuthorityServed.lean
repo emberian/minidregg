@@ -247,6 +247,26 @@ def loadServedAuthority (deployment : CanonicalCellRegistry.Deployment) {store :
     else none
   else none
 
+/-- A checkpoint followed by its admitted suffix reconstructs exactly the authority
+cell that a genesis replay supplies to consent and revocation. This includes refusal
+to decode the authority head. The enumerated IDs are the same query in both runs. -/
+theorem checkpoint_tail_authority_eq (seed : Kernel.DurableReceiver.Seed)
+    (prefixRecords tail : List Kernel.DurableReceiver.IntentRecord)
+    (base : Kernel.DurableCheckpoint.State) (full : Kernel.DurableDataIntent.DataSnapshot rootBytes)
+    (prefixReplay : Kernel.DurableReceiver.replay rootBytes (seed.snapshot rootBytes) prefixRecords =
+      some (base.snapshot rootBytes prefixRecords))
+    (fullReplay : Kernel.DurableReceiver.replay rootBytes (seed.snapshot rootBytes)
+      (prefixRecords ++ tail) = some full)
+    (roots : DurableServed.Held.RootsBound rootBytes tail) (authorityId : Nat) (ids : List Nat) :
+    loadCell ((DurableServed.Held.ofState rootBytes base).replayed tail roots).bytesOf authorityId ids =
+      loadCell full.canonicalBytes authorityId ids := by
+  rw [Kernel.DurableReceiver.replay_append, prefixReplay, Option.bind_some] at fullReplay
+  rw [← (DurableServed.Held.replayed_agrees tail _ _ _ (DurableServed.Held.ofState_agrees
+    rootBytes base prefixRecords) fullReplay roots).bytes]
+
+/-- info: 'Minidregg.Compiler.CredentialAuthorityServed.checkpoint_tail_authority_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms checkpoint_tail_authority_eq
+
 /-- The authority snapshot for a request: the clock is the served height and
 the spent markers are the footprint's answers at that height (a marker whose
 nullifier the request did not declare reads as its footprint says: a family

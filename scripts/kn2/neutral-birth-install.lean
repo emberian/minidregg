@@ -13,10 +13,10 @@ opening (`submitInstallLight`: basis, admission on `Ground.ofBasis`, the served 
  refusal  printed by name when a plant (plant-neutral-birth-install.sh) drops the newborn
           slot from the install step: `neutralBirthUnjudged <successor cell>`.
 
-Usage: lake env lean --run scripts/kn2/neutral-birth-install.lean VERIFIER SIGN-PROBE STORE-BINARY -/
+Usage: lake env lean --run scripts/kn2/neutral-birth-install.lean VERIFIER SIGN-PROBE STORE-BINARY [session-reads] -/
 import Kernel.NativeHostGenesis
 import Kernel.NativeHost
-import Kernel.NativeHostLight
+import Kernel.NativeHostSession
 
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -95,7 +95,83 @@ def describe : NativeHostCodec.Outcome → String
   | .uncertain detail => s!"uncertain {String.fromUTF8! ⟨detail.toArray⟩}"
   | .absent => "absent"
 
-def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
+private def install (host : NativeHost.Config) (signer : System.FilePath) (nonce : Nat) : IO Unit := do
+  let opened ← match ← NativeHost.openExisting host with
+    | .error reason => throw (IO.userError s!"native host open: {reason}")
+    | .ok value => pure value
+  let factory : PolicyId := ⟨host.deployment.factoryId⟩
+  let some head := opened.authority.snapshot.currentHead factory
+    | throw (IO.userError "factory has no policy head")
+  let some old := CanonicalCellRegistry.loadPolicySource host.deployment.domain
+      opened.directory.directory head.address
+    | throw (IO.userError "factory policy source unavailable")
+  let source := { old.record with
+    version := head.version + 1
+    previous := some head.address
+    predicate := .any [.all []] }
+  let declaration : PolicyInstallController.Declaration :=
+    ⟨opened.authority.snapshot.cell.root, some head, nonce, source⟩
+  let bytes := PolicyInstallController.encodeDeclaration declaration
+  let successor := CanonicalCellRegistry.policySourceCreate host.deployment.domain source
+  IO.println s!"successor policy-source cell {successor.cellId}"
+  let plan ← match NativeHost.prepareLoaded host opened (.install ⟨7⟩ ⟨43⟩ bytes) with
+    | .error reason => throw (IO.userError s!"install plan: {reason}")
+    | .ok value => pure value
+  let signatures ← plan.slots.mapM fun slot => do
+    let (_, signature) ← sign signer 7 slot.header
+    pure signature
+  let call ← match NativeHost.assemble plan signatures with
+    | .error reason => throw (IO.userError s!"assemble: {reason}")
+    | .ok value => pure value
+  let light ← match ← NativeHostLight.start host with
+    | .ok light => pure light
+    | .error detail => throw (IO.userError s!"light open: {detail}")
+  let outcome ← NativeHost.submitLoaded host opened light call
+  let verdict := describe outcome
+  IO.println s!"install submission: {verdict}"
+  require s!"install commits (got {verdict})" (verdict == "committed")
+  let reopened ← match ← NativeHost.openExisting host with
+    | .error reason => throw (IO.userError s!"reopen: {reason}")
+    | .ok value => pure value
+  require "installed head is the successor"
+    ((reopened.authority.snapshot.currentHead factory).map (·.version) == some source.version)
+  require "successor source cell is live"
+    ((CanonicalCellRegistry.loadPolicySource host.deployment.domain reopened.directory.directory
+      (PolicyRecordCodec.digest source)).isSome)
+
+/-- A cold session starts with no retained materialization. Trap physical prefix reads
+in SQLite while opening it and resolving the current factory's authority. -/
+private def measure (host : NativeHost.Config) (older : Nat) : IO Unit := do
+  let full ← IO.ofExcept (← NativeHost.openExisting host)
+  let ⟨_, reader⟩ ← IO.ofExcept (← DurableHistoryStore.readerOf host.transport ResourceBirthCodec.rootBytes full.durable)
+  let walk ← IO.ofExcept ((← NativeHostReplay.verifyLoaded host reader full.durable).mapError (·.detail))
+  let db := host.storage.root / "forward-link.sqlite3"
+  let trap ← IO.Process.output { cmd := "python3", args := #["-c",
+    "import sqlite3,sys
+db=sqlite3.connect(sys.argv[1])
+h=int(sys.argv[2])+1
+assert db.execute('select max(height) from durable_checkpoint').fetchone()==(h,)
+db.execute('alter table durable_log rename to bench_log')
+db.execute(f'create view durable_log as select height,tag, case when height < {h} then abs(-9223372036854775808) else record end as record from bench_log')
+db.commit()
+try: db.execute('select record from durable_log where height=1').fetchone()
+except sqlite3.OperationalError as err: assert 'integer overflow' in str(err)
+else: raise AssertionError('prefix trap did not fire')",
+    db.toString, toString older] }
+  unless trap.exitCode == 0 do throw (IO.userError trap.stderr)
+  let session ← IO.ofExcept (← NativeHostSession.start host)
+  let basis ← IO.ofExcept (← session.light.basis ⟨[], []⟩)
+  let ground := ServedBasis.Ground.ofBasis basis
+  let authority := host.deployment.authorityCellId
+  require "cold light session does not materialize history" (session.full.isNone && session.walked.isNone)
+  require "height and root agree with the full admission walk"
+    (session.light.opening.head.height == older + 3 && session.light.opening.head.root == walk.opened.durable.worldRoot)
+  require "authority bytes and current policy agree with the full admission walk"
+    (session.light.opening.served.canonicalBytes ⟨authority⟩ == walk.opened.durable.snapshot.canonicalBytes ⟨authority⟩ &&
+     ground.authority.currentHead ⟨host.deployment.factoryId⟩ == walk.opened.authority.snapshot.currentHead ⟨host.deployment.factoryId⟩)
+  IO.println s!"PASS native session authority: prefix={older} tail=2 pre-checkpoint record reads=0"
+
+def run (verifier signer storeBinary : System.FilePath) (benchmark : Option Nat := none) : IO Unit := do
   let (creatorPublic, _) ← sign signer 7 []
   let cfg := genesis creatorPublic
   let built ← match NativeHostGenesis.build profile cfg with
@@ -104,7 +180,7 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
   IO.FS.withTempDir fun directory => do
     IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
     let storage : DurableReceiverIO.NativeConfig :=
-      { binary := storeBinary, root := directory / "store", key := directory / "key", checkpointEvery := 16 }
+      { binary := storeBinary, root := directory / "store", key := directory / "key", checkpointEvery := (benchmark.map (· + 1)).getD 16 }
     let host : NativeHost.Config := NativeHost.Config.ofInputs
       { hostTemplate.toInputs with
         expectedSeed := NativeHost.seedIdentity built.seed
@@ -113,53 +189,21 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
     match ← DurableReceiverIO.bootstrap host.transport ResourceBirthCodec.rootBytes built.seed with
     | .error reason => throw (IO.userError s!"native bootstrap: {reason}")
     | .ok () => pure ()
-    let opened ← match ← NativeHost.openExisting host with
-      | .error reason => throw (IO.userError s!"native host open: {reason}")
-      | .ok value => pure value
-    let factory : PolicyId := ⟨host.deployment.factoryId⟩
-    let some head := opened.authority.snapshot.currentHead factory
-      | throw (IO.userError "factory has no policy head")
-    let some old := CanonicalCellRegistry.loadPolicySource host.deployment.domain
-        opened.directory.directory head.address
-      | throw (IO.userError "factory policy source unavailable")
-    let source := { old.record with
-      version := head.version + 1
-      previous := some head.address
-      predicate := .any [.all []] }
-    let declaration : PolicyInstallController.Declaration :=
-      ⟨opened.authority.snapshot.cell.root, some head, 1, source⟩
-    let bytes := PolicyInstallController.encodeDeclaration declaration
-    let successor := CanonicalCellRegistry.policySourceCreate host.deployment.domain source
-    IO.println s!"successor policy-source cell {successor.cellId}"
-    let plan ← match NativeHost.prepareLoaded host opened (.install ⟨7⟩ ⟨43⟩ bytes) with
-      | .error reason => throw (IO.userError s!"install plan: {reason}")
-      | .ok value => pure value
-    let signatures ← plan.slots.mapM fun slot => do
-      let (_, signature) ← sign signer 7 slot.header
-      pure signature
-    let call ← match NativeHost.assemble plan signatures with
-      | .error reason => throw (IO.userError s!"assemble: {reason}")
-      | .ok value => pure value
-    let light ← match ← NativeHostLight.start host with
-      | .ok light => pure light
-      | .error detail => throw (IO.userError s!"light open: {detail}")
-    let outcome ← NativeHost.submitLoaded host opened light call
-    let verdict := describe outcome
-    IO.println s!"install submission: {verdict}"
-    require s!"install commits (got {verdict})" (verdict == "committed")
-    let reopened ← match ← NativeHost.openExisting host with
-      | .error reason => throw (IO.userError s!"reopen: {reason}")
-      | .ok value => pure value
-    require "installed head is the successor"
-      ((reopened.authority.snapshot.currentHead factory).map (·.version) == some source.version)
-    require "successor source cell is live"
-      ((CanonicalCellRegistry.loadPolicySource host.deployment.domain reopened.directory.directory
-        (PolicyRecordCodec.digest source)).isSome)
-    IO.println "PASS neutral birth install (control)"
+    match benchmark with
+    | none =>
+      install host signer 1
+      IO.println "PASS neutral birth install (control)"
+    | some older =>
+      for i in List.range (older + 3) do install host signer (i + 1)
+      DurableServed.runAfterReply
+      measure host older
+
 
 end NeutralBirthInstallProbe
 
 def main (args : List String) : IO Unit := do
   match args with
+  | [verifier, signer, store, "session-reads"] => do
+      for older in [2, 20] do NeutralBirthInstallProbe.run verifier signer store (some older)
   | [verifier, signer, store] => NeutralBirthInstallProbe.run verifier signer store
-  | _ => throw (IO.userError "usage: neutral-birth-install VERIFIER SIGN-PROBE STORE-BINARY")
+  | _ => throw (IO.userError "usage: neutral-birth-install VERIFIER SIGN-PROBE STORE-BINARY [session-reads]")
