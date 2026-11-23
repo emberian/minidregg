@@ -52,6 +52,25 @@ Quest: the Host turn's costs, widest first; ember's bar is about 1 ms of warm wo
     StreamContinuity (their `simp` proofs of the light theorems), Compiler/DurableServed (`withFreshTip`), then Host/Main and
     TokenCensus/Table. Land as one epoch set with fold v2's re-record notice.
 
+## KN2 session work on 2026-11-23
+
+The dispatch, paid-agent, lifetime-grant, and continuity handlers now use indexed history and the
+refreshed light session. Five of the original 19 calls to `sessionWalked` remain in `Host/Main.lean`.
+The signed-install `session-reads` fixture compared a cold session with a full admission walk at
+prefix sizes 2 and 20. Both used a two-record tail and read zero record payloads below the checkpoint.
+
+- Fn namespace registration, both poll submissions, and frontier planning need the authenticated
+  registration, ordered cursor, last legacy evidence, ambiguous keys, and global fault. A legacy
+  step after registration can poison the key while leaving its registration and ordered cursor
+  identical. Existing checkpoint bodies omit this audit. A migration can seal a verified audit at
+  a named head and retain it across restart. The replay fold now checks the checkpoint/tail split.
+- Provider reserve continuity still verifies the reserve, optional fence, prior receipt, and
+  admissibility of the intervening records. An indexed replacement must cover certify, tick,
+  seat, and activity records as well as ordinary invokes. The current purse's last-write row
+  answers a narrower question.
+- `ClientConsentCore.verifyInitial` reuses the chained open on fallback. Its chronology-dependent
+  consent requests still require the full representation.
+
 ## Next steps, in order
 1. Check and land wip/he-enrol (above) + send the single re-record notice (fold v2 901d910c2 + index/trie-v2).
 2. Measure: apps-hermes (a990f9e07566fd55c) reruns WBO as wbL on the first builder candidate that contains 2edf8a1ce AND 8834e4862

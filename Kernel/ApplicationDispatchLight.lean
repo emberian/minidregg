@@ -60,6 +60,17 @@ def selectSignedIssue (config : Config) (light : NativeHostLight.Light config)
     | throw "original issue unavailable"
   return ⟨found.height - 1, ← selectIssue config light (found.height - 1)⟩
 
+/-- An admitted reserve writes its purse. Require a positive authenticated last-write
+answer at exactly that height before using the reserve for a paid dispatch. -/
+def reserveLastWrite {store : DurableHistory.StoreIdentity}
+    (reader : DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store)
+    (index : Nat) (cell : DurableDataIntent.CellId) (detail : String) :
+    ExceptT String IO {answer : DurableHistoryReader.LastWrite reader.head cell //
+      answer.value = some (index + 1)} := do
+  let answer ← ExceptT.mk ((·.mapError (·.message)) <$> reader.lastWrite cell)
+  if atReserve : answer.value = some (index + 1) then return ⟨answer, atReserve⟩
+  else throw detail
+
 /-- The app command and payer command are checked on the same state, with the authenticated
 answers for both invocations. The payer's signed command is checked again by each family's admission. -/
 def paidBasis (config : Config) (light : NativeHostLight.Light config)

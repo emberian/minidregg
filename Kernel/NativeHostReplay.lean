@@ -3605,26 +3605,6 @@ private def SelectedStep.prepend {config : Config} {origin middle tip : Opened c
     .cons step selected.priorAdmitted, selected.selectedAdmitted,
     selected.laterAdmitted⟩
 
-private structure Walked (config : Config) (start : Opened config)
-    (records : List DurableReceiver.IntentRecord) where
-  final : Opened config
-  receipts : List NativeHostCodec.Receipt
-  trace : AdmittedReplay config start records final receipts
-  selected : Option (SelectedStep config start final records receipts)
-  issues : List (PriorIssue config)
-  reserves : List (PriorDispatchReserve config)
-  begins : List (PriorBegin config)
-  beginsV2 : List (PriorBeginV2 config)
-  claimsV2 : List (PriorClaimV2 config)
-  frontier : FnConsumerFrontierReplay.Audit
-  releases : List PriorSelectedRelease
-  beginsV3 : List (PriorBeginV3 config)
-  claimsV3 : List (PriorClaimV3 config)
-  createdV3 : List (PriorCreatedV3 config)
-  runningV3 : List (PriorRunningV3 config)
-  grants : List (PriorLifetimeGrant config)
-  retry : RetryHistory config
-
 /-- Called only after the original record was natively admitted, matched in
 full, advanced, and validated by this replay walk. A legacy tag9 is merely a
 present-time linear anchor; old forks poison that scope rather than invalidating
@@ -3667,6 +3647,48 @@ private def frontierAfter (config : Config)
       (FnEmptyPollProgressV2.transition ingress.spec receipt)
   else
     pure (frontierAfterLegacy config frontier record receipt)
+
+/-- Replay the consumer cursor, registration and legacy ambiguity decisions for the
+given record/receipt pairs from an already authenticated audit. The native admission
+walk carries the equation relating its returned audit to this exact fold. -/
+def foldFrontier (config : Config) (base : FnConsumerFrontierReplay.Audit)
+    (entries : List (DurableReceiver.IntentRecord × NativeHostCodec.Receipt)) :
+    Except String FnConsumerFrontierReplay.Audit :=
+  entries.foldlM (fun audit (record, receipt) => frontierAfter config audit record receipt) base
+
+/-- Continuing from a checkpoint's actual audit preserves the entire consumer frontier,
+including every refusal and the effect of legacy records after a registration. -/
+theorem checkpoint_tail_frontier_eq (config : Config) (initial checkpoint : FnConsumerFrontierReplay.Audit)
+    (prior tail : List (DurableReceiver.IntentRecord × NativeHostCodec.Receipt))
+    (atCheckpoint : foldFrontier config initial prior = .ok checkpoint) :
+    foldFrontier config initial (prior ++ tail) = foldFrontier config checkpoint tail := by
+  unfold foldFrontier at *
+  rw [List.foldlM_append, atCheckpoint]
+  rfl
+
+/-- info: 'Minidregg.Kernel.NativeHostReplay.checkpoint_tail_frontier_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms checkpoint_tail_frontier_eq
+
+private structure Walked (config : Config) (start : Opened config)
+    (records : List DurableReceiver.IntentRecord) (baseFrontier : FnConsumerFrontierReplay.Audit) where
+  final : Opened config
+  receipts : List NativeHostCodec.Receipt
+  trace : AdmittedReplay config start records final receipts
+  selected : Option (SelectedStep config start final records receipts)
+  issues : List (PriorIssue config)
+  reserves : List (PriorDispatchReserve config)
+  begins : List (PriorBegin config)
+  beginsV2 : List (PriorBeginV2 config)
+  claimsV2 : List (PriorClaimV2 config)
+  frontier : FnConsumerFrontierReplay.Audit
+  releases : List PriorSelectedRelease
+  beginsV3 : List (PriorBeginV3 config)
+  claimsV3 : List (PriorClaimV3 config)
+  createdV3 : List (PriorCreatedV3 config)
+  runningV3 : List (PriorRunningV3 config)
+  grants : List (PriorLifetimeGrant config)
+  retry : RetryHistory config
+  frontierExact : foldFrontier config baseFrontier (records.zip receipts) = .ok frontier
 
 private def selectedReleaseAfter (config : Config) (after : Opened config)
     (releases : List PriorSelectedRelease)
@@ -3720,9 +3742,9 @@ private def walk (config : Config) (opened : Opened config)
     (retry : RetryHistory config)
     (selectIndex : Option Nat) (timing : AuditTiming.Handle) :
     (records : List DurableReceiver.IntentRecord) →
-    IO (Except Failure (Walked config opened records))
+    IO (Except Failure (Walked config opened records frontier))
   | [] => pure (.ok ⟨opened, [], .nil opened, none, issues, reserves, begins, beginsV2, claimsV2,
-      frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants, retry⟩)
+      frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants, retry, rfl⟩)
   | record :: rest => do
       let index := opened.durable.height
       AuditTiming.beginRecord timing index (fun _ => admissionPhase record)
@@ -3770,8 +3792,10 @@ private def walk (config : Config) (opened : Opened config)
                 derived matched
               let nextGrants := grantsAfter config opened grants record receipt derived matched
               let nextRetry := retryAfter config opened retry record derived matched
-              let .ok nextFrontier := frontierAfter config frontier record receipt
-                | return .error ⟨index, "fn consumer frontier transition refused"⟩
+              let ⟨nextFrontier, h⟩ : {f // frontierAfter config frontier record receipt = .ok f} ←
+                match update : frontierAfter config frontier record receipt with
+                | .error _ => return .error ⟨index, "fn consumer frontier transition refused"⟩
+                | .ok f => pure ⟨f, update⟩
               let nextReleases := selectedReleaseAfter config after releases record receipt
               match ← walk config after reader nextIssues nextReserves nextBegins nextBeginsV2 nextClaimsV2
                   nextBeginsV3 nextClaimsV3 nextCreatedV3 nextRunningV3 nextGrants
@@ -3792,7 +3816,10 @@ private def walk (config : Config) (opened : Opened config)
                   .cons step tail.trace, selectedAt, tail.issues, tail.reserves, tail.begins,
                   tail.beginsV2, tail.claimsV2, tail.frontier, tail.releases,
                   tail.beginsV3, tail.claimsV3, tail.createdV3, tail.runningV3,
-                  tail.grants, tail.retry⟩
+                  tail.grants, tail.retry, by
+                    change (frontierAfter config frontier record receipt >>= _) = .ok tail.frontier
+                    rw [h]
+                    exact tail.frontierExact⟩
         else
           return .error ⟨index, "retained intent differs from native-admitted intent"⟩
 

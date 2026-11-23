@@ -358,8 +358,8 @@ def preparePaidLight (config : Config) (light : NativeHostLight.Light config)
   let (app, issue) ← ApplicationDispatchAgentAuthoring.prepareLight config light request.fixed.base
   let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
   let reserve ← ExceptT.mk ((·.mapError (·.message)) <$> (NativeHostReplay.selectReserve config reader request.reserveIndex).run)
-  let last ← ExceptT.mk ((·.mapError (·.message)) <$> reader.lastWrite ⟨request.context.purseTask⟩)
-  if last.value.getD 0 > request.reserveIndex + 1 then throw "agent reserve changed after original admission"
+  discard <| ApplicationDispatchLight.reserveLastWrite reader request.reserveIndex ⟨request.context.purseTask⟩
+    "agent reserve changed after original admission"
   let basis ← ExceptT.mk (light.basis ⟨[], []⟩)
   let command ← paidCommand config (.ofBasis basis) request app issue reserve
   return compactPlan request app (← planCommand config light command)

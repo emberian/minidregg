@@ -129,6 +129,20 @@ def Audit.adoptLegacy (audit : Audit) (record : DurableReceiver.IntentRecord)
               audit.legacyRecords.filter (fun entry => entry.1 != transition.key) }
     | .error _ => { audit with ambiguous := transition.key :: audit.ambiguous }
 
+/-- A historical legacy step by the registered gateway leaves the ordered cursor and
+the registration bytes identical, yet subsequent resolution must refuse that key. -/
+theorem registered_legacy_poisons_resolution (audit : Audit) (record : DurableReceiver.IntentRecord)
+    (transition : FnConsumerFrontierCore.Transition)
+    (clean : transition.key ∉ audit.ambiguous)
+    (registered : audit.registrations.any (fun prior => prior.ingress.spec.key == transition.key) = true) :
+    let next := audit.adoptLegacy record transition
+    next.ordered = audit.ordered ∧ next.registrations = audit.registrations ∧
+      next.cursor transition.key = .error "fn consumer frontier is ambiguous" := by
+  simp [Audit.adoptLegacy, clean, registered, Audit.cursor]
+
+/-- info: 'Minidregg.Kernel.FnConsumerFrontierReplay.registered_legacy_poisons_resolution' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms registered_legacy_poisons_resolution
+
 /-- New special transitions must extend the same verifier-minted chain. -/
 def Audit.advanceV2 (audit : Audit)
     (registrationReceipt : Receipt)

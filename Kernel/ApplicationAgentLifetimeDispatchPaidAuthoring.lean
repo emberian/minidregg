@@ -518,8 +518,8 @@ def preparePaidLight (config : Config) (light : NativeHostLight.Light config) (r
   let (grant, app) ← lightSource config light request.fixed
   let reader := light.opening.reader config.transport ResourceBirthCodec.rootBytes
   let raw ← ExceptT.mk ((·.mapError (·.message)) <$> (NativeHostReplay.selectReserve config reader request.reserveIndex).run)
-  let last ← ExceptT.mk ((·.mapError (·.message)) <$> reader.lastWrite ⟨request.context.base.purseTask⟩)
-  if last.value.getD 0 > request.reserveIndex + 1 then throw "lifetime reserve changed after original admission"
+  discard <| ApplicationDispatchLight.reserveLastWrite reader request.reserveIndex ⟨request.context.base.purseTask⟩
+    "lifetime reserve changed after original admission"
   let .invoke commandBytes := app.invocation.finalizedDraft | throw "lifetime app signing plan is not an invocation"
   let some appCommand := DeclaredResourceController.commandCodec.decode commandBytes | throw "noncanonical app command"
   let cells ← ExceptT.mk (light.basis (DeclaredResourceController.invocationKeys config.deployment.domain config.profile.semantics appCommand))

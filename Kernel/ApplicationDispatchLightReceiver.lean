@@ -104,8 +104,8 @@ private def proposedAgent {config : Config} (light : NativeHostLight.Light confi
   if index ≥ ingress.reserveIndex then throw "issued ticket must precede reserve"
   let raw ← ExceptT.mk ((·.mapError (·.message)) <$> (NativeHostReplay.selectReserve config reader ingress.reserveIndex).run)
   let bound ← raw.bindContext ingress.reserveContext
-  let last ← ExceptT.mk ((·.mapError (·.message)) <$> reader.lastWrite ⟨ingress.reserveContext.purseTask⟩)
-  if last.value.getD 0 > ingress.reserveIndex + 1 then throw "purse changed after original reserve"
+  discard <| ApplicationDispatchLight.reserveLastWrite reader ingress.reserveIndex ⟨ingress.reserveContext.purseTask⟩
+    "purse changed after original reserve"
   let basis ← ApplicationDispatchLight.paidBasis config light ingress.dispatch ingress.payerSigned
   let checked ← ExceptT.mk (ApplicationDispatchAgentCore.checkCurrent config (.ofBasis basis) ingress issue.evidence bound)
   let some projection := ApplicationDispatchAgentProjection.ofChecked checked ingress.reserveIndex raw.receipt
@@ -138,8 +138,8 @@ private def proposedLifetime {config : Config} (light : NativeHostLight.Light co
   let root := (ResourceBirthController.birthWrite selected.accepted.sourceReady.birth.create).exactPost
   let raw ← ExceptT.mk ((·.mapError (·.message)) <$> (NativeHostReplay.selectReserve config reader ingress.reserveIndex).run)
   let bound ← ApplicationAgentLifetimeDispatchReserveCore.bindContext raw ingress.reserveContext
-  let last ← ExceptT.mk ((·.mapError (·.message)) <$> reader.lastWrite ⟨ingress.reserveContext.base.purseTask⟩)
-  if last.value.getD 0 > ingress.reserveIndex + 1 then throw "purse changed after original reserve"
+  discard <| ApplicationDispatchLight.reserveLastWrite reader ingress.reserveIndex ⟨ingress.reserveContext.base.purseTask⟩
+    "purse changed after original reserve"
   let basis ← ApplicationDispatchLight.paidBasis config light ingress.dispatch ingress.payerSigned
   let checked ← ExceptT.mk (ApplicationAgentLifetimeDispatchCore.checkCurrent config (.ofBasis basis) ingress
     issued.spec issued.descriptor grant grant.source.issueIndex (receiptOfRecord selected.ticket.candidate.read)
