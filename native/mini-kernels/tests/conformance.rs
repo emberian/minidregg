@@ -199,3 +199,25 @@ fn midstate_split_is_the_one_shot_hash_at_rate_boundaries() {
         }
     }
 }
+
+/// qsag 281126b627e557a40b75fa0718ac1e064c9bb9c7,
+/// aeneas/qsag-verified/src/keccak.rs (entire translation input, including round helpers).
+#[test]
+fn qsag_extraction_source_is_byte_exact() {
+    use sha2::{Digest, Sha256};
+    let source = include_bytes!("../src/qsag/keccak.rs");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(source)),
+        "545626aedabb45dc2d1f1c3ed278bfa1f4f320877d8234f8b28ee5bb83a16709"
+    );
+}
+
+/// First 256 output bits of NIST SP 800-185 cSHAKE sample 4 (sample 3 is in lean-vectors.json).
+#[test]
+fn cshake256_nist_sample_4() {
+    let input: Vec<u8> = (0..200).collect();
+    assert_eq!(
+        cshake256_32(b"Email Signature", &input).as_slice(),
+        hex("07dc27b11e51fbac75bc7b3c1d983e8b4b85fb1defaf218912ac864302730917")
+    );
+}

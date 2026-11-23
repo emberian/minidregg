@@ -6,12 +6,10 @@
 equal to it (`cshake256Fast_eq`). This module adds the third layer: `cshake256Kernel`, whose
 Lean body IS the fast path on byte arrays and whose compiled code is the Rust kernel
 `mini_cshake256_32` (`native/mini-kernels`, `@[extern]`). Lean states what the kernel computes;
-the Rust is the implementation; the equality of the two is NOT a theorem here. It is pinned by
-(1) the Lean-authored vectors `native/mini-kernels/testdata/lean-vectors.json` run by
-`cargo test -p mini-kernels --test conformance`, and (2) the tree's own conformance theorems
-(`Theory.Sp800185Cshake256Conformance`, `Compiler.Sp800185Kmac256`): `native_decide` evaluates
-the compiled path, which after `cshake256Bytes_eq_native` is the kernel, so every build of
-those modules is a KAT of the kernel against NIST sample 3 and SHAKE256("").
+the compiled permutation is the Rust input to QSAG's Charon/Aeneas refinement proof
+(`QsagVerified/Proofs/RealSpecKeccakWeld.lean`, `keccak_f1600_array_refines_qsag`).
+The Rust conformance suite pins the vendored source digest and checks the C ABI against
+Lean-authored vectors. The Lean conformance module separately checks the fast path.
 
 What IS proved: `cshake256Native_eq`, the Lean body of the seam equals the specification for
 every input, so the csimp attachment below is sound with respect to the Lean body, and the only

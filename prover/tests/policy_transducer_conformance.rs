@@ -9,7 +9,7 @@ use minidregg_prover::policy_transducer::{
     compiled_mini_json_parser, content_commit, content_commit_unoptimized_ref,
     default_secret_rules, exec_attr_replay, is_api_key_body_byte, ll1_deterministic, mini_json_cfg,
     no_continuation, occurs_in_bytes, prove_mini_rewrite_and_extract, redact_bytes,
-    safe_replacement, verify_rewrite_and_extract, CompiledByteLl1Parser, CompiledRedactor,
+    safe_replacement, verify_rewrite_and_extract_conformance_only, CompiledByteLl1Parser, CompiledRedactor,
     ExactNat, MiniValue, RedactRule, RewriteCertStmt, RewriteCertWitness, TransducerError,
 };
 use serde::Deserialize;
@@ -247,7 +247,7 @@ fn lean_conformance_json_matches_rust_bit_for_bit() {
         assert_eq!(stmt.raw_root, expected_raw_root);
         assert_eq!(stmt.clean_root, expected_clean_root);
         assert_eq!(stmt.claimed_ast, expected_ast);
-        verify_rewrite_and_extract(&mini_cfg, &rules, &stmt, &wit)
+        verify_rewrite_and_extract_conformance_only(&mini_cfg, &rules, &stmt, &wit)
             .expect("honest RewriteCert verify");
     }
 
@@ -287,7 +287,7 @@ fn adversarial_ambiguous_grammar_splice_and_forgery_teeth() {
     assert_eq!(ast_destructive, parse_mini_value_json(&sp.destructive_ast));
     assert_ne!(ast_benign, ast_destructive, "distinct Mini tool ASTs on identical bytes");
 
-    // CompiledByteLl1Parser and verify_rewrite_and_extract refuse `ambig_cfg` at the gate:
+    // CompiledByteLl1Parser and verify_rewrite_and_extract_conformance_only refuse `ambig_cfg` at the gate:
     assert_eq!(
         CompiledByteLl1Parser::compile(ambig_mini_json_cfg(), 6, |nt| nt as usize).err(),
         Some(TransducerError::GrammarNotLl1)
@@ -305,7 +305,7 @@ fn adversarial_ambiguous_grammar_splice_and_forgery_teeth() {
         rule_indices: sp.benign_rule_indices.clone(),
     };
     assert_eq!(
-        verify_rewrite_and_extract(&ambig_cfg, &default_secret_rules(), &ambig_stmt, &ambig_wit),
+        verify_rewrite_and_extract_conformance_only(&ambig_cfg, &default_secret_rules(), &ambig_stmt, &ambig_wit),
         Err(TransducerError::GrammarNotLl1)
     );
 
@@ -352,7 +352,7 @@ fn adversarial_ambiguous_grammar_splice_and_forgery_teeth() {
         ..honest_wit.clone()
     };
     assert_eq!(
-        verify_rewrite_and_extract(&mini_cfg, &rules, &unredacted_stmt, &unredacted_wit),
+        verify_rewrite_and_extract_conformance_only(&mini_cfg, &rules, &unredacted_stmt, &unredacted_wit),
         Err(TransducerError::RedactionMismatch)
     );
 
@@ -367,7 +367,7 @@ fn adversarial_ambiguous_grammar_splice_and_forgery_teeth() {
         ..honest_stmt.clone()
     };
     assert_eq!(
-        verify_rewrite_and_extract(&mini_cfg, &rules, &forged_stmt, &honest_wit),
+        verify_rewrite_and_extract_conformance_only(&mini_cfg, &rules, &forged_stmt, &honest_wit),
         Err(TransducerError::AstMismatch)
     );
 
@@ -375,7 +375,7 @@ fn adversarial_ambiguous_grammar_splice_and_forgery_teeth() {
     let mut tampered_wit = honest_wit.clone();
     tampered_wit.w_raw[10] ^= 0x01;
     assert_eq!(
-        verify_rewrite_and_extract(&mini_cfg, &rules, &honest_stmt, &tampered_wit),
+        verify_rewrite_and_extract_conformance_only(&mini_cfg, &rules, &honest_stmt, &tampered_wit),
         Err(TransducerError::RawRootMismatch)
     );
 
@@ -392,7 +392,7 @@ fn adversarial_ambiguous_grammar_splice_and_forgery_teeth() {
         ..honest_wit
     };
     assert_eq!(
-        verify_rewrite_and_extract(&mini_cfg, &rules, &honest_stmt, &alias_wit),
+        verify_rewrite_and_extract_conformance_only(&mini_cfg, &rules, &honest_stmt, &alias_wit),
         Err(TransducerError::RawLengthMismatch {
             expected: honest_stmt.raw_length,
             actual: honest_stmt.raw_length + 1,
@@ -419,7 +419,7 @@ fn adversarial_ambiguous_grammar_splice_and_forgery_teeth() {
             amount: expected_2p64,
         }
     );
-    verify_rewrite_and_extract(&mini_cfg, &rules, &big_stmt, &big_wit).unwrap();
+    verify_rewrite_and_extract_conformance_only(&mini_cfg, &rules, &big_stmt, &big_wit).unwrap();
     let wrapped_zero_stmt = RewriteCertStmt {
         claimed_ast: MiniValue::ToolCall {
             tool: b"pay".to_vec(),
@@ -429,7 +429,7 @@ fn adversarial_ambiguous_grammar_splice_and_forgery_teeth() {
         ..big_stmt
     };
     assert_eq!(
-        verify_rewrite_and_extract(&mini_cfg, &rules, &wrapped_zero_stmt, &big_wit),
+        verify_rewrite_and_extract_conformance_only(&mini_cfg, &rules, &wrapped_zero_stmt, &big_wit),
         Err(TransducerError::AstMismatch)
     );
 
@@ -689,7 +689,7 @@ fn release_benchmark_multi_kb_agent_cot_and_json_tool_calls() {
         let t5 = Instant::now();
         for _ in 0..iters_e2e {
             let (stmt, wit) = prove_mini_rewrite_and_extract(redactor, parser, &raw).unwrap();
-            verify_rewrite_and_extract(&mini_cfg, &rules, &stmt, &wit).unwrap();
+            verify_rewrite_and_extract_conformance_only(&mini_cfg, &rules, &stmt, &wit).unwrap();
             sink ^= stmt.clean_length;
         }
         let dt_e2e = t5.elapsed().as_secs_f64();

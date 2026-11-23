@@ -2197,6 +2197,35 @@ mod anchor_tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// Fail inside SQLite if any query fetches a pre-checkpoint record, including
+    /// the anchor checks. A genesis read exercises the same trap as a control.
+    #[test]
+    fn light_open_reads_zero_prefix_records_at_tenfold_height() {
+        for prefix in [10u64, 100] {
+            let checkpoint = prefix + 1;
+            let head = checkpoint + 2;
+            let root = kn2_root(&format!("fixed-tail-{prefix}"));
+            let store = SqliteByteStore::open(&root).unwrap();
+            store.durable_init(b"seed").unwrap();
+            for h in 1..=head {
+                store.durable_append(h, &h.to_be_bytes(), b"tag", &[]).unwrap();
+            }
+            store.durable_checkpoint(checkpoint, b"checkpoint").unwrap();
+            store.database.exec(
+                b"CREATE TEMP VIEW durable_log AS SELECT height, tag,
+                  CASE WHEN height < (SELECT max(height) FROM durable_checkpoint)
+                  THEN abs(-9223372036854775808) ELSE record END AS record
+                  FROM main.durable_log\0",
+            ).unwrap();
+            let read = store.durable_read_from_checkpoint().unwrap();
+            let heights: Vec<_> = read.entries.iter().map(|entry| entry.height).collect();
+            assert_eq!(heights, [checkpoint, checkpoint + 1, head]);
+            assert!(store.durable_read(1, true).is_err(), "prefix read escaped the trap");
+            drop(store);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
     /// A seeded v4 Store (no accumulator) refuses by name; it is never upgraded.
     #[test]
     fn seeded_schema_v4_store_refuses_by_name() {

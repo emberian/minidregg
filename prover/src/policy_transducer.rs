@@ -1936,8 +1936,10 @@ pub fn prove_mini_rewrite_and_extract(
     Ok((stmt, wit))
 }
 
-/// Executable `RewriteCert` verifier (`Compiler.PolicyAstTransducerEmit.verifyRewriteAndExtract`).
-pub fn verify_rewrite_and_extract<NT, SemOp, Val>(
+/// Differential-test oracle for `Compiler.PolicyAstTransducerEmit.verifyRewriteAndExtract`,
+/// which owns admission of RewriteCert statements.
+#[doc(hidden)]
+pub fn verify_rewrite_and_extract_conformance_only<NT, SemOp, Val>(
     cfg: &AttrCfg<u8, NT, SemOp, Val>,
     rules: &[RedactRule],
     stmt: &RewriteCertStmt<Val>,

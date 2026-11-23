@@ -16,27 +16,27 @@
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha512};
-use sha3::{
-    digest::{ExtendableOutput, Update, XofReader},
-    CShake256, CShake256Core,
-};
-
-/// The Keccak-f[1600] rate of cSHAKE256/KMAC256 in bytes (`rateBytes` in the Lean spec).
-pub const RATE_BYTES: usize = 136;
+// Vendored under the adjacent QSAG MIT license. The source digest is pinned in conformance.rs.
+#[allow(dead_code)]
+#[path = "qsag/keccak.rs"]
+mod qsag_keccak;
+use qsag_keccak::Shake256Sponge;
+pub use qsag_keccak::{cshake256_32, SHAKE256_RATE_BYTES as RATE_BYTES};
 /// Every kernel here squeezes exactly 32 bytes (`outputBytes` in the Lean spec).
 pub const OUTPUT_BYTES: usize = 32;
 
-/// cSHAKE256 with an EMPTY function name and a 32-byte output: `cshake256Bytes` in
-/// `Theory/Sp800185Cshake256Spec.lean`. An empty customization is SHAKE256 (the `0x1f`
-/// suffix), as in the spec's `cshake256Bytes` and in SP 800-185 §3.3.
-pub fn cshake256_32(customization: &[u8], input: &[u8]) -> [u8; OUTPUT_BYTES] {
-    let core = CShake256Core::new(customization);
-    let mut hasher = CShake256::from_core(core);
-    hasher.update(input);
-    let mut reader = hasher.finalize_xof();
-    let mut output = [0u8; OUTPUT_BYTES];
-    reader.read(&mut output);
-    output
+/// SP 800-185 §3.3 for named functions, including KMAC. The Lean cSHAKE root uses
+/// QSAG's empty-function-name entry point directly.
+fn named_sponge(name: &[u8], customization: &[u8]) -> Shake256Sponge {
+    if name.is_empty() {
+        return Shake256Sponge::new_cshake256(customization);
+    }
+    let mut sponge = Shake256Sponge::new_shake256();
+    sponge.suffix = 0x04;
+    let mut names = encode_string(name);
+    names.extend_from_slice(&encode_string(customization));
+    sponge.absorb(&bytepad(&names, RATE_BYTES));
+    sponge
 }
 
 /// The size of a cSHAKE256 midstate's fixed part: the 25 Keccak lanes, little-endian, then the
@@ -45,24 +45,6 @@ pub const MIDSTATE_FIXED_BYTES: usize = 201;
 /// The longest midstate `cshake256_absorb` writes: the fixed part and fewer than one rate block.
 pub const MIDSTATE_MAX_BYTES: usize = MIDSTATE_FIXED_BYTES + RATE_BYTES - 1;
 
-fn xor_block(state: &mut [u64; 25], block: &[u8]) {
-    for (lane, chunk) in state.iter_mut().zip(block.chunks(8)).take(RATE_BYTES / 8) {
-        let mut word = [0u8; 8];
-        word[..chunk.len()].copy_from_slice(chunk);
-        *lane ^= u64::from_le_bytes(word);
-    }
-}
-
-/// Absorb every full rate block of `bytes` into `state`; return the unabsorbed tail.
-fn absorb_blocks<'a>(state: &mut [u64; 25], bytes: &'a [u8]) -> &'a [u8] {
-    let full = bytes.len() / RATE_BYTES;
-    for block in bytes.chunks_exact(RATE_BYTES).take(full) {
-        xor_block(state, block);
-        keccak::f1600(state);
-    }
-    &bytes[full * RATE_BYTES..]
-}
-
 /// cSHAKE256's absorbed prefix, as bytes: `cshake256AbsorbKernel` in
 /// `Theory/Sp800185Cshake256Midstate.lean`. The framed input (the SP 800-185 customization block,
 /// absent for an empty customization, then `prefix`) is absorbed block by block; the result is
@@ -70,23 +52,14 @@ fn absorb_blocks<'a>(state: &mut [u64; 25], bytes: &'a [u8]) -> &'a [u8] {
 /// (fewer than 136 bytes). `cshake256_finish_32(&cshake256_absorb(c, p), s)` is
 /// `cshake256_32(c, p ++ s)`.
 pub fn cshake256_absorb(customization: &[u8], prefix: &[u8]) -> Vec<u8> {
-    let mut framed = if customization.is_empty() {
-        Vec::with_capacity(prefix.len())
-    } else {
-        let mut names = encode_string(&[]);
-        names.extend_from_slice(&encode_string(customization));
-        bytepad(&names, RATE_BYTES)
-    };
-    framed.extend_from_slice(prefix);
-    let suffix: u8 = if customization.is_empty() { 0x1f } else { 0x04 };
-    let mut state = [0u64; 25];
-    let tail = absorb_blocks(&mut state, &framed);
-    let mut out = Vec::with_capacity(MIDSTATE_FIXED_BYTES + tail.len());
-    for lane in state {
+    let mut sponge = Shake256Sponge::new_cshake256(customization);
+    sponge.absorb(prefix);
+    let mut out = Vec::with_capacity(MIDSTATE_FIXED_BYTES + sponge.buf_len);
+    for lane in sponge.state {
         out.extend_from_slice(&lane.to_le_bytes());
     }
-    out.push(suffix);
-    out.extend_from_slice(tail);
+    out.push(sponge.suffix);
+    out.extend_from_slice(&sponge.buf[..sponge.buf_len]);
     out
 }
 
@@ -97,37 +70,22 @@ pub fn cshake256_finish_32(midstate: &[u8], suffix: &[u8]) -> [u8; OUTPUT_BYTES]
     let mut fixed = [0u8; MIDSTATE_FIXED_BYTES];
     let take = midstate.len().min(MIDSTATE_FIXED_BYTES);
     fixed[..take].copy_from_slice(&midstate[..take]);
-    let mut state = [0u64; 25];
-    for (i, lane) in state.iter_mut().enumerate() {
+    let mut sponge = Shake256Sponge::new_shake256();
+    for (i, lane) in sponge.state.iter_mut().enumerate() {
         let mut word = [0u8; 8];
         word.copy_from_slice(&fixed[8 * i..8 * i + 8]);
         *lane = u64::from_le_bytes(word);
     }
-    let delimiter = fixed[200];
-    let pending = if midstate.len() > MIDSTATE_FIXED_BYTES { &midstate[MIDSTATE_FIXED_BYTES..] } else { &[] };
-    let mut tail = Vec::with_capacity(pending.len() + suffix.len() + RATE_BYTES);
-    tail.extend_from_slice(pending);
-    tail.extend_from_slice(suffix);
-    // `padForRate`: the delimiter, zeros, and a final 0x80, merged when one byte is left.
-    let count = RATE_BYTES - tail.len() % RATE_BYTES;
-    if count == 1 {
-        tail.push(delimiter ^ 0x80);
-    } else {
-        tail.push(delimiter);
-        tail.resize(tail.len() + count - 2, 0);
-        tail.push(0x80);
-    }
-    let rest = absorb_blocks(&mut state, &tail);
-    debug_assert!(rest.is_empty());
+    sponge.suffix = fixed[200];
+    sponge.absorb(midstate.get(MIDSTATE_FIXED_BYTES..).unwrap_or_default());
+    sponge.absorb(suffix);
     let mut output = [0u8; OUTPUT_BYTES];
-    for (k, byte) in output.iter_mut().enumerate() {
-        *byte = (state[k / 8] >> (8 * (k % 8))) as u8;
-    }
+    sponge.squeeze(&mut output);
     output
 }
 
 /// SP 800-185 `left_encode`: the minimal big-endian bytes of `value`, preceded by their count.
-fn left_encode(value: usize) -> Vec<u8> {
+fn left_encode(value: u128) -> Vec<u8> {
     let bytes = minimal_be(value);
     let mut out = Vec::with_capacity(bytes.len() + 1);
     out.push(bytes.len() as u8);
@@ -137,13 +95,13 @@ fn left_encode(value: usize) -> Vec<u8> {
 
 /// SP 800-185 `right_encode`: the minimal big-endian bytes of `value`, followed by their count.
 fn right_encode(value: usize) -> Vec<u8> {
-    let mut bytes = minimal_be(value);
+    let mut bytes = minimal_be(value as u128);
     bytes.push(bytes.len() as u8);
     bytes
 }
 
 /// The minimal big-endian bytes of `value`; `0` is the one byte `00` (`natBytesBE` in Lean).
-fn minimal_be(value: usize) -> Vec<u8> {
+fn minimal_be(value: u128) -> Vec<u8> {
     let mut bytes: Vec<u8> = value.to_be_bytes().to_vec();
     while bytes.len() > 1 && bytes[0] == 0 {
         bytes.remove(0);
@@ -153,7 +111,7 @@ fn minimal_be(value: usize) -> Vec<u8> {
 
 /// SP 800-185 `encode_string`: `left_encode(bit length) || bytes` (`encodeString` in Lean).
 fn encode_string(bytes: &[u8]) -> Vec<u8> {
-    let mut out = left_encode(bytes.len() * 8);
+    let mut out = left_encode((bytes.len() as u128) * 8);
     out.extend_from_slice(bytes);
     out
 }
@@ -161,7 +119,7 @@ fn encode_string(bytes: &[u8]) -> Vec<u8> {
 /// SP 800-185 `bytepad(X, w)`: `left_encode(w) || X`, zero-padded to a multiple of `w`
 /// (`bytepad` in Lean).
 fn bytepad(bytes: &[u8], width: usize) -> Vec<u8> {
-    let mut out = left_encode(width);
+    let mut out = left_encode(width as u128);
     out.extend_from_slice(bytes);
     while out.len() % width != 0 {
         out.push(0);
@@ -172,14 +130,12 @@ fn bytepad(bytes: &[u8], width: usize) -> Vec<u8> {
 /// KMAC256 with a 32-byte tag: `kmac256Bytes` in `Compiler/Sp800185Kmac256.lean`,
 /// `cSHAKE256(bytepad(encode_string(K), 136) || X || right_encode(256), 256, "KMAC", S)`.
 pub fn kmac256_32(key: &[u8], customization: &[u8], input: &[u8]) -> [u8; OUTPUT_BYTES] {
-    let core = CShake256Core::new_with_function_name(b"KMAC", customization);
-    let mut hasher = CShake256::from_core(core);
-    hasher.update(&bytepad(&encode_string(key), RATE_BYTES));
-    hasher.update(input);
-    hasher.update(&right_encode(OUTPUT_BYTES * 8));
-    let mut reader = hasher.finalize_xof();
+    let mut sponge = named_sponge(b"KMAC", customization);
+    sponge.absorb(&bytepad(&encode_string(key), RATE_BYTES));
+    sponge.absorb(input);
+    sponge.absorb(&right_encode(OUTPUT_BYTES * 8));
     let mut output = [0u8; OUTPUT_BYTES];
-    reader.read(&mut output);
+    sponge.squeeze(&mut output);
     output
 }
 
@@ -383,6 +339,36 @@ pub unsafe extern "C" fn mini_kernels_sshsig_verify(
 #[cfg(test)]
 mod framing {
     use super::*;
+
+    #[test]
+    fn named_sponge_matches_rustcrypto_at_rate_boundaries() {
+        use sha3::digest::{ExtendableOutput, Update, XofReader};
+        for name in [&b""[..], b"KMAC"] {
+            for custom in [&b""[..], b"Email Signature", &[42; 129], &[43; 130]] {
+                for len in [0usize, 1, 134, 135, 136, 137, 271, 272, 273] {
+                    let input: Vec<u8> = (0..len).map(|i| (7 * i + 3) as u8).collect();
+                    let mut oracle = sha3::CShake256::from_core(
+                        sha3::CShake256Core::new_with_function_name(name, custom),
+                    );
+                    oracle.update(&input);
+                    let mut expected = [0; 32];
+                    oracle.finalize_xof().read(&mut expected);
+                    let mut sponge = named_sponge(name, custom);
+                    sponge.absorb(&input);
+                    let mut wrong_domain = sponge.clone();
+                    wrong_domain.suffix ^= 1;
+                    let mut output = [0; 32];
+                    wrong_domain.squeeze(&mut output);
+                    assert_ne!(output, expected);
+                    sponge.squeeze(&mut output);
+                    assert_eq!(output, expected, "len={len}, N={name:?}, |S|={}", custom.len());
+                    if name.is_empty() {
+                        assert_eq!(cshake256_32(custom, &input), expected);
+                    }
+                }
+            }
+        }
+    }
 
     /// The Lean `@[simp]` facts in `Compiler/Sp800185Cshake256.lean`: `leftEncode 0 = [1, 0]`,
     /// `leftEncode 65536 = [3, 1, 0, 0]`, `encodeString [] = [1, 0]`, `bytepad [] 4 = [1, 4, 0, 0]`.
