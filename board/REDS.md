@@ -1,18 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `453aba535878` (Judge inspect byte comparisons from the exact retained renderer inputs). Round finished 2026-11-23T08:07Z.
-green: `1db75a1dba5d`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-453aba53`.
+Tip: `cb2a3279f878` (Serve Fn frontier and provider continuity from native admission checkpoints). Round finished 2026-11-23T09:17Z.
+green: `453aba535878`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-cb2a3279`.
 
-No reds: `green` moves to `453aba535878`.
+| stage | signature | reruns? | same place as last round? | owner | detail |
+|---|---|---|---|---|---|
+| ratchets | rc=1 see /home/hbox/lanes/integ/logs/ratchets.log | - | no | suspects' owners | /home/hbox/lanes/integ/logs/ratchets.log |
+| consent | rc=1 lane-build: host roles built at cb2a3279f878; compiled inputs identical at cb2a3279f878 | - | no | suspects' owners | /home/hbox/lanes/integ/logs/consent.log |
+| rust | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| pack | did not run | - | no | suspects' owners | an earlier stage stopped the build |
+| umbrella-tree | did not run | - | no | build-loop | an earlier stage stopped the build |
 
-## Flatness (published, does not gate `green`)
+Suspect commits since green (`git log 453aba535878..cb2a3279f878`), newest first; owners are the seats whose
+`Owns:` line (board/seats/*.md) names a path the commit touched:
 
-| row | verdict | metric | early | late | ratio | bound | owner |
-|---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.218 | 0.267 | 1.224 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 49.063 | 112.891 | 2.301 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.249 | 0.385 | 1.548 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 27.049 | 119.408 | 4.415 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.862 | 0.633 | 0.735 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 1017.445 | 957.508 | 0.941 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-453aba53/flatness.log | - | - | - | - | host-execution, store-retained |
+- `cb2a3279` Serve Fn frontier and provider continuity from native admission checkpoints (owner: apps-hermes, bytes-repr)
+- `7bc4d1a0` builder: REDS.md for 453aba535878 (0 red) (owner: build-loop)
