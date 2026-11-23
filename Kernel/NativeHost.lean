@@ -2762,11 +2762,12 @@ def clockAssemble (plan : ClockTickReceiver.SigningPlan) (signature : List UInt8
     pure (ClockTickReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
   else .error "noncanonical clock plan command"
 
-def clockSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
+def clockSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8)
+    (transport : DurableReceiverIO.Transport := config.transport) :
     IO Outcome := do
   let ambient := logicalHeight config opened.durable
   match ← ClockTickReceiver.receiveLoaded config.deployment config.profile
-      ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
+      ⟨config.federation, ambient⟩ config.signature transport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "clock-tick" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
@@ -3065,9 +3066,10 @@ def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature :
   pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, plan.outcome, envelope⟩)
 
 def activitySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
-    (held : ObjectiveActivity.LoadMemo) (bytes : List UInt8) : IO Outcome := do
+    (held : ObjectiveActivity.LoadMemo) (bytes : List UInt8)
+    (transport : DurableReceiverIO.Transport := config.kernelTransport) : IO Outcome := do
   match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
-      (activityAmbient config opened held) config.signature config.kernelTransport opened.durable bytes with
+      (activityAmbient config opened held) config.signature transport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .charged kind receipt cause =>
       chargedVia confirm kind receipt.transactionId receipt.eventId cause
@@ -3185,9 +3187,10 @@ def seatAssemble (plan : SeatReceiver.SigningPlan) (signature : List UInt8) :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (SeatReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def seatSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
+def seatSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8)
+    (transport : DurableReceiverIO.Transport := config.kernelTransport) : IO Outcome := do
   match ← SeatReceiver.receiveLoaded config.deployment config.profile
-      (seatAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
+      (seatAmbient config opened) config.signature transport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "seat" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
@@ -3319,11 +3322,12 @@ def certifyAssemble (plan : CertifyReceiver.SigningPlan) (signature : List UInt8
     pure (CertifyReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
   else .error "noncanonical certify plan command"
 
-def certifySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
+def certifySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8)
+    (transport : DurableReceiverIO.Transport := config.transport) :
     IO Outcome := do
   let ambient := logicalHeight config opened.durable
   match ← CertifyReceiver.receiveLoaded config.deployment config.profile
-      ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
+      ⟨config.federation, ambient⟩ config.signature transport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "certify" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
@@ -3894,14 +3898,15 @@ every other call uniformly. -/
 def submitDisclosedSession (config : Config)
     (light : NativeHostLight.Light config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ()) :
+    (adopt : NativeHostLight.Adopt light.opening := fun _ _ _ => pure ())
+    (transport : DurableReceiverIO.Transport := config.transport) :
     IO (Outcome × Disclosure) := do
   match call with
   | .renounce bytes =>
-      submitRenounceLight config.transport config.deployment config.profile.semantics config.federation
+      submitRenounceLight transport config.deployment config.profile.semantics config.federation
         config.genesisHeight config.signature light.opening light.basis bytes confirm adopt
-  | .invoke _ => return invokeDisclosure (← submitLightVia config.transport config light call confirm adopt)
-  | _ => return (← submitLightVia config.transport config light call confirm adopt, .uniform)
+  | .invoke _ => return invokeDisclosure (← submitLightVia transport config light call confirm adopt)
+  | _ => return (← submitLightVia transport config light call confirm adopt, .uniform)
 
 /-- `submitDisclosedSession` with the full image already held. -/
 def submitDisclosedWith (config : Config) (opened : Opened config) (light : NativeHostLight.Light config)
@@ -3911,13 +3916,15 @@ def submitDisclosedWith (config : Config) (opened : Opened config) (light : Nati
   let _ := opened
   submitDisclosedSession config light call confirm
 
-def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
+def submit (config : Config) (bytes : List UInt8)
+    (receive : (light : NativeHostLight.Light config) → SignedCall → Confirm → IO (Outcome × Disclosure) :=
+      fun light call confirm => submitDisclosedSession config light call confirm) : IO Outcome := do
   let result ← match callCodec.decode bytes with
     | none => pure (refused .malformed "wire" "noncanonical or unsupported native host call", .uniform)
     | some call =>
         match ← NativeHostLight.start config with
         | .error detail => pure (.unavailable detail.toUTF8.toList, .uniform)
-        | .ok light => submitDisclosedSession config light call (confirmed config)
+        | .ok light => receive light call (confirmed config)
   logOperatorRefusal result.1
   return disclose result
 

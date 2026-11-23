@@ -88,7 +88,7 @@ inductive Result where
   | uncertain (detail : String)
 
 def receiveLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
-    (bytes : List UInt8) : IO Result := do
+    (bytes : List UInt8) (transport : DurableReceiverIO.Transport := config.transport) : IO Result := do
   match ingressCodec.decode bytes with
   | none => return .rejected .malformedIngress
   | some ingress =>
@@ -99,7 +99,7 @@ def receiveLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
           match ← FnSelectiveReleaseAdmission.admit config opened ingress with
           | .error reason => return .rejected (.admission reason)
           | .ok accepted =>
-              match ← DurableReceiverIO.receiveLoaded config.transport
+              match ← DurableReceiverIO.receiveLoaded transport
                   ResourceBirthCodec.rootBytes opened.durable
                   (accepted.intent config opened ingress) with
               | .confirmed kind _ => return .confirmed kind (receipt ingress)

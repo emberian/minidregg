@@ -893,7 +893,14 @@ end
 theorem firstFailingLeaf_congr (ho : Agree covered o₁ o₂) (hn : Agree covered n₁ n₂)
     (p : Pred) (h : readsOnly covered p = true) :
     firstFailingLeaf p o₁ n₁ = firstFailingLeaf p o₂ n₂ :=
-  leafWith_congr ho hn p h
+  by
+    unfold firstFailingLeaf
+    split
+    · rename_i guard clauses
+      simp only [readsOnly, readsOnlyList, Bool.and_true, Bool.and_eq_true] at h
+      rw [show Minidregg.Pred.eval guard o₁ n₁ = Minidregg.Pred.eval guard o₂ n₂ from evalWith_congr ho hn _ h.1,
+        leafWith_congr ho hn (.allL clauses) h.2]
+    · exact leafWith_congr ho hn _ h
 
 end Congr
 

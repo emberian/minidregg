@@ -44,15 +44,16 @@ policy address; superseded addresses are freed) are used to refuse an ordinary
 command that purports to target an authority cell. An ordinary invocation's admitted marker
 does write an authority nullifier, so these cells must not be used as a blunt
 physical-write exclusion for otherwise unrelated invocations. -/
-def authorityCells {config : Config} (session : NativeHostSession.Walked config) :
-    List CellId :=
-  let snapshot := session.verified.opened.authority.snapshot
+def authorityCellsAt (config : Config) (snapshot : CredentialAuthorityDomain.Snapshot) : List CellId :=
   ⟨config.deployment.authorityCellId⟩ ::
     (StoreCodec.entries CredentialAuthorityCell.wire snapshot.logical).filterMap (fun entry =>
       match entry with
       | ⟨⟨.policyAddress, _⟩, address⟩ =>
           some ⟨PolicySourceCell.physicalId config.deployment.domain address⟩
       | _ => none)
+
+def authorityCells {config : Config} (session : NativeHostSession.Walked config) : List CellId :=
+  authorityCellsAt config session.verified.opened.authority.snapshot
 
 def writesCell (record : DurableReceiver.IntentRecord) (cell : CellId) : Prop :=
   cell ∈ record.writes.map DataWrite.cellId
@@ -98,31 +99,26 @@ Ordinary invocations add an authority nullifier marker, so their physical
 authority write cannot by itself close the fence. This family check does not
 prove that an ordinary invocation left every parent/policy dependency intact;
 the caller composes fresh signed parent and provider checks. -/
-def ordinaryOther {config : Config} (session : NativeHostSession.Walked config)
-    (providerCell : CellId) (record : DurableReceiver.IntentRecord) : Bool :=
-  let bytes := record.event.canonicalBytes
+def ordinaryTargets (bytes : List UInt8) : Option (List Nat) := do
   if (CapabilityRevocationReceiver.decodeIngress bytes).isSome ||
       (CapabilityRenounce.decodeIngress bytes).isSome ||
       (ResourceBirthPolicyController.Concrete.decodeIngress bytes).isSome ||
       (PolicyInstallReceiver.decodeIngress bytes).isSome ||
-      (CapabilityDelegationReceiver.decodeIngress bytes).isSome then false
+      (CapabilityDelegationReceiver.decodeIngress bytes).isSome then none
+  else if (CertifyReceiver.decodeIngress bytes).isSome ||
+      (ClockTickReceiver.decodeIngress bytes).isSome ||
+      (SeatReceiver.decodeIngress bytes).isSome ||
+      (ObjectiveActivityReceiver.decodeIngress bytes).isSome then some []
   else
-    let nonAuthorityFamily :=
-      if (CertifyReceiver.decodeIngress bytes).isSome ||
-          (ClockTickReceiver.decodeIngress bytes).isSome ||
-          (SeatReceiver.decodeIngress bytes).isSome ||
-          (ObjectiveActivityReceiver.decodeIngress bytes).isSome then
-        true
-      else
-        match DeclaredResourceController.decodeSignedBytes bytes with
-        | some (_, _, signed) =>
-            match DeclaredResourceController.commandCodec.decode signed.commandBytes with
-            | some command =>
-                command.targets.all (fun target =>
-                  decide (⟨target.target⟩ ∉ authorityCells session))
-            | none => false
-        | none => false
-    nonAuthorityFamily && !decide (writesCell record providerCell)
+    let (_, _, signed) ← DeclaredResourceController.decodeSignedBytes bytes
+    let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
+    return command.targets.map (·.target)
+
+def ordinaryOther {config : Config} (session : NativeHostSession.Walked config)
+    (providerCell : CellId) (record : DurableReceiver.IntentRecord) : Bool :=
+  (ordinaryTargets record.event.canonicalBytes).any (fun targets =>
+    targets.all (fun target => decide (⟨target⟩ ∉ authorityCells session))) &&
+    !decide (writesCell record providerCell)
 
 /-- The public host call is an outer dispatch frame; the durable event retains
 the family's canonical ingress. Decode the outer frame in Lean before comparing
@@ -149,11 +145,8 @@ theorem ordinaryOther_no_provider_write {config : Config}
     (record : DurableReceiver.IntentRecord)
     (safe : ordinaryOther session providerCell record = true) :
     ¬ writesCell record providerCell := by
-  dsimp [ordinaryOther] at safe
-  split at safe
-  · simp at safe
-  · simp only [Bool.and_eq_true, Bool.not_eq_true', decide_eq_false_iff_not] at safe
-    exact safe.2
+  simp only [ordinaryOther, Bool.and_eq_true, Bool.not_eq_true', decide_eq_false_iff_not] at safe
+  exact safe.2
 
 theorem safeSuffix_no_provider_write {config : Config}
     (session : NativeHostSession.Walked config) (providerCell : CellId)

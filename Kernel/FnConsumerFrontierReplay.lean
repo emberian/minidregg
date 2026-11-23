@@ -138,7 +138,7 @@ theorem registered_legacy_poisons_resolution (audit : Audit) (record : DurableRe
     let next := audit.adoptLegacy record transition
     next.ordered = audit.ordered ∧ next.registrations = audit.registrations ∧
       next.cursor transition.key = .error "fn consumer frontier is ambiguous" := by
-  simp [Audit.adoptLegacy, clean, registered, Audit.cursor]
+  simp [Audit.adoptLegacy, clean, registered, Audit.cursor, bind, Except.bind, throw, throwThe, MonadExceptOf.throw]
 
 /-- info: 'Minidregg.Kernel.FnConsumerFrontierReplay.registered_legacy_poisons_resolution' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms registered_legacy_poisons_resolution

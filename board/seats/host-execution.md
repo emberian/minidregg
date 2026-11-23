@@ -54,24 +54,34 @@ Quest: the Host turn's costs, widest first; ember's bar is about 1 ms of warm wo
 
 ## KN2 session work on 2026-11-23
 
-Dispatch, paid-agent, lifetime-grant, and application stream continuity use indexed history and the
-refreshed light session. Five of the original 19 calls to `sessionWalked` remain in `Host/Main.lean`.
-The signed-install `session-reads` fixture compared a cold session with a full admission walk at
-prefix sizes 2 and 20. Both used a two-record tail and read zero record payloads below the checkpoint.
-The served and full consent planners produced identical signing-plan bytes for a fresh installation
-and returned the same refusal for a forged authority preimage in both runs.
+Wave 13 retired the remaining five live `sessionWalked` calls in `Host/Main.lean`. Fn namespace
+registration, selected and empty poll submission, frontier planning and provider continuity share
+an authenticated projection of native admission at the exact Store head.
 
-- Fn namespace registration, both poll submissions, and frontier planning need the authenticated
-  registration, ordered cursor, last legacy evidence, ambiguous keys, and global fault. A legacy
-  step after registration can poison the key while leaving its registration and ordered cursor
-  identical. Existing checkpoint bodies omit this audit. A migration can seal a verified audit at
-  a named head and retain it across restart. The replay fold now checks the checkpoint/tail split.
-- Provider reserve continuity still verifies the reserve, optional fence, prior receipt, and
-  admissibility of the intervening records. An indexed replacement must cover certify, tick,
-  seat, and activity records as well as ordinary invokes. The current purse's last-write row
-  answers a narrower question.
-- `ClientConsentCore.verifyInitial` reuses the chained open on fallback. Its chronology-dependent
-  consent requests still require the full representation.
+- `checkpoint fn-frontier` migrates an existing Store by verifying its history from genesis.
+  First use also migrates when the current head has no valid cut. The cut binds the deployment,
+  Fn and consensus pins, fold version, height, chain and world root. Ordinary calls, Fn receives,
+  clock, certify, seat and activity submissions seal their candidate before CAS. A cold session
+  accepts it only at the matching physical head. A writer outside these paths, a missing cut or
+  a lost checkpoint write can require another full verification.
+- The Fn cut retains the ordered cursor, namespace registration, legacy originals, ambiguous
+  keys, global fault and exact originals for retries and selected-release plans. Fresh admission
+  checks the live gateway law, signature marker and authority. `append_replays` checks the
+  writer's audit update against full replay. `restored_legacy_poison` checks the refusal after
+  restoring an ambiguous key.
+- Provider continuity selects exact historical receipt and ingress bytes. For each protected cell,
+  authority target and excluded family it tracks the last two occurrences. This covers an exact
+  allowed fence, earlier rewrites, changes to the current authority cell set and prior-root checks.
+- The native `frontier-reads` probe used checkpoints at 4 and 40 with two later invocations.
+  A SQLite view raised on any payload read below the cut. Cold registration and empty-poll retry
+  frames, a selected-poll missing-release refusal and the signing-plan bytes agreed with full
+  replay. Provider continuity accepted the original anchor and returned the same refusal for a
+  forged root. This fixture exercises the planner after local poll evidence is supplied.
+- Host closure is 792 modules (ceiling 799), down from 828. Objective checkpoint invariants
+  remain in the proof library. J0–J8, THIN, JINSPECT (135/135), and the browser/session journey
+  (73/73) passed on hbox. Wave 12's JINSPECT was 128/135 on the same manifest.
+- `ClientConsentCore.verifyInitial` still uses its chained-open fallback for chronology-dependent
+  consent requests.
 
 ## Next steps, in order
 1. Check and land wip/he-enrol (above) + send the single re-record notice (fold v2 901d910c2 + index/trie-v2).

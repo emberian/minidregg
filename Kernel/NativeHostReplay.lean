@@ -2757,7 +2757,7 @@ private def derive (config : Config) (opened : Opened config)
     match ← FnConsumerNamespaceAdmissionAt.prepareConditional config opened legacy ingress with
     | .error detail => return .error detail
     | .ok accepted =>
-        return .ok ⟨accepted.intent config opened legacy ingress,
+        return .ok ⟨FnConsumerNamespaceAdmissionAt.Conditional.intent config opened legacy ingress accepted,
           .fnConsumerNamespace accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectedPollCoverage.ingressCodec.decode bytes then
     let .ok cursor := frontier.cursor ingress.spec.evidence.key
@@ -2771,7 +2771,7 @@ private def derive (config : Config) (opened : Opened config)
     match ← FnSelectedPollAdmissionAt.admitAt config opened cursor original registration ingress with
     | .error detail => return .error detail
     | .ok accepted =>
-        return .ok ⟨accepted.intent config opened cursor original registration ingress,
+        return .ok ⟨FnSelectedPollAdmissionAt.Accepted.intent config opened cursor original registration ingress accepted,
           .fnSelectedPoll accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnEmptyPollProgressV2.ingressCodec.decode bytes then
     let .ok cursor := frontier.cursor ingress.spec.evidence.key
@@ -2782,7 +2782,7 @@ private def derive (config : Config) (opened : Opened config)
     match ← FnEmptyPollAdmissionAtV2.admitAt config opened cursor registration ingress with
     | .error detail => return .error detail
     | .ok accepted =>
-        return .ok ⟨accepted.intent config opened cursor registration ingress,
+        return .ok ⟨FnEmptyPollAdmissionAtV2.Accepted.intent config opened cursor registration ingress accepted,
           .fnEmptyPollV2 accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if (ApplicationShareIssueSource.ingressCodec.decode bytes).isSome then
     match ← ApplicationShareIssueAdmission.admitNative config.profile config opened.pins

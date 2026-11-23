@@ -42,7 +42,7 @@ structure Selected where
   ingressBytes : List UInt8
   receipt : Minidregg.Compiler.NativeHostCodec.Receipt
 
-private def selectRecord (config : Minidregg.Kernel.NativeHost.Config)
+def selectRecord (config : Minidregg.Kernel.NativeHost.Config)
     (miniTransactionId : Digest)
     (projectedSource projectedMessageId : List UInt8)
     (record : Minidregg.Kernel.DurableReceiver.IntentRecord)

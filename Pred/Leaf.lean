@@ -172,18 +172,36 @@ end
 /-- **`firstFailingLeaf`** — the path to the first failing leaf of the first-party `eval`
 (`witnessed` fails closed, exactly as in `eval`), or `none` when the step is admitted. -/
 def firstFailingLeaf (p : Pred) (old new : State) : Option (List Nat) :=
-  leafWith failClosed p old new
+  match p with
+  | .anyL (.cons guard (.cons (.allL clauses) .nil)) =>
+      -- A component's selector guards its authored conjunction. If the guard
+      -- passes there is no failure. Otherwise child 1 decides the disjunction.
+      if eval guard old new then none
+      else (leafWith failClosed (.allL clauses) old new).map (1 :: ·)
+  | _ => leafWith failClosed p old new
 
 /-- The explanation is the decision: it names nothing exactly when `eval` accepts. -/
 theorem firstFailingLeaf_none_iff_eval (p : Pred) (old new : State) :
-    firstFailingLeaf p old new = none ↔ eval p old new = true :=
-  leafWith_none_iff failClosed p old new
+    firstFailingLeaf p old new = none ↔ eval p old new = true := by
+  unfold firstFailingLeaf
+  split
+  · rename_i guard clauses
+    change _ ↔ (eval guard old new || (eval (.allL clauses) old new || false)) = true
+    cases h : eval guard old new <;> simp [h, leafWith_none_iff, eval]
+  · exact leafWith_none_iff failClosed _ old new
 
 /-- The named subterm exists, is a leaf, and `eval` rejects it on the same step. -/
 theorem firstFailingLeaf_some_leaf (p : Pred) (old new : State) (path : List Nat)
     (named : firstFailingLeaf p old new = some path) :
     ∃ q, p.subterm path = some q ∧ q.isLeaf = true ∧ eval q old new = false :=
-  leafWith_sound failClosed p old new path named
+  by
+    unfold firstFailingLeaf at named
+    split at named
+    · split at named
+      · contradiction
+      · obtain ⟨sub, found, rfl⟩ := Option.map_eq_some_iff.mp named
+        exact leafWith_sound failClosed _ old new sub found
+    · exact leafWith_sound failClosed _ old new path named
 
 /-! ## Both poles on the J13 law
 

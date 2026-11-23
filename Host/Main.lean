@@ -103,6 +103,7 @@ public import Compiler.DurableStoreAudit
 public import Compiler.FnWirePinned
 public import Kernel.NativeHostObjectAudience
 public import Kernel.NativeHostSession
+public import Kernel.FnFrontierCheckpoint
 public import Kernel.NativeReserveContinuity
 public import Kernel.NativeProviderHistory
 public import Kernel.NativePlanHeight
@@ -110,9 +111,6 @@ public import Kernel.NativeHostGenesis
 public import Kernel.FnEvidence
 public import Kernel.FnConsumerOperation
 public import Kernel.FnConsumerProgress
-public import Kernel.FnConsumerNamespaceReceiver
-public import Kernel.FnSelectedPollReceiver
-public import Kernel.FnEmptyPollReceiverV2
 public import Kernel.FnCatalogOwnRProgress
 public import Kernel.FnReplyPublication
 public import Kernel.FnReplyConsumption
@@ -218,6 +216,7 @@ meta import Compiler.DurableStoreAudit
 meta import Compiler.FnWirePinned
 meta import Kernel.NativeHostObjectAudience
 meta import Kernel.NativeHostSession
+meta import Kernel.FnFrontierCheckpoint
 meta import Kernel.NativeReserveContinuity
 meta import Kernel.NativeProviderHistory
 meta import Kernel.NativePlanHeight
@@ -225,9 +224,6 @@ meta import Kernel.NativeHostGenesis
 meta import Kernel.FnEvidence
 meta import Kernel.FnConsumerOperation
 meta import Kernel.FnConsumerProgress
-meta import Kernel.FnConsumerNamespaceReceiver
-meta import Kernel.FnSelectedPollReceiver
-meta import Kernel.FnEmptyPollReceiverV2
 meta import Kernel.FnCatalogOwnRProgress
 meta import Kernel.FnReplyPublication
 meta import Kernel.FnReplyConsumption
@@ -1761,21 +1757,6 @@ def sessionCurrent (config : NativeHost.Config)
       state.set (some current)
       return current
 
-/-- The genesis-walked history for the walk-provenance families, computed on
-first use and extended by re-admission afterwards (`NativeHostSession.walked`). -/
-def sessionWalked (config : NativeHost.Config)
-    (state : IO.Ref (Option (NativeHostSession.Session config))) :
-    IO (NativeHostSession.Walked config) := do
-  let some prior ← state.get
-    | throw (IO.userError "native host session invalidated")
-  match ← NativeHostSession.refreshWalked config prior with
-  | .error detail =>
-      state.set none
-      throw (IO.userError detail)
-  | .ok (current, walked) =>
-      state.set (some current)
-      return walked
-
 /-- The full image of the already refreshed session (`NativeHostSession.materialize`):
 the one it holds, or the Store opened in full now and kept. Only operations not yet
 ported to the light opening ask for it. -/
@@ -1874,7 +1855,7 @@ def selectedReleaseSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let opened ← sessionOpened config state
-  let result ← FnSelectiveReleaseReceiver.receiveLoaded config opened payload
+  let result ← FnFrontierCheckpoint.submitRelease config opened payload
   let outcome ← match result with
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
@@ -2143,28 +2124,33 @@ def applicationLifecycleCompletionLookupSession (config : NativeHost.Config)
     return .refused .malformed "application-lifecycle-completion".toUTF8.toList
       "noncanonical ingress".toUTF8.toList
 
+/-- Prefer the certified frontier of the current physical head. A Store with
+no matching certificate keeps its original native verification path. -/
+def sessionAdmissionCheckpoint (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config))) :
+    IO ((light : NativeHostLight.Light config) × FnFrontierCheckpoint.At config light.opening.head) := do
+  let light := (← sessionCurrent config state).light
+  if let some cut ← FnFrontierCheckpoint.loadAt config light.opening.head then return ⟨light, cut⟩
+  let cut ← FnFrontierCheckpoint.migrateAt config light.opening.head
+  return ⟨light, cut⟩
+
+def submitFn (config : NativeHost.Config) (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (poll : Option FnFrontierCheckpoint.Poll) (phase malformed : String) : IO NativeHostCodec.Outcome := do
+  let ⟨light, cut⟩ ← sessionAdmissionCheckpoint config state
+  let outcome ← match poll with
+    | none => pure (.refused .operationRejected phase.toUTF8.toList malformed.toUTF8.toList)
+    | some p => FnFrontierCheckpoint.receive config light cut p phase (sessionAdopt config state light)
+  NativeHost.logOperatorRefusal outcome
+  return NativeHost.publicSubmissionOutcome outcome
+
 /-- Event20 activates one gateway-bound consumer namespace. The receiver
 rechecks current gateway authority, performs the native CAS, then reopens a
 verified physical tip before returning its original receipt. -/
 def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result ← FnConsumerNamespaceReceiver.receiveVerified session.verified payload
-  let outcome ← match result with
-  | .confirmed kind receipt =>
-      sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected reason =>
-      pure (.refused .operationRejected "fn-consumer-namespace".toUTF8.toList
-        reason.toUTF8.toList)
-  | .transactionConflict =>
-      pure (.refused .conflict "replay".toUTF8.toList
-        "transaction identity conflict".toUTF8.toList)
-  | .contention => pure .contention
-  | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
-  | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
-  NativeHost.logOperatorRefusal outcome
-  return NativeHost.publicSubmissionOutcome outcome
+    (payload : List UInt8) : IO NativeHostCodec.Outcome :=
+  submitFn config state ((FnConsumerNamespaceRegistration.ingressCodec.decode payload).map .registration)
+    "fn-consumer-namespace" "noncanonical fn consumer namespace ingress"
 
 /-- Op41 is receipt-only. A missing original is never resubmitted. -/
 def fnConsumerNamespaceLookupSession (config : NativeHost.Config)
@@ -2197,21 +2183,9 @@ def fnConsumerNamespaceLookupSession (config : NativeHost.Config)
 observation. It never implies that an external fn delivery is complete. -/
 def fnSelectedPollSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result ← FnSelectedPollReceiver.receiveVerified session.verified payload
-  let outcome ← match result with
-  | .confirmed kind receipt =>
-      sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected reason =>
-      pure (.refused .operationRejected "fn-selected-poll".toUTF8.toList reason.toUTF8.toList)
-  | .transactionConflict =>
-      pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
-  | .contention => pure .contention
-  | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
-  | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
-  NativeHost.logOperatorRefusal outcome
-  return NativeHost.publicSubmissionOutcome outcome
+    (payload : List UInt8) : IO NativeHostCodec.Outcome :=
+  submitFn config state ((FnSelectedPollCoverage.ingressCodec.decode payload).map .selected)
+    "fn-selected-poll" "noncanonical selected fn poll ingress"
 
 def fnSelectedPollLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -2238,21 +2212,9 @@ def fnSelectedPollLookupSession (config : NativeHost.Config)
 /-- Event19 advances the same durable frontier for a bounded empty page. -/
 def fnEmptyPollSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionWalked config state
-  let result ← FnEmptyPollReceiverV2.receiveVerified session.verified payload
-  let outcome ← match result with
-  | .confirmed kind receipt =>
-      sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected reason =>
-      pure (.refused .operationRejected "fn-empty-poll-v2".toUTF8.toList reason.toUTF8.toList)
-  | .transactionConflict =>
-      pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
-  | .contention => pure .contention
-  | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
-  | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
-  NativeHost.logOperatorRefusal outcome
-  return NativeHost.publicSubmissionOutcome outcome
+    (payload : List UInt8) : IO NativeHostCodec.Outcome :=
+  submitFn config state ((FnEmptyPollProgressV2.ingressCodec.decode payload).map .empty)
+    "fn-empty-poll-v2" "noncanonical empty fn poll ingress"
 
 def fnEmptyPollLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -5074,13 +5036,16 @@ def fnFrontierPrepareSession (config : NativeHost.Config)
   let key : FnConsumerFrontierCore.Key :=
     ⟨gateway.application, scope, binding, gateway.subject, gateway.target,
       gateway.capability⟩
-  let session ← sessionWalked config state
-  let cursor ← IO.ofExcept (session.verified.frontierCursor key)
-  let registration ← match session.verified.frontier.registrations.find?
+  let ⟨light, cut⟩ ← sessionAdmissionCheckpoint config state
+  let head := light.opening.head
+  let snapshot := cut.snapshot
+  let ground := ServedBasis.Ground.ofBasis (← IO.ofExcept (← light.basis ⟨[], []⟩))
+  let cursor ← IO.ofExcept (snapshot.audit.cursor key)
+  let registration ← match snapshot.audit.registrations.find?
       (fun original => original.ingress.spec.consumerNamespace == key.namespace) with
     | none => throw (IO.userError "fn frontier has no admitted namespace")
     | some original => pure original
-  let _ ← IO.ofExcept (session.verified.frontierRegistration key registration.receipt)
+  let _ ← IO.ofExcept (snapshot.audit.registrationFor key registration.receipt)
   IO.FS.withTempDir fun directory => do
     let executable ← snapshotOperatorFile directory "fn-frontier-helper"
       service.fnExecutable (64 * 1024 * 1024) "0500"
@@ -5106,9 +5071,13 @@ def fnFrontierPrepareSession (config : NativeHost.Config)
             projection.sequence + 1 == projection.position &&
             projection.position ≤ cursor.position + FnConsumerScope.maxPollScan do
           throw (IO.userError "selected fn poll is outside authenticated scan window")
-        let original ← IO.ofExcept (← FnSelectiveReleaseFnAck.selectOriginalLight
-          config (← sessionCurrent config state).light transaction
-          projection.source projection.messageId)
+        let some (record, receipt) := snapshot.special.find? (fun e => e.1.transactionId == transaction)
+          | match ← DurableHistoryStore.indexAnswer config.transport head (DurableIndex.transactionKey transaction) with
+            | .error reason => throw (IO.userError reason)
+            | .ok ⟨none, _⟩ => throw (IO.userError "selected release Mini transaction is absent")
+            | .ok ⟨some _, _⟩ => throw (IO.userError "Mini transaction is not a selected release event")
+        let original ← IO.ofExcept (FnSelectiveReleaseFnAck.selectRecord config transaction
+          projection.source projection.messageId record receipt)
         sourceBytes := projection.source
         selected := some
           { domain := config.deployment.domain
@@ -5155,7 +5124,7 @@ def fnFrontierPrepareSession (config : NativeHost.Config)
       service.controlPath
     unless afterPosition == position && after.committedAck == before.committedAck do
       throw (IO.userError "fn frontier local ACK changed during poll")
-    IO.ofExcept (FnConsumerFrontierPlan.prepare config session.verified.opened
+    IO.ofExcept (FnConsumerFrontierPlan.prepareAt config ground
       selected empty cursorBytes reportBytes sourceBytes)
 
 def selectedFnNewPaths (paths : List String) : IO Unit := do
@@ -6455,18 +6424,13 @@ def runProviderContinuitySession (config : NativeHost.Config)
     providerFromReserveCall providerIds reserveCall
   let some (.confirmed _ anchor) := outcomeCodec.decode outcomeBytes
     | throw (IO.userError "provider continuity outcome is not canonical confirmation")
-  let current ← sessionWalked config state
+  let ⟨light, cut⟩ ← sessionAdmissionCheckpoint config state
   let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
-  let checkedWorldRoot := (current.target.worldRoot).value
-  let checkedCount := current.target.height
-  let continuity : Except String Unit := match allowedFence with
-    | none => (NativeReserveContinuity.check current anchor reserveCall providerCell).map (fun _ => ())
-    | some (fenceCall, fenceReceipt) =>
-        (NativeProviderHistory.check current anchor fenceReceipt reserveCall fenceCall providerCell).map
-          (fun _ => ())
-  let verdict := continuity.bind fun _ => match priorChecked with
-    | none => Except.ok ()
-    | some point => (NativeProviderHistory.checkPrior current anchor.acceptedCount point).map (fun _ => ())
+  let checkedWorldRoot := light.opening.head.root.value
+  let checkedCount := light.opening.head.height
+  let ground := ServedBasis.Ground.ofBasis (← IO.ofExcept (← light.basis ⟨[], []⟩))
+  let authority := NativeReserveContinuity.authorityCellsAt config ground.authority
+  let verdict := cut.snapshot.provider.check config authority anchor reserveCall providerCell allowedFence priorChecked
   let (continuous, reason) := match verdict with
     | .ok _ => (true, "")
     | .error detail => (false, detail)
@@ -6849,7 +6813,7 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((211 : UInt8), ingress)
   | 212 =>
       let opened ← sessionOpened pinnedConfig state
-      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened
+      let outcome ← FnFrontierCheckpoint.submitActivity pinnedConfig (sessionConfirmed pinnedConfig state) opened
         (← NativeHostHeld.heldFor pinnedConfig opened) payload
       return ((212 : UInt8), outcomeCodec.encode outcome)
   | 213 =>
@@ -6882,7 +6846,7 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((216 : UInt8), ingress)
   | 217 =>
       let opened ← sessionOpened pinnedConfig state
-      let outcome ← NativeHost.seatSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
+      let outcome ← FnFrontierCheckpoint.submitSeat pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
       return ((217 : UInt8), outcomeCodec.encode outcome)
   | 218 =>
       let opened ← sessionOpened pinnedConfig state
@@ -7654,6 +7618,10 @@ def runCommandCheckpoint (_arguments : List String) (_configPath _command : Stri
           match ← DurableReceiverIO.sealHead config.transport ResourceBirthCodec.rootBytes with
           | .ok height => IO.println s!"checkpoint sealed at height {height}"; pure 0
           | .error message => (← IO.getStderr).putStrLn message; pure 1
+  | ["fn-frontier"] =>
+      let height ← FnFrontierCheckpoint.migrate config
+      IO.println s!"admitted fn frontier sealed at height {height}"
+      pure 0
   | _ => throw (IO.userError usage)
 
 /-- `fn-archive` (dispatched by `run`). -/
@@ -7744,7 +7712,7 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                     "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList,
                                     NativeHost.Disclosure.uniform)
                                 | some call =>
-                                  NativeHost.submitDisclosedSession pinnedConfig session.light call
+                                  FnFrontierCheckpoint.submitOrdinary pinnedConfig session.light call
                                     (sessionConfirmed pinnedConfig state) (sessionAdopt pinnedConfig state session.light)
                               NativeHost.logOperatorRefusal result.1
                               return (2, outcomeCodec.encode (NativeHost.disclose result))
@@ -8218,7 +8186,7 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             return ((127 : UInt8), ingress)
                         | 128 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.clockSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
+                            let outcome ← FnFrontierCheckpoint.submitClock pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((128 : UInt8), outcomeCodec.encode outcome)
                         | 129 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -8399,7 +8367,7 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             return ((171 : UInt8), ingress)
                         | 172 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.certifySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
+                            let outcome ← FnFrontierCheckpoint.submitCertify pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((172 : UInt8), outcomeCodec.encode outcome)
                         | 173 =>
                             let ⟨_, served⟩ ← sessionServed pinnedConfig state
@@ -9500,7 +9468,8 @@ def runCommandSubmit (_arguments : List String) (_configPath _command : String) 
   let config := settings.config
   match rest with
   | [input, output] =>
-          writeBytes output (outcomeCodec.encode (← NativeHost.submit config (← readBytes input)))
+          writeBytes output (outcomeCodec.encode (← NativeHost.submit config (← readBytes input)
+            (fun light call confirm => FnFrontierCheckpoint.submitOrdinary config light call confirm (fun _ _ _ => pure ()))))
           pure 0
   | _ => throw (IO.userError usage)
 

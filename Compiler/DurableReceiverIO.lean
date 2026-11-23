@@ -2,7 +2,7 @@
 module
 
 public import Compiler.DurableReceiverCore
-public import Kernel.ObjectiveAdmissible
+public import Kernel.ObjectiveAdmissionCertificate
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr

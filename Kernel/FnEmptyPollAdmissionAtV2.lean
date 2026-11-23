@@ -21,7 +21,7 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
-structure Accepted (config : NativeHost.Config) (opened : NativeHost.Opened config)
+structure AcceptedGround (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (cursor : FnConsumerFrontierCore.Cursor)
     (registration : FnConsumerNamespaceHistory.Original) (ingress : Ingress) where
   private mk ::
@@ -30,8 +30,12 @@ structure Accepted (config : NativeHost.Config) (opened : NativeHost.Opened conf
   keyGatewayExact : ingress.spec.keyMatchesGateway = true
   registrationExact : registration.receipt = ingress.spec.registrationReceipt
   registrationKeyExact : registration.ingress.spec.key = ingress.spec.evidence.key
-  gateway : FnConsumerFrontierGateway.CheckedOpened config opened
+  gateway : FnConsumerFrontierGateway.CheckedGround config ground
     (FnConsumerFrontierProposal.empty ingress) ingress.gatewayEnvelope
+
+abbrev Accepted (config : NativeHost.Config) (opened : NativeHost.Opened config) :=
+  AcceptedGround config (FnConsumerFrontierGateway.contextOf opened)
+
 theorem Accepted.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
     {cursor : FnConsumerFrontierCore.Cursor} {registration : FnConsumerNamespaceHistory.Original}
     {ingress : Ingress} (accepted : Accepted config opened cursor registration ingress) :
@@ -44,10 +48,10 @@ theorem Accepted.sound {config : NativeHost.Config} {opened : NativeHost.Opened 
   ⟨accepted.frontierExact, accepted.registrationExact, accepted.registrationKeyExact,
     accepted.gateway.signature.envelopeExact, accepted.gateway.signature.authorized⟩
 
-def admitAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
+def admitAtGround (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (cursor : FnConsumerFrontierCore.Cursor)
     (registration : FnConsumerNamespaceHistory.Original) (ingress : Ingress) :
-    IO (Except String (Accepted config opened cursor registration ingress)) := do
+    IO (Except String (AcceptedGround config ground cursor registration ingress)) := do
   unless ingress.spec.evidence.valid &&
       (ingressCodec.encode ingress).length ≤ 12288 do
     return .error "ordered empty fn page refused"
@@ -56,7 +60,7 @@ def admitAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
       if keyGatewayExact : ingress.spec.keyMatchesGateway = true then
         if frontierExact : FnConsumerFrontierCore.checkAfter cursor
             (candidate ingress.spec) = .ok () then
-          match ← FnConsumerFrontierGateway.checkOpened config opened
+          match ← FnConsumerFrontierGateway.checkGround config ground
               (FnConsumerFrontierProposal.empty ingress) ingress.gatewayEnvelope with
           | .error _ => return .error "ordered empty fn page refused"
           | .ok gateway => return .ok ⟨frontierExact, keyGatewayExact, registrationExact,
@@ -65,6 +69,9 @@ def admitAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
       else return .error "ordered empty fn page refused"
     else return .error "ordered empty fn page refused"
   else return .error "ordered empty fn page refused"
+
+def admitAt (config : NativeHost.Config) (opened : NativeHost.Opened config) :=
+  admitAtGround config (FnConsumerFrontierGateway.contextOf opened)
 
 /-- The turn's charge: it writes nothing, so its storage lane is the World's
 storage of its retained event (`DeployedCharge.storageCharge`; a guard is a pin and writes
@@ -80,22 +87,29 @@ def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (guards : List Rea
   | .sideEffectCount => 1
   | .feeDebit | .networkBytes | .leaseByteBlocks => 0
 
-def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened config)
+def AcceptedGround.intent (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (cursor : FnConsumerFrontierCore.Cursor)
     (registration : FnConsumerNamespaceHistory.Original) (ingress : Ingress)
-    (accepted : Accepted config opened cursor registration ingress) :
+    (accepted : AcceptedGround config ground cursor registration ingress) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let guards := FnConsumerFrontierGateway.readGuards accepted.gateway.prepared ++
-    opened.authority.readGuards
+    ground.authorityReadGuards
   { transactionId := transactionId ingress.spec
     writes := []
     readGuards := guards
     nullifiers := [frontierNullifier ingress.spec]
     exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
-      (charge opened.durable.snapshot guards ingress)).toCharge
+      (charge ground.view guards ingress)).toCharge
     event := event ingress
     subject := some ingress.spec.gatewaySubject
     postRootsBound := by intro write present; cases present
     guardsReadOnly := by intro guard _; simp }
+
+def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (cursor : FnConsumerFrontierCore.Cursor)
+    (registration : FnConsumerNamespaceHistory.Original) (ingress : Ingress)
+    (accepted : Accepted config opened cursor registration ingress) :
+    DataIntent ResourceBirthCodec.rootBytes :=
+  AcceptedGround.intent config (FnConsumerFrontierGateway.contextOf opened) cursor registration ingress accepted
 
 end Minidregg.Kernel.FnEmptyPollAdmissionAtV2

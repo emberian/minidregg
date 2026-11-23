@@ -56,7 +56,7 @@ under the complete deployed profile, for every configured custodian key. -/
 theorem select_without_custodian (config : NativeHost.Config) :
     select (NativeHost.Config.ofInputs { config.toInputs with completionCustodianKey := none })
       (some config) = .ok config.profile := by
-  simp [select, NativeHost.Config.ofInputs]
+  simp [select, NativeHost.Config.ofInputs, pure, Except.pure]
 
 theorem select_unconfigured (config : NativeHost.Config) :
     select config none = .ok config.profile := by

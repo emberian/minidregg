@@ -461,7 +461,7 @@ check T "receipt: the committed legs are exactly the turn's (what it said it wou
 step T 0 newcomer "invoke td board write 2 0 2"
 W2=$(world)
 step T 3 newcomer "inspect turn td"
-check T "a refused turn names the clause through the why view" grep -q 'failing clause \[1\]: field 2 monotone' "$LAST"
+check T "a refused turn names the clause through the why view" grep -qF 'failing clause [1,1]: field 2 monotone' "$LAST"
 check T "a refused turn commits nothing" is "$(world)" "$W2"
 
 # ------------------------------------------------------------- X: restart, same views

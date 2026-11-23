@@ -280,16 +280,20 @@ def contextOf {config : NativeHost.Config} (opened : NativeHost.Opened config) :
     Context config.deployment :=
   (Minidregg.Compiler.ServedBasis.Ground.full _ opened.directory opened.authority)
 
-structure CheckedOpened (config : NativeHost.Config)
-    (opened : NativeHost.Opened config) (proposal : Proposal)
+structure CheckedGround (config : NativeHost.Config)
+    (ground : Context config.deployment) (proposal : Proposal)
     (envelope : List UInt8) where
   private mk ::
   pin : NativeHost.FnGatewayPin
   pinExact : config.fnGateway = some pin
-  current : FnGatewayPolicy.checkCurrent config opened pin = .ok ()
-  prepared : Prepared (contextOf opened) config.profile config.federation
-    (NativeHost.logicalHeight config opened.durable) pin proposal
+  current : FnGatewayPolicy.checkGround config ground pin = .ok ()
+  prepared : Prepared ground config.profile config.federation
+    (config.genesisHeight + ground.height) pin proposal
   signature : Checked prepared envelope
+
+abbrev CheckedOpened (config : NativeHost.Config) (opened : NativeHost.Opened config) :=
+  CheckedGround config (contextOf opened)
+
 theorem CheckedOpened.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
     {proposal : Proposal} {envelope : List UInt8}
     (checked : CheckedOpened config opened proposal envelope) :
@@ -300,22 +304,24 @@ theorem CheckedOpened.sound {config : NativeHost.Config} {opened : NativeHost.Op
   ⟨checked.pinExact, checked.current, checked.signature.envelopeExact,
     checked.signature.authorized⟩
 
-def checkOpened (config : NativeHost.Config) (opened : NativeHost.Opened config)
+def checkGround (config : NativeHost.Config) (ground : Context config.deployment)
     (proposal : Proposal) (envelope : List UInt8) :
-    IO (Except String (CheckedOpened config opened proposal envelope)) := do
+    IO (Except String (CheckedGround config ground proposal envelope)) := do
+  unless (ground.markerSpent (marker proposal)).isSome do
+    return .error "fn consumer gateway testimony refused"
   unless proposal.domain == config.deployment.domain &&
       proposal.semantics == config.profile.semantics &&
       envelope.length ≤ 4096 &&
       proposal.expectedAuthorityRoot ==
-        opened.durable.snapshot.model.roots
+        ground.view.model.roots
           (CredentialAuthorityDomainReceiver.cellIdOf config.deployment) do
     return .error "fn consumer gateway testimony refused"
   let some pin := config.fnGateway
     | return .error "fn consumer gateway testimony refused"
   if pinExact : config.fnGateway = some pin then
-    if current : FnGatewayPolicy.checkCurrent config opened pin = .ok () then
-      match prepare (contextOf opened) config.profile config.federation
-          (NativeHost.logicalHeight config opened.durable) pin proposal with
+    if current : FnGatewayPolicy.checkGround config ground pin = .ok () then
+      match prepare ground config.profile config.federation
+          (config.genesisHeight + ground.height) pin proposal with
       | .error _ => return .error "fn consumer gateway testimony refused"
       | .ok prepared =>
           match ← check config.signature prepared envelope with
@@ -323,5 +329,8 @@ def checkOpened (config : NativeHost.Config) (opened : NativeHost.Opened config)
           | .ok signature => return .ok ⟨pin, pinExact, current, prepared, signature⟩
     else return .error "fn consumer gateway testimony refused"
   else return .error "fn consumer gateway testimony refused"
+
+def checkOpened (config : NativeHost.Config) (opened : NativeHost.Opened config) :=
+  checkGround config (contextOf opened)
 
 end Minidregg.Kernel.FnConsumerFrontierGateway

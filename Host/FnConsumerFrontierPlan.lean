@@ -106,41 +106,50 @@ def Plan.proposal (plan : Plan) : Except String FnConsumerFrontierGateway.Propos
         ⟨spec, [], plan.expectedAuthorityRoot, plan.expectedTargetRoot⟩)
   | _, _ => throw "fn frontier plan must contain exactly one poll kind"
 
-def prepareSigningHeader (config : NativeHost.Config)
-    (opened : NativeHost.Opened config)
+def prepareSigningHeaderAt (config : NativeHost.Config)
+    (ground : ServedBasis.Ground config.deployment)
     (proposal : FnConsumerFrontierGateway.Proposal) : Except String (List UInt8) := do
   let some pin := config.fnGateway
     | throw "fn consumer gateway is not configured"
-  let .ok () := FnGatewayPolicy.checkCurrent config opened pin
+  let .ok () := FnGatewayPolicy.checkGround config ground pin
     | throw "fn consumer gateway current law refused"
   let .ok prepared := FnConsumerFrontierGateway.prepare
-      (FnConsumerFrontierGateway.contextOf opened) config.profile config.federation
-      (NativeHost.logicalHeight config opened.durable) pin proposal
+      ground config.profile config.federation
+      (config.genesisHeight + ground.height) pin proposal
     | throw "fn frontier target or pin refused"
   let wanted : PackedEffectRequest := ⟨.object, prepared.wanted⟩
   let .ok header := CredentialSignatureAdmission.signingHeader
-      opened.authority.snapshot (FnConsumerFrontierGateway.marker proposal) wanted
+      ground.authority (FnConsumerFrontierGateway.marker proposal) wanted
     | throw "fn frontier gateway signing key unavailable"
   pure (CredentialSignedEnvelopeController.headerCodec.encode header)
 
-def prepare (config : NativeHost.Config) (opened : NativeHost.Opened config)
+def prepareSigningHeader (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (proposal : FnConsumerFrontierGateway.Proposal) : Except String (List UInt8) :=
+  prepareSigningHeaderAt config (FnConsumerFrontierGateway.contextOf opened) proposal
+
+def prepareAt (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (selected : Option FnSelectedPollCoverage.Spec)
     (empty : Option FnEmptyPollProgressV2.Spec) (cursorBytes reportBytes
       sourceBytes : List UInt8) : Except String Plan := do
   let some pin := config.fnGateway
     | throw "fn consumer gateway is not configured"
-  let (authorityRoot, targetRoot) ← FnConsumerNamespacePlan.currentRoots
-    config opened pin
+  let (authorityRoot, targetRoot) ← FnConsumerNamespacePlan.currentRootsAt
+    config ground pin
   let candidate : Plan := ⟨selected, empty, cursorBytes, reportBytes, sourceBytes,
     authorityRoot, targetRoot, []⟩
   let proposal ← candidate.proposal
-  let header ← prepareSigningHeader config opened proposal
+  let header ← prepareSigningHeaderAt config ground proposal
   let plan := { candidate with signingHeader := header }
   unless !header.isEmpty && header.length ≤ 4096 &&
       (planCodec.encode plan).length + 4 + 64 ≤
         FnEvidenceCodec.maxHostFrameBytes do
     throw "fn frontier signing plan exceeds strict profile"
   pure plan
+
+def prepare (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (selected : Option FnSelectedPollCoverage.Spec) (empty : Option FnEmptyPollProgressV2.Spec)
+    (cursorBytes reportBytes sourceBytes : List UInt8) : Except String Plan :=
+  prepareAt config (FnConsumerFrontierGateway.contextOf opened) selected empty cursorBytes reportBytes sourceBytes
 
 def checkCurrent (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (plan : Plan) : Except String Unit := do
@@ -150,7 +159,7 @@ def checkCurrent (config : NativeHost.Config) (opened : NativeHost.Opened config
   unless roots == (plan.expectedAuthorityRoot, plan.expectedTargetRoot) do
     throw "fn frontier signing plan roots changed"
   let proposal ← plan.proposal
-  let header ← prepareSigningHeader config opened proposal
+  let header ← prepareSigningHeaderAt config (FnConsumerFrontierGateway.contextOf opened) proposal
   unless header == plan.signingHeader do
     throw "fn frontier signing plan no longer current"
 

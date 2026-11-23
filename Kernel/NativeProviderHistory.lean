@@ -242,4 +242,115 @@ def check {config : Config} (session : NativeHostSession.Walked config)
     else .error "allowed fence is not the same provider subject's canonical held disconnect"
   else .error "allowed fence does not follow reserve"
 
+/-- The last two occurrences suffice when a continuity request exempts at most one fence. -/
+structure LastTwo where
+  last : Nat := 0
+  previous : Nat := 0
+  deriving Inhabited
+
+def LastTwo.after (p : LastTwo) (anchor fence : Nat) : Bool :=
+  decide (anchor < (if p.last = fence then p.previous else p.last))
+
+def LastTwo.push (p : LastTwo) (height : Nat) : LastTwo := ⟨height, p.last⟩
+
+theorem LastTwo.after_push (p : LastTwo) (height anchor fence : Nat)
+    (ordered : p.previous ≤ p.last) (fresh : p.last < height) :
+    (p.push height).after anchor fence =
+      ((decide (anchor < height ∧ height ≠ fence)) || p.after anchor fence) := by
+  simp only [LastTwo.after, LastTwo.push]
+  by_cases h : height = fence <;> by_cases l : p.last = fence <;> simp_all <;> omega
+
+/-- info: 'Minidregg.Kernel.NativeProviderHistory.LastTwo.after_push' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms LastTwo.after_push
+
+/-- An isolated fence is safe; a preceding conflicting write stays visible. -/
+theorem fence_alone_and_rewrite :
+    (⟨9, 4⟩ : LastTwo).after 4 9 = false ∧ (⟨9, 5⟩ : LastTwo).after 4 9 = true := by decide
+
+/-- One historical position, sufficient for exact anchor, fence and old-root selection.
+Only signed invocation frames can equal an authored reserve or fence. -/
+structure Position where
+  receipt : NativeHostCodec.Receipt
+  invocation : Option (List UInt8)
+  written : List Nat
+
+structure Index where
+  positions : Array Position := #[]
+  blocked : LastTwo := {}
+  writes : List (Nat × LastTwo) := []
+  targets : List (Nat × LastTwo) := []
+
+private def mark (height : Nat) (table : List (Nat × LastTwo)) (cell : Nat) :=
+  let prior := (table.lookup cell).getD {}
+  (cell, prior.push height) :: table.filter (fun row => row.1 != cell)
+
+def Index.append (index : Index) (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt) :
+    Index :=
+  let bytes := record.event.canonicalBytes
+  let written := (record.writes.map (·.cellId.value)).eraseDups
+  let invocation := if (DeclaredResourceController.decodeSignedBytes bytes).isSome then some bytes else none
+  let height := receipt.acceptedCount
+  let common := { index with
+    positions := index.positions.push ⟨receipt, invocation, written⟩
+    writes := written.foldl (mark height) index.writes }
+  match ordinaryTargets bytes with
+  | none => { common with blocked := index.blocked.push height }
+  | some targets => { common with targets := targets.eraseDups.foldl (mark height) index.targets }
+
+private def Index.exact (index : Index) (config : Config) (receipt : NativeHostCodec.Receipt)
+    (call : List UInt8) (cell : Nat) (fenced : Bool) : Except String Unit := do
+  if receipt.acceptedCount = 0 then
+    throw (if fenced then "history receipt has zero accepted count" else "reserve receipt has zero accepted count")
+  let position := index.positions[receipt.acceptedCount - 1]?
+  unless position.map (·.receipt) == some receipt do
+    throw (if fenced then "history receipt differs from admitted prefix" else "confirmed reserve receipt differs from admitted prefix")
+  let some ingress := reserveIngress? config call
+    | throw (if fenced then "history call is not a canonical signed invocation" else "reserve call is not a canonical signed invocation")
+  unless (position.bind (·.invocation)) == some ingress do
+    throw (if fenced then "history call differs from admitted ingress" else "confirmed reserve call differs from admitted history")
+  unless position.any (fun p => p.written.contains cell) do
+    throw (if fenced then "confirmed history call did not write the provider" else "confirmed call did not write the provider resource")
+
+def Index.check (index : Index) (config : Config) (authority : List CellId)
+    (anchor : NativeHostCodec.Receipt) (call : List UInt8) (provider : CellId)
+    (fence : Option (List UInt8 × NativeHostCodec.Receipt)) (prior : Option PriorChecked) : Except String Unit := do
+  index.exact config anchor call provider.value fence.isSome
+  let exception ← match fence with
+    | none => pure 0
+    | some (fenceCall, receipt) => do
+        index.exact config receipt fenceCall provider.value true
+        unless anchor.acceptedCount < receipt.acceptedCount do throw "allowed fence does not follow reserve"
+        unless exactHardFence provider call fenceCall do
+          throw "allowed fence is not the same provider subject's canonical held disconnect"
+        pure receipt.acceptedCount
+  let later := fun (p : LastTwo) => p.after anchor.acceptedCount exception
+  if later index.blocked || (index.writes.lookup provider.value).any later ||
+      authority.any (fun id => (index.targets.lookup id.value).any later) then
+    throw (if fence.isSome then "provider rewrite or authority-changing ingress outside exact fence"
+      else "provider rewrite or authority-changing ingress after reserve")
+  if let some point := prior then
+    unless priorBounds anchor.acceptedCount index.positions.size point do
+      throw "prior checked count is outside reserve and current prefix bounds"
+    let some p := index.positions[point.acceptedCount - 1]?
+      | throw "prior checked prefix receipt is absent from verified history"
+    unless priorReceiptMatches point p.receipt do throw "prior checked root differs from verified historical prefix"
+
+open Minidregg.Theory Minidregg.Compiler.NativeHostCodec Minidregg.Compiler.Tower256ConcreteBackend
+
+private def lastStream : StreamCodec LastTwo :=
+  StreamCodec.xmap (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+    (fun p => (p.last, p.previous)) (fun (a,b) => ⟨a,b⟩) (by intro p; cases p; rfl)
+
+private def positionStream : StreamCodec Position :=
+  StreamCodec.xmap (StreamCodec.product receiptStream (StreamCodec.product
+    (StreamCodec.option bytesStream) (StreamCodec.list StreamCodec.nat)))
+    (fun p => (p.receipt, p.invocation, p.written)) (fun (r,i,w) => ⟨r,i,w⟩) (by intro p; cases p; rfl)
+
+def indexStream : StreamCodec Index :=
+  let table := StreamCodec.list (StreamCodec.product StreamCodec.nat lastStream)
+  StreamCodec.xmap (StreamCodec.product (StreamCodec.list positionStream)
+    (StreamCodec.product lastStream (StreamCodec.product table table)))
+    (fun i => (i.positions.toList, i.blocked, i.writes, i.targets))
+    (fun (ps,b,w,t) => ⟨ps.toArray,b,w,t⟩) (by intro i; cases i; simp)
+
 end Minidregg.Kernel.NativeProviderHistory

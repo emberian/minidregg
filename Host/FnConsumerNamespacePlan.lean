@@ -123,17 +123,21 @@ def prepareSigningHeader (config : NativeHost.Config)
 /-- The authority guard is the durable outer root; the gateway request's
 target pre-state root is the selected content cell's logical root. The lower
 gateway preparation separately proves that cell's outer root is current. -/
-def currentRoots (config : NativeHost.Config) (opened : NativeHost.Opened config)
+def currentRootsAt (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (pin : NativeHost.FnGatewayPin) : Except String (Digest × Digest) := do
-  let authorityRoot := opened.durable.snapshot.model.roots
+  let authorityRoot := ground.view.model.roots
     (CredentialAuthorityDomainReceiver.cellIdOf config.deployment)
   let probe : DeclaredResourceController.Target :=
     ⟨.object, pin.target, pin.capability, 1, ⟨0⟩, .content ⟨[]⟩, none, none, none⟩
-  let .present cell := opened.directory.directory.slots pin.target
+  let .present cell := ground.directory.slots pin.target
     | throw "fn consumer namespace target is absent"
   let some pre := DeclaredResourceController.selectTarget config.deployment probe cell
     | throw "fn consumer namespace target is not valid content"
   pure (authorityRoot, pre.root)
+
+def currentRoots (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (pin : NativeHost.FnGatewayPin) : Except String (Digest × Digest) :=
+  currentRootsAt config (FnConsumerFrontierGateway.contextOf opened) pin
 
 def prepare (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (pin : NativeHost.FnGatewayPin) (scope : FnConsumerScope.Scope)

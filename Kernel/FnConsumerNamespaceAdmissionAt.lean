@@ -54,12 +54,16 @@ def proposal (ingress : Ingress) : FnConsumerFrontierGateway.Proposal :=
     expectedAuthorityRoot := ingress.expectedAuthorityRoot
     expectedTargetRoot := ingress.expectedTargetRoot }
 
-structure Conditional (config : NativeHost.Config) (opened : NativeHost.Opened config)
+structure ConditionalGround (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (legacy : Option Legacy) (ingress : Ingress) where
   private mk ::
   anchorExact : anchorMatches ingress.spec legacy = true
-  gateway : FnConsumerFrontierGateway.CheckedOpened config opened
+  gateway : FnConsumerFrontierGateway.CheckedGround config ground
     (proposal ingress) ingress.gatewayEnvelope
+
+abbrev Conditional (config : NativeHost.Config) (opened : NativeHost.Opened config) :=
+  ConditionalGround config (FnConsumerFrontierGateway.contextOf opened)
+
 theorem Conditional.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
     {legacy : Option Legacy} {ingress : Ingress}
     (conditional : Conditional config opened legacy ingress) :
@@ -70,18 +74,21 @@ theorem Conditional.sound {config : NativeHost.Config} {opened : NativeHost.Open
   ⟨conditional.anchorExact, conditional.gateway.signature.envelopeExact,
     conditional.gateway.signature.authorized⟩
 
-def prepareConditional (config : NativeHost.Config) (opened : NativeHost.Opened config)
+def prepareConditionalGround (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (legacy : Option Legacy) (ingress : Ingress) :
-    IO (Except String (Conditional config opened legacy ingress)) := do
+    IO (Except String (ConditionalGround config ground legacy ingress)) := do
   unless ingress.spec.valid &&
       (ingressCodec.encode ingress).length ≤ 8192 do
     return .error "fn consumer namespace registration refused"
   if anchorExact : anchorMatches ingress.spec legacy = true then
-    match ← FnConsumerFrontierGateway.checkOpened config opened
+    match ← FnConsumerFrontierGateway.checkGround config ground
         (proposal ingress) ingress.gatewayEnvelope with
     | .error _ => return .error "fn consumer namespace registration refused"
     | .ok gateway => return .ok ⟨anchorExact, gateway⟩
   else return .error "fn consumer namespace registration refused"
+
+def prepareConditional (config : NativeHost.Config) (opened : NativeHost.Opened config) :=
+  prepareConditionalGround config (FnConsumerFrontierGateway.contextOf opened)
 
 /-- The turn's charge: it writes nothing, so its storage lane is the World's
 storage of its guards and its retained event (`DeployedCharge.storageCharge`). -/
@@ -96,21 +103,27 @@ def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (guards : List Rea
   | .sideEffectCount => 1
   | .feeDebit | .networkBytes | .leaseByteBlocks => 0
 
-def Conditional.intent (config : NativeHost.Config) (opened : NativeHost.Opened config)
+def ConditionalGround.intent (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (legacy : Option Legacy) (ingress : Ingress)
-    (accepted : Conditional config opened legacy ingress) :
+    (accepted : ConditionalGround config ground legacy ingress) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let guards := FnConsumerFrontierGateway.readGuards accepted.gateway.prepared ++
-    opened.authority.readGuards
+    ground.authorityReadGuards
   { transactionId := transactionId ingress.spec
     writes := []
     readGuards := guards
     nullifiers := [claimNullifier ingress.spec]
     exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
-      (charge opened.durable.snapshot guards ingress)).toCharge
+      (charge ground.view guards ingress)).toCharge
     event := event ingress
     subject := some ingress.spec.gatewaySubject
     postRootsBound := by intro write present; cases present
     guardsReadOnly := by intro guard _; simp }
+
+def Conditional.intent (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (legacy : Option Legacy) (ingress : Ingress)
+    (accepted : Conditional config opened legacy ingress) :
+    DataIntent ResourceBirthCodec.rootBytes :=
+  ConditionalGround.intent config (FnConsumerFrontierGateway.contextOf opened) legacy ingress accepted
 
 end Minidregg.Kernel.FnConsumerNamespaceAdmissionAt

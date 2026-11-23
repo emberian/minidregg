@@ -6,6 +6,7 @@ fn poll into a portable fn-issued Store attestation.
 -/
 module
 
+public import Compiler.ServedBasis
 public import Kernel.NativeHostContext
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
@@ -84,19 +85,23 @@ theorem non_gateway_subject_refused (gateway actual : SubjectId)
 /-- Resolve from the loaded complete authority and policy-source cell, never
 from a caller-supplied policy object. A changed current law needs an explicit
 new operator pin before another fn consumer command is prepared. -/
-def checkCurrent (config : NativeHost.Config) (opened : NativeHost.Opened config)
+def checkGround (config : NativeHost.Config) (ground : ServedBasis.Ground config.deployment)
     (pin : Pin) : Except String Unit := do
   let some head := CredentialAuthorityDomain.headAt
-      opened.authority.snapshot.logical ⟨pin.target⟩
+      ground.authority.logical ⟨pin.target⟩
     | throw "fn gateway target has no current policy head"
   unless head.address == pin.policyAddress do
     throw "fn gateway current policy differs from operator pin"
   let some source := CanonicalCellRegistry.loadPolicySource config.deployment.domain
-      opened.directory.directory head.address
+      ground.directory head.address
     | throw "fn gateway current policy source is unavailable"
   unless source.record.policyId == ⟨pin.target⟩ &&
       source.record.semantics == config.profile.semantics &&
       subjectLocked pin.subject source.record.predicate do
     throw "fn gateway current policy does not lock mutation to gateway subject"
+
+def checkCurrent (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (pin : Pin) : Except String Unit :=
+  checkGround config (.full _ opened.directory opened.authority) pin
 
 end Minidregg.Kernel.FnGatewayPolicy
