@@ -279,6 +279,26 @@ vstep() {
   check "$j" "audit count unchanged by '$line' ($ab)" is "$aa" "$ab"
 }
 jqv() { jq -e "$@" "$V" >/dev/null || { echo "jq $* failed on $V"; cat "$V"; return 1; }; }
+# Read exactly the bytes passed to the renderer for this observed view. The
+# client's signed-read and dry-run scratch directories end with their process.
+rendered_input() { # workspace, kind, observed JSON, field, binary destination
+  python3 - "$@" <<'PYTHON'
+import json
+from pathlib import Path
+import sys
+
+workspace, kind, observed, field, dest = sys.argv[1:]
+wanted = json.loads(Path(observed).read_text())
+inputs = set()
+for answer in (Path(workspace) / 'inspect').glob(f'*-{kind}.out.json'):
+    if json.loads(answer.read_text()) == wanted:
+        request = answer.with_name(answer.name.removesuffix('.out.json') + '.json')
+        inputs.add(bytes.fromhex(json.loads(request.read_text())[field]))
+if len(inputs) != 1:
+    raise SystemExit(f'{kind} renderer has {len(inputs)} distinct matching {field} inputs')
+Path(dest).write_bytes(inputs.pop())
+PYTHON
+}
 differs() { [[ $1 != "$2" ]] || { echo "root did not move: $1"; return 1; }; }
 start_server() {
   setsid nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
@@ -367,10 +387,15 @@ check L "law: the token round trip holds (law_print_parse, evaluated)" jqv '.rou
 check L "law: field 2's current value from the reader's own read" jqv '.slots[] | select(.rendered == "field 2") | .now == "2 now"'
 LAW_LINE=$(jq -r .law "$V")
 OWNER_LAW=$V
-POLICY_VIEW=$(ls -t "$R"/sponsor/attempts/*/view.json | while read -r f; do jq -e '.type == "policy"' "$f" >/dev/null 2>&1 && { echo "$f"; break; }; done)
+POLICY_VIEW=$LOG/rendered-policy.json
+rendered_input "$R/sponsor" law "$OWNER_LAW" policy "$LOG/rendered-policy.bin" &&
+  "$HOST" "$CONFIG" inspect view-policy "$LOG/rendered-policy.bin" "$POLICY_VIEW" >"$LOG/policy-decode.out" 2>"$LOG/policy-decode.err"
 echo "policy view: $POLICY_VIEW" >>"$LOG/ids.txt"
 step L 0 sponsor "law rt board \"$LAW_LINE\""
-same_predicate() { [[ -n $POLICY_VIEW ]] && diff <(jq -S .predicate "$POLICY_VIEW") <(jq -S .predicate "$R/sponsor/proposals/rt/request.json"); }
+same_predicate() {
+  jq -e '.type == "policy" and .predicate != null' "$POLICY_VIEW" >/dev/null &&
+    diff <(jq -S .predicate "$POLICY_VIEW") <(jq -S .predicate "$R/sponsor/proposals/rt/request.json")
+}
 check L "law: the printed line, parsed by the shell's grammar, is the Host's compiled predicate" same_predicate
 vstep L newcomer "inspect law board"
 check L "reader: the law text view prints the same line" grep -qF "  $JLAW" "$V"
@@ -418,7 +443,8 @@ check T "turn: the leg writes board's cell, field 1 := $F1N (expected $F1)" \
   jqv --arg t "$TARGET" --arg w "    write field 1 := $F1N (expected $F1)" '(.legs | map(select(test("writes cell object " + $t))) | length == 1) and (.legs | index($w) != null)'
 check T "turn: not submitted" jqv '.outcome == null and (.text | test("nothing was submitted"))'
 TURN=$V
-DRY_PLAN=$(ls -td "$RUN"/homes/newcomer/workspace/attempts/*/ | while read -r d; do [[ -f $d/dry-run-plan.bin ]] && { echo "${d}dry-run-plan.bin"; break; }; done)
+DRY_PLAN=$LOG/rendered-turn-plan.bin
+rendered_input "$RUN/homes/newcomer/workspace" turn "$TURN" plan "$DRY_PLAN"
 echo "turn plan: $DRY_PLAN" >>"$LOG/ids.txt"
 "$HOST" "$CONFIG" inspect plan "$DRY_PLAN" "$LOG/turn-plan.json" >/dev/null 2>"$LOG/turn-plan.err"
 same_footprint() { [[ -s $LOG/turn-plan.json ]] && diff <(jq -c '[.slots[] | [.signing.footprint[].address]]' "$LOG/turn-plan.json") <(jq -c '[.slots[] | [.reads[].canonical]]' "$TURN"); }
