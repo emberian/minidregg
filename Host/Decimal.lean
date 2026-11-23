@@ -1,7 +1,6 @@
 module
 
-public import Init.Data.Nat.ToString
-import Theory.AssertAxioms
+public import Theory.AssertAxioms
 
 @[expose] public section
 
