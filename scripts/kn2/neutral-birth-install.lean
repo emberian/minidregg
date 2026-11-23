@@ -95,10 +95,8 @@ def describe : NativeHostCodec.Outcome → String
   | .uncertain detail => s!"uncertain {String.fromUTF8! ⟨detail.toArray⟩}"
   | .absent => "absent"
 
-private def install (host : NativeHost.Config) (signer : System.FilePath) (nonce : Nat) : IO Unit := do
-  let opened ← match ← NativeHost.openExisting host with
-    | .error reason => throw (IO.userError s!"native host open: {reason}")
-    | .ok value => pure value
+private def nextDeclaration (host : NativeHost.Config) (opened : NativeHost.Opened host)
+    (nonce : Nat) : IO PolicyInstallController.Declaration := do
   let factory : PolicyId := ⟨host.deployment.factoryId⟩
   let some head := opened.authority.snapshot.currentHead factory
     | throw (IO.userError "factory has no policy head")
@@ -109,8 +107,13 @@ private def install (host : NativeHost.Config) (signer : System.FilePath) (nonce
     version := head.version + 1
     previous := some head.address
     predicate := .any [.all []] }
-  let declaration : PolicyInstallController.Declaration :=
-    ⟨opened.authority.snapshot.cell.root, some head, nonce, source⟩
+  return ⟨opened.authority.snapshot.cell.root, some head, nonce, source⟩
+
+private def install (host : NativeHost.Config) (signer : System.FilePath) (nonce : Nat) : IO Unit := do
+  let opened ← IO.ofExcept (← NativeHost.openExisting host)
+  let factory : PolicyId := ⟨host.deployment.factoryId⟩
+  let declaration ← nextDeclaration host opened nonce
+  let source := declaration.source
   let bytes := PolicyInstallController.encodeDeclaration declaration
   let successor := CanonicalCellRegistry.policySourceCreate host.deployment.domain source
   IO.println s!"successor policy-source cell {successor.cellId}"
@@ -169,6 +172,19 @@ else: raise AssertionError('prefix trap did not fire')",
   require "authority bytes and current policy agree with the full admission walk"
     (session.light.opening.served.canonicalBytes ⟨authority⟩ == walk.opened.durable.snapshot.canonicalBytes ⟨authority⟩ &&
      ground.authority.currentHead ⟨host.deployment.factoryId⟩ == walk.opened.authority.snapshot.currentHead ⟨host.deployment.factoryId⟩)
+  let declaration ← nextDeclaration host walk.opened (older + 4)
+  let bytes := PolicyInstallController.encodeDeclaration declaration
+  let fullPlan ← IO.ofExcept (NativeHost.prepareLoaded host walk.opened (.install ⟨7⟩ ⟨43⟩ bytes))
+  let lightPlan ← IO.ofExcept ((← NativeHost.prepareInstallLight host session.light ⟨7⟩ ⟨43⟩ bytes none).mapError (·.detail))
+  require "light and full consent planners produce identical signing bytes"
+    (NativeHostCodec.signingPlanCodec.encode lightPlan == NativeHostCodec.signingPlanCodec.encode fullPlan)
+  let stale := PolicyInstallController.encodeDeclaration
+    { declaration with expectedPreRoot := ⟨declaration.expectedPreRoot.value + 1⟩ }
+  let .error expected := NativeHost.prepareLoaded host walk.opened (.install ⟨7⟩ ⟨43⟩ stale)
+    | throw (IO.userError "full planner accepted a forged authority root")
+  let .error refusal ← NativeHost.prepareInstallLight host session.light ⟨7⟩ ⟨43⟩ stale none
+    | throw (IO.userError "light planner accepted a forged authority root")
+  require "light and full consent planners refuse the same stale preimage" (refusal.detail == expected)
   IO.println s!"PASS native session authority: prefix={older} tail=2 pre-checkpoint record reads=0"
 
 def run (verifier signer storeBinary : System.FilePath) (benchmark : Option Nat := none) : IO Unit := do

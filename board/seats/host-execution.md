@@ -54,10 +54,12 @@ Quest: the Host turn's costs, widest first; ember's bar is about 1 ms of warm wo
 
 ## KN2 session work on 2026-11-23
 
-The dispatch, paid-agent, lifetime-grant, and continuity handlers now use indexed history and the
+Dispatch, paid-agent, lifetime-grant, and application stream continuity use indexed history and the
 refreshed light session. Five of the original 19 calls to `sessionWalked` remain in `Host/Main.lean`.
 The signed-install `session-reads` fixture compared a cold session with a full admission walk at
 prefix sizes 2 and 20. Both used a two-record tail and read zero record payloads below the checkpoint.
+The served and full consent planners produced identical signing-plan bytes for a fresh installation
+and returned the same refusal for a forged authority preimage in both runs.
 
 - Fn namespace registration, both poll submissions, and frontier planning need the authenticated
   registration, ordered cursor, last legacy evidence, ambiguous keys, and global fault. A legacy
