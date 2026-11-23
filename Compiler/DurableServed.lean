@@ -1694,6 +1694,10 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
       if let some systemId := transport.systemCell then
         if let .error reason := Kernel.TailBound.gate systemId (⟨served.height, served.chain⟩ : Kernel.ChainHistory.Tip) view intent then
           return .rejected reason
+      let worldAfter ← match DurableReceiverIO.submitWorld transport.systemCell.isSome opening.world
+          served.height intent with
+        | .error detail => return .unavailable s!"not admitted by the World: {detail}"
+        | .ok after => pure after
       let key := opening.store.key
       let height := served.height + 1
       let record := IntentRecord.ofIntent intent
@@ -1731,8 +1735,6 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                     -- The index rows this append wrote, decoded, to the transport's holder.
                     transport.holdIndexRows height true indexWrites
                     let served' := served.advance footprint intent next executed chain worldRoot
-                    let worldAfter := opening.world.bind fun w =>
-                      (DurableReceiverIO.advanceHeld view.model.roots w served.height intent).toOption
                     -- The written cells' checkpoint entries, encoded once here (the seal concatenates).
                     have moved := served.advance_moved footprint intent next executed chain worldRoot
                     let cellsAfter := opening.cells.step served'.cellIds served'.canonicalBytes

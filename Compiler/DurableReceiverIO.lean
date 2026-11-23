@@ -181,6 +181,7 @@ structure PreparedAppend {rootBytes : List UInt8 → Digest} (loaded : Loaded ro
   nodes : List NodeWrite
   extended : Loaded rootBytes
   extendedImage : extended.image = loaded.image.append intent
+  admitted : AdmittedSuccessor intent loaded.track.world? extended.track.world?
   indexAfter : Digest
   /-- The index rows the append writes, decoded: handed to the transport's holder once the Store
   installed them, so the next append walks them and reads no index row from the Store. -/
@@ -214,8 +215,10 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   let extended := loaded.extend ready
   -- The World judges the append: an intent whose turn it does not admit is
   -- refused here, before any byte is written (FD-1 4a).
-  if let .lost reason := extended.track then
-    return .error s!"not admitted by the World: {reason}"
+  let admitted : PLift (AdmittedSuccessor intent loaded.track.world? extended.track.world?) ←
+    match tracked : extended.track with
+    | .lost reason => return .error s!"not admitted by the World: {reason}"
+    | .held _ _ => pure ⟨loaded.extend_admitted ready (by change extended.track.world?.isSome = true; rw [tracked]; rfl)⟩
   let t3 ← IO.monoNanosNow
   let leaf := leafDigest height recordBytes chain extended.worldRoot
   let frontierAfter := DurableHistory.Frontier.push frontier leaf
@@ -270,7 +273,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
             (Minidregg.Kernel.World.pinCheckFromBy (snapPinFails loaded.snapshot w) 0 t.pins) w t)
           let b4 ← IO.monoNanosNow
           IO.eprintln s!"store turn us at height {height}: of-intent {(b1-b0)/1000} charge {(b2-b1)/1000} pins {(b3-b2)/1000} ({t.pins.length}) admit-with-pins {(b4-b3)/1000} (legs {t.legs.length} creates {t.creates.length} nullifiers {t.nullifiers.length})"
-  return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter, indexWrites⟩
+  return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, admitted.down, indexAfter, indexWrites⟩
 
 
 /-- What the receiving loop does after the append's observation: confirm by
@@ -308,7 +311,8 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
             ⟨afterCheckpoint tagged checkpointStored,
               (afterCheckpoint_image tagged checkpointStored).trans prepared.extendedImage, entry,
               prepared.entryExact,
-              (afterCheckpoint_headTag tagged checkpointStored).trans rfl⟩)
+              (afterCheckpoint_headTag tagged checkpointStored).trans rfl, by
+                rw [afterCheckpoint_world]; exact prepared.admitted⟩)
         else return (false, .ordinary .contention)
   match observation with
   | .installed => confirm true .installed
@@ -364,6 +368,19 @@ theorem receiveCandidateWithFresh_rejected_at_prepare (transport : Transport)
       pure (false, .ordinary (.rejected reason)) := by
   unfold receiveCandidateWithFresh
   rw [prepared]
+
+/-- Duplicate submission returns the already-held snapshot without touching the transport. -/
+theorem receiveCandidateWithFresh_replayed (transport : Transport)
+    (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) (candidate : Candidate loaded)
+    {recorded : DurableCommitProtocol.Intent TransactionId CellId StableNullifier ReplayEnvelope}
+    (duplicate : loaded.prepare candidate.intent = .inr (.replayed recorded)) :
+    receiveCandidateWithFresh transport rootBytes loaded candidate =
+      pure (false, .ordinary (.confirmed .replayed loaded.snapshot)) := by
+  unfold receiveCandidateWithFresh
+  rw [duplicate]
+
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.receiveCandidateWithFresh_replayed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms receiveCandidateWithFresh_replayed
 
 /-- A candidate the judge refuses (gate, source gate or tail bound) is likewise answered
 before the checkpoint key is read and before anything is prepared or published. -/

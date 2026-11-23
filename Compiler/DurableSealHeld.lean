@@ -153,6 +153,55 @@ theorem advanceHeld_world {rootBytes : List UInt8 → Digest} (roots : CellId �
           rw [← HeldWorld.admitPinned_world]
           cases held.admitPinned _ t <;> rfl
 
+/-- Decide the World transition before a Store write. Native transports require a
+held World. A generic byte-store probe may operate without a deployed World. -/
+def submitWorld {rootBytes : List UInt8 → Digest} (required : Bool)
+    (before : Option HeldWorld) (height : Nat) (intent : DataIntent rootBytes) :
+    Except String (Option HeldWorld) :=
+  match before with
+  | none => if required then .error "the opening carries no admitted World" else .ok none
+  | some held =>
+    match advanceHeld (fun id => DeployedHistory.history.cellDigest (held.world.cells id.value))
+        held height intent with
+    | .ok after => .ok (some after)
+    | .error detail => if required then .error detail else .ok none
+
+/-- A successful native light gate has the actual admitted World successor. -/
+theorem host_submit_light_is_step {rootBytes : List UInt8 → Digest}
+    {before after : Option HeldWorld} {height : Nat} {intent : DataIntent rootBytes}
+    (accepted : submitWorld true before height intent = .ok after) :
+    AdmittedSuccessor intent (before.map (·.world)) (after.map (·.world)) := by
+  cases before with
+  | none => cases accepted
+  | some held =>
+    cases advanced : advanceHeld (fun id => DeployedHistory.history.cellDigest (held.world.cells id.value))
+        held height intent with
+    | error detail => simp only [submitWorld, advanced, ite_true] at accepted; cases accepted
+    | ok next =>
+      simp only [submitWorld, advanced, Except.ok.injEq] at accepted
+      subst after
+      have result := advanceHeld_world (fun id => DeployedHistory.history.cellDigest (held.world.cells id.value))
+        held height intent
+      rw [advanced] at result
+      symm at result
+      unfold advanceWorldIntent at result
+      split at result
+      · cases result
+      · rename_i turn derived
+        split at result
+        · cases result
+        · split at result
+          · cases result
+          · rename_i w admitted
+            cases result
+            exact ⟨held.world, turn, next.world, rfl, rfl, derived,
+              DeployedCharge.mismatch_none (by assumption),
+              (Minidregg.Kernel.World.admitPinned_by_eq DeployedHistory.history held.world turn
+                (fun _ _ => rfl)).symm.trans admitted⟩
+
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.host_submit_light_is_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms host_submit_light_is_step
+
 /-- `foldRecords` on a held World (`foldHeld_world`): each turn admitted by `World.admit`, the
 system entries moved by its system patch. -/
 def foldHeld (rootBytes : List UInt8 → Digest) : HeldWorld → Nat → List IntentRecord → Except String HeldWorld

@@ -73,51 +73,9 @@ Empty.  `TurnCensus.census_shapes_admitted_at_w0` decides it for all 48 shapes a
   set is derived from the verified prefix records (`consumed_of_loaded`), so the
   former custody premise `BaseHonest` (and T4's `load_baseHonest`) is gone.
 
-## The statement left for T4
-
-```lean
--- statement only; not proved in this repo
-  theorem host_submit_is_step
-      (H : History deployedR TransactionId StableEvent Digest)
-        -- stage F: WorldRoot.cshakeHistory encode logRoot0 legBytes imageBytes
-      {config : NativeHost.Config} {opened : NativeHost.Opened config}
-      {intent : DataIntent ResourceBirthCodec.rootBytes}
-      (admitted : NativeHostReplay.NativeAdmission config opened intent)
-      {w : World deployedR TransactionId Digest}
-      (represents : DeployedRepresents opened.durable w)
-      {t : DTurn deployedR Digest} (derived : Turn.ofAdmission bridge H w admitted = .ok t)
-      {ready : Ready ResourceBirthCodec.rootBytes opened.durable.image opened.durable.baseHeight
-        opened.durable.base opened.durable.snapshot intent}
-      (prepared : DurableCheckpoint.prepare opened.durable.image opened.durable.baseHeight
-        opened.durable.base opened.durable.snapshot opened.durable.withinLog opened.durable.resumed
-        intent = .inl ready)
-      (stored : Bool) {receipt : NativeHostCodec.Receipt}
-      (sealed : NativeHost.historicalReceipt config
-        (DurableReceiverIO.afterCheckpoint (opened.durable.extend ready) stored)
-        intent.transactionId intent.event.eventId = some receipt) :
-      ∃ w', World.admit H w t = .ok w' ∧
-        DeployedRepresents (DurableReceiverIO.afterCheckpoint (opened.durable.extend ready) stored) w' ∧
-        receipt.acceptedCount = (w.head.map Prod.fst).getD 0 + 1 ∧
-        receipt.worldRoot = WorldRoot.rootOf S w'
-```
-
-Its state half is `confirmed_represents` (proved here, for any bridge).  What
-T4 adds is the receipt (`acceptedCount` from `represents.head`; `worldRoot`
-needs `Loaded.worldRoot = WorldRoot.rootOf S w'`, the root-cache agreement),
-and then the cutover itself: `Loaded` becomes a `World`, `Represents` becomes
-equality, `prepare`+`extend` becomes `World.admit` + append.
-
-Its two poles, which T4 must keep:
-
-* satisfiable -- `Example.toy_refined` (the derived turn steps and the
-  installed snapshot represents it) lifted through `confirmed_represents`; a
-  deployed source birth (`policy_source_birth_is_turn`).
-* refuting -- an admitted intent whose derived turn is refused is a deployed
-  step that installs nothing:
-  `Turn.ofAdmission bridge H w admitted = .error r → ∀ ready, prepare … ≠ .inl ready`
-  is what the cutover must make TRUE (today the durable layer would install an
-  append-only rewrite, `Example.toy_rewrite_refused` shows `ofIntent` refusing
-  it); and `policy_source_rewrite_has_no_turn` (no turn rewrites a ROM record).
+The full append gate and its exact readback carry the evidence used by
+`host_submit_is_step`. The deployed receipt trie binds the physical record
+chain. The logical World's head separately binds the derived turns.
 -/
 module
 
@@ -641,6 +599,66 @@ abbrev DeployedRepresents (p : Loaded Minidregg.Compiler.ResourceBirthCodec.root
     (w : World deployedR TransactionId Theory.TypedAuthorization.Digest) : Prop :=
   Represents bridge p w
 
+/-- An exact readback of a native append installs the admitted turn's World. The
+root kept for sealing is the deployed trie of the same installed snapshot and
+physical record chain. The World's head carries the derived-turn chain. -/
+theorem host_submit_is_step {p : Loaded Minidregg.Compiler.ResourceBirthCodec.rootBytes}
+    {intent : DataIntent Minidregg.Compiler.ResourceBirthCodec.rootBytes}
+    (append : Minidregg.Compiler.DurableReceiverIO.Appended _ p intent) :
+    ∃ w t w', p.track.world? = some w ∧ append.next.track.world? = some w' ∧
+      Turn.ofIntent bridge DeployedHistory.history w intent = .ok t ∧
+      World.admit DeployedHistory.history w t = .ok w' ∧
+      World.step DeployedHistory.history w t = some w' ∧
+      DeployedRepresents append.next w' ∧
+      w'.head.map Prod.fst = some (p.height + 1) ∧
+      append.next.worldRoot = WorldRoot.deployedRoot
+        (Minidregg.Compiler.DurableReceiverIO.entriesOf append.next.image
+          append.next.snapshot append.next.chain) := by
+  obtain ⟨w, t, w', before, after, derives, _, admits⟩ := append.admitted
+  have rep : DeployedRepresents append.next w' := by
+    cases h : append.next.track with
+    | lost reason => rw [h] at after; cases after
+    | held world represents =>
+      rw [h] at after
+      cases after
+      exact represents
+  obtain ⟨root, head⟩ := rep.head
+  refine ⟨w, t, w', before, after, derives, admits, (step_eq_some _).2 admits, rep, ?_,
+    append.next.worldRoot_eq⟩
+  rw [head]
+  simp [Loaded.height, append.image, DurableReceiver.Image.accepted_append]
+
+/-- A different sealed root cannot describe the installed snapshot. -/
+theorem host_submit_forged_root {p : Loaded Minidregg.Compiler.ResourceBirthCodec.rootBytes}
+    {intent : DataIntent Minidregg.Compiler.ResourceBirthCodec.rootBytes}
+    (append : Minidregg.Compiler.DurableReceiverIO.Appended _ p intent)
+    {claimed : Theory.TypedAuthorization.Digest} (wrong : claimed ≠ append.next.worldRoot) :
+    claimed ≠ WorldRoot.deployedRoot (Minidregg.Compiler.DurableReceiverIO.entriesOf
+      append.next.image append.next.snapshot append.next.chain) :=
+  fun equal => wrong (equal.trans append.next.worldRoot_eq.symm)
+
+/-- A turn that the World refuses cannot produce an exact host append for this intent. -/
+theorem host_submit_refused_has_no_append {p : Loaded Minidregg.Compiler.ResourceBirthCodec.rootBytes}
+    {intent : DataIntent Minidregg.Compiler.ResourceBirthCodec.rootBytes} {w : DWorld}
+    (before : p.track.world? = some w) {t : DTurn deployedR Theory.TypedAuthorization.Digest}
+    (derived : Turn.ofIntent bridge DeployedHistory.history w intent = .ok t)
+    {reason : World.Reject} (refused : World.admit DeployedHistory.history w t = .error reason) :
+    ¬ Nonempty (Minidregg.Compiler.DurableReceiverIO.Appended _ p intent) := by
+  rintro ⟨append⟩
+  obtain ⟨_, _, _, old, _, derives, admits, _⟩ := host_submit_is_step append
+  cases before.symm.trans old
+  cases derived.symm.trans derives
+  cases refused.symm.trans admits
+
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.host_submit_is_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms host_submit_is_step
+
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.host_submit_forged_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms host_submit_forged_root
+
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.host_submit_refused_has_no_append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms host_submit_refused_has_no_append
+
 /-- Its cells field, instantiated: every deployed cell's bytes are the
 canonical lifecycle encoding of the world's cell, or the retired image over an
 absent one. -/
@@ -651,6 +669,42 @@ theorem deployedRepresents_cells {p : Loaded Minidregg.Compiler.ResourceBirthCod
       (w.cells c = none ∧ Minidregg.Kernel.DeployedBridge.retiresCell (p.snapshot.canonicalBytes ⟨c⟩) = true) :=
   (Minidregg.Kernel.DeployedBridge.deployed_cells_iff (fun c => p.snapshot.canonicalBytes ⟨c⟩)
     (fun c => w.cells c)).mp rep.cells c
+
+/-- The receipt trie commits the cells of the represented World and its height.
+Its system leaf uses the physical intent-record chain retained by the Store. -/
+theorem deployedRepresents_receipt_root {p : Loaded Minidregg.Compiler.ResourceBirthCodec.rootBytes}
+    {w : DWorld} (rep : DeployedRepresents p w) :
+    p.worldRoot = WorldRoot.deployedRoot
+      ((WorldRoot.Key.system, Minidregg.Compiler.DurableCheckpointCodec.systemLeaf
+        ((w.head.map Prod.fst).getD 0) p.chain) ::
+       p.image.cellIds.map fun id => (WorldRoot.Key.cell id.value,
+         Minidregg.Compiler.ResourceBirthCodec.rootBytes (TurnLog.bytesOf w id.value))) := by
+  obtain ⟨logRoot, head⟩ := rep.head
+  rw [p.worldRoot_eq, head]
+  unfold Minidregg.Compiler.DurableReceiverIO.entriesOf
+  apply congrArg WorldRoot.deployedRoot
+  apply congrArg (List.cons _)
+  apply List.map_congr_left
+  intro id _
+  rw [← p.snapshot.coherent id]
+  apply congrArg (fun bytes => (WorldRoot.Key.cell id.value, Minidregg.Compiler.ResourceBirthCodec.rootBytes bytes))
+  unfold TurnLog.bytesOf
+  have retired := rep.retired id.value
+  change (w.retired id.value).isSome = DeployedBridge.retiresCell (p.snapshot.canonicalBytes id) at retired
+  rw [retired]
+  split
+  · rename_i isRetired
+    unfold DeployedBridge.retiresCell at isRetired
+    split at isRetired
+    · rename_i decoded
+      exact (Minidregg.Compiler.ResourceBirthCodec.LifecycleImage.decode_canonical
+        Minidregg.Compiler.CanonicalCellRegistry.registry decoded).symm
+    · cases isRetired
+  · rename_i live
+    exact (deployedRepresents_cells rep id.value).resolve_right (fun h => live h.2)
+
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.deployedRepresents_receipt_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployedRepresents_receipt_root
 
 /-- **The derived turn of a deployed source birth carries the record**: if an
 intent writes an absent cell with the canonical bytes of a policy-source cell

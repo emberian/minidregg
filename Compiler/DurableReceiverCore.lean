@@ -1001,6 +1001,28 @@ def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : Data
                 DeployedHistory.history rep derived (DeployedCharge.mismatch_none charged) executed
                 admit)
 
+/-- What the full receiver's successful World gate establishes about its two tracks. -/
+def AdmittedSuccessor {rootBytes : List UInt8 → Digest} (intent : DataIntent rootBytes)
+    (before after : Option HostRefinesWorld.DWorld) : Prop :=
+  ∃ w t w', before = some w ∧ after = some w' ∧
+    TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent = .ok t ∧
+    t.charge = intent.exactCharge ∧
+    Minidregg.Kernel.World.World.admit DeployedHistory.history w t = .ok w'
+
+theorem WorldTrack.advance_sound {rootBytes : List UInt8 → Digest}
+    {snapshot next : DataSnapshot rootBytes} {height height' : Nat} {intent : DataIntent rootBytes}
+    (executed : DurableDataIntent.execute .complete snapshot intent = .accepted next)
+    (up : height' = height + 1) (before : WorldTrack snapshot height)
+    (accepted : (before.advance executed up).world?.isSome = true) :
+    AdmittedSuccessor intent before.world? (before.advance executed up).world? := by
+  revert accepted
+  fun_cases WorldTrack.advance executed up before <;> intro accepted
+  all_goals first | exact Bool.noConfusion accepted | skip
+  rename_i w rep t derived charged w' admitted
+  exact ⟨w, t, w', rfl, rfl, derived, DeployedCharge.mismatch_none charged,
+    (Minidregg.Kernel.World.admitPinned_by_eq DeployedHistory.history w t
+      (fun p _ => snapPinFails_eq rep p)).symm.trans admitted⟩
+
 /-- **The append path refuses an intent charged other than its turn.**  From a
 held World, an intent whose derived turn's charge differs from its exact charge
 on any lane leaves the World lost: `prepareAppend` refuses it before a byte is
@@ -1782,6 +1804,7 @@ structure Appended (rootBytes : List UInt8 → Digest) (loaded : Loaded rootByte
   one the append computed under the key, so the head's authentication is not
   lost (`Loaded.headTag`). -/
   headTagExact : next.headTag = some entry.tag
+  admitted : AdmittedSuccessor intent loaded.track.world? next.track.world?
 
 /-- Only the read-back-equal branch constructs `exact`. -/
 inductive DetailedResult (rootBytes : List UInt8 → Digest)
@@ -1890,6 +1913,14 @@ theorem Loaded.extend_snapshot {rootBytes : List UInt8 → Digest} (loaded : Loa
   show (loaded.engine.install rootBytes intent).view rootBytes = ready.next
   rw [DurableReceiver.execute_accepted_install _ _ _ ready.executed, loaded.snapshotExact,
     DurableEngine.Engine.view_install]
+
+theorem Loaded.extend_admitted {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    {intent : DataIntent rootBytes}
+    (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
+    (accepted : (loaded.extend ready).track.world?.isSome = true) :
+    AdmittedSuccessor intent loaded.track.world? (loaded.extend ready).track.world? :=
+  WorldTrack.advance_sound (loaded.extend_snapshot ready ▸ ready.executed)
+    (by simp [Loaded.extend, Image.append]) loaded.track accepted
 
 /-- **The root log keeps the served root**: after an append, the newest stored
 receipt root is the root the extended image serves. -/
@@ -2189,6 +2220,10 @@ def checkpointDue {rootBytes : List UInt8 → Digest} (transport : Transport)
 def afterCheckpoint {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (stored : Bool) : Loaded rootBytes :=
   if stored then loaded.rebase else loaded
+
+theorem afterCheckpoint_world {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (stored : Bool) : (afterCheckpoint loaded stored).track.world? = loaded.track.world? := by
+  cases stored <;> rfl
 
 theorem afterCheckpoint_headTag {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (stored : Bool) : (afterCheckpoint loaded stored).headTag = loaded.headTag := by

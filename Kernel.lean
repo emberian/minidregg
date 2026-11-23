@@ -148,8 +148,9 @@ import Kernel.TurnGen  -- HP-6 SIM: seeded generator of intents (honest and inva
 import Kernel.ObjectiveAdmissible -- Exact receiver intent certificates consumed by the durable writer
 import Kernel.ObjectiveRefinesWorld -- Exact payload bridge and receiver-essential OB invariants in reached Worlds
 import Kernel.ObjectiveTurnTotality  -- Constructed seedless-create/stateless-member absence poles
+import Kernel.HostSubmitWitness
 import Kernel.ObjectiveTurnTotalityStorage  -- the receiver storage lane IS the World storage; full images = value writes + classified framing (no longer charged)
-import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
+import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step on exact readback
 import Kernel.DurableCheckpoint -- docs/DATAMODEL.md §5 C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.DurableView -- KN2: executing against a per-request view; declared-key families
 import Kernel.WorldRoot  -- docs/DATAMODEL.md §3.2/§3.4, §5 C1: world root = AuthTrie compressed trie over (slot -> slot root), last value per key; RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE node hash WORLD-ROOT/v2 (256-bit hashed index), deployedRoot_binds premise-free up to a cSHAKE collision, cSHAKE History; honest/tampered poles

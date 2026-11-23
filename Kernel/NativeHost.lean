@@ -1572,6 +1572,39 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]
 
+/-- Exact readback always selects the newly appended record. Freshness follows
+from the admitted turn and the represented journal, including after rebase. -/
+theorem host_submit_receipt (config : Config) {loaded : Durable}
+    {intent : DurableDataIntent.DataIntent ResourceBirthCodec.rootBytes}
+    (append : DurableReceiverIO.Appended _ loaded intent) :
+    historicalReceipt config append.next intent.transactionId intent.event.eventId =
+      some ⟨intent.transactionId, intent.event.eventId, loaded.height + 1,
+        WorldRoot.deployedRoot (DurableReceiverIO.entriesOf append.next.image
+          append.next.snapshot append.next.chain)⟩ := by
+  obtain ⟨w, t, _, old, _, derived, _, stepped, _, _, root⟩ :=
+    HostRefinesWorld.host_submit_is_step append
+  obtain ⟨_, _, _, fresh, _⟩ := World.step_journal DeployedHistory.history stepped
+  rw [(TurnOfIntent.ofCells_fields derived).1] at fresh
+  have absent : intent.transactionId ∉ loaded.image.accepted.map DurableReceiver.IntentRecord.transactionId := by
+    cases tracked : loaded.track with
+    | lost reason => rw [tracked] at old; cases old
+    | held world rep =>
+      rw [tracked] at old
+      cases old
+      have journal := rep.journal intent.transactionId
+      rw [fresh, HostRefinesWorld.lookupRecorded_isSome, (DurableEngine.resume_model loaded.resumed).1] at journal
+      simpa [List.map_reverse, List.map_map, Function.comp_def] using journal.symm
+  have first : loaded.image.accepted.findIdx? (fun r => r.transactionId == intent.transactionId) = none := by
+    apply List.findIdx?_eq_none_iff.mpr
+    intro record member
+    simpa using (fun eq => absent (List.mem_map.mpr ⟨record, member, eq⟩))
+  simp [historicalReceipt, receiptRoot, append.image, DurableReceiver.Image.accepted_append,
+    List.findIdx?_append, first, DurableReceiver.IntentRecord.ofIntent,
+    DurableReceiverIO.Loaded.height_eq, root]
+
+/-- info: 'Minidregg.Kernel.NativeHost.host_submit_receipt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms host_submit_receipt
+
 /-- A history refusal as a Host refusal frame: the detail is `Refusal.message`
 verbatim (it names the height); never "absent". -/
 def historyRefusal (refusal : DurableHistory.Refusal) : Refusal :=
